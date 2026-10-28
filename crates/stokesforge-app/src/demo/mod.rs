@@ -1,42 +1,42 @@
-//! Le projet de démonstration : de quoi essayer beaucoup de fonctionnalités dès
-//! l'ouverture, sans fichier (décision de l'utilisateur : la démo vit dans le
-//! code). Module du **binaire**, pas de la bibliothèque : l'application n'en a
-//! pas besoin, seul `main` l'ouvre.
+//! The demo project: enough to try many features right at opening, without a
+//! file (user decision: the demo lives in the code). A module of the
+//! **binary**, not of the library: the application does not need it, only
+//! `main` opens it.
 //!
 //! ```text
 //! Demo
-//! ├── Book1 (Sheet1…4, Spectre, Cinetique) et Graph1   — inchangés
-//! ├── Classeurs : Types, Mesures, Matrice, Lisez-moi   (classeur.rs)
-//! ├── Analyse   : un classeur par famille de calcul    (analyse.rs)
-//! └── Panneaux, Axes, TypesTrace, Annotations, Groupes, Lignes   (graphes.rs)
+//! ├── Book1 (Sheet1…4, Spectre, Cinetique) and Graph1   — unchanged
+//! ├── Classeurs : Types, Mesures, Matrice, Lisez-moi   (workbooks.rs)
+//! ├── Analyse   : one workbook per computation family   (analysis.rs)
+//! └── Panneaux, Axes, TypesTrace, Annotations, Groupes, Lignes   (graphs.rs)
 //! ```
 //!
-//! `bruit.rs` donne le bruit pseudo-aléatoire à graine fixe : la démo est la
-//! même à chaque lancement, ce que les tests épinglent.
+//! `noise.rs` provides the pseudo-random noise with a fixed seed: the demo is
+//! the same at every launch, which the tests pin.
 //!
-//! # Contraintes qui ont fixé la forme
+//! # Constraints that fixed the shape
 //!
-//! - **Un `Project` neuf, avant `Session::spawn`** (invariant 1) : on peut
-//!   alors appeler les primitives de `stokesforge-core`, jamais ensuite. Les
-//!   calculs déjà faits passent par `add_calculation` sur ce même projet neuf.
-//! - **Les colonnes à formule ne reçoivent aucune valeur ici** (invariant 11,
-//!   #193) : seule la formule est posée ; `demo_session` demande un
-//!   recalcul complet juste après le démarrage de l'acteur, sans quoi ces
-//!   colonnes resteraient vides.
-//! - **Les noms de fenêtre sont uniques dans tout le projet**, pas seulement
-//!   entre frères : le chemin `[Nom]` les désigne sans dossier. C'est pourquoi
-//!   le graphe des types de tracé s'appelle `TypesTrace` (le classeur `Types`
-//!   existe déjà).
-//! - **Les jeux à axe logarithmique sont strictement positifs** (invariant 10).
-//! - Quelques centaines de points par jeu au plus : la sauvegarde automatique
-//!   (#317) copie la démo.
-//! - Les noms de colonnes restent les lettres automatiques (A, B, C…) ; les
-//!   titres lisibles sont des noms longs.
+//! - **A fresh `Project`, before `Session::spawn`** (invariant 1): the
+//!   primitives of `stokesforge-core` can then be called, never afterwards.
+//!   The computations already done go through `add_calculation` on this same
+//!   fresh project.
+//! - **Formula columns get no value here** (invariant 11, #193): only the
+//!   formula is set; `demo_session` asks for a full recalculation right after
+//!   the actor starts, without which these columns would stay empty.
+//! - **Window names are unique across the whole project**, not only among
+//!   siblings: the `[Name]` path designates them without a folder. This is
+//!   why the plot types graph is called `TypesTrace` (the `Types` workbook
+//!   already exists).
+//! - **Datasets on a logarithmic axis are strictly positive** (invariant 10).
+//! - A few hundred points per dataset at most: the autosave (#317) copies the
+//!   demo.
+//! - Column names stay the automatic letters (A, B, C…); the readable titles
+//!   are long names.
 
-mod analyse;
-mod bruit;
-mod classeur;
-mod graphes;
+mod analysis;
+mod graphs;
+mod noise;
+mod workbooks;
 
 #[cfg(test)]
 mod tests;
@@ -44,8 +44,8 @@ mod tests;
 use anyhow::Context as _;
 use stokesforge_core::{NodeId, Project};
 
-/// Donne le rôle X (abscisse) à une colonne de la démonstration : la
-/// première colonne d'une feuille est l'axe des abscisses.
+/// Gives the X role (abscissa) to a column of the demo: the first column of
+/// a sheet is the abscissa axis.
 fn set_x_role(project: &mut Project, column: NodeId) -> anyhow::Result<()> {
     let mut meta = project
         .tree()
@@ -56,18 +56,18 @@ fn set_x_role(project: &mut Project, column: NodeId) -> anyhow::Result<()> {
     meta.role = stokesforge_core::ColumnRole::X;
     project
         .set_column_meta(column, meta)
-        .context("rôle X de la démonstration")?;
+        .context("X role of the demo")?;
     Ok(())
 }
 
-/// Projet de démonstration (voir la documentation du module). `Book1` et
-/// `Graph1` d'abord, dans cet ordre : le script d'exemple lit `[Book1]Sheet1!A`.
+/// The demo project (see the module documentation). `Book1` and `Graph1`
+/// first, in this order: the example script reads `[Book1]Sheet1!A`.
 pub(crate) fn demo_project() -> anyhow::Result<Project> {
-    let mut project = Project::new("Demo").context("projet de démonstration")?;
-    let book1 = classeur::book1(&mut project)?;
-    graphes::graph1(&mut project, &book1)?;
-    let mesures = classeur::dossier(&mut project)?;
-    analyse::dossier(&mut project)?;
-    graphes::autres(&mut project, &book1, &mesures)?;
+    let mut project = Project::new("Demo").context("demo project")?;
+    let book1 = workbooks::book1(&mut project)?;
+    graphs::graph1(&mut project, &book1)?;
+    let measures = workbooks::folder(&mut project)?;
+    analysis::folder(&mut project)?;
+    graphs::others(&mut project, &book1, &measures)?;
     Ok(project)
 }

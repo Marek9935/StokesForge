@@ -1,21 +1,22 @@
-//! Le glisser-déposer des séries, des groupes et des objets libres, côté
-//! interface : l'état du geste en cours, partagé par l'Object Manager et la
-//! fenêtre des séries (`curve_settings.rs`).
+//! Drag and drop of series, groups and free objects, on the interface side:
+//! the state of the gesture in progress, shared by the Object Manager and the
+//! series window (`curve_settings.rs`).
 //!
-//! La décision — où va l'élément selon la ligne survolée — est pure et vit
-//! dans `stokesforge_app_state::object_drag`. Ici : retenir ce qui est saisi, lire où est le
-//! pointeur, et, pour l'Object Manager, tenir l'**aperçu**.
+//! The decision — where the item goes according to the hovered row — is pure
+//! and lives in `stokesforge_app_state::object_drag`. Here: remember what is
+//! grabbed, read where the pointer is, and, for the Object Manager, hold the
+//! **preview**.
 //!
-//! L'Object Manager lit le spec de l'instantané, qu'une commande seule peut
-//! changer ; or le geste réordonne la liste à chaque ligne survolée. Il peint
-//! donc un spec d'aperçu (`Live::preview`), cloné du spec réel au premier
-//! déplacement, et ne demande **qu'une** action au relâchement (une entrée
-//! d'historique par geste), calculée par `object_drag::finish`. La fenêtre des
-//! séries travaille sur un brouillon : elle le modifie directement.
+//! The Object Manager reads the snapshot's spec, which only a command can
+//! change; but the gesture reorders the list on every hovered row. It
+//! therefore paints a preview spec (`Live::preview`), cloned from the real spec
+//! at the first move, and asks for **one** action only on release (one history
+//! entry per gesture), computed by `object_drag::finish`. The series window
+//! works on a draft: it edits it directly.
 //!
-//! Un seul glisser à la fois : une clé unique dans la mémoire d'egui. L'état
-//! n'est lu que tant qu'une charge utile de glisser existe — Échap ou un
-//! relâchement hors fenêtre l'abandonnent sans rien nettoyer.
+//! Only one drag at a time: a single key in egui's memory. The state is read
+//! only while a drag payload exists — Escape or a release outside the window
+//! abandon it without cleaning anything.
 
 use std::cell::RefCell;
 
@@ -29,19 +30,19 @@ use stokesforge_app_state::state::Action;
 
 const LIVE: &str = "object_dnd_live";
 
-/// Le glisser en cours.
+/// The drag in progress.
 #[derive(Clone)]
 pub(super) struct Live {
-    /// Le graphe de l'Object Manager ; `None` pour la fenêtre des séries.
+    /// The Object Manager's graph; `None` for the series window.
     pub graph: Option<NodeId>,
-    /// L'élément saisi, à sa place actuelle.
+    /// The grabbed item, at its current place.
     pub item: DragItem,
-    /// Le spec tel que le geste l'a laissé (Object Manager), absent tant que
-    /// rien n'a bougé.
+    /// The spec as the gesture left it (Object Manager), absent until
+    /// something has moved.
     pub preview: Option<PlotSpec>,
 }
 
-/// La poignée vient d'être saisie.
+/// The handle has just been grabbed.
 pub(super) fn begin(ctx: &egui::Context, graph: Option<NodeId>, item: DragItem) {
     store(
         ctx,
@@ -57,7 +58,7 @@ fn store(ctx: &egui::Context, live: Live) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(LIVE), live));
 }
 
-/// Le glisser en cours, s'il y en a un.
+/// The drag in progress, if any.
 pub(super) fn live(ctx: &egui::Context) -> Option<Live> {
     if !dragging(ctx) {
         return None;
@@ -65,26 +66,26 @@ pub(super) fn live(ctx: &egui::Context) -> Option<Live> {
     ctx.data(|data| data.get_temp(egui::Id::new(LIVE)))
 }
 
-/// L'élément glissé change de place (fenêtre des séries).
+/// The dragged item changes place (series window).
 pub(super) fn set_item(ctx: &egui::Context, item: DragItem) {
     if let Some(live) = live(ctx) {
         store(ctx, Live { item, ..live });
     }
 }
 
-/// Le relâchement a lieu à cette image.
+/// The release happens on this frame.
 fn released(ctx: &egui::Context) -> bool {
     ctx.input(|input| input.pointer.any_released())
 }
 
-/// Le pointeur est dans la moitié basse de `rect`.
+/// The pointer is in the lower half of `rect`.
 pub(super) fn pointer_after(ui: &egui::Ui, rect: egui::Rect) -> bool {
     ui.input(|input| input.pointer.interact_pos())
         .is_some_and(|pos| pos.y > rect.center().y)
 }
 
-/// La première ligne survolée de l'image : celle qui décide du déplacement,
-/// comme dans la liste des formats de copie.
+/// The first row hovered in the frame: the one that decides the move, as in
+/// the copy formats list.
 #[derive(Default)]
 pub(super) struct Hover(RefCell<Option<DropOver>>);
 
@@ -101,8 +102,8 @@ impl Hover {
     }
 }
 
-/// Fin d'image de l'Object Manager : applique le survol à l'aperçu, et au
-/// relâchement rend l'action unique du geste. `base` est le spec réel.
+/// End of the Object Manager's frame: applies the hover to the preview, and on
+/// release returns the gesture's single action. `base` is the real spec.
 pub(super) fn end_of_frame(
     ctx: &egui::Context,
     graph: NodeId,
@@ -136,7 +137,7 @@ pub(super) fn end_of_frame(
     }
 }
 
-/// L'action du modèle pour une destination.
+/// The model action for a destination.
 fn action_of(graph: NodeId, drop: Drop) -> Action {
     match drop {
         Drop::Series {

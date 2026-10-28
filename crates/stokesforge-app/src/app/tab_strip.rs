@@ -1,23 +1,23 @@
-//! **La** bande d'onglets de l'application (standard du projet, issue #19) :
-//! [`tab_strip`] / [`tab_strip_with`], sa mémoire de débordement, ses gestes
-//! de renommage, duplication et suppression ([`TabOps`], [`TabEvent`]) et son
-//! défilement automatique ([`scroll_tab_strip_to_selected`]).
+//! **The** application's tab strip (project standard, issue #19):
+//! [`tab_strip`] / [`tab_strip_with`], its overflow memory, its gestures for
+//! renaming, duplicating and deleting ([`TabOps`], [`TabEvent`]) and its
+//! automatic scrolling ([`scroll_tab_strip_to_selected`]).
 //!
-//! Sorti d'`app.rs` tel quel (#117). La bande des feuilles d'un classeur
-//! (`sheet_tabs`) et le menu Classeur vivent avec le classeur, dans
-//! `workbook.rs` (#120). Les menus, flèches, onglets et renommage sont
-//! des sections de peinture privées (#124) ; leurs appels ne créent aucune
-//! portée egui supplémentaire et les callbacks restent différés après le dessin.
+//! Moved out of `app.rs` as is (#117). The strip of a workbook's sheets
+//! (`sheet_tabs`) and the Workbook menu live with the workbook, in
+//! `workbook.rs` (#120). The menus, arrows, tabs and rename are private
+//! painting sections (#124); their calls create no extra egui scope and the
+//! callbacks stay deferred until after drawing.
 //!
-//! Aspect (#169, option A de la maquette des onglets) : onglets plats, sans
-//! cadre. L'actif est écrit dans l'accent et porte un trait **du côté du
-//! contenu** ([`TabStripSide`]) — sous le libellé pour une bande posée en
-//! haut (pages des propriétés), au-dessus pour une bande posée en bas
-//! (feuilles d'un classeur) ; un filet gris sépare la bande du contenu.
-//! Auparavant, l'onglet actif était un bouton au fond `selection.bg_fill`,
-//! le même que l'entrée sélectionnée du Project Manager : trois rôles, un
-//! seul aspect. Écartée : l'option B, onglets rectangulaires façon
-//! Origin/Excel, plus chargée avec beaucoup de feuilles.
+//! Look (#169, option A of the tabs mockup): flat tabs, no frame. The active
+//! one is written in the accent color and carries a mark **on the content
+//! side** ([`TabStripSide`]) — under the label for a strip placed at the top
+//! (properties pages), above it for a strip placed at the bottom (a
+//! workbook's sheets); a grey rule separates the strip from the content.
+//! Previously, the active tab was a button with the `selection.bg_fill`
+//! background, the same as the selected entry of the Project Manager: three
+//! roles, one look. Ruled out: option B, rectangular tabs in the Origin/Excel
+//! style, busier with many sheets.
 
 use eframe::egui;
 
@@ -29,65 +29,62 @@ use super::inplace_edit;
 use super::menu_sections::MenuSections;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 
-/// Hauteur fixe du panneau des onglets de feuille sous la grille.
-/// `book_contents` la réserve avant de construire la table : la hauteur
-/// intrinsèque de cette dernière ne peut plus repousser les onglets hors
-/// de la fenêtre. Juste la hauteur d'un onglet et un filet : la bande n'a
-/// plus de barre de défilement à loger (boutons « < » « > », voir
-/// `sheet_tabs`), et la barre horizontale de la grille est en dessous.
+/// Fixed height of the sheet tabs panel under the grid. `book_contents`
+/// reserves it before building the table: the table's intrinsic height can no
+/// longer push the tabs out of the window. Just the height of a tab and a
+/// rule: the strip has no scroll bar left to house ("<" ">" buttons, see
+/// `sheet_tabs`), and the grid's horizontal bar is below.
 pub(super) const TAB_STRIP_HEIGHT: f32 = 24.0;
 
-/// Marge horizontale d'un libellé d'onglet, de chaque côté.
+/// Horizontal margin of a tab label, on each side.
 const TAB_PADDING_X: f32 = 10.0;
 
-/// Épaisseur du trait de l'onglet actif (ou survolé).
+/// Thickness of the mark of the active (or hovered) tab.
 const TAB_MARK: f32 = 2.0;
 
-/// Place de la bande par rapport à son contenu : le trait de l'onglet actif
-/// et le filet de séparation se posent du côté du contenu (#169).
+/// Position of the strip relative to its content: the mark of the active tab
+/// and the separator rule go on the content side (#169).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabStripSide {
-    /// Bande au-dessus du contenu (pages des propriétés du graphe).
+    /// Strip above the content (graph properties pages).
     Top,
-    /// Bande sous le contenu (feuilles d'un classeur).
+    /// Strip below the content (a workbook's sheets).
     Bottom,
 }
 
-/// Mémoire d'une image à l'autre de la bande d'onglets de feuille : de quoi
-/// savoir, **avant** de la dessiner (donc avant de placer les boutons « < »
-/// et « > »), si des onglets sont cachés à gauche ou à droite — ce qui ne se
-/// constate qu'en dessinant les onglets.
+/// Memory from one frame to the next of the sheet tab strip: what is needed
+/// to know, **before** drawing it (so before placing the "<" and ">"
+/// buttons), whether tabs are hidden on the left or right — which can only be
+/// seen by drawing the tabs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct TabStripOverflow {
     pub(super) hidden_left: bool,
     pub(super) hidden_right: bool,
 }
 
-/// Ce que `sheet_tabs` (`workbook.rs`) a dessiné : décalage de la bande, onglets cachés,
-/// et rectangles des boutons « < » et « > » s'ils sont affichés. Seuls les
-/// tests le lisent ; l'interface n'en a pas besoin.
+/// What `sheet_tabs` (`workbook.rs`) drew: offset of the strip, hidden tabs,
+/// and rectangles of the "<" and ">" buttons if they are shown. Only the
+/// tests read it; the interface does not need it.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TabStripOutput {
     pub(super) offset: f32,
     pub(super) overflow: TabStripOverflow,
     pub(super) arrows: Option<[egui::Rect; 2]>,
-    /// Indices du premier et du dernier onglet entièrement visibles.
+    /// Indices of the first and last fully visible tabs.
     pub(super) fully_visible: Option<(usize, usize)>,
 }
 
-/// **La** bande d'onglets de l'application (standard du projet, issue #19) :
-/// tout jeu d'onglets — feuilles d'un classeur, pages de la fenêtre des
-/// propriétés du graphe — passe par elle, jamais par une rangée de
-/// `selectable_label`. Style d'origine (bouton pleine taille, sans
-/// troncature) : quand elle ne tient pas dans la largeur disponible, elle
-/// défile horizontalement plutôt que de rétrécir ses onglets ou de replier
-/// les feuilles cachées dans un menu « … ». Elle n'a **pas** de barre de
-/// défilement : deux boutons « < » et « > », à gauche de la bande, font
-/// apparaître l'onglet caché suivant de ce côté — et n'apparaissent que si
-/// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
-/// script, ou par clic) fait défiler la bande juste assez pour montrer
-/// l'onglet actif et ses voisins ([`scroll_tab_strip_to_selected`]).
+/// **The** application's tab strip (project standard, issue #19): every set
+/// of tabs — a workbook's sheets, pages of the graph properties window — goes
+/// through it, never through a row of `selectable_label`. Original style
+/// (full-size button, no truncation): when it does not fit in the available
+/// width, it scrolls horizontally rather than shrinking its tabs or folding
+/// the hidden sheets into a "…" menu. It has **no** scroll bar: two buttons
+/// "<" and ">", at the left of the strip, bring out the next hidden tab on
+/// that side — and appear only if tabs are hidden. Changing the selected
+/// sheet (by keyboard, script, or click) scrolls the strip just enough to
+/// show the active tab and its neighbors ([`scroll_tab_strip_to_selected`]).
 pub(crate) fn tab_strip<
     K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
 >(
@@ -112,10 +109,10 @@ pub(crate) fn tab_strip<
     )
 }
 
-/// [`tab_strip`] avec, en option, les gestes sur une feuille : double-clic
-/// (renommage en place, validé par Entrée ou en quittant le champ, abandonné
-/// par Échap), menu contextuel Renommer / Dupliquer / Supprimer. Les demandes
-/// remontent par `on_event` ; la bande ne touche jamais au modèle.
+/// [`tab_strip`] with, optionally, the gestures on a sheet: double-click
+/// (in-place rename, validated by Enter or by leaving the field, abandoned by
+/// Escape), context menu Rename / Duplicate / Delete. Requests go up through
+/// `on_event`; the strip never touches the model.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tab_strip_with<
     K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
@@ -153,12 +150,11 @@ pub(super) fn tab_strip_with<
         }
         return TabStripOutput::default();
     }
-    // Mémorisée par instance de bande (scopée par la pile d'`Id` du parent,
-    // donc distincte entre fenêtre flottante et fenêtre détachée) : ne
-    // redéclenche le défilement automatique que lorsque la sélection change
-    // réellement d'une image à l'autre, pas à chaque image où elle est
-    // simplement reconduite — sinon un défilement manuel de l'utilisateur
-    // serait annulé en continu.
+    // Remembered per strip instance (scoped by the parent's `Id` stack, so
+    // distinct between floating and detached windows): triggers automatic
+    // scrolling again only when the selection really changes from one frame
+    // to the next, not on every frame where it is simply carried over —
+    // otherwise the user's manual scrolling would be undone continuously.
     let last_selected_id = ui.id().with("tab_strip_last_selected");
     let last_selected: Option<K> = ui.memory(|memory| memory.data.get_temp(last_selected_id));
     let should_scroll_to_selected = last_selected != Some(selected);
@@ -168,13 +164,13 @@ pub(super) fn tab_strip_with<
         .memory(|memory| memory.data.get_temp(overflow_id))
         .unwrap_or_default();
 
-    // -1 : faire apparaître l'onglet caché à gauche ; +1 : à droite.
+    // -1: bring out the tab hidden on the left; +1: on the right.
     let mut step: i8 = 0;
     let mut content = TabStripContent::default();
     let mut arrows = None;
     let mut offset = 0.0;
-    // Le filet passe sous les traits des onglets : réservé avant eux, posé
-    // une fois la bande mesurée.
+    // The rule goes under the tab marks: reserved before them, placed once
+    // the strip is measured.
     let rule = ui.painter().add(egui::Shape::Noop);
     let band = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -235,8 +231,8 @@ pub(super) fn tab_strip_with<
     }
 }
 
-// Données et demandes d'une image, sans Ui ni identifiant propre : les
-// extractions conservent les portées egui et l'ordre des callbacks de la bande.
+// Data and requests of a frame, without Ui or an id of its own: the
+// extractions keep the egui scopes and the order of the strip's callbacks.
 struct TabStripConfig<'a, K> {
     side: TabStripSide,
     tabs: &'a [(K, String)],
@@ -266,8 +262,8 @@ fn tab_strip_add_menu(ui: &mut egui::Ui, add_label: Option<&str>, requested_add:
     }
 }
 
-/// Menu d'un onglet (#152) : Add ─ Rename · Duplicate ─ Delete, à plat — le
-/// clic droit désigne déjà la feuille, pas de sous-menu « Sheet ▸ ».
+/// Menu of a tab (#152): Add ─ Rename · Duplicate ─ Delete, flat — the
+/// right-click already designates the sheet, no "Sheet ▸" submenu.
 fn tab_strip_tab_menu<K: Copy + PartialEq>(
     ui: &mut egui::Ui,
     id: K,
@@ -370,8 +366,8 @@ fn tab_strip_arrows(
     (step, arrows)
 }
 
-/// Pourquoi ce nom d'onglet est refusé (S-T4, cadre rouge) : vide, ou déjà pris
-/// par un autre onglet de la bande.
+/// Why this tab name is refused (S-T4, red frame): empty, or already taken by
+/// another tab of the strip.
 fn tab_name_refusal<K: PartialEq>(tabs: &[(K, String)], id: &K, name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -383,10 +379,10 @@ fn tab_name_refusal<K: PartialEq>(tabs: &[(K, String)], id: &K, name: &str) -> O
     }
 }
 
-/// Le renommage en place d'un onglet : le contrat commun de
-/// [`inplace_edit`](super::inplace_edit) (tout le nom sélectionné, Entrée ou
-/// clic ailleurs valident, Échap annule, Tab valide) ; un nom vide ou déjà pris
-/// garde le champ ouvert sous un cadre rouge.
+/// The in-place rename of a tab: the common contract of
+/// [`inplace_edit`](super::inplace_edit) (whole name selected, Enter or a click
+/// elsewhere validate, Escape cancels, Tab validates); an empty or already
+/// taken name keeps the field open under a red frame.
 fn tab_strip_rename<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     ui: &mut egui::Ui,
     id: K,
@@ -422,7 +418,7 @@ fn tab_strip_rename<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
             } else {
                 TabEvent::CancelRename
             });
-            // Tab passe au renommage de l'onglet voisin (Maj+Tab : le précédent).
+            // Tab moves on to renaming the neighboring tab (Shift+Tab: the previous one).
             if let inplace_edit::EditEnd::Tab { shift } = end {
                 let at = tabs.iter().position(|(other, _)| *other == id);
                 let next = at.and_then(|at| {
@@ -467,17 +463,17 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     }
 }
 
-/// Un onglet plat (#169) : libellé sans cadre, écrit dans l'accent s'il est
-/// actif, avec un trait du côté du contenu — d'accent pour l'actif, gris pour
-/// le survolé.
+/// A flat tab (#169): label without a frame, written in the accent color if
+/// active, with a mark on the content side — accent for the active one, grey
+/// for the hovered one.
 fn tab_strip_label(
     ui: &mut egui::Ui,
     name: &str,
     selected: bool,
     side: TabStripSide,
 ) -> egui::Response {
-    // La largeur est celle du libellé **en gras** pour tous les onglets : en
-    // changer la graisse à la sélection ne décale alors aucun voisin.
+    // The width is that of the **bold** label for every tab: changing the
+    // weight on selection then shifts no neighbor.
     let galley_of = |ui: &egui::Ui, text: egui::RichText| {
         egui::WidgetText::from(text.size(12.0)).into_galley(
             ui,
@@ -611,41 +607,40 @@ fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     }
 }
 
-/// Ce que la bande d'onglets demande sur une feuille ; l'appelant en fait des
-/// [`Action`](stokesforge_app_state::state::Action).
+/// What the tab strip asks for on a sheet; the caller turns it into
+/// [`Action`](stokesforge_app_state::state::Action)s.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum TabEvent<K> {
     BeginRename(K),
     CommitRename(K, String),
     CancelRename,
     Duplicate(K),
-    /// Remettre toutes les colonnes de la feuille à la largeur par défaut (#330).
+    /// Reset all columns of the sheet to the default width (#330).
     ResetColumnWidths(K),
     Delete(K),
 }
 
-/// Gestes de renommage, de duplication et de suppression d'une bande d'onglets
-/// de feuilles.
+/// Rename, duplicate and delete gestures of a sheet tab strip.
 pub(super) struct TabOps<K> {
-    /// Onglet dont le nom est en cours d'édition.
+    /// Tab whose name is being edited.
     pub(super) renaming: Option<K>,
-    /// Faux sur la dernière feuille d'un classeur : « Supprimer » grisé.
+    /// False on the last sheet of a workbook: "Delete" greyed out.
     pub(super) can_delete: bool,
-    /// Onglets dont au moins une colonne a une largeur retenue (#330) : pour
-    /// les autres, « Réinitialiser les largeurs » est grisé.
+    /// Tabs with at least one column that has a stored width (#330): for the
+    /// others, "Reset Column Widths" is greyed out.
     pub(super) resettable: Vec<K>,
 }
 
-/// Défilement automatique de la bande d'onglets quand la feuille
-/// sélectionnée change : **le plus petit décalage** qui rend entièrement
-/// visibles l'onglet sélectionné et ses deux voisins immédiats (pour qu'on
-/// voie toujours ce qui vient ensuite). Rien ne bouge s'ils le sont déjà ; sinon
-/// la bande s'aligne sur le bord dépassé. Si la bande est trop étroite pour
-/// ces trois onglets, l'onglet sélectionné est centré.
+/// Automatic scrolling of the tab strip when the selected sheet changes:
+/// **the smallest shift** that makes the selected tab and its two immediate
+/// neighbors fully visible (so that what comes next is always seen). Nothing
+/// moves if they already are; otherwise the strip aligns on the edge that was
+/// exceeded. If the strip is too narrow for these three tabs, the selected tab
+/// is centered.
 ///
-/// Issue #1 : la bande centrait auparavant l'onglet sélectionné à chaque
-/// changement — cliquer sur le dernier onglet visible décalait alors de deux
-/// onglets ou plus au lieu d'un.
+/// Issue #1: the strip used to center the selected tab at every change —
+/// clicking the last visible tab then shifted by two tabs or more instead of
+/// one.
 fn scroll_tab_strip_to_selected(
     ui: &egui::Ui,
     tab_rects: &[egui::Rect],
@@ -667,24 +662,24 @@ fn scroll_tab_strip_to_selected(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{contexte, touche};
+    use super::super::test_support::{context, key};
     use super::*;
 
-    /// Dix onglets « Feuille N », de clés `0..10`.
-    fn dix_onglets() -> Vec<(u32, String)> {
+    /// Ten tabs "Sheet N", with keys `0..10`.
+    fn ten_tabs() -> Vec<(u32, String)> {
         (0..10)
-            .map(|index| (index, format!("Feuille {index}")))
+            .map(|index| (index, format!("Sheet {index}")))
             .collect()
     }
 
-    /// Peint une bande d'onglets dans `largeur` points, à l'instant
-    /// `*time + 0.1`, avec `events`. Le défilement automatique est animé
-    /// (`Response::scroll_to_me`) : il s'étale sur `ScrollAnimation::duration`
-    /// (jusqu'à 0.3 s par défaut) ; faire avancer `RawInput::time`
-    /// explicitement simule ce laps de temps sans dépendre de l'horloge réelle.
-    fn peindre_onglets(
+    /// Paints a tab strip within `width` points, at time `*time + 0.1`, with
+    /// `events`. Automatic scrolling is animated (`Response::scroll_to_me`):
+    /// it spreads over `ScrollAnimation::duration` (up to 0.3 s by default);
+    /// advancing `RawInput::time` explicitly simulates that lapse without
+    /// depending on the real clock.
+    fn paint_tabs(
         context: &egui::Context,
-        largeur: f32,
+        width: f32,
         tabs: &[(u32, String)],
         selected: u32,
         time: &mut f64,
@@ -694,15 +689,15 @@ mod tests {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(largeur, 60.0),
+                egui::vec2(width, 60.0),
             )),
             time: Some(*time),
             events,
             ..Default::default()
         };
-        let mut sortie = TabStripOutput::default();
+        let mut strip = TabStripOutput::default();
         let mut output = context.run_ui(input, |ui| {
-            sortie = tab_strip(
+            strip = tab_strip(
                 ui,
                 TabStripSide::Bottom,
                 tabs,
@@ -713,21 +708,21 @@ mod tests {
             );
         });
         output.textures_delta.clear();
-        (sortie, output)
+        (strip, output)
     }
 
-    /// [`peindre_onglets`] dans 400 points (cinq onglets environ, sur dix).
-    fn peindre(
+    /// [`paint_tabs`] within 400 points (about five tabs out of ten).
+    fn paint(
         context: &egui::Context,
         tabs: &[(u32, String)],
         selected: u32,
         time: &mut f64,
         events: Vec<egui::Event>,
     ) -> TabStripOutput {
-        peindre_onglets(context, 400.0, tabs, selected, time, events).0
+        paint_tabs(context, 400.0, tabs, selected, time, events).0
     }
 
-    /// Centre du texte peint `needle`, s'il l'est.
+    /// Center of the painted text `needle`, if it is painted.
     fn position(output: &egui::FullOutput, needle: &str) -> Option<egui::Pos2> {
         fn walk(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
             match shape {
@@ -744,7 +739,7 @@ mod tests {
             .find_map(|clipped| walk(&clipped.shape, needle))
     }
 
-    fn clic(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    fn click_event(pos: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -754,13 +749,13 @@ mod tests {
     }
 
     #[test]
-    fn les_onglets_de_proprietes_ne_proposent_pas_un_menu_feuille_vide() {
-        let context = contexte();
-        let tabs = [(0, "Propriétés".to_string())];
+    fn the_properties_tabs_do_not_offer_an_empty_sheet_menu() {
+        let context = context();
+        let tabs = [(0, "Properties".to_string())];
         let mut time = 0.0;
-        let (_, output) = peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
-        let pos = position(&output, "Propriétés").expect("témoin : l'onglet est peint");
-        peindre_onglets(
+        let (_, output) = paint_tabs(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        let pos = position(&output, "Properties").expect("witness: the tab is painted");
+        paint_tabs(
             &context,
             800.0,
             &tabs,
@@ -769,7 +764,7 @@ mod tests {
             vec![egui::Event::PointerMoved(pos)],
         );
         for pressed in [true, false] {
-            peindre_onglets(
+            paint_tabs(
                 &context,
                 800.0,
                 &tabs,
@@ -783,21 +778,21 @@ mod tests {
                 }],
             );
         }
-        let (_, output) = peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
-        assert!(position(&output, "Propriétés").is_some());
+        let (_, output) = paint_tabs(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        assert!(position(&output, "Properties").is_some());
         assert!(position(&output, &tr!("menu-sheet")).is_none());
     }
 
-    /// #169 : l'onglet actif porte un trait d'accent du côté du contenu —
-    /// sous le libellé pour une bande en haut, au-dessus pour une bande en
-    /// bas — et son texte est dans l'accent. Témoins : l'onglet inactif n'a
-    /// ni trait ni accent, et aucun onglet ne garde le fond de sélection des
-    /// boutons ; un filet gris court sous (ou sur) toute la bande.
+    /// #169: the active tab carries an accent mark on the content side —
+    /// under the label for a strip at the top, above it for a strip at the
+    /// bottom — and its text is in the accent color. Witnesses: the inactive
+    /// tab has neither a mark nor the accent, and no tab keeps the buttons'
+    /// selection background; a grey rule runs under (or over) the whole strip.
     #[test]
-    fn l_onglet_actif_est_souligne_du_cote_du_contenu() {
+    fn the_active_tab_is_underlined_on_the_content_side() {
         for side in [TabStripSide::Top, TabStripSide::Bottom] {
-            let context = contexte();
-            let tabs: Vec<(u32, String)> = vec![(0, "Graphe".into()), (1, "Axes".into())];
+            let context = context();
+            let tabs: Vec<(u32, String)> = vec![(0, "Graph".into()), (1, "Axes".into())];
             let run = || {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -834,37 +829,37 @@ mod tests {
                         }
                         _ => None,
                     })
-                    .unwrap_or_else(|| panic!("{needle:?} n'est pas peint"))
+                    .unwrap_or_else(|| panic!("{needle:?} is not painted"))
             };
             let marks = rects(theme::accent());
-            assert_eq!(marks.len(), 1, "{side:?} : un seul trait, celui de l'actif");
+            assert_eq!(marks.len(), 1, "{side:?}: a single mark, the active one's");
             let mark = marks[0];
             assert_eq!(mark.height(), TAB_MARK);
-            let (actif, couleur_actif) = text("Axes");
-            let (inactif, couleur_inactif) = text("Graphe");
-            assert_eq!(couleur_actif, theme::accent());
-            let gras = |needle: &str| {
-                super::super::test_support::textes(&output.shapes)
+            let (active, active_color) = text("Axes");
+            let (inactive, inactive_color) = text("Graph");
+            assert_eq!(active_color, theme::accent());
+            let bold = |needle: &str| {
+                super::super::test_support::texts(&output.shapes)
                     .into_iter()
-                    .find(|t| t.texte == needle)
+                    .find(|t| t.text == needle)
                     .unwrap()
-                    .gras
+                    .bold
             };
-            assert!(gras("Axes"), "{side:?} : l'onglet actif est en gras");
-            assert!(!gras("Graphe"), "{side:?} : témoin, l'inactif ne l'est pas");
-            assert_ne!(couleur_inactif, theme::accent(), "{side:?} : témoin");
-            assert!(mark.x_range().contains(actif.center().x), "{side:?}");
-            assert!(!mark.x_range().contains(inactif.center().x), "{side:?}");
+            assert!(bold("Axes"), "{side:?}: the active tab is bold");
+            assert!(!bold("Graph"), "{side:?}: witness, the inactive one is not");
+            assert_ne!(inactive_color, theme::accent(), "{side:?}: witness");
+            assert!(mark.x_range().contains(active.center().x), "{side:?}");
+            assert!(!mark.x_range().contains(inactive.center().x), "{side:?}");
             match side {
-                TabStripSide::Top => assert!(mark.top() >= actif.bottom(), "{mark:?} {actif:?}"),
+                TabStripSide::Top => assert!(mark.top() >= active.bottom(), "{mark:?} {active:?}"),
                 TabStripSide::Bottom => {
-                    assert!(mark.bottom() <= actif.top(), "{mark:?} {actif:?}")
+                    assert!(mark.bottom() <= active.top(), "{mark:?} {active:?}")
                 }
             }
             let button_fill = context.global_style().visuals.selection.bg_fill;
             assert!(
                 rects(button_fill).is_empty(),
-                "{side:?} : plus de fond de bouton"
+                "{side:?}: no more button background"
             );
             let rule = output
                 .shapes
@@ -877,10 +872,10 @@ mod tests {
                     }
                     _ => None,
                 })
-                .expect("le filet de la bande est peint");
+                .expect("the strip rule is painted");
             assert!(
                 rule[1].x - rule[0].x >= 390.0,
-                "le filet court sur la bande"
+                "the rule runs along the strip"
             );
             match side {
                 TabStripSide::Top => assert!(rule[0].y >= mark.top()),
@@ -889,26 +884,25 @@ mod tests {
         }
     }
 
-    /// Passer un onglet en gras à la sélection ne décale aucun onglet : la
-    /// largeur réservée est celle du gras pour tous. Le trait d'accent couvre
-    /// l'onglet actif : sa largeur, mesurée quand l'onglet est actif, doit
-    /// être celle qui sépare son bord gauche du bord gauche du suivant,
-    /// mesuré quand le précédent est inactif (écart des onglets : 2 points).
+    /// Making a tab bold on selection shifts no tab: the reserved width is the
+    /// bold one for all. The accent mark covers the active tab: its width,
+    /// measured when the tab is active, must be the one that separates its
+    /// left edge from the left edge of the next one, measured when the
+    /// previous one is inactive (gap between tabs: 2 points).
     #[test]
-    fn changer_d_onglet_actif_ne_decale_aucun_onglet() {
+    fn changing_the_active_tab_shifts_no_tab() {
         let tabs: Vec<(u32, String)> = vec![
-            (0, "Général".into()),
-            (1, "Zone de tracé".into()),
+            (0, "General".into()),
+            (1, "Plot area".into()),
             (2, "Axes".into()),
         ];
-        let trait_actif = |selected: u32| {
-            let context = contexte();
+        let active_mark = |selected: u32| {
+            let context = context();
             let mut time = 0.0;
             let mut output = None;
             for _ in 0..2 {
-                output = Some(
-                    peindre_onglets(&context, 600.0, &tabs, selected, &mut time, Vec::new()).1,
-                );
+                output =
+                    Some(paint_tabs(&context, 600.0, &tabs, selected, &mut time, Vec::new()).1);
             }
             output
                 .unwrap()
@@ -918,28 +912,28 @@ mod tests {
                     egui::Shape::Rect(rect) if rect.fill == theme::accent() => Some(rect.rect),
                     _ => None,
                 })
-                .expect("le trait de l'onglet actif est peint")
+                .expect("the active tab mark is painted")
         };
-        let traits: Vec<egui::Rect> = (0..3).map(trait_actif).collect();
+        let marks: Vec<egui::Rect> = (0..3).map(active_mark).collect();
         for k in 0..2 {
             assert!(
-                (traits[k + 1].left() - traits[k].left() - traits[k].width() - 2.0).abs() < 0.01,
-                "l'onglet {k} garde sa largeur quand il n'est plus actif : {traits:?}"
+                (marks[k + 1].left() - marks[k].left() - marks[k].width() - 2.0).abs() < 0.01,
+                "tab {k} keeps its width when it is no longer active: {marks:?}"
             );
         }
     }
 
-    /// #19 : tous les onglets d'une bande qui tient dans sa largeur sont
-    /// peints, et un clic sur l'un d'eux le choisit. Le témoin : tant qu'on
-    /// ne clique pas, rien n'est choisi — la sélection reconduite d'une image
-    /// à l'autre n'est pas un choix. (C'est la bande des propriétés du
-    /// graphe ; qu'elles l'emploient est tenu par
-    /// `un_clic_sur_un_onglet_des_proprietes_change_de_page`, dans
+    /// #19: all the tabs of a strip that fits in its width are painted, and a
+    /// click on one of them chooses it. The witness: as long as nothing is
+    /// clicked, nothing is chosen — the selection carried over from one frame
+    /// to the next is not a choice. (This is the graph properties strip; that
+    /// they use it is enforced by
+    /// `a_click_on_a_properties_tab_changes_the_page`, in
     /// `app/plot_settings.rs`.)
     #[test]
-    fn un_clic_sur_un_onglet_le_choisit() {
-        let context = contexte();
-        let tabs: Vec<(u32, String)> = ["Graphe", "Axes", "Séries", "Thème"]
+    fn a_click_on_a_tab_chooses_it() {
+        let context = context();
+        let tabs: Vec<(u32, String)> = ["Graph", "Axes", "Series", "Theme"]
             .iter()
             .enumerate()
             .map(|(index, name)| (index as u32, name.to_string()))
@@ -973,23 +967,23 @@ mod tests {
         for (_, name) in &tabs {
             assert!(position(&output, name).is_some(), "{name}");
         }
-        let theme = position(&output, "Thème").unwrap();
+        let theme = position(&output, "Theme").unwrap();
         run(vec![egui::Event::PointerMoved(theme)]);
-        assert_eq!(chosen.get(), None, "survoler un onglet ne le choisit pas");
-        run(vec![clic(theme, true)]);
-        run(vec![clic(theme, false)]);
+        assert_eq!(chosen.get(), None, "hovering a tab does not choose it");
+        run(vec![click_event(theme, true)]);
+        run(vec![click_event(theme, false)]);
         assert_eq!(chosen.get(), Some(3));
     }
 
-    /// Dix onglets en taille naturelle ne tiennent pas dans 200 points : la
-    /// bande doit défiler plutôt que rétrécir ses boutons ou replier les
-    /// feuilles cachées dans un menu. Chaque onglet peint garde son nom
-    /// entier, à la même largeur que dans une bande assez large pour tous
-    /// (témoin), et les onglets qui ne tiennent pas sont cachés à droite.
+    /// Ten tabs at natural size do not fit in 200 points: the strip must
+    /// scroll rather than shrink its buttons or fold the hidden sheets into a
+    /// menu. Each painted tab keeps its whole name, at the same width as in a
+    /// strip wide enough for all (witness), and the tabs that do not fit are
+    /// hidden on the right.
     #[test]
-    fn les_onglets_defilent_plutot_que_de_retrecir() {
-        let tabs = dix_onglets();
-        let largeur_du_nom = |output: &egui::FullOutput, needle: &str| {
+    fn tabs_scroll_rather_than_shrink() {
+        let tabs = ten_tabs();
+        let name_width = |output: &egui::FullOutput, needle: &str| {
             output
                 .shapes
                 .iter()
@@ -1001,201 +995,174 @@ mod tests {
                 })
         };
 
-        let large = contexte();
+        let wide = context();
         let mut time = 0.0;
-        let mut au_large = None;
+        let mut at_wide = None;
         for _ in 0..3 {
-            au_large = Some(peindre_onglets(
-                &large,
-                2000.0,
-                &tabs,
-                0,
-                &mut time,
-                Vec::new(),
-            ));
+            at_wide = Some(paint_tabs(&wide, 2000.0, &tabs, 0, &mut time, Vec::new()));
         }
-        let (sortie_large, output_large) = au_large.unwrap();
-        assert_eq!(sortie_large.fully_visible, Some((0, 9)));
-        assert!(sortie_large.arrows.is_none());
+        let (wide_strip, wide_output) = at_wide.unwrap();
+        assert_eq!(wide_strip.fully_visible, Some((0, 9)));
+        assert!(wide_strip.arrows.is_none());
 
-        let etroit = contexte();
-        let mut a_l_etroit = None;
+        let narrow = context();
+        let mut at_narrow = None;
         for _ in 0..3 {
-            a_l_etroit = Some(peindre_onglets(
-                &etroit,
-                200.0,
-                &tabs,
-                0,
-                &mut time,
-                Vec::new(),
-            ));
+            at_narrow = Some(paint_tabs(&narrow, 200.0, &tabs, 0, &mut time, Vec::new()));
         }
-        let (sortie, output) = a_l_etroit.unwrap();
+        let (strip, output) = at_narrow.unwrap();
         assert!(
-            sortie.overflow.hidden_right,
-            "des onglets doivent être cachés à droite : {sortie:?}"
+            strip.overflow.hidden_right,
+            "tabs must be hidden on the right: {strip:?}"
         );
-        let (premier, dernier) = sortie.fully_visible.expect("des onglets visibles");
-        assert!(premier == 0 && dernier < 9, "{sortie:?}");
-        for (_, name) in &tabs[..=dernier] {
+        let (first, last) = strip.fully_visible.expect("visible tabs");
+        assert!(first == 0 && last < 9, "{strip:?}");
+        for (_, name) in &tabs[..=last] {
             assert_eq!(
-                largeur_du_nom(&output, name),
-                largeur_du_nom(&output_large, name),
-                "{name} doit garder sa largeur naturelle"
+                name_width(&output, name),
+                name_width(&wide_output, name),
+                "{name} must keep its natural width"
             );
         }
     }
 
     #[test]
-    fn selectionner_un_onglet_hors_vue_fait_defiler_la_bande_pour_le_montrer() {
-        let context = contexte();
-        let tabs = dix_onglets();
+    fn selecting_an_out_of_view_tab_scrolls_the_strip_to_show_it() {
+        let context = context();
+        let tabs = ten_tabs();
         let mut time = 0.0;
-        // Sélectionner d'abord le premier onglet, laisser le défilement se
-        // stabiliser, puis basculer sur le dernier : hors vue, il doit
-        // déclencher un nouveau défilement (`should_scroll_to_selected`).
-        let mut avant = TabStripOutput::default();
+        // Select the first tab first, let the scrolling settle, then switch
+        // to the last one: out of view, it must trigger a new scroll
+        // (`should_scroll_to_selected`).
+        let mut before = TabStripOutput::default();
         for _ in 0..3 {
-            avant = peindre(&context, &tabs, 0, &mut time, Vec::new());
+            before = paint(&context, &tabs, 0, &mut time, Vec::new());
         }
-        let mut apres = TabStripOutput::default();
+        let mut after = TabStripOutput::default();
         for _ in 0..8 {
-            apres = peindre(&context, &tabs, 9, &mut time, Vec::new());
+            after = paint(&context, &tabs, 9, &mut time, Vec::new());
         }
         assert!(
-            apres.offset > avant.offset,
-            "sélectionner un onglet hors vue doit faire défiler la bande vers lui : {avant:?} -> {apres:?}"
+            after.offset > before.offset,
+            "selecting an out-of-view tab must scroll the strip towards it: {before:?} -> {after:?}"
         );
-        assert_eq!(apres.fully_visible.map(|(_, dernier)| dernier), Some(9));
+        assert_eq!(after.fully_visible.map(|(_, last)| last), Some(9));
     }
 
-    /// Issue #1 : cliquer sur le dernier onglet entièrement visible décale la
-    /// bande juste assez pour montrer son voisin de droite — un onglet de
-    /// plus, pas deux (l'ancien comportement centrait l'onglet sélectionné).
-    /// Symétriquement vers la gauche.
+    /// Issue #1: clicking the last fully visible tab shifts the strip just
+    /// enough to show its right neighbor — one more tab, not two (the old
+    /// behavior centered the selected tab). Symmetrically towards the left.
     #[test]
-    fn selectionner_le_dernier_onglet_visible_ne_decale_que_d_un_onglet() {
-        let context = contexte();
-        let tabs = dix_onglets();
+    fn selecting_the_last_visible_tab_shifts_by_one_tab_only() {
+        let context = context();
+        let tabs = ten_tabs();
         let mut time = 0.0;
-        let mut sortie = TabStripOutput::default();
+        let mut strip = TabStripOutput::default();
         for _ in 0..4 {
-            sortie = peindre(&context, &tabs, 0, &mut time, Vec::new());
+            strip = paint(&context, &tabs, 0, &mut time, Vec::new());
         }
-        let (_, dernier) = sortie.fully_visible.expect("des onglets visibles");
-        assert!(
-            dernier + 2 < tabs.len(),
-            "il faut des onglets cachés à droite"
-        );
+        let (_, last) = strip.fully_visible.expect("visible tabs");
+        assert!(last + 2 < tabs.len(), "tabs must be hidden on the right");
         for _ in 0..8 {
-            sortie = peindre(&context, &tabs, dernier as u32, &mut time, Vec::new());
+            strip = paint(&context, &tabs, last as u32, &mut time, Vec::new());
         }
-        let (premier_apres, dernier_apres) = sortie.fully_visible.unwrap();
+        let (first_after, last_after) = strip.fully_visible.unwrap();
         assert_eq!(
-            dernier_apres,
-            dernier + 1,
-            "seul le voisin de droite de l'onglet sélectionné doit apparaître : {sortie:?}"
+            last_after,
+            last + 1,
+            "only the right neighbor of the selected tab must appear: {strip:?}"
         );
 
-        // Le témoin : sélectionner un onglet déjà visible au milieu de la
-        // bande, voisins compris, ne la fait pas bouger.
-        let decalage = sortie.offset;
+        // The witness: selecting a tab already visible in the middle of the
+        // strip, neighbors included, does not move it.
+        let shift = strip.offset;
         for _ in 0..8 {
-            sortie = peindre(
+            strip = paint(
                 &context,
                 &tabs,
-                (premier_apres + 2) as u32,
+                (first_after + 2) as u32,
                 &mut time,
                 Vec::new(),
             );
         }
-        assert_eq!(sortie.offset, decalage, "{sortie:?}");
+        assert_eq!(strip.offset, shift, "{strip:?}");
 
-        // Vers la gauche : sélectionner le premier onglet visible montre son
-        // voisin de gauche, et rien de plus.
+        // Towards the left: selecting the first visible tab shows its left
+        // neighbor, and nothing more.
         for _ in 0..8 {
-            sortie = peindre(&context, &tabs, premier_apres as u32, &mut time, Vec::new());
+            strip = paint(&context, &tabs, first_after as u32, &mut time, Vec::new());
         }
         assert_eq!(
-            sortie.fully_visible.unwrap().0,
-            premier_apres - 1,
-            "seul le voisin de gauche doit apparaître : {sortie:?}"
+            strip.fully_visible.unwrap().0,
+            first_after - 1,
+            "only the left neighbor must appear: {strip:?}"
         );
 
-        // Un onglet sélectionné loin de la vue (par script) redevient visible.
+        // A tab selected far from view (by script) becomes visible again.
         for _ in 0..8 {
-            sortie = peindre(&context, &tabs, 9, &mut time, Vec::new());
+            strip = paint(&context, &tabs, 9, &mut time, Vec::new());
         }
-        assert_eq!(sortie.fully_visible.unwrap().1, 9, "{sortie:?}");
+        assert_eq!(strip.fully_visible.unwrap().1, 9, "{strip:?}");
     }
 
-    /// Les boutons « < » et « > » n'apparaissent que si des onglets sont
-    /// cachés ; « > » fait défiler la bande vers la droite, puis « < »
-    /// devient actif.
+    /// The "<" and ">" buttons appear only if tabs are hidden; ">" scrolls
+    /// the strip to the right, then "<" becomes active.
     #[test]
-    fn les_fleches_d_onglets_n_apparaissent_que_si_des_onglets_sont_caches() {
-        let context = contexte();
-        let tabs = dix_onglets();
+    fn the_tab_arrows_appear_only_if_tabs_are_hidden() {
+        let ctx = context();
+        let tabs = ten_tabs();
         let mut time = 0.0;
-        let mut sortie = TabStripOutput::default();
+        let mut strip = TabStripOutput::default();
         for _ in 0..3 {
-            sortie = peindre(&context, &tabs, 0, &mut time, Vec::new());
+            strip = paint(&ctx, &tabs, 0, &mut time, Vec::new());
         }
         assert_eq!(
-            sortie.overflow,
+            strip.overflow,
             TabStripOverflow {
                 hidden_left: false,
                 hidden_right: true
             }
         );
-        let [_, next] = sortie
-            .arrows
-            .expect("des onglets cachés : flèches affichées");
+        let [_, next] = strip.arrows.expect("hidden tabs: arrows shown");
         let pos = next.center();
-        peindre(
-            &context,
+        paint(
+            &ctx,
             &tabs,
             0,
             &mut time,
-            vec![egui::Event::PointerMoved(pos), clic(pos, true)],
+            vec![egui::Event::PointerMoved(pos), click_event(pos, true)],
         );
-        peindre(&context, &tabs, 0, &mut time, vec![clic(pos, false)]);
+        paint(&ctx, &tabs, 0, &mut time, vec![click_event(pos, false)]);
         for _ in 0..6 {
-            sortie = peindre(&context, &tabs, 0, &mut time, Vec::new());
+            strip = paint(&ctx, &tabs, 0, &mut time, Vec::new());
         }
+        assert!(strip.offset > 0.0, "\">\" must scroll the strip: {strip:?}");
         assert!(
-            sortie.offset > 0.0,
-            "« > » doit faire défiler la bande : {sortie:?}"
-        );
-        assert!(
-            sortie.overflow.hidden_left,
-            "« < » devient utile : {sortie:?}"
+            strip.overflow.hidden_left,
+            "\"<\" becomes useful: {strip:?}"
         );
 
-        // Deux onglets tiennent dans la bande : pas de flèches.
-        let context = contexte();
-        let deux = &tabs[..2];
+        // Two tabs fit in the strip: no arrows.
+        let ctx = context();
+        let two = &tabs[..2];
         for _ in 0..3 {
-            sortie = peindre(&context, deux, 0, &mut time, Vec::new());
+            strip = paint(&ctx, two, 0, &mut time, Vec::new());
         }
-        assert!(
-            sortie.arrows.is_none(),
-            "aucun onglet caché : pas de flèches"
-        );
+        assert!(strip.arrows.is_none(), "no hidden tab: no arrows");
     }
 
-    /// Peint trois onglets avec [`tab_strip_with`], une image par lot
-    /// d'événements, et rend ce que la bande a demandé : onglets choisis et
-    /// [`TabEvent`] émis, dans l'ordre.
-    fn gestes(
+    /// Paints three tabs with [`tab_strip_with`], one frame per batch of
+    /// events, and returns what the strip asked for: chosen tabs and
+    /// [`TabEvent`]s emitted, in order.
+    fn gestures(
         ops: Option<&TabOps<u32>>,
-        lots: Vec<Vec<egui::Event>>,
+        batches: Vec<Vec<egui::Event>>,
     ) -> (Vec<u32>, Vec<TabEvent<u32>>) {
-        let context = contexte();
-        let tabs: Vec<(u32, String)> = (0..3).map(|i| (i, format!("Feuille {i}"))).collect();
-        let mut choisis = Vec::new();
-        let mut demandes = Vec::new();
-        for events in lots {
+        let context = context();
+        let tabs: Vec<(u32, String)> = (0..3).map(|i| (i, format!("Sheet {i}"))).collect();
+        let mut chosen_tabs = Vec::new();
+        let mut requests = Vec::new();
+        for events in batches {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1210,38 +1177,38 @@ mod tests {
                     TabStripSide::Bottom,
                     &tabs,
                     0,
-                    |tab| choisis.push(tab),
+                    |tab| chosen_tabs.push(tab),
                     None,
                     || {},
                     ops,
-                    |event| demandes.push(event),
+                    |event| requests.push(event),
                 );
             });
             output.textures_delta.clear();
         }
-        (choisis, demandes)
+        (chosen_tabs, requests)
     }
 
-    /// Le double-clic sur un onglet demande son renommage — seulement quand
-    /// la bande porte des gestes ([`TabOps`]). Le témoin : sans eux, le même
-    /// double-clic ne fait que choisir l'onglet.
+    /// A double-click on a tab asks for its rename — only when the strip
+    /// carries gestures ([`TabOps`]). The witness: without them, the same
+    /// double-click only chooses the tab.
     #[test]
-    fn le_double_clic_demande_le_renommage_seulement_avec_des_gestes() {
-        // Repérer la position de « Feuille 1 » : la bande ne la rend pas.
-        let context = contexte();
-        let tabs: Vec<(u32, String)> = (0..3).map(|i| (i, format!("Feuille {i}"))).collect();
+    fn double_click_asks_for_rename_only_with_gestures() {
+        // Locate the position of "Sheet 1": the strip does not return it.
+        let context = context();
+        let tabs: Vec<(u32, String)> = (0..3).map(|i| (i, format!("Sheet {i}"))).collect();
         let mut time = 0.0;
-        peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
-        let (_, output) = peindre_onglets(&context, 800.0, &tabs, 0, &mut time, Vec::new());
-        let pos = position(&output, "Feuille 1").expect("onglet peint");
-        let double_clic = || {
+        paint_tabs(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        let (_, output) = paint_tabs(&context, 800.0, &tabs, 0, &mut time, Vec::new());
+        let pos = position(&output, "Sheet 1").expect("painted tab");
+        let double_click = || {
             vec![
                 Vec::new(),
                 vec![egui::Event::PointerMoved(pos)],
-                vec![clic(pos, true)],
-                vec![clic(pos, false)],
-                vec![clic(pos, true)],
-                vec![clic(pos, false)],
+                vec![click_event(pos, true)],
+                vec![click_event(pos, false)],
+                vec![click_event(pos, true)],
+                vec![click_event(pos, false)],
             ]
         };
 
@@ -1250,36 +1217,36 @@ mod tests {
             can_delete: true,
             resettable: Vec::new(),
         };
-        let (choisis, demandes) = gestes(Some(&ops), double_clic());
-        assert_eq!(demandes, vec![TabEvent::BeginRename(1)]);
-        assert!(choisis.iter().all(|&tab| tab == 1));
+        let (chosen_tabs, requests) = gestures(Some(&ops), double_click());
+        assert_eq!(requests, vec![TabEvent::BeginRename(1)]);
+        assert!(chosen_tabs.iter().all(|&tab| tab == 1));
 
-        let (choisis, demandes) = gestes(None, double_clic());
+        let (chosen_tabs, requests) = gestures(None, double_click());
         assert!(
-            demandes.is_empty(),
-            "sans gestes, pas de renommage : {demandes:?}"
+            requests.is_empty(),
+            "without gestures, no rename: {requests:?}"
         );
-        assert!(!choisis.is_empty() && choisis.iter().all(|&tab| tab == 1));
+        assert!(!chosen_tabs.is_empty() && chosen_tabs.iter().all(|&tab| tab == 1));
     }
 
-    /// Le double-clic demande d'abord la sélection, puis le renommage :
-    /// les callbacks restent différés et ordonnés après les extractions.
+    /// The double-click asks for the selection first, then the rename: the
+    /// callbacks stay deferred and ordered after the extractions.
     #[test]
-    fn le_double_clic_notifie_la_selection_avant_le_renommage() {
+    fn double_click_notifies_the_selection_before_the_rename() {
         #[derive(Debug, PartialEq)]
-        enum Appel {
+        enum Call {
             Selection(u32),
-            Ajout,
-            Geste(TabEvent<u32>),
+            Add,
+            Gesture(TabEvent<u32>),
         }
-        let context = contexte();
-        let tabs = vec![(0, "Première".into()), (1, "Seconde".into())];
+        let context = context();
+        let tabs = vec![(0, "First".into()), (1, "Second".into())];
         let ops = TabOps {
             renaming: None,
             can_delete: true,
             resettable: Vec::new(),
         };
-        let appels = std::cell::RefCell::new(Vec::new());
+        let calls = std::cell::RefCell::new(Vec::new());
         let paint = |events| {
             let mut output = context.run_ui(
                 egui::RawInput {
@@ -1296,11 +1263,11 @@ mod tests {
                         TabStripSide::Bottom,
                         &tabs,
                         0,
-                        |id| appels.borrow_mut().push(Appel::Selection(id)),
-                        Some("Ajouter"),
-                        || appels.borrow_mut().push(Appel::Ajout),
+                        |id| calls.borrow_mut().push(Call::Selection(id)),
+                        Some("Add"),
+                        || calls.borrow_mut().push(Call::Add),
                         Some(&ops),
-                        |event| appels.borrow_mut().push(Appel::Geste(event)),
+                        |event| calls.borrow_mut().push(Call::Gesture(event)),
                     );
                 },
             );
@@ -1310,37 +1277,37 @@ mod tests {
         paint(Vec::new());
         let output = paint(Vec::new());
         assert!(
-            appels.borrow().is_empty(),
-            "témoin : peindre ne notifie aucun choix"
+            calls.borrow().is_empty(),
+            "witness: painting notifies no choice"
         );
-        let pos = position(&output, "Seconde").unwrap();
+        let pos = position(&output, "Second").unwrap();
         paint(vec![egui::Event::PointerMoved(pos)]);
-        paint(vec![clic(pos, true)]);
-        paint(vec![clic(pos, false)]);
+        paint(vec![click_event(pos, true)]);
+        paint(vec![click_event(pos, false)]);
         assert_eq!(
-            appels.take(),
-            [Appel::Selection(1)],
-            "un clic choisit seulement l'onglet"
+            calls.take(),
+            [Call::Selection(1)],
+            "a click only chooses the tab"
         );
-        paint(vec![clic(pos, true)]);
-        paint(vec![clic(pos, false)]);
+        paint(vec![click_event(pos, true)]);
+        paint(vec![click_event(pos, false)]);
         assert_eq!(
-            appels.take(),
-            [Appel::Selection(1), Appel::Geste(TabEvent::BeginRename(1))]
+            calls.take(),
+            [Call::Selection(1), Call::Gesture(TabEvent::BeginRename(1))]
         );
     }
 
-    /// Le renommage en place : le champ s'ouvre avec le nom entier
-    /// sélectionné, la saisie le remplace et Entrée la valide ; Échap
-    /// l'abandonne sans rien valider.
+    /// The in-place rename: the field opens with the whole name selected, the
+    /// input replaces it and Enter validates it; Escape abandons it without
+    /// validating anything.
     #[test]
-    fn le_renommage_en_place_se_valide_par_entree_et_s_abandonne_par_echap() {
+    fn in_place_rename_is_validated_by_enter_and_abandoned_by_escape() {
         let ops = TabOps {
             renaming: Some(1),
             can_delete: true,
             resettable: Vec::new(),
         };
-        let touche = |key| egui::Event::Key {
+        let press = |key| egui::Event::Key {
             key,
             physical_key: None,
             pressed: true,
@@ -1348,73 +1315,73 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
 
-        let (_, demandes) = gestes(
+        let (_, requests) = gestures(
             Some(&ops),
             vec![
                 Vec::new(),
-                vec![egui::Event::Text("Spectres".to_string())],
-                vec![touche(egui::Key::Enter)],
+                vec![egui::Event::Text("Spectra".to_string())],
+                vec![press(egui::Key::Enter)],
             ],
         );
         assert_eq!(
-            demandes,
-            vec![TabEvent::CommitRename(1, "Spectres".to_string())]
+            requests,
+            vec![TabEvent::CommitRename(1, "Spectra".to_string())]
         );
 
-        let (_, demandes) = gestes(
+        let (_, requests) = gestures(
             Some(&ops),
             vec![
                 Vec::new(),
-                vec![egui::Event::Text("Spectres".to_string())],
-                vec![touche(egui::Key::Escape)],
+                vec![egui::Event::Text("Spectra".to_string())],
+                vec![press(egui::Key::Escape)],
             ],
         );
-        assert_eq!(demandes, vec![TabEvent::CancelRename]);
+        assert_eq!(requests, vec![TabEvent::CancelRename]);
     }
 
-    /// Un nom déjà pris ou vide garde le champ ouvert (Entrée ne valide pas) ;
-    /// Tab sur un nom valide l'écrit et ouvre le renommage de l'onglet suivant,
-    /// Maj+Tab celui du précédent (S-T4, #224).
+    /// An already taken or empty name keeps the field open (Enter does not
+    /// validate); Tab on a valid name writes it and opens the rename of the
+    /// next tab, Shift+Tab that of the previous one (S-T4, #224).
     #[test]
-    fn le_renommage_refuse_un_nom_pris_et_tab_passe_a_l_onglet_voisin() {
+    fn rename_refuses_a_taken_name_and_tab_moves_to_the_neighboring_tab() {
         let ops = TabOps {
             renaming: Some(1),
             can_delete: true,
             resettable: Vec::new(),
         };
-        let (_, demandes) = gestes(
+        let (_, requests) = gestures(
             Some(&ops),
             vec![
                 Vec::new(),
-                vec![egui::Event::Text("Feuille 2".to_string())],
-                vec![touche(egui::Key::Enter)],
+                vec![egui::Event::Text("Sheet 2".to_string())],
+                vec![key(egui::Key::Enter)],
             ],
         );
-        assert!(demandes.is_empty(), "un nom pris n'est pas validé");
+        assert!(requests.is_empty(), "a taken name is not validated");
 
-        let (_, demandes) = gestes(
+        let (_, requests) = gestures(
             Some(&ops),
             vec![
                 Vec::new(),
-                vec![egui::Event::Text("Spectres".to_string())],
-                vec![touche(egui::Key::Tab)],
+                vec![egui::Event::Text("Spectra".to_string())],
+                vec![key(egui::Key::Tab)],
             ],
         );
         assert_eq!(
-            demandes,
+            requests,
             vec![
-                TabEvent::CommitRename(1, "Spectres".to_string()),
+                TabEvent::CommitRename(1, "Spectra".to_string()),
                 TabEvent::BeginRename(2)
             ]
         );
 
-        // Sans changement, Tab ne valide rien mais passe quand même au suivant.
-        let (_, demandes) = gestes(
+        // Without a change, Tab validates nothing but still moves on to the next one.
+        let (_, requests) = gestures(
             Some(&ops),
-            vec![Vec::new(), Vec::new(), vec![touche(egui::Key::Tab)]],
+            vec![Vec::new(), Vec::new(), vec![key(egui::Key::Tab)]],
         );
         assert_eq!(
-            demandes,
+            requests,
             vec![TabEvent::CancelRename, TabEvent::BeginRename(2)]
         );
     }

@@ -34,7 +34,7 @@ Two consequences to know:
   also under the `test-support` feature of `stokesforge-app-state`, which the
   dev-dependency of `stokesforge-app` enables: without it, the app tests
   (which build an `AppState` with `new`) would read and write the real
-  `preferences.json` (`stokesforge-app/tests/isolation_preferences.rs`). This
+  `preferences.json` (`stokesforge-app/tests/preferences_isolation.rs`). This
   feature is never put in a `[dependencies]`.
 
 A window cannot be tested in continuous integration. That is the whole reason for the
@@ -158,9 +158,9 @@ compile): `shell.rs` (the complete loop), `script_panel.rs`,
 `perf_write_under_snapshot.rs`, `analysis.rs`, `analysis_state.rs`,
 `project_objects.rs`, `output_names.rs`, `history_text.rs`,
 `language_switch.rs` and the boundary guard `no_ui_dependency.rs`. In
-`stokesforge-app/tests/`: `libelles.rs` (the translation guard and the dead
-keys, see "Multilingual interface" in `theme-i18n-systeme.md`), `gardes.rs` (text guards on the
-sources of both crates), `isolation_preferences.rs`, `wayland_{uri,bridge}.rs`.
+`stokesforge-app/tests/`: `labels.rs` (the translation guard and the dead
+keys, see "Multilingual interface" in `theme-i18n-systeme.md`), `guards.rs` (text guards on the
+sources of both crates), `preferences_isolation.rs`, `wayland_{uri,bridge}.rs`.
 
 ## `stokesforge-cli`
 

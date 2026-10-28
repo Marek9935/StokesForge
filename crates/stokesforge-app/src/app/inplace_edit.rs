@@ -1,36 +1,35 @@
-//! **Le** contrat de l'édition sur place (#224, `docs/standard-interface.md`,
-//! § Text fields and in-place editing, S-T4) : grille, onglets de feuille,
-//! Project Manager, Object Manager et titres du graphe l'appellent tous.
+//! **The** contract of in-place editing (#224, `docs/standard-interface.md`,
+//! § Text fields and in-place editing, S-T4): the grid, sheet tabs, Project
+//! Manager, Object Manager and graph titles all call it.
 //!
-//! Le contrat, identique partout :
+//! The contract, identical everywhere:
 //!
-//! - à l'ouverture le champ prend le focus et **tout le texte est
-//!   sélectionné** (sauf quand la frappe qui l'ouvre est déjà son contenu :
-//!   la grille, [`Opening::KeepCursor`]) ;
-//! - Entrée et un clic ailleurs **valident**, Échap **annule**, Tab **valide et
-//!   passe au suivant** (Maj+Tab au précédent) ;
-//! - une saisie refusée ([`Resolution::Stay`]) garde le champ ouvert et son
-//!   texte, cadre rouge de `field_state` ; un clic ailleurs sur une saisie
-//!   refusée rend l'ancienne valeur.
+//! - on opening the field takes the focus and **all the text is selected**
+//!   (except when the keystroke that opens it is already its content: the grid,
+//!   [`Opening::KeepCursor`]);
+//! - Enter and a click elsewhere **validate**, Escape **cancels**, Tab
+//!   **validates and moves to the next** (Shift+Tab to the previous);
+//! - a refused entry ([`Resolution::Stay`]) keeps the field open and its text,
+//!   red frame of `field_state`; a click elsewhere on a refused entry gives back
+//!   the old value.
 //!
-//! La brique ne possède ni le tampon ni le modèle : l'appelant garde son
-//! `String` et son état, pose sa mise en page (la brique ne crée aucun `Ui`,
-//! donc ne change aucun identifiant egui) et traduit [`Resolution`] en
-//! action. Entrée, Tab et Échap sont **consommés** ici : aucun raccourci
-//! plus bas dans l'image ne les revoit (le piège du double déplacement de
-//! la grille, #38).
+//! The building block owns neither the buffer nor the model: the caller keeps
+//! its `String` and its state, sets its layout (the block creates no `Ui`, so
+//! changes no egui identifier) and translates [`Resolution`] into an action.
+//! Enter, Tab and Escape are **consumed** here: no shortcut further down the
+//! frame sees them again (the trap of the grid's double move, #38).
 //!
-//! Pourquoi une fonction pure ([`resolve`]) : la décision « valider, rester,
-//! rendre l'ancienne valeur » est testée sans fenêtre ; [`show`] n'est que la
-//! lecture des touches et du focus.
+//! Why a pure function ([`resolve`]): the decision "validate, stay, give back
+//! the old value" is tested without a window; [`show`] is only the reading of
+//! keys and focus.
 
 use eframe::egui;
 
 use crate::field_state::{show_issue, FieldIssue};
 
-/// Les touches que le champ garde pour lui : Tab ne doit pas faire sortir le
-/// focus vers le reste de l'interface (le champ le lit, #38). Échap reste à
-/// egui, qui rend le focus : [`show`] le lit avant.
+/// The keys the field keeps for itself: Tab must not make the focus leave for
+/// the rest of the interface (the field reads it, #38). Escape stays with egui,
+/// which gives the focus back: [`show`] reads it first.
 pub(super) const KEYS: egui::EventFilter = egui::EventFilter {
     tab: true,
     horizontal_arrows: true,
@@ -38,56 +37,56 @@ pub(super) const KEYS: egui::EventFilter = egui::EventFilter {
     escape: false,
 };
 
-/// Comment s'ouvre le champ.
+/// How the field opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Opening {
-    /// Tout le texte est sélectionné : taper le remplace.
+    /// All the text is selected: typing replaces it.
     SelectAll,
-    /// Le curseur reste où egui l'a mis (à la fin) : le texte vient d'être
-    /// tapé, il ne faut pas le sélectionner pour le remplacer.
+    /// The cursor stays where egui put it (at the end): the text has just been
+    /// typed, it must not be selected to be replaced.
     KeepCursor,
 }
 
-/// Ce que fait la perte du focus.
+/// What losing the focus does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FocusLoss {
-    /// Un clic ailleurs termine la saisie ([`EditEnd::Elsewhere`]) : le cas
-    /// général.
+    /// A click elsewhere ends the entry ([`EditEnd::Elsewhere`]): the general
+    /// case.
     Ends,
-    /// Le champ peut perdre le focus sans que la saisie finisse : un éditeur
-    /// qui porte d'autres réglages (taille, rotation, couleur) et décide lui-même
-    /// de ce qu'est un « ailleurs » (titres du graphe, textes libres). Le champ
-    /// ne reprend pas le focus de force.
+    /// The field may lose the focus without the entry ending: an editor that
+    /// carries other settings (size, rotation, color) and decides itself what an
+    /// "elsewhere" is (graph titles, free texts). The field does not take the focus
+    /// back by force.
     Ignored,
 }
 
-/// Ce qui a terminé la saisie cette image.
+/// What ended the entry this frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EditEnd {
-    /// Entrée ; `shift` si Maj était tenue (la grille remonte d'une ligne).
+    /// Enter; `shift` if Shift was held (the grid goes up one row).
     Enter { shift: bool },
-    /// Tab ; `shift` pour Maj+Tab (le champ précédent).
+    /// Tab; `shift` for Shift+Tab (the previous field).
     Tab { shift: bool },
-    /// Un clic ailleurs, ou le focus pris par un autre champ.
+    /// A click elsewhere, or the focus taken by another field.
     Elsewhere,
-    /// Échap.
+    /// Escape.
     Cancel,
 }
 
-/// Ce que l'appelant fait de la fin de saisie.
+/// What the caller does with the end of the entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Resolution {
-    /// Le champ reste ouvert avec son texte (Entrée ou Tab sur une saisie
-    /// refusée).
+    /// The field stays open with its text (Enter or Tab on a refused
+    /// entry).
     Stay,
-    /// Le champ se ferme. `write` : le texte est à appliquer (il a changé et
-    /// il est lisible) ; sinon l'ancienne valeur revient. `end` dit comment
-    /// continuer (Tab passe au suivant, Entrée avance dans la grille).
+    /// The field closes. `write`: the text is to be applied (it changed and it is
+    /// readable); otherwise the old value comes back. `end` says how to continue
+    /// (Tab moves to the next, Enter advances in the grid).
     Close { write: bool, end: EditEnd },
 }
 
-/// La décision du cycle, sans egui. `unchanged` : le texte vaut encore
-/// l'original ; `refused` : l'appelant refuse le texte (nom vide, déjà pris…).
+/// The cycle's decision, without egui. `unchanged`: the text still equals the
+/// original; `refused`: the caller refuses the text (empty name, already taken…).
 pub(super) fn resolve(end: EditEnd, unchanged: bool, refused: bool) -> Resolution {
     match end {
         EditEnd::Cancel => Resolution::Close { write: false, end },
@@ -100,21 +99,21 @@ pub(super) fn resolve(end: EditEnd, unchanged: bool, refused: bool) -> Resolutio
     }
 }
 
-/// Ce que rend [`show`].
+/// What [`show`] returns.
 pub(super) struct Shown {
     pub(super) response: egui::Response,
-    /// La fin de saisie de cette image, s'il y en a une.
+    /// The end of the entry of this frame, if there is one.
     pub(super) end: Option<EditEnd>,
 }
 
-/// Dernière image où le champ `id` a été peint : de quoi reconnaître son
-/// ouverture (le `TextEdit` d'un identifiant stable garde son curseur d'une
-/// édition à l'autre, il ne dit donc pas s'il est neuf).
+/// Last frame in which the field `id` was painted: a way to recognize its
+/// opening (the `TextEdit` of a stable identifier keeps its cursor from one
+/// edit to the next, so it does not say whether it is new).
 #[derive(Clone, Copy)]
 struct Seen(u64);
 
-/// L'ouverture du champ `id` est-elle cette image ? À appeler **avant** de
-/// peindre le `TextEdit`, une fois par image et par champ.
+/// Is the opening of the field `id` this frame? To be called **before**
+/// painting the `TextEdit`, once per frame and per field.
 pub(super) fn begin(ctx: &egui::Context, id: egui::Id) -> bool {
     let pass = ctx.cumulative_pass_nr();
     let seen_id = id.with("inplace_seen");
@@ -125,11 +124,11 @@ pub(super) fn begin(ctx: &egui::Context, id: egui::Id) -> bool {
     fresh
 }
 
-/// Lit la fin de saisie d'un champ déjà peint (`response`) : focus et
-/// sélection à l'ouverture, Entrée, Tab, Échap, perte du focus. `fresh` vient
-/// de [`begin`], le `TextEdit` portait [`KEYS`] et l'identifiant `response.id`.
-/// `refusal` : la phrase qui dit pourquoi le texte actuel est refusé, peinte en
-/// cadre rouge.
+/// Reads the end of the entry of an already painted field (`response`): focus
+/// and selection on opening, Enter, Tab, Escape, loss of focus. `fresh` comes
+/// from [`begin`], the `TextEdit` carried [`KEYS`] and the identifier
+/// `response.id`. `refusal`: the sentence that says why the current text is
+/// refused, painted as a red frame.
 pub(super) fn finish(
     ui: &egui::Ui,
     response: &egui::Response,
@@ -140,8 +139,8 @@ pub(super) fn finish(
 ) -> Option<EditEnd> {
     let ctx = ui.ctx().clone();
     let id = response.id;
-    // Lu avant toute demande de focus : redemander le focus effacerait la perte
-    // que signale Entrée (le piège de `cell_widget`).
+    // Read before any focus request: asking for the focus again would erase the
+    // loss that Enter signals (the trap of `cell_widget`).
     let lost = response.lost_focus();
     if fresh {
         response.request_focus();
@@ -188,8 +187,8 @@ pub(super) fn finish(
             Some(EditEnd::Elsewhere)
         }
     } else {
-        // Un champ ouvert sans focus (après un changement de fenêtre) le
-        // reprend : il n'y a pas d'état « ouvert mais inerte ».
+        // An open field without focus (after a window change) takes it back: there is
+        // no "open but inert" state.
         if !fresh && !focused && !lost && loss == FocusLoss::Ends {
             response.request_focus();
         }
@@ -203,26 +202,26 @@ pub(super) fn finish(
     end
 }
 
-/// Le texte du champ, mesuré en caractères, pour tout sélectionner.
+/// The field's text, measured in characters, to select it all.
 fn state_text_len(ctx: &egui::Context, id: egui::Id) -> usize {
     ctx.data(|data| data.get_temp::<TextLen>(id.with("inplace_len")))
         .map_or(0, |TextLen(len)| len)
 }
 
-/// Longueur du texte vue par [`show`] ou [`measured`] cette image.
+/// Text length seen by [`show`] or [`measured`] this frame.
 #[derive(Clone, Copy)]
 struct TextLen(usize);
 
-/// Retient la longueur du texte d'un champ posé hors de [`show`] (avant
-/// [`finish`], qui sélectionne tout à l'ouverture).
+/// Records the text length of a field placed outside [`show`] (before
+/// [`finish`], which selects everything on opening).
 pub(super) fn measured(ctx: &egui::Context, id: egui::Id, text: &str) {
     ctx.data_mut(|data| data.insert_temp(id.with("inplace_len"), TextLen(text.chars().count())));
 }
 
-/// Peint le champ et lit sa fin de saisie. `edit` est le `TextEdit` de
-/// l'appelant (largeur, police, cadre, texte d'aide) : la brique lui pose
-/// seulement son identifiant et le filtre de touches. Pour un champ posé par
-/// `ui.put` ou dans une mise en page particulière : [`begin`] puis [`finish`].
+/// Paints the field and reads its end of entry. `edit` is the caller's
+/// `TextEdit` (width, font, frame, hint text): the block only sets its
+/// identifier and the key filter on it. For a field placed by `ui.put` or in a
+/// particular layout: [`begin`] then [`finish`].
 pub(super) fn show(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -241,14 +240,14 @@ pub(super) fn show(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{contexte, image, touche};
+    use super::super::test_support::{context, image, key};
     use super::*;
 
-    const ENTREE: EditEnd = EditEnd::Enter { shift: false };
+    const ENTER: EditEnd = EditEnd::Enter { shift: false };
     const TAB: EditEnd = EditEnd::Tab { shift: false };
 
     #[test]
-    fn echap_annule_toujours() {
+    fn escape_always_cancels() {
         for refused in [false, true] {
             assert_eq!(
                 resolve(EditEnd::Cancel, false, refused),
@@ -261,14 +260,14 @@ mod tests {
     }
 
     #[test]
-    fn entree_et_tab_valident_ce_qui_a_change() {
-        for end in [ENTREE, TAB] {
+    fn enter_and_tab_validate_what_changed() {
+        for end in [ENTER, TAB] {
             assert_eq!(
                 resolve(end, false, false),
                 Resolution::Close { write: true, end }
             );
-            // Sans changement, rien n'est écrit mais le geste continue (Tab
-            // passe au suivant).
+            // Without change, nothing is written but the gesture continues (Tab moves to
+            // the next).
             assert_eq!(
                 resolve(end, true, false),
                 Resolution::Close { write: false, end }
@@ -277,14 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn entree_et_tab_sur_une_saisie_refusee_gardent_le_champ_ouvert() {
-        for end in [ENTREE, TAB] {
+    fn enter_and_tab_on_a_refused_entry_keep_the_field_open() {
+        for end in [ENTER, TAB] {
             assert_eq!(resolve(end, false, true), Resolution::Stay);
         }
     }
 
     #[test]
-    fn un_clic_ailleurs_valide_ou_rend_l_ancienne_valeur_si_refuse() {
+    fn a_click_elsewhere_validates_or_restores_the_old_value_if_refused() {
         assert_eq!(
             resolve(EditEnd::Elsewhere, false, false),
             Resolution::Close {
@@ -301,21 +300,21 @@ mod tests {
         );
     }
 
-    /// Un champ ouvert sur « Spectre », piloté image par image.
-    struct Banc {
+    /// A field opened on "Spectrum", driven frame by frame.
+    struct Bench {
         context: egui::Context,
-        texte: String,
-        fins: Vec<EditEnd>,
+        text: String,
+        ends: Vec<EditEnd>,
         opening: Opening,
         refusal: Option<String>,
     }
 
-    impl Banc {
-        fn nouveau(opening: Opening) -> Self {
+    impl Bench {
+        fn new(opening: Opening) -> Self {
             Self {
-                context: contexte(),
-                texte: "Spectre".to_string(),
-                fins: Vec::new(),
+                context: context(),
+                text: "Spectrum".to_string(),
+                ends: Vec::new(),
                 opening,
                 refusal: None,
             }
@@ -324,100 +323,100 @@ mod tests {
         fn image(&mut self, events: Vec<egui::Event>) {
             let Self {
                 context,
-                texte,
-                fins,
+                text,
+                ends,
                 opening,
                 refusal,
             } = self;
             image(context, events, |ui| {
                 let shown = show(
                     ui,
-                    egui::Id::new("champ"),
-                    egui::TextEdit::singleline(texte),
+                    egui::Id::new("field"),
+                    egui::TextEdit::singleline(text),
                     *opening,
                     FocusLoss::Ends,
                     refusal.as_deref(),
                 );
-                fins.extend(shown.end);
+                ends.extend(shown.end);
             });
         }
 
-        fn ouvrir(&mut self) {
+        fn open(&mut self) {
             self.image(Vec::new());
             self.image(Vec::new());
         }
     }
 
     #[test]
-    fn l_ouverture_selectionne_tout_et_la_frappe_remplace() {
-        let mut banc = Banc::nouveau(Opening::SelectAll);
-        banc.ouvrir();
-        banc.image(vec![egui::Event::Text("Neuf".to_string())]);
-        assert_eq!(banc.texte, "Neuf");
-        assert!(banc.fins.is_empty());
+    fn opening_selects_everything_and_typing_replaces() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.open();
+        bench.image(vec![egui::Event::Text("New".to_string())]);
+        assert_eq!(bench.text, "New");
+        assert!(bench.ends.is_empty());
     }
 
     #[test]
-    fn garder_le_curseur_n_efface_pas_le_texte_tape() {
-        let mut banc = Banc::nouveau(Opening::KeepCursor);
-        banc.ouvrir();
-        banc.image(vec![egui::Event::Text("!".to_string())]);
-        assert_eq!(banc.texte, "Spectre!");
+    fn keeping_the_cursor_does_not_erase_the_typed_text() {
+        let mut bench = Bench::new(Opening::KeepCursor);
+        bench.open();
+        bench.image(vec![egui::Event::Text("!".to_string())]);
+        assert_eq!(bench.text, "Spectrum!");
     }
 
     #[test]
-    fn entree_valide_et_est_consommee() {
-        let mut banc = Banc::nouveau(Opening::SelectAll);
-        banc.ouvrir();
-        banc.image(vec![touche(egui::Key::Enter)]);
-        assert_eq!(banc.fins, [ENTREE]);
+    fn enter_validates_and_is_consumed() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.open();
+        bench.image(vec![key(egui::Key::Enter)]);
+        assert_eq!(bench.ends, [ENTER]);
     }
 
     #[test]
-    fn echap_annule() {
-        let mut banc = Banc::nouveau(Opening::SelectAll);
-        banc.ouvrir();
-        banc.image(vec![touche(egui::Key::Escape)]);
-        assert_eq!(banc.fins, [EditEnd::Cancel]);
+    fn escape_cancels() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.open();
+        bench.image(vec![key(egui::Key::Escape)]);
+        assert_eq!(bench.ends, [EditEnd::Cancel]);
     }
 
     #[test]
-    fn tab_valide_et_passe_au_suivant_sans_quitter_le_focus_par_egui() {
-        let mut banc = Banc::nouveau(Opening::SelectAll);
-        banc.ouvrir();
-        banc.image(vec![touche(egui::Key::Tab)]);
-        assert_eq!(banc.fins, [TAB]);
+    fn tab_validates_and_moves_to_the_next_without_egui_moving_the_focus() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.open();
+        bench.image(vec![key(egui::Key::Tab)]);
+        assert_eq!(bench.ends, [TAB]);
     }
 
     #[test]
-    fn un_champ_refuse_se_peint_en_rouge() {
-        let mut banc = Banc::nouveau(Opening::SelectAll);
-        banc.refusal = Some("Name already used".to_string());
-        banc.ouvrir();
-        let rouge = crate::theme::field_refused_color();
-        let mut peint = false;
-        let context = banc.context.clone();
-        let Banc {
-            texte,
+    fn a_refused_field_is_painted_red() {
+        let mut bench = Bench::new(Opening::SelectAll);
+        bench.refusal = Some("Name already used".to_string());
+        bench.open();
+        let red = crate::theme::field_refused_color();
+        let mut painted = false;
+        let context = bench.context.clone();
+        let Bench {
+            text,
             opening,
             refusal,
             ..
-        } = &mut banc;
-        let formes = image(&context, Vec::new(), |ui| {
+        } = &mut bench;
+        let clipped_shapes = image(&context, Vec::new(), |ui| {
             show(
                 ui,
-                egui::Id::new("champ"),
-                egui::TextEdit::singleline(texte),
+                egui::Id::new("field"),
+                egui::TextEdit::singleline(text),
                 *opening,
                 FocusLoss::Ends,
                 refusal.as_deref(),
             );
         });
-        for forme in formes {
-            if let egui::Shape::Rect(rect) = forme.shape {
-                peint |= rect.stroke.color == rouge;
+        for clipped in clipped_shapes {
+            if let egui::Shape::Rect(rect) = clipped.shape {
+                painted |= rect.stroke.color == red;
             }
         }
-        assert!(peint, "un cadre rouge entoure le champ refusé");
+        assert!(painted, "a red frame surrounds the refused field");
     }
 }

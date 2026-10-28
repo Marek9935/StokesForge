@@ -1,21 +1,21 @@
-//! La grille d'une feuille : table virtualisée ([`grid_contents`]), en-tête
-//! empilé (lettre, nom long, unité, commentaire, formule, métadonnées),
-//! gouttière des numéros de ligne, cellules, menu d'édition commun à toutes
-//! ses zones ([`grid_edit_menu`]), focus clavier (Tab, Maj+Tab et les flèches
-//! appartiennent à la grille, #38 : [`GRID_KEYS`]), barres de défilement
-//! déportées et prise du glisser de colonnes vers un graphe, par le bord d'un
-//! bloc de colonnes sélectionnées ([`column_grip_bands`], #160).
+//! The grid of a worksheet: virtualized table ([`grid_contents`]), stacked
+//! header (letter, long name, unit, comment, formula, metadata), row-number
+//! gutter, cells, edit menu shared by all its zones ([`grid_edit_menu`]),
+//! keyboard focus (Tab, Shift+Tab and the arrows belong to the grid, #38:
+//! [`GRID_KEYS`]), detached scroll bars and the grip that drags columns to a
+//! graph, by the edge of a block of selected columns ([`column_grip_bands`],
+//! #160).
 //!
-//! Sorti d'`app.rs` tel quel (#120). Le classeur qui l'entoure (onglets de
-//! feuille, menu Classeur) vit dans `workbook.rs`. Les autres modules ne lisent
-//! d'ici que [`keyboard_focus_outside_grid`] (`app.rs` pour les raccourcis
-//! globaux, `dialogs.rs`, `graph_window.rs`) et la visibilité de la ligne
-//! « Metadata » (`workbook.rs`) ; [`role_label`] sert aussi au test du classeur
-//! détaché (`window_detach.rs`).
+//! Moved out of `app.rs` as is (#120). The workbook around it (sheet tabs,
+//! Workbook menu) lives in `workbook.rs`. The other modules read only
+//! [`keyboard_focus_outside_grid`] from here (`app.rs` for the global shortcuts,
+//! `dialogs.rs`, `graph_window.rs`) and the visibility of the "Metadata" row
+//! (`workbook.rs`); [`role_label`] also serves the detached workbook test
+//! (`window_detach.rs`).
 //!
-//! Les tests sont en fin de fichier : ils peignent le classeur sans fenêtre,
-//! injectent clavier et souris, et lisent ce qui est peint (textes,
-//! positions) ou les actions poussées, jamais le texte source.
+//! The tests are at the end of the file: they paint the workbook without a
+//! window, inject keyboard and mouse, and read what is painted (texts,
+//! positions) or the pushed actions, never the source text.
 
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
@@ -40,37 +40,33 @@ use super::shortcuts::{
     SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_SELECT_ALL,
 };
 
-/// Hauteur d'une ligne de la grille, en points.
+/// Height of a grid row, in points.
 const ROW_HEIGHT: f32 = 20.0;
-/// Largeur par défaut d'une colonne de données dans la grille docquée. 54px
-/// (plutôt que les 110px historiques) : demande explicite, pour loger
-/// davantage de colonnes à l'écran — l'utilisateur peut toujours
-/// redimensionner à la souris (`.resizable(true)`).
+/// Default width of a data column in the docked grid. 54px (rather than the
+/// historical 110px): explicit request, to fit more columns on screen — the user
+/// can still resize with the mouse (`.resizable(true)`).
 pub(super) const DEFAULT_COLUMN_WIDTH: f32 = 54.0;
-/// Largeur minimale d'une colonne de données après redimensionnement manuel.
-/// Sous l'ancien plancher (56px) pour ne pas empêcher un retour à
-/// [`DEFAULT_COLUMN_WIDTH`] une fois qu'on l'a élargie puis rétrécie.
+/// Minimum width of a data column after a manual resize. Lower than the old
+/// floor (56px) so as not to prevent a return to [`DEFAULT_COLUMN_WIDTH`] once it
+/// has been widened then narrowed.
 const MIN_COLUMN_WIDTH: f32 = 28.0;
-/// Largeur par défaut de la gouttière des numéros de ligne dans la grille
-/// docquée — élargie (l'ancienne valeur, 56px, coupait déjà les libellés
-/// d'en-tête « Long Name »/« Comments ») et redimensionnable comme les
-/// colonnes de données plutôt que figée (`TableColumn::exact`).
+/// Default width of the row-number gutter in the docked grid — widened (the old
+/// value, 56px, already cut the "Long Name"/"Comments" header labels) and
+/// resizable like the data columns rather than fixed (`TableColumn::exact`).
 const ROW_NUMBER_COLUMN_WIDTH: f32 = 90.0;
-/// Largeur minimale de la gouttière des numéros de ligne après
-/// redimensionnement manuel — assez pour garder `#` et quelques chiffres
-/// lisibles.
+/// Minimum width of the row-number gutter after a manual resize — enough to
+/// keep `#` and a few digits readable.
 const MIN_ROW_NUMBER_COLUMN_WIDTH: f32 = 32.0;
-/// Hauteur d'une rangée secondaire de l'en-tête empilé (lettre, unité,
-/// commentaire, formule).
+/// Height of a secondary row of the stacked header (letter, unit, comment,
+/// formula).
 const HEADER_SUBROW_HEIGHT: f32 = 18.0;
-/// Hauteur de la rangée du nom long, légèrement plus haute — c'est le nom
-/// principal de la colonne.
+/// Height of the long-name row, slightly taller — it is the column's main name.
 const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
-/// Hauteur totale de l'en-tête empilé de la grille docquée avec toutes ses
-/// rangées (lettre, x', nom long, unité, commentaire, formule, métadonnées).
+/// Total height of the stacked header of the docked grid with all its rows
+/// (letter, x', long name, unit, comment, formula, metadata).
 const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 6.0 * HEADER_SUBROW_HEIGHT;
 
-/// Les rangées facultatives de l'en-tête d'un classeur : « Metadata » et x'.
+/// The optional rows of a workbook's header: "Metadata" and x'.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct HeaderRows {
     pub(super) metadata: bool,
@@ -78,14 +74,14 @@ pub(super) struct HeaderRows {
 }
 
 impl HeaderRows {
-    /// Sans préférence lue : Metadata affichée, x' cachée.
+    /// Without a stored preference: Metadata shown, x' hidden.
     const DEFAULT: Self = Self {
         metadata: true,
         x_prime: false,
     };
 }
 
-/// Hauteur de l'en-tête empilé selon les rangées affichées.
+/// Height of the stacked header according to the displayed rows.
 fn stacked_header_height(rows: HeaderRows) -> f32 {
     let hidden = usize::from(!rows.metadata) + usize::from(!rows.x_prime);
     HEADER_HEIGHT_STACKED - hidden as f32 * HEADER_SUBROW_HEIGHT
@@ -95,19 +91,19 @@ fn header_rows_default_id() -> egui::Id {
     egui::Id::new("stokesforge_header_rows_default")
 }
 
-/// Publie le réglage des **nouveaux** classeurs (préférences), à chaque image :
-/// seul canal commun aux viewports, qui partagent le `Context`.
+/// Publishes the setting for **new** workbooks (preferences), every frame: the
+/// only channel shared by the viewports, which share the `Context`.
 pub(super) fn publish_header_row_defaults(ctx: &egui::Context, metadata: bool, x_prime: bool) {
     ctx.data_mut(|data| {
         data.insert_temp(header_rows_default_id(), HeaderRows { metadata, x_prime });
     });
 }
 
-/// Les rangées d'en-tête d'un classeur. Réglage de vue **propre au classeur**,
-/// gardé dans la mémoire d'egui (un seul `Context` pour tous les viewports :
-/// les classeurs flottants et détachés le suivent ensemble), jamais dans le
-/// modèle ni l'historique. Tant que l'utilisateur n'y a pas touché, c'est le
-/// réglage des préférences au moment où il regarde.
+/// The header rows of a workbook. A view setting **specific to the workbook**,
+/// kept in egui's memory (one `Context` for all viewports: floating and detached
+/// workbooks follow it together), never in the model or the history. As long as
+/// the user has not touched it, it is the preferences setting at the moment they
+/// look.
 pub(super) fn header_rows(ctx: &egui::Context, book: Option<NodeId>) -> HeaderRows {
     ctx.data(|data| {
         book.and_then(|book| data.get_temp::<HeaderRows>(header_rows_id(book)))
@@ -124,12 +120,12 @@ pub(super) fn set_header_rows(ctx: &egui::Context, book: NodeId, rows: HeaderRow
     ctx.data_mut(|data| data.insert_temp(header_rows_id(book), rows));
 }
 
-/// Le classeur d'une feuille.
+/// The workbook of a worksheet.
 pub(super) fn book_of(tree: &stokesforge_core::Tree, sheet: NodeId) -> Option<NodeId> {
     tree.node(sheet).and_then(|node| node.parent())
 }
 
-/// Bascule d'une rangée pour le classeur `book` seul.
+/// Toggle of a row for the workbook `book` alone.
 pub(super) fn toggle_header_row_menu(ui: &mut egui::Ui, book: NodeId) {
     let ctx = ui.ctx().clone();
     let mut rows = header_rows(&ctx, Some(book));
@@ -143,29 +139,27 @@ pub(super) fn toggle_header_row_menu(ui: &mut egui::Ui, book: NodeId) {
     }
 }
 
-/// Demi-largeur, en points, de la bande de prise du glisser de colonnes : elle
-/// déborde de part et d'autre du bord vertical d'un bloc de colonnes
-/// sélectionnées (#160).
+/// Half-width, in points, of the grip band for dragging columns: it extends on
+/// both sides of the vertical edge of a block of selected columns (#160).
 const COLUMN_GRIP_HALF_WIDTH: f32 = 3.0;
 
-/// Étendue horizontale d'une colonne de la grille : `(colonne, gauche, droite)`.
+/// Horizontal extent of a grid column: `(column, left, right)`.
 type ColumnExtent = (NodeId, f32, f32);
 
-/// Étendue verticale d'une ligne **peinte** de la grille : `(ligne, haut, bas)`.
-/// La table ne peint que les lignes visibles (virtualisation).
+/// Vertical extent of a **painted** grid row: `(row, top, bottom)`. The table
+/// paints only the visible rows (virtualization).
 type RowExtent = (usize, f32, f32);
 
-/// Demi-hauteur, en points, de la bande de prise du glisser de lignes (#166).
+/// Half-height, in points, of the grip band for dragging rows (#166).
 const ROW_GRIP_HALF_HEIGHT: f32 = 3.0;
 
-/// Bandes de prise du glisser de lignes vers un graphe (#166) : une au-dessus
-/// et une au-dessous de chaque **bloc** de lignes sélectionnées qui se
-/// suivent, sur son bord extérieur, de `left` à `right` — la gouttière des
-/// numéros de ligne, qui sélectionne au clic, en est exclue par l'appelant.
-/// Les blocs se lisent sur `selected` (croissant), pas sur ce qui est peint :
-/// un bord n'existe que si sa ligne est visible ET qu'elle est vraiment le
-/// bord du bloc, jamais parce que le bloc continue hors de l'écran. Les
-/// bandes restent dans `top..bottom` (le corps de la table, sans l'en-tête).
+/// Grip bands for dragging rows to a graph (#166): one above and one below each
+/// **block** of consecutive selected rows, on its outer edge, from `left` to
+/// `right` — the row-number gutter, which selects on click, is excluded by the
+/// caller. Blocks are read from `selected` (ascending), not from what is
+/// painted: an edge exists only if its row is visible AND is really the edge of
+/// the block, never because the block continues off screen. The bands stay
+/// within `top..bottom` (the table body, without the header).
 fn row_grip_bands(
     extents: &[RowExtent],
     selected: &[usize],
@@ -200,12 +194,11 @@ fn row_grip_bands(
     bands
 }
 
-/// Bandes de prise du glisser de colonnes vers un graphe (#160) : une de part
-/// et d'autre de chaque **bloc** de colonnes sélectionnées qui se suivent,
-/// sur son bord extérieur. Elles couvrent la hauteur `top..bottom` — la
-/// rangée des lettres, où les bords de colonne servent au redimensionnement,
-/// en est exclue par l'appelant. Fonction pure : testable sans fenêtre, comme
-/// le reste des décisions de ce module.
+/// Grip bands for dragging columns to a graph (#160): one on each side of each
+/// **block** of consecutive selected columns, on its outer edge. They cover the
+/// height `top..bottom` — the letter row, where column edges serve for
+/// resizing, is excluded by the caller. Pure function: testable without a
+/// window, like the rest of this module's decisions.
 fn column_grip_bands(
     extents: &[ColumnExtent],
     selected: &[NodeId],
@@ -234,11 +227,11 @@ fn column_grip_bands(
     bands
 }
 
-/// Zone de défilement horizontale de la grille. Sa propre barre est masquée :
-/// la barre visible est déportée **sous les onglets de feuille**
-/// ([`show_grid_horizontal_bar`]), comme dans un tableur. Le défilement
-/// (molette avec Maj, glisser) reste actif ; un décalage demandé par la barre
-/// déportée à l'image précédente (`pending_offset`) est appliqué ici.
+/// Horizontal scroll area of the grid. Its own bar is hidden: the visible bar is
+/// moved **under the sheet tabs** ([`show_grid_horizontal_bar`]), as in a
+/// spreadsheet. Scrolling (wheel with Shift, drag) stays active; an offset
+/// requested by the moved bar in the previous frame (`pending_offset`) is
+/// applied here.
 pub(super) fn show_horizontally_scrollable_grid<R>(
     ui: &mut egui::Ui,
     pending_offset: Option<f32>,
@@ -253,13 +246,12 @@ pub(super) fn show_horizontally_scrollable_grid<R>(
     area.show(ui, add_grid)
 }
 
-/// Barre de défilement horizontale de la grille, déportée dans la bande
-/// réservée **sous les onglets de feuille** (`strip`). Même principe que
-/// [`show_grid_vertical_bar`] : une `ScrollArea` horizontale vide, de la
-/// largeur de contenu de la grille, qui reflète son décalage ; un glisser sur
-/// cette barre est mis en attente (`pending_id`) et appliqué à la grille à
-/// l'image suivante ([`show_horizontally_scrollable_grid`]). La bande a la
-/// largeur de la grille : pas de mise à l'échelle.
+/// Horizontal scroll bar of the grid, moved into the strip reserved **under the
+/// sheet tabs** (`strip`). Same principle as [`show_grid_vertical_bar`]: an
+/// empty horizontal `ScrollArea`, as wide as the grid's content, that mirrors
+/// its offset; a drag on this bar is put on hold (`pending_id`) and applied to
+/// the grid in the next frame ([`show_horizontally_scrollable_grid`]). The strip
+/// has the grid's width: no scaling.
 pub(super) fn show_grid_horizontal_bar<R>(
     ui: &mut egui::Ui,
     pending_id: egui::Id,
@@ -285,13 +277,12 @@ pub(super) fn show_grid_horizontal_bar<R>(
     }
 }
 
-/// Rapport d'échelle entre la barre verticale de la grille et le corps de
-/// la table qu'elle pilote : la barre couvre toute la hauteur de la fenêtre
-/// (`bar_height`), le corps défilant seulement la sienne (`body_height`, sous
-/// l'en-tête figé). Contenu et décalage de la barre sont ceux de la table
-/// multipliés par ce rapport : la poignée garde ainsi la même proportion
-/// (visible / total) et la même position relative que si elle ne couvrait
-/// que le corps. `1.0` quand le corps n'a pas de hauteur.
+/// Scale ratio between the grid's vertical bar and the table body it drives:
+/// the bar covers the whole window height (`bar_height`), while the body
+/// scrolls only its own (`body_height`, under the frozen header). The bar's
+/// content and offset are the table's multiplied by this ratio: the handle thus
+/// keeps the same proportion (visible / total) and the same relative position as
+/// if it covered only the body. `1.0` when the body has no height.
 fn grid_vertical_bar_scale(bar_height: f32, body_height: f32) -> f32 {
     if body_height > 0.0 {
         bar_height / body_height
@@ -300,21 +291,19 @@ fn grid_vertical_bar_scale(bar_height: f32, body_height: f32) -> f32 {
     }
 }
 
-/// Barre de défilement verticale de la grille (B10), collée au bord droit de
-/// la fenêtre plutôt qu'au bord droit de la table, et sur toute la hauteur
-/// de la fenêtre (`strip`, en-tête et onglets de feuille compris).
+/// Vertical scroll bar of the grid (B10), stuck to the right edge of the window
+/// rather than to the right edge of the table, and over the whole window height
+/// (`strip`, header and sheet tabs included).
 ///
-/// La table (`TableBuilder`) défile verticalement elle-même — c'est ce qui
-/// fige son en-tête — mais, dessinée dans la zone de défilement horizontale,
-/// sa propre barre suivrait la largeur de ses colonnes. Sa barre est donc
-/// masquée, et celle-ci en est le miroir : une `ScrollArea` verticale vide,
-/// posée dans la bande réservée, dont la hauteur de contenu est celle du
-/// corps de la table mise à l'échelle de la barre
-/// ([`grid_vertical_bar_scale`]). Le décalage suit la table (molette,
-/// glisser dans la table) ; inversement, un glisser sur cette barre est mis
-/// en attente dans la mémoire (`pending_id`), ramené à l'échelle de la table,
-/// et appliqué à celle-ci à l'image suivante (`grid_contents`,
-/// `pending_vertical_offset`).
+/// The table (`TableBuilder`) scrolls vertically itself — that is what freezes
+/// its header — but, drawn in the horizontal scroll area, its own bar would
+/// follow the width of its columns. Its bar is therefore hidden, and this one
+/// mirrors it: an empty vertical `ScrollArea`, placed in the reserved strip,
+/// whose content height is the table body's scaled to the bar
+/// ([`grid_vertical_bar_scale`]). The offset follows the table (wheel, drag in
+/// the table); conversely, a drag on this bar is put on hold in memory
+/// (`pending_id`), scaled back to the table, and applied to it in the next frame
+/// (`grid_contents`, `pending_vertical_offset`).
 pub(super) fn show_grid_vertical_bar(
     ui: &mut egui::Ui,
     pending_id: egui::Id,
@@ -345,13 +334,13 @@ pub(super) fn show_grid_vertical_bar(
     }
 }
 
-/// Un pictogramme suivi d'un nom (un nom de dossier ou de fenêtre, choisi par
-/// l'utilisateur : jamais traduit, R15).
+/// An icon followed by a name (a folder or window name, chosen by the user:
+/// never translated, R15).
 fn icon_label(icon: &str, name: &str) -> String {
     format!("{icon} {name}")
 }
 
-/// Nom d'un type de colonne, tel que l'offre le menu de la rangée des lettres.
+/// Name of a column type, as offered by the menu of the letter row.
 fn type_label(column_type: ColumnType) -> String {
     match column_type {
         ColumnType::Numeric => tr!("column-type-numeric"),
@@ -360,13 +349,13 @@ fn type_label(column_type: ColumnType) -> String {
     }
 }
 
-/// Nom du rôle, affiché entre parenthèses après la lettre de colonne pour
-/// rappeler son rôle de tracé et dans le sous-menu « Role » ([`stokesforge_core::ColumnRole`]) — `A(x)`, `B(y)`… Ce rôle
-/// n'est pour l'instant lu par rien d'autre que la persistance
-/// (`stokesforge-persistence`) : aucune résolution de série ne s'en sert encore
-/// (voir `stokesforge_core::resolve`, qui détermine X/Y autrement) — l'afficher et
-/// le rendre modifiable ici n'a donc, pour l'instant, qu'une valeur
-/// informative, en avance sur son câblage au rendu.
+/// Name of the role, shown in parentheses after the column letter to recall its
+/// plot role and in the "Role" submenu ([`stokesforge_core::ColumnRole`]) —
+/// `A(x)`, `B(y)`… For now this role is read by nothing but persistence
+/// (`stokesforge-persistence`): no series resolution uses it yet (see
+/// `stokesforge_core::resolve`, which determines X/Y otherwise) — showing it
+/// and making it editable here therefore has, for now, only informative value,
+/// ahead of its wiring to rendering.
 pub(super) fn role_label(role: ColumnRole) -> String {
     match role {
         ColumnRole::X => tr!("workbook-role-x"),
@@ -385,26 +374,24 @@ pub(super) fn role_label(role: ColumnRole) -> String {
     }
 }
 
-/// Lettre de colonne façon tableur, en base 26 : `0 → "A"`, `25 → "Z"`,
-/// `26 → "AA"`, `701 → "ZZ"`… — l'ordre de la feuille, pas un nom stocké
-/// dans le modèle.
+/// Spreadsheet-style column letter, in base 26: `0 → "A"`, `25 → "Z"`,
+/// `26 → "AA"`, `701 → "ZZ"`… — the order in the worksheet, not a name stored in
+/// the model.
 ///
-/// Simple alias de [`stokesforge_core::spreadsheet_name`], qui portait déjà cet
-/// algorithme (elle nomme les colonnes créées sans nom explicite). Ce module
-/// en avait sa propre copie, de sorte que la lettre affichée en en-tête et
-/// celle qui sert de nom par défaut à une colonne neuve venaient de deux
-/// implémentations distinctes — et, depuis que les libellés d'historique
-/// désignent eux aussi une colonne par sa lettre
-/// (`stokesforge_commands::Command::label`), il en aurait fallu une troisième.
+/// Simple alias of [`stokesforge_core::spreadsheet_name`], which already held
+/// this algorithm (it names columns created without an explicit name). This
+/// module had its own copy, so the letter shown in the header and the one used
+/// as the default name of a new column came from two distinct implementations —
+/// and, since history labels also designate a column by its letter
+/// (`stokesforge_commands::Command::label`), a third would have been needed.
 fn column_letter(index: usize) -> String {
     stokesforge_core::spreadsheet_name(index)
 }
 
-/// Vrai si `column` est la dernière colonne visible de `sheet` — condition
-/// commune aux deux endroits où Tab doit ajouter une colonne plutôt que
-/// revenir en début de ligne suivante (voir `Action::AddColumnAndSelect`) :
-/// le raccourci clavier global de `grid_contents` et la validation d'édition
-/// de `cell_widget`.
+/// True if `column` is the last visible column of `sheet` — a condition shared
+/// by the two places where Tab must add a column rather than return to the start
+/// of the next row (see `Action::AddColumnAndSelect`): the global keyboard
+/// shortcut of `grid_contents` and the edit validation of `cell_widget`.
 fn is_last_visible_column(state: &AppState, sheet: NodeId, column: NodeId) -> bool {
     state
         .visible_columns(sheet)
@@ -412,46 +399,41 @@ fn is_last_visible_column(state: &AppState, sheet: NodeId, column: NodeId) -> bo
         .is_some_and(|(last, ..)| *last == column)
 }
 
-/// Contenu du presse-papier **système**, lu à la demande — pour « Coller »
-/// pris dans un menu contextuel, qui n'a pas d'`egui::Event::Paste` à se
-/// mettre sous la dent.
+/// Contents of the **system** clipboard, read on demand — for "Paste" taken from
+/// a context menu, which has no `egui::Event::Paste` to rely on.
 ///
-/// Ctrl+V fonctionne sans ça parce qu'`egui-winit` lit lui-même le
-/// presse-papier et pousse le texte dans l'événement ; egui, lui, n'expose
-/// aucune API de **lecture** (seulement `Context::copy_text`, en écriture).
-/// D'où cette lecture directe par `arboard` — la bibliothèque qu'`egui-winit`
-/// utilise déjà en interne, donc déjà présente dans l'arbre de dépendances.
+/// Ctrl+V works without this because `egui-winit` reads the clipboard itself and
+/// pushes the text into the event; egui exposes no **read** API (only
+/// `Context::copy_text`, for writing). Hence this direct read through `arboard`
+/// — the library `egui-winit` already uses internally, so already in the
+/// dependency tree.
 ///
-/// Une nouvelle poignée à chaque appel, plutôt qu'une gardée en vie : c'est
-/// l'**écriture** qui exige sous X11 de garder le processus propriétaire du
-/// presse-papier vivant, jamais la lecture, qui est un aller-retour unique.
-/// Et un menu s'ouvre trop rarement pour que ce coût compte — raison pour
-/// laquelle « Coller » n'est d'ailleurs jamais grisé : savoir s'il y a
-/// quelque chose à coller demanderait cette lecture à *chaque image* où le
-/// menu est ouvert. On tente, et on le dit si ça ne donne rien.
+/// A new handle on each call, rather than one kept alive: it is the **write**
+/// that requires, under X11, keeping the process that owns the clipboard alive,
+/// never the read, which is a single round trip. And a menu opens too rarely for
+/// this cost to matter — which is also why "Paste" is never grayed out: knowing
+/// whether there is something to paste would require this read on *every frame*
+/// the menu is open. We try, and say so if it yields nothing.
 ///
-/// `None` si le presse-papier est inaccessible (pas de serveur d'affichage,
-/// portail refusé…) ou s'il ne contient pas de texte (une image, par
-/// exemple).
+/// `None` if the clipboard is inaccessible (no display server, portal
+/// refused…) or if it holds no text (an image, for example).
 fn system_clipboard_text() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
 }
 
-/// Bloc d'édition commun à tous les menus contextuels de la grille : les
-/// raccourcis clavier de [`grid_contents`], contextualisés à ce que la
-/// sélection courante touche réellement (voir [`AppState::grid_menu`] et
-/// [`GridMenu`]).
+/// Edit block shared by all the grid's context menus: the keyboard shortcuts of
+/// [`grid_contents`], contextualized to what the current selection really
+/// touches (see [`AppState::grid_menu`] and [`GridMenu`]).
 ///
-/// Le même bloc, dans le même ordre, sur les trois zones — cellule de
-/// données, champ d'en-tête, rangée des lettres : seuls les libellés
-/// changent, et « Supprimer et décaler » disparaît dans l'en-tête, où Suppr
-/// n'a rien à faire remonter. Le menu de la rangée des lettres y ajoute
-/// ensuite ce qui lui est propre (type et rôle de colonne, voir
+/// The same block, in the same order, on the three zones — data cell, header
+/// field, letter row: only the labels change, and "Delete and shift" disappears
+/// in the header, where Delete has nothing to bring up. The letter row's menu
+/// then adds what is its own (column type and role, see
 /// [`column_header_widget`]).
 ///
-/// N'ouvre rien si [`AppState::grid_menu`] rend `None` (plus de sélection
-/// valide) : l'appelant doit alors s'abstenir de poser un menu, plutôt que
-/// d'en poser un vide.
+/// Opens nothing if [`AppState::grid_menu`] returns `None` (no valid selection
+/// left): the caller must then refrain from placing a menu, rather than placing
+/// an empty one.
 fn grid_edit_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -464,9 +446,9 @@ fn grid_edit_menu(
     grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
 }
 
-/// Presse-papiers de la grille, **un seul groupe** (#152) : Cut · Copy ·
-/// Copy with Header · Paste · Paste in Place. Pas d'Undo/Redo au clic droit :
-/// Edit et le clavier suffisent.
+/// Grid clipboard, **a single group** (#152): Cut · Copy · Copy with Header ·
+/// Paste · Paste in Place. No Undo/Redo on right-click: Edit and the keyboard
+/// are enough.
 fn grid_clipboard_section(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
@@ -486,9 +468,9 @@ fn grid_clipboard_section(
             .on_disabled_hover_text(tr!("action-copy", "disabled"))
             .clicked()
         {
-            // Couper = copier puis vider, exactement comme le bloc clavier :
-            // `copy_selection` pose le presse-papier interne *et* rend le texte
-            // à pousser au presse-papier système.
+            // Cut = copy then clear, exactly like the keyboard block: `copy_selection`
+            // sets the internal clipboard *and* returns the text to push to the system
+            // clipboard.
             if let Some(text) = state.copy_selection(sheet) {
                 ctx.copy_text(text);
             }
@@ -560,8 +542,8 @@ fn grid_clipboard_section(
     });
 }
 
-/// Effacer et supprimer : Remove Formula, Keep Data (si une formule est
-/// sélectionnée, #236) · Clear · Delete (Shift Up).
+/// Clear and delete: Remove Formula, Keep Data (if a formula is selected, #236)
+/// · Clear · Delete (Shift Up).
 fn grid_erase_section(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
@@ -570,8 +552,8 @@ fn grid_erase_section(
     sheet: NodeId,
     menu: &GridMenu,
 ) {
-    // Une plage de colonnes entières n'a rien à « remonter » : Delete retire
-    // les colonnes elles-mêmes (`AppState::delete_selected_cells`).
+    // A range of whole columns has nothing to "bring up": Delete removes the
+    // columns themselves (`AppState::delete_selected_cells`).
     let columns = menu.zone == GridZone::Columns;
     sections.section(ui, true, |ui| {
         if menu.offers_keep_formula_data
@@ -610,11 +592,11 @@ fn grid_erase_section(
                 })
                 .clicked()
         {
-            // Passer par l'action directement, sans `consume_delete_key` : un
-            // menu contextuel est un geste explicite et désigné, là où la
-            // double pression sur Suppr n'existe que pour protéger d'une frappe
-            // réflexe. Le compteur en cours est quand même oublié, pour qu'une
-            // pression sur Suppr juste après ne parte pas du mauvais temps.
+            // Go through the action directly, without `consume_delete_key`: a context menu
+            // is an explicit, designated gesture, whereas the double press on Delete exists
+            // only to protect against a reflex keystroke. The running counter is forgotten
+            // all the same, so that a press on Delete right after does not start from the
+            // wrong time.
             state.forget_delete_repeat(sheet);
             actions.push(Action::DeleteSelectedCells { sheet });
             ui.close();
@@ -622,19 +604,17 @@ fn grid_erase_section(
     });
 }
 
-/// En-tête empilée d'une colonne : lettre (clic → sélectionne la colonne
-/// entière), puis nom long, unité, commentaire et formule — les quatre
-/// champs de [`stokesforge_core::ColumnMeta`], jusqu'ici stockés sans jamais être
-/// montrés côté UI. Chacun bascule affichage/édition au double-clic, comme
-/// [`cell_widget`].
+/// Stacked header of a column: letter (click → selects the whole column), then
+/// long name, unit, comment and formula — the four fields of
+/// [`stokesforge_core::ColumnMeta`], until now stored without ever being shown
+/// in the UI. Each toggles display/edit on double-click, like [`cell_widget`].
 ///
-/// La rangée des lettres porte un fond distinct
-/// ([`crate::theme::header_letter_row_fill`]) — elle seule sélectionne la
-/// colonne au clic, les quatre rangées de champs qui suivent n'affichent
-/// plus qu'un libellé grisé répété par colonne (leur nom de champ vit une
-/// seule fois dans la gouttière des numéros de ligne, voir
-/// [`row_number_header_widget`]) : elles n'affichent que la **valeur** du
-/// champ, vide si le champ ne l'est pas.
+/// The letter row has a distinct background
+/// ([`crate::theme::header_letter_row_fill`]) — it alone selects the column on
+/// click; the four field rows that follow show only a grayed label repeated per
+/// column (their field name lives once in the row-number gutter, see
+/// [`row_number_header_widget`]): they show only the field **value**, empty if
+/// the field is.
 fn column_header_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -644,10 +624,10 @@ fn column_header_widget(
     column_index: usize,
 ) {
     ui.vertical(|ui| {
-        // Sans ceci, l'espacement par défaut d'egui entre enfants d'un
-        // `vertical` (`Spacing::item_spacing.y`) laisse un mince filet blanc
-        // entre chaque rangée empilée — la couleur de fond ne remplit alors
-        // pas vraiment la case, elle y flotte.
+        // Without this, egui's default spacing between children of a `vertical`
+        // (`Spacing::item_spacing.y`) leaves a thin white line between each stacked
+        // row — the background color then does not really fill the cell, it floats
+        // in it.
         ui.spacing_mut().item_spacing.y = 0.0;
         let is_column_selected =
             column_letter_widget(ui, state, actions, sheet, column, column_index);
@@ -710,7 +690,7 @@ fn column_header_widget(
     });
 }
 
-/// Rangée des lettres : sélection de colonnes, puis menu sur la sélection.
+/// Letter row: column selection, then menu on the selection.
 fn column_letter_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -730,22 +710,20 @@ fn column_letter_widget(
         ui.painter()
             .rect_filled(rect, 0.0, gutter_fill(is_column_selected, touched));
         header_row_separator(ui, rect);
-        // Toute la largeur de la rangée sélectionne la colonne — pas
-        // seulement la lettre —, glisser ou Maj-clic étend à plusieurs
-        // colonnes (même logique que la multi-sélection de cellules de
-        // données, voir `cell_widget`), au clic principal comme au clic
-        // secondaire (`response.secondary_clicked()` couvre aussi
-        // `Sense::click_and_drag()`) : le clic droit doit pouvoir
-        // sélectionner *et* ouvrir le menu contextuel en un seul geste,
-        // sans exiger que la colonne soit déjà sélectionnée au
-        // préalable.
+        // The whole row width selects the column — not only the letter —, dragging or
+        // Shift-click extends to several columns (same logic as the multi-selection of
+        // data cells, see `cell_widget`), on the primary click as on the secondary
+        // click (`response.secondary_clicked()` also covers
+        // `Sense::click_and_drag()`): a right-click must be able to select *and* open
+        // the context menu in a single gesture, without requiring the column to be
+        // already selected beforehand.
         let id = ui
             .id()
             .with(("stokesforge_column_letter_row", column.raw()));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         let letter_text = format!("{letter}({})", role_label(role));
-        // Colonne d'un calcul pas à jour (#181, M9 a) : lettre teintée, la
-        // raison dans l'info-bulle.
+        // Column of an out-of-date calculation (#181, M9 a): tinted letter, the reason
+        // in the tooltip.
         let stale_text = state.column_stale_text(column);
         let letter_color = if stale_text.is_some() {
             crate::theme::stale_color(ui.visuals().dark_mode)
@@ -762,8 +740,8 @@ fn column_letter_widget(
             .correction_traces()
             .values()
             .any(|trace| trace.series.iter().any(|source| source.y == column));
-        // Un seul repère dans la marge : l’avertissement de calcul périmé
-        // garde la priorité, la trace des corrections reste dans la bulle.
+        // A single marker in the margin: the out-of-date calculation warning keeps
+        // priority, the trace of the corrections stays in the bubble.
         if corrected {
             if stale_text.is_none() && rect.width() >= 3.0 * crate::icons::ICON_SIZE {
                 let size = egui::Vec2::splat(crate::icons::ICON_SIZE);
@@ -780,8 +758,8 @@ fn column_letter_widget(
             response.clone().on_hover_text(tr!("grid-column-modified"));
         }
         if let Some(text) = stale_text {
-            // L'icône d'avertissement à gauche de la lettre (#200), si la colonne
-            // est assez large pour ne pas la mordre.
+            // The warning icon to the left of the letter (#200), if the column is wide
+            // enough not to bite into it.
             if rect.width() >= 3.0 * crate::icons::ICON_SIZE {
                 let size = egui::Vec2::splat(crate::icons::ICON_SIZE);
                 let at = egui::Rect::from_min_size(
@@ -799,8 +777,8 @@ fn column_letter_widget(
         let modifiers = ui.input(|i| i.modifiers);
         let press_here = press_started_in(ui, rect);
         if response.clicked() || response.drag_started() {
-            // Ctrl+clic bascule la colonne, Maj+clic prend la plage ancre →
-            // colonne, Ctrl+Maj+clic l'ajoute à la sélection (#159).
+            // Ctrl+click toggles the column, Shift+click takes the anchor → column range,
+            // Ctrl+Shift+click adds it to the selection (#159).
             match (modifiers.command, modifiers.shift) {
                 (true, true) => state.extend_column_selection(sheet, column),
                 (true, false) => state.toggle_column_selection(sheet, column),
@@ -808,10 +786,10 @@ fn column_letter_widget(
                 (false, false) => state.select_column(sheet, column),
             }
         } else if response.secondary_clicked() && !is_column_selected {
-            // `&& !is_column_selected` : un clic droit *dans* la sélection
-            // (même non contiguë) la laisse intacte et le menu agit sur
-            // toute la sélection ; hors de la sélection, il la remplace par
-            // la colonne visée (#152, #159).
+            // `&& !is_column_selected`: a right-click *inside* the selection (even a
+            // non-contiguous one) leaves it intact and the menu acts on the whole
+            // selection; outside the selection, it replaces it with the targeted column
+            // (#152, #159).
             state.select_column(sheet, column);
         } else if response.contains_pointer()
             && !press_here
@@ -819,17 +797,15 @@ fn column_letter_widget(
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
-            // Glisser parti d'une autre lettre : étendre au survol. Un appui
-            // commencé sur cette lettre ne relève pas d'ici — sinon un
-            // Ctrl+clic, qui bascule au relâchement, aurait déjà ajouté la
-            // plage ancre → colonne pendant l'appui.
+            // Drag started from another letter: extend on hover. A press started on this
+            // letter does not belong here — otherwise a Ctrl+click, which toggles on
+            // release, would already have added the anchor → column range during the press.
             state.extend_column_selection(sheet, column);
         }
-        // Colonnes visées par le menu contextuel : toute la plage
-        // sélectionnée si `column` en fait partie (menu ouvert sur une
-        // sélection multiple déjà posée), sinon `column` seule — un
-        // clic droit hors de la plage sélectionnée l'a déjà réduite à
-        // elle-même ci-dessus.
+        // Columns targeted by the context menu: the whole selected range if `column`
+        // is part of it (menu opened on an already placed multiple selection), else
+        // `column` alone — a right-click outside the selected range has already reduced
+        // it to itself above.
         let target_columns: Vec<NodeId> = state
             .selection(sheet)
             .map(|selection| selection.columns(state.tree(), sheet))
@@ -842,10 +818,9 @@ fn column_letter_widget(
     is_column_selected
 }
 
-/// Menu de la rangée des lettres (#152) : tracer et ajouter, presse-papiers,
-/// type et rôle des colonnes, puis effacer — à plat, sans enveloppe
-/// « Columns ▸ ». Calcul paresseux de [`AppState::grid_menu`], pour la même
-/// raison que dans `cell_widget`.
+/// Menu of the letter row (#152): plot and add, clipboard, column type and role,
+/// then clear — flat, without a "Columns ▸" wrapper. Lazy computation of
+/// [`AppState::grid_menu`], for the same reason as in `cell_widget`.
 fn column_properties_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -881,9 +856,9 @@ fn column_properties_menu(
     }
 }
 
-/// Menu d'une sélection de **lignes entières** d'une feuille à x' (#166) :
-/// Plot et Send to tracent les lignes (une série par ligne, contre les x'),
-/// puis presse-papiers et effacer comme pour les colonnes.
+/// Menu of a selection of **whole rows** of an x' sheet (#166): Plot and Send to
+/// plot the rows (one series per row, against the x'), then clipboard and clear
+/// as for columns.
 fn row_properties_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -910,8 +885,8 @@ fn row_properties_menu(
     }
 }
 
-/// « Plot » d'une sélection de lignes : les mêmes types de tracé que
-/// [`plot_menu`], poussant [`Action::PlotRows`].
+/// "Plot" of a selection of rows: the same plot types as [`plot_menu`], pushing
+/// [`Action::PlotRows`].
 pub(super) fn plot_rows_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<Action>,
@@ -936,11 +911,10 @@ pub(super) fn plot_rows_menu(
     });
 }
 
-/// Le clic droit sur une case de la grille (cellule, numéro de ligne, champ
-/// d'en-tête, coin). Sur une sélection de **colonnes ou de lignes entières**,
-/// c'est le menu des lettres de colonnes — Plot, Send to, presse-papiers, type
-/// et rôle, effacer — appliqué aux colonnes de la sélection ; sur une plage de
-/// cellules ou de champs, presse-papiers et effacer seulement.
+/// The right-click on a grid box (cell, row number, header field, corner). On a
+/// selection of **whole columns or rows**, it is the menu of the column letters
+/// — Plot, Send to, clipboard, type and role, clear — applied to the columns of
+/// the selection; on a range of cells or fields, clipboard and clear only.
 fn selection_context_menu(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -951,8 +925,8 @@ fn selection_context_menu(
         .selection(sheet)
         .filter(|selection| selection.is_columns() || selection.is_full_rows())
         .map(|selection| selection.columns(state.tree(), sheet));
-    // Des lignes entières sur une feuille à x' (#166) : tracer des **lignes**,
-    // pas toutes les colonnes qu'elles traversent.
+    // Whole rows on an x' sheet (#166): plot the **rows**, not all the columns
+    // they cross.
     if let Some(payload) = state.row_drag_payload(sheet) {
         row_properties_menu(ui, state, actions, &payload);
         return;
@@ -969,7 +943,8 @@ fn selection_context_menu(
     }
 }
 
-/// Ajout disponible même sans sélection, commun au classeur et au vide de grille.
+/// Add available even without a selection, shared by the workbook and the empty
+/// part of the grid.
 fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>) {
     if ui.button(tr!("workbook-column-add")).clicked() {
         actions.push(Action::AddColumn { sheet });
@@ -977,13 +952,13 @@ fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>)
     }
 }
 
-/// Sous-menu `Move ▸` (#319) : quatre entrées qui déplacent les colonnes visées
-/// dans leur feuille (jamais ailleurs). Peint par `column_type_role_menus`, donc
-/// une seule écriture pour le clic droit des lettres et le menu Colonnes de la
-/// barre. Une entrée est **grisée**, raison en bulle, quand le geste ne
-/// changerait rien — tout ou rien : une seule colonne qui ne peut pas avancer
-/// grise Left ou Right pour toutes (`column_move::target_order`, la même
-/// décision que celle qui exécute).
+/// `Move ▸` submenu (#319): four entries that move the targeted columns within
+/// their worksheet (never elsewhere). Painted by `column_type_role_menus`, so a
+/// single implementation for the right-click on letters and the Columns menu of
+/// the bar. An entry is **grayed out**, reason in a tooltip, when the gesture
+/// would change nothing — all or nothing: a single column that cannot move
+/// grays out Left or Right for all (`column_move::target_order`, the same
+/// decision as the one that executes).
 fn move_columns_menu(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -1048,9 +1023,8 @@ fn move_columns_menu(
     });
 }
 
-/// Type et rôle des colonnes visées : même cible et mêmes actions dans le
-/// menu Classeur et au clic droit. Une sélection hétérogène ne coche aucun
-/// choix.
+/// Type and role of the targeted columns: same target and same actions in the
+/// Workbook menu and on right-click. A heterogeneous selection ticks no choice.
 pub(super) fn column_type_role_menus(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -1070,11 +1044,11 @@ pub(super) fn column_type_role_menus(
         .filter(|role| columns.iter().all(|column| column.meta().role == *role));
     ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
         move_columns_menu(ui, state, actions, target_columns);
-        // Choix manuel du type de colonne — conversion destructrice
-        // assumée (`Action::SetColumnType`/`Command::
-        // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
-        // texte non numérique effacé en passant en `Numeric`, comme
-        // pour toute saisie directe dans une colonne numérique.
+        // Manual choice of the column type — destructive conversion accepted
+        // (`Action::SetColumnType`/`Command::
+        // SetColumnType`, `stokesforge-core::Column::set_column_type`):
+        // non-numeric text cleared when switching to `Numeric`, as for any
+        // direct entry in a numeric column.
         ui.menu_button(tr!("column-type"), |ui| {
             for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
                 if menu_choice(ui, column_type == Some(candidate), type_label(candidate)).clicked()
@@ -1089,8 +1063,8 @@ pub(super) fn column_type_role_menus(
                 }
             }
         });
-        // Le rôle décrit les colonnes, et reste partagé avec le
-        // menu Classeur comme le type.
+        // The role describes the columns, and stays shared with the Workbook menu
+        // like the type.
         ui.menu_button(tr!("column-role"), |ui| {
             for candidate in ColumnRole::ALL {
                 if menu_choice(ui, role == Some(candidate), role_label(candidate)).clicked() {
@@ -1104,9 +1078,9 @@ pub(super) fn column_type_role_menus(
                 }
             }
         });
-        // Réglage de vue (#330) : non annulable, sans confirmation, comme la
-        // pose d'une largeur. Grisé quand aucune colonne visée n'a de largeur
-        // retenue — la sélection est traitée en entier.
+        // View setting (#330): not undoable, no confirmation, like setting a width.
+        // Grayed out when no targeted column has a stored width — the selection is
+        // handled as a whole.
         let resettable = !state.columns_with_width(target_columns).is_empty();
         if ui
             .add_enabled(
@@ -1125,11 +1099,10 @@ pub(super) fn column_type_role_menus(
     });
 }
 
-/// Entrée « Reset Column Widths » d'une feuille (#330) : Workbook ▸ Sheet et
-/// clic droit de l'onglet (côté onglet, la bande d'onglets n'a pas l'état : voir
-/// `TabEvent::ResetColumnWidths`). Toutes les colonnes de la feuille ; la
-/// gouttière des numéros de ligne revient aussi à sa largeur par défaut, sans
-/// être enregistrée.
+/// "Reset Column Widths" entry of a sheet (#330): Workbook ▸ Sheet and the tab's
+/// right-click (on the tab side, the tab strip has no state: see
+/// `TabEvent::ResetColumnWidths`). All the columns of the sheet; the row-number
+/// gutter also returns to its default width, without being recorded.
 pub(super) fn reset_sheet_widths_entry(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -1153,12 +1126,11 @@ pub(super) fn reset_sheet_widths_entry(
     }
 }
 
-/// Créer un graphe depuis les colonnes visées — chantier « tracer depuis un
-/// classeur ». La règle d'appariement X/Y (chaque Y prend la colonne X la
-/// plus proche à sa gauche) vit dans `AppState::plot_columns`/
-/// `series_from_columns` ; ce menu ne fait que choisir le type de tracé et
-/// pousser l'action sur `target_columns`. Premier niveau du clic droit des
-/// lettres comme du menu Classeur (#152).
+/// Create a graph from the targeted columns — work package "plot from a
+/// workbook". The X/Y pairing rule (each Y takes the nearest X column to its
+/// left) lives in `AppState::plot_columns`/`series_from_columns`; this menu only
+/// chooses the plot type and pushes the action on `target_columns`. First level
+/// of the right-click on letters as well as of the Workbook menu (#152).
 pub(super) fn plot_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<Action>,
@@ -1186,7 +1158,7 @@ pub(super) fn plot_menu(
     });
 }
 
-/// Menu Colonnes de la barre Classeur : Add Column, puis Type et Rôle.
+/// Columns menu of the Workbook bar: Add Column, then Type and Role.
 pub(super) fn columns_menu_contents(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -1217,10 +1189,10 @@ pub(super) fn columns_menu_contents(
     });
 }
 
-/// Case « Métadonnées » de l'en-tête : le résumé des métadonnées du fichier
-/// d'origine (« 23 clés »), en lecture seule. Un clic ouvre la fenêtre qui les
-/// liste ([`column_metadata_window`](crate::app::plot_settings::column_metadata_window)). Hors sélection de champ : il n'y a rien
-/// à copier, effacer ni éditer.
+/// "Metadata" box of the header: the summary of the metadata of the original
+/// file ("23 keys"), read-only. A click opens the window that lists them
+/// ([`column_metadata_window`](crate::app::plot_settings::column_metadata_window)).
+/// Outside field selection: there is nothing to copy, clear or edit.
 fn metadata_cell_widget(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -1257,10 +1229,9 @@ fn metadata_cell_widget(
     });
 }
 
-/// Ligne de séparation fine sous une rangée de l'en-tête empilé (lettre, ou
-/// l'un des quatre champs) : sans elle, les quatre rangées de champs
-/// n'avaient aucun remplissage propre et se confondaient visuellement les
-/// unes dans les autres (contrairement aux lignes de données, zébrées par
+/// Thin separator line under a row of the stacked header (letter, or one of the
+/// four fields): without it, the four field rows had no fill of their own and
+/// blended visually into one another (unlike the data rows, striped by
 /// `TableBuilder::striped`).
 fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
     ui.painter().hline(
@@ -1270,13 +1241,13 @@ fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
-/// Fond d'une case de la gouttière de la grille, à trois paliers — voir
+/// Background of a gutter box of the grid, in three levels — see
 /// [`crate::theme::header_letter_row_fill`]/[`crate::theme::
 /// header_letter_row_touched_fill`]/[`crate::theme::
-/// header_letter_row_selected_fill`] : repos, concernée par la sélection en
-/// cours sans l'être directement, ou sélectionnée elle-même (le palier le
-/// plus fort l'emporte). Partagé par [`column_header_widget`], [`row_number_
-/// widget`], [`header_row_label_widget`] et le « # » de [`row_number_header_
+/// header_letter_row_selected_fill`]: rest, concerned by the current selection
+/// without being so directly, or selected itself (the strongest level wins).
+/// Shared by [`column_header_widget`], [`row_number_
+/// widget`], [`header_row_label_widget`] and the "#" of [`row_number_header_
 /// widget`].
 fn gutter_fill(selected: bool, touched: bool) -> egui::Color32 {
     if selected {
@@ -1288,17 +1259,17 @@ fn gutter_fill(selected: bool, touched: bool) -> egui::Color32 {
     }
 }
 
-/// Une rangée éditable de l'en-tête empilé, pour un seul champ de
-/// [`stokesforge_core::ColumnMeta`] — le même schéma sélection/édition que
-/// [`cell_widget`] pour une cellule de données : simple clic sélectionne
-/// (surlignage identique), double-clic édite ; piloté par [`AppState::
-/// header_editing`]/[`AppState::select_header_field`] plutôt que par
+/// An editable row of the stacked header, for a single field of
+/// [`stokesforge_core::ColumnMeta`] — the same selection/edit scheme as
+/// [`cell_widget`] for a data cell: a single click selects (identical
+/// highlight), double-click edits; driven by [`AppState::
+/// header_editing`]/[`AppState::select_header_field`] rather than by
 /// [`AppState::editing`]/[`AppState::select_cell`].
 ///
-/// N'affiche que la **valeur** du champ, vide si le champ l'est — pas de
-/// placeholder répété par colonne : le libellé du champ (« Long Name »,
-/// « Units », « Comments », « F(x)= ») vit une seule fois dans la gouttière
-/// des numéros de ligne, voir [`row_number_header_widget`].
+/// Shows only the field **value**, empty if the field is — no placeholder
+/// repeated per column: the field label ("Long Name", "Units", "Comments",
+/// "F(x)=") lives once in the row-number gutter, see
+/// [`row_number_header_widget`].
 #[allow(clippy::too_many_arguments)]
 fn header_field_widget(
     ui: &mut egui::Ui,
@@ -1310,10 +1281,10 @@ fn header_field_widget(
     height: f32,
     column_selected: bool,
 ) {
-    // `actions` ne sert pas à la validation de la saisie — elle passe par
-    // `AppState::commit_header_edit`, appelé directement (mutation
-    // transitoire, comme `commit_edit`) — mais bien au menu contextuel
-    // ci-dessous, qui pousse des actions comme partout ailleurs.
+    // `actions` is not used to validate the entry — that goes through
+    // `AppState::commit_header_edit`, called directly (transient mutation, like
+    // `commit_edit`) — but it is used by the context menu below, which pushes
+    // actions as everywhere else.
     ui.scope(|ui| {
         ui.set_min_height(height);
         ui.set_max_height(height);
@@ -1323,9 +1294,9 @@ fn header_field_widget(
             .header_editing()
             .is_some_and(|edit| edit.column == column && edit.field == field);
         if editing_here {
-            // Le refus de la ligne Formule (lettre inconnue, colonne qui se
-            // lit elle-même, `#REF` modifié) se décide dans `app-state` : la
-            // grille le peint et garde le champ ouvert (#321).
+            // The refusal of the Formula row (unknown letter, column that reads itself,
+            // modified `#REF`) is decided in `app-state`: the grid paints it and keeps
+            // the field open (#321).
             let refusal = state.header_edit_refusal();
             let Some(edit) = state.header_editing_mut() else {
                 return;
@@ -1335,9 +1306,8 @@ fn header_field_widget(
             } else {
                 inplace_edit::Opening::SelectAll
             };
-            // Le contrat commun de l'édition sur place (#224) ; il consomme
-            // Entrée, Tab et Échap, que le bloc de raccourcis plus bas ne doit
-            // pas revoir (#38).
+            // The shared in-place edit contract (#224); it consumes Enter, Tab and Escape,
+            // which the shortcut block further down must not see again (#38).
             let shown = inplace_edit::show(
                 ui,
                 ui.id().with("header_edit"),
@@ -1353,9 +1323,8 @@ fn header_field_widget(
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
                     let refused = state.header_edit_refusal().is_some();
-                    // Entrée ou Tab sur un texte refusé : le champ reste
-                    // ouvert (cadre rouge et bulle). Un clic ailleurs ferme
-                    // sans rien écrire.
+                    // Enter or Tab on a refused text: the field stays open (red frame and
+                    // bubble). A click elsewhere closes without writing anything.
                     let write = match inplace_edit::resolve(end, false, refused) {
                         inplace_edit::Resolution::Stay => return,
                         inplace_edit::Resolution::Close { write, .. } => write,
@@ -1370,11 +1339,9 @@ fn header_field_widget(
                     };
                     state.commit_header_edit();
                     if tab && !shift && is_last_visible_column(state, sheet, column) {
-                        // Tab valide sur n'importe quel champ d'en-tête de
-                        // la dernière colonne (#52) : même geste que Tab en dernière colonne
-                        // d'une ligne de données — ajoute une colonne plutôt
-                        // que d'entrer dans les données (voir
-                        // `Action::AddColumnAndSelectHeaderField`).
+                        // Tab validates on any header field of the last column (#52): same gesture as
+                        // Tab on the last column of a data row — adds a column rather than entering
+                        // the data (see `Action::AddColumnAndSelectHeaderField`).
                         actions.push(Action::AddColumnAndSelectHeaderField { sheet, field });
                     } else if tab {
                         state.move_selection_tab(sheet, shift);
@@ -1386,11 +1353,10 @@ fn header_field_widget(
         let text = header_field_text(state, column, field);
         let id = ui.id().with((column.raw(), field as u8));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-        // Surlignée si ce champ précis est sélectionné, ou si c'est toute la
-        // colonne qui l'est (sélection faite depuis la rangée des lettres,
-        // voir `column_header_widget`) : la sélection d'une colonne doit se
-        // voir sur ses 5 rangées d'en-tête, pas seulement sur la rangée des
-        // lettres.
+        // Highlighted if this exact field is selected, or if the whole column is
+        // (selection made from the letter row, see `column_header_widget`): the
+        // selection of a column must show on its 5 header rows, not only on the letter
+        // row.
         let selected = column_selected || state.is_header_field_selected(sheet, column, field);
         if selected {
             ui.painter().rect_filled(
@@ -1405,8 +1371,8 @@ fn header_field_widget(
                 .selectable(false)
                 .truncate(),
         );
-        // Une formule qui lit une colonne supprimée s'affiche `#REF` : cadre
-        // rouge et bulle sur sa case (#321). La phrase vient d'`app-state`.
+        // A formula that reads a deleted column shows `#REF`: red frame and bubble on
+        // its box (#321). The sentence comes from `app-state`.
         if field == HeaderField::Formula {
             if let Some(message) = state.formula_issue(column) {
                 crate::field_state::show_issue(
@@ -1420,9 +1386,8 @@ fn header_field_widget(
             state.begin_header_edit(column, field);
             return;
         }
-        // Même logique de multi-sélection à la souris que pour les
-        // cellules de données (clic/glisser/Maj-clic) — voir le
-        // commentaire détaillé de `cell_widget`.
+        // Same mouse multi-selection logic as for data cells (click/drag/Shift-click)
+        // — see the detailed comment of `cell_widget`.
         let modifiers = ui.input(|i| i.modifiers);
         let (command, shift) = (modifiers.command, modifiers.shift);
         let dragging = response.contains_pointer()
@@ -1439,37 +1404,33 @@ fn header_field_widget(
         } else if (response.clicked() && shift) || dragging {
             state.extend_header_field_selection(sheet, column, field);
         } else if response.secondary_clicked() && !selected {
-            // Même règle que la rangée des lettres : un clic droit *dans*
-            // la sélection ouvre le menu sur elle sans la toucher ; un clic
-            // droit en dehors la réduit d'abord à la case visée, pour que
-            // le menu agisse sur ce qu'on vient de désigner et pas sur une
-            // sélection oubliée ailleurs.
+            // Same rule as the letter row: a right-click *inside* the selection opens the
+            // menu on it without touching it; a right-click outside first reduces it to
+            // the targeted box, so that the menu acts on what was just designated and not
+            // on a selection forgotten elsewhere.
             state.select_header_field(sheet, column, field);
         }
-        // Calcul paresseux, pour la même raison que dans `cell_widget`.
+        // Lazy computation, for the same reason as in `cell_widget`.
         response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
     });
 }
 
-/// Gouttière des numéros de ligne, côté en-tête empilée : le « # » sur la
-/// rangée des lettres — un clic sélectionne tout le tableau (voir
-/// [`AppState::select_all`]), même geste qu'un clic sur une lettre de
-/// colonne ou un numéro de ligne mais pour l'ensemble — puis, aligné avec
-/// chacune des quatre rangées de champs de [`column_header_widget`], le
-/// **libellé** du champ concerné (« Long Name », « Units », « Comments »,
-/// « F(x)= », repris de l'ancienne UI Qt), une seule fois plutôt que répété
-/// en grisé dans chaque colonne. Les cellules par colonne n'affichent plus
-/// que la valeur (voir [`header_field_widget`]).
+/// Row-number gutter, stacked-header side: the "#" on the letter row — a click
+/// selects the whole table (see [`AppState::select_all`]), the same gesture as a
+/// click on a column letter or a row number but for the whole — then, aligned
+/// with each of the four field rows of [`column_header_widget`], the **label**
+/// of the field concerned ("Long Name", "Units", "Comments", "F(x)=", taken
+/// from the old Qt UI), once rather than repeated grayed out in each column.
+/// The per-column cells now show only the value (see [`header_field_widget`]).
 ///
-/// Homogène de haut en bas avec le reste de la gouttière : chaque rangée
-/// porte le même fond que le « # » ([`gutter_fill`]) — les quatre rangées de
-/// libellés restaient auparavant transparentes, seul le « # » du dessus
-/// rompant le fond de la colonne. Chaque libellé sélectionne désormais son
-/// champ pour **toutes** les colonnes visibles de la feuille (glisser/
-/// Maj-clic étend à plusieurs champs), symétrique de [`row_number_widget`]
-/// côté données — voir [`header_row_label_widget`]. Les libellés longs
-/// restent sur une ligne (#125) : egui les tronque et affiche le texte
-/// complet au survol, sans déborder sur une rangée voisine.
+/// Consistent from top to bottom with the rest of the gutter: each row has the
+/// same background as the "#" ([`gutter_fill`]) — the four label rows used to
+/// stay transparent, only the "#" above breaking the column background. Each
+/// label now selects its field for **all** the visible columns of the worksheet
+/// (drag/Shift-click extends to several fields), symmetric to
+/// [`row_number_widget`] on the data side — see [`header_row_label_widget`].
+/// Long labels stay on one line (#125): egui truncates them and shows the full
+/// text on hover, without overflowing into a neighboring row.
 fn row_number_header_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1497,12 +1458,11 @@ fn row_number_header_widget(
                     .selectable(false),
             );
             if response.clicked() && selected {
-                // Un second clic désélectionne (#159).
+                // A second click deselects (#159).
                 state.deselect_all(sheet);
             } else if response.clicked() || (response.secondary_clicked() && !selected) {
-                // `&& !selected` : un clic droit alors que tout est déjà
-                // sélectionné ouvre le menu sans y toucher — même règle que
-                // dans les autres cases de la gouttière (voir
+                // `&& !selected`: a right-click when everything is already selected opens the
+                // menu without touching it — same rule as in the other gutter boxes (see
                 // `column_header_widget`).
                 state.select_all(sheet);
             }
@@ -1583,8 +1543,7 @@ fn row_number_header_widget(
                     .truncate()
                     .sense(egui::Sense::click()),
                 );
-                // Miroir du menu Fenêtre : rien n'est atteignable au seul
-                // clic droit.
+                // Mirror of the Window menu: nothing is reachable by right-click alone.
                 response.context_menu(|ui| {
                     if ui.button(tr!("workbook-metadata-hide")).clicked() {
                         if let Some(book) = book {
@@ -1605,15 +1564,14 @@ fn row_number_header_widget(
     });
 }
 
-/// Une rangée de la gouttière côté en-tête (voir [`row_number_header_widget`]) :
-/// le libellé d'un champ, à la hauteur exacte de la rangée de
-/// [`column_header_widget`] qu'elle longe — et, depuis que la sélection de
-/// champ entier existe, un vrai geste de sélection, miroir exact de
-/// [`row_number_widget`] pour les lignes de données et de
-/// [`column_header_widget`] pour les colonnes : toute la largeur du libellé
-/// sélectionne le champ pour **toutes** les colonnes visibles de la feuille
-/// (glisser/Maj-clic étend à plusieurs champs), le clic droit ouvre le même
-/// menu contextuel d'édition ([`grid_edit_menu`]).
+/// A row of the gutter, header side (see [`row_number_header_widget`]): the
+/// label of a field, at the exact height of the row of
+/// [`column_header_widget`] it runs along — and, since whole-field selection
+/// exists, a real selection gesture, exact mirror of [`row_number_widget`] for
+/// the data rows and of [`column_header_widget`] for the columns: the whole
+/// width of the label selects the field for **all** the visible columns of the
+/// worksheet (drag/Shift-click extends to several fields), the right-click opens
+/// the same edit context menu ([`grid_edit_menu`]).
 fn header_row_label_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1648,34 +1606,33 @@ fn header_row_label_widget(
             && ui.input(|i| i.pointer.primary_down())
             && state.selection(sheet).is_some()
         {
-            // Même geste que pour les cellules de données et la rangée des
-            // lettres — étendre pendant le glisser, pas seulement au clic de
-            // départ (voir le commentaire détaillé de `cell_widget`).
+            // Same gesture as for data cells and the letter row — extend during the drag,
+            // not only on the starting click (see the detailed comment of `cell_widget`).
             state.extend_header_row_selection(sheet, field);
         } else if response.secondary_clicked() && !selected {
-            // Clic droit hors de la sélection : la réduire à ce champ avant
-            // d'ouvrir le menu — même règle que dans les trois autres zones.
+            // Right-click outside the selection: reduce it to this field before opening
+            // the menu — same rule as in the other three zones.
             state.select_header_row(sheet, field);
         }
-        // `grid_menu` **dans** la fermeture, jamais avant — même raison que
-        // dans `cell_widget`/`row_number_widget` : calculée dehors, elle
-        // serait recalculée à chaque image pour chacune des 4 rangées.
+        // `grid_menu` **inside** the closure, never before — same reason as in
+        // `cell_widget`/`row_number_widget`: computed outside, it would be recomputed
+        // on every frame for each of the 4 rows.
         response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
     });
 }
 
-/// Valeur actuelle d'un champ d'en-tête, telle qu'affichée hors édition.
+/// Current value of a header field, as displayed outside editing.
 fn header_field_text(state: &AppState, column: NodeId, field: HeaderField) -> String {
     state.header_field_display_text(column, field)
 }
 
-/// Touches que la grille réclame à egui tant qu'elle a le focus clavier (#38) :
-/// Tab et les flèches. egui les traite au **début** de l'image
-/// (`Focus::begin_pass`) pour déplacer son propre focus de widget en widget,
-/// sauf si le widget focalisé les réclame par ce filtre — les lire ensuite par
-/// `key_pressed`, comme le faisait la grille, ne retire rien : la sélection
-/// avançait (ou pas), et le focus partait quand même dans le reste de
-/// l'interface. Échap reste à egui : il rend le focus.
+/// Keys that the grid claims from egui as long as it has keyboard focus (#38):
+/// Tab and the arrows. egui handles them at the **start** of the frame
+/// (`Focus::begin_pass`) to move its own focus from widget to widget, unless the
+/// focused widget claims them through this filter — reading them afterwards
+/// with `key_pressed`, as the grid used to, removes nothing: the selection
+/// advanced (or not), and the focus left anyway for the rest of the interface.
+/// Escape stays with egui: it gives the focus back.
 const GRID_KEYS: egui::EventFilter = egui::EventFilter {
     tab: true,
     horizontal_arrows: true,
@@ -1683,32 +1640,32 @@ const GRID_KEYS: egui::EventFilter = egui::EventFilter {
     escape: false,
 };
 
-/// Clé mémoire egui du dernier ancrage de focus qu'une grille a réclamé
-/// ([`claim_grid_focus`]) — de quoi reconnaître, depuis le reste de
-/// l'application, que le focus clavier est à la grille et non à un champ texte.
+/// egui memory key of the last focus anchor that a grid claimed
+/// ([`claim_grid_focus`]) — a way to recognize, from the rest of the
+/// application, that keyboard focus is on the grid and not on a text field.
 fn grid_focus_owner_key() -> egui::Id {
     egui::Id::new("stokesforge_grid_focus_owner")
 }
 
-/// Identifiant du widget d'ancrage du focus de la grille de `sheet` — un par
-/// feuille et par `Ui`, pour que le classeur flottant et sa copie détachée
-/// ne se disputent pas le même identifiant.
+/// Identifier of the grid's focus anchor widget for `sheet` — one per worksheet
+/// and per `Ui`, so that the floating workbook and its detached copy do not
+/// fight over the same identifier.
 fn grid_focus_id(ui: &egui::Ui, sheet: NodeId) -> egui::Id {
     ui.id().with(("grid_focus", sheet.raw()))
 }
 
-/// La grille prend le focus clavier : sa sélection reçoit désormais Tab et les
-/// flèches (voir [`GRID_KEYS`]).
+/// The grid takes keyboard focus: its selection now receives Tab and the arrows
+/// (see [`GRID_KEYS`]).
 fn claim_grid_focus(ctx: &egui::Context, anchor: egui::Id) {
     ctx.memory_mut(|memory| memory.request_focus(anchor));
     ctx.data_mut(|data| data.insert_temp(grid_focus_owner_key(), anchor));
 }
 
-/// Vrai si un widget **autre qu'une grille** a le focus clavier — typiquement
-/// un champ texte, qui garde alors Entrée, Suppr, Tab… Remplace le test
-/// `focused().is_some()` partout où la grille, elle, peut légitimement tenir le
-/// focus (#38) : sans lui, une grille focalisée ferait passer ses voisins pour
-/// des champs en cours de saisie.
+/// True if a widget **other than a grid** has keyboard focus — typically a text
+/// field, which then keeps Enter, Delete, Tab… Replaces the
+/// `focused().is_some()` test wherever the grid can legitimately hold the focus
+/// (#38): without it, a focused grid would make its neighbors pass for fields
+/// being typed in.
 pub(super) fn keyboard_focus_outside_grid(ctx: &egui::Context) -> bool {
     let Some(focused) = ctx.memory(|memory| memory.focused()) else {
         return false;
@@ -1717,20 +1674,19 @@ pub(super) fn keyboard_focus_outside_grid(ctx: &egui::Context) -> bool {
     owner != Some(focused)
 }
 
-/// La grille, en lignes **virtualisées** : seules les lignes visibles sont
-/// construites, sans quoi une feuille d'un million de lignes bloquerait
-/// chaque image. Scopée à `sheet` — voir [`book_contents`](crate::app::workbook::book_contents), son seul
-/// appelant.
+/// The grid, in **virtualized** rows: only the visible rows are built, without
+/// which a worksheet of a million rows would block every frame. Scoped to
+/// `sheet` — see [`book_contents`](crate::app::workbook::book_contents), its
+/// only caller.
 ///
-/// En-tête empilée (lettre A/B/C, nom long, unité, commentaire, formule —
-/// voir [`column_header_widget`]), sélection de cellules/colonnes à la
-/// souris (voir [`cell_widget`]), et raccourcis Ctrl+C/X/V/Suppr/Retour
-/// arrière scopés à cette grille : ils ne sont consommés que si aucune
-/// cellule ni aucun champ d'en-tête n'est en édition, **ni la fenêtre
-/// d'import ouverte**, pour ne jamais voler le copier/coller natif d'un
-/// `TextEdit` en cours de saisie — la fenêtre d'import est un dialogue modal
-/// flottant peint par-dessus cette grille, toujours présente dessous tant
-/// qu'il est ouvert (voir la garde plus bas, dans le corps de la fonction).
+/// Stacked header (letter A/B/C, long name, unit, comment, formula — see
+/// [`column_header_widget`]), mouse selection of cells/columns (see
+/// [`cell_widget`]), and Ctrl+C/X/V/Delete/Backspace shortcuts scoped to this
+/// grid: they are consumed only if no cell and no header field is being edited,
+/// **nor the import window open**, so as never to steal the native copy/paste of
+/// a `TextEdit` being typed in — the import window is a floating modal dialog
+/// painted over this grid, which is always present underneath as long as it is
+/// open (see the guard further down, in the function body).
 pub(super) fn grid_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1756,32 +1712,31 @@ pub(super) fn grid_contents(
     let mut row_extents: Vec<RowExtent> = Vec::new();
     let header_rows = header_rows(ui.ctx(), book_of(state.tree(), sheet));
     let header_height = stacked_header_height(header_rows);
-    // #325 : la largeur d'une colonne est un fait de la **colonne** (`NodeId`,
-    // dans l'acteur et le `.stf`), non de sa position. egui_extras garde les
-    // siennes par position et les jette dès que le nombre de colonnes change
-    // (`TableState::load`) : on lui redonne donc, à chaque image, la largeur
-    // de chaque colonne, et on lui fait oublier son état quand la liste
-    // ordonnée des colonnes n'est plus celle de l'image précédente (ajout,
-    // suppression, annulation, déplacement, autre feuille, autre projet).
-    // Jamais un `id_salt` variable : l'identifiant de la zone de défilement
-    // verticale en dérive, et le défilement serait perdu.
+    // #325: the width of a column is a fact of the **column** (`NodeId`, in the
+    // actor and the `.stf`), not of its position. egui_extras keeps its own by
+    // position and discards them as soon as the number of columns changes
+    // (`TableState::load`): so every frame we give it back the width of each
+    // column, and we make it forget its state when the ordered list of columns is
+    // no longer the previous frame's (add, delete, undo, move, another worksheet,
+    // another project). Never a variable `id_salt`: the identifier of the vertical
+    // scroll area derives from it, and the scrolling would be lost.
     let column_ids: Vec<NodeId> = columns.iter().map(|(id, _, _)| *id).collect();
-    // #330 : les largeurs retenues des colonnes visibles entrent dans la clé,
-    // sinon remettre une colonne au défaut (sa clé quitte la table) ne
-    // changerait rien à l'écran — `TableColumn::initial` n'est lu qu'après un
-    // `reset`. Leur valeur, pas leur seul état : une largeur posée à la main
-    // refait la mise en page avec la valeur envoyée.
+    // #330: the stored widths of the visible columns enter the key, otherwise
+    // putting a column back to the default (its key leaves the table) would change
+    // nothing on screen — `TableColumn::initial` is read only after a `reset`.
+    // Their value, not just their state: a width set by hand redoes the layout with
+    // the value sent.
     let widths: Vec<Option<u32>> = column_ids
         .iter()
         .map(|id| state.column_width(*id).map(f32::to_bits))
         .collect();
     let layout_key = (state.snapshot().epoch, column_ids.clone(), widths);
     let layout_memory = ui.id().with("stokesforge_grid_layout");
-    // #337 : la première image d'un `egui::Window` est une passe de mesure
-    // (`Ui::is_sizing_pass`) pendant laquelle egui_extras réduit chaque colonne
-    // à la largeur que son contenu a utilisée (50 au lieu de 54), puis garde
-    // cette valeur. La table oublie donc son état à l'image qui suit une passe
-    // de mesure, et `TableColumn::initial` redonne les largeurs retenues.
+    // #337: the first frame of an `egui::Window` is a measuring pass
+    // (`Ui::is_sizing_pass`) during which egui_extras shrinks each column to the
+    // width its content used (50 instead of 54), then keeps that value. The table
+    // therefore forgets its state on the frame that follows a measuring pass, and
+    // `TableColumn::initial` gives back the stored widths.
     let sizing_memory = ui.id().with("stokesforge_grid_sizing_pass");
     let after_sizing_pass = ui.data(|data| data.get_temp::<bool>(sizing_memory)) == Some(true);
     ui.data_mut(|data| data.insert_temp(sizing_memory, ui.is_sizing_pass()));
@@ -1791,10 +1746,10 @@ pub(super) fn grid_contents(
     if layout_changed {
         ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
     }
-    // `TableBuilder::reset` remet **toutes** les colonnes, gouttière comprise,
-    // à leur largeur initiale : la gouttière redonne celle qu'elle avait à
-    // l'image précédente (mémoire temporaire, par feuille), sinon chaque
-    // glisser d'une colonne la ramènerait à 90.
+    // `TableBuilder::reset` puts **all** the columns back to their initial width,
+    // gutter included: the gutter gives back the one it had in the previous frame
+    // (temporary memory, per worksheet), otherwise every drag of a column would
+    // bring it back to 90.
     let gutter_width = ui
         .ctx()
         .data(|data| data.get_temp::<f32>(gutter_width_id(sheet)))
@@ -1814,15 +1769,13 @@ pub(super) fn grid_contents(
     }
     let mut table = table
         .min_scrolled_height(0.0)
-        // La table occupe l'espace laissé par le panneau d'onglets, même
-        // quand sa feuille contient peu de lignes : la grille garde ainsi
-        // sa hauteur et son défilement vertical.
+        // The table takes the space left by the tab panel, even when its worksheet
+        // holds few rows: the grid thus keeps its height and its vertical scrolling.
         .auto_shrink([false, false])
-        // Sa barre verticale n'est pas dessinée ici : dans la zone de
-        // défilement horizontale, elle suivrait le bord droit de la table et
-        // sortirait de la vue sur une grille large (B10). Le défilement
-        // (molette, glisser) reste actif ; la barre visible est portée par
-        // [`show_grid_vertical_bar`], collée au bord droit de la fenêtre.
+        // Its vertical bar is not drawn here: in the horizontal scroll area, it would
+        // follow the right edge of the table and leave the view on a wide grid (B10).
+        // Scrolling (wheel, drag) stays active; the visible bar is carried by
+        // [`show_grid_vertical_bar`], stuck to the right edge of the window.
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
     if let Some(offset) = pending_vertical_offset {
         table = table.vertical_scroll_offset(offset);
@@ -1843,9 +1796,9 @@ pub(super) fn grid_contents(
             );
         });
 
-    // Une largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la
-    // main** : pousser la largeur rendue à chaque image marquerait le projet
-    // modifié à chaque ouverture (#325).
+    // A width is pushed only at the **end of a resize done by hand**: pushing the
+    // rendered width on every frame would mark the project modified on every
+    // opening (#325).
     for (column, width) in finished_column_resizes(ui, &column_ids, &extents) {
         actions.push(Action::SetColumnWidth { column, width });
     }
@@ -1876,28 +1829,28 @@ pub(super) fn grid_contents(
     Some(table_output)
 }
 
-/// Où la grille retient, en mémoire temporaire d'egui, la largeur rendue de la
-/// gouttière des numéros de ligne de `sheet` (#330).
+/// Where the grid keeps, in egui's temporary memory, the rendered width of the
+/// row-number gutter of `sheet` (#330).
 fn gutter_width_id(sheet: NodeId) -> egui::Id {
     egui::Id::new(("stokesforge_gutter_width", sheet.raw()))
 }
 
-/// Oublie la largeur de la gouttière de `sheet` : la prochaine mise en page la
-/// ramène à sa largeur par défaut (remise de toute la feuille, #330).
+/// Forgets the gutter width of `sheet`: the next layout brings it back to its
+/// default width (reset of the whole worksheet, #330).
 pub(super) fn forget_gutter_width(ctx: &egui::Context, sheet: NodeId) {
     ctx.data_mut(|data| data.remove::<f32>(gutter_width_id(sheet)));
 }
 
-/// Sel de la table de la grille : fixe, donc sans effet sur l'identifiant de sa
-/// zone de défilement verticale. `finished_column_resizes` en reconstruit les
-/// identifiants des poignées de redimensionnement.
+/// Salt of the grid table: fixed, so without effect on the identifier of its
+/// vertical scroll area. `finished_column_resizes` rebuilds from it the
+/// identifiers of the resize handles.
 const GRID_TABLE_SALT: &str = "stokesforge_grid_table";
 
-/// Les colonnes dont un redimensionnement à la main vient de se terminer
-/// (bouton relâché cette image), avec leur largeur rendue : `(colonne, largeur)`.
-/// La poignée de la colonne de données `k` est celle de rang `k + 1` de la table
-/// (la gouttière des numéros de ligne porte le rang 0) ; son identifiant est
-/// celui qu'egui_extras lui donne (`table.rs`, `state_id.with("resize_column")`).
+/// The columns whose manual resize has just ended (button released this frame),
+/// with their rendered width: `(column, width)`. The handle of data column `k`
+/// is the one of rank `k + 1` of the table (the row-number gutter has rank 0);
+/// its identifier is the one egui_extras gives it (`table.rs`,
+/// `state_id.with("resize_column")`).
 fn finished_column_resizes(
     ui: &egui::Ui,
     column_ids: &[NodeId],
@@ -1919,31 +1872,30 @@ fn finished_column_resizes(
         .collect()
 }
 
-/// Prépare les espacements et l'ancrage focalisable, sans créer de nouvelle Ui.
+/// Prepares the spacings and the focusable anchor, without creating a new Ui.
 fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
-    // Sans ceci, l'espacement vertical par défaut d'egui entre les rangées
-    // de la table (`Spacing::item_spacing.y`, dont `TableBuilder` se sert en
-    // interne pour séparer les lignes) laisse un mince filet blanc entre
-    // chacune — la couleur de fond de la gouttière ne remplit alors pas
-    // vraiment la case, elle y flotte (numéros de ligne notamment,
-    // sensibles à l'œil car peints d'un aplat plein plutôt qu'un simple
-    // texte). `item_spacing.x` reste intact : il porte l'espacement entre
-    // colonnes, dont dépendent les poignées de redimensionnement.
+    // Without this, egui's default vertical spacing between the table rows
+    // (`Spacing::item_spacing.y`, which `TableBuilder` uses internally to separate
+    // the lines) leaves a thin white line between each — the gutter's background
+    // color then does not really fill the cell, it floats in it (row numbers in
+    // particular, noticeable to the eye because painted as a solid fill rather than
+    // plain text). `item_spacing.x` stays intact: it carries the spacing between
+    // columns, on which the resize handles depend.
     ui.spacing_mut().item_spacing.y = 0.0;
-    // Capturé *avant* la table, dont `.auto_shrink([false, false])` occupe
-    // justement tout cet espace disponible : sert de référence à la zone de
-    // prise du glisser de colonnes plus bas ([`column_grip_bands`]).
+    // Captured *before* the table, whose `.auto_shrink([false, false])` occupies
+    // exactly all this available space: serves as the reference for the column
+    // drag grip area further down ([`column_grip_bands`]).
     let grid_rect = ui.available_rect_before_wrap();
-    // Ancrage du focus clavier de la grille (#38) : un widget focalisable
-    // **seulement tant qu'il a le focus** (sinon un Tab tombant sur un
-    // clavier sans focus l'y ferait entrer de lui-même). Il porte le filtre
-    // d'événements [`GRID_KEYS`] — voir la doc de cette constante. La grille
-    // le réclame par [`claim_grid_focus`] après un appui dans son rectangle
-    // ou la fin d'une édition (plus bas) ; egui le lui retire seul à un appui
-    // ailleurs ou si la grille cesse d'être peinte. Le filtre n'est pris en
-    // compte qu'à l'image qui suit la prise de focus (`set_focus_lock_filter`
-    // exige `had_focus_last_frame`) : un Tab dans l'image même du clic n'est
-    // pas une frappe réaliste.
+    // Focus anchor of the grid's keyboard focus (#38): a focusable widget
+    // **only while it has the focus** (otherwise a Tab arriving while nothing
+    // has focus would make the focus enter it by itself). It carries the event filter
+    // [`GRID_KEYS`] — see the doc of this constant. The grid claims it through
+    // [`claim_grid_focus`] after a press in its rectangle or the end of an edit
+    // (further down); egui removes it by itself on a press elsewhere or if the grid
+    // stops being painted. The filter is taken into account only in the frame that
+    // follows the focus grab (`set_focus_lock_filter` requires
+    // `had_focus_last_frame`): a Tab in the very frame of the click is not a
+    // realistic keystroke.
     let focus_anchor = grid_focus_id(ui, sheet);
     let anchor_focused = ui.memory(|memory| memory.has_focus(focus_anchor));
     ui.interact(
@@ -1961,7 +1913,7 @@ fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
     (grid_rect, focus_anchor)
 }
 
-/// L'en-tête dispose les colonnes et relève la borne de la zone libre.
+/// The header lays out the columns and records the bound of the free area.
 fn grid_table_header(
     mut header: egui_extras::TableRow<'_, '_>,
     state: &mut AppState,
@@ -1972,8 +1924,7 @@ fn grid_table_header(
 ) {
     header.col(|ui| {
         let width = ui.max_rect().width();
-        // Pas pendant une passe de mesure (#337) : sa largeur n'est pas celle de
-        // la gouttière.
+        // Not during a measuring pass (#337): its width is not the gutter's.
         if width > 0.0 && !ui.is_sizing_pass() {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(gutter_width_id(sheet), width));
@@ -1989,7 +1940,7 @@ fn grid_table_header(
     }
 }
 
-/// Le corps garde la virtualisation des lignes au même endroit dans la table.
+/// The body keeps the row virtualization in the same place in the table.
 fn grid_table_body(
     body: egui_extras::TableBody<'_>,
     state: &mut AppState,
@@ -2021,9 +1972,9 @@ fn grid_blank_column_target(
     grid_rect: egui::Rect,
     last_column_right: f32,
 ) {
-    // La portion libre après la dernière colonne est une cible distincte
-    // des cellules et de leurs menus. La borne vient de l'en-tête réellement
-    // disposé (y compris les largeurs redimensionnées), pas des largeurs par défaut.
+    // The free portion after the last column is a target distinct from the cells
+    // and their menus. The bound comes from the header actually laid out
+    // (including resized widths), not from the default widths.
     if last_column_right < grid_rect.right() {
         let rect = egui::Rect::from_min_max(
             egui::pos2(last_column_right, grid_rect.top()),
@@ -2038,18 +1989,17 @@ fn grid_blank_column_target(
     }
 }
 
-/// Glisser une sélection de **colonnes entières** vers un graphe (#160), en
-/// attrapant le bord extérieur d'un bloc de colonnes sélectionnées, comme la
-/// sélection d'Excel : curseur « main » au survol, « main fermée » pendant le
-/// glisser. Les bandes ([`column_grip_bands`]) sont posées **après** la table,
-/// donc au-dessus des cellules et des poignées de redimensionnement : elles
-/// n'existent que sur les bords des colonnes sélectionnées, hors de la rangée
-/// des lettres, si bien que le glisser d'extension de sélection des cellules
-/// et le redimensionnement gardent tout le reste de la surface.
+/// Drag a selection of **whole columns** to a graph (#160), by grabbing the
+/// outer edge of a block of selected columns, like Excel's selection: "hand"
+/// cursor on hover, "closed hand" during the drag. The bands
+/// ([`column_grip_bands`]) are placed **after** the table, so above the cells
+/// and the resize handles: they exist only on the edges of the selected
+/// columns, outside the letter row, so that the selection-extending drag of the
+/// cells and the resizing keep all the rest of the surface.
 ///
-/// La charge utile ([`AppState::column_drag_payload`]) emporte toutes les
-/// colonnes sélectionnées, dans l'ordre de la feuille. Échap annule le
-/// glisser ; un repère (nombre de colonnes) suit le pointeur.
+/// The payload ([`AppState::column_drag_payload`]) carries all the selected
+/// columns, in the worksheet's order. Escape cancels the drag; a marker (number
+/// of columns) follows the pointer.
 fn grid_column_drag_source(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -2072,7 +2022,7 @@ fn grid_column_drag_source(
     let Some(payload) = state.column_drag_payload(sheet) else {
         return;
     };
-    // Sous la rangée des lettres : ses bords de colonne redimensionnent.
+    // Under the letter row: its column edges resize.
     let top = grid_rect.top() + HEADER_SUBROW_HEIGHT;
     for (index, band) in column_grip_bands(extents, &payload.columns, top, grid_rect.bottom())
         .into_iter()
@@ -2092,14 +2042,12 @@ fn grid_column_drag_source(
     }
 }
 
-/// Glisser une sélection de **lignes entières** vers un graphe (#166), par le
-/// bord haut ou bas d'un bloc de lignes sélectionnées — mêmes curseurs, même
-/// repère et même Échap que pour les colonnes ([`grid_column_drag_source`]).
-/// Proposé seulement quand la feuille porte une ligne x' (voir
-/// [`AppState::row_drag_payload`]) : sans x', une ligne n'a pas d'abscisse.
-/// `body_top`/`right` bornent la table (sous l'en-tête) ; la gouttière des
-/// numéros de ligne, à gauche de la première colonne, reste libre pour
-/// sélectionner.
+/// Drag a selection of **whole rows** to a graph (#166), by the top or bottom
+/// edge of a block of selected rows — same cursors, same marker and same Escape
+/// as for columns ([`grid_column_drag_source`]). Offered only when the worksheet
+/// has an x' row (see [`AppState::row_drag_payload`]): without x', a row has no
+/// abscissa. `body_top`/`right` bound the table (under the header); the
+/// row-number gutter, to the left of the first column, stays free for selecting.
 fn grid_row_drag_source(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -2145,7 +2093,7 @@ fn grid_row_drag_source(
     }
 }
 
-/// Repère qui suit le pointeur pendant le glisser de lignes.
+/// Marker that follows the pointer during the row drag.
 fn row_drag_marker(ctx: &egui::Context, sheet: NodeId, count: usize) {
     let Some(pointer) = ctx.pointer_latest_pos() else {
         return;
@@ -2167,8 +2115,8 @@ fn row_drag_marker(ctx: &egui::Context, sheet: NodeId, count: usize) {
         });
 }
 
-/// Repère qui suit le pointeur pendant le glisser de colonnes : un
-/// pictogramme du composant d'icônes et le nombre de colonnes emportées.
+/// Marker that follows the pointer during the column drag: an icon from the
+/// icon component and the number of columns carried.
 fn column_drag_marker(ctx: &egui::Context, sheet: NodeId, count: usize) {
     let Some(pointer) = ctx.pointer_latest_pos() else {
         return;
@@ -2190,7 +2138,7 @@ fn column_drag_marker(ctx: &egui::Context, sheet: NodeId, count: usize) {
         });
 }
 
-/// Après la peinture et le dépôt : reprise du focus, puis saisie, navigation et édition.
+/// After painting and the drop: focus recovery, then typing, navigation and editing.
 fn grid_keyboard(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2200,19 +2148,18 @@ fn grid_keyboard(
     focus_anchor: egui::Id,
     was_editing: bool,
 ) {
-    // Prise du focus clavier (#38), **avant** le bloc de raccourcis, pour que
-    // la touche qui suit un clic soit déjà celle de la grille. Deux cas : un
-    // appui dans le rectangle de la grille (clic, glisser, menu contextuel),
-    // sauf s'il ouvre ou prolonge une édition, dont le champ texte réclame le
-    // focus lui-même ; et la fin d'une édition qui a rendu le focus à
-    // personne (Entrée, Tab — voir [`cell_widget`] —, Échap) : sans lui, le
-    // Tab suivant repartirait dans le reste de l'interface. Un focus tenu par
-    // un autre widget (clic dans un autre champ) n'est jamais repris.
+    // Taking keyboard focus (#38), **before** the shortcut block, so that the key
+    // following a click is already the grid's. Two cases: a press in the grid's
+    // rectangle (click, drag, context menu), unless it opens or continues an
+    // edit, whose text field claims the focus itself; and the end of an edit that
+    // gave the focus back to nobody (Enter, Tab — see [`cell_widget`] —, Escape):
+    // without it, the next Tab would go off into the rest of the interface. A focus
+    // held by another widget (click in another field) is never taken back.
     let editing_now = state.editing().is_some() || state.header_editing().is_some();
-    // Appui **ou** relâchement : egui rend le focus de l'ancrage au clic
-    // (`SurrenderFocusOn::Clicks`, son réglage par défaut), donc au
-    // relâchement, parce que l'ancrage n'est pas sous le curseur ; l'appui
-    // seul ne suffit pas pour un clic simple.
+    // Press **or** release: egui gives the anchor's focus back on click
+    // (`SurrenderFocusOn::Clicks`, its default setting), so on release, because
+    // the anchor is not under the cursor; the press alone is not enough for a
+    // simple click.
     let pressed_in_grid = ui
         .input(|input| input.pointer.any_pressed() || input.pointer.any_released())
         && ui.rect_contains_pointer(grid_rect);
@@ -2226,40 +2173,36 @@ fn grid_keyboard(
         .memory(|memory| memory.focused())
         .is_none_or(|focused| focused == focus_anchor);
 
-    // Raccourcis clavier de la grille — voir la doc de tête de cette
-    // fonction pour la garde d'édition.
+    // Keyboard shortcuts of the grid — see the head doc of this function for the
+    // edit guard.
     //
-    // `state.import_state().is_none()` est la troisième condition de cette
-    // garde, ajoutée avec la refonte de la fenêtre d'import : `consume_key`
-    // ci-dessous agit sur l'`InputState` du `Context` entier, pas sur celui
-    // d'une `Ui` — donc pas seulement sur cette grille. Tant que la fenêtre
-    // d'import (un `egui::Window` flottant, peint *après* les fenêtres
-    // flottantes de contenu — voir `StokesForgeApp::ui`) est ouverte, cette
-    // grille continue d'être peinte
-    // dessous à chaque image ; sans cette condition, Retour arrière/Suppr
-    // tapés dans un champ texte de la fenêtre d'import étaient retirés d'ici
-    // avant même que ce champ ait pu les voir : plus aucune suppression de
-    // caractère possible sans passer par une sélection (qui, elle, remplace
-    // le texte sélectionné via l'insertion d'`Event::Text`, jamais
-    // consommée ici) — c'était le bug connu du champ de texte du module
-    // d'import, corrigé ici plutôt que dans la fenêtre elle-même parce que
-    // c'est ici qu'il naissait.
+    // `state.import_state().is_none()` is the third condition of this guard, added
+    // with the redesign of the import window: `consume_key` below acts on the
+    // `InputState` of the whole `Context`, not on that of a `Ui` — so not only on
+    // this grid. As long as the import window (a floating `egui::Window`, painted
+    // *after* the floating content windows — see `StokesForgeApp::ui`) is open,
+    // this grid keeps being painted underneath on every frame; without this
+    // condition, Backspace/Delete typed in a text field of the import window were
+    // removed from here before that field could even see them: no more character
+    // deletion possible without going through a selection (which replaces the
+    // selected text through the insertion of `Event::Text`, never consumed here) —
+    // that was the known bug of the import module's text field, fixed here rather
+    // than in the window itself because it was born here.
     //
-    // #17 : même vol, cette fois dans le dialogue des propriétés du graphe —
-    // la liste de conditions par fenêtre ne pouvait que rater la suivante.
-    // `focus_free` (aucun widget n'a le focus clavier, ou c'est l'ancrage de
-    // **cette** grille — voir `GRID_KEYS`, #38 ; `egui_wants_keyboard_input`
-    // ne le distinguait pas d'un champ texte) couvre d'un coup ce dialogue,
-    // l'import et tout futur dialogue ; `import_state` reste pour le cas d'un
-    // import ouvert sans champ focalisé.
+    // #17: same theft, this time in the graph properties dialog — the per-window
+    // list of conditions could only miss the next one. `focus_free` (no widget has
+    // keyboard focus, or it is the anchor of **this** grid — see `GRID_KEYS`, #38;
+    // `egui_wants_keyboard_input` did not tell it from a text field) covers this
+    // dialog, the import and any future dialog at once; `import_state` stays for
+    // the case of an open import with no focused field.
     if state.editing().is_none()
         && state.header_editing().is_none()
         && state.import_state().is_none()
         && focus_free
     {
-        // #143 : F2 appartient uniquement à la grille focalisée. Les autres
-        // raccourcis gardent leur secours sans focus, mais F2 doit rester
-        // disponible pour les gestionnaires. Réutiliser l'éditeur du double-clic.
+        // #143: F2 belongs only to the focused grid. The other shortcuts keep their
+        // fallback without focus, but F2 must stay available for the managers. Reuse
+        // the double-click editor.
         if ui.ctx().memory(|memory| memory.focused()) == Some(focus_anchor)
             && ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_EDIT_CELL))
         {
@@ -2277,8 +2220,8 @@ fn grid_keyboard(
             }
             return;
         }
-        // Ctrl+A : même effet que la case du coin (#159). Échap lève la
-        // sélection, comme un second clic sur la case du coin.
+        // Ctrl+A: same effect as the corner box (#159). Escape lifts the selection,
+        // like a second click on the corner box.
         if ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_SELECT_ALL)) {
             actions.push(Action::SelectAll { sheet });
         } else if ui.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE)) {
@@ -2291,17 +2234,14 @@ fn grid_keyboard(
 }
 
 fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
-    // Taper sur une cellule ou un champ d'en-tête sélectionné (simple
-    // clic, pas encore en édition) démarre l'édition en remplaçant tout
-    // son contenu par ce qui est tapé — comportement standard de
-    // tableur, le même pour les deux. Ne se déclenche que pour une
-    // sélection réduite à une seule cellule ([`Selection::single_cell`])
-    // côté données : taper sur une plage ne doit jamais écraser
-    // plusieurs cellules à la fois — un champ d'en-tête, lui, n'est
-    // jamais une plage. `egui::Event::Text` ne porte que du texte
-    // imprimable — jamais une touche de contrôle ou de navigation, qui
-    // n'apparaît que dans `events` comme un `Event::Key` — donc pas de
-    // filtrage supplémentaire à faire ici.
+    // Typing on a selected cell or header field (single click, not yet
+    // being edited) starts the edit by replacing all its content with what is
+    // typed — standard spreadsheet behavior, the same for both. Triggers only for
+    // a selection reduced to a single cell ([`Selection::single_cell`]) on the
+    // data side: typing on a range must never overwrite several cells at once — a
+    // header field, for its part, is never a range. `egui::Event::Text` carries
+    // only printable text — never a control or navigation key, which appears only
+    // in `events` as an `Event::Key` — so no extra filtering to do here.
     let typed: String = ui.input(|input| {
         input
             .events
@@ -2335,14 +2275,12 @@ fn navigate_grid_selection(
     actions: &mut Vec<Action>,
     sheet: NodeId,
 ) {
-    // Déplacement clavier d'une cellule déjà sélectionnée, sans
-    // édition en cours (pendant l'édition, ces mêmes touches sont
-    // gérées par `cell_widget`, qui valide *puis* déplace : voir sa
-    // doc). Flèches directionnelles + Maj pour étendre le rectangle ;
-    // Tab/Maj+Tab avec retour à la ligne aux bords ; Entrée/Maj+Entrée
-    // comme équivalents non-éditants de Bas/Haut. Sans effet si la
-    // sélection courante n'est pas un rectangle de cellules (colonne
-    // entière ou champ d'en-tête) — voir `Selection::cursor`.
+    // Keyboard move of an already selected cell, with no edit in progress (during
+    // editing, these same keys are handled by `cell_widget`, which validates *then*
+    // moves: see its doc). Arrow keys + Shift to extend the rectangle; Tab/
+    // Shift+Tab with wrap at the edges; Enter/Shift+Enter as non-editing
+    // equivalents of Down/Up. No effect if the current selection is not a
+    // rectangle of cells (whole column or header field) — see `Selection::cursor`.
     let shift = ui.input(|i| i.modifiers.shift);
     let (up, down, left, right, tab, enter) = ui.input(|input| {
         (
@@ -2367,16 +2305,14 @@ fn navigate_grid_selection(
         state.move_selection(sheet, MoveDirection::Right, shift);
     }
     if tab && !shift {
-        // Tab sur la dernière colonne d'une ligne de données, ou sur
-        // n'importe quel champ d'en-tête de la dernière colonne : même geste — ajoute une colonne plutôt que de
-        // revenir en début de ligne suivante ou d'entrer dans les
-        // données, puis sélectionne tout de suite la case qui y
-        // correspondra (voir `Action::AddColumnAndSelect`/
-        // `Action::AddColumnAndSelectHeaderField`, qui ne peuvent la
-        // poser qu'une fois la colonne réellement créée, contrairement à
-        // une ligne). Valait seulement pour Formule avant #52 (Tab
-        // circulait d'abord colonne par colonne pour un même champ) ;
-        // décision levée par l'utilisateur.
+        // Tab on the last column of a data row, or on any header field of the last
+        // column: same gesture — adds a column rather than returning to the start of
+        // the next row or entering the data, then immediately selects the box that
+        // will correspond to it (see `Action::AddColumnAndSelect`/
+        // `Action::AddColumnAndSelectHeaderField`, which can place it only once the
+        // column is really created, unlike a row). Applied only to Formula before #52
+        // (Tab used to go column by column first for the same field); decision lifted
+        // by the user.
         let cursor = state.selection(sheet).and_then(Selection::grid_cursor);
         let needs_new_column = match cursor {
             Some(GridCursor::Data(column, _) | GridCursor::Header(column, _)) => {
@@ -2403,13 +2339,12 @@ fn navigate_grid_selection(
     if enter && shift {
         state.move_selection(sheet, MoveDirection::Up, false);
     } else if enter {
-        // Entrée sur la dernière ligne de la feuille, cellule déjà
-        // vide et jamais éditée dans cette frappe : `move_selection`
-        // seul ne ferait rien (`Down` est borné à `row_count - 1`,
-        // voir sa doc). Même geste que `CommitCellAndAdvance` sur une
-        // cellule qu'on vient de remplir — ajoute la ligne, puis
-        // sélectionne tout de suite la cellule qui y correspondra
-        // (elle sera créée avant le prochain rendu, voir `cell_widget`).
+        // Enter on the last row of the worksheet, cell already empty and never edited
+        // in this keystroke: `move_selection` alone would do nothing (`Down` is bounded
+        // to `row_count - 1`, see its doc). Same gesture as `CommitCellAndAdvance` on a
+        // cell that was just filled — adds the row, then immediately selects the cell
+        // that will correspond to it (it will be created before the next render, see
+        // `cell_widget`).
         let data_cursor = state
             .selection(sheet)
             .and_then(Selection::grid_cursor)
@@ -2439,29 +2374,25 @@ fn grid_clipboard_shortcuts(
     actions: &mut Vec<Action>,
     sheet: NodeId,
 ) {
-    // Ctrl+C/X/V n'apparaissent **jamais** comme un `egui::Event::Key`
-    // ordinaire (donc jamais via `consume_key`/`consume_shortcut`) :
-    // `egui-winit` les intercepte lui-même à la traduction des
-    // événements de la fenêtre et pousse à la place un `Event::Copy`/
-    // `Event::Cut`/`Event::Paste(String)` (ce dernier porte déjà le
-    // contenu du presse-papier système, lu par `egui-winit` via
-    // `arboard` en interne — inutile de le relire nous-mêmes). Ça vaut
-    // aussi pour Ctrl+Maj+C/Ctrl+Maj+V : `egui-winit::is_copy_command`/
-    // `is_paste_command` ne testent que `modifiers.command`, jamais
-    // `shift` (voir `egui-winit/src/lib.rs`), donc Maj enfoncée ou non
-    // produit le **même** `Event::Copy`/`Event::Paste` — jamais un
-    // `Event::Key` à capturer par un raccourci séparé (un essai
-    // précédent le supposait à tort : `consume_shortcut` sur un
-    // raccourci Ctrl+Maj+C/V ne matchait jamais). On distingue donc les
-    // deux en lisant `input.modifiers.shift` au moment de l'événement —
-    // toujours à jour à ce point, `ModifiersChanged` précédant la
-    // frappe de la touche elle-même. Retour arrière/Suppr, eux, n'ont
-    // pas de modificateur et restent des `Event::Key` ordinaires,
-    // capturés via `consume_key` comme avant. Suppr est le seul des
-    // deux à ne pas dispatcher une action fixe : `AppState::
-    // consume_delete_key` décide si c'est un vidage ou une suppression
-    // selon qu'il s'agit ou non de la deuxième pression consécutive sur
-    // la même sélection (voir sa doc).
+    // Ctrl+C/X/V **never** appear as an ordinary `egui::Event::Key` (so never via
+    // `consume_key`/`consume_shortcut`): `egui-winit` intercepts them itself when
+    // translating the window events and pushes instead an `Event::Copy`/
+    // `Event::Cut`/`Event::Paste(String)` (the latter already carries the content
+    // of the system clipboard, read by `egui-winit` through `arboard` internally —
+    // no need to reread it ourselves). This also holds for Ctrl+Shift+C/Ctrl+Shift+V:
+    // `egui-winit::is_copy_command`/`is_paste_command` test only
+    // `modifiers.command`, never `shift` (see `egui-winit/src/lib.rs`), so Shift
+    // held or not produces the **same** `Event::Copy`/`Event::Paste` — never an
+    // `Event::Key` to capture with a separate shortcut (an earlier attempt wrongly
+    // assumed so: `consume_shortcut` on a Ctrl+Shift+C/V shortcut never matched).
+    // The two are therefore told apart by reading `input.modifiers.shift` at the
+    // time of the event — always up to date at that point, `ModifiersChanged`
+    // coming before the keystroke itself. Backspace/Delete, for their part, have
+    // no modifier and stay ordinary `Event::Key`s, captured via `consume_key` as
+    // before. Delete is the only one of the two that does not dispatch a fixed
+    // action: `AppState::consume_delete_key` decides whether it is a clear or a
+    // deletion depending on whether it is the second consecutive press on the same
+    // selection (see its doc).
     let (mut copy, mut cut, mut paste_text, mut copy_full_columns, mut paste_absolute) =
         (false, false, None, false, false);
     ui.input(|input| {
@@ -2483,16 +2414,15 @@ fn grid_clipboard_shortcuts(
             input.consume_shortcut(&super::shortcuts::KEY_BACKSPACE),
         )
     });
-    // Toute la matrice de comportement (une seule case copiée devient du
-    // texte brut, un rectangle devient relatif, Ctrl+Maj+C promeut les
-    // colonnes touchées en entier, un collage se décale sur l'ancre ou
-    // rejoue ses rangs d'origine…) vit dans `AppState` — voir sa doc de
-    // tête, section copier/coller. Cette couche ne fait que traduire
-    // clavier/souris en appels, la même façon quelle que soit la sorte
-    // de sélection courante : plus de branche séparée pour un champ
-    // d'en-tête sélectionné, `AppState::copy_selection`/`AppState::
-    // paste`/`Action::ClearSelectedCells`/`Action::DeleteSelectedCells`
-    // savent déjà tous distinguer en-tête et données par eux-mêmes.
+    // The whole behavior matrix (a single copied box becomes plain text, a
+    // rectangle becomes relative, Ctrl+Shift+C promotes the touched columns in
+    // full, a paste shifts onto the anchor or replays its original ranks…) lives
+    // in `AppState` — see its head doc, copy/paste section. This layer only
+    // translates keyboard/mouse into calls, the same way whatever the kind of
+    // current selection: no separate branch any more for a selected header field,
+    // `AppState::copy_selection`/`AppState::paste`/`Action::ClearSelectedCells`/
+    // `Action::DeleteSelectedCells` all already tell header and data apart by
+    // themselves.
     if copy_full_columns {
         if let Some(text) = state.copy_full_columns(sheet) {
             ui.ctx().copy_text(text);
@@ -2500,15 +2430,14 @@ fn grid_clipboard_shortcuts(
     } else if copy || cut {
         match state.copy_selection(sheet) {
             Some(text) => ui.ctx().copy_text(text),
-            // Copie ambiguë (#159) : Couper ne vide rien, il n'a rien copié.
+            // Ambiguous copy (#159): Cut clears nothing, it copied nothing.
             None => cut = false,
         }
     }
     if cut || backspace {
-        // Une autre mutation de la grille s'intercale entre deux
-        // pressions sur Suppr : la deuxième doit repartir au premier
-        // temps (vider), pas supprimer par surprise — voir la doc de
-        // `AppState::consume_delete_key`.
+        // Another grid mutation slips in between two presses on Delete: the second
+        // must start again at the first step (clear), not delete by surprise — see
+        // the doc of `AppState::consume_delete_key`.
         state.forget_delete_repeat(sheet);
         actions.push(Action::ClearSelectedCells { sheet });
     }
@@ -2526,22 +2455,20 @@ fn grid_clipboard_shortcuts(
     }
 }
 
-/// Case de la gouttière des numéros de ligne, dans le **corps** de la table
-/// — miroir exact de la rangée des lettres de colonne
-/// ([`column_header_widget`]) mais pour les lignes : toute la largeur de la
-/// case sélectionne **toute la ligne** (glisser/Maj-clic étend à plusieurs
-/// lignes, même logique de multi-sélection que [`cell_widget`]/
-/// [`column_header_widget`]) et ouvre le même menu contextuel d'édition
+/// Box of the row-number gutter, in the table **body** — exact mirror of the
+/// column letter row ([`column_header_widget`]) but for rows: the whole width
+/// of the box selects **the whole row** (drag/Shift-click extends to several
+/// rows, same multi-selection logic as [`cell_widget`]/
+/// [`column_header_widget`]) and opens the same edit context menu
 /// ([`grid_edit_menu`]).
 ///
-/// Fond à trois paliers comme la rangée des lettres ([`gutter_fill`]) —
-/// repos, touchée par une sélection de données sans l'être elle-même
-/// ([`AppState::row_touched_by_selection`]), ou directement sélectionnée —
-/// pour que la gouttière se reconnaisse comme une zone de contrôle au
-/// premier coup d'œil, et que la ligne d'une cellule sélectionnée se
-/// remarque même sans avoir cliqué la gouttière elle-même. Cohérent avec le
-/// choix déjà fait pour `column_header_widget` et pour le « # » de
-/// [`row_number_header_widget`] juste au-dessus.
+/// Background in three levels like the letter row ([`gutter_fill`]) — rest,
+/// touched by a data selection without being selected itself
+/// ([`AppState::row_touched_by_selection`]), or directly selected — so that the
+/// gutter is recognized as a control area at first glance, and the row of a
+/// selected cell is noticed even without having clicked the gutter itself.
+/// Consistent with the choice already made for `column_header_widget` and for
+/// the "#" of [`row_number_header_widget`] just above.
 fn row_number_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2565,8 +2492,8 @@ fn row_number_widget(
     );
     let modifiers = ui.input(|i| i.modifiers);
     if response.clicked() || response.drag_started() {
-        // Ctrl+clic bascule la ligne, Maj+clic prend la plage ancre → ligne,
-        // Ctrl+Maj+clic l'ajoute à la sélection (#159) — comme les lettres.
+        // Ctrl+click toggles the row, Shift+click takes the anchor → row range,
+        // Ctrl+Shift+click adds it to the selection (#159) — like the letters.
         match (modifiers.command, modifiers.shift) {
             (true, true) => state.extend_row_selection(sheet, row),
             (true, false) => state.toggle_row_selection(sheet, row),
@@ -2579,42 +2506,41 @@ fn row_number_widget(
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
-        // Même geste que pour les cellules de données et la rangée des
-        // lettres — étendre pendant le glisser, pas seulement au clic de
-        // départ (voir le commentaire détaillé de `cell_widget`).
+        // Same gesture as for data cells and the letter row — extend during the drag,
+        // not only on the starting click (see the detailed comment of `cell_widget`).
         state.extend_row_selection(sheet, row);
     } else if response.secondary_clicked() && !selected {
-        // Clic droit hors de la sélection : la réduire à cette ligne avant
-        // d'ouvrir le menu — même règle que pour une cellule ou un champ
-        // d'en-tête (voir `cell_widget`/`header_field_widget`).
+        // Right-click outside the selection: reduce it to this row before opening the
+        // menu — same rule as for a cell or a header field (see
+        // `cell_widget`/`header_field_widget`).
         state.select_row(sheet, row);
     }
-    // `grid_menu` **dans** la fermeture, jamais avant — même raison que dans
-    // `cell_widget` : calculée dehors, elle serait recalculée à chaque image
-    // pour chaque ligne visible.
+    // `grid_menu` **inside** the closure, never before — same reason as in
+    // `cell_widget`: computed outside, it would be recomputed on every frame for
+    // each visible row.
     response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
 }
 
-/// Peint une cellule et récolte les actions qu'elle produit.
+/// Paints a cell and collects the actions it produces.
 ///
-/// Une seule cellule à la fois porte un vrai tampon (celui de
-/// [`AppState::editing`]) ; toutes les autres sont peintes comme un `Label`
-/// surligné si sélectionné, sans jamais accaparer le focus clavier — ce qui
-/// garde le coût mémoire de la grille indépendant du nombre de lignes, et
-/// laisse le clic simple à la sélection plutôt qu'à l'édition.
+/// Only one cell at a time carries a real buffer (the one of
+/// [`AppState::editing`]); all the others are painted as a `Label` highlighted
+/// if selected, never grabbing keyboard focus — which keeps the grid's memory
+/// cost independent of the number of rows, and leaves the single click to
+/// selection rather than to editing.
 ///
-/// - Simple clic (ou glisser à partir d'ici) : sélectionne cette cellule,
-///   ancre d'un futur rectangle.
-/// - Shift-clic, ou survol pendant qu'un glisser est en cours ailleurs dans
-///   la grille : étend la sélection jusqu'ici.
-/// - Double-clic : ouvre l'édition.
+/// - Single click (or drag starting here): selects this cell, anchor of a
+///   future rectangle.
+/// - Shift-click, or hover while a drag is in progress elsewhere in the grid:
+///   extends the selection to here.
+/// - Double-click: opens the edit.
 ///
-/// Le contenu n'est envoyé au modèle qu'à la **perte de focus** de l'édition
-/// — ce que provoque aussi la touche Entrée — jamais à chaque frappe : sinon
-/// l'historique compterait une entrée par caractère. Perdre le focus par
-/// Entrée pousse [`Action::CommitCellAndAdvance`] plutôt que [`Action::
-/// CommitCell`] : c'est elle qui ajoute une ligne quand on était sur la
-/// dernière de la colonne.
+/// The content is sent to the model only on **loss of focus** of the edit —
+/// which the Enter key also causes — never on each keystroke: otherwise the
+/// history would count one entry per character. Losing focus through Enter
+/// pushes [`Action::CommitCellAndAdvance`] rather than [`Action::
+/// CommitCell`]: it is the one that adds a row when we were on the last one of
+/// the column.
 fn cell_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2623,9 +2549,9 @@ fn cell_widget(
     column: NodeId,
     row: usize,
 ) {
-    // L'identifiant est ancré sur (colonne, ligne) et non sur la position à
-    // l'écran : avec des lignes virtualisées, faire défiler déplacerait sinon
-    // le focus d'une cellule à l'autre.
+    // The identifier is anchored on (column, row) and not on the position on
+    // screen: with virtualized rows, scrolling would otherwise move the focus from
+    // one cell to another.
     ui.push_id((column.raw(), row), |ui| {
         let editing_here = state
             .editing()
@@ -2639,7 +2565,7 @@ fn cell_widget(
     });
 }
 
-/// Champ de saisie : la validation consomme Tab/Entrée avant le clavier de grille.
+/// Input field: validation consumes Tab/Enter before the grid keyboard.
 fn edit_cell_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2656,13 +2582,12 @@ fn edit_cell_widget(
     } else {
         inplace_edit::Opening::SelectAll
     };
-    // Le contrat commun de l'édition sur place (#224) : focus et sélection à
-    // l'ouverture, Entrée, Tab et Échap **consommés** ici (avant le bloc de
-    // raccourcis de `grid_contents`, qui les relirait et déplacerait la
-    // sélection une seconde fois : Entrée sur la ligne 2 atterrissait sur la
-    // ligne 4). Échap referme sans rien écrire ; toute autre fin valide, et
-    // Entrée/Maj+Entrée/Tab/Maj+Tab déplacent aussi la sélection, comme dans
-    // tout tableur.
+    // The shared in-place edit contract (#224): focus and selection on opening,
+    // Enter, Tab and Escape **consumed** here (before the shortcut block of
+    // `grid_contents`, which would reread them and move the selection a second
+    // time: Enter on row 2 landed on row 4). Escape closes without writing
+    // anything; any other end validates, and Enter/Shift+Enter/Tab/Shift+Tab also
+    // move the selection, as in any spreadsheet.
     let shown = inplace_edit::show(
         ui,
         ui.id().with("cell_edit"),
@@ -2692,12 +2617,10 @@ fn edit_cell_widget(
     if let Some(text) = pending {
         state.cancel_edit();
         if enter && !shift {
-            // `CommitCellAndAdvance` ajoute déjà une ligne quand
-            // `row` était la dernière de la colonne ; sélectionner
-            // `row + 1` sans attendre que cette commande (appliquée
-            // après le rendu de cette image) ait créé la ligne est
-            // sûr : soit elle existait déjà, soit elle est sur le
-            // point de l'être.
+            // `CommitCellAndAdvance` already adds a row when `row` was the last of the
+            // column; selecting `row + 1` without waiting for that command (applied after
+            // this frame's render) to have created the row is safe: either it already
+            // existed, or it is about to.
             actions.push(Action::CommitCellAndAdvance {
                 column,
                 row,
@@ -2708,13 +2631,12 @@ fn edit_cell_widget(
         } else {
             actions.push(Action::CommitCell { column, row, text });
             if enter {
-                // Maj+Entrée : remonte d'une ligne, jamais d'ajout.
+                // Shift+Enter: goes up one row, never adds.
                 state.move_selection(sheet, MoveDirection::Up, false);
             } else if tab && !shift && is_last_visible_column(state, sheet, column) {
-                // Même geste que dans le bloc de raccourcis hors
-                // édition : Tab valide sur la dernière colonne ajoute
-                // une colonne plutôt que de revenir en début de ligne
-                // suivante (voir `Action::AddColumnAndSelect`).
+                // Same gesture as in the shortcut block outside editing: Tab validating on the
+                // last column adds a column rather than returning to the start of the next row
+                // (see `Action::AddColumnAndSelect`).
                 actions.push(Action::AddColumnAndSelect { sheet, row });
             } else if tab {
                 state.move_selection_tab(sheet, shift);
@@ -2723,7 +2645,7 @@ fn edit_cell_widget(
     }
 }
 
-/// Cellule au repos : affichage, sélection et menu contextuel paresseux.
+/// Resting cell: display, selection and lazy context menu.
 fn display_cell_widget(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -2744,24 +2666,21 @@ fn display_cell_widget(
             ui.visuals().selection.bg_fill.linear_multiply(0.35),
         );
     }
-    // `.truncate()` plutôt que le retour à la ligne par défaut d'un
-    // `Label` : une valeur trop large pour sa colonne est coupée à
-    // droite (avec un léger fondu), jamais renvoyée sur une seconde
-    // ligne qui casserait la hauteur uniforme des rangées de la table.
+    // `.truncate()` rather than the default line wrapping of a `Label`: a value
+    // too wide for its column is cut on the right (with a slight fade), never sent
+    // onto a second line that would break the uniform height of the table rows.
     //
-    // Alignement à la tableur, dans le **corps** seulement (jamais la
-    // gouttière ni l'en-tête, qui ne portent pas de valeur de colonne) :
-    // les nombres à droite, le texte à gauche — `AppState::
-    // cell_is_numeric` tranche par cellule, pas par colonne, pour
-    // qu'une colonne `Mixed` aligne chaque ligne selon sa propre valeur.
+    // Spreadsheet-style alignment, in the **body** only (never the gutter nor the
+    // header, which carry no column value): numbers on the right, text on the left
+    // — `AppState::cell_is_numeric` decides per cell, not per column, so that a
+    // `Mixed` column aligns each row according to its own value.
     //
-    // `Label::halign` seul ne suffit pas ici : `ui.put` place le widget
-    // dans un `Layout::centered_and_justified`, qui justifie le texte
-    // (l'étire pour remplir la largeur) avant que `halign` n'ait voix au
-    // chapitre — le résultat restait visuellement centré. Un vrai
-    // `Layout` directionnel (`right_to_left`/`left_to_right`), comme
-    // celui déjà posé sur toute la table (`cell_layout` du
-    // `TableBuilder`), aligne réellement le texte contre le bord voulu.
+    // `Label::halign` alone is not enough here: `ui.put` places the widget in a
+    // `Layout::centered_and_justified`, which justifies the text (stretches it to
+    // fill the width) before `halign` has a say — the result stayed visually
+    // centered. A real directional `Layout` (`right_to_left`/`left_to_right`), like
+    // the one already placed on the whole table (`cell_layout` of the
+    // `TableBuilder`), really aligns the text against the wanted edge.
     let layout = if state.cell_is_numeric(column, row) {
         egui::Layout::right_to_left(egui::Align::Center)
     } else {
@@ -2772,7 +2691,7 @@ fn display_cell_widget(
             .max_rect(rect.shrink2(egui::vec2(4.0, 0.0)))
             .layout(layout),
         |ui| {
-            // Une colonne pas à jour est entièrement grisée (#181, M9 a).
+            // A column that is not up to date is entirely grayed out (#181, M9 a).
             let text = if stale {
                 egui::RichText::new(text).color(ui.visuals().weak_text_color())
             } else {
@@ -2789,7 +2708,7 @@ fn display_cell_widget(
     let modifiers = ui.input(|i| i.modifiers);
     let (command, shift) = (modifiers.command, modifiers.shift);
     if response.drag_started() && command {
-        // Ctrl+glisser : un nouveau rectangle, les précédents restent (#159).
+        // Ctrl+drag: a new rectangle, the previous ones stay (#159).
         state.add_cell_selection(sheet, column, row);
     } else if response.clicked() && command && !shift {
         state.toggle_cell_selection(sheet, column, row);
@@ -2803,49 +2722,45 @@ fn display_cell_widget(
         && ui.input(|i| i.pointer.primary_down())
         && state.selection(sheet).is_some()
     {
-        // `response.dragged()` ne se déclenche que sur le widget qui a
-        // *commencé* le glisser — jamais sur les cellules simplement
-        // survolées ensuite —, d'où ce test manuel plutôt que
-        // `dragged()` pour étendre la sélection pendant qu'on glisse.
+        // `response.dragged()` triggers only on the widget that *started* the drag —
+        // never on cells merely hovered afterwards —, hence this manual test rather
+        // than `dragged()` to extend the selection while dragging.
         //
-        // `response.hovered()` ne convient pas non plus : tant qu'un
-        // glisser est en cours *ailleurs* (sur la cellule de départ),
-        // egui ne considère plus que ce widget d'origine comme
-        // « survolé » — aucune autre cellule ne redevient `hovered()`
-        // pendant tout le glisser, même sous le curseur (`egui::
-        // Context::interact`, doc de `InteractionSnapshot::hovered` :
-        // « While dragging or clicking something, nothing else is
-        // hovered »). `contains_pointer()` reste vrai indépendamment de
-        // ce qui est en train d'être glissé ailleurs — c'est le test
-        // qu'il faut ici.
+        // `response.hovered()` is not suitable either: as long as a drag is in
+        // progress *elsewhere* (on the starting cell), egui considers only that
+        // original widget "hovered" — no other cell becomes `hovered()` again during
+        // the whole drag, even under the cursor (`egui::
+        // Context::interact`, doc of `InteractionSnapshot::hovered`:
+        // "While dragging or clicking something, nothing else is hovered").
+        // `contains_pointer()` stays true regardless of what is being dragged
+        // elsewhere — that is the test needed here.
         state.extend_selection(sheet, column, row);
     } else if response.secondary_clicked() && !selected {
-        // Clic droit hors de la sélection : la réduire à cette cellule
-        // avant d'ouvrir le menu — même règle que dans l'en-tête et sur
-        // la rangée des lettres (voir `header_field_widget`).
+        // Right-click outside the selection: reduce it to this cell before opening
+        // the menu — same rule as in the header and on the letter row (see
+        // `header_field_widget`).
         state.select_cell(sheet, column, row);
     }
-    // `grid_menu` **dans** la fermeture, jamais avant : elle ne tourne
-    // que tant que le menu est ouvert. Calculée dehors, elle serait
-    // recalculée à chaque image pour *chaque cellule visible* — et elle
-    // parcourt l'arbre (`Selection::columns`), ce qui en ferait un coût
-    // quadratique en nombre de colonnes sur une grille qui ne fait que
-    // s'afficher.
+    // `grid_menu` **inside** the closure, never before: it runs only while the
+    // menu is open. Computed outside, it would be recomputed on every frame for
+    // *every visible cell* — and it walks the tree (`Selection::columns`), which
+    // would make it a cost quadratic in the number of columns on a grid that only
+    // displays.
     response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
 }
 
-/// Un glisser de colonnes ou de lignes vers un graphe est-il en cours ? Tant
-/// qu'il dure, survoler d'autres cases n'étend plus la sélection : sinon elle
-/// serait remplacée « à la volée » par une sélection de cellules (#160, #166).
+/// Is a drag of columns or rows to a graph in progress? As long as it lasts,
+/// hovering other boxes no longer extends the selection: otherwise it would be
+/// replaced "on the fly" by a cell selection (#160, #166).
 fn grid_drag_in_progress(ctx: &egui::Context) -> bool {
     egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ctx)
         || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ctx)
 }
 
-/// Vrai si l'appui en cours a commencé dans `rect`. L'extension de sélection
-/// au survol ne concerne que les cases où le glisser n'a **pas** commencé :
-/// sur la case d'origine, un Ctrl+clic (qui bascule au relâchement) aurait
-/// sinon déjà étendu la sélection pendant l'appui (#159).
+/// True if the current press started in `rect`. The selection extension on
+/// hover concerns only the boxes where the drag did **not** start: on the
+/// origin box, a Ctrl+click (which toggles on release) would otherwise already
+/// have extended the selection during the press (#159).
 fn press_started_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
     ui.input(|i| i.pointer.press_origin())
         .is_some_and(|origin| rect.contains(origin))
@@ -2853,15 +2768,14 @@ fn press_started_in(ui: &egui::Ui, rect: egui::Rect) -> bool {
 
 #[cfg(test)]
 mod tests {
-    //! Tests de la grille, sans fenêtre : un `egui::Context` nu, des
-    //! événements injectés, et la lecture de ce qui est **peint** (textes,
-    //! positions) ou des actions poussées — jamais du texte source.
+    //! Grid tests, without a window: a bare `egui::Context`, injected events, and
+    //! reading what is **painted** (texts, positions) or the pushed actions —
+    //! never the source text.
     //!
-    //! Le banc peint le classeur entier ([`book_contents`]) plutôt que la seule
-    //! grille : c'est le contenu commun du classeur flottant et du classeur
-    //! détaché, donc le chemin qu'emprunte l'utilisateur dans les deux
-    //! fenêtres.
-    use super::super::test_support::image_de;
+    //! The bench paints the whole workbook ([`book_contents`]) rather than the grid
+    //! alone: it is the content shared by the floating workbook and the detached
+    //! workbook, hence the path the user takes in both windows.
+    use super::super::test_support::frame_of;
 
     use super::super::workbook::book_contents;
     use super::*;
@@ -2869,11 +2783,11 @@ mod tests {
     use stokesforge_core::{Column, Project};
     use stokesforge_session::Session;
 
-    /// Les bandes de prise bordent le **bloc** de colonnes sélectionnées —
-    /// une de part et d'autre —, et seulement lui : un bloc qui n'est pas
-    /// contigu en a deux paires, les colonnes non sélectionnées aucune.
+    /// The grip bands border the **block** of selected columns — one on each side
+    /// —, and only it: a block that is not contiguous has two pairs, the
+    /// unselected columns none.
     #[test]
-    fn les_bandes_de_prise_bordent_chaque_bloc_de_colonnes_selectionnees() {
+    fn grip_bands_border_each_block_of_selected_columns() {
         let ids: Vec<NodeId> = (1..=5).map(NodeId::from_raw).collect();
         let extents: Vec<ColumnExtent> = ids
             .iter()
@@ -2883,7 +2797,7 @@ mod tests {
         let half = COLUMN_GRIP_HALF_WIDTH;
 
         let bands = column_grip_bands(&extents, &[ids[1], ids[2]], 20.0, 200.0);
-        assert_eq!(bands.len(), 2, "un bloc : ses deux bords");
+        assert_eq!(bands.len(), 2, "one block: its two edges");
         assert_eq!(
             (bands[0].left(), bands[0].right()),
             (100.0 - half, 100.0 + half)
@@ -2895,26 +2809,25 @@ mod tests {
         assert_eq!((bands[0].top(), bands[0].bottom()), (20.0, 200.0));
 
         let bands = column_grip_bands(&extents, &[ids[0], ids[3], ids[4]], 20.0, 200.0);
-        assert_eq!(bands.len(), 4, "deux blocs non contigus : deux paires");
+        assert_eq!(bands.len(), 4, "two non-contiguous blocks: two pairs");
         assert_eq!(bands[2].center().x, 300.0);
         assert_eq!(bands[3].center().x, 500.0);
 
         assert!(column_grip_bands(&extents, &[], 20.0, 200.0).is_empty());
     }
 
-    /// #166 : les bandes de prise des lignes bordent chaque **bloc** de lignes
-    /// sélectionnées — au-dessus de la première, au-dessous de la dernière —,
-    /// dans les bornes du corps de la table ; un bord n'existe que si sa ligne
-    /// est peinte ET qu'elle borde vraiment le bloc.
+    /// #166: the row grip bands border each **block** of selected rows — above the
+    /// first, below the last —, within the bounds of the table body; an edge exists
+    /// only if its row is painted AND it really borders the block.
     #[test]
-    fn les_bandes_de_prise_bordent_chaque_bloc_de_lignes_selectionnees() {
+    fn grip_bands_border_each_block_of_selected_rows() {
         let extents: Vec<RowExtent> = (3..8)
             .map(|row| (row, 20.0 * row as f32, 20.0 * (row + 1) as f32))
             .collect();
         let half = ROW_GRIP_HALF_HEIGHT;
 
         let bands = row_grip_bands(&extents, &[4, 5], 50.0, 400.0, 0.0, 1000.0);
-        assert_eq!(bands.len(), 2, "un bloc : ses deux bords");
+        assert_eq!(bands.len(), 2, "one block: its two edges");
         assert_eq!(
             (bands[0].top(), bands[0].bottom()),
             (80.0 - half, 80.0 + half)
@@ -2925,26 +2838,26 @@ mod tests {
         );
         assert_eq!((bands[0].left(), bands[0].right()), (50.0, 400.0));
 
-        // Deux blocs non contigus : deux paires.
+        // Two non-contiguous blocks: two pairs.
         assert_eq!(
             row_grip_bands(&extents, &[3, 5, 6], 50.0, 400.0, 0.0, 1000.0).len(),
             4
         );
-        // Le bloc continue hors de l'écran (lignes 1..=4, la ligne 1 n'est pas
-        // peinte) : pas de bord haut inventé, seulement le bord bas réel.
+        // The block continues off screen (rows 1..=4, row 1 is not painted): no
+        // invented top edge, only the real bottom edge.
         let bands = row_grip_bands(&extents, &[1, 2, 3, 4], 50.0, 400.0, 0.0, 1000.0);
         assert_eq!(bands.len(), 1);
         assert_eq!(bands[0].center().y, 100.0);
-        // Une bande ne déborde pas sur l'en-tête (`top`) ni sous la table.
+        // A band does not overflow onto the header (`top`) nor under the table.
         let bands = row_grip_bands(&extents, &[3], 50.0, 400.0, 61.0, 1000.0);
-        assert_eq!(bands[0].top(), 61.0, "bord haut rogné sous l'en-tête");
+        assert_eq!(bands[0].top(), 61.0, "top edge clipped under the header");
         assert!(row_grip_bands(&extents, &[], 50.0, 400.0, 0.0, 1000.0).is_empty());
     }
 
-    /// Un bouton voisin (« avant », premier widget focalisable venu de
-    /// l'image, donc celui qu'egui choisirait sur un Tab) puis un classeur de
-    /// trois colonnes de quatre lignes, valeurs 101..104, 201..204, 301..304.
-    struct Banc {
+    /// A neighboring button ("before", the first focusable widget of the frame, so
+    /// the one egui would pick on a Tab) then a workbook of three columns of four
+    /// rows, values 101..104, 201..204, 301..304.
+    struct Bench {
         _session: Session,
         context: egui::Context,
         state: AppState,
@@ -2952,38 +2865,37 @@ mod tests {
         book: NodeId,
         sheet: NodeId,
         columns: Vec<NodeId>,
-        voisin_focalise: bool,
-        dernier: Option<egui::FullOutput>,
-        /// Combien d'`Action::SetColumnWidth` la grille a émises, toutes
-        /// images confondues (#325).
-        largeurs_envoyees: usize,
-        /// Toutes les actions que la grille a poussées, images confondues
-        /// (`actions` ne garde que la dernière).
-        vues: Vec<Action>,
-        /// Taille de la fenêtre simulée (700 x 420 par défaut) ; la changer
-        /// agrandit le classeur à l'image suivante.
-        taille: egui::Vec2,
+        neighbor_focused: bool,
+        last_frame: Option<egui::FullOutput>,
+        /// How many `Action::SetColumnWidth` the grid emitted, all frames together
+        /// (#325).
+        widths_sent: usize,
+        /// All the actions the grid pushed, all frames together (`actions` keeps only
+        /// the last).
+        seen: Vec<Action>,
+        /// Size of the simulated window (700 x 420 by default); changing it enlarges
+        /// the workbook in the next frame.
+        size: egui::Vec2,
     }
 
-    impl Banc {
+    impl Bench {
         fn new() -> Self {
-            Self::avec_valeurs(4, |c, r| f64::from(c * 100 + r))
+            Self::with_values(4, |c, r| f64::from(c * 100 + r))
         }
 
-        /// Comme `new`, avec `lignes` lignes dont la valeur de la ligne `r`
-        /// (1..=lignes) de la colonne `c` (1..=3) est donnée par `valeur` :
-        /// des nombres larges font grandir le contenu mesuré d'une cellule
-        /// au-delà de la largeur par défaut.
-        fn avec_valeurs(lignes: u32, valeur: impl Fn(u32, u32) -> f64) -> Self {
-            let mut project = Project::new("Clavier").unwrap();
+        /// Like `new`, with `rows` rows where the value of row `r` (1..=rows) of
+        /// column `c` (1..=3) is given by `value`: wide numbers make the measured
+        /// content of a cell grow beyond the default width.
+        fn with_values(rows: u32, value: impl Fn(u32, u32) -> f64) -> Self {
+            let mut project = Project::new("Keyboard").unwrap();
             let root = project.root();
             let book = project.add_empty_workbook(root, None).unwrap();
             let sheet = project.add_worksheet(book, None).unwrap();
             let columns = (1..=3)
                 .map(|c| {
-                    let valeurs: Vec<f64> = (1..=lignes).map(|r| valeur(c, r)).collect();
+                    let values: Vec<f64> = (1..=rows).map(|r| value(c, r)).collect();
                     project
-                        .add_column(sheet, None, None, Column::from_f64(&valeurs))
+                        .add_column(sheet, None, None, Column::from_f64(&values))
                         .unwrap()
                 })
                 .collect();
@@ -2992,7 +2904,7 @@ mod tests {
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             theme::install(&context);
-            // Toutes les rangées de l'en-tête : la mise en page testée est la complète.
+            // All the header rows: the layout under test is the full one.
             set_header_rows(
                 &context,
                 book,
@@ -3001,7 +2913,7 @@ mod tests {
                     x_prime: true,
                 },
             );
-            let mut banc = Banc {
+            let mut bench = Bench {
                 _session: session,
                 context,
                 state,
@@ -3009,119 +2921,122 @@ mod tests {
                 book,
                 sheet,
                 columns,
-                voisin_focalise: false,
-                dernier: None,
-                largeurs_envoyees: 0,
-                vues: Vec::new(),
-                taille: egui::vec2(700.0, 420.0),
+                neighbor_focused: false,
+                last_frame: None,
+                widths_sent: 0,
+                seen: Vec::new(),
+                size: egui::vec2(700.0, 420.0),
             };
             for _ in 0..3 {
-                banc.image(Vec::new());
+                bench.image(Vec::new());
             }
-            banc
+            bench
         }
 
         fn image(&mut self, events: Vec<egui::Event>) {
             self.actions.clear();
             let (state, actions, book) = (&mut self.state, &mut self.actions, self.book);
-            let mut voisin = false;
-            let sortie = image_de(&self.context, self.taille, events, |ui| {
-                voisin = ui.button("avant").has_focus();
+            let mut neighbor = false;
+            let output = frame_of(&self.context, self.size, events, |ui| {
+                neighbor = ui.button("before").has_focus();
                 book_contents(ui, state, actions, book);
             });
-            self.voisin_focalise = voisin;
-            self.dernier = Some(sortie);
-            self.vues.extend(self.actions.iter().cloned());
-            self.largeurs_envoyees += self
+            self.neighbor_focused = neighbor;
+            self.last_frame = Some(output);
+            self.seen.extend(self.actions.iter().cloned());
+            self.widths_sent += self
                 .actions
                 .iter()
                 .filter(|action| matches!(action, Action::SetColumnWidth { .. }))
                 .count();
         }
 
-        fn touche(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
-            // `ModifiersChanged` explicite : un `Event::Key` ne met pas à jour
-            // `InputState::modifiers`, que la grille lit pour Maj.
-            let touche = |pressed| egui::Event::Key {
+        fn press_key(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+            // Explicit `ModifiersChanged`: an `Event::Key` does not update
+            // `InputState::modifiers`, which the grid reads for Shift.
+            let press_key = |pressed| egui::Event::Key {
                 key,
                 physical_key: None,
                 pressed,
                 repeat: false,
                 modifiers,
             };
-            self.image(vec![egui::Event::ModifiersChanged(modifiers), touche(true)]);
             self.image(vec![
-                touche(false),
+                egui::Event::ModifiersChanged(modifiers),
+                press_key(true),
+            ]);
+            self.image(vec![
+                press_key(false),
                 egui::Event::ModifiersChanged(egui::Modifiers::NONE),
             ]);
-            // Une image de plus, sans événement : le focus rendu à un autre
-            // widget par `end_pass` se verrait ici.
+            // One more frame, without events: the focus given back to another widget by
+            // `end_pass` would show here.
             self.image(Vec::new());
         }
 
         fn tab(&mut self) {
-            self.touche(egui::Key::Tab, egui::Modifiers::NONE);
+            self.press_key(egui::Key::Tab, egui::Modifiers::NONE);
         }
 
-        fn maj_tab(&mut self) {
-            self.touche(egui::Key::Tab, egui::Modifiers::SHIFT);
+        fn shift_tab(&mut self) {
+            self.press_key(egui::Key::Tab, egui::Modifiers::SHIFT);
         }
 
-        /// Centre du texte peint exactement égal à `texte` à la dernière
-        /// image, s'il y en a un.
-        fn centre_de(&self, texte: &str) -> Option<egui::Pos2> {
-            self.dernier
+        /// Center of the painted text exactly equal to `text` in the last frame, if
+        /// there is one.
+        fn center_of(&self, text: &str) -> Option<egui::Pos2> {
+            self.last_frame
                 .as_ref()
                 .unwrap()
                 .shapes
                 .iter()
-                .find_map(|peint| match &peint.shape {
-                    egui::Shape::Text(shape) if shape.galley.job.text == texte => {
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == text => {
                         Some(shape.pos + shape.galley.rect.center().to_vec2())
                     }
                     _ => None,
                 })
         }
 
-        /// Tous les textes peints à la dernière image.
-        fn textes(&self) -> Vec<String> {
-            self.dernier
+        /// All the texts painted in the last frame.
+        fn texts(&self) -> Vec<String> {
+            self.last_frame
                 .as_ref()
                 .unwrap()
                 .shapes
                 .iter()
-                .filter_map(|peint| match &peint.shape {
+                .filter_map(|painted| match &painted.shape {
                     egui::Shape::Text(shape) => Some(shape.galley.job.text.clone()),
                     _ => None,
                 })
                 .collect()
         }
 
-        /// Clic sur le texte peint `texte`, comme à la souris, du bouton
-        /// `bouton`.
-        fn clic_bouton(&mut self, texte: &str, bouton: egui::PointerButton) {
+        /// Click on the painted text `text`, as with the mouse, with button
+        /// `button`.
+        fn click_button(&mut self, text: &str, button: egui::PointerButton) {
             let position = self
-                .centre_de(texte)
-                .unwrap_or_else(|| panic!("aucun texte peint ne porte {texte:?}"));
+                .center_of(text)
+                .unwrap_or_else(|| panic!("no painted text carries {text:?}"));
             self.image(vec![egui::Event::PointerMoved(position)]);
             for pressed in [true, false] {
                 self.image(vec![egui::Event::PointerButton {
                     pos: position,
-                    button: bouton,
+                    button,
                     pressed,
                     modifiers: egui::Modifiers::NONE,
                 }]);
             }
-            // Laisse passer les images de retombée (focus, relâchement).
+            // Let the fall-back frames pass (focus, release).
             self.image(Vec::new());
         }
 
-        /// Clic gauche sur le texte peint `texte`, `modifiers` enfoncés
-        /// (`ModifiersChanged` explicite : la grille lit `InputState::modifiers`).
-        fn clic_avec(&mut self, texte: &str, modifiers: egui::Modifiers) {
+        /// Left click on the painted text `text`, `modifiers` held down (explicit
+        /// `ModifiersChanged`: the grid reads `InputState::modifiers`).
+        fn click_with(&mut self, text: &str, modifiers: egui::Modifiers) {
             let position = self
-                .centre_de(texte)
-                .unwrap_or_else(|| panic!("aucun texte peint ne porte {texte:?}"));
+                .center_of(text)
+                .unwrap_or_else(|| panic!("no painted text carries {text:?}"));
             self.image(vec![
                 egui::Event::PointerMoved(position),
                 egui::Event::ModifiersChanged(modifiers),
@@ -3138,260 +3053,263 @@ mod tests {
             self.image(Vec::new());
         }
 
-        /// Clic gauche sur la cellule peinte portant `texte`.
-        fn clic_sur(&mut self, texte: &str) {
-            self.clic_bouton(texte, egui::PointerButton::Primary);
+        /// Left click on the painted cell carrying `text`.
+        fn click_on(&mut self, text: &str) {
+            self.click_button(text, egui::PointerButton::Primary);
         }
 
-        fn curseur(&self) -> Option<GridCursor> {
+        fn cursor(&self) -> Option<GridCursor> {
             self.state
                 .selection(self.sheet)
                 .and_then(Selection::grid_cursor)
         }
     }
 
-    // --- Focus clavier (#38) ---------------------------------------------
+    // --- Keyboard focus (#38) ---------------------------------------------
     //
-    // Tab et les flèches appartiennent à la grille. egui les traite au début
-    // de l'image (`Focus::begin_pass`) pour déplacer **son** focus, sauf si le
-    // widget focalisé les réclame par un `EventFilter` ([`GRID_KEYS`]) : sans
-    // filtre, Tab faisait sortir le focus du tableau vers le reste de
-    // l'interface au lieu d'avancer la sélection de cellule en cellule.
+    // Tab and the arrows belong to the grid. egui handles them at the start of
+    // the frame (`Focus::begin_pass`) to move **its** focus, unless the focused
+    // widget claims them through an `EventFilter` ([`GRID_KEYS`]): without a
+    // filter, Tab made the focus leave the table for the rest of the interface
+    // instead of advancing the selection from cell to cell.
 
     #[test]
-    fn f2_edite_la_cellule_comme_un_double_clic() {
-        let mut saisies = Vec::new();
-        for clavier in [false, true] {
-            let mut banc = Banc::new();
-            banc.clic_sur("101");
-            if clavier {
-                banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+    fn f2_edits_the_cell_like_a_double_click() {
+        let mut entries = Vec::new();
+        for keyboard in [false, true] {
+            let mut bench = Bench::new();
+            bench.click_on("101");
+            if keyboard {
+                bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
             } else {
-                banc.clic_sur("101");
+                bench.click_on("101");
             }
-            let edit = banc
+            let edit = bench
                 .state
                 .editing()
-                .unwrap_or_else(|| panic!("le geste ouvre l'éditeur (clavier : {clavier})"));
+                .unwrap_or_else(|| panic!("the gesture opens the editor (keyboard: {keyboard})"));
             assert_eq!(
                 (edit.column, edit.row, edit.buffer.as_str()),
-                (banc.columns[0], 0, "101")
+                (bench.columns[0], 0, "101")
             );
             assert!(
-                keyboard_focus_outside_grid(&banc.context),
-                "le champ a le focus"
+                keyboard_focus_outside_grid(&bench.context),
+                "the field has the focus"
             );
-            banc.image(vec![egui::Event::Text("7".into())]);
-            let saisie = banc.state.editing().unwrap().buffer.clone();
-            assert_ne!(saisie, "101");
-            saisies.push(saisie.clone());
-            banc.image(vec![egui::Event::Key {
+            bench.image(vec![egui::Event::Text("7".into())]);
+            let entry = bench.state.editing().unwrap().buffer.clone();
+            assert_ne!(entry, "101");
+            entries.push(entry.clone());
+            bench.image(vec![egui::Event::Key {
                 key: egui::Key::Enter,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
                 modifiers: egui::Modifiers::NONE,
             }]);
-            assert!(banc.state.editing().is_none());
-            assert!(banc.actions.iter().any(|action| matches!(action,
+            assert!(bench.state.editing().is_none());
+            assert!(bench.actions.iter().any(|action| matches!(action,
                 Action::CommitCellAndAdvance { column, row: 0, text, .. }
-                if *column == banc.columns[0] && text == &saisie)));
+                if *column == bench.columns[0] && text == &entry)));
         }
-        assert_eq!(
-            saisies[0], saisies[1],
-            "même focus et même curseur de saisie"
-        );
+        assert_eq!(entries[0], entries[1], "same focus and same entry cursor");
     }
 
     #[test]
-    fn f2_edite_chaque_champ_d_en_tete_comme_un_double_clic() {
+    fn f2_edits_each_header_field_like_a_double_click() {
         for field in [
             HeaderField::LongName,
             HeaderField::Unit,
             HeaderField::Comment,
             HeaderField::Formula,
         ] {
-            let mut saisies = Vec::new();
-            for clavier in [false, true] {
-                let mut banc = Banc::new();
-                let column = banc.columns[0];
-                banc.state.begin_header_edit(column, field);
-                banc.state.header_editing_mut().unwrap().buffer = "9".into();
-                banc.state.commit_header_edit();
-                banc.image(Vec::new());
-                banc.clic_sur("9");
-                if clavier {
-                    banc.touche(egui::Key::F2, egui::Modifiers::NONE);
+            let mut entries = Vec::new();
+            for keyboard in [false, true] {
+                let mut bench = Bench::new();
+                let column = bench.columns[0];
+                bench.state.begin_header_edit(column, field);
+                bench.state.header_editing_mut().unwrap().buffer = "9".into();
+                bench.state.commit_header_edit();
+                bench.image(Vec::new());
+                bench.click_on("9");
+                if keyboard {
+                    bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
                 } else {
-                    banc.clic_sur("9");
+                    bench.click_on("9");
                 }
-                let edit = banc
+                let edit = bench
                     .state
                     .header_editing()
-                    .expect("le geste ouvre le champ");
+                    .expect("the gesture opens the field");
                 assert_eq!(
                     (edit.column, edit.field, edit.buffer.as_str()),
                     (column, field, "9")
                 );
-                assert!(banc.context.text_edit_focused());
-                banc.image(vec![egui::Event::Text("7".into())]);
-                let saisie = banc.state.header_editing().unwrap().buffer.clone();
-                assert_ne!(saisie, "9");
-                banc.touche(egui::Key::Enter, egui::Modifiers::NONE);
-                assert!(banc.state.header_editing().is_none());
-                assert_eq!(header_field_text(&banc.state, column, field), saisie);
-                saisies.push(saisie.clone());
-                // Entrée peut déplacer la sélection : revenir au champ validé
-                // pour éprouver ensuite son annulation, comme avec un double-clic.
-                banc.state.select_header_field(banc.sheet, column, field);
-                banc.touche(egui::Key::F2, egui::Modifiers::NONE);
-                banc.image(vec![egui::Event::Text("8".into())]);
-                assert_ne!(banc.state.header_editing().unwrap().buffer, saisie);
-                banc.touche(egui::Key::Escape, egui::Modifiers::NONE);
-                assert!(banc.state.header_editing().is_none());
-                assert_eq!(header_field_text(&banc.state, column, field), saisie);
+                assert!(bench.context.text_edit_focused());
+                bench.image(vec![egui::Event::Text("7".into())]);
+                let entry = bench.state.header_editing().unwrap().buffer.clone();
+                assert_ne!(entry, "9");
+                bench.press_key(egui::Key::Enter, egui::Modifiers::NONE);
+                assert!(bench.state.header_editing().is_none());
+                assert_eq!(header_field_text(&bench.state, column, field), entry);
+                entries.push(entry.clone());
+                // Enter may move the selection: go back to the validated field to then test
+                // its cancellation, as with a double-click.
+                bench.state.select_header_field(bench.sheet, column, field);
+                bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
+                bench.image(vec![egui::Event::Text("8".into())]);
+                assert_ne!(bench.state.header_editing().unwrap().buffer, entry);
+                bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+                assert!(bench.state.header_editing().is_none());
+                assert_eq!(header_field_text(&bench.state, column, field), entry);
             }
-            assert_eq!(saisies[0], saisies[1], "même saisie pour {field:?}");
+            assert_eq!(entries[0], entries[1], "same entry for {field:?}");
         }
     }
 
     #[test]
-    fn f2_edite_le_coin_superieur_gauche_d_une_plage_d_en_tete_inversee() {
-        let mut banc = Banc::new();
-        banc.clic_sur("303");
-        banc.state
-            .select_header_field(banc.sheet, banc.columns[2], HeaderField::Comment);
-        banc.state.extend_header_field_selection(
-            banc.sheet,
-            banc.columns[0],
+    fn f2_edits_the_top_left_corner_of_a_reversed_header_range() {
+        let mut bench = Bench::new();
+        bench.click_on("303");
+        bench
+            .state
+            .select_header_field(bench.sheet, bench.columns[2], HeaderField::Comment);
+        bench.state.extend_header_field_selection(
+            bench.sheet,
+            bench.columns[0],
             HeaderField::LongName,
         );
-        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
-        let edit = banc.state.header_editing().unwrap();
+        bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
+        let edit = bench.state.header_editing().unwrap();
         assert_eq!(
             (edit.column, edit.field),
-            (banc.columns[0], HeaderField::LongName)
+            (bench.columns[0], HeaderField::LongName)
         );
-        assert!(banc.state.editing().is_none());
+        assert!(bench.state.editing().is_none());
     }
 
     #[test]
-    fn f2_edite_le_coin_superieur_gauche_d_une_plage_inversee() {
-        let mut banc = Banc::new();
-        banc.clic_sur("303");
-        banc.state.extend_selection(banc.sheet, banc.columns[0], 0);
-        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
-        let edit = banc.state.editing().unwrap();
+    fn f2_edits_the_top_left_corner_of_a_reversed_range() {
+        let mut bench = Bench::new();
+        bench.click_on("303");
+        bench
+            .state
+            .extend_selection(bench.sheet, bench.columns[0], 0);
+        bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
+        let edit = bench.state.editing().unwrap();
         assert_eq!(
             (edit.column, edit.row, edit.buffer.as_str()),
-            (banc.columns[0], 0, "101")
+            (bench.columns[0], 0, "101")
         );
     }
 
     #[test]
-    fn f2_annule_sans_ecrire_et_ne_vole_pas_le_focus_voisin() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
-        assert!(banc.state.editing().is_some());
-        banc.image(vec![egui::Event::Text("7".into())]);
-        banc.image(vec![egui::Event::Key {
+    fn f2_cancels_without_writing_and_does_not_steal_the_neighbor_focus() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
+        assert!(bench.state.editing().is_some());
+        bench.image(vec![egui::Event::Text("7".into())]);
+        bench.image(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
             pressed: true,
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }]);
-        assert!(banc.actions.is_empty(), "Échap ne soumet aucune commande");
-        assert!(banc.state.editing().is_none());
-        assert_eq!(banc.state.cell_text(banc.columns[0], 0), "101");
-        banc.clic_sur("avant");
-        banc.touche(egui::Key::F2, egui::Modifiers::NONE);
-        assert!(banc.state.editing().is_none());
+        assert!(bench.actions.is_empty(), "Escape submits no command");
+        assert!(bench.state.editing().is_none());
+        assert_eq!(bench.state.cell_text(bench.columns[0], 0), "101");
+        bench.click_on("before");
+        bench.press_key(egui::Key::F2, egui::Modifiers::NONE);
+        assert!(bench.state.editing().is_none());
     }
 
     #[test]
-    fn tab_hors_edition_avance_la_selection_sans_sortir_de_la_grille() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
+    fn tab_outside_editing_advances_the_selection_without_leaving_the_grid() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
         assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Data(banc.columns[0], 0)),
-            "le clic sélectionne la cellule"
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[0], 0)),
+            "the click selects the cell"
         );
-        banc.tab();
+        bench.tab();
         assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Data(banc.columns[1], 0)),
-            "Tab avance d'une colonne"
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[1], 0)),
+            "Tab advances by one column"
         );
         assert!(
-            !banc.voisin_focalise,
-            "Tab a fait sortir le focus de la grille vers le widget voisin"
+            !bench.neighbor_focused,
+            "Tab made the focus leave the grid for the neighboring widget"
         );
-        banc.tab();
-        assert_eq!(banc.curseur(), Some(GridCursor::Data(banc.columns[2], 0)));
-        banc.maj_tab();
+        bench.tab();
+        assert_eq!(bench.cursor(), Some(GridCursor::Data(bench.columns[2], 0)));
+        bench.shift_tab();
         assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Data(banc.columns[1], 0)),
-            "Maj+Tab recule"
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[1], 0)),
+            "Shift+Tab goes back"
         );
-        assert!(!banc.voisin_focalise);
+        assert!(!bench.neighbor_focused);
     }
 
     #[test]
-    fn les_fleches_deplacent_la_selection_et_gardent_le_focus_dans_la_grille() {
-        let mut banc = Banc::new();
-        banc.clic_sur("102");
-        for (key, attendu) in [
-            (egui::Key::ArrowRight, GridCursor::Data(banc.columns[1], 1)),
-            (egui::Key::ArrowDown, GridCursor::Data(banc.columns[1], 2)),
-            (egui::Key::ArrowLeft, GridCursor::Data(banc.columns[0], 2)),
-            (egui::Key::ArrowUp, GridCursor::Data(banc.columns[0], 1)),
+    fn the_arrows_move_the_selection_and_keep_the_focus_in_the_grid() {
+        let mut bench = Bench::new();
+        bench.click_on("102");
+        for (key, expected) in [
+            (egui::Key::ArrowRight, GridCursor::Data(bench.columns[1], 1)),
+            (egui::Key::ArrowDown, GridCursor::Data(bench.columns[1], 2)),
+            (egui::Key::ArrowLeft, GridCursor::Data(bench.columns[0], 2)),
+            (egui::Key::ArrowUp, GridCursor::Data(bench.columns[0], 1)),
         ] {
-            banc.touche(key, egui::Modifiers::NONE);
-            assert_eq!(banc.curseur(), Some(attendu), "{key:?}");
-            assert!(!banc.voisin_focalise, "{key:?} a déplacé le focus egui");
+            bench.press_key(key, egui::Modifiers::NONE);
+            assert_eq!(bench.cursor(), Some(expected), "{key:?}");
+            assert!(!bench.neighbor_focused, "{key:?} moved the egui focus");
         }
     }
 
     #[test]
-    fn tab_pendant_l_edition_valide_et_garde_le_focus_dans_la_grille() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        // Une frappe sur une cellule sélectionnée ouvre l'édition.
-        banc.image(vec![egui::Event::Text("7".to_string())]);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        assert!(banc.state.editing().is_some(), "la frappe ouvre l'édition");
-        banc.tab();
-        assert!(banc.state.editing().is_none(), "Tab valide la saisie");
-        assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Data(banc.columns[1], 0)),
-            "Tab valide *et* avance"
+    fn tab_during_editing_validates_and_keeps_the_focus_in_the_grid() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        // A keystroke on a selected cell opens the edit.
+        bench.image(vec![egui::Event::Text("7".to_string())]);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        assert!(
+            bench.state.editing().is_some(),
+            "the keystroke opens the edit"
         );
-        // Et la grille garde la main pour les Tab suivants, hors édition.
-        banc.tab();
+        bench.tab();
+        assert!(bench.state.editing().is_none(), "Tab validates the entry");
         assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Data(banc.columns[2], 0)),
-            "après la validation, Tab continue d'avancer dans la grille"
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[1], 0)),
+            "Tab validates *and* advances"
         );
-        assert!(!banc.voisin_focalise);
+        // And the grid keeps control for the following Tabs, outside editing.
+        bench.tab();
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Data(bench.columns[2], 0)),
+            "after validation, Tab keeps advancing in the grid"
+        );
+        assert!(!bench.neighbor_focused);
     }
 
-    /// Tab validé dans une cellule pousse la saisie au modèle
-    /// (`Action::CommitCell`) dans l'image même de la touche : la valeur tapée
-    /// n'est pas perdue en chemin.
+    /// Tab validated in a cell pushes the entry to the model
+    /// (`Action::CommitCell`) in the very frame of the key: the typed value is not
+    /// lost along the way.
     #[test]
-    fn tab_pendant_l_edition_pousse_la_saisie_dans_l_image_de_la_touche() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        banc.image(vec![egui::Event::Text("7".to_string())]);
-        banc.image(Vec::new());
-        banc.image(vec![
+    fn tab_during_editing_pushes_the_entry_in_the_frame_of_the_key() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.image(vec![egui::Event::Text("7".to_string())]);
+        bench.image(Vec::new());
+        bench.image(vec![
             egui::Event::ModifiersChanged(egui::Modifiers::NONE),
             egui::Event::Key {
                 key: egui::Key::Tab,
@@ -3401,40 +3319,40 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             },
         ]);
-        let colonne = banc.columns[0];
+        let first_column = bench.columns[0];
         assert!(
-            banc.actions.iter().any(|action| matches!(
+            bench.actions.iter().any(|action| matches!(
                 action,
-                Action::CommitCell { column, row: 0, text } if *column == colonne && text == "7"
+                Action::CommitCell { column, row: 0, text } if *column == first_column && text == "7"
             )),
-            "la saisie doit partir au modèle : {:?}",
-            banc.actions
+            "the entry must go to the model: {:?}",
+            bench.actions
         );
     }
 
-    /// #52 : Tab sur la dernière colonne ajoute une colonne quel que soit le
-    /// champ d'en-tête, hors édition comme en édition — plus seulement Formule.
+    /// #52: Tab on the last column adds a column whatever the header field,
+    /// outside editing as in editing — no longer only Formula.
     #[test]
-    fn tab_en_derniere_colonne_ajoute_une_colonne_pour_chaque_champ_d_en_tete() {
-        for editer in [false, true] {
+    fn tab_on_the_last_column_adds_a_column_for_each_header_field() {
+        for edit in [false, true] {
             for field in [
                 HeaderField::LongName,
                 HeaderField::Unit,
                 HeaderField::Comment,
                 HeaderField::Formula,
             ] {
-                let mut banc = Banc::new();
-                let (sheet, derniere) = (banc.sheet, banc.columns[2]);
-                // Le clic donne le focus à la grille (sinon Tab n'est pas à elle).
-                banc.clic_sur("301");
-                banc.state.select_header_field(sheet, derniere, field);
-                if editer {
-                    banc.state.begin_header_edit(derniere, field);
+                let mut bench = Bench::new();
+                let (sheet, last) = (bench.sheet, bench.columns[2]);
+                // The click gives the focus to the grid (otherwise Tab is not its own).
+                bench.click_on("301");
+                bench.state.select_header_field(sheet, last, field);
+                if edit {
+                    bench.state.begin_header_edit(last, field);
                 }
                 for _ in 0..3 {
-                    banc.image(Vec::new());
+                    bench.image(Vec::new());
                 }
-                banc.image(vec![
+                bench.image(vec![
                     egui::Event::ModifiersChanged(egui::Modifiers::NONE),
                     egui::Event::Key {
                         key: egui::Key::Tab,
@@ -3445,96 +3363,98 @@ mod tests {
                     },
                 ]);
                 assert!(
-                    banc.actions.iter().any(|action| matches!(
+                    bench.actions.iter().any(|action| matches!(
                         action,
                         Action::AddColumnAndSelectHeaderField { field: f, .. } if *f == field
                     )),
-                    "Tab sur {field:?} (édition : {editer}) doit ajouter une colonne"
+                    "Tab on {field:?} (edit: {edit}) must add a column"
                 );
             }
         }
     }
 
     #[test]
-    fn tab_pendant_l_edition_d_un_champ_d_en_tete_valide_et_reste_dans_la_grille() {
-        let mut banc = Banc::new();
-        let (sheet, colonne) = (banc.sheet, banc.columns[0]);
-        banc.state
-            .select_header_field(sheet, colonne, HeaderField::LongName);
-        banc.state.begin_header_edit(colonne, HeaderField::LongName);
+    fn tab_during_a_header_field_edit_validates_and_stays_in_the_grid() {
+        let mut bench = Bench::new();
+        let (sheet, first_column) = (bench.sheet, bench.columns[0]);
+        bench
+            .state
+            .select_header_field(sheet, first_column, HeaderField::LongName);
+        bench
+            .state
+            .begin_header_edit(first_column, HeaderField::LongName);
         for _ in 0..3 {
-            banc.image(Vec::new());
+            bench.image(Vec::new());
         }
-        assert!(banc.state.header_editing().is_some());
-        banc.tab();
-        assert!(banc.state.header_editing().is_none(), "Tab valide le champ");
-        assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Header(banc.columns[1], HeaderField::LongName)),
-            "Tab valide *et* passe à la colonne suivante"
-        );
-        banc.tab();
-        assert_eq!(
-            banc.curseur(),
-            Some(GridCursor::Header(banc.columns[2], HeaderField::LongName)),
-            "puis continue hors édition"
-        );
-        assert!(!banc.voisin_focalise);
-    }
-
-    /// Le focus de la grille ne se retient pas : un clic ailleurs le rend, et
-    /// Tab reprend alors son rôle d'egui (déplacer le focus), sans toucher la
-    /// sélection de la grille.
-    #[test]
-    fn un_clic_hors_de_la_grille_lui_retire_tab() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        assert!(!keyboard_focus_outside_grid(&banc.context));
+        assert!(bench.state.header_editing().is_some());
+        bench.tab();
         assert!(
-            banc.context.memory(|memory| memory.focused()).is_some(),
-            "un clic dans la grille lui donne le focus clavier"
+            bench.state.header_editing().is_none(),
+            "Tab validates the field"
         );
-        banc.clic_sur("avant");
-        let avant = banc.curseur();
-        banc.tab();
         assert_eq!(
-            banc.curseur(),
-            avant,
-            "Tab, hors de la grille, ne déplace pas sa sélection"
+            bench.cursor(),
+            Some(GridCursor::Header(bench.columns[1], HeaderField::LongName)),
+            "Tab validates *and* moves to the next column"
         );
+        bench.tab();
+        assert_eq!(
+            bench.cursor(),
+            Some(GridCursor::Header(bench.columns[2], HeaderField::LongName)),
+            "then continues outside editing"
+        );
+        assert!(!bench.neighbor_focused);
     }
 
-    /// Le focus de la grille n'est pas un champ texte pour le reste de
-    /// l'application (Entrée d'un dialogue, Suppr d'une annotation) : seul un
-    /// autre widget focalisé l'est.
+    /// The grid's focus is not retained: a click elsewhere gives it back, and Tab
+    /// then takes back its egui role (move the focus), without touching the grid's
+    /// selection.
     #[test]
-    fn le_focus_de_la_grille_n_est_pas_un_champ_en_cours_de_saisie() {
-        let mut banc = Banc::new();
-        assert!(!keyboard_focus_outside_grid(&banc.context), "aucun focus");
-        banc.clic_sur("101");
+    fn a_click_outside_the_grid_takes_tab_away_from_it() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        assert!(!keyboard_focus_outside_grid(&bench.context));
         assert!(
-            !keyboard_focus_outside_grid(&banc.context),
-            "focus de la grille"
+            bench.context.memory(|memory| memory.focused()).is_some(),
+            "a click in the grid gives it keyboard focus"
         );
-        banc.context
-            .memory_mut(|memory| memory.request_focus(egui::Id::new("champ_etranger")));
-        assert!(keyboard_focus_outside_grid(&banc.context), "focus étranger");
+        bench.click_on("before");
+        let before = bench.cursor();
+        bench.tab();
+        assert_eq!(
+            bench.cursor(),
+            before,
+            "Tab, outside the grid, does not move its selection"
+        );
     }
 
-    /// Le focus clavier d'un champ étranger à la grille (ici un champ texte
-    /// d'un dialogue) reste le sien : ni Tab ni flèche ne déplacent la
-    /// sélection. Le témoin est `les_fleches_deplacent_la_selection_…` et
-    /// `tab_hors_edition_…` : mêmes touches, grille focalisée, sélection
-    /// déplacée.
+    /// The grid's focus is not a text field for the rest of the application (Enter
+    /// of a dialog, Delete of an annotation): only another focused widget is.
     #[test]
-    fn un_champ_etranger_focalise_garde_tab_et_les_fleches() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        let champ = egui::Id::new("champ_etranger");
-        let avant = banc.curseur();
-        let mut texte = String::new();
+    fn the_grid_focus_is_not_a_field_being_typed_in() {
+        let mut bench = Bench::new();
+        assert!(!keyboard_focus_outside_grid(&bench.context), "no focus");
+        bench.click_on("101");
+        assert!(!keyboard_focus_outside_grid(&bench.context), "grid focus");
+        bench
+            .context
+            .memory_mut(|memory| memory.request_focus(egui::Id::new("foreign_field")));
+        assert!(keyboard_focus_outside_grid(&bench.context), "foreign focus");
+    }
+
+    /// The keyboard focus of a field foreign to the grid (here a text field of a
+    /// dialog) stays its own: neither Tab nor arrow moves the selection. The
+    /// witness is `the_arrows_move_the_selection_…` and `tab_outside_editing_…`:
+    /// same keys, focused grid, selection moved.
+    #[test]
+    fn a_focused_foreign_field_keeps_tab_and_the_arrows() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        let field_id = egui::Id::new("foreign_field");
+        let before = bench.cursor();
+        let mut text = String::new();
         for key in [egui::Key::ArrowRight, egui::Key::Tab] {
-            // Trois images pour que le champ soit posé et focalisé, puis la touche.
+            // Three frames so that the field is placed and focused, then the key.
             for frame in 0..4 {
                 let events = if frame == 3 {
                     vec![egui::Event::Key {
@@ -3555,36 +3475,35 @@ mod tests {
                     events,
                     ..Default::default()
                 };
-                let (state, actions, book) = (&mut banc.state, &mut banc.actions, banc.book);
-                let mut sortie = banc.context.run_ui(input, |ui| {
-                    egui::Area::new(egui::Id::new("dialogue")).show(ui.ctx(), |ui| {
-                        ui.add(egui::TextEdit::singleline(&mut texte).id(champ));
+                let (state, actions, book) = (&mut bench.state, &mut bench.actions, bench.book);
+                let mut output = bench.context.run_ui(input, |ui| {
+                    egui::Area::new(egui::Id::new("dialog")).show(ui.ctx(), |ui| {
+                        ui.add(egui::TextEdit::singleline(&mut text).id(field_id));
                     });
                     if frame < 3 {
-                        ui.ctx().memory_mut(|memory| memory.request_focus(champ));
+                        ui.ctx().memory_mut(|memory| memory.request_focus(field_id));
                     }
                     book_contents(ui, state, actions, book);
                 });
-                sortie.textures_delta.clear();
+                output.textures_delta.clear();
             }
             assert_eq!(
-                banc.curseur(),
-                avant,
-                "{key:?} : la grille a volé la touche au champ texte focalisé"
+                bench.cursor(),
+                before,
+                "{key:?}: the grid stole the key from the focused text field"
             );
         }
     }
 
-    /// #17 : la grille reste peinte sous un dialogue (Propriétés du graphe,
-    /// import…) ; tant qu'un champ texte y a le focus, Retour arrière et
-    /// Suppr lui appartiennent — la grille ne doit ni les consommer ni vider
-    /// la cellule sélectionnée. Témoin : le même banc sans focus au champ
-    /// vide bien la cellule (sans lui, une grille sourde à Retour arrière
-    /// passerait le test).
+    /// #17: the grid stays painted under a dialog (Graph properties, import…); as
+    /// long as a text field there has the focus, Backspace and Delete belong to
+    /// it — the grid must neither consume them nor clear the selected cell.
+    /// Witness: the same bench without focus on the field does clear the cell
+    /// (without it, a grid deaf to Backspace would pass the test).
     #[test]
-    fn un_champ_texte_focalise_garde_retour_arriere_et_suppr() {
-        for champ_focalise in [true, false] {
-            let mut project = Project::new("Clavier").unwrap();
+    fn a_focused_text_field_keeps_backspace_and_delete() {
+        for field_focused in [true, false] {
+            let mut project = Project::new("Keyboard").unwrap();
             let root = project.root();
             let book = project.add_empty_workbook(root, None).unwrap();
             let sheet = project.add_worksheet(book, None).unwrap();
@@ -3596,7 +3515,7 @@ mod tests {
             state.select_cell(sheet, column, 0);
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
-            let mut titre = String::from("Titre");
+            let mut title = String::from("Title");
             let mut actions = Vec::new();
             for frame in 0..3 {
                 let mut input = egui::RawInput {
@@ -3618,11 +3537,11 @@ mod tests {
                     }
                 }
                 let mut output = context.run_ui(input, |ui| {
-                    let field = egui::Id::new("champ_dialogue");
-                    egui::Area::new(egui::Id::new("dialogue")).show(ui.ctx(), |ui| {
-                        ui.add(egui::TextEdit::singleline(&mut titre).id(field));
+                    let field = egui::Id::new("dialog_field");
+                    egui::Area::new(egui::Id::new("dialog")).show(ui.ctx(), |ui| {
+                        ui.add(egui::TextEdit::singleline(&mut title).id(field));
                     });
-                    if champ_focalise {
+                    if field_focused {
                         ui.ctx().memory_mut(|memory| memory.request_focus(field));
                     }
                     actions.clear();
@@ -3630,33 +3549,33 @@ mod tests {
                 });
                 output.textures_delta.clear();
             }
-            let vide = actions.iter().any(|action| {
+            let cleared = actions.iter().any(|action| {
                 matches!(
                     action,
                     Action::ClearSelectedCells { .. } | Action::DeleteSelectedCells { .. }
                 )
             });
-            if champ_focalise {
+            if field_focused {
                 assert!(
-                    !vide,
-                    "la grille a volé Retour arrière/Suppr au champ texte : {actions:?}"
+                    !cleared,
+                    "the grid stole Backspace/Delete from the text field: {actions:?}"
                 );
             } else {
                 assert!(
-                    vide,
-                    "témoin : sans champ focalisé, Retour arrière vide la cellule : {actions:?}"
+                    cleared,
+                    "witness: without a focused field, Backspace clears the cell: {actions:?}"
                 );
             }
         }
     }
 
-    // --- En-tête empilé et gouttière --------------------------------------
+    // --- Stacked header and gutter --------------------------------------
 
-    /// Par défaut Metadata est affichée et x' cachée ; le réglage est propre à
-    /// chaque classeur et la préférence ne vaut que pour ceux qui n'y ont pas
-    /// touché. L'en-tête empilé perd une sous-ligne par rangée masquée.
+    /// By default Metadata is shown and x' hidden; the setting is specific to each
+    /// workbook and the preference applies only to those that have not touched it.
+    /// The stacked header loses a sub-row per hidden row.
     #[test]
-    fn les_rangees_d_en_tete_se_reglent_par_classeur() {
+    fn header_rows_are_set_per_workbook() {
         let context = egui::Context::default();
         let (a, b) = (NodeId::from_raw(1), NodeId::from_raw(2));
         assert_eq!(
@@ -3666,7 +3585,7 @@ mod tests {
                 x_prime: false
             }
         );
-        // La préférence s'applique aux classeurs non réglés…
+        // The preference applies to workbooks with no setting…
         publish_header_row_defaults(&context, false, true);
         assert_eq!(
             header_rows(&context, Some(b)),
@@ -3675,7 +3594,7 @@ mod tests {
                 x_prime: true
             }
         );
-        // …mais pas à celui qui a son propre réglage.
+        // …but not to the one that has its own setting.
         let own = HeaderRows {
             metadata: true,
             x_prime: false,
@@ -3702,21 +3621,20 @@ mod tests {
         );
     }
 
-    /// L'en-tête empilé, tel que peint : la gouttière porte « # » sur la
-    /// rangée des lettres, puis chaque libellé de champ à la hauteur de sa
-    /// rangée (nom long un peu plus haut que les autres), la lettre de
-    /// colonne et son rôle sur la même rangée que « # », la première ligne
-    /// de données dessous. Masquer la ligne « Metadata » retire son libellé
-    /// et remonte les données d'une sous-rangée exactement — le témoin que la
-    /// position lue suit bien la hauteur de l'en-tête.
+    /// The stacked header, as painted: the gutter carries "#" on the letter row,
+    /// then each field label at the height of its row (long name a bit taller than
+    /// the others), the column letter and its role on the same row as "#", the
+    /// first data row below. Hiding the "Metadata" row removes its label and moves
+    /// the data up by exactly one sub-row — the witness that the position read
+    /// follows the header height.
     #[test]
-    fn l_en_tete_empile_aligne_ses_libelles_sur_ses_rangees() {
-        let mut banc = Banc::new();
-        let lettre = format!(
+    fn the_stacked_header_aligns_its_labels_on_its_rows() {
+        let mut bench = Bench::new();
+        let letter = format!(
             "A({})",
-            role_label(banc.state.column_meta(banc.columns[0]).role)
+            role_label(bench.state.column_meta(bench.columns[0]).role)
         );
-        let libelles = [
+        let labels = [
             "#".to_string(),
             tr!("column-x-prime"),
             tr!("column-long-name"),
@@ -3726,17 +3644,18 @@ mod tests {
             tr!("common-metadata"),
             "1".to_string(),
         ];
-        let y: Vec<f32> = libelles
+        let y: Vec<f32> = labels
             .iter()
-            .map(|libelle| {
-                banc.centre_de(libelle)
-                    .unwrap_or_else(|| panic!("{libelle:?} absent : {:?}", banc.textes()))
+            .map(|label| {
+                bench
+                    .center_of(label)
+                    .unwrap_or_else(|| panic!("{label:?} missing: {:?}", bench.texts()))
                     .y
             })
             .collect();
-        // Écart entre centres de deux rangées voisines : demi-hauteur de l'une
-        // plus demi-hauteur de l'autre.
-        let ecarts = [
+        // Gap between the centers of two neighboring rows: half-height of one plus
+        // half-height of the other.
+        let gaps = [
             HEADER_SUBROW_HEIGHT,
             (HEADER_SUBROW_HEIGHT + HEADER_LONGNAME_HEIGHT) / 2.0,
             (HEADER_LONGNAME_HEIGHT + HEADER_SUBROW_HEIGHT) / 2.0,
@@ -3744,59 +3663,56 @@ mod tests {
             HEADER_SUBROW_HEIGHT,
             HEADER_SUBROW_HEIGHT,
         ];
-        for (index, ecart) in ecarts.iter().enumerate() {
-            let mesure = y[index + 1] - y[index];
+        for (index, gap) in gaps.iter().enumerate() {
+            let measured = y[index + 1] - y[index];
             assert!(
-                (mesure - ecart).abs() <= 0.5,
-                "{:?} → {:?} : écart {mesure}, attendu {ecart}",
-                libelles[index],
-                libelles[index + 1]
+                (measured - gap).abs() <= 0.5,
+                "{:?} → {:?}: gap {measured}, expected {gap}",
+                labels[index],
+                labels[index + 1]
             );
         }
-        assert!(
-            y[7] > y[6],
-            "la première ligne de données est sous l'en-tête"
-        );
-        let y_lettre = banc
-            .centre_de(&lettre)
-            .unwrap_or_else(|| panic!("{lettre:?} absent : {:?}", banc.textes()))
+        assert!(y[7] > y[6], "the first data row is under the header");
+        let y_letter = bench
+            .center_of(&letter)
+            .unwrap_or_else(|| panic!("{letter:?} missing: {:?}", bench.texts()))
             .y;
         assert!(
-            (y_lettre - y[0]).abs() <= 0.5,
-            "la lettre {lettre:?} et « # » partagent la rangée des lettres"
+            (y_letter - y[0]).abs() <= 0.5,
+            "the letter {letter:?} and '#' share the letter row"
         );
 
         set_header_rows(
-            &banc.context,
-            banc.book,
+            &bench.context,
+            bench.book,
             HeaderRows {
                 metadata: false,
                 x_prime: true,
             },
         );
-        banc.image(Vec::new());
-        banc.image(Vec::new());
+        bench.image(Vec::new());
+        bench.image(Vec::new());
         assert!(
-            banc.centre_de(&tr!("common-metadata")).is_none(),
-            "la ligne « Metadata » masquée ne peint plus son libellé"
+            bench.center_of(&tr!("common-metadata")).is_none(),
+            "the hidden 'Metadata' row no longer paints its label"
         );
-        let y_donnees = banc.centre_de("1").expect("première ligne").y;
+        let y_data = bench.center_of("1").expect("first row").y;
         assert!(
-            (y[7] - y_donnees - HEADER_SUBROW_HEIGHT).abs() <= 0.5,
-            "les données remontent d'une sous-rangée : {} → {y_donnees}",
+            (y[7] - y_data - HEADER_SUBROW_HEIGHT).abs() <= 0.5,
+            "the data moves up by one sub-row: {} → {y_data}",
             y[7]
         );
     }
 
-    /// #125 : les traductions longues restent dans leur rangée, même
-    /// lorsque la gouttière est rétrécie à sa largeur minimale.
+    /// #125: long translations stay in their row, even when the gutter is
+    /// narrowed to its minimum width.
     #[test]
-    fn les_libelles_de_gouttiere_restent_sur_une_seule_ligne() {
+    fn gutter_labels_stay_on_a_single_line() {
         use stokesforge_app_state::i18n::{build_loader, Language};
-        let mut banc = Banc::new();
+        let mut bench = Bench::new();
         for language in [Language::English, Language::French, Language::PseudoEnglish] {
             let loader = build_loader(language);
-            let libelles = [
+            let labels = [
                 tr!(in loader; "column-x-prime"),
                 tr!(in loader; "column-long-name"),
                 tr!(in loader; "column-units"),
@@ -3805,7 +3721,7 @@ mod tests {
                 tr!(in loader; "common-metadata"),
             ];
             for width in [ROW_NUMBER_COLUMN_WIDTH, MIN_ROW_NUMBER_COLUMN_WIDTH] {
-                let mut output = banc.context.run_ui(
+                let mut output = bench.context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -3815,14 +3731,19 @@ mod tests {
                     },
                     |ui| {
                         ui.set_width(width);
-                        row_number_header_widget(ui, &mut banc.state, &mut Vec::new(), banc.sheet);
-                        // Les libellés de champ empruntent exactement le même widget.
-                        for label in &libelles {
+                        row_number_header_widget(
+                            ui,
+                            &mut bench.state,
+                            &mut Vec::new(),
+                            bench.sheet,
+                        );
+                        // The field labels go through exactly the same widget.
+                        for label in &labels {
                             header_row_label_widget(
                                 ui,
-                                &mut banc.state,
+                                &mut bench.state,
                                 &mut Vec::new(),
-                                banc.sheet,
+                                bench.sheet,
                                 HeaderField::LongName,
                                 HEADER_LONGNAME_HEIGHT,
                                 label,
@@ -3834,14 +3755,14 @@ mod tests {
                 let mut found = 0;
                 for painted in &output.shapes {
                     if let egui::Shape::Text(text) = &painted.shape {
-                        if libelles.contains(&text.galley.text().to_string())
+                        if labels.contains(&text.galley.text().to_string())
                             || text.galley.text() == tr!("common-metadata")
                         {
                             found += 1;
                             assert_eq!(
                                 text.galley.rows.len(),
                                 1,
-                                "{language:?}, {width} px : {:?}",
+                                "{language:?}, {width} px: {:?}",
                                 text.galley.text()
                             );
                         }
@@ -3849,54 +3770,53 @@ mod tests {
                 }
                 assert!(
                     found >= 6,
-                    "les cinq traductions et la rangée Metadata sont réellement peintes"
+                    "the five translations and the Metadata row are really painted"
                 );
             }
         }
     }
 
-    /// Le fond de la gouttière a trois paliers distincts, et « sélectionnée »
-    /// l'emporte sur « concernée par la sélection ».
+    /// The gutter background has three distinct levels, and "selected" wins over
+    /// "concerned by the selection".
     #[test]
-    fn le_fond_de_la_gouttiere_a_trois_paliers() {
-        let repos = gutter_fill(false, false);
-        let touchee = gutter_fill(false, true);
-        let choisie = gutter_fill(true, false);
-        assert_ne!(repos, touchee);
-        assert_ne!(repos, choisie);
-        assert_ne!(touchee, choisie);
-        assert_eq!(gutter_fill(true, true), choisie);
+    fn the_gutter_background_has_three_levels() {
+        let at_rest = gutter_fill(false, false);
+        let touched = gutter_fill(false, true);
+        let chosen = gutter_fill(true, false);
+        assert_ne!(at_rest, touched);
+        assert_ne!(at_rest, chosen);
+        assert_ne!(touched, chosen);
+        assert_eq!(gutter_fill(true, true), chosen);
     }
 
-    /// Chaque type et chaque rôle proposé par le menu de la rangée des
-    /// lettres a un libellé non vide et distinct : deux entrées au même nom
-    /// rendraient le choix ambigu.
+    /// Every type and every role offered by the letter row's menu has a non-empty
+    /// and distinct label: two entries with the same name would make the choice
+    /// ambiguous.
     #[test]
-    fn les_libelles_de_type_et_de_role_sont_distincts() {
+    fn type_and_role_labels_are_distinct() {
         let types: Vec<String> = [ColumnType::Numeric, ColumnType::DateTime, ColumnType::Mixed]
             .into_iter()
             .map(type_label)
             .collect();
         let roles: Vec<String> = ColumnRole::ALL.into_iter().map(role_label).collect();
-        for libelles in [&types, &roles] {
-            let distincts: std::collections::HashSet<&String> = libelles.iter().collect();
-            assert_eq!(distincts.len(), libelles.len(), "{libelles:?}");
-            assert!(libelles.iter().all(|libelle| !libelle.is_empty()));
+        for labels in [&types, &roles] {
+            let distinct: std::collections::HashSet<&String> = labels.iter().collect();
+            assert_eq!(distinct.len(), labels.len(), "{labels:?}");
+            assert!(labels.iter().all(|label| !label.is_empty()));
         }
         assert_eq!(column_letter(0), "A");
         assert_eq!(column_letter(26), "AA");
     }
 
-    // --- Menu d'édition ---------------------------------------------------
+    // --- Edit menu ---------------------------------------------------
 
-    /// Le même bloc d'édition au clic droit sur une cellule et sur un
-    /// libellé de champ de la gouttière, à une différence près : « Supprimer
-    /// et décaler » n'existe pas dans l'en-tête, où Suppr n'a rien à faire
-    /// remonter. Un clic droit hors de la sélection la réduit d'abord à la
-    /// case visée.
+    /// The same edit block on right-click on a cell and on a field label of the
+    /// gutter, with one difference: "Delete (Shift Up)" does not exist in the
+    /// header, where Delete has nothing to bring up. A right-click outside the
+    /// selection first reduces it to the targeted box.
     #[test]
-    fn le_menu_d_edition_est_le_meme_sur_cellule_et_en_tete_sauf_supprimer_et_decaler() {
-        let communs = [
+    fn the_edit_menu_is_the_same_on_cell_and_header_except_delete_and_shift() {
+        let common = [
             tr!("action-cut"),
             tr!("action-copy"),
             tr!("action-copy-with-header"),
@@ -3904,179 +3824,179 @@ mod tests {
             tr!("action-paste-in-place"),
             tr!("action-clear"),
         ];
-        let decaler = tr!("action-delete-shift-up");
+        let shift_up = tr!("action-delete-shift-up");
 
-        let mut cellule = Banc::new();
-        cellule.clic_bouton("102", egui::PointerButton::Secondary);
-        let textes = cellule.textes();
-        for entree in communs.iter().chain([&decaler]) {
+        let mut cell_bench = Bench::new();
+        cell_bench.click_button("102", egui::PointerButton::Secondary);
+        let texts = cell_bench.texts();
+        for entry in common.iter().chain([&shift_up]) {
             assert!(
-                textes.contains(entree),
-                "cellule : {entree:?} absent de {textes:?}"
+                texts.contains(entry),
+                "cell: {entry:?} missing from {texts:?}"
             );
         }
-        for absent in [tr!("history-undo"), tr!("history-redo")] {
+        for missing_entry in [tr!("history-undo"), tr!("history-redo")] {
             assert!(
-                !textes.contains(&absent),
-                "Undo et Redo restent à Edit et au clavier : {textes:?}"
+                !texts.contains(&missing_entry),
+                "Undo and Redo stay with Edit and the keyboard: {texts:?}"
             );
         }
         assert_eq!(
-            cellule.curseur(),
-            Some(GridCursor::Data(cellule.columns[0], 1)),
-            "le clic droit sélectionne la cellule visée"
+            cell_bench.cursor(),
+            Some(GridCursor::Data(cell_bench.columns[0], 1)),
+            "the right-click selects the targeted cell"
         );
 
-        let mut en_tete = Banc::new();
-        en_tete.clic_bouton(&tr!("column-units"), egui::PointerButton::Secondary);
-        let textes = en_tete.textes();
-        for entree in &communs {
+        let mut header_bench = Bench::new();
+        header_bench.click_button(&tr!("column-units"), egui::PointerButton::Secondary);
+        let texts = header_bench.texts();
+        for entry in &common {
             assert!(
-                textes.contains(entree),
-                "en-tête : {entree:?} absent de {textes:?}"
+                texts.contains(entry),
+                "header: {entry:?} missing from {texts:?}"
             );
         }
         assert!(
-            !textes.contains(&decaler),
-            "« Supprimer et décaler » n'a rien à faire dans l'en-tête : {textes:?}"
+            !texts.contains(&shift_up),
+            "'Delete (Shift Up)' does not belong in the header: {texts:?}"
         );
     }
 
-    /// Sur une sélection de colonnes (ou de lignes) entières, le clic droit
-    /// d'une cellule est celui des lettres : Plot, type et rôle comprises ; sur
-    /// une cellule seule, il reste celui de l'édition (témoin).
+    /// On a selection of whole columns (or rows), the right-click of a cell is the
+    /// letters' one: Plot, type and role included; on a lone cell, it stays the
+    /// edit one (witness).
     #[test]
-    fn le_clic_droit_d_une_selection_de_colonnes_ou_de_lignes_est_celui_des_lettres() {
-        let propres_aux_lettres = [tr!("workbook-plot-menu"), tr!("column-type")];
+    fn the_right_click_of_a_column_or_row_selection_is_the_letters_one() {
+        let letter_specific = [tr!("workbook-plot-menu"), tr!("column-type")];
 
-        let mut colonnes = Banc::new();
-        colonnes
+        let mut columns_bench = Bench::new();
+        columns_bench
             .state
-            .select_column(colonnes.sheet, colonnes.columns[0]);
-        colonnes.image(Vec::new());
-        colonnes.clic_bouton("102", egui::PointerButton::Secondary);
-        let textes = colonnes.textes();
-        for entree in propres_aux_lettres.iter().chain([
+            .select_column(columns_bench.sheet, columns_bench.columns[0]);
+        columns_bench.image(Vec::new());
+        columns_bench.click_button("102", egui::PointerButton::Secondary);
+        let texts = columns_bench.texts();
+        for entry in letter_specific.iter().chain([
             &tr!("action-copy"),
             &tr!("action-clear"),
             &tr!("menu-analysis"),
         ]) {
             assert!(
-                textes.contains(entree),
-                "colonne sélectionnée : {entree:?} absent de {textes:?}"
+                texts.contains(entry),
+                "selected column: {entry:?} missing from {texts:?}"
             );
         }
         assert!(
-            colonnes
+            columns_bench
                 .state
-                .is_column_selected(colonnes.sheet, colonnes.columns[0]),
-            "le clic droit dans la sélection la laisse intacte"
+                .is_column_selected(columns_bench.sheet, columns_bench.columns[0]),
+            "a right-click inside the selection leaves it intact"
         );
 
-        let mut lignes = Banc::new();
-        lignes.state.select_row(lignes.sheet, 1);
-        lignes.image(Vec::new());
-        lignes.clic_bouton("102", egui::PointerButton::Secondary);
-        let textes = lignes.textes();
-        for entree in &propres_aux_lettres {
+        let mut rows_bench = Bench::new();
+        rows_bench.state.select_row(rows_bench.sheet, 1);
+        rows_bench.image(Vec::new());
+        rows_bench.click_button("102", egui::PointerButton::Secondary);
+        let texts = rows_bench.texts();
+        for entry in &letter_specific {
             assert!(
-                textes.contains(entree),
-                "ligne sélectionnée : {entree:?} absent de {textes:?}"
+                texts.contains(entry),
+                "selected row: {entry:?} missing from {texts:?}"
             );
         }
 
-        let mut cellule = Banc::new();
-        cellule.clic_bouton("102", egui::PointerButton::Secondary);
-        let textes = cellule.textes();
-        for entree in &propres_aux_lettres {
+        let mut cell_bench = Bench::new();
+        cell_bench.click_button("102", egui::PointerButton::Secondary);
+        let texts = cell_bench.texts();
+        for entry in &letter_specific {
             assert!(
-                !textes.contains(entree),
-                "témoin : une cellule seule n'a pas {entree:?} : {textes:?}"
+                !texts.contains(entry),
+                "witness: a lone cell does not have {entry:?}: {texts:?}"
             );
         }
     }
 
-    /// L'en-tête d'une colonne produite par un calcul pas à jour porte une icône
-    /// d'avertissement (#200) ; à jour, il n'en porte pas (témoin).
+    /// The header of a column produced by an out-of-date calculation carries a
+    /// warning icon (#200); up to date, it carries none (witness).
     #[test]
-    fn l_en_tete_d_une_colonne_perimee_porte_l_icone_d_avertissement() {
+    fn the_header_of_a_stale_column_carries_the_warning_icon() {
         use stokesforge_app_state::analysis::Preset;
-        let mut banc = Banc::new();
-        egui_extras::install_image_loaders(&banc.context);
-        let icones = |banc: &mut Banc| {
-            banc.image(Vec::new());
-            banc.image(Vec::new());
+        let mut bench = Bench::new();
+        egui_extras::install_image_loaders(&bench.context);
+        let icons = |bench: &mut Bench| {
+            bench.image(Vec::new());
+            bench.image(Vec::new());
             crate::app::window_chrome::tests::find_icon_centers(
-                &banc.dernier.as_ref().unwrap().shapes,
+                &bench.last_frame.as_ref().unwrap().shapes,
             )
             .len()
         };
-        banc.state.dispatch(Action::OpenAnalysis {
+        bench.state.dispatch(Action::OpenAnalysis {
             preset: Preset::Integrate,
-            sheet: banc.sheet,
-            columns: vec![banc.columns[0]],
+            sheet: bench.sheet,
+            columns: vec![bench.columns[0]],
         });
         {
-            let form = banc.state.analysis_form_mut().unwrap();
+            let form = bench.state.analysis_form_mut().unwrap();
             form.setup.integrate.cumulative = true;
             form.auto_recalc = false;
             form.auto_recalc_chosen = true;
         }
-        banc.state.dispatch(Action::ApplyAnalysis);
-        let a_jour = icones(&mut banc);
-        banc.state.dispatch(Action::CommitCell {
-            column: banc.columns[0],
+        bench.state.dispatch(Action::ApplyAnalysis);
+        let up_to_date = icons(&mut bench);
+        bench.state.dispatch(Action::CommitCell {
+            column: bench.columns[0],
             row: 0,
             text: "999".to_string(),
         });
-        assert_eq!(banc.state.stale_calculations().len(), 1);
-        let perime = icones(&mut banc);
-        assert_eq!(perime, a_jour + 1, "une icône d'avertissement de plus");
+        assert_eq!(bench.state.stale_calculations().len(), 1);
+        let stale = icons(&mut bench);
+        assert_eq!(stale, up_to_date + 1, "one more warning icon");
     }
 
-    /// Choisir « Effacer » dans le menu d'une cellule pousse le vidage de la
-    /// sélection, comme Retour arrière.
+    /// Choosing "Clear" in a cell's menu pushes the clearing of the selection,
+    /// like Backspace.
     #[test]
-    fn effacer_dans_le_menu_d_une_cellule_vide_la_selection() {
-        let mut banc = Banc::new();
-        banc.clic_bouton("102", egui::PointerButton::Secondary);
-        let position = banc.centre_de(&tr!("action-clear")).expect("menu ouvert");
-        let sheet = banc.sheet;
-        banc.image(vec![egui::Event::PointerMoved(position)]);
-        banc.image(vec![egui::Event::PointerButton {
+    fn clear_in_a_cell_menu_clears_the_selection() {
+        let mut bench = Bench::new();
+        bench.click_button("102", egui::PointerButton::Secondary);
+        let position = bench.center_of(&tr!("action-clear")).expect("menu open");
+        let sheet = bench.sheet;
+        bench.image(vec![egui::Event::PointerMoved(position)]);
+        bench.image(vec![egui::Event::PointerButton {
             pos: position,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        banc.image(vec![egui::Event::PointerButton {
+        bench.image(vec![egui::Event::PointerButton {
             pos: position,
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
         assert!(
-            banc.actions.iter().any(
+            bench.actions.iter().any(
                 |action| matches!(action, Action::ClearSelectedCells { sheet: s } if *s == sheet)
             ),
             "{:?}",
-            banc.actions
+            bench.actions
         );
     }
 
-    // --- Barres de défilement ---------------------------------------------
+    // --- Scroll bars ---------------------------------------------------
 
     #[test]
-    fn la_barre_verticale_de_la_grille_est_a_lechelle_du_corps_de_la_table() {
+    fn the_grid_vertical_bar_is_scaled_to_the_table_body() {
         assert_eq!(grid_vertical_bar_scale(320.0, 160.0), 2.0);
         assert_eq!(grid_vertical_bar_scale(320.0, 0.0), 1.0);
     }
 
-    /// Largeur de contenu, largeur visible et décalage horizontal de la zone
-    /// défilable autour d'une table de `colonnes` colonnes de 110 points, sur
-    /// un écran de 220, `decalage` étant celui qu'aurait demandé la barre
-    /// déportée à l'image précédente.
-    fn zone_defilable(colonnes: usize, decalage: Option<f32>) -> (f32, f32, f32) {
+    /// Content width, visible width and horizontal offset of the scroll area
+    /// around a table of `columns` columns of 110 points, on a screen of 220,
+    /// `offset` being the one the detached bar would have requested in the
+    /// previous frame.
+    fn scrollable_area(columns: usize, offset: Option<f32>) -> (f32, f32, f32) {
         let context = egui::Context::default();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -4087,14 +4007,14 @@ mod tests {
         };
         let mut scroll = None;
         let mut output = context.run_ui(input, |ui| {
-            scroll = Some(show_horizontally_scrollable_grid(ui, decalage, |ui| {
+            scroll = Some(show_horizontally_scrollable_grid(ui, offset, |ui| {
                 TableBuilder::new(ui)
-                    .columns(TableColumn::initial(110.0).at_least(56.0), colonnes)
+                    .columns(TableColumn::initial(110.0).at_least(56.0), columns)
                     .auto_shrink([false, false])
                     .header(20.0, |mut header| {
-                        for _ in 0..colonnes {
+                        for _ in 0..columns {
                             header.col(|ui| {
-                                ui.label("Colonne");
+                                ui.label("Column");
                             });
                         }
                     })
@@ -4102,7 +4022,7 @@ mod tests {
             }));
         });
         output.textures_delta.clear();
-        let scroll = scroll.expect("la grille doit être dessinée");
+        let scroll = scroll.expect("the grid must be drawn");
         (
             scroll.content_size.x,
             scroll.inner_rect.width(),
@@ -4110,69 +4030,74 @@ mod tests {
         )
     }
 
-    /// Des colonnes plus larges que l'écran débordent dans la zone
-    /// défilable ; une seule colonne étroite n'y déborde pas (témoin : la
-    /// mesure distingue bien les deux cas).
+    /// Columns wider than the screen overflow in the scroll area; a single narrow
+    /// column does not (witness: the measure does tell the two cases apart).
     #[test]
-    fn la_grille_deborde_horizontalement_dans_sa_zone_defilable() {
-        let (contenu, visible, _) = zone_defilable(5, None);
+    fn the_grid_overflows_horizontally_in_its_scrollable_area() {
+        let (content, visible, _) = scrollable_area(5, None);
         assert!(
-            contenu > visible,
-            "les colonnes doivent pouvoir défiler dans le rectangle visible : {contenu:?} > {visible:?}",
+            content > visible,
+            "the columns must be able to scroll in the visible rectangle: {content:?} > {visible:?}",
         );
-        let (contenu, visible, _) = zone_defilable(1, None);
+        let (content, visible, _) = scrollable_area(1, None);
         assert!(
-            contenu <= visible + 0.5,
-            "témoin : une colonne tient dans l'écran : {contenu:?} <= {visible:?}",
+            content <= visible + 0.5,
+            "witness: one column fits on the screen: {content:?} <= {visible:?}",
         );
     }
 
-    /// Le décalage demandé par la barre horizontale déportée (sous les
-    /// onglets de feuille) est appliqué à la grille ; sans débordement, il
-    /// n'y a rien à décaler (témoin : le décalage lu n'est pas un simple
-    /// écho de la demande).
+    /// The offset requested by the detached horizontal bar (under the sheet tabs)
+    /// is applied to the grid; without overflow, there is nothing to offset
+    /// (witness: the offset read is not a mere echo of the request).
     #[test]
-    fn le_decalage_de_la_barre_deportee_s_applique_a_la_grille() {
-        let (_, _, decalage) = zone_defilable(5, Some(60.0));
+    fn the_offset_of_the_moved_bar_applies_to_the_grid() {
+        let (_, _, offset) = scrollable_area(5, Some(60.0));
         assert!(
-            (decalage - 60.0).abs() < 0.5,
-            "la grille doit défiler de 60 points : {decalage}"
+            (offset - 60.0).abs() < 0.5,
+            "the grid must scroll by 60 points: {offset}"
         );
-        let (_, _, decalage) = zone_defilable(1, Some(60.0));
+        let (_, _, offset) = scrollable_area(1, Some(60.0));
         assert!(
-            decalage.abs() < 0.5,
-            "témoin : rien à faire défiler, décalage {decalage}"
+            offset.abs() < 0.5,
+            "witness: nothing to scroll, offset {offset}"
         );
     }
-    /// Le clic droit dans une plage de colonnes la conserve. Un changement
-    /// de type vise chacune de ces colonnes une fois, sans toucher la voisine.
+    /// A right-click inside a column range keeps it. A type change targets each of
+    /// these columns once, without touching the neighbor.
     #[test]
-    fn le_type_dans_le_menu_des_lettres_vise_toute_la_selection() {
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.state
-            .extend_column_selection(banc.sheet, banc.columns[1]);
-        banc.state.dispatch(Action::SetColumnType {
-            column: banc.columns[0],
+    fn the_type_in_the_letters_menu_targets_the_whole_selection() {
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench
+            .state
+            .extend_column_selection(bench.sheet, bench.columns[1]);
+        bench.state.dispatch(Action::SetColumnType {
+            column: bench.columns[0],
             column_type: ColumnType::Mixed,
         });
-        banc.image(Vec::new());
-        let lettre = format!("B({})", role_label(ColumnRole::Y));
-        banc.clic_bouton(&lettre, egui::PointerButton::Secondary);
-        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[0]));
-        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[1]));
+        bench.image(Vec::new());
+        let letter = format!("B({})", role_label(ColumnRole::Y));
+        bench.click_button(&letter, egui::PointerButton::Secondary);
+        assert!(bench
+            .state
+            .is_column_selected(bench.sheet, bench.columns[0]));
+        assert!(bench
+            .state
+            .is_column_selected(bench.sheet, bench.columns[1]));
         assert!(
-            !banc.state.is_column_selected(banc.sheet, banc.columns[2]),
-            "témoin : la voisine n'est pas sélectionnée"
+            !bench
+                .state
+                .is_column_selected(bench.sheet, bench.columns[2]),
+            "witness: the neighbor is not selected"
         );
-        assert!(banc.centre_de(&type_label(ColumnType::Numeric)).is_none());
-        banc.clic_sur(&tr!("column-type"));
-        let position = banc
-            .centre_de(&type_label(ColumnType::Numeric))
-            .expect("menu du type ouvert");
-        banc.image(vec![egui::Event::PointerMoved(position)]);
+        assert!(bench.center_of(&type_label(ColumnType::Numeric)).is_none());
+        bench.click_on(&tr!("column-type"));
+        let position = bench
+            .center_of(&type_label(ColumnType::Numeric))
+            .expect("type menu open");
+        bench.image(vec![egui::Event::PointerMoved(position)]);
         for pressed in [true, false] {
-            banc.image(vec![egui::Event::PointerButton {
+            bench.image(vec![egui::Event::PointerButton {
                 pos: position,
                 button: egui::PointerButton::Primary,
                 pressed,
@@ -4180,79 +4105,79 @@ mod tests {
             }]);
         }
         assert_eq!(
-            banc.actions,
+            bench.actions,
             vec![Action::SetColumnsType {
-                columns: banc.columns[..2].to_vec(),
+                columns: bench.columns[..2].to_vec(),
                 column_type: ColumnType::Numeric,
             }],
-            "une seule action, sur les deux colonnes sélectionnées, pas la voisine"
+            "a single action, on the two selected columns, not the neighbor"
         );
     }
 
-    // --- Sélection multiple (#159) ------------------------------------------
+    // --- Multiple selection (#159) ------------------------------------------
 
-    fn lettre(banc: &Banc, index: usize) -> String {
-        let role = banc.state.column_meta(banc.columns[index]).role;
+    fn letter(bench: &Bench, index: usize) -> String {
+        let role = bench.state.column_meta(bench.columns[index]).role;
         format!("{}({})", column_letter(index), role_label(role))
     }
 
     #[test]
-    fn ctrl_clic_sur_les_lettres_pose_une_selection_non_contigue() {
-        let mut banc = Banc::new();
-        let (a, c) = (lettre(&banc, 0), lettre(&banc, 2));
-        banc.clic_sur(&a);
-        banc.clic_avec(&c, egui::Modifiers::COMMAND);
-        let sheet = banc.sheet;
-        assert!(banc.state.is_column_selected(sheet, banc.columns[0]));
-        assert!(!banc.state.is_column_selected(sheet, banc.columns[1]));
-        assert!(banc.state.is_column_selected(sheet, banc.columns[2]));
-        // Un second Ctrl+clic retire la colonne.
-        banc.clic_avec(&c, egui::Modifiers::COMMAND);
-        assert!(!banc.state.is_column_selected(sheet, banc.columns[2]));
-        assert!(banc.state.is_column_selected(sheet, banc.columns[0]));
-        // Un clic simple remplace tout.
-        banc.clic_avec(&c, egui::Modifiers::COMMAND);
-        banc.clic_sur(&lettre(&banc, 1));
-        assert!(!banc.state.is_column_selected(sheet, banc.columns[0]));
-        assert!(banc.state.is_column_selected(sheet, banc.columns[1]));
+    fn ctrl_click_on_the_letters_places_a_non_contiguous_selection() {
+        let mut bench = Bench::new();
+        let (a, c) = (letter(&bench, 0), letter(&bench, 2));
+        bench.click_on(&a);
+        bench.click_with(&c, egui::Modifiers::COMMAND);
+        let sheet = bench.sheet;
+        assert!(bench.state.is_column_selected(sheet, bench.columns[0]));
+        assert!(!bench.state.is_column_selected(sheet, bench.columns[1]));
+        assert!(bench.state.is_column_selected(sheet, bench.columns[2]));
+        // A second Ctrl+click removes the column.
+        bench.click_with(&c, egui::Modifiers::COMMAND);
+        assert!(!bench.state.is_column_selected(sheet, bench.columns[2]));
+        assert!(bench.state.is_column_selected(sheet, bench.columns[0]));
+        // A simple click replaces everything.
+        bench.click_with(&c, egui::Modifiers::COMMAND);
+        bench.click_on(&letter(&bench, 1));
+        assert!(!bench.state.is_column_selected(sheet, bench.columns[0]));
+        assert!(bench.state.is_column_selected(sheet, bench.columns[1]));
     }
 
     #[test]
-    fn maj_clic_remplace_et_ctrl_maj_clic_ajoute_une_plage() {
-        let mut banc = Banc::new();
-        let sheet = banc.sheet;
-        let (a, b, c) = (lettre(&banc, 0), lettre(&banc, 1), lettre(&banc, 2));
-        banc.clic_sur(&a);
-        banc.clic_avec(&b, egui::Modifiers::COMMAND);
-        // Maj+clic : plage ancre (B) → C, A disparaît.
-        banc.clic_avec(&c, egui::Modifiers::SHIFT);
-        assert!(!banc.state.is_column_selected(sheet, banc.columns[0]));
-        assert!(banc.state.is_column_selected(sheet, banc.columns[1]));
-        assert!(banc.state.is_column_selected(sheet, banc.columns[2]));
-        // Ctrl+Maj+clic : l'ajoute aux colonnes déjà posées.
-        banc.clic_sur(&a);
-        banc.clic_avec(&c, egui::Modifiers::COMMAND);
-        banc.clic_avec(&b, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
-        for column in &banc.columns {
-            assert!(banc.state.is_column_selected(sheet, *column));
+    fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
+        let mut bench = Bench::new();
+        let sheet = bench.sheet;
+        let (a, b, c) = (letter(&bench, 0), letter(&bench, 1), letter(&bench, 2));
+        bench.click_on(&a);
+        bench.click_with(&b, egui::Modifiers::COMMAND);
+        // Shift+click: anchor (B) → C range, A disappears.
+        bench.click_with(&c, egui::Modifiers::SHIFT);
+        assert!(!bench.state.is_column_selected(sheet, bench.columns[0]));
+        assert!(bench.state.is_column_selected(sheet, bench.columns[1]));
+        assert!(bench.state.is_column_selected(sheet, bench.columns[2]));
+        // Ctrl+Shift+click: adds it to the columns already placed.
+        bench.click_on(&a);
+        bench.click_with(&c, egui::Modifiers::COMMAND);
+        bench.click_with(&b, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+        for column in &bench.columns {
+            assert!(bench.state.is_column_selected(sheet, *column));
         }
     }
 
     #[test]
-    fn la_case_du_coin_selectionne_tout_puis_deselectionne() {
-        let mut banc = Banc::new();
-        let sheet = banc.sheet;
-        banc.clic_sur("#");
-        assert!(banc.state.is_all_selected(sheet));
-        banc.clic_sur("#");
-        assert!(banc.state.selection(sheet).is_none());
+    fn the_corner_box_selects_all_then_deselects() {
+        let mut bench = Bench::new();
+        let sheet = bench.sheet;
+        bench.click_on("#");
+        assert!(bench.state.is_all_selected(sheet));
+        bench.click_on("#");
+        assert!(bench.state.selection(sheet).is_none());
     }
 
     #[test]
-    fn ctrl_a_dans_la_grille_pousse_select_all_et_echap_deselectionne() {
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        banc.image(vec![
+    fn ctrl_a_in_the_grid_pushes_select_all_and_escape_deselects() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.image(vec![
             egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
             egui::Event::Key {
                 key: egui::Key::A,
@@ -4262,96 +4187,97 @@ mod tests {
                 modifiers: egui::Modifiers::COMMAND,
             },
         ]);
-        assert!(banc
+        assert!(bench
             .actions
-            .contains(&Action::SelectAll { sheet: banc.sheet }));
-        banc.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
-        banc.touche(egui::Key::Escape, egui::Modifiers::NONE);
-        assert!(banc.state.selection(banc.sheet).is_none());
+            .contains(&Action::SelectAll { sheet: bench.sheet }));
+        bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(bench.state.selection(bench.sheet).is_none());
     }
 
     #[test]
-    fn ctrl_clic_sur_les_cellules_et_les_lignes_compose_une_selection_multiple() {
-        let mut banc = Banc::new();
-        let sheet = banc.sheet;
-        banc.clic_sur("101");
-        banc.clic_avec("303", egui::Modifiers::COMMAND);
-        assert!(banc.state.is_selected(sheet, banc.columns[0], 0));
-        assert!(banc.state.is_selected(sheet, banc.columns[2], 2));
-        assert!(!banc.state.is_selected(sheet, banc.columns[1], 1));
-        // Ctrl+clic sur une cellule déjà sélectionnée la retire.
-        banc.clic_avec("101", egui::Modifiers::COMMAND);
-        assert!(!banc.state.is_selected(sheet, banc.columns[0], 0));
-        assert!(banc.state.is_selected(sheet, banc.columns[2], 2));
-        // Les numéros de ligne : une seule sorte à la fois.
-        banc.clic_sur("1");
-        banc.clic_avec("3", egui::Modifiers::COMMAND);
-        assert!(banc.state.is_row_selected(sheet, 0));
-        assert!(!banc.state.is_row_selected(sheet, 1));
-        assert!(banc.state.is_row_selected(sheet, 2));
-        assert!(!banc.state.is_selected(sheet, banc.columns[2], 1));
+    fn ctrl_click_on_cells_and_rows_composes_a_multiple_selection() {
+        let mut bench = Bench::new();
+        let sheet = bench.sheet;
+        bench.click_on("101");
+        bench.click_with("303", egui::Modifiers::COMMAND);
+        assert!(bench.state.is_selected(sheet, bench.columns[0], 0));
+        assert!(bench.state.is_selected(sheet, bench.columns[2], 2));
+        assert!(!bench.state.is_selected(sheet, bench.columns[1], 1));
+        // Ctrl+click on an already selected cell removes it.
+        bench.click_with("101", egui::Modifiers::COMMAND);
+        assert!(!bench.state.is_selected(sheet, bench.columns[0], 0));
+        assert!(bench.state.is_selected(sheet, bench.columns[2], 2));
+        // The row numbers: a single kind at a time.
+        bench.click_on("1");
+        bench.click_with("3", egui::Modifiers::COMMAND);
+        assert!(bench.state.is_row_selected(sheet, 0));
+        assert!(!bench.state.is_row_selected(sheet, 1));
+        assert!(bench.state.is_row_selected(sheet, 2));
+        assert!(!bench.state.is_selected(sheet, bench.columns[2], 1));
     }
 
-    // --- Glisser de colonnes vers un graphe (#160) ---------------------------
+    // --- Column drag to a graph (#160) ---------------------------------------
 
-    /// Bord droit du bloc : un point à 1 pt à l'intérieur de la dernière
-    /// colonne (les bandes de prise débordent de 3 pt de part et d'autre).
-    fn bord_droit(banc: &Banc, derniere: usize, y: f32) -> egui::Pos2 {
-        let lettre = lettre(banc, derniere);
-        let centre = banc.centre_de(&lettre).expect("lettre peinte");
-        egui::pos2(centre.x + DEFAULT_COLUMN_WIDTH / 2.0 - 1.0, y)
+    /// Right edge of the block: a point 1 pt inside the last column (the grip
+    /// bands extend 3 pt on each side).
+    fn right_edge(bench: &Bench, last: usize, y: f32) -> egui::Pos2 {
+        let letter = letter(bench, last);
+        let center = bench.center_of(&letter).expect("letter painted");
+        egui::pos2(center.x + DEFAULT_COLUMN_WIDTH / 2.0 - 1.0, y)
     }
 
-    fn charge_posee(banc: &Banc) -> bool {
-        egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(&banc.context)
+    fn payload_set(bench: &Bench) -> bool {
+        egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(&bench.context)
     }
 
-    /// Appuie en `depart` puis glisse de 30 pt vers la droite.
-    fn glisse_depuis(banc: &mut Banc, depart: egui::Pos2) {
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    /// Presses at `start` then drags 30 pt to the right.
+    fn drag_from(bench: &mut Bench, start: egui::Pos2) {
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        for pas in 1..=3 {
-            banc.image(vec![egui::Event::PointerMoved(
-                depart + egui::vec2(10.0 * pas as f32, 0.0),
+        for step in 1..=3 {
+            bench.image(vec![egui::Event::PointerMoved(
+                start + egui::vec2(10.0 * step as f32, 0.0),
             )]);
         }
     }
 
     #[test]
-    fn attraper_le_bord_d_un_bloc_de_colonnes_emporte_toute_la_selection() {
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.state
-            .extend_column_selection(banc.sheet, banc.columns[1]);
-        banc.image(Vec::new());
-        let y = banc.centre_de("101").expect("cellule peinte").y;
-        let depart = bord_droit(&banc, 1, y);
+    fn grabbing_the_edge_of_a_column_block_carries_the_whole_selection() {
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench
+            .state
+            .extend_column_selection(bench.sheet, bench.columns[1]);
+        bench.image(Vec::new());
+        let y = bench.center_of("101").expect("cell painted").y;
+        let start = right_edge(&bench, 1, y);
 
-        glisse_depuis(&mut banc, depart);
+        drag_from(&mut bench, start);
 
-        assert!(charge_posee(&banc), "le bord du bloc démarre le glisser");
-        let charge =
-            egui::DragAndDrop::payload::<ColumnDragPayload>(&banc.context).expect("charge posée");
-        assert_eq!(charge.sheet, banc.sheet);
-        assert_eq!(charge.columns, banc.columns[..2]);
+        assert!(payload_set(&bench), "the block edge starts the drag");
+        let payload =
+            egui::DragAndDrop::payload::<ColumnDragPayload>(&bench.context).expect("payload set");
+        assert_eq!(payload.sheet, bench.sheet);
+        assert_eq!(payload.columns, bench.columns[..2]);
     }
 
     #[test]
-    fn echap_annule_le_glisser_de_colonnes() {
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.image(Vec::new());
-        let y = banc.centre_de("101").unwrap().y;
-        let depart = bord_droit(&banc, 0, y);
-        glisse_depuis(&mut banc, depart);
-        assert!(charge_posee(&banc));
+    fn escape_cancels_the_column_drag() {
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench.image(Vec::new());
+        let y = bench.center_of("101").unwrap().y;
+        let start = right_edge(&bench, 0, y);
+        drag_from(&mut bench, start);
+        assert!(payload_set(&bench));
 
-        banc.image(vec![egui::Event::Key {
+        bench.image(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
             pressed: true,
@@ -4359,462 +4285,492 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         }]);
 
-        assert!(!charge_posee(&banc));
+        assert!(!payload_set(&bench));
     }
 
     #[test]
-    fn des_cellules_ou_le_milieu_d_une_colonne_ne_demarrent_pas_le_glisser() {
-        // Une sélection de cellules n'offre pas le geste, même au bord.
-        let mut banc = Banc::new();
-        banc.clic_sur("101");
-        let y = banc.centre_de("101").unwrap().y;
-        let depart = bord_droit(&banc, 0, y);
-        glisse_depuis(&mut banc, depart);
-        assert!(!charge_posee(&banc), "cellules sélectionnées");
+    fn cells_or_the_middle_of_a_column_do_not_start_the_drag() {
+        // A selection of cells does not offer the gesture, even at the edge.
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        let y = bench.center_of("101").unwrap().y;
+        let start = right_edge(&bench, 0, y);
+        drag_from(&mut bench, start);
+        assert!(!payload_set(&bench), "selected cells");
 
-        // Une colonne entière, mais loin de son bord : le glisser de cellules
-        // reste celui de l'extension de sélection.
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.image(Vec::new());
-        let milieu = banc.centre_de("201").expect("cellule peinte");
-        glisse_depuis(&mut banc, milieu);
-        assert!(!charge_posee(&banc), "milieu de colonne");
+        // A whole column, but far from its edge: the cell drag stays the
+        // selection-extending one.
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench.image(Vec::new());
+        let middle = bench.center_of("201").expect("cell painted");
+        drag_from(&mut bench, middle);
+        assert!(!payload_set(&bench), "column middle");
         assert!(
-            banc.state.is_selected(banc.sheet, banc.columns[1], 0)
-                || banc.state.selection(banc.sheet).is_some(),
-            "le glisser a étendu ou posé une sélection de cellules"
+            bench.state.is_selected(bench.sheet, bench.columns[1], 0)
+                || bench.state.selection(bench.sheet).is_some(),
+            "the drag extended or placed a cell selection"
         );
     }
 
     #[test]
-    fn la_rangee_des_lettres_garde_le_redimensionnement() {
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.image(Vec::new());
-        let lettre = banc.centre_de(&lettre(&banc, 0)).expect("lettre peinte");
-        let depart = bord_droit(&banc, 0, lettre.y);
-        glisse_depuis(&mut banc, depart);
+    fn the_letter_row_keeps_resizing() {
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench.image(Vec::new());
+        let letter = bench.center_of(&letter(&bench, 0)).expect("letter painted");
+        let start = right_edge(&bench, 0, letter.y);
+        drag_from(&mut bench, start);
         assert!(
-            !charge_posee(&banc),
-            "le bord dans la rangée des lettres redimensionne, il n'attrape pas"
+            !payload_set(&bench),
+            "the edge in the letter row resizes, it does not grab"
         );
     }
 
-    // --- Largeur des colonnes par identifiant (#325) ------------------------
+    // --- Column width by identifier (#325) ------------------------
 
-    /// La lettre de la colonne visible de rang `index` (la liste change avec
-    /// les ajouts et suppressions, `banc.columns` non).
-    fn lettre_visible(banc: &Banc, index: usize) -> String {
-        let (id, _, _) = banc.state.visible_columns(banc.sheet)[index].clone();
+    /// The letter of the visible column of rank `index` (the list changes with
+    /// additions and deletions, `bench.columns` does not).
+    fn visible_letter(bench: &Bench, index: usize) -> String {
+        let (id, _, _) = bench.state.visible_columns(bench.sheet)[index].clone();
         format!(
             "{}({})",
             column_letter(index),
-            role_label(banc.state.column_meta(id).role)
+            role_label(bench.state.column_meta(id).role)
         )
     }
 
-    /// Largeur peinte de la colonne visible de rang `index` : l'aplat de sa
-    /// lettre, qui remplit toute la cellule.
-    fn largeur_peinte(banc: &Banc, index: usize) -> f32 {
-        let centre = banc
-            .centre_de(&lettre_visible(banc, index))
-            .expect("lettre peinte");
-        banc.dernier
+    /// Painted width of the visible column of rank `index`: the fill of its
+    /// letter, which fills the whole cell.
+    fn painted_width(bench: &Bench, index: usize) -> f32 {
+        let center = bench
+            .center_of(&visible_letter(bench, index))
+            .expect("letter painted");
+        bench
+            .last_frame
             .as_ref()
             .unwrap()
             .shapes
             .iter()
-            .find_map(|peint| match &peint.shape {
+            .find_map(|painted| match &painted.shape {
                 egui::Shape::Rect(rect)
                     if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
-                        && rect.rect.contains(centre) =>
+                        && rect.rect.contains(center) =>
                 {
                     Some(rect.rect.width())
                 }
                 _ => None,
             })
-            .expect("aplat de la lettre")
+            .expect("fill of the letter")
     }
 
-    fn largeurs_peintes(banc: &Banc, nombre: usize) -> Vec<f32> {
-        (0..nombre).map(|i| largeur_peinte(banc, i)).collect()
+    fn painted_widths(bench: &Bench, count: usize) -> Vec<f32> {
+        (0..count).map(|i| painted_width(bench, i)).collect()
     }
 
-    fn laisse_passer(banc: &mut Banc) {
+    fn let_frames_pass(bench: &mut Bench) {
         for _ in 0..3 {
-            banc.image(Vec::new());
+            bench.image(Vec::new());
         }
     }
 
-    /// Applique les actions de la dernière image à l'état, comme l'application.
-    fn applique(banc: &mut Banc) {
-        for action in std::mem::take(&mut banc.actions) {
-            banc.state.dispatch(action);
+    /// Applies the actions of the last frame to the state, like the application.
+    fn apply(bench: &mut Bench) {
+        for action in std::mem::take(&mut bench.actions) {
+            bench.state.dispatch(action);
         }
     }
 
-    fn largeurs_vues(banc: &Banc) -> Vec<Action> {
-        banc.actions
+    fn seen_widths(bench: &Bench) -> Vec<Action> {
+        bench
+            .actions
             .iter()
             .filter(|action| matches!(action, Action::SetColumnWidth { .. }))
             .cloned()
             .collect()
     }
 
-    /// Redimensionne la colonne visible `index` de `delta` points en tirant
-    /// son bord droit, comme à la souris ; applique les actions de chaque
-    /// image. Rend les `SetColumnWidth` vues **pendant** le glisser, puis
-    /// celles de l'image du relâchement.
-    fn redimensionne(banc: &mut Banc, index: usize, delta: f32) -> (Vec<Action>, Vec<Action>) {
-        let centre = banc
-            .centre_de(&lettre_visible(banc, index))
-            .expect("lettre peinte");
-        let bord = centre.x
-            + largeur_peinte(banc, index) / 2.0
-            + banc.context.global_style().spacing.item_spacing.x / 2.0;
-        let depart = egui::pos2(bord, centre.y);
-        let mut pendant = Vec::new();
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    /// Resizes the visible column `index` by `delta` points by dragging its right
+    /// edge, as with the mouse; applies the actions of each frame. Returns the
+    /// `SetColumnWidth`s seen **during** the drag, then those of the release frame.
+    fn resize(bench: &mut Bench, index: usize, delta: f32) -> (Vec<Action>, Vec<Action>) {
+        let center = bench
+            .center_of(&visible_letter(bench, index))
+            .expect("letter painted");
+        let edge = center.x
+            + painted_width(bench, index) / 2.0
+            + bench.context.global_style().spacing.item_spacing.x / 2.0;
+        let start = egui::pos2(edge, center.y);
+        let mut during = Vec::new();
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        pendant.extend(largeurs_vues(banc));
-        for pas in 1..=3 {
-            let x = depart.x + delta * pas as f32 / 3.0;
-            banc.image(vec![egui::Event::PointerMoved(egui::pos2(x, depart.y))]);
-            pendant.extend(largeurs_vues(banc));
-            applique(banc);
+        during.extend(seen_widths(bench));
+        for step in 1..=3 {
+            let x = start.x + delta * step as f32 / 3.0;
+            bench.image(vec![egui::Event::PointerMoved(egui::pos2(x, start.y))]);
+            during.extend(seen_widths(bench));
+            apply(bench);
         }
-        banc.image(vec![egui::Event::PointerButton {
-            pos: egui::pos2(depart.x + delta, depart.y),
+        bench.image(vec![egui::Event::PointerButton {
+            pos: egui::pos2(start.x + delta, start.y),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
-        let fin = largeurs_vues(banc);
-        applique(banc);
-        laisse_passer(banc);
-        (pendant, fin)
+        let end = seen_widths(bench);
+        apply(bench);
+        let_frames_pass(bench);
+        (during, end)
     }
 
-    fn proches(a: f32, b: f32) -> bool {
+    fn nearly_equal(a: f32, b: f32) -> bool {
         (a - b).abs() <= 0.6
     }
 
-    /// Le bord tiré d'une colonne ne pousse sa largeur qu'au relâchement, et
-    /// c'est la largeur peinte.
+    /// The dragged edge of a column pushes its width only on release, and it is the
+    /// painted width.
     #[test]
-    fn un_redimensionnement_a_la_main_envoie_la_largeur_a_la_fin_seulement() {
-        let mut banc = Banc::new();
-        let avant = largeur_peinte(&banc, 1);
-        let (pendant, fin) = redimensionne(&mut banc, 1, 30.0);
-        assert!(pendant.is_empty(), "rien pendant le glisser : {pendant:?}");
-        let [Action::SetColumnWidth { column, width }] = fin.as_slice() else {
-            panic!("une largeur au relâchement, vu {fin:?}");
+    fn a_manual_resize_sends_the_width_at_the_end_only() {
+        let mut bench = Bench::new();
+        let before = painted_width(&bench, 1);
+        let (during, end) = resize(&mut bench, 1, 30.0);
+        assert!(during.is_empty(), "nothing during the drag: {during:?}");
+        let [Action::SetColumnWidth { column, width }] = end.as_slice() else {
+            panic!("one width on release, saw {end:?}");
         };
-        assert_eq!(*column, banc.columns[1]);
+        assert_eq!(*column, bench.columns[1]);
         assert!(
-            proches(*width, avant + 30.0),
-            "{width} pour {}",
-            avant + 30.0
+            nearly_equal(*width, before + 30.0),
+            "{width} for {}",
+            before + 30.0
         );
-        assert_eq!(banc.state.column_width(banc.columns[1]), Some(*width));
+        assert_eq!(bench.state.column_width(bench.columns[1]), Some(*width));
     }
 
-    /// Ouvrir la feuille et la peindre : aucune largeur envoyée, le projet n'est
-    /// pas marqué modifié. Témoin : pousser la largeur rendue à chaque image.
+    /// Open the worksheet and paint it: no width sent, the project is not marked
+    /// modified. Witness: pushing the rendered width on every frame.
     #[test]
-    fn ouvrir_la_feuille_n_envoie_aucune_largeur() {
-        let mut banc = Banc::new();
-        laisse_passer(&mut banc);
-        assert_eq!(banc.largeurs_envoyees, 0);
-        let acteur = banc._session.handle().snapshot().unwrap();
-        assert!(acteur.column_widths.is_empty());
-        assert_eq!(acteur.geometry_revision, 0, "le projet n'est pas modifié");
+    fn opening_the_worksheet_sends_no_width() {
+        let mut bench = Bench::new();
+        let_frames_pass(&mut bench);
+        assert_eq!(bench.widths_sent, 0);
+        let actor = bench._session.handle().snapshot().unwrap();
+        assert!(actor.column_widths.is_empty());
+        assert_eq!(actor.geometry_revision, 0, "the project is not modified");
     }
 
-    /// Une largeur posée sur B, puis Add Column : A, B et C gardent la leur, la
-    /// neuve prend la largeur par défaut. Témoin : stockage par position.
+    /// A width set on B, then Add Column: A, B and C keep theirs, the new one takes
+    /// the default width. Witness: storage by position.
     #[test]
-    fn la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne() {
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 1, 30.0);
-        let avant = largeurs_peintes(&banc, 3);
-        assert!(avant[1] > avant[0] + 20.0, "B est élargie : {avant:?}");
+    fn each_column_width_survives_adding_a_column() {
+        let mut bench = Bench::new();
+        resize(&mut bench, 1, 30.0);
+        let before = painted_widths(&bench, 3);
+        assert!(before[1] > before[0] + 20.0, "B is widened: {before:?}");
 
-        banc.state.dispatch(Action::AddColumn { sheet: banc.sheet });
-        laisse_passer(&mut banc);
+        bench
+            .state
+            .dispatch(Action::AddColumn { sheet: bench.sheet });
+        let_frames_pass(&mut bench);
 
-        let apres = largeurs_peintes(&banc, 4);
+        let after = painted_widths(&bench, 4);
         for i in 0..3 {
             assert!(
-                proches(apres[i], avant[i]),
-                "colonne {i} : {apres:?} / {avant:?}"
+                nearly_equal(after[i], before[i]),
+                "column {i}: {after:?} / {before:?}"
             );
         }
         assert!(
-            proches(apres[3], DEFAULT_COLUMN_WIDTH),
-            "la colonne neuve prend la largeur par défaut : {apres:?}"
+            nearly_equal(after[3], DEFAULT_COLUMN_WIDTH),
+            "the new column takes the default width: {after:?}"
         );
     }
 
-    /// Supprimer B puis Ctrl+Z : B et ses voisines retrouvent leur largeur ;
-    /// entre les deux, A et C gardent la leur, même quand une colonne neuve
-    /// ramène le même nombre de colonnes (la liste, elle, a changé).
+    /// Delete B then Ctrl+Z: B and its neighbors get their width back; in between,
+    /// A and C keep theirs, even when a new column brings back the same number of
+    /// columns (the list, for its part, has changed).
     #[test]
-    fn supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur() {
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 0, 12.0);
-        redimensionne(&mut banc, 1, 30.0);
-        let avant = largeurs_peintes(&banc, 3);
+    fn delete_then_undo_gives_the_column_and_its_neighbors_their_width_back() {
+        let mut bench = Bench::new();
+        resize(&mut bench, 0, 12.0);
+        resize(&mut bench, 1, 30.0);
+        let before = painted_widths(&bench, 3);
 
-        banc.state.select_column(banc.sheet, banc.columns[1]);
-        banc.state
-            .dispatch(Action::DeleteSelectedCells { sheet: banc.sheet });
-        laisse_passer(&mut banc);
-        let apres = largeurs_peintes(&banc, 2);
-        assert!(proches(apres[0], avant[0]), "A : {apres:?} / {avant:?}");
-        assert!(proches(apres[1], avant[2]), "C : {apres:?} / {avant:?}");
-
-        // Une colonne neuve : deux colonnes devenues trois, la même quantité
-        // qu'avant la suppression, mais pas la même liste.
-        banc.state.dispatch(Action::AddColumn { sheet: banc.sheet });
-        laisse_passer(&mut banc);
-        let neuve = largeurs_peintes(&banc, 3);
+        bench.state.select_column(bench.sheet, bench.columns[1]);
+        bench
+            .state
+            .dispatch(Action::DeleteSelectedCells { sheet: bench.sheet });
+        let_frames_pass(&mut bench);
+        let after = painted_widths(&bench, 2);
         assert!(
-            proches(neuve[0], avant[0]) && proches(neuve[1], avant[2]),
-            "{neuve:?}"
+            nearly_equal(after[0], before[0]),
+            "A: {after:?} / {before:?}"
         );
-        assert!(proches(neuve[2], DEFAULT_COLUMN_WIDTH), "{neuve:?}");
+        assert!(
+            nearly_equal(after[1], before[2]),
+            "C: {after:?} / {before:?}"
+        );
 
-        banc.state.dispatch(Action::Undo);
-        banc.state.dispatch(Action::Undo);
-        laisse_passer(&mut banc);
-        let rendu = largeurs_peintes(&banc, 3);
+        // A new column: two columns become three, the same quantity as before the
+        // deletion, but not the same list.
+        bench
+            .state
+            .dispatch(Action::AddColumn { sheet: bench.sheet });
+        let_frames_pass(&mut bench);
+        let with_new_column = painted_widths(&bench, 3);
+        assert!(
+            nearly_equal(with_new_column[0], before[0])
+                && nearly_equal(with_new_column[1], before[2]),
+            "{with_new_column:?}"
+        );
+        assert!(
+            nearly_equal(with_new_column[2], DEFAULT_COLUMN_WIDTH),
+            "{with_new_column:?}"
+        );
+
+        bench.state.dispatch(Action::Undo);
+        bench.state.dispatch(Action::Undo);
+        let_frames_pass(&mut bench);
+        let restored = painted_widths(&bench, 3);
         for i in 0..3 {
             assert!(
-                proches(rendu[i], avant[i]),
-                "colonne {i} : {rendu:?} / {avant:?}"
+                nearly_equal(restored[i], before[i]),
+                "column {i}: {restored:?} / {before:?}"
             );
         }
     }
 
-    // --- Remise à la largeur par défaut (#330) ------------------------------
+    // --- Reset to the default width (#330) ------------------------------
 
-    /// Largeur peinte de la gouttière : l'aplat du « # ».
-    fn largeur_gouttiere(banc: &Banc) -> f32 {
-        let centre = banc.centre_de("#").expect("« # » peint");
-        banc.dernier
+    /// Painted width of the gutter: the fill of the "#".
+    fn painted_gutter_width(bench: &Bench) -> f32 {
+        let center = bench.center_of("#").expect("'#' painted");
+        bench
+            .last_frame
             .as_ref()
             .unwrap()
             .shapes
             .iter()
-            .find_map(|peint| match &peint.shape {
+            .find_map(|painted| match &painted.shape {
                 egui::Shape::Rect(rect)
                     if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
-                        && rect.rect.contains(centre) =>
+                        && rect.rect.contains(center) =>
                 {
                     Some(rect.rect.width())
                 }
                 _ => None,
             })
-            .expect("aplat du « # »")
+            .expect("fill of '#'")
     }
 
-    /// Tire le bord droit de la gouttière de `delta` points, comme à la souris.
-    fn redimensionne_gouttiere(banc: &mut Banc, delta: f32) {
-        let centre = banc.centre_de("#").expect("« # » peint");
-        let bord = centre.x
-            + largeur_gouttiere(banc) / 2.0
-            + banc.context.global_style().spacing.item_spacing.x / 2.0;
-        let depart = egui::pos2(bord, centre.y);
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    /// Drags the right edge of the gutter by `delta` points, as with the mouse.
+    fn resize_gutter(bench: &mut Bench, delta: f32) {
+        let center = bench.center_of("#").expect("'#' painted");
+        let edge = center.x
+            + painted_gutter_width(bench) / 2.0
+            + bench.context.global_style().spacing.item_spacing.x / 2.0;
+        let start = egui::pos2(edge, center.y);
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        for pas in 1..=3 {
-            let x = depart.x + delta * pas as f32 / 3.0;
-            banc.image(vec![egui::Event::PointerMoved(egui::pos2(x, depart.y))]);
-            applique(banc);
+        for step in 1..=3 {
+            let x = start.x + delta * step as f32 / 3.0;
+            bench.image(vec![egui::Event::PointerMoved(egui::pos2(x, start.y))]);
+            apply(bench);
         }
-        banc.image(vec![egui::Event::PointerButton {
-            pos: egui::pos2(depart.x + delta, depart.y),
+        bench.image(vec![egui::Event::PointerButton {
+            pos: egui::pos2(start.x + delta, start.y),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
-        applique(banc);
-        laisse_passer(banc);
+        apply(bench);
+        let_frames_pass(bench);
     }
 
-    /// B élargie de 40 puis remise : elle revient à 54, A et C gardent la leur.
-    /// Témoin : laisser les largeurs retenues hors de la clé de mise en page
-    /// (`TableColumn::initial` est alors ignoré, B reste large).
+    /// B widened by 40 then reset: it returns to 54, A and C keep theirs. Witness:
+    /// leaving the stored widths out of the layout key (`TableColumn::initial` is
+    /// then ignored, B stays wide).
     #[test]
-    fn remettre_une_colonne_au_defaut_ne_touche_pas_les_autres() {
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 0, 12.0);
-        redimensionne(&mut banc, 1, 40.0);
-        redimensionne(&mut banc, 2, 20.0);
-        let avant = largeurs_peintes(&banc, 3);
-        assert!(avant[1] > 90.0, "B est élargie : {avant:?}");
+    fn resetting_a_column_to_default_does_not_touch_the_others() {
+        let mut bench = Bench::new();
+        resize(&mut bench, 0, 12.0);
+        resize(&mut bench, 1, 40.0);
+        resize(&mut bench, 2, 20.0);
+        let before = painted_widths(&bench, 3);
+        assert!(before[1] > 90.0, "B is widened: {before:?}");
 
-        banc.state.dispatch(Action::ResetColumnWidths {
-            columns: vec![banc.columns[1]],
+        bench.state.dispatch(Action::ResetColumnWidths {
+            columns: vec![bench.columns[1]],
         });
-        laisse_passer(&mut banc);
+        let_frames_pass(&mut bench);
 
-        let apres = largeurs_peintes(&banc, 3);
-        assert!(proches(apres[1], DEFAULT_COLUMN_WIDTH), "B : {apres:?}");
-        assert!(proches(apres[0], avant[0]), "A : {apres:?} / {avant:?}");
-        assert!(proches(apres[2], avant[2]), "C : {apres:?} / {avant:?}");
-    }
-
-    /// Élargir une colonne à la main ne ramène pas la gouttière à 90 : elle
-    /// garde la largeur qu'on lui avait donnée. Témoin : ne pas mémoriser la
-    /// largeur rendue de la gouttière.
-    #[test]
-    fn un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere() {
-        let mut banc = Banc::new();
-        redimensionne_gouttiere(&mut banc, 30.0);
-        let large = largeur_gouttiere(&banc);
+        let after = painted_widths(&bench, 3);
+        assert!(nearly_equal(after[1], DEFAULT_COLUMN_WIDTH), "B: {after:?}");
         assert!(
-            proches(large, ROW_NUMBER_COLUMN_WIDTH + 30.0),
-            "gouttière tirée : {large}"
+            nearly_equal(after[0], before[0]),
+            "A: {after:?} / {before:?}"
         );
-        redimensionne(&mut banc, 1, 40.0);
         assert!(
-            proches(largeur_gouttiere(&banc), large),
-            "gouttière après le glisser : {}",
-            largeur_gouttiere(&banc)
+            nearly_equal(after[2], before[2]),
+            "C: {after:?} / {before:?}"
         );
-        // Remettre une colonne n'y touche pas non plus.
-        banc.state.dispatch(Action::ResetColumnWidths {
-            columns: vec![banc.columns[1]],
-        });
-        laisse_passer(&mut banc);
-        assert!(proches(largeur_gouttiere(&banc), large));
-        // Toute la feuille la ramène à 90, sans l'enregistrer.
-        redimensionne(&mut banc, 1, 40.0);
-        forget_gutter_width(&banc.context, banc.sheet);
-        banc.state.dispatch(Action::ResetColumnWidths {
-            columns: banc.columns.clone(),
-        });
-        laisse_passer(&mut banc);
-        assert!(proches(largeur_gouttiere(&banc), ROW_NUMBER_COLUMN_WIDTH));
-        assert!(banc.state.snapshot().column_widths.is_empty());
     }
 
-    /// Ouvre le clic droit de la lettre `index` et rend le menu peint.
-    fn ouvre_menu_lettre(banc: &mut Banc, index: usize) -> Vec<EntreeMenu> {
-        banc.context.enable_accesskit();
-        banc.image(Vec::new());
-        banc.clic_bouton(&lettre_visible(banc, index), egui::PointerButton::Secondary);
-        menu_lu(banc)
-    }
-
-    /// L'entrée suit Role ▸ ; grisée tant qu'aucune colonne visée n'a de
-    /// largeur retenue, active ensuite, et pousse l'action sur la cible.
-    /// Témoin éprouvé : `add_enabled(true, …)` (rouge).
+    /// Widening a column by hand does not bring the gutter back to 90: it keeps
+    /// the width it had been given. Witness: not remembering the rendered width of
+    /// the gutter.
     #[test]
-    fn l_entree_de_remise_suit_role_et_se_grise_sans_largeur() {
-        let mut banc = Banc::new();
-        let menu = ouvre_menu_lettre(&mut banc, 1);
-        let (_, actif, _) = entree_menu(&menu, &tr!("action-reset-column-widths"));
-        assert!(!actif, "rien à remettre : grisée");
-        let y = |label: String| entree_menu(&menu, &label).2.y;
+    fn a_column_drag_keeps_the_gutter_width() {
+        let mut bench = Bench::new();
+        resize_gutter(&mut bench, 30.0);
+        let wide = painted_gutter_width(&bench);
+        assert!(
+            nearly_equal(wide, ROW_NUMBER_COLUMN_WIDTH + 30.0),
+            "dragged gutter: {wide}"
+        );
+        resize(&mut bench, 1, 40.0);
+        assert!(
+            nearly_equal(painted_gutter_width(&bench), wide),
+            "gutter after the drag: {}",
+            painted_gutter_width(&bench)
+        );
+        // Resetting a column does not touch it either.
+        bench.state.dispatch(Action::ResetColumnWidths {
+            columns: vec![bench.columns[1]],
+        });
+        let_frames_pass(&mut bench);
+        assert!(nearly_equal(painted_gutter_width(&bench), wide));
+        // The whole worksheet brings it back to 90, without recording it.
+        resize(&mut bench, 1, 40.0);
+        forget_gutter_width(&bench.context, bench.sheet);
+        bench.state.dispatch(Action::ResetColumnWidths {
+            columns: bench.columns.clone(),
+        });
+        let_frames_pass(&mut bench);
+        assert!(nearly_equal(
+            painted_gutter_width(&bench),
+            ROW_NUMBER_COLUMN_WIDTH
+        ));
+        assert!(bench.state.snapshot().column_widths.is_empty());
+    }
+
+    /// Opens the right-click of the letter `index` and returns the painted menu.
+    fn open_letter_menu(bench: &mut Bench, index: usize) -> Vec<MenuEntry> {
+        bench.context.enable_accesskit();
+        bench.image(Vec::new());
+        bench.click_button(
+            &visible_letter(bench, index),
+            egui::PointerButton::Secondary,
+        );
+        read_menu(bench)
+    }
+
+    /// The entry follows Role ▸; grayed out as long as no targeted column has a
+    /// stored width, active afterwards, and pushes the action on the target.
+    /// Proven witness: `add_enabled(true, …)` (red).
+    #[test]
+    fn the_reset_entry_follows_role_and_is_grayed_out_without_a_width() {
+        let mut bench = Bench::new();
+        let menu = open_letter_menu(&mut bench, 1);
+        let (_, active, _) = menu_entry(&menu, &tr!("action-reset-column-widths"));
+        assert!(!active, "nothing to reset: grayed out");
+        let y = |label: String| menu_entry(&menu, &label).2.y;
         assert!(
             y(tr!("column-role")) < y(tr!("action-reset-column-widths")),
             "{menu:#?}"
         );
 
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 1, 30.0);
-        let b = banc.columns[1];
-        let menu = ouvre_menu_lettre(&mut banc, 1);
-        assert!(entree_menu(&menu, &tr!("action-reset-column-widths")).1);
-        banc.clic_sur(&tr!("action-reset-column-widths"));
+        let mut bench = Bench::new();
+        resize(&mut bench, 1, 30.0);
+        let b = bench.columns[1];
+        let menu = open_letter_menu(&mut bench, 1);
+        assert!(menu_entry(&menu, &tr!("action-reset-column-widths")).1);
+        bench.click_on(&tr!("action-reset-column-widths"));
         assert!(
-            banc.vues
+            bench
+                .seen
                 .contains(&Action::ResetColumnWidths { columns: vec![b] }),
             "{:?}",
-            banc.vues
+            bench.seen
         );
     }
 
-    /// Une sélection de colonnes est traitée en entier : A et B, dont une seule
-    /// a une largeur, partent ensemble. Témoin éprouvé : ne viser que la colonne
-    /// cliquée (rouge).
+    /// A selection of columns is handled as a whole: A and B, only one of which has
+    /// a width, go together. Proven witness: targeting only the clicked column
+    /// (red).
     #[test]
-    fn la_remise_traite_toute_la_selection() {
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 1, 30.0);
-        let (sheet, a, b) = (banc.sheet, banc.columns[0], banc.columns[1]);
-        banc.state.select_column(sheet, a);
-        banc.state.toggle_column_selection(sheet, b);
-        banc.image(Vec::new());
-        ouvre_menu_lettre(&mut banc, 0);
-        banc.clic_sur(&tr!("action-reset-column-widths"));
+    fn the_reset_handles_the_whole_selection() {
+        let mut bench = Bench::new();
+        resize(&mut bench, 1, 30.0);
+        let (sheet, a, b) = (bench.sheet, bench.columns[0], bench.columns[1]);
+        bench.state.select_column(sheet, a);
+        bench.state.toggle_column_selection(sheet, b);
+        bench.image(Vec::new());
+        open_letter_menu(&mut bench, 0);
+        bench.click_on(&tr!("action-reset-column-widths"));
         assert!(
-            banc.vues.contains(&Action::ResetColumnWidths {
+            bench.seen.contains(&Action::ResetColumnWidths {
                 columns: vec![a, b]
             }),
             "{:?}",
-            banc.vues
+            bench.seen
         );
     }
 
-    /// Clic droit de l'onglet de la feuille : l'entrée de feuille, grisée sans
-    /// largeur, active avec, pousse toutes les colonnes de la feuille. Témoins
-    /// éprouvés : entrée toujours active, ou une seule colonne visée (rouges).
+    /// Right-click on the worksheet's tab: the worksheet entry, grayed out without
+    /// a width, active with one, pushes all the columns of the worksheet. Proven
+    /// witnesses: an always active entry, or a single targeted column (red).
     #[test]
-    fn le_clic_droit_de_l_onglet_remet_toute_la_feuille() {
-        let mut banc = Banc::new();
-        banc.context.enable_accesskit();
-        let nom = banc.state.worksheets_of(banc.book)[0].1.clone();
-        banc.image(Vec::new());
-        banc.clic_bouton(&nom, egui::PointerButton::Secondary);
-        let menu = menu_lu(&banc);
-        assert!(!entree_menu(&menu, &tr!("action-reset-sheet-column-widths")).1);
+    fn the_tab_right_click_resets_the_whole_sheet() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let name = bench.state.worksheets_of(bench.book)[0].1.clone();
+        bench.image(Vec::new());
+        bench.click_button(&name, egui::PointerButton::Secondary);
+        let menu = read_menu(&bench);
+        assert!(!menu_entry(&menu, &tr!("action-reset-sheet-column-widths")).1);
 
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 1, 30.0);
-        banc.context.enable_accesskit();
-        banc.image(Vec::new());
-        banc.clic_bouton(&nom, egui::PointerButton::Secondary);
-        let menu = menu_lu(&banc);
-        assert!(entree_menu(&menu, &tr!("action-reset-sheet-column-widths")).1);
-        banc.clic_sur(&tr!("action-reset-sheet-column-widths"));
+        let mut bench = Bench::new();
+        resize(&mut bench, 1, 30.0);
+        bench.context.enable_accesskit();
+        bench.image(Vec::new());
+        bench.click_button(&name, egui::PointerButton::Secondary);
+        let menu = read_menu(&bench);
+        assert!(menu_entry(&menu, &tr!("action-reset-sheet-column-widths")).1);
+        bench.click_on(&tr!("action-reset-sheet-column-widths"));
         assert!(
-            banc.vues.contains(&Action::ResetColumnWidths {
-                columns: banc.columns.clone()
+            bench.seen.contains(&Action::ResetColumnWidths {
+                columns: bench.columns.clone()
             }),
             "{:?}",
-            banc.vues
+            bench.seen
         );
     }
 
-    // --- Sous-menu Move ▸ des lettres de colonne (#319) -----------------------
+    // --- Move ▸ submenu of the column letters (#319) -----------------------
 
-    /// Une entrée du menu peint, lue par accesskit : `(libellé, actif, centre)`.
-    type EntreeMenu = (String, bool, egui::Pos2);
+    /// An entry of the painted menu, read through accesskit: `(label, active, center)`.
+    type MenuEntry = (String, bool, egui::Pos2);
 
-    fn menu_lu(banc: &Banc) -> Vec<EntreeMenu> {
-        let update = banc
-            .dernier
+    fn read_menu(bench: &Bench) -> Vec<MenuEntry> {
+        let update = bench
+            .last_frame
             .as_ref()
             .unwrap()
             .platform_output
             .accesskit_update
             .as_ref()
-            .expect("accesskit activé par `ouvre_move`");
+            .expect("accesskit enabled by `open_move`");
         update
             .nodes
             .iter()
@@ -4834,20 +4790,20 @@ mod tests {
             .collect()
     }
 
-    fn entree_menu<'a>(menu: &'a [EntreeMenu], label: &str) -> &'a EntreeMenu {
-        // Un raccourci est écrit à la suite du libellé (« Copy Ctrl+C »).
+    fn menu_entry<'a>(menu: &'a [MenuEntry], label: &str) -> &'a MenuEntry {
+        // A shortcut is written after the label ("Copy Ctrl+C").
         menu.iter()
-            .find(|(texte, _, _)| {
-                texte == label
-                    || texte
+            .find(|(text, _, _)| {
+                text == label
+                    || text
                         .strip_prefix(label)
-                        .is_some_and(|reste| reste.starts_with(" Ctrl+"))
+                        .is_some_and(|rest| rest.starts_with(" Ctrl+"))
             })
-            .unwrap_or_else(|| panic!("entrée {label:?} absente de {menu:#?}"))
+            .unwrap_or_else(|| panic!("entry {label:?} missing from {menu:#?}"))
     }
 
-    /// Libellés des quatre entrées de `Move ▸`, dans l'ordre du menu.
-    fn entrees_move() -> [String; 4] {
+    /// Labels of the four entries of `Move ▸`, in the menu's order.
+    fn move_entries() -> [String; 4] {
         [
             tr!("action-move-columns-first"),
             tr!("action-move-columns-left"),
@@ -4856,87 +4812,91 @@ mod tests {
         ]
     }
 
-    /// Clic droit sur la lettre de la colonne visible `index`, puis ouverture de
-    /// `Move ▸` : rend le menu peint (principal et sous-menu).
-    fn ouvre_move(banc: &mut Banc, index: usize) -> Vec<EntreeMenu> {
-        banc.context.enable_accesskit();
-        banc.image(Vec::new());
-        banc.clic_bouton(&lettre_visible(banc, index), egui::PointerButton::Secondary);
-        banc.clic_sur(&tr!("column-move"));
-        menu_lu(banc)
+    /// Right-click on the letter of the visible column `index`, then opening of
+    /// `Move ▸`: returns the painted menu (main and submenu).
+    fn open_move(bench: &mut Bench, index: usize) -> Vec<MenuEntry> {
+        bench.context.enable_accesskit();
+        bench.image(Vec::new());
+        bench.click_button(
+            &visible_letter(bench, index),
+            egui::PointerButton::Secondary,
+        );
+        bench.click_on(&tr!("column-move"));
+        read_menu(bench)
     }
 
-    /// `Move ▸` entre le presse-papiers et `Type ▸`, avec ses quatre entrées
-    /// dans l'ordre du sous-menu.
+    /// `Move ▸` between the clipboard and `Type ▸`, with its four entries in the
+    /// submenu's order.
     #[test]
-    fn move_est_place_entre_le_presse_papiers_et_type_avec_quatre_entrees() {
-        let mut banc = Banc::new();
-        let menu = ouvre_move(&mut banc, 1);
-        let y = |label: String| entree_menu(&menu, &label).2.y;
+    fn move_sits_between_the_clipboard_and_type_with_four_entries() {
+        let mut bench = Bench::new();
+        let menu = open_move(&mut bench, 1);
+        let y = |label: String| menu_entry(&menu, &label).2.y;
         assert!(y(tr!("action-copy")) < y(tr!("column-move")), "{menu:#?}");
         assert!(y(tr!("action-paste")) < y(tr!("column-move")), "{menu:#?}");
         assert!(y(tr!("column-move")) < y(tr!("column-type")), "{menu:#?}");
         assert!(y(tr!("column-type")) < y(tr!("column-role")), "{menu:#?}");
-        let ys: Vec<f32> = entrees_move().into_iter().map(y).collect();
-        assert!(ys.windows(2).all(|paire| paire[0] < paire[1]), "{ys:?}");
+        let ys: Vec<f32> = move_entries().into_iter().map(y).collect();
+        assert!(ys.windows(2).all(|pair| pair[0] < pair[1]), "{ys:?}");
         assert_eq!(
             menu.iter()
-                .filter(|(texte, _, _)| texte.starts_with("Move"))
+                .filter(|(text, _, _)| text.starts_with("Move"))
                 .count(),
             5,
-            "Move et ses quatre entrées, rien de plus : {menu:#?}"
+            "Move and its four entries, nothing more: {menu:#?}"
         );
     }
 
-    /// Grisage : tout ou rien, par le même calcul que l'exécution.
+    /// Graying out: all or nothing, by the same computation as the execution.
     #[test]
-    fn les_entrees_de_move_sont_grisees_quand_le_geste_ne_changerait_rien() {
-        let actives = |menu: &[EntreeMenu]| -> Vec<bool> {
-            entrees_move()
+    fn move_entries_are_grayed_out_when_the_gesture_would_change_nothing() {
+        let actives = |menu: &[MenuEntry]| -> Vec<bool> {
+            move_entries()
                 .iter()
-                .map(|label| entree_menu(menu, label).1)
+                .map(|label| menu_entry(menu, label).1)
                 .collect()
         };
-        // A seule : déjà en tête, ni First ni Left.
-        let mut banc = Banc::new();
-        let menu = ouvre_move(&mut banc, 0);
-        assert_eq!(actives(&menu), [false, false, true, true], "A seule");
-        // B seule : tout est possible.
-        let mut banc = Banc::new();
-        let menu = ouvre_move(&mut banc, 1);
-        assert_eq!(actives(&menu), [true, true, true, true], "B seule");
-        // C seule : déjà en fin.
-        let mut banc = Banc::new();
-        let menu = ouvre_move(&mut banc, 2);
-        assert_eq!(actives(&menu), [true, true, false, false], "C seule");
-        // A et C (non contiguës) : A bloque Left, C bloque Right, tout ou rien.
-        let mut banc = Banc::new();
-        let (sheet, a, c) = (banc.sheet, banc.columns[0], banc.columns[2]);
-        banc.state.select_column(sheet, a);
-        banc.state.toggle_column_selection(sheet, c);
-        banc.image(Vec::new());
-        let menu = ouvre_move(&mut banc, 0);
-        assert_eq!(actives(&menu), [true, false, false, true], "A et C");
-        // Des lignes entières : toutes les colonnes, rien ne bouge.
-        let mut banc = Banc::new();
-        banc.context.enable_accesskit();
-        banc.state.select_row(banc.sheet, 1);
-        banc.image(Vec::new());
-        banc.clic_bouton("102", egui::PointerButton::Secondary);
-        banc.clic_sur(&tr!("column-move"));
-        let menu = menu_lu(&banc);
-        assert_eq!(actives(&menu), [false; 4], "lignes entières");
+        // A alone: already first, neither First nor Left.
+        let mut bench = Bench::new();
+        let menu = open_move(&mut bench, 0);
+        assert_eq!(actives(&menu), [false, false, true, true], "A alone");
+        // B alone: everything is possible.
+        let mut bench = Bench::new();
+        let menu = open_move(&mut bench, 1);
+        assert_eq!(actives(&menu), [true, true, true, true], "B alone");
+        // C alone: already last.
+        let mut bench = Bench::new();
+        let menu = open_move(&mut bench, 2);
+        assert_eq!(actives(&menu), [true, true, false, false], "C alone");
+        // A and C (non-contiguous): A blocks Left, C blocks Right, all or nothing.
+        let mut bench = Bench::new();
+        let (sheet, a, c) = (bench.sheet, bench.columns[0], bench.columns[2]);
+        bench.state.select_column(sheet, a);
+        bench.state.toggle_column_selection(sheet, c);
+        bench.image(Vec::new());
+        let menu = open_move(&mut bench, 0);
+        assert_eq!(actives(&menu), [true, false, false, true], "A and C");
+        // Whole rows: all the columns, nothing moves.
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        bench.state.select_row(bench.sheet, 1);
+        bench.image(Vec::new());
+        bench.click_button("102", egui::PointerButton::Secondary);
+        bench.click_on(&tr!("column-move"));
+        let menu = read_menu(&bench);
+        assert_eq!(actives(&menu), [false; 4], "whole rows");
     }
 
-    /// L'entrée active pousse `MoveColumns` sur la sélection, la grisée non.
+    /// The active entry pushes `MoveColumns` on the selection, the grayed one does not.
     #[test]
-    fn une_entree_de_move_pousse_l_action_sur_la_selection() {
-        let mut banc = Banc::new();
-        let (sheet, b) = (banc.sheet, banc.columns[1]);
-        ouvre_move(&mut banc, 1);
-        banc.clic_sur(&tr!("action-move-columns-left"));
+    fn a_move_entry_pushes_the_action_on_the_selection() {
+        let mut bench = Bench::new();
+        let (sheet, b) = (bench.sheet, bench.columns[1]);
+        open_move(&mut bench, 1);
+        bench.click_on(&tr!("action-move-columns-left"));
         assert_eq!(
-            banc.vues
+            bench
+                .seen
                 .iter()
                 .filter(|action| matches!(action, Action::MoveColumns { .. }))
                 .cloned()
@@ -4947,119 +4907,120 @@ mod tests {
                 to: ColumnMove::Left
             }]
         );
-        // Une entrée grisée ne pousse rien.
-        let mut banc = Banc::new();
-        ouvre_move(&mut banc, 0);
-        banc.clic_sur(&tr!("action-move-columns-left"));
+        // A grayed-out entry pushes nothing.
+        let mut bench = Bench::new();
+        open_move(&mut bench, 0);
+        bench.click_on(&tr!("action-move-columns-left"));
         assert!(
-            !banc
-                .vues
+            !bench
+                .seen
                 .iter()
                 .any(|action| matches!(action, Action::MoveColumns { .. })),
             "{:?}",
-            banc.vues
+            bench.seen
         );
     }
 
-    /// La largeur suit sa colonne : B (réglée) et A (réglée) échangent leur
-    /// place, chacune garde la sienne. Témoin : stockage par position.
+    /// The width follows its column: B (set) and A (set) swap places, each keeps
+    /// its own. Witness: storage by position.
     #[test]
-    fn la_largeur_suit_la_colonne_deplacee() {
-        let mut banc = Banc::new();
-        redimensionne(&mut banc, 0, 12.0);
-        redimensionne(&mut banc, 1, 30.0);
-        let avant = largeurs_peintes(&banc, 3);
-        assert!(!proches(avant[0], avant[1]), "deux largeurs distinctes");
+    fn the_width_follows_the_moved_column() {
+        let mut bench = Bench::new();
+        resize(&mut bench, 0, 12.0);
+        resize(&mut bench, 1, 30.0);
+        let before = painted_widths(&bench, 3);
+        assert!(!nearly_equal(before[0], before[1]), "two distinct widths");
 
-        ouvre_move(&mut banc, 1);
-        banc.clic_sur(&tr!("action-move-columns-left"));
-        for action in std::mem::take(&mut banc.vues) {
-            banc.state.dispatch(action);
+        open_move(&mut bench, 1);
+        bench.click_on(&tr!("action-move-columns-left"));
+        for action in std::mem::take(&mut bench.seen) {
+            bench.state.dispatch(action);
         }
-        laisse_passer(&mut banc);
+        let_frames_pass(&mut bench);
 
-        let ordre: Vec<NodeId> = banc
+        let order: Vec<NodeId> = bench
             .state
-            .visible_columns(banc.sheet)
+            .visible_columns(bench.sheet)
             .into_iter()
             .map(|(id, _, _)| id)
             .collect();
         assert_eq!(
-            ordre,
-            vec![banc.columns[1], banc.columns[0], banc.columns[2]]
+            order,
+            vec![bench.columns[1], bench.columns[0], bench.columns[2]]
         );
-        let apres = largeurs_peintes(&banc, 3);
+        let after = painted_widths(&bench, 3);
         assert!(
-            proches(apres[0], avant[1]),
-            "B en tête : {apres:?} / {avant:?}"
+            nearly_equal(after[0], before[1]),
+            "B first: {after:?} / {before:?}"
         );
         assert!(
-            proches(apres[1], avant[0]),
-            "A en second : {apres:?} / {avant:?}"
+            nearly_equal(after[1], before[0]),
+            "A second: {after:?} / {before:?}"
         );
-        assert!(proches(apres[2], avant[2]), "C : {apres:?} / {avant:?}");
+        assert!(
+            nearly_equal(after[2], before[2]),
+            "C: {after:?} / {before:?}"
+        );
     }
 
-    // --- Glisser de lignes vers un graphe (#166) ------------------------------
+    // --- Row drag to a graph (#166) ------------------------------------
 
-    fn charge_de_lignes_posee(banc: &Banc) -> bool {
-        egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(&banc.context)
+    fn row_payload_set(bench: &Bench) -> bool {
+        egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(&bench.context)
     }
 
-    /// Donne une valeur x' à la première colonne du banc.
-    fn pose_x_prime(banc: &mut Banc, text: &str) {
-        banc.state
-            .begin_header_edit(banc.columns[0], HeaderField::XPrime);
-        if let Some(edit) = banc.state.header_editing_mut() {
+    /// Gives an x' value to the first column of the bench.
+    fn set_x_prime(bench: &mut Bench, text: &str) {
+        bench
+            .state
+            .begin_header_edit(bench.columns[0], HeaderField::XPrime);
+        if let Some(edit) = bench.state.header_editing_mut() {
             edit.buffer = text.to_string();
         }
-        banc.state.commit_header_edit();
+        bench.state.commit_header_edit();
     }
 
-    /// Un point à 1 pt au-dessus du bord bas de la ligne `row`, au milieu de la
-    /// colonne `column`.
-    fn bord_bas(banc: &Banc, cell: &str) -> egui::Pos2 {
-        let centre = banc.centre_de(cell).expect("cellule peinte");
-        egui::pos2(centre.x, centre.y + ROW_HEIGHT / 2.0 - 1.0)
+    /// A point 1 pt above the bottom edge of row `row`, in the middle of column
+    /// `column`.
+    fn bottom_edge(bench: &Bench, cell: &str) -> egui::Pos2 {
+        let center = bench.center_of(cell).expect("cell painted");
+        egui::pos2(center.x, center.y + ROW_HEIGHT / 2.0 - 1.0)
     }
 
     #[test]
-    fn attraper_le_bord_d_un_bloc_de_lignes_emporte_toute_la_selection() {
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.state.select_row(banc.sheet, 0);
-        banc.state.extend_row_selection(banc.sheet, 1);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "202");
+    fn grabbing_the_edge_of_a_row_block_carries_the_whole_selection() {
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.state.select_row(bench.sheet, 0);
+        bench.state.extend_row_selection(bench.sheet, 1);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "202");
 
-        glisse_depuis(&mut banc, depart);
+        drag_from(&mut bench, start);
 
-        assert!(
-            charge_de_lignes_posee(&banc),
-            "le bord du bloc démarre le glisser"
-        );
-        assert!(!charge_posee(&banc), "ce n'est pas un glisser de colonnes");
-        let charge =
-            egui::DragAndDrop::payload::<RowDragPayload>(&banc.context).expect("charge posée");
+        assert!(row_payload_set(&bench), "the block edge starts the drag");
+        assert!(!payload_set(&bench), "this is not a column drag");
+        let payload =
+            egui::DragAndDrop::payload::<RowDragPayload>(&bench.context).expect("payload set");
         assert_eq!(
-            (charge.sheet, charge.rows.clone()),
-            (banc.sheet, vec![0, 1])
+            (payload.sheet, payload.rows.clone()),
+            (bench.sheet, vec![0, 1])
         );
     }
 
     #[test]
-    fn echap_annule_le_glisser_de_lignes() {
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.state.select_row(banc.sheet, 0);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "201");
-        glisse_depuis(&mut banc, depart);
-        assert!(charge_de_lignes_posee(&banc));
+    fn escape_cancels_the_row_drag() {
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.state.select_row(bench.sheet, 0);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "201");
+        drag_from(&mut bench, start);
+        assert!(row_payload_set(&bench));
 
-        banc.image(vec![egui::Event::Key {
+        bench.image(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
             pressed: true,
@@ -5067,124 +5028,125 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         }]);
 
-        assert!(!charge_de_lignes_posee(&banc));
+        assert!(!row_payload_set(&bench));
     }
 
     #[test]
-    fn sans_ligne_x_prime_ou_loin_du_bord_le_glisser_de_lignes_n_existe_pas() {
-        // Sans valeur x' : le geste n'est pas offert, même au bord.
-        let mut banc = Banc::new();
-        banc.state.select_row(banc.sheet, 0);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "201");
-        glisse_depuis(&mut banc, depart);
-        assert!(!charge_de_lignes_posee(&banc), "sans x'");
+    fn without_an_x_prime_row_or_far_from_the_edge_the_row_drag_does_not_exist() {
+        // Without an x' value: the gesture is not offered, even at the edge.
+        let mut bench = Bench::new();
+        bench.state.select_row(bench.sheet, 0);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "201");
+        drag_from(&mut bench, start);
+        assert!(!row_payload_set(&bench), "without x'");
 
-        // Avec x', mais au milieu de la ligne : c'est l'extension de sélection.
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.state.select_row(banc.sheet, 0);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let milieu = banc.centre_de("201").expect("cellule peinte");
-        glisse_depuis(&mut banc, milieu);
-        assert!(!charge_de_lignes_posee(&banc), "milieu de ligne");
+        // With x', but in the middle of the row: it is the selection extension.
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.state.select_row(bench.sheet, 0);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let middle = bench.center_of("201").expect("cell painted");
+        drag_from(&mut bench, middle);
+        assert!(!row_payload_set(&bench), "row middle");
     }
 
-    /// Un glisser rapide : le pointeur quitte la bande et traverse d'autres
-    /// cellules dès la première image de mouvement. L'extension de sélection au
-    /// survol ne doit pas défaire la sélection de lignes avant que le glisser
-    /// ne démarre.
+    /// A fast drag: the pointer leaves the band and crosses other cells from the
+    /// first movement frame. The selection extension on hover must not undo the row
+    /// selection before the drag starts.
     #[test]
-    fn un_glisser_de_lignes_rapide_garde_la_selection_et_emporte_les_lignes() {
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.state.select_row(banc.sheet, 0);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "201");
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    fn a_fast_row_drag_keeps_the_selection_and_carries_the_rows() {
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.state.select_row(bench.sheet, 0);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "201");
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        for pas in 1..=4 {
-            banc.image(vec![egui::Event::PointerMoved(
-                depart + egui::vec2(60.0 * pas as f32, 25.0 * pas as f32),
+        for step in 1..=4 {
+            bench.image(vec![egui::Event::PointerMoved(
+                start + egui::vec2(60.0 * step as f32, 25.0 * step as f32),
             )]);
         }
-        assert!(charge_de_lignes_posee(&banc), "le glisser rapide a démarré");
+        assert!(row_payload_set(&bench), "the fast drag started");
     }
 
-    /// Le geste complet de l'utilisateur : clic sur le numéro de ligne, puis
-    /// prise du bord bas de la ligne sélectionnée.
+    /// The user's complete gesture: click on the row number, then grab the bottom
+    /// edge of the selected row.
     #[test]
-    fn clic_sur_le_numero_de_ligne_puis_prise_du_bord() {
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.clic_sur("2");
-        assert!(banc.state.is_row_selected(banc.sheet, 1));
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "202");
-        glisse_depuis(&mut banc, depart);
-        assert!(charge_de_lignes_posee(&banc));
+    fn click_on_the_row_number_then_grab_the_edge() {
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.click_on("2");
+        assert!(bench.state.is_row_selected(bench.sheet, 1));
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "202");
+        drag_from(&mut bench, start);
+        assert!(row_payload_set(&bench));
     }
 
-    /// Pendant le glisser de lignes, survoler d'autres cellules ne remplace pas
-    /// la sélection de lignes par une sélection de cellules.
+    /// During the row drag, hovering other cells does not replace the row
+    /// selection by a cell selection.
     #[test]
-    fn le_glisser_de_lignes_garde_la_selection_de_lignes() {
-        let mut banc = Banc::new();
-        pose_x_prime(&mut banc, "5");
-        banc.state.select_row(banc.sheet, 1);
-        banc.image(Vec::new());
-        banc.image(Vec::new());
-        let depart = bord_bas(&banc, "202");
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    fn the_row_drag_keeps_the_row_selection() {
+        let mut bench = Bench::new();
+        set_x_prime(&mut bench, "5");
+        bench.state.select_row(bench.sheet, 1);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        let start = bottom_edge(&bench, "202");
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        let cible = banc.centre_de("303").expect("cellule peinte");
-        for pas in 1..=4 {
-            let t = pas as f32 / 4.0;
-            banc.image(vec![egui::Event::PointerMoved(depart.lerp(cible, t))]);
-            banc.image(Vec::new());
+        let target = bench.center_of("303").expect("cell painted");
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            bench.image(vec![egui::Event::PointerMoved(start.lerp(target, t))]);
+            bench.image(Vec::new());
         }
-        assert!(charge_de_lignes_posee(&banc));
+        assert!(row_payload_set(&bench));
         assert!(
-            banc.state.is_row_selected(banc.sheet, 1),
-            "la ligne reste sélectionnée pendant le glisser"
+            bench.state.is_row_selected(bench.sheet, 1),
+            "the row stays selected during the drag"
         );
     }
 
-    /// Même garantie pour un glisser de colonnes.
+    /// Same guarantee for a column drag.
     #[test]
-    fn le_glisser_de_colonnes_garde_la_selection_de_colonnes() {
-        let mut banc = Banc::new();
-        banc.state.select_column(banc.sheet, banc.columns[0]);
-        banc.image(Vec::new());
-        let y = banc.centre_de("101").expect("cellule peinte").y;
-        let depart = bord_droit(&banc, 0, y);
-        banc.image(vec![egui::Event::PointerMoved(depart)]);
-        banc.image(vec![egui::Event::PointerButton {
-            pos: depart,
+    fn the_column_drag_keeps_the_column_selection() {
+        let mut bench = Bench::new();
+        bench.state.select_column(bench.sheet, bench.columns[0]);
+        bench.image(Vec::new());
+        let y = bench.center_of("101").expect("cell painted").y;
+        let start = right_edge(&bench, 0, y);
+        bench.image(vec![egui::Event::PointerMoved(start)]);
+        bench.image(vec![egui::Event::PointerButton {
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        let cible = banc.centre_de("303").expect("cellule peinte");
-        for pas in 1..=4 {
-            let t = pas as f32 / 4.0;
-            banc.image(vec![egui::Event::PointerMoved(depart.lerp(cible, t))]);
-            banc.image(Vec::new());
+        let target = bench.center_of("303").expect("cell painted");
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            bench.image(vec![egui::Event::PointerMoved(start.lerp(target, t))]);
+            bench.image(Vec::new());
         }
-        assert!(charge_posee(&banc));
-        assert!(banc.state.is_column_selected(banc.sheet, banc.columns[0]));
+        assert!(payload_set(&bench));
+        assert!(bench
+            .state
+            .is_column_selected(bench.sheet, bench.columns[0]));
     }
 }

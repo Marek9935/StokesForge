@@ -1,33 +1,33 @@
-//! Barres d'outils (issues #60, #108, chantier #59).
+//! Toolbars (issues #60, #108, work package #59).
 //!
-//! # Des barres fixes
+//! # Fixed bars
 //!
-//! Le contenu des barres est figé dans le logiciel, et leur place aussi : la
-//! zone du haut, sous la barre de menu, rangée par rangée ([`ToolbarId::row`]).
-//! Pas de poignée, pas de glisser-déposer, pas de barre flottante, pas de
-//! barre verticale ni de logique de fenêtre étroite (#108). La zone est un
-//! `egui::Panel::top` : ni `egui::Window` brute (interdite,
-//! `aucune_fenetre_n_est_une_egui_window_brute`) ni `show_window_in_layer`.
+//! The content of the bars is fixed in the software, and so is their place:
+//! the top area, under the menu bar, row by row ([`ToolbarId::row`]).
+//! No handle, no drag and drop, no floating bar, no
+//! vertical bar and no narrow-window logic (#108). The area is an
+//! `egui::Panel::top`: neither a raw `egui::Window` (forbidden,
+//! `no_window_is_a_raw_egui_window`) nor `show_window_in_layer`.
 //!
-//! La disposition par défaut est écrite en dur : rangée 0 = `File`, `Tools` ;
-//! rangée 1 = `Text`, large, seule sur sa rangée. Le panneau Object Manager
-//! se commande par View et son en-tête (#100) : sa barre est supprimée (#109).
+//! The default layout is hard-coded: row 0 = `File`, `Tools`;
+//! row 1 = `Text`, wide, alone on its row. The Object Manager panel
+//! is controlled by View and its header (#100): its bar is removed (#109).
 //!
-//! # Ce qui est pur, ce qui est egui
+//! # What is pure, what is egui
 //!
-//! [`ToolbarLayout`] (la visibilité par barre) est pur et testé sans fenêtre.
-//! [`ToolbarState`] n'est que la glu qui peint. Une barre ne contient que des
-//! boutons ([`ToolbarButton`]) qui poussent les mêmes `Action` que les menus :
-//! jamais une seconde écriture. Les barres `Tools` et `Text` se peignent
-//! toujours : sans fenêtre à servir, leurs boutons sont grisés, avec une
-//! info-bulle qui dit comment les employer.
+//! [`ToolbarLayout`] (the visibility per bar) is pure and tested without a window.
+//! [`ToolbarState`] is only the glue that paints. A bar contains only
+//! buttons ([`ToolbarButton`]) that push the same `Action`s as the menus:
+//! never a second implementation. The `Tools` and `Text` bars are always
+//! painted: with no window to serve, their buttons are greyed out, with a
+//! tooltip that says how to use them.
 //!
-//! # Mémoire
+//! # Memory
 //!
-//! Seule la **visibilité** de chaque barre (menu View) vit dans les préférences
-//! de l'utilisateur ([`stokesforge_app_state::preferences`], champ `toolbars`), pas dans le
-//! `.stf`. La lecture tolère un fichier écrit par une autre version : barre
-//! inconnue ignorée, barre absente visible, ancien champ `placement` ignoré.
+//! Only the **visibility** of each bar (View menu) lives in the user's
+//! preferences ([`stokesforge_app_state::preferences`], field `toolbars`), not in the
+//! `.stf`. Reading tolerates a file written by another version: unknown
+//! bar ignored, missing bar visible, old `placement` field ignored.
 
 use eframe::egui::{self, Pos2, Rect};
 use serde::{Deserialize, Serialize};
@@ -45,19 +45,19 @@ use stokesforge_app_state::object_format::ObjectFormat;
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::text_format::TextFormat;
 
-/// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
-/// variante, son nom (`toolbar-*`) et son contenu dans [`bar_contents`].
+/// The existing bars — a closed enum: adding a bar means adding a
+/// variant, its name (`toolbar-*`) and its content in [`bar_contents`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolbarId {
     File,
-    /// La barre contextuelle (issue #62) : son contenu suit la fenêtre au
-    /// premier plan. Toujours affichée (#93) ; elle porte aussi le format de
-    /// l'objet graphique sélectionné (issue #64), fusionné avec elle.
+    /// The contextual bar (issue #62): its content follows the foreground
+    /// window. Always shown (#93); it also carries the format of the
+    /// selected graphical object (issue #64), merged into it.
     Tools,
-    /// Le format du texte (issue #63) : propre au graphe au premier plan.
+    /// The text format (issue #63): specific to the foreground graph.
     Text,
-    /// Annuler / Rétablir (issue #238).
+    /// Undo / Redo (issue #238).
     Edit,
 }
 
@@ -69,7 +69,7 @@ impl ToolbarId {
         ToolbarId::Text,
     ];
 
-    /// Nom de la barre : entrée du menu View.
+    /// Name of the bar: entry of the View menu.
     pub fn label(self) -> String {
         match self {
             ToolbarId::File => tr!("toolbar-file"),
@@ -79,7 +79,7 @@ impl ToolbarId {
         }
     }
 
-    /// Info-bulle de l'entrée du menu View.
+    /// Tooltip of the View menu entry.
     pub fn hint(self) -> String {
         match self {
             ToolbarId::File => tr!("toolbar-file", "hint"),
@@ -91,8 +91,8 @@ impl ToolbarId {
 }
 
 impl ToolbarId {
-    /// Rangée fixe de la barre dans la zone du haut (0 = la plus haute). Les
-    /// barres de format sont larges : `Text` a sa propre rangée.
+    /// Fixed row of the bar in the top area (0 = the highest). The
+    /// format bars are wide: `Text` has its own row.
     pub const fn row(self) -> usize {
         match self {
             ToolbarId::Text => 1,
@@ -101,16 +101,16 @@ impl ToolbarId {
     }
 }
 
-/// Une barre et sa visibilité. Un ancien champ `placement` (avant #108) est
-/// ignoré à la lecture.
+/// A bar and its visibility. An old `placement` field (before #108) is
+/// ignored on reading.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
     pub id: ToolbarId,
     pub visible: bool,
 }
 
-/// Visibilité de toutes les barres. Leur place est fixe ([`ToolbarId::row`],
-/// ordre de [`ToolbarId::ALL`]).
+/// Visibility of all the bars. Their place is fixed ([`ToolbarId::row`],
+/// order of [`ToolbarId::ALL`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolbarLayout {
     entries: Vec<Entry>,
@@ -142,8 +142,8 @@ impl ToolbarLayout {
         }
     }
 
-    /// Les barres visibles, rangée par rangée, dans l'ordre de
-    /// [`ToolbarId::ALL`]. Une rangée sans barre visible n'apparaît pas.
+    /// The visible bars, row by row, in the order of
+    /// [`ToolbarId::ALL`]. A row with no visible bar does not appear.
     pub fn rows(&self) -> Vec<Vec<ToolbarId>> {
         let mut rows: std::collections::BTreeMap<usize, Vec<ToolbarId>> = Default::default();
         for id in ToolbarId::ALL {
@@ -154,8 +154,8 @@ impl ToolbarLayout {
         rows.into_values().collect()
     }
 
-    /// Lit une disposition écrite par cette version ou une autre : ce qui ne se
-    /// lit pas est ignoré, toute barre manquante revient visible.
+    /// Reads a layout written by this version or another: what cannot be
+    /// read is ignored, any missing bar comes back visible.
     pub fn from_json(value: &serde_json::Value) -> Self {
         let mut layout = ToolbarLayout {
             entries: Vec::new(),
@@ -184,16 +184,16 @@ impl ToolbarLayout {
     }
 }
 
-/// Un bouton de barre : icône (composant commun), info-bulle obligatoire,
-/// raccourci rappelé. Il rend `true` au clic ; l'appelant pousse l'`Action`.
+/// A bar button: icon (common component), mandatory tooltip,
+/// shortcut recalled. It returns `true` on click; the caller pushes the `Action`.
 pub struct ToolbarButton {
     pub icon: Icon,
     pub role: IconRole,
-    /// Le libellé de l'action (`action-*`).
+    /// The label of the action (`action-*`).
     pub label: String,
-    /// Le `.hint` de l'action, ou le `.disabled` quand elle est grisée.
+    /// The `.hint` of the action, or the `.disabled` when it is greyed out.
     pub hint: Option<String>,
-    /// Le raccourci tel que les menus l'écrivent.
+    /// The shortcut as the menus write it.
     pub shortcut: Option<String>,
     pub enabled: bool,
 }
@@ -217,29 +217,29 @@ impl ToolbarButton {
     }
 }
 
-/// Ce qu'un bouton demande à l'application. Les gestes qui ouvrent un
-/// sélecteur de fichier ou un assistant, ou qui règlent la vue d'un graphe,
-/// ne sont pas des `Action` : l'application les exécute par les mêmes méthodes
-/// que les entrées de menu.
+/// What a button asks of the application. The gestures that open a
+/// file picker or a wizard, or that adjust a graph's view,
+/// are not `Action`s: the application runs them through the same methods
+/// as the menu entries.
 #[derive(Debug, Clone)]
 pub enum ToolbarRequest {
-    /// Une action du modèle ou de l'état, la même que celle du menu.
+    /// A model or state action, the same as the menu's.
     Action(Box<Action>),
     Import,
     Open,
     SaveAs,
     ExportGraph,
-    /// Change l'outil du graphe au premier plan.
+    /// Changes the tool of the foreground graph.
     SetGraphTool(GraphTool),
-    /// Réinitialise le zoom du graphe au premier plan.
+    /// Resets the zoom of the foreground graph.
     ResetZoom,
-    /// Met en forme le texte visé du graphe au premier plan.
+    /// Formats the targeted text of the foreground graph.
     FormatText(TextFormat),
-    /// Règle l'objet graphique sélectionné du graphe au premier plan.
+    /// Adjusts the selected graphical object of the foreground graph.
     FormatObject(ObjectFormat),
 }
 
-/// Les raccourcis tels que les menus les écrivent (rappel dans l'info-bulle).
+/// The shortcuts as the menus write them (recalled in the tooltip).
 #[derive(Debug, Clone, Default)]
 pub struct ShortcutTexts {
     pub new_project: String,
@@ -252,51 +252,51 @@ pub struct ShortcutTexts {
     pub redo: String,
 }
 
-/// Sur quoi la barre de format agit (issue #63).
+/// What the format bar acts on (issue #63).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FormatTarget {
-    /// Rien n'est sélectionné ni en édition : les boutons sont grisés.
+    /// Nothing is selected or being edited: the buttons are greyed out.
     #[default]
     None,
-    /// Un champ est en édition sur place : le surlignage, ou le curseur.
+    /// A field is being edited in place: the highlight, or the cursor.
     Field,
-    /// Un texte est sélectionné sans être édité : tout le texte.
+    /// A text is selected without being edited: the whole text.
     Block,
-    /// Un titre, un titre d'axe ou la légende est sélectionné (issue #77) :
-    /// la police et le corps de la zone, rien dans son contenu.
+    /// A title, an axis title or the legend is selected (issue #77):
+    /// the font and size of the area, nothing in its content.
     Zone,
 }
 
-/// Les réglages de l'objet graphique sélectionné, tels que la barre de format
-/// d'objet les montre (issue #64).
+/// The settings of the selected graphical object, as the object format bar
+/// shows them (issue #64).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectFormatState {
-    /// Vrai pour un rectangle ou une ellipse : seuls ceux-là se remplissent.
+    /// True for a rectangle or an ellipse: only those can be filled.
     pub closed: bool,
     pub line_color: String,
     pub fill_color: String,
     pub line_width: f64,
 }
 
-/// Format lu sur la sélection, jamais la dernière valeur choisie (#97).
-/// Une valeur absente laisse le libellé neutre pour un format non uniforme.
+/// Format read from the selection, never the last value chosen (#97).
+/// An absent value leaves the label neutral for a non-uniform format.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TextFormatState {
-    /// Identité de la zone, pour borner le brouillon du sélecteur pendant une saisie.
+    /// Identity of the area, to bound the picker's draft during an input.
     pub source: Option<egui::Id>,
     pub family: Option<String>,
     pub size: Option<f64>,
-    /// `None` = couleur locale/mixte ; chaîne vide = automatique.
+    /// `None` = local/mixed color; empty string = automatic.
     pub color: Option<String>,
     pub auto_family: bool,
     pub auto_size: bool,
-    /// Alignement de la boîte visée (#244) ; `None` sans cible. Allume le
-    /// bouton correspondant.
+    /// Alignment of the targeted box (#244); `None` with no target. Lights up the
+    /// matching button.
     pub align: Option<TextAlign>,
 }
 
 impl TextFormatState {
-    /// Un passage réglé dans le markup ne se résume pas au format de la zone.
+    /// A passage set in the markup does not boil down to the format of the area.
     pub fn with_markup(mut self, text: &str) -> Self {
         let overrides = stokesforge_render_egui::formula::local_text_overrides(text);
         if overrides.font {
@@ -314,10 +314,10 @@ impl TextFormatState {
     }
 }
 
-/// Ce que la barre contextuelle montre : décidé par la fenêtre au premier plan.
+/// What the contextual bar shows: decided by the foreground window.
 #[derive(Debug, Clone, Default)]
 pub enum ToolsContext {
-    /// Matrice, note, ou aucune fenêtre : les outils du graphe, grisés.
+    /// Matrix, note, or no window: the graph tools, greyed out.
     #[default]
     None,
     Graph {
@@ -326,38 +326,38 @@ pub enum ToolsContext {
     },
     Book {
         book: NodeId,
-        /// La feuille affichée, si le classeur en a une.
+        /// The displayed sheet, if the workbook has one.
         sheet: Option<NodeId>,
-        /// Les colonnes sélectionnées de cette feuille.
+        /// The selected columns of this sheet.
         columns: Vec<NodeId>,
     },
 }
 
-/// Ce que les barres lisent de l'application, calculé une fois par image.
+/// What the bars read from the application, computed once per frame.
 #[derive(Debug, Clone, Default)]
 pub struct BarEnv {
-    /// Le dossier racine du projet : destination d'*Add Folder* (#326).
+    /// The root folder of the project: destination of *Add Folder* (#326).
     pub root: Option<NodeId>,
-    /// Même garde que File > New Project et Ctrl+N.
-    /// Libellé d'historique (« Undo Rename ») ; `None` = pile vide (grisé).
+    /// Same guard as File > New Project and Ctrl+N.
+    /// History label ("Undo Rename"); `None` = empty stack (greyed out).
     pub undo_label: Option<String>,
     pub redo_label: Option<String>,
     pub new_project_enabled: bool,
-    /// Un script s'exécute : *Save* est grisé (#315).
+    /// A script is running: *Save* is greyed out (#315).
     pub save_blocked: bool,
-    /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
-    /// Graph est absent).
+    /// A graph is in the foreground (otherwise *Export* is greyed out, as the
+    /// Graph menu is absent).
     pub export_enabled: bool,
     pub shortcuts: ShortcutTexts,
     pub tools: ToolsContext,
     pub text_format: FormatTarget,
     pub text_style: TextFormatState,
-    /// L'objet graphique sélectionné, s'il y en a un (issue #64).
+    /// The selected graphical object, if there is one (issue #64).
     pub object_format: Option<ObjectFormatState>,
 }
 
-/// Le contenu d'une barre. Chaque bouton répond à un geste que les menus
-/// offrent déjà, avec le même libellé (`action-*`).
+/// The content of a bar. Each button answers a gesture that the menus
+/// already offer, with the same label (`action-*`).
 pub fn bar_contents(
     ui: &mut egui::Ui,
     id: ToolbarId,
@@ -537,7 +537,7 @@ pub fn bar_contents(
     }
 }
 
-/// Bouton d'outil (pour les barres sans raccourci à rappeler).
+/// Tool button (for bars with no shortcut to recall).
 fn tool_button(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -560,8 +560,8 @@ fn tool_button(
         .clicked()
 }
 
-/// La barre contextuelle : chaque bouton répond à un geste que les menus ou
-/// le menu contextuel offrent déjà.
+/// The contextual bar: each button answers a gesture that the menus or
+/// the context menu already offer.
 fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
     match &env.tools {
         ToolsContext::None => graph_tools(ui, None, None, requests),
@@ -629,9 +629,9 @@ fn tools_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarReq
     object_format_contents(ui, env, requests);
 }
 
-/// Les outils du graphe. Sans graphe au premier plan (`graph` vide), ils
-/// restent affichés mais grisés, avec l'info-bulle qui dit comment les
-/// employer (#93) : la barre ne change pas de forme quand on change de fenêtre.
+/// The graph tools. With no graph in the foreground (`graph` empty), they
+/// stay shown but greyed out, with the tooltip that says how to
+/// use them (#93): the bar does not change shape when the window changes.
 fn graph_tools(
     ui: &mut egui::Ui,
     graph: Option<NodeId>,
@@ -672,7 +672,7 @@ fn graph_tools(
         tr!("tool-text"),
         tr!("tool-text", "hint"),
     );
-    // Objets graphiques (issue #76) : un outil par sorte, comme
+    // Graphical objects (issue #76): one tool per kind, like
     // Origin.
     for (kind, icon, label, hint) in [
         (
@@ -703,7 +703,7 @@ fn graph_tools(
         tool_entry(ui, kind, icon, label, hint);
     }
     ui.separator();
-    // Le groupe zoom : l'outil et sa remise à zéro côte à côte.
+    // The zoom group: the tool and its reset side by side.
     tool_entry(
         ui,
         GraphTool::ZoomBox,
@@ -740,9 +740,9 @@ fn graph_tools(
     }
 }
 
-/// Le format d'objet, à la fin de la barre « Outils » (#93) : couleur de trait, couleur de remplissage
-/// (l'opacité se règle dans le sélecteur, `#RRGGBBAA`), épaisseur. Grisée tant
-/// qu'aucun objet n'est sélectionné.
+/// The object format, at the end of the "Tools" bar (#93): stroke color, fill color
+/// (opacity is set in the picker, `#RRGGBBAA`), thickness. Greyed out while
+/// no object is selected.
 fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
     let state = env.object_format.clone();
     let enabled = state.is_some();
@@ -775,7 +775,7 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
             requests: Vec::new(),
         };
 
-        // Trait.
+        // Stroke.
         let mut line_color = state.line_color.clone();
         ui.scope(|ui| {
             crate::color_picker::color_icon_button(
@@ -800,7 +800,7 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
             )));
         }
 
-        // Remplissage : grisé pour une ligne ou une flèche.
+        // Fill: greyed out for a line or an arrow.
         let mut fill_color = state.fill_color.clone();
         ui.add_enabled_ui(state.closed || !enabled, |ui| {
             ui.scope(|ui| {
@@ -830,8 +830,8 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
             requests.push(ToolbarRequest::Action(Box::new(request.into_action())));
         }
 
-        // Épaisseur : un champ numérique éditable avec ses valeurs courantes
-        // (choisir 3 ou taper 2,5), S-N9.
+        // Thickness: an editable numeric field with its current values
+        // (pick 3 or type 2.5), S-N9.
         let mut width = state.line_width;
         let field = number_field(
             ui,
@@ -850,20 +850,20 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
     });
 }
 
-/// Où la barre de format s'est peinte à l'image précédente : un clic dessus ne
-/// ferme pas l'éditeur sur place, sinon le bouton n'agirait jamais.
+/// Where the format bar was painted on the previous frame: a click on it does not
+/// close the in-place editor, otherwise the button would never act.
 fn format_bar_id() -> egui::Id {
     egui::Id::new("stokesforge_text_format_bar_rect")
 }
 
-/// Le pointeur est-il sur la barre de format ? (cadre de l'image précédente)
+/// Is the pointer on the format bar? (frame rectangle of the previous frame)
 pub fn over_format_bar(ctx: &egui::Context, pos: Pos2) -> bool {
     ctx.data(|data| data.get_temp::<Rect>(format_bar_id()))
         .is_some_and(|rect| rect.contains(pos))
 }
 
-/// Les trois boutons d'alignement du texte (#244), partagés avec la barre de
-/// l'éditeur sur place (#246). `current` allume celui de la boîte visée.
+/// The three text alignment buttons (#244), shared with the bar of
+/// the in-place editor (#246). `current` lights up the one of the targeted box.
 pub(crate) fn align_buttons(
     ui: &mut egui::Ui,
     current: Option<TextAlign>,
@@ -899,9 +899,9 @@ pub(crate) fn align_buttons(
     }
 }
 
-/// Pourquoi les boutons de la barre de format sont grisés : sans graphe au
-/// premier plan, le même conseil que la barre « Outils » (#108) ; avec un
-/// graphe, ce qu'il faut sélectionner.
+/// Why the format bar buttons are greyed out: with no graph in the
+/// foreground, the same advice as the "Tools" bar (#108); with a
+/// graph, what has to be selected.
 fn text_disabled_hint(env: &BarEnv) -> String {
     if matches!(env.tools, ToolsContext::Graph { .. }) {
         tr!("format-disabled")
@@ -910,7 +910,7 @@ fn text_disabled_hint(env: &BarEnv) -> String {
     }
 }
 
-/// La barre de format du texte : polices, corps, couleur, puis les balises.
+/// The text format bar: fonts, size, color, then the tags.
 fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
     let enabled = env.text_format != FormatTarget::None;
     let ctx = ui.ctx().clone();
@@ -928,7 +928,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             response.on_hover_text(tooltip)
         };
 
-        // Police.
+        // Font.
         let rich = matches!(env.text_format, FormatTarget::Field | FormatTarget::Block);
         let chosen = egui::ComboBox::from_id_salt("stokesforge_format_font")
             .selected_text(
@@ -977,15 +977,15 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
         }
 
-        // Corps : liste éditable avec « Auto » (choisir 12 ou taper 15, S-N9 ; vider
-        // le champ ou taper `auto` rend le corps automatique, S-C4).
+        // Size: editable list with "Auto" (pick 12 or type 15, S-N9; emptying
+        // the field or typing `auto` makes the size automatic, S-C4).
         let mut size = if env.text_style.auto_size {
             None
         } else {
             env.text_style.size
         };
         let hint = if env.text_style.auto_size {
-            // Le corps réellement appliqué reste lisible : « Auto (12) ».
+            // The size actually applied stays readable: "Auto (12)".
             match env.text_style.size {
                 Some(effective) => format!(
                     "{} ({})",
@@ -1019,9 +1019,9 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             }));
         }
 
-        // #99 : la couleur vient de la zone sélectionnée. Seul un champ en
-        // édition garde un brouillon jusqu'à la fin du geste : le poser à
-        // chaque caractère empilerait des balises Typst dans le passage.
+        // #99: the color comes from the selected area. Only a field being
+        // edited keeps a draft until the end of the gesture: setting it on
+        // every character would stack Typst tags in the passage.
         let draft_id = egui::Id::new("stokesforge_text_color_picker_draft");
         let mut color = env.text_style.color.clone().unwrap_or_default();
         if env.text_format == FormatTarget::Field {
@@ -1044,8 +1044,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             user,
             requests: Vec::new(),
         };
-        // Aussi sur une zone sélectionnée (titre, axe, légende) : sa couleur
-        // entière, pas un passage (#90).
+        // Also on a selected area (title, axis, legend): its whole color,
+        // not a passage (#90).
         let chosen = ui.add_enabled_ui(enabled, |ui| {
             crate::color_picker::color_icon_button(
                 ui,
@@ -1114,7 +1114,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 tr!("format-math", "hint"),
             ),
         ] {
-            // Gras et italique agissent aussi sur tout un titre sélectionné (#243).
+            // Bold and italic also act on a whole selected title (#243).
             let usable = rich
                 || (env.text_format == FormatTarget::Zone
                     && matches!(format, TextFormat::Bold | TextFormat::Italic));
@@ -1130,7 +1130,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
     });
 }
 
-/// La visibilité des barres, et le dernier changement à enregistrer.
+/// The visibility of the bars, and the last change to save.
 #[derive(Debug, Default)]
 pub struct ToolbarState {
     layout: ToolbarLayout,
@@ -1156,14 +1156,14 @@ impl ToolbarState {
         }
     }
 
-    /// Vrai une fois après chaque changement de visibilité : l'appelant
-    /// l'enregistre dans les préférences.
+    /// True once after each visibility change: the caller
+    /// saves it in the preferences.
     pub fn take_changed(&mut self) -> bool {
         std::mem::take(&mut self.changed)
     }
 
-    /// Peint la zone du haut (panneau sous la barre de menu) : une ligne par
-    /// rangée de [`ToolbarLayout::rows`].
+    /// Paints the top area (panel under the menu bar): one line per
+    /// row of [`ToolbarLayout::rows`].
     pub fn show(&mut self, ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<ToolbarRequest>) {
         let ctx = ui.ctx().clone();
         let rows = self.layout.rows();
@@ -1197,7 +1197,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn par_defaut_toutes_les_barres_sont_visibles_a_leur_place_fixe() {
+    fn by_default_all_the_bars_are_visible_in_their_fixed_place() {
         let layout = ToolbarLayout::default();
         assert_eq!(
             layout.rows(),
@@ -1208,10 +1208,10 @@ mod tests {
         );
     }
 
-    /// Sans graphe au premier plan, la barre `Text` est peinte (cadre mémorisé
-    /// pour `over_format_bar`) et ne pousse aucune demande : boutons grisés.
+    /// With no graph in the foreground, the `Text` bar is painted (frame remembered
+    /// for `over_format_bar`) and pushes no request: buttons greyed out.
     #[test]
-    fn la_barre_du_texte_se_peint_sans_graphe_boutons_grises() {
+    fn the_text_bar_paints_without_a_graph_with_buttons_greyed_out() {
         let ctx = egui::Context::default();
         egui_extras::install_image_loaders(&ctx);
         let mut state = ToolbarState::default();
@@ -1229,16 +1229,16 @@ mod tests {
         }
         let rect = ctx
             .data(|data| data.get_temp::<Rect>(format_bar_id()))
-            .expect("la barre Text ne s'est pas peinte");
+            .expect("the Text bar was not painted");
         assert!(rect.width() > 0.0 && rect.height() > 0.0);
         assert!(over_format_bar(&ctx, rect.center()));
         assert!(requests.is_empty());
         assert_eq!(BarEnv::default().text_format, FormatTarget::None);
     }
 
-    /// Clique, à chaque pas le long de la barre *File*, et rend ce que les
-    /// boutons demandent : le bouton d'un dossier se trouve par ce qu'il pousse.
-    fn clics_le_long_de_la_barre_file(env: &BarEnv) -> Vec<ToolbarRequest> {
+    /// Clicks, at each step along the *File* bar, and returns what the
+    /// buttons ask: a folder's button is found by what it pushes.
+    fn clicks_along_the_file_bar(env: &BarEnv) -> Vec<ToolbarRequest> {
         let ctx = egui::Context::default();
         egui_extras::install_image_loaders(&ctx);
         let mut requests = Vec::new();
@@ -1276,15 +1276,15 @@ mod tests {
         requests
     }
 
-    /// #326 : le bouton Add Folder pousse `AddFolder` sur la racine du projet.
+    /// #326: the Add Folder button pushes `AddFolder` on the project root.
     #[test]
-    fn le_bouton_add_folder_vise_la_racine() {
+    fn the_add_folder_button_targets_the_root() {
         let root = NodeId::from_raw(1);
         let env = BarEnv {
             root: Some(root),
             ..Default::default()
         };
-        let dossiers: Vec<_> = clics_le_long_de_la_barre_file(&env)
+        let folder_actions: Vec<_> = clicks_along_the_file_bar(&env)
             .into_iter()
             .filter_map(|request| match request {
                 ToolbarRequest::Action(action) => Some(*action),
@@ -1292,17 +1292,17 @@ mod tests {
             })
             .filter(|action| matches!(action, Action::AddFolder { .. }))
             .collect();
-        assert!(!dossiers.is_empty(), "le bouton existe");
-        assert!(dossiers
+        assert!(!folder_actions.is_empty(), "the button exists");
+        assert!(folder_actions
             .iter()
             .all(|action| *action == Action::AddFolder { parent: root }));
     }
 
-    /// Témoin : sans racine connue, le bouton est grisé et ne pousse rien.
+    /// Witness: with no known root, the button is greyed out and pushes nothing.
     #[test]
-    fn le_bouton_add_folder_est_grise_sans_racine() {
+    fn the_add_folder_button_is_greyed_out_without_a_root() {
         let env = BarEnv::default();
-        assert!(clics_le_long_de_la_barre_file(&env)
+        assert!(clicks_along_the_file_bar(&env)
             .into_iter()
             .all(|request| !matches!(
                 request,
@@ -1311,9 +1311,9 @@ mod tests {
     }
 
     #[test]
-    fn une_ancienne_disposition_avec_la_barre_objet_se_relit_sans_elle() {
-        // Les préférences d'avant la fusion (#93) portent une entrée « object » :
-        // elle est ignorée, les autres barres gardent leur visibilité.
+    fn an_old_layout_with_the_object_bar_reads_back_without_it() {
+        // Preferences from before the merge (#93) carry an "object" entry:
+        // it is ignored, the other bars keep their visibility.
         let value = serde_json::json!({ "entries": [
             { "id": "object", "visible": false },
             { "id": "tools", "visible": true },
@@ -1323,10 +1323,10 @@ mod tests {
         assert_eq!(layout.entries.len(), ToolbarId::ALL.len());
     }
 
-    /// #108 : un `preferences.json` d'avant, qui porte `placement` (rangé ou
-    /// flottant), se lit sans erreur ; le champ est ignoré, la visibilité gardée.
+    /// #108: an earlier `preferences.json`, which carries `placement` (docked or
+    /// floating), reads without error; the field is ignored, the visibility kept.
     #[test]
-    fn l_ancien_champ_placement_est_ignore_la_visibilite_est_gardee() {
+    fn the_old_placement_field_is_ignored_and_the_visibility_kept() {
         let value = serde_json::json!({ "entries": [
             { "id": "file", "visible": false,
               "placement": { "kind": "floating", "x": 120.0, "y": 80.0 } },
@@ -1342,7 +1342,7 @@ mod tests {
         assert!(layout.is_visible(ToolbarId::Tools));
         assert_eq!(layout.entries.len(), ToolbarId::ALL.len());
         assert!(!layout.to_json().to_string().contains("object_manager"));
-        // La place reste celle du logiciel, quoi que dise le fichier.
+        // The place stays the software's, whatever the file says.
         assert_eq!(
             layout.rows(),
             vec![
@@ -1354,7 +1354,7 @@ mod tests {
     }
 
     #[test]
-    fn une_barre_masquee_ne_se_peint_nulle_part() {
+    fn a_hidden_bar_is_painted_nowhere() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::File, false);
@@ -1364,18 +1364,18 @@ mod tests {
     }
 
     #[test]
-    fn la_visibilite_survit_a_l_ecriture() {
+    fn the_visibility_survives_writing() {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::File, false);
         assert_eq!(ToolbarLayout::from_json(&layout.to_json()), layout);
     }
 
     #[test]
-    fn une_disposition_illisible_ou_etrangere_retombe_sur_le_defaut() {
+    fn an_unreadable_or_foreign_layout_falls_back_to_the_default() {
         for value in [
             serde_json::Value::Null,
-            serde_json::json!("n'importe quoi"),
-            serde_json::json!({ "entries": [{ "id": "barre_future", "visible": true }] }),
+            serde_json::json!("anything"),
+            serde_json::json!({ "entries": [{ "id": "future_bar", "visible": true }] }),
             serde_json::json!({ "entries": 3 }),
         ] {
             assert_eq!(ToolbarLayout::from_json(&value), ToolbarLayout::default());
@@ -1383,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn changer_la_visibilite_signale_un_enregistrement() {
+    fn changing_the_visibility_signals_a_save() {
         let mut state = ToolbarState::default();
         state.set_visible(ToolbarId::Text, true);
         assert!(!state.take_changed());

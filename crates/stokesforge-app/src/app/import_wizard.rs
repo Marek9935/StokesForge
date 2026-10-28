@@ -1,13 +1,14 @@
-//! Assistant d'import (#2, #3–#8) : les six étapes (fichiers, format, en-têtes,
-//! colonnes, métadonnées, destination), l'aperçu en lignes colorées par rôle
-//! et les libellés des choix. Un seul point d'entrée pour `app.rs` :
-//! [`import_window`], un `modal_dialog_with` (jamais d'`egui::Window` brute).
+//! Import wizard (#2, #3–#8): the six steps (files, format, headers,
+//! columns, metadata, destination), the preview in lines colored by role and
+//! the labels of the choices. A single entry point for `app.rs`:
+//! [`import_window`], a `modal_dialog_with` (never a raw `egui::Window`).
 //!
-//! Sorti d'`app.rs` tel quel (#118), à une retouche près : le libellé d'une
-//! fin des données (`data_end_label`) est une table à part, testable et
-//! gardée par `tests/libelles.rs`, au lieu d'une fermeture de `data_end_row`.
-//! Les tests sont en fin de fichier : ils peignent l'assistant sans fenêtre et
-//! lisent les textes peints (contenu, couleur, position), jamais le source.
+//! Moved out of `app.rs` as is (#118), with one touch-up: the label of a data
+//! end (`data_end_label`) is a separate table, testable and guarded by
+//! `tests/labels.rs`, instead of a closure of `data_end_row`.
+//! The tests are at the end of the file: they paint the wizard without a
+//! window and read the painted texts (content, color, position), never the
+//! source.
 
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
@@ -30,8 +31,8 @@ use super::dialogs::{
 use super::form::{choice, choice_by, form, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 
-/// Libellé d'une option « Fin des données » : celui de la variante, quel que
-/// soit le texte ou le nombre qu'elle porte.
+/// Label of a "Data end" option: that of the variant, whatever text or number
+/// it carries.
 fn data_end_label(end: &stokesforge_import::DataEnd) -> String {
     use stokesforge_import::DataEnd;
     match end {
@@ -44,10 +45,10 @@ fn data_end_label(end: &stokesforge_import::DataEnd) -> String {
     }
 }
 
-/// Réglage « Fin des données » de la recette d'import (issue #4) : coupure
-/// automatique par défaut, désactivable. Le texte ou le nombre associé à
-/// l'option choisie reste dans la recette tant qu'on en change. Sans libellé :
-/// le titre de section « Data end » le porte (#227).
+/// "Data end" setting of the import recipe (issue #4): automatic cut by
+/// default, can be turned off. The text or number tied to the chosen option
+/// stays in the recipe while switching. No label: the "Data end" section title
+/// carries it (#227).
 fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
     use stokesforge_import::DataEnd;
     ui.horizontal(|ui| {
@@ -86,13 +87,13 @@ fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
     });
 }
 
-/// Deux options de même variante, quel que soit ce qu'elles portent : en
-/// reprendre une garde le texte ou le nombre déjà saisi.
+/// Two options of the same variant, whatever they carry: choosing one again
+/// keeps the text or number already typed.
 fn same_variant<T>(a: &T, b: &T) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
-/// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
+/// Label shown for a [`Separator`] in the import window.
 fn separator_label(separator: &Separator) -> String {
     match separator {
         Separator::Comma => tr!("import-option-comma"),
@@ -105,10 +106,10 @@ fn separator_label(separator: &Separator) -> String {
     }
 }
 
-/// Libellé d'un encodage forcé.
+/// Label of a forced encoding.
 fn encoding_label(encoding: stokesforge_import::Encoding) -> String {
     use stokesforge_import::Encoding;
-    // Les noms d'encodage sont des noms techniques : seul « Auto » se traduit.
+    // Encoding names are technical names: only "Auto" is translated.
     match encoding {
         Encoding::Auto => tr!("common-auto"),
         Encoding::Utf8 => "UTF-8".to_string(),
@@ -119,7 +120,7 @@ fn encoding_label(encoding: stokesforge_import::Encoding) -> String {
     }
 }
 
-/// Libellé d'un séparateur de milliers.
+/// Label of a thousands separator.
 fn thousands_label(thousands: Option<char>) -> String {
     match thousands {
         None => tr!("import-option-none"),
@@ -131,7 +132,7 @@ fn thousands_label(thousands: Option<char>) -> String {
     }
 }
 
-/// Libellé affiché pour un [`DecimalStyle`] dans la fenêtre d'import.
+/// Label shown for a [`DecimalStyle`] in the import window.
 fn decimal_label(decimal: DecimalStyle) -> String {
     match decimal {
         DecimalStyle::Dot => tr!("import-option-dot"),
@@ -140,12 +141,12 @@ fn decimal_label(decimal: DecimalStyle) -> String {
     }
 }
 
-/// Une ligne « from … to … » d'assignation d'un rôle de sous-en-tête (voir
-/// [`import_window`]) : une case pour activer/désactiver le rôle (`None` vs
-/// `Some`), deux compteurs pour la plage. `id_source` distingue les trois
-/// rôles (`long_name`/`unit`/`comment`) qui, sans lui, partageraient le même
-/// id auto-généré (même position relative dans leurs branches `if`
-/// respectives) et se marcheraient dessus.
+/// A "from … to …" row assigning a subheader role (see [`import_window`]): a
+/// checkbox to enable/disable the role (`None` vs `Some`), two counters for
+/// the range. `id_source` tells the three roles
+/// (`long_name`/`unit`/`comment`) apart; without it they would share the same
+/// auto-generated id (same relative position in their respective `if`
+/// branches) and step on each other.
 fn subheader_role_row(
     ui: &mut egui::Ui,
     id_source: &str,
@@ -178,11 +179,10 @@ fn subheader_role_row(
     });
 }
 
-/// Couleur associée à un [`stokesforge_import::LineRole`] dans l'aperçu — bleu
-/// pour un rôle d'en-tête reconnu, magenta pour un commentaire, orange pour
-/// le pied de page, couleur de texte par défaut pour une donnée : même
-/// esprit de code couleur que l'assistant d'import ASCII d'OriginLab
-/// (§ légende de l'aperçu), sans reprendre ses teintes exactes.
+/// Color tied to a [`stokesforge_import::LineRole`] in the preview — blue for
+/// a recognized header role, magenta for a comment, orange for the footer,
+/// default text color for data: same color-coding spirit as OriginLab's ASCII
+/// import wizard (§ preview legend), without reusing its exact hues.
 fn line_role_color(ui: &egui::Ui, role: stokesforge_import::LineRole) -> egui::Color32 {
     use stokesforge_import::LineRole;
     match role {
@@ -200,7 +200,7 @@ fn line_role_color(ui: &egui::Ui, role: stokesforge_import::LineRole) -> egui::C
     }
 }
 
-/// Couleur et libellé de chaque code de l'aperçu (légende colorée).
+/// Color and label of each preview code (colored legend).
 fn preview_legend(ui: &mut egui::Ui) {
     use stokesforge_import::LineRole;
     ui.horizontal_wrapped(|ui| {
@@ -226,11 +226,11 @@ fn preview_legend(ui: &mut egui::Ui) {
     });
 }
 
-/// L'aperçu du découpage d'un fichier, aligné en colonnes, une ligne par ligne
-/// — voir `stokesforge_import::preview` pour ce qui borne son coût. Un clic droit
-/// sur une ligne règle l'import à cet endroit (`ImportLineAction`). Une
-/// cellule qui deviendrait un texte conservé dans une colonne mixte est
-/// annotée en couleur d'avertissement.
+/// The preview of how a file is split, aligned in columns, one row per line —
+/// see `stokesforge_import::preview` for what bounds its cost. A right-click
+/// on a line sets the import at that place (`ImportLineAction`). A cell that
+/// would become a text kept in a mixed column is annotated in the warning
+/// color.
 fn import_line_preview_widget(
     ui: &mut egui::Ui,
     preview: &stokesforge_import::FilePreview,
@@ -340,8 +340,8 @@ fn import_line_preview_widget(
         });
 }
 
-/// Volet de droite de l'assistant, visible à toutes les étapes : choix du
-/// fichier montré, encodage, légende et aperçu.
+/// Right pane of the wizard, visible at every step: choice of the file shown,
+/// encoding, legend and preview.
 fn import_preview_pane(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -408,8 +408,8 @@ fn import_preview_pane(
     }
 }
 
-/// Ce que l'assistant demande à l'application après une image, une fois
-/// l'emprunt de l'état relâché.
+/// What the wizard asks of the application after a frame, once the borrow of
+/// the state is released.
 #[derive(Default)]
 struct ImportWizardRequests {
     save_recipe: bool,
@@ -419,7 +419,7 @@ struct ImportWizardRequests {
     forward: bool,
     line_action: Option<(ImportLineAction, usize)>,
     import: bool,
-    /// Sélecteurs de fichiers demandés (#192), poussés comme actions.
+    /// File pickers requested (#192), pushed as actions.
     picks: Vec<Action>,
 }
 
@@ -431,9 +431,9 @@ fn recipe_combo_text(name: &str, modified: bool) -> String {
     }
 }
 
-/// Étape 1 : fichiers et modèle.
+/// Step 1: files and template.
 fn import_step_files(ui: &mut egui::Ui, state: &mut AppState, picks: &mut Vec<Action>) {
-    // Sans état, l'étape ne peint rien, comme avant son découpage.
+    // Without a state, the step paints nothing, as before it was split.
     if state.import_state().is_none() {
         return;
     }
@@ -444,7 +444,7 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState, picks: &mut Vec<Ac
     });
 }
 
-/// Modèle sélectionné, échanges JSON et confirmation de suppression.
+/// Selected template, JSON exchanges and delete confirmation.
 fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: &mut Vec<Action>) {
     let (names, current_name, modified, confirm) = {
         let Some(import) = state.import_state() else {
@@ -462,8 +462,7 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
             import.confirm_delete.clone(),
         )
     };
-    // Les modèles enregistrés sont des données : liste déroulante quel que
-    // soit leur nombre.
+    // Saved templates are data: a dropdown list whatever their number.
     rows.row(tr!("import-files-template"), |ui| {
         egui::ComboBox::from_id_salt("stokesforge_import_recipe_combo")
             .selected_text(recipe_combo_text(&current_name, modified))
@@ -481,9 +480,8 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
         {
             state.new_import_recipe();
         }
-        // Un modèle fourni d'office ne se supprime pas (il reviendrait au
-        // lancement suivant) : on l'enregistre sous un autre nom pour le
-        // modifier.
+        // A built-in template cannot be deleted (it would come back at the
+        // next launch): save it under another name to modify it.
         let can_delete = names.contains(&current_name)
             && !state
                 .import_state()
@@ -519,9 +517,9 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
         rows.note(tr!("import-files-unsaved"));
     }
     if let Some(name) = confirm {
-        // Ctrl+Z ne rend pas un modèle supprimé : confirmation modale (S-F3,
-        // #229), peinte dans le contenu de l'assistant pour lire Entrée et
-        // Échap avant lui.
+        // Ctrl+Z does not bring back a deleted template: modal confirmation
+        // (S-F3, #229), painted in the wizard's content to read Enter and
+        // Escape before it.
         match modal_confirm(
             rows.ui().ctx(),
             egui::Id::new("stokesforge_import_template_delete"),
@@ -540,7 +538,7 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
     }
 }
 
-/// Ajout de fichiers et choix parmi les fichiers récemment importés.
+/// Adding files and choosing among the recently imported files.
 fn import_file_choices(rows: &mut Form<'_>, state: &mut AppState, actions: &mut Vec<Action>) {
     rows.section(tr!("import-files-section"));
     rows.ui().horizontal(|ui| {
@@ -549,7 +547,7 @@ fn import_file_choices(rows: &mut Form<'_>, state: &mut AppState, actions: &mut 
             .on_hover_text(tr!("import-files-add", "hint"))
             .clicked()
         {
-            // Le dossier du dernier fichier importé.
+            // The folder of the last imported file.
             let directory = state
                 .import_state()
                 .and_then(|import| import.recent.last_dir().map(std::path::Path::to_path_buf));
@@ -584,7 +582,7 @@ fn import_file_choices(rows: &mut Form<'_>, state: &mut AppState, actions: &mut 
     }
 }
 
-/// Choix du fichier prévisualisé et retrait, appliqués après toutes les rangées.
+/// Choice of the previewed file and removal, applied after all the rows.
 fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
     let statuses = state.import_file_statuses();
     let preview_index = state
@@ -633,7 +631,7 @@ fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-/// Étape 2 : lecture des colonnes et du fichier, groupée par réglage.
+/// Step 2: reading of the columns and the file, grouped by setting.
 fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(import) = state.import_state_mut() else {
         return;
@@ -676,7 +674,7 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     });
 }
 
-/// Délimiteur et paramètres de sa variante (caractère ou largeurs fixes).
+/// Delimiter and the parameters of its variant (character or fixed widths).
 fn import_delimiter_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::ImportRecipe) {
     rows.row(tr!("import-format-delimiter"), |ui| {
         let options = [
@@ -733,9 +731,9 @@ fn import_delimiter_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_impor
     });
 }
 
-/// Décimale, milliers et valeurs manquantes, dans leur ordre de saisie.
+/// Decimal, thousands and missing values, in their input order.
 fn import_number_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::ImportRecipe) {
-    // Trois choix : des radios (S-C1).
+    // Three choices: radio buttons (S-C1).
     rows.row(tr!("import-format-decimal"), |ui| {
         choice(
             ui,
@@ -781,14 +779,14 @@ fn import_number_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::
     });
 }
 
-/// Découpage en blocs et encodage du fichier.
+/// Splitting into blocks and file encoding.
 fn import_block_encoding_controls(
     rows: &mut Form<'_>,
     recipe: &mut stokesforge_import::ImportRecipe,
 ) {
     rows.row(tr!("import-format-blocks"), |ui| {
         use stokesforge_import::BlockSplit;
-        // Trois découpages : des radios (S-C1).
+        // Three splits: radio buttons (S-C1).
         choice_by(
             ui,
             "stokesforge_import_blocks_combo",
@@ -827,7 +825,7 @@ fn import_block_encoding_controls(
     });
 }
 
-/// Le réglage d'en-tête de l'étape 3, déduit de la recette.
+/// The header setting of step 3, derived from the recipe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderMode {
     None,
@@ -835,8 +833,8 @@ enum HeaderMode {
     Marker,
 }
 
-/// Étape 3 : en-tête (un seul réglage), fin des données et noms des colonnes,
-/// trois blocs sous leur titre (S-L3).
+/// Step 3: header (a single setting), data end and column names, three
+/// blocks under their title (S-L3).
 fn import_step_header(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -862,8 +860,8 @@ fn import_step_header(
             );
             help_text(ui, tr!("import-header-skip-footer", "hint"));
         });
-        // Garder les valeurs choisies pendant le grisage pour les retrouver
-        // quand les noms ne viennent plus de la première ligne.
+        // Keep the chosen values while greyed out, to find them again when the
+        // names no longer come from the first line.
         rows.enabled(!recipe.has_column_header_row, |rows| {
             rows.section(tr!("import-column-names"));
             let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
@@ -893,15 +891,15 @@ fn import_step_header(
     });
 }
 
-/// Le bloc « Header » de l'étape 3 : mode, lignes, rôles des sous-en-têtes.
+/// The "Header" block of step 3: mode, lines, subheader roles.
 fn import_header_controls(
     rows: &mut Form<'_>,
     recipe: &mut stokesforge_import::ImportRecipe,
     has_files: bool,
     requests: &mut ImportWizardRequests,
 ) {
-    // Comme `parse` : le découpage structuré ne compte que s'il a des lignes
-    // (l'ancien drapeau `auto_detect` seul ne suffit pas).
+    // Like `parse`: the structured split counts only if it has lines (the old
+    // `auto_detect` flag alone is not enough).
     let structured =
         recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0;
     let is_marker = matches!(recipe.header, HeaderSkip::UntilMarker(_));
@@ -1025,7 +1023,7 @@ fn import_header_controls(
     );
 }
 
-/// Libellé de la nature choisie pour une colonne.
+/// Label of the kind chosen for a column.
 fn column_kind_label(kind: stokesforge_import::ColumnKind) -> String {
     match kind {
         stokesforge_import::ColumnKind::Auto => tr!("column-type-numeric"),
@@ -1034,7 +1032,7 @@ fn column_kind_label(kind: stokesforge_import::ColumnKind) -> String {
     }
 }
 
-/// Libellé d'un rôle de colonne choisi à l'étape « Colonnes ».
+/// Label of a column role chosen at the "Columns" step.
 fn column_role_label(role: stokesforge_import::ColumnRoleChoice) -> String {
     use stokesforge_import::ColumnRoleChoice;
     match role {
@@ -1047,7 +1045,7 @@ fn column_role_label(role: stokesforge_import::ColumnRoleChoice) -> String {
     }
 }
 
-/// Étape 4 : le résultat, colonne par colonne, avec le rôle de chacune.
+/// Step 4: the result, column by column, with the role of each.
 fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
     use stokesforge_import::ColumnRoleChoice;
     let columns = match state.import_column_previews() {
@@ -1162,7 +1160,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
         });
 }
 
-/// Étape 5 : les métadonnées à garder.
+/// Step 5: the metadata to keep.
 fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
     let available = state.import_available_metadata();
     let Some(import) = state.import_state_mut() else {
@@ -1220,7 +1218,7 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
         });
 }
 
-/// Étape 6 : destination, enregistrement du modèle.
+/// Step 6: destination, saving the template.
 fn import_step_destination(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1231,8 +1229,9 @@ fn import_step_destination(
     };
     form(ui, "import_destination", |rows| {
         rows.section(tr!("import-destination"));
-        // Trois destinations dont une peut manquer (aucun classeur actif) :
-        // radios l'un sous l'autre, posés ici pour griser la première.
+        // Three destinations, one of which may be missing (no active
+        // workbook): radio buttons one under the other, placed here to grey
+        // out the first.
         rows.field(|ui| {
             ui.vertical(|ui| {
                 if let Some(book) = import.active_book {
@@ -1263,7 +1262,7 @@ fn import_step_destination(
         if matches!(import.destination, ImportDestination::ActiveBook(_)) {
             rows.section(tr!("import-destination-mode"));
             use stokesforge_import::ImportMode;
-            // Quatre modes : une liste déroulante (S-C1).
+            // Four modes: a dropdown list (S-C1).
             rows.field(|ui| {
                 choice(
                     ui,
@@ -1340,16 +1339,16 @@ fn import_step_destination(
     });
 }
 
-/// L'assistant d'import (« Importer… », menu Fichier) en six étapes façon
-/// assistant ASCII d'Origin : fichiers et modèle, format, en-tête et fin des
-/// données, colonnes, métadonnées, destination. L'aperçu du fichier reste
-/// visible à droite à toutes les étapes. « Terminer » importe dès que des
-/// fichiers sont choisis, avec le modèle tel qu'il est — import en deux clics
-/// pour un format connu. **Dialogue modal de la brique commune**
-/// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
-/// [`StokesForgeApp::ui`](eframe::App::ui) tant que [`AppState::import_state`] est `Some` ; la croix
-/// et Échap valent « Annuler », Entrée « Terminer ». Pied d'assistant
-/// ([`modal_wizard`], S-F6) : Cancel à gauche, Back · Next · Finish à droite.
+/// The import wizard ("Import…", File menu) in six steps in the style of
+/// Origin's ASCII wizard: files and template, format, header and data end,
+/// columns, metadata, destination. The file preview stays visible on the right
+/// at every step. "Finish" imports as soon as files are chosen, with the
+/// template as it is — import in two clicks for a known format. **Modal
+/// dialog of the common building block** ([`modal_dialog_with`], like the
+/// graph properties), painted from [`StokesForgeApp::ui`](eframe::App::ui)
+/// as long as [`AppState::import_state`] is `Some`; the close cross and Escape
+/// mean "Cancel", Enter "Finish". Wizard footer ([`modal_wizard`], S-F6):
+/// Cancel on the left, Back · Next · Finish on the right.
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     let Some(step) = state.import_state().map(|import| import.step) else {
         return;
@@ -1357,11 +1356,11 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     let has_files = state
         .import_state()
         .is_some_and(|import| !import.paths.is_empty());
-    // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
-    // dans les mêmes demandes, l'une après l'autre : `RefCell`.
+    // The two closures of the building block (content, footer buttons) write
+    // into the same requests, one after the other: `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
-    // Grisé, Finish dit pourquoi (S-G1, S-F10) : dans le pied et dans sa bulle
-    // (`DialogFooter::gated`).
+    // When greyed out, Finish says why (S-G1, S-F10): in the footer and in its
+    // bubble (`DialogFooter::gated`).
     let (finish_label, finish_hint) = (
         tr!("import-button-finish"),
         tr!("import-button-finish", "hint"),
@@ -1371,12 +1370,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
         &tr!("import-window-title"),
-        // TAILLE-LIBRE(#300): six étapes dont un aperçu du fichier à droite à toutes les étapes ; le tableau de l'aperçu demande plus de 600 px de large, au-delà de la classe Large
+        // FREE-SIZE(#300): six steps with a file preview on the right at every step; the preview table needs more than 600 px of width, beyond the Large class
         InteractiveSize::Free(egui::vec2(1000.0, 620.0)),
         DialogFooter::gated(&finish_label, &finish_hint, has_files, &add_file_first),
         |footer| {
-            // Ajoutés de droite à gauche, contre Finish : « Next » puis
-            // « Back » (S-F6 : Back · Next · Finish groupés à droite).
+            // Added right to left, against Finish: "Next" then "Back" (S-F6:
+            // Back · Next · Finish grouped on the right).
             if footer
                 .add_enabled(
                     step != ImportStep::Destination,
@@ -1403,8 +1402,8 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             ui.horizontal_wrapped(|ui| {
                 for (i, candidate) in ImportStep::ALL.iter().enumerate() {
                     if i > 0 {
-                        // Séparateur décoratif du fil d'étapes : une icône
-                        // atténuée, sans geste donc sans info-bulle.
+                        // Decorative separator of the step trail: a dimmed
+                        // icon, no gesture so no tooltip.
                         ui.add(
                             icon_image(Icon::CaretRight, IconRole::Neutral)
                                 .tint(crate::theme::help_icon_tint()),
@@ -1412,7 +1411,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
                     }
                     let text = format!("{} {}", i + 1, candidate.title());
                     if *candidate == step {
-                        // Comme l'onglet actif : gras et accent.
+                        // Like the active tab: bold and accent.
                         ui.label(crate::theme::bold(text).color(crate::theme::accent()));
                     } else {
                         ui.weak(text);
@@ -1444,7 +1443,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             });
         },
     );
-    // Les aperçus se recalculent après une pause de frappe (S-T1, #224).
+    // Previews are recomputed after a pause in typing (S-T1, #224).
     let now = ctx.input(|input| input.time);
     if let Some(wait) = state
         .import_state_mut()
@@ -1459,8 +1458,8 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         DialogOutcome::Cancel => requests.cancel = true,
     }
 
-    // Tout ce qui demande l'état entier est appliqué ici, une fois la fenêtre
-    // peinte.
+    // Everything that needs the whole state is applied here, once the window
+    // is painted.
     actions.append(&mut requests.picks);
     if requests.save_recipe {
         state.save_import_recipe();
@@ -1515,241 +1514,241 @@ mod tests {
     use stokesforge_app_state::tr;
 
     use super::super::test_support::{
-        cliquer, contexte, distincts, image, texte_exact, textes, touche, Texte,
+        click, context, distinct, image, key, text_exact, texts, Text,
     };
 
-    // -- Outillage --------------------------------------------------------
+    // -- Tooling ----------------------------------------------------------
 
-    /// Sérialise les tests de ce module qui ouvrent l'assistant :
-    /// Le dossier de config est un état du *processus*, et `cargo test` fait
-    /// tourner les tests en parallèle (même motif que
-    /// `tests/shell.rs::isolate_recipe_store`).
+    /// Serializes the tests of this module that open the wizard: the config
+    /// folder is *process* state, and `cargo test` runs the tests in parallel
+    /// (same reason as `tests/shell.rs::isolate_recipe_store`).
     static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Redirige le dossier de config (`STOKESFORGE_CONFIG_DIR`, #332, et
-    /// `XDG_CONFIG_HOME`) vers un dossier temporaire tant que la valeur vit :
-    /// `AppState::open_import` lit les modèles et les fichiers récents de la
-    /// machine (`RecipeStore`, `RecentFiles`), ce qui rendrait le test
-    /// dépendant du poste. `Drop` restaure les valeurs d'avant, même sur
-    /// panique.
-    struct ConfigIsolee {
-        avant: [(&'static str, Option<std::ffi::OsString>); 2],
-        _dossier: tempfile::TempDir,
-        _verrou: MutexGuard<'static, ()>,
+    /// Redirects the config folder (`STOKESFORGE_CONFIG_DIR`, #332, and
+    /// `XDG_CONFIG_HOME`) to a temporary folder as long as the value lives:
+    /// `AppState::open_import` reads the machine's templates and recent files
+    /// (`RecipeStore`, `RecentFiles`), which would make the test depend on the
+    /// workstation. `Drop` restores the earlier values, even on panic.
+    struct IsolatedConfig {
+        before: [(&'static str, Option<std::ffi::OsString>); 2],
+        _directory: tempfile::TempDir,
+        _guard: MutexGuard<'static, ()>,
     }
 
-    impl Drop for ConfigIsolee {
+    impl Drop for IsolatedConfig {
         fn drop(&mut self) {
-            for (nom, valeur) in self.avant.iter_mut() {
-                match valeur.take() {
-                    Some(valeur) => std::env::set_var(nom, valeur),
-                    None => std::env::remove_var(nom),
+            for (name, value) in self.before.iter_mut() {
+                match value.take() {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
                 }
             }
         }
     }
 
-    fn isoler_la_config() -> ConfigIsolee {
-        let verrou = CONFIG_ENV_LOCK
+    fn isolate_the_config() -> IsolatedConfig {
+        let guard = CONFIG_ENV_LOCK
             .lock()
-            .unwrap_or_else(|empoisonne| empoisonne.into_inner());
-        let dossier = tempfile::tempdir().unwrap();
-        let noms = [
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let directory = tempfile::tempdir().unwrap();
+        let names = [
             stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
             "XDG_CONFIG_HOME",
         ];
-        let avant = noms.map(|nom| (nom, std::env::var_os(nom)));
-        for nom in noms {
-            std::env::set_var(nom, dossier.path());
+        let before = names.map(|name| (name, std::env::var_os(name)));
+        for name in names {
+            std::env::set_var(name, directory.path());
         }
-        ConfigIsolee {
-            avant,
-            _dossier: dossier,
-            _verrou: verrou,
+        IsolatedConfig {
+            before,
+            _directory: directory,
+            _guard: guard,
         }
     }
 
-    /// Un fichier Jasco : un en-tête jusqu'au repère `XYDATA`, trois lignes
-    /// de données à deux colonnes, un pied de page.
+    /// A Jasco file: a header up to the `XYDATA` marker, three data lines with
+    /// two columns, a footer.
     const JASCO: &str =
         "TITLE;S13\nXUNITS;NANOMETERS\nXYDATA\n800;1\n799;2\n798;3\n\nData points;3\n";
 
-    /// L'assistant ouvert sur un projet vide, sans classeur actif, avec
-    /// `fichiers` déjà choisis ; la recette lit `JASCO` (point-virgule,
-    /// en-tête jusqu'à `XYDATA`). Les champs gardent en vie ce dont l'état
-    /// dépend.
-    struct Banc {
+    /// The wizard open on an empty project, with no active workbook, with
+    /// `files` already chosen; the recipe reads `JASCO` (semicolon, header up
+    /// to `XYDATA`). The fields keep alive what the state depends on.
+    struct Bench {
         state: AppState,
-        fichiers: Vec<PathBuf>,
+        files: Vec<PathBuf>,
         _session: Session,
-        _dossier: tempfile::TempDir,
-        _config: ConfigIsolee,
+        _directory: tempfile::TempDir,
+        _config: IsolatedConfig,
     }
 
-    fn banc(avec_fichier: bool) -> Banc {
-        let config = isoler_la_config();
+    fn bench(with_file: bool) -> Bench {
+        let config = isolate_the_config();
         let session = Session::spawn(Project::new("Import").unwrap(), None).unwrap();
         let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let dossier = tempfile::tempdir().unwrap();
-        let mut fichiers = Vec::new();
-        if avec_fichier {
-            let fichier = dossier.path().join("jasco.csv");
-            std::fs::write(&fichier, JASCO).unwrap();
-            fichiers.push(fichier);
+        let directory = tempfile::tempdir().unwrap();
+        let mut files = Vec::new();
+        if with_file {
+            let file = directory.path().join("jasco.csv");
+            std::fs::write(&file, JASCO).unwrap();
+            files.push(file);
         }
         state.open_import(None::<stokesforge_core::NodeId>);
-        state.set_import_paths(fichiers.clone());
+        state.set_import_paths(files.clone());
         let import = state.import_state_mut().unwrap();
         import.recipe.separator = Separator::Semicolon;
         import.recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
-        Banc {
+        Bench {
             state,
-            fichiers,
+            files,
             _session: session,
-            _dossier: dossier,
+            _directory: directory,
             _config: config,
         }
     }
 
-    fn est_peint(textes: &[Texte], cherche: &str) -> bool {
-        textes.iter().any(|t| t.texte == cherche)
+    fn is_painted(texts: &[Text], needle: &str) -> bool {
+        texts.iter().any(|t| t.text == needle)
     }
 
-    /// Peint l'assistant trois fois (mise en page stabilisée, dialogue
-    /// centré) puis une quatrième avec `events` ; rend les textes de la
-    /// dernière image.
-    fn peindre_assistant(
-        context: &egui::Context,
+    /// Paints the wizard three times (layout settled, dialog centered) then a
+    /// fourth time with `events`; returns the texts of the last frame.
+    fn paint_wizard(
+        ctx: &egui::Context,
         state: &mut AppState,
         actions: &mut Vec<Action>,
         events: Vec<egui::Event>,
-    ) -> Vec<Texte> {
+    ) -> Vec<Text> {
         for _ in 0..3 {
-            image(context, Vec::new(), |ui| {
+            image(ctx, Vec::new(), |ui| {
                 import_window(ui.ctx(), state, actions)
             });
         }
-        textes(&image(context, events, |ui| {
+        texts(&image(ctx, events, |ui| {
             import_window(ui.ctx(), state, actions)
         }))
     }
 
-    // -- L'assistant entier -----------------------------------------------
+    // -- The whole wizard ---------------------------------------------------
 
-    /// Le fil d'étapes sépare ses étapes par une icône, plus par un chevron de
-    /// texte (#170, point 8). Témoin : le fil est bien peint (chaque étape
-    /// porte son rang), seul le chevron manque.
+    /// The step trail separates its steps with an icon, no longer with a text
+    /// chevron (#170, point 8). Witness: the trail is painted (each step
+    /// carries its rank), only the chevron is missing.
     #[test]
-    fn le_fil_d_etapes_n_a_plus_de_chevron_de_texte() {
-        let mut banc = banc(true);
-        let context = contexte();
+    fn the_step_trail_has_no_text_chevron_any_more() {
+        let mut bench = bench(true);
+        let ctx = context();
         let mut actions = Vec::new();
-        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        for (i, etape) in ImportStep::ALL.iter().enumerate() {
-            let attendu = format!("{} {}", i + 1, etape.title());
-            assert!(est_peint(&peints, &attendu), "étape non peinte : {attendu}");
+        let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        for (i, wizard_step) in ImportStep::ALL.iter().enumerate() {
+            let expected = format!("{} {}", i + 1, wizard_step.title());
+            assert!(
+                is_painted(&painted, &expected),
+                "step not painted: {expected}"
+            );
         }
         assert!(
-            !peints.iter().any(|t| t.texte.contains('\u{203A}')),
-            "un chevron de texte est encore peint : {peints:?}"
+            !painted.iter().any(|t| t.text.contains('\u{203A}')),
+            "a text chevron is still painted: {painted:?}"
         );
     }
 
     #[test]
-    fn noms_de_colonnes_inactifs_avec_noms_en_premiere_ligne() {
-        let mut banc = banc(true);
-        banc.state.import_state_mut().unwrap().step = ImportStep::Header;
-        banc.state
+    fn column_names_are_inactive_with_names_on_the_first_line() {
+        let mut bench = bench(true);
+        bench.state.import_state_mut().unwrap().step = ImportStep::Header;
+        bench
+            .state
             .import_state_mut()
             .unwrap()
             .recipe
             .has_column_header_row = true;
-        let context = contexte();
+        let ctx = context();
         let mut actions = Vec::new();
-        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        let cle = texte_exact(&peints, &tr!("import-header-name-key")).centre;
-        cliquer(&context, cle, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let key_pos = text_exact(&painted, &tr!("import-header-name-key")).center;
+        click(&ctx, key_pos, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
         assert_eq!(
-            banc.state.import_state().unwrap().recipe.name_source,
+            bench.state.import_state().unwrap().recipe.name_source,
             stokesforge_import::NameSource::Filename,
-            "la section désactivée doit ignorer les clics"
+            "the disabled section must ignore clicks"
         );
 
-        let case = texte_exact(&peints, &tr!("import-header-names-first-line")).centre;
-        cliquer(&context, case, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let checkbox = text_exact(&painted, &tr!("import-header-names-first-line")).center;
+        click(&ctx, checkbox, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
         assert!(
-            !banc
+            !bench
                 .state
                 .import_state()
                 .unwrap()
                 .recipe
                 .has_column_header_row
         );
-        let actifs = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let enabled_texts = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
         assert_ne!(
-            texte_exact(&peints, &tr!("import-column-names")).couleur,
-            texte_exact(&actifs, &tr!("import-column-names")).couleur,
-            "le titre doit refléter le grisage"
+            text_exact(&painted, &tr!("import-column-names")).color,
+            text_exact(&enabled_texts, &tr!("import-column-names")).color,
+            "the title must reflect the greying out"
         );
-        let cle = texte_exact(&actifs, &tr!("import-header-name-key")).centre;
-        cliquer(&context, cle, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let key_pos = text_exact(&enabled_texts, &tr!("import-header-name-key")).center;
+        click(&ctx, key_pos, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
         assert_eq!(
-            banc.state.import_state().unwrap().recipe.name_source,
+            bench.state.import_state().unwrap().recipe.name_source,
             stokesforge_import::NameSource::HeaderKey(String::new()),
-            "décocher réactive la section"
+            "unchecking re-enables the section"
         );
-        banc.state.import_state_mut().unwrap().recipe.name_source =
+        bench.state.import_state_mut().unwrap().recipe.name_source =
             stokesforge_import::NameSource::HeaderKey("TITLE".into());
-        let actifs = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        let case = texte_exact(&actifs, &tr!("import-header-names-first-line")).centre;
-        cliquer(&context, case, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let enabled_texts = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let checkbox = text_exact(&enabled_texts, &tr!("import-header-names-first-line")).center;
+        click(&ctx, checkbox, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
-        let grises = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        let champ = texte_exact(&grises, "TITLE").centre;
-        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let greyed = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let field = text_exact(&greyed, "TITLE").center;
+        click(&ctx, field, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
-        peindre_assistant(
-            &context,
-            &mut banc.state,
+        paint_wizard(
+            &ctx,
+            &mut bench.state,
             &mut actions,
             vec![egui::Event::Text("modification".into())],
         );
-        let fichier = texte_exact(&grises, &tr!("import-header-name-file")).centre;
-        cliquer(&context, fichier, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let file = text_exact(&greyed, &tr!("import-header-name-file")).center;
+        click(&ctx, file, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
         assert_eq!(
-            banc.state.import_state().unwrap().recipe.name_source,
+            bench.state.import_state().unwrap().recipe.name_source,
             stokesforge_import::NameSource::HeaderKey("TITLE".into()),
-            "le champ et les deux choix restent inactifs, sans perdre la clé"
+            "the field and the two choices stay inactive, without losing the key"
         );
     }
 
-    /// Les groupes de Format sont nommés par de vrais titres, dans l'ordre
-    /// des contrôles, plutôt que séparés par des traits sans indication.
+    /// The Format groups are named by real titles, in the order of the
+    /// controls, rather than separated by unlabeled lines.
     #[test]
-    fn le_format_d_import_nomme_les_groupes_de_reglages() {
-        let mut banc = banc(false);
-        let context = contexte();
-        let recette_avant = banc.state.import_state().unwrap().recipe.clone();
+    fn the_import_format_names_the_setting_groups() {
+        let mut bench = bench(false);
+        let ctx = context();
+        let recipe_before = bench.state.import_state().unwrap().recipe.clone();
         for _ in 0..2 {
-            image(&context, Vec::new(), |ui| {
-                super::import_step_format(ui, &mut banc.state)
+            image(&ctx, Vec::new(), |ui| {
+                super::import_step_format(ui, &mut bench.state)
             });
         }
-        let formes = image(&context, Vec::new(), |ui| {
-            super::import_step_format(ui, &mut banc.state)
+        let shapes = image(&ctx, Vec::new(), |ui| {
+            super::import_step_format(ui, &mut bench.state)
         });
-        let peints = textes(&formes);
-        let groupes = [
+        let painted = texts(&shapes);
+        let groups = [
             (
                 tr!("import-format-delimiter-section"),
                 tr!("import-format-delimiter"),
@@ -1771,36 +1770,36 @@ mod tests {
                 tr!("import-format-skip-chars"),
             ),
         ];
-        let mut precedent = f32::NEG_INFINITY;
-        for (titre, champ) in groupes {
-            let titre = peints
+        let mut previous = f32::NEG_INFINITY;
+        for (title, field) in groups {
+            let title = painted
                 .iter()
-                .find(|texte| texte.texte == titre && texte.gras)
-                .unwrap_or_else(|| panic!("titre de section absent : {titre}"));
-            let champ = peints
+                .find(|text| text.text == title && text.bold)
+                .unwrap_or_else(|| panic!("section title missing: {title}"));
+            let field = painted
                 .iter()
-                .find(|texte| texte.texte == champ && !texte.gras)
-                .unwrap_or_else(|| panic!("libellé ordinaire absent : {champ}"));
-            assert!(titre.centre.y > precedent);
-            assert!(champ.centre.y > titre.centre.y);
-            precedent = champ.centre.y;
+                .find(|text| text.text == field && !text.bold)
+                .unwrap_or_else(|| panic!("ordinary label missing: {field}"));
+            assert!(title.center.y > previous);
+            assert!(field.center.y > title.center.y);
+            previous = field.center.y;
         }
-        assert_eq!(banc.state.import_state().unwrap().recipe, recette_avant);
+        assert_eq!(bench.state.import_state().unwrap().recipe, recipe_before);
     }
 
-    /// Issue #6 : chaque étape de l'assistant se peint sans paniquer, montre
-    /// son titre en surbrillance (les autres en retrait), **son** contenu et
-    /// pas celui des autres étapes, et l'aperçu du fichier à droite, quelle
-    /// que soit l'étape. Peindre n'importe rien et ne ferme pas l'assistant.
+    /// Issue #6: each step of the wizard paints without panicking, shows its
+    /// title highlighted (the others dimmed), **its** content and not that of
+    /// the other steps, and the file preview on the right, whatever the step.
+    /// Painting imports nothing and does not close the wizard.
     #[test]
-    fn chaque_etape_de_l_assistant_d_import_se_peint_avec_son_apercu() {
-        let mut banc = banc(true);
-        let context = contexte();
-        let visuals = context.global_style().visuals.clone();
-        let (fort, faible) = (visuals.strong_text_color(), visuals.weak_text_color());
-        assert_ne!(fort, faible, "témoin : surbrillance et retrait diffèrent");
-        // Un libellé propre à chaque étape.
-        let propres = [
+    fn each_step_of_the_import_wizard_paints_with_its_preview() {
+        let mut bench = bench(true);
+        let ctx = context();
+        let visuals = ctx.global_style().visuals.clone();
+        let (strong, weak) = (visuals.strong_text_color(), visuals.weak_text_color());
+        assert_ne!(strong, weak, "witness: highlight and dimming differ");
+        // A label specific to each step.
+        let own_labels = [
             (ImportStep::Files, tr!("import-files-template")),
             (ImportStep::Format, tr!("import-format-delimiter")),
             (ImportStep::Header, tr!("import-dataend")),
@@ -1808,168 +1807,176 @@ mod tests {
             (ImportStep::Metadata, tr!("import-metadata-keep-header")),
             (ImportStep::Destination, tr!("import-destination")),
         ];
-        assert_eq!(propres.len(), ImportStep::ALL.len());
+        assert_eq!(own_labels.len(), ImportStep::ALL.len());
         for step in ImportStep::ALL {
-            assert_eq!(banc.state.import_state().unwrap().step, step);
-            let colonnes_avant = banc.state.import_state().unwrap().recipe.column_roles.len();
+            assert_eq!(bench.state.import_state().unwrap().step, step);
+            let columns_before = bench
+                .state
+                .import_state()
+                .unwrap()
+                .recipe
+                .column_roles
+                .len();
             let mut actions = Vec::new();
-            let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+            let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
             for (i, candidate) in ImportStep::ALL.iter().enumerate() {
-                let fil = texte_exact(&peints, &format!("{} {}", i + 1, candidate.title()));
-                let attendu = if *candidate == step { fort } else { faible };
+                let trail = text_exact(&painted, &format!("{} {}", i + 1, candidate.title()));
+                let expected = if *candidate == step { strong } else { weak };
                 assert_eq!(
-                    fil.couleur, attendu,
-                    "{step:?} : fil d'Ariane de {candidate:?}"
+                    trail.color, expected,
+                    "{step:?}: breadcrumb of {candidate:?}"
                 );
                 assert_eq!(
-                    fil.gras,
+                    trail.bold,
                     *candidate == step,
-                    "{step:?} : seule l'étape courante est en gras ({candidate:?})"
+                    "{step:?}: only the current step is bold ({candidate:?})"
                 );
             }
-            for (proprietaire, libelle) in &propres {
+            for (owner, label) in &own_labels {
                 assert_eq!(
-                    est_peint(&peints, libelle),
-                    *proprietaire == step,
-                    "{step:?} : {libelle:?} appartient à {proprietaire:?}"
+                    is_painted(&painted, label),
+                    *owner == step,
+                    "{step:?}: {label:?} belongs to {owner:?}"
                 );
             }
-            // L'aperçu : la ligne d'en-tête brute et une cellule de données.
+            // The preview: the raw header line and a data cell.
             assert!(
-                peints.iter().any(|t| t.texte.contains("TITLE;S13")),
-                "{step:?} : aperçu absent"
+                painted.iter().any(|t| t.text.contains("TITLE;S13")),
+                "{step:?}: preview missing"
             );
-            assert!(est_peint(&peints, "800"), "{step:?} : cellule absente");
+            assert!(is_painted(&painted, "800"), "{step:?}: cell missing");
             if step == ImportStep::Columns {
-                // Un rôle et une nature par colonne lue : la liste
-                // déroulante de la colonne 2 écrit `column_roles[1]`.
-                assert!(colonnes_avant < 2, "témoin : la recette part sans rôles");
-                let recipe = &banc.state.import_state().unwrap().recipe;
+                // A role and a kind per column read: the dropdown list of
+                // column 2 writes `column_roles[1]`.
+                assert!(
+                    columns_before < 2,
+                    "witness: the recipe starts without roles"
+                );
+                let recipe = &bench.state.import_state().unwrap().recipe;
                 assert_eq!(recipe.column_roles.len(), 2);
                 assert_eq!(recipe.column_kinds.len(), 2);
             }
-            assert!(actions.is_empty(), "peindre n'importe rien");
-            banc.state.import_step_forward();
+            assert!(actions.is_empty(), "painting imports nothing");
+            bench.state.import_step_forward();
         }
         assert!(
-            banc.state.import_state().is_some(),
-            "l'assistant reste ouvert"
+            bench.state.import_state().is_some(),
+            "the wizard stays open"
         );
     }
 
-    /// « Terminer » (Entrée, bouton par défaut) importe dès que des fichiers
-    /// sont choisis, avec la recette telle qu'elle est — import en deux
-    /// clics — et ferme l'assistant ; sans fichier, Entrée ne fait rien
-    /// (témoin). Échap vaut « Annuler » : fermé, rien d'importé, même avec
-    /// des fichiers.
+    /// "Finish" (Enter, default button) imports as soon as files are chosen,
+    /// with the recipe as it is — import in two clicks — and closes the
+    /// wizard; without a file, Enter does nothing (witness). Escape means
+    /// "Cancel": closed, nothing imported, even with files.
     #[test]
-    fn terminer_importe_la_recette_telle_quelle_et_annuler_n_importe_rien() {
-        let mut complet = banc(true);
-        let recette = complet.state.import_state().unwrap().recipe.clone();
-        assert_eq!(recette.separator, Separator::Semicolon);
+    fn finish_imports_the_recipe_as_it_is_and_cancel_imports_nothing() {
+        let mut complete = bench(true);
+        let recipe = complete.state.import_state().unwrap().recipe.clone();
+        assert_eq!(recipe.separator, Separator::Semicolon);
         let mut actions = Vec::new();
-        peindre_assistant(
-            &contexte(),
-            &mut complet.state,
+        paint_wizard(
+            &context(),
+            &mut complete.state,
             &mut actions,
-            vec![touche(egui::Key::Enter)],
+            vec![key(egui::Key::Enter)],
         );
         assert_eq!(
             actions,
             vec![Action::StartImport {
                 destination: ImportDestination::NewBookForAll,
-                recipe: recette,
-                paths: complet.fichiers.clone(),
+                recipe,
+                paths: complete.files.clone(),
             }]
         );
-        assert!(complet.state.import_state().is_none(), "Terminer ferme");
-        drop(complet);
+        assert!(complete.state.import_state().is_none(), "Finish closes");
+        drop(complete);
 
-        let mut vide = banc(false);
-        let context = contexte();
+        let mut empty = bench(false);
+        let ctx = context();
         let mut actions = Vec::new();
-        peindre_assistant(
-            &context,
-            &mut vide.state,
+        paint_wizard(
+            &ctx,
+            &mut empty.state,
             &mut actions,
-            vec![touche(egui::Key::Enter)],
+            vec![key(egui::Key::Enter)],
         );
-        assert!(actions.is_empty(), "sans fichier, rien à importer");
-        assert!(vide.state.import_state().is_some(), "ni fermé");
-        drop(vide);
+        assert!(actions.is_empty(), "without a file, nothing to import");
+        assert!(empty.state.import_state().is_some(), "nor closed");
+        drop(empty);
 
-        let mut annule = banc(true);
+        let mut cancelled = bench(true);
         let mut actions = Vec::new();
-        peindre_assistant(
-            &contexte(),
-            &mut annule.state,
+        paint_wizard(
+            &context(),
+            &mut cancelled.state,
             &mut actions,
-            vec![touche(egui::Key::Escape)],
+            vec![key(egui::Key::Escape)],
         );
-        assert!(actions.is_empty(), "Annuler n'importe rien");
-        assert!(annule.state.import_state().is_none(), "Annuler ferme");
+        assert!(actions.is_empty(), "Cancel imports nothing");
+        assert!(cancelled.state.import_state().is_none(), "Cancel closes");
     }
 
-    /// Les boutons du pied : « Suivant » avance d'une étape, « Précédent »
-    /// recule — pas l'inverse.
+    /// The footer buttons: "Next" moves forward one step, "Back" moves back —
+    /// not the reverse.
     #[test]
-    fn suivant_et_precedent_changent_d_etape() {
-        let mut banc = banc(true);
-        let context = contexte();
+    fn next_and_back_change_the_step() {
+        let mut bench = bench(true);
+        let ctx = context();
         let mut actions = Vec::new();
-        for (bouton, attendue) in [
+        for (button, expected) in [
             (tr!("import-button-next"), ImportStep::Format),
             (tr!("import-button-next"), ImportStep::Header),
             (tr!("import-button-back"), ImportStep::Format),
         ] {
-            let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-            let pos = texte_exact(&peints, &bouton).centre;
-            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
-                import_window(ui.ctx(), &mut banc.state, &mut actions)
+            let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+            let pos = text_exact(&painted, &button).center;
+            click(&ctx, pos, egui::PointerButton::Primary, |ui| {
+                import_window(ui.ctx(), &mut bench.state, &mut actions)
             });
             assert_eq!(
-                banc.state.import_state().unwrap().step,
-                attendue,
-                "{bouton}"
+                bench.state.import_state().unwrap().step,
+                expected,
+                "{button}"
             );
         }
         assert!(actions.is_empty());
     }
 
-    /// Le clic droit dans l'aperçu de l'assistant atteint la recette, une
-    /// fois l'image peinte : « Les données commencent ici » sur la ligne 4
-    /// (`800;1`) remplace le repère `XYDATA` par trois lignes d'en-tête.
+    /// A right-click in the wizard's preview reaches the recipe, once the
+    /// frame is painted: "Start Data Here" on line 4 (`800;1`) replaces the
+    /// `XYDATA` marker with three header lines.
     #[test]
-    fn le_clic_droit_dans_l_apercu_de_l_assistant_regle_la_recette() {
-        let mut banc = banc(true);
-        let context = contexte();
+    fn right_click_in_the_wizard_preview_sets_the_recipe() {
+        let mut bench = bench(true);
+        let ctx = context();
         let mut actions = Vec::new();
-        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        let ligne = numero(&peints, 4).centre;
-        cliquer(&context, ligne, egui::PointerButton::Secondary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let line = line_number(&painted, 4).center;
+        click(&ctx, line, egui::PointerButton::Secondary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let painted = texts(&image(&ctx, Vec::new(), |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         }));
-        let entree = texte_exact(&peints, &tr!("import-line-data-start")).centre;
-        cliquer(&context, entree, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        let entry = text_exact(&painted, &tr!("import-line-data-start")).center;
+        click(&ctx, entry, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
-        let recipe = &banc.state.import_state().unwrap().recipe;
+        let recipe = &bench.state.import_state().unwrap().recipe;
         assert_eq!(recipe.header, HeaderSkip::None);
         assert_eq!(recipe.header_layout.main_header_lines, 3);
         assert!(actions.is_empty());
     }
 
-    // -- Les libellés des choix ---------------------------------------------
+    // -- The labels of the choices ------------------------------------------
 
-    /// Chaque liste déroulante de l'assistant montre des choix qu'on
-    /// distingue ; le libellé suit la variante, pas la valeur qu'elle porte
-    /// (un séparateur « autre » reste « autre » quel que soit son caractère).
+    /// Each dropdown list of the wizard shows choices that can be told apart;
+    /// the label follows the variant, not the value it carries (an "Other"
+    /// separator stays "Other" whatever its character).
     #[test]
-    fn les_choix_d_une_meme_liste_ont_des_libelles_distincts() {
-        distincts(
+    fn the_choices_of_one_list_have_distinct_labels() {
+        distinct(
             &[
                 Separator::Comma,
                 Separator::Semicolon,
@@ -1989,17 +1996,17 @@ mod tests {
             separator_label(&Separator::FixedWidth(vec![10])),
             separator_label(&Separator::FixedWidth(vec![4, 8]))
         );
-        distincts(
+        distinct(
             &[DecimalStyle::Auto, DecimalStyle::Dot, DecimalStyle::Comma],
             |d| decimal_label(*d),
         );
-        // Les milliers : les cinq choix proposés, plus un caractère lu dans
-        // un modèle, qui s'affiche « autre » sans se confondre avec eux.
-        distincts(
+        // Thousands: the five choices offered, plus a character read from a
+        // template, which shows as "Other" without being confused with them.
+        distinct(
             &[None, Some(' '), Some(','), Some('.'), Some('\''), Some('_')],
             |t| thousands_label(*t),
         );
-        distincts(
+        distinct(
             &[
                 Encoding::Auto,
                 Encoding::Utf8,
@@ -2010,11 +2017,11 @@ mod tests {
             ],
             |e| encoding_label(*e),
         );
-        distincts(
+        distinct(
             &[ColumnKind::Auto, ColumnKind::Text, ColumnKind::DateTime],
             |k| column_kind_label(*k),
         );
-        distincts(
+        distinct(
             &[
                 ColumnRoleChoice::Auto,
                 ColumnRoleChoice::X,
@@ -2025,7 +2032,7 @@ mod tests {
             ],
             |r| column_role_label(*r),
         );
-        distincts(
+        distinct(
             &[
                 DataEnd::Auto,
                 DataEnd::None,
@@ -2038,7 +2045,7 @@ mod tests {
         );
         assert_eq!(
             data_end_label(&DataEnd::Marker(String::new())),
-            data_end_label(&DataEnd::Marker("FIN".into()))
+            data_end_label(&DataEnd::Marker("END".into()))
         );
         assert_eq!(
             data_end_label(&DataEnd::LinesAfterHeader(100)),
@@ -2046,102 +2053,92 @@ mod tests {
         );
     }
 
-    /// Une notion, un mot (`docs/textes-interface.md`) : la virgule, le point,
-    /// « Auto » et « aucun » s'écrivent pareil d'une liste de l'assistant à
-    /// l'autre.
+    /// One notion, one word (`docs/textes-interface.md`): the comma, the dot,
+    /// "Auto" and "None" are written the same from one list of the wizard to
+    /// another.
     #[test]
-    fn une_meme_notion_porte_le_meme_libelle_d_une_liste_a_l_autre() {
-        let virgule = separator_label(&Separator::Comma);
-        assert_eq!(decimal_label(DecimalStyle::Comma), virgule);
-        assert_eq!(thousands_label(Some(',')), virgule);
+    fn one_notion_carries_the_same_label_from_one_list_to_another() {
+        let comma = separator_label(&Separator::Comma);
+        assert_eq!(decimal_label(DecimalStyle::Comma), comma);
+        assert_eq!(thousands_label(Some(',')), comma);
         assert_eq!(thousands_label(Some('.')), decimal_label(DecimalStyle::Dot));
         let auto = separator_label(&Separator::Auto);
         assert_eq!(decimal_label(DecimalStyle::Auto), auto);
         assert_eq!(encoding_label(Encoding::Auto), auto);
         assert_eq!(column_role_label(ColumnRoleChoice::Auto), auto);
-        let aucun = thousands_label(None);
-        assert_eq!(column_role_label(ColumnRoleChoice::Ignore), aucun);
-        assert_eq!(data_end_label(&DataEnd::None), aucun);
-        // Un séparateur personnalisé est un « autre », comme un séparateur
-        // de milliers inconnu.
+        let none_label = thousands_label(None);
+        assert_eq!(column_role_label(ColumnRoleChoice::Ignore), none_label);
+        assert_eq!(data_end_label(&DataEnd::None), none_label);
+        // A custom separator is an "Other", like an unknown thousands
+        // separator.
         assert_eq!(
             separator_label(&Separator::Custom('|')),
             thousands_label(Some('_'))
         );
     }
 
-    /// La liste des modèles dit qu'une recette a été modifiée sans être
-    /// enregistrée, sans perdre le nom du modèle ; non modifiée, le nom seul.
+    /// The template list says a recipe was modified without being saved,
+    /// without losing the template name; unmodified, the name alone.
     #[test]
-    fn le_modele_modifie_se_signale_dans_la_liste_des_modeles() {
+    fn the_modified_template_is_flagged_in_the_template_list() {
         assert_eq!(recipe_combo_text("Jasco", false), "Jasco");
-        let modifie = recipe_combo_text("Jasco", true);
-        assert_ne!(modifie, "Jasco");
-        assert!(modifie.contains("Jasco"), "{modifie:?}");
+        let modified = recipe_combo_text("Jasco", true);
+        assert_ne!(modified, "Jasco");
+        assert!(modified.contains("Jasco"), "{modified:?}");
     }
 
-    // -- La fin des données -------------------------------------------------
+    // -- The data end ------------------------------------------------------
 
-    /// Ouvre la liste « Fin des données » puis clique le choix `libelle`.
-    fn choisir_fin(context: &egui::Context, fin: &mut DataEnd, libelle: &str) {
-        let peints = textes(&image(context, Vec::new(), |ui| data_end_row(ui, fin)));
-        let liste = texte_exact(&peints, &data_end_label(fin)).centre;
-        cliquer(context, liste, egui::PointerButton::Primary, |ui| {
-            data_end_row(ui, fin)
+    /// Opens the "Data end" list then clicks the choice `libelle`.
+    fn choose_end(ctx: &egui::Context, end: &mut DataEnd, label: &str) {
+        let painted = texts(&image(ctx, Vec::new(), |ui| data_end_row(ui, end)));
+        let list = text_exact(&painted, &data_end_label(end)).center;
+        click(ctx, list, egui::PointerButton::Primary, |ui| {
+            data_end_row(ui, end)
         });
-        let peints = textes(&image(context, Vec::new(), |ui| data_end_row(ui, fin)));
-        // La liste ouverte : le choix voulu, ailleurs que sur le bouton fermé.
-        let choix = peints
+        let painted = texts(&image(ctx, Vec::new(), |ui| data_end_row(ui, end)));
+        // The open list: the wanted choice, somewhere other than the closed button.
+        let choice = painted
             .iter()
-            .find(|t| t.texte == libelle && t.centre != liste)
-            .unwrap_or_else(|| panic!("{libelle:?} absent de la liste ouverte"))
-            .centre;
-        cliquer(context, choix, egui::PointerButton::Primary, |ui| {
-            data_end_row(ui, fin)
+            .find(|t| t.text == label && t.center != list)
+            .unwrap_or_else(|| panic!("{label:?} missing from the open list"))
+            .center;
+        click(ctx, choice, egui::PointerButton::Primary, |ui| {
+            data_end_row(ui, end)
         });
     }
 
-    /// Issue #4 : la fin des données montre le champ de l'option choisie
-    /// (repère, nombre de lignes) ; reprendre la même option garde le texte
-    /// saisi, en changer prend la valeur par défaut de la nouvelle (témoin :
-    /// le clic atteint bien la liste).
+    /// Issue #4: the data end shows the field of the chosen option (marker,
+    /// number of lines); choosing the same option again keeps the typed text,
+    /// changing it takes the new option's default value (witness: the click
+    /// does reach the list).
     #[test]
-    fn la_fin_des_donnees_garde_sa_valeur_tant_qu_on_ne_change_pas_d_option() {
-        let context = contexte();
-        let mut fin = DataEnd::Marker("FIN".into());
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            data_end_row(ui, &mut fin)
-        }));
-        assert!(est_peint(&peints, "FIN"), "le repère est dans son champ");
+    fn the_data_end_keeps_its_value_until_the_option_changes() {
+        let ctx = context();
+        let mut end = DataEnd::Marker("END".into());
+        let painted = texts(&image(&ctx, Vec::new(), |ui| data_end_row(ui, &mut end)));
+        assert!(is_painted(&painted, "END"), "the marker is in its field");
 
-        choisir_fin(&context, &mut fin, &tr!("import-dataend-marker"));
-        assert_eq!(
-            fin,
-            DataEnd::Marker("FIN".into()),
-            "même option : texte gardé"
-        );
+        choose_end(&ctx, &mut end, &tr!("import-dataend-marker"));
+        assert_eq!(end, DataEnd::Marker("END".into()), "same option: text kept");
 
-        choisir_fin(&context, &mut fin, &tr!("import-dataend-after-header"));
-        assert_eq!(fin, DataEnd::LinesAfterHeader(100), "autre option");
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            data_end_row(ui, &mut fin)
-        }));
-        assert!(est_peint(&peints, "100"), "le nombre est dans son champ");
-        assert!(!est_peint(&peints, "FIN"));
+        choose_end(&ctx, &mut end, &tr!("import-dataend-after-header"));
+        assert_eq!(end, DataEnd::LinesAfterHeader(100), "other option");
+        let painted = texts(&image(&ctx, Vec::new(), |ui| data_end_row(ui, &mut end)));
+        assert!(is_painted(&painted, "100"), "the number is in its field");
+        assert!(!is_painted(&painted, "END"));
 
-        choisir_fin(&context, &mut fin, &tr!("import-dataend-auto"));
-        assert_eq!(fin, DataEnd::Auto);
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            data_end_row(ui, &mut fin)
-        }));
-        assert!(!est_peint(&peints, "100"), "Auto n'a pas de champ");
+        choose_end(&ctx, &mut end, &tr!("import-dataend-auto"));
+        assert_eq!(end, DataEnd::Auto);
+        let painted = texts(&image(&ctx, Vec::new(), |ui| data_end_row(ui, &mut end)));
+        assert!(!is_painted(&painted, "100"), "Auto has no field");
     }
 
-    // -- L'aperçu -----------------------------------------------------------
+    // -- The preview -------------------------------------------------------
 
-    /// Un aperçu de trois lignes : un en-tête, une donnée à deux cellules
-    /// dont la seconde serait gardée en texte, un pied de page.
-    fn apercu(total_data_lines: usize) -> FilePreview {
+    /// A preview of three lines: a header, a data line with two cells of which
+    /// the second would be kept as text, a footer.
+    fn preview_of(total_data_lines: usize) -> FilePreview {
         FilePreview {
             lines: vec![
                 PreviewLine {
@@ -2177,117 +2174,113 @@ mod tests {
         }
     }
 
-    /// Le numéro de la ligne `numero` dans l'aperçu : aligné à droite sur
-    /// cinq caractères, puis son code de rôle (pas « 4 Colonnes », l'étape
-    /// du fil d'Ariane).
-    fn numero(peints: &[Texte], numero: usize) -> &Texte {
-        let numero = numero.to_string();
-        peints
+    /// The number of line `numero` in the preview: right-aligned on five
+    /// characters, then its role code (not "4 Columns", the breadcrumb step).
+    fn line_number(painted: &[Text], line_number: usize) -> &Text {
+        let line_number = line_number.to_string();
+        painted
             .iter()
-            .find(|t| t.texte.get(..5).map(str::trim_start) == Some(numero.as_str()))
-            .unwrap_or_else(|| panic!("ligne {numero} absente"))
+            .find(|t| t.text.get(..5).map(str::trim_start) == Some(line_number.as_str()))
+            .unwrap_or_else(|| panic!("line {line_number} missing"))
     }
 
-    /// Clic droit sur la ligne `ligne` de l'aperçu, puis clic sur l'entrée
-    /// `entree` du menu : ce que l'aperçu demande alors.
-    fn clic_droit(ligne: usize, entree: &str, auto_cut: bool) -> Option<(ImportLineAction, usize)> {
-        let context = contexte();
-        let preview = apercu(1);
+    /// Right-click on line `ligne` of the preview, then click on the menu
+    /// entry `entree`: what the preview then asks for.
+    fn right_click(line: usize, entry: &str, auto_cut: bool) -> Option<(ImportLineAction, usize)> {
+        let ctx = context();
+        let preview = preview_of(1);
         let mut chosen = None;
-        let mut peindre =
+        let mut paint =
             |ui: &mut egui::Ui| import_line_preview_widget(ui, &preview, auto_cut, &mut chosen);
-        let peints = textes(&image(&context, Vec::new(), &mut peindre));
-        let pos = numero(&peints, ligne).centre;
-        cliquer(&context, pos, egui::PointerButton::Secondary, &mut peindre);
-        let peints = textes(&image(&context, Vec::new(), &mut peindre));
-        let pos = texte_exact(&peints, entree).centre;
-        cliquer(&context, pos, egui::PointerButton::Primary, &mut peindre);
+        let painted = texts(&image(&ctx, Vec::new(), &mut paint));
+        let pos = line_number(&painted, line).center;
+        click(&ctx, pos, egui::PointerButton::Secondary, &mut paint);
+        let painted = texts(&image(&ctx, Vec::new(), &mut paint));
+        let pos = text_exact(&painted, entry).center;
+        click(&ctx, pos, egui::PointerButton::Primary, &mut paint);
         chosen
     }
 
-    /// Le clic droit sur une ligne de l'aperçu règle l'import à cet endroit,
-    /// en rapportant le numéro de la ligne. « Fin des données ici » n'a de
-    /// sens que sur une donnée ou le pied de page, « Annuler la coupure
-    /// automatique » que si elle est active : grisés sinon, ils ne
-    /// demandent rien (le même clic actif étant le témoin).
+    /// A right-click on a line of the preview sets the import at that place,
+    /// reporting the line number. "End Data Here" only makes sense on a data
+    /// line or the footer, "Disable Auto Data End" only if it is active:
+    /// greyed out otherwise, they ask for nothing (the same click when active
+    /// being the witness).
     #[test]
-    fn le_clic_droit_sur_une_ligne_regle_l_import_a_cet_endroit() {
-        let debut = tr!("import-line-data-start");
-        let unites = tr!("import-line-units");
-        let fin = tr!("import-line-data-end");
-        let sans_coupure = tr!("import-line-no-auto-end");
-        for (ligne, entree, auto_cut, attendu) in [
-            (2, &debut, true, Some(ImportLineAction::DataStartsHere)),
-            (1, &unites, true, Some(ImportLineAction::UnitsLine)),
-            (2, &fin, true, Some(ImportLineAction::DataEndsHere)),
-            (3, &fin, true, Some(ImportLineAction::DataEndsHere)),
-            (1, &fin, true, None),
-            (3, &sans_coupure, true, Some(ImportLineAction::NoAutoCut)),
-            (3, &sans_coupure, false, None),
+    fn right_click_on_a_line_sets_the_import_at_that_place() {
+        let start = tr!("import-line-data-start");
+        let units = tr!("import-line-units");
+        let end = tr!("import-line-data-end");
+        let without_cut = tr!("import-line-no-auto-end");
+        for (line, entry, auto_cut, expected) in [
+            (2, &start, true, Some(ImportLineAction::DataStartsHere)),
+            (1, &units, true, Some(ImportLineAction::UnitsLine)),
+            (2, &end, true, Some(ImportLineAction::DataEndsHere)),
+            (3, &end, true, Some(ImportLineAction::DataEndsHere)),
+            (1, &end, true, None),
+            (3, &without_cut, true, Some(ImportLineAction::NoAutoCut)),
+            (3, &without_cut, false, None),
         ] {
             assert_eq!(
-                clic_droit(ligne, entree, auto_cut),
-                attendu.map(|action| (action, ligne)),
-                "ligne {ligne}, {entree:?}, coupure auto {auto_cut}"
+                right_click(line, entry, auto_cut),
+                expected.map(|action| (action, line)),
+                "line {line}, {entry:?}, auto cut {auto_cut}"
             );
         }
     }
 
-    /// L'aperçu colore chaque ligne selon son rôle (numéro et texte brut) et
-    /// signale en couleur d'avertissement une cellule qui serait gardée en
-    /// texte — une cellule numérique de la même ligne, non (témoin). Le
-    /// nombre de lignes montrées n'est dit que s'il en manque.
+    /// The preview colors each line by its role (number and raw text) and
+    /// flags in the warning color a cell that would be kept as text — a
+    /// numeric cell of the same line is not (witness). The number of lines
+    /// shown is stated only if some are missing.
     #[test]
-    fn l_apercu_colore_les_lignes_par_role_et_les_cellules_gardees_en_texte() {
-        let context = contexte();
-        let visuals = context.global_style().visuals.clone();
+    fn the_preview_colors_lines_by_role_and_cells_kept_as_text() {
+        let ctx = context();
+        let visuals = ctx.global_style().visuals.clone();
         let mut chosen = None;
-        let preview = apercu(1);
-        let peints = textes(&image(&context, Vec::new(), |ui| {
+        let preview = preview_of(1);
+        let painted = texts(&image(&ctx, Vec::new(), |ui| {
             import_line_preview_widget(ui, &preview, true, &mut chosen)
         }));
-        assert_eq!(texte_exact(&peints, "abc").couleur, visuals.warn_fg_color);
-        assert_eq!(texte_exact(&peints, "1.5").couleur, visuals.text_color());
-        let couleur_de = |role| {
-            let mut couleur = egui::Color32::PLACEHOLDER;
-            image(&context, Vec::new(), |ui| {
-                couleur = line_role_color(ui, role)
-            });
-            couleur
+        assert_eq!(text_exact(&painted, "abc").color, visuals.warn_fg_color);
+        assert_eq!(text_exact(&painted, "1.5").color, visuals.text_color());
+        let color_of = |role| {
+            let mut color = egui::Color32::PLACEHOLDER;
+            image(&ctx, Vec::new(), |ui| color = line_role_color(ui, role));
+            color
         };
-        let entete = couleur_de(LineRole::MainHeader);
-        let pied = couleur_de(LineRole::Footer);
-        let donnee = couleur_de(LineRole::Data);
-        assert_eq!(texte_exact(&peints, "TITLE").couleur, entete);
-        assert_eq!(numero(&peints, 1).couleur, entete);
-        assert_eq!(texte_exact(&peints, "END").couleur, pied);
-        assert_eq!(numero(&peints, 3).couleur, pied);
-        assert_eq!(numero(&peints, 2).couleur, donnee);
-        // Rien ne manque : pas de résumé, ni « 1 sur 1 ».
-        let complet = tr!("import-preview-showing", shown = 1, total = 1);
-        assert!(!est_peint(&peints, &complet));
-        let resume = tr!("import-preview-showing", shown = 1, total = 40);
-        assert!(!est_peint(&peints, &resume));
+        let header = color_of(LineRole::MainHeader);
+        let footer = color_of(LineRole::Footer);
+        let data = color_of(LineRole::Data);
+        assert_eq!(text_exact(&painted, "TITLE").color, header);
+        assert_eq!(line_number(&painted, 1).color, header);
+        assert_eq!(text_exact(&painted, "END").color, footer);
+        assert_eq!(line_number(&painted, 3).color, footer);
+        assert_eq!(line_number(&painted, 2).color, data);
+        // Nothing is missing: no summary, no "1 of 1".
+        let complete = tr!("import-preview-showing", shown = 1, total = 1);
+        assert!(!is_painted(&painted, &complete));
+        let summary = tr!("import-preview-showing", shown = 1, total = 40);
+        assert!(!is_painted(&painted, &summary));
 
-        let tronque = apercu(40);
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            import_line_preview_widget(ui, &tronque, true, &mut chosen)
+        let truncated = preview_of(40);
+        let painted = texts(&image(&ctx, Vec::new(), |ui| {
+            import_line_preview_widget(ui, &truncated, true, &mut chosen)
         }));
-        texte_exact(&peints, &resume);
-        assert_eq!(chosen, None, "peindre ne règle rien");
+        text_exact(&painted, &summary);
+        assert_eq!(chosen, None, "painting sets nothing");
     }
 
-    /// Le code couleur de l'aperçu (façon assistant ASCII d'OriginLab) :
-    /// une couleur pour toute ligne d'en-tête reconnue, une pour les
-    /// commentaires de sous-en-tête, une pour le pied de page, une pour les
-    /// lignes ignorées, et le texte ordinaire pour les données — cinq
-    /// familles, toutes distinctes dans le thème de l'application.
+    /// The preview's color code (OriginLab ASCII wizard style): one color for
+    /// every recognized header line, one for the subheader comments, one for
+    /// the footer, one for the ignored lines, and the ordinary text color for
+    /// the data — five families, all distinct in the application theme.
     #[test]
-    fn chaque_famille_de_lignes_a_sa_couleur_dans_l_apercu() {
-        let context = contexte();
-        let mut couleurs = Vec::new();
-        image(&context, Vec::new(), |ui| {
-            couleurs = [
+    fn each_family_of_lines_has_its_color_in_the_preview() {
+        let ctx = context();
+        let mut colors = Vec::new();
+        image(&ctx, Vec::new(), |ui| {
+            colors = [
                 LineRole::MainHeader,
                 LineRole::Subheader,
                 LineRole::SubheaderLongName,
@@ -2304,8 +2297,8 @@ mod tests {
             .map(|role| (role, line_role_color(ui, role)))
             .to_vec();
         });
-        let couleur = |role| couleurs.iter().find(|(r, _)| *r == role).unwrap().1;
-        let familles = [
+        let color = |role| colors.iter().find(|(r, _)| *r == role).unwrap().1;
+        let families = [
             vec![
                 LineRole::MainHeader,
                 LineRole::Subheader,
@@ -2318,127 +2311,124 @@ mod tests {
             vec![LineRole::Comment, LineRole::Skipped],
             vec![LineRole::Data, LineRole::Blank],
         ];
-        for famille in &familles {
-            for role in famille {
-                assert_eq!(couleur(*role), couleur(famille[0]), "{role:?}");
+        for family in &families {
+            for role in family {
+                assert_eq!(color(*role), color(family[0]), "{role:?}");
             }
         }
-        distincts(&familles, |famille| format!("{:?}", couleur(famille[0])));
+        distinct(&families, |family| format!("{:?}", color(family[0])));
     }
-    /// Repartir d'un modèle vierge réinitialise la recette, tout en gardant
-    /// les fichiers déjà choisis pour le prochain aperçu.
+
+    /// Starting again from a blank template resets the recipe, while keeping
+    /// the files already chosen for the next preview.
     #[test]
-    fn nouveau_modele_reinitialise_la_recette_et_garde_les_fichiers() {
-        let mut banc = banc(true);
-        let context = contexte();
-        let avant = banc.state.import_state().unwrap().recipe.clone();
+    fn new_template_resets_the_recipe_and_keeps_the_files() {
+        let mut bench = bench(true);
+        let ctx = context();
+        let before = bench.state.import_state().unwrap().recipe.clone();
         assert_ne!(
-            avant,
+            before,
             stokesforge_import::ImportRecipe::new(tr!("import-template-untitled")),
-            "témoin : la recette initiale porte nos réglages Jasco"
+            "witness: the initial recipe carries our Jasco settings"
         );
-        let peints = textes(&image(&context, Vec::new(), |ui| {
-            super::import_step_files(ui, &mut banc.state, &mut Vec::new())
+        let painted = texts(&image(&ctx, Vec::new(), |ui| {
+            super::import_step_files(ui, &mut bench.state, &mut Vec::new())
         }));
-        let position = texte_exact(&peints, &tr!("import-files-reset")).centre;
-        cliquer(&context, position, egui::PointerButton::Primary, |ui| {
-            super::import_step_files(ui, &mut banc.state, &mut Vec::new())
+        let position = text_exact(&painted, &tr!("import-files-reset")).center;
+        click(&ctx, position, egui::PointerButton::Primary, |ui| {
+            super::import_step_files(ui, &mut bench.state, &mut Vec::new())
         });
-        let import = banc.state.import_state().unwrap();
+        let import = bench.state.import_state().unwrap();
         assert_eq!(
             import.recipe,
             stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
         );
-        assert_eq!(import.paths, banc.fichiers);
-        assert!(
-            !import.paths.is_empty(),
-            "témoin : des fichiers sont conservés"
-        );
+        assert_eq!(import.paths, bench.files);
+        assert!(!import.paths.is_empty(), "witness: files are kept");
     }
 
-    /// S-F3–S-F5 (#229) : supprimer un modèle (Ctrl+Z ne le rend pas) passe par
-    /// une confirmation modale par-dessus l'assistant, Cancel par défaut :
-    /// Entrée l'annule sans valider l'assistant (qui reste ouvert) ; le verbe
-    /// supprime. Plus de « Keep ».
+    /// S-F3–S-F5 (#229): deleting a template (Ctrl+Z does not bring it back)
+    /// goes through a modal confirmation over the wizard, Cancel by default:
+    /// Enter cancels it without validating the wizard (which stays open); the
+    /// verb deletes. No more "Keep".
     #[test]
-    fn supprimer_un_modele_passe_par_une_confirmation_modale() {
-        let mut banc = banc(true);
-        let context = contexte();
+    fn deleting_a_template_goes_through_a_modal_confirmation() {
+        let mut bench = bench(true);
+        let ctx = context();
         let mut actions = Vec::new();
-        banc.state.request_delete_import_recipe("Jasco");
-        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        assert!(est_peint(&peints, &tr!("import-files-delete-title")));
-        texte_exact(&peints, &tr!("import-files-delete-yes"));
-        peindre_assistant(
-            &context,
-            &mut banc.state,
+        bench.state.request_delete_import_recipe("Jasco");
+        let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        assert!(is_painted(&painted, &tr!("import-files-delete-title")));
+        text_exact(&painted, &tr!("import-files-delete-yes"));
+        paint_wizard(
+            &ctx,
+            &mut bench.state,
             &mut actions,
-            vec![touche(egui::Key::Enter)],
+            vec![key(egui::Key::Enter)],
         );
-        let import = banc.state.import_state().expect("l'assistant reste ouvert");
-        assert!(import.confirm_delete.is_none(), "Entrée = Cancel");
-        assert!(actions.is_empty(), "l'assistant n'a rien validé");
+        let import = bench.state.import_state().expect("the wizard stays open");
+        assert!(import.confirm_delete.is_none(), "Enter = Cancel");
+        assert!(actions.is_empty(), "the wizard validated nothing");
 
-        banc.state.request_delete_import_recipe("Jasco");
-        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
-        let verbe = texte_exact(&peints, &tr!("import-files-delete-yes")).centre;
-        cliquer(&context, verbe, egui::PointerButton::Primary, |ui| {
-            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        bench.state.request_delete_import_recipe("Jasco");
+        let painted = paint_wizard(&ctx, &mut bench.state, &mut actions, Vec::new());
+        let verb = text_exact(&painted, &tr!("import-files-delete-yes")).center;
+        click(&ctx, verb, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut bench.state, &mut actions)
         });
         assert!(
-            banc.state
+            bench
+                .state
                 .import_state()
-                .expect("ouvert")
+                .expect("open")
                 .confirm_delete
                 .is_none(),
-            "le verbe a répondu"
+            "the verb answered"
         );
     }
 
-    /// Le champ associé à un délimiteur conserve sa valeur en reprenant la
-    /// même variante. Changer d'option prouve que le clic atteint la liste.
+    /// The field tied to a delimiter keeps its value when the same variant is
+    /// chosen again. Changing option proves the click reaches the list.
     #[test]
-    fn reprendre_le_delimiteur_garde_ses_parametres() {
+    fn choosing_the_delimiter_again_keeps_its_parameters() {
         for initial in [Separator::Custom('@'), Separator::FixedWidth(vec![4, 8])] {
-            let mut banc = banc(false);
-            let context = contexte();
-            banc.state.import_state_mut().unwrap().recipe.separator = initial.clone();
-            choisir_delimiteur(&context, &mut banc.state, &separator_label(&initial));
-            assert_eq!(banc.state.import_state().unwrap().recipe.separator, initial);
-            choisir_delimiteur(
-                &context,
-                &mut banc.state,
-                &separator_label(&Separator::Comma),
-            );
+            let mut bench = bench(false);
+            let ctx = context();
+            bench.state.import_state_mut().unwrap().recipe.separator = initial.clone();
+            choose_delimiter(&ctx, &mut bench.state, &separator_label(&initial));
             assert_eq!(
-                banc.state.import_state().unwrap().recipe.separator,
+                bench.state.import_state().unwrap().recipe.separator,
+                initial
+            );
+            choose_delimiter(&ctx, &mut bench.state, &separator_label(&Separator::Comma));
+            assert_eq!(
+                bench.state.import_state().unwrap().recipe.separator,
                 Separator::Comma,
-                "témoin : le choix d'une autre option écrit bien la recette"
+                "witness: choosing another option does write the recipe"
             );
         }
     }
 
-    fn choisir_delimiteur(context: &egui::Context, state: &mut AppState, libelle: &str) {
-        let actuel = separator_label(&state.import_state().unwrap().recipe.separator);
-        let peints = textes(&image(context, Vec::new(), |ui| {
+    fn choose_delimiter(ctx: &egui::Context, state: &mut AppState, label: &str) {
+        let current = separator_label(&state.import_state().unwrap().recipe.separator);
+        let painted = texts(&image(ctx, Vec::new(), |ui| {
             super::import_step_format(ui, state)
         }));
-        let liste = texte_exact(&peints, &actuel).centre;
-        cliquer(context, liste, egui::PointerButton::Primary, |ui| {
+        let list = text_exact(&painted, &current).center;
+        click(ctx, list, egui::PointerButton::Primary, |ui| {
             super::import_step_format(ui, state)
         });
-        let peints = textes(&image(context, Vec::new(), |ui| {
+        let painted = texts(&image(ctx, Vec::new(), |ui| {
             super::import_step_format(ui, state)
         }));
-        // La liste ouverte se peint par-dessus le formulaire, donc en dernier :
-        // un même libellé peut aussi être celui d'un radio (« Comma » de la
-        // décimale).
-        let choix = peints
+        // The open list is painted over the form, so last: the same label can
+        // also be that of a radio (the decimal's "Comma").
+        let choice = painted
             .iter()
-            .rfind(|texte| texte.texte == libelle && texte.centre != liste)
-            .unwrap_or_else(|| panic!("{libelle:?} absent de la liste ouverte"))
-            .centre;
-        cliquer(context, choix, egui::PointerButton::Primary, |ui| {
+            .rfind(|text| text.text == label && text.center != list)
+            .unwrap_or_else(|| panic!("{label:?} missing from the open list"))
+            .center;
+        click(ctx, choice, egui::PointerButton::Primary, |ui| {
             super::import_step_format(ui, state)
         });
     }

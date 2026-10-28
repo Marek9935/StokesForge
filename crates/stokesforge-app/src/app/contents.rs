@@ -1,10 +1,10 @@
-//! Contenus de fenêtre partagés entre fenêtre flottante et fenêtre détachée
-//! (piège 6 de #115) : [`tab_contents`] aiguille selon la nature de
-//! l'onglet ; [`note_contents`] et [`matrix_contents`] ne dépendent que de
-//! `(ui, état, actions)`, jamais d'un champ de `StokesForgeApp` — la fermeture
-//! de `show_viewport_deferred` est `'static + Send + Sync`.
+//! Window contents shared between the floating window and the detached
+//! window (pitfall 6 of #115): [`tab_contents`] dispatches on the kind of
+//! tab; [`note_contents`] and [`matrix_contents`] depend only on
+//! `(ui, state, actions)`, never on a field of `StokesForgeApp` — the
+//! `show_viewport_deferred` closure is `'static + Send + Sync`.
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Moved out of `app.rs` as is (#121).
 
 use std::collections::HashMap;
 
@@ -19,13 +19,13 @@ use super::graph_window::graph_drop_target;
 use super::tab::Tab;
 use super::workbook::book_contents;
 
-/// Peint le contenu de l'onglet `tab`, quelle que soit sa provenance — la
-/// boucle des fenêtres flottantes ou la zone de maximisation
-/// ([`StokesForgeApp::ui`](eframe::App::ui)) l'appellent toutes les deux : **une seule** fonction
-/// qui sait peindre un onglet, jamais deux implémentations à tenir en
-/// accord. Ne prend plus de `&egui::Context` depuis que la console de script
-/// (seule nature à en avoir eu besoin, pour son `request_repaint`) est
-/// devenue un panneau fixe — voir [`StokesForgeApp::script_panel`](crate::app::StokesForgeApp::script_panel).
+/// Paints the contents of tab `tab`, whatever its origin — the floating
+/// windows loop and the maximize area
+/// ([`StokesForgeApp::ui`](eframe::App::ui)) both call it: **one** function
+/// that knows how to paint a tab, never two implementations to keep in
+/// sync. Takes no `&egui::Context` any more since the script console (the
+/// only kind that ever needed one, for its `request_repaint`) became a
+/// fixed panel — see [`StokesForgeApp::script_panel`](crate::app::StokesForgeApp::script_panel).
 pub(super) fn tab_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -41,28 +41,29 @@ pub(super) fn tab_contents(
     }
 }
 
-/// Contenu d'un [`Tab::Matrix`] — **espace réservé documenté**. L'édition de
-/// matrice est explicitement hors périmètre de cette tâche
-/// (`docs/application/gestionnaires.md`) : la fenêtre s'ouvre et se focalise exactement
-/// comme les trois autres natures, mais ne montre qu'un message plutôt qu'un
-/// éditeur. `stokesforge-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu
-/// (juste des métadonnées de fenêtre) — il n'y a donc littéralement rien
-/// d'autre à afficher tant que cette nature n'a pas de valeurs.
+/// Contents of a [`Tab::Matrix`] — **documented placeholder**. Matrix
+/// editing is explicitly out of scope for this task
+/// (`docs/application/gestionnaires.md`): the window opens and takes focus
+/// exactly like the three other kinds, but shows only a message instead of
+/// an editor. `stokesforge-core::NodeKind::Matrix` has no content today
+/// (just window metadata) — so there is literally nothing else to show
+/// until this kind has values.
 ///
-/// Une seule écriture pour la fenêtre flottante et la fenêtre détachée : elle
-/// ne lit que l'arbre, que les deux ont sous la main (`state.tree()` d'un
-/// côté, l'instantané du viewport de l'autre).
+/// One implementation for the floating window and the detached window: it
+/// reads only the tree, which both have at hand (`state.tree()` on one
+/// side, the viewport snapshot on the other).
 pub(super) fn matrix_contents(ui: &mut egui::Ui, _tree: &Tree, _matrix: NodeId) {
     ui.centered_and_justified(|ui| {
         ui.weak(tr!("matrix-unavailable"));
     });
 }
 
-/// Contenu d'un [`Tab::Note`] : un éditeur multi-lignes, sur le même principe
-/// de saisie différée que `cell_widget` (`grid.rs`) — le tampon ([`stokesforge_app_state::state::
-/// NoteEdit`]) n'atteint le modèle qu'à la perte de focus, jamais à chaque
-/// frappe (sinon l'historique compterait une entrée par caractère). Échap
-/// abandonne la saisie sans rien écrire, comme pour une cellule.
+/// Contents of a [`Tab::Note`]: a multi-line editor, on the same deferred
+/// input principle as `cell_widget` (`grid.rs`) — the buffer
+/// ([`stokesforge_app_state::state::
+/// NoteEdit`]) reaches the model only on focus loss, never on each
+/// keystroke (otherwise the history would count one entry per character).
+/// Escape abandons the input without writing anything, as for a cell.
 pub(super) fn note_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -130,18 +131,18 @@ mod tests {
 
     use super::super::project_manager::tests::find_text_center;
 
-    /// Une note « Journal » au texte « Début » et une matrice.
-    fn projet() -> (Session, AppState, NodeId, NodeId) {
-        let mut project = Project::new("Contenus").unwrap();
+    /// A note "Log" with the text "Début" and a matrix.
+    fn project() -> (Session, AppState, NodeId, NodeId) {
+        let mut project = Project::new("Contents").unwrap();
         let root = project.root();
-        let note = project.add_note(root, Some("Journal"), "Début").unwrap();
-        let matrix = project.add_matrix(root, Some("Carte")).unwrap();
+        let note = project.add_note(root, Some("Log"), "Début").unwrap();
+        let matrix = project.add_matrix(root, Some("Map")).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         (session, state, note, matrix)
     }
 
-    /// Une image de `tab` sur un écran de 800 × 800.
+    /// A frame of `tab` on an 800 × 800 screen.
     fn paint(
         context: &egui::Context,
         state: &mut AppState,
@@ -165,12 +166,12 @@ mod tests {
         output
     }
 
-    /// `tab_contents` aiguille selon la nature de l'onglet : une note montre
-    /// son nom et son texte, une matrice son message d'attente, et une note
-    /// disparue le dit au lieu de paniquer.
+    /// `tab_contents` dispatches on the kind of tab: a note shows its name
+    /// and its text, a matrix its placeholder message, and a vanished note
+    /// says so instead of panicking.
     #[test]
-    fn chaque_onglet_peint_son_contenu_et_une_note_disparue_le_dit() {
-        let (_session, mut state, note, matrix) = projet();
+    fn each_tab_paints_its_contents_and_a_vanished_note_says_so() {
+        let (_session, mut state, note, matrix) = project();
         let context = egui::Context::default();
         let mut actions = Vec::new();
         let output = paint(
@@ -180,7 +181,7 @@ mod tests {
             Tab::Note(note),
             Vec::new(),
         );
-        assert!(painted(&output, "Journal") && painted(&output, "Début"));
+        assert!(painted(&output, "Log") && painted(&output, "Début"));
         assert!(!painted(&output, &tr!("matrix-unavailable")));
 
         let output = paint(
@@ -191,7 +192,7 @@ mod tests {
             Vec::new(),
         );
         assert!(painted(&output, &tr!("matrix-unavailable")));
-        assert!(!painted(&output, "Journal"));
+        assert!(!painted(&output, "Log"));
 
         let gone = NodeId::from_raw(9999);
         let output = paint(
@@ -202,7 +203,7 @@ mod tests {
             Vec::new(),
         );
         assert!(painted(&output, &tr!("note-deleted")));
-        assert!(actions.is_empty(), "peindre n'écrit rien");
+        assert!(actions.is_empty(), "painting writes nothing");
     }
 
     fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
@@ -214,12 +215,12 @@ mod tests {
         }
     }
 
-    /// Saisie différée d'une note : la frappe n'atteint pas le modèle, la
-    /// perte de focus valide en **une** action, Échap abandonne sans rien
-    /// écrire — comme une cellule.
+    /// Deferred input of a note: typing does not reach the model, losing
+    /// focus commits in **one** action, Escape abandons without writing
+    /// anything — like a cell.
     #[test]
-    fn la_note_n_ecrit_le_modele_qu_a_la_perte_de_focus_et_echap_abandonne() {
-        let (_session, state, note, _) = projet();
+    fn the_note_writes_the_model_only_on_focus_loss_and_escape_abandons() {
+        let (_session, state, note, _) = project();
         let state = RefCell::new(state);
         let actions = RefCell::new(Vec::new());
         let context = egui::Context::default();
@@ -233,7 +234,7 @@ mod tests {
             )
         };
         let first = image(Vec::new());
-        // À droite du texte, sur sa ligne : le curseur se pose en fin de texte.
+        // To the right of the text, on its line: the cursor lands at the end of the text.
         let at = find_text_center(&first.shapes, "Début") + egui::vec2(200.0, 0.0);
         let outside = egui::pos2(400.0, 790.0);
         let edit = |text: &str| {
@@ -245,7 +246,7 @@ mod tests {
         edit(" suite");
         assert!(
             actions.borrow().is_empty(),
-            "la frappe n'écrit pas le modèle"
+            "typing does not write the model"
         );
         assert_eq!(
             state
@@ -265,12 +266,12 @@ mod tests {
                 note,
                 text: "Début suite".to_owned(),
             }],
-            "la perte de focus valide en une action"
+            "focus loss commits in one action"
         );
         assert!(state.borrow().note_editing().is_none());
 
         actions.borrow_mut().clear();
-        edit(" jetée");
+        edit(" dropped");
         image(vec![egui::Event::Key {
             key: egui::Key::Escape,
             physical_key: None,
@@ -278,10 +279,10 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }]);
-        assert!(actions.borrow().is_empty(), "Échap n'écrit rien");
+        assert!(actions.borrow().is_empty(), "Escape writes nothing");
         assert!(
             state.borrow().note_editing().is_none(),
-            "Échap abandonne la saisie"
+            "Escape abandons the input"
         );
     }
 }

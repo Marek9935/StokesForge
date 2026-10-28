@@ -1,13 +1,13 @@
-//! La fenêtre d'analyse (#181, maquettes M3 à M5) et la confirmation de
-//! suppression d'un calcul (M8).
+//! The analysis window (#181, mockups M3 to M5) and the confirmation to
+//! delete a calculation (M8).
 //!
-//! Une fenêtre **modale** (`modal_dialog_with`) à deux colonnes : à gauche les
-//! réglages (`analysis_forms.rs`), à droite l'aperçu cliquable
-//! (`analysis_preview.rs`), ses outils et les valeurs calculées. Le
-//! formulaire vit dans `AppState` (`analysis_form_mut`) ; la fenêtre ne
-//! pousse que deux actions, `ApplyAnalysis` et `CloseAnalysis`. « Create » (ou
-//! « Update » en modification) se grise tant qu'un réglage manque ou que le
-//! calcul de l'aperçu échoue — la raison est écrite dans l'aperçu.
+//! A **modal** window (`modal_dialog_with`) with two columns: the settings on
+//! the left (`analysis_forms.rs`), the clickable preview on the right
+//! (`analysis_preview.rs`), its tools and the computed values. The form lives
+//! in `AppState` (`analysis_form_mut`); the window pushes only two actions,
+//! `ApplyAnalysis` and `CloseAnalysis`. "Create" (or "Update" when editing)
+//! is grayed out while a setting is missing or the preview computation
+//! fails; the reason is written in the preview.
 
 use eframe::egui;
 use stokesforge_analysis::ops::Warning;
@@ -28,18 +28,18 @@ use stokesforge_app_state::r_squared::{level_of_value, RSquaredLevel};
 use stokesforge_app_state::state::{Action, AppState, CalculationDelete};
 use stokesforge_app_state::tr;
 
-/// Largeur de la colonne des réglages.
+/// Width of the settings column.
 const FORM_WIDTH: f32 = 330.0;
-/// Hauteur réservée aux valeurs calculées sous l'aperçu.
+/// Height reserved for the computed values below the preview.
 const VALUES_HEIGHT: f32 = 130.0;
 
-/// Une valeur et son erreur type, par le formateur commun (#222) :
+/// A value and its standard error, through the common formatter (#222):
 /// `12.346 ± 0.052`.
 pub(super) fn format_value(value: f64, error: Option<f64>) -> String {
     format_with_uncertainty(value, error)
 }
 
-/// La valeur exacte d'un résultat, pour la bulle : `12.3456789 ± 0.0523`.
+/// The exact value of a result, for the tooltip: `12.3456789 ± 0.0523`.
 pub(super) fn exact_text(value: f64, error: Option<f64>) -> String {
     match error {
         Some(error) if error.is_finite() => {
@@ -49,10 +49,10 @@ pub(super) fn exact_text(value: f64, error: Option<f64>) -> String {
     }
 }
 
-/// Rend un résultat arrondi (#222) : la valeur exacte s'affiche en bulle au
-/// survol, et Ctrl+C sur le résultat survolé copie **la valeur exacte**, avec
-/// un point, sans l'unité ni l'incertitude. L'`Event::Copy` est retiré, comme
-/// le fait le Project Manager, pour ne pas déclencher aussi la copie du graphe.
+/// Renders a rounded result (#222): the exact value shows in a tooltip on
+/// hover, and Ctrl+C on the hovered result copies **the exact value**, with a
+/// dot, without the unit or the uncertainty. The `Event::Copy` is removed, as
+/// the Project Manager does, so it does not also trigger the graph copy.
 pub(super) fn exact_result_label(
     ui: &mut egui::Ui,
     shown: String,
@@ -60,8 +60,8 @@ pub(super) fn exact_result_label(
     error: Option<f64>,
     level: RSquaredLevel,
 ) -> egui::Response {
-    // Un R² faible (#288) se lit à deux signaux, pas à la seule couleur : la
-    // teinte du palier, et le gras, avec une ligne de plus dans la bulle.
+    // A low R² (#288) reads through two signals, not by color alone: the
+    // tint of the level, and bold, with one more line in the tooltip.
     let (text, hover) = if level.is_warning() {
         (
             theme::bold(shown).color(theme::r_squared_color(level, ui.visuals().dark_mode)),
@@ -90,7 +90,7 @@ pub(super) fn exact_result_label(
     response
 }
 
-/// La phrase d'un avertissement de calcul.
+/// The sentence of a calculation warning.
 pub(super) fn warning_text(warning: &Warning) -> String {
     match warning {
         Warning::SignalStepNotUniform => tr!("analysis-warning-step-not-uniform"),
@@ -117,7 +117,7 @@ pub(super) fn warning_text(warning: &Warning) -> String {
     }
 }
 
-/// Les valeurs de la série montrée, sous l'aperçu.
+/// The values of the series shown, below the preview.
 fn values_panel(
     ui: &mut egui::Ui,
     outcome: &PreviewOutcome,
@@ -161,7 +161,7 @@ fn values_panel(
         });
 }
 
-/// La fenêtre d'analyse, tant que le formulaire est ouvert.
+/// The analysis window, while the form is open.
 pub(super) fn analysis_window(
     ctx: &egui::Context,
     state: &mut AppState,
@@ -183,8 +183,8 @@ pub(super) fn analysis_window(
         let kind = kind_title(form.kind);
         tr!("analysis-window-edit", kind = kind.as_str())
     } else {
-        // La fenêtre est celle d'une catégorie (#248) : son titre ne change pas
-        // quand on passe d'une méthode à l'autre.
+        // The window is that of a category (#248): its title does not change
+        // when moving from one method to another.
         let category = Category::of(form.kind).title();
         tr!("analysis-window-new", kind = category.as_str())
     };
@@ -204,8 +204,8 @@ pub(super) fn analysis_window(
         .unwrap_or(false);
     let issues = form.issues();
     let accept_enabled = issues.is_empty() && !failed;
-    // Grisé, le bouton dit pourquoi (S-G1, S-F10) : dans le pied et dans sa
-    // bulle — le premier manque du formulaire, sinon l'aperçu en échec.
+    // Grayed out, the button says why (S-G1, S-F10): in the footer and in its
+    // tooltip: the form's first missing item, otherwise the failed preview.
     let accept_disabled = match issues.first() {
         Some(issue) => issue_message(issue),
         None => tr!("disabled-analysis-issues"),
@@ -215,7 +215,7 @@ pub(super) fn analysis_window(
         ctx,
         id,
         &title,
-        // TAILLE-LIBRE(#300): deux colonnes (réglages de 330 et aperçu cliquable avec ses outils et ses valeurs) : l'aperçu a besoin de 600 px de large au moins, au-delà de la classe Large
+        // FREE-SIZE(#300): two columns (settings of 330 and clickable preview with its tools and values): the preview needs at least 600 px of width, beyond the Large class
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(1000.0, 660.0))),
         DialogFooter::gated(
             &accept_label,
@@ -242,14 +242,14 @@ pub(super) fn analysis_window(
                     egui::vec2((full.x - FORM_WIDTH - 24.0).max(200.0), full.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        // Les gestes de l'aperçu : l'analyse décide du sien ; seule la
-                        // détection de pics en offre deux, à bascule (#270, #299).
+                        // The preview gestures: the analysis decides its own; only
+                        // peak detection offers two, as a toggle (#270, #299).
                         super::form::form(ui, id.with("tools"), |rows| {
                             if form.tool_choices().len() > 1 {
                                 rows.field(|ui| {
-                                    // OUTIL-EN-FENETRE(#299): exception de D1/D2 pour les outils
-                                    // d'analyse ; les pics demandent un clic (position) et un
-                                    // glisser (plage), propres à l'aperçu, hors de la barre Tools.
+                                    // TOOL-IN-WINDOW(#299): exception to D1/D2 for the analysis
+                                    // tools; peaks need a click (position) and a drag
+                                    // (range), specific to the preview, outside the Tools bar.
                                     toggle_texts(
                                         ui,
                                         id.with("tool"),
@@ -269,7 +269,7 @@ pub(super) fn analysis_window(
                                     );
                                 });
                             }
-                            // Le geste de l'analyse, puis la navigation, en clair (S-M1).
+                            // The analysis gesture, then the navigation, in plain words (S-M1).
                             rows.note(match form.tool {
                                 PreviewTool::Points => tr!("analysis-tool-points", "hint"),
                                 PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),
@@ -298,9 +298,9 @@ pub(super) fn analysis_window(
     }
 }
 
-/// La confirmation de suppression d'un calcul (M8) : `Delete` garde les
-/// colonnes comme colonnes ordinaires, `Delete with Columns` les supprime
-/// aussi, `Cancel` ne fait rien.
+/// The confirmation to delete a calculation (M8): `Delete` keeps the columns
+/// as ordinary columns, `Delete with Columns` deletes them too, `Cancel` does
+/// nothing.
 pub(super) fn calculation_delete_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -363,7 +363,7 @@ pub(super) fn calculation_delete_window(
     }
 }
 
-/// Une source partagée modifie toutes ses courbes : Cancel garde le formulaire.
+/// A shared source changes all its curves: Cancel keeps the form.
 pub(super) fn analysis_replace_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -392,7 +392,7 @@ pub(super) fn analysis_replace_window(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
+    use super::super::test_support::{click, context, frame_of, painted, text_exact, texts};
     use super::*;
     use stokesforge_analysis::model::Model;
     use stokesforge_app_state::analysis::Preset;
@@ -400,10 +400,10 @@ mod tests {
     use stokesforge_session::Session;
 
     #[test]
-    fn chaque_avertissement_a_sa_propre_phrase_dans_la_langue_courante() {
+    fn each_warning_has_its_own_sentence_in_the_current_language() {
         use stokesforge_app_state::i18n::{build_loader, language};
         let loader = build_loader(language());
-        let attendu = [
+        let expected = [
             (
                 Warning::SignalStepNotUniform,
                 tr!(in &loader; "analysis-warning-step-not-uniform"),
@@ -441,11 +441,11 @@ mod tests {
                 tr!(in &loader; "analysis-warning-shifted-x"),
             ),
         ];
-        for (warning, text) in &attendu {
+        for (warning, text) in &expected {
             assert_eq!(&warning_text(warning), text, "{warning:?}");
             assert!(!text.is_empty());
         }
-        // Le nombre est bien celui de l'avertissement.
+        // The number is the one of the warning.
         assert_ne!(
             warning_text(&Warning::Undetermined(3)),
             warning_text(&Warning::Undetermined(4))
@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn les_resultats_ont_trois_chiffres_et_l_incertitude_deux() {
+    fn results_have_three_digits_and_the_uncertainty_two() {
         assert_eq!(format_value(12.3456, None), "12.3");
         assert_eq!(format_value(12.3456, Some(0.0523)), "12.346 ± 0.052");
         assert_eq!(format_value(12.5, Some(f64::NAN)), "12.5");
@@ -474,9 +474,9 @@ mod tests {
         assert_eq!(exact_text(0.1 + 0.2, None), "0.30000000000000004");
     }
 
-    /// Une feuille X, Y, Y' : `y = 2x + 1` et une référence constante.
-    fn banc() -> (Session, AppState, NodeId, Vec<NodeId>) {
-        let mut project = Project::new("Analyse").unwrap();
+    /// A sheet X, Y, Y': `y = 2x + 1` and a constant reference.
+    fn bench() -> (Session, AppState, NodeId, Vec<NodeId>) {
+        let mut project = Project::new("Analysis").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
         let sheet = project.tree().children(book).unwrap()[0];
         let xs: Vec<f64> = (0..21).map(f64::from).collect();
@@ -506,15 +506,15 @@ mod tests {
 
     fn frame(ctx: &egui::Context, state: &mut AppState) -> (egui::FullOutput, Vec<Action>) {
         let mut actions = Vec::new();
-        let output = image_de(ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
+        let output = frame_of(ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
             analysis_window(ui.ctx(), state, &mut actions);
         });
         (output, actions)
     }
 
     #[test]
-    fn chaque_famille_se_peint_sans_planter_et_titre_sa_fenetre() {
-        let ctx = contexte();
+    fn each_family_paints_without_crashing_and_titles_its_window() {
+        let ctx = context();
         let presets = [
             Preset::BaselineLine,
             Preset::BaselinePolynomial,
@@ -531,34 +531,33 @@ mod tests {
             Preset::DirectDeconvolution,
         ];
         for preset in presets {
-            let (session, mut state, sheet, ids) = banc();
+            let (session, mut state, sheet, ids) = bench();
             state.dispatch(Action::OpenAnalysis {
                 preset: preset.clone(),
                 sheet,
                 columns: vec![ids[0], ids[1]],
             });
-            // Une fenêtre egui ne se peint qu'à la deuxième image (mesure) ;
-            // la troisième éprouve le calcul mémorisé de l'aperçu.
+            // An egui window is painted only on the second frame (measuring);
+            // the third exercises the memoized computation of the preview.
             frame(&ctx, &mut state);
             let (output, _) = frame(&ctx, &mut state);
             let title = tr!(
                 "analysis-window-new",
                 kind = Category::of(preset.kind()).title()
             );
-            assert!(painted(&output, &title), "{preset:?} : titre {title:?}");
+            assert!(painted(&output, &title), "{preset:?}: title {title:?}");
             frame(&ctx, &mut state);
             session.shutdown().unwrap();
         }
     }
 
-    /// « Analysis type » ne liste que les familles de la catégorie de la
-    /// fenêtre (#248) et en change à chaud ; une catégorie à une seule famille
-    /// n'a pas de choix.
+    /// "Analysis type" lists only the families of the window's category (#248)
+    /// and changes them live; a category with a single family has no choice.
     #[test]
-    fn analysis_type_ne_liste_que_les_familles_de_la_categorie() {
+    fn analysis_type_lists_only_the_families_of_the_category() {
         use stokesforge_analysis::ops::OperationKind;
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::BaselineLine,
             sheet,
@@ -566,30 +565,30 @@ mod tests {
         });
         frame(&ctx, &mut state);
         let (output, _) = frame(&ctx, &mut state);
-        let all = textes(&output.shapes);
+        let all = texts(&output.shapes);
         assert!(painted(&output, &tr!("analysis-block-type")));
-        for autre in [
+        for other in [
             OperationKind::Fit,
             OperationKind::Integrate,
             OperationKind::Peaks,
         ] {
             assert!(
-                !all.iter().any(|t| t.texte == kind_title(autre)),
-                "{autre:?} n'est pas une méthode de Data Manipulation"
+                !all.iter().any(|t| t.text == kind_title(other)),
+                "{other:?} is not a Data Manipulation method"
             );
         }
-        let correct = texte_exact(&all, &kind_title(OperationKind::Correct));
+        let correct = text_exact(&all, &kind_title(OperationKind::Correct));
         let mut actions = Vec::new();
-        cliquer(&ctx, correct.centre, egui::PointerButton::Primary, |ui| {
+        click(&ctx, correct.center, egui::PointerButton::Primary, |ui| {
             analysis_window(ui.ctx(), &mut state, &mut actions);
         });
         frame(&ctx, &mut state);
         assert_eq!(state.analysis_form().unwrap().kind, OperationKind::Correct);
         session.shutdown().unwrap();
 
-        // Témoin : Fitting n'a qu'une famille, donc pas de choix.
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+        // Witness: Fitting has only one family, so no choice.
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Fit(Model::Linear),
             sheet,
@@ -602,9 +601,9 @@ mod tests {
     }
 
     #[test]
-    fn creer_se_grise_tant_qu_un_reglage_manque_puis_valide() {
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+    fn create_is_grayed_out_while_a_setting_is_missing_then_validates() {
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Fit(Model::Linear),
             sheet,
@@ -613,19 +612,19 @@ mod tests {
         frame(&ctx, &mut state);
         let (output, _) = frame(&ctx, &mut state);
         let create = tr!("analysis-apply-create");
-        let pos = texte_exact(&textes(&output.shapes), &create).centre;
+        let pos = text_exact(&texts(&output.shapes), &create).center;
         let mut actions = Vec::new();
-        cliquer(&ctx, pos, egui::PointerButton::Primary, |ui| {
+        click(&ctx, pos, egui::PointerButton::Primary, |ui| {
             analysis_window(ui.ctx(), &mut state, &mut actions);
         });
         assert!(actions.contains(&Action::ApplyAnalysis), "{actions:?}");
         session.shutdown().unwrap();
 
-        // Une correction sans référence : « Create » est grisé, rien ne part.
-        // Contexte neuf : l'aperçu garde sa mémoire (résultat, pause de frappe)
-        // d'une fenêtre à l'autre.
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+        // A correction without a reference: "Create" is grayed out, nothing is sent.
+        // Fresh context: the preview keeps its memory (result, typing pause)
+        // from one window to the next.
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Correct,
             sheet,
@@ -634,9 +633,9 @@ mod tests {
         frame(&ctx, &mut state);
         let (output, _) = frame(&ctx, &mut state);
         assert!(painted(&output, &tr!("analysis-issue-needs-reference")));
-        let pos = texte_exact(&textes(&output.shapes), &create).centre;
+        let pos = text_exact(&texts(&output.shapes), &create).center;
         let mut actions = Vec::new();
-        cliquer(&ctx, pos, egui::PointerButton::Primary, |ui| {
+        click(&ctx, pos, egui::PointerButton::Primary, |ui| {
             analysis_window(ui.ctx(), &mut state, &mut actions);
         });
         assert!(!actions.contains(&Action::ApplyAnalysis), "{actions:?}");
@@ -644,9 +643,9 @@ mod tests {
     }
 
     #[test]
-    fn un_clic_sur_l_apercu_pose_un_point_d_ancrage() {
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+    fn a_click_on_the_preview_places_an_anchor_point() {
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::BaselineAnchors,
             sheet,
@@ -655,16 +654,16 @@ mod tests {
         frame(&ctx, &mut state);
         frame(&ctx, &mut state);
         let mut actions = Vec::new();
-        cliquer(
+        click(
             &ctx,
             egui::pos2(800.0, 300.0),
             egui::PointerButton::Primary,
             |ui| analysis_window(ui.ctx(), &mut state, &mut actions),
         );
         let points = state.analysis_form().unwrap().setup.baseline.points.len();
-        assert_eq!(points, 1, "un point posé par le clic");
-        // Le clic droit au même endroit le retire.
-        cliquer(
+        assert_eq!(points, 1, "one point placed by the click");
+        // A right-click at the same place removes it.
+        click(
             &ctx,
             egui::pos2(800.0, 300.0),
             egui::PointerButton::Secondary,
@@ -681,9 +680,9 @@ mod tests {
     }
 
     #[test]
-    fn la_confirmation_de_suppression_propose_trois_issues() {
-        let ctx = contexte();
-        let (session, mut state, sheet, ids) = banc();
+    fn the_delete_confirmation_offers_three_outcomes() {
+        let ctx = context();
+        let (session, mut state, sheet, ids) = bench();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Integrate,
             sheet,
@@ -701,7 +700,7 @@ mod tests {
         let mut actions = Vec::new();
         let mut output = egui::FullOutput::default();
         for _ in 0..2 {
-            output = image_de(&ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
+            output = frame_of(&ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
                 calculation_delete_window(ui.ctx(), &state, &mut actions);
             });
         }
@@ -710,14 +709,10 @@ mod tests {
             tr!("analysis-delete-with-columns"),
             tr!("dialog-cancel"),
         ] {
-            assert!(painted(&output, &label), "bouton {label:?}");
+            assert!(painted(&output, &label), "button {label:?}");
         }
-        let pos = texte_exact(
-            &textes(&output.shapes),
-            &tr!("analysis-delete-with-columns"),
-        )
-        .centre;
-        cliquer(&ctx, pos, egui::PointerButton::Primary, |ui| {
+        let pos = text_exact(&texts(&output.shapes), &tr!("analysis-delete-with-columns")).center;
+        click(&ctx, pos, egui::PointerButton::Primary, |ui| {
             calculation_delete_window(ui.ctx(), &state, &mut actions);
         });
         assert_eq!(

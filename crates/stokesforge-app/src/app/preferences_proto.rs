@@ -1,15 +1,15 @@
-//! PROTOTYPE (test seulement) — la fenêtre Preferences « avancée » de #148,
-//! montée **sans logique** : un brouillon `Proto` en mémoire, aucune session,
-//! aucun `preferences.json`. Elle emploie les vraies briques (`modal_dialog_with`,
-//! `tab_strip`, `form`, `choice`, `number_field`) pour que son rendu soit celui
-//! de l'application, et se pilote avec `egui_kittest` (clics par libellé,
-//! captures de référence dans `tests/snapshots/`).
+//! PROTOTYPE (test only) — the "advanced" Preferences window of #148,
+//! assembled **without logic**: an in-memory `Proto` draft, no session,
+//! no `preferences.json`. It uses the real building blocks (`modal_dialog_with`,
+//! `tab_strip`, `form`, `choice`, `number_field`) so that its rendering is that
+//! of the application, and is driven with `egui_kittest` (clicks by label,
+//! reference screenshots in `tests/snapshots/`).
 //!
-//! Beaucoup de réglages ci-dessous **n'existent pas encore** dans StokesForge
-//! (thème, échelle de l'interface, sauvegarde automatique, dossiers par défaut,
-//! formats de copie…) : ils servent à juger la forme, pas à promettre le fond.
-//! Les libellés sont en dur parce que le module ne livre rien (il n'est
-//! compilé qu'en test) ; une version livrée passerait par `tr!` (en/fr).
+//! Many settings below **do not exist yet** in StokesForge
+//! (theme, interface scale, autosave, default folders,
+//! copy formats…): they serve to judge the shape, not to promise the substance.
+//! The labels are hard-coded because the module delivers nothing (it is only
+//! compiled in test); a delivered version would go through `tr!` (en/fr).
 
 use eframe::egui;
 
@@ -23,7 +23,7 @@ use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
 use stokesforge_app_state::quantities::Quantity;
 
-/// Les rubriques, dans l'ordre de #148 (+ Analysis, décision M5 de #181).
+/// The sections, in the order of #148 (+ Analysis, decision M5 of #181).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Page {
     General,
@@ -66,8 +66,8 @@ pub(super) enum Theme {
     Dark,
 }
 
-/// Au démarrage, les panneaux reprennent leur dernier état ou un état fixé
-/// (question 1 de #148).
+/// At start, the panels take back their last state or a fixed state
+/// (question 1 of #148).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StartMode {
     Remember,
@@ -97,21 +97,21 @@ impl Format {
     }
 }
 
-/// Un format offert par Copy Graph, et s'il l'est.
+/// A format offered by Copy Graph, and whether it is offered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct CopyFormat {
     pub(super) format: Format,
     pub(super) on: bool,
 }
 
-/// Un dossier par défaut : le dernier utilisé, ou un dossier fixé (question 3).
+/// A default folder: the last used, or a fixed folder (question 3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct FolderRule {
     pub(super) fixed: bool,
     pub(super) path: String,
 }
 
-/// Le brouillon des préférences : tout ce que la fenêtre peut régler.
+/// The preferences draft: everything the window can set.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Proto {
     // General
@@ -133,9 +133,9 @@ pub(super) struct Proto {
     pub(super) png_scale: u32,
     pub(super) svg_text: SvgText,
     pub(super) default_format: Format,
-    /// Dans l'ordre où Copy Graph les offre ; `on` dit s'il est offert.
+    /// In the order in which Copy Graph offers them; `on` says whether it is offered.
     pub(super) copy_formats: Vec<CopyFormat>,
-    // Folders: ouvrir, enregistrer, importer, exporter
+    // Folders: open, save, import, export
     pub(super) folders: [FolderRule; 4],
     // Analysis
     pub(super) keep_in_results: bool,
@@ -185,7 +185,7 @@ const ITER: Quantity = stokesforge_app_state::quantities::ITERATIONS;
 
 const FOLDER_KINDS: [&str; 4] = ["Open", "Save", "Import", "Export"];
 
-/// L'état de la fenêtre dans le banc : brouillon, page, valeur validée.
+/// The state of the window in the bench: draft, page, validated value.
 pub(super) struct Bench {
     pub(super) draft: Proto,
     pub(super) page: Page,
@@ -204,7 +204,7 @@ impl Bench {
     }
 }
 
-/// Pourquoi « Apply » est grisé, s'il l'est (S-G1) : un dossier fixé sans chemin.
+/// Why "Apply" is greyed out, if it is (S-G1): a fixed folder without a path.
 pub(super) fn apply_blocker(draft: &Proto) -> Option<String> {
     draft
         .folders
@@ -214,7 +214,7 @@ pub(super) fn apply_blocker(draft: &Proto) -> Option<String> {
         .map(|(_, kind)| format!("Choose a folder for “{kind}”, or switch it to Last used."))
 }
 
-/// Peint la fenêtre (une image). Rend la valeur validée à « Apply ».
+/// Paints the window (one frame). Returns the value validated by "Apply".
 pub(super) fn preferences_proto(ctx: &egui::Context, bench: &mut Bench) {
     if bench.closed {
         return;
@@ -226,7 +226,7 @@ pub(super) fn preferences_proto(ctx: &egui::Context, bench: &mut Bench) {
         ctx,
         egui::Id::new("preferences_proto"),
         "Preferences",
-        // TAILLE-LIBRE(#300): banc de test dont les captures de référence (tests/snapshots/preferences_proto_*.png) fixent la taille
+        // FREE-SIZE(#300): test bench whose reference screenshots (tests/snapshots/preferences_proto_*.png) fix the size
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(560.0, 470.0))),
         DialogFooter::gated(
             "Apply",
@@ -531,8 +531,8 @@ fn analysis_page(ui: &mut egui::Ui, p: &mut Proto) {
     });
 }
 
-/// Le banc dans une vraie fenêtre : la fenêtre modale se rouvre par un bouton
-/// et la valeur validée s'affiche derrière elle.
+/// The bench in a real window: the modal window reopens through a button
+/// and the validated value is shown behind it.
 struct Demo {
     bench: Bench,
 }
@@ -555,9 +555,9 @@ impl eframe::App for Demo {
     }
 }
 
-/// Ouvre la fenêtre de démonstration (bloque jusqu'à sa fermeture). winit veut
-/// d'ordinaire le fil principal ; un test tourne dans un autre, d'où
-/// `with_any_thread` (une extension par plateforme : Wayland et X11, Windows).
+/// Opens the demonstration window (blocks until it is closed). winit usually
+/// wants the main thread; a test runs in another, hence
+/// `with_any_thread` (one extension per platform: Wayland and X11, Windows).
 fn run() -> eframe::Result {
     eframe::run_native(
         "Preferences prototype",
@@ -577,7 +577,7 @@ fn run() -> eframe::Result {
                     use winit::platform::windows::EventLoopBuilderExtWindows;
                     EventLoopBuilderExtWindows::with_any_thread(builder, true);
                 }
-                // Autre plateforme (macOS) : rien à poser, `builder` reste utilisé.
+                // Other platform (macOS): nothing to set, `builder` stays used.
                 #[cfg(not(any(target_os = "linux", windows)))]
                 let _ = builder;
             })),
@@ -602,17 +602,17 @@ mod tests {
 
     use super::*;
 
-    /// Un seul moteur de capture à la fois. Sous Windows, deux instances
-    /// wgpu simultanées (egui_kittest) plantent le rasteriseur logiciel
-    /// `d3d10warp.dll` en `0xc0000005` (#333). À prendre **avant** le banc
-    /// dans tout test qui appelle `snapshot` : il se libère après lui.
-    fn verrou_captures() -> std::sync::MutexGuard<'static, ()> {
+    /// Only one capture engine at a time. Under Windows, two simultaneous
+    /// wgpu instances (egui_kittest) crash the `d3d10warp.dll` software rasterizer
+    /// with `0xc0000005` (#333). To be taken **before** the bench
+    /// in any test that calls `snapshot`: it is released after it.
+    fn screenshot_lock() -> std::sync::MutexGuard<'static, ()> {
         static CAPTURES: std::sync::Mutex<()> = std::sync::Mutex::new(());
         CAPTURES.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Le banc : l'UI du thème de l'application, la fenêtre ouverte.
-    fn banc() -> Harness<'static, Bench> {
+    /// The bench: the application theme UI, the window open.
+    fn bench() -> Harness<'static, Bench> {
         let mut harness = Harness::builder()
             .with_size(egui::vec2(760.0, 600.0))
             .with_theme(egui::Theme::Dark)
@@ -628,31 +628,31 @@ mod tests {
         harness
     }
 
-    fn aller_a(harness: &mut Harness<'static, Bench>, page: &str) {
+    fn go_to(harness: &mut Harness<'static, Bench>, page: &str) {
         harness.get_by_label(page).click();
         harness.run();
     }
 
     #[test]
-    fn les_cinq_rubriques_sont_des_onglets() {
-        let harness = banc();
+    fn the_five_sections_are_tabs() {
+        let harness = bench();
         for page in Page::ALL {
             harness.get_by_label(page.title());
         }
     }
 
     #[test]
-    fn choisir_le_theme_sombre_modifie_le_brouillon_pas_la_valeur_validee() {
-        let mut harness = banc();
+    fn choosing_the_dark_theme_changes_the_draft_not_the_validated_value() {
+        let mut harness = bench();
         harness.get_by_label("Dark").click();
         harness.run();
         assert_eq!(harness.state().draft.theme, Theme::Dark);
-        assert!(harness.state().applied.is_none(), "rien n'est validé");
+        assert!(harness.state().applied.is_none(), "nothing is validated");
     }
 
     #[test]
-    fn cocher_la_sauvegarde_automatique_modifie_le_brouillon() {
-        let mut harness = banc();
+    fn ticking_autosave_changes_the_draft() {
+        let mut harness = bench();
         assert!(!harness.state().draft.autosave);
         harness
             .get_by_label("Save a recovery copy automatically")
@@ -661,7 +661,7 @@ mod tests {
         assert!(harness.state().draft.autosave);
     }
 
-    fn ordre(harness: &Harness<'static, Bench>) -> Vec<Format> {
+    fn order(harness: &Harness<'static, Bench>) -> Vec<Format> {
         harness
             .state()
             .draft
@@ -672,24 +672,27 @@ mod tests {
     }
 
     #[test]
-    fn un_dossier_fixe_sans_chemin_bloque_apply_et_dit_pourquoi() {
-        let mut harness = banc();
-        aller_a(&mut harness, "Folders and Paths");
-        // « Fixed » apparaît quatre fois (Open, Save, Import, Export) : le premier.
+    fn a_fixed_folder_without_a_path_blocks_apply_and_says_why() {
+        let mut harness = bench();
+        go_to(&mut harness, "Folders and Paths");
+        // "Fixed" appears four times (Open, Save, Import, Export): the first.
         harness.get_all_by_label("Fixed").next().unwrap().click();
         harness.run();
         assert!(harness.state().draft.folders[0].fixed);
         assert!(apply_blocker(&harness.state().draft).is_some());
         harness.get_by_label("Apply").click();
         harness.run();
-        assert!(!harness.state().closed, "Apply grisé : la fenêtre reste");
+        assert!(
+            !harness.state().closed,
+            "Apply greyed out: the window stays"
+        );
         harness.get_by_label_contains("Choose a folder for “Open”");
     }
 
     #[test]
-    fn apply_valide_le_brouillon_et_ferme() {
-        let mut harness = banc();
-        aller_a(&mut harness, "Export");
+    fn apply_validates_the_draft_and_closes() {
+        let mut harness = bench();
+        go_to(&mut harness, "Export");
         harness.get_by_label("×2").click();
         harness.run();
         harness.get_by_label("Apply").click();
@@ -699,8 +702,8 @@ mod tests {
     }
 
     #[test]
-    fn cancel_ferme_sans_rien_valider() {
-        let mut harness = banc();
+    fn cancel_closes_without_validating_anything() {
+        let mut harness = bench();
         harness.get_by_label("Dark").click();
         harness.run();
         harness.get_by_label("Cancel").click();
@@ -710,32 +713,32 @@ mod tests {
     }
 
     #[test]
-    fn reset_page_ne_touche_que_la_rubrique_courante() {
-        let mut harness = banc();
+    fn reset_page_touches_only_the_current_section() {
+        let mut harness = bench();
         harness.get_by_label("Dark").click();
-        aller_a(&mut harness, "Export");
+        go_to(&mut harness, "Export");
         harness.get_by_label("×1").click();
         harness.run();
         harness.get_by_label("Reset Page").click();
         harness.run();
-        assert_eq!(harness.state().draft.png_scale, 4, "Export remis au défaut");
+        assert_eq!(harness.state().draft.png_scale, 4, "Export back to default");
         assert_eq!(harness.state().draft.theme, Theme::Dark, "General intact");
     }
 
-    /// La fenêtre interactive : `cargo test -p stokesforge-app --lib
-    /// preferences_proto_interactif -- --ignored --nocapture`.
+    /// The interactive window: `cargo test -p stokesforge-app --lib
+    /// preferences_proto_interactive -- --ignored --nocapture`.
     #[test]
-    #[ignore = "ouvre une vraie fenêtre"]
-    fn preferences_proto_interactif() {
+    #[ignore = "opens a real window"]
+    fn preferences_proto_interactive() {
         run().unwrap();
     }
 
     #[test]
-    fn glisser_une_ligne_change_l_ordre_de_copie() {
-        let _captures = verrou_captures();
-        let mut harness = banc();
-        aller_a(&mut harness, "Export");
-        assert_eq!(ordre(&harness), [Format::Svg, Format::Png, Format::Pdf]);
+    fn dragging_a_row_changes_the_copy_order() {
+        let _captures = screenshot_lock();
+        let mut harness = bench();
+        go_to(&mut harness, "Export");
+        assert_eq!(order(&harness), [Format::Svg, Format::Png, Format::Pdf]);
         let from = harness.get_by_label("Move PDF").rect().center();
         let first = harness.get_by_label("Move SVG").rect();
         harness.hover_at(from);
@@ -749,18 +752,18 @@ mod tests {
         harness.step();
         harness.drop_at(egui::pos2(first.center().x, first.top() + 2.0));
         harness.run();
-        assert_eq!(ordre(&harness), [Format::Pdf, Format::Svg, Format::Png]);
+        assert_eq!(order(&harness), [Format::Pdf, Format::Svg, Format::Png]);
         harness.snapshot("preferences_proto_export_reordered");
     }
 
-    /// Captures de référence de chaque rubrique (premier lancement :
+    /// Reference screenshots of each section (first run:
     /// `UPDATE_SNAPSHOTS=1 cargo test -p stokesforge-app preferences_proto`).
     #[test]
-    fn captures_des_rubriques() {
-        let _captures = verrou_captures();
-        let mut harness = banc();
+    fn screenshots_of_the_sections() {
+        let _captures = screenshot_lock();
+        let mut harness = bench();
         for page in Page::ALL {
-            aller_a(&mut harness, page.title());
+            go_to(&mut harness, page.title());
             harness.snapshot(format!(
                 "preferences_proto_{}",
                 page.title().to_lowercase().replace(' ', "_")

@@ -1,55 +1,56 @@
-//! Dialogues **modaux** : [`modal_dialog`], [`modal_dialog_with`],
+//! **Modal** dialogs: [`modal_dialog`], [`modal_dialog_with`],
 //! [`modal_wizard`], [`modal_live_settings`], [`modal_read_only`], [`modal_confirm`],
-//! [`modal_save_changes`] et [`modal_alert`], la brique de toute boîte de
-//! dialogue et de tout assistant — même cadre, même barre de titre, même
-//! blocage du reste de l'interface. Elle pose la fenêtre par la brique des
-//! fenêtres de contenu (`window_chrome::show_window_in_layer`).
+//! [`modal_save_changes`] and [`modal_alert`], the building block of every
+//! dialog box and every wizard — same frame, same title bar, same blocking of
+//! the rest of the interface. It places the window through the content-window
+//! building block (`window_chrome::show_window_in_layer`).
 //!
-//! Sorti d'`app.rs` tel quel (#117), puis étendu par #228
-//! (`docs/standard-interface.md`, § Windows and dialogs) :
+//! Moved out of `app.rs` as is (#117), then extended by #228
+//! (`docs/standard-interface.md`, § Windows and dialogs):
 //!
-//! - **nature** (#300, S-F11) : [`DialogNature`] dit ce qu'est la fenêtre —
-//!   réglages, brouillon, choix, assistant, lecture seule, confirmation,
-//!   enregistrement, alerte — et en tire, par des `match` exhaustifs sans `_`,
-//!   le pied, la taille par défaut (une [`SizeClass`] : Petite 480 x 170,
-//!   Moyenne 480 x 420, Grande 640 x 500), le focus initial et le bouton par
-//!   défaut. La taille est un champ de la variante : une fenêtre interactive
-//!   ([`InteractiveSize`]) prend une classe ou une taille libre justifiée par
-//!   `// TAILLE-LIBRE(#300):` ; une fenêtre sans interaction riche
-//!   ([`PlainSize`]) peut prendre la taille de son contenu sans justification ;
-//! - **ordre des boutons** (S-F6) : un dialogue range ses boutons secondaires à
-//!   gauche, puis Cancel, puis le principal à droite ; un assistant met Cancel
-//!   à gauche et groupe Back · Next · Finish à droite ; une fenêtre en lecture
-//!   seule n'a qu'un bouton Close (S-F2) ;
-//! - **zone de message** du pied, à gauche des boutons (S-M7) : l'erreur d'un
-//!   geste du dialogue (jamais dans la barre d'état ; `AppState::dialog_error`,
-//!   publiée par [`sync_dialogs`]), sinon la **raison** du bouton principal
-//!   grisé (S-F10 → S-R14) — qui est aussi sa bulle. La raison vient de l'appelant :
-//!   `AcceptButton::Gated` (#226, `DialogFooter::gated`) quand le bouton est
-//!   grisé ; un bouton qui ne l'est jamais est `AcceptButton::Always` ;
-//! - **Échap** (S-F7) : celui qui sort d'un champ texte ne ferme pas le
-//!   dialogue, le suivant fait Cancel ;
-//! - **taille et position** mémorisées par sorte de dialogue (S-F8), dans les
-//!   préférences : reprises à l'ouverture, rendues à la fermeture par
-//!   [`sync_dialogs`] (`Action::RememberDialogGeometry`). La sorte est tirée
-//!   de l'identifiant du dialogue ;
-//! - **confirmations** (#229, S-F4, S-F5 → S-R4, S-R5) : [`modal_confirm`] — Cancel
-//!   est le bouton par défaut (encadré ; Entrée et Échap l'actionnent), le
-//!   verbe (Delete…) a le style normal et rougit au survol **et** au focus
-//!   clavier ; [`modal_save_changes`] — « Discard Changes · Cancel · Save »,
-//!   seule exception écrite : Entrée = Save ; [`modal_alert`] — l'échec grave
-//!   (S-M8), un bouton Close et une action possible ;
-//! - **focus initial** (S-F9, S-F11) : selon la nature ([`InitialFocus`]), le
-//!   premier champ de saisie, le bouton par défaut (confirmation, enregistrement,
-//!   alerte) ou rien (lecture seule). Pour le premier champ de saisie :
-//!   egui ne dit pas quels widgets sont des champs texte : à l'ouverture, une
-//!   ancre invisible prend le focus en tête du contenu, puis le focus avance
-//!   d'un widget par passe, toutes dans la même image (`request_discard` :
-//!   rien n'est peint entre deux pas ; la navigation de Tab d'egui) jusqu'au premier
-//!   champ texte du dialogue (un `TextEdit`, reconnu à l'état qu'il garde
-//!   dans la mémoire d'egui). Il s'arrête — focus rendu — au pied, hors du
-//!   dialogue, au bout de [`FOCUS_WALK_STEPS`] widgets, ou dès que
-//!   l'utilisateur tape ou clique (le geste s'applique alors sans focus).
+//! - **nature** (#300, S-F11): [`DialogNature`] says what the window is —
+//!   settings, draft, choice, wizard, read-only, confirmation,
+//!   save, alert — and derives from it, through exhaustive `match`es without
+//!   `_`, the footer, the default size (a [`SizeClass`]: Small 480 x 170,
+//!   Medium 480 x 420, Large 640 x 500), the initial focus and the default
+//!   button. The size is a field of the variant: an interactive window
+//!   ([`InteractiveSize`]) takes a class or a free size justified by
+//!   `// FREE-SIZE(#300):`; a window without rich interaction
+//!   ([`PlainSize`]) may take the size of its content without justification;
+//! - **button order** (S-F6): a dialog puts its secondary buttons on the left,
+//!   then Cancel, then the main one on the right; a wizard puts Cancel on the
+//!   left and groups Back · Next · Finish on the right; a read-only window
+//!   has only a Close button (S-F2);
+//! - **message area** of the footer, to the left of the buttons (S-M7): the
+//!   error of a dialog gesture (never in the status bar; `AppState::dialog_error`,
+//!   published by [`sync_dialogs`]), otherwise the **reason** the main button
+//!   is greyed out (S-F10 → S-R14) — which is also its tooltip. The reason comes
+//!   from the caller: `AcceptButton::Gated` (#226, `DialogFooter::gated`) when
+//!   the button is greyed out; a button that never is, is `AcceptButton::Always`;
+//! - **Escape** (S-F7): the one that leaves a text field does not close the
+//!   dialog, the next one does Cancel;
+//! - **size and position** remembered per kind of dialog (S-F8), in the
+//!   preferences: restored on opening, handed back on closing by
+//!   [`sync_dialogs`] (`Action::RememberDialogGeometry`). The kind is drawn
+//!   from the dialog's identifier;
+//! - **confirmations** (#229, S-F4, S-F5 → S-R4, S-R5): [`modal_confirm`] — Cancel
+//!   is the default button (framed; Enter and Escape trigger it), the
+//!   verb (Delete…) has the normal style and turns red on hover **and** on
+//!   keyboard focus; [`modal_save_changes`] — "Discard Changes · Cancel · Save",
+//!   the only written exception: Enter = Save; [`modal_alert`] — the serious
+//!   failure (S-M8), a Close button and one possible action;
+//! - **initial focus** (S-F9, S-F11): depending on the nature ([`InitialFocus`]),
+//!   the first input field, the default button (confirmation, save,
+//!   alert) or nothing (read-only). For the first input field:
+//!   egui does not say which widgets are text fields: on opening, an
+//!   invisible anchor takes the focus at the head of the content, then the
+//!   focus advances one widget per pass, all in the same frame
+//!   (`request_discard`: nothing is painted between two steps; egui's Tab
+//!   navigation) up to the first text field of the dialog (a `TextEdit`,
+//!   recognized by the state it keeps in egui's memory). It stops — focus
+//!   given back — at the footer, outside the dialog, after
+//!   [`FOCUS_WALK_STEPS`] widgets, or as soon as the user types or clicks
+//!   (the gesture then applies with no focus).
 
 use std::collections::BTreeMap;
 
@@ -66,49 +67,49 @@ use super::window_chrome::{
     HeaderPlacement, WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE,
 };
 
-/// Issue d'une image de [`modal_dialog`].
+/// Outcome of one frame of [`modal_dialog`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DialogOutcome {
     /// Toujours ouvert.
     Open,
-    /// « Valider » (bouton par défaut : Entrée), ou Close d'une fenêtre en
-    /// lecture seule.
+    /// "Accept" (default button: Enter), or Close of a read-only
+    /// window.
     Accept,
-    /// « Annuler », croix ou Échap.
+    /// "Cancel", cross or Escape.
     Cancel,
 }
 
-/// Hauteur de la bande des boutons « Valider » / « Annuler ».
+/// Height of the strip of the "Accept" / "Cancel" buttons.
 const DIALOG_FOOTER_HEIGHT: f32 = 38.0;
 
-/// Taille minimale d'un bouton du pied.
+/// Minimum size of a footer button.
 pub(super) const FOOTER_BUTTON_SIZE: egui::Vec2 = egui::vec2(84.0, 24.0);
 
-/// Durée d'une alerte de clic bloqué ([`modal_dialog`]) : deux impulsions.
+/// Duration of a blocked-click alert ([`modal_dialog`]): two pulses.
 const MODAL_FLASH_SECONDS: f64 = 0.6;
 
-/// Nombre de widgets que le focus initial (S-F9) parcourt au plus avant de
-/// renoncer.
+/// Number of widgets the initial focus (S-F9) walks through at most before
+/// giving up.
 const FOCUS_WALK_STEPS: u8 = 32;
 
-/// Position et taille d'un dialogue modal, gardées en mémoire egui le temps
-/// qu'il est ouvert.
+/// Position and size of a modal dialog, kept in egui memory for as long as it
+/// is open.
 #[derive(Clone, Copy)]
 struct DialogGeometry {
     pos: egui::Pos2,
     size: egui::Vec2,
 }
 
-/// Les trois **classes de taille** d'un dialogue (S-F11) : la taille par défaut
-/// ne s'invente pas, elle se range dans l'une d'elles. La taille que
-/// l'utilisateur a laissée (S-F8) l'emporte ensuite.
+/// The three **size classes** of a dialog (S-F11): the default size is not
+/// invented, it fits into one of them. The size the user left (S-F8) then
+/// takes precedence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SizeClass {
-    /// 480 x 170 : une question, un message, quelques boutons.
+    /// 480 x 170: a question, a message, a few buttons.
     Small,
-    /// 480 x 420 : un formulaire ou des réglages à quelques pages.
+    /// 480 x 420: a form or settings of a few pages.
     Medium,
-    /// 640 x 500 : une liste et son éditeur côte à côte.
+    /// 640 x 500: a list and its editor side by side.
     Large,
 }
 
@@ -122,21 +123,21 @@ impl SizeClass {
     }
 }
 
-/// La taille d'une fenêtre **interactive** (réglages, brouillon, assistant) :
-/// la classe par défaut de sa nature, une autre classe, ou une taille libre
-/// que la garde `aucune_taille_libre_sans_justification` ne laisse passer qu'avec
-/// un `// TAILLE-LIBRE(#300): <justification>` juste avant.
+/// The size of an **interactive** window (settings, draft, wizard):
+/// the default class of its nature, another class, or a free size
+/// that the guard `no_free_size_without_justification` only lets through with
+/// a `// FREE-SIZE(#300): <justification>` right before.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum InteractiveSize {
-    /// La classe par défaut de la nature ([`DialogNature::default_class`]).
+    /// The default class of the nature ([`DialogNature::default_class`]).
     Default,
     Class(SizeClass),
-    /// Hors classes, justifiée dans le code (S-F11).
+    /// Outside the classes, justified in the code (S-F11).
     Free(egui::Vec2),
 }
 
 impl InteractiveSize {
-    /// La taille, `default` étant la classe de la nature.
+    /// The size, `default` being the class of the nature.
     fn resolve(self, default: SizeClass) -> egui::Vec2 {
         match self {
             Self::Default => default.size(),
@@ -146,22 +147,22 @@ impl InteractiveSize {
     }
 }
 
-/// La taille d'une fenêtre **sans interaction riche** (choix, lecture seule,
-/// confirmation, enregistrement, alerte) : pas de formulaire à ranger, une
-/// taille mal choisie y coûte peu. Elle peut donc prendre la taille de son
-/// contenu **sans justification** (S-F11) — ce que la fenêtre interactive ne
-/// peut pas : le type ne l'offre pas.
+/// The size of a window **without rich interaction** (choice, read-only,
+/// confirmation, save, alert): no form to lay out, a badly chosen size costs
+/// little there. It can therefore take the size of its content **without
+/// justification** (S-F11) — which the interactive window cannot: the type
+/// does not offer it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PlainSize {
-    /// La classe par défaut de la nature ([`DialogNature::default_class`]).
+    /// The default class of the nature ([`DialogNature::default_class`]).
     Default,
     Class(SizeClass),
-    /// La taille que demande le contenu.
+    /// The size the content asks for.
     Content(egui::Vec2),
 }
 
 impl PlainSize {
-    /// La taille, `default` étant la classe de la nature.
+    /// The size, `default` being the class of the nature.
     fn resolve(self, default: SizeClass) -> egui::Vec2 {
         match self {
             Self::Default => default.size(),
@@ -171,63 +172,62 @@ impl PlainSize {
     }
 }
 
-/// La **nature** d'une fenêtre modale (S-F11) : ce qu'elle est fixe son pied
-/// (ordre des boutons, S-F2, S-F4, S-F6), sa taille par défaut, son focus
-/// initial (S-F9) et le bouton par défaut. Chaque `match` sur la nature est
-/// exhaustif, sans `_` : une nature nouvelle ne compile pas avant d'avoir dit
-/// tout cela.
+/// The **nature** of a modal window (S-F11): what it is fixes its footer
+/// (button order, S-F2, S-F4, S-F6), its default size, its initial focus
+/// (S-F9) and the default button. Every `match` on the nature is exhaustive,
+/// without `_`: a new nature does not compile before it has said all of this.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum DialogNature {
-    /// Réglages en direct d'un objet visible : `[Cancel] [OK]`.
+    /// Live settings of a visible object: `[Cancel] [OK]`.
     Settings(InteractiveSize),
-    /// Création sur brouillon : `[secondaires] [message] [Cancel] [verbe]`.
+    /// Creation on a draft: `[secondary] [message] [Cancel] [verb]`.
     Draft(InteractiveSize),
-    /// Choix sans réponse « oui » : même pied, secondaires = autres réponses.
+    /// Choice with no "yes" answer: same footer, secondary = the other answers.
     Choice(PlainSize),
-    /// Assistant : `[Cancel] [message] [Back · Next] [Finish]`.
+    /// Wizard: `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard(InteractiveSize),
-    /// Réglages **appliqués en direct**, sans rien à valider ni annuler :
-    /// `[message] [Close]` (S-F2). Interactive (des champs à remplir : focus
-    /// sur le premier, taille par classe), mais au pied d'une lecture seule.
+    /// Settings **applied live**, with nothing to confirm or cancel:
+    /// `[message] [Close]` (S-F2). Interactive (fields to fill in: focus
+    /// on the first one, size by class), but with the footer of a read-only window.
     LiveSettings(InteractiveSize),
-    /// Lecture seule : `[secondaires] [message] [Close]`.
+    /// Read-only: `[secondary] [message] [Close]`.
     ReadOnly(PlainSize),
-    /// Confirmation : `[message] [Cancel] [verbe]`, Cancel par défaut.
+    /// Confirmation: `[message] [Cancel] [verb]`, Cancel by default.
     Confirm(PlainSize),
-    /// Enregistrer ? : `[Discard Changes] [message] [Cancel] [Save]`.
+    /// Save?: `[Discard Changes] [message] [Cancel] [Save]`.
     SaveChanges(PlainSize),
-    /// Échec grave : `[action] [message] [Close]`.
+    /// Serious failure: `[action] [message] [Close]`.
     Alert(PlainSize),
 }
 
-/// Où le focus va à l'ouverture (S-F9, S-F11).
+/// Where the focus goes on opening (S-F9, S-F11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum InitialFocus {
-    /// Le premier champ de saisie, trouvé par la brique.
+    /// The first input field, found by the building block.
     FirstField,
-    /// Le bouton par défaut du pied : Cancel d'une confirmation, Save, Close.
+    /// The default button of the footer: Cancel of a confirmation, Save, Close.
     DefaultButton,
-    /// Rien : la fenêtre se lit, Entrée ferme.
+    /// Nothing: the window is read, Enter closes.
     Nothing,
 }
 
-/// La disposition des boutons du pied d'une nature.
+/// The layout of the footer buttons of a nature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FooterShape {
-    /// `[secondaires] [message] [Cancel] [principal]`.
+    /// `[secondary] [message] [Cancel] [main]`.
     Dialog,
     /// `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard,
-    /// `[secondaires] [message] [Close]`.
+    /// `[secondary] [message] [Close]`.
     ReadOnly,
-    /// `[message] [Cancel] [verbe]`.
+    /// `[message] [Cancel] [verb]`.
     Confirm,
     /// `[Discard Changes] [message] [Cancel] [Save]`.
     SaveChanges,
 }
 
 impl DialogNature {
-    /// La disposition du pied (S-F2, S-F4, S-F6).
+    /// The footer layout (S-F2, S-F4, S-F6).
     pub(super) fn footer(self) -> FooterShape {
         match self {
             Self::Settings(_) | Self::Draft(_) | Self::Choice(_) => FooterShape::Dialog,
@@ -238,7 +238,7 @@ impl DialogNature {
         }
     }
 
-    /// La classe de taille quand l'appelant n'en dit pas.
+    /// The size class when the caller does not say.
     pub(super) fn default_class(self) -> SizeClass {
         match self {
             Self::Settings(_) | Self::Draft(_) | Self::LiveSettings(_) | Self::ReadOnly(_) => {
@@ -251,7 +251,7 @@ impl DialogNature {
         }
     }
 
-    /// La taille par défaut de la fenêtre.
+    /// The default size of the window.
     pub(super) fn size(self) -> egui::Vec2 {
         let default = self.default_class();
         match self {
@@ -267,9 +267,9 @@ impl DialogNature {
         }
     }
 
-    /// Le focus initial (S-F9) : un brouillon, des réglages, un assistant ou un
-    /// choix ont des champs à remplir ; une confirmation, un enregistrement ou
-    /// une alerte attendent un bouton ; une lecture seule n'a rien à saisir.
+    /// The initial focus (S-F9): a draft, settings, a wizard or a choice have
+    /// fields to fill in; a confirmation, a save or an alert wait for a
+    /// button; a read-only window has nothing to enter.
     pub(super) fn initial_focus(self) -> InitialFocus {
         match self {
             Self::Settings(_)
@@ -282,7 +282,7 @@ impl DialogNature {
         }
     }
 
-    /// Cancel est-il le bouton par défaut (S-F5) ? Sinon c'est le principal.
+    /// Is Cancel the default button (S-F5)? Otherwise it is the main one.
     fn cancel_is_default(self) -> bool {
         match self {
             Self::Confirm(_) => true,
@@ -298,8 +298,8 @@ impl DialogNature {
     }
 }
 
-/// Issue d'une image du corps commun : celle d'un [`DialogOutcome`], plus le
-/// bouton secondaire de la brique (Discard Changes).
+/// Outcome of one frame of the common body: that of a [`DialogOutcome`], plus
+/// the secondary button of the building block (Discard Changes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameOutcome {
     Open,
@@ -309,7 +309,7 @@ enum FrameOutcome {
 }
 
 impl FrameOutcome {
-    /// Pour les dialogues sans secondaire de brique.
+    /// For dialogs without a building-block secondary.
     fn dialog(self) -> DialogOutcome {
         match self {
             Self::Open | Self::Secondary => DialogOutcome::Open,
@@ -319,16 +319,16 @@ impl FrameOutcome {
     }
 }
 
-/// Le message du pied (S-M7, S-F10) : l'erreur passe devant la raison du bouton
-/// principal grisé.
+/// The footer message (S-M7, S-F10): the error takes precedence over the reason
+/// of the greyed-out main button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FooterMessage<'a> {
     Error(&'a str),
     Reason(&'a str),
 }
 
-/// La décision du pied, pure : une erreur s'il y en a une ; sinon, bouton
-/// principal grisé, sa raison ; sinon rien.
+/// The footer decision, pure: an error if there is one; otherwise, if the main
+/// button is greyed out, its reason; otherwise nothing.
 fn footer_message<'a>(
     error: Option<&'a str>,
     accept_enabled: bool,
@@ -341,22 +341,22 @@ fn footer_message<'a>(
     }
 }
 
-/// Dialogue **modal** : au premier plan, le reste de l'interface ne reçoit
-/// plus aucun clic, et un clic ailleurs fait clignoter le contour du
-/// dialogue en rouge foncé ([`theme::blocked_flash_color`]) pour le
-/// désigner. Il se ferme par « Valider » (bouton par défaut, Entrée hors
-/// saisie de texte) ou par « Annuler » (croix, Échap) : voir [`DialogOutcome`].
+/// **Modal** dialog: in the foreground, the rest of the interface no longer
+/// receives any click, and a click elsewhere makes the dialog's outline flash
+/// dark red ([`theme::blocked_flash_color`]) to point it out. It closes through
+/// "Accept" (default button, Enter outside text input) or through "Cancel"
+/// (cross, Escape): see [`DialogOutcome`].
 ///
-/// Même brique que les fenêtres de contenu : [`show_window_in_layer`] (cadre,
-/// contour actif, rognage), [`window_header`] (placement
-/// [`HeaderPlacement::Dialog`]) et [`floating_resize_handles`]. Ne diffère
-/// que par l'ordre de calque (`Foreground`, au-dessus des fenêtres en
-/// `Middle`) et par le calque plein écran qui capte les clics. Les menus
-/// déroulants et le sélecteur de couleur ouverts depuis le dialogue restent
-/// utilisables : ils sont créés après lui, donc au-dessus.
+/// Same building block as the content windows: [`show_window_in_layer`] (frame,
+/// active outline, clipping), [`window_header`] (placement
+/// [`HeaderPlacement::Dialog`]) and [`floating_resize_handles`]. It differs
+/// only by the layer order (`Foreground`, above the `Middle` windows) and by
+/// the full-screen layer that captures clicks. Drop-down menus and the color
+/// picker opened from the dialog stay usable: they are created after it, hence
+/// above.
 ///
-/// Limite : les fenêtres OS détachées sont d'autres viewports, que ce calque
-/// ne couvre pas.
+/// Limit: detached OS windows are other viewports, which this layer does not
+/// cover.
 pub(super) fn modal_dialog(
     ctx: &egui::Context,
     id: egui::Id,
@@ -364,8 +364,8 @@ pub(super) fn modal_dialog(
     size: InteractiveSize,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> DialogOutcome {
-    // Le pied par défaut : « OK », toujours actif — ce que les propriétés du
-    // graphe emploient. Les textes viennent du catalogue ; le pied les emprunte.
+    // The default footer: "OK", always enabled — what the graph properties
+    // use. The texts come from the catalog; the footer borrows them.
     let accept_label = tr!("dialog-ok");
     let accept_hint = tr!("dialog-ok", "hint");
     modal_dialog_with(
@@ -379,15 +379,15 @@ pub(super) fn modal_dialog(
     )
 }
 
-/// Le bouton principal d'un pied : ou bien **toujours actif** (il n'a qu'une
-/// bulle), ou bien **peut être grisé** — et alors la bulle du bouton actif et
-/// la raison du grisage sont toutes deux obligatoires (S-F10, S-G1).
+/// The main button of a footer: either **always enabled** (it only has a
+/// tooltip), or **can be greyed out** — and then both the tooltip of the
+/// enabled button and the reason for the greying are mandatory (S-F10, S-G1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AcceptButton<'a> {
-    /// Jamais grisé.
+    /// Never greyed out.
     Always { hint: &'a str },
-    /// Grisé quand `enabled` est faux. `reason` dit pourquoi et quoi faire ; elle
-    /// s'écrit dans la zone de message du pied **et** en bulle du bouton grisé.
+    /// Greyed out when `enabled` is false. `reason` says why and what to do; it
+    /// is written in the footer's message area **and** as the tooltip of the greyed-out button.
     Gated {
         enabled: bool,
         hint: &'a str,
@@ -395,16 +395,16 @@ pub(super) enum AcceptButton<'a> {
     },
 }
 
-/// Le pied de page d'un [`modal_dialog_with`] : libellé et état du bouton par
-/// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
-/// du graphe emploient.
+/// The footer of a [`modal_dialog_with`]: label and state of the default
+/// button. [`modal_dialog`] puts "OK" in it, always enabled — what the graph
+/// properties use.
 pub(super) struct DialogFooter<'a> {
     pub(super) accept_label: &'a str,
     pub(super) accept: AcceptButton<'a>,
 }
 
 impl<'a> DialogFooter<'a> {
-    /// Un bouton principal qui n'est jamais grisé.
+    /// A main button that is never greyed out.
     pub(super) fn always(label: &'a str, hint: &'a str) -> Self {
         Self {
             accept_label: label,
@@ -412,11 +412,11 @@ impl<'a> DialogFooter<'a> {
         }
     }
 
-    /// Un bouton principal qui peut être grisé, avec sa raison (#226).
+    /// A main button that can be greyed out, with its reason (#226).
     pub(super) fn gated(label: &'a str, hint: &'a str, enabled: bool, reason: &'a str) -> Self {
         debug_assert!(
             enabled || !reason.is_empty(),
-            "un bouton grisé sans raison (S-G1)"
+            "a greyed-out button without a reason (S-G1)"
         );
         Self {
             accept_label: label,
@@ -435,15 +435,15 @@ impl<'a> DialogFooter<'a> {
         }
     }
 
-    /// La bulle du bouton actif.
+    /// The tooltip of the enabled button.
     fn hint(&self) -> &str {
         match self.accept {
             AcceptButton::Always { hint } | AcceptButton::Gated { hint, .. } => hint,
         }
     }
 
-    /// La raison du grisage, qui est aussi la bulle du bouton grisé ; un bouton
-    /// qui ne l'est jamais n'en a pas.
+    /// The reason for the greying, which is also the tooltip of the greyed-out
+    /// button; a button that never is has none.
     fn disabled_reason(&self) -> &str {
         match self.accept {
             AcceptButton::Always { .. } => "",
@@ -452,11 +452,11 @@ impl<'a> DialogFooter<'a> {
     }
 }
 
-/// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
-/// boutons **secondaires** (`extra_buttons`), posés à gauche du pied, de
-/// gauche à droite, avant la zone de message ; Cancel puis le bouton principal
-/// restent à droite (S-F6). `nature` est celle d'un pied de dialogue :
-/// réglages, brouillon ou choix.
+/// [`modal_dialog`] with a custom default button (`footer`) and **secondary**
+/// buttons (`extra_buttons`), placed on the left of the footer, from left to
+/// right, before the message area; Cancel then the main button stay on the
+/// right (S-F6). `nature` is that of a dialog footer: settings, draft or
+/// choice.
 pub(super) fn modal_dialog_with(
     ctx: &egui::Context,
     id: egui::Id,
@@ -478,10 +478,10 @@ pub(super) fn modal_dialog_with(
     .dialog()
 }
 
-/// Un **assistant** (S-F6) : Cancel à gauche, les boutons d'étape
-/// (`step_buttons`, ajoutés **de droite à gauche** : Next puis Back) groupés à
-/// droite contre le bouton final (`footer`, Finish). Même fenêtre que
-/// [`modal_dialog_with`] ; l'assistant d'import en est l'usage.
+/// A **wizard** (S-F6): Cancel on the left, the step buttons
+/// (`step_buttons`, added **from right to left**: Next then Back) grouped on
+/// the right against the final button (`footer`, Finish). Same window as
+/// [`modal_dialog_with`]; the import wizard is its use.
 pub(super) fn modal_wizard(
     ctx: &egui::Context,
     id: egui::Id,
@@ -503,10 +503,10 @@ pub(super) fn modal_wizard(
     .dialog()
 }
 
-/// Une fenêtre de **réglages appliqués en direct** (S-F2, S-F11) : rien à
-/// valider ni à annuler, donc un seul bouton, Close, comme la lecture seule ;
-/// mais elle a des champs, donc le focus initial va au premier (S-F9) et la
-/// taille se range dans une classe ([`InteractiveSize`]). Mêmes issues que
+/// A window of **settings applied live** (S-F2, S-F11): nothing to
+/// confirm or cancel, hence a single button, Close, like the read-only window;
+/// but it has fields, so the initial focus goes to the first one (S-F9) and the
+/// size fits into a class ([`InteractiveSize`]). Same outcomes as
 /// [`modal_read_only`].
 pub(super) fn modal_live_settings(
     ctx: &egui::Context,
@@ -529,9 +529,9 @@ pub(super) fn modal_live_settings(
     .dialog()
 }
 
-/// Une fenêtre modale en **lecture seule** (S-F2) : un seul bouton, Close
-/// (Entrée), qui rend [`DialogOutcome::Accept`] ; Échap et la croix rendent
-/// [`DialogOutcome::Cancel`]. Les deux ferment sans rien changer.
+/// A modal window in **read-only** mode (S-F2): a single button, Close
+/// (Enter), which returns [`DialogOutcome::Accept`]; Escape and the cross return
+/// [`DialogOutcome::Cancel`]. Both close without changing anything.
 pub(super) fn modal_read_only(
     ctx: &egui::Context,
     id: egui::Id,
@@ -553,9 +553,9 @@ pub(super) fn modal_read_only(
     .dialog()
 }
 
-/// [`modal_read_only`] avec des boutons secondaires à gauche de Close
-/// (`[secondaires] [Close]`) : une lecture seule qui propose aussi un geste
-/// (#306 : « Undo »).
+/// [`modal_read_only`] with secondary buttons to the left of Close
+/// (`[secondary] [Close]`): a read-only window that also offers a gesture
+/// (#306: "Undo").
 pub(super) fn modal_read_only_with(
     ctx: &egui::Context,
     id: egui::Id,
@@ -578,21 +578,21 @@ pub(super) fn modal_read_only_with(
     .dialog()
 }
 
-/// Issue d'une image de [`modal_confirm`].
+/// Outcome of one frame of [`modal_confirm`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ConfirmOutcome {
-    /// Toujours ouvert.
+    /// Still open.
     Open,
-    /// Le verbe (Delete…) : seulement par son bouton, jamais par Entrée.
+    /// The verb (Delete…): only through its button, never through Enter.
     Confirm,
-    /// Cancel (bouton par défaut, Entrée), croix ou Échap.
+    /// Cancel (default button, Enter), cross or Escape.
     Cancel,
 }
 
-/// Une **confirmation** (S-F3–S-F5 → S-R4, S-R5) : seulement pour ce que Ctrl+Z ne
-/// rattrape pas. Pied `[Cancel] [verbe]` : Cancel est le bouton par défaut,
-/// encadré, et Entrée comme Échap l'actionnent ; le verbe (`verb`, sa bulle
-/// `verb_hint`) a le style normal et rougit au survol et au focus clavier.
+/// A **confirmation** (S-F3–S-F5 → S-R4, S-R5): only for what Ctrl+Z does not
+/// recover. Footer `[Cancel] [verb]`: Cancel is the default button, framed,
+/// and Enter as well as Escape trigger it; the verb (`verb`, its tooltip
+/// `verb_hint`) has the normal style and turns red on hover and on keyboard focus.
 pub(super) fn modal_confirm(
     ctx: &egui::Context,
     id: egui::Id,
@@ -617,22 +617,22 @@ pub(super) fn modal_confirm(
     }
 }
 
-/// Issue d'une image de [`modal_save_changes`].
+/// Outcome of one frame of [`modal_save_changes`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SaveChangesOutcome {
-    /// Toujours ouvert.
+    /// Still open.
     Open,
     /// Discard Changes.
     Discard,
-    /// Cancel, croix ou Échap.
+    /// Cancel, cross or Escape.
     Cancel,
-    /// Save (bouton par défaut : Entrée).
+    /// Save (default button: Enter).
     Save,
 }
 
-/// Le dialogue des changements non enregistrés (S-F4) : « Discard Changes ·
-/// Cancel · Save ». Exception écrite à S-R4 : Entrée = Save, Échap = Cancel ;
-/// Discard Changes, à gauche, rougit au survol et au focus clavier.
+/// The dialog for unsaved changes (S-F4): "Discard Changes · Cancel · Save".
+/// Written exception to S-R4: Enter = Save, Escape = Cancel;
+/// Discard Changes, on the left, turns red on hover and on keyboard focus.
 pub(super) fn modal_save_changes(
     ctx: &egui::Context,
     id: egui::Id,
@@ -658,20 +658,20 @@ pub(super) fn modal_save_changes(
     }
 }
 
-/// Issue d'une image de [`modal_alert`].
+/// Outcome of one frame of [`modal_alert`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AlertOutcome {
-    /// Toujours ouvert.
+    /// Still open.
     Open,
-    /// Close (Entrée), croix ou Échap : le message est lu.
+    /// Close (Enter), cross or Escape: the message is read.
     Close,
-    /// L'action proposée.
+    /// The proposed action.
     Action,
 }
 
-/// Un **échec grave** hors fenêtre (S-M8) : dialogue bloquant, le message dans
-/// le contenu, un bouton Close (Entrée, Échap) et l'action possible
-/// (`action` : libellé et bulle), à gauche.
+/// A **serious failure** outside a window (S-M8): blocking dialog, the message
+/// in the content, a Close button (Enter, Escape) and the possible action
+/// (`action`: label and tooltip), on the left.
 pub(super) fn modal_alert(
     ctx: &egui::Context,
     id: egui::Id,
@@ -704,13 +704,13 @@ pub(super) fn modal_alert(
     }
 }
 
-/// La sorte d'un dialogue, clé de sa géométrie dans les préférences (S-F8) :
-/// son identifiant egui, stable d'une session à l'autre.
+/// The kind of a dialog, key of its geometry in the preferences (S-F8):
+/// its egui identifier, stable from one session to the next.
 fn dialog_kind(id: egui::Id) -> String {
     format!("{:016x}", id.value())
 }
 
-/// Les géométries mémorisées, recopiées des préférences dans la mémoire d'egui.
+/// The remembered geometries, copied from the preferences into egui's memory.
 #[derive(Clone, Default)]
 struct RememberedGeometries(BTreeMap<String, SavedGeometry>);
 
@@ -718,7 +718,7 @@ fn remembered_id() -> egui::Id {
     egui::Id::new("stokesforge_dialog_geometries")
 }
 
-/// Les géométries des dialogues fermés, à rendre aux préférences.
+/// The geometries of the closed dialogs, to hand back to the preferences.
 #[derive(Clone, Default)]
 struct ClosedGeometries(Vec<(String, SavedGeometry)>);
 
@@ -726,15 +726,15 @@ fn closed_id() -> egui::Id {
     egui::Id::new("stokesforge_dialog_geometries_closed")
 }
 
-/// L'erreur du dialogue ouvert (S-M7), publiée par [`sync_dialogs`].
+/// The error of the open dialog (S-M7), published by [`sync_dialogs`].
 fn dialog_error_id() -> egui::Id {
     egui::Id::new("stokesforge_dialog_error")
 }
 
-/// Le lien entre les dialogues et l'état, une fois par image après les
-/// dialogues : publie l'erreur du dialogue ouvert pour son pied (S-M7), recopie
-/// une fois les géométries mémorisées (S-F8) et rend en actions celles des
-/// dialogues qui viennent de se fermer.
+/// The link between the dialogs and the state, once per frame after the
+/// dialogs: publishes the error of the open dialog for its footer (S-M7), copies
+/// the remembered geometries once (S-F8) and turns into actions those of the
+/// dialogs that have just closed.
 pub(super) fn sync_dialogs(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     let error = state.dialog_error().map(str::to_owned);
     let closed = ctx.data_mut(|data| {
@@ -755,15 +755,15 @@ pub(super) fn sync_dialogs(ctx: &egui::Context, state: &AppState, actions: &mut 
     }
 }
 
-/// Le focus initial en cours (S-F9) : combien de widgets il a déjà passés, et
-/// les boutons du pied de l'image précédente (il s'arrête sur eux).
+/// The initial focus in progress (S-F9): how many widgets it has already passed,
+/// and the footer buttons of the previous frame (it stops on them).
 #[derive(Clone, Default)]
 struct FocusWalk {
     steps: u8,
     footer: Vec<egui::Id>,
 }
 
-/// `id` est-il un champ texte posé dans `layer` ?
+/// Is `id` a text field placed in `layer`?
 fn text_field_in(ctx: &egui::Context, id: egui::Id, layer: egui::LayerId) -> bool {
     egui::TextEdit::load_state(ctx, id).is_some()
         && ctx
@@ -771,7 +771,7 @@ fn text_field_in(ctx: &egui::Context, id: egui::Id, layer: egui::LayerId) -> boo
             .is_some_and(|response| response.layer_id == layer)
 }
 
-/// L'image a-t-elle un geste (touche, texte, clic) ?
+/// Does the frame have a gesture (key, text, click)?
 fn any_gesture(ctx: &egui::Context) -> bool {
     ctx.input(|input| {
         input.events.iter().any(|event| {
@@ -785,7 +785,7 @@ fn any_gesture(ctx: &egui::Context) -> bool {
     })
 }
 
-/// Le corps commun des dialogues modaux.
+/// The common body of modal dialogs.
 fn modal_frame(
     ctx: &egui::Context,
     id: egui::Id,
@@ -831,8 +831,8 @@ fn modal_frame(
         .clamp(screen.min, (screen.max - geometry.size).max(screen.min));
     let layer = egui::LayerId::new(egui::Order::Foreground, id);
 
-    // S-F9 : un pas du focus initial, avant que les widgets se posent (egui
-    // ne suit une direction de focus que pendant la passe où elle est donnée).
+    // S-F9: one step of the initial focus, before the widgets are placed (egui
+    // follows a focus direction only during the pass where it is given).
     let focus = nature.initial_focus();
     if just_opened {
         if focus == InitialFocus::FirstField {
@@ -841,19 +841,19 @@ fn modal_frame(
     } else {
         advance_initial_focus(ctx, walk_id, anchor_id, layer);
     }
-    // S-F7 : l'Échap qui sort d'un champ texte du dialogue ne le ferme pas.
-    // egui rend le focus sur Échap dès le début de la passe : on lit donc
-    // celui de la fin de l'image précédente.
+    // S-F7: the Escape that leaves a text field of the dialog does not close it.
+    // egui gives the focus back on Escape from the start of the pass: so we read
+    // the one from the end of the previous frame.
     let text_focus_id = id.with("text_focus");
     let editing_before = ctx
         .data(|data| data.get_temp::<bool>(text_focus_id))
         .unwrap_or(false);
 
-    // Le calque qui capte les clics : tout le reste de l'interface est sous lui.
-    // Il est **invisible** : pas de voile sombre sur le reste de l'application,
-    // pour qu'on continue de voir le rendu du graphe pendant qu'on règle ses
-    // propriétés (issue #20). Le clignotement du contour dit déjà que le
-    // reste est bloqué.
+    // The layer that captures clicks: everything else in the interface is under it.
+    // It is **invisible**: no dark veil over the rest of the application,
+    // so that one keeps seeing the graph rendering while adjusting its
+    // properties (issue #20). The flashing outline already says that the
+    // rest is blocked.
     let backdrop = egui::Area::new(id.with("backdrop"))
         .order(egui::Order::Foreground)
         .fixed_pos(screen.min)
@@ -876,7 +876,7 @@ fn modal_frame(
         .filter(|elapsed| *elapsed < MODAL_FLASH_SECONDS)
         .map(|elapsed| {
             ctx.request_repaint();
-            // Deux impulsions sur la durée : 0 → 1 → 0, deux fois.
+            // Two pulses over the duration: 0 → 1 → 0, twice.
             0.5 * (1.0 - (std::f64::consts::TAU * elapsed / (MODAL_FLASH_SECONDS / 2.0)).cos())
         });
 
@@ -910,7 +910,7 @@ fn modal_frame(
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body.set_clip_rect(ui.clip_rect().intersect(body.max_rect()));
-                // L'ancre du focus initial (S-F9) : invisible, en tête du contenu.
+                // The anchor of the initial focus (S-F9): invisible, at the head of the content.
                 if focus == InitialFocus::FirstField {
                     body.interact(
                         egui::Rect::from_min_size(body.max_rect().min, egui::Vec2::ZERO),
@@ -977,15 +977,15 @@ fn modal_frame(
         data.insert_temp(text_focus_id, editing_now);
     });
     if let Some(mut walk) = ctx.data(|data| data.get_temp::<FocusWalk>(walk_id)) {
-        // L'ancre prend le focus à l'ouverture ; le pied borne la recherche.
+        // The anchor takes the focus on opening; the footer bounds the search.
         if just_opened {
             ctx.memory_mut(|memory| memory.request_focus(anchor_id));
         }
         walk.footer = clicks.ids.clone();
         ctx.data_mut(|data| data.insert_temp(walk_id, walk));
-        // Les pas du focus s'enchaînent dans la même image : egui refait la
-        // passe (sans la peindre) au lieu de montrer le focus qui saute de
-        // widget en widget. Le plafond de passes est relevé en conséquence.
+        // The focus steps follow one another in the same frame: egui redoes the
+        // pass (without painting it) instead of showing the focus jumping from
+        // widget to widget. The cap on passes is raised accordingly.
         ctx.options_mut(|options| {
             options.max_passes = std::num::NonZeroUsize::new(usize::from(FOCUS_WALK_STEPS) + 2)
                 .unwrap_or(options.max_passes);
@@ -994,12 +994,12 @@ fn modal_frame(
         ctx.request_repaint();
     }
 
-    // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
-    // le lisent avant), sinon il annule — sauf celui qui vient de sortir d'un
-    // champ texte (S-F7). Entrée actionne le bouton par défaut, sauf pendant
-    // une saisie de texte (où elle termine la saisie) : le principal, ou
-    // Cancel d'une confirmation (S-R4). Un bouton du pied focalisé au clavier
-    // reçoit Entrée lui-même : son clic passe devant.
+    // Escape: consumed by the color picker or an open list (they read it
+    // before), otherwise it cancels — except the one that has just left a text
+    // field (S-F7). Enter triggers the default button, except during a text
+    // input (where it ends the input): the main one, or Cancel of a
+    // confirmation (S-R4). A footer button with keyboard focus receives Enter
+    // itself: its click takes precedence.
     let escape = !popup_open
         && ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE))
         && !editing_before;
@@ -1041,20 +1041,20 @@ fn modal_frame(
     outcome
 }
 
-/// Les boutons du pied cliqués dans l'image, et leurs identifiants (le focus
-/// initial s'arrête au pied).
+/// The footer buttons clicked in the frame, and their identifiers (the initial
+/// focus stops at the footer).
 #[derive(Default)]
 struct FooterClicks {
     accept: bool,
     cancel: bool,
-    /// Discard Changes (seul secondaire posé par la brique).
+    /// Discard Changes (the only secondary placed by the building block).
     secondary: bool,
     ids: Vec<egui::Id>,
 }
 
-/// Le pied d'un dialogue, dans `footer` (disposition de droite à gauche) :
-/// boutons rangés selon `layout` (S-F2, S-F6) et zone de message à gauche des
-/// boutons (S-M7, S-F10).
+/// The footer of a dialog, in `footer` (right-to-left layout): buttons
+/// arranged according to `layout` (S-F2, S-F6) and a message area to the left
+/// of the buttons (S-M7, S-F10).
 fn paint_footer(
     footer: &mut egui::Ui,
     nature: DialogNature,
@@ -1065,8 +1065,8 @@ fn paint_footer(
 ) -> FooterClicks {
     let mut clicks = FooterClicks::default();
     let default_fill = footer.visuals().selection.bg_fill;
-    // Premier ajouté = le plus à droite : le bouton principal — par défaut,
-    // sauf dans une confirmation, où il est destructeur et Cancel l'est (S-R4).
+    // First added = rightmost: the main button — default, except in a
+    // confirmation, where it is destructive and Cancel is the default (S-R4).
     let confirm = nature.cancel_is_default();
     let response = footer
         .scope(|ui| {
@@ -1081,8 +1081,8 @@ fn paint_footer(
                 .on_disabled_hover_text(spec.disabled_reason())
         })
         .inner;
-    // S-F11 : le bouton par défaut prend le focus à l'ouverture (le principal ;
-    // Cancel dans une confirmation, plus bas).
+    // S-F11: the default button takes the focus on opening (the main one;
+    // Cancel in a confirmation, further down).
     if focus_default && !confirm {
         response.request_focus();
     }
@@ -1148,8 +1148,8 @@ fn paint_footer(
     clicks
 }
 
-/// La zone de message du pied : l'erreur en couleur d'erreur, la raison d'un
-/// grisage estompée ; coupée à la place qui reste (texte complet au survol).
+/// The footer message area: the error in the error color, the reason for a
+/// greying faded; cut to the space that remains (full text on hover).
 fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
     let text = match message {
         Some(FooterMessage::Error(error)) => {
@@ -1161,9 +1161,9 @@ fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
     ui.add(egui::Label::new(text).truncate());
 }
 
-/// Un pas du focus initial (S-F9), au début d'une image : voir la doc du
-/// module. Un geste l'interrompt avant que les widgets voient le focus ; un
-/// focus posé en route sur autre chose qu'un champ texte est alors rendu.
+/// One step of the initial focus (S-F9), at the start of a frame: see the
+/// module doc. A gesture interrupts it before the widgets see the focus; a
+/// focus set along the way on something other than a text field is then given back.
 fn advance_initial_focus(
     ctx: &egui::Context,
     walk_id: egui::Id,
@@ -1208,283 +1208,282 @@ fn advance_initial_focus(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{image_de, textes, touche, Texte};
+    use super::super::test_support::{frame_of, key, texts, Text};
     use super::*;
 
-    /// Le centre du texte peint `cherche`.
-    fn centre(peints: &[Texte], cherche: &str) -> egui::Pos2 {
-        peints
+    /// The center of the painted text `wanted`.
+    fn center(painted: &[Text], wanted: &str) -> egui::Pos2 {
+        painted
             .iter()
-            .find(|t| t.texte == cherche)
-            .unwrap_or_else(|| panic!("{cherche:?} non peint"))
-            .centre
+            .find(|t| t.text == wanted)
+            .unwrap_or_else(|| panic!("{wanted:?} not painted"))
+            .center
     }
 
-    /// Une nature de brouillon, de la taille libre des tests.
-    fn brouillon() -> DialogNature {
+    /// A draft nature, of the free size used by the tests.
+    fn draft() -> DialogNature {
         DialogNature::Draft(InteractiveSize::Free(egui::vec2(600.0, 300.0)))
     }
 
-    /// Une nature d'assistant, de la taille libre des tests.
-    fn assistant() -> DialogNature {
+    /// A wizard nature, of the free size used by the tests.
+    fn wizard() -> DialogNature {
         DialogNature::Wizard(InteractiveSize::Free(egui::vec2(600.0, 300.0)))
     }
 
-    /// Un dialogue de `nature` dont le bouton principal est `principal` (grisé
-    /// avec la raison `raison` si `actif` est faux), un bouton supplémentaire
-    /// « Autre » ; rend l'issue de l'image et ses textes.
-    fn pied(
+    /// A dialog of `nature` whose main button is `primary` (greyed out with the
+    /// reason `reason` if `enabled` is false), plus an extra button "Other";
+    /// returns the outcome of the frame and its texts.
+    fn footer_frame(
         context: &egui::Context,
         nature: DialogNature,
-        actif: bool,
+        enabled: bool,
         events: Vec<egui::Event>,
-        mut contenu: impl FnMut(&mut egui::Ui),
-    ) -> (DialogOutcome, Vec<Texte>) {
-        let mut issue = DialogOutcome::Open;
-        let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-            issue = modal_frame(
+        mut contents: impl FnMut(&mut egui::Ui),
+    ) -> (DialogOutcome, Vec<Text>) {
+        let mut outcome = DialogOutcome::Open;
+        let output = frame_of(context, egui::vec2(800.0, 600.0), events, |ui| {
+            outcome = modal_frame(
                 ui.ctx(),
-                egui::Id::new("dialogue_pied"),
-                "Titre",
+                egui::Id::new("dialog_footer"),
+                "Title",
                 nature,
-                DialogFooter::gated("Principal", "Bulle", actif, "Raison"),
+                DialogFooter::gated("Main", "Tooltip", enabled, "Reason"),
                 |ui| {
-                    let _ = ui.button("Autre");
+                    let _ = ui.button("Other");
                 },
                 |ui| {
-                    contenu(ui);
+                    contents(ui);
                 },
             )
             .dialog();
         });
-        (issue, textes(&sortie.shapes))
+        (outcome, texts(&output.shapes))
     }
 
-    /// S-F6 : un dialogue range le secondaire à gauche, puis Cancel, puis le
-    /// principal à droite ; un assistant met Cancel tout à gauche et groupe ses
-    /// boutons d'étape contre le principal. Lu dans les formes peintes.
+    /// S-F6: a dialog puts the secondary button on the left, then Cancel, then
+    /// the main one on the right; a wizard puts Cancel on the far left and groups
+    /// its step buttons against the main one. Read from the painted shapes.
     #[test]
-    fn l_ordre_des_boutons_suit_la_sorte_de_dialogue() {
-        let annuler = tr!("dialog-cancel");
+    fn the_button_order_follows_the_kind_of_dialog() {
+        let cancel_label = tr!("dialog-cancel");
         let context = egui::Context::default();
-        let mut peints = Vec::new();
+        let mut painted = Vec::new();
         for _ in 0..3 {
-            peints = pied(&context, brouillon(), true, Vec::new(), |_| {}).1;
+            painted = footer_frame(&context, draft(), true, Vec::new(), |_| {}).1;
         }
-        let (autre, cancel, principal) = (
-            centre(&peints, "Autre"),
-            centre(&peints, &annuler),
-            centre(&peints, "Principal"),
+        let (other, cancel, primary) = (
+            center(&painted, "Other"),
+            center(&painted, &cancel_label),
+            center(&painted, "Main"),
         );
-        assert!(autre.x < cancel.x && cancel.x < principal.x, "dialogue");
-        assert!((autre.y - principal.y).abs() < 1.0, "une seule rangée");
+        assert!(other.x < cancel.x && cancel.x < primary.x, "dialog");
+        assert!((other.y - primary.y).abs() < 1.0, "a single row");
 
         let context = egui::Context::default();
         for _ in 0..3 {
-            peints = pied(&context, assistant(), true, Vec::new(), |_| {}).1;
+            painted = footer_frame(&context, wizard(), true, Vec::new(), |_| {}).1;
         }
-        let (autre, cancel, principal) = (
-            centre(&peints, "Autre"),
-            centre(&peints, &annuler),
-            centre(&peints, "Principal"),
+        let (other, cancel, primary) = (
+            center(&painted, "Other"),
+            center(&painted, &cancel_label),
+            center(&painted, "Main"),
         );
-        assert!(cancel.x < autre.x && autre.x < principal.x, "assistant");
+        assert!(cancel.x < other.x && other.x < primary.x, "wizard");
         assert!(
-            principal.x - autre.x < autre.x - cancel.x,
-            "les boutons d'étape sont groupés contre le principal"
+            primary.x - other.x < other.x - cancel.x,
+            "the step buttons are grouped against the main one"
         );
     }
 
-    /// S-F2 : une fenêtre en lecture seule n'a qu'un bouton, Close, qu'Entrée
-    /// actionne ; pas de Cancel.
+    /// S-F2: a read-only window has only one button, Close, which Enter
+    /// triggers; no Cancel.
     #[test]
-    fn une_fenetre_en_lecture_seule_n_a_que_close() {
+    fn a_read_only_window_has_only_close() {
         let context = egui::Context::default();
-        let id = egui::Id::new("lecture_seule");
-        let mut issue = DialogOutcome::Open;
-        let mut peints = Vec::new();
-        for events in [vec![], vec![], vec![], vec![touche(egui::Key::Enter)]] {
-            let sortie = image_de(&context, egui::vec2(800.0, 600.0), events, |ui| {
-                issue = modal_read_only(
+        let id = egui::Id::new("read_only");
+        let mut outcome = DialogOutcome::Open;
+        let mut painted = Vec::new();
+        for events in [vec![], vec![], vec![], vec![key(egui::Key::Enter)]] {
+            let output = frame_of(&context, egui::vec2(800.0, 600.0), events, |ui| {
+                outcome = modal_read_only(
                     ui.ctx(),
                     id,
-                    "Titre",
+                    "Title",
                     PlainSize::Content(egui::vec2(300.0, 200.0)),
                     |ui| {
-                        ui.label("contenu");
+                        ui.label("content");
                     },
                 );
             });
-            if issue == DialogOutcome::Open {
-                peints = textes(&sortie.shapes);
+            if outcome == DialogOutcome::Open {
+                painted = texts(&output.shapes);
             }
         }
-        assert!(peints.iter().any(|t| t.texte == tr!("dialog-close")));
-        assert!(!peints.iter().any(|t| t.texte == tr!("dialog-cancel")));
-        assert_eq!(issue, DialogOutcome::Accept, "Entrée ferme");
+        assert!(painted.iter().any(|t| t.text == tr!("dialog-close")));
+        assert!(!painted.iter().any(|t| t.text == tr!("dialog-cancel")));
+        assert_eq!(outcome, DialogOutcome::Accept, "Enter closes");
     }
 
-    /// S-M7, S-F10 (décision pure) : l'erreur passe devant la raison ; la raison
-    /// n'est dite que bouton grisé ; sans l'une ni l'autre, rien.
+    /// S-M7, S-F10 (pure decision): the error takes precedence over the reason;
+    /// the reason is only given with the button greyed out; with neither, nothing.
     #[test]
-    fn l_erreur_passe_devant_la_raison_du_grisage() {
+    fn the_error_takes_precedence_over_the_reason_for_greying() {
         assert_eq!(
-            footer_message(Some("Erreur"), false, "Raison"),
-            Some(FooterMessage::Error("Erreur"))
+            footer_message(Some("Error"), false, "Reason"),
+            Some(FooterMessage::Error("Error"))
         );
         assert_eq!(
-            footer_message(None, false, "Raison"),
-            Some(FooterMessage::Reason("Raison"))
+            footer_message(None, false, "Reason"),
+            Some(FooterMessage::Reason("Reason"))
         );
-        assert_eq!(footer_message(None, true, "Raison"), None);
+        assert_eq!(footer_message(None, true, "Reason"), None);
         assert_eq!(footer_message(Some(""), false, ""), None);
     }
 
-    /// S-F10, S-M7 peints : bouton principal grisé, sa raison est dans le pied ;
-    /// une erreur publiée la remplace, et la raison revient quand l'erreur
-    /// disparaît. Témoin : bouton actif, la raison n'est pas peinte.
+    /// S-F10, S-M7 painted: main button greyed out, its reason is in the footer;
+    /// a published error replaces it, and the reason comes back when the error
+    /// disappears. Witness: enabled button, the reason is not painted.
     #[test]
-    fn le_pied_montre_l_erreur_puis_la_raison_du_grisage() {
+    fn the_footer_shows_the_error_then_the_reason_for_greying() {
         let context = egui::Context::default();
-        let mut peints = Vec::new();
+        let mut painted = Vec::new();
         for _ in 0..3 {
-            peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
+            painted = footer_frame(&context, draft(), false, Vec::new(), |_| {}).1;
         }
-        assert!(peints.iter().any(|t| t.texte == "Raison"));
+        assert!(painted.iter().any(|t| t.text == "Reason"));
         context.data_mut(|data| {
-            data.insert_temp(dialog_error_id(), Some("Échec du calcul".to_string()));
+            data.insert_temp(dialog_error_id(), Some("Computation failed".to_string()));
         });
-        peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
-        assert!(peints.iter().any(|t| t.texte == "Échec du calcul"));
-        assert!(!peints.iter().any(|t| t.texte == "Raison"));
+        painted = footer_frame(&context, draft(), false, Vec::new(), |_| {}).1;
+        assert!(painted.iter().any(|t| t.text == "Computation failed"));
+        assert!(!painted.iter().any(|t| t.text == "Reason"));
         context.data_mut(|data| data.insert_temp(dialog_error_id(), None::<String>));
-        peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
+        painted = footer_frame(&context, draft(), false, Vec::new(), |_| {}).1;
         assert!(
-            peints.iter().any(|t| t.texte == "Raison"),
-            "la raison revient"
+            painted.iter().any(|t| t.text == "Reason"),
+            "the reason comes back"
         );
 
-        let actif = egui::Context::default();
+        let enabled = egui::Context::default();
         for _ in 0..3 {
-            peints = pied(&actif, brouillon(), true, Vec::new(), |_| {}).1;
+            painted = footer_frame(&enabled, draft(), true, Vec::new(), |_| {}).1;
         }
-        assert!(!peints.iter().any(|t| t.texte == "Raison"), "témoin");
+        assert!(!painted.iter().any(|t| t.text == "Reason"), "witness");
     }
 
-    /// Un dialogue dont le contenu est une case puis un champ texte.
-    fn dialogue_a_champ(
+    /// A dialog whose content is a checkbox then a text field.
+    fn dialog_with_field(
         context: &egui::Context,
-        texte: &mut String,
+        text: &mut String,
         events: Vec<egui::Event>,
     ) -> (DialogOutcome, Option<egui::Id>) {
-        let mut champ = None;
-        let mut case = false;
-        let issue = pied(context, brouillon(), true, events, |ui| {
-            ui.checkbox(&mut case, "case");
-            champ = Some(ui.text_edit_singleline(texte).id);
+        let mut field = None;
+        let mut checked = false;
+        let outcome = footer_frame(context, draft(), true, events, |ui| {
+            ui.checkbox(&mut checked, "checkbox");
+            field = Some(ui.text_edit_singleline(text).id);
         })
         .0;
-        (issue, champ)
+        (outcome, field)
     }
 
-    /// S-F9 : à l'ouverture, le premier champ de saisie prend le focus, même
-    /// derrière une case ; S-F7 : le premier Échap sort du champ sans fermer, le
-    /// second fait Cancel.
+    /// S-F9: on opening, the first input field takes the focus, even behind a
+    /// checkbox; S-F7: the first Escape leaves the field without closing, the
+    /// second does Cancel.
     #[test]
-    fn le_premier_champ_a_le_focus_et_le_premier_echap_n_en_fait_que_sortir() {
+    fn the_first_field_has_the_focus_and_the_first_escape_only_leaves_it() {
         let context = egui::Context::default();
-        let mut texte = String::from("abc");
-        let mut champ = None;
+        let mut text = String::from("abc");
+        let mut field = None;
         for _ in 0..8 {
-            champ = dialogue_a_champ(&context, &mut texte, Vec::new()).1;
+            field = dialog_with_field(&context, &mut text, Vec::new()).1;
         }
-        let champ = champ.expect("champ peint");
-        assert_eq!(context.memory(|memory| memory.focused()), Some(champ));
-        let (issue, _) = dialogue_a_champ(&context, &mut texte, vec![touche(egui::Key::Escape)]);
-        assert_eq!(issue, DialogOutcome::Open, "le premier Échap sort du champ");
-        assert_ne!(context.memory(|memory| memory.focused()), Some(champ));
-        let (issue, _) = dialogue_a_champ(&context, &mut texte, vec![touche(egui::Key::Escape)]);
-        assert_eq!(issue, DialogOutcome::Cancel, "le second annule");
+        let field = field.expect("field painted");
+        assert_eq!(context.memory(|memory| memory.focused()), Some(field));
+        let (outcome, _) = dialog_with_field(&context, &mut text, vec![key(egui::Key::Escape)]);
+        assert_eq!(
+            outcome,
+            DialogOutcome::Open,
+            "the first Escape leaves the field"
+        );
+        assert_ne!(context.memory(|memory| memory.focused()), Some(field));
+        let (outcome, _) = dialog_with_field(&context, &mut text, vec![key(egui::Key::Escape)]);
+        assert_eq!(outcome, DialogOutcome::Cancel, "the second one cancels");
     }
 
-    /// S-F9 : les pas du focus s'enchaînent dans l'image (passes jetées), pas
-    /// un widget par image — ici deux images suffisent derrière une case.
+    /// S-F9: the focus steps follow one another within the frame (discarded
+    /// passes), not one widget per frame — here two frames suffice behind a checkbox.
     #[test]
-    fn le_focus_initial_ne_prend_pas_une_image_par_widget() {
+    fn the_initial_focus_does_not_take_one_frame_per_widget() {
         let context = egui::Context::default();
-        let mut texte = String::from("abc");
-        let mut champ = None;
+        let mut text = String::from("abc");
+        let mut field = None;
         for _ in 0..2 {
-            champ = dialogue_a_champ(&context, &mut texte, Vec::new()).1;
+            field = dialog_with_field(&context, &mut text, Vec::new()).1;
         }
         assert_eq!(
             context.memory(|memory| memory.focused()),
-            Some(champ.expect("champ peint"))
+            Some(field.expect("field painted"))
         );
     }
 
-    /// S-F9, sans champ de saisie : le focus initial ne laisse rien de
-    /// focalisé (Entrée valide toujours). Un geste pendant la recherche
-    /// l'interrompt : la touche agit sans focus.
+    /// S-F9, without an input field: the initial focus leaves nothing
+    /// focused (Enter still confirms). A gesture during the search
+    /// interrupts it: the key acts with no focus.
     #[test]
-    fn sans_champ_le_focus_initial_ne_laisse_rien_de_focalise() {
+    fn without_a_field_the_initial_focus_leaves_nothing_focused() {
         let context = egui::Context::default();
         for _ in 0..8 {
-            pied(&context, brouillon(), true, Vec::new(), |ui| {
-                ui.label("contenu");
+            footer_frame(&context, draft(), true, Vec::new(), |ui| {
+                ui.label("content");
             });
         }
         assert_eq!(context.memory(|memory| memory.focused()), None);
 
         let context = egui::Context::default();
-        pied(&context, brouillon(), true, Vec::new(), |_| {});
-        let (issue, _) = pied(
-            &context,
-            brouillon(),
-            true,
-            vec![touche(egui::Key::Enter)],
-            |_| {},
-        );
+        footer_frame(&context, draft(), true, Vec::new(), |_| {});
+        let (outcome, _) =
+            footer_frame(&context, draft(), true, vec![key(egui::Key::Enter)], |_| {});
         assert_eq!(
-            issue,
+            outcome,
             DialogOutcome::Accept,
-            "Entrée agit pendant la recherche"
+            "Enter acts during the search"
         );
     }
 
-    /// S-F8 : fermé, un dialogue rend sa géométrie (pour les préférences) et la
-    /// reprend à sa réouverture, même avec une autre taille par défaut.
+    /// S-F8: closed, a dialog hands back its geometry (for the preferences) and
+    /// takes it again on reopening, even with another default size.
     #[test]
-    fn un_dialogue_rouvert_reprend_sa_taille_et_sa_place() {
+    fn a_reopened_dialog_takes_back_its_size_and_position() {
         let context = egui::Context::default();
-        let id = egui::Id::new("dialogue_memorise");
-        let mut taille = egui::vec2(300.0, 200.0);
-        let ouvrir = |events: Vec<egui::Event>, taille: egui::Vec2| {
-            let mut issue = DialogOutcome::Open;
-            image_de(&context, egui::vec2(800.0, 600.0), events, |ui| {
-                issue = modal_dialog(ui.ctx(), id, "Titre", InteractiveSize::Free(taille), |ui| {
-                    ui.label("contenu");
+        let id = egui::Id::new("remembered_dialog");
+        let mut size = egui::vec2(300.0, 200.0);
+        let open = |events: Vec<egui::Event>, size: egui::Vec2| {
+            let mut outcome = DialogOutcome::Open;
+            frame_of(&context, egui::vec2(800.0, 600.0), events, |ui| {
+                outcome = modal_dialog(ui.ctx(), id, "Title", InteractiveSize::Free(size), |ui| {
+                    ui.label("content");
                 });
             });
-            issue
+            outcome
         };
-        ouvrir(Vec::new(), taille);
+        open(Vec::new(), size);
         assert_eq!(
-            ouvrir(vec![touche(egui::Key::Escape)], taille),
+            open(vec![key(egui::Key::Escape)], size),
             DialogOutcome::Cancel
         );
-        let fermees = context
+        let closed_geometries = context
             .data(|data| data.get_temp::<ClosedGeometries>(closed_id()))
             .unwrap_or_default()
             .0;
-        assert_eq!(fermees.len(), 1);
-        let (sorte, rendue) = &fermees[0];
-        assert_eq!(sorte, &dialog_kind(id));
-        assert_eq!((rendue.width, rendue.height), (300.0, 200.0));
+        assert_eq!(closed_geometries.len(), 1);
+        let (kind, returned) = &closed_geometries[0];
+        assert_eq!(kind, &dialog_kind(id));
+        assert_eq!((returned.width, returned.height), (300.0, 200.0));
 
-        // Une géométrie mémorisée (venue des préférences) l'emporte sur la
-        // taille par défaut.
-        let memorisee = SavedGeometry {
+        // A remembered geometry (coming from the preferences) takes precedence
+        // over the default size.
+        let remembered = SavedGeometry {
             x: 40.0,
             y: 50.0,
             width: 420.0,
@@ -1493,72 +1492,72 @@ mod tests {
         context.data_mut(|data| {
             data.insert_temp(
                 remembered_id(),
-                RememberedGeometries(BTreeMap::from([(dialog_kind(id), memorisee)])),
+                RememberedGeometries(BTreeMap::from([(dialog_kind(id), remembered)])),
             );
         });
-        taille = egui::vec2(500.0, 500.0);
-        ouvrir(Vec::new(), taille);
-        let ouverte = context
+        size = egui::vec2(500.0, 500.0);
+        open(Vec::new(), size);
+        let opened = context
             .data(|data| data.get_temp::<DialogGeometry>(id.with("geometry")))
-            .expect("ouvert");
-        assert_eq!(ouverte.pos, egui::pos2(40.0, 50.0));
-        assert_eq!(ouverte.size, egui::vec2(420.0, 260.0));
+            .expect("open");
+        assert_eq!(opened.pos, egui::pos2(40.0, 50.0));
+        assert_eq!(opened.size, egui::vec2(420.0, 260.0));
     }
 
-    /// Une confirmation (#229) : une image avec `events` ; rend l'issue et
-    /// les formes peintes.
+    /// A confirmation (#229): one frame with `events`; returns the outcome and
+    /// the painted shapes.
     fn confirmation(
         context: &egui::Context,
         events: Vec<egui::Event>,
     ) -> (ConfirmOutcome, egui::FullOutput) {
-        let mut issue = ConfirmOutcome::Open;
-        let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-            issue = modal_confirm(
+        let mut outcome = ConfirmOutcome::Open;
+        let output = frame_of(context, egui::vec2(800.0, 600.0), events, |ui| {
+            outcome = modal_confirm(
                 ui.ctx(),
                 egui::Id::new("confirmation"),
-                "Supprimer le modèle",
+                "Delete template",
                 PlainSize::Content(egui::vec2(400.0, 160.0)),
-                "Supprimer",
-                "Irréversible",
+                "Delete",
+                "Irreversible",
                 |ui| {
-                    ui.label("Supprimer « A » ?");
+                    ui.label("Delete \"A\"?");
                 },
             );
         });
-        (issue, sortie)
+        (outcome, output)
     }
 
-    /// Le trio « Discard Changes · Cancel · Save » : une image avec `events`.
+    /// The "Discard Changes · Cancel · Save" trio: one frame with `events`.
     fn trio(
         context: &egui::Context,
         events: Vec<egui::Event>,
     ) -> (SaveChangesOutcome, egui::FullOutput) {
-        let mut issue = SaveChangesOutcome::Open;
-        let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-            issue = modal_save_changes(
+        let mut outcome = SaveChangesOutcome::Open;
+        let output = frame_of(context, egui::vec2(800.0, 600.0), events, |ui| {
+            outcome = modal_save_changes(
                 ui.ctx(),
                 egui::Id::new("trio"),
-                "Modifications",
+                "Changes",
                 PlainSize::Content(egui::vec2(400.0, 160.0)),
                 |ui| {
-                    ui.label("Enregistrer ?");
+                    ui.label("Save?");
                 },
             );
         });
-        (issue, sortie)
+        (outcome, output)
     }
 
-    /// Clique `cherche` (un texte peint par `peindre`) en trois images ; rend
-    /// la première issue autre que `ouvert`.
-    fn cliquer_texte<T: PartialEq + Copy>(
+    /// Clicks `wanted` (a text painted by `paint`) over three frames; returns
+    /// the first outcome other than `still_open`.
+    fn click_text<T: PartialEq + Copy>(
         context: &egui::Context,
-        cherche: &str,
-        ouvert: T,
-        peindre: impl Fn(&egui::Context, Vec<egui::Event>) -> (T, egui::FullOutput),
+        wanted: &str,
+        still_open: T,
+        paint: impl Fn(&egui::Context, Vec<egui::Event>) -> (T, egui::FullOutput),
     ) -> T {
-        let (_, sortie) = peindre(context, Vec::new());
-        let pos = centre(&textes(&sortie.shapes), cherche);
-        let bouton = |pressed| egui::Event::PointerButton {
+        let (_, output) = paint(context, Vec::new());
+        let pos = center(&texts(&output.shapes), wanted);
+        let button = |pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
             pressed,
@@ -1566,29 +1565,29 @@ mod tests {
         };
         [
             vec![egui::Event::PointerMoved(pos)],
-            vec![bouton(true)],
-            vec![bouton(false)],
+            vec![button(true)],
+            vec![button(false)],
         ]
         .into_iter()
-        .map(|events| peindre(context, events).0)
-        .find(|issue| *issue != ouvert)
-        .unwrap_or(ouvert)
+        .map(|events| paint(context, events).0)
+        .find(|outcome| *outcome != still_open)
+        .unwrap_or(still_open)
     }
 
-    /// S-R4 (#229) : dans une confirmation, Entrée **et** Échap font Cancel —
-    /// le bouton par défaut ; le verbe ne s'obtient que par son bouton
-    /// (témoin : le clic confirme).
+    /// S-R4 (#229): in a confirmation, Enter **and** Escape do Cancel —
+    /// the default button; the verb is only obtained through its button
+    /// (witness: the click confirms).
     #[test]
-    fn une_confirmation_s_annule_par_entree_comme_par_echap() {
-        for key in [egui::Key::Enter, egui::Key::Escape] {
+    fn a_confirmation_cancels_with_enter_as_with_escape() {
+        for key_code in [egui::Key::Enter, egui::Key::Escape] {
             let context = egui::Context::default();
             for _ in 0..3 {
                 confirmation(&context, Vec::new());
             }
             assert_eq!(
-                confirmation(&context, vec![touche(key)]).0,
+                confirmation(&context, vec![key(key_code)]).0,
                 ConfirmOutcome::Cancel,
-                "{key:?}"
+                "{key_code:?}"
             );
         }
         let context = egui::Context::default();
@@ -1596,17 +1595,17 @@ mod tests {
             confirmation(&context, Vec::new());
         }
         assert_eq!(
-            cliquer_texte(&context, "Supprimer", ConfirmOutcome::Open, confirmation),
+            click_text(&context, "Delete", ConfirmOutcome::Open, confirmation),
             ConfirmOutcome::Confirm
         );
     }
 
-    /// S-F4, exception écrite à S-R4 : dans « Discard Changes · Cancel · Save »,
-    /// Entrée = Save, Échap = Cancel ; Discard Changes par son bouton, à
-    /// gauche de Cancel et Save.
+    /// S-F4, written exception to S-R4: in "Discard Changes · Cancel · Save",
+    /// Enter = Save, Escape = Cancel; Discard Changes through its button, to
+    /// the left of Cancel and Save.
     #[test]
-    fn le_trio_enregistre_par_entree_et_s_annule_par_echap() {
-        for (key, attendu) in [
+    fn the_trio_saves_with_enter_and_cancels_with_escape() {
+        for (key_code, expected) in [
             (egui::Key::Enter, SaveChangesOutcome::Save),
             (egui::Key::Escape, SaveChangesOutcome::Cancel),
         ] {
@@ -1614,22 +1613,26 @@ mod tests {
             for _ in 0..3 {
                 trio(&context, Vec::new());
             }
-            assert_eq!(trio(&context, vec![touche(key)]).0, attendu, "{key:?}");
+            assert_eq!(
+                trio(&context, vec![key(key_code)]).0,
+                expected,
+                "{key_code:?}"
+            );
         }
         let context = egui::Context::default();
-        let mut sortie = None;
+        let mut output = None;
         for _ in 0..3 {
-            sortie = Some(trio(&context, Vec::new()).1);
+            output = Some(trio(&context, Vec::new()).1);
         }
-        let peints = textes(&sortie.expect("peint").shapes);
-        let (abandon, annuler, enregistrer) = (
-            centre(&peints, &tr!("unsaved-discard")),
-            centre(&peints, &tr!("dialog-cancel")),
-            centre(&peints, &tr!("unsaved-save")),
+        let painted = texts(&output.expect("painted").shapes);
+        let (discard, cancel_label, save) = (
+            center(&painted, &tr!("unsaved-discard")),
+            center(&painted, &tr!("dialog-cancel")),
+            center(&painted, &tr!("unsaved-save")),
         );
-        assert!(abandon.x < annuler.x && annuler.x < enregistrer.x);
+        assert!(discard.x < cancel_label.x && cancel_label.x < save.x);
         assert_eq!(
-            cliquer_texte(
+            click_text(
                 &context,
                 &tr!("unsaved-discard"),
                 SaveChangesOutcome::Open,
@@ -1639,162 +1642,162 @@ mod tests {
         );
     }
 
-    /// Un rectangle plein de `couleur` a-t-il été peint ?
-    fn rectangle_de(sortie: &egui::FullOutput, couleur: egui::Color32) -> bool {
-        sortie
+    /// Was a filled rectangle of `color` painted?
+    fn has_filled_rect(output: &egui::FullOutput, color: egui::Color32) -> bool {
+        output
             .shapes
             .iter()
-            .any(|peint| matches!(&peint.shape, egui::Shape::Rect(rect) if rect.fill == couleur))
+            .any(|painted| matches!(&painted.shape, egui::Shape::Rect(rect) if rect.fill == color))
     }
 
-    /// S-R5 (#229) : le verbe destructeur a le style normal au repos, et rougit
-    /// au survol **et** au focus clavier (Tab), pointeur ailleurs.
+    /// S-R5 (#229): the destructive verb has the normal style at rest, and turns
+    /// red on hover **and** on keyboard focus (Tab), pointer elsewhere.
     #[test]
-    fn le_verbe_destructeur_rougit_au_survol_et_au_focus() {
+    fn the_destructive_verb_turns_red_on_hover_and_focus() {
         let context = egui::Context::default();
-        let rouge = context.global_style().visuals.error_fg_color;
-        let mut sortie = None;
+        let red = context.global_style().visuals.error_fg_color;
+        let mut output = None;
         for _ in 0..3 {
-            sortie = Some(confirmation(&context, Vec::new()).1);
+            output = Some(confirmation(&context, Vec::new()).1);
         }
-        let sortie = sortie.expect("peint");
-        assert!(!rectangle_de(&sortie, rouge), "au repos : style normal");
-        let verbe = centre(&textes(&sortie.shapes), "Supprimer");
-        let survol = confirmation(&context, vec![egui::Event::PointerMoved(verbe)]).1;
-        assert!(rectangle_de(&survol, rouge), "survol");
-        let ailleurs = egui::pos2(5.0, 5.0);
-        let repos = confirmation(&context, vec![egui::Event::PointerMoved(ailleurs)]).1;
-        assert!(!rectangle_de(&repos, rouge), "témoin : pointeur parti");
+        let output = output.expect("painted");
+        assert!(!has_filled_rect(&output, red), "at rest: normal style");
+        let verb = center(&texts(&output.shapes), "Delete");
+        let hovered = confirmation(&context, vec![egui::Event::PointerMoved(verb)]).1;
+        assert!(has_filled_rect(&hovered, red), "hover");
+        let elsewhere = egui::pos2(5.0, 5.0);
+        let resting = confirmation(&context, vec![egui::Event::PointerMoved(elsewhere)]).1;
+        assert!(!has_filled_rect(&resting, red), "witness: pointer gone");
         let focus = (0..6).any(|_| {
-            // Cancel a le focus à l'ouverture (S-F11) : le verbe est son
-            // voisin d'avant, Maj + Tab y mène.
-            let retour = egui::Event::Key {
+            // Cancel has the focus on opening (S-F11): the verb is its
+            // previous neighbor, Shift + Tab leads there.
+            let back = egui::Event::Key {
                 key: egui::Key::Tab,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
                 modifiers: egui::Modifiers::SHIFT,
             };
-            let sortie = confirmation(&context, vec![retour]).1;
-            rectangle_de(&confirmation(&context, Vec::new()).1, rouge)
-                || rectangle_de(&sortie, rouge)
+            let output = confirmation(&context, vec![back]).1;
+            has_filled_rect(&confirmation(&context, Vec::new()).1, red)
+                || has_filled_rect(&output, red)
         });
-        assert!(focus, "focus clavier");
+        assert!(focus, "keyboard focus");
     }
 
-    /// S-M8 : l'échec grave se ferme par Entrée (Close) ; son action est un
-    /// bouton à part.
+    /// S-M8: the serious failure closes with Enter (Close); its action is a
+    /// separate button.
     #[test]
-    fn un_echec_grave_se_ferme_par_entree_et_propose_son_action() {
-        let alerte = |context: &egui::Context, events: Vec<egui::Event>| {
-            let mut issue = AlertOutcome::Open;
-            let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-                issue = modal_alert(
+    fn a_serious_failure_closes_with_enter_and_offers_its_action() {
+        let alert = |context: &egui::Context, events: Vec<egui::Event>| {
+            let mut outcome = AlertOutcome::Open;
+            let output = frame_of(context, egui::vec2(800.0, 600.0), events, |ui| {
+                outcome = modal_alert(
                     ui.ctx(),
-                    egui::Id::new("alerte"),
-                    "Échec",
+                    egui::Id::new("alert"),
+                    "Failure",
                     PlainSize::Content(egui::vec2(400.0, 160.0)),
-                    ("Réessayer", "Aide"),
+                    ("Retry", "Help"),
                     |ui| {
-                        ui.label("Raté");
+                        ui.label("Failed");
                     },
                 );
             });
-            (issue, sortie)
+            (outcome, output)
         };
         let context = egui::Context::default();
         for _ in 0..3 {
-            alerte(&context, Vec::new());
+            alert(&context, Vec::new());
         }
         assert_eq!(
-            alerte(&context, vec![touche(egui::Key::Enter)]).0,
+            alert(&context, vec![key(egui::Key::Enter)]).0,
             AlertOutcome::Close
         );
         let context = egui::Context::default();
         for _ in 0..3 {
-            alerte(&context, Vec::new());
+            alert(&context, Vec::new());
         }
         assert_eq!(
-            cliquer_texte(&context, "Réessayer", AlertOutcome::Open, alerte),
+            click_text(&context, "Retry", AlertOutcome::Open, alert),
             AlertOutcome::Action
         );
     }
 
-    /// S-F11 : chaque nature dit son pied, sa taille par défaut (une classe),
-    /// son focus initial ; la taille est celle du champ quand l'appelant en
-    /// donne une. Classes : Petite 480 x 170, Moyenne 480 x 420, Grande 640 x 500.
+    /// S-F11: each nature says its footer, its default size (a class), its
+    /// initial focus; the size is that of the field when the caller gives one.
+    /// Classes: Small 480 x 170, Medium 480 x 420, Large 640 x 500.
     #[test]
-    fn chaque_nature_fixe_son_pied_sa_taille_et_son_focus() {
+    fn each_nature_fixes_its_footer_size_and_focus() {
         use InitialFocus::{DefaultButton, FirstField, Nothing};
-        let petite = egui::vec2(480.0, 170.0);
-        let moyenne = egui::vec2(480.0, 420.0);
-        let grande = egui::vec2(640.0, 500.0);
+        let small = egui::vec2(480.0, 170.0);
+        let medium = egui::vec2(480.0, 420.0);
+        let large = egui::vec2(640.0, 500.0);
         let interactive = InteractiveSize::Default;
-        let simple = PlainSize::Default;
-        for (nature, pied, taille, focus) in [
+        let plain = PlainSize::Default;
+        for (nature, shape, size, focus) in [
             (
                 DialogNature::Settings(interactive),
                 FooterShape::Dialog,
-                moyenne,
+                medium,
                 FirstField,
             ),
             (
                 DialogNature::Draft(interactive),
                 FooterShape::Dialog,
-                moyenne,
+                medium,
                 FirstField,
             ),
             (
-                DialogNature::Choice(simple),
+                DialogNature::Choice(plain),
                 FooterShape::Dialog,
-                petite,
+                small,
                 FirstField,
             ),
             (
                 DialogNature::Wizard(interactive),
                 FooterShape::Wizard,
-                grande,
+                large,
                 FirstField,
             ),
             (
                 DialogNature::LiveSettings(interactive),
                 FooterShape::ReadOnly,
-                moyenne,
+                medium,
                 FirstField,
             ),
             (
-                DialogNature::ReadOnly(simple),
+                DialogNature::ReadOnly(plain),
                 FooterShape::ReadOnly,
-                moyenne,
+                medium,
                 Nothing,
             ),
             (
-                DialogNature::Confirm(simple),
+                DialogNature::Confirm(plain),
                 FooterShape::Confirm,
-                petite,
+                small,
                 DefaultButton,
             ),
             (
-                DialogNature::SaveChanges(simple),
+                DialogNature::SaveChanges(plain),
                 FooterShape::SaveChanges,
-                petite,
+                small,
                 DefaultButton,
             ),
             (
-                DialogNature::Alert(simple),
+                DialogNature::Alert(plain),
                 FooterShape::ReadOnly,
-                petite,
+                small,
                 DefaultButton,
             ),
         ] {
-            assert_eq!(nature.footer(), pied, "{nature:?} : pied");
-            assert_eq!(nature.size(), taille, "{nature:?} : taille par défaut");
-            assert_eq!(nature.initial_focus(), focus, "{nature:?} : focus");
+            assert_eq!(nature.footer(), shape, "{nature:?}: footer");
+            assert_eq!(nature.size(), size, "{nature:?}: default size");
+            assert_eq!(nature.initial_focus(), focus, "{nature:?}: focus");
         }
-        // Le champ de la variante l'emporte sur la classe par défaut.
+        // The field of the variant takes precedence over the default class.
         assert_eq!(
             DialogNature::Choice(PlainSize::Class(SizeClass::Large)).size(),
-            grande
+            large
         );
         assert_eq!(
             DialogNature::Choice(PlainSize::Content(egui::vec2(560.0, 170.0))).size(),
@@ -1806,135 +1809,129 @@ mod tests {
         );
         assert_eq!(
             DialogNature::Settings(InteractiveSize::Class(SizeClass::Small)).size(),
-            petite
+            small
         );
     }
 
-    /// Le widget focalisé est-il le bouton peint `texte` ?
-    fn focus_sur_le_bouton(context: &egui::Context, peints: &[Texte], texte: &str) -> bool {
+    /// Is the focused widget the painted button `text`?
+    fn focus_is_on_button(context: &egui::Context, painted: &[Text], text: &str) -> bool {
         let Some(focused) = context.memory(|memory| memory.focused()) else {
             return false;
         };
         context
             .read_response(focused)
-            .is_some_and(|response| response.rect.contains(centre(peints, texte)))
+            .is_some_and(|response| response.rect.contains(center(painted, text)))
     }
 
-    /// S-F11 : à l'ouverture, une confirmation donne le focus à **Cancel**, un
-    /// enregistrement et une alerte à leur bouton principal — jamais à un champ,
-    /// même si le contenu en a un ; une lecture seule ne le donne à rien.
-    /// Témoin : un brouillon, lui, le donne au champ.
+    /// S-F11: on opening, a confirmation gives the focus to **Cancel**, a
+    /// save and an alert to their main button — never to a field,
+    /// even if the content has one; a read-only window gives it to nothing.
+    /// Witness: a draft gives it to the field.
     #[test]
-    fn le_focus_initial_suit_la_nature() {
-        let mut texte = String::from("abc");
-        let ouvrir = |nature: DialogNature, texte: &mut String| {
+    fn the_initial_focus_follows_the_nature() {
+        let mut text = String::from("abc");
+        let open = |nature: DialogNature, text: &mut String| {
             let context = egui::Context::default();
-            let mut peints = Vec::new();
-            let mut champ = None;
+            let mut painted = Vec::new();
+            let mut field = None;
             for _ in 0..6 {
-                let sortie = image_de(&context, egui::vec2(800.0, 600.0), Vec::new(), |ui| {
+                let output = frame_of(&context, egui::vec2(800.0, 600.0), Vec::new(), |ui| {
                     modal_frame(
                         ui.ctx(),
                         egui::Id::new("nature_focus"),
-                        "Titre",
+                        "Title",
                         nature,
-                        DialogFooter::always("Principal", "Bulle"),
+                        DialogFooter::always("Main", "Tooltip"),
                         |_| {},
                         |ui| {
-                            champ = Some(ui.text_edit_singleline(texte).id);
+                            field = Some(ui.text_edit_singleline(text).id);
                         },
                     );
                 });
-                peints = textes(&sortie.shapes);
+                painted = texts(&output.shapes);
             }
-            (context, peints, champ)
+            (context, painted, field)
         };
-        let simple = PlainSize::Default;
+        let plain = PlainSize::Default;
 
-        let (context, peints, champ) = ouvrir(DialogNature::Confirm(simple), &mut texte);
+        let (context, painted, field) = open(DialogNature::Confirm(plain), &mut text);
         assert!(
-            focus_sur_le_bouton(&context, &peints, &tr!("dialog-cancel")),
+            focus_is_on_button(&context, &painted, &tr!("dialog-cancel")),
             "Cancel"
         );
-        assert_ne!(context.memory(|memory| memory.focused()), champ);
+        assert_ne!(context.memory(|memory| memory.focused()), field);
 
-        for nature in [
-            DialogNature::SaveChanges(simple),
-            DialogNature::Alert(simple),
-        ] {
-            let (context, peints, champ) = ouvrir(nature, &mut texte);
-            assert!(
-                focus_sur_le_bouton(&context, &peints, "Principal"),
-                "{nature:?}"
-            );
-            assert_ne!(context.memory(|memory| memory.focused()), champ);
+        for nature in [DialogNature::SaveChanges(plain), DialogNature::Alert(plain)] {
+            let (context, painted, field) = open(nature, &mut text);
+            assert!(focus_is_on_button(&context, &painted, "Main"), "{nature:?}");
+            assert_ne!(context.memory(|memory| memory.focused()), field);
         }
 
-        let (context, _, _) = ouvrir(DialogNature::ReadOnly(simple), &mut texte);
-        assert_eq!(context.memory(|memory| memory.focused()), None, "lecture");
+        let (context, _, _) = open(DialogNature::ReadOnly(plain), &mut text);
+        assert_eq!(context.memory(|memory| memory.focused()), None, "read-only");
 
-        // Des réglages en direct ont des champs : focus sur le premier, comme
-        // un brouillon, malgré le pied « Close seul » d'une lecture.
-        let (context, _, champ) = ouvrir(
+        // Live settings have fields: focus on the first one, like
+        // a draft, despite the "Close only" footer of a read-only window.
+        let (context, _, field) = open(
             DialogNature::LiveSettings(InteractiveSize::Default),
-            &mut texte,
+            &mut text,
         );
         assert_eq!(
             context.memory(|memory| memory.focused()),
-            champ,
-            "réglages en direct : le premier champ"
+            field,
+            "live settings: the first field"
         );
 
-        let (context, _, champ) = ouvrir(DialogNature::Draft(InteractiveSize::Default), &mut texte);
+        let (context, _, field) = open(DialogNature::Draft(InteractiveSize::Default), &mut text);
         assert_eq!(
             context.memory(|memory| memory.focused()),
-            champ,
-            "témoin : le brouillon va au champ"
+            field,
+            "witness: the draft goes to the field"
         );
     }
 
-    /// S-F10, S-F11 : un pied « peut être grisé » grisé montre sa **raison**,
-    /// jamais la bulle du bouton actif ; un pied « toujours actif » n'a pas de
-    /// raison. (La bulle n'est peinte qu'au survol : on lit donc le pied.)
+    /// S-F10, S-F11: a greyed-out "can be greyed out" footer shows its **reason**,
+    /// never the tooltip of the enabled button; an "always enabled" footer has no
+    /// reason. (The tooltip is only painted on hover: so we read the footer.)
     #[test]
-    fn un_pied_grise_montre_sa_raison_et_non_sa_bulle() {
+    fn a_greyed_out_footer_shows_its_reason_and_not_its_tooltip() {
         let context = egui::Context::default();
-        let mut peints = Vec::new();
+        let mut painted = Vec::new();
         for _ in 0..3 {
-            peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
+            painted = footer_frame(&context, draft(), false, Vec::new(), |_| {}).1;
         }
-        assert!(peints.iter().any(|t| t.texte == "Raison"));
-        assert!(!peints.iter().any(|t| t.texte == "Bulle"));
-        let grise = DialogFooter::gated("P", "Bulle", false, "Raison");
-        assert!(!grise.enabled());
-        assert_eq!(grise.disabled_reason(), "Raison");
-        assert_eq!(grise.hint(), "Bulle");
-        let toujours = DialogFooter::always("P", "Bulle");
-        assert!(toujours.enabled());
-        assert_eq!(toujours.disabled_reason(), "", "témoin : jamais de raison");
+        assert!(painted.iter().any(|t| t.text == "Reason"));
+        assert!(!painted.iter().any(|t| t.text == "Tooltip"));
+        let greyed = DialogFooter::gated("P", "Tooltip", false, "Reason");
+        assert!(!greyed.enabled());
+        assert_eq!(greyed.disabled_reason(), "Reason");
+        assert_eq!(greyed.hint(), "Tooltip");
+        let always = DialogFooter::always("P", "Tooltip");
+        assert!(always.enabled());
+        assert_eq!(always.disabled_reason(), "", "witness: never a reason");
         assert_eq!(
-            footer_message(None, toujours.enabled(), toujours.disabled_reason()),
+            footer_message(None, always.enabled(), always.disabled_reason()),
             None
         );
     }
 
-    /// Une image de 800 × 600 avec `events`, où `ui` dessine l'arrière-plan.
+    /// A 800 × 600 frame with `events`, where `ui` draws the background.
     fn image(context: &egui::Context, events: Vec<egui::Event>, ui: impl FnMut(&mut egui::Ui)) {
-        image_de(context, egui::vec2(800.0, 600.0), events, ui);
+        frame_of(context, egui::vec2(800.0, 600.0), events, ui);
     }
 
-    /// #14 : tant qu'un dialogue modal est ouvert, un clic sur le reste de
-    /// l'interface n'a aucun effet et déclenche le clignotement du contour ;
-    /// Échap le ferme ; sans dialogue, le même clic agit (témoin). Un clic
-    /// **dans** le dialogue, lui, ne clignote pas.
+    /// #14: while a modal dialog is open, a click on the rest of the
+    /// interface has no effect and triggers the outline flashing;
+    /// Escape closes it; without a dialog, the same click acts (witness). A click
+    /// **in** the dialog, on the other hand, does not flash.
     #[test]
-    fn un_dialogue_modal_bloque_l_arriere_plan_et_clignote() {
-        let id = egui::Id::new("dialogue_test");
+    fn a_modal_dialog_blocks_the_background_and_flashes() {
+        let id = egui::Id::new("test_dialog");
         let clicks = std::cell::Cell::new(0);
         let closed = std::cell::Cell::new(DialogOutcome::Open);
         let run = |context: &egui::Context, modal: bool, events: Vec<egui::Event>| {
             image(context, events, |ui| {
-                if ui.button("fond").clicked() {
+                if ui.button("background").clicked() {
                     clicks.set(clicks.get() + 1);
                 }
                 if modal {
@@ -1944,7 +1941,7 @@ mod tests {
                         "Test",
                         InteractiveSize::Free(egui::vec2(300.0, 200.0)),
                         |ui| {
-                            ui.label("contenu");
+                            ui.label("content");
                         },
                     );
                     if close != DialogOutcome::Open {
@@ -1964,87 +1961,87 @@ mod tests {
             run(context, modal, vec![button(true)]);
             run(context, modal, vec![button(false)]);
         };
-        let fond = egui::pos2(20.0, 14.0);
+        let background = egui::pos2(20.0, 14.0);
         let flash = |context: &egui::Context| {
             context.data(|data| data.get_temp::<f64>(id.with("flash_start")))
         };
 
         let free = egui::Context::default();
         run(&free, false, vec![]);
-        click(&free, false, fond);
-        assert_eq!(clicks.get(), 1, "sans dialogue, le bouton répond");
+        click(&free, false, background);
+        assert_eq!(clicks.get(), 1, "without a dialog, the button responds");
 
         let context = egui::Context::default();
         for _ in 0..3 {
             run(&context, true, vec![]);
         }
-        // Le dialogue est centré à l'écran : son milieu est dans son corps.
+        // The dialog is centered on the screen: its middle is in its body.
         click(&context, true, egui::pos2(400.0, 300.0));
         assert!(
             flash(&context).is_none(),
-            "un clic dans le dialogue n'est pas un clic bloqué"
+            "a click in the dialog is not a blocked click"
         );
         assert_eq!(closed.get(), DialogOutcome::Open);
-        click(&context, true, fond);
-        assert_eq!(clicks.get(), 1, "le dialogue a bloqué le clic");
+        click(&context, true, background);
+        assert_eq!(clicks.get(), 1, "the dialog blocked the click");
         assert!(
             flash(&context).is_some(),
-            "le clic bloqué déclenche le clignotement"
+            "the blocked click triggers the flashing"
         );
         assert_eq!(closed.get(), DialogOutcome::Open);
-        run(&context, true, vec![touche(egui::Key::Escape)]);
-        assert_eq!(closed.get(), DialogOutcome::Cancel, "Échap annule");
+        run(&context, true, vec![key(egui::Key::Escape)]);
+        assert_eq!(closed.get(), DialogOutcome::Cancel, "Escape cancels");
         assert!(
             flash(&context).is_none(),
-            "fermé, le dialogue oublie son clignotement"
+            "closed, the dialog forgets its flashing"
         );
 
-        // Valider est le bouton par défaut : Entrée (hors saisie de texte).
+        // Accept is the default button: Enter (outside text input).
         closed.set(DialogOutcome::Open);
         let again = egui::Context::default();
         for _ in 0..3 {
             run(&again, true, vec![]);
         }
-        run(&again, true, vec![touche(egui::Key::Enter)]);
-        assert_eq!(closed.get(), DialogOutcome::Accept, "Entrée valide");
+        run(&again, true, vec![key(egui::Key::Enter)]);
+        assert_eq!(closed.get(), DialogOutcome::Accept, "Enter confirms");
     }
 
-    /// Le bouton par défaut grisé (assistant à une étape incomplète) : Entrée
-    /// ne valide plus, Échap annule toujours.
+    /// The greyed-out default button (wizard at an incomplete step): Enter
+    /// no longer confirms, Escape still cancels.
     #[test]
-    fn entree_ne_valide_pas_un_dialogue_dont_le_bouton_par_defaut_est_grise() {
-        let id = egui::Id::new("dialogue_grise");
-        for (accept_enabled, attendu) in
+    fn enter_does_not_confirm_a_dialog_whose_default_button_is_greyed_out() {
+        let id = egui::Id::new("greyed_dialog");
+        for (accept_enabled, expected) in
             [(false, DialogOutcome::Open), (true, DialogOutcome::Accept)]
         {
             let context = egui::Context::default();
-            let mut issue = DialogOutcome::Open;
+            let mut outcome = DialogOutcome::Open;
             let mut run = |events: Vec<egui::Event>| {
                 image(&context, events, |ui| {
-                    issue = modal_dialog_with(
+                    outcome = modal_dialog_with(
                         ui.ctx(),
                         id,
                         "Test",
-                        brouillon(),
-                        DialogFooter::gated("Suivant", "", accept_enabled, "raison"),
+                        draft(),
+                        DialogFooter::gated("Next", "", accept_enabled, "reason"),
                         |_| {},
                         |ui| {
-                            ui.label("contenu");
+                            ui.label("content");
                         },
                     );
                 });
-                issue
+                outcome
             };
             for _ in 0..3 {
                 run(Vec::new());
             }
             assert_eq!(
-                run(vec![touche(egui::Key::Enter)]),
-                attendu,
+                run(vec![key(egui::Key::Enter)]),
+                expected,
                 "accept_enabled={accept_enabled}"
             );
             if !accept_enabled {
-                assert_eq!(run(vec![touche(egui::Key::Escape)]), DialogOutcome::Cancel);
+                assert_eq!(run(vec![key(egui::Key::Escape)]), DialogOutcome::Cancel);
             }
         }
     }

@@ -1,39 +1,38 @@
-//! Arbre du Project Manager : une seule écriture pour le panneau fixe et la
-//! fenêtre OS détachée, sur un arbre déjà construit
-//! ([`stokesforge_app_state::state::ProjectTreeNode`]). Ce que les clics demandent (ouvrir,
-//! fermer, sélectionner) s'accumule dans
-//! [`PmInteraction`], appliqué par `StokesForgeApp` après la peinture.
+//! The Project Manager tree: one piece of code for the fixed panel and the
+//! detached OS window, on an already built tree
+//! ([`stokesforge_app_state::state::ProjectTreeNode`]). What the clicks ask for
+//! (open, close, select) accumulates in
+//! [`PmInteraction`], applied by `StokesForgeApp` after painting.
 //!
-//! Le titre appartient au cadre partagé `panel_header`, pas à l'arbre :
-//! attaché ou détaché, aucun double en-tête et les mêmes gestes (#100).
-//! Une sélection reprise par la fenêtre active doit aussi déplacer l'ancre
-//! de Maj-clic dans les deux viewports : le seul fond sélectionné ne suffit
-//! pas à définir la prochaine plage après un clic dans le workspace (#154).
-//! Open et Close vivent dans le menu contextuel d'une entrée et portent
-//! sur la sélection entière ; l'arbre commence directement sous l'en-tête.
+//! The title belongs to the shared `panel_header` frame, not to the tree:
+//! docked or detached, no double header and the same gestures (#100).
+//! A selection taken over by the active window must also move the Shift-click
+//! anchor in both viewports: the selected background alone does not define the
+//! next range after a click in the workspace (#154).
+//! Open and Close live in an entry's context menu and apply to the whole
+//! selection; the tree starts directly under the header.
 //!
-//! Une entrée sélectionnable est un dossier **ou** une fenêtre ([`PmEntry`],
-//! #170 point 4). Un clic sur un dossier le sélectionne et, s'il est fermé, le
-//! déplie ; un clic sur un dossier ouvert ne le replie pas (un clic de
-//! sélection ne doit pas faire sauter l'arbre) ; le double-clic et le
-//! triangle le replient. Supprimer et Renommer agissent sur lui, une sélection
-//! de dossier collée **dans** ce dossier. **Copier et dupliquer un dossier sont
-//! refusés pour l'instant** : une copie locale garderait ses références vers
-//! les classeurs d'origine (hors dossier) ; l'entrée de menu est grisée avec sa
-//! raison, et `AppState` refuse le geste au clavier avec la même phrase. À
-//! reprendre dans une issue à part.
+//! A selectable entry is a folder **or** a window ([`PmEntry`], #170 point 4).
+//! A click on a folder selects it and, if it is closed, expands it; a click on
+//! an open folder does not collapse it (a selection click must not make the
+//! tree jump); the double-click and the triangle collapse it. Delete and
+//! Rename act on it, a folder selection pastes **into** that folder. **Copying
+//! and duplicating a folder are refused for now**: a local copy would keep its
+//! references to the original workbooks (outside the folder); the menu entry is
+//! grayed out with its reason, and `AppState` refuses the keyboard gesture with
+//! the same sentence. To be taken up in a separate issue.
 //!
-//! **Navigation au clavier (#170, point 6).** Panneau focalisé (`PmMemory::focus`,
-//! posé par un clic), ↑ et ↓ déplacent la sélection d'une ligne **visible** à
-//! l'autre (`PmMemory::visible`, relevée à la peinture : les dossiers repliés
-//! sont sautés, contrairement à `order`, qui sert aux plages Maj), et Entrée
-//! ouvre la ou les fenêtres sélectionnées, déplie ou replie les dossiers. La
-//! flèche ne touche à aucune fenêtre ni à l'historique. Les touches sont
-//! consommées ici, avant la grille d'un classeur (peinte après le panneau), qui
-//! lit les flèches sans les consommer ; les variantes Maj et Alt+↓, qu'egui
-//! confondrait avec ↑ et ↓ (il ignore Maj et Alt en trop), sont consommées
-//! d'abord et laissées sans effet. La ligne qui porte le curseur clavier a le
-//! contour de focus des lignes de liste (`list_row::paint_focus_outline`).
+//! **Keyboard navigation (#170, point 6).** With the panel focused
+//! (`PmMemory::focus`, set by a click), ↑ and ↓ move the selection from one
+//! **visible** row to the other (`PmMemory::visible`, collected while painting:
+//! collapsed folders are skipped, unlike `order`, which serves the Shift
+//! ranges), and Enter opens the selected window(s), expands or collapses the
+//! folders. The arrow touches no window and not the history. The keys are
+//! consumed here, before a workbook's grid (painted after the panel), which
+//! reads the arrows without consuming them; the Shift and Alt+↓ variants, which
+//! egui would confuse with ↑ and ↓ (it ignores extra Shift and Alt), are
+//! consumed first and left without effect. The row that carries the keyboard
+//! cursor has the focus outline of list rows (`list_row::paint_focus_outline`).
 
 use std::collections::HashSet;
 
@@ -55,30 +54,30 @@ use super::tab::{tab_for_window, tab_node, Tab};
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::StokesForgeApp;
 
-/// Ce que le rendu de l'arbre du Project Manager accumule ou lit, à travers
-/// [`project_manager_contents_from_tree`]/[`project_tree_node_ui`] — un seul
-/// paquet plutôt que cinq paramètres, pour les deux mêmes contextes que le
-/// reste du module (panneau fixe et fenêtre OS détachée, voir la doc de tête
-/// de [`StokesForgeApp::show_detached_project_manager`]).
+/// What the Project Manager tree rendering accumulates or reads, through
+/// [`project_manager_contents_from_tree`]/[`project_tree_node_ui`] — one single
+/// bundle rather than five parameters, for the same two contexts as the rest of
+/// the module (fixed panel and detached OS window, see the head doc of
+/// [`StokesForgeApp::show_detached_project_manager`]).
 pub(super) struct PmInteraction<'a> {
     pub(super) actions: &'a mut Vec<Action>,
     pub(super) root: NodeId,
-    /// Onglet ouvert ou focalisé par un simple clic — voir
+    /// Tab opened or focused by a single click — see
     /// [`StokesForgeApp::open_tab`].
     pub(super) open_requests: &'a mut Vec<Tab>,
-    /// Sélection courante dans l'arbre — Ctrl/Cmd-clic en bascule
-    /// l'appartenance sans ouvrir l'onglet.
+    /// Current selection in the tree — Ctrl/Cmd-click toggles the membership
+    /// without opening the tab.
     pub(super) selection: &'a mut HashSet<PmEntry>,
-    /// Onglets actuellement ouverts (flottants ou détachés) : les autres
-    /// lignes sont atténuées dans l'arbre (#327).
+    /// Tabs currently open (floating or detached): the other rows are dimmed
+    /// in the tree (#327).
     pub(super) open: &'a HashSet<Tab>,
-    /// Onglets que « Close » demande de fermer, par le même chemin que la
-    /// croix de la fenêtre (flottante ou détachée).
+    /// Tabs that "Close" asks to close, through the same path as the window's
+    /// cross (floating or detached).
     pub(super) close_requests: &'a mut Vec<Tab>,
 }
 
-/// La sélection est partagée avec le viewport ; l'éditeur et le focus restent
-/// dans la mémoire du viewport qui reçoit le clavier.
+/// The selection is shared with the viewport; the editor and the focus stay in
+/// the memory of the viewport that receives the keyboard.
 #[derive(Clone, Default)]
 struct PmMemory {
     focus: bool,
@@ -86,29 +85,29 @@ struct PmMemory {
     rename: Vec<NodeId>,
     renamed: Vec<(NodeId, String)>,
     text: Option<String>,
-    /// Dernier clic simple sur une fenêtre déjà seule sélectionnée : s'il n'est
-    /// pas suivi d'un second clic avant [`SLOW_CLICK_SECONDS`], c'est un clic
-    /// lent, donc un renommage (S-K4, #224).
+    /// Last single click on a window already alone in the selection: if it is
+    /// not followed by a second click before [`SLOW_CLICK_SECONDS`], it is a
+    /// slow click, hence a rename (S-K4, #224).
     slow_click: Option<(PmEntry, f64)>,
-    /// Les dossiers et fenêtres de l'arbre dans l'ordre de lecture, dossiers
-    /// repliés compris (#327) : la plage Maj et les ids agissants en dépendent.
+    /// The tree's folders and windows in reading order, collapsed folders
+    /// included (#327): the Shift range and the acting ids depend on it.
     order: Vec<PmEntry>,
-    /// Dossiers à déplier à leur prochaine peinture (#326) : le parent d'un
-    /// dossier qu'on vient de créer doit montrer son nouvel enfant.
+    /// Folders to expand on their next painting (#326): the parent of a
+    /// folder just created must show its new child.
     reveal: Vec<NodeId>,
-    /// Les lignes **visibles** de l'image précédente, dans l'ordre de lecture :
-    /// ce que ↑ et ↓ parcourent (un dossier replié cache ses enfants, à la
-    /// différence de `order`).
+    /// The **visible** rows of the previous frame, in reading order: what ↑
+    /// and ↓ walk through (a collapsed folder hides its children, unlike
+    /// `order`).
     visible: Vec<PmEntry>,
-    /// Dossiers que Entrée doit déplier ou replier à leur prochaine peinture.
+    /// Folders that Enter must expand or collapse on their next painting.
     toggle: Vec<NodeId>,
-    /// Ligne que le clavier vient d'atteindre : à faire apparaître dans la
-    /// zone de défilement à sa prochaine peinture.
+    /// Row the keyboard has just reached: to make appear in the scroll area
+    /// on its next painting.
     scroll_to: Option<PmEntry>,
 }
 
-/// Une entrée sélectionnable de l'arbre du Project Manager (#170, point 4) :
-/// un dossier, ou une fenêtre (son onglet).
+/// A selectable entry of the Project Manager tree (#170, point 4): a folder,
+/// or a window (its tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum PmEntry {
     Folder(NodeId),
@@ -116,7 +115,7 @@ pub(super) enum PmEntry {
 }
 
 impl PmEntry {
-    /// Le nœud du modèle que désigne l'entrée.
+    /// The model node the entry designates.
     pub(super) fn node(self) -> NodeId {
         match self {
             PmEntry::Folder(id) => id,
@@ -129,8 +128,8 @@ impl PmEntry {
     }
 }
 
-/// Les dossiers et fenêtres de `tree`, en parcours en profondeur, un dossier
-/// avant ses enfants.
+/// The folders and windows of `tree`, in depth-first order, a folder before
+/// its children.
 fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<PmEntry>) {
     for node in tree {
         match node {
@@ -145,8 +144,8 @@ fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<PmEntry>) {
     }
 }
 
-/// Où se colle le presse-papiers : **dans** le dossier quand la sélection est
-/// ce seul dossier, à la racine sinon (comme avant #170).
+/// Where the clipboard is pasted: **into** the folder when the selection is
+/// that single folder, at the root otherwise (as before #170).
 pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId {
     let mut entries = selection.iter();
     match (entries.next(), entries.next()) {
@@ -155,8 +154,8 @@ pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId
     }
 }
 
-/// La ligne qui porte le curseur clavier : l'ancre du dernier geste si elle est
-/// sélectionnée, sinon l'unique entrée sélectionnée.
+/// The row that carries the keyboard cursor: the anchor of the last gesture if
+/// it is selected, otherwise the only selected entry.
 fn cursor_of(selection: &HashSet<PmEntry>, anchor: Option<PmEntry>) -> Option<PmEntry> {
     anchor
         .filter(|entry| selection.contains(entry))
@@ -169,7 +168,7 @@ fn cursor_of(selection: &HashSet<PmEntry>, anchor: Option<PmEntry>) -> Option<Pm
         })
 }
 
-/// Note qu'une ligne est visible dans cette image (voir `PmMemory::visible`).
+/// Notes that a row is visible in this frame (see `PmMemory::visible`).
 fn note_visible(ctx: &egui::Context, memory_key: egui::Id, entry: PmEntry) {
     ctx.data_mut(|data| {
         data.get_temp_mut_or_default::<PmMemory>(memory_key)
@@ -178,7 +177,7 @@ fn note_visible(ctx: &egui::Context, memory_key: egui::Id, entry: PmEntry) {
     });
 }
 
-/// La sélection contient-elle un dossier (copie refusée, voir la doc de tête) ?
+/// Does the selection contain a folder (copy refused, see the head doc)?
 pub(super) fn selection_has_folder(selection: &HashSet<PmEntry>) -> bool {
     selection.iter().any(|entry| entry.is_folder())
 }
@@ -187,7 +186,7 @@ pub(super) fn viewport_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
 }
 
-/// Aucun éditeur ne peut survivre à un remplacement d'identité du projet.
+/// No editor can survive a replacement of the project's identity.
 pub(super) fn forget_views(ctx: &egui::Context) {
     let paste_keys = [egui::ViewportId::ROOT, viewport_id()]
         .map(|viewport| egui::Id::new(("project_paste_parent", viewport)));
@@ -203,9 +202,9 @@ fn memory_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("project_manager_gestures", ctx.viewport_id()))
 }
 
-/// Une activation externe remplace l'ancre, sans toucher au focus ni à
-/// l'éditeur du panneau. Les gestes internes gardent leur propre ancre,
-/// notamment lorsqu'une plage Maj revient à une seule entrée.
+/// An external activation replaces the anchor, without touching the focus nor
+/// the panel's editor. Internal gestures keep their own anchor, notably when a
+/// Shift range comes back to a single entry.
 pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
     let anchor = tab.map(PmEntry::Window);
     ctx.data_mut(|data| {
@@ -218,8 +217,8 @@ pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
     });
 }
 
-/// Après *Add Folder* (#326) : déplie `parent` et ouvre le champ de nom sur
-/// `folder`, dans le panneau qui est à l'écran (`viewport`).
+/// After *Add Folder* (#326): expands `parent` and opens the name field on
+/// `folder`, in the panel that is on screen (`viewport`).
 pub(super) fn begin_rename_of_new_folder(
     ctx: &egui::Context,
     viewport: egui::ViewportId,
@@ -239,7 +238,7 @@ pub(super) fn begin_rename_of_new_folder(
     ctx.request_repaint_of(viewport);
 }
 
-/// Les noms en cours d'édition dans le panneau de `viewport` (tests).
+/// The names being edited in the panel of `viewport` (tests).
 #[cfg(test)]
 pub(super) fn renaming_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Vec<NodeId> {
     let key = egui::Id::new(("project_manager_gestures", viewport));
@@ -264,23 +263,23 @@ fn selected_ids(selection: &HashSet<PmEntry>, order: &[PmEntry]) -> Vec<NodeId> 
         .collect()
 }
 
-/// La cible d'un menu d'objets du Project Manager : des fenêtres, ou un
-/// dossier (qui offre en plus Add Folder, et dont Copier et Dupliquer sont
-/// grisés pour l'instant, comme pour toute sélection qui en contient un).
+/// The target of a Project Manager object menu: windows, or a folder (which
+/// additionally offers Add Folder, and whose Copy and Duplicate are grayed out
+/// for now, as for any selection that contains one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ObjectMenuTarget {
     Windows,
     Folder,
 }
 
-/// Le contenu du menu d'objets (#157), **à plat** : le clic droit l'affiche
-/// tel quel, Edit › Selection l'enveloppe. Sections de `docs/menus.md` —
-/// presse-papiers (Copy · Paste), organiser (Rename · Duplicate), supprimer.
-/// `sections` est celui du menu appelant : les entrées propres au panneau
-/// (Open · Close) se peignent avant, sous le même compte de séparateurs.
-/// Le collage déclenche une demande de lecture à egui-winit, donc utilise
-/// aussi le récepteur Wayland. `has_folder` : la sélection contient un dossier,
-/// donc Copy et Duplicate sont grisés (copie de dossier refusée, #170).
+/// The content of the object menu (#157), **flat**: the right click shows it
+/// as is, Edit › Selection wraps it. Sections of `docs/menus.md` —
+/// clipboard (Copy · Paste), organize (Rename · Duplicate), delete.
+/// `sections` is the calling menu's: the entries specific to the panel
+/// (Open · Close) are painted before, under the same count of separators.
+/// Pasting triggers a read request to egui-winit, hence also uses the Wayland
+/// receiver. `has_folder`: the selection contains a folder, so Copy and
+/// Duplicate are grayed out (folder copy refused, #170).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn object_menu(
     ui: &mut egui::Ui,
@@ -295,7 +294,7 @@ pub(super) fn object_menu(
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
     let enabled = !ids.is_empty();
-    // Copier et dupliquer : refusés dès qu'un dossier est visé (voir la doc de tête).
+    // Copy and duplicate: refused as soon as a folder is targeted (see the head doc).
     let has_folder = has_folder || target == ObjectMenuTarget::Folder;
     let copy_enabled = enabled && !has_folder;
     let copy_reason = || {
@@ -306,7 +305,7 @@ pub(super) fn object_menu(
         }
     };
     if target == ObjectMenuTarget::Folder {
-        // Seul geste qui crée dans un sous-dossier (#326, `docs/menus.md`).
+        // The only gesture that creates in a subfolder (#326, `docs/menus.md`).
         sections.section(ui, true, |ui| {
             if ui
                 .button(tr!("action-add-folder"))
@@ -394,8 +393,8 @@ pub(super) fn object_menu(
     });
 }
 
-/// Délai d'un clic lent (S-K4) : plus long que l'intervalle d'un double-clic
-/// d'egui, pour qu'un double-clic (ouvrir) n'ouvre jamais le champ.
+/// Delay of a slow click (S-K4): longer than egui's double-click interval, so
+/// that a double-click (open) never opens the field.
 const SLOW_CLICK_SECONDS: f64 = 0.5;
 
 fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
@@ -412,7 +411,7 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         value
     });
     let ids = selected_ids(interaction.selection, &memory.order);
-    // Clic lent : le délai écoulé sans second clic, le nom se renomme comme à F2.
+    // Slow click: the delay elapsed without a second click, the name is renamed like on F2.
     if let Some((entry, at)) = memory.slow_click {
         let now = ctx.input(|input| input.time);
         if now - at >= SLOW_CLICK_SECONDS {
@@ -488,8 +487,8 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
                 }
             }
             Some(NavKey::Enter) => {
-                // Comme « Open » du menu : chaque fenêtre sélectionnée s'ouvre,
-                // chaque dossier bascule.
+                // Like the menu's "Open": each selected window opens,
+                // each folder toggles.
                 for entry in memory
                     .order
                     .iter()
@@ -508,13 +507,14 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
     ctx.data_mut(|data| data.insert_temp(memory_key, memory));
 }
 
-/// Le corps du Project Manager, à partir d'un arbre déjà construit plutôt
-/// que d'un `&AppState` vivant — seul le callback `show_viewport_deferred`
-/// de [`StokesForgeApp::show_detached_project_manager`] a besoin de cette forme :
-/// il ne porte qu'une copie de l'arbre ([`ProjectManagerViewModel`](crate::app::window_detach::ProjectManagerViewModel)), jamais
-/// `AppState` elle-même. Le panneau fixe ([`StokesForgeApp::project_manager_panel`])
-/// passe directement `&self.state.project_tree()` — même fonction, deux
-/// sources d'arbre.
+/// The body of the Project Manager, from an already built tree rather than a
+/// live `&AppState` — only the `show_viewport_deferred` callback of
+/// [`StokesForgeApp::show_detached_project_manager`] needs this form: it
+/// carries only a copy of the tree
+/// ([`ProjectManagerViewModel`](crate::app::window_detach::ProjectManagerViewModel)),
+/// never `AppState` itself. The fixed panel ([`StokesForgeApp::project_manager_panel`])
+/// passes `&self.state.project_tree()` directly — same function, two
+/// sources of tree.
 pub(super) fn project_manager_contents_from_tree(
     ui: &mut egui::Ui,
     tree: &[ProjectTreeNode],
@@ -527,7 +527,7 @@ pub(super) fn project_manager_contents_from_tree(
         memory.order.clear();
         memory.visible.clear();
         tree_order(tree, &mut memory.order);
-        // Un dossier supprimé ne reste pas sélectionné (un script, Ctrl+Z).
+        // A deleted folder does not stay selected (a script, Ctrl+Z).
         interaction
             .selection
             .retain(|entry| !entry.is_folder() || memory.order.contains(entry));
@@ -539,8 +539,8 @@ pub(super) fn project_manager_contents_from_tree(
             project_tree_node_ui(ui, node, tree, interaction);
         }
     });
-    // Une demande de clavier ne vaut que pour l'image qui suit : un dossier
-    // caché (replié sous un autre) ne doit pas la garder en réserve.
+    // A keyboard request is valid only for the next frame: a hidden folder
+    // (collapsed under another) must not keep it in reserve.
     ui.ctx().data_mut(|data| {
         let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
         memory.toggle.clear();
@@ -558,14 +558,14 @@ pub(super) fn project_manager_contents_from_tree(
     }
 }
 
-/// Vrai si `id` est en cours de renommage dans ce panneau.
+/// True if `id` is being renamed in this panel.
 fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
     ctx.data(|data| data.get_temp::<PmMemory>(memory_key))
         .is_some_and(|m| m.rename.first() == Some(&id))
 }
 
-/// Pourquoi ce nom est refusé (S-T4, cadre rouge) : vide, ou déjà pris par un
-/// autre enfant du même dossier.
+/// Why this name is refused (S-T4, red frame): empty, or already taken by
+/// another child of the same folder.
 fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -582,12 +582,12 @@ fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Optio
     taken.then(|| tr!("field-refused-name-taken"))
 }
 
-/// Le champ de renommage en place d'une ligne (fenêtre ou dossier), au contrat
-/// commun de [`inplace_edit`](super::inplace_edit) : tout le nom sélectionné,
-/// Entrée, Tab ou un clic ailleurs valident et passent à la ligne suivante de la
-/// sélection, Échap abandonne tout. Un nom vide ou déjà pris reste ouvert sous
-/// un cadre rouge. Tous les noms saisis partent en une seule
-/// `Action::RenameObjects` après la dernière ligne.
+/// A row's in-place rename field (window or folder), under the common
+/// contract of [`inplace_edit`](super::inplace_edit): the whole name selected,
+/// Enter, Tab or a click elsewhere commit and move to the next row of the
+/// selection, Escape abandons everything. An empty or already taken name stays
+/// open under a red frame. All the typed names go out in a single
+/// `Action::RenameObjects` after the last row.
 fn rename_editor(
     ui: &mut egui::Ui,
     interaction: &mut PmInteraction,
@@ -641,20 +641,20 @@ fn rename_editor(
     shown.response
 }
 
-/// Ce qu'une ligne a reçu comme geste de sélection (voir [`select_gestures`]).
+/// What a row received as a selection gesture (see [`select_gestures`]).
 #[derive(Default)]
 struct RowGestures {
-    /// Clic simple sans modificateur : la ligne devient la seule sélectionnée.
+    /// Single click without modifier: the row becomes the only one selected.
     plain: bool,
-    /// Double-clic sans modificateur.
+    /// Double-click without modifier.
     double: bool,
 }
 
-/// Les gestes de sélection d'une ligne, communs aux dossiers et aux fenêtres :
-/// clic droit (sélectionne si besoin), Maj (plage), Ctrl/Cmd (bascule), clic
-/// simple (remplace, arme le clic lent du renommage) et double-clic (désarme
-/// le clic lent). Ce que le clic simple **fait** ensuite — ouvrir la fenêtre,
-/// déplier le dossier — est à l'appelant.
+/// A row's selection gestures, common to folders and windows: right click
+/// (selects if needed), Shift (range), Ctrl/Cmd (toggle), single click
+/// (replaces, arms the slow click of the rename) and double-click (disarms the
+/// slow click). What the single click then **does** — open the window,
+/// expand the folder — is up to the caller.
 fn select_gestures(
     ui: &egui::Ui,
     interaction: &mut PmInteraction,
@@ -681,8 +681,8 @@ fn select_gestures(
                 memory.order.iter().position(|t| *t == anchor),
                 memory.order.iter().position(|t| *t == entry),
             ) {
-                // L'ordre complet de l'image précédente reste disponible dans
-                // la liste de rangs des lignes, y compris après la cible.
+                // The complete order of the previous frame stays available in
+                // the list of row ranks, including after the target.
                 if !modifiers.command {
                     interaction.selection.clear();
                 }
@@ -706,9 +706,9 @@ fn select_gestures(
         memory.focus = true;
         ui.ctx()
             .data_mut(|data| data.insert_temp(memory_key, memory));
-        // La demande d'ouverture s'applique après la peinture : sans
-        // image réclamée ici, le surlignage et la fenêtre active
-        // n'apparaîtraient qu'au prochain mouvement de souris.
+        // The open request applies after painting: without a frame claimed
+        // here, the highlight and the active window would appear only on
+        // the next mouse move.
         ui.ctx().request_repaint();
     }
     if response.double_clicked() {
@@ -721,9 +721,9 @@ fn select_gestures(
     gestures
 }
 
-/// La ligne qui porte le contour de focus : le curseur clavier, tant que le
-/// panneau a le focus (`PmMemory::focus`, posé par un clic dedans). Rend `None`
-/// panneau non focalisé ou en renommage.
+/// The row that carries the focus outline: the keyboard cursor, as long as the
+/// panel has the focus (`PmMemory::focus`, set by a click inside). Returns
+/// `None` when the panel is not focused or while renaming.
 fn keyboard_cursor(
     ctx: &egui::Context,
     memory_key: egui::Id,
@@ -735,7 +735,7 @@ fn keyboard_cursor(
         .flatten()
 }
 
-/// Fait défiler la zone jusqu'à la ligne que le clavier vient d'atteindre.
+/// Scrolls the area to the row the keyboard has just reached.
 fn reveal_if_reached(
     ctx: &egui::Context,
     memory_key: egui::Id,
@@ -751,8 +751,8 @@ fn reveal_if_reached(
     }
 }
 
-/// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
-/// le centre vertical de sa rangée, pour les connecteurs de son parent.
+/// Recursively paints a [`ProjectTreeNode`] node and its children; returns
+/// the vertical center of its row, for its parent's connectors.
 fn project_tree_node_ui(
     ui: &mut egui::Ui,
     node: &ProjectTreeNode,
@@ -785,11 +785,11 @@ fn project_tree_node_ui(
                 state.set_open(true);
             }
             if toggled {
-                // Entrée (#170, point 6) : déplie un dossier fermé, replie un ouvert.
+                // Enter (#170, point 6): expands a closed folder, collapses an open one.
                 state.set_open(!state.is_open());
             }
-            // #170 : la ligne d'en-tête a la hauteur d'une ligne de liste ; la
-            // hauteur est rendue après le corps (la réponse emprunte l'`Ui`).
+            // #170: the header row has the height of a list row; the height is
+            // given back after the body (the response borrows the `Ui`).
             let previous_height = raise_to_list_row_height(ui);
             let mut gestures = RowGestures::default();
             let mut header = state.show_header(ui, |ui| {
@@ -798,8 +798,8 @@ fn project_tree_node_ui(
                     rename_editor(ui, interaction, memory_key, *id, name, siblings);
                     return;
                 }
-                // #170 point 4 : un dossier est une ligne de liste comme une
-                // fenêtre (fond, filet, survol), sélectionnable.
+                // #170 point 4: a folder is a list row like a window
+                // (background, bar, hover), selectable.
                 let selected = interaction.selection.contains(&entry);
                 let focused =
                     keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
@@ -833,8 +833,8 @@ fn project_tree_node_ui(
                     )
                 });
             });
-            // Un clic sur un dossier fermé le déplie, sur un dossier ouvert il
-            // ne le replie pas ; le double-clic le replie (le triangle aussi).
+            // A click on a closed folder expands it, on an open folder it does
+            // not collapse it; the double-click collapses it (the triangle too).
             if gestures.plain && !header.is_open() {
                 header.set_open(true);
             }
@@ -876,10 +876,10 @@ fn project_tree_node_ui(
             let is_closed = !interaction.open.contains(&tab);
             let focused =
                 keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
-            // Le salt par onglet évite que toutes les lignes partagent le même Id.
+            // The per-tab salt prevents all the rows from sharing the same Id.
             let response = ui
                 .push_id(tab, |ui| {
-                    // #169 : une ligne de liste (`list_row`), jamais un bouton `.selected()`.
+                    // #169: a list row (`list_row`), never a `.selected()` button.
                     list_row_focused(
                         ui,
                         Some(icon_image(icon.0, icon.1)),
@@ -942,8 +942,8 @@ fn project_tree_node_ui(
                     viewport,
                 );
             });
-            // S-K3 : un double-clic active ou restaure la fenêtre, il ne la
-            // ferme jamais (fermer se fait par Close ou l'en-tête).
+            // S-K3: a double-click activates or restores the window, it never
+            // closes it (closing is done by Close or the header).
             if gestures.double {
                 interaction.open_requests.push(tab);
             }
@@ -952,16 +952,16 @@ fn project_tree_node_ui(
     }
 }
 
-/// Largeur par défaut du panneau Project Manager fixe, et de la fenêtre OS
-/// séparée quand il est détaché.
+/// Default width of the fixed Project Manager panel, and of the separate OS
+/// window when it is detached.
 pub(super) const PROJECT_MANAGER_WIDTH: f32 = 260.0;
 
 impl StokesForgeApp {
-    /// #146 : suivre seulement les changements de fenêtre active. Refaire la
-    /// sélection à chaque image écraserait le clic du panneau avant que sa
-    /// demande d'ouverture soit appliquée. Une sélection multiple reste à
-    /// l'utilisateur tant qu'aucun clic explicite sur une entrée ou une fenêtre
-    /// du workspace ne la remplace (#154, `Workspace::activate_clicked_tab`).
+    /// #146: follow only the active window changes. Redoing the selection on
+    /// every frame would overwrite the panel's click before its open request is
+    /// applied. A multiple selection stays the user's as long as no explicit
+    /// click on an entry or a workspace window replaces it (#154,
+    /// `Workspace::activate_clicked_tab`).
     pub(super) fn follow_project_manager_active_tab(
         &mut self,
         ctx: &egui::Context,
@@ -977,21 +977,21 @@ impl StokesForgeApp {
         }
     }
 
-    /// Peint le Project Manager dans son panneau fixe, ancré à gauche — voir
-    /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
-    /// Appelé par
-    /// [`StokesForgeApp::ui`](eframe::App::ui) *avant* le `CentralPanel`, mais
-    /// *après* [`StokesForgeApp::script_panel`] — voir sa doc de tête pour
-    /// pourquoi cet ordre précis. Comme [`StokesForgeApp::menu_bar`]
-    /// (`egui::Panel::top`) : peindre un panneau ancré avant le reste
-    /// garantit par construction qu'il n'est jamais recouvert ni ne recouvre
-    /// ce qui vient après. N'est pas appelé quand [`StokesForgeApp::pm_detached`]
-    /// vaut `true` — cette image-là, rien ne remplace ce panneau, la vraie
-    /// fenêtre OS séparée ([`StokesForgeApp::show_detached_project_manager`]) en
-    /// tient lieu. Reste redimensionnable en largeur par glisser du bord
-    /// (comportement par défaut d'`egui::Panel::left`) mais figé en
-    /// position : pas de bascule vers la droite ni de repositionnement par
-    /// glisser. Une bande séparée au repli conserve la largeur déployée.
+    /// Paints the Project Manager in its fixed panel, anchored left — see
+    /// the head doc of `app.rs`, § What stays here (the order of the panels).
+    /// Called by
+    /// [`StokesForgeApp::ui`](eframe::App::ui) *before* the `CentralPanel`, but
+    /// *after* [`StokesForgeApp::script_panel`] — see its head doc for
+    /// why this precise order. Like [`StokesForgeApp::menu_bar`]
+    /// (`egui::Panel::top`): painting an anchored panel before the rest
+    /// guarantees by construction that it is never covered nor covers
+    /// what comes after. Not called when [`StokesForgeApp::pm_detached`]
+    /// is `true` — that frame, nothing replaces this panel, the real
+    /// separate OS window ([`StokesForgeApp::show_detached_project_manager`])
+    /// takes its place. Stays resizable in width by dragging the edge
+    /// (default behavior of `egui::Panel::left`) but fixed in
+    /// position: no switch to the right nor repositioning by
+    /// drag. A separate strip when collapsed keeps the expanded width.
     pub(super) fn project_manager_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -1047,8 +1047,8 @@ impl StokesForgeApp {
     }
 }
 
-/// `pub(super)` : [`tests::find_text_center`] et [`tests::click_at`] servent
-/// aussi aux tests des autres modules d'`app` qui cliquent un texte peint.
+/// `pub(super)`: [`tests::find_text_center`] and [`tests::click_at`] also serve
+/// the tests of the other `app` modules that click a painted text.
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -1063,12 +1063,11 @@ pub(super) mod tests {
     use crate::theme;
     use stokesforge_app_state::state::AppState;
 
-    /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
-    /// utilisé pour cliquer une entrée du Project Manager sans supposer sa
-    /// position exacte (mise en page auto), et par les tests des autres
-    /// modules d'`app` (`graph_window.rs`, `format.rs`, `menus.rs`…). Même
-    /// technique que
-    /// `window_chrome::tests::len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche`.
+    /// Finds the center of the painted text containing `needle` in `shapes` —
+    /// used to click a Project Manager entry without assuming its exact
+    /// position (auto layout), and by the tests of the other `app` modules
+    /// (`graph_window.rs`, `format.rs`, `menus.rs`…). Same technique as
+    /// `window_chrome::tests::the_graph_header_keeps_its_title_centered_and_its_arrow_on_the_left`.
     pub(in crate::app) fn find_text_center(
         shapes: &[egui::epaint::ClippedShape],
         needle: &str,
@@ -1081,26 +1080,25 @@ pub(super) mod tests {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("aucun texte contenant {needle:?} n'a été peint"))
+            .unwrap_or_else(|| panic!("no text containing {needle:?} was painted"))
     }
 
-    /// Un clic (glissé nul, pression puis relâchement au même endroit) sur
-    /// `pos`, réparti sur deux images comme le veut la détection de clic
-    /// d'egui — voir
+    /// A click (zero drag, press then release at the same place) on
+    /// `pos`, spread over two frames as egui's click detection requires — see
     /// `graph_window::tests::le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante`
-    /// pour le même schéma appliqué à un glissé.
+    /// for the same pattern applied to a drag.
     pub(in crate::app) fn click_at<R>(
         context: &egui::Context,
         pos: egui::Pos2,
         modifiers: egui::Modifiers,
         mut paint: impl FnMut(&egui::Context, Vec<egui::Event>) -> R,
     ) {
-        // `PointerButton::modifiers` n'alimente pas `InputState::modifiers`
-        // (voir `InputState::begin_pass`, qui ne le lit que sur
-        // `Event::ModifiersChanged`/`Event::Key`) : sans cet événement
-        // explicite, `ui.input(|i| i.modifiers.command)` resterait toujours
-        // faux, quels que soient les `modifiers` posés sur les événements
-        // de pointeur eux-mêmes.
+        // `PointerButton::modifiers` does not feed `InputState::modifiers`
+        // (see `InputState::begin_pass`, which reads it only on
+        // `Event::ModifiersChanged`/`Event::Key`): without this explicit
+        // event, `ui.input(|i| i.modifiers.command)` would always stay
+        // false, whatever the `modifiers` set on the pointer events
+        // themselves.
         paint(
             context,
             vec![
@@ -1134,9 +1132,9 @@ pub(super) mod tests {
         }
     }
 
-    /// Construit l'arbre d'un projet Book+Graph, lu par `AppState` comme le
-    /// panneau le lit — commun aux tests de double-clic et de sélection
-    /// multiple du Project Manager.
+    /// Builds the tree of a Book+Graph project, read by `AppState` the way the
+    /// panel reads it — common to the Project Manager's double-click and
+    /// multiple-selection tests.
     fn project_manager_fixture() -> (Session, Tab, Tab, Vec<ProjectTreeNode>) {
         let mut project = Project::new("Project Manager").unwrap();
         let root = project.root();
@@ -1155,17 +1153,17 @@ pub(super) mod tests {
                 } => Some(*id),
                 _ => None,
             })
-            .expect("le projet du fixture porte un classeur");
+            .expect("the fixture project carries a workbook");
         (session, Tab::Book(book_id), Tab::Graph(graph), tree)
     }
 
-    /// Une sélection de fenêtres (les tests historiques n'en ont pas d'autre).
-    pub(in crate::app) fn fenetres<const N: usize>(tabs: [Tab; N]) -> HashSet<PmEntry> {
+    /// A selection of windows (the historical tests have no other).
+    pub(in crate::app) fn windows<const N: usize>(tabs: [Tab; N]) -> HashSet<PmEntry> {
         tabs.into_iter().map(PmEntry::Window).collect()
     }
 
-    /// Les onglets des fenêtres d'une sélection (les dossiers sont écartés).
-    fn onglets(selection: &HashSet<PmEntry>) -> HashSet<Tab> {
+    /// The tabs of the windows of a selection (folders are left out).
+    fn tabs_of(selection: &HashSet<PmEntry>) -> HashSet<Tab> {
         selection
             .iter()
             .filter_map(|entry| match entry {
@@ -1175,23 +1173,23 @@ pub(super) mod tests {
             .collect()
     }
 
-    /// Les accumulateurs de [`PmInteraction`] d'un test, et une image peinte
-    /// de l'arbre sur un écran de 400 × 400.
-    struct Banc {
+    /// The accumulators of a test's [`PmInteraction`], and a painted frame
+    /// of the tree on a 400 × 400 screen.
+    struct Bench {
         actions: RefCell<Vec<Action>>,
         open_requests: RefCell<Vec<Tab>>,
         selection: RefCell<HashSet<PmEntry>>,
         open: RefCell<HashSet<Tab>>,
         close_requests: RefCell<Vec<Tab>>,
-        /// ↓ était-elle encore lisible après le panneau, dans la même image ?
-        /// Ce qu'une grille peinte ensuite verrait (elle lit les flèches sans
-        /// les consommer, #170 point 6).
+        /// Was ↓ still readable after the panel, in the same frame?
+        /// What a grid painted afterwards would see (it reads the arrows without
+        /// consuming them, #170 point 6).
         arrow_down_left: std::cell::Cell<bool>,
     }
 
-    impl Banc {
+    impl Bench {
         fn new(selection: HashSet<PmEntry>) -> Self {
-            Banc {
+            Bench {
                 actions: RefCell::new(Vec::new()),
                 open_requests: RefCell::new(Vec::new()),
                 selection: RefCell::new(selection),
@@ -1210,8 +1208,8 @@ pub(super) mod tests {
             self.paint_at(context, tree, events, None)
         }
 
-        /// Comme [`Banc::paint`], à l'instant `time` : les gestes qui dépendent
-        /// du délai (clic lent) ne peuvent pas se piloter à l'horloge réelle.
+        /// Like [`Bench::paint`], at instant `time`: the gestures that depend
+        /// on the delay (slow click) cannot be driven by the real clock.
         fn paint_at(
             &self,
             context: &egui::Context,
@@ -1246,58 +1244,56 @@ pub(super) mod tests {
         }
     }
 
-    /// #170, point 5 : l'en-tête d'un dossier a la même hauteur qu'une fenêtre
-    /// (`LIST_ROW_HEIGHT`) ; les connecteurs en L visent le centre de la ligne.
-    /// Mesuré par le pas entre les centres de lignes consécutives (dossier ->
-    /// fenêtre -> fenêtre -> dossier) : constant, et égal à la hauteur de ligne
-    /// plus l'écart vertical. Témoin : sans la hauteur imposée à l'en-tête, le
-    /// pas du dossier à la fenêtre est plus court.
+    /// #170, point 5: a folder's header has the same height as a window
+    /// (`LIST_ROW_HEIGHT`); the L connectors aim at the row's center.
+    /// Measured by the step between the centers of consecutive rows (folder ->
+    /// window -> window -> folder): constant, and equal to the row height
+    /// plus the vertical gap. Witness: without the height imposed on the header,
+    /// the step from the folder to the window is shorter.
     #[test]
-    fn un_dossier_a_la_hauteur_d_une_fenetre() {
+    fn a_folder_has_the_height_of_a_window() {
         use super::super::list_row::LIST_ROW_HEIGHT;
-        let mut project = Project::new("Hauteurs").unwrap();
+        let mut project = Project::new("Heights").unwrap();
         let root = project.root();
-        project.add_folder(root, "Dossier A").unwrap();
+        project.add_folder(root, "Folder A").unwrap();
         project.add_graph(root, None, PlotSpec::default()).unwrap();
         project.add_note(root, None, "").unwrap();
-        project.add_folder(root, "Dossier B").unwrap();
+        project.add_folder(root, "Folder B").unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let tree = state.project_tree();
-        let context = super::super::test_support::contexte();
-        let banc = Banc::new(HashSet::new());
-        banc.paint(&context, &tree, Vec::new());
-        let output = banc.paint(&context, &tree, Vec::new());
-        let mut centres: Vec<f32> = super::super::test_support::textes(&output.shapes)
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
+        bench.paint(&context, &tree, Vec::new());
+        let output = bench.paint(&context, &tree, Vec::new());
+        let mut centers: Vec<f32> = super::super::test_support::texts(&output.shapes)
             .iter()
             .filter(|t| {
-                t.texte.starts_with("Dossier")
-                    || t.texte.contains("Graph")
-                    || t.texte.contains("Note")
+                t.text.starts_with("Folder") || t.text.contains("Graph") || t.text.contains("Note")
             })
-            .map(|t| t.centre.y)
+            .map(|t| t.center.y)
             .collect();
-        centres.sort_by(f32::total_cmp);
-        assert_eq!(centres.len(), 4, "{centres:?}");
-        let pas: Vec<f32> = centres.windows(2).map(|w| w[1] - w[0]).collect();
+        centers.sort_by(f32::total_cmp);
+        assert_eq!(centers.len(), 4, "{centers:?}");
+        let steps: Vec<f32> = centers.windows(2).map(|w| w[1] - w[0]).collect();
         let spacing = context.global_style().spacing.item_spacing.y;
-        for p in &pas {
+        for p in &steps {
             assert!(
                 (p - (LIST_ROW_HEIGHT + spacing)).abs() < 1.0,
-                "pas {p} attendu {} : {pas:?}",
+                "steps {p} attendu {} : {steps:?}",
                 LIST_ROW_HEIGHT + spacing
             );
         }
     }
 
-    /// #169 : une entrée sélectionnée est une ligne de liste — fond pâle
-    /// d'accent sur toute la largeur restante et filet d'accent à gauche —
-    /// et non plus le fond `selection.bg_fill` des boutons, que gardent les
-    /// autres sélections de l'application. Témoin : sans sélection, ni fond
-    /// ni filet.
+    /// #169: a selected entry is a list row — pale accent background over the
+    /// whole remaining width and accent bar on the left — and no longer the
+    /// buttons' `selection.bg_fill` background, which the other selections of
+    /// the application keep. Witness: without selection, neither background
+    /// nor bar.
     #[test]
-    fn la_selection_du_project_manager_est_une_ligne_de_liste_a_filet() {
-        let mut project = Project::new("Sélection en liste").unwrap();
+    fn the_project_manager_selection_is_a_list_row_with_a_bar() {
+        let mut project = Project::new("List selection").unwrap();
         let root = project.root();
         let book = Tab::Book(project.add_empty_workbook(root, None).unwrap());
         let graph = Tab::Graph(project.add_graph(root, None, PlotSpec::default()).unwrap());
@@ -1306,10 +1302,10 @@ pub(super) mod tests {
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let tree = state.project_tree();
-        let context = super::super::test_support::contexte();
-        let banc = Banc::new(fenetres([book, graph, note, matrix]));
-        banc.paint(&context, &tree, Vec::new());
-        let output = banc.paint(&context, &tree, Vec::new());
+        let context = super::super::test_support::context();
+        let bench = Bench::new(windows([book, graph, note, matrix]));
+        bench.paint(&context, &tree, Vec::new());
+        let output = bench.paint(&context, &tree, Vec::new());
         let rects = |output: &egui::FullOutput, fill: egui::Color32| -> Vec<egui::Rect> {
             output
                 .shapes
@@ -1322,46 +1318,46 @@ pub(super) mod tests {
         };
         let rows = rects(&output, theme::list_row_selected_fill());
         let marks = rects(&output, theme::accent());
-        assert_eq!(rows.len(), 4, "un seul fond par entrée sélectionnée");
-        assert_eq!(marks.len(), 4, "un filet par entrée sélectionnée");
+        assert_eq!(rows.len(), 4, "a single background per selected entry");
+        assert_eq!(marks.len(), 4, "a bar per selected entry");
         for (row, mark) in rows.iter().zip(&marks) {
-            assert_eq!(mark.left(), row.left(), "le filet est à gauche de la ligne");
-            assert_eq!(mark.height(), row.height(), "le filet couvre la ligne");
+            assert_eq!(mark.left(), row.left(), "the bar is at the left of the row");
+            assert_eq!(mark.height(), row.height(), "the bar covers the row");
             assert_eq!(mark.width(), LIST_ROW_MARK);
             assert!(
                 row.width() > 300.0,
-                "la ligne court sur toute la largeur restante : {row:?}"
+                "the row runs over the whole remaining width: {row:?}"
             );
         }
         let button_fill = context.global_style().visuals.selection.bg_fill;
         assert!(
             rects(&output, button_fill).is_empty(),
-            "plus de fond de bouton sélectionné"
+            "no more selected button background"
         );
-        let peints = super::super::test_support::textes(&output.shapes);
-        for nom in ["Book", "Graph1"] {
+        let painted_texts = super::super::test_support::texts(&output.shapes);
+        for name in ["Book", "Graph1"] {
             assert!(
-                peints
+                painted_texts
                     .iter()
-                    .filter(|t| t.texte.contains(nom))
-                    .all(|t| t.gras),
-                "{nom} : l'entrée sélectionnée est en gras"
+                    .filter(|t| t.text.contains(name))
+                    .all(|t| t.bold),
+                "{name}: the selected entry is bold"
             );
         }
-        banc.selection.borrow_mut().clear();
-        let output = banc.paint(&context, &tree, Vec::new());
+        bench.selection.borrow_mut().clear();
+        let output = bench.paint(&context, &tree, Vec::new());
         assert!(rects(&output, theme::list_row_selected_fill()).is_empty());
         assert!(rects(&output, theme::accent()).is_empty());
         assert!(
-            !super::super::test_support::textes(&output.shapes)
+            !super::super::test_support::texts(&output.shapes)
                 .iter()
-                .any(|t| t.gras),
-            "témoin : sans sélection, rien n'est en gras"
+                .any(|t| t.bold),
+            "witness: without selection, nothing is bold"
         );
     }
 
     #[test]
-    fn le_suivi_du_contenu_actif_preserve_la_selection_multiple() {
+    fn following_the_active_content_preserves_the_multiple_selection() {
         let (session, book, graph, _tree) = project_manager_fixture();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
@@ -1386,49 +1382,45 @@ pub(super) mod tests {
             }
         };
         app.follow_project_manager_active_tab(&context, Some(book));
-        assert_eq!(app.pm_selection, fenetres([book]));
+        assert_eq!(app.pm_selection, windows([book]));
         assert_anchor(Some(PmEntry::Window(book)));
         app.follow_project_manager_active_tab(&context, Some(graph));
-        assert_eq!(app.pm_selection, fenetres([graph]));
+        assert_eq!(app.pm_selection, windows([graph]));
         assert_anchor(Some(PmEntry::Window(graph)));
         app.pm_selection.insert(PmEntry::Window(book));
         app.follow_project_manager_active_tab(&context, Some(book));
-        assert_eq!(app.pm_selection, fenetres([book, graph]));
+        assert_eq!(app.pm_selection, windows([book, graph]));
         assert_anchor(Some(PmEntry::Window(graph)));
         app.follow_project_manager_active_tab(&context, None);
-        assert_eq!(app.pm_selection, fenetres([book, graph]));
-        // Le clic simple existant remplace la sélection. Même fenêtre active :
-        // ne pas écraser ce clic avant l'application de sa demande d'ouverture.
-        app.pm_selection = fenetres([book]);
+        assert_eq!(app.pm_selection, windows([book, graph]));
+        // The existing single click replaces the selection. Same active window:
+        // do not overwrite that click before its open request is applied.
+        app.pm_selection = windows([book]);
         app.follow_project_manager_active_tab(&context, None);
-        assert_eq!(app.pm_selection, fenetres([book]));
+        assert_eq!(app.pm_selection, windows([book]));
         app.follow_project_manager_active_tab(&context, Some(graph));
-        assert_eq!(app.pm_selection, fenetres([graph]));
+        assert_eq!(app.pm_selection, windows([graph]));
         app.follow_project_manager_active_tab(&context, None);
         assert!(app.pm_selection.is_empty());
         assert_anchor(None);
         context.data(|data| {
             let memory = data.get_temp::<PmMemory>(detached_key).unwrap();
-            assert!(memory.focus, "le focus de l'autre viewport est conservé");
-            assert_eq!(
-                memory.rename,
-                vec![tab_node(book)],
-                "l'éditeur est conservé"
-            );
+            assert!(memory.focus, "the other viewport's focus is kept");
+            assert_eq!(memory.rename, vec![tab_node(book)], "the editor is kept");
         });
     }
 
     #[test]
-    fn maj_apres_un_clic_workspace_part_de_la_fenetre_selectionnee() {
-        verifier_maj_apres_clic_workspace(false);
+    fn shift_after_a_workspace_click_starts_from_the_selected_window() {
+        verify_shift_after_workspace_click(false);
     }
 
     #[test]
-    fn maj_apres_un_clic_workspace_sur_la_meme_entree_ne_selectionne_pas_l_ancienne_ancre() {
-        verifier_maj_apres_clic_workspace(true);
+    fn shift_after_a_workspace_click_on_the_same_entry_does_not_select_the_old_anchor() {
+        verify_shift_after_workspace_click(true);
     }
 
-    fn verifier_maj_apres_clic_workspace(same_target: bool) {
+    fn verify_shift_after_workspace_click(same_target: bool) {
         for maximized in [false, true] {
             let (session, book, graph, tree) = project_manager_fixture();
             let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -1441,10 +1433,10 @@ pub(super) mod tests {
                 .window_positions
                 .insert(book, egui::pos2(750.0, 30.0));
             app.borrow_mut().maximized_tab = maximized.then_some(graph);
-            let context = super::super::test_support::contexte();
+            let context = super::super::test_support::context();
             egui_extras::install_image_loaders(&context);
             let paint = |ctx: &egui::Context, events| {
-                super::super::test_support::image_de(ctx, egui::vec2(1400.0, 900.0), events, |ui| {
+                super::super::test_support::frame_of(ctx, egui::vec2(1400.0, 900.0), events, |ui| {
                     let mut app = app.borrow_mut();
                     egui::Panel::left("pm_test")
                         .exact_size(260.0)
@@ -1473,23 +1465,23 @@ pub(super) mod tests {
             let first = paint(&context, vec![]);
             let book_pos = find_text_center(&first.shapes, "Book");
             let graph_pos = find_text_center(&first.shapes, "Graph");
-            // L'ancre vient d'un vrai clic du panneau, puis la même fenêtre
-            // déjà active reprend la sélection par le workspace.
+            // The anchor comes from a real click on the panel, then the same
+            // already active window takes over the selection through the workspace.
             click_at(&context, book_pos, egui::Modifiers::NONE, paint);
-            assert_eq!(app.borrow().pm_selection, fenetres([book]));
+            assert_eq!(app.borrow().pm_selection, windows([book]));
             click_at(
                 &context,
                 egui::pos2(410.0, 150.0),
                 egui::Modifiers::NONE,
                 paint,
             );
-            assert_eq!(app.borrow().pm_selection, fenetres([graph]));
+            assert_eq!(app.borrow().pm_selection, windows([graph]));
             let detached_key = egui::Id::new(("project_manager_gestures", viewport_id()));
             context.data(|data| {
                 assert_eq!(
                     data.get_temp::<PmMemory>(detached_key).unwrap().anchor,
                     Some(PmEntry::Window(graph)),
-                    "le clic workspace déplace aussi l'ancre du panneau détaché"
+                    "the workspace click also moves the detached panel's anchor"
                 )
             });
             click_at(
@@ -1501,32 +1493,32 @@ pub(super) mod tests {
             assert_eq!(
                 app.borrow().pm_selection,
                 if same_target {
-                    fenetres([graph])
+                    windows([graph])
                 } else {
-                    fenetres([book, graph])
+                    windows([book, graph])
                 },
-                "maximisée={maximized}, même cible={same_target}"
+                "maximized={maximized}, same target={same_target}"
             );
             session.shutdown().unwrap();
         }
     }
 
     #[test]
-    fn maj_selectionne_la_plage_et_les_raccourcis_agissent_sur_la_selection() {
+    fn shift_selects_the_range_and_the_shortcuts_act_on_the_selection() {
         let (_session, book, graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
         let book_pos = find_text_center(&first.shapes, "Book");
         let graph_pos = find_text_center(&first.shapes, "Graph");
         click_at(&context, book_pos, egui::Modifiers::NONE, paint);
         click_at(&context, graph_pos, egui::Modifiers::SHIFT, paint);
-        assert_eq!(*banc.selection.borrow(), fenetres([book, graph]));
+        assert_eq!(*bench.selection.borrow(), windows([book, graph]));
         paint(&context, vec![egui::Event::Copy]);
         assert_eq!(
-            banc.actions.take(),
+            bench.actions.take(),
             vec![Action::CopyObjects(vec![tab_node(book), tab_node(graph)])]
         );
         paint(
@@ -1540,7 +1532,7 @@ pub(super) mod tests {
             }],
         );
         assert_eq!(
-            banc.actions.take(),
+            bench.actions.take(),
             vec![Action::DuplicateObjects(vec![
                 tab_node(book),
                 tab_node(graph)
@@ -1560,17 +1552,17 @@ pub(super) mod tests {
             ],
         );
         assert_eq!(
-            banc.actions.take(),
+            bench.actions.take(),
             vec![Action::DeleteObjects(vec![tab_node(book), tab_node(graph)])]
         );
     }
 
     #[test]
-    fn f2_ouvre_le_champ_et_entree_valide_une_seule_action() {
+    fn f2_opens_the_field_and_enter_commits_one_action() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(fenetres([book]));
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(windows([book]));
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);
         context.data_mut(|data| {
@@ -1587,17 +1579,17 @@ pub(super) mod tests {
         };
         paint(&context, vec![key(egui::Key::F2)]);
         assert!(context.text_edit_focused());
-        // Le nom est sélectionné à l'ouverture : la frappe le remplace.
-        paint(&context, vec![egui::Event::Text("Neuf".to_string())]);
+        // The name is selected on opening: typing replaces it.
+        paint(&context, vec![egui::Event::Text("New".to_string())]);
         paint(&context, vec![key(egui::Key::Enter)]);
-        assert_eq!(banc.actions.take().len(), 1);
+        assert_eq!(bench.actions.take().len(), 1);
         assert!(
             !has_focus(&egui::Context::default()),
-            "un autre contexte ne possède pas ce focus"
+            "another context does not own this focus"
         );
     }
 
-    /// Couleur effective du premier texte peint contenant `needle`.
+    /// Effective color of the first painted text containing `needle`.
     fn text_color(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Color32 {
         shapes
             .iter()
@@ -1612,15 +1604,15 @@ pub(super) mod tests {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("aucun texte contenant {needle:?} n'a été peint"))
+            .unwrap_or_else(|| panic!("no text containing {needle:?} was painted"))
     }
 
-    /// Le panneau fixe ([`StokesForgeApp::project_manager_panel`]) occupe le
-    /// bord gauche et relie l'arbre aux champs de l'application : un
-    /// Ctrl-clic sélectionne dans `pm_selection`, un clic simple demande
-    /// l'ouverture, appliquée plus tard par `ui()`.
+    /// The fixed panel ([`StokesForgeApp::project_manager_panel`]) occupies the
+    /// left edge and links the tree to the application's fields: a
+    /// Ctrl-click selects in `pm_selection`, a single click requests the
+    /// opening, applied later by `ui()`.
     #[test]
-    fn le_panneau_fixe_relie_l_arbre_aux_champs_de_l_application() {
+    fn the_fixed_panel_links_the_tree_to_the_application_fields() {
         let (session, book_tab, _graph_tab, _tree) = project_manager_fixture();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let app = RefCell::new(StokesForgeApp::new(state));
@@ -1651,10 +1643,10 @@ pub(super) mod tests {
         assert!(painted(&output, &tr!("project-manager-title")));
         let panel =
             egui::containers::panel::PanelState::load(&context, egui::Id::new("stokesforge_pm"))
-                .expect("le panneau est posé")
+                .expect("the panel is placed")
                 .outer_rect;
-        assert_eq!(panel.left(), 0.0, "ancré à gauche");
-        assert!(panel.width() < 800.0, "il laisse la place au reste");
+        assert_eq!(panel.left(), 0.0, "anchored left");
+        assert!(panel.width() < 800.0, "it leaves room for the rest");
 
         let book = find_text_center(&output.shapes, "Book");
         click_at(&context, book, egui::Modifiers::COMMAND, paint);
@@ -1664,7 +1656,7 @@ pub(super) mod tests {
             .contains(&PmEntry::Window(book_tab)));
         assert!(
             open.borrow().is_empty(),
-            "Ctrl-clic sélectionne sans ouvrir"
+            "Ctrl-click selects without opening"
         );
         click_at(&context, book, egui::Modifiers::NONE, paint);
         assert!(open.borrow().contains(&book_tab));
@@ -1672,136 +1664,136 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn le_double_clic_active_lentree_sans_modificateur() {
+    fn double_click_activates_the_entry_without_modifier() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let double_click = |target: &str, modifiers| {
-            // Contexte neuf : dans le même, egui compterait ces clics à la
-            // suite des précédents (triple clic, puis davantage) et le geste
-            // ne serait plus un double-clic.
+            // Fresh context: in the same one, egui would count these clicks
+            // after the previous ones (triple click, then more) and the
+            // gesture would no longer be a double-click.
             let context = egui::Context::default();
-            let banc = Banc::new(HashSet::new());
-            let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+            let bench = Bench::new(HashSet::new());
+            let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
             let first = paint(&context, Vec::new());
             let pos = find_text_center(&first.shapes, target);
             click_at(&context, pos, modifiers, paint);
             click_at(&context, pos, modifiers, paint);
-            let open = banc.open_requests.borrow().clone();
+            let open = bench.open_requests.borrow().clone();
             open
         };
-        // S-K3 : le double-clic active la fenêtre (le Project Manager n'a plus
-        // aucun chemin de fermeture, voir `PmInteraction`).
+        // S-K3: the double-click activates the window (the Project Manager has
+        // no closing path anymore, see `PmInteraction`).
         let open = double_click("Graph1", egui::Modifiers::NONE);
         assert!(open.contains(&graph_tab), "open_requests={open:?}");
         let open = double_click("Book", egui::Modifiers::NONE);
         assert!(open.contains(&book_tab), "open_requests={open:?}");
-        // Deux Ctrl-clics rapides basculent la sélection deux fois : ce n'est
-        // pas une ouverture.
+        // Two quick Ctrl-clicks toggle the selection twice: this is not an
+        // opening.
         let open = double_click("Book", egui::Modifiers::COMMAND);
         assert!(open.is_empty(), "open_requests={open:?}");
     }
 
-    /// Ctrl/Cmd-clic bascule l'appartenance à la sélection : il ajoute, puis
-    /// retire au second clic, sans jamais ouvrir l'onglet.
+    /// Ctrl/Cmd-click toggles the membership in the selection: it adds, then
+    /// removes on the second click, without ever opening the tab.
     #[test]
-    fn ctrl_clic_selectionne_sans_ouvrir() {
+    fn ctrl_click_selects_without_opening() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
 
         let first = paint(&context, Vec::new());
         let graph_pos = find_text_center(&first.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::COMMAND, paint);
 
         assert_eq!(
-            *banc.selection.borrow(),
-            fenetres([graph_tab]),
-            "Ctrl/Cmd-clic doit ajouter l'entrée à la sélection"
+            *bench.selection.borrow(),
+            windows([graph_tab]),
+            "Ctrl/Cmd-click must add the entry to the selection"
         );
         assert!(
-            banc.open_requests.borrow().is_empty(),
-            "Ctrl/Cmd-clic ne doit jamais ouvrir l'onglet, open_requests={:?}",
-            banc.open_requests.borrow()
+            bench.open_requests.borrow().is_empty(),
+            "Ctrl/Cmd-click must never open the tab, open_requests={:?}",
+            bench.open_requests.borrow()
         );
 
-        // La sélection a fait apparaître la barre groupée au-dessus de
-        // l'arbre : l'entrée a descendu, on la relit avant de recliquer.
+        // The selection made the grouped bar appear above the tree: the entry
+        // moved down, we read it again before clicking again.
         let with_toolbar = paint(&context, Vec::new());
         let graph_pos = find_text_center(&with_toolbar.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::COMMAND, paint);
         assert!(
-            banc.selection.borrow().is_empty(),
-            "un second Ctrl/Cmd-clic retire l'entrée de la sélection, selection={:?}",
-            banc.selection.borrow()
+            bench.selection.borrow().is_empty(),
+            "a second Ctrl/Cmd-click removes the entry from the selection, selection={:?}",
+            bench.selection.borrow()
         );
-        assert!(banc.open_requests.borrow().is_empty());
+        assert!(bench.open_requests.borrow().is_empty());
     }
 
     #[test]
-    fn close_et_open_agissent_sur_toute_la_selection() {
+    fn close_and_open_act_on_the_whole_selection() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        // Sélection posée directement plutôt que reconstruite par deux
-        // Ctrl-clics successifs (voir `ctrl_clic_selectionne_sans_ouvrir`).
-        let banc = Banc::new(fenetres([graph_tab, book_tab]));
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        // Selection set directly rather than rebuilt by two successive
+        // Ctrl-clicks (see `ctrl_click_selects_without_opening`).
+        let bench = Bench::new(windows([graph_tab, book_tab]));
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
 
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
         let graph_pos = find_text_center(&first.shapes, "Graph");
-        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
-        assert_eq!(*banc.selection.borrow(), fenetres([graph_tab, book_tab]));
+        let menu = open_context_menu(&context, graph_pos, paint);
+        assert_eq!(*bench.selection.borrow(), windows([graph_tab, book_tab]));
         let close_pos = find_text_center(&menu.shapes, &tr!("project-manager-close"));
         click_at(&context, close_pos, egui::Modifiers::NONE, paint);
-        let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
+        let closed: HashSet<Tab> = bench.close_requests.borrow().iter().copied().collect();
         assert_eq!(
             closed,
             HashSet::from([graph_tab, book_tab]),
-            "« Close » doit s'appliquer à toute la sélection"
+            "\"Close\" must apply to the whole selection"
         );
         assert!(
-            banc.open_requests.borrow().is_empty(),
-            "« Close » n'ouvre rien"
+            bench.open_requests.borrow().is_empty(),
+            "\"Close\" opens nothing"
         );
         assert!(
             !painted(&paint(&context, Vec::new()), &tr!("project-manager-close")),
-            "Close ferme le menu contextuel"
+            "Close closes the context menu"
         );
 
-        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        let menu = open_context_menu(&context, graph_pos, paint);
         let open_pos = find_text_center(&menu.shapes, &tr!("project-manager-open"));
         click_at(&context, open_pos, egui::Modifiers::NONE, paint);
         assert!(
-            banc.open_requests.borrow().contains(&graph_tab)
-                && banc.open_requests.borrow().contains(&book_tab),
-            "« Open » garantit que chaque onglet est ouvert, open_requests={:?}",
-            banc.open_requests.borrow()
+            bench.open_requests.borrow().contains(&graph_tab)
+                && bench.open_requests.borrow().contains(&book_tab),
+            "\"Open\" guarantees that each tab is open, open_requests={:?}",
+            bench.open_requests.borrow()
         );
         assert!(
             !painted(&paint(&context, Vec::new()), &tr!("project-manager-open")),
-            "Open ferme le menu contextuel"
+            "Open closes the context menu"
         );
     }
 
-    /// #327 : un arbre dont le dossier (replié par défaut) cache deux fenêtres
-    /// entre la première et la dernière ligne visibles.
-    fn arbre_avec_dossier_replie() -> (Vec<ProjectTreeNode>, [Tab; 4]) {
-        let fenetre = |raw, name: &str, kind| ProjectTreeNode::Window {
+    /// #327: a tree whose folder (collapsed by default) hides two windows
+    /// between the first and the last visible rows.
+    fn tree_with_collapsed_folder() -> (Vec<ProjectTreeNode>, [Tab; 4]) {
+        let window = |raw, name: &str, kind| ProjectTreeNode::Window {
             id: NodeId::from_raw(raw),
             name: name.into(),
             kind,
         };
         let tree = vec![
-            fenetre(2, "Alpha", WindowKind::Book),
+            window(2, "Alpha", WindowKind::Book),
             ProjectTreeNode::Folder {
                 id: NodeId::from_raw(3),
-                name: "Dossier".into(),
+                name: "Folder".into(),
                 children: vec![
-                    fenetre(4, "Beta", WindowKind::Graph),
-                    fenetre(5, "Gamma", WindowKind::Note),
+                    window(4, "Beta", WindowKind::Graph),
+                    window(5, "Gamma", WindowKind::Note),
                 ],
             },
-            fenetre(6, "Delta", WindowKind::Matrix),
+            window(6, "Delta", WindowKind::Matrix),
         ];
         let tabs = [
             Tab::Book(NodeId::from_raw(2)),
@@ -1812,42 +1804,42 @@ pub(super) mod tests {
         (tree, tabs)
     }
 
-    /// #327 : la plage Maj traverse un dossier replié, et Copier, Supprimer,
-    /// Open et Close agissent sur toute la plage, fenêtres cachées comprises.
+    /// #327: the Shift range crosses a collapsed folder, and Copy, Delete,
+    /// Open and Close act on the whole range, hidden windows included.
     #[test]
-    fn la_plage_maj_traverse_un_dossier_replie_et_les_actions_la_suivent() {
-        let (tree, [alpha, beta, gamma, delta]) = arbre_avec_dossier_replie();
+    fn the_shift_range_crosses_a_collapsed_folder_and_the_actions_follow_it() {
+        let (tree, [alpha, beta, gamma, delta]) = tree_with_collapsed_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        assert!(!painted(&first, "Beta"), "témoin : le dossier est replié");
+        assert!(!painted(&first, "Beta"), "witness: the folder is collapsed");
         let alpha_pos = find_text_center(&first.shapes, "Alpha");
         let delta_pos = find_text_center(&first.shapes, "Delta");
-        // Du bas vers le haut, puis du haut vers le bas.
+        // From bottom to top, then from top to bottom.
         click_at(&context, delta_pos, egui::Modifiers::NONE, paint);
         click_at(&context, alpha_pos, egui::Modifiers::SHIFT, paint);
-        // Le dossier replié est lui aussi dans la plage (#170, point 4).
-        let dossier = PmEntry::Folder(NodeId::from_raw(3));
-        let mut tout = fenetres([alpha, beta, gamma, delta]);
-        tout.insert(dossier);
-        assert_eq!(*banc.selection.borrow(), tout);
+        // The collapsed folder is also in the range (#170, point 4).
+        let folder = PmEntry::Folder(NodeId::from_raw(3));
+        let mut all = windows([alpha, beta, gamma, delta]);
+        all.insert(folder);
+        assert_eq!(*bench.selection.borrow(), all);
         click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
         click_at(&context, delta_pos, egui::Modifiers::SHIFT, paint);
-        assert_eq!(*banc.selection.borrow(), tout);
+        assert_eq!(*bench.selection.borrow(), all);
 
-        // Dans l'ordre de lecture : le dossier précède ses enfants.
+        // In reading order: the folder precedes its children.
         let ids: Vec<NodeId> = vec![
             tab_node(alpha),
-            dossier.node(),
+            folder.node(),
             tab_node(beta),
             tab_node(gamma),
             tab_node(delta),
         ];
-        banc.actions.borrow_mut().clear();
+        bench.actions.borrow_mut().clear();
         paint(&context, vec![egui::Event::Copy]);
-        assert_eq!(banc.actions.take(), vec![Action::CopyObjects(ids.clone())]);
+        assert_eq!(bench.actions.take(), vec![Action::CopyObjects(ids.clone())]);
         paint(
             &context,
             vec![
@@ -1861,37 +1853,37 @@ pub(super) mod tests {
                 },
             ],
         );
-        assert_eq!(banc.actions.take(), vec![Action::DeleteObjects(ids)]);
+        assert_eq!(bench.actions.take(), vec![Action::DeleteObjects(ids)]);
 
-        banc.open_requests.borrow_mut().clear();
-        let menu = ouvrir_menu_contextuel(&context, alpha_pos, paint);
+        bench.open_requests.borrow_mut().clear();
+        let menu = open_context_menu(&context, alpha_pos, paint);
         let close_pos = find_text_center(&menu.shapes, &tr!("project-manager-close"));
         click_at(&context, close_pos, egui::Modifiers::NONE, paint);
-        let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
+        let closed: HashSet<Tab> = bench.close_requests.borrow().iter().copied().collect();
         assert_eq!(
             closed,
-            onglets(&tout),
-            "Close ferme aussi les fenêtres du dossier replié"
+            tabs_of(&all),
+            "Close also closes the windows of the collapsed folder"
         );
-        let menu = ouvrir_menu_contextuel(&context, alpha_pos, paint);
+        let menu = open_context_menu(&context, alpha_pos, paint);
         let open_pos = find_text_center(&menu.shapes, &tr!("project-manager-open"));
         click_at(&context, open_pos, egui::Modifiers::NONE, paint);
-        let opened: HashSet<Tab> = banc.open_requests.borrow().iter().copied().collect();
+        let opened: HashSet<Tab> = bench.open_requests.borrow().iter().copied().collect();
         assert_eq!(
             opened,
-            onglets(&tout),
-            "Open ouvre aussi celles du dossier replié"
+            tabs_of(&all),
+            "Open also opens those of the collapsed folder"
         );
     }
 
-    /// #327 : une borne de la plage peut elle-même être dans un dossier replié
-    /// (l'ancre vient de la fenêtre active, dont la ligne n'est pas peinte).
+    /// #327: a bound of the range may itself be in a collapsed folder
+    /// (the anchor comes from the active window, whose row is not painted).
     #[test]
-    fn une_borne_de_plage_maj_dans_un_dossier_replie_compte() {
-        let (tree, [_alpha, beta, gamma, delta]) = arbre_avec_dossier_replie();
+    fn a_shift_range_bound_in_a_collapsed_folder_counts() {
+        let (tree, [_alpha, beta, gamma, delta]) = tree_with_collapsed_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(fenetres([beta]));
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(windows([beta]));
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
         follow_selection_anchor(&context, Some(beta));
@@ -1901,10 +1893,10 @@ pub(super) mod tests {
             egui::Modifiers::SHIFT,
             paint,
         );
-        assert_eq!(*banc.selection.borrow(), fenetres([beta, gamma, delta]));
+        assert_eq!(*bench.selection.borrow(), windows([beta, gamma, delta]));
     }
 
-    fn ouvrir_menu_contextuel(
+    fn open_context_menu(
         context: &egui::Context,
         pos: egui::Pos2,
         mut paint: impl FnMut(&egui::Context, Vec<egui::Event>) -> egui::FullOutput,
@@ -1924,31 +1916,31 @@ pub(super) mod tests {
         paint(context, Vec::new())
     }
 
-    /// Les actions de visibilité s'ouvrent au clic droit. Le clic simple
-    /// ouvre toujours son entrée, sans déplacer l'arbre lors de la sélection.
+    /// The visibility actions open on right click. The single click
+    /// still opens its entry, without moving the tree when selecting.
     #[test]
-    fn les_actions_de_visibilite_sont_dans_le_menu_contextuel_et_le_clic_simple_ouvre() {
+    fn the_visibility_actions_are_in_the_context_menu_and_the_single_click_opens() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
 
         let first = paint(&context, Vec::new());
         assert!(
             !painted(&first, &tr!("project-manager-close"))
                 && !painted(&first, &tr!("project-manager-open")),
-            "sans sélection, aucun bouton groupé à regarder"
+            "without selection, no grouped button to look at"
         );
         let graph_pos = find_text_center(&first.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
-        assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
+        assert_eq!(*bench.open_requests.borrow(), vec![graph_tab]);
         assert_eq!(
-            *banc.selection.borrow(),
-            fenetres([graph_tab]),
-            "un clic simple sélectionne sa cible (#105)"
+            *bench.selection.borrow(),
+            windows([graph_tab]),
+            "a single click selects its target (#105)"
         );
 
-        // La sélection ne déplace pas les entrées sous la souris.
+        // The selection does not move the entries under the mouse.
         let with_selection = paint(&context, Vec::new());
         assert!(!painted(&with_selection, &tr!("project-manager-close")));
         assert!(!painted(&with_selection, &tr!("project-manager-open")));
@@ -1956,24 +1948,24 @@ pub(super) mod tests {
             find_text_center(&with_selection.shapes, "Graph1"),
             graph_pos
         );
-        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
+        let menu = open_context_menu(&context, graph_pos, paint);
         assert!(painted(&menu, &tr!("project-manager-close")));
         assert!(painted(&menu, &tr!("project-manager-open")));
     }
 
-    /// #157 : le clic droit d'une fenêtre est **à plat** — Open · Close ─ Copy ·
-    /// Paste ─ Rename · Duplicate ─ Delete, sans « Selection ▸ ».
+    /// #157: a window's right click is **flat** — Open · Close ─ Copy ·
+    /// Paste ─ Rename · Duplicate ─ Delete, without "Selection ▸".
     #[test]
-    fn le_clic_droit_d_une_fenetre_est_a_plat_dans_l_ordre_des_sections() {
+    fn a_window_right_click_is_flat_in_section_order() {
         let (_session, _book_tab, _graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
         let first = paint(&context, Vec::new());
         let graph_pos = find_text_center(&first.shapes, "Graph1");
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
-        let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
-        let ordre = [
+        let menu = open_context_menu(&context, graph_pos, paint);
+        let order = [
             tr!("project-manager-open"),
             tr!("project-manager-close"),
             tr!("action-copy"),
@@ -1982,71 +1974,71 @@ pub(super) mod tests {
             tr!("action-duplicate-project-object"),
             tr!("action-delete-project-object"),
         ];
-        let hauteurs: Vec<f32> = ordre
+        let heights: Vec<f32> = order
             .iter()
             .map(|label| find_text_center(&menu.shapes, label).y)
             .collect();
         assert!(
-            hauteurs.windows(2).all(|pair| pair[0] < pair[1]),
-            "l'ordre des sections : {hauteurs:?}"
+            heights.windows(2).all(|pair| pair[0] < pair[1]),
+            "the section order: {heights:?}"
         );
         assert!(
             !painted(&menu, &tr!("menu-selected-content")),
-            "pas d'enveloppe au clic droit"
+            "no wrapper on right click"
         );
     }
 
-    /// #157, #326 : un dossier propose Add Folder, Paste, Rename et Delete
-    /// seulement, et son renommage s'édite sur place comme celui d'une fenêtre.
+    /// #157, #326: a folder offers Add Folder, Paste, Rename and Delete
+    /// only, and its renaming is edited in place like a window's.
     #[test]
-    fn le_clic_droit_d_un_dossier_propose_ajouter_coller_renommer_supprimer() {
-        let dossier = NodeId::from_raw(7);
+    fn a_folder_right_click_offers_add_paste_rename_delete() {
+        let folder = NodeId::from_raw(7);
         let tree = vec![ProjectTreeNode::Folder {
-            id: dossier,
-            name: "Mesures".into(),
+            id: folder,
+            name: "Measurements".into(),
             children: Vec::new(),
         }];
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
-        let pos = find_text_center(&first.shapes, "Mesures");
-        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        let pos = find_text_center(&first.shapes, "Measurements");
+        let menu = open_context_menu(&context, pos, paint);
         for present in [
             tr!("action-add-folder"),
             tr!("action-paste"),
             tr!("action-rename-project-object"),
             tr!("action-delete-project-object"),
         ] {
-            assert!(painted(&menu, &present), "{present} sur un dossier");
+            assert!(painted(&menu, &present), "{present} on a folder");
         }
         assert!(
             find_text_center(&menu.shapes, &tr!("action-add-folder")).y
                 < find_text_center(&menu.shapes, &tr!("action-paste")).y,
-            "la création vient en tête"
+            "the creation comes first"
         );
         for absent in [tr!("project-manager-open"), tr!("project-manager-close")] {
-            assert!(!painted(&menu, &absent), "{absent} n'a pas de sens ici");
+            assert!(!painted(&menu, &absent), "{absent} makes no sense here");
         }
-        // Copier et Dupliquer un dossier sont refusés pour l'instant : les
-        // entrées restent visibles, grisées (leur clic ne pousse rien).
-        for grisee in [tr!("action-copy"), tr!("action-duplicate-project-object")] {
-            assert!(painted(&menu, &grisee), "{grisee} grisée sur un dossier");
-            let at = find_text_center(&menu.shapes, &grisee);
+        // Copying and duplicating a folder are refused for now: the entries
+        // stay visible, grayed out (their click pushes nothing).
+        for grayed in [tr!("action-copy"), tr!("action-duplicate-project-object")] {
+            assert!(painted(&menu, &grayed), "{grayed} grayed out on a folder");
+            let at = find_text_center(&menu.shapes, &grayed);
             click_at(&context, at, egui::Modifiers::NONE, paint);
             assert!(
-                banc.actions.borrow().is_empty(),
-                "{grisee} grisée : aucune action, {:?}",
-                banc.actions.borrow()
+                bench.actions.borrow().is_empty(),
+                "{grayed} grayed out: no action, {:?}",
+                bench.actions.borrow()
             );
-            ouvrir_menu_contextuel(&context, pos, paint);
+            open_context_menu(&context, pos, paint);
         }
         let rename = find_text_center(&menu.shapes, &tr!("action-rename-project-object"));
         click_at(&context, rename, egui::Modifiers::NONE, paint);
         paint(&context, Vec::new());
         paint(&context, Vec::new());
-        paint(&context, vec![egui::Event::Text("Séries".to_string())]);
+        paint(&context, vec![egui::Event::Text("Series".to_string())]);
         paint(
             &context,
             vec![egui::Event::Key {
@@ -2058,163 +2050,164 @@ pub(super) mod tests {
             }],
         );
         assert_eq!(
-            *banc.actions.borrow(),
-            vec![Action::RenameObjects(vec![(dossier, "Séries".into())])],
-            "le dossier se renomme sur place"
+            *bench.actions.borrow(),
+            vec![Action::RenameObjects(vec![(folder, "Series".into())])],
+            "the folder is renamed in place"
         );
     }
 
-    /// Une fenêtre fermée reste listée, atténuée : sa couleur diffère de celle
-    /// de la même fenêtre ouverte, et ses voisines ne changent pas ; un clic
-    /// sur la ligne atténuée l'ouvre (#327).
+    /// A closed window stays listed, dimmed: its color differs from that of
+    /// the same open window, and its neighbors do not change; a click on the
+    /// dimmed row opens it (#327).
     #[test]
-    fn une_fenetre_fermee_reste_listee_mais_attenuee_et_un_clic_l_ouvre() {
+    fn a_closed_window_stays_listed_but_dimmed_and_a_click_opens_it() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        banc.open.borrow_mut().extend([book_tab, graph_tab]);
-        banc.paint(&context, &tree, Vec::new());
-        let ouverte = banc.paint(&context, &tree, Vec::new());
-        banc.open.borrow_mut().remove(&graph_tab);
-        let fermee = banc.paint(&context, &tree, Vec::new());
+        let bench = Bench::new(HashSet::new());
+        bench.open.borrow_mut().extend([book_tab, graph_tab]);
+        bench.paint(&context, &tree, Vec::new());
+        let open_frame = bench.paint(&context, &tree, Vec::new());
+        bench.open.borrow_mut().remove(&graph_tab);
+        let closed_frame = bench.paint(&context, &tree, Vec::new());
         assert_ne!(
-            text_color(&fermee.shapes, "Graph1"),
-            text_color(&ouverte.shapes, "Graph1"),
-            "la fenêtre fermée doit se distinguer de l'ouverte"
+            text_color(&closed_frame.shapes, "Graph1"),
+            text_color(&open_frame.shapes, "Graph1"),
+            "the closed window must stand out from the open one"
         );
         assert_eq!(
-            text_color(&fermee.shapes, "Book"),
-            text_color(&ouverte.shapes, "Book"),
-            "les autres entrées ne changent pas"
+            text_color(&closed_frame.shapes, "Book"),
+            text_color(&open_frame.shapes, "Book"),
+            "the other entries do not change"
         );
-        let pos = find_text_center(&fermee.shapes, "Graph1");
+        let pos = find_text_center(&closed_frame.shapes, "Graph1");
         click_at(&context, pos, egui::Modifiers::NONE, |ctx, events| {
-            banc.paint(ctx, &tree, events)
+            bench.paint(ctx, &tree, events)
         });
-        assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
+        assert_eq!(*bench.open_requests.borrow(), vec![graph_tab]);
     }
 
-    /// #326 : « Add Folder » au clic droit d'un dossier crée *dans* ce dossier,
-    /// et le clic droit d'une fenêtre ne propose pas la création.
+    /// #326: "Add Folder" on a folder's right click creates *inside* that
+    /// folder, and a window's right click does not offer the creation.
     #[test]
-    fn le_clic_droit_d_un_dossier_ajoute_un_dossier_dedans() {
-        let dossier = NodeId::from_raw(7);
+    fn a_folder_right_click_adds_a_folder_inside() {
+        let folder = NodeId::from_raw(7);
         let tree = vec![ProjectTreeNode::Folder {
-            id: dossier,
-            name: "Mesures".into(),
+            id: folder,
+            name: "Measurements".into(),
             children: Vec::new(),
         }];
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
-        let pos = find_text_center(&first.shapes, "Mesures");
-        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        let pos = find_text_center(&first.shapes, "Measurements");
+        let menu = open_context_menu(&context, pos, paint);
         let add = find_text_center(&menu.shapes, &tr!("action-add-folder"));
         click_at(&context, add, egui::Modifiers::NONE, paint);
         assert_eq!(
-            *banc.actions.borrow(),
-            vec![Action::AddFolder { parent: dossier }],
-            "dans le dossier cliqué, pas à la racine"
+            *bench.actions.borrow(),
+            vec![Action::AddFolder { parent: folder }],
+            "in the clicked folder, not at the root"
         );
 
-        let fenetre = vec![ProjectTreeNode::Window {
+        let window = vec![ProjectTreeNode::Window {
             id: NodeId::from_raw(8),
             name: "Graph1".into(),
             kind: WindowKind::Graph,
         }];
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &fenetre, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &window, events);
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
         let pos = find_text_center(&first.shapes, "Graph1");
-        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        let menu = open_context_menu(&context, pos, paint);
         assert!(
             painted(&menu, &tr!("action-delete-project-object")),
-            "témoin"
+            "witness"
         );
         assert!(!painted(&menu, &tr!("action-add-folder")));
     }
 
-    /// #326 : après la création, le parent se déplie et le nom du dossier neuf
-    /// s'édite sur place ; sans la demande (témoin), le parent reste replié.
+    /// #326: after the creation, the parent expands and the new folder's name
+    /// is edited in place; without the request (witness), the parent stays
+    /// collapsed.
     #[test]
-    fn un_dossier_neuf_deplie_son_parent_et_s_edite_sur_place() {
+    fn a_new_folder_expands_its_parent_and_is_edited_in_place() {
         let parent = NodeId::from_raw(1);
-        let neuf = NodeId::from_raw(5);
+        let fresh = NodeId::from_raw(5);
         let tree = vec![ProjectTreeNode::Folder {
             id: parent,
-            name: "Mesures".into(),
+            name: "Measurements".into(),
             children: vec![ProjectTreeNode::Folder {
-                id: neuf,
+                id: fresh,
                 name: "Folder1".into(),
                 children: Vec::new(),
             }],
         }];
-        let temoin = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        banc.paint(&temoin, &tree, Vec::new());
-        let sortie = banc.paint(&temoin, &tree, Vec::new());
+        let witness_context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        bench.paint(&witness_context, &tree, Vec::new());
+        let output = bench.paint(&witness_context, &tree, Vec::new());
         assert!(
-            !painted(&sortie, "Folder1"),
-            "témoin : le parent est replié"
+            !painted(&output, "Folder1"),
+            "witness: the parent is collapsed"
         );
 
         let context = egui::Context::default();
-        banc.paint(&context, &tree, Vec::new());
-        begin_rename_of_new_folder(&context, egui::ViewportId::ROOT, neuf, parent);
-        banc.paint(&context, &tree, Vec::new());
-        let sortie = banc.paint(&context, &tree, Vec::new());
-        assert!(painted(&sortie, "Folder1"), "le parent est déplié");
-        let memoire = context
+        bench.paint(&context, &tree, Vec::new());
+        begin_rename_of_new_folder(&context, egui::ViewportId::ROOT, fresh, parent);
+        bench.paint(&context, &tree, Vec::new());
+        let output = bench.paint(&context, &tree, Vec::new());
+        assert!(painted(&output, "Folder1"), "the parent is expanded");
+        let memory = context
             .data(|data| data.get_temp::<PmMemory>(memory_id(&context)))
-            .expect("mémoire du panneau");
-        assert_eq!(memoire.rename, vec![neuf], "le nom est en édition");
-        assert!(memoire.reveal.is_empty(), "la demande est consommée");
+            .expect("panel memory");
+        assert_eq!(memory.rename, vec![fresh], "the name is being edited");
+        assert!(memory.reveal.is_empty(), "the request is consumed");
     }
 
-    /// Un dossier est replié par défaut : ses enfants ne sont pas peints.
-    /// Déplié (clic sur son triangle), il les peint, et un dossier vide dit
-    /// qu'il l'est au lieu de ne rien montrer.
+    /// A folder is collapsed by default: its children are not painted.
+    /// Expanded (click on its triangle), it paints them, and an empty folder
+    /// says it is empty instead of showing nothing.
     #[test]
-    fn un_dossier_est_replie_par_defaut_et_un_dossier_vide_le_dit() {
+    fn a_folder_is_collapsed_by_default_and_an_empty_folder_says_so() {
         let tree = vec![
             ProjectTreeNode::Folder {
                 id: NodeId::from_raw(1),
-                name: "Mesures".into(),
+                name: "Measurements".into(),
                 children: vec![ProjectTreeNode::Window {
                     id: NodeId::from_raw(2),
-                    name: "Spectre".into(),
+                    name: "Spectrum".into(),
                     kind: WindowKind::Graph,
                 }],
             },
             ProjectTreeNode::Folder {
                 id: NodeId::from_raw(3),
-                name: "Vide".into(),
+                name: "Void".into(),
                 children: Vec::new(),
             },
         ];
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |context: &egui::Context, events| bench.paint(context, &tree, events);
         paint(&context, Vec::new());
         let closed = paint(&context, Vec::new());
-        assert!(painted(&closed, "Mesures") && painted(&closed, "Vide"));
+        assert!(painted(&closed, "Measurements") && painted(&closed, "Void"));
         assert!(
-            !painted(&closed, "Spectre"),
-            "un dossier replié ne peint pas ses enfants"
+            !painted(&closed, "Spectrum"),
+            "a collapsed folder does not paint its children"
         );
         assert!(!painted(&closed, &tr!("project-folder-empty")));
         assert!(
-            banc.open_requests.borrow().is_empty(),
-            "peindre n'ouvre rien"
+            bench.open_requests.borrow().is_empty(),
+            "painting opens nothing"
         );
 
-        // Le triangle d'un dossier est le premier élément de sa ligne, à
-        // gauche de son icône : on clique à mi-hauteur de la ligne, au bord
-        // gauche de l'arbre.
+        // A folder's triangle is the first element of its row, left of its
+        // icon: we click at mid-height of the row, at the left edge of the
+        // tree.
         let toggle = |shapes: &[egui::epaint::ClippedShape], name: &str| {
             let label = find_text_center(shapes, name);
             let left = shapes
@@ -2225,36 +2218,36 @@ pub(super) mod tests {
                 .fold(f32::INFINITY, f32::min);
             egui::pos2(left + 4.0, label.y)
         };
-        let at = toggle(&closed.shapes, "Mesures");
+        let at = toggle(&closed.shapes, "Measurements");
         click_at(&context, at, egui::Modifiers::NONE, paint);
         let opened = paint(&context, Vec::new());
         assert!(
-            painted(&opened, "Spectre"),
-            "le dossier déplié peint son enfant"
+            painted(&opened, "Spectrum"),
+            "the expanded folder paints its child"
         );
-        let at = toggle(&opened.shapes, "Vide");
+        let at = toggle(&opened.shapes, "Void");
         click_at(&context, at, egui::Modifiers::NONE, paint);
         let opened = paint(&context, Vec::new());
         assert!(painted(&opened, &tr!("project-folder-empty")));
         assert!(
-            banc.open_requests.borrow().is_empty(),
-            "déplier un dossier n'ouvre aucune fenêtre"
+            bench.open_requests.borrow().is_empty(),
+            "expanding a folder opens no window"
         );
     }
 
-    /// Un clic lent (S-K4) sur une fenêtre déjà seule sélectionnée ouvre son
-    /// renommage ; un double-clic, jamais ; le champ s'ouvre sur le nom
-    /// sélectionné.
+    /// A slow click (S-K4) on a window already alone in the selection opens
+    /// its rename; a double-click, never; the field opens on the selected
+    /// name.
     #[test]
-    fn un_clic_lent_sur_un_nom_selectionne_le_renomme_pas_un_double_clic() {
+    fn a_slow_click_on_a_selected_name_renames_it_not_a_double_click() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         for double in [false, true] {
             let context = egui::Context::default();
-            let banc = Banc::new(fenetres([book]));
-            let horloge = std::cell::Cell::new(1.0);
+            let bench = Bench::new(windows([book]));
+            let clock = std::cell::Cell::new(1.0);
             let paint = |ctx: &egui::Context, events| {
-                horloge.set(horloge.get() + 0.01);
-                banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+                clock.set(clock.get() + 0.01);
+                bench.paint_at(ctx, &tree, events, Some(clock.get()))
             };
             let first = paint(&context, Vec::new());
             let pos = find_text_center(&first.shapes, "Book1");
@@ -2263,26 +2256,26 @@ pub(super) mod tests {
                 click_at(&context, pos, egui::Modifiers::NONE, paint);
             }
             paint(&context, Vec::new());
-            assert!(!context.text_edit_focused(), "pas encore (double={double})");
-            horloge.set(horloge.get() + 0.6);
+            assert!(!context.text_edit_focused(), "not yet (double={double})");
+            clock.set(clock.get() + 0.6);
             paint(&context, Vec::new());
             paint(&context, Vec::new());
             assert_eq!(
                 context.text_edit_focused(),
                 !double,
-                "le renommage s'ouvre après un clic lent seulement (double={double})"
+                "the rename opens after a slow click only (double={double})"
             );
         }
     }
 
-    /// Un nom déjà pris par un frère garde le champ ouvert : Entrée n'envoie
-    /// rien ; un nom libre est écrit.
+    /// A name already taken by a sibling keeps the field open: Enter sends
+    /// nothing; a free name is written.
     #[test]
-    fn un_nom_deja_pris_garde_le_champ_ouvert() {
+    fn a_name_already_taken_keeps_the_field_open() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(fenetres([book]));
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(windows([book]));
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);
         context.data_mut(|data| {
@@ -2301,17 +2294,20 @@ pub(super) mod tests {
         paint(&context, vec![egui::Event::Text("Graph1".to_string())]);
         paint(&context, vec![key(egui::Key::Enter)]);
         paint(&context, Vec::new());
-        assert!(banc.actions.borrow().is_empty(), "nom pris : rien d'écrit");
-        assert!(context.text_edit_focused(), "le champ reste ouvert");
+        assert!(
+            bench.actions.borrow().is_empty(),
+            "name taken: nothing written"
+        );
+        assert!(context.text_edit_focused(), "the field stays open");
 
-        paint(&context, vec![egui::Event::Text("Libre".to_string())]);
+        paint(&context, vec![egui::Event::Text("Free".to_string())]);
         paint(&context, vec![key(egui::Key::Enter)]);
-        assert_eq!(banc.actions.borrow().len(), 1);
+        assert_eq!(bench.actions.borrow().len(), 1);
     }
 
-    // -- Dossiers sélectionnables (#170, point 4) -----------------------------
+    // -- Selectable folders (#170, point 4) ----------------------------------
 
-    fn touche_pm(key: egui::Key) -> egui::Event {
+    fn pm_key(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -2321,58 +2317,58 @@ pub(super) mod tests {
         }
     }
 
-    /// Le dossier de `arbre_avec_dossier_replie`.
-    fn dossier_de_l_arbre() -> NodeId {
+    /// The folder of `tree_with_collapsed_folder`.
+    fn tree_folder() -> NodeId {
         NodeId::from_raw(3)
     }
 
-    /// Ouvre le dossier au prochain dessin (comme après *Add Folder*).
-    fn deplier(context: &egui::Context, dossier: NodeId) {
+    /// Opens the folder on the next draw (as after *Add Folder*).
+    fn expand(context: &egui::Context, folder: NodeId) {
         let key = memory_id(context);
         context.data_mut(|data| {
             data.get_temp_mut_or_default::<PmMemory>(key)
                 .reveal
-                .push(dossier);
+                .push(folder);
         });
     }
 
-    /// Un clic sur un dossier le sélectionne et, s'il est fermé, le déplie ;
-    /// il n'ouvre aucune fenêtre. Témoin : sans insertion du dossier dans la
-    /// sélection, rien n'est sélectionné.
+    /// A click on a folder selects it and, if it is closed, expands it;
+    /// it opens no window. Witness: without inserting the folder in the
+    /// selection, nothing is selected.
     #[test]
-    fn un_clic_sur_un_dossier_le_selectionne_et_le_deplie() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
+    fn a_click_on_a_folder_selects_and_expands_it() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        assert!(!painted(&first, "Beta"), "témoin : le dossier est replié");
-        let pos = find_text_center(&first.shapes, "Dossier");
+        assert!(!painted(&first, "Beta"), "witness: the folder is collapsed");
+        let pos = find_text_center(&first.shapes, "Folder");
         click_at(&context, pos, egui::Modifiers::NONE, paint);
         assert_eq!(
-            *banc.selection.borrow(),
-            HashSet::from([PmEntry::Folder(dossier)])
+            *bench.selection.borrow(),
+            HashSet::from([PmEntry::Folder(folder)])
         );
         paint(&context, vec![]);
-        let apres = paint(&context, vec![]);
-        assert!(painted(&apres, "Beta"), "le clic a déplié le dossier");
+        let after = paint(&context, vec![]);
+        assert!(painted(&after, "Beta"), "the click expanded the folder");
         assert!(
-            banc.open_requests.borrow().is_empty(),
-            "un dossier n'ouvre aucune fenêtre"
+            bench.open_requests.borrow().is_empty(),
+            "a folder opens no window"
         );
     }
 
-    /// Un dossier sélectionné se peint comme une fenêtre : fond pâle d'accent
-    /// et filet à gauche ; survolé seulement, fond gris. Témoin : non
-    /// sélectionné et non survolé, ni l'un ni l'autre.
+    /// A selected folder is painted like a window: pale accent background
+    /// and bar on the left; hovered only, gray background. Witness: neither
+    /// selected nor hovered, neither of the two.
     #[test]
-    fn un_dossier_selectionne_porte_fond_filet_et_survol_comme_une_fenetre() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
-        let context = super::super::test_support::contexte();
-        let banc = Banc::new(HashSet::new());
+    fn a_selected_folder_carries_background_bar_and_hover_like_a_window() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
         let rects = |output: &egui::FullOutput, fill: egui::Color32| -> usize {
             output
                 .shapes
@@ -2382,256 +2378,253 @@ pub(super) mod tests {
                 )
                 .count()
         };
-        banc.paint(&context, &tree, vec![]);
-        let repos = banc.paint(&context, &tree, vec![]);
-        assert_eq!(rects(&repos, theme::list_row_selected_fill()), 0);
-        assert_eq!(rects(&repos, theme::list_row_hover_fill()), 0);
-        let pos = find_text_center(&repos.shapes, "Dossier");
-        let survol = banc.paint(&context, &tree, vec![egui::Event::PointerMoved(pos)]);
+        bench.paint(&context, &tree, vec![]);
+        let resting = bench.paint(&context, &tree, vec![]);
+        assert_eq!(rects(&resting, theme::list_row_selected_fill()), 0);
+        assert_eq!(rects(&resting, theme::list_row_hover_fill()), 0);
+        let pos = find_text_center(&resting.shapes, "Folder");
+        let hovered = bench.paint(&context, &tree, vec![egui::Event::PointerMoved(pos)]);
         assert_eq!(
-            rects(&survol, theme::list_row_hover_fill()),
+            rects(&hovered, theme::list_row_hover_fill()),
             1,
-            "le dossier survolé a le fond de survol"
+            "the hovered folder has the hover background"
         );
-        banc.selection.borrow_mut().insert(PmEntry::Folder(dossier));
-        let choisi = banc.paint(
+        bench.selection.borrow_mut().insert(PmEntry::Folder(folder));
+        let chosen = bench.paint(
             &context,
             &tree,
             vec![egui::Event::PointerMoved(egui::pos2(380.0, 390.0))],
         );
-        assert_eq!(rects(&choisi, theme::list_row_selected_fill()), 1);
-        assert_eq!(rects(&choisi, theme::accent()), 1, "filet d'accent");
+        assert_eq!(rects(&chosen, theme::list_row_selected_fill()), 1);
+        assert_eq!(rects(&chosen, theme::accent()), 1, "accent bar");
         assert!(
-            super::super::test_support::textes(&choisi.shapes)
+            super::super::test_support::texts(&chosen.shapes)
                 .iter()
-                .any(|t| t.texte == "Dossier" && t.gras),
-            "libellé en gras"
+                .any(|t| t.text == "Folder" && t.bold),
+            "label in bold"
         );
     }
 
-    /// Un clic sur un dossier ouvert le sélectionne **sans** le replier, même
-    /// quand il est déjà seul sélectionné. Témoin : un clic sur un dossier
-    /// fermé l'ouvre (autre test).
+    /// A click on an open folder selects it **without** collapsing it, even
+    /// when it is already alone in the selection. Witness: a click on a closed
+    /// folder opens it (other test).
     #[test]
-    fn un_clic_sur_un_dossier_ouvert_le_selectionne_sans_le_replier() {
-        let (tree, [alpha, ..]) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
+    fn a_click_on_an_open_folder_selects_it_without_collapsing_it() {
+        let (tree, [alpha, ..]) = tree_with_collapsed_folder();
+        let folder = tree_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let horloge = std::cell::Cell::new(1.0);
+        let bench = Bench::new(HashSet::new());
+        let clock = std::cell::Cell::new(1.0);
         let paint = |ctx: &egui::Context, events| {
-            horloge.set(horloge.get() + 0.01);
-            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+            clock.set(clock.get() + 0.01);
+            bench.paint_at(ctx, &tree, events, Some(clock.get()))
         };
-        deplier(&context, dossier);
+        expand(&context, folder);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        assert!(painted(&first, "Beta"), "précondition : dossier ouvert");
+        assert!(painted(&first, "Beta"), "precondition: folder open");
         let alpha_pos = find_text_center(&first.shapes, "Alpha");
-        let dossier_pos = find_text_center(&first.shapes, "Dossier");
+        let dossier_pos = find_text_center(&first.shapes, "Folder");
         click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
-        assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
+        assert_eq!(*bench.selection.borrow(), windows([alpha]));
         for _ in 0..2 {
-            // Hors de l'intervalle de double-clic : deux clics simples.
-            horloge.set(horloge.get() + 2.0);
+            // Outside the double-click interval: two single clicks.
+            clock.set(clock.get() + 2.0);
             click_at(&context, dossier_pos, egui::Modifiers::NONE, paint);
-            // Un repli serait animé : on laisse passer le temps.
-            horloge.set(horloge.get() + 0.3);
+            // A collapse would be animated: we let time pass.
+            clock.set(clock.get() + 0.3);
             paint(&context, vec![]);
-            let apres = paint(&context, vec![]);
+            let after = paint(&context, vec![]);
             assert_eq!(
-                *banc.selection.borrow(),
-                HashSet::from([PmEntry::Folder(dossier)])
+                *bench.selection.borrow(),
+                HashSet::from([PmEntry::Folder(folder)])
             );
-            assert!(painted(&apres, "Beta"), "le clic ne replie pas");
+            assert!(painted(&after, "Beta"), "the click does not collapse");
         }
     }
 
-    /// Un double-clic replie le dossier, qu'il fût ouvert ou fermé au départ
-    /// (le premier clic d'un double-clic déplie un dossier fermé).
+    /// A double-click collapses the folder, whether it was open or closed at
+    /// the start (the first click of a double-click expands a closed folder).
     #[test]
-    fn un_double_clic_replie_le_dossier() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
-        for ouvert_au_depart in [false, true] {
-            // Contexte neuf : voir `le_double_clic_active_lentree_sans_modificateur`.
+    fn a_double_click_collapses_the_folder() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
+        for open_at_start in [false, true] {
+            // Fresh context: see `double_click_activates_the_entry_without_modifier`.
             let context = egui::Context::default();
-            let banc = Banc::new(HashSet::new());
-            let horloge = std::cell::Cell::new(1.0);
+            let bench = Bench::new(HashSet::new());
+            let clock = std::cell::Cell::new(1.0);
             let paint = |ctx: &egui::Context, events| {
-                horloge.set(horloge.get() + 0.01);
-                banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+                clock.set(clock.get() + 0.01);
+                bench.paint_at(ctx, &tree, events, Some(clock.get()))
             };
-            if ouvert_au_depart {
-                deplier(&context, dossier);
+            if open_at_start {
+                expand(&context, folder);
             }
             paint(&context, vec![]);
             let first = paint(&context, vec![]);
-            assert_eq!(painted(&first, "Beta"), ouvert_au_depart);
-            let pos = find_text_center(&first.shapes, "Dossier");
+            assert_eq!(painted(&first, "Beta"), open_at_start);
+            let pos = find_text_center(&first.shapes, "Folder");
             click_at(&context, pos, egui::Modifiers::NONE, paint);
             click_at(&context, pos, egui::Modifiers::NONE, paint);
-            // Le repli est animé : on laisse passer le temps.
-            horloge.set(horloge.get() + 2.0);
+            // The collapse is animated: we let time pass.
+            clock.set(clock.get() + 2.0);
             paint(&context, vec![]);
-            let apres = paint(&context, vec![]);
+            let after = paint(&context, vec![]);
             assert!(
-                !painted(&apres, "Beta"),
-                "double-clic : replié (ouvert au départ : {ouvert_au_depart})"
+                !painted(&after, "Beta"),
+                "double-click: collapsed (open at start: {open_at_start})"
             );
             assert_eq!(
-                *banc.selection.borrow(),
-                HashSet::from([PmEntry::Folder(dossier)])
+                *bench.selection.borrow(),
+                HashSet::from([PmEntry::Folder(folder)])
             );
         }
     }
 
-    /// Le triangle replie un dossier ouvert (geste d'egui, conservé).
+    /// The triangle collapses an open folder (egui's gesture, kept).
     #[test]
-    fn le_triangle_replie_un_dossier_ouvert() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
+    fn the_triangle_collapses_an_open_folder() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let horloge = std::cell::Cell::new(1.0);
+        let bench = Bench::new(HashSet::new());
+        let clock = std::cell::Cell::new(1.0);
         let paint = |ctx: &egui::Context, events| {
-            horloge.set(horloge.get() + 0.01);
-            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+            clock.set(clock.get() + 0.01);
+            bench.paint_at(ctx, &tree, events, Some(clock.get()))
         };
-        deplier(&context, dossier);
+        expand(&context, folder);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
         assert!(painted(&first, "Beta"));
-        let libelle = find_text_center(&first.shapes, "Dossier");
-        let triangle = egui::pos2(libelle.x - 62.0, libelle.y);
+        let label = find_text_center(&first.shapes, "Folder");
+        let triangle = egui::pos2(label.x - 62.0, label.y);
         click_at(&context, triangle, egui::Modifiers::NONE, paint);
-        // Le repli est animé : on laisse passer le temps.
-        horloge.set(horloge.get() + 2.0);
+        // The collapse is animated: we let time pass.
+        clock.set(clock.get() + 2.0);
         paint(&context, vec![]);
-        let apres = paint(&context, vec![]);
-        assert!(!painted(&apres, "Beta"), "le triangle replie");
+        let after = paint(&context, vec![]);
+        assert!(!painted(&after, "Beta"), "the triangle collapses");
         assert!(
-            banc.selection.borrow().is_empty(),
-            "le triangle ne sélectionne pas"
+            bench.selection.borrow().is_empty(),
+            "the triangle does not select"
         );
     }
 
-    /// Suppr sur un dossier sélectionné supprime le dossier (une entrée
-    /// d'historique, `DeleteObjects`) ; F2 ouvre son renommage sur place.
+    /// Delete on a selected folder deletes the folder (one history entry,
+    /// `DeleteObjects`); F2 opens its in-place rename.
     #[test]
-    fn suppr_et_f2_agissent_sur_un_dossier_selectionne() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
+    fn delete_and_f2_act_on_a_selected_folder() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        let pos = find_text_center(&first.shapes, "Dossier");
+        let pos = find_text_center(&first.shapes, "Folder");
         click_at(&context, pos, egui::Modifiers::NONE, paint);
-        banc.actions.borrow_mut().clear();
-        paint(&context, vec![touche_pm(egui::Key::Delete)]);
+        bench.actions.borrow_mut().clear();
+        paint(&context, vec![pm_key(egui::Key::Delete)]);
         assert_eq!(
-            banc.actions.take(),
-            vec![Action::DeleteObjects(vec![dossier])]
+            bench.actions.take(),
+            vec![Action::DeleteObjects(vec![folder])]
         );
-        paint(&context, vec![touche_pm(egui::Key::F2)]);
+        paint(&context, vec![pm_key(egui::Key::F2)]);
         paint(&context, vec![]);
         assert_eq!(
             renaming_in(&context, context.viewport_id()),
-            vec![dossier],
-            "F2 ouvre le renommage du dossier"
+            vec![folder],
+            "F2 opens the folder rename"
         );
-        paint(&context, vec![egui::Event::Text("Série".to_string())]);
-        paint(&context, vec![touche_pm(egui::Key::Enter)]);
+        paint(&context, vec![egui::Event::Text("Sample".to_string())]);
+        paint(&context, vec![pm_key(egui::Key::Enter)]);
         assert_eq!(
-            banc.actions.take(),
-            vec![Action::RenameObjects(vec![(dossier, "Série".into())])]
+            bench.actions.take(),
+            vec![Action::RenameObjects(vec![(folder, "Sample".into())])]
         );
     }
 
-    /// Copier et dupliquer un dossier sont refusés (voir la doc de tête) :
-    /// Ctrl+C et Ctrl+D transmettent le geste à l'état, qui le refuse avec sa
-    /// raison (`stokesforge-app-state/tests/project_objects.rs`) ; l'entrée de
-    /// menu, elle, est grisée (test du clic droit d'un dossier).
+    /// Copying and duplicating a folder are refused (see the head doc):
+    /// Ctrl+C and Ctrl+D pass the gesture on to the state, which refuses it
+    /// with its reason (`stokesforge-app-state/tests/project_objects.rs`); the
+    /// menu entry is grayed out (test of a folder's right click).
     #[test]
-    fn ctrl_c_sur_un_dossier_passe_par_l_etat_qui_le_refuse() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
+    fn ctrl_c_on_a_folder_goes_through_the_state_which_refuses_it() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        let pos = find_text_center(&first.shapes, "Dossier");
+        let pos = find_text_center(&first.shapes, "Folder");
         click_at(&context, pos, egui::Modifiers::NONE, paint);
-        banc.actions.borrow_mut().clear();
+        bench.actions.borrow_mut().clear();
         paint(&context, vec![egui::Event::Copy]);
         assert_eq!(
-            banc.actions.take(),
-            vec![Action::CopyObjects(vec![dossier])]
+            bench.actions.take(),
+            vec![Action::CopyObjects(vec![folder])]
         );
     }
 
-    /// Ctrl+V avec un dossier seul sélectionné colle **dans** ce dossier ;
-    /// avec une fenêtre sélectionnée, à la racine comme avant. Témoin : les
-    /// deux parents diffèrent.
+    /// Ctrl+V with a single folder selected pastes **into** that folder;
+    /// with a window selected, at the root as before. Witness: the two
+    /// parents differ.
     #[test]
-    fn ctrl_v_avec_un_dossier_selectionne_colle_dans_le_dossier() {
-        let (tree, [alpha, ..]) = arbre_avec_dossier_replie();
-        let dossier = dossier_de_l_arbre();
-        let racine = NodeId::from_raw(1);
+    fn ctrl_v_with_a_selected_folder_pastes_into_the_folder() {
+        let (tree, [alpha, ..]) = tree_with_collapsed_folder();
+        let folder = tree_folder();
+        let root = NodeId::from_raw(1);
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
-        let dossier_pos = find_text_center(&first.shapes, "Dossier");
+        let dossier_pos = find_text_center(&first.shapes, "Folder");
         let alpha_pos = find_text_center(&first.shapes, "Alpha");
         click_at(&context, dossier_pos, egui::Modifiers::NONE, paint);
-        banc.actions.borrow_mut().clear();
-        paint(&context, vec![egui::Event::Paste("données".into())]);
+        bench.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Paste("data".into())]);
         assert_eq!(
-            banc.actions.take(),
+            bench.actions.take(),
             vec![Action::PasteObjects {
-                parent: dossier,
-                text: "données".into()
+                parent: folder,
+                text: "data".into()
             }]
         );
         click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
-        assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
-        banc.actions.borrow_mut().clear();
-        paint(&context, vec![egui::Event::Paste("données".into())]);
+        assert_eq!(*bench.selection.borrow(), windows([alpha]));
+        bench.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Paste("data".into())]);
         assert_eq!(
-            banc.actions.take(),
+            bench.actions.take(),
             vec![Action::PasteObjects {
-                parent: racine,
-                text: "données".into()
+                parent: root,
+                text: "data".into()
             }]
         );
     }
 
-    /// `paste_parent` : le dossier seul, sinon la racine.
+    /// `paste_parent`: the single folder, otherwise the root.
     #[test]
-    fn le_parent_du_collage_est_le_dossier_seul_ou_la_racine() {
-        let racine = NodeId::from_raw(1);
-        let dossier = PmEntry::Folder(NodeId::from_raw(3));
-        let fenetre = PmEntry::Window(Tab::Book(NodeId::from_raw(2)));
+    fn the_paste_parent_is_the_single_folder_or_the_root() {
+        let root = NodeId::from_raw(1);
+        let folder = PmEntry::Folder(NodeId::from_raw(3));
+        let window = PmEntry::Window(Tab::Book(NodeId::from_raw(2)));
         assert_eq!(
-            paste_parent(&HashSet::from([dossier]), racine),
+            paste_parent(&HashSet::from([folder]), root),
             NodeId::from_raw(3)
         );
-        assert_eq!(paste_parent(&HashSet::from([fenetre]), racine), racine);
-        assert_eq!(
-            paste_parent(&HashSet::from([dossier, fenetre]), racine),
-            racine
-        );
-        assert_eq!(paste_parent(&HashSet::new(), racine), racine);
+        assert_eq!(paste_parent(&HashSet::from([window]), root), root);
+        assert_eq!(paste_parent(&HashSet::from([folder, window]), root), root);
+        assert_eq!(paste_parent(&HashSet::new(), root), root);
     }
 
-    // -- Navigation au clavier (#170, point 6) --------------------------------
+    // -- Keyboard navigation (#170, point 6) ----------------------------------
 
-    fn touche_avec(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    fn key_with(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -2641,192 +2634,201 @@ pub(super) mod tests {
         }
     }
 
-    /// Un banc dont le panneau a le focus (un clic sur « Alpha »), l'arbre
-    /// `arbre_avec_dossier_replie` : Alpha, Dossier (replié : Beta, Gamma),
-    /// Delta. `f` reçoit le banc, le contexte et le peintre.
-    fn avec_panneau_focalise(
+    /// A bench whose panel has the focus (a click on "Alpha"), the tree
+    /// `tree_with_collapsed_folder`: Alpha, Folder (collapsed: Beta, Gamma),
+    /// Delta. `f` receives the bench, the context and the painter.
+    fn with_focused_panel(
         f: impl FnOnce(
-            &Banc,
+            &Bench,
             &egui::Context,
             &dyn Fn(&egui::Context, Vec<egui::Event>) -> egui::FullOutput,
             [Tab; 4],
         ),
     ) {
-        let (tree, tabs) = arbre_avec_dossier_replie();
-        let context = super::super::test_support::contexte();
-        let banc = Banc::new(HashSet::new());
-        let horloge = std::cell::Cell::new(1.0);
+        let (tree, tabs) = tree_with_collapsed_folder();
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
+        let clock = std::cell::Cell::new(1.0);
         let paint = |ctx: &egui::Context, events| {
-            horloge.set(horloge.get() + 0.1);
-            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+            clock.set(clock.get() + 0.1);
+            bench.paint_at(ctx, &tree, events, Some(clock.get()))
         };
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
         let alpha = find_text_center(&first.shapes, "Alpha");
         click_at(&context, alpha, egui::Modifiers::NONE, paint);
         paint(&context, vec![]);
-        banc.open_requests.borrow_mut().clear();
-        f(&banc, &context, &paint, tabs);
+        bench.open_requests.borrow_mut().clear();
+        f(&bench, &context, &paint, tabs);
     }
 
-    /// ↓ deux fois depuis Alpha atteint la **troisième ligne visible** (Delta),
-    /// le dossier replié comptant pour une ligne et ses enfants pour aucune ;
-    /// la flèche ne demande ni ouverture ni action. Témoin : suivre `order`
-    /// (enfants cachés compris) s'arrêterait sur Beta.
+    /// ↓ twice from Alpha reaches the **third visible row** (Delta), the
+    /// collapsed folder counting for one row and its children for none;
+    /// the arrow requests neither an opening nor an action. Witness: following
+    /// `order` (hidden children included) would stop on Beta.
     #[test]
-    fn deux_fois_bas_atteignent_la_troisieme_ligne_visible() {
-        avec_panneau_focalise(|banc, context, paint, [alpha, _beta, _gamma, delta]| {
-            assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
+    fn two_downs_reach_the_third_visible_row() {
+        with_focused_panel(|bench, context, paint, [alpha, _beta, _gamma, delta]| {
+            assert_eq!(*bench.selection.borrow(), windows([alpha]));
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
             assert_eq!(
-                *banc.selection.borrow(),
-                HashSet::from([PmEntry::Folder(dossier_de_l_arbre())]),
-                "la première flèche va au dossier"
+                *bench.selection.borrow(),
+                HashSet::from([PmEntry::Folder(tree_folder())]),
+                "the first arrow goes to the folder"
             );
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
             assert_eq!(
-                *banc.selection.borrow(),
-                fenetres([delta]),
-                "la seconde saute les enfants du dossier replié"
+                *bench.selection.borrow(),
+                windows([delta]),
+                "the second skips the children of the collapsed folder"
             );
             assert!(
-                banc.open_requests.borrow().is_empty(),
-                "une flèche n'ouvre rien"
+                bench.open_requests.borrow().is_empty(),
+                "an arrow opens nothing"
             );
-            assert!(banc.actions.borrow().is_empty(), "ni action, ni historique");
-            // En bas de liste : ↓ reste sur place ; ↑ remonte d'une ligne visible.
+            assert!(
+                bench.actions.borrow().is_empty(),
+                "neither action nor history"
+            );
+            // At the bottom of the list: ↓ stays in place; ↑ goes up one visible row.
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
-            assert_eq!(*banc.selection.borrow(), fenetres([delta]));
+            assert_eq!(*bench.selection.borrow(), windows([delta]));
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowUp, egui::Modifiers::NONE)],
             );
             assert_eq!(
-                *banc.selection.borrow(),
-                HashSet::from([PmEntry::Folder(dossier_de_l_arbre())])
+                *bench.selection.borrow(),
+                HashSet::from([PmEntry::Folder(tree_folder())])
             );
         });
     }
 
-    /// Les flèches ne s'appliquent qu'à un panneau qui a le focus : sans clic
-    /// dedans, ↓ ne bouge rien et reste lisible par le reste de l'application.
+    /// The arrows apply only to a panel that has the focus: without a click
+    /// inside, ↓ moves nothing and stays readable by the rest of the application.
     #[test]
-    fn sans_focus_les_fleches_ne_touchent_pas_au_panneau() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
+    fn without_focus_the_arrows_do_not_touch_the_panel() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::new());
-        banc.paint(&context, &tree, vec![]);
-        banc.paint(
+        let bench = Bench::new(HashSet::new());
+        bench.paint(&context, &tree, vec![]);
+        bench.paint(
             &context,
             &tree,
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
         );
-        assert!(banc.selection.borrow().is_empty());
-        assert!(banc.arrow_down_left.get(), "la touche reste à qui la veut");
+        assert!(bench.selection.borrow().is_empty());
+        assert!(
+            bench.arrow_down_left.get(),
+            "the key stays available to whoever wants it"
+        );
     }
 
-    /// Depuis le panneau focalisé, la flèche est consommée : la grille d'un
-    /// classeur, peinte après, lit les flèches sans les consommer et déplacerait
-    /// sa cellule en même temps. Témoin : sans focus, la flèche reste lisible.
+    /// From the focused panel, the arrow is consumed: a workbook's grid,
+    /// painted afterwards, reads the arrows without consuming them and would
+    /// move its cell at the same time. Witness: without focus, the arrow stays readable.
     #[test]
-    fn une_fleche_du_panneau_n_atteint_pas_la_grille() {
-        avec_panneau_focalise(|banc, context, paint, _| {
+    fn a_panel_arrow_does_not_reach_the_grid() {
+        with_focused_panel(|bench, context, paint, _| {
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
             assert!(
-                !banc.arrow_down_left.get(),
-                "↓ consommée par le panneau : la grille ne la voit pas"
+                !bench.arrow_down_left.get(),
+                "↓ consumed by the panel: the grid does not see it"
             );
         });
     }
 
-    /// Maj+↓ et Alt+↓ ne se prennent pas pour ↓ (egui ignore Maj et Alt en
-    /// trop) : ils sont consommés et ne bougent pas la sélection. Témoin : ↓
-    /// seule la bouge.
+    /// Shift+↓ and Alt+↓ do not pass for ↓ (egui ignores extra Shift and Alt):
+    /// they are consumed and do not move the selection. Witness: ↓
+    /// alone moves it.
     #[test]
-    fn maj_et_alt_bas_ne_deplacent_pas_la_selection() {
-        avec_panneau_focalise(|banc, context, paint, [alpha, ..]| {
+    fn shift_and_alt_down_do_not_move_the_selection() {
+        with_focused_panel(|bench, context, paint, [alpha, ..]| {
             for modifiers in [egui::Modifiers::SHIFT, egui::Modifiers::ALT] {
-                paint(context, vec![touche_avec(egui::Key::ArrowDown, modifiers)]);
-                assert_eq!(*banc.selection.borrow(), fenetres([alpha]), "{modifiers:?}");
-                assert!(!banc.arrow_down_left.get(), "{modifiers:?} consommée");
+                paint(context, vec![key_with(egui::Key::ArrowDown, modifiers)]);
+                assert_eq!(*bench.selection.borrow(), windows([alpha]), "{modifiers:?}");
+                assert!(!bench.arrow_down_left.get(), "{modifiers:?} consumed");
             }
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
-            assert_ne!(*banc.selection.borrow(), fenetres([alpha]), "témoin");
+            assert_ne!(*bench.selection.borrow(), windows([alpha]), "witness");
         });
     }
 
-    /// Entrée ouvre la fenêtre sélectionnée (`open_requests`), déplie un
-    /// dossier fermé et le replie ouvert. Témoin : sans Entrée, rien.
+    /// Enter opens the selected window (`open_requests`), expands a closed
+    /// folder and collapses an open one. Witness: without Enter, nothing.
     #[test]
-    fn entree_ouvre_la_fenetre_et_bascule_le_dossier() {
-        avec_panneau_focalise(|banc, context, paint, [alpha, ..]| {
+    fn enter_opens_the_window_and_toggles_the_folder() {
+        with_focused_panel(|bench, context, paint, [alpha, ..]| {
             paint(context, vec![]);
-            assert!(banc.open_requests.borrow().is_empty(), "témoin");
+            assert!(bench.open_requests.borrow().is_empty(), "witness");
             paint(
                 context,
-                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::Enter, egui::Modifiers::NONE)],
             );
             assert_eq!(
-                *banc.open_requests.borrow(),
+                *bench.open_requests.borrow(),
                 vec![alpha],
-                "Entrée ouvre Alpha"
+                "Enter opens Alpha"
             );
 
             paint(
                 context,
-                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             );
-            let ferme = paint(context, vec![]);
-            assert!(!painted(&ferme, "Beta"), "précondition : dossier replié");
+            let closed_frame = paint(context, vec![]);
+            assert!(
+                !painted(&closed_frame, "Beta"),
+                "precondition: folder collapsed"
+            );
             paint(
                 context,
-                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::Enter, egui::Modifiers::NONE)],
             );
-            let ouvert = paint(context, vec![]);
-            assert!(painted(&ouvert, "Beta"), "Entrée déplie le dossier");
+            let open_frame = paint(context, vec![]);
+            assert!(painted(&open_frame, "Beta"), "Enter expands the folder");
             assert_eq!(
-                banc.open_requests.borrow().len(),
+                bench.open_requests.borrow().len(),
                 1,
-                "un dossier n'ouvre aucune fenêtre"
+                "a folder opens no window"
             );
             paint(
                 context,
-                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+                vec![key_with(egui::Key::Enter, egui::Modifiers::NONE)],
             );
-            // Le repli est animé : on laisse passer le temps.
-            let mut apres = paint(context, vec![]);
+            // The collapse is animated: we let time pass.
+            let mut after = paint(context, vec![]);
             for _ in 0..10 {
-                apres = paint(context, vec![]);
+                after = paint(context, vec![]);
             }
-            assert!(!painted(&apres, "Beta"), "Entrée replie le dossier ouvert");
+            assert!(!painted(&after, "Beta"), "Enter collapses the open folder");
         });
     }
 
-    /// La ligne qui porte le curseur clavier a le contour de focus de
-    /// `selection.stroke`, comme une ligne de liste qui a le focus d'egui ;
-    /// sans focus du panneau, aucun contour. Témoin : le contour retiré de la
-    /// peinture des lignes fait échouer ce test.
+    /// The row that carries the keyboard cursor has the focus outline of
+    /// `selection.stroke`, like a list row that has egui's focus;
+    /// without panel focus, no outline. Witness: the outline removed from the
+    /// painting of rows makes this test fail.
     #[test]
-    fn la_ligne_du_curseur_clavier_a_le_contour_de_focus() {
-        let (tree, _tabs) = arbre_avec_dossier_replie();
-        let context = super::super::test_support::contexte();
-        let banc = Banc::new(HashSet::new());
-        let contour = |output: &egui::FullOutput| -> usize {
+    fn the_keyboard_cursor_row_has_the_focus_outline() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let context = super::super::test_support::context();
+        let bench = Bench::new(HashSet::new());
+        let outline = |output: &egui::FullOutput| -> usize {
             let stroke = context.global_style().visuals.selection.stroke;
             output
                 .shapes
@@ -2836,42 +2838,47 @@ pub(super) mod tests {
                 })
                 .count()
         };
-        banc.paint(&context, &tree, vec![]);
-        let first = banc.paint(&context, &tree, vec![]);
-        banc.selection
+        bench.paint(&context, &tree, vec![]);
+        let first = bench.paint(&context, &tree, vec![]);
+        bench
+            .selection
             .borrow_mut()
-            .insert(PmEntry::Folder(dossier_de_l_arbre()));
-        let sans_focus = banc.paint(&context, &tree, vec![]);
+            .insert(PmEntry::Folder(tree_folder()));
+        let without_focus = bench.paint(&context, &tree, vec![]);
         assert_eq!(
-            contour(&sans_focus),
+            outline(&without_focus),
             0,
-            "panneau sans focus : pas de contour"
+            "panel without focus: no outline"
         );
         let pos = find_text_center(&first.shapes, "Alpha");
         click_at(&context, pos, egui::Modifiers::NONE, |ctx, events| {
-            banc.paint(ctx, &tree, events)
+            bench.paint(ctx, &tree, events)
         });
-        let avec_focus = banc.paint(&context, &tree, vec![]);
-        assert_eq!(contour(&avec_focus), 1, "une seule ligne, celle du curseur");
+        let with_focus = bench.paint(&context, &tree, vec![]);
+        assert_eq!(outline(&with_focus), 1, "a single row, the cursor's");
     }
 
-    /// `neighbour` : voisine visible, bornée ; sans curseur ↓ va au début et ↑
-    /// à la fin ; liste vide, rien.
+    /// `neighbour`: bounded visible neighbor; without a cursor ↓ goes to the start and ↑
+    /// to the end; empty list, nothing.
     #[test]
-    fn la_ligne_voisine_est_bornee_et_sans_curseur_on_part_d_un_bout() {
+    fn the_neighbor_row_is_bounded_and_without_a_cursor_we_start_from_one_end() {
         use super::super::list_row::neighbour;
-        let lignes = [10, 20, 30];
-        assert_eq!(neighbour(&lignes, Some(20), 1), Some(30));
-        assert_eq!(neighbour(&lignes, Some(20), -1), Some(10));
-        assert_eq!(neighbour(&lignes, Some(30), 1), Some(30), "borné en bas");
-        assert_eq!(neighbour(&lignes, Some(10), -1), Some(10), "borné en haut");
-        assert_eq!(neighbour(&lignes, None, 1), Some(10));
-        assert_eq!(neighbour(&lignes, None, -1), Some(30));
+        let rows = [10, 20, 30];
+        assert_eq!(neighbour(&rows, Some(20), 1), Some(30));
+        assert_eq!(neighbour(&rows, Some(20), -1), Some(10));
         assert_eq!(
-            neighbour(&lignes, Some(99), 1),
-            Some(10),
-            "curseur invisible"
+            neighbour(&rows, Some(30), 1),
+            Some(30),
+            "bounded at the bottom"
         );
+        assert_eq!(
+            neighbour(&rows, Some(10), -1),
+            Some(10),
+            "bounded at the top"
+        );
+        assert_eq!(neighbour(&rows, None, 1), Some(10));
+        assert_eq!(neighbour(&rows, None, -1), Some(30));
+        assert_eq!(neighbour(&rows, Some(99), 1), Some(10), "invisible cursor");
         assert_eq!(neighbour::<i32>(&[], Some(1), 1), None);
     }
 }

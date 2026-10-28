@@ -108,7 +108,7 @@ kind is a **set** and no longer a range `{ ancre, curseur }`:
 |---|---|---|
 | columns (`Columns`) | `base` (columns set one by one) ∪ range `ancre..=curseur` | click · Ctrl+click toggles the column · Shift+click replaces everything with the range anchor → target · Ctrl+Shift+click and drag add the range |
 | rows (`FullRows`) | intervals of rows (same model) | same gestures on the row numbers |
-| cells (`Rows`) | rectangles already set (`extra`) + last rectangle `ancre`–`curseur` | Ctrl+click adds or removes a cell (the rectangle is split around it) · Ctrl+drag adds a rectangle · Shift+click extends the last rectangle |
+| cells (`Rows`) | rectangles already set (`extra`) + last rectangle `anchor`–`cursor` | Ctrl+click adds or removes a cell (the rectangle is split around it) · Ctrl+drag adds a rectangle · Shift+click extends the last rectangle |
 
 A Ctrl+click of another kind, or on the other side of the
 header/data boundary, sets a simple selection again. The whole header fields

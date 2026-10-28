@@ -1,16 +1,15 @@
-//! Console de script : zone de saisie, boutons « Exécuter »/« Arrêter »,
-//! sortie. Contenu de [`StokesForgeApp::script_panel`].
+//! Script console: input area, "Run"/"Stop" buttons, output. Contents of
+//! [`StokesForgeApp::script_panel`].
 //!
-//! Ne bloque jamais la fenêtre : voir la doc de tête d'`app.rs`, § « La
-//! console de script ne fige pas la fenêtre ».
-//! `Action::RunScript`/`InterruptScript` sont poussées comme n'importe
-//! quelle autre action, appliquées après le rendu par la boucle
-//! principale — c'est [`AppState::dispatch`] qui garantit qu'elles ne
-//! bloquent pas.
+//! Never blocks the window: see the head doc of `app.rs`, § "The script
+//! console does not freeze the window".
+//! `Action::RunScript`/`InterruptScript` are pushed like any other action
+//! and applied after rendering by the main loop — [`AppState::dispatch`]
+//! guarantees they do not block.
 //!
-//! Un contenu unique lit AppState en mode attaché et `ScriptConsoleModel`
-//! en mode détaché (#100) : aucun moteur ne migre dans le callback. Le tampon
-//! de saisie remonte avant les actions, la sortie reste celle de la racine.
+//! A single content reads AppState in attached mode and `ScriptConsoleModel`
+//! in detached mode (#100): no engine migrates into the callback. The input
+//! buffer goes up before the actions, the output stays the root's.
 
 use eframe::egui;
 
@@ -24,11 +23,11 @@ use super::window_chrome::{
 };
 use super::StokesForgeApp;
 
-/// Hauteur de la zone de sortie du script, en points.
+/// Height of the script output area, in points.
 const SCRIPT_OUTPUT_HEIGHT: f32 = 140.0;
 
-/// Barre de titre de la console de script, avec le bouton qui la replie ou la
-/// déplie (issue #79), et celui qui la détache (#100).
+/// Title bar of the script console, with the button that collapses or
+/// expands it (issue #79), and the one that detaches it (#100).
 pub(super) fn script_header(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -41,8 +40,8 @@ pub(super) fn script_header(
     header
 }
 
-/// Lecture de la console pour le callback différé ; le moteur et son travail
-/// restent dans AppState à la racine. Seule la saisie remonte comme requête.
+/// Reading of the console for the deferred callback; the engine and its work
+/// stay in AppState at the root. Only the input goes up as a request.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ScriptConsoleModel {
     pub(super) source: String,
@@ -100,8 +99,8 @@ pub(super) fn script_model_contents(
     );
 }
 
-/// La console attachée emprunte la sortie : pas de copie de tout un résultat
-/// à chaque image. La lecture détachée en possède déjà sa copie publiée.
+/// The attached console borrows the output: no copy of a whole result on
+/// every frame. The detached reading already owns its published copy.
 fn script_fields_contents(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -112,8 +111,8 @@ fn script_fields_contents(
     actions: &mut Vec<Action>,
 ) {
     if running {
-        // Sans ça, egui ne redessine que sur événement d'entrée : la fin du
-        // script n'apparaîtrait qu'au prochain geste de l'utilisateur.
+        // Without this, egui redraws only on an input event: the end of the
+        // script would show up only at the user's next gesture.
         ctx.request_repaint();
     }
 
@@ -187,29 +186,29 @@ fn script_fields_contents(
         });
 }
 
-/// Hauteur par défaut du panneau fixe de la console de script — point de
-/// départ seulement, l'utilisateur peut ensuite le redimensionner en
-/// glissant son bord (`.resizable(true)`, voir [`StokesForgeApp::script_panel`]).
+/// Default height of the script console's fixed panel — a starting point
+/// only, the user can then resize it by dragging its edge
+/// (`.resizable(true)`, see [`StokesForgeApp::script_panel`]).
 const SCRIPT_PANEL_HEIGHT: f32 = 220.0;
 
 impl StokesForgeApp {
-    /// Peint la console de script dans son panneau fixe, ancré en bas — voir
-    /// la doc de tête d'`app.rs`, § Ce qui reste ici (l'ordre des panneaux).
-    /// Appelé par
-    /// [`StokesForgeApp::ui`](eframe::App::ui) *avant* [`StokesForgeApp::project_manager_panel`]
-    /// (`egui::Panel::left`) : avec `egui::Panel`, le premier panneau ajouté
-    /// est le plus extérieur, donc celui-ci, posé en premier, réserve sa
-    /// bande sur toute la largeur de la fenêtre — y compris sous le Project
-    /// Manager, pas seulement sous la zone du `CentralPanel` — plutôt que
-    /// d'être resserré entre lui et le bord droit. `egui::Panel::bottom`
-    /// n'est **pas** redimensionnable par défaut (à la différence de
-    /// `left`/`right`) : `.resizable(true)` restaure le glisser du bord en
-    /// hauteur. Le détachement utilise la même lecture de console et laisse
-    /// le moteur à la racine ; le masquage View ne suspend pas son travail.
+    /// Paints the script console in its fixed panel, anchored at the bottom
+    /// — see the head doc of `app.rs`, § What stays here (the order of the
+    /// panels). Called by
+    /// [`StokesForgeApp::ui`](eframe::App::ui) *before* [`StokesForgeApp::project_manager_panel`]
+    /// (`egui::Panel::left`): with `egui::Panel`, the first panel added
+    /// is the outermost, so this one, placed first, reserves its band
+    /// across the whole window width — including under the Project
+    /// Manager, not only under the `CentralPanel` area — instead of
+    /// being squeezed between it and the right edge. `egui::Panel::bottom`
+    /// is **not** resizable by default (unlike `left`/`right`):
+    /// `.resizable(true)` restores dragging the edge in height. Detaching
+    /// uses the same console reading and leaves the engine at the root;
+    /// hiding it through View does not suspend its work.
     ///
-    /// Repliée (issue #79), la console se réduit à sa barre de titre — un
-    /// panneau distinct, non redimensionnable, pour que la hauteur mémorisée
-    /// du panneau déplié ne soit pas écrasée.
+    /// Collapsed (issue #79), the console shrinks to its title bar — a
+    /// separate, non-resizable panel, so that the remembered height of the
+    /// expanded panel is not overwritten.
     pub(super) fn script_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -252,8 +251,8 @@ impl StokesForgeApp {
                 self.detach_script_console();
             }
             if !collapsed {
-                // Le contenu seul peut être plus court que la hauteur
-                // choisie : occuper la place réservée la conserve (#100).
+                // The content alone may be shorter than the chosen height:
+                // filling the reserved space keeps it (#100).
                 show_window_contents_bounded(ui, |ui| {
                     script_contents(ui, ctx, &mut self.state, actions);
                 });
@@ -290,10 +289,10 @@ mod tests {
         }
     }
 
-    /// La barre de titre (#79) : un clic sur son chevron le signale, une image
-    /// sans clic non ; elle dit quand l'interpréteur manque à ce binaire.
+    /// The title bar (#79): a click on its chevron reports it, a frame
+    /// without a click does not; it says when the interpreter is missing from this binary.
     #[test]
-    fn la_barre_de_titre_signale_le_clic_du_chevron_et_l_absence_d_interpreteur() {
+    fn the_title_bar_reports_the_chevron_click_and_the_missing_interpreter() {
         let (_session, state) = state();
         for collapsed in [true, false] {
             let context = egui::Context::default();
@@ -309,27 +308,27 @@ mod tests {
             };
             paint(&context, Vec::new());
             let output = paint(&context, Vec::new());
-            assert!(!toggled.get(), "sans clic, pas de bascule");
+            assert!(!toggled.get(), "no click, no toggle");
             assert!(painted(&output, &tr!("script-title")));
             assert_eq!(
                 painted(&output, &tr!("script-unavailable")),
                 !collapsed && !state.script_available(),
-                "l'absence d'interpréteur se dit, et seulement elle"
+                "the missing interpreter is reported, and only it"
             );
             let chevron = find_icon_centers(&output.shapes)[0];
             click_at(&context, chevron, egui::Modifiers::NONE, paint);
             assert!(
                 toggled.get(),
-                "le clic sur le chevron bascule (replié : {collapsed})"
+                "a click on the chevron toggles (collapsed: {collapsed})"
             );
         }
     }
 
-    /// « Exécuter » n'émet `RunScript` que si un interpréteur est là ;
-    /// « Arrêter » est grisé tant qu'aucun script ne tourne. Avant toute
-    /// exécution, la sortie le dit.
+    /// "Run" emits `RunScript` only if an interpreter is there;
+    /// "Stop" is greyed out while no script is running. Before any
+    /// run, the output says so.
     #[test]
-    fn executer_n_emet_que_si_un_interpreteur_est_la_et_arreter_reste_grise() {
+    fn run_emits_only_if_an_interpreter_is_there_and_stop_stays_greyed_out() {
         let (_session, mut state) = state();
         let context = egui::Context::default();
         let actions = std::cell::RefCell::new(Vec::new());
@@ -355,7 +354,7 @@ mod tests {
         );
         assert!(
             actions.borrow().is_empty(),
-            "Arrêter est grisé sans script en cours"
+            "Stop is greyed out with no script running"
         );
 
         click_at(
@@ -372,15 +371,15 @@ mod tests {
         assert_eq!(
             *actions.borrow(),
             expected,
-            "interpréteur présent : {available}"
+            "interpreter present: {available}"
         );
     }
 
-    /// Repliée au démarrage, la console n'a que sa barre de titre (#79) ;
-    /// une exécution demandée dans l'image la déplie, pour qu'on en voie la
-    /// sortie, et le panneau déplié peint le contenu.
+    /// Collapsed at startup, the console has only its title bar (#79);
+    /// a run requested in the frame expands it, so that its output is
+    /// seen, and the expanded panel paints the content.
     #[test]
-    fn lancer_un_script_deplie_la_console() {
+    fn launching_a_script_expands_the_console() {
         let (_session, state) = state();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -393,17 +392,17 @@ mod tests {
             output.textures_delta.clear();
             output
         };
-        assert!(app.script_collapsed, "repliée au démarrage");
+        assert!(app.script_collapsed, "collapsed at startup");
         let output = paint(&mut app, Vec::new());
-        assert!(app.script_collapsed, "sans exécution, elle reste repliée");
+        assert!(app.script_collapsed, "without a run, it stays collapsed");
         assert!(painted(&output, &tr!("script-title")));
         assert!(
             !painted(&output, &tr!("script-not-run")),
-            "repliée : pas de contenu"
+            "collapsed: no content"
         );
 
         let output = paint(&mut app, vec![Action::RunScript]);
-        assert!(!app.script_collapsed, "une exécution la déplie");
+        assert!(!app.script_collapsed, "a run expands it");
         assert!(painted(&output, &tr!("script-not-run")));
     }
 }

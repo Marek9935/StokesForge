@@ -1,28 +1,28 @@
-//! Curseurs de la souris (#231, S-X2) : le seul endroit qui nomme un
-//! `egui::CursorIcon`. Trois sens, partout les mêmes :
+//! Mouse cursors (#231, S-X2): the only place that names an
+//! `egui::CursorIcon`. Three meanings, the same everywhere:
 //!
-//! - **glisser** : main ouverte au survol d'une prise ([`grab`]), fermée
-//!   pendant le geste ([`grabbing`]) ;
-//! - **redimensionner** : la flèche du bord ou du coin (`RESIZE_*`) ;
-//! - **cliquer** : le doigt sur un élément cliquable qui n'est pas un bouton
-//!   — onglet, ligne de liste, zone de la barre d'état ([`clickable`]). Un
-//!   bouton garde la flèche.
+//! - **drag**: open hand on hover over a grip ([`grab`]), closed hand
+//!   during the gesture ([`grabbing`]);
+//! - **resize**: the arrow of the edge or corner (`RESIZE_*`);
+//! - **click**: the finger on a clickable element that is not a button
+//!   — tab, list row, status bar area ([`clickable`]). A button keeps the
+//!   arrow.
 //!
-//! Garde `aucun_curseur_hors_du_module_des_curseurs` (`tests/gardes.rs`).
+//! Guard `no_cursor_outside_the_cursors_module` (`tests/guards.rs`).
 
 use eframe::egui;
 
-/// Main ouverte : la prise se saisit.
+/// Open hand: the grip can be grabbed.
 pub(super) fn grab(ctx: &egui::Context) {
     ctx.set_cursor_icon(egui::CursorIcon::Grab);
 }
 
-/// Main fermée : le glisser est en cours.
+/// Closed hand: the drag is in progress.
 pub(super) fn grabbing(ctx: &egui::Context) {
     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
 }
 
-/// Une prise : main ouverte au survol, fermée pendant le glisser.
+/// A grip: open hand on hover, closed during the drag.
 pub(super) fn grab_handle(response: egui::Response) -> egui::Response {
     if response.dragged() {
         grabbing(&response.ctx);
@@ -32,7 +32,7 @@ pub(super) fn grab_handle(response: egui::Response) -> egui::Response {
     response
 }
 
-/// Le doigt sur un élément cliquable qui n'est pas un bouton.
+/// The finger on a clickable element that is not a button.
 pub(super) fn clickable(response: egui::Response) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

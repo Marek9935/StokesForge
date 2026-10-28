@@ -38,7 +38,7 @@ An empty section disappears with its separators.
 - **Separators**: a thin line between two present sections, never at the start,
   at the end or doubled. It is placed **only** by `MenuSections::section(ui,
   présente, contenu)`; the caller says whether the section exists for the
-  target, the line follows. Guard `aucun_separateur_brut_dans_un_menu` (`tests/gardes.rs`),
+  target, the line follows. Guard `no_raw_separator_in_a_menu` (`tests/guards.rs`),
   with no exemption: no `ui.separator()` in a menu.
 - **Submenu** only for an exclusive choice (Type, Role, plot type)
   or at least **3** secondary entries of the same family. Never 1 entry;
@@ -166,7 +166,7 @@ without a click. With the bar at rest, hovering opens nothing. If the pointer
 heads toward the open popup (a diagonal toward an entry that crosses the
 neighboring title), no switch happens; the switch happens as soon as the
 pointer no longer aims at the popup (`is_moving_towards_rect` tolerance, as for
-egui's submenus). A single piece of code, `bascule_au_survol` (`app/menus.rs`),
+egui's submenus). A single piece of code, `toggle_on_hover` (`app/menus.rs`),
 shared by the active tab and the detached window. A click on the title that is
 already open closes it.
 

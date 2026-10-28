@@ -1,9 +1,8 @@
-//! Fenêtre d'historique de la barre d'état (#230, S-M6) : les 50 derniers
-//! messages, horodatés, du plus récent au plus ancien. Lecture seule, donc
-//! `modal_read_only` (Close seul, S-F2) ; un message d'échec reste dans la barre
-//! d'état, jamais ici seulement. L'heure est l'heure UTC : la bibliothèque
-//! standard ne connaît pas le fuseau local et le projet n'a pas de dépendance
-//! de calendrier.
+//! Status bar history window (#230, S-M6): the last 50 messages, timestamped,
+//! from newest to oldest. Read-only, hence `modal_read_only` (Close only,
+//! S-F2); a failure message stays in the status bar, never only here. The time
+//! is UTC: the standard library does not know the local time zone and the
+//! project has no calendar dependency.
 
 use eframe::egui;
 
@@ -13,7 +12,7 @@ use super::menus::status_line;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// « HH:MM:SS » (UTC) d'un instant.
+/// "HH:MM:SS" (UTC) of a point in time.
 fn clock(at: std::time::SystemTime) -> String {
     let seconds = at
         .duration_since(std::time::UNIX_EPOCH)
@@ -27,7 +26,7 @@ fn clock(at: std::time::SystemTime) -> String {
     )
 }
 
-/// Peint la fenêtre tant que l'historique est ouvert.
+/// Paints the window while the history is open.
 pub(super) fn status_history_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -62,9 +61,9 @@ pub(super) fn status_history_window(
     }
 }
 
-/// Peint la liste des R² faibles du projet par type (#290), ouverte par la
-/// pastille de la barre d'état. Lecture seule : Close seul. Les mêmes
-/// compteurs que la boîte (`AppState::low_r2_list_text`).
+/// Paints the list of the project's weak R² by type (#290), opened by the
+/// status bar badge. Read-only: Close only. The same counters as the box
+/// (`AppState::low_r2_list_text`).
 pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     if !state.low_r2_list_open() {
         return;
@@ -75,7 +74,7 @@ pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions:
         &tr!("alert-low-r2-title"),
         PlainSize::Content(egui::vec2(480.0, 170.0)),
         |ui| {
-            // Texte normal : les compteurs sont le contenu, pas un détail (#290).
+            // Normal text: the counters are the content, not a detail (#290).
             ui.label(state.low_r2_list_text());
         },
     );
@@ -89,7 +88,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn l_heure_est_celle_du_jour_en_utc() {
+    fn the_time_is_the_time_of_day_in_utc() {
         let at = std::time::UNIX_EPOCH
             + std::time::Duration::from_secs(86_400 * 3 + 13 * 3600 + 5 * 60 + 9);
         assert_eq!(clock(at), "13:05:09");

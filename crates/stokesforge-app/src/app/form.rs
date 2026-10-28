@@ -1,30 +1,30 @@
-//! La brique « formulaire » (#227, `docs/standard-interface.md`, § Choices,
-//! layout) : une grille à **deux colonnes** — libellés à gauche, champs
-//! alignés sur une même verticale, cases à cocher et notes dans la colonne des
-//! champs (S-L1) — et le **choix exclusif** qui se peint en boutons radio pour
-//! 2 ou 3 options, en liste déroulante dès 4 (S-C1), radios côte à côte si
-//! chaque libellé tient en 3 mots, l'un sous l'autre sinon (S-C2).
+//! The "form" building block (#227, `docs/standard-interface.md`, § Choices,
+//! layout): a **two-column** grid — labels on the left, fields
+//! aligned on one vertical, checkboxes and notes in the fields column
+//! (S-L1) — and the **exclusive choice** that is painted as radio buttons for
+//! 2 or 3 options, as a dropdown list from 4 (S-C1), radios side by side if
+//! each label fits in 3 words, one under the other otherwise (S-C2).
 //!
-//! Pourquoi pas `egui::Grid` : une grille d'egui n'a pas de cellule qui
-//! s'étend sur deux colonnes, donc un titre de section (S-L3) y élargirait la
-//! colonne des libellés, et `add_space` y est interdit (assertion d'egui) — or
-//! le titre de section pose son écart. La brique garde des rangées ordinaires
-//! (`ui.horizontal`), où l'icône « ? » de `hover_help` se pose comme ailleurs,
-//! et aligne la colonne des champs sur le libellé le plus large, mesuré à
-//! l'image précédente et gardé dans la mémoire d'egui sous l'identifiant du
-//! formulaire (comme `egui::Grid` le fait de ses colonnes). Quand cette
-//! largeur change (première image, autre page), l'image est refaite
-//! (`request_discard`) : on ne voit jamais un formulaire désaligné.
+//! Why not `egui::Grid`: an egui grid has no cell spanning two columns,
+//! so a section title (S-L3) would widen the labels column there, and
+//! `add_space` is forbidden in it (egui assertion) — yet the section title
+//! sets its gap. The building block keeps ordinary rows
+//! (`ui.horizontal`), where the "?" icon of `hover_help` is placed as elsewhere,
+//! and aligns the fields column on the widest label, measured on the
+//! previous frame and kept in egui's memory under the form's identifier
+//! (as `egui::Grid` does for its columns). When this
+//! width changes (first frame, other page), the frame is redone
+//! (`request_discard`): a misaligned form is never seen.
 //!
-//! L'ordre de Tab suit l'ordre de lecture (S-K6) parce que les rangées se
-//! peignent de haut en bas et, dans une rangée, de gauche à droite : un
-//! formulaire n'a pas à le régler.
+//! The Tab order follows the reading order (S-K6) because the rows are
+//! painted from top to bottom and, within a row, from left to right: a
+//! form does not have to set it.
 //!
-//! Pas de section repliable dans un formulaire (S-L5) : trop long, il passe en
-//! onglets (`tab_strip`). Seule exception, [`Form::collapsible`] (S-L8, #344) :
-//! un bloc « Avancé » fermé par défaut, pour des réglages qu'on ne touche
-//! presque jamais et dont le défaut est Auto. Les largeurs de champ sont celles de
-//! [`theme::FieldWidth`] (S-L2) ; les écarts, [`theme::SPACE_ITEM`] et
+//! No collapsible section in a form (S-L5): too long, it goes into
+//! tabs (`tab_strip`). The only exception, [`Form::collapsible`] (S-L8, #344):
+//! an "Advanced" block closed by default, for settings that are almost never
+//! touched and whose default is Auto. The field widths are those of
+//! [`theme::FieldWidth`] (S-L2); the gaps, [`theme::SPACE_ITEM`] and
 //! [`theme::SPACE_SECTION`] (S-L4).
 
 use std::hash::Hash;
@@ -36,19 +36,19 @@ use crate::theme;
 
 use super::hover_help::help_beside;
 
-/// Un formulaire en cours de peinture : voir [`form`].
+/// A form being painted: see [`form`].
 pub(super) struct Form<'a> {
     ui: &'a mut egui::Ui,
-    /// Largeur de la colonne des libellés retenue pour cette image (le plus
-    /// large de l'image précédente).
+    /// Width of the labels column kept for this frame (the widest of the
+    /// previous frame).
     label_width: f32,
-    /// Le libellé le plus large peint dans cette image.
+    /// The widest label painted in this frame.
     widest: f32,
 }
 
-/// Peint un formulaire en grille à deux colonnes (S-L1) : `add` pose ses
-/// rangées par [`Form::row`], [`Form::field`], [`Form::note`] et
-/// [`Form::section`]. `id_salt` distingue deux formulaires d'un même `Ui`.
+/// Paints a form as a two-column grid (S-L1): `add` places its
+/// rows through [`Form::row`], [`Form::field`], [`Form::note`] and
+/// [`Form::section`]. `id_salt` tells two forms of the same `Ui` apart.
 pub(super) fn form<R>(
     ui: &mut egui::Ui,
     id_salt: impl Hash + std::fmt::Debug,
@@ -67,26 +67,25 @@ pub(super) fn form<R>(
     };
     if (widest - label_width).abs() > 0.5 {
         ui.data_mut(|data| data.insert_temp(id, widest));
-        ui.ctx()
-            .request_discard("colonne des libellés d'un formulaire");
+        ui.ctx().request_discard("labels column of a form");
     }
     inner
 }
 
 impl Form<'_> {
-    /// Le `Ui` du formulaire, pour ce qui s'étend sur toute la largeur (un
-    /// tableau, un aperçu, une liste de lignes).
+    /// The form's `Ui`, for what spans the whole width (a
+    /// table, a preview, a list of rows).
     pub(super) fn ui(&mut self) -> &mut egui::Ui {
         self.ui
     }
 
-    /// Un titre de section (S-L3), sur toute la largeur : [`theme::section_title`].
+    /// A section title (S-L3), over the whole width: [`theme::section_title`].
     pub(super) fn section(&mut self, title: impl Into<String>) -> egui::Response {
         theme::section_title(self.ui, title)
     }
 
-    /// Une rangée : `label` dans la colonne des libellés, `field` dans celle
-    /// des champs (le champ, puis s'il y a lieu son icône « ? »).
+    /// A row: `label` in the labels column, `field` in the fields column
+    /// (the field, then if applicable its "?" icon).
     pub(super) fn row<R>(
         &mut self,
         label: impl Into<egui::WidgetText>,
@@ -105,8 +104,8 @@ impl Form<'_> {
         inner
     }
 
-    /// Une rangée sans libellé : `field` dans la colonne des champs (case à
-    /// cocher, bouton, groupe de radios sous son libellé).
+    /// A row without a label: `field` in the fields column (checkbox,
+    /// button, group of radios under its label).
     pub(super) fn field<R>(&mut self, field: impl FnOnce(&mut egui::Ui) -> R) -> R {
         let indent = self.indent();
         self.ui
@@ -117,8 +116,8 @@ impl Form<'_> {
             .inner
     }
 
-    /// Une case à cocher dans la colonne des champs, son rappel en icône
-    /// « ? » à droite si `hint` est donné. Rend `true` si elle a changé.
+    /// A checkbox in the fields column, its reminder as a "?" icon
+    /// on the right if `hint` is given. Returns `true` if it changed.
     pub(super) fn checkbox(
         &mut self,
         value: &mut bool,
@@ -131,10 +130,10 @@ impl Form<'_> {
         })
     }
 
-    /// Une rangée de couleur : `label` à gauche, l'échantillon du sélecteur
-    /// commun ([`color_button`], identifié par son libellé comme
-    /// `color_field`) dans la colonne des champs. Rend `true` quand un geste
-    /// vient de se terminer.
+    /// A color row: `label` on the left, the swatch of the common picker
+    /// ([`color_button`], identified by its label like
+    /// `color_field`) in the fields column. Returns `true` when a gesture
+    /// has just ended.
     pub(super) fn color(
         &mut self,
         label: &str,
@@ -148,8 +147,8 @@ impl Form<'_> {
         })
     }
 
-    /// Un texte en clair estompé (effet de bord, portée : S-M1) dans la colonne
-    /// des champs, qui revient à la ligne dans sa colonne.
+    /// A faded plain text (side effect, scope: S-M1) in the fields column,
+    /// which wraps within its column.
     pub(super) fn note(&mut self, text: impl Into<String>) {
         let text = text.into();
         let indent = self.indent();
@@ -161,8 +160,8 @@ impl Form<'_> {
         });
     }
 
-    /// Les rangées de `add`, grisées si `enabled` est faux (S-G4 : valeurs
-    /// visibles et conservées). Rend la réponse du groupe, pour sa raison.
+    /// The rows of `add`, greyed out if `enabled` is false (S-G4: values
+    /// visible and kept). Returns the group's response, for its reason.
     pub(super) fn enabled<R>(
         &mut self,
         enabled: bool,
@@ -184,13 +183,13 @@ impl Form<'_> {
         response
     }
 
-    /// Un bloc repliable (S-L8, #344), **fermé par défaut** : une flèche et son
-    /// titre sur une rangée, puis les rangées de `add` — dans la même grille,
-    /// donc alignées sur les champs d'au-dessus — quand il est ouvert. Rend
-    /// `None` fermé. L'état ouvert/fermé vit dans la mémoire d'egui sous
-    /// `id_salt` : il se garde le temps de la session, jamais dans le fichier.
-    /// Réservé aux réglages « Avancé » dont tous les défauts sont Auto ; un
-    /// formulaire trop long passe toujours en onglets (S-L5).
+    /// A collapsible block (S-L8, #344), **closed by default**: an arrow and its
+    /// title on a row, then the rows of `add` — in the same grid,
+    /// hence aligned on the fields above — when it is open. Returns
+    /// `None` when closed. The open/closed state lives in egui's memory under
+    /// `id_salt`: it is kept for the session, never in the file.
+    /// Reserved for "Advanced" settings whose defaults are all Auto; a
+    /// form that is too long always goes into tabs (S-L5).
     pub(super) fn collapsible<R>(
         &mut self,
         id_salt: impl Hash + std::fmt::Debug,
@@ -206,9 +205,9 @@ impl Form<'_> {
             false,
         );
         let title = title.into();
-        // Flèche et titre sont une seule zone cliquable, dans la colonne des
-        // libellés comme « Tick direction » : aucun espace mort entre eux, et
-        // le titre n'est pas sélectionnable (S-L8).
+        // Arrow and title are a single clickable area, in the labels column
+        // like "Tick direction": no dead space between them, and
+        // the title is not selectable (S-L8).
         let (toggled, width) = self
             .ui
             .horizontal(|ui| {
@@ -256,8 +255,8 @@ impl Form<'_> {
         open.then(|| add(self))
     }
 
-    /// Le retrait de la colonne des champs : la colonne des libellés et
-    /// l'écart entre les deux colonnes.
+    /// The indent of the fields column: the labels column and
+    /// the gap between the two columns.
     fn indent(&self) -> f32 {
         if self.label_width > 0.0 {
             self.label_width + self.ui.spacing().item_spacing.x
@@ -267,25 +266,25 @@ impl Form<'_> {
     }
 }
 
-/// Comment se peint un choix exclusif (S-C1, S-C2).
+/// How an exclusive choice is painted (S-C1, S-C2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChoiceLayout {
-    /// 2 ou 3 options aux libellés de 3 mots au plus : radios côte à côte.
+    /// 2 or 3 options with labels of at most 3 words: radios side by side.
     RadiosRow,
-    /// 2 ou 3 options dont un libellé dépasse 3 mots : radios l'un sous
-    /// l'autre.
+    /// 2 or 3 options of which a label exceeds 3 words: radios one under
+    /// the other.
     RadiosColumn,
-    /// 4 options ou plus : liste déroulante.
+    /// 4 options or more: dropdown list.
     List,
 }
 
-/// Le nombre d'options à partir duquel un choix passe en liste (S-C1).
+/// The number of options from which a choice becomes a list (S-C1).
 pub(super) const LIST_FROM: usize = 4;
 
-/// Le nombre de mots au-delà duquel les radios passent l'un sous l'autre (S-C2).
+/// The number of words beyond which the radios go one under the other (S-C2).
 const RADIO_ROW_WORDS: usize = 3;
 
-/// La décision de S-C1 et S-C2, pure : la forme d'un choix d'après ses libellés.
+/// The decision of S-C1 and S-C2, pure: the shape of a choice from its labels.
 pub(super) fn choice_layout<S: AsRef<str>>(labels: &[S]) -> ChoiceLayout {
     if labels.len() >= LIST_FROM {
         ChoiceLayout::List
@@ -299,9 +298,9 @@ pub(super) fn choice_layout<S: AsRef<str>>(labels: &[S]) -> ChoiceLayout {
     }
 }
 
-/// Une option d'un [`choice`] : sa valeur, son libellé, et le rappel
-/// facultatif posé en icône « ? » à côté de son radio (ou en bulle de son
-/// entrée de liste).
+/// An option of a [`choice`]: its value, its label, and the optional
+/// reminder placed as a "?" icon next to its radio (or as a bubble on its
+/// list entry).
 pub(super) struct ChoiceOption<T> {
     pub(super) value: T,
     pub(super) label: String,
@@ -310,7 +309,7 @@ pub(super) struct ChoiceOption<T> {
 }
 
 impl<T> ChoiceOption<T> {
-    /// Une option sans rappel.
+    /// An option without a reminder.
     pub(super) fn new(value: T, label: impl Into<String>) -> Self {
         Self {
             value,
@@ -320,24 +319,24 @@ impl<T> ChoiceOption<T> {
         }
     }
 
-    /// Grise une option avec la raison du refus affichée au survol.
+    /// Greys out an option with the reason for the refusal shown on hover.
     pub(super) fn disabled(mut self, reason: Option<String>) -> Self {
         self.disabled = reason;
         self
     }
 
-    /// La même option, avec son rappel.
+    /// The same option, with its reminder.
     pub(super) fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
     }
 }
 
-/// Un choix exclusif parmi des options fixes, peint selon [`choice_layout`] :
-/// radios (2–3 options) ou liste déroulante (4 et plus). `same` dit si une
-/// valeur est l'option courante (égalité, ou même variante quand l'option
-/// porte un paramètre). Rend `true` si l'utilisateur a choisi une **autre**
-/// option, écrite dans `value`.
+/// An exclusive choice among fixed options, painted per [`choice_layout`]:
+/// radios (2–3 options) or dropdown list (4 and more). `same` says whether a
+/// value is the current option (equality, or same variant when the option
+/// carries a parameter). Returns `true` if the user picked a **different**
+/// option, written into `value`.
 pub(super) fn choice_by<T: Clone>(
     ui: &mut egui::Ui,
     id_salt: impl Hash + std::fmt::Debug,
@@ -375,8 +374,8 @@ pub(super) fn choice_by<T: Clone>(
         }
         layout => {
             let radios = |ui: &mut egui::Ui| {
-                // Un libellé qui ne tient pas passe à la ligne (#335), il n'est
-                // pas rogné par le bord de la colonne.
+                // A label that does not fit wraps (#335), it is not
+                // clipped by the edge of the column.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.push_id(id_salt, |ui| {
                     for (index, option) in options.iter().enumerate() {
@@ -416,7 +415,7 @@ pub(super) fn choice_by<T: Clone>(
     }
 }
 
-/// [`choice_by`] pour des valeurs comparables par égalité.
+/// [`choice_by`] for values comparable by equality.
 pub(super) fn choice<T: Clone + PartialEq>(
     ui: &mut egui::Ui,
     id_salt: impl Hash + std::fmt::Debug,
@@ -426,17 +425,17 @@ pub(super) fn choice<T: Clone + PartialEq>(
     choice_by(ui, id_salt, value, options, |a, b| a == b)
 }
 
-/// Le rayon des coins d'un texte entouré de [`toggle_texts`].
+/// The corner radius of a text surrounded by [`toggle_texts`].
 const TOGGLE_TEXT_RADIUS: u8 = 6;
 
-/// Des **textes entourés** qui font office de boutons à bascule (#270) : un
-/// cadre arrondi autour de chaque libellé, l'option courante en fond plein de
-/// la couleur d'accent, les autres en contour seul. Un clic sur une autre
-/// option la rend courante (rend `true`) ; un clic sur la courante ne change
-/// rien. C'est un choix exclusif, mais pour la rangée d'outils de l'aperçu
-/// d'analyse, où des radios alourdiraient une barre qui change selon l'analyse ;
-/// partout ailleurs, [`choice`]. Peint à la main : le fond sélectionné d'egui
-/// est réservé aux menus (`aucun_bouton_selectionnable_hors_d_un_menu`).
+/// **Surrounded texts** that act as toggle buttons (#270): a
+/// rounded frame around each label, the current option as a solid background in
+/// the accent color, the others as an outline only. A click on another
+/// option makes it current (returns `true`); a click on the current one changes
+/// nothing. It is an exclusive choice, but for the tool row of the analysis
+/// preview, where radios would weigh down a bar that changes with the analysis;
+/// everywhere else, [`choice`]. Painted by hand: egui's selected background
+/// is reserved for menus (`no_selectable_button_outside_a_menu`).
 pub(super) fn toggle_texts<T: Clone + PartialEq>(
     ui: &mut egui::Ui,
     id_salt: impl Hash + std::fmt::Debug,
@@ -449,7 +448,7 @@ pub(super) fn toggle_texts<T: Clone + PartialEq>(
             for (index, option) in options.iter().enumerate() {
                 let active = *value == option.value;
                 let font = egui::TextStyle::Button.resolve(ui.style());
-                // Couleur choisie à la peinture (`galley` la prend en repli).
+                // Color chosen at paint time (`galley` takes it as a fallback).
                 let galley = ui.painter().layout_no_wrap(
                     option.label.clone(),
                     font,
@@ -507,14 +506,14 @@ pub(super) fn toggle_texts<T: Clone + PartialEq>(
 mod tests {
     use eframe::egui;
 
-    use super::super::test_support::{cliquer, contexte, image, textes};
+    use super::super::test_support::{click, context, image, texts};
     use super::{choice, choice_layout, form, toggle_texts, ChoiceLayout, ChoiceOption};
     use crate::theme;
 
-    /// S-C1, S-C2 : 2–3 options en radios, côte à côte tant que chaque libellé
-    /// tient en 3 mots ; 4 et plus en liste, quelle que soit leur longueur.
+    /// S-C1, S-C2: 2–3 options as radios, side by side as long as each label
+    /// fits in 3 words; 4 and more as a list, whatever their length.
     #[test]
-    fn la_forme_d_un_choix_suit_le_nombre_d_options_et_de_mots() {
+    fn the_shape_of_a_choice_follows_the_number_of_options_and_words() {
         assert_eq!(choice_layout(&["Dot", "Comma"]), ChoiceLayout::RadiosRow);
         assert_eq!(
             choice_layout(&["None", "Constant", "Linear"]),
@@ -523,224 +522,218 @@ mod tests {
         assert_eq!(
             choice_layout(&["One sheet per file", "Side by side"]),
             ChoiceLayout::RadiosColumn,
-            "un libellé de 4 mots met les radios l'un sous l'autre"
+            "a label of 4 words puts the radios one under the other"
         );
         assert_eq!(
             choice_layout(&["a b c", "d e f"]),
             ChoiceLayout::RadiosRow,
-            "3 mots tiennent encore sur la rangée"
+            "3 words still fit on the row"
         );
         assert_eq!(choice_layout(&["a", "b", "c", "d"]), ChoiceLayout::List);
         assert_eq!(
-            choice_layout(&["un deux trois quatre", "b", "c", "d"]),
+            choice_layout(&["one two three four", "b", "c", "d"]),
             ChoiceLayout::List,
-            "dès 4 options, la liste, même avec un libellé long"
+            "from 4 options, the list, even with a long label"
         );
     }
 
-    /// S-L1 : la colonne des champs est une même verticale, quel que soit le
-    /// libellé de la rangée ; une case sans libellé s'y range aussi. Témoin :
-    /// les libellés, eux, commencent tous à gauche, à des largeurs différentes.
+    /// S-L1: the fields column is one vertical, whatever the
+    /// row's label; a checkbox without a label is placed there too. Witness:
+    /// the labels, for their part, all start on the left, at different widths.
     #[test]
-    fn les_champs_d_un_formulaire_sont_alignes_sur_une_meme_verticale() {
-        let context = contexte();
-        let mut case = false;
-        let mut formes = Vec::new();
+    fn the_fields_of_a_form_are_aligned_on_one_vertical() {
+        let context = context();
+        let mut checkbox = false;
+        let mut shapes = Vec::new();
         for _ in 0..3 {
-            formes = image(&context, Vec::new(), |ui| {
-                form(ui, "essai", |form| {
-                    form.row("Court", |ui| ui.label("champ un"));
-                    form.row("Un libellé bien plus long", |ui| ui.label("champ deux"));
-                    form.checkbox(&mut case, "case", None);
+            shapes = image(&context, Vec::new(), |ui| {
+                form(ui, "trial", |form| {
+                    form.row("Short", |ui| ui.label("field one"));
+                    form.row("A much longer label", |ui| ui.label("field two"));
+                    form.checkbox(&mut checkbox, "checkbox", None);
                     form.note("note");
                 });
             });
         }
-        // Le rectangle peint d'un texte (sa galée posée à l'écran).
-        let rect = |cherche: &str| {
-            formes
+        // The painted rectangle of a text (its galley placed on the screen).
+        let rect = |needle: &str| {
+            shapes
                 .iter()
-                .find_map(|forme| match &forme.shape {
-                    egui::Shape::Text(texte) if texte.galley.job.text == cherche => {
-                        Some(texte.galley.rect.translate(texte.pos.to_vec2()))
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == needle => {
+                        Some(text.galley.rect.translate(text.pos.to_vec2()))
                     }
                     _ => None,
                 })
-                .unwrap_or_else(|| panic!("{cherche:?} non peint"))
+                .unwrap_or_else(|| panic!("{needle:?} non peint"))
         };
-        let champ_un = rect("champ un").left();
-        assert!((champ_un - rect("champ deux").left()).abs() < 0.5);
+        let field_one = rect("field one").left();
+        assert!((field_one - rect("field two").left()).abs() < 0.5);
         assert!(
-            rect("case").left() > champ_un,
-            "la case est dans la colonne des champs (après sa coche)"
+            rect("checkbox").left() > field_one,
+            "the checkbox is in the fields column (after its tick)"
         );
-        assert!((rect("note").left() - champ_un).abs() < 0.5);
-        // Témoin : les libellés partent du même bord gauche, et le plus long
-        // pousse la colonne des champs au-delà de sa fin.
-        let long = rect("Un libellé bien plus long");
-        assert!((rect("Court").left() - long.left()).abs() < 0.5);
-        assert!(champ_un > long.right());
-        assert!(rect("Court").right() < long.right());
+        assert!((rect("note").left() - field_one).abs() < 0.5);
+        // Witness: the labels start from the same left edge, and the longest
+        // pushes the fields column beyond its end.
+        let long = rect("A much longer label");
+        assert!((rect("Short").left() - long.left()).abs() < 0.5);
+        assert!(field_one > long.right());
+        assert!(rect("Short").right() < long.right());
     }
 
-    /// Un clic sur un radio choisit sa valeur ; un clic sur l'option déjà
-    /// choisie ne rend pas de changement.
+    /// A click on a radio picks its value; a click on the already
+    /// picked option returns no change.
     #[test]
-    fn un_clic_sur_un_radio_choisit_son_option() {
-        let context = contexte();
-        let mut valeur = 1;
-        let options = [ChoiceOption::new(1, "Un"), ChoiceOption::new(2, "Deux")];
+    fn a_click_on_a_radio_picks_its_option() {
+        let context = context();
+        let mut value = 1;
+        let options = [ChoiceOption::new(1, "One"), ChoiceOption::new(2, "Two")];
         let change = std::cell::Cell::new(false);
-        let peindre = |events: Vec<egui::Event>, valeur: &mut i32| {
-            textes(&image(&context, events, |ui| {
-                change.set(choice(ui, "radios", valeur, &options));
+        let paint = |events: Vec<egui::Event>, value: &mut i32| {
+            texts(&image(&context, events, |ui| {
+                change.set(choice(ui, "radios", value, &options));
             }))
         };
-        let peints = peindre(Vec::new(), &mut valeur);
-        let deux = peints.iter().find(|t| t.texte == "Deux").unwrap().centre;
-        let clic = |pressed| egui::Event::PointerButton {
-            pos: deux,
+        let painted_texts = paint(Vec::new(), &mut value);
+        let two = painted_texts
+            .iter()
+            .find(|t| t.text == "Two")
+            .unwrap()
+            .center;
+        let click_event = |pressed| egui::Event::PointerButton {
+            pos: two,
             button: egui::PointerButton::Primary,
             pressed,
             modifiers: egui::Modifiers::default(),
         };
-        peindre(vec![egui::Event::PointerMoved(deux)], &mut valeur);
-        peindre(vec![clic(true)], &mut valeur);
-        peindre(vec![clic(false)], &mut valeur);
-        assert_eq!(valeur, 2);
+        paint(vec![egui::Event::PointerMoved(two)], &mut value);
+        paint(vec![click_event(true)], &mut value);
+        paint(vec![click_event(false)], &mut value);
+        assert_eq!(value, 2);
         assert!(change.get());
-        peindre(vec![clic(true)], &mut valeur);
-        peindre(vec![clic(false)], &mut valeur);
-        assert!(!change.get(), "l'option déjà choisie ne change rien");
+        paint(vec![click_event(true)], &mut value);
+        paint(vec![click_event(false)], &mut value);
+        assert!(!change.get(), "the already picked option changes nothing");
     }
-    /// #335 : dans une colonne étroite, des radios côte à côte ou l'un sous
-    /// l'autre passent à la ligne au lieu de dépasser (et d'être rognés).
+    /// #335: in a narrow column, radios side by side or one under
+    /// the other wrap instead of overflowing (and being clipped).
     #[test]
-    fn des_radios_dans_une_colonne_etroite_ne_depassent_pas() {
-        let context = contexte();
-        let mut valeur = 1;
+    fn radios_in_a_narrow_column_do_not_overflow() {
+        let context = context();
+        let mut value = 1;
         let options = [
             ChoiceOption::new(1, "Mathematical Correction"),
             ChoiceOption::new(2, "Constant (point)"),
         ];
-        let largeur = 120.0;
-        let formes = image(&context, Vec::new(), |ui| {
-            ui.allocate_ui(egui::vec2(largeur, 400.0), |ui| {
+        let width = 120.0;
+        let shapes = image(&context, Vec::new(), |ui| {
+            ui.allocate_ui(egui::vec2(width, 400.0), |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(20.0);
                     ui.vertical(|ui| {
-                        choice(ui, "etroit", &mut valeur, &options);
+                        choice(ui, "narrow", &mut value, &options);
                     });
                 });
             });
         });
-        for forme in &formes {
-            if let egui::Shape::Text(texte) = &forme.shape {
-                let droite = texte.pos.x + texte.galley.rect.right();
+        for shape in &shapes {
+            if let egui::Shape::Text(text) = &shape.shape {
+                let right_edge = text.pos.x + text.galley.rect.right();
                 assert!(
-                    droite <= largeur + 1.0,
-                    "{:?} dépasse la colonne ({droite} > {largeur})",
-                    texte.galley.job.text
+                    right_edge <= width + 1.0,
+                    "{:?} overflows the column ({right_edge} > {width})",
+                    text.galley.job.text
                 );
             }
         }
     }
 
-    /// Le même refus doit tenir dans les radios et dans une liste déroulante.
+    /// The same refusal must hold in radios and in a dropdown list.
     #[test]
-    fn une_option_grisee_ne_se_choisit_ni_en_radio_ni_en_liste() {
-        use super::super::test_support::cliquer;
+    fn a_greyed_out_option_cannot_be_picked_in_radios_or_in_a_list() {
+        use super::super::test_support::click;
         for count in [2, 4] {
-            let context = contexte();
+            let context = context();
             let mut value = 1;
             let options: Vec<_> = (1..=count)
                 .map(|n| {
-                    ChoiceOption::new(n, n.to_string()).disabled((n == 2).then(|| "refus".into()))
+                    ChoiceOption::new(n, n.to_string()).disabled((n == 2).then(|| "refusal".into()))
                 })
                 .collect();
-            let mut peindre = |ui: &mut egui::Ui| {
-                choice(ui, "refus", &mut value, &options);
+            let mut paint = |ui: &mut egui::Ui| {
+                choice(ui, "refusal", &mut value, &options);
             };
-            let mut painted = image(&context, vec![], &mut peindre);
+            let mut painted = image(&context, vec![], &mut paint);
             if count == 4 {
-                let position = textes(&painted)
+                let position = texts(&painted)
                     .iter()
-                    .find(|t| t.texte == "1")
+                    .find(|t| t.text == "1")
                     .unwrap()
-                    .centre;
-                cliquer(
-                    &context,
-                    position,
-                    egui::PointerButton::Primary,
-                    &mut peindre,
-                );
-                painted = image(&context, vec![], &mut peindre);
+                    .center;
+                click(&context, position, egui::PointerButton::Primary, &mut paint);
+                painted = image(&context, vec![], &mut paint);
             }
-            let position = textes(&painted)
+            let position = texts(&painted)
                 .iter()
-                .find(|t| t.texte == "2")
+                .find(|t| t.text == "2")
                 .unwrap()
-                .centre;
-            cliquer(
-                &context,
-                position,
-                egui::PointerButton::Primary,
-                &mut peindre,
-            );
+                .center;
+            click(&context, position, egui::PointerButton::Primary, &mut paint);
             assert_eq!(value, 1);
         }
     }
 
-    /// #270 : les textes entourés sont un choix exclusif à bascule. L'option
-    /// courante a le fond plein de l'accent et son texte clair ; un clic sur
-    /// l'autre la rend courante ; un clic sur la courante ne change rien.
+    /// #270: surrounded texts are an exclusive toggle choice. The
+    /// current option has the solid accent background and its light text; a click on
+    /// the other makes it current; a click on the current one changes nothing.
     #[test]
-    fn les_textes_entoures_basculent_et_marquent_l_option_courante() {
-        let context = contexte();
+    fn surrounded_texts_toggle_and_mark_the_current_option() {
+        let context = context();
         let value = std::cell::Cell::new(1);
         let changes = std::cell::Cell::new(0);
         let options = vec![ChoiceOption::new(1, "Point"), ChoiceOption::new(2, "Zone")];
-        let mut peindre = |ui: &mut egui::Ui| {
-            let mut courante = value.get();
-            if toggle_texts(ui, "bascule", &mut courante, &options) {
+        let mut paint = |ui: &mut egui::Ui| {
+            let mut current = value.get();
+            if toggle_texts(ui, "toggle", &mut current, &options) {
                 changes.set(changes.get() + 1);
             }
-            value.set(courante);
+            value.set(current);
         };
-        let painted = image(&context, vec![], &mut peindre);
-        let remplis = |painted: &[egui::epaint::ClippedShape]| {
+        let painted = image(&context, vec![], &mut paint);
+        let filled = |painted: &[egui::epaint::ClippedShape]| {
             painted
                 .iter()
                 .filter(|p| matches!(&p.shape, egui::Shape::Rect(r) if r.fill == theme::accent()))
                 .count()
         };
-        assert_eq!(remplis(&painted), 1, "une seule option est pleine");
-        let texte = |painted: &[egui::epaint::ClippedShape], cherche: &str| {
-            textes(painted)
+        assert_eq!(filled(&painted), 1, "only one option is solid");
+        let text = |painted: &[egui::epaint::ClippedShape], needle: &str| {
+            texts(painted)
                 .into_iter()
-                .find(|t| t.texte == cherche)
+                .find(|t| t.text == needle)
                 .unwrap()
         };
-        assert_eq!(texte(&painted, "Point").couleur, theme::text_on_accent());
-        assert_ne!(texte(&painted, "Zone").couleur, theme::text_on_accent());
+        assert_eq!(text(&painted, "Point").color, theme::text_on_accent());
+        assert_ne!(text(&painted, "Zone").color, theme::text_on_accent());
         let (point, zone) = (
-            texte(&painted, "Point").centre,
-            texte(&painted, "Zone").centre,
+            text(&painted, "Point").center,
+            text(&painted, "Zone").center,
         );
-        cliquer(&context, point, egui::PointerButton::Primary, &mut peindre);
+        click(&context, point, egui::PointerButton::Primary, &mut paint);
         assert_eq!(
             (value.get(), changes.get()),
             (1, 0),
-            "la courante : rien ne change"
+            "the current one: nothing changes"
         );
-        cliquer(&context, zone, egui::PointerButton::Primary, &mut peindre);
+        click(&context, zone, egui::PointerButton::Primary, &mut paint);
         assert_eq!((value.get(), changes.get()), (2, 1));
-        let painted = image(&context, vec![], &mut peindre);
-        assert_eq!(remplis(&painted), 1);
+        let painted = image(&context, vec![], &mut paint);
+        assert_eq!(filled(&painted), 1);
         assert_eq!(
-            texte(&painted, "Zone").couleur,
+            text(&painted, "Zone").color,
             theme::text_on_accent(),
-            "Zone est pleine"
+            "Zone is solid"
         );
     }
 }

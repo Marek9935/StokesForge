@@ -1,8 +1,8 @@
-//! Windows, release : l'exécutable est du sous-système « fenêtré », donc un
-//! double-clic n'ouvre plus de console noire (#332). Revers : depuis un terminal,
-//! `stderr` et `stdout` n'arriveraient plus nulle part. [`attach_parent`] rend
-//! les messages (erreur de démarrage, sortie d'un script) au terminal qui a
-//! lancé l'application ; sans terminal parent, il ne fait rien.
+//! Windows, release: the executable uses the "windowed" subsystem, so a
+//! double-click no longer opens a black console (#332). Downside: from a
+//! terminal, `stderr` and `stdout` would go nowhere. [`attach_parent`] gives
+//! the messages (startup error, script output) back to the terminal that
+//! launched the application; without a parent terminal, it does nothing.
 
 use std::ffi::c_void;
 
@@ -33,13 +33,14 @@ extern "system" {
     ) -> Handle;
 }
 
-/// Rattache les sorties standard au terminal parent, si l'application en a un.
+/// Attaches the standard outputs to the parent terminal, if the application
+/// has one.
 ///
-/// Une sortie déjà redirigée (fichier, tube) est laissée telle quelle : seules
-/// les sorties absentes sont rouvertes sur `CONOUT$`.
+/// An output that is already redirected (file, pipe) is left as is: only the
+/// missing outputs are reopened on `CONOUT$`.
 pub fn attach_parent() {
-    // SAFETY : appels Win32 sans pointeur retenu ; `conout` vit pendant l'appel
-    // de `CreateFileW`, terminé par son zéro final.
+    // SAFETY: Win32 calls that keep no pointer; `conout` lives during the
+    // `CreateFileW` call, ended by its final zero.
     unsafe {
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
             return;

@@ -166,7 +166,7 @@ appearance of the same strip, so avoid two separate passes.
       `graph_view_contents`, covers both).
 - [x] Implemented in `graph_view_contents`
       (`crates/stokesforge-app/src/app.rs`); test adapted
-      (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`);
+      (`the_rendering_keeps_its_ratio_and_scales_into_the_available_area`);
       `docs/application/` updated.
 
 ---

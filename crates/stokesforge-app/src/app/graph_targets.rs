@@ -1,17 +1,17 @@
-//! « Envoyer vers un graphique » : envoyer les colonnes sélectionnées vers un
-//! graphique ouvert, attaché ou détaché (#165).
+//! "Send to Graph": send the selected columns to an open graph, docked or
+//! detached (#165).
 //!
-//! Le glisser de colonnes (#160) ne passe pas d'une fenêtre système à l'autre
-//! sous Wayland (la fenêtre source garde le pointeur tant que le bouton est
-//! pris) : plutôt qu'un vrai glisser-déposer du système, le clic droit sur une
-//! sélection de colonnes ou de lignes entières — lettres, numéros de ligne,
-//! cases — et le menu Classeur proposent, à côté de « Plot », **chaque
-//! graphique ouvert** : la même [`Action::AddSeriesToGraph`] que le dépôt.
-//! Sans graphique ouvert, l'entrée est absente (grammaire de `docs/menus.md`).
+//! Dragging columns (#160) does not cross from one system window to another
+//! under Wayland (the source window keeps the pointer while the button is
+//! held). Instead of a real system drag and drop, the right-click on a
+//! selection of whole columns or rows (letters, row numbers, boxes) and the
+//! Workbook menu offer, next to "Plot", **each open graph**: the same
+//! [`Action::AddSeriesToGraph`] as the drop. With no open graph, the entry is
+//! absent (grammar in `docs/menus.md`).
 //!
-//! La liste des graphiques ouverts appartient à `StokesForgeApp` ; elle est
-//! publiée dans le `Context` à chaque image ([`publish`]), seul canal commun
-//! aux viewports et à leurs états dupliqués, comme les couleurs enregistrées.
+//! The list of open graphs belongs to `StokesForgeApp`. It is published in the
+//! `Context` on every frame ([`publish`]), the only channel shared by the
+//! viewports and their duplicated states, like the saved colors.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -23,7 +23,7 @@ use stokesforge_app_state::state::{
 };
 use stokesforge_app_state::tr;
 
-/// Les graphiques ouverts, dans l'ordre : attachés puis détachés.
+/// The open graphs, in order: docked first, then detached.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct OpenGraphs(Vec<NodeId>);
 
@@ -31,7 +31,7 @@ fn open_graphs_id() -> egui::Id {
     egui::Id::new("stokesforge_open_graphs_for_send_to_graph")
 }
 
-/// Publie les graphiques ouverts : appelée une fois par image par
+/// Publishes the open graphs: called once per frame by
 /// `StokesForgeApp::ui`.
 pub(super) fn publish<'a>(
     ctx: &egui::Context,
@@ -51,14 +51,14 @@ pub(super) fn publish<'a>(
             _ => None,
         })
         .collect();
-    // `detached` vient d'une `HashMap` : un ordre stable évite un menu qui
-    // change d'une image à l'autre.
+    // `detached` comes from a `HashMap`: a stable order keeps the menu from
+    // changing from one frame to the next.
     detached.sort();
     graphs.extend(detached);
     ctx.data_mut(|data| data.insert_temp(open_graphs_id(), OpenGraphs(graphs)));
 }
 
-/// Les graphiques ouverts qui existent encore dans l'arbre.
+/// The open graphs that still exist in the tree.
 fn targets(ctx: &egui::Context, tree: &Tree) -> Vec<NodeId> {
     let open: OpenGraphs = ctx
         .data(|data| data.get_temp(open_graphs_id()))
@@ -69,8 +69,8 @@ fn targets(ctx: &egui::Context, tree: &Tree) -> Vec<NodeId> {
         .collect()
 }
 
-/// L'entrée (ou le sous-menu, à trois graphiques ou plus) « Envoyer vers »,
-/// absente sans cible.
+/// The "Send to" entry (or submenu, with three graphs or more), absent
+/// without a target.
 pub(super) fn send_to_graph_menu(
     ui: &mut egui::Ui,
     tree: &Tree,
@@ -118,9 +118,9 @@ pub(super) fn send_to_graph_menu(
     }
 }
 
-/// « Envoyer vers » pour des **lignes** (#166) : la même liste de graphiques
-/// ouverts, mais l'action trace les lignes ([`drop_rows_action`], qui pose la
-/// question de l'axe si le graphique a déjà un X).
+/// "Send to" for **rows** (#166): the same list of open graphs, but the
+/// action plots the rows ([`drop_rows_action`], which asks the axis question
+/// if the graph already has an X).
 pub(super) fn send_rows_to_graph_menu(
     ui: &mut egui::Ui,
     tree: &Tree,
@@ -158,12 +158,12 @@ mod tests {
     use stokesforge_core::Project;
     use stokesforge_plot::PlotSpec;
 
-    /// Tous les graphiques ouverts sont des cibles, attachés d'abord puis
-    /// détachés ; un classeur ou un graphique disparu de l'arbre n'en est pas
-    /// une, et sans graphique ouvert il n'y a pas de cible.
+    /// Every open graph is a target, docked first then detached. A workbook or
+    /// a graph gone from the tree is not one, and with no open graph there is
+    /// no target.
     #[test]
-    fn tous_les_graphiques_ouverts_sont_des_cibles() {
-        let mut project = Project::new("Cibles").unwrap();
+    fn every_open_graph_is_a_target() {
+        let mut project = Project::new("Targets").unwrap();
         let root = project.root();
         let docked = project.add_graph(root, None, PlotSpec::empty("A")).unwrap();
         let detached = project.add_graph(root, None, PlotSpec::empty("B")).unwrap();
@@ -181,8 +181,8 @@ mod tests {
         );
         assert_eq!(targets(&ctx, tree), vec![docked, detached]);
 
-        // Un graphique supprimé de l'arbre reste ouvert un instant dans la
-        // liste publiée : il n'est pas proposé.
+        // A graph deleted from the tree stays open for a moment in the
+        // published list: it is not offered.
         publish(&ctx, &[Tab::Graph(NodeId::from_raw(9999))], [].iter());
         assert!(targets(&ctx, tree).is_empty());
     }

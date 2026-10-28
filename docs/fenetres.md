@@ -21,9 +21,9 @@ Maintenance rules:
 The code is authoritative: the sizes below are the **default** sizes
 passed to the building block; the size and position used afterwards are those
 the user left (S-F8, see below). Two guards hold this
-page (S-F11): `le_catalogue_des_fenetres_et_le_code_concordent` (every
+page (S-F11): `the_window_catalog_and_the_code_agree` (every
 `stokesforge_…` identifier passed to a `modal_*` appears here, and every row has its
-call; **it does not read the sizes**) and `aucune_taille_libre_sans_justification`.
+call; **it does not read the sizes**) and `no_free_size_without_justification`.
 
 ## Natures and size classes (S-F11)
 
@@ -41,7 +41,7 @@ whose default value is a class:
 
 - **Interactive window** (settings, live settings, draft, wizard: `InteractiveSize`):
   the default class of the nature, another class, or a **free size**
-  (`InteractiveSize::Free`) that requires `// TAILLE-LIBRE(#300): <justification>`
+  (`InteractiveSize::Free`) that requires `// FREE-SIZE(#300): <justification>`
   in the twelve lines before it (15 characters at least). Free sizes
   today: the analysis (1000 x 660), the import wizard (1000 x 620) and the
   `preferences_proto` bench (560 x 470, reference screenshots).
@@ -89,7 +89,7 @@ The first five building block rows all go through the same body
 `modal_frame` (same frame, same title bar, same blocking of the rest of
 the interface); the content window goes through `show_window_in_layer`, an
 `egui::Area` and not an `egui::Window`. A raw `egui::Window` is forbidden
-(guard `aucune_fenetre_n_est_une_egui_window_brute`).
+(guard `no_window_is_a_raw_egui_window`).
 
 ## Modal dialogs
 
@@ -119,7 +119,7 @@ their state is open in `AppState`, except the blocking ones (last section).
 
 The "built" identifiers are chosen before the call (a `&str`, not a
 literal in its arguments): the catalog guard looks for them as
-literals (`IDENTIFIANTS_CONSTRUITS` in `tests/gardes.rs`).
+literals (`BUILT_IDENTIFIERS` in `tests/guards.rs`).
 
 ## Blocking dialogs
 
@@ -193,7 +193,7 @@ standard):
    exists only for what Ctrl+Z cannot recover (standard S-F3).
    **Size**: the default class of the nature, otherwise another class;
    outside the classes, an interactive window requires a justified free size
-   (`// TAILLE-LIBRE(#300):`), a window without rich interaction takes the
+   (`// FREE-SIZE(#300):`), a window without rich interaction takes the
    size of its content.
 2. **Mockup (E2).** Have it approved before any code: size (class), pages or
    sections, content of each page, footer, opening point. Attach, when
@@ -213,13 +213,13 @@ standard):
 7. **Content building blocks.** `form`/`choice` (`form.rs`), `number_field`,
    `tab_strip`, `hover_help`, `empty_state`, `theme::SPACE_*`. No bare
    tooltip, no `DragValue`, no hard-coded color: the guards of
-   `tests/gardes.rs` refuse them.
+   `tests/guards.rs` refuse them.
 8. **Tests.** Paint the window without a real window (`test_support.rs`) and
-   read the painted texts; the guard `aucune_fenetre_n_est_une_egui_window_brute`
-   and `tests/libelles.rs` already cover the building block and the labels.
+   read the painted texts; the guard `no_window_is_a_raw_egui_window`
+   and `tests/labels.rs` already cover the building block and the labels.
 9. **Catalog (E1).** Add the row of this page in the same commit,
    with the identifier `stokesforge_<nom>` in backticks: the guard
-   `le_catalogue_des_fenetres_et_le_code_concordent` refuses an identifier
+   `the_window_catalog_and_the_code_agree` refuses an identifier
    missing from the page, or a row without a call.
 
 ### Reference window by type

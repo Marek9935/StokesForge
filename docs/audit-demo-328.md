@@ -2,7 +2,7 @@
 
 **Reading** audit (2026-10-23), without running the application: for each
 element of the six demo graphs
-(`crates/stokesforge-app/src/demo/graphes.rs`), we look for the interface
+(`crates/stokesforge-app/src/demo/graphs.rs`), we look for the interface
 gesture that produces it. The ✗ are established by the absence of any call in
 `app/`, `app-state/` and `render-egui` (text search with no result). No hidden
 gesture in the context menus of the Object Manager was searched for beyond

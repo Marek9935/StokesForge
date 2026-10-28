@@ -1,13 +1,13 @@
-//! Brique « état vide » (#232, S-P3) : une phrase grisée, centrée, qui dit ce
-//! qui manque **et** le geste pour le créer (« No columns in this sheet. Use
-//! Workbook › Add Column »). Une surface vide ne reste jamais muette ni ne
-//! pose son propre `ui.weak`.
+//! "Empty state" building block (#232, S-P3): a greyed-out, centered sentence
+//! that says what is missing **and** the gesture to create it ("No columns in
+//! this sheet. Use Workbook › Add Column"). An empty surface is never silent
+//! and never places its own `ui.weak`.
 
 use eframe::egui;
 
 use crate::theme;
 
-/// Peint la phrase `text` au centre de la place disponible.
+/// Paints the sentence `text` at the center of the available space.
 pub(super) fn empty_state(ui: &mut egui::Ui, text: impl Into<String>) {
     let text = text.into();
     ui.vertical_centered(|ui| {
@@ -20,10 +20,10 @@ pub(super) fn empty_state(ui: &mut egui::Ui, text: impl Into<String>) {
 mod tests {
     use super::*;
 
-    /// La phrase est peinte, grisée (couleur de texte faible), au milieu de
-    /// la largeur disponible.
+    /// The sentence is painted, greyed out (weak text color), in the middle of
+    /// the available width.
     #[test]
-    fn la_phrase_est_grisee_et_centree() {
+    fn the_sentence_is_greyed_out_and_centered() {
         let context = egui::Context::default();
         crate::theme::install(&context);
         let mut output = context.run_ui(
@@ -34,14 +34,14 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ui| empty_state(ui, "Rien ici"),
+            |ui| empty_state(ui, "Nothing here"),
         );
         output.textures_delta.clear();
         let (center, color) = output
             .shapes
             .iter()
             .find_map(|painted| match &painted.shape {
-                egui::Shape::Text(shape) if shape.galley.job.text == "Rien ici" => Some((
+                egui::Shape::Text(shape) if shape.galley.job.text == "Nothing here" => Some((
                     painted
                         .clip_rect
                         .center()
@@ -51,8 +51,8 @@ mod tests {
                 )),
                 _ => None,
             })
-            .expect("phrase peinte");
-        assert!((center - 200.0).abs() < 20.0, "centre {center}");
+            .expect("sentence painted");
+        assert!((center - 200.0).abs() < 20.0, "center {center}");
         assert_ne!(color, egui::Color32::PLACEHOLDER);
     }
 }

@@ -1,17 +1,16 @@
-//! Brique « travail en cours » (#232, S-P1/S-P2) : le même indicateur partout où
-//! un travail dure.
+//! "Work in progress" building block (#232, S-P1/S-P2): the same indicator
+//! everywhere a task takes time.
 //!
-//! - **S-P1** : en dessous de [`SHOW_AFTER`] (≈ 0,5 s) rien ne s'affiche — un
-//!   travail bref ne doit pas clignoter ; au-delà, un indicateur tournant et
-//!   un mot (« Importing… »), avec une barre de progression quand le nombre
-//!   d'étapes est connu ;
-//! - **S-P2** : au-delà de [`STOP_AFTER`] (quelques secondes), un bouton Stop
-//!   qui pousse l'`Action` donnée. Le travail dit lui-même ce que Stop
-//!   défait (voir `AppState::stop_import`).
+//! - **S-P1**: below [`SHOW_AFTER`] (≈ 0.5 s) nothing is shown — a short task
+//!   must not flicker; beyond it, a spinning indicator and a word
+//!   ("Importing…"), with a progress bar when the number of steps is known;
+//! - **S-P2**: beyond [`STOP_AFTER`] (a few seconds), a Stop button that
+//!   pushes the given `Action`. The task itself says what Stop undoes
+//!   (see `AppState::stop_import`).
 //!
-//! La brique ne mesure rien : l'appelant donne la durée écoulée, lue sur le
-//! travail (`AppState::import_work`). Elle demande elle-même l'image suivante
-//! tant qu'elle est visible ou sur le point de l'être.
+//! The building block measures nothing: the caller gives the elapsed time,
+//! read from the task (`AppState::import_work`). It requests the next frame
+//! itself as long as it is visible or about to be.
 
 use std::time::Duration;
 
@@ -20,35 +19,35 @@ use eframe::egui;
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
 
-/// Durée avant laquelle un travail reste invisible (S-P1).
+/// Duration below which a task stays invisible (S-P1).
 pub(super) const SHOW_AFTER: Duration = Duration::from_millis(500);
-/// Durée à partir de laquelle Stop est proposé (S-P2).
+/// Duration from which Stop is offered (S-P2).
 pub(super) const STOP_AFTER: Duration = Duration::from_secs(3);
 
-/// Un travail en cours, tel que la brique le peint.
+/// A task in progress, as the building block paints it.
 pub(super) struct Work {
-    /// Le mot : « Importing… ».
+    /// The word: "Importing…".
     pub(super) label: String,
-    /// Depuis combien de temps il dure.
+    /// How long it has been running.
     pub(super) elapsed: Duration,
-    /// `(faites, total)` quand le nombre d'étapes est connu.
+    /// `(done, total)` when the number of steps is known.
     pub(super) progress: Option<(usize, usize)>,
-    /// Ce que pousse Stop ; `None` si le travail ne s'interrompt pas.
+    /// What Stop pushes; `None` if the task cannot be interrupted.
     pub(super) stop: Option<Action>,
 }
 
-/// L'indicateur seul : tourniquet et mot. Pour les surfaces qui ont déjà leur
-/// propre Stop (la console de script).
+/// The indicator alone: spinner and word. For the surfaces that already have
+/// their own Stop (the script console).
 pub(super) fn indicator(ui: &mut egui::Ui, label: &str) {
     ui.spinner();
     ui.weak(label);
 }
 
-/// Peint le travail s'il dure depuis assez longtemps ; rend vrai si quelque
-/// chose a été peint.
+/// Paints the task if it has been running long enough; returns true if
+/// something was painted.
 pub(super) fn work_in_progress(ui: &mut egui::Ui, work: &Work, actions: &mut Vec<Action>) -> bool {
     if work.elapsed < SHOW_AFTER {
-        // Rien à voir encore, mais l'image où il apparaîtra doit venir.
+        // Nothing to see yet, but the frame where it will appear must come.
         ui.ctx().request_repaint_after(SHOW_AFTER - work.elapsed);
         return false;
     }
@@ -85,7 +84,7 @@ pub(super) fn work_in_progress(ui: &mut egui::Ui, work: &Work, actions: &mut Vec
 mod tests {
     use super::*;
 
-    /// Peint `work` et rend (peint ?, textes, actions).
+    /// Paints `work` and returns (painted?, texts, actions).
     fn paint(work: &Work) -> (bool, Vec<String>, Vec<Action>) {
         let context = egui::Context::default();
         crate::theme::install(&context);
@@ -122,24 +121,24 @@ mod tests {
         }
     }
 
-    /// S-P1 : rien avant 0,5 s ; le mot ensuite. S-P2 : Stop seulement après
-    /// quelques secondes, et seulement si le travail s'interrompt.
+    /// S-P1: nothing before 0.5 s; the word afterwards. S-P2: Stop only after
+    /// a few seconds, and only if the task can be interrupted.
     #[test]
-    fn l_indicateur_et_stop_arrivent_chacun_a_leur_heure() {
+    fn the_indicator_and_stop_each_arrive_at_their_own_time() {
         let (drawn, texts, _) = paint(&work(0.2));
         assert!(!drawn && texts.is_empty(), "{texts:?}");
 
         let (drawn, texts, _) = paint(&work(1.0));
         assert!(drawn);
         assert!(texts.contains(&"Importing…".to_string()), "{texts:?}");
-        assert!(!texts.contains(&tr!("busy-stop")), "Stop trop tôt");
+        assert!(!texts.contains(&tr!("busy-stop")), "Stop too early");
 
         let (_, texts, _) = paint(&work(4.0));
         assert!(texts.contains(&tr!("busy-stop")), "{texts:?}");
 
-        let mut sans_stop = work(4.0);
-        sans_stop.stop = None;
-        let (_, texts, _) = paint(&sans_stop);
+        let mut without_stop = work(4.0);
+        without_stop.stop = None;
+        let (_, texts, _) = paint(&without_stop);
         assert!(!texts.contains(&tr!("busy-stop")), "{texts:?}");
     }
 }

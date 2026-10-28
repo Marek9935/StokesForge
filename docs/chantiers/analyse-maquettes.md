@@ -292,7 +292,7 @@ temporary graph is needed). Cost ≈ +1 d, plus the "workbook" case ≈ +1 d.
 
 Fully interactive graph, but a **new building block** for windows (outside
 `modal_dialog_with`, so against the rule and the guard
-`aucune_fenetre_n_est_une_egui_window_brute` to extend), a macro left open
+`no_window_is_a_raw_egui_window` to extend), a macro left open
 while the user can click elsewhere, and still nothing from the workbook.
 Cost ≈ +3 d.
 

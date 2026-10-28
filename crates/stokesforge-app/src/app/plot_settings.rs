@@ -1,13 +1,13 @@
-//! Fenêtre des propriétés du graphe : onglets (thème, axes, séries, légende),
-//! éditeurs par famille, mémo des formules Typst, libellés des choix, et la
-//! fenêtre des métadonnées d'une colonne (même famille de dialogue).
-//! Points d'entrée pour `app.rs` : [`plot_settings_window`] et
+//! Graph properties window: tabs (theme, axes, series, legend),
+//! editors per family, the Typst formula reminder, the labels of the choices, and the
+//! window for a column's metadata (same dialog family).
+//! Entry points for `app.rs`: [`plot_settings_window`] and
 //! [`column_metadata_window`].
 //!
-//! Sorti d'`app.rs` (#119), puis découpé par page (#124). Les fonctions de
-//! page empruntent seulement le brouillon utile et rendent la demande de
-//! validation ; le corps commun conserve les sous-Ui, leurs identifiants et
-//! l'ordre validation → couleurs enregistrées → sélection de page/axe.
+//! Moved out of `app.rs` (#119), then split by page (#124). The page
+//! functions borrow only the draft they need and return the commit
+//! request; the common body keeps the child Uis, their identifiers and
+//! the order commit → saved colors → page/axis selection.
 
 use eframe::egui;
 use stokesforge_core::Tree;
@@ -35,63 +35,63 @@ use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
 
-/// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
-/// que `import_window`), ouvert par le clic droit sur un composant du
-/// graphe ou par le menu « Graphique », et organisé en onglets thématiques
-/// ([`PlotSettingsTab`]). Elle remplace l'ancien panneau fixe à droite de
-/// l'espace de travail, qui prenait de la place en permanence dès qu'un
-/// graphe était actif.
+/// Properties window of a graph: a floating dialog (same family
+/// as `import_window`), opened by the right-click on a component of the
+/// graph or by the "Graph" menu, and organized into thematic tabs
+/// ([`PlotSettingsTab`]). It replaces the former fixed panel on the right of
+/// the workspace, which took up room permanently as soon as a
+/// graph was active.
 ///
-/// Édite le [`stokesforge_plot::PlotSpec`] au travers d'un brouillon transitoire
-/// ([`stokesforge_app_state::state::PlotEdit`]), jamais directement.
+/// Edits the [`stokesforge_plot::PlotSpec`] through a transient draft
+/// ([`stokesforge_app_state::state::PlotEdit`]), never directly.
 ///
-/// **Stratégie anti-inflation d'historique** : chaque widget met à jour le
-/// brouillon en direct (retour visuel immédiat), et `commit` — un simple
-/// booléen local, mis à `true` par n'importe quel widget qui vient de finir
-/// une interaction — ne déclenche [`AppState::commit_plot_edit`] qu'une
-/// seule fois, à la fin de la fonction. Trois familles de widgets, trois
-/// façons de finir une interaction :
-/// - **texte** (titres, libellés) : `lost_focus()`,
-///   comme `note_contents`/`cell_widget` — jamais à chaque frappe ;
-/// - **nombre** (épaisseur de trait, taille de marqueur, bornes d'axe, brique
-///   [`crate::number_field`]) : `NumberResponse::changed` — Entrée, sortie du
-///   champ, flèche, cran de molette ou choix dans la liste ;
-/// - **case à cocher / menu déroulant** : un seul événement discret par
-///   clic, validé tout de suite.
+/// **History anti-inflation strategy**: each widget updates the
+/// draft live (immediate visual feedback), and `commit` — a simple
+/// local boolean, set to `true` by any widget that has just finished
+/// an interaction — triggers [`AppState::commit_plot_edit`] only
+/// once, at the end of the function. Three families of widgets, three
+/// ways to finish an interaction:
+/// - **text** (titles, labels): `lost_focus()`,
+///   like `note_contents`/`cell_widget` — never on each keystroke;
+/// - **number** (line width, marker size, axis bounds, building block
+///   [`crate::number_field`]): `NumberResponse::changed` — Enter, leaving the
+///   field, arrow, wheel notch or choice in the list;
+/// - **checkbox / dropdown menu**: a single discrete event per
+///   click, committed right away.
 ///
-/// Fermer la fenêtre valide ce qui diverge encore du modèle
+/// Closing the window commits whatever still differs from the model
 /// ([`AppState::close_plot_settings`]).
 ///
-/// **Un seul panneau, pas de multi-panneaux** : seul `PlotSpec::panels[0]`
-/// est éditable ici. Éditer le premier panneau revient, pour l'instant, à
-/// éditer *le* graphe.
+/// **A single panel, no multi-panel**: only `PlotSpec::panels[0]`
+/// is editable here. Editing the first panel amounts, for now, to
+/// editing *the* graph.
 pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     let Some(settings) = state.plot_settings() else {
         return;
     };
-    // Cloné avant d'emprunter `state` en écriture pour le brouillon : un
-    // `Arc<Tree>` cloné est un compteur de références, pas une copie.
+    // Cloned before borrowing `state` mutably for the draft: a cloned
+    // `Arc<Tree>` is a reference counter, not a copy.
     let tree = state.tree().clone();
     let Some(node) = tree.node(settings.graph) else {
         state.cancel_plot_settings();
         return;
     };
-    // Les séries ont leur propre fenêtre (#179) : même brouillon, autre titre,
-    // autre taille, autre identité (donc sa propre place à l'écran).
+    // The series have their own window (#179): same draft, other title,
+    // other size, other identity (hence its own place on screen).
     let curves = settings.tab == PlotSettingsTab::Series;
     let (title, id, size) = if curves {
         (
             tr!("curve-window-title", name = node.name()),
             "stokesforge_curve_settings",
-            // Les séries (#179) : une liste et un éditeur côte à côte.
+            // The series (#179): a list and an editor side by side.
             InteractiveSize::Class(SizeClass::Large),
         )
     } else {
         (
             tr!("plot-window-title", name = node.name()),
             "stokesforge_plot_settings",
-            // La fenêtre se redimensionne ensuite librement, y compris plus
-            // haut que son contenu (voir [`plot_settings_contents`]).
+            // The window is then freely resizable, including taller
+            // than its content (see [`plot_settings_contents`]).
             InteractiveSize::Class(SizeClass::Medium),
         )
     };
@@ -106,12 +106,12 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
-/// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
-/// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
-/// brique modale que les propriétés du graphe, au pied d'une fenêtre en
-/// lecture seule : un seul bouton, Close (S-F2, #228). Seule écriture : le
-/// bouton « Utiliser comme x' » d'une valeur numérique, qui l'écrit dans la
-/// ligne x' de la colonne (#164).
+/// Window to consult the file metadata of a column (issue
+/// #5): the key / value rows, sections included, read-only. Same
+/// modal building block as the graph properties, at the foot of a read-only
+/// window: a single button, Close (S-F2, #228). Only write: the
+/// "Use as x'" button of a numeric value, which writes it into the
+/// x' row of the column (#164).
 pub(super) fn column_metadata_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -152,8 +152,8 @@ pub(super) fn column_metadata_window(
                                 ui.label(&line.key);
                                 ui.label(&line.value);
                             }
-                            // Mini sélecteur d'import (#164) : une valeur
-                            // numérique du fichier peut alimenter la ligne x'.
+                            // Mini import picker (#164): a numeric value
+                            // from the file can feed the x' row.
                             if !line.key.is_empty()
                                 && matches!(parse_x_prime(&line.value), Ok(Some(_)))
                                 && ui
@@ -177,8 +177,8 @@ pub(super) fn column_metadata_window(
     }
 }
 
-/// Corps de [`plot_settings_window`] : la bande d'onglets, puis la page de
-/// l'onglet choisi.
+/// Body of [`plot_settings_window`]: the tab strip, then the page of the
+/// chosen tab.
 fn plot_settings_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -187,15 +187,15 @@ fn plot_settings_contents(
 ) {
     let mut chosen_tab = settings.tab;
     let mut chosen_axis = settings.axis;
-    // Même bande que les onglets de feuille (`tab_strip`, issue #19) : elle
-    // défile au lieu de rétrécir quand la fenêtre est étroite.
+    // Same strip as the sheet tabs (`tab_strip`, issue #19): it
+    // scrolls instead of shrinking when the window is narrow.
     if settings.tab != PlotSettingsTab::Series {
         let tabs: Vec<(PlotSettingsTab, String)> = PlotSettingsTab::ALL
             .iter()
             .map(|tab| (*tab, tab.label()))
             .collect();
-        // La bande trace son propre filet sous les onglets (#169) : pas de
-        // séparateur en plus, seulement l'espace qu'il laissait.
+        // The strip draws its own rule under the tabs (#169): no
+        // separator in addition, only the space it used to leave.
         tab_strip(
             ui,
             TabStripSide::Top,
@@ -210,9 +210,9 @@ fn plot_settings_contents(
 
     let mut commit = false;
     let mut gradient_actions: Vec<Action> = Vec::new();
-    // Couleurs enregistrées, lues avant d'emprunter le brouillon ; les
-    // demandes du sélecteur (enregistrer, retirer) sont traduites en actions
-    // après.
+    // Saved colors, read before borrowing the draft; the
+    // picker requests (save, remove) are translated into actions
+    // afterwards.
     let mut env = PickerEnv {
         project: state.saved_colors(SaveTarget::Project),
         user: state.saved_colors(SaveTarget::User),
@@ -225,8 +225,8 @@ fn plot_settings_contents(
         let spec = &mut edit.spec;
         edit.selected_panel = edit.selected_panel.min(spec.panels.len() - 1);
         if spec.panels.len() > 1 {
-            // Les pages « Graph » et « Theme » valent pour tout le graphique :
-            // le choix du calque reste affiché mais grisé, avec sa raison (#180).
+            // The "Graph" and "Theme" pages apply to the whole graph:
+            // the layer choice stays displayed but grayed out, with its reason (#180).
             let per_layer = !matches!(chosen_tab, PlotSettingsTab::Graph | PlotSettingsTab::Theme);
             let layer_choice = ui.add_enabled_ui(per_layer, |ui| {
                 egui::ComboBox::from_id_salt("plot_settings_layer")
@@ -250,13 +250,13 @@ fn plot_settings_contents(
                     .on_hover_text(tr!("plot-layer-choice-disabled"));
             }
         }
-        // La page occupe toute la hauteur de la fenêtre, même quand son
-        // contenu est plus court : sans `auto_shrink(false)`, une
-        // `egui::Window` redimensionnable se recale sur la hauteur de son
-        // contenu, et on ne pouvait pas l'agrandir au-delà. Le même réglage
-        // la fait défiler quand la fenêtre est plus petite que la page.
+        // The page takes the whole height of the window, even when its
+        // content is shorter: without `auto_shrink(false)`, a resizable
+        // `egui::Window` snaps to the height of its
+        // content, and it could not be enlarged beyond. The same setting
+        // makes it scroll when the window is smaller than the page.
         if chosen_tab == PlotSettingsTab::Series {
-            // Deux colonnes qui défilent chacune : pas de défilement commun.
+            // Two columns that each scroll: no common scrolling.
             if let Some(panel) = spec.panels.get_mut(edit.selected_panel) {
                 commit |= curve_settings_page(
                     ui,
@@ -294,7 +294,7 @@ fn plot_settings_contents(
                             &mut env,
                         );
                     }
-                    // Les séries ont leur fenêtre : voir plus haut.
+                    // The series have their window: see above.
                     PlotSettingsTab::Series => {}
                     PlotSettingsTab::Theme => {
                         commit |= theme_editor(ui, spec, &mut env);
@@ -334,7 +334,7 @@ fn plot_settings_contents(
     }
 }
 
-/// Page du graphe : titre et fond, en formulaire à deux colonnes (#227).
+/// Graph page: title and background, as a two-column form (#227).
 fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
     form(ui, "plot_graph_page", |form| {
         let mut commit = false;
@@ -368,7 +368,7 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
     })
 }
 
-/// Page du calque : titre et lignes de grille.
+/// Layer page: title and gridlines.
 fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     form(ui, "plot_area_page", |form| {
         let mut commit = false;
@@ -393,7 +393,7 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     })
 }
 
-/// Page des axes : choix local de l'axe, puis éditeur partagé.
+/// Axes page: local choice of the axis, then the shared editor.
 pub(super) fn axes_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -404,14 +404,14 @@ pub(super) fn axes_settings_page(
 ) -> bool {
     let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
     if panel.overlay.is_none() {
-        // Haut et droite : les axes miroirs (#176), toujours proposés.
+        // Top and right: the mirror axes (#176), always offered.
         axes.extend([PlotAxis::Right, PlotAxis::Top]);
     } else if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
         axes.push(PlotAxis::Right);
     }
-    // #169 : les axes sont un jeu d'onglets (une page par axe), donc la
-    // bande commune, pas une rangée de boutons sélectionnables ; son filet
-    // remplace l'ancien séparateur.
+    // #169: the axes are a set of tabs (one page per axis), so the
+    // common strip, not a row of selectable buttons; its rule
+    // replaces the former separator.
     let tabs: Vec<(PlotAxis, String)> = axes.into_iter().map(|axis| (axis, axis.label())).collect();
     let mut picked = None;
     tab_strip(
@@ -427,8 +427,8 @@ pub(super) fn axes_settings_page(
         *chosen_axis = axis;
     }
     ui.add_space(ui.spacing().item_spacing.y);
-    // Le haut est toujours un miroir ; la droite l'est tant qu'aucune série n'y
-    // est rattachée (sinon c'est un vrai axe, éditeur complet).
+    // The top is always a mirror; the right is one as long as no series is
+    // attached to it (otherwise it is a real axis, full editor).
     let mirror = panel.overlay.is_none()
         && (*chosen_axis == PlotAxis::Top
             || (*chosen_axis == PlotAxis::Right && !panel.uses_right_axis()));
@@ -449,7 +449,7 @@ pub(super) fn axes_settings_page(
         } else {
             axis_editor(form, axis, computed, env)
         };
-        // Réglage du graphe entier (#223), rangé sous l'affichage des axes.
+        // Setting of the whole graph (#223), put under the axes display.
         commit |= form.checkbox(
             decimal_comma,
             tr!("plot-axes-decimal-comma"),
@@ -459,10 +459,10 @@ pub(super) fn axes_settings_page(
     })
 }
 
-/// Onglet « Thème » : fond, couleur du texte et couleur des axes, réglés
-/// globalement (issue #11), plus des thèmes prédéfinis. Le dernier réglage
-/// écrase ce qui avait été réglé une à une : voir [`stokesforge_plot::theme`].
-/// Rend `true` si le brouillon doit être validé.
+/// "Theme" tab: background, text color and axes color, set
+/// globally (issue #11), plus predefined themes. The last setting
+/// overwrites what had been set one by one: see [`stokesforge_plot::theme`].
+/// Returns `true` if the draft must be committed.
 fn theme_editor(
     ui: &mut egui::Ui,
     spec: &mut stokesforge_plot::PlotSpec,
@@ -519,15 +519,15 @@ fn theme_editor(
     })
 }
 
-/// Le rappel de syntaxe des textes du graphe (issues #33, #197), en bulle de
-/// survol sur l'icône d'aide posée à droite du champ.
+/// The syntax reminder for the graph texts (issues #33, #197), as a hover
+/// bubble on the help icon placed to the right of the field.
 ///
-/// Ces textes sont composés par Typst et lus comme du **markup** (issue
-/// #32) : un chimiste venu d'Origin n'en connaît pas la syntaxe, et un `_`
-/// ou un `$` isolé change le rendu sans prévenir. Le rappel nomme Typst et
-/// donne la page de référence. Une icône au bout du champ plutôt qu'un mémo
-/// repliable dessous : le lien avec le champ se voit, et l'aide ne prend plus
-/// de hauteur dans la fenêtre (voir [`super::hover_help`]).
+/// These texts are composed by Typst and read as **markup** (issue
+/// #32): a chemist coming from Origin does not know its syntax, and a lone `_`
+/// or `$` changes the rendering without warning. The reminder names Typst and
+/// gives the reference page. An icon at the end of the field rather than a
+/// collapsible memo below: the link with the field is visible, and the help no longer takes
+/// height in the window (see [`super::hover_help`]).
 fn formula_help(ui: &mut egui::Ui, hint: &str) {
     hover_help(ui, |ui| {
         if !hint.is_empty() {
@@ -551,8 +551,8 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
     });
 }
 
-/// Les lignes du rappel de [`formula_help`] : ce qu'on tape (de la syntaxe
-/// Typst, jamais traduite), ce qu'on obtient (traduit).
+/// The rows of the [`formula_help`] reminder: what is typed (Typst
+/// syntax, never translated), what is obtained (translated).
 fn formula_memo_rows() -> [(&'static str, String); 7] {
     [
         ("$lambda$  $Delta$", tr!("plot-math-greek")),
@@ -565,19 +565,19 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
     ]
 }
 
-/// Une rangée de formulaire dont le champ texte accepte une formule (#197),
-/// validé à la perte de focus ; `hint` est son rappel, première ligne de
-/// l'icône d'aide à la syntaxe Typst ([`formula_help`]) posée tout à droite (S-T6
-/// : l'icône « ? » seule). Le champ prend la pleine largeur (S-L2), moins la
-/// place de l'icône. Rend `true` si le brouillon doit être validé — voir la
-/// doc de tête de [`plot_settings_window`].
+/// A form row whose text field accepts a formula (#197),
+/// committed on focus loss; `hint` is its reminder, first line of
+/// the help icon for the Typst syntax ([`formula_help`]) placed at the far right (S-T6
+/// : the "?" icon alone). The field takes the full width (S-L2), minus the
+/// icon's room. Returns `true` if the draft must be committed — see the
+/// head doc of [`plot_settings_window`].
 fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
-        // S-T3 : une fois le texte validé (champ quitté), l'erreur Typst se peint
-        // sur le champ ; le graphe, lui, retombe sur le texte brut. Pas de rouge
-        // pendant la frappe, où le markup est forcément inachevé.
+        // S-T3: once the text is committed (field left), the Typst error is painted
+        // on the field; the graph, for its part, falls back to the raw text. No red
+        // while typing, where the markup is necessarily unfinished.
         if !response.has_focus() {
             if let Some(error) = stokesforge_render_egui::formula::diagnose(value) {
                 field_state::show_issue(ui, &response, &FieldIssue::refused(error));
@@ -588,10 +588,10 @@ fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut Strin
     })
 }
 
-/// Édite un axe miroir (#176) : il reprend l'échelle de l'axe opposé et n'a ni
-/// titre ni couleur d'axe propres ; on choisit de l'afficher, avec ou sans
-/// étiquettes de graduation, et de régler ses graduations (comme tout axe,
-/// chacun pour soi).
+/// Edits a mirror axis (#176): it takes the scale of the opposite axis and has neither
+/// its own title nor axis color; one chooses to show it, with or without
+/// tick labels, and to set its ticks (like any axis,
+/// each for itself).
 fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     form.section(tr!("plot-axes-display-section"));
     let mut commit = form.checkbox(&mut axis.mirror, tr!("plot-axes-show-mirror"), None);
@@ -620,9 +620,9 @@ fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec, env: &mut Picker
     commit
 }
 
-/// Les réglages des sous-graduations (#344) : la case, puis leur nombre entre
-/// deux graduations principales (Auto par défaut ; sans effet en échelle
-/// logarithmique, grisé). `enabled` faux (miroir éteint) grise le tout, avec
+/// The minor tick settings (#344): the checkbox, then their count between
+/// two major ticks (Auto by default; no effect on a logarithmic
+/// scale, grayed out). `enabled` false (mirror off) grays out everything, with
 /// `reason`.
 fn minor_ticks_rows(
     form: &mut Form<'_>,
@@ -656,7 +656,7 @@ fn minor_ticks_rows(
     commit
 }
 
-/// « Un nombre sur n » (#344) : grisé quand les nombres sont masqués.
+/// "Label every" (#344): grayed out when the labels are hidden.
 fn label_every_row(form: &mut Form<'_>, axis: &mut AxisSpec, enabled: bool) -> bool {
     form.row(tr!("plot-axes-label-every"), |ui| {
         let shown = ui.add_enabled_ui(enabled && axis.tick_labels, |ui| {
@@ -672,9 +672,9 @@ fn label_every_row(form: &mut Form<'_>, axis: &mut AxisSpec, enabled: bool) -> b
     })
 }
 
-/// Une rangée « nombre ou Auto » de la section Avancé (#344) : `None` montre
-/// « Auto » en gris, vider le champ la rend automatique. Grisée avec `reason`
-/// quand `enabled` est faux (S-G4).
+/// A "number or Auto" row of the Advanced section (#344): `None` shows
+/// "Auto" in gray, emptying the field makes it automatic. Grayed out with `reason`
+/// when `enabled` is false (S-G4).
 fn auto_value_row(
     form: &mut Form<'_>,
     label: String,
@@ -693,10 +693,10 @@ fn auto_value_row(
     })
 }
 
-/// Le bloc repliable « Avancé » des graduations (#344), fermé par défaut :
-/// longueur des grands et des petits tirets, épaisseur et couleur, tous
-/// Auto tant qu'on n'y touche pas. Par axe, jamais recopié sur les autres.
-/// `enabled` faux (miroir éteint) grise le tout, avec `reason`.
+/// The collapsible "Advanced" block of the ticks (#344), closed by default:
+/// length of the major and minor tick marks, width and color, all
+/// Auto as long as they are not touched. Per axis, never copied to the others.
+/// `enabled` false (mirror off) grays out everything, with `reason`.
 fn advanced_ticks_block(
     form: &mut Form<'_>,
     axis: &mut AxisSpec,
@@ -770,9 +770,9 @@ fn advanced_ticks_block(
     .unwrap_or(false)
 }
 
-/// Le sens des graduations (#344) : vers l'extérieur, l'intérieur ou des deux
-/// côtés. `enabled` faux (miroir éteint, graduations coupées) grise le choix,
-/// avec `reason`.
+/// The direction of the ticks (#344): outward, inward or on both
+/// sides. `enabled` false (mirror off, ticks off) grays out the choice,
+/// with `reason`.
 fn tick_direction_row(
     form: &mut Form<'_>,
     axis: &mut AxisSpec,
@@ -804,11 +804,11 @@ fn tick_direction_row(
     })
 }
 
-/// Édite un [`AxisSpec`], en quatre groupes : le titre de l'axe (libellé,
-/// unité), son échelle (logarithmique, bornes De/À : le sens de l'axe se lit
-/// sur leur ordre), son affichage (axe, nombres, grille, couleur) et ses
-/// graduations (tirets, sens, sous-graduations, bloc « Avancé »). Rend `true` si le brouillon doit être validé — voir la doc
-/// de tête de [`plot_settings_window`].
+/// Edits an [`AxisSpec`], in four groups: the axis title (label,
+/// unit), its scale (logarithmic, From/To bounds: the axis direction is read
+/// from their order), its display (axis, numbers, grid, color) and its
+/// ticks (tick marks, direction, minor ticks, "Advanced" block). Returns `true` if the draft must be committed — see the head doc
+/// of [`plot_settings_window`].
 fn axis_editor(
     form: &mut Form<'_>,
     axis: &mut AxisSpec,
@@ -851,10 +851,10 @@ fn axis_editor(
         };
         commit = true;
     }
-    // De et À : toujours éditables (#344). Sous Auto, ils montrent les bornes
-    // calculées, dans l'ordre d'affichage ; une saisie fige les deux bornes
-    // (l'autre est prise du calcul) et le sens suit l'ordre : De > À = axe
-    // inversé. Le bouton « Auto » rend les bornes aux données, sens conservé.
+    // From and To: always editable (#344). Under Auto, they show the computed
+    // bounds, in display order; typing in one freezes both bounds
+    // (the other is taken from the computation) and the direction follows the order: From > To = inverted
+    // axis. The "Auto" button gives the bounds back to the data, direction kept.
     let auto = axis.auto_range;
     let (mut min, mut max) = if auto {
         computed
@@ -872,8 +872,8 @@ fn axis_editor(
     };
     let mut changed = false;
     let mut auto_asked = false;
-    // « De … à … » sur une seule rangée ; l'ordre est libre, contrairement aux
-    // plages d'analyse (S-N11).
+    // "From … to …" on a single row; the order is free, unlike the
+    // analysis ranges (S-N11).
     form.row(tr!("plot-axes-from"), |ui| {
         let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
         ui.label(tr!("analysis-field-to"));
@@ -891,7 +891,7 @@ fn axis_editor(
     });
     if auto_asked {
         axis.auto_range = true;
-        // Les bornes mémorisées reprennent le sens de l'axe.
+        // The stored bounds take the axis direction again.
         *axis = axis.orient();
         commit = true;
     } else if changed {
@@ -928,22 +928,22 @@ fn axis_editor(
     commit
 }
 
-/// Édite la série sélectionnée : nom, type de tracé, visibilité, présence en
-/// légende, style de trait, style de marqueur. Rend `true` si le brouillon
-/// doit être validé — voir la doc de tête de [`plot_settings_window`].
+/// Edits the selected series: name, plot type, visibility, presence in
+/// the legend, line style, marker style. Returns `true` if the draft
+/// must be committed — see the head doc of [`plot_settings_window`].
 ///
-/// [`PlotType::Unknown`] (C5, `guide-de-correction-robustesse.md` §F3) ne
-/// figure **jamais** dans la liste proposée : c'est le type de tracé d'une
-/// version plus récente de StokesForge, et le proposer laisserait croire qu'on
-/// peut y revenir alors que rien ne sait le reconstruire. Une série qui le
-/// porte s'affiche quand même, en lecture seule pour ce seul champ — le
-/// reste (nom, visibilité...) reste éditable normalement.
+/// [`PlotType::Unknown`] (C5, `guide-de-correction-robustesse.md` §F3) is
+/// **never** in the offered list: it is the plot type of a
+/// newer version of StokesForge, and offering it would suggest one can
+/// go back to it when nothing knows how to rebuild it. A series that
+/// carries it is still shown, read-only for this one field — the
+/// rest (name, visibility…) stays editable as usual.
 ///
-/// `locked` (#177) : on règle le **groupe** de la série, pas la série seule.
-/// Les réglages propres à une série (nom, visibilité, présence en
-/// légende) sont alors grisés, avec une info-bulle qui dit pourquoi, et les
-/// couleurs masquées (#213 : le nuancier du groupe les donne) ; les autres (style du trait, forme et taille du symbole) restent actifs et la
-/// page les recopie dans tout le groupe.
+/// `locked` (#177): the **group** of the series is being set, not the series alone.
+/// The settings specific to a series (name, visibility, presence in
+/// the legend) are then grayed out, with a tooltip that says why, and the
+/// colors hidden (#213: the group's color gradient provides them); the others (line style, symbol shape and size) stay active and the
+/// page copies them to the whole group.
 pub(super) fn series_editor(
     ui: &mut egui::Ui,
     series: &mut stokesforge_plot::SeriesSpec,
@@ -961,8 +961,8 @@ pub(super) fn series_editor(
             )
         });
 
-        // Le type de tracé se règle toujours série par série (#213), même en
-        // portée « tout le groupe » ; il ne touche que la série choisie.
+        // The plot type is always set series by series (#213), even in
+        // "whole group" scope; it only touches the chosen series.
         commit |= form.row(tr!("plot-series-plot-type"), |ui| match &series.plot_type {
             PlotType::Unknown(_) => {
                 ui.weak(tr!("plot-series-type-unknown"));
@@ -986,7 +986,7 @@ pub(super) fn series_editor(
                 }),
             ),
         });
-        // « Show series » est la case de la liste des séries (curve_settings.rs).
+        // "Show series" is the checkbox of the series list (curve_settings.rs).
         commit |= per_series(form, locked, |form| {
             form.checkbox(
                 &mut series.show_in_legend,
@@ -1070,8 +1070,8 @@ pub(super) fn series_editor(
     })
 }
 
-/// Un réglage propre à une série : grisé, avec l'info-bulle qui dit pourquoi,
-/// quand on règle le groupe entier (`locked`, voir [`series_editor`]).
+/// A setting specific to a series: grayed out, with the tooltip that says why,
+/// when the whole group is being set (`locked`, see [`series_editor`]).
 fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>) -> bool) -> bool {
     let out = form.enabled(!locked, add);
     if locked {
@@ -1080,8 +1080,8 @@ fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>)
     out.inner
 }
 
-/// Édite un [`stokesforge_plot::LegendSpec`] : visibilité, coin d'ancrage. Rend
-/// `true` si le brouillon doit être validé — voir la doc de tête de
+/// Edits a [`stokesforge_plot::LegendSpec`]: visibility, anchor corner. Returns
+/// `true` if the draft must be committed — see the head doc of
 /// [`plot_settings_window`].
 fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -> bool {
     form(ui, "plot_legend_page", |form| {
@@ -1104,10 +1104,10 @@ fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -
     })
 }
 
-/// Libellé d'un [`PlotType`], y compris [`PlotType::Unknown`] (par
-/// prudence : ce bras existe pour que la fonction reste totale, mais
-/// `series_editor` ne l'affiche jamais — un type inconnu ne passe pas par le
-/// menu déroulant qui appelle cette fonction).
+/// Label of a [`PlotType`], including [`PlotType::Unknown`] (out of
+/// caution: this arm exists so that the function stays total, but
+/// `series_editor` never shows it — an unknown type does not go through the
+/// dropdown menu that calls this function).
 fn plot_type_label(plot_type: &PlotType) -> String {
     match plot_type {
         PlotType::Scatter => tr!("plot-type-scatter"),
@@ -1120,7 +1120,7 @@ fn plot_type_label(plot_type: &PlotType) -> String {
     }
 }
 
-/// Libellé d'un [`LineStyle`].
+/// Label of a [`LineStyle`].
 pub(super) fn line_style_label(style: LineStyle) -> String {
     match style {
         LineStyle::None => tr!("plot-line-style-none"),
@@ -1131,7 +1131,7 @@ pub(super) fn line_style_label(style: LineStyle) -> String {
     }
 }
 
-/// Libellé d'un [`SymbolShape`].
+/// Label of a [`SymbolShape`].
 pub(super) fn symbol_shape_label(shape: SymbolShape) -> String {
     match shape {
         SymbolShape::None => tr!("plot-symbol-none"),
@@ -1144,7 +1144,7 @@ pub(super) fn symbol_shape_label(shape: SymbolShape) -> String {
     }
 }
 
-/// Libellé d'une [`LegendPosition`].
+/// Label of a [`LegendPosition`].
 fn legend_position_label(position: LegendPosition) -> String {
     match position {
         LegendPosition::TopLeft => tr!("plot-legend-top-left"),
@@ -1178,16 +1178,16 @@ mod tests {
     use stokesforge_app_state::tr;
 
     use super::super::test_support::{
-        cliquer, colonnes_xy, contexte, distincts, image, texte_exact, textes, touche, Texte,
+        self, click, distinct, image, key, text_exact, texts, xy_columns, Text,
     };
 
-    // -- Outillage --------------------------------------------------------
+    // -- Tooling ----------------------------------------------------------
 
-    fn est_peint(textes: &[Texte], cherche: &str) -> bool {
-        textes.iter().any(|t| t.texte == cherche)
+    fn is_painted(texts: &[Text], wanted: &str) -> bool {
+        texts.iter().any(|t| t.text == wanted)
     }
 
-    fn clic(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    fn click_event(pos: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -1196,42 +1196,42 @@ mod tests {
         }
     }
 
-    /// Le premier panneau, modifiable (`Panels` ne s'indexe qu'en lecture).
-    fn panneau(spec: &mut PlotSpec) -> &mut PanelSpec {
+    /// The first panel, mutable (`Panels` can only be indexed for reading).
+    fn first_panel(spec: &mut PlotSpec) -> &mut PanelSpec {
         spec.panels.get_mut(0).unwrap()
     }
 
-    /// Un graphe d'une série (B en fonction de A) dans une session, la
-    /// fenêtre des propriétés fermée. `regler` ajuste le graphe avant que la
-    /// session le prenne ; les champs gardent en vie ce dont l'état dépend.
-    struct Banc {
+    /// A one-series graph (B as a function of A) in a session, with the
+    /// properties window closed. `adjust` tunes the graph before the
+    /// session takes it; the fields keep alive what the state depends on.
+    struct Harness {
         state: AppState,
         graph: NodeId,
         _session: Session,
     }
 
-    fn banc(regler: impl FnOnce(&mut PlotSpec)) -> Banc {
-        let mut project = Project::new("Propriétés").unwrap();
+    fn harness(adjust: impl FnOnce(&mut PlotSpec)) -> Harness {
+        let mut project = Project::new("Properties").unwrap();
         let root = project.root();
-        let (x, y) = colonnes_xy(&mut project);
+        let (x, y) = xy_columns(&mut project);
         let mut panel = PanelSpec::at(0, 0);
         panel.series.push(SeriesSpec::new_xy(x, y));
         let mut spec = PlotSpec::default().with_panels(panel);
-        regler(&mut spec);
+        adjust(&mut spec);
         let graph = project.add_graph(root, None, spec).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        Banc {
+        Harness {
             state,
             graph,
             _session: session,
         }
     }
 
-    impl Banc {
-        /// Ouvre la fenêtre des propriétés sur `tab` (et `axis`), comme le
-        /// clic droit ou le menu « Graphique ».
-        fn ouvrir(&mut self, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
+    impl Harness {
+        /// Opens the properties window on `tab` (and `axis`), like the
+        /// right-click or the "Graph" menu.
+        fn open(&mut self, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
             self.state.dispatch(Action::OpenPlotSettings {
                 graph: self.graph,
                 tab,
@@ -1240,53 +1240,53 @@ mod tests {
             assert_eq!(self.state.plot_settings().map(|s| s.tab), Some(tab));
         }
 
-        /// Le graphe tel que le modèle le tient (pas le brouillon).
-        fn modele(&self) -> PlotSpec {
+        /// The graph as the model holds it (not the draft).
+        fn model(&self) -> PlotSpec {
             self.state.plot_spec(self.graph).unwrap()
         }
 
-        /// Le brouillon de la fenêtre.
-        fn brouillon(&self) -> PlotSpec {
+        /// The window's draft.
+        fn draft(&self) -> PlotSpec {
             self.state.plot_edit().unwrap().spec.clone()
         }
     }
 
-    /// Peint la fenêtre des propriétés trois fois (mise en page stabilisée,
-    /// dialogue centré) puis une quatrième avec `events` ; rend les textes de
-    /// la dernière image.
-    fn peindre_fenetre(
+    /// Paints the properties window three times (layout settled,
+    /// dialog centered) then a fourth with `events`; returns the texts of
+    /// the last frame.
+    fn paint_window(
         context: &egui::Context,
         state: &mut AppState,
         events: Vec<egui::Event>,
-    ) -> Vec<Texte> {
+    ) -> Vec<Text> {
         for _ in 0..3 {
             image(context, Vec::new(), |ui| {
                 plot_settings_window(ui.ctx(), state)
             });
         }
-        textes(&image(context, events, |ui| {
+        texts(&image(context, events, |ui| {
             plot_settings_window(ui.ctx(), state)
         }))
     }
 
-    /// Clique sur le texte `libelle` de la fenêtre (une seule occurrence),
-    /// puis rend les textes de l'image suivante.
-    fn cliquer_libelle(context: &egui::Context, state: &mut AppState, libelle: &str) -> Vec<Texte> {
-        let peints = peindre_fenetre(context, state, Vec::new());
-        let pos = texte_exact(&peints, libelle).centre;
-        cliquer(context, pos, egui::PointerButton::Primary, |ui| {
+    /// Clicks on the text `label` of the window (a single occurrence),
+    /// then returns the texts of the next frame.
+    fn click_label(context: &egui::Context, state: &mut AppState, label: &str) -> Vec<Text> {
+        let painted = paint_window(context, state, Vec::new());
+        let pos = text_exact(&painted, label).center;
+        click(context, pos, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), state)
         });
-        peindre_fenetre(context, state, Vec::new())
+        paint_window(context, state, Vec::new())
     }
 
-    /// Fait défiler la page des axes jusqu'en bas (la molette sur le texte
-    /// `survol`, peint avant le défilement) ; le décalage est gardé par egui
-    /// pour les images suivantes.
-    fn defiler(context: &egui::Context, state: &mut AppState, survol: &str) -> Vec<Texte> {
-        let peints = peindre_fenetre(context, state, Vec::new());
-        let pos = texte_exact(&peints, survol).centre;
-        peindre_fenetre(
+    /// Scrolls the axes page to the bottom (the wheel over the text
+    /// `hover`, painted before the scroll); the offset is kept by egui
+    /// for the next frames.
+    fn scroll_down(context: &egui::Context, state: &mut AppState, hover: &str) -> Vec<Text> {
+        let painted = paint_window(context, state, Vec::new());
+        let pos = text_exact(&painted, hover).center;
+        paint_window(
             context,
             state,
             vec![
@@ -1299,26 +1299,26 @@ mod tests {
                 },
             ],
         );
-        peindre_fenetre(context, state, Vec::new())
+        paint_window(context, state, Vec::new())
     }
 
-    /// Le texte `cherche` peint sur la même rangée que `rangee` (à quelques
-    /// points de hauteur près) : « Auto » y figure plusieurs fois.
-    fn dans_la_rangee<'a>(textes: &'a [Texte], rangee: &str, cherche: &str) -> &'a Texte {
-        let y = texte_exact(textes, rangee).centre.y;
-        textes
+    /// The text `wanted` painted on the same row as `row` (within a few
+    /// points of height): "Auto" appears there several times.
+    fn in_the_row<'a>(texts: &'a [Text], row: &str, wanted: &str) -> &'a Text {
+        let y = text_exact(texts, row).center.y;
+        texts
             .iter()
-            .find(|t| t.texte == cherche && (t.centre.y - y).abs() < 4.0)
-            .unwrap_or_else(|| panic!("{cherche:?} absent de la rangée {rangee:?} : {textes:?}"))
+            .find(|t| t.text == wanted && (t.center.y - y).abs() < 4.0)
+            .unwrap_or_else(|| panic!("{wanted:?} absent from row {row:?}: {texts:?}"))
     }
 
-    // -- Chaque onglet, dans chaque langue ----------------------------------
+    // -- Each tab, in each language -----------------------------------------
 
-    /// Un libellé propre à chaque onglet : peint sur sa page, absent des
-    /// autres. Choisis pour ne coïncider avec aucun autre texte des six pages
-    /// (« Axes » est à la fois l'onglet et une couleur du thème, « Line » à la
-    /// fois une section et un type de tracé).
-    fn libelles_propres() -> [(PlotSettingsTab, String); 6] {
+    /// A label specific to each tab: painted on its page, absent from the
+    /// others. Chosen not to coincide with any other text of the six pages
+    /// ("Axes" is both the tab and a theme color, "Line" is both
+    /// a section and a plot type).
+    fn own_labels() -> [(PlotSettingsTab, String); 6] {
         [
             (PlotSettingsTab::Graph, tr!("plot-general-dark-note")),
             (
@@ -1332,278 +1332,293 @@ mod tests {
         ]
     }
 
-    /// Issue #119 (captures avant/après) : chaque onglet se peint sans
-    /// paniquer, montre la bande commune des six onglets, **son** contenu et
-    /// pas celui des autres, et ne modifie rien — ni le modèle, ni le
-    /// brouillon, ni l'historique, ni l'onglet choisi. En pseudo-langue
-    /// (`STOKESFORGE_LANG=en-XA`), tout texte peint qui n'est pas une donnée
-    /// passe par le catalogue : il est encadré de `[[ ]]` (un `]]` absent
-    /// dirait un texte tronqué par la mise en page).
+    /// Issue #119 (before/after screenshots): each tab draws without
+    /// panicking, shows the common strip of the six tabs, **its own** content
+    /// and not that of the others, and changes nothing — neither the model,
+    /// nor the draft, nor the history, nor the chosen tab. In the pseudo-locale
+    /// (`STOKESFORGE_LANG=en-XA`), every painted text that is not data goes
+    /// through the catalog: it is framed by `[[ ]]` (a missing `]]` would
+    /// mean a text truncated by the layout).
     ///
-    /// La langue est celle du processus : c'est
-    /// [`chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue`] qui le relance
-    /// en sous-processus avec `en` puis `en-XA` (la langue est un état global :
-    /// la changer ici troublerait les tests voisins). Il lit la ligne
-    /// « onglets peints en … » pour savoir que les vérifications ont eu lieu
-    /// dans la bonne langue.
+    /// The language is the process's: it is
+    /// [`each_tab_draws_in_english_and_in_the_pseudo_locale`] that reruns it
+    /// in a subprocess with `en` then `en-XA` (the language is a global state:
+    /// changing it here would disturb the neighboring tests). It reads the line
+    /// "tabs painted in …" to know that the checks ran in the right language.
     #[test]
-    #[ignore = "lancé en sous-processus par chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue"]
-    fn chaque_onglet_se_peint_sans_rien_modifier_dans_la_langue_du_processus() {
-        let langue = i18n::language();
-        let mut verifies = 0;
+    #[ignore = "run in a subprocess by each_tab_draws_in_english_and_in_the_pseudo_locale"]
+    fn each_tab_draws_without_changing_anything_in_the_process_language() {
+        let language = i18n::language();
+        let mut checked = 0;
         for tab in PlotSettingsTab::ALL {
-            // Une ordonnée de titre coloré différemment du titre du graphe :
-            // l'onglet « Thème » ne doit pas les fondre en une seule couleur
-            // par le seul fait de se peindre.
-            let mut banc = banc(|spec| {
+            // A Y axis title colored differently from the graph title:
+            // the "Theme" tab must not merge them into a single color
+            // just by being drawn.
+            let mut harness = harness(|spec| {
                 spec.set_text_color("#336699");
-                panneau(spec).left.title_color = "#aa0000".into();
-                panneau(spec).left.tick_color = "#00aa00".into();
+                first_panel(spec).left.title_color = "#aa0000".into();
+                first_panel(spec).left.tick_color = "#00aa00".into();
             });
-            let historique = banc.state.undo_label();
-            banc.ouvrir(tab, None);
-            let original = banc.modele();
-            let context = contexte();
-            let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+            let history = harness.state.undo_label();
+            harness.open(tab, None);
+            let original = harness.model();
+            let context = test_support::context();
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
 
-            // La bande défile quand elle ne tient pas (#19) : en anglais, les
-            // six onglets tiennent ; en pseudo-langue, allongée de 30 %, seul
-            // l'onglet choisi est sûr d'être visible.
+            // The strip scrolls when it does not fit (#19): in English, the
+            // six tabs fit; in the pseudo-locale, 30 % longer, only the
+            // chosen tab is sure to be visible.
             assert!(
-                est_peint(&peints, &tab.label()),
-                "{tab:?} : l'onglet choisi n'est pas visible dans la bande"
+                is_painted(&painted, &tab.label()),
+                "{tab:?}: the chosen tab is not visible in the strip"
             );
-            if langue == Language::English {
-                for onglet in PlotSettingsTab::ALL {
+            if language == Language::English {
+                for other in PlotSettingsTab::ALL {
                     assert!(
-                        est_peint(&peints, &onglet.label()),
-                        "{tab:?} : onglet {onglet:?} absent de la bande"
+                        is_painted(&painted, &other.label()),
+                        "{tab:?}: tab {other:?} missing from the strip"
                     );
                 }
             }
-            for (proprietaire, libelle) in libelles_propres() {
+            for (owner, label) in own_labels() {
                 assert_eq!(
-                    est_peint(&peints, &libelle),
-                    proprietaire == tab,
-                    "{tab:?} : {libelle:?} appartient à {proprietaire:?}"
+                    is_painted(&painted, &label),
+                    owner == tab,
+                    "{tab:?}: {label:?} belongs to {owner:?}"
                 );
             }
-            assert_eq!(banc.modele(), original, "{tab:?} : le modèle a changé");
-            assert_eq!(
-                banc.brouillon(),
-                original,
-                "{tab:?} : le brouillon a changé"
-            );
-            assert_eq!(banc.state.undo_label(), historique, "{tab:?} : historique");
-            let settings = banc.state.plot_settings().expect("fenêtre restée ouverte");
+            assert_eq!(harness.model(), original, "{tab:?}: the model changed");
+            assert_eq!(harness.draft(), original, "{tab:?}: the draft changed");
+            assert_eq!(harness.state.undo_label(), history, "{tab:?}: history");
+            let settings = harness.state.plot_settings().expect("window stayed open");
             assert_eq!(settings.tab, tab);
 
-            // Les données ne passent pas par le catalogue :
-            // libellé de la série tiré de ses colonnes, valeurs numériques,
-            // champs de saisie vides (titres non renseignés).
-            let tree = banc.state.tree().clone();
-            let serie = series_list_label(&tree, &original.panels[0].series[0]);
-            let donnee =
-                |texte: &str| texte.is_empty() || texte == serie || texte.parse::<f64>().is_ok();
-            for peint in &peints {
-                if langue == Language::PseudoEnglish && !donnee(&peint.texte) {
+            // Data does not go through the catalog: the series label taken
+            // from its columns, numeric values, empty input fields (titles
+            // not filled in).
+            let tree = harness.state.tree().clone();
+            let series = series_list_label(&tree, &original.panels[0].series[0]);
+            let is_data =
+                |text: &str| text.is_empty() || text == series || text.parse::<f64>().is_ok();
+            for item in &painted {
+                if language == Language::PseudoEnglish && !is_data(&item.text) {
                     assert!(
-                        peint.texte.starts_with(pseudo::OPEN)
-                            && peint.texte.ends_with(pseudo::CLOSE),
-                        "{tab:?} : {:?} n'est pas passé par le catalogue (ou est tronqué)",
-                        peint.texte
+                        item.text.starts_with(pseudo::OPEN) && item.text.ends_with(pseudo::CLOSE),
+                        "{tab:?}: {:?} did not go through the catalog (or is truncated)",
+                        item.text
                     );
                 } else {
                     assert!(
-                        !peint.texte.contains(pseudo::OPEN),
-                        "{tab:?} : {:?} en pseudo-langue hors de en-XA",
-                        peint.texte
+                        !item.text.contains(pseudo::OPEN),
+                        "{tab:?}: {:?} in the pseudo-locale outside en-XA",
+                        item.text
                     );
                 }
-                verifies += 1;
+                checked += 1;
             }
         }
-        println!("onglets peints en {} : {verifies} textes", langue.tag());
+        println!("tabs painted in {}: {checked} texts", language.tag());
     }
 
-    /// Relance [`chaque_onglet_se_peint_sans_rien_modifier_dans_la_langue_du_processus`]
-    /// dans un processus fils par langue, `STOKESFORGE_LANG` posé : l'anglais,
-    /// puis la pseudo-langue. Le fils doit réussir **et** dire qu'il a peint
-    /// dans la langue demandée (témoin : un fils qui n'aurait rien lancé, ou
-    /// dans une autre langue, ne l'écrirait pas).
+    /// Reruns [`each_tab_draws_without_changing_anything_in_the_process_language`]
+    /// in a child process per language, with `STOKESFORGE_LANG` set: English,
+    /// then the pseudo-locale. The child must succeed **and** say that it
+    /// painted in the requested language (witness: a child that ran nothing,
+    /// or in another language, would not write it).
     #[test]
-    fn chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue() {
+    fn each_tab_draws_in_english_and_in_the_pseudo_locale() {
         let executable = std::env::current_exe().unwrap();
         let module = module_path!()
             .split_once("::")
-            .map_or(module_path!(), |(_, reste)| reste);
-        let nom = format!(
-            "{module}::chaque_onglet_se_peint_sans_rien_modifier_dans_la_langue_du_processus"
-        );
-        for langue in [Language::English, Language::PseudoEnglish] {
-            let sortie = std::process::Command::new(&executable)
+            .map_or(module_path!(), |(_, rest)| rest);
+        let name =
+            format!("{module}::each_tab_draws_without_changing_anything_in_the_process_language");
+        for language in [Language::English, Language::PseudoEnglish] {
+            let output = std::process::Command::new(&executable)
                 .args([
-                    nom.as_str(),
+                    name.as_str(),
                     "--exact",
                     "--ignored",
                     "--nocapture",
                     "--test-threads=1",
                 ])
-                .env(LANGUAGE_VARIABLE, langue.tag())
+                .env(LANGUAGE_VARIABLE, language.tag())
                 .output()
                 .unwrap();
-            let stdout = String::from_utf8_lossy(&sortie.stdout);
-            let stderr = String::from_utf8_lossy(&sortie.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(
-                sortie.status.success(),
-                "{} :\n{stdout}\n{stderr}",
-                langue.tag()
+                output.status.success(),
+                "{}:\n{stdout}\n{stderr}",
+                language.tag()
             );
             assert!(
-                stdout.contains(&format!("onglets peints en {} : ", langue.tag())),
-                "{} : le fils n'a pas peint dans cette langue :\n{stdout}",
-                langue.tag()
+                stdout.contains(&format!("tabs painted in {}: ", language.tag())),
+                "{}: the child did not paint in this language:\n{stdout}",
+                language.tag()
             );
         }
     }
 
-    // -- La bande d'onglets et l'onglet des axes ----------------------------
+    // -- The tab strip and the axes tab -------------------------------------
 
-    /// #19 : les onglets des propriétés sont la bande commune (`tab_strip`) ;
-    /// un clic sur l'un d'eux change la page (témoin : tant qu'on ne clique
-    /// pas, la page reste la même, image après image).
+    /// #19: the properties tabs are the common strip (`tab_strip`);
+    /// a click on one of them changes the page (witness: as long as one does not click,
+    /// the page stays the same, frame after frame).
     #[test]
-    fn un_clic_sur_un_onglet_des_proprietes_change_de_page() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Graph, None);
-        let context = contexte();
+    fn a_click_on_a_properties_tab_changes_the_page() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Graph, None);
+        let context = test_support::context();
         let axes = tr!("plot-axes-scale-section");
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(!est_peint(&peints, &axes));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &axes));
         assert_eq!(
-            banc.state.plot_settings().unwrap().tab,
+            harness.state.plot_settings().unwrap().tab,
             PlotSettingsTab::Graph
         );
 
-        let peints = cliquer_libelle(&context, &mut banc.state, &PlotSettingsTab::Axes.label());
+        let painted = click_label(&context, &mut harness.state, &PlotSettingsTab::Axes.label());
         assert_eq!(
-            banc.state.plot_settings().unwrap().tab,
+            harness.state.plot_settings().unwrap().tab,
             PlotSettingsTab::Axes
         );
-        assert!(est_peint(&peints, &axes), "la page des axes est peinte");
+        assert!(is_painted(&painted, &axes), "the axes page is painted");
     }
 
-    /// L'onglet « Axes » propose X, Y et les deux axes miroirs (#176) ; un
-    /// calque superposé n'a pas de miroir. Un clic sur un axe le choisit, sans
-    /// rien modifier.
+    /// The "Axes" tab offers X, Y and the two mirror axes (#176); an
+    /// overlaid layer has no mirror. A click on an axis chooses it, without
+    /// changing anything.
     #[test]
-    fn l_onglet_des_axes_choisit_l_axe_et_propose_les_miroirs() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Axes, None);
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &PlotAxis::Bottom.label()));
-        assert!(est_peint(&peints, &PlotAxis::Left.label()));
-        assert!(est_peint(&peints, &PlotAxis::Right.label()));
-        assert!(est_peint(&peints, &PlotAxis::Top.label()));
-        assert_eq!(banc.state.plot_settings().unwrap().axis, PlotAxis::Bottom);
+    fn the_axes_tab_chooses_the_axis_and_offers_the_mirrors() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, None);
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &PlotAxis::Bottom.label()));
+        assert!(is_painted(&painted, &PlotAxis::Left.label()));
+        assert!(is_painted(&painted, &PlotAxis::Right.label()));
+        assert!(is_painted(&painted, &PlotAxis::Top.label()));
+        assert_eq!(
+            harness.state.plot_settings().unwrap().axis,
+            PlotAxis::Bottom
+        );
 
-        let original = banc.modele();
-        cliquer_libelle(&context, &mut banc.state, &PlotAxis::Left.label());
-        assert_eq!(banc.state.plot_settings().unwrap().axis, PlotAxis::Left);
-        assert_eq!(banc.modele(), original);
+        let original = harness.model();
+        click_label(&context, &mut harness.state, &PlotAxis::Left.label());
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Left);
+        assert_eq!(harness.model(), original);
 
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Right));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &PlotAxis::Right.label()));
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Right));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &PlotAxis::Right.label()));
     }
 
-    /// #176 : l'onglet d'un axe miroir ne propose ni titre ni couleur, seulement
-    /// de l'afficher et de garder ou non les étiquettes de graduation.
+    /// #176: the tab of a mirror axis offers neither title nor color, only
+    /// to show it and to keep or not the tick labels.
     #[test]
-    fn l_onglet_d_un_axe_miroir_ne_propose_que_l_affichage() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-axes-show-mirror")));
-        assert!(est_peint(&peints, &tr!("plot-axes-show-tick-labels")));
-        assert!(!est_peint(&peints, &tr!("plot-axes-quantity")));
-        assert!(!est_peint(&peints, &tr!("plot-axes-color")));
+    fn the_tab_of_a_mirror_axis_offers_only_display() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-axes-show-mirror")));
+        assert!(is_painted(&painted, &tr!("plot-axes-show-tick-labels")));
+        assert!(!is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(!is_painted(&painted, &tr!("plot-axes-color")));
 
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-axes-quantity")));
-        assert!(!est_peint(&peints, &tr!("plot-axes-show-mirror")));
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-axes-quantity")));
+        assert!(!is_painted(&painted, &tr!("plot-axes-show-mirror")));
     }
 
-    /// #344 : la page d'un axe n'a plus ni « Axe inversé » ni « Plage auto »
-    /// (le sens se lit sur l'ordre De / À, le bouton Auto rend aux données),
-    /// ni « Cadre fermé » ; elle a une section « Graduations » dont le bloc
-    /// « Avancé » est fermé, puis ouvert au clic (et de nouveau fermé).
+    /// #344: the page of an axis no longer has "Reverse axis" or "Auto range"
+    /// (the direction is read from the From / To order, the Auto button gives back to the data),
+    /// nor "Closed Frame"; it has a "Ticks" section whose
+    /// "Advanced" block is closed, then opened on click (and closed again).
     #[test]
-    fn la_page_d_un_axe_a_ses_graduations_et_un_bloc_avance_replie() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-axes-from")));
-        assert!(est_peint(&peints, &tr!("plot-axes-from-auto")));
-        for retire in ["Reverse axis", "Auto range", "Closed Frame"] {
-            assert!(!est_peint(&peints, retire), "{retire:?} n'existe plus");
+    fn an_axis_page_has_its_ticks_and_a_folded_advanced_block() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-axes-from")));
+        assert!(is_painted(&painted, &tr!("plot-axes-from-auto")));
+        for removed in ["Reverse axis", "Auto range", "Closed Frame"] {
+            assert!(
+                !is_painted(&painted, removed),
+                "{removed:?} no longer exists"
+            );
         }
-        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
-        assert!(est_peint(&peints, &tr!("plot-axes-ticks-section")));
-        assert!(est_peint(&peints, &tr!("plot-axes-show-minor-ticks")));
-        assert!(est_peint(&peints, &tr!("plot-axes-advanced")));
-        let avances = [
+        let painted = scroll_down(
+            &context,
+            &mut harness.state,
+            &tr!("plot-axes-show-gridlines"),
+        );
+        assert!(is_painted(&painted, &tr!("plot-axes-ticks-section")));
+        assert!(is_painted(&painted, &tr!("plot-axes-show-minor-ticks")));
+        assert!(is_painted(&painted, &tr!("plot-axes-advanced")));
+        let advanced_labels = [
             tr!("plot-axes-tick-length"),
             tr!("plot-axes-minor-tick-length"),
             tr!("plot-axes-tick-width"),
             tr!("plot-axes-tick-mark-color"),
         ];
-        for libelle in &avances {
-            assert!(
-                !est_peint(&peints, libelle),
-                "{libelle:?} : fermé par défaut"
-            );
+        for label in &advanced_labels {
+            assert!(!is_painted(&painted, label), "{label:?}: closed by default");
         }
-        let cliquer_avance = |banc: &mut Banc| {
-            let pos = texte_exact(
-                &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
+        let click_advanced = |harness: &mut Harness| {
+            let pos = text_exact(
+                &scroll_down(
+                    &context,
+                    &mut harness.state,
+                    &tr!("plot-axes-show-gridlines"),
+                ),
                 &tr!("plot-axes-advanced"),
             )
-            .centre;
-            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut banc.state)
+            .center;
+            click(&context, pos, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
             });
-            defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"))
+            scroll_down(
+                &context,
+                &mut harness.state,
+                &tr!("plot-axes-show-gridlines"),
+            )
         };
-        let peints = cliquer_avance(&mut banc);
-        for libelle in &avances {
-            assert!(est_peint(&peints, libelle), "{libelle:?} : ouvert au clic");
+        let painted = click_advanced(&mut harness);
+        for label in &advanced_labels {
+            assert!(is_painted(&painted, label), "{label:?}: opened on click");
         }
-        assert_eq!(banc.modele(), banc.brouillon(), "ouvrir ne modifie rien");
-        let peints = cliquer_avance(&mut banc);
-        assert!(!est_peint(&peints, &avances[0]), "second clic : refermé");
+        assert_eq!(harness.model(), harness.draft(), "opening changes nothing");
+        let painted = click_advanced(&mut harness);
+        assert!(
+            !is_painted(&painted, &advanced_labels[0]),
+            "second click: closed again"
+        );
     }
 
-    /// #344 : le bloc « Avancé » s'ouvre une seule fois à un clic sur la
-    /// flèche ou dans l'espace entre la flèche et le titre (une seule zone
-    /// cliquable : la flèche qui basculerait d'elle-même, en plus du titre,
-    /// l'ouvrirait puis la refermerait au même passage).
+    /// #344: the "Advanced" block opens exactly once on a click on the
+    /// arrow or in the space between the arrow and the title (a single
+    /// clickable area: an arrow that toggled by itself, in addition to the title,
+    /// would open it then close it in the same pass).
     #[test]
-    fn un_clic_sur_la_fleche_du_bloc_avance_l_ouvre_une_fois() {
-        for decalage in [10.0, 2.0] {
-            let mut banc = banc(|_| {});
-            banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-            let context = contexte();
-            let titre = texte_exact(
-                &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
+    fn a_click_on_the_advanced_block_arrow_opens_it_once() {
+        for offset in [10.0, 2.0] {
+            let mut harness = harness(|_| {});
+            harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+            let context = test_support::context();
+            let title = text_exact(
+                &scroll_down(
+                    &context,
+                    &mut harness.state,
+                    &tr!("plot-axes-show-gridlines"),
+                ),
                 &tr!("plot-axes-advanced"),
             )
-            .centre;
-            let largeur = context.fonts_mut(|fonts| {
+            .center;
+            let width = context.fonts_mut(|fonts| {
                 fonts
                     .layout_no_wrap(
                         tr!("plot-axes-advanced"),
@@ -1613,640 +1628,659 @@ mod tests {
                     .size()
                     .x
             });
-            // À gauche du bord du titre : la flèche, puis l'espace qui la sépare.
-            let point = egui::pos2(titre.x - largeur / 2.0 - decalage, titre.y);
-            cliquer(&context, point, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut banc.state)
+            // Left of the title's edge: the arrow, then the space that separates them.
+            let point = egui::pos2(title.x - width / 2.0 - offset, title.y);
+            click(&context, point, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
             });
-            let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+            let painted = scroll_down(
+                &context,
+                &mut harness.state,
+                &tr!("plot-axes-show-gridlines"),
+            );
             assert!(
-                est_peint(&peints, &tr!("plot-axes-tick-length")),
-                "ouvert à {decalage} px du titre"
+                is_painted(&painted, &tr!("plot-axes-tick-length")),
+                "opened at {offset} px from the title"
             );
         }
     }
 
-    /// Publie les bornes que le tracé aurait retenues pour l'axe du bas.
-    fn publier_bornes_du_bas(context: &egui::Context, banc: &Banc, bornes: (f64, f64)) {
+    /// Publishes the bounds that the draw would have kept for the bottom axis.
+    fn publish_bottom_bounds(context: &egui::Context, harness: &Harness, bounds: (f64, f64)) {
         super::super::graph_window::set_published_axis_bounds(
             context,
-            banc.graph,
+            harness.graph,
             vec![super::super::graph_window::PanelBounds {
                 index: 0,
-                bottom: Some(bornes),
+                bottom: Some(bounds),
                 ..Default::default()
             }],
         );
     }
 
-    /// Tape `saisi` dans le champ numérique qui affiche `valeur`, valide à
-    /// Entrée.
-    fn saisir(context: &egui::Context, banc: &mut Banc, valeur: &str, saisi: &str) {
-        focaliser(context, &mut banc.state, valeur);
-        une_image(
+    /// Types `typed` into the numeric field that displays `value`, commits on
+    /// Enter.
+    fn type_into(context: &egui::Context, harness: &mut Harness, value: &str, typed: &str) {
+        focus_field(context, &mut harness.state, value);
+        one_frame(
             context,
-            &mut banc.state,
-            vec![egui::Event::Text(saisi.into())],
+            &mut harness.state,
+            vec![egui::Event::Text(typed.into())],
         );
-        une_image(context, &mut banc.state, vec![touche(egui::Key::Enter)]);
-        une_image(context, &mut banc.state, Vec::new());
+        one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(context, &mut harness.state, Vec::new());
     }
 
-    /// #344 : sous Auto, De et À montrent les bornes calculées ; saisir l'une
-    /// fige les deux (l'autre est prise du calcul), en **une** entrée
-    /// d'historique, et le sens suit l'ordre : De > À inverse l'axe.
+    /// #344: under Auto, From and To show the computed bounds; typing in one
+    /// freezes both (the other is taken from the computation), in **one** history
+    /// entry, and the direction follows the order: From > To inverts the axis.
     #[test]
-    fn saisir_une_borne_sous_auto_fige_les_deux_et_le_sens_suit_l_ordre() {
-        let context = contexte();
-        for (valeur, saisi, bornes, inverse) in [
+    fn typing_a_bound_under_auto_freezes_both_and_the_direction_follows_the_order() {
+        let context = test_support::context();
+        for (value, typed, bounds, inverted) in [
             ("5", "3", (3.0, 20.0), false),
             ("20", "1", (5.0, 1.0), true),
             ("5", "30", (30.0, 20.0), true),
         ] {
-            let mut banc = banc(|_| {});
-            banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-            publier_bornes_du_bas(&context, &banc, (5.0, 20.0));
-            let original = banc.modele();
+            let mut harness = harness(|_| {});
+            harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+            publish_bottom_bounds(&context, &harness, (5.0, 20.0));
+            let original = harness.model();
             assert!(original.panels[0].bottom.auto_range);
-            let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
             assert!(
-                est_peint(&peints, "5") && est_peint(&peints, "20"),
-                "{peints:?}"
+                is_painted(&painted, "5") && is_painted(&painted, "20"),
+                "{painted:?}"
             );
 
-            saisir(&context, &mut banc, valeur, saisi);
-            let axe = banc.modele().panels[0].bottom.clone();
-            assert!(!axe.auto_range, "{valeur}->{saisi} : la saisie fige");
+            type_into(&context, &mut harness, value, typed);
+            let axis = harness.model().panels[0].bottom.clone();
+            assert!(!axis.auto_range, "{value}->{typed}: the input freezes");
             assert_eq!(
-                (axe.range_min, axe.range_max),
-                (Some(bornes.0), Some(bornes.1)),
-                "{valeur}->{saisi}"
+                (axis.range_min, axis.range_max),
+                (Some(bounds.0), Some(bounds.1)),
+                "{value}->{typed}"
             );
-            assert_eq!(axe.inverted, inverse, "{valeur}->{saisi} : sens");
-            banc.state.close_plot_settings();
-            banc.state.dispatch(Action::Undo);
-            assert_eq!(banc.modele(), original, "une seule entrée d'historique");
+            assert_eq!(axis.inverted, inverted, "{value}->{typed}: direction");
+            harness.state.close_plot_settings();
+            harness.state.dispatch(Action::Undo);
+            assert_eq!(harness.model(), original, "a single history entry");
         }
     }
 
-    /// #344 : le bouton Auto rend les bornes aux données et **garde le sens** ;
-    /// un axe inversé sous Auto montre sa borne haute dans le champ De.
+    /// #344: the Auto button gives the bounds back to the data and **keeps the direction**;
+    /// an inverted axis under Auto shows its upper bound in the From field.
     #[test]
-    fn le_bouton_auto_rend_aux_donnees_en_gardant_le_sens() {
-        let context = contexte();
-        let mut banc = banc(|spec| {
-            let axe = &mut panneau(spec).bottom;
-            axe.auto_range = false;
-            axe.inverted = true;
-            axe.range_min = Some(20.0);
-            axe.range_max = Some(5.0);
+    fn the_auto_button_gives_back_to_the_data_keeping_the_direction() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            let axis = &mut first_panel(spec).bottom;
+            axis.auto_range = false;
+            axis.inverted = true;
+            axis.range_min = Some(20.0);
+            axis.range_max = Some(5.0);
         });
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        publier_bornes_du_bas(&context, &banc, (5.0, 20.0));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        let bouton =
-            dans_la_rangee(&peints, &tr!("plot-axes-from"), &tr!("plot-axes-from-auto")).centre;
-        cliquer(&context, bouton, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut banc.state)
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        publish_bottom_bounds(&context, &harness, (5.0, 20.0));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let button = in_the_row(
+            &painted,
+            &tr!("plot-axes-from"),
+            &tr!("plot-axes-from-auto"),
+        )
+        .center;
+        click(&context, button, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
         });
-        let axe = banc.modele().panels[0].bottom.clone();
-        assert!(axe.auto_range);
-        assert!(axe.inverted, "le sens est conservé");
-        assert_eq!((axe.range_min, axe.range_max), (Some(20.0), Some(5.0)));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let axis = harness.model().panels[0].bottom.clone();
+        assert!(axis.auto_range);
+        assert!(axis.inverted, "the direction is kept");
+        assert_eq!((axis.range_min, axis.range_max), (Some(20.0), Some(5.0)));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
-            texte_exact(&peints, "20").centre.x < texte_exact(&peints, "5").centre.x,
-            "axe inversé : De montre la borne haute"
+            text_exact(&painted, "20").center.x < text_exact(&painted, "5").center.x,
+            "inverted axis: From shows the upper bound"
         );
     }
 
-    /// #344 : les réglages « Avancé » (longueur des tirets, épaisseur) s'écrivent
-    /// dans l'axe ; vider un champ le rend Auto ; ils sont propres à l'axe
-    /// choisi.
+    /// #344: the "Advanced" settings (length of tick marks, width) are written
+    /// into the axis; emptying a field makes it Auto; they are specific to the
+    /// chosen axis.
     #[test]
-    fn les_reglages_avances_des_tirets_s_ecrivent_par_axe() {
-        let context = contexte();
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        let ouvrir = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
-        let pos = texte_exact(&ouvrir, &tr!("plot-axes-advanced")).centre;
-        cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut banc.state)
-        });
-        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
-        let champ =
-            dans_la_rangee(&peints, &tr!("plot-axes-tick-length"), &tr!("common-auto")).centre;
-        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut banc.state)
-        });
-        une_image(
+    fn advanced_tick_settings_are_written_per_axis() {
+        let context = test_support::context();
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let open = scroll_down(
             &context,
-            &mut banc.state,
+            &mut harness.state,
+            &tr!("plot-axes-show-gridlines"),
+        );
+        let pos = text_exact(&open, &tr!("plot-axes-advanced")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let painted = scroll_down(
+            &context,
+            &mut harness.state,
+            &tr!("plot-axes-show-gridlines"),
+        );
+        let field = in_the_row(&painted, &tr!("plot-axes-tick-length"), &tr!("common-auto")).center;
+        click(&context, field, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        one_frame(
+            &context,
+            &mut harness.state,
             vec![egui::Event::Text("9".into())],
         );
-        une_image(&context, &mut banc.state, vec![touche(egui::Key::Enter)]);
-        une_image(&context, &mut banc.state, Vec::new());
-        let panneau = &banc.modele().panels[0];
-        assert_eq!(panneau.bottom.tick_length, Some(9.0));
-        assert_eq!(panneau.left.tick_length, None, "propre à l'axe du bas");
-        assert_eq!(panneau.bottom.minor_tick_length, None);
-        assert_eq!(panneau.bottom.tick_width, None);
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        let first_panel = &harness.model().panels[0];
+        assert_eq!(first_panel.bottom.tick_length, Some(9.0));
+        assert_eq!(
+            first_panel.left.tick_length, None,
+            "specific to the bottom axis"
+        );
+        assert_eq!(first_panel.bottom.minor_tick_length, None);
+        assert_eq!(first_panel.bottom.tick_width, None);
     }
 
-    /// #344 : les graduations et leur sens se règlent par axe, miroirs compris ;
-    /// un miroir éteint ou des graduations coupées grisent le choix du sens.
+    /// #344: ticks and their direction are set per axis, mirrors included;
+    /// a mirror turned off or ticks turned off gray out the direction choice.
     #[test]
-    fn les_graduations_et_leur_sens_se_reglent_par_axe() {
-        let context = contexte();
-        // L'éditeur complet (bas, gauche, vrai axe de droite).
+    fn ticks_and_their_direction_are_set_per_axis() {
+        let context = test_support::context();
+        // The full editor (bottom, left, real right axis).
         let mut axis = stokesforge_plot::AxisSpec::default();
-        let (_, peints) = peindre_axe(&context, &mut axis, None);
-        assert!(est_peint(&peints, &tr!("plot-axes-show-ticks")));
-        assert!(est_peint(&peints, &tr!("plot-axes-tick-direction")));
+        let (_, painted) = paint_axis(&context, &mut axis, None);
+        assert!(is_painted(&painted, &tr!("plot-axes-show-ticks")));
+        assert!(is_painted(&painted, &tr!("plot-axes-tick-direction")));
 
-        // Le miroir du haut, page courte : toutes les commandes sont peintes.
-        let mut banc = banc(|spec| panneau(spec).top.mirror = true);
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-axes-show-ticks")));
-        assert!(est_peint(&peints, &tr!("plot-axes-tick-direction")));
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        // The top mirror, short page: all the controls are painted.
+        let mut harness = harness(|spec| first_panel(spec).top.mirror = true);
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-axes-show-ticks")));
+        assert!(is_painted(&painted, &tr!("plot-axes-tick-direction")));
+        click_label(&context, &mut harness.state, &tr!("plot-axes-tick-in"));
         assert_eq!(
-            banc.modele().panels[0].top.tick_direction,
+            harness.model().panels[0].top.tick_direction,
             TickDirection::In
         );
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-both"));
+        click_label(&context, &mut harness.state, &tr!("plot-axes-tick-both"));
         assert_eq!(
-            banc.modele().panels[0].top.tick_direction,
+            harness.model().panels[0].top.tick_direction,
             TickDirection::Both
         );
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
-        assert!(!banc.modele().panels[0].top.ticks);
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        click_label(&context, &mut harness.state, &tr!("plot-axes-show-ticks"));
+        assert!(!harness.model().panels[0].top.ticks);
+        click_label(&context, &mut harness.state, &tr!("plot-axes-tick-in"));
         assert_eq!(
-            banc.modele().panels[0].top.tick_direction,
+            harness.model().panels[0].top.tick_direction,
             TickDirection::Both,
-            "graduations coupées : le choix du sens est grisé"
+            "ticks off: the direction choice is grayed out"
         );
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
-        assert!(banc.modele().panels[0].top.ticks);
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        click_label(&context, &mut harness.state, &tr!("plot-axes-show-ticks"));
+        assert!(harness.model().panels[0].top.ticks);
+        click_label(&context, &mut harness.state, &tr!("plot-axes-tick-in"));
         assert_eq!(
-            banc.modele().panels[0].top.tick_direction,
+            harness.model().panels[0].top.tick_direction,
             TickDirection::In
         );
 
-        // Les sous-graduations : allumées par défaut, indépendantes des tirets.
-        assert!(est_peint(&peints, &tr!("plot-axes-show-minor-ticks")));
-        assert!(banc.modele().panels[0].top.minor_ticks);
-        cliquer_libelle(
+        // Minor ticks: on by default, independent of the major tick marks.
+        assert!(is_painted(&painted, &tr!("plot-axes-show-minor-ticks")));
+        assert!(harness.model().panels[0].top.minor_ticks);
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-axes-show-minor-ticks"),
         );
-        assert!(!banc.modele().panels[0].top.minor_ticks);
-        cliquer_libelle(
+        assert!(!harness.model().panels[0].top.minor_ticks);
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-axes-show-minor-ticks"),
         );
-        assert!(banc.modele().panels[0].top.minor_ticks);
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
-        assert!(!banc.modele().panels[0].top.ticks);
-        cliquer_libelle(
+        assert!(harness.model().panels[0].top.minor_ticks);
+        click_label(&context, &mut harness.state, &tr!("plot-axes-show-ticks"));
+        assert!(!harness.model().panels[0].top.ticks);
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-axes-show-minor-ticks"),
         );
         assert!(
-            !banc.modele().panels[0].top.minor_ticks,
-            "sans tirets principaux, les sous-graduations se règlent encore"
+            !harness.model().panels[0].top.minor_ticks,
+            "without major tick marks, the minor ticks can still be set"
         );
     }
 
-    /// #124 : la page choisit le calque du brouillon ; le premier calque
-    /// sert de témoin qui doit rester inchangé après le clic sur la grille.
+    /// #124: the page picks the draft's layer; the first layer
+    /// serves as a witness that must stay unchanged after the click on the grid.
     #[test]
-    fn la_page_du_calque_valide_uniquement_le_calque_choisi() {
-        let mut banc = banc(|spec| {
-            panneau(spec).bottom.grid = false;
+    fn the_layer_page_commits_only_the_chosen_layer() {
+        let mut harness = harness(|spec| {
+            first_panel(spec).bottom.grid = false;
             let mut second = PanelSpec::at(0, 1);
-            second.title = "Calque choisi".into();
+            second.title = "Chosen layer".into();
             second.bottom.grid = false;
             spec.panels.push(second);
         });
-        banc.ouvrir(PlotSettingsTab::PlotArea, None);
-        banc.state.plot_edit_mut().unwrap().selected_panel = usize::MAX;
-        let original = banc.modele();
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, "Calque choisi"));
-        assert_eq!(banc.state.plot_edit().unwrap().selected_panel, 1);
-        assert_eq!(banc.modele(), original, "le choix seul ne valide rien");
+        harness.open(PlotSettingsTab::PlotArea, None);
+        harness.state.plot_edit_mut().unwrap().selected_panel = usize::MAX;
+        let original = harness.model();
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, "Chosen layer"));
+        assert_eq!(harness.state.plot_edit().unwrap().selected_panel, 1);
+        assert_eq!(
+            harness.model(),
+            original,
+            "the choice alone commits nothing"
+        );
 
-        cliquer_libelle(
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-area-gridlines-vertical"),
         );
-        let apres = banc.modele();
-        assert_eq!(apres.panels[0], original.panels[0]);
+        let after = harness.model();
+        assert_eq!(after.panels[0], original.panels[0]);
         assert!(
-            apres.panels[1].bottom.grid,
-            "le clic a validé le calque choisi"
+            after.panels[1].bottom.grid,
+            "the click committed the chosen layer"
         );
-        banc.state.close_plot_settings();
-        banc.state.dispatch(Action::Undo);
-        assert_eq!(banc.modele(), original, "la validation reste annulable");
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "the commit stays undoable");
     }
 
-    /// #169 : l'axe choisi est l'onglet actif d'une bande `tab_strip` (gras
-    /// et accent), la série choisie une ligne de liste en gras, et les
-    /// sections « Line » / « Symbol » des titres en gras — plus des boutons
-    /// sélectionnables ni des libellés ordinaires précédés d'un filet.
-    /// Témoins : l'axe et la série non choisis restent en graisse normale.
+    /// #169: the chosen axis is the active tab of a `tab_strip` (bold
+    /// and accent), the chosen series a bold list row, and the
+    /// "Line" / "Symbol" sections bold titles — no longer selectable
+    /// buttons nor ordinary labels preceded by a rule.
+    /// Witnesses: the unchosen axis and series stay in normal weight.
     #[test]
-    fn l_axe_choisi_est_un_onglet_et_la_serie_choisie_une_ligne_de_liste() {
-        let mut banc = banc(|spec| {
-            let panel = panneau(spec);
-            panel.series[0].name = "Première".into();
-            let mut seconde = panel.series[0].clone();
-            seconde.name = "Seconde".into();
-            panel.series.push(seconde);
+    fn the_chosen_axis_is_a_tab_and_the_chosen_series_a_list_row() {
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            panel.series[0].name = "First".into();
+            let mut second = panel.series[0].clone();
+            second.name = "Second".into();
+            panel.series.push(second);
         });
-        let context = contexte();
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Left));
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        let gauche = texte_exact(&peints, &PlotAxis::Left.label());
-        assert!(gauche.gras, "l'axe choisi est en gras");
-        assert_eq!(gauche.couleur, crate::theme::accent(), "et dans l'accent");
-        let bas = texte_exact(&peints, &PlotAxis::Bottom.label());
-        assert!(!bas.gras, "témoin : l'axe non choisi");
-        assert_ne!(bas.couleur, crate::theme::accent());
+        let context = test_support::context();
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Left));
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let left = text_exact(&painted, &PlotAxis::Left.label());
+        assert!(left.bold, "the chosen axis is bold");
+        assert_eq!(left.color, crate::theme::accent(), "and in the accent");
+        let bottom = text_exact(&painted, &PlotAxis::Bottom.label());
+        assert!(!bottom.bold, "witness: the unchosen axis");
+        assert_ne!(bottom.color, crate::theme::accent());
 
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        banc.state.plot_edit_mut().unwrap().selected_series = 1;
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        let spec = banc.brouillon();
-        let tree = banc.state.tree();
-        let libelle = |index: usize| series_list_label(tree, &spec.panels[0].series[index]);
-        let lignes = |index: usize| -> Vec<&Texte> {
-            peints
-                .iter()
-                .filter(|t| t.texte == libelle(index))
-                .collect()
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_series = 1;
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let spec = harness.draft();
+        let tree = harness.state.tree();
+        let label = |index: usize| series_list_label(tree, &spec.panels[0].series[index]);
+        let rows = |index: usize| -> Vec<&Text> {
+            painted.iter().filter(|t| t.text == label(index)).collect()
         };
         assert!(
-            lignes(1).iter().any(|t| t.gras),
-            "la série choisie est une ligne en gras : {:?}",
-            lignes(1)
+            rows(1).iter().any(|t| t.bold),
+            "the chosen series is a bold row: {:?}",
+            rows(1)
         );
         assert!(
-            lignes(0).iter().all(|t| !t.gras),
-            "témoin : la série non choisie"
+            rows(0).iter().all(|t| !t.bold),
+            "witness: the unchosen series"
         );
         for section in [
             tr!("plot-series-line-section"),
             tr!("plot-series-symbol-section"),
         ] {
             assert!(
-                peints.iter().any(|t| t.texte == section && t.gras),
-                "{section} : un titre de section en gras"
+                painted.iter().any(|t| t.text == section && t.bold),
+                "{section}: a bold section title"
             );
         }
     }
 
-    /// #124 : le retour anticipé sur une liste vide doit laisser le
-    /// dialogue ouvert ; une liste non vide borne la sélection sans écrire
-    /// le graphe, puis son éditeur ne modifie que la série choisie.
+    /// #124: the early return on an empty list must leave the
+    /// dialog open; a non-empty list bounds the selection without writing
+    /// the graph, then its editor changes only the chosen series.
     #[test]
-    fn la_page_des_series_borne_la_selection_et_garde_le_cas_vide() {
-        let mut vide = banc(|spec| panneau(spec).series.clear());
-        vide.ouvrir(PlotSettingsTab::Series, None);
-        vide.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
-        let original = vide.modele();
-        let peints = peindre_fenetre(&contexte(), &mut vide.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-series-empty")));
-        assert!(!est_peint(&peints, &tr!("plot-series-show")));
-        assert_eq!(vide.modele(), original);
-        assert!(vide.state.plot_settings().is_some());
-        assert_eq!(vide.state.plot_edit().unwrap().selected_series, usize::MAX);
+    fn the_series_page_bounds_the_selection_and_keeps_the_empty_case() {
+        let mut empty = harness(|spec| first_panel(spec).series.clear());
+        empty.open(PlotSettingsTab::Series, None);
+        empty.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
+        let original = empty.model();
+        let painted = paint_window(&test_support::context(), &mut empty.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-series-empty")));
+        assert!(!is_painted(&painted, &tr!("plot-series-show")));
+        assert_eq!(empty.model(), original);
+        assert!(empty.state.plot_settings().is_some());
+        assert_eq!(empty.state.plot_edit().unwrap().selected_series, usize::MAX);
 
-        let mut banc = banc(|spec| {
-            let panel = panneau(spec);
-            panel.series[0].name = "Première".into();
-            let mut seconde = panel.series[0].clone();
-            seconde.name = "Seconde".into();
-            panel.series.push(seconde);
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            panel.series[0].name = "First".into();
+            let mut second = panel.series[0].clone();
+            second.name = "Second".into();
+            panel.series.push(second);
         });
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        banc.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
-        let original = banc.modele();
-        let context = contexte();
-        peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert_eq!(banc.state.plot_edit().unwrap().selected_series, 1);
-        assert_eq!(banc.modele(), original);
-        cliquer_libelle(
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_series = usize::MAX;
+        let original = harness.model();
+        let context = test_support::context();
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(harness.state.plot_edit().unwrap().selected_series, 1);
+        assert_eq!(harness.model(), original);
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-series-show-in-legend"),
         );
-        let apres = banc.modele();
-        assert_eq!(apres.panels[0].series[0], original.panels[0].series[0]);
-        assert!(!apres.panels[0].series[1].show_in_legend);
-        assert_eq!(apres.panels[0].series[1].name, "Seconde");
+        let after = harness.model();
+        assert_eq!(after.panels[0].series[0], original.panels[0].series[0]);
+        assert!(!after.panels[0].series[1].show_in_legend);
+        assert_eq!(after.panels[0].series[1].name, "Second");
     }
 
-    /// #177–#179 : les séries ont leur fenêtre — la bande du graphe ne les
-    /// propose plus — qui montre le groupe de la série choisie ; choisir un
-    /// nuancier le répartit aussitôt sur ses seules séries (pas de bouton
-    /// « Appliquer », #213), jusqu'au modèle.
+    /// #177–#179: the series have their window — the graph's strip no longer
+    /// offers them — which shows the group of the chosen series; choosing a
+    /// color gradient spreads it at once over its own series only (no
+    /// "Apply" button, #213), down to the model.
     #[test]
-    fn la_fenetre_des_series_regle_un_groupe_et_lui_applique_un_nuancier() {
-        let mut banc = banc(|spec| {
-            let panel = panneau(spec);
-            let modele = panel.series[0].clone();
+    fn the_series_window_sets_a_group_and_applies_a_color_gradient_to_it() {
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let model = panel.series[0].clone();
             panel.series.clear();
-            panel.push_series_batch(vec![modele.clone(), modele.clone()]);
-            panel.push_series_batch(vec![modele]);
+            panel.push_series_batch(vec![model.clone(), model.clone()]);
+            panel.push_series_batch(vec![model]);
         });
-        let context = contexte();
+        let context = test_support::context();
 
-        banc.ouvrir(PlotSettingsTab::Graph, None);
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(!est_peint(&peints, &PlotSettingsTab::Series.label()));
+        harness.open(PlotSettingsTab::Graph, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &PlotSettingsTab::Series.label()));
 
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        banc.state.plot_edit_mut().unwrap().selected_series = 1;
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(!est_peint(&peints, &PlotSettingsTab::Graph.label()));
-        assert!(est_peint(&peints, &tr!("curve-group-section")));
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_series = 1;
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &PlotSettingsTab::Graph.label()));
+        assert!(is_painted(&painted, &tr!("curve-group-section")));
         assert!(
-            !est_peint(&peints, &tr!("curve-scope-group-note")),
-            "la phrase de portée est sous le « ? », plus en note"
+            !is_painted(&painted, &tr!("curve-scope-group-note")),
+            "the scope sentence is under the '?' icon, no longer a note"
         );
         assert!(
-            est_peint(&peints, &tr!("plot-series-plot-type")),
-            "le type reste réglable"
+            is_painted(&painted, &tr!("plot-series-plot-type")),
+            "the type stays settable"
         );
-        let original = banc.modele();
+        let original = harness.model();
 
-        // #213 : un groupe neuf n'a aucun nuancier — la liste est vide (aucun
-        // nom de nuancier peint), rien n'est coloré — et, le groupe étant
-        // réglé en bloc, la couleur individuelle n'est pas proposée.
-        assert!(banc.modele().panels[0].group_gradients.is_empty());
-        assert!(!est_peint(&peints, &tr!("curve-gradient-blue-red")));
-        assert!(!est_peint(&peints, &tr!("plot-series-line-color")));
-        assert!(!est_peint(&peints, &tr!("plot-series-symbol-color")));
+        // #213: a new group has no color gradient — the list is empty (no
+        // gradient name painted), nothing is colored — and, since the group is
+        // set as a whole, the individual color is not offered.
+        assert!(harness.model().panels[0].group_gradients.is_empty());
+        assert!(!is_painted(&painted, &tr!("curve-gradient-blue-red")));
+        assert!(!is_painted(&painted, &tr!("plot-series-line-color")));
+        assert!(!is_painted(&painted, &tr!("plot-series-symbol-color")));
 
-        // La liste n'a pas de texte à cliquer tant qu'elle est vide : on la
-        // clique à gauche du bouton Delete qui la suit.
-        let ouvrir = |context: &egui::Context, state: &mut AppState| {
-            let peints = peindre_fenetre(context, state, Vec::new());
-            let pos = texte_exact(&peints, &tr!("curve-gradient-delete")).centre;
-            cliquer(
+        // The list has no text to click while it is empty: click it
+        // to the left of the Delete button that follows it.
+        let open = |context: &egui::Context, state: &mut AppState| {
+            let painted = paint_window(context, state, Vec::new());
+            let pos = text_exact(&painted, &tr!("curve-gradient-delete")).center;
+            click(
                 context,
                 pos - egui::vec2(70.0, 0.0),
                 egui::PointerButton::Primary,
                 |ui| plot_settings_window(ui.ctx(), state),
             );
         };
-        ouvrir(&context, &mut banc.state);
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        open(&context, &mut harness.state);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
-            est_peint(&peints, &tr!("curve-gradient-blue-red")),
-            "la liste s'ouvre sur ses nuanciers"
+            is_painted(&painted, &tr!("curve-gradient-blue-red")),
+            "the list opens on its color gradients"
         );
-        assert_eq!(banc.modele(), original, "ouvrir la liste ne colore rien");
-        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-black-red"));
-        let apres = banc.modele();
-        let couleurs: Vec<&str> = apres.panels[0]
+        assert_eq!(harness.model(), original, "opening the list colors nothing");
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("curve-gradient-black-red"),
+        );
+        let after = harness.model();
+        let colors: Vec<&str> = after.panels[0]
             .series
             .iter()
             .map(|s| s.line.color.as_str())
             .collect();
-        assert_eq!(couleurs[..2], ["#000000", "#ff0000"]);
+        assert_eq!(colors[..2], ["#000000", "#ff0000"]);
         assert_eq!(
-            apres.panels[0].series[2], original.panels[0].series[2],
-            "la série d'un autre groupe n'est pas touchée"
+            after.panels[0].series[2], original.panels[0].series[2],
+            "the series of another group is untouched"
         );
         assert_eq!(
-            apres.panels[0].group_gradient(1).map(<[String]>::len),
+            after.panels[0].group_gradient(1).map(<[String]>::len),
             Some(2),
-            "le groupe retient son nuancier"
+            "the group keeps its color gradient"
         );
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
-            est_peint(&peints, &tr!("curve-gradient-black-red")),
-            "la liste montre le nuancier du groupe"
+            is_painted(&painted, &tr!("curve-gradient-black-red")),
+            "the list shows the group's color gradient"
         );
 
-        // #213 : la pastille de couleurs d'une entrée se clique comme son nom.
-        ouvrir(&context, &mut banc.state);
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        let nom = texte_exact(&peints, &tr!("curve-gradient-black-blue")).centre;
-        cliquer(
+        // #213: the color swatch of an entry is clicked like its name.
+        open(&context, &mut harness.state);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let name = text_exact(&painted, &tr!("curve-gradient-black-blue")).center;
+        click(
             &context,
-            nom - egui::vec2(80.0, 0.0),
+            name - egui::vec2(80.0, 0.0),
             egui::PointerButton::Primary,
-            |ui| plot_settings_window(ui.ctx(), &mut banc.state),
+            |ui| plot_settings_window(ui.ctx(), &mut harness.state),
         );
-        let couleurs: Vec<String> = banc.modele().panels[0]
+        let colors: Vec<String> = harness.model().panels[0]
             .series
             .iter()
             .map(|s| s.line.color.clone())
             .collect();
-        assert_eq!(
-            couleurs[..2],
-            ["#000000", "#0000ff"],
-            "clic sur la pastille"
-        );
+        assert_eq!(colors[..2], ["#000000", "#0000ff"], "click on the swatch");
 
-        // Portée « cette série » : la couleur individuelle revient.
-        let peints = cliquer_libelle(&context, &mut banc.state, &tr!("curve-scope-series"));
-        assert!(est_peint(&peints, &tr!("plot-series-line-color")));
+        // "This series" scope: the individual color comes back.
+        let painted = click_label(&context, &mut harness.state, &tr!("curve-scope-series"));
+        assert!(is_painted(&painted, &tr!("plot-series-line-color")));
 
-        // Une série hors groupe n'a pas de nuancier à régler, mais sa couleur.
-        banc.state.plot_edit_mut().unwrap().selected_series = 2;
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(!est_peint(&peints, &tr!("curve-gradient-section")));
-        assert!(est_peint(&peints, &tr!("plot-series-line-color")));
+        // A series outside any group has no gradient to set, but its color.
+        harness.state.plot_edit_mut().unwrap().selected_series = 2;
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &tr!("curve-gradient-section")));
+        assert!(is_painted(&painted, &tr!("plot-series-line-color")));
     }
 
-    /// #177 : portée « tout le groupe » — les réglages propres à une série sont
-    /// grisés (le clic ne fait rien) ; portée « cette série seulement » — ils
-    /// se rouvrent et ne touchent que la série choisie.
+    /// #177: "whole group" scope — the settings specific to a series are
+    /// grayed out (the click does nothing); "this series only" scope — they
+    /// reopen and touch only the chosen series.
     #[test]
-    fn la_portee_grise_les_reglages_propres_a_une_serie() {
-        let mut banc = banc(|spec| {
-            let panel = panneau(spec);
-            let modele = panel.series[0].clone();
+    fn the_scope_grays_out_the_settings_specific_to_a_series() {
+        let mut harness = harness(|spec| {
+            let panel = first_panel(spec);
+            let model = panel.series[0].clone();
             panel.series.clear();
-            panel.push_series_batch(vec![modele.clone(), modele]);
+            panel.push_series_batch(vec![model.clone(), model]);
         });
-        let context = contexte();
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        banc.state.plot_edit_mut().unwrap().selected_series = 1;
-        let original = banc.modele();
+        let context = test_support::context();
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_series = 1;
+        let original = harness.model();
 
-        cliquer_libelle(
+        click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-series-show-in-legend"),
         );
-        assert_eq!(banc.modele(), original, "grisé : le clic ne change rien");
-
-        cliquer_libelle(&context, &mut banc.state, &tr!("curve-scope-series"));
-        cliquer_libelle(
-            &context,
-            &mut banc.state,
-            &tr!("plot-series-show-in-legend"),
-        );
-        let apres = banc.modele();
-        assert!(
-            apres.panels[0].series[0].show_in_legend,
-            "l'autre membre est intact"
-        );
-        assert!(!apres.panels[0].series[1].show_in_legend);
         assert_eq!(
-            apres.panels[0].series[1].group,
-            Some(1),
-            "reste dans son groupe"
-        );
-    }
-
-    /// #124 : vérifie le retour de la page du graphe jusqu'à la validation
-    /// commune, en plus du test local de `formula_field`. Une frappe doit
-    /// seulement changer le brouillon, puis un clic ailleurs dans la page
-    /// doit atteindre le modèle sans fermer le dialogue.
-    #[test]
-    fn le_titre_du_graphe_se_valide_apres_la_perte_de_focus() {
-        let mut banc = banc(|spec| spec.title = "Titre initial".into());
-        banc.ouvrir(PlotSettingsTab::Graph, None);
-        let original = banc.modele();
-        let context = contexte();
-        cliquer_libelle(&context, &mut banc.state, "Titre initial");
-        image(&context, vec![egui::Event::Text("Z".into())], |ui| {
-            plot_settings_window(ui.ctx(), &mut banc.state);
-        });
-        let saisi = banc.brouillon().title;
-        assert!(saisi.contains('Z'), "la frappe a atteint le brouillon");
-        assert_eq!(
-            banc.modele(),
+            harness.model(),
             original,
-            "aucune validation pendant la frappe"
+            "grayed out: the click changes nothing"
         );
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-general-dark-note"));
-        assert_eq!(banc.modele().title, saisi);
+
+        click_label(&context, &mut harness.state, &tr!("curve-scope-series"));
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-series-show-in-legend"),
+        );
+        let after = harness.model();
         assert!(
-            banc.state.plot_settings().is_some(),
-            "la validation vient de la page ouverte"
+            after.panels[0].series[0].show_in_legend,
+            "the other member is intact"
         );
-        banc.state.close_plot_settings();
-        banc.state.dispatch(Action::Undo);
-        assert_eq!(banc.modele(), original);
+        assert!(!after.panels[0].series[1].show_in_legend);
+        assert_eq!(
+            after.panels[0].series[1].group,
+            Some(1),
+            "stays in its group"
+        );
     }
 
-    // -- Quand le brouillon est validé --------------------------------------
+    /// #124: checks the return of the graph page up to the common
+    /// commit, in addition to the local test of `formula_field`. A keystroke must
+    /// only change the draft, then a click elsewhere in the page
+    /// must reach the model without closing the dialog.
+    #[test]
+    fn the_graph_title_commits_after_focus_loss() {
+        let mut harness = harness(|spec| spec.title = "Initial title".into());
+        harness.open(PlotSettingsTab::Graph, None);
+        let original = harness.model();
+        let context = test_support::context();
+        click_label(&context, &mut harness.state, "Initial title");
+        image(&context, vec![egui::Event::Text("Z".into())], |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state);
+        });
+        let typed = harness.draft().title;
+        assert!(typed.contains('Z'), "the keystroke reached the draft");
+        assert_eq!(harness.model(), original, "no commit while typing");
+        click_label(&context, &mut harness.state, &tr!("plot-general-dark-note"));
+        assert_eq!(harness.model().title, typed);
+        assert!(
+            harness.state.plot_settings().is_some(),
+            "the commit comes from the open page"
+        );
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original);
+    }
 
-    /// Clique dans le champ numérique qui affiche `valeur` (focus, tout le texte
-    /// sélectionné), puis rend le centre du champ pour la suite du geste.
-    fn focaliser(context: &egui::Context, state: &mut AppState, valeur: &str) -> egui::Pos2 {
-        let peints = peindre_fenetre(context, state, Vec::new());
-        let centre = texte_exact(&peints, valeur).centre;
-        cliquer(context, centre, egui::PointerButton::Primary, |ui| {
+    // -- When the draft is committed ----------------------------------------
+
+    /// Clicks in the numeric field that displays `value` (focus, whole text
+    /// selected), then returns the field's center for the rest of the gesture.
+    fn focus_field(context: &egui::Context, state: &mut AppState, value: &str) -> egui::Pos2 {
+        let painted = paint_window(context, state, Vec::new());
+        let center = text_exact(&painted, value).center;
+        click(context, center, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), state)
         });
-        centre
+        center
     }
 
-    fn une_image(context: &egui::Context, state: &mut AppState, events: Vec<egui::Event>) {
+    fn one_frame(context: &egui::Context, state: &mut AppState, events: Vec<egui::Event>) {
         image(context, events, |ui| plot_settings_window(ui.ctx(), state));
     }
 
-    /// Un nombre tapé ne valide le brouillon qu'à Entrée (S-N3) — tant que le
-    /// champ est ouvert, ni le brouillon ni le modèle ne bougent ; à Entrée,
-    /// le modèle reprend le brouillon. Épaisseur du trait (série) et borne
-    /// minimale (axe).
+    /// A typed number commits the draft only on Enter (S-N3) — as long as the
+    /// field is open, neither the draft nor the model moves; on Enter,
+    /// the model takes the draft. Line width (series) and minimum
+    /// bound (axis).
     #[test]
-    fn un_nombre_tape_n_est_valide_qu_a_entree() {
-        struct Cas {
+    fn a_typed_number_is_committed_only_on_enter() {
+        struct Case {
             tab: PlotSettingsTab,
             axis: Option<PlotAxis>,
-            valeur: &'static str,
-            saisi: &'static str,
-            attendu: f64,
-            lire: fn(&PlotSpec) -> f64,
+            value: &'static str,
+            typed: &'static str,
+            expected: f64,
+            read: fn(&PlotSpec) -> f64,
         }
-        let cas = [
-            Cas {
+        let cases = [
+            Case {
                 tab: PlotSettingsTab::Series,
                 axis: None,
-                valeur: "2.5",
-                saisi: "3.5",
-                attendu: 3.5,
-                lire: |s| s.panels[0].series[0].line.width,
+                value: "2.5",
+                typed: "3.5",
+                expected: 3.5,
+                read: |s| s.panels[0].series[0].line.width,
             },
-            Cas {
+            Case {
                 tab: PlotSettingsTab::Axes,
                 axis: Some(PlotAxis::Left),
-                valeur: "-3.5",
-                saisi: "-1",
-                attendu: -1.0,
-                lire: |s| s.panels[0].left.range_min.unwrap(),
+                value: "-3.5",
+                typed: "-1",
+                expected: -1.0,
+                read: |s| s.panels[0].left.range_min.unwrap(),
             },
         ];
-        for Cas {
+        for Case {
             tab,
             axis,
-            valeur,
-            saisi,
-            attendu,
-            lire,
-        } in cas
+            value,
+            typed,
+            expected,
+            read,
+        } in cases
         {
-            let mut banc = banc(|spec| {
-                panneau(spec).series[0].line.width = 2.5;
-                let left = &mut panneau(spec).left;
+            let mut harness = harness(|spec| {
+                first_panel(spec).series[0].line.width = 2.5;
+                let left = &mut first_panel(spec).left;
                 left.auto_range = false;
                 left.range_min = Some(-3.5);
                 left.range_max = Some(12.5);
             });
-            banc.ouvrir(tab, axis);
-            let avant = lire(&banc.modele());
-            assert_eq!(Ok(avant), valeur.parse(), "{tab:?} : la valeur affichée");
-            let context = contexte();
-            focaliser(&context, &mut banc.state, valeur);
-            une_image(
+            harness.open(tab, axis);
+            let before = read(&harness.model());
+            assert_eq!(Ok(before), value.parse(), "{tab:?}: the displayed value");
+            let context = test_support::context();
+            focus_field(&context, &mut harness.state, value);
+            one_frame(
                 &context,
-                &mut banc.state,
-                vec![egui::Event::Text(saisi.into())],
+                &mut harness.state,
+                vec![egui::Event::Text(typed.into())],
             );
-            une_image(&context, &mut banc.state, Vec::new());
+            one_frame(&context, &mut harness.state, Vec::new());
             assert_eq!(
-                lire(&banc.brouillon()),
-                avant,
-                "{tab:?} : validé à la frappe"
+                read(&harness.draft()),
+                before,
+                "{tab:?}: committed on keystroke"
             );
-            assert_eq!(lire(&banc.modele()), avant, "{tab:?} : modèle touché");
+            assert_eq!(read(&harness.model()), before, "{tab:?}: model touched");
 
-            une_image(&context, &mut banc.state, vec![touche(egui::Key::Enter)]);
-            assert_eq!(lire(&banc.brouillon()), attendu, "{tab:?} : Entrée");
-            assert_eq!(lire(&banc.modele()), attendu, "{tab:?} : modèle");
+            one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+            assert_eq!(read(&harness.draft()), expected, "{tab:?}: Enter");
+            assert_eq!(read(&harness.model()), expected, "{tab:?}: model");
         }
     }
 
-    /// Molette sur le champ à liste : un cran = la valeur proposée voisine
-    /// (2,5 → 3 → 4, puis 4 aux extrémités) ; trois crans d'affilée ne font
-    /// qu'**une** entrée d'historique, un seul Annuler rend la valeur d'avant.
+    /// Wheel over the list field: one notch = the neighboring proposed value
+    /// (2.5 → 3 → 4, then 4 at the ends); three notches in a row make
+    /// **one** history entry, a single Undo gives back the previous value.
     #[test]
-    fn des_crans_de_molette_ne_font_qu_une_entree_d_historique() {
-        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        let context = contexte();
-        let original = banc.modele();
-        focaliser(&context, &mut banc.state, "2.5");
-        let cran = || {
+    fn wheel_notches_make_only_one_history_entry() {
+        let mut harness = harness(|spec| first_panel(spec).series[0].line.width = 2.5);
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        let original = harness.model();
+        focus_field(&context, &mut harness.state, "2.5");
+        let notch = || {
             vec![egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, 1.0),
@@ -2255,61 +2289,64 @@ mod tests {
             }]
         };
         for _ in 0..3 {
-            une_image(&context, &mut banc.state, cran());
+            one_frame(&context, &mut harness.state, notch());
         }
-        une_image(&context, &mut banc.state, Vec::new());
-        let largeur = |spec: &PlotSpec| spec.panels[0].series[0].line.width;
-        assert_eq!(largeur(&banc.brouillon()), 4.0);
-        banc.state.close_plot_settings();
-        assert_eq!(largeur(&banc.modele()), 4.0);
-        banc.state.dispatch(Action::Undo);
-        assert_eq!(banc.modele(), original, "un seul Annuler");
+        one_frame(&context, &mut harness.state, Vec::new());
+        let width = |spec: &PlotSpec| spec.panels[0].series[0].line.width;
+        assert_eq!(width(&harness.draft()), 4.0);
+        harness.state.close_plot_settings();
+        assert_eq!(width(&harness.model()), 4.0);
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "a single Undo");
     }
 
-    /// S-F7 : le premier Échap rend au champ sa valeur (le dialogue reste ouvert),
-    /// le suivant fait Annuler du dialogue.
+    /// S-F7: the first Escape gives the field its value back (the dialog stays open),
+    /// the next one is the dialog's Cancel.
     #[test]
-    fn echap_rend_la_valeur_puis_annule_le_dialogue() {
-        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        let context = contexte();
-        focaliser(&context, &mut banc.state, "2.5");
-        une_image(
+    fn escape_gives_back_the_value_then_cancels_the_dialog() {
+        let mut harness = harness(|spec| first_panel(spec).series[0].line.width = 2.5);
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        focus_field(&context, &mut harness.state, "2.5");
+        one_frame(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             vec![egui::Event::Text("9".into())],
         );
-        une_image(&context, &mut banc.state, vec![touche(egui::Key::Escape)]);
-        une_image(&context, &mut banc.state, Vec::new());
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
+        one_frame(&context, &mut harness.state, Vec::new());
         assert!(
-            banc.state.plot_settings().is_some(),
-            "premier Échap : le dialogue reste"
+            harness.state.plot_settings().is_some(),
+            "first Escape: the dialog stays"
         );
-        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 2.5);
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, "2.5"), "la valeur est rendue au champ");
-
-        une_image(&context, &mut banc.state, vec![touche(egui::Key::Escape)]);
+        assert_eq!(harness.draft().panels[0].series[0].line.width, 2.5);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(
-            banc.state.plot_settings().is_none(),
-            "second Échap : Annuler"
+            is_painted(&painted, "2.5"),
+            "the value is given back to the field"
+        );
+
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Escape)]);
+        assert!(
+            harness.state.plot_settings().is_none(),
+            "second Escape: Cancel"
         );
     }
 
-    /// Le survol suffit (#235) : sans focus, un cran sur le champ à liste passe à
-    /// la valeur proposée suivante.
+    /// Hovering is enough (#235): without focus, a notch on the list field goes to
+    /// the next proposed value.
     #[test]
-    fn la_molette_au_survol_sans_focus_suit_la_liste() {
-        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        let centre = texte_exact(&peints, "2.5").centre;
-        une_image(
+    fn the_wheel_on_hover_without_focus_follows_the_list() {
+        let mut harness = harness(|spec| first_panel(spec).series[0].line.width = 2.5);
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let center = text_exact(&painted, "2.5").center;
+        one_frame(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             vec![
-                egui::Event::PointerMoved(centre),
+                egui::Event::PointerMoved(center),
                 egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Line,
                     delta: egui::vec2(0.0, 1.0),
@@ -2318,207 +2355,211 @@ mod tests {
                 },
             ],
         );
-        une_image(&context, &mut banc.state, Vec::new());
-        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 3.0);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert_eq!(harness.draft().panels[0].series[0].line.width, 3.0);
     }
 
-    /// Doc de [`plot_settings_window`] : une case à cocher valide tout de
-    /// suite, au clic.
+    /// Doc of [`plot_settings_window`]: a checkbox commits right
+    /// away, on click.
     #[test]
-    fn une_case_a_cocher_valide_au_clic() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Legend, None);
-        let context = contexte();
-        let avant = banc.modele().panels[0].legend.visible;
-        peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert_eq!(banc.modele().panels[0].legend.visible, avant);
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-legend-show"));
-        assert_eq!(banc.modele().panels[0].legend.visible, !avant);
+    fn a_checkbox_commits_on_click() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Legend, None);
+        let context = test_support::context();
+        let before = harness.model().panels[0].legend.visible;
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(harness.model().panels[0].legend.visible, before);
+        click_label(&context, &mut harness.state, &tr!("plot-legend-show"));
+        assert_eq!(harness.model().panels[0].legend.visible, !before);
     }
 
-    /// Le résultat de chaque image de [`formula_field`] sur `valeur`, et ses
-    /// textes peints à la dernière.
-    fn champ(
+    /// The result of each frame of [`formula_field`] on `value`, and its
+    /// texts painted in the last one.
+    fn field(
         context: &egui::Context,
-        valeur: &mut String,
-        images: Vec<Vec<egui::Event>>,
-    ) -> (Vec<bool>, Vec<Texte>) {
-        let mut rendus = Vec::new();
-        let mut peints = Vec::new();
-        for events in images {
-            // Une image peut compter deux passes (la grille du formulaire se
-            // mesure à la première) : son résultat est celui de ses passes.
-            let mut rendu = false;
-            peints = textes(&image(context, events, |ui| {
-                rendu |= form(ui, "essai", |form| {
-                    formula_field(form, "Grandeur", "Aide", valeur)
+        value: &mut String,
+        frames: Vec<Vec<egui::Event>>,
+    ) -> (Vec<bool>, Vec<Text>) {
+        let mut results = Vec::new();
+        let mut painted = Vec::new();
+        for events in frames {
+            // A frame can take two passes (the form grid is
+            // measured on the first): its result is that of its passes.
+            let mut result = false;
+            painted = texts(&image(context, events, |ui| {
+                result |= form(ui, "trial", |form| {
+                    formula_field(form, "Quantity", "Help", value)
                 });
             }));
-            rendus.push(rendu);
+            results.push(result);
         }
-        (rendus, peints)
+        (results, painted)
     }
 
-    /// Nombre de cadres rouges (« refusé ») peints dans `shapes`.
-    fn cadres_rouges(shapes: &[egui::epaint::ClippedShape]) -> usize {
-        let rouge = crate::theme::field_refused_color();
+    /// Number of red frames ("refused") painted in `shapes`.
+    fn red_frames(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        let red = crate::theme::field_refused_color();
         shapes
             .iter()
-            .filter(|peint| match &peint.shape {
-                egui::Shape::Rect(rect) => rect.stroke.color == rouge,
+            .filter(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) => rect.stroke.color == red,
                 _ => false,
             })
             .count()
     }
 
-    /// S-T3 : un texte Typst qui ne compile pas, une fois le champ quitté, est
-    /// signalé par le cadre rouge d'un refus ; un texte valide ne l'est pas.
+    /// S-T3: a Typst text that does not compile, once the field is left, is
+    /// flagged by the red frame of a refusal; a valid text is not.
     #[test]
-    fn une_erreur_typst_peint_le_cadre_rouge_du_champ() {
-        let context = contexte();
-        let peindre = |valeur: &mut String| {
+    fn a_typst_error_paints_the_fields_red_frame() {
+        let context = test_support::context();
+        let paint = |value: &mut String| {
             image(&context, vec![], |ui| {
-                form(ui, "essai", |form| {
-                    formula_field(form, "Grandeur", "Aide", valeur)
+                form(ui, "trial", |form| {
+                    formula_field(form, "Quantity", "Help", value)
                 });
             })
         };
-        let mut valide = String::from("$lambda$ (nm)");
-        let mut fautif = String::from("$ (unclosed");
-        // Deux images : la grille du formulaire se mesure à la première.
-        peindre(&mut valide);
-        peindre(&mut fautif);
-        assert_eq!(cadres_rouges(&peindre(&mut valide)), 0);
-        assert_eq!(cadres_rouges(&peindre(&mut fautif)), 1);
+        let mut valid = String::from("$lambda$ (nm)");
+        let mut faulty = String::from("$ (unclosed");
+        // Two frames: the form grid is measured on the first.
+        paint(&mut valid);
+        paint(&mut faulty);
+        assert_eq!(red_frames(&paint(&mut valid)), 0);
+        assert_eq!(red_frames(&paint(&mut faulty)), 1);
     }
 
-    /// S-T3 en situation : on tape un markup fautif, Entrée quitte le champ, le
-    /// cadre rouge apparaît.
+    /// S-T3 in context: a faulty markup is typed, Enter leaves the field, the
+    /// red frame appears.
     #[test]
-    fn une_erreur_typst_tapee_puis_validee_devient_rouge() {
-        let context = contexte();
-        let mut valeur = String::from("abc");
-        let peindre = |valeur: &mut String, events: Vec<egui::Event>| {
+    fn a_typed_then_committed_typst_error_turns_red() {
+        let context = test_support::context();
+        let mut value = String::from("abc");
+        let paint = |value: &mut String, events: Vec<egui::Event>| {
             image(&context, events, |ui| {
-                form(ui, "essai", |form| {
-                    formula_field(form, "Grandeur", "Aide", valeur)
+                form(ui, "trial", |form| {
+                    formula_field(form, "Quantity", "Help", value)
                 });
             })
         };
-        peindre(&mut valeur, vec![]);
-        let formes = peindre(&mut valeur, vec![]);
-        let dedans = texte_exact(&textes(&formes), "abc").centre;
-        peindre(&mut valeur, vec![egui::Event::PointerMoved(dedans)]);
-        peindre(&mut valeur, vec![clic(dedans, true)]);
-        peindre(&mut valeur, vec![clic(dedans, false)]);
-        peindre(&mut valeur, vec![egui::Event::Text("$x".into())]);
-        assert!(valeur.contains("$x"), "{valeur:?}");
-        assert_eq!(cadres_rouges(&peindre(&mut valeur, vec![])), 0, "en frappe");
-        peindre(&mut valeur, vec![touche(egui::Key::Enter)]);
-        peindre(&mut valeur, vec![]);
-        assert_eq!(cadres_rouges(&peindre(&mut valeur, vec![])), 1);
+        paint(&mut value, vec![]);
+        let frame_shapes = paint(&mut value, vec![]);
+        let inside = text_exact(&texts(&frame_shapes), "abc").center;
+        paint(&mut value, vec![egui::Event::PointerMoved(inside)]);
+        paint(&mut value, vec![click_event(inside, true)]);
+        paint(&mut value, vec![click_event(inside, false)]);
+        paint(&mut value, vec![egui::Event::Text("$x".into())]);
+        assert!(value.contains("$x"), "{value:?}");
+        assert_eq!(red_frames(&paint(&mut value, vec![])), 0, "while typing");
+        paint(&mut value, vec![key(egui::Key::Enter)]);
+        paint(&mut value, vec![]);
+        assert_eq!(red_frames(&paint(&mut value, vec![])), 1);
     }
 
-    /// [`formula_field`] ne valide qu'à la perte de focus — Entrée ou clic
-    /// ailleurs —, jamais à chaque frappe : la saisie arrive dans la valeur
-    /// (aperçu) sans demander de validation.
+    /// [`formula_field`] commits only on focus loss — Enter or a click
+    /// elsewhere —, never on each keystroke: the input reaches the value
+    /// (preview) without asking for a commit.
     #[test]
-    fn un_champ_texte_ne_valide_qu_a_la_perte_de_focus() {
-        let context = contexte();
-        let mut valeur = String::from("abc");
-        let (rendus, peints) = champ(&context, &mut valeur, vec![vec![], vec![]]);
-        assert_eq!(rendus, [false, false]);
-        assert!(est_peint(&peints, "Grandeur"), "le libellé est peint");
-        let dedans = texte_exact(&peints, "abc").centre;
-        let dehors = egui::pos2(1000.0, 800.0);
-        let focaliser = vec![
-            vec![egui::Event::PointerMoved(dedans)],
-            vec![clic(dedans, true)],
-            vec![clic(dedans, false)],
+    fn a_text_field_commits_only_on_focus_loss() {
+        let context = test_support::context();
+        let mut value = String::from("abc");
+        let (results, painted) = field(&context, &mut value, vec![vec![], vec![]]);
+        assert_eq!(results, [false, false]);
+        assert!(is_painted(&painted, "Quantity"), "the label is painted");
+        let inside = text_exact(&painted, "abc").center;
+        let outside = egui::pos2(1000.0, 800.0);
+        let focus_field = vec![
+            vec![egui::Event::PointerMoved(inside)],
+            vec![click_event(inside, true)],
+            vec![click_event(inside, false)],
         ];
 
-        // Entrée.
-        let (rendus, _) = champ(&context, &mut valeur, focaliser.clone());
-        assert_eq!(rendus, [false; 3], "prendre le focus ne valide pas");
-        let (rendus, _) = champ(
+        // Enter.
+        let (results, _) = field(&context, &mut value, focus_field.clone());
+        assert_eq!(results, [false; 3], "taking focus does not commit");
+        let (results, _) = field(
             &context,
-            &mut valeur,
+            &mut value,
             vec![vec![egui::Event::Text("Z".into())], vec![]],
         );
-        assert_eq!(rendus, [false, false], "une frappe ne valide pas");
+        assert_eq!(results, [false, false], "a keystroke does not commit");
         assert!(
-            valeur.contains('Z'),
-            "la frappe atteint la valeur : {valeur:?}"
+            value.contains('Z'),
+            "the keystroke reaches the value: {value:?}"
         );
-        // egui 0.36 signale la perte de focus sur deux images (`lost_focus` :
-        // focus au début de cette image *ou* de la précédente) ; valider deux
-        // fois est sans effet (`AppState::commit_plot_edit` ne valide qu'un
-        // brouillon qui diverge du modèle).
-        let (rendus, _) = champ(
+        // egui 0.36 reports focus loss over two frames (`lost_focus`:
+        // focus at the start of this frame *or* the previous one); committing twice
+        // has no effect (`AppState::commit_plot_edit` commits only a
+        // draft that differs from the model).
+        let (results, _) = field(
             &context,
-            &mut valeur,
-            vec![vec![touche(egui::Key::Enter)], vec![], vec![]],
+            &mut value,
+            vec![vec![key(egui::Key::Enter)], vec![], vec![]],
         );
-        assert!(rendus[0], "Entrée valide tout de suite : {rendus:?}");
-        assert!(!rendus[2], "puis plus rien : {rendus:?}");
+        assert!(results[0], "Enter commits right away: {results:?}");
+        assert!(!results[2], "then nothing more: {results:?}");
 
-        // Clic ailleurs.
-        let (rendus, _) = champ(&context, &mut valeur, focaliser);
-        assert_eq!(rendus, [false; 3]);
-        let (rendus, _) = champ(
+        // Click elsewhere.
+        let (results, _) = field(&context, &mut value, focus_field);
+        assert_eq!(results, [false; 3]);
+        let (results, _) = field(
             &context,
-            &mut valeur,
+            &mut value,
             vec![vec![egui::Event::Text("Y".into())]],
         );
-        assert_eq!(rendus, [false]);
-        let (rendus, _) = champ(
+        assert_eq!(results, [false]);
+        let (results, _) = field(
             &context,
-            &mut valeur,
+            &mut value,
             vec![
-                vec![egui::Event::PointerMoved(dehors)],
-                vec![clic(dehors, true)],
-                vec![clic(dehors, false)],
+                vec![egui::Event::PointerMoved(outside)],
+                vec![click_event(outside, true)],
+                vec![click_event(outside, false)],
                 vec![],
                 vec![],
             ],
         );
         assert!(
-            rendus.contains(&true),
-            "le clic ailleurs valide : {rendus:?}"
+            results.contains(&true),
+            "the click elsewhere commits: {results:?}"
         );
-        assert_eq!(rendus.last(), Some(&false), "puis plus rien : {rendus:?}");
-        assert!(valeur.contains('Y'));
+        assert_eq!(
+            results.last(),
+            Some(&false),
+            "then nothing more: {results:?}"
+        );
+        assert!(value.contains('Y'));
     }
 
-    // -- L'onglet des séries --------------------------------------------------
+    // -- The series tab -------------------------------------------------------
 
-    /// Ouvre la liste déroulante dont le texte affiché est `affiche`, dans
-    /// l'onglet ouvert ; rend les textes peints liste ouverte et la position
-    /// du bouton fermé.
-    fn ouvrir_liste(
+    /// Opens the dropdown list whose displayed text is `displayed`, in
+    /// the open tab; returns the texts painted with the list open and the position
+    /// of the closed button.
+    fn open_list(
         context: &egui::Context,
         state: &mut AppState,
-        affiche: &str,
-    ) -> (Vec<Texte>, egui::Pos2) {
-        let peints = peindre_fenetre(context, state, Vec::new());
-        let bouton = texte_exact(&peints, affiche).centre;
-        cliquer(context, bouton, egui::PointerButton::Primary, |ui| {
+        displayed: &str,
+    ) -> (Vec<Text>, egui::Pos2) {
+        let painted = paint_window(context, state, Vec::new());
+        let button = text_exact(&painted, displayed).center;
+        click(context, button, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), state)
         });
-        (peindre_fenetre(context, state, Vec::new()), bouton)
+        (paint_window(context, state, Vec::new()), button)
     }
 
-    /// Chaque liste déroulante des propriétés propose **toutes** ses
-    /// variantes connues (le type inconnu jamais, voir [`series_editor`]), et
-    /// un choix y est validé tout de suite.
+    /// Each dropdown list of the properties offers **all** its
+    /// known variants (the unknown type never, see [`series_editor`]), and
+    /// a choice in it is committed right away.
     #[test]
-    fn chaque_liste_deroulante_propose_toutes_ses_variantes() {
-        type Lire = fn(&PlotSpec) -> String;
-        let cas: [(PlotSettingsTab, String, Vec<String>, String, Lire); 4] = [
+    fn each_dropdown_list_offers_all_its_variants() {
+        type Reader = fn(&PlotSpec) -> String;
+        let cases: [(PlotSettingsTab, String, Vec<String>, String, Reader); 4] = [
             (
                 PlotSettingsTab::Series,
                 plot_type_label(&PlotType::Scatter),
-                types_connus().iter().map(plot_type_label).collect(),
+                known_types().iter().map(plot_type_label).collect(),
                 plot_type_label(&PlotType::Bar),
                 |s| format!("{:?}", s.panels[0].series[0].plot_type),
             ),
@@ -2532,7 +2573,10 @@ mod tests {
             (
                 PlotSettingsTab::Series,
                 symbol_shape_label(SymbolShape::Circle),
-                formes().into_iter().map(symbol_shape_label).collect(),
+                symbol_shapes()
+                    .into_iter()
+                    .map(symbol_shape_label)
+                    .collect(),
                 symbol_shape_label(SymbolShape::Diamond),
                 |s| format!("{:?}", s.panels[0].series[0].symbol.shape),
             ),
@@ -2544,165 +2588,168 @@ mod tests {
                 |s| format!("{:?}", s.panels[0].legend.position),
             ),
         ];
-        let attendus = ["Bar", "Dash", "Diamond", "BottomLeft"];
-        for ((tab, affiche, proposes, choix, lire), attendu) in cas.into_iter().zip(attendus) {
-            let mut banc = banc(|spec| {
-                let panel = panneau(spec);
+        let expected_values = ["Bar", "Dash", "Diamond", "BottomLeft"];
+        for ((tab, displayed, offered, choice, read), expected) in
+            cases.into_iter().zip(expected_values)
+        {
+            let mut harness = harness(|spec| {
+                let panel = first_panel(spec);
                 panel.series[0].plot_type = PlotType::Scatter;
                 panel.series[0].line.style = LineStyle::Solid;
                 panel.series[0].symbol.shape = SymbolShape::Circle;
                 panel.legend.position = LegendPosition::TopRight;
             });
-            banc.ouvrir(tab, None);
-            let context = contexte();
-            let (peints, bouton) = ouvrir_liste(&context, &mut banc.state, &affiche);
-            for propose in &proposes {
+            harness.open(tab, None);
+            let context = test_support::context();
+            let (painted, button) = open_list(&context, &mut harness.state, &displayed);
+            for offer in &offered {
                 assert!(
-                    peints
+                    painted
                         .iter()
-                        .any(|t| &t.texte == propose && t.centre != bouton),
-                    "{affiche:?} : {propose:?} absent de la liste ouverte"
+                        .any(|t| &t.text == offer && t.center != button),
+                    "{displayed:?}: {offer:?} absent from the open list"
                 );
             }
-            assert!(!est_peint(&peints, &plot_type_label(&inconnu())));
-            assert_ne!(lire(&banc.modele()), attendu, "témoin : pas encore choisi");
-            let pos = texte_exact(&peints, &choix).centre;
-            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
-                plot_settings_window(ui.ctx(), &mut banc.state)
+            assert!(!is_painted(&painted, &plot_type_label(&unknown())));
+            assert_ne!(read(&harness.model()), expected, "witness: not chosen yet");
+            let pos = text_exact(&painted, &choice).center;
+            click(&context, pos, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
             });
-            assert_eq!(lire(&banc.modele()), attendu, "{affiche:?} : choix validé");
+            assert_eq!(
+                read(&harness.model()),
+                expected,
+                "{displayed:?}: choice committed"
+            );
         }
     }
 
-    /// C5 (`guide-de-correction-robustesse.md` §F3) : une série d'un type
-    /// inconnu (version plus récente) le montre en lecture seule, sans liste
-    /// déroulante — rien ne sait le reconstruire —, et le reste de la série
-    /// reste éditable.
+    /// C5 (`guide-de-correction-robustesse.md` §F3): a series of an unknown
+    /// type (newer version) shows it read-only, without a dropdown
+    /// list — nothing knows how to rebuild it —, and the rest of the series
+    /// stays editable.
     #[test]
-    fn un_type_de_trace_inconnu_s_affiche_en_lecture_seule() {
-        let mut banc = banc(|spec| panneau(spec).series[0].plot_type = inconnu());
-        banc.ouvrir(PlotSettingsTab::Series, None);
-        let context = contexte();
-        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("plot-series-type-unknown")));
-        assert!(!est_peint(&peints, &plot_type_label(&inconnu())));
-        // Aucune liste des types : aucun libellé de type connu n'est peint
-        // (hors « Line », qui est aussi le titre de la section du trait).
+    fn an_unknown_plot_type_is_shown_read_only() {
+        let mut harness = harness(|spec| first_panel(spec).series[0].plot_type = unknown());
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-series-type-unknown")));
+        assert!(!is_painted(&painted, &plot_type_label(&unknown())));
+        // No type list: no known type label is painted
+        // (except "Line", which is also the title of the line section).
         let section = tr!("plot-series-line-section");
-        for connu in types_connus() {
-            let libelle = plot_type_label(&connu);
-            if libelle != section {
-                assert!(!est_peint(&peints, &libelle), "{connu:?}");
+        for known in known_types() {
+            let label = plot_type_label(&known);
+            if label != section {
+                assert!(!is_painted(&painted, &label), "{known:?}");
             }
         }
-        assert!(est_peint(&peints, &tr!("plot-series-show-in-legend")));
-        let peints = cliquer_libelle(
+        assert!(is_painted(&painted, &tr!("plot-series-show-in-legend")));
+        let painted = click_label(
             &context,
-            &mut banc.state,
+            &mut harness.state,
             &tr!("plot-series-show-in-legend"),
         );
         assert!(
-            !banc.modele().panels[0].series[0].show_in_legend,
-            "toujours éditable"
+            !harness.model().panels[0].series[0].show_in_legend,
+            "still editable"
         );
-        assert_eq!(banc.modele().panels[0].series[0].plot_type, inconnu());
-        assert!(est_peint(&peints, &tr!("plot-series-type-unknown")));
+        assert_eq!(harness.model().panels[0].series[0].plot_type, unknown());
+        assert!(is_painted(&painted, &tr!("plot-series-type-unknown")));
     }
 
-    // -- L'onglet « Thème » ---------------------------------------------------
+    // -- The "Theme" tab ------------------------------------------------------
 
-    /// Peint [`theme_editor`] sur `spec` ; rend le dernier résultat et les
-    /// textes.
-    fn peindre_theme(
+    /// Paints [`theme_editor`] on `spec`; returns the last result and the
+    /// texts.
+    fn paint_theme(
         context: &egui::Context,
         spec: &mut PlotSpec,
         events: Vec<egui::Event>,
-    ) -> (bool, Vec<Texte>) {
+    ) -> (bool, Vec<Text>) {
         let mut env = PickerEnv {
             project: Default::default(),
             user: Default::default(),
             requests: Vec::new(),
         };
         let mut commit = true;
-        let peints = textes(&image(context, events, |ui| {
+        let painted = texts(&image(context, events, |ui| {
             commit = theme_editor(ui, spec, &mut env);
         }));
-        assert!(
-            env.requests.is_empty(),
-            "peindre n'enregistre aucune couleur"
-        );
-        (commit, peints)
+        assert!(env.requests.is_empty(), "painting saves no color");
+        (commit, painted)
     }
 
-    fn peindre_axe(
+    fn paint_axis(
         context: &egui::Context,
         axis: &mut stokesforge_plot::AxisSpec,
-        calcule: Option<(f64, f64)>,
-    ) -> (bool, Vec<Texte>) {
+        computed: Option<(f64, f64)>,
+    ) -> (bool, Vec<Text>) {
         let mut env = PickerEnv {
             project: Default::default(),
             user: Default::default(),
             requests: Vec::new(),
         };
         let mut commit = true;
-        let peints = textes(&image(context, Vec::new(), |ui| {
-            commit = form(ui, "essai", |form| {
-                super::axis_editor(form, axis, calcule, &mut env)
+        let painted = texts(&image(context, Vec::new(), |ui| {
+            commit = form(ui, "trial", |form| {
+                super::axis_editor(form, axis, computed, &mut env)
             });
         }));
-        (commit, peints)
+        (commit, painted)
     }
 
-    /// #221, #344 : sous Auto, De et À montrent les bornes calculées, dans
-    /// l'ordre d'affichage (un axe inversé montre la borne haute en premier),
-    /// sans les écrire dans le spec. Témoin : hors Auto, ils montrent les bornes
-    /// saisies et non les calculées.
+    /// #221, #344: under Auto, From and To show the computed bounds, in
+    /// display order (an inverted axis shows the upper bound first),
+    /// without writing them into the spec. Witness: outside Auto, they show the typed
+    /// bounds and not the computed ones.
     #[test]
-    fn sous_auto_de_et_a_montrent_les_bornes_calculees_dans_l_ordre_d_affichage() {
-        let context = contexte();
-        let mut axe = stokesforge_plot::AxisSpec::default();
-        assert!(axe.auto_range);
-        let (commit, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
-        assert!(!commit, "peindre ne valide rien");
-        assert!(est_peint(&peints, &tr!("plot-axes-from")));
-        assert!(est_peint(&peints, "4000"), "{peints:?}");
-        assert!(texte_exact(&peints, "7").centre.x < texte_exact(&peints, "4000").centre.x);
-        assert_eq!((axe.range_min, axe.range_max), (None, None));
+    fn under_auto_from_and_to_show_the_computed_bounds_in_display_order() {
+        let context = test_support::context();
+        let mut axis = stokesforge_plot::AxisSpec::default();
+        assert!(axis.auto_range);
+        let (commit, painted) = paint_axis(&context, &mut axis, Some((7.0, 4000.0)));
+        assert!(!commit, "painting commits nothing");
+        assert!(is_painted(&painted, &tr!("plot-axes-from")));
+        assert!(is_painted(&painted, "4000"), "{painted:?}");
+        assert!(text_exact(&painted, "7").center.x < text_exact(&painted, "4000").center.x);
+        assert_eq!((axis.range_min, axis.range_max), (None, None));
 
-        axe.inverted = true;
-        let (commit, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
+        axis.inverted = true;
+        let (commit, painted) = paint_axis(&context, &mut axis, Some((7.0, 4000.0)));
         assert!(!commit);
         assert!(
-            texte_exact(&peints, "4000").centre.x < texte_exact(&peints, "7").centre.x,
-            "axe inversé : la borne haute d'abord"
+            text_exact(&painted, "4000").center.x < text_exact(&painted, "7").center.x,
+            "inverted axis: the upper bound first"
         );
-        assert_eq!((axe.range_min, axe.range_max), (None, None));
+        assert_eq!((axis.range_min, axis.range_max), (None, None));
 
-        axe.inverted = false;
-        axe.auto_range = false;
-        axe.range_min = Some(-5.0);
-        axe.range_max = Some(8.0);
-        let (_, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
-        assert!(est_peint(&peints, "8"), "{peints:?}");
-        assert!(!est_peint(&peints, "4000"), "{peints:?}");
+        axis.inverted = false;
+        axis.auto_range = false;
+        axis.range_min = Some(-5.0);
+        axis.range_max = Some(8.0);
+        let (_, painted) = paint_axis(&context, &mut axis, Some((7.0, 4000.0)));
+        assert!(is_painted(&painted, "8"), "{painted:?}");
+        assert!(!is_painted(&painted, "4000"), "{painted:?}");
     }
 
-    /// #11 : l'onglet « Thème » se dessine (thèmes, fond, texte, axes) sans
-    /// rien modifier tant qu'on n'agit pas — même quand les couleurs locales
-    /// divergent de celles qu'il montre (le titre d'un axe, l'échelle d'un
-    /// autre). Témoin : un clic sur un thème, lui, l'applique et valide.
+    /// #11: the "Theme" tab draws (themes, background, text, axes) without
+    /// changing anything as long as nothing is done — even when the local colors
+    /// differ from those it shows (the title of one axis, the scale of
+    /// another). Witness: a click on a theme does apply it and commits.
     #[test]
-    fn l_onglet_theme_se_dessine_sans_rien_modifier() {
+    fn the_theme_tab_draws_without_changing_anything() {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         spec.set_text_color("#336699");
-        panneau(&mut spec).left.title_color = "#aa0000".into();
-        panneau(&mut spec).left.tick_color = "#00aa00".into();
-        let avant = spec.clone();
-        let context = contexte();
-        let (commit, peints) = peindre_theme(&context, &mut spec, Vec::new());
+        first_panel(&mut spec).left.title_color = "#aa0000".into();
+        first_panel(&mut spec).left.tick_color = "#00aa00".into();
+        let before = spec.clone();
+        let context = test_support::context();
+        let (commit, painted) = paint_theme(&context, &mut spec, Vec::new());
         assert!(!commit);
-        assert_eq!(spec, avant);
-        for libelle in [
+        assert_eq!(spec, before);
+        for label in [
             tr!("plot-theme-themes"),
             tr!("plot-theme-global-colors"),
             tr!("plot-theme-background"),
@@ -2710,113 +2757,113 @@ mod tests {
             tr!("plot-theme-axes"),
             tr!("plot-theme-note"),
         ] {
-            assert!(est_peint(&peints, &libelle), "{libelle:?} absent");
+            assert!(is_painted(&painted, &label), "{label:?} missing");
         }
-        for libelle in [tr!("plot-theme-light"), tr!("plot-theme-dark")] {
-            assert!(est_peint(&peints, &libelle), "thème {libelle:?} absent");
+        for label in [tr!("plot-theme-light"), tr!("plot-theme-dark")] {
+            assert!(is_painted(&painted, &label), "theme {label:?} missing");
         }
 
-        let sombre = &THEMES[1];
-        assert_ne!(spec.background, sombre.background);
-        let pos = texte_exact(&peints, &tr!("plot-theme-dark")).centre;
+        let dark = &THEMES[1];
+        assert_ne!(spec.background, dark.background);
+        let pos = text_exact(&painted, &tr!("plot-theme-dark")).center;
         let mut commits = Vec::new();
         for events in [
             vec![egui::Event::PointerMoved(pos)],
-            vec![clic(pos, true)],
-            vec![clic(pos, false)],
+            vec![click_event(pos, true)],
+            vec![click_event(pos, false)],
         ] {
-            commits.push(peindre_theme(&context, &mut spec, events).0);
+            commits.push(paint_theme(&context, &mut spec, events).0);
         }
-        assert_eq!(commits, [false, false, true], "le clic valide une fois");
-        assert_eq!(spec.background, sombre.background);
-        assert_eq!(spec.panels[0].left.title_color, sombre.text);
+        assert_eq!(commits, [false, false, true], "the click commits once");
+        assert_eq!(spec.background, dark.background);
+        assert_eq!(spec.panels[0].left.title_color, dark.text);
     }
 
-    // -- Le mémo des formules -------------------------------------------------
+    // -- The formula reminder -------------------------------------------------
 
-    /// Chaque exemple du mémo de syntaxe compile vraiment en Typst : un mémo
-    /// qui montre une syntaxe fausse enseignerait une erreur. Les effets
-    /// décrits sont tous distincts.
+    /// Each example of the syntax reminder really compiles in Typst: a reminder
+    /// that showed a wrong syntax would teach an error. The effects
+    /// described are all distinct.
     #[test]
-    fn chaque_exemple_du_memo_compile() {
-        let fonts = formula::resolve_fonts(&stokesforge_render_egui::FontChoice::default())
-            .expect("polices");
-        let lignes = formula_memo_rows();
-        for (source, _) in &lignes {
+    fn each_reminder_example_compiles() {
+        let fonts =
+            formula::resolve_fonts(&stokesforge_render_egui::FontChoice::default()).expect("fonts");
+        let rows = formula_memo_rows();
+        for (source, _) in &rows {
             for example in source.split("  ") {
                 let (sans, math) = fonts.clone();
                 formula::compile(example, 14.0, [0, 0, 0, 255], sans, math)
-                    .unwrap_or_else(|error| panic!("{example:?} ne compile pas : {error}"));
+                    .unwrap_or_else(|error| panic!("{example:?} does not compile: {error}"));
             }
         }
-        distincts(&lignes, |(_, effet)| effet.clone());
-        distincts(&lignes, |(source, _)| source.to_string());
+        distinct(&rows, |(_, effect)| effect.clone());
+        distinct(&rows, |(source, _)| source.to_string());
     }
 
-    /// #33, #197 : le rappel de syntaxe n'est pas peint au repos — l'icône
-    /// seule l'est, tout à droite du champ — et le survol de l'icône montre
-    /// toutes ses lignes (ce qu'on tape, ce qu'on obtient) et un pied de page
-    /// qui nomme Typst.
+    /// #33, #197: the syntax reminder is not painted at rest — only the icon
+    /// is, at the far right of the field — and hovering the icon shows
+    /// all its rows (what is typed, what is obtained) and a footer
+    /// that names Typst.
     #[test]
-    fn le_rappel_des_formules_s_affiche_au_survol_de_l_icone() {
-        let context = contexte();
+    fn the_formula_reminder_shows_on_icon_hover() {
+        let context = test_support::context();
         context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
-        let icone = std::cell::Cell::new(egui::Rect::NOTHING);
-        let champ = std::cell::Cell::new(egui::Rect::NOTHING);
-        let mut texte = String::new();
-        let mut peindre = |ui: &mut egui::Ui| {
+        let icon = std::cell::Cell::new(egui::Rect::NOTHING);
+        let field = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut text = String::new();
+        let mut paint = |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
-                champ.set(ui.text_edit_singleline(&mut texte).rect);
-                icone.set(hover_help_pour_test(ui));
+                field.set(ui.text_edit_singleline(&mut text).rect);
+                icon.set(hover_help_for_test(ui));
             });
         };
-        let peints = textes(&image(&context, Vec::new(), &mut peindre));
-        let pied = tr!("plot-math-footer", url = "typst.app/docs/reference/math");
-        for (source, effet) in formula_memo_rows() {
-            assert!(!est_peint(&peints, source), "au repos : {source:?} peint");
-            assert!(!est_peint(&peints, &effet));
+        let painted = texts(&image(&context, Vec::new(), &mut paint));
+        let footer = tr!("plot-math-footer", url = "typst.app/docs/reference/math");
+        for (source, effect) in formula_memo_rows() {
+            assert!(!is_painted(&painted, source), "at rest: {source:?} painted");
+            assert!(!is_painted(&painted, &effect));
         }
-        assert!(!est_peint(&peints, &pied));
+        assert!(!is_painted(&painted, &footer));
         assert!(
-            icone.get().left() >= champ.get().right(),
-            "l'icône est à droite du champ : {:?} contre {:?}",
-            icone.get(),
-            champ.get()
+            icon.get().left() >= field.get().right(),
+            "the icon is to the right of the field: {:?} vs {:?}",
+            icon.get(),
+            field.get()
         );
 
-        let survol = vec![egui::Event::PointerMoved(icone.get().center())];
-        let mut peints = Vec::new();
+        let hover = vec![egui::Event::PointerMoved(icon.get().center())];
+        let mut painted = Vec::new();
         for _ in 0..4 {
-            peints = textes(&image(&context, survol.clone(), &mut peindre));
+            painted = texts(&image(&context, hover.clone(), &mut paint));
         }
-        for (source, effet) in formula_memo_rows() {
-            assert!(est_peint(&peints, source), "survolé : {source:?} absent");
-            assert!(est_peint(&peints, &effet), "survolé : {effet:?} absent");
+        for (source, effect) in formula_memo_rows() {
+            assert!(is_painted(&painted, source), "hovered: {source:?} absent");
+            assert!(is_painted(&painted, &effect), "hovered: {effect:?} absent");
         }
-        assert!(est_peint(&peints, &pied));
-        assert!(pied.contains("Typst"), "le rappel nomme Typst");
+        assert!(is_painted(&painted, &footer));
+        assert!(footer.contains("Typst"), "the reminder names Typst");
     }
 
-    /// Peint l'icône d'aide des formules et rend son rectangle.
-    fn hover_help_pour_test(ui: &mut egui::Ui) -> egui::Rect {
-        let avant = ui.cursor().min;
+    /// Paints the formula help icon and returns its rectangle.
+    fn hover_help_for_test(ui: &mut egui::Ui) -> egui::Rect {
+        let before = ui.cursor().min;
         formula_help(ui, "");
-        egui::Rect::from_min_max(avant, ui.min_rect().max)
+        egui::Rect::from_min_max(before, ui.min_rect().max)
     }
 
-    // -- Les libellés des choix ---------------------------------------------
+    // -- The choice labels ----------------------------------------------------
 
-    fn inconnu() -> PlotType {
+    fn unknown() -> PlotType {
         PlotType::Unknown(RawVariant {
             name: "Violin".into(),
             payload: Vec::new(),
         })
     }
 
-    /// Les types de tracé proposés par la liste : tous, sauf l'inconnu. Le
-    /// `match` sans `_` oblige à revenir ici quand une variante s'ajoute.
-    fn types_connus() -> Vec<PlotType> {
-        let tous = [
+    /// The plot types offered by the list: all, except the unknown. The
+    /// `match` without `_` forces coming back here when a variant is added.
+    fn known_types() -> Vec<PlotType> {
+        let all = [
             PlotType::Scatter,
             PlotType::Line,
             PlotType::LineScatter,
@@ -2824,7 +2871,7 @@ mod tests {
             PlotType::Histogram,
             PlotType::ErrorBar,
         ];
-        for plot_type in tous.iter().cloned().chain([inconnu()]) {
+        for plot_type in all.iter().cloned().chain([unknown()]) {
             match plot_type {
                 PlotType::Scatter
                 | PlotType::Line
@@ -2835,18 +2882,18 @@ mod tests {
                 | PlotType::Unknown(_) => {}
             }
         }
-        tous.to_vec()
+        all.to_vec()
     }
 
     fn styles() -> [LineStyle; 5] {
-        let tous = [
+        let all = [
             LineStyle::None,
             LineStyle::Solid,
             LineStyle::Dash,
             LineStyle::Dot,
             LineStyle::DashDot,
         ];
-        for style in tous {
+        for style in all {
             match style {
                 LineStyle::None
                 | LineStyle::Solid
@@ -2855,11 +2902,11 @@ mod tests {
                 | LineStyle::DashDot => {}
             }
         }
-        tous
+        all
     }
 
-    fn formes() -> [SymbolShape; 7] {
-        let toutes = [
+    fn symbol_shapes() -> [SymbolShape; 7] {
+        let all = [
             SymbolShape::None,
             SymbolShape::Circle,
             SymbolShape::Square,
@@ -2868,8 +2915,8 @@ mod tests {
             SymbolShape::Plus,
             SymbolShape::Cross,
         ];
-        for forme in toutes {
-            match forme {
+        for shape in all {
+            match shape {
                 SymbolShape::None
                 | SymbolShape::Circle
                 | SymbolShape::Square
@@ -2879,17 +2926,17 @@ mod tests {
                 | SymbolShape::Cross => {}
             }
         }
-        toutes
+        all
     }
 
     fn positions() -> [LegendPosition; 4] {
-        let toutes = [
+        let all = [
             LegendPosition::TopLeft,
             LegendPosition::TopRight,
             LegendPosition::BottomLeft,
             LegendPosition::BottomRight,
         ];
-        for position in toutes {
+        for position in all {
             match position {
                 LegendPosition::TopLeft
                 | LegendPosition::TopRight
@@ -2897,41 +2944,41 @@ mod tests {
                 | LegendPosition::BottomRight => {}
             }
         }
-        toutes
+        all
     }
 
-    /// Chaque liste déroulante des propriétés montre des choix qu'on
-    /// distingue, sur toutes les variantes ; le type inconnu a son propre
-    /// libellé, distinct des types connus.
+    /// Each dropdown list of the properties shows choices that can be
+    /// told apart, over all variants; the unknown type has its own
+    /// label, distinct from the known types.
     #[test]
-    fn les_choix_d_une_meme_liste_ont_des_libelles_distincts() {
-        let mut types = types_connus();
-        types.push(inconnu());
-        distincts(&types, plot_type_label);
-        distincts(&styles(), |style| line_style_label(*style));
-        distincts(&formes(), |forme| symbol_shape_label(*forme));
-        distincts(&positions(), |position| legend_position_label(*position));
-        // Le libellé suit la variante, pas son contenu.
-        let autre = PlotType::Unknown(RawVariant {
+    fn the_choices_of_one_list_have_distinct_labels() {
+        let mut types = known_types();
+        types.push(unknown());
+        distinct(&types, plot_type_label);
+        distinct(&styles(), |style| line_style_label(*style));
+        distinct(&symbol_shapes(), |shape| symbol_shape_label(*shape));
+        distinct(&positions(), |position| legend_position_label(*position));
+        // The label follows the variant, not its content.
+        let other = PlotType::Unknown(RawVariant {
             name: "Polar".into(),
             payload: vec![1],
         });
-        assert_eq!(plot_type_label(&autre), plot_type_label(&inconnu()));
+        assert_eq!(plot_type_label(&other), plot_type_label(&unknown()));
     }
 
-    // -- Les métadonnées d'une colonne --------------------------------------
+    // -- The metadata of a column -------------------------------------------
 
-    /// Une colonne aux métadonnées de fichier : une section, deux lignes
-    /// clé / valeur, une ligne sans clé.
-    fn banc_metadonnees(long_name: &str) -> (Session, AppState, NodeId) {
-        let mut project = Project::new("Métadonnées").unwrap();
+    /// A column with file metadata: a section, two key / value
+    /// rows, a row without a key.
+    fn harness_with_metadata(long_name: &str) -> (Session, AppState, NodeId) {
+        let mut project = Project::new("Metadata").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
         let sheet = project.add_worksheet(book, None).unwrap();
         let column = project
             .add_column(sheet, None, None, Column::from_f64(&[1.0]))
             .unwrap();
-        let ligne = |key: &str, value: &str| MetaLine {
+        let line = |key: &str, value: &str| MetaLine {
             key: key.into(),
             value: value.into(),
         };
@@ -2941,10 +2988,10 @@ mod tests {
                 ColumnMeta {
                     long_name: long_name.into(),
                     file_metadata: vec![
-                        ligne("[Measurement]", ""),
-                        ligne("XUNITS", "NANOMETERS"),
-                        ligne("", "free text line"),
-                        ligne("NPOINTS", "3"),
+                        line("[Measurement]", ""),
+                        line("XUNITS", "NANOMETERS"),
+                        line("", "free text line"),
+                        line("NPOINTS", "3"),
                     ],
                     ..Default::default()
                 },
@@ -2955,73 +3002,81 @@ mod tests {
         (session, state, column)
     }
 
-    fn peindre_metadonnees(
+    fn paint_metadata(
         context: &egui::Context,
         state: &AppState,
         actions: &mut Vec<Action>,
         events: Vec<egui::Event>,
-    ) -> Vec<Texte> {
+    ) -> Vec<Text> {
         for _ in 0..3 {
             image(context, Vec::new(), |ui| {
                 column_metadata_window(ui.ctx(), state, actions)
             });
         }
-        textes(&image(context, events, |ui| {
+        texts(&image(context, events, |ui| {
             column_metadata_window(ui.ctx(), state, actions)
         }))
     }
 
-    /// Issue #5 : la fenêtre des métadonnées montre, en lecture seule, les
-    /// lignes clé / valeur, la section en gras et la ligne sans clé, sous un
-    /// titre qui nomme la colonne. Ouverte, elle ne demande rien ; Entrée
-    /// (« OK ») comme Échap la ferment, sans rien d'autre. Fermée, elle ne
-    /// peint rien.
+    /// Issue #5: the metadata window shows, read-only, the key / value
+    /// rows, the section in bold and the row without a key, under a
+    /// title that names the column. Open, it asks for nothing; Enter
+    /// ("OK") like Escape closes it, without anything else. Closed, it paints
+    /// nothing.
     #[test]
-    fn la_fenetre_des_metadonnees_montre_les_lignes_et_se_ferme() {
-        let context = contexte();
-        for touche_de_fin in [egui::Key::Enter, egui::Key::Escape] {
-            let (_session, mut state, column) = banc_metadonnees("Absorbance");
+    fn the_metadata_window_shows_the_rows_and_closes() {
+        let context = test_support::context();
+        for end_key in [egui::Key::Enter, egui::Key::Escape] {
+            let (_session, mut state, column) = harness_with_metadata("Absorbance");
             let mut actions = Vec::new();
-            let peints = peindre_metadonnees(&context, &state, &mut actions, Vec::new());
-            assert!(!est_peint(&peints, "XUNITS"), "fermée, rien n'est peint");
+            let painted = paint_metadata(&context, &state, &mut actions, Vec::new());
+            assert!(
+                !is_painted(&painted, "XUNITS"),
+                "closed, nothing is painted"
+            );
 
             state.dispatch(Action::ViewColumnMetadata { column });
-            let peints = peindre_metadonnees(&context, &state, &mut actions, Vec::new());
-            let titre = tr!("workbook-metadata-title-named", name = "Absorbance");
-            assert!(est_peint(&peints, &titre), "titre absent");
-            for texte in ["XUNITS", "NANOMETERS", "free text line", "NPOINTS", "3"] {
-                texte_exact(&peints, texte);
+            let painted = paint_metadata(&context, &state, &mut actions, Vec::new());
+            let title = tr!("workbook-metadata-title-named", name = "Absorbance");
+            assert!(is_painted(&painted, &title), "title absent");
+            for text in ["XUNITS", "NANOMETERS", "free text line", "NPOINTS", "3"] {
+                text_exact(&painted, text);
             }
             let visuals = context.global_style().visuals.clone();
-            let section = texte_exact(&peints, "[Measurement]");
-            assert!(section.gras, "section en gras");
+            let section = text_exact(&painted, "[Measurement]");
+            assert!(section.bold, "bold section");
             assert_eq!(
-                section.couleur,
+                section.color,
                 visuals.text_color(),
-                "le gras ne change pas la couleur"
+                "bold does not change the color"
             );
-            assert!(!texte_exact(&peints, "XUNITS").gras, "témoin : ligne à clé");
-            assert_eq!(texte_exact(&peints, "XUNITS").couleur, visuals.text_color());
-            assert!(actions.is_empty(), "ouverte, elle ne demande rien");
-            // #164 : seule une valeur numérique à clé (NPOINTS) offre le
-            // bouton « Utiliser comme x' » ; le texte NANOMETERS non.
+            assert!(!text_exact(&painted, "XUNITS").bold, "witness: keyed row");
+            assert_eq!(text_exact(&painted, "XUNITS").color, visuals.text_color());
+            assert!(actions.is_empty(), "open, it asks for nothing");
+            // #164: only a keyed numeric value (NPOINTS) offers the
+            // "Use as x'" button; the NANOMETERS text does not.
             assert_eq!(
-                peints
+                painted
                     .iter()
-                    .filter(|t| t.texte == tr!("workbook-metadata-use-as-x-prime"))
+                    .filter(|t| t.text == tr!("workbook-metadata-use-as-x-prime"))
                     .count(),
                 1,
-                "un seul bouton : la valeur numérique"
+                "a single button: the numeric value"
             );
 
-            peindre_metadonnees(&context, &state, &mut actions, vec![touche(touche_de_fin)]);
-            assert_eq!(actions, [Action::CloseColumnMetadata], "{touche_de_fin:?}");
+            paint_metadata(&context, &state, &mut actions, vec![key(end_key)]);
+            assert_eq!(actions, [Action::CloseColumnMetadata], "{end_key:?}");
         }
 
-        // Sans nom long, le titre générique.
-        let (_session, mut state, column) = banc_metadonnees("");
+        // Without a long name, the generic title.
+        let (_session, mut state, column) = harness_with_metadata("");
         state.dispatch(Action::ViewColumnMetadata { column });
-        let peints = peindre_metadonnees(&contexte(), &state, &mut Vec::new(), Vec::new());
-        assert!(est_peint(&peints, &tr!("workbook-metadata-title")));
+        let painted = paint_metadata(
+            &test_support::context(),
+            &state,
+            &mut Vec::new(),
+            Vec::new(),
+        );
+        assert!(is_painted(&painted, &tr!("workbook-metadata-title")));
     }
 }

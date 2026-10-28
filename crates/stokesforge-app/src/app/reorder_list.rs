@@ -1,57 +1,56 @@
-//! Une liste de lignes que l'on réordonne au glisser (#148, formats de copie
-//! du graphique).
+//! A list of rows reordered by dragging (#148, figure copy formats).
 //!
-//! Le geste : la poignée en tête de ligne se saisit ; la ligne
-//! entière se glisse (son contenu suit le pointeur depuis l'endroit saisi, dans
-//! une couche flottante) et sa place d'origine reste réservée, vide. Les autres
-//! lignes s'écartent **tout de suite** quand le pointeur en survole une : la
-//! liste est déjà dans son nouvel ordre au relâchement, sans trait de repère
-//! ni dépôt à traiter.
+//! The gesture: the handle at the start of a row is grabbed; the whole row
+//! is dragged (its content follows the pointer from the grabbed spot, in a
+//! floating layer) and its original place stays reserved, empty. The other
+//! rows move aside **at once** when the pointer hovers one: the list is
+//! already in its new order on release, with no marker line and no drop to
+//! handle.
 //!
-//! Deux pièges levés ici. egui centre sa ligne glissée sur le pointeur
-//! (`dnd_drag_source`) : la ligne sauterait de la poignée vers son milieu ;
-//! on retient donc le point saisi, relatif à la ligne, et on recale la couche à
-//! chaque image. Et comme la liste se réordonne pendant le glisser, la charge
-//! utile est l'identifiant de la ligne, jamais son indice.
+//! Two pitfalls handled here. egui centers its dragged row on the pointer
+//! (`dnd_drag_source`): the row would jump from the handle to its middle; so
+//! we keep the grabbed point, relative to the row, and reposition the layer
+//! on every frame. And since the list reorders during the drag, the payload
+//! is the row's identifier, never its index.
 //!
-//! Le module ne touche pas aux données : [`reorder_row`] peint une ligne et dit
-//! si une ligne glissée la survole ; [`reorder_move`] traduit cela en
-//! déplacement ; l'appelant l'applique par [`move_before`].
+//! The module does not touch the data: [`reorder_row`] paints a row and says
+//! whether a dragged row hovers it; [`reorder_move`] turns that into a move;
+//! the caller applies it with [`move_before`].
 
 use eframe::egui;
 
 use super::cursors::grab_handle;
 use crate::icons::{icon_image, Icon, IconRole};
 
-/// La charge utile d'un glisser : la ligne saisie.
+/// The payload of a drag: the grabbed row.
 struct RowDrag {
     id: egui::Id,
 }
 
-/// Où l'on retient le point saisi de la ligne glissée, relatif à la ligne : un
-/// seul glisser à la fois, donc une seule clé — l'identifiant d'une ligne peut
-/// changer pendant le geste (Object Manager : il suit le rang).
+/// Where we keep the grabbed point of the dragged row, relative to the row:
+/// only one drag at a time, so a single key — a row's identifier can change
+/// during the gesture (Object Manager: it follows the rank).
 const GRAB: &str = "reorder_row_grab";
-/// La couche flottante de la ligne glissée.
+/// The floating layer of the dragged row.
 const FLOATING: &str = "reorder_row_floating";
 
-/// Ce qu'une image d'une ligne a vu.
+/// What one frame of a row saw.
 pub(super) struct RowOutcome {
-    /// La ligne qu'une autre ligne, glissée, survole : son cadre.
+    /// The row that a dragged row hovers: its frame.
     pub hover: Option<egui::Rect>,
-    /// La poignée vient d'être saisie.
+    /// The handle was just grabbed.
     pub grabbed: bool,
 }
 
-/// Un glisser de ligne est en cours (ou vient d'être relâché, à l'image du
-/// relâchement).
+/// A row drag is in progress (or was just released, on the frame of the
+/// release).
 pub(super) fn dragging(ctx: &egui::Context) -> bool {
     egui::DragAndDrop::has_payload_of_type::<RowDrag>(ctx)
 }
 
-/// Peint une ligne : la poignée (`grip_alt` pour l'accessibilité, `grip_tip` en
-/// info-bulle) puis `body`. Rend `true` si une autre ligne, glissée, survole
-/// celle-ci : l'appelant mémorise son indice pour [`reorder_move`].
+/// Paints a row: the handle (`grip_alt` for accessibility, `grip_tip` as a
+/// tooltip) then `body`. Returns `true` if another, dragged row hovers this
+/// one: the caller remembers its index for [`reorder_move`].
 pub(super) fn reorder_row(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -74,12 +73,12 @@ pub(super) fn reorder_row(
     .is_some()
 }
 
-/// [`reorder_row`] sans poignée imposée : `body` peint la ligne et rend la
-/// réponse qui **saisit** la ligne (une poignée, ou toute la zone du libellé :
-/// elle doit porter `Sense::drag`), `None` pour une ligne qui ne se glisse pas.
-/// L'appelant dit si la ligne est celle qu'on glisse : quand la liste se
-/// réordonne pendant le geste et que l'identifiant d'une ligne suit son rang,
-/// la charge utile ne la reconnaît plus.
+/// [`reorder_row`] without an imposed handle: `body` paints the row and returns
+/// the response that **grabs** the row (a handle, or the whole label area:
+/// it must carry `Sense::drag`), `None` for a row that cannot be dragged.
+/// The caller says whether the row is the one being dragged: when the list
+/// reorders during the gesture and a row's identifier follows its rank,
+/// the payload no longer recognizes it.
 pub(super) fn reorder_row_with(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -129,9 +128,9 @@ pub(super) fn reorder_row_with(
     }
 }
 
-/// Le déplacement à faire cette image : `ids` sont les identifiants des lignes
-/// dans l'ordre affiché, `over` l'indice de la ligne survolée par la ligne
-/// glissée. Rend `(from, to)` pour [`move_before`], ou `None`.
+/// The move to make this frame: `ids` are the identifiers of the rows in
+/// displayed order, `over` the index of the row hovered by the dragged row.
+/// Returns `(from, to)` for [`move_before`], or `None`.
 pub(super) fn reorder_move(
     ctx: &egui::Context,
     ids: &[egui::Id],
@@ -143,8 +142,8 @@ pub(super) fn reorder_move(
     Some((from, if over > from { over + 1 } else { over }))
 }
 
-/// Déplace l'élément `from` pour qu'il se retrouve avant l'élément `to` de la
-/// liste d'origine (`to == len` : tout à la fin). Pure, pour être testée.
+/// Moves the item `from` so that it ends up before the item `to` of the
+/// original list (`to == len`: at the very end). Pure, to be testable.
 pub(super) fn move_before<T>(list: &mut Vec<T>, from: usize, to: usize) {
     if from >= list.len() || to > list.len() || to == from || to == from + 1 {
         return;
@@ -158,7 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn move_before_place_avant_la_cible() {
+    fn move_before_places_before_the_target() {
         let mut list = vec!['a', 'b', 'c'];
         move_before(&mut list, 2, 0);
         assert_eq!(list, ['c', 'a', 'b']);
@@ -171,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_glisser_rien_ne_bouge() {
+    fn without_a_drag_nothing_moves() {
         let ctx = egui::Context::default();
         let ids = [egui::Id::new(1), egui::Id::new(2)];
         assert_eq!(reorder_move(&ctx, &ids, Some(0)), None);

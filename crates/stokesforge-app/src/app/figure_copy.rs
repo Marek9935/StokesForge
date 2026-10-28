@@ -1,35 +1,35 @@
-//! Copier la figure du graphique actif vers une application externe (Ctrl+C,
+//! Copy the figure of the active graph to an external application (Ctrl+C,
 //! issue #149).
 //!
-//! # Le geste
+//! # The gesture
 //!
-//! Ctrl+C n'arrive jamais comme un `Event::Key` : `egui-winit` le traduit en
-//! `Event::Copy` (voir `grid.rs`, `grid_clipboard_shortcuts`). La figure
-//! entière est copiée quand, **ensemble** :
+//! Ctrl+C never arrives as an `Event::Key`: `egui-winit` translates it into
+//! `Event::Copy` (see `grid.rs`, `grid_clipboard_shortcuts`). The whole
+//! figure is copied when, **together**:
 //!
-//! - une fenêtre de graphique est active, au premier plan — flottante (celle
-//!   que désigne `active_content_tab`) ou détachée (son viewport reçoit la
-//!   touche, donc il est le focalisé) ;
-//! - aucun objet du graphique n'est sélectionné (`selected_manager_target` :
-//!   série, texte libre, forme, titre ou légende ; la sélection de l'Object
-//!   Manager est celle de la vue) : le copier-coller d'un objet n'est pas
-//!   défini par #149 ;
-//! - aucun champ de saisie n'a le focus (`keyboard_focus_outside_grid`) : un
-//!   Ctrl+C dans un champ copie son texte.
+//! - a graph window is active, in the foreground — floating (the one that
+//!   `active_content_tab` designates) or detached (its viewport receives the
+//!   key, so it is the focused one);
+//! - no graph object is selected (`selected_manager_target`: series, free
+//!   text, shape, title or legend; the Object Manager selection is the
+//!   view's): copy-paste of an object is not defined by #149;
+//! - no input field has focus (`keyboard_focus_outside_grid`): a Ctrl+C in
+//!   a field copies its text.
 //!
-//! Le Project Manager retire lui-même son `Event::Copy` quand il a le focus, et
-//! ce module passe **avant** les panneaux et les contenus (le raccourci est
-//! consommé au niveau du contexte, comme `collect_shortcuts`) : une grille
-//! visible derrière la fenêtre de graphique ne reçoit donc pas le même
-//! `Event::Copy` et n'écrase pas la figure par du texte de cellules.
+//! The Project Manager removes its own `Event::Copy` when it has focus, and
+//! this module runs **before** the panels and the contents (the shortcut is
+//! consumed at the context level, like `collect_shortcuts`): a grid visible
+//! behind the graph window therefore does not receive the same
+//! `Event::Copy` and does not overwrite the figure with cell text.
 //!
-//! # Ce que ce module ne fait pas
+//! # What this module does not do
 //!
-//! Il ne rend ni n'offre rien : il pousse une [`Action::CopyGraphFigure`] dont
-//! le spec est déjà cadré par la vue (le zoom affiché, comme l'export vers un
-//! fichier). `AppState` prépare les octets, et [`StokesForgeApp::offer_figure`]
-//! les offre au système depuis la fenêtre racine, la seule à connaître son
-//! affichage (`eframe::Frame`). Aucune commande, aucune entrée d'historique.
+//! It neither renders nor offers anything: it pushes an
+//! [`Action::CopyGraphFigure`] whose spec is already framed by the view (the
+//! displayed zoom, like the export to a file). `AppState` prepares the bytes,
+//! and [`StokesForgeApp::offer_figure`] offers them to the system from the
+//! root window, the only one that knows its display (`eframe::Frame`). No
+//! command, no history entry.
 
 use eframe::egui;
 use stokesforge_clipboard::{mime, ClipboardError, Representation};
@@ -45,8 +45,8 @@ use super::object_manager_ui::selected_manager_target;
 use super::tab::Tab;
 use super::StokesForgeApp;
 
-/// Vrai si un `Event::Copy` attend dans l'entrée du contexte — la lecture bon
-/// marché qui évite tout travail les images sans Ctrl+C.
+/// True if an `Event::Copy` is waiting in the context input — the cheap read
+/// that avoids any work on frames without Ctrl+C.
 pub(super) fn copy_event_pending(ctx: &egui::Context) -> bool {
     ctx.input(|input| {
         input
@@ -56,10 +56,10 @@ pub(super) fn copy_event_pending(ctx: &egui::Context) -> bool {
     })
 }
 
-/// Le geste « copier la figure » est-il celui-ci ? Si oui, il **retire** l'
-/// `Event::Copy` pour que personne d'autre ne le traite.
+/// Is this the "copy the figure" gesture? If so, it **removes** the
+/// `Event::Copy` so that nobody else handles it.
 ///
-/// `view` est la vue du graphique que le geste viserait : sa sélection décide.
+/// `view` is the view of the graph that the gesture would target: its selection decides.
 pub(super) fn take_figure_copy_gesture(ctx: &egui::Context, view: &GraphView) -> bool {
     if keyboard_focus_outside_grid(ctx) || selected_manager_target(view).is_some() {
         return false;
@@ -73,8 +73,8 @@ pub(super) fn take_figure_copy_gesture(ctx: &egui::Context, view: &GraphView) ->
     })
 }
 
-/// Pousse [`Action::CopyGraphFigure`] si le geste est celui de la figure de
-/// `graph`, cadrée par `view`.
+/// Pushes [`Action::CopyGraphFigure`] if the gesture is the one for the figure of
+/// `graph`, framed by `view`.
 pub(super) fn request_figure_copy(
     ctx: &egui::Context,
     view: &GraphView,
@@ -93,9 +93,9 @@ pub(super) fn request_figure_copy(
 }
 
 impl StokesForgeApp {
-    /// Ctrl+C sur le graphique flottant actif (la racine ne reçoit la touche
-    /// que si elle a le focus ; un graphique détaché lit la sienne dans son
-    /// viewport, voir `window_detach.rs`).
+    /// Ctrl+C on the active floating graph (the root receives the key only
+    /// if it has focus; a detached graph reads its own in its viewport, see
+    /// `window_detach.rs`).
     pub(super) fn request_active_figure_copy(
         &mut self,
         ctx: &egui::Context,
@@ -114,9 +114,9 @@ impl StokesForgeApp {
         });
     }
 
-    /// L'entrée « Copier le graphique » des menus : la même action que Ctrl+C,
-    /// sans condition de sélection (le geste est explicite), avec le cadrage de
-    /// la vue du graphique `graph`, flottante ou détachée.
+    /// The "Copy graph" entry of the menus: the same action as Ctrl+C,
+    /// with no selection condition (the gesture is explicit), with the framing of
+    /// the view of graph `graph`, floating or detached.
     pub(super) fn request_graph_figure_copy(&mut self, graph: NodeId, actions: &mut Vec<Action>) {
         let tree = self.state.snapshot().tree.clone();
         self.with_graph_view(graph, |view| {
@@ -128,8 +128,8 @@ impl StokesForgeApp {
         });
     }
 
-    /// Offre au système les représentations que [`Action::CopyGraphFigure`]
-    /// vient de préparer. Un refus remplace le message « copié » par sa cause.
+    /// Offers to the system the representations that [`Action::CopyGraphFigure`]
+    /// has just prepared. A refusal replaces the "copied" message with its cause.
     pub(super) fn offer_figure(&mut self, frame: &eframe::Frame) {
         let Some(figures) = self.state.take_figure_clipboard() else {
             return;
@@ -145,9 +145,9 @@ impl StokesForgeApp {
     }
 }
 
-/// Le type MIME sous lequel la figure d'un format d'export est offerte. Un
-/// `match` exhaustif, sans `_` : un format nouveau ne compile pas tant qu'il
-/// n'a pas son type.
+/// The MIME type under which the figure of an export format is offered. An
+/// exhaustive `match`, without `_`: a new format does not compile until it
+/// has its type.
 fn mime_of(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Svg { .. } => mime::SVG,
@@ -156,9 +156,9 @@ fn mime_of(format: ExportFormat) -> &'static str {
     }
 }
 
-/// La phrase d'une [`ClipboardError`] : les erreurs de l'offre multi-format au
-/// presse-papiers système (#149), mises en phrase ici parce que
-/// `stokesforge-clipboard` (et son winit) reste dans l'application.
+/// The sentence of a [`ClipboardError`]: the errors of the multi-format offer
+/// to the system clipboard (#149), put into sentences here because
+/// `stokesforge-clipboard` (and its winit) stays in the application.
 pub(super) fn clipboard_error_message(error: &ClipboardError) -> String {
     match error {
         ClipboardError::Empty => tr!("error-clipboard-empty"),
@@ -173,18 +173,18 @@ pub(super) fn clipboard_error_message(error: &ClipboardError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::graph_window::{graph_view_contents, tests::graphe};
-    use super::super::test_support::{cliquer, contexte, image, image_de};
+    use super::super::graph_window::{graph_view_contents, tests::plotted_graph};
+    use super::super::test_support::{click, context, frame_of, image};
     use super::*;
     use stokesforge_app_state::errors::tests_support::check;
     use stokesforge_app_state::state::AppState;
     use stokesforge_session::Session;
 
-    /// Chaque format d'export offert a son type MIME, distinct des autres
-    /// (témoin : deux formats qui partageraient un type seraient indiscernables
-    /// pour l'application destinataire).
+    /// Each offered export format has its MIME type, distinct from the others
+    /// (witness: two formats sharing a type would be indistinguishable
+    /// for the receiving application).
     #[test]
-    fn chaque_format_de_la_figure_a_son_type_mime() {
+    fn each_figure_format_has_its_mime_type() {
         use stokesforge_render_svg::SvgTextMode;
         let svg = ExportFormat::Svg {
             text: SvgTextMode::Text,
@@ -193,12 +193,12 @@ mod tests {
         assert_eq!(mime_of(svg), "image/svg+xml");
         assert_eq!(mime_of(png), "image/png");
         assert_eq!(mime_of(ExportFormat::Pdf), "application/pdf");
-        // L'échelle du PNG ne change pas son type.
+        // The PNG scale does not change its type.
         assert_eq!(mime_of(png), mime_of(ExportFormat::Png { scale: 1.0 }));
     }
 
     #[test]
-    fn chaque_erreur_du_presse_papiers_a_sa_phrase() {
+    fn each_clipboard_error_has_its_sentence() {
         let samples = [
             ClipboardError::Empty,
             ClipboardError::Unsupported("Wayland"),
@@ -214,18 +214,18 @@ mod tests {
             seen[index] = true;
             check(sample, &clipboard_error_message(sample));
         }
-        assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
-        // Le détail et l'affichage sont repris tels quels dans la phrase.
+        assert!(seen.iter().all(|&s| s), "a variant has no sample");
+        // The detail and the display are carried over as is into the sentence.
         let phrase = clipboard_error_message(&ClipboardError::Backend("selection refused".into()));
         assert!(phrase.contains("selection refused"), "{phrase}");
         let phrase = clipboard_error_message(&ClipboardError::Unsupported("Wayland"));
         assert!(phrase.contains("Wayland"), "{phrase}");
     }
 
-    /// Une application dont le graphique est au premier plan, et sa vue déjà
-    /// créée (une vue naît à la première peinture de la fenêtre).
-    fn banc() -> (Session, StokesForgeApp, NodeId) {
-        let (session, graph) = graphe();
+    /// An application whose graph is in the foreground, and its view already
+    /// created (a view is born at the first paint of the window).
+    fn bench() -> (Session, StokesForgeApp, NodeId) {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         let mut app = StokesForgeApp::new(state);
         app.graph_views.insert(graph, GraphView::new());
@@ -233,180 +233,183 @@ mod tests {
         (session, app, graph)
     }
 
-    /// Une image de 900 × 700 avec `events`, textures écartées.
-    fn entree(ctx: &egui::Context, events: Vec<egui::Event>, contenu: impl FnMut(&mut egui::Ui)) {
-        image_de(ctx, egui::vec2(900.0, 700.0), events, contenu);
+    /// A frame of 900 × 700 with `events`, textures discarded.
+    fn input(ctx: &egui::Context, events: Vec<egui::Event>, content: impl FnMut(&mut egui::Ui)) {
+        frame_of(ctx, egui::vec2(900.0, 700.0), events, content);
     }
 
-    /// Une image avec `events` où l'application lit Ctrl+C pour `tab` ; rend
-    /// les actions poussées et les événements qui restent à d'autres.
-    fn peint(
+    /// A frame with `events` where the application reads Ctrl+C for `tab`; returns
+    /// the pushed actions and the events that remain for others.
+    fn paint_app(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
         events: Vec<egui::Event>,
     ) -> (Vec<Action>, Vec<egui::Event>) {
         let mut actions = Vec::new();
-        let mut restants = Vec::new();
-        entree(ctx, events, |ui| {
+        let mut remaining = Vec::new();
+        input(ctx, events, |ui| {
             app.request_active_figure_copy(ui.ctx(), tab, &mut actions);
-            restants = ui.input(|input| input.events.clone());
+            remaining = ui.input(|input| input.events.clone());
         });
-        (actions, restants)
+        (actions, remaining)
     }
 
-    fn copie() -> Vec<egui::Event> {
+    fn copy_events() -> Vec<egui::Event> {
         vec![egui::Event::Copy]
     }
 
-    fn est_copie(events: &[egui::Event]) -> bool {
+    fn is_copy(events: &[egui::Event]) -> bool {
         events.iter().any(|e| matches!(e, egui::Event::Copy))
     }
 
-    /// Le geste voulu : graphique actif, rien de sélectionné, Ctrl+C. Une
-    /// seule action, avec la figure cadrée par la vue ; l'événement est retiré
-    /// pour que la grille d'un classeur visible derrière ne le lise pas.
+    /// The intended gesture: active graph, nothing selected, Ctrl+C. A
+    /// single action, with the figure framed by the view; the event is removed
+    /// so that the grid of a workbook visible behind does not read it.
     #[test]
-    fn ctrl_c_sur_un_graphique_actif_sans_selection_copie_la_figure() {
-        let (session, mut app, graph) = banc();
-        let ctx = contexte();
+    fn ctrl_c_on_an_active_graph_with_no_selection_copies_the_figure() {
+        let (session, mut app, graph) = bench();
+        let ctx = context();
         let tab = Some(Tab::Graph(graph));
 
-        // Témoin : sans Ctrl+C, rien ne part.
-        let (actions, _) = peint(&mut app, &ctx, tab, Vec::new());
+        // Witness: without Ctrl+C, nothing goes out.
+        let (actions, _) = paint_app(&mut app, &ctx, tab, Vec::new());
         assert!(actions.is_empty(), "{actions:?}");
 
-        let (actions, restants) = peint(&mut app, &ctx, tab, copie());
+        let (actions, remaining) = paint_app(&mut app, &ctx, tab, copy_events());
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
-        let cadre = app
+        let framed = app
             .read_graph_view(graph, |v| v.framed_spec(&spec))
             .unwrap();
         assert_eq!(
             actions,
             vec![Action::CopyGraphFigure {
-                spec: Box::new(cadre)
+                spec: Box::new(framed)
             }]
         );
-        assert!(!est_copie(&restants), "l'événement doit être consommé");
+        assert!(!is_copy(&remaining), "the event must be consumed");
         session.shutdown().unwrap();
     }
 
-    /// Un objet sélectionné garde Ctrl+C : le copier-coller d'objets
-    /// graphiques n'est pas défini par #149, et l'événement reste lisible.
+    /// A selected object keeps Ctrl+C: copy-paste of graphical objects is not
+    /// defined by #149, and the event stays readable.
     #[test]
-    fn un_objet_selectionne_garde_ctrl_c() {
-        let (session, mut app, graph) = banc();
-        let ctx = contexte();
+    fn a_selected_object_keeps_ctrl_c() {
+        let (session, mut app, graph) = bench();
+        let ctx = context();
         let tab = Some(Tab::Graph(graph));
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         let series = stokesforge_plot::SeriesRef::new(0, 0);
-        assert!(spec.series_at(series).is_some(), "témoin : la série existe");
+        assert!(
+            spec.series_at(series).is_some(),
+            "witness: the series exists"
+        );
         app.with_graph_view(graph, |view| view.select_series(Some(series), &spec));
-        let (actions, restants) = peint(&mut app, &ctx, tab, copie());
+        let (actions, remaining) = paint_app(&mut app, &ctx, tab, copy_events());
         assert!(actions.is_empty(), "{actions:?}");
-        assert!(est_copie(&restants), "l'événement doit rester");
+        assert!(is_copy(&remaining), "the event must stay");
 
-        // Une fois désélectionnée, la figure part : c'est bien la sélection
-        // qui décidait.
+        // Once deselected, the figure goes out: the selection was indeed
+        // what decided.
         app.with_graph_view(graph, |view| view.select_series(None, &spec));
-        let (actions, _) = peint(&mut app, &ctx, tab, copie());
+        let (actions, _) = paint_app(&mut app, &ctx, tab, copy_events());
         assert_eq!(actions.len(), 1);
         session.shutdown().unwrap();
     }
 
-    /// Un champ de saisie focalisé garde Ctrl+C : il copie son texte.
+    /// A focused input field keeps Ctrl+C: it copies its text.
     #[test]
-    fn un_champ_de_saisie_garde_ctrl_c() {
-        let (session, mut app, graph) = banc();
-        let ctx = contexte();
+    fn an_input_field_keeps_ctrl_c() {
+        let (session, mut app, graph) = bench();
+        let ctx = context();
         let tab = Some(Tab::Graph(graph));
-        let id = egui::Id::new("champ");
-        let mut texte = String::from("abc");
-        let mut peint_champ = |app: &mut StokesForgeApp, events: Vec<egui::Event>, focus: bool| {
+        let id = egui::Id::new("field");
+        let mut text = String::from("abc");
+        let mut paint_field = |app: &mut StokesForgeApp, events: Vec<egui::Event>, focus: bool| {
             let mut actions = Vec::new();
-            let mut restants = Vec::new();
-            entree(&ctx, events, |ui| {
-                ui.add(egui::TextEdit::singleline(&mut texte).id(id));
+            let mut remaining = Vec::new();
+            input(&ctx, events, |ui| {
+                ui.add(egui::TextEdit::singleline(&mut text).id(id));
                 if focus {
                     ui.memory_mut(|memory| memory.request_focus(id));
                 }
                 app.request_active_figure_copy(ui.ctx(), tab, &mut actions);
-                restants = ui.input(|input| input.events.clone());
+                remaining = ui.input(|input| input.events.clone());
             });
-            (actions, restants)
+            (actions, remaining)
         };
-        peint_champ(&mut app, Vec::new(), true);
-        let (actions, restants) = peint_champ(&mut app, copie(), false);
+        paint_field(&mut app, Vec::new(), true);
+        let (actions, remaining) = paint_field(&mut app, copy_events(), false);
         assert!(actions.is_empty(), "{actions:?}");
-        assert!(est_copie(&restants), "l'événement doit rester au champ");
+        assert!(is_copy(&remaining), "the event must stay with the field");
         session.shutdown().unwrap();
     }
 
-    /// Un classeur au premier plan, ou aucune fenêtre : pas de figure.
+    /// A workbook in the foreground, or no window: no figure.
     #[test]
-    fn seul_un_graphique_actif_copie_sa_figure() {
-        let (session, mut app, _graph) = banc();
-        let ctx = contexte();
+    fn only_an_active_graph_copies_its_figure() {
+        let (session, mut app, _graph) = bench();
+        let ctx = context();
         let book = app.state.books()[0].0;
-        let (actions, restants) = peint(&mut app, &ctx, Some(Tab::Book(book)), copie());
+        let (actions, remaining) = paint_app(&mut app, &ctx, Some(Tab::Book(book)), copy_events());
         assert!(actions.is_empty(), "{actions:?}");
-        assert!(est_copie(&restants));
-        let (actions, _) = peint(&mut app, &ctx, None, copie());
+        assert!(is_copy(&remaining));
+        let (actions, _) = paint_app(&mut app, &ctx, None, copy_events());
         assert!(actions.is_empty(), "{actions:?}");
         session.shutdown().unwrap();
     }
 
-    /// La figure visée est celle de l'onglet actif, pas d'un autre graphique
-    /// ouvert : Ctrl+C sur le second donne le spec du second.
+    /// The targeted figure is the one of the active tab, not of another open
+    /// graph: Ctrl+C on the second gives the spec of the second.
     #[test]
-    fn la_figure_copiee_est_celle_du_graphique_actif() {
-        let (session, mut app, premier) = banc();
+    fn the_copied_figure_is_the_one_of_the_active_graph() {
+        let (session, mut app, first) = bench();
         app.state.dispatch(Action::AddGraph);
         let second = app.state.graphs().last().unwrap().0;
-        assert_ne!(premier, second);
+        assert_ne!(first, second);
         app.graph_views.insert(second, GraphView::new());
-        let ctx = contexte();
-        let spec_de = |app: &StokesForgeApp, graph| {
+        let ctx = context();
+        let spec_of = |app: &StokesForgeApp, graph| {
             stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap()
         };
-        let (actions, _) = peint(&mut app, &ctx, Some(Tab::Graph(second)), copie());
+        let (actions, _) = paint_app(&mut app, &ctx, Some(Tab::Graph(second)), copy_events());
         assert_eq!(
             actions,
             vec![Action::CopyGraphFigure {
-                spec: Box::new(spec_de(&app, second))
+                spec: Box::new(spec_of(&app, second))
             }]
         );
-        assert_ne!(spec_de(&app, premier), spec_de(&app, second), "témoin");
+        assert_ne!(spec_of(&app, first), spec_of(&app, second), "witness");
         session.shutdown().unwrap();
     }
 
-    /// Cliquer sur la figure ne laisse aucun focus clavier à un widget du
-    /// graphique : sans quoi Ctrl+C, juste après un clic sur la figure, serait
-    /// pris pour une saisie et ne copierait jamais.
+    /// Clicking on the figure leaves no keyboard focus to a widget of the
+    /// graph: otherwise Ctrl+C, right after a click on the figure, would be
+    /// taken for input and would never copy.
     #[test]
-    fn cliquer_sur_la_figure_ne_prend_pas_le_focus_clavier() {
-        let (session, graph) = graphe();
+    fn clicking_on_the_figure_does_not_take_keyboard_focus() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
-        let ctx = contexte();
+        let ctx = context();
         let mut view = GraphView::new();
         let mut actions = Vec::new();
-        let mut peindre = |ui: &mut egui::Ui| {
+        let mut paint_graph = |ui: &mut egui::Ui| {
             graph_view_contents(ui, &mut view, state.snapshot(), graph, &mut actions);
         };
-        image(&ctx, Vec::new(), &mut peindre);
-        let centre = egui::pos2(400.0, 300.0);
-        cliquer(&ctx, centre, egui::PointerButton::Primary, &mut peindre);
+        image(&ctx, Vec::new(), &mut paint_graph);
+        let center = egui::pos2(400.0, 300.0);
+        click(&ctx, center, egui::PointerButton::Primary, &mut paint_graph);
         assert_eq!(ctx.memory(|memory| memory.focused()), None);
         assert!(!keyboard_focus_outside_grid(&ctx));
 
-        // Témoin : le test sait voir un focus quand il y en a un.
-        let ailleurs = egui::Id::new("ailleurs");
-        let mut champ = |ui: &mut egui::Ui| {
-            ui.add(egui::TextEdit::singleline(&mut String::new()).id(ailleurs));
-            ui.memory_mut(|memory| memory.request_focus(ailleurs));
+        // Witness: the test can see a focus when there is one.
+        let elsewhere = egui::Id::new("elsewhere");
+        let mut field = |ui: &mut egui::Ui| {
+            ui.add(egui::TextEdit::singleline(&mut String::new()).id(elsewhere));
+            ui.memory_mut(|memory| memory.request_focus(elsewhere));
         };
-        image(&ctx, Vec::new(), &mut champ);
-        image(&ctx, Vec::new(), &mut champ);
+        image(&ctx, Vec::new(), &mut field);
+        image(&ctx, Vec::new(), &mut field);
         assert!(keyboard_focus_outside_grid(&ctx));
         session.shutdown().unwrap();
     }

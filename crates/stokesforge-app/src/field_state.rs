@@ -1,69 +1,71 @@
-//! État d'un champ de saisie : **refusé** (cadre rouge) ou **ramené** (cadre
-//! orange), une seule brique pour tous les champs (#219, #217 S-N6/S-N7/S-N11, S-T2, S-T3).
+//! State of an input field: **refused** (red frame) or **brought back**
+//! (orange frame), a single building block for all fields (#219, #217
+//! S-N6/S-N7/S-N11, S-T2, S-T3).
 //!
-//! Règles (`docs/standard-interface.md`, § Input refused or brought back) :
+//! Rules (`docs/standard-interface.md`, § Input refused or brought back):
 //!
-//! - une saisie **illisible**, ou qui viole une contrainte entre deux champs,
-//!   est *refusée* : cadre rouge, bulle qui dit la règle, texte gardé tant que
-//!   le champ reste ouvert, ancienne valeur rendue à la sortie ;
-//! - une valeur **hors d'une borne fixe** est *ramenée* à la borne : cadre
-//!   orange pendant [`CLAMPED_SECONDS`], bulle « Set to the maximum, 20 » ;
-//! - jamais d'effacement ni de correction muette.
+//! - an **unreadable** input, or one that violates a constraint between two
+//!   fields, is *refused*: red frame, a bubble that states the rule, text
+//!   kept as long as the field stays open, old value restored on exit;
+//! - a value **outside a fixed bound** is *brought back* to the bound:
+//!   orange frame for [`CLAMPED_SECONDS`], bubble "Set to the maximum, 20";
+//! - never an erasure or a silent correction.
 //!
-//! # Trois étages, du plus bas au plus haut
+//! # Three levels, from lowest to highest
 //!
-//! 1. [`show_issue`] — peint cadre et bulle d'un [`FieldIssue`] sur la réponse
-//!    d'un champ **déjà posé**. Sans mémoire : c'est l'étage d'un champ dont
-//!    l'erreur vient d'ailleurs (message Typst d'un titre, S-T3).
-//! 2. [`flag`] / [`active`] / [`clear`] — la mémoire d'egui (par identifiant de
-//!    champ) d'un état qui doit survivre à la saisie : le cadre orange de 2 s,
-//!    le cadre rouge d'une saisie abandonnée.
-//! 3. [`edit_text`] — le cycle complet d'un champ texte validé (brouillon,
-//!    Entrée, perte du focus, Échap) autour d'une fonction de lecture
-//!    ([`Verdict`]). Les briques « nombre » (#220) et « texte » (#224) sont
-//!    des appels d'[`edit_text`] avec leur lecture ; la décision du cycle,
-//!    [`decide`], est une fonction pure testée sans fenêtre.
+//! 1. [`show_issue`] — paints the frame and bubble of a [`FieldIssue`] on the
+//!    response of a field that is **already placed**. No memory: this is the
+//!    level of a field whose error comes from elsewhere (Typst message of a
+//!    title, S-T3).
+//! 2. [`flag`] / [`active`] / [`clear`] — egui's memory (per field
+//!    identifier) of a state that must outlive the input: the 2 s orange
+//!    frame, the red frame of an abandoned input.
+//! 3. [`edit_text`] — the full cycle of a validated text field (draft,
+//!    Enter, focus loss, Escape) around a reading function
+//!    ([`Verdict`]). The "number" (#220) and "text" (#224) building blocks
+//!    are calls of [`edit_text`] with their reading; the decision of the
+//!    cycle, [`decide`], is a pure function tested without a window.
 //!
-//! Le rouge et l'orange viennent de `theme.rs` (`field_refused_color`,
-//! `field_clamped_color`) ; les messages sont des clés `tr!` du catalogue.
+//! Red and orange come from `theme.rs` (`field_refused_color`,
+//! `field_clamped_color`); the messages are `tr!` keys of the catalog.
 
 use eframe::egui;
 
 use crate::theme;
 use stokesforge_app_state::tr;
 
-/// Durée d'affichage du cadre orange d'une valeur ramenée, en secondes.
+/// How long the orange frame of a brought-back value shows, in seconds.
 pub const CLAMPED_SECONDS: f64 = 2.0;
 
-/// Épaisseur du cadre d'un champ en défaut, en points.
+/// Thickness of the frame of a faulty field, in points.
 const FRAME_WIDTH: f32 = 1.5;
 
-/// Quelle borne a ramené la valeur.
+/// Which bound brought the value back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bound {
     Min,
     Max,
 }
 
-/// Ce qui ne va pas dans un champ, avec la phrase déjà traduite de la bulle.
+/// What is wrong in a field, with the already translated sentence of the bubble.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FieldIssue {
-    /// Saisie refusée : cadre rouge. `message` dit la règle.
+    /// Input refused: red frame. `message` states the rule.
     Refused { message: String },
-    /// Valeur ramenée à une borne : cadre orange. `message` dit laquelle.
+    /// Value brought back to a bound: orange frame. `message` says which.
     Clamped { message: String },
 }
 
 impl FieldIssue {
-    /// Une saisie refusée ; `message` est une phrase `tr!` qui dit la règle.
+    /// A refused input; `message` is a `tr!` sentence that states the rule.
     pub fn refused(message: impl Into<String>) -> Self {
         Self::Refused {
             message: message.into(),
         }
     }
 
-    /// Une valeur ramenée à `bound`, dont `limit` est la valeur affichée
-    /// (« 20 » dans « Set to the maximum, 20 »).
+    /// A value brought back to `bound`, whose displayed value is `limit`
+    /// ("20" in "Set to the maximum, 20").
     pub fn clamped(bound: Bound, limit: &str) -> Self {
         let message = match bound {
             Bound::Min => tr!("field-clamped-min", limit = limit),
@@ -72,14 +74,14 @@ impl FieldIssue {
         Self::Clamped { message }
     }
 
-    /// La phrase de la bulle.
+    /// The sentence of the bubble.
     pub fn message(&self) -> &str {
         match self {
             Self::Refused { message } | Self::Clamped { message } => message,
         }
     }
 
-    /// La couleur du cadre : rouge pour un refus, orange pour une valeur ramenée.
+    /// The color of the frame: red for a refusal, orange for a brought-back value.
     pub fn color(&self) -> egui::Color32 {
         match self {
             Self::Refused { .. } => theme::field_refused_color(),
@@ -88,8 +90,8 @@ impl FieldIssue {
     }
 }
 
-/// Peint le cadre de `issue` autour du champ `response`, et sa bulle tant que le
-/// champ est survolé ou a le focus.
+/// Paints the frame of `issue` around field `response`, and its bubble while the
+/// field is hovered or has focus.
 pub fn show_issue(ui: &egui::Ui, response: &egui::Response, issue: &FieldIssue) {
     let corner = ui.visuals().widgets.inactive.corner_radius;
     ui.painter().rect_stroke(
@@ -103,16 +105,16 @@ pub fn show_issue(ui: &egui::Ui, response: &egui::Response, issue: &FieldIssue) 
     }
 }
 
-/// L'état gardé en mémoire pour un champ : ce qu'il faut encore montrer, et
-/// jusqu'à quand (temps d'egui).
+/// The state kept in memory for a field: what is still to show, and
+/// until when (egui time).
 #[derive(Clone, Debug)]
 struct Flag {
     issue: FieldIssue,
     until: f64,
 }
 
-/// Mémorise `issue` pour le champ `id` pendant [`CLAMPED_SECONDS`] à partir de
-/// `now`, et réveille l'interface à son échéance.
+/// Remembers `issue` for field `id` for [`CLAMPED_SECONDS`] starting from
+/// `now`, and wakes the interface at its deadline.
 pub fn flag(ctx: &egui::Context, id: egui::Id, issue: FieldIssue, now: f64) {
     ctx.data_mut(|data| {
         data.insert_temp(
@@ -126,9 +128,9 @@ pub fn flag(ctx: &egui::Context, id: egui::Id, issue: FieldIssue, now: f64) {
     ctx.request_repaint_after(std::time::Duration::from_secs_f64(CLAMPED_SECONDS));
 }
 
-/// L'état encore à montrer pour le champ `id` à l'instant `now`. Un état échu
-/// est oublié ; sinon l'interface est réveillée à son échéance, sans quoi le
-/// cadre resterait peint jusqu'au prochain événement.
+/// The state still to show for field `id` at time `now`. An expired state
+/// is forgotten; otherwise the interface is woken at its deadline, without which the
+/// frame would stay painted until the next event.
 pub fn active(ctx: &egui::Context, id: egui::Id, now: f64) -> Option<FieldIssue> {
     let flag = ctx.data(|data| data.get_temp::<Flag>(id))?;
     if now >= flag.until {
@@ -139,46 +141,46 @@ pub fn active(ctx: &egui::Context, id: egui::Id, now: f64) -> Option<FieldIssue>
     Some(flag.issue)
 }
 
-/// Oublie l'état mémorisé du champ `id`.
+/// Forgets the remembered state of field `id`.
 pub fn clear(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|data| data.remove::<Flag>(id));
 }
 
-/// Ce que la lecture d'un texte saisi a décidé.
+/// What the reading of an entered text decided.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Verdict<T> {
-    /// Lisible et dans les bornes.
+    /// Readable and within bounds.
     Valid(T),
-    /// Lisible mais hors d'une borne fixe : `value` est la valeur ramenée.
+    /// Readable but outside a fixed bound: `value` is the brought-back value.
     Clamped {
         value: T,
         bound: Bound,
-        /// La borne telle qu'elle s'affiche dans la bulle.
+        /// The bound as it is displayed in the bubble.
         limit: String,
     },
-    /// Illisible ou contraire à une contrainte : `message` dit la règle.
+    /// Unreadable or against a constraint: `message` states the rule.
     Refused(String),
 }
 
-/// Ce que le cycle d'un champ fait d'une image.
+/// What a field's cycle does with a frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step<T> {
-    /// Rien à valider : la saisie continue, ou le texte n'a pas changé.
+    /// Nothing to validate: the input continues, or the text did not change.
     Keep,
-    /// Échap, ou perte du focus sans changement : l'ancienne valeur revient.
+    /// Escape, or focus loss with no change: the old value comes back.
     Revert,
-    /// Valeur validée.
+    /// Validated value.
     Commit(T),
-    /// Valeur validée après avoir été ramenée : cadre orange.
+    /// Value validated after being brought back: orange frame.
     CommitClamped(T, FieldIssue),
-    /// Saisie refusée. À Entrée le champ reste ouvert avec son texte ; à la
-    /// perte du focus l'ancienne valeur revient, le refus restant signalé.
+    /// Input refused. On Enter the field stays open with its text; on
+    /// focus loss the old value comes back, the refusal staying flagged.
     Reject { issue: FieldIssue, stay_open: bool },
 }
 
-/// Le cycle d'un champ, sans egui : `draft` est le texte saisi, `current` la
-/// valeur affichée avant la saisie, `lost_focus` la sortie du champ (Entrée
-/// comprise, `enter` la distingue d'un clic ailleurs), `escape` Échap.
+/// The cycle of a field, without egui: `draft` is the entered text, `current` the
+/// value displayed before the input, `lost_focus` leaving the field (Enter
+/// included, `enter` tells it from a click elsewhere), `escape` Escape.
 pub fn decide<T>(
     draft: &str,
     current: &str,
@@ -210,42 +212,42 @@ pub fn decide<T>(
     }
 }
 
-/// Le brouillon d'un champ pendant la saisie.
+/// The draft of a field during input.
 #[derive(Clone, Debug)]
 struct Draft(String);
 
-/// L'identifiant d'un champ posé par [`edit_text`] sous `id_salt` : celui de
-/// son `TextEdit` et de son état mémorisé.
+/// The identifier of a field placed by [`edit_text`] under `id_salt`: that of
+/// its `TextEdit` and of its remembered state.
 pub fn field_id(ui: &egui::Ui, id_salt: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
     ui.make_persistent_id(id_salt)
 }
 
-/// Abandonne le brouillon du champ `id` et l'état qu'il montrait : la valeur
-/// affichée repart de celle de l'appelant. Pour un changement qui ne vient pas
-/// de la frappe (flèches, molette, choix dans une liste).
+/// Abandons the draft of field `id` and the state it showed: the displayed
+/// value starts again from the caller's. For a change that does not come
+/// from typing (arrows, wheel, choice in a list).
 pub fn discard_draft(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|data| data.remove::<Draft>(id));
     clear(ctx, id);
     ctx.request_repaint();
 }
 
-/// Ce que rend [`edit_text`] : la valeur validée cette image, s'il y en a une,
-/// et la réponse du champ (focus, survol).
+/// What [`edit_text`] returns: the value validated this frame, if there is one,
+/// and the field's response (focus, hover).
 pub struct Edited<T> {
     pub value: Option<T>,
     pub response: egui::Response,
 }
 
-/// Un champ texte d'une ligne au cycle du standard : `current` est la valeur
-/// affichée hors saisie, `parse` la lit. Rend la valeur lue quand elle est
-/// validée (Entrée ou sortie du champ), `None` sinon.
+/// A one-line text field following the standard's cycle: `current` is the value
+/// displayed outside input, `parse` reads it. Returns the value read when it is
+/// validated (Enter or leaving the field), `None` otherwise.
 ///
-/// - la saisie est un brouillon gardé en mémoire d'egui sous `id_salt` ; rien
-///   n'en sort avant la validation ;
-/// - un brouillon illisible peint le cadre rouge dès la frappe, avec la règle
-///   en bulle ;
-/// - Échap rend l'ancienne valeur ; la sortie sans changement aussi.
-/// - `width` est la largeur du champ, en points.
+/// - the input is a draft kept in egui's memory under `id_salt`; nothing
+///   leaves it before validation;
+/// - an unreadable draft paints the red frame from the first keystroke, with the rule
+///   in a bubble;
+/// - Escape returns the old value; so does leaving without a change.
+/// - `width` is the width of the field, in points.
 pub fn edit_text<T>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -256,8 +258,8 @@ pub fn edit_text<T>(
     edit_text_hinted(ui, id_salt, width, current, "", parse)
 }
 
-/// [`edit_text`] avec un texte grisé quand le champ est vide : un champ qui a un
-/// Auto y montre « Auto (0–4000) » (#221).
+/// [`edit_text`] with greyed-out text when the field is empty: a field that has an
+/// Auto shows "Auto (0–4000)" in it (#221).
 pub fn edit_text_hinted<T>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -269,8 +271,8 @@ pub fn edit_text_hinted<T>(
     edit_text_with_arrow(ui, id_salt, width, current, hint, 0.0, parse)
 }
 
-/// [`edit_text_hinted`] avec `arrow_room` points libres à droite du texte, pour
-/// la flèche d'un champ à liste peinte dans le cadre (#234).
+/// [`edit_text_hinted`] with `arrow_room` free points to the right of the text, for
+/// the arrow of a list field painted in the frame (#234).
 pub fn edit_text_with_arrow<T>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -285,9 +287,9 @@ pub fn edit_text_with_arrow<T>(
     let now = ui.input(|input| input.time);
 
     let draft = ctx.data(|data| data.get_temp::<Draft>(id));
-    // Une sortie du champ ne vaut que pour une saisie ouverte : egui peut
-    // annoncer la perte du focus sur deux images de suite, et la seconde ne
-    // doit ni revalider ni effacer l'état qu'a posé la première.
+    // Leaving the field counts only for an open input: egui may
+    // announce the focus loss on two frames in a row, and the second must
+    // neither revalidate nor erase the state the first one set.
     let editing = draft.is_some();
     let mut buffer = draft.map_or_else(|| current.to_owned(), |draft| draft.0);
     let response = ui.add(
@@ -302,19 +304,19 @@ pub fn edit_text_with_arrow<T>(
     );
     let focused = response.has_focus();
 
-    // egui rend lui-même le focus sur Échap : le champ « a eu » le focus aussi
-    // quand il vient de le perdre.
+    // egui itself gives focus back on Escape: the field "had" focus also
+    // when it has just lost it.
     let escape = editing
         && (focused || response.lost_focus())
         && ui.input_mut(|i| i.consume_shortcut(&crate::app::shortcuts::KEY_ESCAPE));
     let left = response.lost_focus() && editing;
-    // Entrée est consommée : un dialogue qui valide sur Entrée ne doit pas se
-    // fermer avec la saisie (il regarde le focus, que le champ vient de perdre).
+    // Enter is consumed: a dialog that validates on Enter must not close
+    // with the input (it looks at the focus, which the field has just lost).
     let enter = left && ui.input_mut(|i| i.consume_shortcut(&crate::app::shortcuts::KEY_ENTER));
     let step = decide(&buffer, current, enter, escape, left || escape, &parse);
 
-    // La frappe a déjà été peinte avec le brouillon : une étape qui le rend
-    // n'est visible qu'à l'image suivante, qu'il faut donc demander.
+    // Typing was already painted with the draft: a step that returns it is
+    // visible only on the next frame, which must therefore be requested.
     if !matches!(step, Step::Keep) {
         ctx.request_repaint();
     }
@@ -353,8 +355,8 @@ pub fn edit_text_with_arrow<T>(
         }
     }
 
-    // Ce qui se montre cette image : un brouillon illisible tant que le champ
-    // est ouvert (la règle s'apprend à la frappe), sinon l'état mémorisé.
+    // What shows this frame: an unreadable draft while the field
+    // is open (the rule is learned while typing), otherwise the remembered state.
     let live = (focused && buffer != current)
         .then(|| match parse(&buffer) {
             Verdict::Refused(message) => Some(FieldIssue::refused(message)),
@@ -374,15 +376,15 @@ pub fn edit_text_with_arrow<T>(
 mod tests {
     use super::*;
 
-    /// Un contexte au thème de l'application (les polices de l'interface n'y
-    /// changent rien : on lit des couleurs et des textes, pas des positions).
-    fn contexte() -> egui::Context {
+    /// A context with the application theme (the interface fonts change
+    /// nothing here: we read colors and texts, not positions).
+    fn context() -> egui::Context {
         let context = egui::Context::default();
         theme::install(&context);
         context
     }
 
-    fn touche(key: egui::Key) -> egui::Event {
+    fn key(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -392,16 +394,16 @@ mod tests {
         }
     }
 
-    /// Un texte contenant `needle` a-t-il été peint ?
+    /// Has a text containing `needle` been painted?
     fn painted(output: &egui::FullOutput, needle: &str) -> bool {
-        output.shapes.iter().any(|peint| {
-            matches!(&peint.shape,
+        output.shapes.iter().any(|painted_shape| {
+            matches!(&painted_shape.shape,
                 egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
         })
     }
 
-    fn lire(texte: &str) -> Verdict<f64> {
-        match texte.trim().parse::<f64>() {
+    fn read(text: &str) -> Verdict<f64> {
+        match text.trim().parse::<f64>() {
             Ok(v) if v > 20.0 => Verdict::Clamped {
                 value: 20.0,
                 bound: Bound::Max,
@@ -413,59 +415,59 @@ mod tests {
     }
 
     #[test]
-    fn la_saisie_en_cours_n_est_pas_lue() {
-        let pas = decide("abc", "1", false, false, false, lire);
-        assert_eq!(pas, Step::Keep);
+    fn an_input_in_progress_is_not_read() {
+        let step = decide("abc", "1", false, false, false, read);
+        assert_eq!(step, Step::Keep);
     }
 
     #[test]
-    fn echap_rend_l_ancienne_valeur_meme_pour_un_texte_illisible() {
-        assert_eq!(decide("abc", "1", false, true, false, lire), Step::Revert);
+    fn escape_restores_the_old_value_even_for_an_unreadable_text() {
+        assert_eq!(decide("abc", "1", false, true, false, read), Step::Revert);
     }
 
     #[test]
-    fn une_sortie_sans_changement_ne_valide_rien() {
-        assert_eq!(decide("1", "1", false, false, true, lire), Step::Revert);
+    fn leaving_without_a_change_validates_nothing() {
+        assert_eq!(decide("1", "1", false, false, true, read), Step::Revert);
     }
 
     #[test]
-    fn un_nombre_lisible_est_valide() {
-        assert_eq!(decide("5", "1", true, false, true, lire), Step::Commit(5.0));
+    fn a_readable_number_is_valid() {
+        assert_eq!(decide("5", "1", true, false, true, read), Step::Commit(5.0));
     }
 
     #[test]
-    fn hors_borne_la_valeur_est_ramenee_avec_sa_bulle() {
-        let Step::CommitClamped(valeur, issue) = decide("99", "1", true, false, true, lire) else {
-            panic!("une valeur hors borne est ramenée");
+    fn outside_the_bound_the_value_is_brought_back_with_its_bubble() {
+        let Step::CommitClamped(value, issue) = decide("99", "1", true, false, true, read) else {
+            panic!("a value outside the bound is brought back");
         };
-        assert_eq!(valeur, 20.0);
+        assert_eq!(value, 20.0);
         assert_eq!(issue, FieldIssue::clamped(Bound::Max, "20"));
         assert!(issue.message().contains("20"), "{}", issue.message());
     }
 
-    /// Entrée sur un texte illisible garde le champ ouvert ; un clic ailleurs
-    /// rend l'ancienne valeur. Dans les deux cas le refus est signalé.
+    /// Enter on an unreadable text keeps the field open; a click elsewhere
+    /// restores the old value. In both cases the refusal is flagged.
     #[test]
-    fn un_texte_illisible_est_refuse_ouvert_a_entree_et_ferme_a_la_sortie() {
-        let attendu = FieldIssue::refused("Enter a number");
+    fn an_unreadable_text_is_refused_open_on_enter_and_closed_on_exit() {
+        let expected = FieldIssue::refused("Enter a number");
         assert_eq!(
-            decide("abc", "1", true, false, true, lire),
+            decide("abc", "1", true, false, true, read),
             Step::Reject {
-                issue: attendu.clone(),
+                issue: expected.clone(),
                 stay_open: true
             }
         );
         assert_eq!(
-            decide("abc", "1", false, false, true, lire),
+            decide("abc", "1", false, false, true, read),
             Step::Reject {
-                issue: attendu,
+                issue: expected,
                 stay_open: false
             }
         );
     }
 
     #[test]
-    fn le_rouge_et_l_orange_sont_distincts() {
+    fn red_and_orange_are_distinct() {
         assert_ne!(
             FieldIssue::refused("x").color(),
             FieldIssue::clamped(Bound::Min, "0").color()
@@ -473,47 +475,47 @@ mod tests {
     }
 
     #[test]
-    fn un_etat_memorise_s_eteint_apres_deux_secondes() {
+    fn a_remembered_state_expires_after_two_seconds() {
         let ctx = egui::Context::default();
-        let id = egui::Id::new("champ");
+        let id = egui::Id::new("field");
         flag(&ctx, id, FieldIssue::clamped(Bound::Max, "20"), 10.0);
         assert!(active(&ctx, id, 11.9).is_some());
         assert!(active(&ctx, id, 12.0).is_none());
-        assert!(active(&ctx, id, 12.1).is_none(), "l'oubli est définitif");
+        assert!(active(&ctx, id, 12.1).is_none(), "forgetting is final");
     }
 
-    // — Les formes peintes : le cadre et la bulle se lisent dans les shapes. —
+    // — The painted shapes: the frame and the bubble are read in the shapes. —
 
-    /// Le nombre de cadres de couleur `couleur` peints dans `shapes`.
-    fn cadres(output: &egui::FullOutput, couleur: egui::Color32) -> usize {
+    /// The number of frames of color `color` painted in `shapes`.
+    fn frames(output: &egui::FullOutput, color: egui::Color32) -> usize {
         output
             .shapes
             .iter()
-            .filter(|peint| match &peint.shape {
-                egui::Shape::Rect(rect) => rect.stroke.color == couleur,
+            .filter(|painted_shape| match &painted_shape.shape {
+                egui::Shape::Rect(rect) => rect.stroke.color == color,
                 _ => false,
             })
             .count()
     }
 
-    /// Une image à l'instant `temps` où `evenements` arrivent ; le champ est
-    /// l'unique contenu, valeur affichée « 1 ».
+    /// A frame at time `time` where `events` arrive; the field is the
+    /// only content, displayed value "1".
     fn image(
         ctx: &egui::Context,
-        temps: f64,
-        evenements: Vec<egui::Event>,
-        sortie: &mut Option<f64>,
+        time: f64,
+        events: Vec<egui::Event>,
+        out: &mut Option<f64>,
     ) -> egui::FullOutput {
-        image_avec(ctx, temps, evenements, sortie, None)
+        frame_with(ctx, time, events, out, None)
     }
 
-    /// Comme [`image`], et `focus` donne (`Some(true)`) ou retire (`Some(false)`)
-    /// le focus au champ avant sa pose.
-    fn image_avec(
+    /// Like [`image`], and `focus` gives (`Some(true)`) or takes away (`Some(false)`)
+    /// the field's focus before it is placed.
+    fn frame_with(
         ctx: &egui::Context,
-        temps: f64,
-        evenements: Vec<egui::Event>,
-        sortie: &mut Option<f64>,
+        time: f64,
+        events: Vec<egui::Event>,
+        out: &mut Option<f64>,
         focus: Option<bool>,
     ) -> egui::FullOutput {
         let mut input = egui::RawInput {
@@ -521,116 +523,116 @@ mod tests {
                 egui::Pos2::ZERO,
                 egui::vec2(400.0, 200.0),
             )),
-            events: evenements,
-            time: Some(temps),
+            events,
+            time: Some(time),
             ..Default::default()
         };
         input.focused = true;
         let mut output = ctx.run_ui(input, |ui| {
-            let id = ui.make_persistent_id("champ");
+            let id = ui.make_persistent_id("field");
             match focus {
                 Some(true) => ui.memory_mut(|m| m.request_focus(id)),
                 Some(false) => ui.memory_mut(|m| m.surrender_focus(id)),
                 None => {}
             }
-            if let Some(valeur) = edit_text(ui, "champ", 80.0, "1", lire).value {
-                *sortie = Some(valeur);
+            if let Some(value) = edit_text(ui, "field", 80.0, "1", read).value {
+                *out = Some(value);
             }
         });
         output.textures_delta.clear();
         output
     }
 
-    fn taper(texte: &str) -> egui::Event {
-        egui::Event::Text(texte.into())
+    fn type_text(text: &str) -> egui::Event {
+        egui::Event::Text(text.into())
     }
 
-    /// Donne le focus au champ en le demandant dans une image, puis tape.
-    fn ouvrir_et_taper(ctx: &egui::Context, texte: &str, sortie: &mut Option<f64>) {
-        image_avec(ctx, 0.0, vec![], sortie, Some(true));
-        image(ctx, 0.1, vec![], sortie);
-        image(ctx, 0.2, vec![taper(texte)], sortie);
-    }
-
-    #[test]
-    fn un_brouillon_illisible_peint_le_cadre_rouge_et_la_regle() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "abc", &mut sortie);
-        let sortie_image = image(&ctx, 0.3, vec![], &mut sortie);
-        assert_eq!(cadres(&sortie_image, theme::field_refused_color()), 1);
-        assert!(painted(&sortie_image, "Enter a number"));
-        assert_eq!(sortie, None, "rien ne sort avant la validation");
-    }
-
-    /// Témoin : une saisie valide ne peint aucun cadre de défaut.
-    #[test]
-    fn une_saisie_valide_ne_peint_aucun_cadre() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "5", &mut sortie);
-        let sortie_image = image(&ctx, 0.3, vec![], &mut sortie);
-        assert_eq!(cadres(&sortie_image, theme::field_refused_color()), 0);
-        assert_eq!(cadres(&sortie_image, theme::field_clamped_color()), 0);
+    /// Gives the field focus by requesting it in a frame, then types.
+    fn open_and_type(ctx: &egui::Context, text: &str, out: &mut Option<f64>) {
+        frame_with(ctx, 0.0, vec![], out, Some(true));
+        image(ctx, 0.1, vec![], out);
+        image(ctx, 0.2, vec![type_text(text)], out);
     }
 
     #[test]
-    fn entree_valide_un_nombre_ramene_et_le_cadre_orange_s_eteint() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "9", &mut sortie); // « 19 » : valide
-        image(&ctx, 0.3, vec![taper("9")], &mut sortie); // « 199 » : hors borne
-        image(&ctx, 0.4, vec![touche(egui::Key::Enter)], &mut sortie);
-        assert_eq!(sortie, Some(20.0), "ramené à la borne");
+    fn an_unreadable_draft_paints_the_red_frame_and_the_rule() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "abc", &mut out);
+        let frame_out = image(&ctx, 0.3, vec![], &mut out);
+        assert_eq!(frames(&frame_out, theme::field_refused_color()), 1);
+        assert!(painted(&frame_out, "Enter a number"));
+        assert_eq!(out, None, "nothing comes out before validation");
+    }
 
-        let avant = image(&ctx, 1.0, vec![], &mut sortie);
-        assert_eq!(cadres(&avant, theme::field_clamped_color()), 1);
-        let apres = image(&ctx, 3.0, vec![], &mut sortie);
-        assert_eq!(cadres(&apres, theme::field_clamped_color()), 0);
+    /// Witness: a valid input paints no fault frame.
+    #[test]
+    fn a_valid_input_paints_no_frame() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "5", &mut out);
+        let frame_out = image(&ctx, 0.3, vec![], &mut out);
+        assert_eq!(frames(&frame_out, theme::field_refused_color()), 0);
+        assert_eq!(frames(&frame_out, theme::field_clamped_color()), 0);
     }
 
     #[test]
-    fn la_sortie_d_un_texte_illisible_rend_l_ancienne_valeur() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "abc", &mut sortie);
-        // Le focus part ailleurs sans Entrée.
-        image_avec(&ctx, 0.4, vec![], &mut sortie, Some(false));
-        let apres = image(&ctx, 0.5, vec![], &mut sortie);
-        assert_eq!(sortie, None);
-        assert!(!painted(&apres, "abc"), "le brouillon est rendu");
+    fn enter_validates_a_brought_back_number_and_the_orange_frame_expires() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "9", &mut out); // "19": valid
+        image(&ctx, 0.3, vec![type_text("9")], &mut out); // "199": outside the bound
+        image(&ctx, 0.4, vec![key(egui::Key::Enter)], &mut out);
+        assert_eq!(out, Some(20.0), "brought back to the bound");
+
+        let before = image(&ctx, 1.0, vec![], &mut out);
+        assert_eq!(frames(&before, theme::field_clamped_color()), 1);
+        let after = image(&ctx, 3.0, vec![], &mut out);
+        assert_eq!(frames(&after, theme::field_clamped_color()), 0);
+    }
+
+    #[test]
+    fn leaving_an_unreadable_text_restores_the_old_value() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "abc", &mut out);
+        // The focus goes elsewhere without Enter.
+        frame_with(&ctx, 0.4, vec![], &mut out, Some(false));
+        let after = image(&ctx, 0.5, vec![], &mut out);
+        assert_eq!(out, None);
+        assert!(!painted(&after, "abc"), "the draft is given back");
         assert_eq!(
-            cadres(&apres, theme::field_refused_color()),
+            frames(&after, theme::field_refused_color()),
             1,
-            "le refus reste signalé un instant"
+            "the refusal stays flagged for a moment"
         );
-        let plus_tard = image(&ctx, 3.0, vec![], &mut sortie);
-        assert_eq!(cadres(&plus_tard, theme::field_refused_color()), 0);
+        let later = image(&ctx, 3.0, vec![], &mut out);
+        assert_eq!(frames(&later, theme::field_refused_color()), 0);
     }
 
-    /// Entrée sur un texte illisible : le champ reste ouvert, le texte gardé,
-    /// le cadre rouge peint (S-T2) ; rien ne sort.
+    /// Enter on an unreadable text: the field stays open, the text kept,
+    /// the red frame painted (S-T2); nothing comes out.
     #[test]
-    fn entree_sur_un_texte_illisible_garde_le_champ_ouvert() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "abc", &mut sortie);
-        image(&ctx, 0.3, vec![touche(egui::Key::Enter)], &mut sortie);
-        let apres = image(&ctx, 0.4, vec![], &mut sortie);
-        let encore = image(&ctx, 0.5, vec![], &mut sortie);
-        assert_eq!(sortie, None);
-        assert!(painted(&apres, "abc") && painted(&encore, "abc"));
-        assert_eq!(cadres(&encore, theme::field_refused_color()), 1);
+    fn enter_on_an_unreadable_text_keeps_the_field_open() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "abc", &mut out);
+        image(&ctx, 0.3, vec![key(egui::Key::Enter)], &mut out);
+        let after = image(&ctx, 0.4, vec![], &mut out);
+        let still = image(&ctx, 0.5, vec![], &mut out);
+        assert_eq!(out, None);
+        assert!(painted(&after, "abc") && painted(&still, "abc"));
+        assert_eq!(frames(&still, theme::field_refused_color()), 1);
     }
 
     #[test]
-    fn echap_rend_l_ancienne_valeur_sans_cadre() {
-        let ctx = contexte();
-        let mut sortie = None;
-        ouvrir_et_taper(&ctx, "abc", &mut sortie);
-        image(&ctx, 0.3, vec![touche(egui::Key::Escape)], &mut sortie);
-        let apres = image(&ctx, 0.4, vec![], &mut sortie);
-        assert!(!painted(&apres, "abc"));
-        assert_eq!(cadres(&apres, theme::field_refused_color()), 0);
+    fn escape_restores_the_old_value_without_a_frame() {
+        let ctx = context();
+        let mut out = None;
+        open_and_type(&ctx, "abc", &mut out);
+        image(&ctx, 0.3, vec![key(egui::Key::Escape)], &mut out);
+        let after = image(&ctx, 0.4, vec![], &mut out);
+        assert!(!painted(&after, "abc"));
+        assert_eq!(frames(&after, theme::field_refused_color()), 0);
     }
 }

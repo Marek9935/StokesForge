@@ -1,15 +1,15 @@
-//! Cadre commun des fenêtres de contenu : barre de titre (`window_header`),
-//! cadre et contour (`floating_window_frame`), poignées de redimensionnement,
-//! et la pose d'une fenêtre dans une couche egui (`show_window_in_layer`).
+//! Common frame of content windows: title bar (`window_header`),
+//! frame and outline (`floating_window_frame`), resize handles,
+//! and the placing of a window in an egui layer (`show_window_in_layer`).
 //!
-//! Déplacé tel quel d'`app.rs` (#100, étape 1 ; la suite — placement, pile,
-//! détachement, masquage, maximisation — est #101), sans changement de
-//! comportement : c'est la brique que partagent les fenêtres flottantes, les
-//! fenêtres détachées et les dialogues modaux. Sous-module d'`app` pour garder
-//! l'accès à ses types privés (`Tab`, constantes d'icônes…).
-//! Les panneaux repliés ne gardent que Déployer : Détacher exige de les ouvrir.
-//! La console regroupe ses prises à gauche (#142) ; sa bande repliée trace
-//! sa séparation côté espace de travail, comme les bandes des gestionnaires.
+//! Moved as is from `app.rs` (#100, step 1; the rest — placement, stack,
+//! detaching, hiding, maximizing — is #101), with no change of
+//! behavior: it is the building block shared by the floating windows, the
+//! detached windows and the modal dialogs. Submodule of `app` to keep
+//! access to its private types (`Tab`, icon constants…).
+//! Collapsed panels keep only Expand: Detach requires opening them.
+//! The console groups its handles on the left (#142); its collapsed strip draws
+//! its separator on the workspace side, like the managers' strips.
 
 use eframe::egui;
 
@@ -18,21 +18,21 @@ use stokesforge_app_state::tr;
 
 use super::tab::Tab;
 
-/// Hauteur de la bande d'en-tête peinte par [`window_header`] — partagée
-/// avec le calcul de la taille repliée d'une fenêtre flottante (B3,
-/// `retours-2026-09-23-bugs.md`) : un contour ou une taille
-/// forcée qui ne reprend pas cette même valeur redevient trop grand dès que
-/// le contenu est masqué.
+/// Height of the header band painted by [`window_header`] — shared
+/// with the computation of a floating window's collapsed size (B3,
+/// `retours-2026-09-23-bugs.md`): an outline or a forced size
+/// that does not use this same value becomes too big again as soon as
+/// the content is hidden.
 pub(super) const WINDOW_HEADER_HEIGHT: f32 = 28.0;
 
-/// Marge intérieure du `Frame` d'une fenêtre de contenu, flottante ou
-/// détachée — voir [`floating_window_frame`] et le `Frame` construit dans
-/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs). Sans marge verticale : la bande
-/// d'en-tête (`WINDOW_HEADER_HEIGHT`) et les séparateurs du contenu
-/// fournissent déjà leur propre espacement, la marge par défaut d'egui
-/// (`Frame::window`/`Frame::central_panel`) n'ajoutait donc qu'un bandeau
-/// blanc mort au-dessus et en dessous, sans rôle. La marge horizontale reste
-/// pour ne pas coller le texte au bord.
+/// Inner margin of the `Frame` of a content window, floating or
+/// detached — see [`floating_window_frame`] and the `Frame` built in
+/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs). No vertical margin: the header
+/// band (`WINDOW_HEADER_HEIGHT`) and the content's separators
+/// already provide their own spacing, so egui's default margin
+/// (`Frame::window`/`Frame::central_panel`) only added a dead white
+/// band above and below, with no role. The horizontal margin stays
+/// so as not to stick the text to the edge.
 pub(super) const WINDOW_CONTENT_MARGIN: egui::Margin = egui::Margin {
     left: 6,
     right: 6,
@@ -40,12 +40,12 @@ pub(super) const WINDOW_CONTENT_MARGIN: egui::Margin = egui::Margin {
     bottom: 0,
 };
 
-/// Trait du contour de surbrillance — la couleur de sélection du thème pour
-/// la fenêtre active, le trait par défaut d'egui sinon. Partagé entre
-/// [`paint_active_window_outline`] (fenêtres flottantes internes et fenêtres
-/// détachées, B1/B3, B7) : même logique de surbrillance des deux côtés, seule
-/// la notion de « active » diffère (`is_active` calculé depuis `active_tab`
-/// pour les unes, depuis le focus OS du viewport pour les autres).
+/// Stroke of the highlight outline — the theme's selection color for
+/// the active window, egui's default stroke otherwise. Shared between
+/// [`paint_active_window_outline`] (internal floating windows and detached
+/// windows, B1/B3, B7): same highlight logic on both sides, only
+/// the notion of "active" differs (`is_active` computed from `active_tab`
+/// for the former, from the OS focus of the viewport for the latter).
 pub(super) fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui::Stroke {
     if is_active {
         style.visuals.selection.stroke
@@ -54,18 +54,18 @@ pub(super) fn active_window_stroke(style: &egui::Style, is_active: bool) -> egui
     }
 }
 
-/// `Frame` d'une fenêtre flottante — le `Frame::window` habituel, sans
-/// recoloration selon l'activité. [`show_floating_window`] le peint sur le
-/// rectangle de la fenêtre ; l'état actif est peint par-dessus, sur ce même
-/// rectangle, par [`paint_active_window_outline`].
+/// `Frame` of a floating window — the usual `Frame::window`, without
+/// recoloring according to activity. [`show_floating_window`] paints it on the
+/// window's rectangle; the active state is painted over it, on that same
+/// rectangle, by [`paint_active_window_outline`].
 pub(super) fn floating_window_frame(style: &egui::Style) -> egui::Frame {
     egui::Frame::window(style).inner_margin(WINDOW_CONTENT_MARGIN)
 }
 
-/// Peint le contour de surbrillance d'une fenêtre active sur `rect`, le
-/// rectangle même de la fenêtre. Les appelants passent un `Painter` de la
-/// bonne couche : celle de la fenêtre côté MDI ([`show_floating_window`]),
-/// la couche de fond du viewport côté fenêtre OS détachée.
+/// Paints the highlight outline of an active window on `rect`, the
+/// window's very rectangle. Callers pass a `Painter` of the
+/// right layer: the window's own on the MDI side,
+/// the viewport's background layer on the detached OS window side.
 pub(super) fn paint_active_window_outline(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -83,49 +83,49 @@ pub(super) fn paint_active_window_outline(
 #[derive(Default)]
 pub(super) struct WindowHeaderActions {
     pub(super) maximize: bool,
-    /// Détacher (placement [`HeaderPlacement::Floating`]) ou réattacher
-    /// (placement [`HeaderPlacement::Detached`]) — le glyphe et l'info-bulle
-    /// changent avec `placement`, mais c'est toujours l'appelant qui
-    /// interprète ce booléen selon le contexte d'où il peint l'en-tête.
+    /// Detach (placement [`HeaderPlacement::Floating`]) or reattach
+    /// (placement [`HeaderPlacement::Detached`]) — the glyph and the tooltip
+    /// change with `placement`, but it is always the caller that
+    /// interprets this boolean according to the context it paints the header from.
     pub(super) detach: bool,
     pub(super) close: bool,
     pub(super) toggle_collapse: bool,
-    /// Delta de glissé du titre pendant l'image — utilisé tel quel par
-    /// l'appelant MDI (`window_positions`). Sans effet pratique pour
-    /// l'appelant détaché, qui préfère `title_drag_started`.
+    /// Drag delta of the title during the frame — used as is by the
+    /// MDI caller (`window_positions`). No practical effect for the
+    /// detached caller, which prefers `title_drag_started`.
     pub(super) drag_delta: egui::Vec2,
-    /// Vrai à l'image où le glissé du titre démarre — c'est celui que
-    /// l'appelant détaché utilise pour déclencher
-    /// `ViewportCommand::StartDrag` une seule fois, la fenêtre OS prenant
-    /// ensuite la main sur le geste (`drag_delta` ne serait plus fiable une
-    /// fois l'OS aux commandes du pointeur).
+    /// True on the frame where the title drag starts — it is the one the
+    /// detached caller uses to trigger
+    /// `ViewportCommand::StartDrag` only once, the OS window then taking
+    /// over the gesture (`drag_delta` would no longer be reliable once
+    /// the OS is in control of the pointer).
     pub(super) title_drag_started: bool,
 }
 
-/// D'où [`window_header`] est peint — pilote la couleur des icônes, le
-/// glyphe « détacher »/« réattacher » et quels boutons apparaissent. Deux
-/// contextes, une seule fonction : c'est la barre elle-même qui doit être
-/// identique, pas seulement son apparence générale (voir la doc de tête du
-/// module, § détachement générique).
+/// Where [`window_header`] is painted from — drives the icon color, the
+/// "detach"/"reattach" glyph and which buttons appear. Two
+/// contexts, one function: it is the bar itself that must be
+/// identical, not just its general look (see the top doc of the
+/// module, § generic detaching).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum HeaderPlacement {
-    /// Fenêtre flottante dans le `CentralPanel` (MDI).
+    /// Floating window in the `CentralPanel` (MDI).
     Floating,
-    /// Fenêtre OS séparée (`StokesForgeApp::show_detached_tabs`), sans
-    /// décoration native — cette barre est tout ce que l'utilisateur a pour
-    /// la déplacer, la redimensionner par ses icônes de maximisation, ou la
-    /// fermer/réattacher.
+    /// Separate OS window (`StokesForgeApp::show_detached_tabs`), without
+    /// native decoration — this bar is all the user has to
+    /// move it, resize it through its maximize icons, or
+    /// close/reattach it.
     Detached,
-    /// Dialogue modal ([`modal_dialog`](crate::app::dialogs::modal_dialog)) : ni repli, ni détachement, ni
-    /// maximisation — le titre, la croix, et le glisser.
+    /// Modal dialog ([`modal_dialog`](crate::app::dialogs::modal_dialog)): no collapse, no detaching, no
+    /// maximizing — the title, the cross, and the drag.
     Dialog,
 }
 
-/// Une icône d'en-tête peinte au pixel près, comme le titre et le chevron de
-/// repli — jamais un `Button` (voir la doc de tête de [`window_header`] pour
-/// la raison précise). `rect` est déjà borné à la hauteur de la barre ; le
-/// fond arrondi au survol imite l'affordance d'un bouton sans réintroduire
-/// son padding natif.
+/// A header icon painted to the pixel, like the title and the collapse
+/// chevron — never a `Button` (see the top doc of [`window_header`] for
+/// the precise reason). `rect` is already clamped to the bar's height; the
+/// rounded background on hover imitates a button's affordance without
+/// reintroducing its native padding.
 pub(super) fn header_icon(
     header: &mut egui::Ui,
     base_id: egui::Id,
@@ -147,58 +147,58 @@ pub(super) fn header_icon(
     response.on_hover_text(tooltip).clicked()
 }
 
-/// Taille minimale d'une fenêtre de contenu, flottante ou détachée — assez
-/// pour garder l'en-tête (icônes + titre) et un fragment de contenu lisibles,
-/// pas une contrainte scientifique.
+/// Minimum size of a content window, floating or detached — enough
+/// to keep the header (icons + title) and a fragment of content readable,
+/// not a scientific constraint.
 pub(super) const MIN_CONTENT_WINDOW_SIZE: egui::Vec2 = egui::vec2(220.0, 140.0);
 
-/// Calque des fenêtres flottantes : celui qu'egui réserve aux fenêtres
-/// qu'on réordonne au clic (`Order::Middle`), au-dessus des panneaux fixes
-/// (`Order::Background`) et **sous** les menus, listes déroulantes et
-/// infobulles (`Order::Foreground`) — un menu contextuel ouvert dans une
-/// fenêtre doit passer devant ses voisines.
+/// Layer of floating windows: the one egui reserves for windows
+/// that are reordered on click (`Order::Middle`), above the fixed panels
+/// (`Order::Background`) and **below** menus, drop-down lists and
+/// tooltips (`Order::Foreground`) — a context menu opened in a
+/// window must come in front of its neighbors.
 pub(super) const FLOATING_WINDOW_ORDER: egui::Order = egui::Order::Middle;
 
-/// Épaisseur des poignées de redimensionnement, posées **hors** du cadre
-/// (voir [`floating_resize_handles`]) et comptées dans la zone cliquable de
-/// la fenêtre par [`show_floating_window`].
+/// Thickness of the resize handles, placed **outside** the frame
+/// (see [`floating_resize_handles`]) and counted in the window's clickable
+/// area by [`show_floating_window`].
 pub(super) const RESIZE_BORDER: f32 = 6.0;
 
-/// Longueur, le long de chaque côté, des deux branches d'une poignée de coin
-/// (voir [`floating_resize_handles`]) : le coin se vise sur ~18 points
-/// au lieu de 6.
+/// Length, along each side, of the two branches of a corner handle
+/// (see [`floating_resize_handles`]): the corner can be targeted over ~18 points
+/// instead of 6.
 const CORNER_REACH: f32 = 12.0;
 
-/// Peint une fenêtre flottante de l'espace de travail, cadre compris, dans
-/// son propre calque. `window_rect` est le rectangle écran de la fenêtre,
-/// `viewport_rect` la portion visible de l'espace de travail (ce que les
-/// panneaux fixes laissent). Rend `None` quand la fenêtre est entièrement
-/// hors de la vue : rien n'est alors peint ni rendu cliquable.
+/// Paints a floating window of the workspace, frame included, in
+/// its own layer. `window_rect` is the window's screen rectangle,
+/// `viewport_rect` the visible portion of the workspace (what the
+/// fixed panels leave). Returns `None` when the window is entirely
+/// out of view: nothing is then painted or made clickable.
 ///
-/// # Pourquoi une `egui::Area` et pas une `egui::Window`
+/// # Why an `egui::Area` and not an `egui::Window`
 ///
-/// `egui::Window` est une boîte de dialogue : barre de titre, glisser,
-/// redimensionnement, repli et bornage à elle. Toutes ces fonctions avaient
-/// été coupées une à une puis refaites à la main ([`window_header`],
-/// [`floating_resize_handles`], [`workspace_to_screen`](crate::app::window_placement::workspace_to_screen)…), et chaque image
-/// devait accorder deux rectangles : celui qu'on demandait et celui
-/// qu'egui recalait. Les bugs 1 et 2 de
-/// `retours-2026-09-24-bugs.md` (contour décalé d'une
-/// fenêtre recalée, fenêtre peinte par-dessus les panneaux fixes) étaient
-/// deux formes de ce désaccord. `egui::Area` est la brique nue sous
-/// `Window` : un calque, une position, un ordre au clic — rien d'autre. Le
-/// cadre, le contour et le rognage sont posés ici, sur le **même**
+/// `egui::Window` is a dialog box: title bar, drag,
+/// resize, collapse and clamping of its own. All these functions had
+/// been cut out one by one then redone by hand ([`window_header`],
+/// [`floating_resize_handles`], [`workspace_to_screen`](crate::app::window_placement::workspace_to_screen)…), and each frame
+/// had to reconcile two rectangles: the one requested and the one
+/// egui readjusted. Bugs 1 and 2 of
+/// `retours-2026-09-24-bugs.md` (outline offset from a
+/// readjusted window, window painted over the fixed panels) were
+/// two forms of this disagreement. `egui::Area` is the bare building block under
+/// `Window`: a layer, a position, an order on click — nothing else. The
+/// frame, the outline and the clipping are set here, on the **same**
 /// rectangle.
 ///
-/// # La zone cliquable est la partie visible
+/// # The clickable area is the visible part
 ///
-/// egui choisit la fenêtre sous le pointeur d'après le rectangle de son
-/// `Area` (`Memory::layer_id_at`), pas d'après ce qui est peint. L'`Area`
-/// est donc taillée à la seule partie visible de la fenêtre (poignées
-/// comprises) : une fenêtre à cheval sur le bord de la vue ne capte aucun
-/// clic destiné au Project Manager ou à la console, et son dessin est rogné
-/// au même bord (`constrain_to(viewport_rect)`, qui donne aussi à `Area` son
-/// rectangle de découpe).
+/// egui picks the window under the pointer from the rectangle of its
+/// `Area` (`Memory::layer_id_at`), not from what is painted. The `Area`
+/// is thus cut to the visible part of the window only (handles
+/// included): a window straddling the edge of the view captures no
+/// click meant for the Project Manager or the console, and its drawing is clipped
+/// at the same edge (`constrain_to(viewport_rect)`, which also gives `Area` its
+/// clip rectangle).
 pub(super) fn show_floating_window<R>(
     ctx: &egui::Context,
     id: egui::Id,
@@ -220,10 +220,10 @@ pub(super) fn show_floating_window<R>(
     )
 }
 
-/// [`show_floating_window`] dans l'ordre de calque `order` : la seule
-/// écriture du cadre, du contour et du rognage d'une fenêtre, que se
-/// partagent les fenêtres de l'espace de travail (`Order::Middle`) et les
-/// dialogues modaux ([`modal_dialog`](crate::app::dialogs::modal_dialog), au-dessus).
+/// [`show_floating_window`] in the layer order `order`: the only
+/// writing of a window's frame, outline and clipping, shared by
+/// the workspace windows (`Order::Middle`) and the modal
+/// dialogs ([`modal_dialog`](crate::app::dialogs::modal_dialog), above).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn show_window_in_layer<R>(
     ctx: &egui::Context,
@@ -246,9 +246,9 @@ pub(super) fn show_window_in_layer<R>(
         .fixed_pos(area_rect.min)
         .constrain_to(viewport_rect)
         .show(ctx, |ui| {
-            // La taille de l'`Area` est celle de son contenu : on la fixe à
-            // la partie visible, le contenu réel vivant dans un sous-`Ui` qui
-            // ne la fait pas grandir.
+            // The `Area`'s size is that of its content: we fix it to
+            // the visible part, the real content living in a child `Ui` that
+            // does not make it grow.
             ui.set_min_size(area_rect.size());
             let style = ui.style().clone();
             let frame = floating_window_frame(&style);
@@ -275,13 +275,13 @@ pub(super) fn show_window_in_layer<R>(
     Some(response.inner)
 }
 
-/// Huit zones fines de redimensionnement pour une fenêtre flottante MDI,
-/// posées entièrement à l'**extérieur** de `rect` (sur [`RESIZE_BORDER`])
-/// pour ne pas disputer le survol au contenu — les barres de défilement de
-/// la grille longent le bord. Elles sont peintes dans le calque de la
-/// fenêtre ([`show_floating_window`] compte ce liseré dans sa zone
-/// cliquable) : la poignée d'une fenêtre ne passe donc jamais devant une
-/// autre fenêtre posée par-dessus.
+/// Eight thin resize zones for an MDI floating window,
+/// placed entirely **outside** `rect` (over [`RESIZE_BORDER`])
+/// so as not to contest the hover with the content — the grid's scroll bars
+/// run along the edge. They are painted in the window's
+/// layer ([`show_floating_window`] counts this edge in its clickable
+/// area): a window's handle thus never passes in front of another
+/// window placed on top of it.
 pub(super) fn floating_resize_handles(
     ui: &egui::Ui,
     tab: impl std::hash::Hash + std::fmt::Debug,
@@ -290,8 +290,8 @@ pub(super) fn floating_resize_handles(
     size: &mut egui::Vec2,
 ) {
     const BORDER: f32 = RESIZE_BORDER;
-    // (source, zone, curseur, ouest, est, nord, sud) — les quatre derniers
-    // indiquent quels côtés ce glissé affecte, combinés pour les coins.
+    // (source, zone, cursor, west, east, north, south) — the last four
+    // say which sides this drag affects, combined for the corners.
     let mut zones: Vec<(String, egui::Rect, egui::CursorIcon, bool, bool, bool, bool)> = vec![
         (
             "n".into(),
@@ -342,11 +342,11 @@ pub(super) fn floating_resize_handles(
             false,
         ),
     ];
-    // Coins : un carré de 6 × 6 hors du cadre est trop petit à viser (#75).
-    // Chaque coin est donc un « L » posé le long des deux côtés voisins,
-    // `CORNER_REACH` de long, toujours hors du cadre (les barres de
-    // défilement du contenu ne sont pas disputées). Ajoutés après les côtés,
-    // ils l'emportent là où ils se recouvrent.
+    // Corners: a 6 × 6 square outside the frame is too small to target (#75).
+    // Each corner is thus an "L" laid along the two neighboring sides,
+    // `CORNER_REACH` long, always outside the frame (the content's scroll
+    // bars are not contested). Added after the sides,
+    // they win where they overlap.
     for (name, x, y, cursor, west, north) in [
         (
             "nw",
@@ -381,7 +381,7 @@ pub(super) fn floating_resize_handles(
             false,
         ),
     ] {
-        // Sens du coin : -1 vers l'extérieur, +1 vers l'intérieur, par axe.
+        // Corner direction: -1 outward, +1 inward, per axis.
         let sx = if west { 1.0 } else { -1.0 };
         let sy = if north { 1.0 } else { -1.0 };
         let horizontal = egui::Rect::from_two_pos(
@@ -440,8 +440,8 @@ pub(super) fn floating_resize_handles(
     }
 }
 
-/// Les deux branches du L d'un coin partagent sa direction accessible ;
-/// les identifiants et les rectangles restent propres à chaque cible.
+/// The two branches of a corner's L share its accessible direction;
+/// the identifiers and the rectangles stay specific to each target.
 fn resize_handle_label(source: &str) -> String {
     match source.split('-').next().unwrap_or(source) {
         "n" => tr!("window-resize-top"),
@@ -452,17 +452,17 @@ fn resize_handle_label(source: &str) -> String {
         "ne" => tr!("window-resize-top-right"),
         "sw" => tr!("window-resize-bottom-left"),
         "se" => tr!("window-resize-bottom-right"),
-        _ => unreachable!("direction de poignée inconnue : {source}"),
+        _ => unreachable!("unknown handle direction: {source}"),
     }
 }
 
-/// Bordure invisible de redimensionnement pour une fenêtre détachée sans
-/// décoration (`.with_decorations(false)`, voir la doc de tête de
-/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)) : huit zones fines aux bords/coins du
-/// viewport, qui délèguent le redimensionnement à l'OS dès que le glissé
-/// démarre (`ViewportCommand::BeginResize`) — même principe que
-/// `ViewportCommand::StartDrag` pour le déplacement du titre : aucun calcul
-/// de delta à notre charge, l'OS/le gestionnaire de fenêtres prend la main.
+/// Invisible resize border for a detached window without
+/// decoration (`.with_decorations(false)`, see the top doc of
+/// [`StokesForgeApp::show_detached_tabs`](crate::app::StokesForgeApp::show_detached_tabs)): eight thin zones at the edges/corners of the
+/// viewport, which delegate resizing to the OS as soon as the drag
+/// starts (`ViewportCommand::BeginResize`) — same principle as
+/// `ViewportCommand::StartDrag` for moving the title: no delta
+/// computation on our side, the OS/window manager takes over.
 pub(super) fn detached_resize_handles(ui: &egui::Ui) {
     const BORDER: f32 = 6.0;
     let rect = ui.ctx().input(|input| input.content_rect());
@@ -557,12 +557,12 @@ pub(super) fn detached_resize_handles(ui: &egui::Ui) {
     }
 }
 
-/// Largeur d'une icône d'action de la barre de titre (croix, détacher,
-/// maximiser).
+/// Width of an action icon of the title bar (cross, detach,
+/// maximize).
 pub(super) const HEADER_ACTION_WIDTH: f32 = 24.0;
 
-/// Les panneaux gardent leur emplacement ; seule leur fenêtre OS se déplace.
-/// Une bande latérale repliée garde son titre vertical et la prise Déployer.
+/// Panels keep their place; only their OS window moves.
+/// A collapsed side strip keeps its vertical title and the Expand handle.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PanelPlacement {
     Left,
@@ -571,11 +571,11 @@ pub(super) enum PanelPlacement {
     Detached,
 }
 
-/// Épaisseur repliée, commune aux bandes latérales et à la console.
+/// Collapsed thickness, common to the side strips and the console.
 pub(super) const PANEL_STRIP_THICKNESS: f32 = ICON_SIZE;
 
-/// Même dessin et mêmes cellules d'icônes que les fenêtres de contenu, avec
-/// une typographie compacte. Aucun chemin ne peint Fermer ou Maximiser (#100).
+/// Same drawing and same icon cells as the content windows, with
+/// compact typography. No path paints Close or Maximize (#100).
 pub(super) fn panel_header(
     ui: &mut egui::Ui,
     title: &str,
@@ -618,10 +618,10 @@ pub(super) fn panel_header(
     } else {
         cell(egui::pos2(rect.right() - action_width, rect.top()))
     };
-    // Le repli se vise au bord de l'espace de travail, le détachement au
-    // bord extérieur pour les gestionnaires. La console garde les deux
-    // prises à gauche, Détacher seulement quand elle est déployée (#142).
-    // Une bande repliée ne garde que Déployer, sans cible de détachement.
+    // Collapsing is targeted at the edge of the workspace, detaching at the
+    // outer edge for the managers. The console keeps both
+    // handles on the left, Detach only when it is expanded (#142).
+    // A collapsed strip keeps only Expand, with no detach target.
     if placement == PanelPlacement::Left && !vertical {
         std::mem::swap(&mut toggle_rect, &mut detach_rect);
     }
@@ -719,8 +719,8 @@ pub(super) fn panel_header(
     }
     let stroke = header.visuals().widgets.noninteractive.bg_stroke;
     if vertical {
-        // La séparation reste dans la bande : Panel réserverait une marge
-        // extérieure qui décalerait le centre des icônes d'un demi-point.
+        // The separation stays in the strip: a Panel would reserve an outer
+        // margin that would shift the icons' center by half a point.
         let x = if placement == PanelPlacement::Left {
             rect.right() - stroke.width / 2.0
         } else {
@@ -732,8 +732,8 @@ pub(super) fn panel_header(
             .painter()
             .hline(rect.x_range(), rect.bottom(), stroke);
         if placement == PanelPlacement::Bottom && collapsed {
-            // Garder tout le trait supérieur à l'intérieur du clip de la
-            // bande, comme les séparations verticales des gestionnaires.
+            // Keep the whole top stroke inside the strip's clip, like the managers'
+            // vertical separations.
             header
                 .painter()
                 .hline(rect.x_range(), rect.top() + stroke.width / 2.0, stroke);
@@ -742,8 +742,8 @@ pub(super) fn panel_header(
     actions
 }
 
-/// Détacher et maximiser sont-ils peints ? Une seule source pour le dessin
-/// et pour la largeur réservée au titre (#50).
+/// Are detach and maximize painted? A single source for the drawing
+/// and for the width reserved for the title (#50).
 pub(super) fn shows_detach_and_maximize(placement: HeaderPlacement, tab: Option<Tab>) -> bool {
     match placement {
         HeaderPlacement::Floating => matches!(tab, Some(Tab::Book(_) | Tab::Graph(_))),
@@ -752,20 +752,20 @@ pub(super) fn shows_detach_and_maximize(placement: HeaderPlacement, tab: Option<
     }
 }
 
-/// Largeur que les icônes réellement peintes retranchent au titre : la
-/// croix seule, ou la croix plus détacher et maximiser (pas de 26 px, marge
-/// de 2 px comprise).
+/// Width that the really painted icons take off the title: the
+/// cross alone, or the cross plus detach and maximize (26 px step, 2 px
+/// margin included).
 pub(super) fn header_actions_width(with_detach_and_maximize: bool) -> f32 {
     let icons = if with_detach_and_maximize { 3.0 } else { 1.0 };
     2.0 + icons * (HEADER_ACTION_WIDTH + 2.0)
 }
 
-/// Barre de titre des fenêtres de contenu — la même base de code pour les
-/// fenêtres flottantes MDI et les fenêtres OS détachées (`placement`, voir
-/// [`HeaderPlacement`]). Les actions et la croix sont peintes de la même
-/// façon que le titre (voir [`header_icon`]) et forment un seul groupe
-/// visuel ; cela évite aussi une `Area` superposée, qui se décale quand une
-/// fenêtre passe derrière une autre.
+/// Title bar of the content windows — the same code base for the MDI
+/// floating windows and the detached OS windows (`placement`, see
+/// [`HeaderPlacement`]). The actions and the cross are painted the same
+/// way as the title (see [`header_icon`]) and form a single visual
+/// group; this also avoids a superimposed `Area`, which shifts when a
+/// window goes behind another.
 pub(super) fn window_header(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -782,10 +782,10 @@ pub(super) fn window_header(
         egui::Sense::hover(),
     );
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    // B5 (`retours-2026-09-23-bugs.md`) : l'icône de repli
-    // était réservée à `Tab::Graph`, sans justification documentée — une
-    // extension jamais faite plutôt qu'un choix. `Matrix`/`Note` restent
-    // exclus faute de raison de les y ajouter.
+    // B5 (`retours-2026-09-23-bugs.md`): the collapse icon
+    // was reserved to `Tab::Graph`, with no documented justification — an
+    // extension never made rather than a choice. `Matrix`/`Note` stay
+    // excluded for lack of a reason to add them.
     let collapse_width = if matches!(tab, Some(Tab::Graph(_) | Tab::Book(_))) {
         COLLAPSE_WIDTH
     } else {
@@ -824,13 +824,13 @@ pub(super) fn window_header(
     ) {
         actions.close = true;
     }
-    // En MDI, détacher/maximiser restent réservés à Book/Graph (Matrix/Note
-    // n'ont pas ce chemin d'UI aujourd'hui, même si `show_detached_tabs` les
-    // gère déjà génériquement). En fenêtre détachée, les quatre natures
-    // gardent réattacher/maximiser en toutes circonstances — c'est ce qui
-    // remplace la barre de titre native de l'OS retirée avec elle
-    // (`.with_decorations(false)`), donc pas question d'en perdre une
-    // capacité pour certains onglets.
+    // In MDI, detach/maximize stay reserved to Book/Graph (Matrix/Note
+    // have no such UI path today, even though `show_detached_tabs` already
+    // handles them generically). In a detached window, the four kinds
+    // keep reattach/maximize in all circumstances — it is what
+    // replaces the OS's native title bar removed with it
+    // (`.with_decorations(false)`), so no question of losing a
+    // capability for some tabs.
     let show_detach_and_maximize = shows_detach_and_maximize(placement, tab);
     if show_detach_and_maximize {
         let (detach_icon, detach_tooltip) = match placement {
@@ -860,10 +860,10 @@ pub(super) fn window_header(
             actions.maximize = true;
         }
     }
-    // La zone de glisser va de la flèche de repli aux icônes réellement
-    // peintes (#50) ; le titre reste centré dans l'en-tête et n'est rogné de
-    // chaque côté que par ce qui s'y trouve vraiment : la flèche à gauche, les
-    // icônes à droite (rien ne rogne un côté vide).
+    // The drag zone goes from the collapse arrow to the really
+    // painted icons (#50); the title stays centered in the header and is clipped on
+    // each side only by what is really there: the arrow on the left, the
+    // icons on the right (nothing clips an empty side).
     let actions_width = header_actions_width(show_detach_and_maximize);
     let title_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + collapse_width, rect.top()),
@@ -897,8 +897,8 @@ pub(super) fn window_header(
     actions
 }
 
-/// Pose le contenu d'une fenêtre dans l'espace qui reste, rogné à cet espace :
-/// un contenu trop grand ne déborde ni ne repousse le cadre.
+/// Places a window's content in the remaining space, clipped to that space:
+/// content that is too big neither overflows nor pushes the frame.
 pub(super) fn show_window_contents_bounded(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -910,17 +910,17 @@ pub(super) fn show_window_contents_bounded(
     ui.advance_cursor_after_rect(rect);
 }
 
-/// `pub(super)` : [`tests::find_icon_centers`] sert aussi aux tests de `window_detach.rs`
-/// qui peignent l'en-tête d'une fenêtre détachée.
+/// `pub(super)`: [`tests::find_icon_centers`] also serves the tests of `window_detach.rs`
+/// that paint the header of a detached window.
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
     use stokesforge_core::NodeId;
 
-    /// Les deux cibles d'un coin flottant annoncent la même direction,
-    /// tandis que chaque bord/coin reste distinct dans l'arbre AccessKit.
+    /// The two targets of a floating corner announce the same direction,
+    /// while each edge/corner stays distinct in the AccessKit tree.
     #[test]
-    fn les_poignees_de_fenetre_annoncent_les_huit_directions() {
+    fn window_handles_announce_the_eight_directions() {
         for detached in [false, true] {
             let context = egui::Context::default();
             context.enable_accesskit();
@@ -953,14 +953,14 @@ pub(super) mod tests {
             for (_, node) in output
                 .platform_output
                 .accesskit_update
-                .expect("arbre d'accessibilité")
+                .expect("accessibility tree")
                 .nodes
             {
                 if node.role() != egui::accesskit::Role::Splitter {
                     continue;
                 }
                 assert!(!node.is_disabled());
-                let bounds = node.bounds().expect("rectangle de la poignée");
+                let bounds = node.bounds().expect("handle rectangle");
                 assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
                 *labels.entry(node.label().unwrap().to_owned()).or_insert(0) += 1;
             }
@@ -982,13 +982,13 @@ pub(super) mod tests {
             ]
             .into_iter()
             .collect();
-            assert_eq!(labels, expected, "fenêtre détachée : {detached}");
+            assert_eq!(labels, expected, "detached window: {detached}");
         }
     }
 
-    /// Centres des icônes peintes (images : rectangles à texture), de gauche à
-    /// droite. Les chargeurs d'images doivent être installés sur le contexte,
-    /// et l'image avoir déjà tourné une fois pour que la texture soit prête.
+    /// Centers of the painted icons (images: rects with a texture), from left to
+    /// right. The image loaders must be installed on the context,
+    /// and the image must have already run once for the texture to be ready.
     pub(in crate::app) fn find_icon_centers(
         shapes: &[egui::epaint::ClippedShape],
     ) -> Vec<egui::Pos2> {
@@ -1003,14 +1003,14 @@ pub(super) mod tests {
         centers
     }
 
-    /// Largeur de l'écran des tests d'en-tête : l'en-tête la prend toute.
-    const LARGEUR_EN_TETE: f32 = 400.0;
+    /// Width of the header tests' screen: the header takes all of it.
+    const HEADER_WIDTH: f32 = 400.0;
 
-    /// Peint [`window_header`] seul, sur toute la largeur de l'écran, sur
-    /// `events.len() + 1` images (la première sans événement : la texture SVG
-    /// des icônes n'est prête qu'à la seconde). Rend la sortie de la dernière
-    /// image et les actions de chaque image.
-    fn peindre_en_tete(
+    /// Paints [`window_header`] alone, over the whole screen width, over
+    /// `events.len() + 1` frames (the first with no event: the icons' SVG
+    /// texture is ready only on the second). Returns the output of the last
+    /// frame and the actions of each frame.
+    fn paint_header(
         context: &egui::Context,
         title: &str,
         tab: Option<Tab>,
@@ -1025,7 +1025,7 @@ pub(super) mod tests {
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(LARGEUR_EN_TETE, 120.0),
+                        egui::vec2(HEADER_WIDTH, 120.0),
                     )),
                     events,
                     ..Default::default()
@@ -1033,7 +1033,7 @@ pub(super) mod tests {
                 |ui| {
                     actions.push(window_header(
                         ui,
-                        egui::Id::new("en_tete_de_test"),
+                        egui::Id::new("test_header"),
                         title,
                         tab,
                         false,
@@ -1046,22 +1046,22 @@ pub(super) mod tests {
         (output, actions)
     }
 
-    /// Les icônes d'un en-tête au repos, de gauche à droite.
-    fn icones_de_l_en_tete(tab: Option<Tab>, placement: HeaderPlacement) -> Vec<egui::Pos2> {
+    /// The icons of a header at rest, from left to right.
+    fn header_icons(tab: Option<Tab>, placement: HeaderPlacement) -> Vec<egui::Pos2> {
         let context = egui::Context::default();
-        let (output, _) = peindre_en_tete(&context, "Titre", tab, placement, vec![Vec::new()]);
+        let (output, _) = paint_header(&context, "Title", tab, placement, vec![Vec::new()]);
         find_icon_centers(&output.shapes)
     }
 
-    // B7 (`retours-2026-09-23-bugs.md`) : jusque-là, la
-    // surbrillance recolorait le trait du `Frame` de la fenêtre
-    // (`floating_window_frame`) plutôt que de peindre un second contour par
-    // dessus — mais ce trait suit `content_ui.min_rect()`, pas la taille
-    // demandée, et débordait donc quand le contenu dépassait (bande
-    // d'outils qui ne s'enroule pas). Le `Frame` ne code plus l'activité :
-    // il garde toujours le trait par défaut d'egui, quel que soit l'état.
+    // B7 (`retours-2026-09-23-bugs.md`): until then, the
+    // highlight recolored the stroke of the window's `Frame`
+    // (`floating_window_frame`) rather than painting a second outline over
+    // it — but that stroke follows `content_ui.min_rect()`, not the requested
+    // size, and so overflowed when the content exceeded it (tool band
+    // that does not wrap). The `Frame` no longer encodes activity:
+    // it always keeps egui's default stroke, whatever the state.
     #[test]
-    fn le_frame_de_la_fenetre_flottante_garde_toujours_le_trait_par_defaut() {
+    fn the_floating_window_frame_always_keeps_the_default_stroke() {
         let style = egui::Style::default();
 
         let frame = floating_window_frame(&style);
@@ -1069,52 +1069,52 @@ pub(super) mod tests {
         assert_eq!(
             frame.stroke.color,
             style.visuals.window_stroke().color,
-            "le Frame ne recolore plus selon l'activité (B7) : le contour actif est peint à \
-             part par `paint_active_window_outline`, sur le rectangle demandé plutôt que celui \
-             qu'egui recalcule depuis le contenu"
+            "the Frame no longer recolors according to activity (B7): the active outline is painted \
+             separately by `paint_active_window_outline`, on the requested rectangle rather than the one \
+             egui recomputes from the content"
         );
         assert_eq!(
             frame.inner_margin, WINDOW_CONTENT_MARGIN,
-            "la marge du cadre est celle des fenêtres de contenu, sans bandeau vertical mort"
+            "the frame's margin is that of the content windows, without a dead vertical band"
         );
     }
 
-    // Le trait recoloré vit maintenant dans `active_window_stroke`, utilisé
-    // par [`paint_active_window_outline`] plutôt que par le `Frame` — même
-    // logique de distinction active/inactive qu'avant B7, déplacée d'une
-    // fonction à l'autre.
+    // The recolored stroke now lives in `active_window_stroke`, used
+    // by [`paint_active_window_outline`] rather than by the `Frame` — same
+    // active/inactive distinction logic as before B7, moved from one
+    // function to the other.
     #[test]
-    fn active_window_stroke_distingue_toujours_actif_et_inactif() {
+    fn active_window_stroke_always_distinguishes_active_from_inactive() {
         let style = egui::Style::default();
 
-        let inactif = active_window_stroke(&style, false);
-        let actif = active_window_stroke(&style, true);
+        let inactive = active_window_stroke(&style, false);
+        let active = active_window_stroke(&style, true);
 
         assert_eq!(
-            inactif.color,
+            inactive.color,
             style.visuals.window_stroke().color,
-            "une fenêtre inactive garde le trait par défaut d'egui"
+            "an inactive window keeps egui's default stroke"
         );
         assert_eq!(
-            actif.color, style.visuals.selection.stroke.color,
-            "une fenêtre active reprend la couleur de sélection du thème"
+            active.color, style.visuals.selection.stroke.color,
+            "an active window takes the theme's selection color"
         );
         assert_ne!(
-            actif.color, inactif.color,
-            "sans couleurs distinctes, rien ne montrerait quelle fenêtre est active"
+            active.color, inactive.color,
+            "without distinct colors, nothing would show which window is active"
         );
     }
 
-    /// Peint des fenêtres flottantes par le chemin de production
-    /// ([`show_floating_window`]), sur une image, et rend la sortie d'egui.
-    /// Deux images au moins sont nécessaires : la première est la passe de
-    /// mesure d'une `Area` neuve, qui ne peint rien.
-    fn peindre_fenetres(
+    /// Paints floating windows through the production path
+    /// ([`show_floating_window`]), over one frame, and returns egui's output.
+    /// At least two frames are needed: the first is the measuring pass
+    /// of a new `Area`, which paints nothing.
+    fn paint_windows(
         context: &egui::Context,
-        fenetres: &[(egui::Id, egui::Rect)],
+        windows: &[(egui::Id, egui::Rect)],
         viewport: egui::Rect,
-        actives: bool,
-        contenu: impl Fn(&mut egui::Ui),
+        active: bool,
+        content: impl Fn(&mut egui::Ui),
     ) -> egui::FullOutput {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1124,169 +1124,172 @@ pub(super) mod tests {
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| {
-            for &(id, rect) in fenetres {
-                show_floating_window(ui.ctx(), id, rect, viewport, actives, &contenu, |_, _| {});
+            for &(id, rect) in windows {
+                show_floating_window(ui.ctx(), id, rect, viewport, active, &content, |_, _| {});
             }
         });
         output.textures_delta.clear();
         output
     }
 
-    /// Contenu plus large que n'importe quelle fenêtre de test — comme un
-    /// classeur à plusieurs colonnes.
-    fn contenu_debordant(ui: &mut egui::Ui) {
+    /// Content wider than any test window — like a
+    /// workbook with several columns.
+    fn overflowing_content(ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for index in 0..10 {
-                ui.label(format!("colonne {index}"));
+                ui.label(format!("column {index}"));
                 ui.add_space(80.0);
             }
         });
     }
 
-    /// Tous les rectangles peints, `Shape::Vec` dépliés (le cadre d'egui
-    /// arrive en `Vec[ombre, rectangle]`).
-    fn rectangles_peints(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::RectShape> {
-        fn deplier(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+    /// All the painted rects, `Shape::Vec` flattened (egui's frame
+    /// arrives as `Vec[shadow, rectangle]`).
+    fn painted_rects(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::RectShape> {
+        fn flatten(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
             match shape {
                 egui::Shape::Rect(rect) => out.push(rect.clone()),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| deplier(shape, out)),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| flatten(shape, out)),
                 _ => {}
             }
         }
         let mut out = Vec::new();
         for painted in shapes {
-            deplier(&painted.shape, &mut out);
+            flatten(&painted.shape, &mut out);
         }
         out
     }
 
-    // Bug 1 (`retours-2026-09-24-bugs.md`), la conséquence, et B1/B3/B4/B7 du
-    // rapport du 2026-09-23 : le cadre, le contour actif, la zone cliquable et
-    // le rognage du contenu suivent tous le même rectangle, que le contenu
-    // soit court ou déborde.
+    // Bug 1 (`retours-2026-09-24-bugs.md`), the consequence, and B1/B3/B4/B7 of the
+    // 2026-09-23 report: the frame, the active outline, the clickable area and
+    // the content clipping all follow the same rectangle, whether the content
+    // is short or overflows.
     #[test]
-    fn le_cadre_le_contour_et_la_zone_cliquable_suivent_le_meme_rectangle() {
+    fn the_frame_the_outline_and_the_clickable_area_follow_the_same_rectangle() {
         let style = egui::Style::default();
         let window_rect =
             egui::Rect::from_min_size(egui::pos2(100.0, 80.0), egui::vec2(220.0, 180.0));
         let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
-        for deborde in [false, true] {
+        for overflows in [false, true] {
             let context = egui::Context::default();
-            let id = egui::Id::new(("meme_rectangle", deborde));
-            let contenu = |ui: &mut egui::Ui| {
-                if deborde {
-                    contenu_debordant(ui);
+            let id = egui::Id::new(("same_rectangle", overflows));
+            let content = |ui: &mut egui::Ui| {
+                if overflows {
+                    overflowing_content(ui);
                 } else {
-                    ui.label("contenu court");
+                    ui.label("short content");
                 }
             };
-            peindre_fenetres(&context, &[(id, window_rect)], viewport, true, contenu);
-            let output = peindre_fenetres(&context, &[(id, window_rect)], viewport, true, contenu);
+            paint_windows(&context, &[(id, window_rect)], viewport, true, content);
+            let output = paint_windows(&context, &[(id, window_rect)], viewport, true, content);
 
-            let rectangles = rectangles_peints(&output.shapes);
-            let cadre = rectangles
+            let rects = painted_rects(&output.shapes);
+            let frame_rect = rects
                 .iter()
                 .find(|rect| rect.fill == style.visuals.window_fill())
-                .expect("le cadre doit être peint");
-            let contour = rectangles
+                .expect("the frame must be painted");
+            let outline = rects
                 .iter()
                 .find(|rect| rect.stroke.color == style.visuals.selection.stroke.color)
-                .expect("le contour actif doit être peint");
-            assert_eq!(cadre.rect, window_rect, "deborde={deborde}");
-            assert_eq!(contour.rect, window_rect, "deborde={deborde}");
+                .expect("the active outline must be painted");
+            assert_eq!(frame_rect.rect, window_rect, "overflows={overflows}");
+            assert_eq!(outline.rect, window_rect, "overflows={overflows}");
             assert_eq!(
                 context.memory(|memory| memory.area_rect(id)),
                 Some(window_rect.expand(RESIZE_BORDER)),
-                "la zone cliquable est la fenêtre plus ses poignées, deborde={deborde}"
+                "the clickable area is the window plus its handles, overflows={overflows}"
             );
-            let mut textes = 0;
+            let mut texts = 0;
             for painted in &output.shapes {
                 if let egui::Shape::Text(text) = &painted.shape {
-                    textes += 1;
+                    texts += 1;
                     assert!(
                         window_rect.contains_rect(painted.clip_rect),
-                        "{:?} déborde de la fenêtre : découpe {:?}",
+                        "{:?} overflows the window: clip {:?}",
                         text.galley.job.text,
                         painted.clip_rect,
                     );
                 }
             }
-            // Sans texte peint, la boucle ci-dessus ne vérifierait rien.
-            assert!(textes > 0, "le contenu doit être peint, deborde={deborde}");
+            // Without painted text, the loop above would check nothing.
+            assert!(
+                texts > 0,
+                "the content must be painted, overflows={overflows}"
+            );
         }
 
-        // Le témoin : la même fenêtre inactive est encadrée, mais aucun
-        // rectangle ne porte la couleur de sélection — c'est bien le contour
-        // actif que la recherche ci-dessus a trouvé, pas un autre trait.
+        // The witness: the same inactive window is framed, but no
+        // rectangle carries the selection color — it is indeed the active
+        // outline that the search above found, not another stroke.
         let context = egui::Context::default();
-        let id = egui::Id::new("meme_rectangle_inactive");
-        let contenu = |ui: &mut egui::Ui| {
-            ui.label("contenu court");
+        let id = egui::Id::new("same_rectangle_inactive");
+        let content = |ui: &mut egui::Ui| {
+            ui.label("short content");
         };
-        peindre_fenetres(&context, &[(id, window_rect)], viewport, false, contenu);
-        let output = peindre_fenetres(&context, &[(id, window_rect)], viewport, false, contenu);
-        let rectangles = rectangles_peints(&output.shapes);
-        assert!(rectangles
+        paint_windows(&context, &[(id, window_rect)], viewport, false, content);
+        let output = paint_windows(&context, &[(id, window_rect)], viewport, false, content);
+        let rects = painted_rects(&output.shapes);
+        assert!(rects
             .iter()
             .any(|rect| rect.fill == style.visuals.window_fill() && rect.rect == window_rect));
         assert!(
-            !rectangles
+            !rects
                 .iter()
                 .any(|rect| rect.stroke.color == style.visuals.selection.stroke.color),
-            "une fenêtre inactive n'a pas de contour de sélection"
+            "an inactive window has no selection outline"
         );
     }
 
-    // Bug 2 (`retours-2026-09-24-bugs.md`) : une fenêtre à
-    // cheval sur le bord de la vue (espace de travail défilé) peignait
-    // par-dessus le Project Manager, et y captait les clics.
+    // Bug 2 (`retours-2026-09-24-bugs.md`): a window straddling
+    // the edge of the view (scrolled workspace) painted
+    // over the Project Manager, and captured the clicks there.
     #[test]
-    fn une_fenetre_a_cheval_sur_le_bord_de_la_vue_est_rognee_et_laisse_passer_les_clics() {
+    fn a_window_straddling_the_edge_of_the_view_is_clipped_and_lets_clicks_through() {
         let context = egui::Context::default();
-        let id = egui::Id::new("a_cheval");
-        // La vue commence à x = 400 (à gauche : le Project Manager).
+        let id = egui::Id::new("straddling");
+        // The view starts at x = 400 (on the left: the Project Manager).
         let viewport = egui::Rect::from_min_max(egui::pos2(400.0, 0.0), egui::pos2(1400.0, 1000.0));
         let window_rect =
             egui::Rect::from_min_size(egui::pos2(250.0, 100.0), egui::vec2(500.0, 400.0));
-        let fenetres = [(id, window_rect)];
-        peindre_fenetres(&context, &fenetres, viewport, true, contenu_debordant);
-        let output = peindre_fenetres(&context, &fenetres, viewport, true, contenu_debordant);
+        let windows = [(id, window_rect)];
+        paint_windows(&context, &windows, viewport, true, overflowing_content);
+        let output = paint_windows(&context, &windows, viewport, true, overflowing_content);
 
         assert!(!output.shapes.is_empty());
         for painted in &output.shapes {
             assert!(
                 viewport.contains_rect(painted.clip_rect),
-                "une forme de la fenêtre est découpée hors de la vue : {:?}",
+                "a shape of the window is clipped outside the view: {:?}",
                 painted.clip_rect,
             );
         }
-        let calque = egui::LayerId::new(FLOATING_WINDOW_ORDER, id);
+        let layer = egui::LayerId::new(FLOATING_WINDOW_ORDER, id);
         assert_ne!(
             context.layer_id_at(egui::pos2(300.0, 300.0)),
-            Some(calque),
-            "sous le Project Manager, la partie cachée de la fenêtre ne doit capter aucun clic"
+            Some(layer),
+            "under the Project Manager, the hidden part of the window must capture no click"
         );
-        assert_eq!(context.layer_id_at(egui::pos2(500.0, 300.0)), Some(calque));
+        assert_eq!(context.layer_id_at(egui::pos2(500.0, 300.0)), Some(layer));
     }
 
-    /// Une fenêtre entièrement hors de la portion visible de l'espace de
-    /// travail (défilé ailleurs) n'est ni peinte ni cliquable, et son contenu
-    /// n'est même pas construit ; sa voisine visible, si (témoin).
+    /// A window entirely outside the visible portion of the
+    /// workspace (scrolled elsewhere) is neither painted nor clickable, and its content
+    /// is not even built; its visible neighbor is (witness).
     #[test]
-    fn une_fenetre_hors_de_la_vue_n_est_ni_peinte_ni_cliquable() {
+    fn a_window_out_of_view_is_neither_painted_nor_clickable() {
         let context = egui::Context::default();
         let viewport = egui::Rect::from_min_max(egui::pos2(400.0, 0.0), egui::pos2(1400.0, 1000.0));
-        let cachee = egui::Id::new("hors_vue");
-        let visible = egui::Id::new("dans_la_vue");
-        // À gauche de la vue, poignées comprises : rien n'en dépasse.
-        let cachee_rect =
+        let hidden = egui::Id::new("out_of_view");
+        let visible = egui::Id::new("in_view");
+        // To the left of the view, handles included: nothing goes beyond it.
+        let hidden_rect =
             egui::Rect::from_min_size(egui::pos2(50.0, 100.0), egui::vec2(300.0, 200.0));
         let visible_rect =
             egui::Rect::from_min_size(egui::pos2(600.0, 100.0), egui::vec2(300.0, 200.0));
-        let mut rendus = Vec::new();
-        // Deux images : la première est la passe de mesure d'une `Area` neuve.
+        let mut results = Vec::new();
+        // Two frames: the first is the measuring pass of a new `Area`.
         for _ in 0..2 {
-            rendus.clear();
+            results.clear();
             let mut output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1296,8 +1299,8 @@ pub(super) mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    for (id, rect) in [(cachee, cachee_rect), (visible, visible_rect)] {
-                        rendus.push(show_floating_window(
+                    for (id, rect) in [(hidden, hidden_rect), (visible, visible_rect)] {
+                        results.push(show_floating_window(
                             ui.ctx(),
                             id,
                             rect,
@@ -1311,15 +1314,15 @@ pub(super) mod tests {
             );
             output.textures_delta.clear();
         }
-        assert_eq!(rendus, vec![None, Some(visible)]);
+        assert_eq!(results, vec![None, Some(visible)]);
         assert_eq!(
-            context.memory(|memory| memory.area_rect(cachee)),
+            context.memory(|memory| memory.area_rect(hidden)),
             None,
-            "aucune zone cliquable n'est posée pour la fenêtre hors de la vue"
+            "no clickable area is set for the window out of view"
         );
         assert_ne!(
-            context.layer_id_at(cachee_rect.center()),
-            Some(egui::LayerId::new(FLOATING_WINDOW_ORDER, cachee))
+            context.layer_id_at(hidden_rect.center()),
+            Some(egui::LayerId::new(FLOATING_WINDOW_ORDER, hidden))
         );
         assert_eq!(
             context.layer_id_at(visible_rect.center()),
@@ -1328,9 +1331,9 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn len_tete_du_graphe_garde_son_titre_au_centre_et_sa_fleche_a_gauche() {
+    fn the_graph_header_keeps_its_title_centered_and_its_arrow_on_the_left() {
         let context = egui::Context::default();
-        let (output, _) = peindre_en_tete(
+        let (output, _) = paint_header(
             &context,
             "Graph1",
             Some(Tab::Graph(NodeId::from_raw(1))),
@@ -1346,92 +1349,92 @@ pub(super) mod tests {
                 egui::Shape::Text(shape) if shape.galley.job.text == "Graph1" => Some(shape),
                 _ => None,
             })
-            .expect("le titre doit être peint");
+            .expect("the title must be painted");
         let title_center = title.pos.x + title.galley.rect.center().x;
         assert!(
-            (title_center - LARGEUR_EN_TETE / 2.0).abs() < f32::EPSILON,
-            "le titre doit être centré dans l'en-tête, pas après la flèche"
+            (title_center - HEADER_WIDTH / 2.0).abs() < f32::EPSILON,
+            "the title must be centered in the header, not after the arrow"
         );
-        let collapse = icons.first().expect("la flèche de repli doit être peinte");
+        let collapse = icons.first().expect("the collapse arrow must be painted");
         assert!(
             collapse.x < 24.0,
-            "la flèche de repli doit rester dans le coin supérieur gauche"
+            "the collapse arrow must stay in the top left corner"
         );
 
-        // Régression : les icônes d'action étaient posées via `Button::
-        // small()`, un widget avec son propre cadre/padding qui ne
-        // s'aligne pas pixel pour pixel sur le titre peint brut — d'où un
-        // désalignement visible malgré des rects nominalement centrés sur
-        // la même ligne (voir la doc de tête de `window_header`).
-        // `header_icon` peint désormais tout de la même façon : les centres
-        // verticaux doivent coïncider exactement.
+        // Regression: the action icons were placed through `Button::
+        // small()`, a widget with its own frame/padding that does not
+        // align pixel for pixel with the raw painted title — hence a
+        // visible misalignment despite rects nominally centered on
+        // the same line (see the top doc of `window_header`).
+        // `header_icon` now paints everything the same way: the vertical
+        // centers must coincide exactly.
         let title_center_y = title.pos.y + title.galley.rect.center().y;
-        let close_center_y = icons.last().expect("le bouton fermer doit être peint").y;
+        let close_center_y = icons.last().expect("the close button must be painted").y;
         assert!(
             (title_center_y - close_center_y).abs() < f32::EPSILON,
-            "le titre et les icônes d'action doivent partager le même centre vertical"
+            "the title and the action icons must share the same vertical center"
         );
     }
 
-    // B5 (`retours-2026-09-23-bugs.md`) : l'icône « Masquer le
-    // contenu de… » était réservée à `Tab::Graph` sans raison documentée —
-    // vérifie qu'elle est bien peinte pour `Tab::Book`, et toujours absente
-    // pour `Tab::Matrix`/`Tab::Note`, qui n'ont pas ce contrôle.
+    // B5 (`retours-2026-09-23-bugs.md`): the icon "Hide the
+    // content of…" was reserved to `Tab::Graph` for no documented reason —
+    // checks that it is indeed painted for `Tab::Book`, and still absent
+    // for `Tab::Matrix`/`Tab::Note`, which do not have this control.
     #[test]
-    fn licone_de_repli_est_peinte_pour_les_classeurs_mais_pas_les_matrices() {
-        // Une icône dans le coin gauche (la croix, elle, est à droite).
-        let fleche_de_repli = |tab: Tab| {
-            icones_de_l_en_tete(Some(tab), HeaderPlacement::Floating)
+    fn the_collapse_icon_is_painted_for_workbooks_but_not_matrices() {
+        // An icon in the left corner (the cross is on the right).
+        let collapse_arrow = |tab: Tab| {
+            header_icons(Some(tab), HeaderPlacement::Floating)
                 .first()
                 .is_some_and(|center| center.x < 24.0)
         };
 
         let node = NodeId::from_raw(1);
         assert!(
-            fleche_de_repli(Tab::Book(node)),
-            "un classeur doit porter l'icône de repli"
+            collapse_arrow(Tab::Book(node)),
+            "a workbook must carry the collapse icon"
         );
         assert!(
-            fleche_de_repli(Tab::Graph(node)),
-            "un graphe doit garder l'icône de repli"
+            collapse_arrow(Tab::Graph(node)),
+            "a graph must keep the collapse icon"
         );
         assert!(
-            !fleche_de_repli(Tab::Matrix(node)),
-            "une matrice n'a pas ce contrôle"
+            !collapse_arrow(Tab::Matrix(node)),
+            "a matrix does not have this control"
         );
         assert!(
-            !fleche_de_repli(Tab::Note(node)),
-            "une note n'a pas ce contrôle"
+            !collapse_arrow(Tab::Note(node)),
+            "a note does not have this control"
         );
     }
 
-    /// #50 : un dialogue ne peint que la croix, il ne doit donc réserver que
-    /// sa place ; la largeur retranchée au titre suit les icônes peintes.
+    /// #50: a dialog paints only the cross, so it must reserved only
+    /// its place; the width taken off the title follows the painted icons.
     #[test]
-    fn la_largeur_reservee_suit_les_icones_peintes() {
+    fn the_reserved_width_follows_the_painted_icons() {
         let id = NodeId::from_raw(1);
-        let croix = header_actions_width(shows_detach_and_maximize(HeaderPlacement::Dialog, None));
-        let trois = header_actions_width(shows_detach_and_maximize(
+        let cross = header_actions_width(shows_detach_and_maximize(HeaderPlacement::Dialog, None));
+        let three = header_actions_width(shows_detach_and_maximize(
             HeaderPlacement::Floating,
             Some(Tab::Graph(id)),
         ));
-        let matrice = header_actions_width(shows_detach_and_maximize(
+        let matrix = header_actions_width(shows_detach_and_maximize(
             HeaderPlacement::Floating,
             Some(Tab::Matrix(id)),
         ));
-        assert_eq!(croix, 28.0);
-        assert_eq!(trois, 80.0);
-        assert_eq!(matrice, croix);
+        assert_eq!(cross, 28.0);
+        assert_eq!(three, 80.0);
+        assert_eq!(matrix, cross);
         assert!(shows_detach_and_maximize(HeaderPlacement::Detached, None));
     }
 
-    /// #50, côté dessin : le nombre d'icônes réellement peintes à droite de
-    /// l'en-tête est celui que [`shows_detach_and_maximize`] annonce, et
-    /// toutes tiennent dans la largeur que [`header_actions_width`] retranche
-    /// au titre — sans quoi le titre passerait sous une icône (ou serait
-    /// rogné pour une icône absente).
+    /// #50, drawing side: the number of icons really painted on the right of
+    /// the header is the one [`shows_detach_and_maximize`] announces, and
+    /// all fit in the width that [`header_actions_width`] takes off
+    /// the title — otherwise the title would pass under an icon (or be
+    /// clipped for a missing icon).
     #[test]
-    fn les_icones_peintes_a_droite_sont_celles_que_la_largeur_reserve() {
+    fn the_icons_painted_on_the_right_are_those_the_width_reserves() {
         let id = NodeId::from_raw(1);
         for (tab, placement) in [
             (Some(Tab::Graph(id)), HeaderPlacement::Floating),
@@ -1442,34 +1445,34 @@ pub(super) mod tests {
             (Some(Tab::Graph(id)), HeaderPlacement::Detached),
             (None, HeaderPlacement::Dialog),
         ] {
-            let a_droite: Vec<_> = icones_de_l_en_tete(tab, placement)
+            let on_the_right: Vec<_> = header_icons(tab, placement)
                 .into_iter()
-                .filter(|center| center.x > LARGEUR_EN_TETE / 2.0)
+                .filter(|center| center.x > HEADER_WIDTH / 2.0)
                 .collect();
-            let trois = shows_detach_and_maximize(placement, tab);
-            assert_eq!(a_droite.len(), if trois { 3 } else { 1 }, "{tab:?}");
-            let reserve = header_actions_width(trois);
-            for center in a_droite {
+            let three = shows_detach_and_maximize(placement, tab);
+            assert_eq!(on_the_right.len(), if three { 3 } else { 1 }, "{tab:?}");
+            let reserved = header_actions_width(three);
+            for center in on_the_right {
                 assert!(
-                    center.x - ICON_SIZE / 2.0 >= LARGEUR_EN_TETE - reserve,
-                    "{tab:?} : une icône ({center:?}) déborde sur la place du titre ({reserve})"
+                    center.x - ICON_SIZE / 2.0 >= HEADER_WIDTH - reserved,
+                    "{tab:?}: an icon ({center:?}) overflows onto the title's place ({reserved})"
                 );
             }
         }
-        // Un dialogue n'a pas non plus de flèche de repli à gauche.
-        assert!(icones_de_l_en_tete(None, HeaderPlacement::Dialog)
+        // A dialog has no collapse arrow on the left either.
+        assert!(header_icons(None, HeaderPlacement::Dialog)
             .iter()
-            .all(|center| center.x > LARGEUR_EN_TETE / 2.0));
+            .all(|center| center.x > HEADER_WIDTH / 2.0));
     }
 
-    /// Les gestes de la barre de titre remontent à l'appelant : glisser le
-    /// titre donne son déplacement (et le signal de départ, une seule fois),
-    /// cliquer la croix demande la fermeture. Le témoin : glisser le titre ne
-    /// ferme rien.
+    /// The title bar's gestures go up to the caller: dragging the
+    /// title gives its displacement (and the start signal, only once),
+    /// clicking the cross requests closing. The witness: dragging the title
+    /// closes nothing.
     #[test]
-    fn glisser_le_titre_deplace_et_cliquer_la_croix_ferme() {
+    fn dragging_the_title_moves_and_clicking_the_cross_closes() {
         let tab = Some(Tab::Graph(NodeId::from_raw(1)));
-        let bouton = |pos, pressed| egui::Event::PointerButton {
+        let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
             pressed,
@@ -1477,24 +1480,24 @@ pub(super) mod tests {
         };
 
         let context = egui::Context::default();
-        let depart = egui::pos2(LARGEUR_EN_TETE / 2.0, WINDOW_HEADER_HEIGHT / 2.0);
-        let arrivee = depart + egui::vec2(30.0, 10.0);
-        let (_, actions) = peindre_en_tete(
+        let start = egui::pos2(HEADER_WIDTH / 2.0, WINDOW_HEADER_HEIGHT / 2.0);
+        let end = start + egui::vec2(30.0, 10.0);
+        let (_, actions) = paint_header(
             &context,
-            "Titre",
+            "Title",
             tab,
             HeaderPlacement::Floating,
             vec![
-                vec![egui::Event::PointerMoved(depart)],
-                vec![bouton(depart, true)],
-                vec![egui::Event::PointerMoved(arrivee)],
-                vec![bouton(arrivee, false)],
+                vec![egui::Event::PointerMoved(start)],
+                vec![button(start, true)],
+                vec![egui::Event::PointerMoved(end)],
+                vec![button(end, false)],
             ],
         );
-        let deplacement = actions
+        let displacement = actions
             .iter()
-            .fold(egui::Vec2::ZERO, |somme, action| somme + action.drag_delta);
-        assert_eq!(deplacement, arrivee - depart);
+            .fold(egui::Vec2::ZERO, |sum, action| sum + action.drag_delta);
+        assert_eq!(displacement, end - start);
         assert_eq!(
             actions
                 .iter()
@@ -1508,18 +1511,18 @@ pub(super) mod tests {
             && !action.toggle_collapse));
 
         let context = egui::Context::default();
-        let croix = *icones_de_l_en_tete(tab, HeaderPlacement::Floating)
+        let cross = *header_icons(tab, HeaderPlacement::Floating)
             .last()
-            .expect("la croix est la dernière icône à droite");
-        let (_, actions) = peindre_en_tete(
+            .expect("the cross is the last icon on the right");
+        let (_, actions) = paint_header(
             &context,
-            "Titre",
+            "Title",
             tab,
             HeaderPlacement::Floating,
             vec![
-                vec![egui::Event::PointerMoved(croix)],
-                vec![bouton(croix, true)],
-                vec![bouton(croix, false)],
+                vec![egui::Event::PointerMoved(cross)],
+                vec![button(cross, true)],
+                vec![button(cross, false)],
             ],
         );
         assert!(actions.iter().any(|action| action.close));
@@ -1528,13 +1531,13 @@ pub(super) mod tests {
             .all(|action| action.drag_delta == egui::Vec2::ZERO && !action.detach));
     }
 
-    /// Glisse, sur une fenêtre de `(300, 300)`, `400 × 300`, la poignée de
-    /// redimensionnement visée en `prise` de `deplacement`, puis relâche et
-    /// peint une image de plus sans événement. Rend la position et la taille
-    /// après le glissé, puis après l'image de repos.
-    fn glisser_poignee(
-        prise: impl FnOnce(egui::Rect) -> egui::Pos2,
-        deplacement: egui::Vec2,
+    /// Drags, on a `(300, 300)`, `400 × 300` window, the targeted resize
+    /// handle at `grab` by `displacement`, then releases and
+    /// paints one more frame with no event. Returns the position and size
+    /// after the drag, then after the rest frame.
+    fn drag_handle(
+        grab: impl FnOnce(egui::Rect) -> egui::Pos2,
+        displacement: egui::Vec2,
     ) -> ((egui::Pos2, egui::Vec2), (egui::Pos2, egui::Vec2)) {
         let tab = Tab::Graph(NodeId::from_raw(1));
         let context = egui::Context::default();
@@ -1560,150 +1563,150 @@ pub(super) mod tests {
 
         paint(Vec::new());
         let (position, size) = state.get();
-        let depart = prise(egui::Rect::from_min_size(position, size));
-        paint(vec![egui::Event::PointerMoved(depart)]);
+        let start = grab(egui::Rect::from_min_size(position, size));
+        paint(vec![egui::Event::PointerMoved(start)]);
         paint(vec![egui::Event::PointerButton {
-            pos: depart,
+            pos: start,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }]);
-        let arrivee = depart + deplacement;
-        paint(vec![egui::Event::PointerMoved(arrivee)]);
-        let apres_glisse = state.get();
+        let end = start + displacement;
+        paint(vec![egui::Event::PointerMoved(end)]);
+        let after_drag = state.get();
         paint(vec![egui::Event::PointerButton {
-            pos: arrivee,
+            pos: end,
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
         paint(Vec::new());
-        (apres_glisse, state.get())
+        (after_drag, state.get())
     }
 
-    /// Régression (§3, redimensionnement par les 4 côtés) : `egui::Window`
-    /// coupe `resize_left`/`resize_top` en interne dès que
-    /// `.drag_area(WindowDrag::Off)` est posé (nécessaire au glissé de la
-    /// barre de titre maison) — les deux dépendent d'`Area::is_movable()`,
-    /// qu'`Off` force à `false`, sans moyen de les garder actifs séparément.
-    /// D'où [`floating_resize_handles`], qui remplace entièrement le
-    /// redimensionnement natif. Ce test glisse sa poignée ouest et vérifie
-    /// que la position *et* la taille suivent, puis qu'une image sans
-    /// événement ne fait rien sauter en arrière.
+    /// Regression (§3, resizing by the 4 sides): `egui::Window`
+    /// cuts `resize_left`/`resize_top` internally as soon as
+    /// `.drag_area(WindowDrag::Off)` is set (needed for the drag of the
+    /// home-made title bar) — both depend on `Area::is_movable()`,
+    /// which `Off` forces to `false`, with no way to keep them active separately.
+    /// Hence [`floating_resize_handles`], which entirely replaces the native
+    /// resizing. This test drags its west handle and checks
+    /// that the position *and* the size follow, then that a frame with no
+    /// event makes nothing jump back.
     #[test]
-    fn le_redimensionnement_par_le_bord_gauche_deplace_et_retrecit() {
-        let ((position, size), repos) = glisser_poignee(
+    fn resizing_by_the_left_edge_moves_and_shrinks() {
+        let ((position, size), at_rest) = drag_handle(
             |rect| egui::pos2(rect.left() - 3.0, rect.center().y),
             egui::vec2(-40.0, 0.0),
         );
         assert!(
             (position.x - 260.0).abs() < f32::EPSILON,
-            "le bord ouest doit déplacer le coin de la fenêtre de la même distance que le glissé, position={position:?}"
+            "the west edge must move the window's corner by the same distance as the drag, position={position:?}"
         );
         assert!(
             (size.x - 440.0).abs() < f32::EPSILON,
-            "le bord ouest doit élargir la fenêtre d'autant que le coin recule, size={size:?}"
+            "the west edge must widen the window as much as the corner moves back, size={size:?}"
         );
         assert_eq!(
             (position.y, size.y),
             (300.0, 300.0),
-            "un bord vertical ne touche pas à la hauteur"
+            "a vertical edge does not touch the height"
         );
-        // Image suivante sans aucun événement : rien ne doit plus bouger —
-        // contrairement au bug natif, il n'y a ici aucun mécanisme qui
-        // pourrait faire sauter la fenêtre en arrière (`position`/`size`
-        // sont notre propre état, pas une mémoire interne qu'un autre
-        // appel pourrait écraser).
-        assert_eq!(repos, (position, size));
+        // Next frame with no event at all: nothing must move anymore —
+        // unlike the native bug, there is here no mechanism that
+        // could make the window jump back (`position`/`size`
+        // are our own state, not an internal memory that another
+        // call could overwrite).
+        assert_eq!(at_rest, (position, size));
     }
 
-    /// Rétrécir par le bord ouest s'arrête à [`MIN_CONTENT_WINDOW_SIZE`], et
-    /// le bord **est** reste alors en place : la fenêtre ne glisse pas vers la
-    /// droite une fois sa taille minimale atteinte.
+    /// Shrinking by the west edge stops at [`MIN_CONTENT_WINDOW_SIZE`], and
+    /// the **east** edge then stays in place: the window does not slide to the
+    /// right once its minimum size is reached.
     #[test]
-    fn retrecir_par_le_bord_gauche_s_arrete_a_la_taille_minimale() {
-        let bord_est = 300.0 + 400.0;
-        let ((position, size), _) = glisser_poignee(
+    fn shrinking_by_the_left_edge_stops_at_the_minimum_size() {
+        let east_edge = 300.0 + 400.0;
+        let ((position, size), _) = drag_handle(
             |rect| egui::pos2(rect.left() - 3.0, rect.center().y),
             egui::vec2(600.0, 0.0),
         );
         assert_eq!(size.x, MIN_CONTENT_WINDOW_SIZE.x);
-        assert_eq!(position.x + size.x, bord_est);
+        assert_eq!(position.x + size.x, east_edge);
     }
 
-    /// #75 : un coin se vise le long de ses deux côtés voisins, sur
-    /// `CORNER_REACH`, pas seulement dans un carré de 6 × 6. Saisi sur le
-    /// bord haut **près** du coin nord-ouest, le glissé redimensionne sur les
-    /// deux axes ; le témoin, saisi au milieu du même bord, ne touche qu'à la
-    /// hauteur.
+    /// #75: a corner is targeted along its two neighboring sides, over
+    /// `CORNER_REACH`, not only in a 6 × 6 square. Grabbed on the
+    /// top edge **near** the north-west corner, the drag resizes on both
+    /// axes; the witness, grabbed in the middle of the same edge, touches only
+    /// the height.
     #[test]
-    fn un_coin_se_saisit_le_long_de_ses_deux_cotes() {
-        let deplacement = egui::vec2(-20.0, -30.0);
-        let ((position, size), _) = glisser_poignee(
+    fn a_corner_is_grabbed_along_its_two_sides() {
+        let displacement = egui::vec2(-20.0, -30.0);
+        let ((position, size), _) = drag_handle(
             |rect| egui::pos2(rect.left() + CORNER_REACH - 2.0, rect.top() - 3.0),
-            deplacement,
+            displacement,
         );
-        assert_eq!(position, egui::pos2(280.0, 270.0), "coin nord-ouest");
-        assert_eq!(size, egui::vec2(420.0, 330.0), "coin nord-ouest");
+        assert_eq!(position, egui::pos2(280.0, 270.0), "north-west corner");
+        assert_eq!(size, egui::vec2(420.0, 330.0), "north-west corner");
 
-        let ((position, size), _) = glisser_poignee(
+        let ((position, size), _) = drag_handle(
             |rect| egui::pos2(rect.center().x, rect.top() - 3.0),
-            deplacement,
+            displacement,
         );
-        assert_eq!(position, egui::pos2(300.0, 270.0), "bord nord seul");
-        assert_eq!(size, egui::vec2(400.0, 330.0), "bord nord seul");
+        assert_eq!(position, egui::pos2(300.0, 270.0), "north edge only");
+        assert_eq!(size, egui::vec2(400.0, 330.0), "north edge only");
     }
 
-    /// [`show_window_contents_bounded`], la borne commune des fenêtres
-    /// flottantes, détachées (B8) et des dialogues : le contenu est rogné à
-    /// l'espace qui reste sous l'en-tête et ne repousse pas le cadre, même
-    /// s'il réclame plus de place que l'écran. Le témoin : le `Ui` parent, lui,
-    /// rogne plus haut (il couvre l'en-tête) — un contenu qui hériterait de
-    /// son rognage serait vu. Les contenus réels (classeur, graphe) posent
-    /// souvent leur propre rognage, qui masquerait l'oubli de celui-ci.
+    /// [`show_window_contents_bounded`], the common bound of floating and
+    /// detached (B8) windows and of dialogs: the content is clipped to
+    /// the space that remains under the header and does not push the frame,
+    /// even if it claims more room than the screen. The witness: the parent `Ui`
+    /// clips higher up (it covers the header) — content that inherited
+    /// its clipping would be seen. The real contents (workbook, graph)
+    /// often set their own clipping, which would hide the omission of this one.
     #[test]
-    fn le_contenu_borne_est_rogne_sous_l_en_tete_et_ne_repousse_pas_le_cadre() {
+    fn the_bounded_content_is_clipped_under_the_header_and_does_not_push_the_frame() {
         let context = egui::Context::default();
-        let ecran = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 150.0));
-        let mut mesures = None;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 150.0));
+        let mut measures = None;
         let mut output = context.run_ui(
             egui::RawInput {
-                screen_rect: Some(ecran),
+                screen_rect: Some(screen),
                 ..Default::default()
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    ui.label("en-tête");
-                    let espace = ui.available_rect_before_wrap();
+                    ui.label("header");
+                    let space = ui.available_rect_before_wrap();
                     let parent = ui.clip_rect();
                     show_window_contents_bounded(ui, |ui| {
-                        ui.label("contenu");
+                        ui.label("content");
                         ui.allocate_space(egui::vec2(1000.0, 1000.0));
                     });
-                    mesures = Some((espace, parent, ui.min_rect()));
+                    measures = Some((space, parent, ui.min_rect()));
                 });
             },
         );
         output.textures_delta.clear();
-        let (espace, parent, cadre) = mesures.expect("panneau peint");
+        let (space, parent, frame_rect) = measures.expect("panel painted");
         assert!(
-            parent.top() < espace.top(),
-            "témoin : le parent couvre l'en-tête ({parent:?} / {espace:?})"
+            parent.top() < space.top(),
+            "witness: the parent covers the header ({parent:?} / {space:?})"
         );
-        let rognage = output
+        let clip = output
             .shapes
             .iter()
             .find_map(|painted| match &painted.shape {
-                egui::Shape::Text(text) if text.galley.job.text == "contenu" => {
+                egui::Shape::Text(text) if text.galley.job.text == "content" => {
                     Some(painted.clip_rect)
                 }
                 _ => None,
             })
-            .expect("contenu peint");
-        assert_eq!(rognage, parent.intersect(espace), "rogné sous l'en-tête");
+            .expect("content painted");
+        assert_eq!(clip, parent.intersect(space), "clipped under the header");
         assert!(
-            ecran.contains_rect(cadre),
-            "le contenu trop grand ne repousse pas le cadre : {cadre:?}"
+            screen.contains_rect(frame_rect),
+            "the content too big does not push the frame: {frame_rect:?}"
         );
     }
 }

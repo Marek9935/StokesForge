@@ -1,23 +1,24 @@
-//! Object Manager peint (#81–#85, #102, #111, #113) : l'arbre de
-//! [`stokesforge_app_state::object_manager::ObjectTree`] en lignes, cases de visibilité, menus
-//! contextuels, glisser par poignée (séries, groupes, objets libres ; `object_dnd.rs`) et raccourcis clavier (Suppr, F2,
-//! Ctrl+flèches). Le modèle (projection du `PlotSpec`, filtres) reste dans
-//! `stokesforge_app_state::object_manager` ; la sélection vit dans la `GraphView`. Ce qui
-//! touche la vue (sélection, propriétés, renommage) remonte en
-//! [`ObjectManagerRequest`], exécuté après la peinture par
-//! [`StokesForgeApp::run_object_manager_request`], qui sert aussi le menu
-//! « Graph › Selected Content ». Une seule écriture pour le panneau fixe et la
-//! fenêtre détachée. Les réglages (#139) viennent de la table unique
-//! `preferences::ObjectManagerSettings` ; egui garde la priorité pour les
-//! groupes déjà vus, y compris après Réinitialiser.
-//! L'échantillon de légende reçoit les mêmes gestes que le nom de série
-//! (#151) : une zone seulement peinte laissait son clic droit au fond.
+//! Painted Object Manager (#81–#85, #102, #111, #113): the
+//! [`stokesforge_app_state::object_manager::ObjectTree`] tree as rows,
+//! visibility checkboxes, context menus, drag by handle (series, groups, free
+//! objects; `object_dnd.rs`) and keyboard shortcuts (Delete, F2, Ctrl+arrows).
+//! The model (projection of the `PlotSpec`, filters) stays in
+//! `stokesforge_app_state::object_manager`; the selection lives in the
+//! `GraphView`. What touches the view (selection, properties, renaming) goes up
+//! as an [`ObjectManagerRequest`], run after painting by
+//! [`StokesForgeApp::run_object_manager_request`], which also serves the menu
+//! "Graph › Selected Content". One piece of code for the fixed panel and the
+//! detached window. The settings (#139) come from the single table
+//! `preferences::ObjectManagerSettings`; egui keeps priority for the groups
+//! already seen, including after Reset.
+//! The legend sample receives the same gestures as the series name (#151): a
+//! zone that was only painted left its right click to the background.
 //!
-//! Le panneau fixe ou détaché (#100),
-//! [`StokesForgeApp::object_manager_panel`], et l'exécution des demandes l'ont
-//! rejoint (#122). Les en-têtes, calques, séries, axes et objets se peignent
-//! par sections (#124), sans changer les portées et identifiants egui ni
-//! l'ordre des demandes et des connecteurs d'arbre.
+//! The fixed or detached panel (#100),
+//! [`StokesForgeApp::object_manager_panel`], and the running of requests have
+//! joined it (#122). Headers, layers, series, axes and objects are painted by
+//! sections (#124), without changing the egui scopes and ids nor the order of
+//! requests and tree connectors.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -65,13 +66,13 @@ pub(super) enum ObjectManagerRequest {
     ),
     Properties(stokesforge_app_state::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
-    /// Édite sur place le nom d'un groupe de séries (#197).
+    /// Edits a series group's name in place (#197).
     RenameGroup(stokesforge_plot::SeriesGroupRef),
-    /// Édite sur place le titre, le titre d'axe ou l'entrée de légende.
+    /// Edits the title, the axis title or the legend entry in place.
     EditText(ContextText),
 }
-/// Libellé d'un nœud d'en-tête de l'Object Manager (graphe, calque, groupes) :
-/// un double-clic ouvre ses paramètres, comme sur les autres lignes (#113).
+/// Label of an Object Manager header node (graph, layer, groups): a
+/// double-click opens its settings, like the other rows (#113).
 fn manager_header_label(
     ui: &mut egui::Ui,
     text: &str,
@@ -79,7 +80,7 @@ fn manager_header_label(
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> egui::Response {
     let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
-    // Un clic sur le nœud d'un calque (ou son groupe) le rend actif (#161).
+    // A click on a layer's node (or its group) makes it active (#161).
     if response.clicked()
         && matches!(
             target,
@@ -132,10 +133,10 @@ pub(super) fn select_manager_target(
     }
 }
 
-/// Séries analysables de la cible, dans leur ordre de tracé. Une série
-/// « ligne » s'analyse par la feuille transposée liée à sa feuille (#253) ;
-/// un groupe qui mêle des courbes de colonnes et de lignes n'est pas
-/// analysable d'un coup (`analysis-needs-same-curves`).
+/// Analyzable series of the target, in plotting order. A "row" series is
+/// analyzed through the transposed sheet linked to its sheet (#253); a group
+/// that mixes column curves and row curves cannot be analyzed in one go
+/// (`analysis-needs-same-curves`).
 pub(super) fn analysis_sources(
     spec: &stokesforge_plot::PlotSpec,
     target: T,
@@ -171,22 +172,21 @@ pub(super) fn analysis_sources(
     }
 }
 
-/// **Le** menu d'un objet du graphe (#152) : le même au clic droit dans la
-/// figure, sur son nœud de l'Object Manager et sous Graph › Selection (qui
-/// l'enveloppe dans son sous-menu, le clic droit l'affiche à plat). Sections
-/// de la grammaire de `docs/menus.md`, une section sans objet pour la cible
-/// étant **absente** :
+/// **The** menu of a graph object (#152): the same on a right click in the
+/// figure, on its Object Manager node and under Graph › Selection (which wraps
+/// it in its submenu; the right click shows it flat). Sections of the grammar
+/// of `docs/menus.md`, a section with nothing for the target being **absent**:
 ///
-/// 1. principale — Show Data / Analysis (courbe), Analysis (groupe),
-///    Edit Text / Reset Position (textes),
-///    Select Members (groupe) ;
-/// 2. organiser — Rename (courbe, groupe), Move Up/Down (courbe, groupe),
-///    Ungroup (groupe), Hide (courbe), Bring to Front / Send to Back (objet),
-///    Hide (texte, axe, groupe) ;
-///    Closed Frame (calque et groupe d'axes, bascule, #344) ;
-/// 3. supprimer — Delete (courbe, texte libre, objet), Delete Group (groupe
-///    et ses séries) ;
-/// 4. `Properties…`, toujours en dernier.
+/// 1. main — Show Data / Analysis (curve), Analysis (group),
+///    Edit Text / Reset Position (texts),
+///    Select Members (group);
+/// 2. organize — Rename (curve, group), Move Up/Down (curve, group),
+///    Ungroup (group), Hide (curve), Bring to Front / Send to Back (object),
+///    Hide (text, axis, group);
+///    Closed Frame (layer and axes group, toggle, #344);
+/// 3. delete — Delete (curve, free text, object), Delete Group (group
+///    and its series);
+/// 4. `Properties…`, always last.
 pub(super) fn object_node_menu(
     ui: &mut egui::Ui,
     graph: NodeId,
@@ -397,7 +397,7 @@ pub(super) fn object_node_menu(
                             target: object,
                             order,
                         });
-                        // Le rang change : la sélection suit l'objet.
+                        // The rank changes: the selection follows the object.
                         requests.push(ObjectManagerRequest::Select(T::Shape(
                             stokesforge_plot::ShapeRef { index, ..object },
                         )));
@@ -452,7 +452,7 @@ pub(super) fn object_node_menu(
     });
 }
 
-/// Pourquoi une série ou un groupe ne monte ou ne descend plus (#226).
+/// Why a series or a group can no longer move up or down (#226).
 fn move_reason(up: bool) -> String {
     if up {
         tr!("disabled-move-first")
@@ -461,8 +461,8 @@ fn move_reason(up: bool) -> String {
     }
 }
 
-/// Pourquoi la case ou l'entrée Show/Hide d'un objet est grisée (#226) : un
-/// axe miroir déjà dessiné par un calque du dessus, sinon rien à basculer.
+/// Why an object's Show/Hide checkbox or entry is grayed out (#226): a mirror
+/// axis already drawn by a layer above, otherwise nothing to toggle.
 fn visibility_reason(
     target: stokesforge_app_state::object_manager::VisibilityTarget,
     spec: &stokesforge_plot::PlotSpec,
@@ -501,10 +501,10 @@ fn object_visibility(
     }
 }
 
-/// Le menu des réglages d'Object Manager **à plat** (#152) : c'est le menu
-/// du clic droit sur le fond du panneau, sans enveloppe « Settings ▸ ». Les
-/// cases gardent le menu ouvert (#114). Les réglages ne touchent ni le
-/// `PlotSpec` ni les replis courants d'egui.
+/// The Object Manager settings menu, **flat** (#152): it is the right-click
+/// menu on the panel background, without a "Settings ▸" wrapper. The
+/// checkboxes keep the menu open (#114). The settings touch neither the
+/// `PlotSpec` nor egui's current collapse states.
 pub(super) fn object_manager_settings_contents(
     ui: &mut egui::Ui,
     settings: ObjectManagerSettings,
@@ -562,9 +562,9 @@ pub(super) fn object_manager_settings_contents(
     });
 }
 
-/// Les mêmes réglages sous View › Object Manager : l'enveloppe du menu du
-/// haut, le contenu étant celui du clic droit sur le fond. Fonctionne aussi
-/// en fenêtre détachée.
+/// The same settings under View › Object Manager: the top menu's wrapper, the
+/// content being that of the right click on the background. Also works in a
+/// detached window.
 pub(super) fn object_manager_settings_menu(
     ui: &mut egui::Ui,
     settings: ObjectManagerSettings,
@@ -573,7 +573,7 @@ pub(super) fn object_manager_settings_menu(
     object_manager_settings_contents(ui, settings, actions);
 }
 
-/// Un seul contenu pour Object Manager, quel que soit son emplacement.
+/// One content for the Object Manager, wherever it sits.
 pub(super) fn object_manager_contents(
     ui: &mut egui::Ui,
     tree: &Tree,
@@ -596,8 +596,8 @@ pub(super) fn object_manager_contents(
         empty_state(ui, tr!("object-manager-no-graph"));
         return requests;
     };
-    // Pendant un glisser, la liste se peint d'après l'aperçu du geste (le spec
-    // réel, lui, ne change qu'au relâchement).
+    // During a drag, the list is painted from the gesture's preview (the real
+    // spec only changes on release).
     let live = object_dnd::live(ui.ctx()).filter(|live| live.graph == Some(model.graph));
     let item = live.as_ref().map(|live| live.item);
     let preview_model;
@@ -617,10 +617,10 @@ pub(super) fn object_manager_contents(
         None => (model, spec),
     };
     let focus = ui.make_persistent_id(("object_manager_keys", model.graph));
-    // #126 : enregistrer l'ancre avant les lignes. egui rend son focus
-    // au relâchement d'un clic, car Rect::NOTHING n'est jamais survolé ;
-    // la ligne cliquée le réclame ensuite. Un clic ailleurs le rend toujours,
-    // et un champ d'édition garde ses propres touches.
+    // #126: register the anchor before the rows. egui gives its focus back on
+    // click release, since Rect::NOTHING is never hovered; the clicked row
+    // then claims it. A click elsewhere always gives it back, and an edit
+    // field keeps its own keys.
     ui.interact(
         egui::Rect::NOTHING,
         focus,
@@ -644,9 +644,9 @@ pub(super) fn object_manager_contents(
     });
     object_dnd::end_of_frame(ui.ctx(), model.graph, spec, paint.hover.take(), actions);
     if ui.memory(|m| m.focused()) == Some(focus) {
-        // ↑ ↓ : la ligne sélectionnable visible voisine ; Entrée : ses propriétés,
-        // comme le double-clic (#170, point 6). Ctrl+↑ / Ctrl+↓ (déplacer une
-        // série) ne passent pas par ici : `series_shortcuts` plus bas.
+        // ↑ ↓: the neighboring visible selectable row; Enter: its properties,
+        // like the double-click (#170, point 6). Ctrl+↑ / Ctrl+↓ (move a
+        // series) do not go through here: `series_shortcuts` below.
         match ui.input_mut(read_navigation) {
             Some(key @ (NavKey::Up | NavKey::Down)) => {
                 let step = if key == NavKey::Up { -1 } else { 1 };
@@ -685,25 +685,24 @@ pub(super) fn object_manager_contents(
     requests
 }
 
-// Arguments de peinture communs aux sections : aucune Ui ni portée egui
-// supplémentaire. La sélection et les événements restent accumulés par les
-// corps effectivement dépliés, dans l'ordre de leurs lignes.
+// Painting arguments common to the sections: no extra Ui nor egui scope. The
+// selection and the events stay accumulated by the bodies actually unfolded,
+// in the order of their rows.
 struct ObjectManagerPaint<'a> {
     tree: &'a Tree,
     spec: &'a stokesforge_plot::PlotSpec,
     graph: NodeId,
     focus: egui::Id,
     settings: ObjectManagerSettings,
-    /// L'élément glissé, à sa place dans l'aperçu.
+    /// The dragged item, at its place in the preview.
     item: Option<DragItem>,
-    /// La ligne que l'élément glissé survole, vue pendant la peinture.
+    /// The row the dragged item hovers, seen during painting.
     hover: Hover,
-    /// Les lignes sélectionnables **peintes** cette image, dans l'ordre de
-    /// lecture : ce que ↑ et ↓ parcourent (#170, point 6) ; une section
-    /// repliée n'y figure pas.
+    /// The selectable rows **painted** this frame, in reading order: what ↑ and
+    /// ↓ walk through (#170, point 6); a collapsed section is not in it.
     visible: std::cell::RefCell<Vec<T>>,
-    /// Le panneau a le focus clavier : sa ligne sélectionnée porte le contour
-    /// de focus.
+    /// The panel has keyboard focus: its selected row carries the focus
+    /// outline.
     has_focus: bool,
 }
 
@@ -838,9 +837,9 @@ impl ObjectManagerPaint<'_> {
             })
             .body(|ui| {
                 crate::tree_lines::tree_children(ui, |ui, branch| {
-                    // Un groupe de séries (#177, #197) est un nœud parent comme
-                    // les autres : en-tête repliable, membres en branche. Une
-                    // série seule reste au niveau du dessus.
+                    // A series group (#177, #197) is a parent node like the
+                    // others: collapsible header, members in a branch. A single
+                    // series stays one level up.
                     for slot in &layer.slots {
                         let y = match slot {
                             LayerSlot::Single(rank) => {
@@ -856,9 +855,9 @@ impl ObjectManagerPaint<'_> {
                         };
                         branch.mark(y);
                     }
-                    // Sortie d'un groupe qui finit la liste (et dépôt en fin de
-                    // liste) : la zone n'existe que pendant un glisser de série
-                    // ou de groupe de ce calque.
+                    // Exit of a group that ends the list (and drop at the end
+                    // of the list): the zone exists only during a drag of a
+                    // series or a group of this layer.
                     if matches!(
                         self.item,
                         Some(DragItem::Series { panel, .. } | DragItem::Group { panel, .. })
@@ -873,7 +872,7 @@ impl ObjectManagerPaint<'_> {
         group_toggle.rect.center().y
     }
 
-    /// La zone « fin de la liste » : une ligne grisée sous la dernière série.
+    /// The "end of the list" zone: a grayed row under the last series.
     fn end_zone(&self, ui: &mut egui::Ui, panel: usize) -> f32 {
         let row = ui.horizontal(|ui| ui.weak(tr!("object-drag-end"))).response;
         if ui.rect_contains_pointer(row.rect) {
@@ -882,9 +881,9 @@ impl ObjectManagerPaint<'_> {
         row.rect.center().y
     }
 
-    /// Un groupe de séries (#197) : le nœud, sa case de visibilité mixte, son
-    /// nom (éditable sur place) et ses membres en branche `tree_lines`. Le
-    /// repli initial est celui de « Series » (#139).
+    /// A series group (#197): the node, its mixed visibility checkbox, its name
+    /// (editable in place) and its members in a `tree_lines` branch. The
+    /// initial collapse state is that of "Series" (#139).
     fn series_group(
         &self,
         ui: &mut egui::Ui,
@@ -922,10 +921,10 @@ impl ObjectManagerPaint<'_> {
         toggle.rect.center().y
     }
 
-    /// L'en-tête d'un groupe : une ligne de liste (#169) sous la case et le
-    /// nom, sélectionnable, ouvrant la fenêtre des séries au double-clic. Sa
-    /// poignée déplace le groupe en bloc ; une série glissée dessus le rejoint
-    /// (moitié basse) ou se pose avant lui (moitié haute).
+    /// A group's header: a list row (#169) under the checkbox and the name,
+    /// selectable, opening the series window on double-click. Its handle moves
+    /// the group as a block; a series dragged onto it joins it (lower half) or
+    /// is placed before it (upper half).
     fn group_header(
         &self,
         ui: &mut egui::Ui,
@@ -1023,7 +1022,7 @@ impl ObjectManagerPaint<'_> {
         selected: &mut Option<T>,
     ) -> f32 {
         let id = ui.make_persistent_id((self.graph, layer.index, "axes"));
-        // Le défaut vient des préférences (#139), sans écraser un repli déjà choisi.
+        // The default comes from the preferences (#139), without overriding a collapse state already chosen.
         let (axes_toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
             ui.ctx(),
             id,
@@ -1107,13 +1106,13 @@ impl ObjectManagerPaint<'_> {
     ) -> f32 {
         self.visible.borrow_mut().push(T::Series(series.target));
         ui.push_id(series.target, |ui| {
-            // #169 : une ligne de liste, fond posé sous la case et l'échantillon.
+            // #169: a list row, background placed under the checkbox and the swatch.
             let background = ListRowBackground::reserve(ui);
             let target = series.target;
             let row = with_list_row_height(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // La poignée en tête (comme les formats de copie des
-                    // préférences) : la ligne se glisse, les autres s'écartent.
+                    // The handle first (like the copy formats of the
+                    // preferences): the row is dragged, the others move aside.
                     let outcome = reorder_row_with(
                         ui,
                         ui.id().with("row"),
@@ -1147,10 +1146,10 @@ impl ObjectManagerPaint<'_> {
                             }
                             let text = list_row_text(&series.label, series.selected)
                                 .color(list_row_text_color(ui, series.selected, false));
-                            // #151 : l'échantillon de légende fait partie de la cible,
-                            // comme le nom. Toute la ligne, hors case, saisit et
-                            // clique : on unit les gestes avant de traiter sélection
-                            // et propriétés.
+                            // #151: the legend swatch is part of the target,
+                            // like the name. The whole row, checkbox aside, grabs
+                            // and clicks: we join the gestures before handling
+                            // selection and properties.
                             let response = list_row_grip(ui, text, series.selected).union(swatch);
                             if response.clicked() || response.secondary_clicked() {
                                 requests.push(ObjectManagerRequest::Select(T::Series(target)));
@@ -1230,8 +1229,8 @@ pub(super) fn series_shortcuts(
     }
 }
 
-/// Les raccourcis d'un groupe de séries sélectionné (#197) : F2 renomme,
-/// Ctrl+↑/↓ le déplace en bloc. Suppr est celui de tous les contenus.
+/// Shortcuts of a selected series group (#197): F2 renames,
+/// Ctrl+↑/↓ moves it as a block. Delete is the one of all contents.
 pub(super) fn group_shortcuts(
     ctx: &egui::Context,
     graph: NodeId,
@@ -1258,9 +1257,9 @@ pub(super) fn group_shortcuts(
     }
 }
 
-/// Le renommage d'un groupe en cours (#197), tenu dans la mémoire d'egui sous
-/// l'identité du graphe : le panneau fixe et sa copie détachée partagent le
-/// même éditeur, qui n'existe que dans l'arbre.
+/// The group rename in progress (#197), held in egui's memory under the
+/// graph's identity: the fixed panel and its detached copy share the same
+/// editor, which exists only in the tree.
 #[derive(Clone)]
 struct GroupRename {
     target: stokesforge_plot::SeriesGroupRef,
@@ -1281,8 +1280,8 @@ fn group_rename_of(
         .filter(|rename| rename.target == target)
 }
 
-/// Pour les tests des autres surfaces (raccourcis du graphe) : un renommage
-/// du groupe `target` est-il en attente ?
+/// For the tests of the other surfaces (graph shortcuts): is a rename of the
+/// group `target` pending?
 #[cfg(test)]
 pub(super) fn group_rename_pending(
     ctx: &egui::Context,
@@ -1292,7 +1291,7 @@ pub(super) fn group_rename_pending(
     group_rename_of(ctx, graph, target).is_some()
 }
 
-/// Ouvre l'éditeur du nom du groupe `group` dans l'arbre.
+/// Opens the editor of the name of the group `group` in the tree.
 pub(super) fn open_group_name_editor(
     ctx: &egui::Context,
     spec: &stokesforge_plot::PlotSpec,
@@ -1318,9 +1317,9 @@ pub(super) fn open_group_name_editor(
     });
 }
 
-/// Le champ du nom à la place du libellé, au contrat commun de
-/// [`inplace_edit`](super::inplace_edit) : Entrée, Tab ou un clic ailleurs
-/// valident (une seule action, et aucune si le nom n'a pas changé), Échap annule.
+/// The name field in place of the label, under the common contract of
+/// [`inplace_edit`](super::inplace_edit): Enter, Tab or a click elsewhere
+/// commit (a single action, and none if the name did not change), Escape cancels.
 fn group_name_editor(
     ui: &mut egui::Ui,
     graph: NodeId,
@@ -1370,10 +1369,10 @@ fn object_manager_object_row(
 ) -> f32 {
     dnd.visible.borrow_mut().push(object.target);
     ui.push_id(object.target, |ui| {
-        // #169 : une ligne de liste, fond posé sous la case et l'icône.
+        // #169: a list row, background placed under the checkbox and the icon.
         let background = ListRowBackground::reserve(ui);
-        // Un texte libre ou une forme se réordonne **dans sa catégorie** ; les
-        // axes ne bougent pas.
+        // A free text or a shape is reordered **within its category**; the
+        // axes do not move.
         let draggable = match object.target {
             T::Annotation(r) => Some((
                 DragItem::Text {
@@ -1560,7 +1559,7 @@ impl StokesForgeApp {
         }
     }
 
-    /// L'arbre et le menu Graph partagent les mêmes gestes de vue et Action.
+    /// The tree and the Graph menu share the same view gestures and Action.
     pub(super) fn run_object_manager_request(
         &mut self,
         ctx: &egui::Context,
@@ -1576,8 +1575,8 @@ impl StokesForgeApp {
     }
 }
 
-/// Exécute une demande d'objet sur la vue du graphe : la même pour le
-/// panneau, Graph › Selection et le clic droit dans la figure (#152).
+/// Runs an object request on the graph view: the same for the panel,
+/// Graph › Selection and the right click in the figure (#152).
 pub(super) fn apply_object_request(
     ctx: &egui::Context,
     view: &mut GraphView,
@@ -1624,7 +1623,7 @@ pub(super) fn apply_object_request(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::image_de;
+    use super::super::test_support::frame_of;
     use super::*;
     use egui_kittest::kittest::Queryable;
     use stokesforge_core::Project;
@@ -1636,8 +1635,8 @@ mod tests {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
 
     #[test]
-    fn analyse_du_groupe_garde_ses_membres_et_le_spec_de_la_vue() {
-        let (project, graph, mut spec, _) = trois_series();
+    fn group_analysis_keeps_its_members_and_the_view_spec() {
+        let (project, graph, mut spec, _) = three_series();
         spec.panels.get_mut(0).unwrap().series[0].group = Some(7);
         spec.panels.get_mut(0).unwrap().series[2].group = Some(7);
         let target = T::SeriesGroup(stokesforge_plot::SeriesGroupRef::new(0, 7));
@@ -1664,33 +1663,33 @@ mod tests {
         spec.panels.get_mut(0).unwrap().series[2].row = Some(0);
         assert!(
             analysis_sources(&spec, target).is_empty(),
-            "un groupe mêlant colonnes et lignes ne s'analyse pas d'un coup"
+            "a group mixing columns and rows is not analyzed in one go"
         );
         spec.panels.get_mut(0).unwrap().series[0].row = Some(1);
         assert_eq!(
             analysis_sources(&spec, target),
             vec![SeriesRef::new(0, 0), SeriesRef::new(0, 2)],
-            "un groupe de lignes s'analyse par sa feuille transposée (#253)"
+            "a group of rows is analyzed through its transposed sheet (#253)"
         );
         assert_eq!(
             analysis_sources(&spec, T::Series(SeriesRef::new(0, 0))),
             vec![SeriesRef::new(0, 0)],
-            "une courbe ligne est analysable"
+            "a row curve is analyzable"
         );
     }
 
-    /// Un graphe de trois séries (« Premier », « Deuxième », « Dernier »), la
-    /// première sélectionnée, et son arbre d'Object Manager.
-    fn trois_series() -> (
+    /// A graph of three series ("First", "Second", "Last"), the first selected,
+    /// and its Object Manager tree.
+    fn three_series() -> (
         Project,
         NodeId,
         PlotSpec,
         stokesforge_app_state::object_manager::ObjectTree,
     ) {
-        let mut project = Project::new("Objets").unwrap();
+        let mut project = Project::new("Objects").unwrap();
         let root = project.root();
         let mut panel = PanelSpec::default();
-        for name in ["Premier", "Deuxième", "Dernier"] {
+        for name in ["First", "Second", "Last"] {
             let mut series = SeriesSpec::new(NodeId::from_raw(900));
             series.name = name.into();
             panel.series.push(series);
@@ -1706,8 +1705,8 @@ mod tests {
         (project, graph, spec, model)
     }
 
-    /// Une image de l'Object Manager sur un écran de 600 × 500 : la sortie,
-    /// les actions et les demandes de l'image.
+    /// A frame of the Object Manager on a 600 × 500 screen: the output, the
+    /// actions and the requests of the frame.
     fn image(
         ctx: &egui::Context,
         tree: &Tree,
@@ -1717,7 +1716,7 @@ mod tests {
     ) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>) {
         let mut actions = Vec::new();
         let mut requests = Vec::new();
-        let output = image_de(ctx, egui::vec2(600.0, 500.0), events, |ui| {
+        let output = frame_of(ctx, egui::vec2(600.0, 500.0), events, |ui| {
             requests = object_manager_contents(
                 ui,
                 tree,
@@ -1740,7 +1739,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("texte absent : {text}"))
+            .unwrap_or_else(|| panic!("text missing: {text}"))
     }
 
     fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
@@ -1752,9 +1751,9 @@ mod tests {
         }
     }
 
-    /// Pilote un vrai clic sur une surface peinte, sans appeler le menu
-    /// directement : les popup racine et les sous-menus participent au geste.
-    fn clic_menu(
+    /// Drives a real click on a painted surface, without calling the menu
+    /// directly: root popups and submenus take part in the gesture.
+    fn click_menu(
         paint: &impl Fn(Vec<egui::Event>) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>),
         pos: egui::Pos2,
         button: egui::PointerButton,
@@ -1775,15 +1774,15 @@ mod tests {
     }
 
     #[test]
-    fn clic_droit_du_fond_affichage_bascule_les_filtres_et_garde_les_menus_ouverts() {
+    fn right_click_on_the_display_background_toggles_the_filters_and_keeps_menus_open() {
         use super::super::test_support::painted;
-        let (project, _, spec, model) = trois_series();
-        let ctx = super::super::test_support::contexte();
+        let (project, _, spec, model) = three_series();
+        let ctx = super::super::test_support::context();
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         paint(Vec::new());
-        clic_menu(
+        click_menu(
             &paint,
             egui::pos2(300.0, 300.0),
             egui::PointerButton::Secondary,
@@ -1791,14 +1790,14 @@ mod tests {
         let output = paint(Vec::new()).0;
         assert!(
             painted(&output, &tr!("object-manager-show-axes")),
-            "les réglages sont au premier niveau, sans enveloppe"
+            "the settings are at the first level, without a wrapper"
         );
         assert!(painted(&output, &tr!("object-manager-reset")));
         {
             let key = tr!("object-manager-show-axes");
             let expected = Action::SetObjectManagerShowScales(true);
             let output = paint(Vec::new()).0;
-            let (_, actions, requests) = clic_menu(
+            let (_, actions, requests) = click_menu(
                 &paint,
                 text_center(&output, &key),
                 egui::PointerButton::Primary,
@@ -1809,32 +1808,32 @@ mod tests {
             let output = paint(Vec::new()).0;
             assert!(
                 painted(&output, &tr!("object-manager-reset")),
-                "le menu racine reste ouvert"
+                "the root menu stays open"
             );
             assert!(painted(&output, &tr!("object-manager-show-axes")));
             assert!(painted(&output, &tr!("object-manager-show-axes")));
         }
     }
 
-    /// Les réglages du fond restent disponibles sans graphe ; les cinq
-    /// bascules gardent leur chaîne ouverte, tandis que Réinitialiser ferme.
+    /// The background settings stay available without a graph; the five
+    /// toggles keep their chain open, while Reset closes it.
     #[test]
-    fn clic_droit_sans_graphe_regle_les_cinq_defauts_puis_reinitialise() {
+    fn right_click_without_a_graph_sets_the_five_defaults_then_resets() {
         use super::super::test_support::painted;
-        let project = Project::new("Réglages").unwrap();
+        let project = Project::new("Settings").unwrap();
         let settings = ObjectManagerSettings::default();
-        let ctx = super::super::test_support::contexte();
+        let ctx = super::super::test_support::context();
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let paint = |events| image(&ctx, project.tree(), None, None, events);
         paint(Vec::new());
         paint(Vec::new());
-        clic_menu(
+        click_menu(
             &paint,
             egui::pos2(200.0, 150.0),
             egui::PointerButton::Secondary,
         );
         let output = paint(Vec::new()).0;
-        clic_menu(
+        click_menu(
             &paint,
             text_center(&output, &tr!("object-manager-default-expansion")),
             egui::PointerButton::Primary,
@@ -1854,7 +1853,7 @@ mod tests {
             (ObjectManagerGroup::Objects, tr!("object-manager-objects")),
         ] {
             let output = paint(Vec::new()).0;
-            let (_, actions, requests) = clic_menu(
+            let (_, actions, requests) = click_menu(
                 &paint,
                 text_center(&output, &label),
                 egui::PointerButton::Primary,
@@ -1874,7 +1873,7 @@ mod tests {
             assert!(painted(&output, &label));
         }
         let output = paint(Vec::new()).0;
-        let (_, actions, requests) = clic_menu(
+        let (_, actions, requests) = click_menu(
             &paint,
             text_center(&output, &tr!("object-manager-reset")),
             egui::PointerButton::Primary,
@@ -1888,31 +1887,31 @@ mod tests {
     }
 
     #[test]
-    fn clic_droit_serie_ordre_grise_les_extremes_et_ferme_apres_deplacement() {
-        use super::super::test_support::{painted, texte_exact, textes};
+    fn right_click_on_a_series_grays_the_extremes_and_closes_after_a_move() {
+        use super::super::test_support::{painted, text_exact, texts};
         for (row, source, disabled, enabled, up) in [
             (
-                "Premier",
+                "First",
                 SeriesRef::new(0, 0),
                 tr!("action-move-series-up"),
                 tr!("action-move-series-down"),
                 false,
             ),
             (
-                "Dernier",
+                "Last",
                 SeriesRef::new(0, 2),
                 tr!("action-move-series-down"),
                 tr!("action-move-series-up"),
                 true,
             ),
         ] {
-            let (project, graph, spec, model) = trois_series();
-            let ctx = super::super::test_support::contexte();
+            let (project, graph, spec, model) = three_series();
+            let ctx = super::super::test_support::context();
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
             let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
             paint(Vec::new());
             let output = paint(Vec::new()).0;
-            let (_, actions, requests) = clic_menu(
+            let (_, actions, requests) = click_menu(
                 &paint,
                 text_center(&output, row),
                 egui::PointerButton::Secondary,
@@ -1923,35 +1922,35 @@ mod tests {
             let output = paint(Vec::new()).0;
             assert!(
                 painted(&output, &enabled) && painted(&output, &disabled),
-                "les déplacements sont à plat, sans sous-menu Ordre"
+                "the moves are flat, without an Order submenu"
             );
-            let labels = textes(&output.shapes);
+            let labels = texts(&output.shapes);
             assert_ne!(
-                texte_exact(&labels, &disabled).couleur,
-                texte_exact(&labels, &enabled).couleur,
-                "l'extrême est grisé"
+                text_exact(&labels, &disabled).color,
+                text_exact(&labels, &enabled).color,
+                "the extreme is grayed out"
             );
-            let (_, actions, requests) = clic_menu(
+            let (_, actions, requests) = click_menu(
                 &paint,
                 text_center(&output, &disabled),
                 egui::PointerButton::Primary,
             );
             assert!(
                 actions.is_empty() && requests.is_empty(),
-                "le déplacement interdit ne produit rien"
+                "the forbidden move produces nothing"
             );
-            // Un clic sur un item grisé peut fermer le popup d'egui ; le
-            // geste utile est testé après réouverture de la même série.
+            // A click on a grayed-out item can close egui's popup; the useful
+            // gesture is tested after reopening the same series.
             if !egui::Popup::is_any_open(&ctx) {
                 let output = paint(Vec::new()).0;
-                clic_menu(
+                click_menu(
                     &paint,
                     text_center(&output, row),
                     egui::PointerButton::Secondary,
                 );
             }
             let output = paint(Vec::new()).0;
-            let (_, actions, requests) = clic_menu(
+            let (_, actions, requests) = click_menu(
                 &paint,
                 text_center(&output, &enabled),
                 egui::PointerButton::Primary,
@@ -1968,7 +1967,7 @@ mod tests {
             paint(Vec::new());
             assert!(
                 !egui::Popup::is_any_open(&ctx),
-                "toute la chaîne de menus est fermée"
+                "the whole menu chain is closed"
             );
             let output = paint(Vec::new()).0;
             assert!(!painted(&output, &enabled));
@@ -1984,19 +1983,19 @@ mod tests {
             modifiers,
         }
     }
-    /// Les groupes ont des identités indépendantes ; replier les séries
-    /// laisse les axes et les objets du calque à leur place, et inversement.
+    /// Groups have independent identities; collapsing the series leaves the
+    /// layer's axes and objects in place, and the other way round.
     #[test]
-    fn replier_un_groupe_preserve_les_autres_sections_de_l_arbre() {
-        let mut project = Project::new("Objets").unwrap();
-        let mut spec = PlotSpec::empty("Titre global");
+    fn collapsing_a_group_preserves_the_other_tree_sections() {
+        let mut project = Project::new("Objects").unwrap();
+        let mut spec = PlotSpec::empty("Global title");
         let panel = spec.panels.get_mut(0).unwrap();
         let mut series = SeriesSpec::new(NodeId::from_raw(900));
-        series.name = "Courbe".into();
+        series.name = "Curve".into();
         panel.series.push(series);
         panel
             .annotations
-            .push(AnnotationSpec::new("Note libre", 0.0, 0.0));
+            .push(AnnotationSpec::new("Free note", 0.0, 0.0));
         let graph = project
             .add_graph(project.root(), None, spec.clone())
             .unwrap();
@@ -2038,7 +2037,7 @@ mod tests {
                     }
                     _ => None,
                 })
-                .expect("flèche de repli peinte sur l'en-tête")
+                .expect("collapse arrow painted on the header")
         };
         paint(Vec::new());
         let (output, actions, requests) = paint(Vec::new());
@@ -2047,13 +2046,13 @@ mod tests {
         expected.extend([
             tr!("object-manager-layer", index = 1),
             tr!("object-manager-group"),
-            "Courbe".into(),
+            "Curve".into(),
             tr!("object-manager-axes"),
         ]);
         for axis in &model.layers[0].axes {
             assert!(
                 !labels(&output).contains(&axis.label),
-                "les axes sont repliés par défaut"
+                "the axes are collapsed by default"
             );
         }
         assert!(!model.layers[0].objects.is_empty());
@@ -2061,7 +2060,7 @@ mod tests {
         assert_eq!(
             labels(&output),
             expected,
-            "les sections suivent l'ordre du graphique, « Objects » replié par défaut"
+            "the sections follow the graph order, \"Objects\" collapsed by default"
         );
 
         let click_toggle = |output: &egui::FullOutput, label: &str| {
@@ -2074,59 +2073,59 @@ mod tests {
                 let (_, actions, requests) = paint(events);
                 assert!(
                     actions.is_empty() && requests.is_empty(),
-                    "replier n'est pas une mutation du modèle"
+                    "collapsing is not a model mutation"
                 );
             }
             paint(Vec::new()).0
         };
         let collapsed = click_toggle(&output, &tr!("object-manager-group"));
         let texts = labels(&collapsed);
-        assert!(!texts.iter().any(|text| text == "Courbe"));
+        assert!(!texts.iter().any(|text| text == "Curve"));
         assert!(texts.contains(&tr!("object-manager-objects")));
         for axis in &model.layers[0].axes {
             assert!(
                 !texts.contains(&axis.label),
-                "replier le groupe de tracés ne déplie pas les axes"
+                "collapsing the plots group does not expand the axes"
             );
         }
         let expanded = click_toggle(&collapsed, &tr!("object-manager-group"));
-        assert!(labels(&expanded).iter().any(|text| text == "Courbe"));
+        assert!(labels(&expanded).iter().any(|text| text == "Curve"));
         let with_axes = click_toggle(&expanded, &tr!("object-manager-axes"));
         let texts = labels(&with_axes);
-        assert!(texts.iter().any(|text| text == "Courbe"));
+        assert!(texts.iter().any(|text| text == "Curve"));
         assert!(texts.contains(&tr!("object-manager-objects")));
         for axis in &model.layers[0].axes {
             assert!(
                 texts.contains(&axis.label),
-                "témoin : un clic sur « Axes » déplie les échelles"
+                "witness: a click on \"Axes\" expands the scales"
             );
         }
         let collapsed = click_toggle(&with_axes, &tr!("object-manager-axes"));
         let texts = labels(&collapsed);
-        assert!(texts.iter().any(|text| text == "Courbe"));
+        assert!(texts.iter().any(|text| text == "Curve"));
         for axis in &model.layers[0].axes {
             assert!(
                 !texts.contains(&axis.label),
-                "un second clic replie les axes, et seulement eux"
+                "a second click collapses the axes, and only them"
             );
         }
     }
 
-    /// Chaque famille a un témoin peint ; modifier le défaut doit changer
-    /// un contexte neuf, sans remplacer les états des groupes déjà vus.
+    /// Each family has a painted witness; changing the default must change a
+    /// new context, without replacing the states of the groups already seen.
     #[test]
-    fn les_reglages_initiaux_changent_chaque_groupe_neuf_et_preservent_les_groupes_vus() {
+    fn the_initial_settings_change_each_new_group_and_preserve_the_groups_already_seen() {
         use crate::app::test_support::painted;
-        let mut project = Project::new("Réglages").unwrap();
-        let mut spec = PlotSpec::empty("Titre");
-        spec.title = "Texte global".into();
+        let mut project = Project::new("Settings").unwrap();
+        let mut spec = PlotSpec::empty("Title");
+        spec.title = "Global text".into();
         let panel = spec.panels.get_mut(0).unwrap();
         let mut series = SeriesSpec::new(NodeId::from_raw(900));
-        series.name = "Courbe témoin".into();
+        series.name = "Witness curve".into();
         panel.series.push(series);
         panel
             .annotations
-            .push(AnnotationSpec::new("Texte local", 0.0, 0.0));
+            .push(AnnotationSpec::new("Local text", 0.0, 0.0));
         let graph = project
             .add_graph(project.root(), None, spec.clone())
             .unwrap();
@@ -2144,7 +2143,7 @@ mod tests {
         .unwrap();
         let paint = |ctx: &egui::Context, settings| {
             let mut actions = Vec::new();
-            let output = image_de(ctx, egui::vec2(800.0, 700.0), Vec::new(), |ui| {
+            let output = frame_of(ctx, egui::vec2(800.0, 700.0), Vec::new(), |ui| {
                 let requests = object_manager_contents(
                     ui,
                     project.tree(),
@@ -2155,7 +2154,10 @@ mod tests {
                 );
                 assert!(requests.is_empty());
             });
-            assert!(actions.is_empty(), "un défaut de vue ne mute pas le modèle");
+            assert!(
+                actions.is_empty(),
+                "a view default does not mutate the model"
+            );
             output
         };
         for (group, witness) in [
@@ -2164,28 +2166,28 @@ mod tests {
                 tr!("object-manager-layer", index = 1),
             ),
             (ObjectManagerGroup::Layers, tr!("object-manager-group")),
-            (ObjectManagerGroup::Plots, "Courbe témoin".into()),
+            (ObjectManagerGroup::Plots, "Witness curve".into()),
             (
                 ObjectManagerGroup::Axes,
                 model.layers[0].axes[0].label.clone(),
             ),
-            (ObjectManagerGroup::Objects, "Texte local".into()),
+            (ObjectManagerGroup::Objects, "Local text".into()),
         ] {
-            let ctx = crate::app::test_support::contexte();
+            let ctx = crate::app::test_support::context();
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
             paint(&ctx, settings);
             let baseline = paint(&ctx, settings);
             if group == ObjectManagerGroup::Objects {
                 assert!(
-                    !painted(&baseline, "Texte global"),
-                    "le titre du graphique n'est jamais listé"
+                    !painted(&baseline, "Global text"),
+                    "the graph title is never listed"
                 );
             }
             let expected = settings.group_open(group);
             assert_eq!(
                 painted(&baseline, &witness),
                 expected,
-                "témoin par défaut {group:?}"
+                "default witness {group:?}"
             );
             let mut changed = settings;
             changed.set_group_open(group, !expected);
@@ -2193,24 +2195,24 @@ mod tests {
             assert_eq!(
                 painted(&paint(&ctx, changed), &witness),
                 expected,
-                "le groupe déjà vu garde son état {group:?}"
+                "the group already seen keeps its state {group:?}"
             );
-            let fresh = crate::app::test_support::contexte();
+            let fresh = crate::app::test_support::context();
             fresh.all_styles_mut(|style| style.animation_time = 0.0);
             paint(&fresh, changed);
             let output = paint(&fresh, changed);
             assert_eq!(
                 painted(&output, &witness),
                 !expected,
-                "le nouveau groupe lit le réglage {group:?}"
+                "the new group reads the setting {group:?}"
             );
             if group == ObjectManagerGroup::Objects {
                 assert!(
-                    !painted(&output, "Texte global"),
-                    "le groupe global suit le même réglage mais possède son propre ID"
+                    !painted(&output, "Global text"),
+                    "the global group follows the same setting but owns its own ID"
                 );
             }
-            // Réinitialiser rend les défauts sans modifier les groupes vus.
+            // Reset gives back the defaults without changing the groups seen.
             paint(&fresh, ObjectManagerSettings::default());
             assert_eq!(
                 painted(&paint(&fresh, ObjectManagerSettings::default()), &witness),
@@ -2219,17 +2221,17 @@ mod tests {
         }
     }
 
-    /// F2 renomme et Ctrl+↓ descend la série sélectionnée (clavier, sans glisser).
+    /// F2 renames and Ctrl+↓ moves down the selected series (keyboard, no drag).
     #[test]
-    fn f2_et_ctrl_fleche_agissent_sur_la_serie_selectionnee() {
-        let (project, _graph, spec, model) = trois_series();
+    fn f2_and_ctrl_arrow_act_on_the_selected_series() {
+        let (project, _graph, spec, model) = three_series();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         image(Vec::new());
         let (output, _, _) = image(Vec::new());
-        // Un clic sur la ligne donne le focus clavier au panneau.
-        let on = text_center(&output, "Premier");
+        // A click on the row gives the panel keyboard focus.
+        let on = text_center(&output, "First");
         image(vec![egui::Event::PointerMoved(on)]);
         image(vec![pointer(on, true)]);
         image(vec![pointer(on, false)]);
@@ -2250,9 +2252,9 @@ mod tests {
         ));
     }
 
-    /// Un Object Manager vivant : le spec et son arbre ne changent pas (le
-    /// modèle n'est écrit qu'au relâchement), les actions s'accumulent.
-    struct Banc {
+    /// A live Object Manager: the spec and its tree do not change (the model is
+    /// written only on release), the actions accumulate.
+    struct Bench {
         project: Project,
         model: stokesforge_app_state::object_manager::ObjectTree,
         spec: PlotSpec,
@@ -2267,28 +2269,28 @@ mod tests {
         stokesforge_app_state::object_manager::ObjectTree,
     );
 
-    fn banc(fixture: Fixture) -> egui_kittest::Harness<'static, Banc> {
-        banc_avec(fixture, ObjectManagerSettings::default())
+    fn bench(fixture: Fixture) -> egui_kittest::Harness<'static, Bench> {
+        bench_with(fixture, ObjectManagerSettings::default())
     }
 
-    fn banc_avec(
+    fn bench_with(
         (project, _graph, spec, model): Fixture,
         settings: ObjectManagerSettings,
-    ) -> egui_kittest::Harness<'static, Banc> {
+    ) -> egui_kittest::Harness<'static, Bench> {
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(420.0, 420.0))
             .build_ui_state(
-                |ui, banc: &mut Banc| {
+                |ui, bench: &mut Bench| {
                     object_manager_contents(
                         ui,
-                        banc.project.tree(),
-                        Some(&banc.model),
-                        Some(&banc.spec),
-                        banc.settings,
-                        &mut banc.actions,
+                        bench.project.tree(),
+                        Some(&bench.model),
+                        Some(&bench.spec),
+                        bench.settings,
+                        &mut bench.actions,
                     );
                 },
-                Banc {
+                Bench {
                     project,
                     model,
                     spec,
@@ -2304,19 +2306,19 @@ mod tests {
         harness
     }
 
-    /// La zone de saisie d'une ligne (son libellé), par son nom.
-    fn poignee(harness: &egui_kittest::Harness<'static, Banc>, nom: &str) -> egui::Rect {
-        harness.get_by_label(nom).rect()
+    /// A row's grab area (its label), by name.
+    fn handle(harness: &egui_kittest::Harness<'static, Bench>, name: &str) -> egui::Rect {
+        harness.get_by_label(name).rect()
     }
 
-    /// Saisit la poignée de `nom`, la mène au point `vers` (en plusieurs
-    /// images, comme une main) et relâche. Les actions émises sont rendues.
-    fn glisser(
-        harness: &mut egui_kittest::Harness<'static, Banc>,
-        nom: &str,
-        vers: impl Fn(&egui_kittest::Harness<'static, Banc>) -> egui::Pos2,
+    /// Grabs the handle of `name`, takes it to the point `target_of` (over
+    /// several frames, like a hand) and releases. The emitted actions are returned.
+    fn drag(
+        harness: &mut egui_kittest::Harness<'static, Bench>,
+        name: &str,
+        target_of: impl Fn(&egui_kittest::Harness<'static, Bench>) -> egui::Pos2,
     ) -> Vec<Action> {
-        let from = poignee(harness, nom).center();
+        let from = handle(harness, name).center();
         harness.hover_at(from);
         harness.step();
         harness.drag_at(from);
@@ -2325,35 +2327,35 @@ mod tests {
         harness.step();
         harness.hover_at(from + egui::vec2(20.0, 0.0));
         harness.step();
-        // La cible se lit une fois : la liste se réordonne sous le pointeur.
-        let to = vers(harness);
+        // The target is read once: the list reorders under the pointer.
+        let to = target_of(harness);
         for _ in 0..3 {
             harness.hover_at(to);
             harness.step();
         }
         assert!(
             harness.state().actions.is_empty(),
-            "l'aperçu n'écrit pas le modèle"
+            "the preview does not write the model"
         );
         harness.drop_at(to);
         harness.run();
         std::mem::take(&mut harness.state_mut().actions)
     }
 
-    /// Le haut de la ligne de `nom` (moitié haute).
-    fn haut_de(nom: &'static str) -> impl Fn(&egui_kittest::Harness<'static, Banc>) -> egui::Pos2 {
+    /// The top of the row of `name` (upper half).
+    fn top_of(name: &'static str) -> impl Fn(&egui_kittest::Harness<'static, Bench>) -> egui::Pos2 {
         move |harness| {
-            let rect = poignee(harness, nom);
+            let rect = handle(harness, name);
             egui::pos2(rect.center().x, rect.top() + 1.0)
         }
     }
 
-    /// Glisser « Premier » sur « Dernier » : une seule action, au relâchement,
-    /// avec le rang final.
+    /// Drag "First" onto "Last": a single action, on release, with the final
+    /// rank.
     #[test]
-    fn glisser_une_serie_seule_emet_un_seul_placement_au_relachement() {
-        let mut harness = banc(trois_series());
-        let actions = glisser(&mut harness, "Premier", |h| poignee(h, "Dernier").center());
+    fn dragging_a_single_series_emits_one_placement_on_release() {
+        let mut harness = bench(three_series());
+        let actions = drag(&mut harness, "First", |h| handle(h, "Last").center());
         assert!(
             matches!(
                 actions.as_slice(),
@@ -2369,26 +2371,24 @@ mod tests {
         harness.run();
         assert!(
             harness.state().actions.is_empty(),
-            "le dépôt ne se répète pas à l'image suivante"
+            "the drop does not repeat on the next frame"
         );
     }
 
-    /// Lâcher une série là où elle était ne demande rien.
+    /// Dropping a series where it was asks for nothing.
     #[test]
-    fn relacher_sur_place_ne_demande_rien() {
-        let mut harness = banc(trois_series());
-        let actions = glisser(&mut harness, "Deuxième", |h| {
-            poignee(h, "Deuxième").center()
-        });
+    fn releasing_in_place_asks_for_nothing() {
+        let mut harness = bench(three_series());
+        let actions = drag(&mut harness, "Second", |h| handle(h, "Second").center());
         assert!(actions.is_empty());
     }
 
-    /// Une série seule glissée sur un membre d'un groupe y entre, au rang de
-    /// la ligne survolée.
+    /// A single series dragged onto a group member enters it, at the rank of
+    /// the hovered row.
     #[test]
-    fn glisser_une_serie_seule_sur_un_membre_la_fait_entrer_dans_le_groupe() {
-        let mut harness = banc(groupe_nomme());
-        let actions = glisser(&mut harness, "Premier", haut_de("Deuxième"));
+    fn dragging_a_single_series_onto_a_member_makes_it_enter_the_group() {
+        let mut harness = bench(named_group());
+        let actions = drag(&mut harness, "First", top_of("Second"));
         assert!(
             matches!(
                 actions.as_slice(),
@@ -2402,11 +2402,11 @@ mod tests {
         );
     }
 
-    /// Un membre glissé sur une série seule quitte son groupe.
+    /// A member dragged onto a single series leaves its group.
     #[test]
-    fn glisser_un_membre_sur_une_serie_seule_le_fait_sortir_du_groupe() {
-        let mut harness = banc(groupe_nomme());
-        let actions = glisser(&mut harness, "Dernier", haut_de("Premier"));
+    fn dragging_a_member_onto_a_single_series_makes_it_leave_the_group() {
+        let mut harness = bench(named_group());
+        let actions = drag(&mut harness, "Last", top_of("First"));
         assert!(
             matches!(
                 actions.as_slice(),
@@ -2421,16 +2421,16 @@ mod tests {
         );
     }
 
-    /// La zone « fin de la liste » n'existe que pendant un glisser, et sort
-    /// d'un groupe qui finit la liste.
+    /// The "end of the list" zone exists only during a drag, and takes a member
+    /// out of a group that ends the list.
     #[test]
-    fn la_zone_de_fin_sort_un_membre_d_un_groupe_qui_finit_la_liste() {
-        let mut harness = banc(groupe_nomme());
+    fn the_end_zone_takes_a_member_out_of_a_group_that_ends_the_list() {
+        let mut harness = bench(named_group());
         assert!(
             harness.query_by_label(&tr!("object-drag-end")).is_none(),
-            "pas de zone hors glisser"
+            "no zone outside a drag"
         );
-        let actions = glisser(&mut harness, "Dernier", |h| {
+        let actions = drag(&mut harness, "Last", |h| {
             h.get_by_label(&tr!("object-drag-end")).rect().center()
         });
         assert!(
@@ -2447,11 +2447,11 @@ mod tests {
         );
     }
 
-    /// Un groupe se glisse en bloc par la poignée de son en-tête.
+    /// A group is dragged as a block by the handle of its header.
     #[test]
-    fn glisser_l_entete_d_un_groupe_le_deplace_en_bloc() {
-        let mut harness = banc(groupe_nomme());
-        let actions = glisser(&mut harness, "Lots", haut_de("Premier"));
+    fn dragging_a_group_header_moves_it_as_a_block() {
+        let mut harness = bench(named_group());
+        let actions = drag(&mut harness, "Sets", top_of("First"));
         assert!(
             matches!(
                 actions.as_slice(),
@@ -2465,13 +2465,13 @@ mod tests {
         );
     }
 
-    /// Un texte libre se réordonne parmi les textes ; jamais parmi les formes.
+    /// A free text is reordered among the texts; never among the shapes.
     #[test]
-    fn les_objets_libres_gardent_leur_categorie_au_glisser() {
-        let mut project = Project::new("Objets").unwrap();
+    fn free_objects_keep_their_category_when_dragged() {
+        let mut project = Project::new("Objects").unwrap();
         let root = project.root();
         let mut panel = PanelSpec::default();
-        for note in ["Pic", "Creux"] {
+        for note in ["Peak", "Trough"] {
             panel.annotations.push(AnnotationSpec::new(note, 0.0, 0.0));
         }
         for kind in [ShapeKind::Line, ShapeKind::Arrow] {
@@ -2491,8 +2491,8 @@ mod tests {
             objects_open: true,
             ..ObjectManagerSettings::default()
         };
-        let mut harness = banc_avec((project, graph, spec, model), settings);
-        let actions = glisser(&mut harness, "Creux", haut_de("Pic"));
+        let mut harness = bench_with((project, graph, spec, model), settings);
+        let actions = drag(&mut harness, "Trough", top_of("Peak"));
         assert!(
             matches!(
                 actions.as_slice(),
@@ -2504,21 +2504,21 @@ mod tests {
             ),
             "{actions:?}"
         );
-        // Un texte sur une forme : rien ne bouge.
-        let actions = glisser(&mut harness, "Pic", |h| {
-            poignee(h, &tr!("tool-line")).center()
+        // A text onto a shape: nothing moves.
+        let actions = drag(&mut harness, "Peak", |h| {
+            handle(h, &tr!("tool-line")).center()
         });
         assert!(actions.is_empty(), "{actions:?}");
     }
 
-    /// #151 : le clic droit doit cibler la ligne visée, même si une autre
-    /// courbe est sélectionnée. Le menu peint est commun au panneau détaché.
+    /// #151: the right click must target the aimed row, even if another curve
+    /// is selected. The painted menu is common to the detached panel.
     #[test]
-    fn clic_droit_supprime_la_courbe_visee_et_ferme_le_menu() {
+    fn right_click_deletes_the_targeted_curve_and_closes_the_menu() {
         use super::super::test_support::painted;
         for swatch in [false, true] {
-            let (project, graph, spec, model) = trois_series();
-            let ctx = super::super::test_support::contexte();
+            let (project, graph, spec, model) = three_series();
+            let ctx = super::super::test_support::context();
             let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
             paint(Vec::new());
             let (output, _, _) = paint(Vec::new());
@@ -2527,25 +2527,25 @@ mod tests {
                     .shapes
                     .iter()
                     .find_map(|shape| match &shape.shape {
-                        egui::Shape::Text(text) if text.galley.text() == "Deuxième" => {
+                        egui::Shape::Text(text) if text.galley.text() == "Second" => {
                             Some(text.visual_bounding_rect())
                         }
                         _ => None,
                     })
                     .unwrap();
-                // Le trait de légende est immédiatement à gauche du bouton.
+                // The legend line is right to the left of the button.
                 egui::pos2(text_rect.left() - 24.0, text_rect.center().y)
             } else {
-                text_center(&output, "Deuxième")
+                text_center(&output, "Second")
             };
-            let (_, actions, requests) = clic_menu(&paint, row, egui::PointerButton::Secondary);
+            let (_, actions, requests) = click_menu(&paint, row, egui::PointerButton::Secondary);
             assert!(actions.is_empty());
             assert!(requests.iter().any(|request| matches!(request,
                 ObjectManagerRequest::Select(T::Series(series)) if *series == SeriesRef::new(0, 1)
             )));
             let (output, _, _) = paint(Vec::new());
             let delete = text_center(&output, &tr!("action-delete-content"));
-            let (_, actions, _) = clic_menu(&paint, delete, egui::PointerButton::Primary);
+            let (_, actions, _) = click_menu(&paint, delete, egui::PointerButton::Primary);
             assert_eq!(
                 actions,
                 vec![Action::RemovePlotObject {
@@ -2560,34 +2560,37 @@ mod tests {
     }
 
     #[test]
-    fn clic_droit_analyse_la_courbe_visee_dans_object_manager() {
-        let (project, _, spec, model) = trois_series();
-        let ctx = super::super::test_support::contexte();
+    fn right_click_analyzes_the_targeted_curve_in_the_object_manager() {
+        let (project, _, spec, model) = three_series();
+        let ctx = super::super::test_support::context();
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         let (output, _, _) = paint(Vec::new());
-        let row = text_center(&output, "Deuxième");
-        clic_menu(&paint, row, egui::PointerButton::Secondary);
+        let row = text_center(&output, "Second");
+        click_menu(&paint, row, egui::PointerButton::Secondary);
         let (output, _, _) = paint(Vec::new());
         let submenu = text_center(&output, &tr!("menu-analysis"));
-        clic_menu(&paint, submenu, egui::PointerButton::Primary);
+        click_menu(&paint, submenu, egui::PointerButton::Primary);
         let (output, _, _) = paint(Vec::new());
         let entry = text_center(&output, &tr!("action-analysis-open-data-manipulation"));
-        let (_, actions, requests) = clic_menu(&paint, entry, egui::PointerButton::Primary);
-        assert!(actions.is_empty(), "la vue doit encore fournir le cadrage");
+        let (_, actions, requests) = click_menu(&paint, entry, egui::PointerButton::Primary);
+        assert!(
+            actions.is_empty(),
+            "the view must still provide the framing"
+        );
         assert!(requests.iter().any(|request| matches!(request,
             ObjectManagerRequest::Analysis(T::Series(series), stokesforge_app_state::analysis::Category::DataManipulation) if *series == SeriesRef::new(0, 1)
         )));
     }
 
-    /// #169 : la série sélectionnée est une ligne de liste — fond pâle
-    /// d'accent sous la case, l'échantillon et le nom, filet d'accent à
-    /// gauche, nom en gras —, comme dans le Project Manager ; plus le fond
-    /// `selection.bg_fill` d'un bouton. Témoin : les séries non choisies.
+    /// #169: the selected series is a list row — pale accent background under
+    /// the checkbox, the swatch and the name, accent bar on the left, name in
+    /// bold —, as in the Project Manager; no longer the `selection.bg_fill`
+    /// of a button. Witness: the unselected series.
     #[test]
-    fn la_serie_selectionnee_est_une_ligne_de_liste_a_filet() {
-        let (project, _graph, spec, model) = trois_series();
-        let ctx = super::super::test_support::contexte();
+    fn the_selected_series_is_a_list_row_with_a_bar() {
+        let (project, _graph, spec, model) = three_series();
+        let ctx = super::super::test_support::context();
         image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         let rects = |fill: egui::Color32| -> Vec<(usize, egui::Rect)> {
@@ -2603,79 +2606,85 @@ mod tests {
         };
         let rows = rects(crate::theme::list_row_selected_fill());
         let marks = rects(crate::theme::accent());
-        assert_eq!(rows.len(), 1, "une seule ligne sélectionnée : {rows:?}");
-        assert_eq!(marks.len(), 1, "un seul filet : {marks:?}");
+        assert_eq!(rows.len(), 1, "a single selected row: {rows:?}");
+        assert_eq!(marks.len(), 1, "a single bar: {marks:?}");
         let (row_index, row) = rows[0];
         let (_, mark) = marks[0];
-        assert_eq!(mark.left(), row.left(), "le filet est à gauche de la ligne");
+        assert_eq!(mark.left(), row.left(), "the bar is at the left of the row");
         assert_eq!(mark.width(), super::super::list_row::LIST_ROW_MARK);
         assert_eq!(mark.height(), row.height());
-        let premier = text_center(&output, "Premier");
-        assert!(row.y_range().contains(premier.y), "la ligne porte le nom");
-        assert!(row.left() < premier.x - 30.0, "et la case, l'échantillon");
+        let first = text_center(&output, "First");
+        assert!(row.y_range().contains(first.y), "the row carries the name");
+        assert!(row.left() < first.x - 30.0, "and the checkbox, the swatch");
         assert!(
             row.right() > 400.0,
-            "sur toute la largeur restante : {row:?}"
+            "over the whole remaining width: {row:?}"
         );
-        let premier_index = output
+        let first_index = output
             .shapes
             .iter()
-            .position(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Premier"))
+            .position(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "First"))
             .unwrap();
-        assert!(row_index < premier_index, "le fond passe sous le nom");
+        assert!(
+            row_index < first_index,
+            "the background goes under the name"
+        );
         let button_fill = ctx.global_style().visuals.selection.bg_fill;
-        assert!(rects(button_fill).is_empty(), "plus de fond de bouton");
-        let peints = super::super::test_support::textes(&output.shapes);
-        let gras = |nom: &str| peints.iter().any(|t| t.texte == nom && t.gras);
-        assert!(gras("Premier"), "la série sélectionnée est en gras");
-        assert!(!gras("Deuxième") && !gras("Dernier"), "témoin : les autres");
+        assert!(rects(button_fill).is_empty(), "no more button background");
+        let painted_texts = super::super::test_support::texts(&output.shapes);
+        let is_bold = |name: &str| painted_texts.iter().any(|t| t.text == name && t.bold);
+        assert!(is_bold("First"), "the selected series is bold");
+        assert!(
+            !is_bold("Second") && !is_bold("Last"),
+            "witness: the others"
+        );
     }
 
-    /// #170, point 5 : un groupe, une série et un objet libre sélectionnés
-    /// peignent un fond de la même hauteur, `LIST_ROW_HEIGHT` ; les connecteurs
-    /// en L (#112) visent le centre de cette hauteur. Témoin : sans la hauteur
-    /// imposée, la rangée retombe à celle de ses widgets (18 px) et le test
-    /// échoue.
+    /// #170, point 5: a selected group, series and free object paint a
+    /// background of the same height, `LIST_ROW_HEIGHT`; the L connectors
+    /// (#112) aim at the center of that height. Witness: without the imposed
+    /// height, the row falls back to that of its widgets (18 px) and the test
+    /// fails.
     #[test]
-    fn groupe_serie_et_objet_ont_la_meme_hauteur_de_ligne() {
+    fn group_series_and_object_have_the_same_row_height() {
         use super::super::list_row::LIST_ROW_HEIGHT;
-        let (mut project, graph, mut spec, _) = trois_series();
+        let (mut project, graph, mut spec, _) = three_series();
         let panel = spec.panels.get_mut(0).unwrap();
         panel.series[1].group = Some(1);
         panel.series[2].group = Some(1);
-        assert!(panel.rename_group(1, "Lots"));
+        assert!(panel.rename_group(1, "Sets"));
         panel
             .shapes
             .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
         project
             .set_plot_spec(graph, spec.clone())
-            .expect("spec avec groupe et forme");
+            .expect("spec with group and shape");
         let settings = ObjectManagerSettings {
             objects_open: true,
             ..ObjectManagerSettings::default()
         };
-        let cibles = [
+        let targets = [
             (
-                "groupe",
+                "group",
                 T::SeriesGroup(stokesforge_plot::SeriesGroupRef::new(0, 1)),
             ),
-            ("série", T::Series(SeriesRef::new(0, 0))),
-            ("objet", T::Shape(ShapeRef { panel: 0, index: 0 })),
+            ("series", T::Series(SeriesRef::new(0, 0))),
+            ("object", T::Shape(ShapeRef { panel: 0, index: 0 })),
         ];
-        for (nature, cible) in cibles {
+        for (kind, target) in targets {
             let model = stokesforge_app_state::object_manager::object_tree_with_selection(
                 project.tree(),
                 graph,
-                Some(cible),
+                Some(target),
                 false,
                 true,
             )
             .unwrap();
-            let ctx = super::super::test_support::contexte();
+            let ctx = super::super::test_support::context();
             let mut actions = Vec::new();
-            let mut sortie = None;
+            let mut output = None;
             for _ in 0..3 {
-                sortie = Some(image_de(&ctx, egui::vec2(600.0, 500.0), Vec::new(), |ui| {
+                output = Some(frame_of(&ctx, egui::vec2(600.0, 500.0), Vec::new(), |ui| {
                     object_manager_contents(
                         ui,
                         project.tree(),
@@ -2686,11 +2695,11 @@ mod tests {
                     );
                 }));
             }
-            let sortie = sortie.unwrap();
-            let fonds: Vec<egui::Rect> = sortie
+            let output = output.unwrap();
+            let backgrounds: Vec<egui::Rect> = output
                 .shapes
                 .iter()
-                .filter_map(|peint| match &peint.shape {
+                .filter_map(|item| match &item.shape {
                     egui::Shape::Rect(rect)
                         if rect.fill == crate::theme::list_row_selected_fill() =>
                     {
@@ -2699,146 +2708,146 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(fonds.len(), 1, "{nature} : une ligne sélectionnée");
-            assert_eq!(fonds[0].height(), LIST_ROW_HEIGHT, "{nature}");
-            // Le fond impose sa hauteur minimale : la rangée elle-même doit la
-            // remplir, donc le texte de la ligne est centré dans le fond.
-            let centres: Vec<f32> = sortie
+            assert_eq!(backgrounds.len(), 1, "{kind}: one selected row");
+            assert_eq!(backgrounds[0].height(), LIST_ROW_HEIGHT, "{kind}");
+            // The background imposes its minimum height: the row itself must
+            // fill it, so the row's text is centered in the background.
+            let centers: Vec<f32> = output
                 .shapes
                 .iter()
-                .filter_map(|peint| match &peint.shape {
-                    egui::Shape::Text(texte) if !texte.galley.text().is_empty() => {
-                        let y = texte.pos.y + texte.galley.rect.center().y;
-                        fonds[0].y_range().contains(y).then_some(y)
+                .filter_map(|item| match &item.shape {
+                    egui::Shape::Text(text) if !text.galley.text().is_empty() => {
+                        let y = text.pos.y + text.galley.rect.center().y;
+                        backgrounds[0].y_range().contains(y).then_some(y)
                     }
                     _ => None,
                 })
                 .collect();
-            assert!(!centres.is_empty(), "{nature} : un texte sur la ligne");
-            for y in centres {
+            assert!(!centers.is_empty(), "{kind}: a text on the row");
+            for y in centers {
                 assert!(
-                    (y - fonds[0].center().y).abs() < 1.0,
-                    "{nature} : texte à {y}, ligne centrée à {}",
-                    fonds[0].center().y
+                    (y - backgrounds[0].center().y).abs() < 1.0,
+                    "{kind}: text at {y}, row centered at {}",
+                    backgrounds[0].center().y
                 );
             }
         }
     }
 
-    /// Trois séries, les deux dernières en groupe nommé « Lots » (#197), et
-    /// l'arbre d'Object Manager de ce graphe.
-    fn groupe_nomme() -> (
+    /// Three series, the last two in a group named "Sets" (#197), and the
+    /// Object Manager tree of that graph.
+    fn named_group() -> (
         Project,
         NodeId,
         PlotSpec,
         stokesforge_app_state::object_manager::ObjectTree,
     ) {
-        let (mut project, graph, mut spec, _) = trois_series();
+        let (mut project, graph, mut spec, _) = three_series();
         let panel = spec.panels.get_mut(0).unwrap();
         panel.series[1].group = Some(1);
         panel.series[2].group = Some(1);
-        assert!(panel.rename_group(1, "Lots"));
+        assert!(panel.rename_group(1, "Sets"));
         project
             .set_plot_spec(graph, spec.clone())
-            .expect("spec avec groupe");
+            .expect("spec with group");
         let model = stokesforge_app_state::object_manager::object_tree(project.tree(), graph, None)
             .unwrap();
         (project, graph, spec, model)
     }
 
-    /// #177, #197 : un groupe est un nœud parent comme les autres — un
-    /// en-tête qui porte son nom, puis ses séries en branche, plus à droite
-    /// que l'en-tête ; une série seule reste au niveau du dessus.
+    /// #177, #197: a group is a parent node like the others — a header that
+    /// carries its name, then its series in a branch, further right than the
+    /// header; a single series stays one level up.
     #[test]
-    fn un_groupe_est_un_noeud_parent_dont_les_membres_sont_en_branche() {
-        let (project, _, spec, model) = groupe_nomme();
-        let ctx = super::super::test_support::contexte();
+    fn a_group_is_a_parent_node_whose_members_are_in_a_branch() {
+        let (project, _, spec, model) = named_group();
+        let ctx = super::super::test_support::context();
         image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
-        let seule = text_center(&output, "Premier");
-        let membre = text_center(&output, "Deuxième");
-        let en_tete = text_center(&output, "Lots");
+        let single = text_center(&output, "First");
+        let member = text_center(&output, "Second");
+        let header = text_center(&output, "Sets");
         assert!(
-            en_tete.y > seule.y && en_tete.y < membre.y,
-            "l'en-tête précède ses membres : {en_tete:?}"
+            header.y > single.y && header.y < member.y,
+            "the header precedes its members: {header:?}"
         );
         assert!(
-            membre.x > en_tete.x && text_center(&output, "Dernier").x > en_tete.x,
-            "les membres sont plus à droite que l'en-tête"
+            member.x > header.x && text_center(&output, "Last").x > header.x,
+            "the members are further right than the header"
         );
         assert_eq!(
-            super::super::test_support::textes(&output.shapes)
+            super::super::test_support::texts(&output.shapes)
                 .iter()
-                .filter(|t| t.texte == tr!("curve-group-name", number = 1))
+                .filter(|t| t.text == tr!("curve-group-name", number = 1))
                 .count(),
             0,
-            "le nom donné remplace « Group 1 » partout"
+            "the given name replaces \"Group 1\" everywhere"
         );
     }
 
-    /// #197 : replier un groupe cache ses membres, jamais ses courbes — la
-    /// case de visibilité du groupe est mixte quand ses membres divergent.
+    /// #197: collapsing a group hides its rows, never its curves — the group's
+    /// visibility checkbox is mixed when its members differ.
     #[test]
-    fn replier_un_groupe_cache_ses_lignes_et_pas_ses_courbes() {
-        let (project, _, mut spec, _) = groupe_nomme();
+    fn collapsing_a_group_hides_its_rows_and_not_its_curves() {
+        let (project, _, mut spec, _) = named_group();
         spec.panels.get_mut(0).unwrap().series[2].visible = false;
         let mut project = project;
         let graph = project.tree().node(project.root()).unwrap().children()[0];
         project.set_plot_spec(graph, spec.clone()).unwrap();
         let model = stokesforge_app_state::object_manager::object_tree(project.tree(), graph, None)
             .unwrap();
-        let ctx = super::super::test_support::contexte();
+        let ctx = super::super::test_support::context();
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         let (output, _, _) = paint(Vec::new());
-        let en_tete = text_center(&output, "Lots");
+        let header = text_center(&output, "Sets");
         let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
         let state = T::SeriesGroup(target).visibility(&spec);
-        assert!(state.mixed && !state.checked, "case mixte : {state:?}");
-        // Le triangle de repli est à gauche de la case, dans la rangée de l'en-tête.
-        let arrow = egui::pos2(en_tete.x - 46.0, en_tete.y);
-        clic_menu(&paint, arrow, egui::PointerButton::Primary);
+        assert!(state.mixed && !state.checked, "mixed checkbox: {state:?}");
+        // The collapse triangle is left of the checkbox, in the header's row.
+        let arrow = egui::pos2(header.x - 46.0, header.y);
+        click_menu(&paint, arrow, egui::PointerButton::Primary);
         paint(Vec::new());
         let (output, _, _) = paint(Vec::new());
         assert!(
-            super::super::test_support::textes(&output.shapes)
+            super::super::test_support::texts(&output.shapes)
                 .iter()
-                .all(|t| t.texte != "Deuxième" && t.texte != "Dernier"),
-            "les membres d'un groupe replié ne sont plus listés"
+                .all(|t| t.text != "Second" && t.text != "Last"),
+            "the members of a collapsed group are no longer listed"
         );
         assert!(
-            super::super::test_support::textes(&output.shapes)
+            super::super::test_support::texts(&output.shapes)
                 .iter()
-                .any(|t| t.texte == "Premier"),
-            "témoin : la série seule reste"
+                .any(|t| t.text == "First"),
+            "witness: the single series stays"
         );
         assert_eq!(
             T::SeriesGroup(target).contents(&spec).len(),
             2,
-            "replier ne retire aucune courbe du groupe"
+            "collapsing removes no curve from the group"
         );
     }
 
-    /// #197 : l'en-tête se sélectionne, s'ouvre au double-clic et porte les
-    /// gestes de groupe au clic droit — sections de `docs/menus.md`.
+    /// #197: the header is selected, opens on double-click and carries the
+    /// group gestures on right click — sections of `docs/menus.md`.
     #[test]
-    fn l_en_tete_d_un_groupe_se_selectionne_s_ouvre_et_a_son_menu() {
-        let (project, graph, spec, model) = groupe_nomme();
+    fn a_group_header_is_selected_opens_and_has_its_menu() {
+        let (project, graph, spec, model) = named_group();
         let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
-        let ctx = super::super::test_support::contexte();
+        let ctx = super::super::test_support::context();
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         let (output, _, _) = paint(Vec::new());
-        let en_tete = text_center(&output, "Lots");
-        let (_, actions, requests) = clic_menu(&paint, en_tete, egui::PointerButton::Primary);
+        let header = text_center(&output, "Sets");
+        let (_, actions, requests) = click_menu(&paint, header, egui::PointerButton::Primary);
         assert!(actions.is_empty());
         assert!(requests
             .iter()
             .any(|r| matches!(r, ObjectManagerRequest::Select(T::SeriesGroup(g)) if *g == target)));
-        // Clic droit : le menu du groupe.
-        clic_menu(&paint, en_tete, egui::PointerButton::Secondary);
+        // Right click: the group's menu.
+        click_menu(&paint, header, egui::PointerButton::Secondary);
         let output = paint(Vec::new()).0;
         use super::super::test_support::painted;
         for entry in [
@@ -2850,7 +2859,7 @@ mod tests {
         ] {
             assert!(painted(&output, &entry), "{entry}");
         }
-        let (_, actions, _) = clic_menu(
+        let (_, actions, _) = click_menu(
             &paint,
             text_center(&output, &tr!("action-ungroup-series")),
             egui::PointerButton::Primary,
@@ -2864,38 +2873,38 @@ mod tests {
         );
     }
 
-    /// #197 : renommer un groupe se fait sur place, dans l'arbre — Entrée
-    /// valide en une action, un nom inchangé n'en émet aucune.
+    /// #197: renaming a group is done in place, in the tree — Enter commits in
+    /// one action, an unchanged name emits none.
     #[test]
-    fn renommer_un_groupe_sur_place_emet_une_action_a_la_validation() {
-        let (project, graph, spec, model) = groupe_nomme();
+    fn renaming_a_group_in_place_emits_one_action_on_commit() {
+        let (project, graph, spec, model) = named_group();
         let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
-        let ctx = super::super::test_support::contexte();
+        let ctx = super::super::test_support::context();
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         open_group_name_editor(&ctx, &spec, graph, target);
         paint(Vec::new());
         paint(Vec::new());
-        paint(vec![egui::Event::Text("Blancs".into())]);
+        paint(vec![egui::Event::Text("Blanks".into())]);
         let (_, actions, _) = paint(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
         assert_eq!(
             actions,
             vec![Action::RenameSeriesGroup {
                 graph,
                 group: target,
-                name: "Blancs".into()
+                name: "Blanks".into()
             }]
         );
         assert!(
             group_rename_of(&ctx, graph, target).is_none(),
-            "l'éditeur se referme"
+            "the editor closes"
         );
     }
 
     #[test]
-    fn le_trait_colore_prend_le_focus_pour_suppr_et_ouvre_les_proprietes() {
-        let (project, graph, spec, model) = trois_series();
-        let ctx = super::super::test_support::contexte();
+    fn the_colored_line_takes_focus_for_delete_and_opens_the_properties() {
+        let (project, graph, spec, model) = three_series();
+        let ctx = super::super::test_support::context();
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         paint(Vec::new());
         let (output, _, _) = paint(Vec::new());
@@ -2903,14 +2912,14 @@ mod tests {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "Premier" => {
+                egui::Shape::Text(text) if text.galley.text() == "First" => {
                     Some(text.visual_bounding_rect())
                 }
                 _ => None,
             })
             .unwrap();
         let swatch = egui::pos2(text_rect.left() - 24.0, text_rect.center().y);
-        let (_, actions, requests) = clic_menu(&paint, swatch, egui::PointerButton::Primary);
+        let (_, actions, requests) = click_menu(&paint, swatch, egui::PointerButton::Primary);
         assert!(actions.is_empty());
         assert!(requests.iter().any(|r| matches!(r,
             ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0)
@@ -2926,7 +2935,7 @@ mod tests {
         );
         let mut properties = false;
         for _ in 0..2 {
-            let (_, _, requests) = clic_menu(&paint, swatch, egui::PointerButton::Primary);
+            let (_, _, requests) = click_menu(&paint, swatch, egui::PointerButton::Primary);
             properties |= requests.iter().any(|r| {
                 matches!(r,
                     ObjectManagerRequest::Properties(T::Series(s)) if *s == SeriesRef::new(0, 0)
@@ -2935,18 +2944,18 @@ mod tests {
         }
         assert!(
             properties,
-            "le double-clic sur le trait ouvre les propriétés"
+            "the double-click on the line opens the properties"
         );
     }
 
-    /// #170, point 6 : dans l'Object Manager focalisé, ↑ et ↓ sélectionnent la
-    /// ligne visible voisine (bornée), Entrée demande les propriétés de la
-    /// sélection comme le double-clic, Maj+↓ ne fait rien, et Ctrl+↓ reste le
-    /// déplacement de la série (aucune sélection). Sans focus, aucune touche.
+    /// #170, point 6: in the focused Object Manager, ↑ and ↓ select the
+    /// neighboring visible row (bounded), Enter asks for the selection's
+    /// properties like the double-click, Shift+↓ does nothing, and Ctrl+↓ stays
+    /// the series move (no selection). Without focus, no key.
     #[test]
-    fn fleches_et_entree_parcourent_les_lignes_de_l_object_manager() {
-        let (project, graph, spec, _model) = trois_series();
-        // La série du milieu est la sélection : ↑ et ↓ ont chacune un voisin.
+    fn arrows_and_enter_walk_through_the_object_manager_rows() {
+        let (project, graph, spec, _model) = three_series();
+        // The middle series is the selection: ↑ and ↓ each have a neighbor.
         let model = stokesforge_app_state::object_manager::object_tree(
             project.tree(),
             graph,
@@ -2967,12 +2976,12 @@ mod tests {
         };
         image(Vec::new());
         let (output, _, _) = image(Vec::new());
-        // Sans focus du panneau, les flèches ne sont pas pour nous.
+        // Without panel focus, the arrows are not for us.
         let (_, _, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)]);
-        assert!(selects(&requests).is_empty(), "sans focus");
+        assert!(selects(&requests).is_empty(), "without focus");
 
-        // Un clic sur la ligne du milieu donne le focus au panneau.
-        let row = text_center(&output, "Deuxième");
+        // A click on the middle row gives the panel focus.
+        let row = text_center(&output, "Second");
         image(vec![egui::Event::PointerMoved(row)]);
         image(vec![pointer(row, true)]);
         image(vec![pointer(row, false)]);
@@ -2982,18 +2991,18 @@ mod tests {
         assert_eq!(
             selects(&requests),
             vec![SeriesRef::new(0, 2)],
-            "↓ : la suivante"
+            "↓: the next one"
         );
         let (_, _, requests) = image(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
         assert_eq!(
             selects(&requests),
             vec![SeriesRef::new(0, 0)],
-            "↑ : la précédente"
+            "↑: the previous one"
         );
         let (_, _, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::SHIFT)]);
-        assert!(selects(&requests).is_empty(), "Maj+↓ ne déplace pas");
+        assert!(selects(&requests).is_empty(), "Shift+↓ does not move");
 
-        // Ctrl+↓ reste « descendre la série » : une action, aucune sélection.
+        // Ctrl+↓ stays "move the series down": one action, no selection.
         let (_, actions, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::CTRL)]);
         assert_eq!(
             actions,
@@ -3003,12 +3012,9 @@ mod tests {
                 up: false,
             }]
         );
-        assert!(
-            selects(&requests).is_empty(),
-            "Ctrl+↓ ne change pas de ligne"
-        );
+        assert!(selects(&requests).is_empty(), "Ctrl+↓ does not change row");
 
-        // Entrée : les propriétés de la série sélectionnée, comme le double-clic.
+        // Enter: the properties of the selected series, like the double-click.
         let (_, actions, requests) = image(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
         assert!(actions.is_empty());
         assert!(requests.iter().any(|request| matches!(
@@ -3017,11 +3023,11 @@ mod tests {
         )));
     }
 
-    /// #170, point 6 : la ligne sélectionnée porte le contour de focus quand le
-    /// panneau a le focus clavier, et seulement alors.
+    /// #170, point 6: the selected row carries the focus outline when the panel
+    /// has keyboard focus, and only then.
     #[test]
-    fn la_ligne_selectionnee_a_le_contour_de_focus_quand_le_panneau_est_focalise() {
-        let (project, _graph, spec, model) = trois_series();
+    fn the_selected_row_has_the_focus_outline_when_the_panel_is_focused() {
+        let (project, _graph, spec, model) = three_series();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
@@ -3037,46 +3043,46 @@ mod tests {
         };
         image(Vec::new());
         let (output, _, _) = image(Vec::new());
-        assert_eq!(contours(&output), 0, "sans focus, pas de contour");
-        let row = text_center(&output, "Premier");
+        assert_eq!(contours(&output), 0, "without focus, no outline");
+        let row = text_center(&output, "First");
         image(vec![egui::Event::PointerMoved(row)]);
         image(vec![pointer(row, true)]);
         image(vec![pointer(row, false)]);
         let (output, _, _) = image(Vec::new());
-        assert_eq!(contours(&output), 1, "focalisé : la ligne sélectionnée");
-        // Témoin : un clic ailleurs rend le focus, le contour disparaît.
+        assert_eq!(contours(&output), 1, "focused: the selected row");
+        // Witness: a click elsewhere gives the focus back, the outline disappears.
         let away = egui::pos2(590.0, 490.0);
         image(vec![egui::Event::PointerMoved(away)]);
         image(vec![pointer(away, true)]);
         image(vec![pointer(away, false)]);
         let (output, _, _) = image(Vec::new());
-        assert_eq!(contours(&output), 0, "le focus rendu, plus de contour");
+        assert_eq!(contours(&output), 0, "focus given back, no more outline");
     }
 
-    /// Suppr retire l'objet sélectionné, mais seulement quand le panneau a le
-    /// focus clavier (un clic sur une ligne le lui donne) : sans lui, la touche
-    /// appartient à un autre widget. Le double-clic demande les propriétés.
+    /// Delete removes the selected object, but only when the panel has keyboard
+    /// focus (a click on a row gives it): without it, the key belongs to another
+    /// widget. The double-click asks for the properties.
     #[test]
-    fn suppr_n_agit_que_sur_le_panneau_focalise_et_le_double_clic_ouvre_les_proprietes() {
-        let (project, graph, spec, model) = trois_series();
+    fn delete_acts_only_on_the_focused_panel_and_the_double_click_opens_the_properties() {
+        let (project, graph, spec, model) = three_series();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         image(Vec::new());
         let (output, _, _) = image(Vec::new());
         let (_, actions, _) = image(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
-        assert!(actions.is_empty(), "sans focus, Suppr n'est pas pour nous");
+        assert!(actions.is_empty(), "without focus, Delete is not for us");
 
-        // #126 : un clic simple doit suffire, sans amorcer de glisser.
-        let row = text_center(&output, "Premier");
+        // #126: a single click must suffice, without starting a drag.
+        let row = text_center(&output, "First");
         image(vec![egui::Event::PointerMoved(row)]);
         image(vec![pointer(row, true)]);
         let (_, actions, requests) = image(vec![pointer(row, false)]);
-        assert!(actions.is_empty(), "un clic ne déplace pas la série");
+        assert!(actions.is_empty(), "a click does not move the series");
         assert!(requests.iter().any(|r| {
             matches!(r, ObjectManagerRequest::Select(T::Series(s)) if *s == SeriesRef::new(0, 0))
         }));
-        // Une image sans événement ne doit pas rendre le focus.
+        // A frame without an event must not give the focus back.
         image(Vec::new());
         let (_, actions, requests) = image(vec![key(egui::Key::F2, egui::Modifiers::NONE)]);
         assert!(actions.is_empty());
@@ -3108,7 +3114,7 @@ mod tests {
             }]
         );
 
-        // Double-clic : deux clics rapprochés sur la même ligne.
+        // Double-click: two close clicks on the same row.
         let mut properties = false;
         for _ in 0..2 {
             image(vec![pointer(row, true)]);
@@ -3119,36 +3125,36 @@ mod tests {
         }
         assert!(
             properties,
-            "le double-clic demande les propriétés de la série"
+            "the double-click asks for the series properties"
         );
 
-        // Témoin : un clic hors des lignes rend le focus du panneau.
-        let ailleurs = egui::pos2(550.0, 450.0);
-        image(vec![egui::Event::PointerMoved(ailleurs)]);
-        image(vec![pointer(ailleurs, true)]);
-        image(vec![pointer(ailleurs, false)]);
-        for (touche, modifiers) in [
+        // Witness: a click outside the rows gives the panel focus back.
+        let elsewhere = egui::pos2(550.0, 450.0);
+        image(vec![egui::Event::PointerMoved(elsewhere)]);
+        image(vec![pointer(elsewhere, true)]);
+        image(vec![pointer(elsewhere, false)]);
+        for (pressed_key, modifiers) in [
             (egui::Key::F2, egui::Modifiers::NONE),
             (egui::Key::ArrowDown, egui::Modifiers::CTRL),
             (egui::Key::Delete, egui::Modifiers::NONE),
         ] {
-            let (_, actions, requests) = image(vec![key(touche, modifiers)]);
+            let (_, actions, requests) = image(vec![key(pressed_key, modifiers)]);
             assert!(
                 actions.is_empty() && requests.is_empty(),
-                "le panneau a rendu ses touches"
+                "the panel gave its keys back"
             );
         }
     }
 
-    /// La case d'une ligne bascule la visibilité de son objet : une action,
-    /// vers l'état inverse de celui affiché.
+    /// A row's checkbox toggles its object's visibility: one action, to the
+    /// opposite of the state shown.
     #[test]
-    fn la_case_d_une_ligne_bascule_la_visibilite_de_son_objet() {
+    fn a_row_checkbox_toggles_the_visibility_of_its_object() {
         for visible in [true, false] {
-            let mut project = Project::new("Objets").unwrap();
+            let mut project = Project::new("Objects").unwrap();
             let root = project.root();
             let mut panel = PanelSpec::default();
-            for name in ["Premier", "Deuxième"] {
+            for name in ["First", "Second"] {
                 let mut series = SeriesSpec::new(NodeId::from_raw(900));
                 series.name = name.into();
                 panel.series.push(series);
@@ -3163,15 +3169,15 @@ mod tests {
             let image = |events| image(&ctx, project.tree(), model.as_ref(), Some(&spec), events);
             image(Vec::new());
             let (output, _, _) = image(Vec::new());
-            // La case est le carré peint sur la ligne, à gauche du libellé.
-            let label = text_center(&output, "Deuxième");
+            // The checkbox is the square painted on the row, left of the label.
+            let label = text_center(&output, "Second");
             let at = output
                 .shapes
                 .iter()
                 .filter_map(|painted| match &painted.shape {
                     egui::Shape::Rect(rect)
-                        // La case fait la hauteur d'une ligne (#170) ; la
-                        // poignée, à sa gauche, 16 px.
+                        // The checkbox is one row high (#170); the handle,
+                        // on its left, 16 px.
                         if (rect.rect.width() - rect.rect.height()).abs() < 1.0
                             && (rect.rect.width() - super::super::list_row::LIST_ROW_HEIGHT)
                                 .abs()
@@ -3184,7 +3190,7 @@ mod tests {
                     _ => None,
                 })
                 .min_by(|a, b| a.x.total_cmp(&b.x))
-                .expect("case de visibilité peinte sur la ligne");
+                .expect("visibility checkbox painted on the row");
             image(vec![egui::Event::PointerMoved(at)]);
             image(vec![pointer(at, true)]);
             let (_, actions, _) = image(vec![pointer(at, false)]);
@@ -3200,13 +3206,13 @@ mod tests {
         }
     }
 
-    /// Sans graphe actif, le panneau le dit et ne demande rien.
-    /// Le panneau ([`StokesForgeApp::object_manager_panel`]) ne se peint
-    /// qu'ouvert : ancré au bord droit, ou dans son viewport OS.
+    /// Without an active graph, the panel says so and asks for nothing.
+    /// The panel ([`StokesForgeApp::object_manager_panel`]) is painted only when
+    /// open: anchored to the right edge, or in its OS viewport.
     #[test]
-    fn l_object_manager_ne_se_peint_qu_ouvert_ancre_a_droite_ou_detache() {
+    fn the_object_manager_is_painted_only_when_open_anchored_right_or_detached() {
         use egui::containers::panel::PanelState;
-        let (project, graph, _, _) = trois_series();
+        let (project, graph, _, _) = three_series();
         let session = stokesforge_session::Session::spawn(project, None).unwrap();
         let state =
             stokesforge_app_state::state::AppState::new(session.handle(), String::new()).unwrap();
@@ -3226,10 +3232,10 @@ mod tests {
                 );
             }
             output.textures_delta.clear();
-            assert!(actions.is_empty(), "peindre ne demande rien");
+            assert!(actions.is_empty(), "painting asks for nothing");
             output
         };
-        let peint = |output: &egui::FullOutput, needle: &str| {
+        let is_painted = |output: &egui::FullOutput, needle: &str| {
             output.shapes.iter().any(|painted| {
                 matches!(&painted.shape,
                     egui::Shape::Text(shape) if shape.galley.job.text.contains(needle))
@@ -3241,54 +3247,54 @@ mod tests {
         let context = egui::Context::default();
         egui_extras::install_image_loaders(&context);
         let output = paint(&mut app, &context);
-        assert!(!peint(&output, "Premier"), "fermé : rien n'est peint");
+        assert!(!is_painted(&output, "First"), "closed: nothing is painted");
         assert!(PanelState::load(&context, id).is_none());
 
         app.state.set_object_manager_open_for_test(true);
         let output = paint(&mut app, &context);
-        assert!(peint(&output, &tr!("action-object-manager")));
-        assert!(peint(&output, "Premier"), "témoin : l'arbre est peint");
+        assert!(is_painted(&output, &tr!("action-object-manager")));
+        assert!(is_painted(&output, "First"), "witness: the tree is painted");
         let docked = PanelState::load(&context, id).unwrap().outer_rect;
-        assert_eq!(docked.right(), screen.right(), "ancré au bord droit");
+        assert_eq!(docked.right(), screen.right(), "anchored to the right edge");
 
         app.om_detached = true;
         let context = egui::Context::default();
         egui_extras::install_image_loaders(&context);
         let output = paint(&mut app, &context);
-        assert!(peint(&output, "Premier"));
+        assert!(is_painted(&output, "First"));
         assert!(
             PanelState::load(&context, id).is_none(),
-            "plus de panneau ancré"
+            "no more anchored panel"
         );
-        assert!(app.om_view.is_some(), "le lecteur détaché existe");
+        assert!(app.om_view.is_some(), "the detached reader exists");
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn sans_graphe_le_panneau_le_dit_et_ne_demande_rien() {
-        let (project, _, spec, model) = trois_series();
+    fn without_a_graph_the_panel_says_so_and_asks_for_nothing() {
+        let (project, _, spec, model) = three_series();
         let ctx = egui::Context::default();
         let (output, actions, requests) =
             image(&ctx, project.tree(), None, Some(&spec), Vec::new());
         assert!(actions.is_empty() && requests.is_empty());
         text_center(&output, &tr!("object-manager-no-graph"));
-        // Témoin : avec un graphe, le message n'est pas peint.
+        // Witness: with a graph, the message is not painted.
         let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Text(text) if text.galley.text() == tr!("object-manager-no-graph"))));
     }
 
-    /// La sélection de l'Object Manager et celle de la vue sont la même :
-    /// sélectionner une cible puis la relire rend la même cible, pour chaque
-    /// nature d'objet ; une cible disparue ne sélectionne rien.
+    /// The Object Manager's selection and the view's are the same: selecting a
+    /// target then reading it back returns the same target, for each kind of
+    /// object; a vanished target selects nothing.
     #[test]
-    fn selectionner_puis_relire_une_cible_rend_la_meme_cible() {
-        let mut spec = PlotSpec::empty("Titre");
+    fn selecting_then_reading_back_a_target_returns_the_same_target() {
+        let mut spec = PlotSpec::empty("Title");
         let panel = spec.panels.get_mut(0).unwrap();
         panel.series.push(SeriesSpec::new(NodeId::from_raw(900)));
         panel
             .annotations
-            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+            .push(AnnotationSpec::new("Text", 0.0, 0.0));
         panel
             .shapes
             .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
@@ -3305,7 +3311,7 @@ mod tests {
             assert_eq!(selected_manager_target(&view), Some(target));
         }
         select_manager_target(&mut view, None, &spec);
-        assert_eq!(selected_manager_target(&view), None, "None désélectionne");
+        assert_eq!(selected_manager_target(&view), None, "None deselects");
 
         select_manager_target(&mut view, Some(T::Shape(shape)), &spec);
         let gone = ShapeRef { index: 5, ..shape };
@@ -3313,7 +3319,7 @@ mod tests {
         assert_eq!(
             selected_manager_target(&view),
             None,
-            "un objet disparu ne reste pas sélectionné"
+            "a vanished object does not stay selected"
         );
     }
 }

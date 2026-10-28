@@ -1,17 +1,17 @@
-//! Éditeurs sur place d'un graphe : le texte libre (issue #35, avec sa barre
-//! couleur / taille / rotation), le titre et le nom de légende d'une série
-//! (issue #53), et la mise en forme demandée par la barre de format pour le
-//! champ en édition (`pending_format_*`, `apply_pending_*`, #77/#78).
+//! In-place editors of a graph: the free text (issue #35, with its
+//! color / size / rotation bar), the title and the legend name of a series
+//! (issue #53), and the formatting requested by the format bar for the
+//! field being edited (`pending_format_*`, `apply_pending_*`, #77/#78).
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Moved out of `app.rs` as is (#121).
 //!
-//! L'édition sur place et le glisser ne touchent pas le modèle tant qu'ils
-//! durent : l'aperçu vit dans la vue (`GraphView::set_annotation_preview`),
-//! comme le zoom, et la validation envoie **une** `Action::SetAnnotation` —
-//! une entrée d'historique, Échap jette l'aperçu. L'état de l'éditeur est
-//! rangé dans la mémoire d'egui sous l'identifiant de la vue : la même
-//! écriture sert la fenêtre flottante et la fenêtre détachée, sans rien
-//! faire transiter par `AppState`.
+//! In-place editing and dragging do not touch the model while they
+//! last: the preview lives in the view (`GraphView::set_annotation_preview`),
+//! like the zoom, and validation sends **one** `Action::SetAnnotation` —
+//! one history entry, Escape throws the preview away. The editor state is
+//! stored in egui's memory under the view's identifier: the same
+//! implementation serves the floating window and the detached window, without
+//! passing anything through `AppState`.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -26,69 +26,69 @@ use stokesforge_app_state::tr;
 use super::inplace_edit;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
-/// L'éditeur sur place d'un texte libre, ouvert sur une vue.
+/// The in-place editor of a free text, open on a view.
 #[derive(Debug, Clone)]
 pub(super) struct AnnotationEditor {
     pub(super) target: stokesforge_render_egui::AnnotationRef,
     pub(super) draft: stokesforge_render_egui::AnnotationSpec,
-    /// Le texte tel qu'il est dans le modèle ; `None` pour un texte nouveau.
+    /// The text as it is in the model; `None` for a new text.
     pub(super) original: Option<stokesforge_render_egui::AnnotationSpec>,
-    /// Donner le focus au champ à la prochaine image (ouverture).
+    /// Give the field focus on the next frame (opening).
     pub(super) focus: bool,
-    /// Le dernier centre et la dernière taille (écran) du texte droit rendu :
-    /// un texte vidé n'est plus tracé, mais le champ doit rester où il est.
+    /// The last center and size (screen) of the straight text rendered:
+    /// an emptied text is no longer plotted, but the field must stay where it is.
     pub(super) anchor: Option<(egui::Pos2, egui::Vec2)>,
 }
 
-/// Un titre ou une entrée de légende visé par le clic droit (issue #53).
+/// A title or a legend entry targeted by the right click (issue #53).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ContextText {
-    /// Un titre, un titre d'axe ou la légende entière.
+    /// A title, an axis title or the whole legend.
     Title(TextTarget),
-    /// La ligne de légende de la série `series` du calque `panel`.
+    /// The legend row of series `series` of layer `panel`.
     LegendEntry { panel: usize, series: usize },
 }
 
-/// Ce que l'éditeur sur place d'un titre modifie.
+/// What the in-place editor of a title modifies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum TextEditTarget {
-    /// Le texte saisi d'un titre.
+    /// The entered text of a title.
     Title(TextTarget),
-    /// Le nom, en légende, d'une série.
+    /// The name, in the legend, of a series.
     LegendEntry(stokesforge_plot::SeriesRef),
-    /// Le nom d'un groupe de séries (#206).
+    /// The name of a series group (#206).
     GroupName(stokesforge_plot::SeriesGroupRef),
 }
 
-/// L'éditeur sur place d'un titre ou d'un nom de légende (issue #53) : un
-/// champ posé sur le texte. Entrée ou clic ailleurs valide, Échap annule —
-/// comme l'éditeur d'un texte libre, sans barre de réglages (couleur et
-/// taille d'un titre se règlent dans les propriétés du graphe).
+/// The in-place editor of a title or a legend name (issue #53): a
+/// field placed over the text. Enter or a click elsewhere validates, Escape cancels —
+/// like the free text editor, without a settings bar (color and
+/// size of a title are set in the graph properties).
 #[derive(Debug, Clone)]
 pub(super) struct TextEditor {
     pub(super) target: TextEditTarget,
     pub(super) buffer: String,
-    /// Le texte tel qu'il était à l'ouverture : valider sans l'avoir changé
-    /// n'envoie rien (et ne fige pas un nom dérivé de la colonne).
+    /// The text as it was at opening: validating without having changed it
+    /// sends nothing (and does not freeze a name derived from the column).
     original: String,
-    /// Donner le focus au champ à la prochaine image (ouverture).
+    /// Give the field focus on the next frame (opening).
     focus: bool,
-    /// Centre et taille (écran) du texte tracé à l'ouverture.
+    /// Center and size (screen) of the text plotted at opening.
     anchor: (egui::Pos2, egui::Vec2),
 }
 
-/// La mise en forme demandée par la barre, en attente du champ en édition.
+/// The formatting requested by the bar, waiting for the field being edited.
 pub(super) fn pending_format_id() -> egui::Id {
     egui::Id::new("stokesforge_pending_text_format")
 }
 
-/// La police demandée par la barre pour le texte libre en édition : elle
-/// s'applique au brouillon de l'éditeur, pas au contenu (issue #78).
+/// The font requested by the bar for the free text being edited: it
+/// applies to the editor's draft, not to the content (issue #78).
 pub(super) fn pending_zone_font_id() -> egui::Id {
     egui::Id::new("stokesforge_pending_zone_font")
 }
 
-/// Pose sur `font` la police demandée par la barre de format, s'il y en a une.
+/// Sets on `font` the font requested by the format bar, if there is one.
 fn apply_pending_zone_font(ctx: &egui::Context, font: &mut String) {
     if let Some(Some(name)) =
         ctx.data_mut(|data| data.remove_temp::<Option<String>>(pending_zone_font_id()))
@@ -97,10 +97,10 @@ fn apply_pending_zone_font(ctx: &egui::Context, font: &mut String) {
     }
 }
 
-/// Pose la mise en forme demandée par la barre de format sur `buffer`, selon
-/// la sélection que le champ `field` a gardée (egui la conserve quand le
-/// champ perd le focus au clic sur la barre), puis rend le focus au champ avec
-/// la sélection à l'intérieur des balises.
+/// Applies the formatting requested by the format bar to `buffer`, according to
+/// the selection that field `field` kept (egui keeps it when the
+/// field loses focus on the click on the bar), then gives the field focus back with
+/// the selection inside the tags.
 fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut String) {
     use egui::text::{CCursor, CCursorRange};
     let Some(format) = ctx
@@ -115,8 +115,8 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
     };
     let mut state = egui::TextEdit::load_state(ctx, field).unwrap_or_default();
     let length = buffer.chars().count();
-    // egui réduit la sélection d'un champ peint sans le focus (#242) : on
-    // prend celle que le champ avait tant qu'il l'avait.
+    // egui shrinks the selection of a field painted without focus (#242): we
+    // take the one the field had while it had it.
     let kept = ctx.data(|data| data.get_temp::<SelectionKept>(field.with("selection_kept")));
     let selection = kept.map(|SelectionKept(range)| range).unwrap_or_else(|| {
         state.cursor.char_range().map_or(length..length, |range| {
@@ -141,12 +141,12 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
     ctx.memory_mut(|memory| memory.request_focus(field));
 }
 
-/// La dernière sélection du champ quand il avait le focus, en caractères.
+/// The last selection of the field when it had focus, in characters.
 #[derive(Clone)]
 struct SelectionKept(std::ops::Range<usize>);
 
-/// Retient la sélection du champ `field` s'il a le focus cette image, pour
-/// que le clic suivant sur la barre de format la retrouve (voir
+/// Keeps the selection of field `field` if it has focus this frame, so
+/// that the next click on the format bar finds it again (see
 /// [`apply_pending_format`]).
 fn keep_selection(ctx: &egui::Context, field: egui::Id) {
     if !ctx.memory(|memory| memory.has_focus(field)) {
@@ -169,8 +169,8 @@ pub(super) fn text_editor_id(view: &GraphView) -> egui::Id {
     view.id().with("text_editor")
 }
 
-/// Ouvre l'éditeur sur le texte d'un titre ; sans effet si le titre n'est
-/// pas tracé ou n'existe plus (la légende n'a pas de texte à elle).
+/// Opens the editor on the text of a title; no effect if the title is
+/// not plotted or no longer exists (the legend has no text of its own).
 pub(super) fn open_text_editor(
     ctx: &egui::Context,
     view: &GraphView,
@@ -195,7 +195,7 @@ pub(super) fn open_text_editor(
     );
 }
 
-/// Ouvre l'éditeur sur le nom, en légende, d'une série.
+/// Opens the editor on the name, in the legend, of a series.
 pub(super) fn open_legend_entry_editor(
     ctx: &egui::Context,
     view: &GraphView,
@@ -253,9 +253,9 @@ pub(super) fn open_series_name_editor(
     );
 }
 
-/// Ouvre l'éditeur sur le nom d'un groupe, posé sur l'entrée de légende de
-/// son premier membre (#206) : F2 sur un groupe sélectionné dans le graphe
-/// marche même quand l'Object Manager est masqué ou replié.
+/// Opens the editor on the name of a group, placed on the legend entry of
+/// its first member (#206): F2 on a group selected in the graph
+/// works even when the Object Manager is hidden or collapsed.
 pub(super) fn open_group_name_editor_in_graph(
     ctx: &egui::Context,
     view: &GraphView,
@@ -301,8 +301,8 @@ fn start_text_editor(
     ctx.data_mut(|data| data.insert_temp(text_editor_id(view), editor));
 }
 
-/// Peint l'éditeur d'un titre ou d'un nom de légende, et traduit sa
-/// validation en **une** action.
+/// Paints the editor of a title or a legend name, and translates its
+/// validation into **one** action.
 pub(super) fn text_editor_ui(
     ctx: &egui::Context,
     view: &GraphView,
@@ -326,10 +326,10 @@ pub(super) fn text_editor_ui(
         .constrain(true)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                // Le contrat commun : tout le texte sélectionné à l'ouverture,
-                // Entrée et Tab valident, Échap annule. Le « clic ailleurs »
-                // reste décidé plus bas (`outside`), le champ vit dans une
-                // couche à part.
+                // The common contract: all the text selected on opening,
+                // Enter and Tab validate, Escape cancels. The "click elsewhere"
+                // stays decided further down (`outside`), the field lives in a
+                // separate layer.
                 let shown = inplace_edit::show(
                     ui,
                     field_id,
@@ -402,8 +402,8 @@ pub(super) fn annotation_editor_id(view: &GraphView) -> egui::Id {
     view.id().with("annotation_editor")
 }
 
-/// Ouvre l'éditeur sur un texte existant ; sans effet si le texte n'existe
-/// plus dans le modèle.
+/// Opens the editor on an existing text; no effect if the text no longer
+/// exists in the model.
 pub(super) fn open_annotation_editor(
     ctx: &egui::Context,
     view: &mut GraphView,
@@ -419,8 +419,8 @@ pub(super) fn open_annotation_editor(
     start_annotation_editor(ctx, view, target, original.clone(), Some(original));
 }
 
-/// Ajoute un texte au point de données `(panel, x, y)` et ouvre
-/// l'éditeur dessus : rien n'entre dans le modèle avant validation.
+/// Adds a text at data point `(panel, x, y)` and opens
+/// the editor on it: nothing enters the model before validation.
 pub(super) fn add_annotation_at(
     ctx: &egui::Context,
     view: &mut GraphView,
@@ -455,9 +455,9 @@ fn start_annotation_editor(
     ctx.data_mut(|data| data.insert_temp(annotation_editor_id(view), editor));
 }
 
-/// Peint l'éditeur sur place : le champ de texte posé sur le texte, et
-/// au-dessus une barre couleur / taille / rotation. Entrée ou clic ailleurs
-/// valide, Échap annule.
+/// Paints the in-place editor: the text field placed over the text, and
+/// above it a color / size / rotation bar. Enter or a click elsewhere
+/// validates, Escape cancels.
 pub(super) fn annotation_editor_ui(
     ctx: &egui::Context,
     view: &mut GraphView,
@@ -468,8 +468,8 @@ pub(super) fn annotation_editor_ui(
     let id = annotation_editor_id(view);
     apply_pending_format(ctx, id.with("field"), &mut editor.draft.text);
     apply_pending_zone_font(ctx, &mut editor.draft.font);
-    // Le cadre du texte rendu ; à défaut (texte neuf, ou vidé donc plus
-    // tracé), le dernier connu, puis le centre de la figure.
+    // The frame of the rendered text; failing that (new text, or emptied hence no longer
+    // plotted), the last known, then the center of the figure.
     if let Some((center, size, _)) = view.annotation_screen_box(editor.target) {
         editor.anchor = Some((center, size));
     }
@@ -479,8 +479,8 @@ pub(super) fn annotation_editor_ui(
             .map_or(egui::Pos2::ZERO, |rect| rect.center());
         (center, egui::Vec2::ZERO)
     });
-    // Le champ s'écrit dans le cadre du rendu (#37) : centré, au corps du
-    // texte, droit même si le texte est tourné.
+    // The field is written in the render frame (#37): centered, at the body size of the
+    // text, straight even if the text is rotated.
     let field = stokesforge_render_egui::annotation_field(
         center,
         size,
@@ -529,9 +529,9 @@ pub(super) fn annotation_editor_ui(
                         &mut editor.draft.rotation,
                         &quantities::ROTATION,
                     );
-                    // L'alignement ne se voit que dans une boîte de largeur
-                    // fixée (poignées du texte sélectionné, #244) ; mêmes
-                    // boutons que la barre de format (#246).
+                    // The alignment is only visible in a box of fixed
+                    // width (handles of the selected text, #244); same
+                    // buttons as the format bar (#246).
                     let mut requests = Vec::new();
                     crate::toolbar::align_buttons(
                         ui,
@@ -557,9 +557,9 @@ pub(super) fn annotation_editor_ui(
                 });
             });
         });
-    // Tant qu'on tape, le champ droit couvre le texte ; dès qu'il perd le
-    // focus (on règle la rotation ou la taille), il devient transparent et
-    // l'aperçu — tourné — se voit (#36).
+    // While typing, the straight field covers the text; as soon as it loses
+    // focus (the rotation or the size is being set), it becomes transparent and
+    // the — rotated — preview shows (#36).
     let field_id = id.with("field");
     let typing = editor.focus || ctx.memory(|memory| memory.has_focus(field_id));
     let text = egui::Area::new(id.with("text"))
@@ -601,9 +601,9 @@ pub(super) fn annotation_editor_ui(
             );
             inplace_edit::measured(ui.ctx(), field_id, &editor.draft.text);
             keep_selection(ui.ctx(), field_id);
-            // Le contrat commun, sauf le clic ailleurs : l'éditeur porte des
-            // réglages (taille, rotation, couleur) qui prennent le focus sans
-            // finir la saisie, `outside` décide (plus bas).
+            // The common contract, except the click elsewhere: the editor carries
+            // settings (size, rotation, color) that take focus without
+            // ending the input, `outside` decides (further down).
             let end = inplace_edit::finish(
                 ui,
                 &response,
@@ -624,11 +624,11 @@ pub(super) fn annotation_editor_ui(
 
     actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
 
-    // Échap : le sélecteur de couleur ouvert le consomme d'abord pour lui.
+    // Escape: the open color picker consumes it first for itself.
     let cancel =
         cancelled || ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE));
-    // Un clic hors de l'éditeur (et hors de toute couche surgissante, comme
-    // le sélecteur de couleur) valide.
+    // A click outside the editor (and outside any popup layer, such as
+    // the color picker) validates.
     let pressed_at = ctx.input(|input| {
         input
             .pointer
@@ -659,9 +659,9 @@ pub(super) fn annotation_editor_ui(
     ctx.data_mut(|data| data.insert_temp(id, editor));
 }
 
-/// Valide l'éditeur : une seule action, et seulement si quelque chose a
-/// changé. Un texte vidé est retiré (un texte vide n'est pas tracé, il ne
-/// pourrait plus être désigné).
+/// Validates the editor: one action, and only if something
+/// changed. An emptied text is removed (an empty text is not plotted, it
+/// could no longer be designated).
 fn commit_annotation_editor(
     view: &mut GraphView,
     graph: NodeId,
@@ -711,11 +711,11 @@ mod tests {
         ctx
     }
 
-    /// #63 : la mise en forme demandée par la barre s'applique au surlignage
-    /// que le champ a gardé, puis la sélection se place dans les balises.
+    /// #63: the formatting requested by the bar applies to the highlight
+    /// that the field kept, then the selection is placed within the tags.
     #[test]
-    fn la_mise_en_forme_en_attente_s_applique_au_surlignage_du_champ() {
-        let field = egui::Id::new("champ");
+    fn the_pending_formatting_applies_to_the_field_highlight() {
+        let field = egui::Id::new("field");
         let ctx = context_with_selection(field, 4..7);
         ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Bold)));
         let mut buffer = "Abs 280 nm".to_owned();
@@ -726,16 +726,16 @@ mod tests {
         assert_eq!((start.index.0, end.index.0), (12, 15));
         assert!(
             ctx.memory(|memory| memory.has_focus(field)),
-            "le champ retrouve le focus après le clic sur la barre"
+            "the field regains focus after the click on the bar"
         );
-        // La demande est consommée : une seconde image ne la rejoue pas.
+        // The request is consumed: a second frame does not replay it.
         apply_pending_format(&ctx, field, &mut buffer);
         assert_eq!(buffer, "Abs #strong[280] nm");
     }
 
     #[test]
-    fn sans_surlignage_le_curseur_recoit_les_balises() {
-        let field = egui::Id::new("champ");
+    fn without_a_highlight_the_cursor_receives_the_tags() {
+        let field = egui::Id::new("field");
         let ctx = context_with_selection(field, 3..3);
         ctx.data_mut(|data| data.insert_temp(pending_format_id(), Some(TextFormat::Subscript)));
         let mut buffer = "H2O".to_owned();
@@ -743,11 +743,11 @@ mod tests {
         assert_eq!(buffer, "H2O#sub[]");
     }
 
-    /// Sans demande en attente, le texte du champ reste tel quel (le témoin des
-    /// deux tests précédents).
+    /// With no request pending, the field text stays as it is (the witness of the
+    /// two previous tests).
     #[test]
-    fn sans_demande_en_attente_le_texte_reste_tel_quel() {
-        let field = egui::Id::new("champ");
+    fn without_a_pending_request_the_text_stays_as_it_is() {
+        let field = egui::Id::new("field");
         let ctx = context_with_selection(field, 0..3);
         let mut buffer = "H2O".to_owned();
         apply_pending_format(&ctx, field, &mut buffer);
@@ -757,14 +757,14 @@ mod tests {
         assert_eq!(buffer, "H2O");
     }
 
-    /// #78 : la police demandée par la barre se pose une fois sur le brouillon
-    /// du texte libre, puis la demande est consommée.
+    /// #78: the font requested by the bar is set once on the draft
+    /// of the free text, then the request is consumed.
     #[test]
-    fn la_police_en_attente_se_pose_une_fois_sur_le_brouillon() {
+    fn the_pending_font_is_set_once_on_the_draft() {
         let ctx = egui::Context::default();
         let mut font = "Fira Sans".to_owned();
         apply_pending_zone_font(&ctx, &mut font);
-        assert_eq!(font, "Fira Sans", "rien en attente, rien ne change");
+        assert_eq!(font, "Fira Sans", "nothing pending, nothing changes");
         ctx.data_mut(|data| {
             data.insert_temp(pending_zone_font_id(), Some("Libertinus Serif".to_owned()))
         });
@@ -772,7 +772,7 @@ mod tests {
         assert_eq!(font, "Libertinus Serif");
         font = "Fira Sans".to_owned();
         apply_pending_zone_font(&ctx, &mut font);
-        assert_eq!(font, "Fira Sans", "la demande est consommée");
+        assert_eq!(font, "Fira Sans", "the request is consumed");
     }
 
     fn editor(
@@ -789,19 +789,19 @@ mod tests {
         }
     }
 
-    /// Valider l'éditeur d'un texte libre n'envoie qu'une action, et
-    /// seulement si quelque chose a changé ; un texte vidé est retiré.
+    /// Validating the editor of a free text sends only one action, and
+    /// only if something changed; an emptied text is removed.
     #[test]
-    fn valider_un_texte_libre_n_envoie_qu_une_action_et_seulement_s_il_a_change() {
+    fn validating_a_free_text_sends_one_action_and_only_if_it_changed() {
         let graph = NodeId::from_raw(5);
         let target = AnnotationRef { panel: 0, index: 0 };
-        let pic = AnnotationSpec::new("Pic", 1.0, 2.0);
+        let pic = AnnotationSpec::new("Peak", 1.0, 2.0);
         let blank = AnnotationSpec::new("   ", 1.0, 2.0);
-        let renamed = AnnotationSpec::new("Pic 2", 1.0, 2.0);
+        let renamed = AnnotationSpec::new("Peak 2", 1.0, 2.0);
         for (case, draft, original, expected) in [
-            ("neuf et vide", blank.clone(), None, vec![]),
+            ("new and empty", blank.clone(), None, vec![]),
             (
-                "neuf",
+                "new",
                 pic.clone(),
                 None,
                 vec![Action::SetAnnotation {
@@ -811,14 +811,14 @@ mod tests {
                 }],
             ),
             (
-                "vidé",
+                "emptied",
                 blank.clone(),
                 Some(pic.clone()),
                 vec![Action::RemoveAnnotation { graph, target }],
             ),
-            ("inchangé", pic.clone(), Some(pic.clone()), vec![]),
+            ("unchanged", pic.clone(), Some(pic.clone()), vec![]),
             (
-                "modifié",
+                "modified",
                 renamed.clone(),
                 Some(pic.clone()),
                 vec![Action::SetAnnotation {
@@ -838,13 +838,13 @@ mod tests {
                 &mut actions,
             );
             assert_eq!(actions, expected, "{case}");
-            // Sans figure tracée (pas de révision à attendre), l'aperçu
-            // s'efface dans tous les cas.
+            // With no plotted figure (no revision to wait for), the preview
+            // is cleared in all cases.
             assert_eq!(view.annotation_preview(), None, "{case}");
         }
     }
 
-    /// Une image de l'éditeur de titre ouvert sur `view`, s'il y en a un.
+    /// A frame of the title editor open on `view`, if there is one.
     fn run_text_editor(
         ctx: &egui::Context,
         view: &GraphView,
@@ -894,12 +894,12 @@ mod tests {
         ]
     }
 
-    /// L'éditeur sur place d'un titre ou d'un nom de légende (#53) : il reste
-    /// ouvert tant qu'on n'agit pas, Échap le ferme sans rien écrire, Entrée
-    /// ou un clic ailleurs valide — par une action, et seulement si le texte
-    /// a changé.
+    /// The in-place editor of a title or a legend name (#53): it stays
+    /// open as long as nothing is done, Escape closes it without writing anything, Enter
+    /// or a click elsewhere validates — through an action, and only if the text
+    /// changed.
     #[test]
-    fn l_editeur_d_un_titre_valide_par_entree_ou_un_clic_ailleurs_et_annule_par_echap() {
+    fn the_title_editor_validates_on_enter_or_a_click_elsewhere_and_cancels_on_escape() {
         let graph = NodeId::from_raw(5);
         let view = GraphView::new();
         let id = text_editor_id(&view);
@@ -924,24 +924,27 @@ mod tests {
         let title = TextEditTarget::Title(TextTarget::Title);
 
         let ctx = egui::Context::default();
-        open(&ctx, title, "Spectre");
+        open(&ctx, title, "Spectrum");
         assert!(run_text_editor(&ctx, &view, graph, Vec::new()).is_empty());
-        assert!(open_now(&ctx), "sans geste, l'éditeur reste ouvert");
-        type_text(&ctx, "Autre");
+        assert!(open_now(&ctx), "without a gesture, the editor stays open");
+        type_text(&ctx, "Other");
         assert!(run_text_editor(&ctx, &view, graph, vec![key(egui::Key::Escape)]).is_empty());
-        assert!(!open_now(&ctx), "Échap ferme l'éditeur sans rien écrire");
+        assert!(
+            !open_now(&ctx),
+            "Escape closes the editor without writing anything"
+        );
 
         let ctx = egui::Context::default();
-        open(&ctx, title, "Spectre");
+        open(&ctx, title, "Spectrum");
         run_text_editor(&ctx, &view, graph, Vec::new());
         assert!(
             run_text_editor(&ctx, &view, graph, click_far()).is_empty(),
-            "valider un texte inchangé n'envoie rien"
+            "validating an unchanged text sends nothing"
         );
         assert!(!open_now(&ctx));
 
         let ctx = egui::Context::default();
-        open(&ctx, title, "Spectre");
+        open(&ctx, title, "Spectrum");
         run_text_editor(&ctx, &view, graph, Vec::new());
         type_text(&ctx, "Absorbance");
         assert_eq!(
@@ -955,7 +958,7 @@ mod tests {
         assert!(!open_now(&ctx));
 
         let ctx = egui::Context::default();
-        open(&ctx, title, "Spectre");
+        open(&ctx, title, "Spectrum");
         run_text_editor(&ctx, &view, graph, Vec::new());
         type_text(&ctx, "Absorbance");
         assert_eq!(
@@ -965,31 +968,31 @@ mod tests {
                 target: TextTarget::Title,
                 text: "Absorbance".to_owned(),
             }],
-            "Entrée valide aussi"
+            "Enter validates too"
         );
 
         let ctx = egui::Context::default();
         let series = SeriesRef::new(0, 1);
         open(&ctx, TextEditTarget::LegendEntry(series), "B");
         run_text_editor(&ctx, &view, graph, Vec::new());
-        type_text(&ctx, "Témoin");
+        type_text(&ctx, "Control");
         assert_eq!(
             run_text_editor(&ctx, &view, graph, click_far()),
             vec![Action::SetLegendEntryName {
                 graph,
                 series,
-                name: "Témoin".to_owned(),
+                name: "Control".to_owned(),
             }]
         );
     }
 
-    /// L'éditeur d'un texte libre (#35) : l'aperçu montre le brouillon, Échap
-    /// le jette sans rien écrire, un clic ailleurs valide par une action.
+    /// The editor of a free text (#35): the preview shows the draft, Escape
+    /// throws it away without writing anything, a click elsewhere validates through an action.
     #[test]
-    fn l_editeur_d_un_texte_libre_valide_par_un_clic_ailleurs_et_jette_l_apercu_sur_echap() {
+    fn the_free_text_editor_validates_on_a_click_elsewhere_and_throws_the_preview_away_on_escape() {
         let graph = NodeId::from_raw(5);
         let target = AnnotationRef { panel: 0, index: 0 };
-        let draft = AnnotationSpec::new("Pic", 1.0, 2.0);
+        let draft = AnnotationSpec::new("Peak", 1.0, 2.0);
         let run = |ctx: &egui::Context, view: &mut GraphView, events: Vec<egui::Event>| {
             let mut actions = Vec::new();
             let input = egui::RawInput {
@@ -1022,12 +1025,16 @@ mod tests {
         assert_eq!(
             view.annotation_preview(),
             Some(&(target, draft.clone())),
-            "l'aperçu montre le brouillon avant toute validation"
+            "the preview shows the draft before any validation"
         );
         assert!(run(&ctx, &mut view, Vec::new()).is_empty());
         assert!(open_now(&ctx, &view));
         assert!(run(&ctx, &mut view, vec![key(egui::Key::Escape)]).is_empty());
-        assert_eq!(view.annotation_preview(), None, "Échap jette l'aperçu");
+        assert_eq!(
+            view.annotation_preview(),
+            None,
+            "Escape throws the preview away"
+        );
         assert!(!open_now(&ctx, &view));
 
         let ctx = egui::Context::default();
@@ -1047,7 +1054,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod selection_entre_deux_formats {
+mod selection_between_two_formats {
     use super::*;
     use stokesforge_app_state::text_format::TextFormat;
 
@@ -1069,18 +1076,18 @@ mod selection_entre_deux_formats {
         });
     }
 
-    /// #242 : B puis I sur la même sélection — egui réduit la sélection d'un champ
-    /// peint sans focus, le champ la retient donc lui-même.
+    /// #242: B then I on the same selection — egui shrinks the selection of a field
+    /// painted without focus, so the field retains it itself.
     #[test]
-    fn la_selection_survit_a_deux_formats() {
-        let ctx = crate::app::test_support::contexte();
-        let field = egui::Id::new("champ");
+    fn the_selection_survives_two_formats() {
+        let ctx = crate::app::test_support::context();
+        let field = egui::Id::new("field");
         let mut buffer = "λ (nm)".to_owned();
         for _ in 0..3 {
             image(&ctx, field, &mut buffer, false);
         }
         for format in [TextFormat::Bold, TextFormat::Italic] {
-            // Le clic sur la barre : le champ perd le focus, la demande est posée.
+            // The click on the bar: the field loses focus, the request is set.
             image(&ctx, field, &mut buffer, true);
             ctx.data_mut(|d| d.insert_temp(pending_format_id(), Some(format)));
             image(&ctx, field, &mut buffer, false);

@@ -1,24 +1,24 @@
-//! Page des propriétés des séries (#177–#179) : la fenêtre à part, ouverte
-//! par le double-clic sur une courbe ou sur sa ligne de l'Object Manager,
-//! qui règle les séries d'un calque — liste à gauche, réglages à droite — et
-//! leurs **groupes** : un groupe est l'ensemble des séries tracées ensemble
-//! ([`stokesforge_plot::PanelSpec::push_series_batch`]) ou rassemblées à la
-//! main ; il règle leur style commun et leur répartit un nuancier.
+//! Series properties page (#177-#179): the separate window, opened by
+//! double-clicking a curve or its row in the Object Manager, which sets the
+//! series of a layer (list on the left, settings on the right) and their
+//! **groups**. A group is the set of series plotted together
+//! ([`stokesforge_plot::PanelSpec::push_series_batch`]) or gathered by hand;
+//! it sets their common style and spreads a color gradient over them.
 //!
-//! La fenêtre est celle de [`super::plot_settings`] (même brouillon, même
-//! validation, même macro d'historique) : [`PlotSettingsTab::Series`] ne
-//! figure plus dans la bande d'onglets du graphe, elle choisit cette page.
-//! Une série d'un groupe se règle selon une **portée** choisie en clair
-//! ([`EditScope`]) : « cette série » (rien ne touche les autres, c'est
-//! l'exception) ou « tout le groupe » (style du trait et du symbole recopiés
-//! dans chaque membre, nuancier appliqué ; les réglages propres à une série —
-//! nom, type, visibilité, couleurs — sont grisés avec une info-bulle). Le
-//! style commun s'**écrit dans chaque série** : aucun drapeau d'exception à
-//! tenir, et « Quitter le groupe » rend une série à elle-même.
+//! The window is that of [`super::plot_settings`] (same draft, same
+//! validation, same history macro): [`PlotSettingsTab::Series`] no longer
+//! appears in the graph's tab strip, it chooses this page. A series of a
+//! group is edited according to a **scope** chosen in plain words
+//! ([`EditScope`]): "This series only" (nothing touches the others, this is
+//! the exception) or "Whole group" (line and symbol style copied into each
+//! member, gradient applied; the settings specific to a series (name, type,
+//! visibility, colors) are grayed out with a tooltip). The common style is
+//! **written into each series**: no exception flag to keep track of, and
+//! "Leave Group" gives a series back to itself.
 //!
-//! Nuanciers (#178) : fournis, enregistrés dans le projet ou pour
-//! l'utilisateur (même motif que les couleurs, `SavedColors::gradients`),
-//! ou personnalisés ; ils se suppriment depuis la même liste.
+//! Color gradients (#178): built in, saved in the project or for the user
+//! (same pattern as colors, `SavedColors::gradients`), or custom; they are
+//! deleted from the same list.
 //!
 //! [`PlotSettingsTab::Series`]: stokesforge_app_state::state::PlotSettingsTab::Series
 
@@ -46,41 +46,41 @@ use super::object_dnd::{self, Hover};
 use super::plot_settings::series_editor;
 use super::reorder_list::reorder_row_with;
 
-/// Largeur de la liste des séries, à gauche.
+/// Width of the series list, on the left.
 const LIST_WIDTH: f32 = 190.0;
-/// Hauteur retirée à la liste pour la rangée Monter / Descendre.
+/// Height taken off the list for the Move Up / Move Down row.
 const LIST_FOOTER: f32 = 34.0;
-/// Arrêts de départ d'un nuancier personnalisé : du bleu au rouge.
+/// Starting stops of a custom color gradient: from blue to red.
 const CUSTOM_STOPS: [&str; 2] = ["#0000ff", "#ff0000"];
-/// Nombre d'échantillons de l'aperçu d'un nuancier.
+/// Number of samples in the preview of a color gradient.
 const PREVIEW_STEPS: usize = 24;
-/// Nombre d'échantillons de la pastille d'une entrée de la liste.
+/// Number of samples in the swatch of a list entry.
 const ENTRY_STEPS: usize = 12;
 
-/// Sur quoi portent les réglages d'une série qui est dans un groupe.
+/// What the settings of a series that is in a group apply to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditScope {
-    /// Cette série seulement : les autres membres ne bougent pas.
+    /// This series only: the other members do not move.
     Series,
-    /// Tout le groupe.
+    /// Whole group.
     Group,
 }
 
-/// Le nuancier choisi dans la liste (état de fenêtre, jamais écrit au modèle).
+/// The color gradient chosen in the list (window state, never written to the model).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GradientChoice {
-    /// Un nuancier fourni : rang dans `GRADIENT_PRESETS`.
+    /// A built-in color gradient: rank in `GRADIENT_PRESETS`.
     Preset(usize),
-    /// Un nuancier enregistré : où et sous quel nom.
+    /// A saved color gradient: where and under what name.
     Saved(SaveTarget, String),
-    /// Les arrêts saisis dans la fenêtre.
+    /// The stops entered in the window.
     Custom,
 }
 
-/// Page des séries du calque `panel` : la liste, puis le groupe et les
-/// réglages de la série `selected`. Rend `true` si le brouillon doit être
-/// validé — voir la doc de tête de `plot_settings_window`. Les enregistrements
-/// et suppressions de nuanciers sortent en `actions`.
+/// Series page of the layer `panel`: the list, then the group and the
+/// settings of the series `selected`. Returns `true` if the draft must be
+/// validated; see the head doc of `plot_settings_window`. Saves and deletions
+/// of color gradients go out in `actions`.
 pub(super) fn curve_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -114,10 +114,9 @@ pub(super) fn curve_settings_page(
     commit
 }
 
-/// Tout le groupe : recopie dans les membres de `group` ce que la série `index`
-/// vient de changer dans son style de trait et de symbole par rapport à
-/// `before` (seulement ce qui a changé : les exceptions déjà posées sur les
-/// autres champs sont gardées).
+/// Whole group: copies into the members of `group` what the series `index`
+/// has just changed in its line and symbol style relative to `before` (only
+/// what changed: the exceptions already set on the other fields are kept).
 fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index: usize) {
     let edited = panel.series[index].clone();
     for member in panel.group_members(group) {
@@ -137,17 +136,17 @@ fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index
     }
 }
 
-/// Le glisser-déposer de la liste : l'élément saisi (le brouillon se modifie
-/// tout de suite, sans aperçu) et la première ligne survolée de l'image.
+/// The drag and drop of the list: the item grabbed (the draft changes right
+/// away, without preview) and the first row hovered in the frame.
 struct ListDnd {
     layer: usize,
     item: Option<DragItem>,
     hover: Hover,
 }
 
-/// Une ligne de série de la liste ; rend le centre vertical de la ligne. Sa
-/// poignée la glisse : dans son groupe, vers un autre groupe, hors du groupe,
-/// ou parmi les séries seules.
+/// A series row of the list; returns the vertical center of the row. Its
+/// handle drags it: within its group, to another group, out of the group, or
+/// among the single series.
 fn series_row(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -171,7 +170,7 @@ fn series_row(
                             Some(DragItem::Series { current, .. }) if current == index
                         ),
                         |ui| {
-                            // « Show series » : la case de la série, en tête de ligne.
+                            // "Show series": the series' box, at the head of the row.
                             let mut visible = panel.series[index].visible;
                             if ui
                                 .add(egui::Checkbox::new(&mut visible, ""))
@@ -181,7 +180,7 @@ fn series_row(
                                 panel.series[index].visible = visible;
                                 *commit = true;
                             }
-                            // Toute la ligne, hors case, se clique et se glisse.
+                            // The whole row, outside the box, is clicked and dragged.
                             let response = list_row_draggable(ui, &label, *selected == index);
                             clicked = response.clicked();
                             Some(response)
@@ -218,10 +217,10 @@ fn series_row(
     row.response.rect.center().y
 }
 
-/// La liste des séries, rangée comme l'Object Manager (#197) : une série seule
-/// est une ligne, un groupe est un nœud repliable (réduire ne masque aucune
-/// courbe) dont les membres sont en branche. Dessous, la rangée qui change
-/// l'ordre. Rend `true` si l'ordre a changé.
+/// The series list, arranged like the Object Manager (#197): a single series
+/// is a row, a group is a collapsible node (collapsing hides no curve) whose
+/// members are in a branch. Below, the row that changes the order. Returns
+/// `true` if the order changed.
 fn series_list(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -243,7 +242,7 @@ fn series_list(
         .max_height((ui.available_height() - LIST_FOOTER).max(60.0))
         .show(ui, |ui| {
             crate::tree_lines::begin_tree(ui);
-            // #169 : une liste, donc des lignes de liste (`list_row`).
+            // #169: a list, so list rows (`list_row`).
             for slot in panel.slots() {
                 match slot {
                     SeriesSlot::Single(index) => {
@@ -260,10 +259,10 @@ fn series_list(
                         let previous_height = raise_to_list_row_height(ui);
                         header
                             .show_header(ui, |ui| {
-                                // Comme dans l'Object Manager (#208) : l'en-tête est
-                                // surligné quand le groupe est ce qu'on règle, et un
-                                // clic choisit le groupe (sa première série, portée
-                                // « tout le groupe »).
+                                // As in the Object Manager (#208): the header is
+                                // highlighted when the group is what is being edited, and a
+                                // click chooses the group (its first series, scope
+                                // "Whole group").
                                 let scope_id = egui::Id::new("curve_edit_scope");
                                 let scope = ui
                                     .data(|d| d.get_temp(scope_id))
@@ -329,8 +328,8 @@ fn series_list(
                     }
                 }
             }
-            // La sortie d'un groupe qui finit la liste, et le dépôt en fin de
-            // liste : la zone n'existe que pendant un glisser.
+            // The exit of a group that ends the list, and the drop at the end of
+            // the list: the zone exists only during a drag.
             if dnd.item.is_some() {
                 let row = ui.horizontal(|ui| ui.weak(tr!("object-drag-end"))).response;
                 if ui.rect_contains_pointer(row.rect) {
@@ -341,7 +340,7 @@ fn series_list(
     if let (Some(item), Some(over)) = (dnd.item, dnd.hover.take()) {
         if let Some((item, order)) = step_panel(panel, item, over) {
             object_dnd::set_item(ui.ctx(), item);
-            // La série réglée suit sa place dans le nouvel ordre.
+            // The edited series follows its place in the new order.
             if let Some(rank) = order.iter().position(|old| old == selected) {
                 *selected = rank;
             }
@@ -373,7 +372,7 @@ fn series_list(
     commit
 }
 
-/// Le côté droit : groupe, portée, nuancier, puis les réglages de la série.
+/// The right side: group, scope, color gradient, then the series settings.
 fn series_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -388,14 +387,14 @@ fn series_page(
         .unwrap_or(EditScope::Group);
     let mut commit = membership_editor(ui, panel, layer, index, &mut scope);
     ui.data_mut(|d| d.insert_temp(scope_id, scope));
-    // Supprimer un groupe peut vider le calque : rien à régler ensuite.
+    // Deleting a group can empty the layer: nothing to edit afterwards.
     if panel.series.is_empty() {
         return commit;
     }
     *index = (*index).min(panel.series.len() - 1);
     let group = panel.series[*index].group;
     let whole_group = group.is_some() && scope == EditScope::Group;
-    // Hors d'un groupe, il n'y a rien à répartir : pas de nuancier (#213).
+    // Outside a group there is nothing to spread: no color gradient (#213).
     if let Some(group) = group {
         commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
     }
@@ -408,11 +407,10 @@ fn series_page(
     commit
 }
 
-/// Appartenance de la série `index` : liste déroulante, « Quitter le groupe »,
-/// puis, si elle est dans un groupe, ses gestes (nom, ordre, dissoudre,
-/// supprimer) et le choix de portée avec sa phrase d'explication. Un groupe
-/// reste contigu (#197) : changer d'appartenance déplace la série, `index`
-/// la suit.
+/// Membership of the series `index`: dropdown, "Leave Group", then, if it is
+/// in a group, its gestures (name, order, ungroup, delete) and the scope
+/// choice with its explanatory sentence. A group stays contiguous (#197):
+/// changing membership moves the series, `index` follows it.
 fn membership_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -470,8 +468,8 @@ fn membership_editor(
             commit |= group_editor(f, panel, layer, group, index);
             let count = panel.group_members(group).len();
             f.row(tr!("curve-scope-field"), |ui| {
-                // Les deux options sont l'une sous l'autre : le « ? » se pose
-                // au niveau de la dernière, « Whole group ».
+                // The two options are one under the other: the "?" sits
+                // at the level of the last one, "Whole group".
                 ui.horizontal(|ui| {
                     let options = ui.vertical(|ui| {
                         choice(
@@ -487,8 +485,8 @@ fn membership_editor(
                             ],
                         );
                     });
-                    // Ce qui s'applique selon la portée : sous le « ? » (#213),
-                    // plus en note grisée.
+                    // What applies depending on the scope: under the "?" (#213),
+                    // no longer in a grayed note.
                     let text = match scope {
                         EditScope::Group => tr!("curve-scope-group-note"),
                         EditScope::Series => tr!("curve-scope-series-note"),
@@ -519,11 +517,11 @@ fn membership_editor(
     })
 }
 
-/// Les gestes du groupe `group` (#197) : son nom, son rang dans l'ordre de
-/// tracé, sa dissolution (les séries restent) et sa suppression avec ses
-/// séries. `index` est la série réglée : il suit son contenu quand le groupe
-/// change de rang, et retombe sur la place du groupe quand il est supprimé.
-/// Rend `true` si le groupe a changé.
+/// The gestures of the group `group` (#197): its name, its rank in the
+/// drawing order, its dissolution (the series stay) and its deletion with its
+/// series. `index` is the edited series: it follows its content when the
+/// group changes rank, and falls back on the group's place when it is
+/// deleted. Returns `true` if the group changed.
 fn group_editor(
     f: &mut Form<'_>,
     panel: &mut PanelSpec,
@@ -532,8 +530,8 @@ fn group_editor(
     index: &mut usize,
 ) -> bool {
     let mut commit = false;
-    // Le texte en cours de frappe ne vit que le temps du focus : le reste du
-    // temps, le champ relit le modèle (nom changé ailleurs, autre groupe).
+    // The text being typed lives only as long as the focus: the rest of the
+    // time, the field rereads the model (name changed elsewhere, other group).
     let name_id = egui::Id::new(("curve_group_name", layer, group));
     let mut name: String = f
         .ui()
@@ -617,7 +615,7 @@ fn group_editor(
     commit
 }
 
-/// Le nom d'un nuancier fourni.
+/// The name of a built-in color gradient.
 fn gradient_label(id: &str) -> String {
     match id {
         "blue-red" => tr!("curve-gradient-blue-red"),
@@ -632,7 +630,7 @@ fn gradient_label(id: &str) -> String {
     }
 }
 
-/// Les couleurs enregistrées de la cible `target`.
+/// The saved colors of the target `target`.
 fn saved_of(env: &PickerEnv, target: SaveTarget) -> &SavedColors {
     match target {
         SaveTarget::Project => &env.project,
@@ -640,8 +638,8 @@ fn saved_of(env: &PickerEnv, target: SaveTarget) -> &SavedColors {
     }
 }
 
-/// Les arrêts du nuancier choisi ; `custom` pour un nuancier personnalisé (ou
-/// un nuancier enregistré qui a disparu).
+/// The stops of the chosen color gradient; `custom` for a custom one (or a
+/// saved one that has disappeared).
 fn choice_stops(choice: &GradientChoice, env: &PickerEnv, custom: &[String]) -> Vec<String> {
     match choice {
         GradientChoice::Preset(index) => GRADIENT_PRESETS.get(*index).map_or_else(
@@ -657,9 +655,9 @@ fn choice_stops(choice: &GradientChoice, env: &PickerEnv, custom: &[String]) -> 
     }
 }
 
-/// Le choix qui correspond aux `stops` retenus par le groupe (#213) : celui que
-/// la fenêtre se rappelle s'il donne ces arrêts, sinon un nuancier fourni ou
-/// enregistré qui les porte, sinon le nuancier personnalisé.
+/// The choice that matches the `stops` retained by the group (#213): the one
+/// the window remembers if it gives these stops, otherwise a built-in or
+/// saved color gradient that carries them, otherwise the custom one.
 fn identify_choice(
     stops: &[String],
     remembered: Option<&GradientChoice>,
@@ -696,7 +694,7 @@ fn identify_choice(
     GradientChoice::Custom
 }
 
-/// Une entrée de la liste des nuanciers : ses couleurs, puis son nom (#213).
+/// An entry of the color gradient list: its colors, then its name (#213).
 fn gradient_popup_entry(
     ui: &mut egui::Ui,
     choice: &mut Option<GradientChoice>,
@@ -705,7 +703,7 @@ fn gradient_popup_entry(
     stops: &[String],
 ) {
     ui.horizontal(|ui| {
-        // Toute la ligne se clique (#213) : la pastille comme le nom.
+        // The whole row is clicked (#213): the swatch as well as the name.
         let swatch = gradient_swatch(ui, &gradient_colors(stops, ENTRY_STEPS));
         if swatch.clicked() {
             *choice = Some(value.clone());
@@ -714,16 +712,16 @@ fn gradient_popup_entry(
     });
 }
 
-/// Nuanciers (#178, #213) : choisir (fourni, enregistré, personnalisé), voir
-/// ses couleurs dans la liste et en bande, enregistrer ou supprimer un nuancier
-/// enregistré. Il répartit les couleurs régulièrement sur les séries du groupe
-/// dans l'ordre de la liste, et le groupe le **retient** : la liste montre
-/// celui du groupe, vide tant qu'aucun n'a été choisi (la bande est alors
-/// grisée et rien n'est appliqué). Une série qui rejoint le groupe en reçoit la
-/// couleur. Grisé tant que la portée n'est pas « tout le groupe » (`enabled`),
-/// avec l'info-bulle qui le dit. Le nuancier s'applique dès qu'on le choisit ou
-/// qu'on change un arrêt (brouillon, validé par OK). Hors d'un groupe, la page
-/// ne l'appelle pas : il n'y a rien à répartir.
+/// Color gradients (#178, #213): choose (built-in, saved, custom), see their
+/// colors in the list and as a strip, save or delete a saved gradient. It
+/// spreads the colors evenly over the series of the group in the order of the
+/// list, and the group **retains** it: the list shows the group's one, empty
+/// until one has been chosen (the strip is then grayed out and nothing is
+/// applied). A series that joins the group receives its color. Grayed out
+/// unless the scope is "Whole group" (`enabled`), with the tooltip that says
+/// so. The gradient applies as soon as it is chosen or a stop changes (draft,
+/// validated by OK). Outside a group, the page does not call it: there is
+/// nothing to spread.
 fn gradient_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -743,8 +741,8 @@ fn gradient_editor(
     let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut target: SaveTarget = ui.data(|d| d.get_temp(target_id)).unwrap_or_default();
 
-    // Ce que montre la liste vient du groupe, pas de la fenêtre : vide s'il n'a
-    // reçu aucun nuancier.
+    // What the list shows comes from the group, not from the window: empty if
+    // it has received no color gradient.
     let retained: Option<Vec<String>> = panel.group_gradient(group).map(<[String]>::to_vec);
     let mut choice: Option<GradientChoice> = retained
         .as_deref()
@@ -824,8 +822,8 @@ fn gradient_editor(
                 {
                     if let Some((target, name)) = saved {
                         actions.push(Action::RemoveSavedGradient { name, target });
-                        // Les couleurs déjà posées restent : la liste les relit
-                        // comme un nuancier personnalisé.
+                        // The colors already set stay: the list rereads them
+                        // as a custom color gradient.
                         choice = Some(GradientChoice::Custom);
                     }
                 }
@@ -896,9 +894,9 @@ fn gradient_editor(
                     }
                 });
             }
-            // Pas de bouton « Appliquer » : comme tous les autres réglages,
-            // le nuancier s'écrit dans le brouillon dès qu'on le change
-            // (choix, arrêt de couleur) ; Cancel l'efface, OK le valide (#213).
+            // No "Apply" button: like all the other settings, the color
+            // gradient is written into the draft as soon as it changes
+            // (choice, color stop); Cancel discards it, OK validates it (#213).
             let active = choice
                 .as_ref()
                 .map(|choice| choice_stops(choice, env, &custom));
@@ -907,8 +905,8 @@ fn gradient_editor(
                     commit |= panel.set_group_gradient(group, active);
                 }
             }
-            // La bande montre le nuancier du groupe ; grisée, vide, tant qu'il
-            // n'en a reçu aucun.
+            // The strip shows the group's color gradient; grayed out, empty, while it
+            // has received none.
             let strip = active
                 .as_deref()
                 .map(|stops| gradient_colors(stops, PREVIEW_STEPS))
@@ -938,7 +936,7 @@ mod tests {
     use stokesforge_core::NodeId;
     use stokesforge_plot::LineStyle;
 
-    fn panneau() -> PanelSpec {
+    fn sample_panel() -> PanelSpec {
         let mut panel = PanelSpec::default();
         panel.push_series_batch(vec![SeriesSpec::new(NodeId::from_raw(1))]);
         panel.push_series_batch(
@@ -950,28 +948,32 @@ mod tests {
     }
 
     #[test]
-    fn le_style_modifie_se_recopie_dans_le_groupe_sans_ecraser_le_reste() {
-        let mut panel = panneau();
-        panel.series[2].line.width = 4.0; // exception posée à la main
-        let avant = panel.series[1].clone();
+    fn the_changed_style_is_copied_to_the_group_without_overwriting_the_rest() {
+        let mut panel = sample_panel();
+        panel.series[2].line.width = 4.0; // exception set by hand
+        let before = panel.series[1].clone();
         panel.series[1].line.style = LineStyle::Dash;
         panel.series[1].symbol.size = 11.0;
-        propagate_style(&mut panel, 1, &avant, 1);
+        propagate_style(&mut panel, 1, &before, 1);
         for member in [1, 2, 3] {
             assert_eq!(panel.series[member].line.style, LineStyle::Dash);
             assert_eq!(panel.series[member].symbol.size, 11.0);
         }
-        assert_eq!(panel.series[2].line.width, 4.0, "champ non touché : gardé");
-        assert_eq!(panel.series[0].line.style, LineStyle::Solid, "hors groupe");
+        assert_eq!(panel.series[2].line.width, 4.0, "untouched field: kept");
+        assert_eq!(
+            panel.series[0].line.style,
+            LineStyle::Solid,
+            "outside the group"
+        );
         assert_eq!(
             panel.series[0].symbol.size,
             SeriesSpec::new(NodeId::from_raw(1)).symbol.size
         );
     }
 
-    /// Un calque « A, [B C D] » dont le groupe s'appelle « Lots » ; les séries
-    /// portent le nom de leur lettre.
-    fn calque_avec_groupe() -> PanelSpec {
+    /// A layer "A, [B C D]" whose group is called "Batch"; the series
+    /// carry the name of their letter.
+    fn layer_with_group() -> PanelSpec {
         let mut panel = PanelSpec::default();
         for (n, name) in [(1, "A"), (2, "B"), (3, "C"), (4, "D")] {
             let mut series = SeriesSpec::new(NodeId::from_raw(n));
@@ -981,24 +983,24 @@ mod tests {
         for member in 1..=3 {
             panel.series[member].group = Some(1);
         }
-        assert!(panel.rename_group(1, "Lots"));
+        assert!(panel.rename_group(1, "Batch"));
         panel
     }
 
-    /// Une image de la page des séries : rend ce qui a été peint et si elle
-    /// demande la validation.
+    /// A frame of the series page: returns what was painted and whether it
+    /// asks for validation.
     fn page(
         ctx: &egui::Context,
         panel: &mut PanelSpec,
         selected: &mut usize,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, bool) {
-        let project = stokesforge_core::Project::new("Séries").unwrap();
+        let project = stokesforge_core::Project::new("Series").unwrap();
         let mut env = PickerEnv::default();
         let mut actions = Vec::new();
         let mut commit = false;
         let output =
-            super::super::test_support::image_de(ctx, egui::vec2(900.0, 700.0), events, |ui| {
+            super::super::test_support::frame_of(ctx, egui::vec2(900.0, 700.0), events, |ui| {
                 commit |= curve_settings_page(
                     ui,
                     panel,
@@ -1012,30 +1014,30 @@ mod tests {
         (output, commit)
     }
 
-    fn centre(output: &egui::FullOutput, texte: &str) -> egui::Pos2 {
-        super::super::test_support::textes(&output.shapes)
+    fn center_of(output: &egui::FullOutput, text: &str) -> egui::Pos2 {
+        super::super::test_support::texts(&output.shapes)
             .into_iter()
-            .find(|t| t.texte == texte)
-            .unwrap_or_else(|| panic!("texte absent : {texte}"))
-            .centre
+            .find(|t| t.text == text)
+            .unwrap_or_else(|| panic!("text absent: {text}"))
+            .center
     }
 
-    /// Bord gauche du texte peint : l'alignement d'une ligne, quelle que soit
-    /// la longueur de son libellé.
-    fn gauche(output: &egui::FullOutput, texte: &str) -> f32 {
+    /// Left edge of the painted text: the alignment of a row, whatever the
+    /// length of its label.
+    fn left_of(output: &egui::FullOutput, text: &str) -> f32 {
         output
             .shapes
             .iter()
-            .find_map(|peint| match &peint.shape {
-                egui::Shape::Text(shape) if shape.galley.text() == texte => {
+            .find_map(|painted_shape| match &painted_shape.shape {
+                egui::Shape::Text(shape) if shape.galley.text() == text => {
                     Some(shape.visual_bounding_rect().left())
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("texte absent : {texte}"))
+            .unwrap_or_else(|| panic!("text absent: {text}"))
     }
 
-    fn clic(
+    fn click_at(
         ctx: &egui::Context,
         panel: &mut PanelSpec,
         selected: &mut usize,
@@ -1059,53 +1061,53 @@ mod tests {
         commit
     }
 
-    /// #197 : la liste des séries range un groupe comme l'Object Manager — un
-    /// en-tête qui porte son nom, ses membres en retrait dessous — et ne le
-    /// montre plus en suffixe de chaque ligne.
+    /// #197: the series list arranges a group like the Object Manager, with a
+    /// header that carries its name and its members indented below, and no
+    /// longer shows it as a suffix on each row.
     #[test]
-    fn la_liste_range_un_groupe_sous_son_en_tete_nomme() {
-        let ctx = super::super::test_support::contexte();
-        let mut panel = calque_avec_groupe();
+    fn the_list_arranges_a_group_under_its_named_header() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
         let mut selected = 0;
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let (seule, en_tete, membre) = (
-            centre(&output, "A"),
-            centre(&output, "Lots"),
-            centre(&output, "B"),
+        let (single, header, member) = (
+            center_of(&output, "A"),
+            center_of(&output, "Batch"),
+            center_of(&output, "B"),
         );
-        assert!(seule.y < en_tete.y && en_tete.y < membre.y);
+        assert!(single.y < header.y && header.y < member.y);
         assert!(
-            gauche(&output, "B") > gauche(&output, "A") + 10.0,
-            "les membres sont en retrait d'une série seule"
+            left_of(&output, "B") > left_of(&output, "A") + 10.0,
+            "members are indented relative to a single series"
         );
         assert!(
-            super::super::test_support::textes(&output.shapes)
+            super::super::test_support::texts(&output.shapes)
                 .iter()
-                .all(|t| !t.texte.contains('·')),
-            "plus de groupe en suffixe"
+                .all(|t| !t.text.contains('·')),
+            "no group as a suffix any more"
         );
     }
 
-    /// #170, point 5 : une ligne série avec sa case à cocher a la hauteur
-    /// unique des lignes de liste — la case est un carré de `LIST_ROW_HEIGHT`,
-    /// centré sur le libellé — et les lignes se suivent d'un pas constant, que
-    /// la série soit seule, en groupe ou l'en-tête du groupe. Témoin : sans la
-    /// hauteur imposée, la case retombe à 18 px.
+    /// #170, point 5: a series row with its checkbox has the single height
+    /// of list rows (the box is a square of `LIST_ROW_HEIGHT`, centered on the
+    /// label) and the rows follow one another with a constant step, whether
+    /// the series is single, in a group or the group header. Witness: without
+    /// the imposed height, the box falls back to 18 px.
     #[test]
-    fn la_ligne_serie_a_la_hauteur_unique_avec_sa_case() {
+    fn the_series_row_has_the_single_height_with_its_checkbox() {
         use super::super::list_row::LIST_ROW_HEIGHT;
-        let ctx = super::super::test_support::contexte();
-        let mut panel = calque_avec_groupe();
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
         let mut selected = 0;
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        for nom in ["A", "B"] {
-            let label = centre(&output, nom);
-            let cases: Vec<egui::Rect> = output
+        for name in ["A", "B"] {
+            let label = center_of(&output, name);
+            let boxes: Vec<egui::Rect> = output
                 .shapes
                 .iter()
-                .filter_map(|peint| match &peint.shape {
+                .filter_map(|painted_shape| match &painted_shape.shape {
                     egui::Shape::Rect(rect)
                         if (rect.rect.width() - rect.rect.height()).abs() < 1.0
                             && (rect.rect.width() - LIST_ROW_HEIGHT).abs() < 1.0
@@ -1117,58 +1119,61 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert!(!cases.is_empty(), "{nom} : case de LIST_ROW_HEIGHT absente");
+            assert!(!boxes.is_empty(), "{name}: box of LIST_ROW_HEIGHT missing");
         }
-        let (a, lots, b) = (
-            centre(&output, "A"),
-            centre(&output, "Lots"),
-            centre(&output, "B"),
+        let (a, batch, b) = (
+            center_of(&output, "A"),
+            center_of(&output, "Batch"),
+            center_of(&output, "B"),
         );
-        let pas = lots.y - a.y;
-        assert!(pas >= LIST_ROW_HEIGHT, "lignes trop serrées : {pas}");
+        let step = batch.y - a.y;
+        assert!(step >= LIST_ROW_HEIGHT, "rows too tight: {step}");
         assert!(
-            ((b.y - lots.y) - pas).abs() < 1.0,
-            "pas constant entre série seule, en-tête et membre : {pas} / {}",
-            b.y - lots.y
+            ((b.y - batch.y) - step).abs() < 1.0,
+            "constant step between single series, header and member: {step} / {}",
+            b.y - batch.y
         );
     }
 
-    /// #197 : Dissoudre rend ses séries simples (style gardé), Supprimer le
-    /// groupe les retire ; les deux demandent la validation du brouillon.
+    /// #197: Ungroup makes its series single (style kept), Delete Group
+    /// removes them; both ask for validation of the draft.
     #[test]
-    fn dissoudre_et_supprimer_un_groupe_depuis_la_fenetre() {
-        let ctx = super::super::test_support::contexte();
-        let mut panel = calque_avec_groupe();
+    fn ungroup_and_delete_a_group_from_the_window() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
         panel.series[1].line.width = 4.5;
         let mut selected = 1;
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let pos = centre(&output, &tr!("curve-group-ungroup"));
-        assert!(clic(&ctx, &mut panel, &mut selected, pos));
+        let pos = center_of(&output, &tr!("curve-group-ungroup"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
         assert!(panel.series.iter().all(|s| s.group.is_none()));
-        assert_eq!(panel.series[1].line.width, 4.5, "le style reste");
+        assert_eq!(panel.series[1].line.width, 4.5, "the style stays");
         assert_eq!(panel.series.len(), 4);
 
-        let mut panel = calque_avec_groupe();
+        let mut panel = layer_with_group();
         let mut selected = 3;
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let pos = centre(&output, &tr!("curve-group-delete"));
-        assert!(clic(&ctx, &mut panel, &mut selected, pos));
-        assert_eq!(panel.series.len(), 1, "A reste seule");
+        let pos = center_of(&output, &tr!("curve-group-delete"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        assert_eq!(panel.series.len(), 1, "A stays single");
         assert!(panel.group_names.is_empty());
         let (_, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        assert_eq!(selected, 0, "la sélection retombe sur une série existante");
+        assert_eq!(
+            selected, 0,
+            "the selection falls back on an existing series"
+        );
     }
 
-    /// #197 : rejoindre un groupe place la série à la suite de ses membres, et
-    /// la sélection suit la série.
+    /// #197: joining a group places the series after its members, and
+    /// the selection follows the series.
     #[test]
-    fn rejoindre_un_groupe_deplace_la_serie_et_la_selection_la_suit() {
-        let mut panel = calque_avec_groupe();
+    fn joining_a_group_moves_the_series_and_the_selection_follows() {
+        let mut panel = layer_with_group();
         let mut ui_selected = 0;
-        let ctx = super::super::test_support::contexte();
-        // « A » (rang 0) rejoint le groupe 1 par la même voie que la liste déroulante.
+        let ctx = super::super::test_support::context();
+        // "A" (rank 0) joins group 1 by the same path as the dropdown.
         let moved = panel.set_series_group(ui_selected, Some(1)).unwrap();
         ui_selected = moved;
         assert_eq!(ui_selected, 3);
@@ -1181,100 +1186,99 @@ mod tests {
             ["B", "C", "D", "A"]
         );
         let (output, _) = page(&ctx, &mut panel, &mut ui_selected, Vec::new());
-        assert!(centre(&output, "A").y > centre(&output, "D").y);
+        assert!(center_of(&output, "A").y > center_of(&output, "D").y);
     }
 
-    /// #209 : rejoindre un groupe **par la liste déroulante** de la fenêtre —
-    /// et non par `set_series_group` appelé directement — range la série à la
-    /// suite des membres, et l'éditeur garde la même série (`*index = moved`
-    /// dans `membership_editor`). Témoin : avant le choix, la série réglée est
-    /// au rang 0, qu'elle quitte.
+    /// #209: joining a group **through the window's dropdown** (and not by
+    /// calling `set_series_group` directly) places the series after the
+    /// members, and the editor keeps the same series (`*index = moved`
+    /// in `membership_editor`). Witness: before the choice, the edited series is
+    /// at rank 0, which it leaves.
     #[test]
-    fn la_liste_deroulante_fait_rejoindre_un_groupe_et_l_editeur_suit_la_serie() {
-        let ctx = super::super::test_support::contexte();
-        let mut panel = calque_avec_groupe();
-        let mut selected = 0; // « A », hors groupe
+    fn the_dropdown_joins_a_group_and_the_editor_follows_the_series() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut selected = 0; // "A", outside a group
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let liste = centre(&output, &tr!("curve-group-none"));
+        let list = center_of(&output, &tr!("curve-group-none"));
         assert!(
-            !clic(&ctx, &mut panel, &mut selected, liste),
-            "ouvrir la liste ne change rien"
+            !click_at(&ctx, &mut panel, &mut selected, list),
+            "opening the list changes nothing"
         );
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let pos = centre(
+        let pos = center_of(
             &output,
-            &tr!("curve-group-entry", group = "Lots", count = 3),
+            &tr!("curve-group-entry", group = "Batch", count = 3),
         );
         assert!(
-            clic(&ctx, &mut panel, &mut selected, pos),
-            "le choix demande la validation"
+            click_at(&ctx, &mut panel, &mut selected, pos),
+            "the choice asks for validation"
         );
-        let noms: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(noms, ["B", "C", "D", "A"], "A rejoint la fin du groupe");
+        let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["B", "C", "D", "A"], "A joins the end of the group");
         assert_eq!(panel.series[3].group, Some(1));
         assert_eq!(selected, 3);
-        assert_eq!(panel.series[selected].name, "A", "l'éditeur suit la série");
+        assert_eq!(
+            panel.series[selected].name, "A",
+            "the editor follows the series"
+        );
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
         assert!(
-            super::super::test_support::textes(&output.shapes)
+            super::super::test_support::texts(&output.shapes)
                 .iter()
-                .any(|t| t.texte == tr!("curve-group-entry", group = "Lots", count = 4)),
-            "la liste montre désormais le groupe de la série"
+                .any(|t| t.text == tr!("curve-group-entry", group = "Batch", count = 4)),
+            "the list now shows the series' group"
         );
     }
 
-    /// #197 : Descendre le groupe garde la série réglée (la même, pas le même
-    /// rang) dans l'éditeur.
+    /// #197: Move Group Down keeps the edited series (the same one, not the same
+    /// rank) in the editor.
     #[test]
-    fn descendre_le_groupe_garde_la_serie_reglee() {
-        let ctx = super::super::test_support::contexte();
-        let mut panel = calque_avec_groupe();
-        let mut suite = SeriesSpec::new(NodeId::from_raw(5));
-        suite.name = "E".into();
-        panel.series.push(suite);
-        let mut selected = 1; // « B », premier membre du groupe
+    fn moving_the_group_down_keeps_the_edited_series() {
+        let ctx = super::super::test_support::context();
+        let mut panel = layer_with_group();
+        let mut extra = SeriesSpec::new(NodeId::from_raw(5));
+        extra.name = "E".into();
+        panel.series.push(extra);
+        let mut selected = 1; // "B", first member of the group
         page(&ctx, &mut panel, &mut selected, Vec::new());
         let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
-        let pos = centre(&output, &tr!("curve-group-move-down"));
-        assert!(clic(&ctx, &mut panel, &mut selected, pos));
-        let noms: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(
-            noms,
-            ["A", "E", "B", "C", "D"],
-            "témoin : le groupe a bougé"
-        );
+        let pos = center_of(&output, &tr!("curve-group-move-down"));
+        assert!(click_at(&ctx, &mut panel, &mut selected, pos));
+        let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["A", "E", "B", "C", "D"], "witness: the group moved");
         assert_eq!(panel.series[selected].name, "B");
     }
 
-    /// La page des séries vivante, pour piloter un glisser-déposer image par
-    /// image : le brouillon se modifie tout de suite, sans aperçu.
-    struct Banc {
+    /// The live series page, to drive a drag and drop frame by
+    /// frame: the draft changes right away, without preview.
+    struct Bench {
         project: stokesforge_core::Project,
         panel: PanelSpec,
         selected: usize,
         committed: bool,
     }
 
-    fn banc(panel: PanelSpec, selected: usize) -> egui_kittest::Harness<'static, Banc> {
+    fn bench(panel: PanelSpec, selected: usize) -> egui_kittest::Harness<'static, Bench> {
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(900.0, 600.0))
             .build_ui_state(
-                |ui, banc: &mut Banc| {
+                |ui, bench: &mut Bench| {
                     let mut env = PickerEnv::default();
                     let mut actions = Vec::new();
-                    banc.committed |= curve_settings_page(
+                    bench.committed |= curve_settings_page(
                         ui,
-                        &mut banc.panel,
+                        &mut bench.panel,
                         0,
-                        banc.project.tree(),
-                        &mut banc.selected,
+                        bench.project.tree(),
+                        &mut bench.selected,
                         &mut env,
                         &mut actions,
                     );
                 },
-                Banc {
-                    project: stokesforge_core::Project::new("Séries").unwrap(),
+                Bench {
+                    project: stokesforge_core::Project::new("Series").unwrap(),
                     panel,
                     selected,
                     committed: false,
@@ -1288,15 +1292,15 @@ mod tests {
         harness
     }
 
-    fn poignee(harness: &egui_kittest::Harness<'static, Banc>, nom: &str) -> egui::Rect {
+    fn handle(harness: &egui_kittest::Harness<'static, Bench>, name: &str) -> egui::Rect {
         use egui_kittest::kittest::Queryable;
-        harness.get_by_label(nom).rect()
+        harness.get_by_label(name).rect()
     }
 
-    /// Saisit la poignée de `nom` et la mène sur le haut de la ligne de `vers`.
-    fn glisser(harness: &mut egui_kittest::Harness<'static, Banc>, nom: &str, vers: &str) {
-        let from = poignee(harness, nom).center();
-        let target = poignee(harness, vers);
+    /// Grabs the handle of `name` and leads it onto the top of the row of `onto`.
+    fn drag(harness: &mut egui_kittest::Harness<'static, Bench>, name: &str, onto: &str) {
+        let from = handle(harness, name).center();
+        let target = handle(harness, onto);
         let to = egui::pos2(target.center().x, target.top() + 1.0);
         harness.hover_at(from);
         harness.step();
@@ -1314,65 +1318,65 @@ mod tests {
         harness.run();
     }
 
-    fn noms(panel: &PanelSpec) -> Vec<&str> {
+    fn names(panel: &PanelSpec) -> Vec<&str> {
         panel.series.iter().map(|s| s.name.as_str()).collect()
     }
 
-    /// Une série seule glissée sur un membre rejoint le groupe ; le brouillon
-    /// est modifié tout de suite et la série réglée la suit.
+    /// A single series dragged onto a member joins the group; the draft
+    /// is changed right away and the edited series follows it.
     #[test]
-    fn glisser_une_serie_seule_sur_un_membre_la_fait_rejoindre_le_groupe() {
-        let mut harness = banc(calque_avec_groupe(), 0);
-        glisser(&mut harness, "A", "B");
-        let banc = harness.state();
-        assert!(banc.committed, "le brouillon est à valider");
-        let a = banc
+    fn dragging_a_single_series_onto_a_member_makes_it_join_the_group() {
+        let mut harness = bench(layer_with_group(), 0);
+        drag(&mut harness, "A", "B");
+        let bench = harness.state();
+        assert!(bench.committed, "the draft is to be validated");
+        let a = bench
             .panel
             .series
             .iter()
             .position(|s| s.name == "A")
             .unwrap();
-        assert_eq!(banc.panel.series[a].group, Some(1));
-        assert_eq!(banc.panel.group_members(1).len(), 4);
-        assert_eq!(banc.selected, a, "la série réglée suit sa place");
+        assert_eq!(bench.panel.series[a].group, Some(1));
+        assert_eq!(bench.panel.group_members(1).len(), 4);
+        assert_eq!(bench.selected, a, "the edited series follows its place");
     }
 
-    /// Un membre glissé sur une série seule quitte son groupe.
+    /// A member dragged onto a single series leaves its group.
     #[test]
-    fn glisser_un_membre_sur_une_serie_seule_le_fait_sortir_du_groupe() {
-        let mut harness = banc(calque_avec_groupe(), 1);
-        glisser(&mut harness, "B", "A");
-        let banc = harness.state();
-        assert_eq!(noms(&banc.panel), ["B", "A", "C", "D"]);
-        assert_eq!(banc.panel.series[0].group, None);
-        assert_eq!(banc.panel.group_members(1), [2, 3]);
-        assert_eq!(banc.selected, 0);
+    fn dragging_a_member_onto_a_single_series_makes_it_leave_the_group() {
+        let mut harness = bench(layer_with_group(), 1);
+        drag(&mut harness, "B", "A");
+        let bench = harness.state();
+        assert_eq!(names(&bench.panel), ["B", "A", "C", "D"]);
+        assert_eq!(bench.panel.series[0].group, None);
+        assert_eq!(bench.panel.group_members(1), [2, 3]);
+        assert_eq!(bench.selected, 0);
     }
 
-    /// Une série seule et un groupe s'échangent ; le groupe se glisse en bloc.
+    /// A single series and a group swap; the group is dragged as a block.
     #[test]
-    fn glisser_un_groupe_le_deplace_en_bloc_et_la_selection_le_suit() {
-        let mut harness = banc(calque_avec_groupe(), 2);
-        glisser(&mut harness, "Lots", "A");
-        let banc = harness.state();
-        assert_eq!(noms(&banc.panel), ["B", "C", "D", "A"]);
-        assert_eq!(banc.panel.group_members(1), [0, 1, 2]);
-        // Saisir l'en-tête choisit le groupe (sa première série, « B »), qui suit.
-        assert_eq!(banc.panel.series[banc.selected].name, "B");
+    fn dragging_a_group_moves_it_as_a_block_and_the_selection_follows() {
+        let mut harness = bench(layer_with_group(), 2);
+        drag(&mut harness, "Batch", "A");
+        let bench = harness.state();
+        assert_eq!(names(&bench.panel), ["B", "C", "D", "A"]);
+        assert_eq!(bench.panel.group_members(1), [0, 1, 2]);
+        // Grabbing the header chooses the group (its first series, "B"), which follows.
+        assert_eq!(bench.panel.series[bench.selected].name, "B");
     }
 
-    /// Entre deux séries indépendantes, deux séries s'échangent.
+    /// Between two independent series, two series swap.
     #[test]
-    fn glisser_une_serie_independante_sur_une_autre_les_echange() {
+    fn dragging_an_independent_series_onto_another_swaps_them() {
         let mut panel = PanelSpec::default();
         for (n, name) in [(1, "A"), (2, "B"), (3, "C")] {
             let mut series = SeriesSpec::new(NodeId::from_raw(n));
             series.name = name.into();
             panel.series.push(series);
         }
-        let mut harness = banc(panel, 0);
-        glisser(&mut harness, "A", "C");
-        assert_eq!(noms(&harness.state().panel), ["B", "C", "A"]);
+        let mut harness = bench(panel, 0);
+        drag(&mut harness, "A", "C");
+        assert_eq!(names(&harness.state().panel), ["B", "C", "A"]);
         assert_eq!(harness.state().selected, 2);
     }
 }

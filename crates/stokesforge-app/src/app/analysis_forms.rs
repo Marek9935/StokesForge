@@ -1,10 +1,10 @@
-//! Les réglages de la fenêtre d'analyse (#181) : trois blocs — l'**entrée**
-//! (séries, référence), les **réglages de la famille** et la **sortie**
-//! (Show / Keep, recalcul automatique, colonnes écrites).
+//! The settings of the analysis window (#181): three blocks, the **input**
+//! (series, reference), the **family settings** and the **output** (Show /
+//! Keep, automatic recalculation, columns written).
 //!
-//! Chaque contrôle écrit dans [`AnalysisForm`] ; rien ici ne décide ni ne
-//! calcule (`analysis.rs`), et rien n'envoie d'action : la fenêtre valide le
-//! tout d'un coup.
+//! Each control writes into [`AnalysisForm`]; nothing here decides or
+//! computes (`analysis.rs`), and nothing sends an action: the window
+//! validates everything at once.
 
 use eframe::egui;
 use stokesforge_analysis::baseline::{BaselineOp, Interpolation};
@@ -31,22 +31,21 @@ use stokesforge_app_state::quantities;
 use stokesforge_app_state::r_squared::RSquaredLevel;
 use stokesforge_app_state::tr;
 
-/// Un nombre réel modifiable, sans bornes mais **fini** (la brique refuse
-/// « inf » et « nan » : ils deviendraient `null` dans le fichier et feraient
-/// perdre le calcul au rechargement). Son identifiant est celui de sa place
-/// dans la rangée.
+/// An editable real number, without bounds but **finite** (the building block
+/// refuses "inf" and "nan": they would become `null` in the file and lose the
+/// calculation on reload). Its identifier is that of its place in the row.
 fn number(ui: &mut egui::Ui, value: &mut f64) -> bool {
     number_response(ui, value).changed
 }
 
-/// [`number`], avec la réponse du champ (pour y peindre un refus, S-N11).
+/// [`number`], with the field's response (to paint a refusal on it, S-N11).
 fn number_response(ui: &mut egui::Ui, value: &mut f64) -> NumberResponse {
     let salt = ui.next_auto_id();
     ui.skip_ahead_auto_ids(1);
     number_field(ui, salt, value, &quantities::FREE)
 }
 
-/// Un entier borné par sa grandeur ; même identifiant que [`number`].
+/// An integer bounded by its magnitude; same identifier as [`number`].
 fn whole<T: crate::number_field::Number>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -57,15 +56,15 @@ fn whole<T: crate::number_field::Number>(
     number_field(ui, salt, value, quantity).changed
 }
 
-/// Un nombre facultatif : un champ texte vide, `auto` ou `a` vaut « automatique ». Le texte en
-/// cours de frappe est gardé hors du modèle tant qu'il n'est pas un nombre.
+/// An optional number: an empty text field, `auto` or `a` means "automatic".
+/// The text being typed is kept outside the model while it is not a number.
 fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> bool {
     optional_number_response(ui, id, value).0
 }
 
-/// Ce que dit la saisie d'un nombre facultatif : `Some(None)` pour l'Auto
-/// (champ vidé, mot `auto` ou lettre `a`, comme `number_field::read`, #247),
-/// `Some(Some(n))` pour un nombre, `None` pour une saisie illisible.
+/// What the input of an optional number says: `Some(None)` for Auto (emptied
+/// field, word `auto` or letter `a`, like `number_field::read`, #247),
+/// `Some(Some(n))` for a number, `None` for an unreadable input.
 fn parse_optional(text: &str) -> Option<Option<f64>> {
     let trimmed = text.trim();
     if trimmed.is_empty()
@@ -77,7 +76,7 @@ fn parse_optional(text: &str) -> Option<Option<f64>> {
     stokesforge_core::number_format::parse_input(trimmed).map(Some)
 }
 
-/// [`optional_number`], avec la réponse du champ (pour y peindre un refus, S-N11).
+/// [`optional_number`], with the field's response (to paint a refusal on it, S-N11).
 fn optional_number_response(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -93,7 +92,7 @@ fn optional_number_response(
         .hint_text(tr!("analysis-field-auto"))
         .show(ui);
     let response = output.response.response;
-    // Comme `number_field` : prendre le focus sélectionne tout le texte.
+    // Like `number_field`: taking focus selects all the text.
     if response.gained_focus() {
         let mut state = output.state;
         let end = egui::text::CCursor::new(text.chars().count());
@@ -112,10 +111,10 @@ fn optional_number_response(
             *value = next;
         }
     }
-    // Un texte qui n'est pas un nombre, ou qui dit « auto » (`a`, `auto`), est
-    // vidé en quittant le champ : la borne redevient « auto » et le champ montre
-    // son indication. Pendant la frappe on le tolère : « - » ou « 1e »
-    // précèdent un nombre.
+    // A text that is not a number, or that says "auto" (`a`, `auto`), is
+    // emptied on leaving the field: the bound becomes "auto" again and the
+    // field shows its hint. While typing it is tolerated: "-" or "1e"
+    // come before a number.
     if response.lost_focus() && !matches!(parse_optional(&text), Some(Some(_))) {
         text.clear();
         changed = value.is_some();
@@ -125,12 +124,12 @@ fn optional_number_response(
     (changed, response)
 }
 
-/// La liste des plages `(de, à)`, une rangée par plage.
+/// The list of ranges `(from, to)`, one row per range.
 ///
-/// Comme [`optional_range`], chaque borne vide (« auto ») prend l'étendue des
-/// données `extent`, et un texte illisible est vidé. Les bornes saisies vivent
-/// dans l'état du champ (`pending`), car le modèle ne porte que la plage
-/// résolue. Une paire inversée est échangée sans bruit.
+/// Like [`optional_range`], each empty bound ("auto") takes the extent of the
+/// data `extent`, and an unreadable text is emptied. The typed bounds live in
+/// the field state (`pending`), because the model carries only the resolved
+/// range. A reversed pair is swapped silently.
 fn range_rows(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -142,8 +141,8 @@ fn range_rows(
     for (i, row) in ranges.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             let state_id = id.with(("pending", i));
-            // `committed` : la plage que ce champ a lui-même écrite ; si le
-            // modèle en diffère (tracé à la souris), il fait foi.
+            // `committed`: the range this field wrote itself; if the model
+            // differs from it (drawn with the mouse), the model prevails.
             let (mut a, mut b) = match ui.data(|d| d.get_temp::<Pending>(state_id)) {
                 Some((a, b, committed)) if committed == *row => (a, b),
                 _ => (Some(row.0), Some(row.1)),
@@ -151,9 +150,9 @@ fn range_rows(
             let (changed_a, resp_a) = optional_number_response(ui, id.with(("a", i)), &mut a);
             ui.label(tr!("analysis-field-to"));
             let (changed_b, resp_b) = optional_number_response(ui, id.with(("b", i)), &mut b);
-            // Pas d'échange pendant la frappe (il déplacerait le texte sous le
-            // curseur) : le modèle reçoit la paire ordonnée, l'affichage la
-            // suit quand on quitte les deux champs.
+            // No swap while typing (it would move the text under the
+            // cursor): the model receives the ordered pair, the display
+            // follows when both fields are left.
             if (resp_a.lost_focus() || resp_b.lost_focus())
                 && !resp_a.has_focus()
                 && !resp_b.has_focus()
@@ -190,7 +189,7 @@ fn range_rows(
         .on_hover_text(tr!("analysis-field-add-range", "hint"))
         .clicked()
     {
-        // Une rangée neuve couvre toute la série (bornes « auto »).
+        // A new row covers the whole series ("auto" bounds).
         ranges.push(extent.unwrap_or((0.0, 0.0)));
         let i = ranges.len() - 1;
         ui.data_mut(|d| {
@@ -202,7 +201,7 @@ fn range_rows(
     }
 }
 
-/// La liste des points `(x, y)`, une rangée par point.
+/// The list of points `(x, y)`, one row per point.
 fn point_rows(ui: &mut egui::Ui, points: &mut Vec<(f64, f64)>) {
     let mut remove = None;
     for (i, (x, y)) in points.iter_mut().enumerate() {
@@ -228,14 +227,14 @@ fn point_rows(ui: &mut egui::Ui, points: &mut Vec<(f64, f64)>) {
     }
 }
 
-/// Une plage facultative : deux champs et un bouton pour la retirer.
+/// An optional range: two fields and a button to remove it.
 ///
-/// Chaque borne se saisit seule : une borne vide (« auto ») prend l'étendue des
-/// données `extent` ; sans étendue connue, la plage reste absente tant que les
-/// deux bornes ne sont pas données. Une paire inversée est échangée sans bruit.
-/// Les bornes saisies vivent dans l'état du champ (`pending`), car le modèle
-/// ne porte qu'une plage complète : sans cela, une borne tapée seule serait
-/// effacée au rendu suivant.
+/// Each bound is typed alone: an empty bound ("auto") takes the extent of the
+/// data `extent`; with no known extent, the range stays absent until both
+/// bounds are given. A reversed pair is swapped silently. The typed bounds
+/// live in the field state (`pending`), because the model carries only a
+/// complete range: without that, a bound typed alone would be erased at the
+/// next render.
 fn optional_range(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -245,9 +244,9 @@ fn optional_range(
     type Pending = (Option<f64>, Option<f64>, Option<(f64, f64)>);
     ui.horizontal(|ui| {
         let state_id = id.with("pending");
-        // `committed` : la plage que ce champ a lui-même écrite. Si le modèle
-        // en diffère (tracé à la souris, bouton retirer, autre formulaire), il
-        // fait foi.
+        // `committed`: the range this field wrote itself. If the model
+        // differs from it (drawn with the mouse, remove button, another form),
+        // the model prevails.
         let (mut a, mut b) = match ui.data(|d| d.get_temp::<Pending>(state_id)) {
             Some((a, b, committed)) if committed == *range => (a, b),
             _ => (range.map(|r| r.0), range.map(|r| r.1)),
@@ -255,9 +254,9 @@ fn optional_range(
         let (changed_a, resp_a) = optional_number_response(ui, id.with("a"), &mut a);
         ui.label(tr!("analysis-field-to"));
         let (changed_b, resp_b) = optional_number_response(ui, id.with("b"), &mut b);
-        // Pas d'échange pendant la frappe (il déplacerait le texte sous le
-        // curseur) : le modèle reçoit la paire ordonnée, l'affichage la suit
-        // quand on quitte les deux champs.
+        // No swap while typing (it would move the text under the cursor): the
+        // model receives the ordered pair, the display follows when both
+        // fields are left.
         if (resp_a.lost_focus() || resp_b.lost_focus())
             && !resp_a.has_focus()
             && !resp_b.has_focus()
@@ -297,8 +296,8 @@ fn caption(ui: &mut egui::Ui, text: String) {
     ui.label(egui::RichText::new(text).weak());
 }
 
-/// Tout le formulaire : entrée, famille, sortie, en une grille à deux
-/// colonnes (#227) dont les champs s'alignent d'un bloc à l'autre.
+/// The whole form: input, family, output, in a two-column grid (#227) whose
+/// fields align from one block to the next.
 pub(super) fn form_body(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -314,7 +313,7 @@ pub(super) fn form_body(
     });
 }
 
-/// Une liste de rangées (plages, points, pics) dans la colonne des champs.
+/// A list of rows (ranges, points, peaks) in the fields column.
 fn field_list(rows: &mut Form<'_>, add: impl FnOnce(&mut egui::Ui)) {
     rows.field(|ui| {
         ui.vertical(add);
@@ -365,8 +364,8 @@ fn input_block(rows: &mut Form<'_>, form: &mut AnalysisForm, tree: &Tree) {
     }
 }
 
-/// Le sélecteur de la colonne auxiliaire (Reference / Response), en tête du
-/// bloc de la famille, sous « Analysis type » (#252).
+/// The selector of the auxiliary column (Reference / Response), at the top of
+/// the family block, under "Analysis type" (#252).
 fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     if form.needs_aux() {
         let candidates = aux_candidates(tree, &form.series);
@@ -374,8 +373,8 @@ fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &
             .aux
             .as_ref()
             .and_then(|a| {
-                // Une référence figée (#248) n'est pas une colonne à choisir :
-                // elle se lit « copy of … ».
+                // A frozen reference (#248) is not a column to choose: it
+                // reads "copy of ...".
                 if tree.is_analysis_copy(a.y) {
                     Some(reference_label(tree, a))
                 } else {
@@ -391,8 +390,8 @@ fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &
         } else {
             tr!("analysis-field-response")
         };
-        // Une liste de colonnes du projet, pas un jeu d'options fixe : liste
-        // déroulante quel que soit leur nombre.
+        // A list of project columns, not a fixed set of options: a dropdown
+        // whatever their number.
         rows.row(heading, |ui| {
             egui::ComboBox::from_id_salt(id.with("aux"))
                 .selected_text(selected)
@@ -411,10 +410,10 @@ fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &
     }
 }
 
-/// Le titre de la famille ; à la création, le choix « Analysis type » parmi les
-/// seules familles de la catégorie de la fenêtre (#248), qui en change à chaud.
-/// Une catégorie à une seule famille (Fitting, Integrate) n'a rien à choisir.
-/// Un calcul rouvert garde sa famille : seule sa méthode se change.
+/// The title of the family; on creation, the "Analysis type" choice among
+/// only the families of the window's category (#248), which changes them
+/// live. A category with a single family (Fitting, Integrate) has nothing to
+/// choose. A reopened calculation keeps its family: only its method changes.
 fn family_chooser(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let kinds = Category::of(form.kind).kinds();
     if form.editing.is_some() || kinds.len() < 2 {
@@ -590,7 +589,7 @@ fn integrate_form(
     rows.checkbox(&mut i.normalize, tr!("analysis-integrate-normalize"), None);
 }
 
-/// Le nom d'un modèle dans la liste déroulante.
+/// The name of a model in the dropdown.
 fn model_name(model: &Model) -> String {
     match model {
         Model::Linear => tr!("analysis-model-linear"),
@@ -606,7 +605,7 @@ fn model_name(model: &Model) -> String {
     }
 }
 
-/// L'étendue en X de l'entrée courante : ce que vaut une borne laissée « auto ».
+/// The X extent of the current input: what a bound left "auto" is worth.
 fn x_extent_of(xs: &[f64]) -> Option<(f64, f64)> {
     let lo = xs.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -636,8 +635,8 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         })
         .collect();
     let mut model = f.model.clone();
-    // Un modèle choisi vaut par sa variante : le degré d'un polynôme ou la
-    // formule libre en cours restent ceux du formulaire.
+    // A chosen model is worth its variant: the degree of a polynomial or the
+    // free formula in progress stay those of the form.
     if rows.row(tr!("analysis-fit-model"), |ui| {
         choice_by(ui, id.with("model"), &mut model, &models, |a, b| {
             std::mem::discriminant(a) == std::mem::discriminant(b)
@@ -710,8 +709,8 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
     rows.checkbox(&mut f.residuals, tr!("analysis-fit-residuals"), None);
 }
 
-/// Le tableau des paramètres d'un ajustement : valeur de départ, fixé, bornes
-/// et, pour un lot, partagé entre les séries (ajustement global).
+/// The table of the parameters of a fit: starting value, fixed, bounds and,
+/// for a batch, shared between the series (global fit).
 fn params_table(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -754,7 +753,7 @@ fn params_table(
 fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let extent = x_extent(form, tree);
     let p = &mut form.setup.peaks;
-    // Trois formes : des radios (S-C1), plus une liste déroulante.
+    // Three shapes: radios (S-C1), plus a dropdown.
     rows.row(tr!("analysis-peaks-shape"), |ui| {
         choice(
             ui,
@@ -1001,7 +1000,7 @@ fn output_block(
         rows.note(tr!("analysis-output-replace-hint"));
         return;
     }
-    // Les colonnes que cette famille peut écrire en plus de la principale.
+    // The columns this family can write besides the main one.
     match form.kind {
         OperationKind::Baseline => {
             rows.checkbox(
@@ -1057,10 +1056,10 @@ fn output_block(
     }
 }
 
-/// « Add to graph » (#200) : la case, et le choix du graphique quand plusieurs
-/// montrent la courbe. Le graphique retenu reste valide : un choix qui n'est plus
-/// parmi les candidats retombe sur le premier. Les graphiques sont des objets du
-/// projet, pas un jeu d'options fixe : liste déroulante quel que soit leur nombre.
+/// "Add to graph" (#200): the box, and the choice of the graph when several
+/// show the curve. The retained graph stays valid: a choice that is no longer
+/// among the candidates falls back to the first. Graphs are objects of the
+/// project, not a fixed set of options: a dropdown whatever their number.
 fn graph_target(
     rows: &mut Form<'_>,
     id: egui::Id,
@@ -1096,7 +1095,7 @@ fn graph_target(
     }
 }
 
-/// Une valeur calculée sous l'aperçu : son libellé estompé, puis le nombre.
+/// A value computed below the preview: its dimmed label, then the number.
 pub(super) fn value_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -1121,127 +1120,127 @@ pub(super) fn value_row(
 mod tests {
     use eframe::egui;
 
-    use super::super::test_support::{cliquer, contexte, image, texte_exact, textes, touche};
+    use super::super::test_support::{click, context, image, key, text_exact, texts};
     use super::{parse_optional, range_rows};
 
     #[test]
-    fn un_nombre_facultatif_lit_auto_comme_le_champ_nombre() {
-        // #247 : `auto` et `a` valent un champ vidé.
-        for texte in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
-            assert_eq!(parse_optional(texte), Some(None), "{texte:?}");
+    fn an_optional_number_reads_auto_like_the_number_field() {
+        // #247: `auto` and `a` mean an emptied field.
+        for text in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
+            assert_eq!(parse_optional(text), Some(None), "{text:?}");
         }
         assert_eq!(parse_optional("2.5"), Some(Some(2.5)));
         assert_eq!(parse_optional("abc"), None);
     }
 
-    fn cadres_rouges(shapes: &[egui::epaint::ClippedShape]) -> usize {
-        let rouge = crate::theme::field_refused_color();
+    fn red_frames(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        let red = crate::theme::field_refused_color();
         shapes
             .iter()
-            .filter(|peint| {
-                matches!(&peint.shape, egui::Shape::Rect(rect) if rect.stroke.color == rouge)
+            .filter(|painted_shape| {
+                matches!(&painted_shape.shape, egui::Shape::Rect(rect) if rect.stroke.color == red)
             })
             .count()
     }
 
-    /// Tape `saisie` dans le champ « à » de la plage `(1, 5)`, valide par Entrée,
-    /// et rend la plage et les cadres rouges de l'image suivante.
-    fn saisir_dans_a(saisie: &str) -> ((f64, f64), usize) {
-        let context = contexte();
-        let mut plages = vec![(1.0, 5.0)];
-        let id = egui::Id::new("essai");
-        let peindre = |plages: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
+    /// Types `typed` in the "to" field of the range `(1, 5)`, validates with Enter,
+    /// and returns the range and the red frames of the next frame.
+    fn type_in_to(typed: &str) -> ((f64, f64), usize) {
+        let context = context();
+        let mut ranges = vec![(1.0, 5.0)];
+        let id = egui::Id::new("trial");
+        let paint = |ranges: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
             image(&context, events, |ui| {
-                range_rows(ui, id, plages, None);
+                range_rows(ui, id, ranges, None);
             })
         };
-        peindre(&mut plages, vec![]);
-        let formes = peindre(&mut plages, vec![]);
-        let champ = texte_exact(&textes(&formes), "5").centre;
-        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            range_rows(ui, id, &mut plages, None);
+        paint(&mut ranges, vec![]);
+        let shapes = paint(&mut ranges, vec![]);
+        let field = text_exact(&texts(&shapes), "5").center;
+        click(&context, field, egui::PointerButton::Primary, |ui| {
+            range_rows(ui, id, &mut ranges, None);
         });
-        peindre(&mut plages, vec![egui::Event::Text(saisie.into())]);
-        peindre(&mut plages, vec![touche(egui::Key::Enter)]);
-        let formes = peindre(&mut plages, vec![]);
-        (plages[0], cadres_rouges(&formes))
+        paint(&mut ranges, vec![egui::Event::Text(typed.into())]);
+        paint(&mut ranges, vec![key(egui::Key::Enter)]);
+        let shapes = paint(&mut ranges, vec![]);
+        (ranges[0], red_frames(&shapes))
     }
 
-    /// « de » ≤ « à » : une paire mise à l'envers est échangée sans bruit,
-    /// sans cadre rouge.
+    /// "from" <= "to": a reversed pair is swapped silently,
+    /// without a red frame.
     #[test]
-    fn une_plage_inversee_est_echangee_sans_bruit() {
-        assert_eq!(saisir_dans_a("0"), ((0.0, 1.0), 0));
+    fn a_reversed_range_is_swapped_silently() {
+        assert_eq!(type_in_to("0"), ((0.0, 1.0), 0));
     }
 
-    /// Une plage facultative accepte une borne seule : taper « min » d'abord ne
-    /// l'efface pas, et la borne laissée « auto » prend l'étendue des données.
+    /// An optional range accepts a single bound: typing "min" first does not
+    /// erase it, and the bound left "auto" takes the extent of the data.
     #[test]
-    fn une_borne_tapee_seule_n_est_pas_effacee() {
-        let context = contexte();
-        let mut plage: Option<(f64, f64)> = None;
-        let id = egui::Id::new("facultative");
+    fn a_bound_typed_alone_is_not_erased() {
+        let context = context();
+        let mut range: Option<(f64, f64)> = None;
+        let id = egui::Id::new("optional");
         let extent = Some((0.0, 100.0));
-        let peindre = |plage: &mut Option<(f64, f64)>, events: Vec<egui::Event>| {
+        let paint = |range: &mut Option<(f64, f64)>, events: Vec<egui::Event>| {
             image(&context, events, |ui| {
-                super::optional_range(ui, id, plage, extent);
+                super::optional_range(ui, id, range, extent);
             })
         };
-        peindre(&mut plage, vec![]);
-        let formes = peindre(&mut plage, vec![]);
-        let champ = textes(&formes)
+        paint(&mut range, vec![]);
+        let shapes = paint(&mut range, vec![]);
+        let field = texts(&shapes)
             .into_iter()
-            .find(|t| t.texte == "auto")
-            .expect("le champ « de » est vide")
-            .centre;
-        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            super::optional_range(ui, id, &mut plage, extent);
+            .find(|t| t.text == "auto")
+            .expect("the \"from\" field is empty")
+            .center;
+        click(&context, field, egui::PointerButton::Primary, |ui| {
+            super::optional_range(ui, id, &mut range, extent);
         });
-        peindre(&mut plage, vec![egui::Event::Text("30".into())]);
-        let formes = peindre(&mut plage, vec![]);
-        assert_eq!(plage, Some((30.0, 100.0)));
+        paint(&mut range, vec![egui::Event::Text("30".into())]);
+        let shapes = paint(&mut range, vec![]);
+        assert_eq!(range, Some((30.0, 100.0)));
         assert!(
-            textes(&formes).iter().any(|t| t.texte == "30"),
-            "la borne tapée reste affichée"
+            texts(&shapes).iter().any(|t| t.text == "30"),
+            "the typed bound stays displayed"
         );
     }
 
     #[test]
-    fn une_plage_ordonnee_est_appliquee() {
-        assert_eq!(saisir_dans_a("9"), ((1.0, 9.0), 0));
+    fn an_ordered_range_is_applied() {
+        assert_eq!(type_in_to("9"), ((1.0, 9.0), 0));
     }
 
-    /// Taper deux chiffres dans « à » sous une borne « de » plus grande : le
-    /// texte tapé reste en place pendant la frappe (pas d'échange sous le
-    /// curseur, qui donnait « 6960 »), et le modèle reçoit la paire ordonnée.
+    /// Typing two digits in "to" under a larger "from" bound: the typed text
+    /// stays in place while typing (no swap under the cursor, which gave
+    /// "6960"), and the model receives the ordered pair.
     #[test]
-    fn taper_sous_une_borne_plus_grande_n_echange_pas_pendant_la_frappe() {
-        let context = contexte();
-        let mut plages = vec![(660.0, 700.0)];
-        let id = egui::Id::new("frappe");
-        let peindre = |plages: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
+    fn typing_under_a_larger_bound_does_not_swap_while_typing() {
+        let context = context();
+        let mut ranges = vec![(660.0, 700.0)];
+        let id = egui::Id::new("typing");
+        let paint = |ranges: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
             image(&context, events, |ui| {
-                range_rows(ui, id, plages, None);
+                range_rows(ui, id, ranges, None);
             })
         };
-        peindre(&mut plages, vec![]);
-        let formes = peindre(&mut plages, vec![]);
-        let champ = texte_exact(&textes(&formes), "700").centre;
-        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            range_rows(ui, id, &mut plages, None);
+        paint(&mut ranges, vec![]);
+        let shapes = paint(&mut ranges, vec![]);
+        let field = text_exact(&texts(&shapes), "700").center;
+        click(&context, field, egui::PointerButton::Primary, |ui| {
+            range_rows(ui, id, &mut ranges, None);
         });
-        peindre(&mut plages, vec![egui::Event::Text("9".into())]);
-        let formes = peindre(&mut plages, vec![egui::Event::Text("9".into())]);
-        let affiches: Vec<String> = textes(&formes).into_iter().map(|t| t.texte).collect();
-        assert!(affiches.contains(&"660".to_string()), "{affiches:?}");
-        assert!(affiches.contains(&"99".to_string()), "{affiches:?}");
-        assert_eq!(plages[0], (99.0, 660.0));
+        paint(&mut ranges, vec![egui::Event::Text("9".into())]);
+        let shapes = paint(&mut ranges, vec![egui::Event::Text("9".into())]);
+        let shown: Vec<String> = texts(&shapes).into_iter().map(|t| t.text).collect();
+        assert!(shown.contains(&"660".to_string()), "{shown:?}");
+        assert!(shown.contains(&"99".to_string()), "{shown:?}");
+        assert_eq!(ranges[0], (99.0, 660.0));
     }
 
     #[test]
-    fn peindre_une_constante_ne_detruit_pas_les_reglages_des_autres_formes() {
+    fn painting_a_constant_does_not_destroy_the_settings_of_the_other_shapes() {
         use stokesforge_app_state::analysis::{AnalysisForm, BaselineShape, Preset};
-        let context = contexte();
+        let context = context();
         let mut form = AnalysisForm::new(&Preset::BaselineAnchors, vec![], false);
         let points = vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)];
         let zones = vec![(1.0, 2.0), (3.0, 4.0)];
@@ -1257,8 +1256,8 @@ mod tests {
         ] {
             form.setup.baseline.shape = shape;
             image(&context, vec![], |ui| {
-                super::super::form::form(ui, "constante", |rows| {
-                    super::baseline_form(rows, egui::Id::new("constante"), &mut form, None);
+                super::super::form::form(ui, "constant", |rows| {
+                    super::baseline_form(rows, egui::Id::new("constant"), &mut form, None);
                 });
             });
             assert_eq!(form.setup.baseline.points, points);
@@ -1268,26 +1267,25 @@ mod tests {
         }
     }
 
-    /// #252 : la colonne de référence se choisit sous « Analysis type », dans
-    /// le bloc de la famille, comme les réglages de la Baseline — pas sous
-    /// l'entrée.
+    /// #252: the reference column is chosen under "Analysis type", in the
+    /// family block, like the Baseline settings, not under the input.
     #[test]
-    fn la_reference_vient_sous_le_type_d_analyse() {
+    fn the_reference_comes_under_the_analysis_type() {
         use stokesforge_app_state::analysis::{AnalysisForm, Preset};
         use stokesforge_core::Project;
-        let context = contexte();
-        let project = Project::new("essai").unwrap();
+        let context = context();
+        let project = Project::new("trial").unwrap();
         let tree = project.tree().clone();
         let mut form = AnalysisForm::new(&Preset::Correct, vec![], false);
-        let formes = image(&context, vec![], |ui| {
-            super::form_body(ui, egui::Id::new("essai"), &mut form, &tree, &[]);
+        let shapes = image(&context, vec![], |ui| {
+            super::form_body(ui, egui::Id::new("trial"), &mut form, &tree, &[]);
         });
-        let peints = textes(&formes);
-        let y = |libelle: String| texte_exact(&peints, &libelle).centre.y;
-        let entree = y(stokesforge_app_state::tr!("analysis-block-input"));
+        let painted = texts(&shapes);
+        let y = |label: String| text_exact(&painted, &label).center.y;
+        let input = y(stokesforge_app_state::tr!("analysis-block-input"));
         let type_ = y(stokesforge_app_state::tr!("analysis-block-type"));
         let reference = y(stokesforge_app_state::tr!("analysis-field-reference"));
-        assert!(entree < type_, "Input au-dessus d'Analysis type");
-        assert!(type_ < reference, "Reference sous Analysis type");
+        assert!(input < type_, "Input above Analysis type");
+        assert!(type_ < reference, "Reference below Analysis type");
     }
 }

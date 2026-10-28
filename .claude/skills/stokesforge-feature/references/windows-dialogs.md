@@ -15,10 +15,10 @@ Read when creating or changing a content window, dialog, wizard, confirmation or
 
 ## Check
 
-- [ ] no raw `egui::Window` (`aucune_fenetre_n_est_une_egui_window_brute`), even when a neighbour does it: existing code that deviates is not a model
+- [ ] no raw `egui::Window` (`no_window_is_a_raw_egui_window`), even when a neighbour does it: existing code that deviates is not a model
 - [ ] a reference twin named and compared by screenshot; mockup validated by the user before code (new window)
 - [ ] editing dialog: gesture in a macro (`begin_macro`), OK closes it, Cancel aborts it
 - [ ] greyed main button: `DialogFooter::gated` (tooltip and reason), otherwise `DialogFooter::always`
-- [ ] nature chosen (`DialogNature`, S-F11) and a size class; free size only with `// TAILLE-LIBRE(#300): <justification>`
-- [ ] row added to `docs/fenetres.md` with the `stokesforge_…` id (`le_catalogue_des_fenetres_et_le_code_concordent`)
+- [ ] nature chosen (`DialogNature`, S-F11) and a size class; free size only with `// FREE-SIZE(#300): <justification>`
+- [ ] row added to `docs/fenetres.md` with the `stokesforge_…` id (`the_window_catalog_and_the_code_agree`)
 - [ ] an undoable deletion asks nothing; otherwise `modal_confirm`

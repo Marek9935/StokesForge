@@ -1,19 +1,21 @@
-//! Le menu Analysis (#181, maquettes M1 et M2) : la barre de menus et le clic
-//! droit d'une colonne partagent **un seul contenu**, `analysis_menu_contents`
-//! (grammaire de `docs/menus.md`) ; le menu du haut l'enveloppe. Le menu range
-//! les méthodes en **catégories** (#248), une fenêtre par catégorie, puis liste
-//! les trois dernières analyses lancées (#249). Le clic droit d'une colonne a
-//! un sous-menu `Analysis ▸` à une entrée par catégorie.
+//! The Analysis menu (#181, mockups M1 and M2): the menu bar and the
+//! right-click of a column share **a single content**, `analysis_menu_contents`
+//! (grammar in `docs/menus.md`); the top menu wraps it. The menu arranges the
+//! methods in **categories** (#248), one window per category, then lists the
+//! last three analyses run (#249). The right-click of a column has an
+//! `Analysis ▸` submenu with one entry per category.
 //!
-//! Chaque entrée pousse [`Action::OpenAnalysis`] ou
-//! [`Action::OpenGraphAnalysis`] avec la famille et la méthode préchoisies ; la fenêtre (`analysis_dialog.rs`) fait le reste. Tant qu'aucune
-//! colonne Y n'est visée, les entrées sont **grisées** avec leur info-bulle
-//! `.disabled`, jamais absentes : la cible est pertinente, le geste
-//! momentanément impossible. « Recalculate Out of Date » se grise de même quand
-//! tout est à jour.
+//! Each entry pushes [`Action::OpenAnalysis`] or
+//! [`Action::OpenGraphAnalysis`] with the family and method preselected; the
+//! window (`analysis_dialog.rs`) does the rest. While no Y column is
+//! targeted, the entries are **grayed out** with their `.disabled` tooltip,
+//! never absent: the target is relevant, the gesture temporarily impossible.
+//! "Recalculate Out of Date" is grayed out the same way when everything is
+//! up to date.
 //!
-//! Sur une colonne que produit un calcul, le clic droit ajoute les gestes du
-//! calcul — modifier, recalculer, détacher, supprimer ([`calculation_section`]).
+//! On a column that a calculation produces, the right-click adds the gestures
+//! of the calculation: edit, recalculate, detach, delete
+//! ([`calculation_section`]).
 
 use eframe::egui;
 use stokesforge_analysis::model::Model;
@@ -24,8 +26,8 @@ use stokesforge_app_state::analysis::{Category, Preset, RecentTarget};
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// La cible du menu : colonnes du classeur, ou séries exactes du graphe
-/// sélectionné et description cadrée par sa vue (#210).
+/// The menu target: columns of the workbook, or exact series of the selected
+/// graph and description framed by its view (#210).
 #[derive(Clone, Copy)]
 pub(super) enum AnalysisTarget<'a> {
     Columns {
@@ -37,8 +39,8 @@ pub(super) enum AnalysisTarget<'a> {
         series: &'a [stokesforge_plot::SeriesRef],
         spec: &'a stokesforge_plot::PlotSpec,
     },
-    /// Des lignes entières `(feuille, ligne)` (#253) : l'analyse passe par la
-    /// feuille transposée liée.
+    /// Whole rows `(sheet, row)` (#253): the analysis goes through the linked
+    /// transposed sheet.
     Rows { rows: &'a [(NodeId, usize)] },
 }
 
@@ -52,14 +54,14 @@ impl AnalysisTarget<'_> {
     }
 }
 
-/// Au moins une colonne Y parmi `columns`.
+/// At least one Y column among `columns`.
 fn has_y(state: &AppState, columns: &[NodeId]) -> bool {
     columns
         .iter()
         .any(|c| state.column_meta(*c).role.paired_x().is_some())
 }
 
-/// Une entrée qui ouvre la fenêtre sur `preset`.
+/// An entry that opens the window on `preset`.
 fn open_entry(
     ui: &mut egui::Ui,
     actions: &mut Vec<Action>,
@@ -101,7 +103,7 @@ fn open_entry(
     }
 }
 
-/// Le nom d'un modèle d'ajustement dans le menu `Fit ▸`.
+/// The name of a fit model in the `Fit ▸` menu.
 fn fit_label(model: &Model) -> (String, String) {
     match model {
         Model::Linear => (
@@ -144,8 +146,8 @@ fn fit_label(model: &Model) -> (String, String) {
     }
 }
 
-/// Un sous-menu de catégorie : grisé tant qu'aucune colonne Y n'est visée,
-/// avec la raison en info-bulle.
+/// A category submenu: grayed out while no Y column is targeted, with the
+/// reason in a tooltip.
 fn category_menu(
     ui: &mut egui::Ui,
     enabled: bool,
@@ -159,7 +161,7 @@ fn category_menu(
     });
 }
 
-/// Ce que `target` devient quand on relance une analyse récente.
+/// What `target` becomes when a recent analysis is rerun.
 fn recent_target(target: AnalysisTarget) -> RecentTarget {
     match target {
         AnalysisTarget::Columns { sheet, columns } => RecentTarget::Columns {
@@ -181,9 +183,9 @@ fn recent_target(target: AnalysisTarget) -> RecentTarget {
     }
 }
 
-/// Les dernières analyses lancées (#249), sous le dernier filet du menu : un
-/// clic ouvre la fenêtre avec leurs réglages, Ctrl+clic les lance sur la
-/// sélection courante.
+/// The last analyses run (#249), below the last separator of the menu: a
+/// click opens the window with their settings, Ctrl+click runs them on the
+/// current selection.
 fn recent_entries(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -215,9 +217,9 @@ fn recent_entries(
     }
 }
 
-/// Le contenu du menu Analysis (#248) : une entrée par catégorie — Data
-/// Manipulation, Fitting, Peaks and Deconvolution, Integrate —, le recalcul
-/// des périmés, puis les dernières analyses lancées (#249).
+/// The content of the Analysis menu (#248): one entry per category (Data
+/// Manipulation, Fitting, Peaks and Deconvolution, Integrate), the
+/// recalculation of out-of-date results, then the last analyses run (#249).
 pub(super) fn analysis_menu_contents(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -342,9 +344,10 @@ fn last_preset_id(category: Category) -> egui::Id {
     egui::Id::new(("stokesforge_analysis_last_preset", category))
 }
 
-/// Publie, à chaque image, la dernière méthode lancée de chaque catégorie
-/// (tirée des analyses récentes, #249) : seul canal commun aux menus, au clic
-/// droit des courbes et à celui du graphe, qui n'ont pas l'état sous la main.
+/// Publishes, on every frame, the last method run of each category (taken
+/// from the recent analyses, #249): the only channel shared by the menus,
+/// the right-click of curves and that of the graph, which do not have the
+/// state at hand.
 pub(super) fn publish_last_presets(ctx: &egui::Context, state: &AppState) {
     ctx.data_mut(|data| {
         for category in Category::ALL {
@@ -358,18 +361,18 @@ pub(super) fn publish_last_presets(ctx: &egui::Context, state: &AppState) {
     });
 }
 
-/// La méthode préchoisie quand on ouvre la fenêtre d'une catégorie sans en
-/// choisir : la dernière lancée dans cette catégorie, sinon son défaut.
+/// The method preselected when opening the window of a category without
+/// choosing one: the last one run in that category, else its default.
 pub(super) fn category_preset(ctx: &egui::Context, category: Category) -> Preset {
     ctx.data(|data| data.get_temp::<Preset>(last_preset_id(category)))
         .unwrap_or_else(|| category.default_preset())
 }
 
-/// Le sous-menu `Analysis ▸` du clic droit (colonne, courbe) : une entrée par
-/// catégorie, qui ouvre la fenêtre de la catégorie (#248). Les méthodes d'une
-/// catégorie se choisissent dans sa fenêtre : un sous-menu de méthodes aurait
-/// fait trois niveaux, au-delà de la profondeur 2 de la grammaire. Grisé avec
-/// `disabled` en info-bulle quand rien n'est analysable.
+/// The `Analysis ▸` submenu of the right-click (column, curve): one entry per
+/// category, which opens the window of the category (#248). The methods of a
+/// category are chosen in its window: a submenu of methods would have made
+/// three levels, beyond depth 2 of the grammar. Grayed out with `disabled` as
+/// tooltip when nothing can be analyzed.
 pub(super) fn analysis_open_menu(
     ui: &mut egui::Ui,
     enabled: bool,
@@ -411,7 +414,7 @@ pub(super) fn analysis_open_menu(
     });
 }
 
-/// Le sous-menu `Analysis ▸` du clic droit d'une colonne (#202, #248).
+/// The `Analysis ▸` submenu of the right-click of a column (#202, #248).
 pub(super) fn analysis_entry(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -450,8 +453,8 @@ pub(super) fn analysis_entry(
     );
 }
 
-/// Les gestes d'un calcul, sur une colonne qu'il produit : modifier,
-/// recalculer, détacher, supprimer. Absente pour une colonne ordinaire.
+/// The gestures of a calculation, on a column it produces: edit, recalculate,
+/// detach, delete. Absent for an ordinary column.
 pub(super) fn calculation_section(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
@@ -516,13 +519,13 @@ mod tests {
     use stokesforge_analysis::ops::Operation;
     use stokesforge_app_state::analysis_recent::RecentAnalysis;
 
-    /// Sans historique, la catégorie ouvre son défaut ; après une analyse
-    /// lancée, elle rouvre cette méthode, et les autres catégories gardent
-    /// leur défaut.
+    /// Without history, the category opens its default; after an analysis
+    /// run, it reopens that method, and the other categories keep their
+    /// default.
     #[test]
-    fn une_categorie_rouvre_sa_derniere_methode() {
+    fn a_category_reopens_its_last_method() {
         let session = stokesforge_session::Session::spawn(
-            stokesforge_core::Project::new("Récent").unwrap(),
+            stokesforge_core::Project::new("Recent").unwrap(),
             None,
         )
         .unwrap();

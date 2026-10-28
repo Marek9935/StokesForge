@@ -1,57 +1,55 @@
-//! Sélecteur de couleur de StokesForge : un bouton-échantillon qui ouvre une
-//! fenêtre surgissante avec une **palette** adaptée à ce qu'on colore, les
-//! **couleurs enregistrées**, un **nuancier** (carré saturation ×
-//! luminosité ou **roue chromatique**), l'**opacité**, et la saisie en
-//! **RVB**, **TSL** et **hexadécimal**.
+//! Color picker of StokesForge: a swatch button that opens a popup with a
+//! **palette** suited to what is being colored, the **saved colors**, a
+//! **color area** (saturation × lightness square or **color wheel**), the
+//! **opacity**, and entry as **RGB**, **HSL** and **hexadecimal**.
 //!
-//! # Une palette par usage
+//! # One palette per usage
 //!
-//! Une courbe, un texte et un fond n'ont pas besoin des mêmes couleurs
-//! ([`ColorUsage`]) :
+//! A curve, a text and a background do not need the same colors
+//! ([`ColorUsage`]):
 //!
-//! - **courbes** : un outil à part, plus complet — un choix de palettes
-//!   nommées ([`stokesforge_plot::CURVE_PALETTES`] : StokesForge, Tableau 10,
-//!   Okabe-Ito lisible par les daltoniens, ColorBrewer, et les dégradés
-//!   Viridis, Plasma, gris), chacune avec ses nuances foncées et claires.
-//!   Les palettes vivent dans `stokesforge-plot` pour qu'une évolution future
-//!   puisse colorer plusieurs courbes d'un coup (palette ou dégradé) sans
-//!   les déplacer ;
-//! - **texte** : des encres lisibles — noirs, gris, blanc, teintes foncées ;
-//! - **fonds** : des teintes claires, des fonds **sombres** (le texte
-//!   automatique passe alors en blanc, règle de `stokesforge_render::color::
-//!   auto_ink`), et **« Aucune »** : un fond transparent, pour intégrer la
-//!   figure exportée à une autre présentation.
+//! - **curves**: a separate, fuller tool — a choice of named palettes
+//!   ([`stokesforge_plot::CURVE_PALETTES`]: StokesForge, Tableau 10,
+//!   Okabe-Ito (colorblind-safe), ColorBrewer, and the gradients
+//!   Viridis, Plasma, grayscale), each with its darker and lighter shades.
+//!   The palettes live in `stokesforge-plot` so that a future change
+//!   can color several curves at once (palette or gradient) without
+//!   moving them;
+//! - **text**: readable inks — blacks, grays, white, dark tints;
+//! - **backgrounds**: light tints, **dark** backgrounds (the automatic text
+//!   then turns white, rule of `stokesforge_render::color::
+//!   auto_ink`), and **"No color"**: a transparent background, to embed the
+//!   exported figure in another presentation.
 //!
-//! # Couleurs enregistrées
+//! # Saved colors
 //!
-//! « Enregistrer » garde la couleur courante **dans le projet** (par
-//! défaut : elle voyage avec le `.stf`, et s'annule par Ctrl+Z) ou **pour
-//! l'utilisateur** (sur cette machine, dans tous les projets) — voir
-//! [`stokesforge_app_state::state::SaveTarget`]. Une couleur enregistrée ne réapparaît que
-//! dans la palette de son usage. Clic droit sur une couleur enregistrée : la
-//! retirer. Ce module ne touche ni au modèle ni au disque : il dépose des
-//! [`SavedColorRequest`] dans le [`PickerEnv`] fourni par l'appelant, qui
-//! les traduit en actions.
+//! "Save Color" keeps the current color **in the project** (by default: it
+//! travels with the `.stf` and is undone by Ctrl+Z) or **for the user**
+//! (on this machine, in all projects) — see
+//! [`stokesforge_app_state::state::SaveTarget`]. A saved color reappears only
+//! in the palette of its usage. Right-click on a saved color: remove
+//! it. This module touches neither the model nor the disk: it drops
+//! [`SavedColorRequest`]s into the [`PickerEnv`] supplied by the caller, which
+//! turns them into actions.
 //!
-//! # « Automatique », « Aucune » et l'opacité
+//! # "Automatic", "No color" and opacity
 //!
-//! Dans le modèle, une couleur est une chaîne `#RRGGBB` (opaque) ou
-//! `#RRGGBBAA` ; la chaîne vide veut dire « automatique » (encre contrastée
-//! avec le fond, couleur du trait pour un marqueur…). « Aucune » est une
-//! opacité nulle (`#ffffff00`). Une couleur transparente est montrée sur un
-//! damier.
+//! In the model, a color is a `#RRGGBB` string (opaque) or
+//! `#RRGGBBAA`; the empty string means "automatic" (ink contrasting
+//! with the background, line color for a marker…). "No color" is a zero
+//! opacity (`#ffffff00`). A transparent color is shown on a
+//! checkerboard.
 //!
-//! # Quand la couleur est-elle validée
+//! # When the color is committed
 //!
-//! La chaîne est modifiée en direct (retour visuel immédiat dans le
-//! graphe), et [`color_button`] rend `true` quand l'interaction est finie :
-//! clic sur un échantillon, fin d'un glisser dans le nuancier, champ
-//! validé, fermeture de la fenêtre surgissante. Même règle anti-inflation
-//! d'historique que le reste de la fenêtre des propriétés
-//! (`crate::app::plot_settings`).
+//! The string is modified live (immediate visual feedback in the
+//! graph), and [`color_button`] returns `true` when the interaction is over:
+//! click on a swatch, end of a drag in the color area, field
+//! committed, popup closed. Same history anti-inflation rule as the rest
+//! of the properties window (`crate::app::plot_settings`).
 //!
-//! Les conversions (hexadécimal, RVB ↔ TSL, RVB ↔ TSV) et les palettes sont
-//! des fonctions pures, testées sans fenêtre.
+//! The conversions (hexadecimal, RGB ↔ HSL, RGB ↔ HSV) and the palettes are
+//! pure functions, tested without a window.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 pub use stokesforge_plot::ColorUsage;
@@ -64,20 +62,20 @@ use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{AppState, SaveTarget};
 use stokesforge_app_state::tr;
 
-/// Une rangée nommée d'échantillons.
+/// A named row of swatches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaletteSection {
-    /// Titre de la rangée.
+    /// Title of the row.
     pub title: String,
-    /// Couleurs, en RVBA (opacité comprise : « Aucune couleur » est
-    /// transparente).
+    /// Colors, as RGBA (opacity included: "No color" is
+    /// transparent).
     pub colors: Vec<[u8; 4]>,
 }
 
-/// Le nom affiché de la palette de courbes d'indice `index` dans
-/// [`CURVE_PALETTES`] (ramené dans les bornes). Les noms de `stokesforge-plot` sont
-/// ceux de la description neutre du graphique : l'interface, elle, les écrit
-/// par le catalogue (clés `color-palette-*`, dans l'ordre de la table).
+/// The displayed name of the curve palette at `index` in [`CURVE_PALETTES`]
+/// (clamped to the bounds). The ids of `stokesforge-plot` belong to the
+/// renderer-neutral graph description: the interface writes the names through
+/// the catalog (`color-palette-*` keys, in the order of the table).
 pub fn curve_palette_name(index: usize) -> String {
     let index = index.min(CURVE_PALETTES.len() - 1);
     match index {
@@ -94,35 +92,35 @@ pub fn curve_palette_name(index: usize) -> String {
     }
 }
 
-/// Encres de la palette « texte ».
+/// Inks of the "text" palette.
 const TEXT_INKS: [&str; 12] = [
     "#000000", "#202020", "#404040", "#6b6b6b", "#a0a0a0", "#ffffff", "#1f2a44", "#1f4e79",
     "#8b1a1a", "#1e5631", "#4b2a6b", "#5c3a1e",
 ];
 
-/// Fonds clairs de la palette « fonds », précédés d'« Aucune couleur »
-/// ([`NO_COLOR`]), le fond par défaut d'un graphe.
+/// Light backgrounds of the "backgrounds" palette, preceded by "No color"
+/// ([`NO_COLOR`]), the default background of a graph.
 const LIGHT_BACKGROUNDS: [&str; 9] = [
     NO_COLOR, "#ffffff", "#fafaf7", "#f5f0e1", "#f4ecd8", "#f0f0f0", "#e6e6e6", "#eef4fb",
     "#eef7ee",
 ];
 
-/// Fonds sombres de la palette « fonds » : texte automatique en blanc.
+/// Dark backgrounds of the "backgrounds" palette: automatic text in white.
 const DARK_BACKGROUNDS: [&str; 6] = [
     "#000000", "#1e1e1e", "#2b2f36", "#101820", "#14213d", "#102a1f",
 ];
 
-/// La chaîne d'un fond sans couleur : blanc d'opacité nulle — le fond par
-/// défaut d'un graphe (`stokesforge_plot::TRANSPARENT`).
+/// The string of a background with no color: white with zero opacity — the
+/// default background of a graph (`stokesforge_plot::TRANSPARENT`).
 pub const NO_COLOR: &str = stokesforge_plot::TRANSPARENT;
 
 fn parse_all(colors: &[&str]) -> Vec<[u8; 4]> {
     colors.iter().filter_map(|hex| parse_hex(hex)).collect()
 }
 
-/// Les rangées de la palette de `usage`. Pour les courbes, celles de la
-/// palette nommée d'indice `curve_palette` dans
-/// [`stokesforge_plot::CURVE_PALETTES`] (ramené dans les bornes).
+/// The rows of the palette for `usage`. For curves, those of the named
+/// palette at index `curve_palette` in
+/// [`stokesforge_plot::CURVE_PALETTES`] (clamped into bounds).
 pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
     match usage {
         ColorUsage::Curves => {
@@ -169,16 +167,16 @@ pub fn palette(usage: ColorUsage, curve_palette: usize) -> Vec<PaletteSection> {
     }
 }
 
-/// Les composantes d'une couleur `#RRGGBB` (opaque) ou `#RRGGBBAA` —
-/// casse indifférente, `#` facultatif, espaces de bordure ignorés —, ou
-/// `None`. La syntaxe est celle de [`stokesforge_plot::parse_hex`], source unique
-/// partagée avec le rendu (issue #25).
+/// The components of a `#RRGGBB` (opaque) or `#RRGGBBAA` color —
+/// case-insensitive, `#` optional, surrounding spaces ignored —, or
+/// `None`. The syntax is that of [`stokesforge_plot::parse_hex`], the single
+/// source shared with rendering (issue #25).
 pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
     stokesforge_plot::parse_hex(text)
 }
 
-/// La chaîne d'une couleur : `#rrggbb` si elle est opaque, `#rrggbbaa`
-/// sinon.
+/// The string of a color: `#rrggbb` if it is opaque, `#rrggbbaa`
+/// otherwise.
 pub fn to_hex([r, g, b, a]: [u8; 4]) -> String {
     if a == 255 {
         format!("#{r:02x}{g:02x}{b:02x}")
@@ -187,8 +185,8 @@ pub fn to_hex([r, g, b, a]: [u8; 4]) -> String {
     }
 }
 
-/// RVB → TSL : teinte en degrés (0–360), saturation et luminosité en
-/// pourcentage (0–100).
+/// RGB → HSL: hue in degrees (0–360), saturation and lightness as a
+/// percentage (0–100).
 pub fn rgb_to_hsl([r, g, b]: [u8; 3]) -> (f32, f32, f32) {
     let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let max = r.max(g).max(b);
@@ -202,8 +200,8 @@ pub fn rgb_to_hsl([r, g, b]: [u8; 3]) -> (f32, f32, f32) {
     (hue_of(r, g, b, max, delta), s * 100.0, l * 100.0)
 }
 
-/// TSL → RVB, inverse de [`rgb_to_hsl`]. Les entrées hors bornes sont
-/// ramenées dans leurs bornes.
+/// HSL → RGB, inverse of [`rgb_to_hsl`]. Out-of-bounds inputs are
+/// clamped into their bounds.
 pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
     let h = h.rem_euclid(360.0);
     let s = (s / 100.0).clamp(0.0, 1.0);
@@ -212,7 +210,7 @@ pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
     from_chroma(h, c, l - c / 2.0)
 }
 
-/// RVB → TSV : teinte, saturation et valeur, chacune entre 0 et 1.
+/// RGB → HSV: hue, saturation and value, each between 0 and 1.
 pub fn rgb_to_hsv([r, g, b]: [u8; 3]) -> (f32, f32, f32) {
     let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let max = r.max(g).max(b);
@@ -231,7 +229,7 @@ pub fn rgb_to_hsv([r, g, b]: [u8; 3]) -> (f32, f32, f32) {
     (h, s, max)
 }
 
-/// TSV → RVB, inverse de [`rgb_to_hsv`].
+/// HSV → RGB, inverse of [`rgb_to_hsv`].
 pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
     let h = (h * 360.0).rem_euclid(360.0);
     let s = s.clamp(0.0, 1.0);
@@ -265,45 +263,45 @@ fn from_chroma(h: f32, c: f32, m: f32) -> [u8; 3] {
     [channel(r), channel(g), channel(b)]
 }
 
-/// Point d'une roue chromatique de rayon 1 centrée à l'origine → (teinte,
-/// saturation), chacune entre 0 et 1 ; la teinte 0 (rouge) est à droite et
-/// tourne dans le sens trigonométrique, la saturation croît vers le bord.
+/// Point of a color wheel of radius 1 centered at the origin → (hue,
+/// saturation), each between 0 and 1; hue 0 (red) is on the right and
+/// turns counterclockwise, saturation grows toward the edge.
 pub fn wheel_to_hue_saturation(dx: f32, dy: f32) -> (f32, f32) {
     let hue = (-dy).atan2(dx) / std::f32::consts::TAU;
     (hue.rem_euclid(1.0), (dx * dx + dy * dy).sqrt().min(1.0))
 }
 
-/// Inverse de [`wheel_to_hue_saturation`].
+/// Inverse of [`wheel_to_hue_saturation`].
 pub fn hue_saturation_to_wheel(hue: f32, saturation: f32) -> (f32, f32) {
     let angle = hue * std::f32::consts::TAU;
     (saturation * angle.cos(), -saturation * angle.sin())
 }
 
-/// Enregistrer ou retirer une couleur.
+/// Save or remove a color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SavedColorEdit {
-    /// Enregistrer.
+    /// Save.
     Save,
-    /// Retirer.
+    /// Remove.
     Remove,
 }
 
-/// Une demande du sélecteur sur les couleurs enregistrées, que l'appelant
-/// traduit en action (`Action::SaveColor`/`RemoveSavedColor`).
+/// A request from the picker about saved colors, which the caller turns
+/// into an action (`Action::SaveColor`/`RemoveSavedColor`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedColorRequest {
-    /// Enregistrer ou retirer.
+    /// Save or remove.
     pub edit: SavedColorEdit,
     /// Usage.
     pub usage: ColorUsage,
-    /// Projet ou utilisateur.
+    /// Project or user.
     pub target: SaveTarget,
-    /// La couleur.
+    /// The color.
     pub color: String,
 }
 
 impl SavedColorRequest {
-    /// L'action qui exécute la demande.
+    /// The action that carries out the request.
     pub fn into_action(self) -> stokesforge_app_state::state::Action {
         use stokesforge_app_state::state::Action;
         match self.edit {
@@ -321,9 +319,9 @@ impl SavedColorRequest {
     }
 }
 
-/// Les couleurs enregistrées, publiées chaque image par la racine pour que
-/// le sélecteur de couleur de l'éditeur sur place les propose aussi depuis
-/// une fenêtre détachée (qui n'a pas `AppState`).
+/// The saved colors, published every frame by the root so that
+/// the color picker of the in-place editor also offers them from
+/// a detached window (which has no `AppState`).
 pub(crate) fn saved_colors_id() -> egui::Id {
     egui::Id::new("stokesforge_saved_colors_for_graphs")
 }
@@ -336,19 +334,19 @@ pub(crate) fn publish_saved_colors(ctx: &egui::Context, state: &AppState) {
     ctx.data_mut(|data| data.insert_temp(saved_colors_id(), colors));
 }
 
-/// Ce que le sélecteur lit et écrit hors de la couleur éditée : les couleurs
-/// enregistrées, et les demandes qui les modifient.
+/// What the picker reads and writes besides the edited color: the saved
+/// colors, and the requests that modify them.
 #[derive(Debug, Clone, Default)]
 pub struct PickerEnv {
-    /// Couleurs enregistrées dans le projet.
+    /// Colors saved in the project.
     pub project: SavedColors,
-    /// Couleurs enregistrées pour l'utilisateur.
+    /// Colors saved for the user.
     pub user: SavedColors,
-    /// Demandes déposées pendant cette image.
+    /// Requests dropped during this frame.
     pub requests: Vec<SavedColorRequest>,
 }
 
-/// Un libellé suivi de [`color_button`], sur une ligne.
+/// A label followed by [`color_button`], on one line.
 pub fn color_field(
     ui: &mut egui::Ui,
     label: &str,
@@ -364,26 +362,26 @@ pub fn color_field(
     .inner
 }
 
-/// Côté de l'échantillon du bouton : un petit carré (#89).
+/// Side of the button's swatch: a small square (#89).
 const SWATCH_SIDE: f32 = 12.0;
-/// Place réservée au bouton : le carré, plus un peu d'air sur les côtés.
+/// Room reserved for the button: the square, plus a little air on the sides.
 const BUTTON_SWATCH: Vec2 = Vec2::new(14.5, SWATCH_SIDE);
-/// Le trait en travers d'une couleur non définie (automatique), même rouge
-/// que le rôle `Danger` des icônes.
+/// The stroke across an undefined (automatic) color, the same red
+/// as the `Danger` role of the icons.
 const AUTO_SLASH: Color32 = Color32::from_rgb(0xe5, 0x45, 0x3b);
-/// Taille d'un échantillon de palette.
+/// Size of a palette swatch.
 const PALETTE_SWATCH: f32 = 18.0;
-/// Côté du carré du nuancier (et diamètre de la roue).
+/// Side of the color-area square (and diameter of the wheel).
 const PICKER_SIDE: f32 = 200.0;
-/// Hauteur des barres (teinte, valeur, opacité).
+/// Height of the bars (hue, value, opacity).
 const BAR_HEIGHT: f32 = 16.0;
-/// Finesse des maillages du nuancier.
+/// Fineness of the color-area meshes.
 const MESH_STEPS: usize = 24;
-/// Côté d'une case du damier des couleurs transparentes.
+/// Side of a cell of the checkerboard for transparent colors.
 const CHECKER: f32 = 5.0;
 
-/// Nuancier affiché : carré ou roue. Choix mémorisé pour la session, commun
-/// à tous les sélecteurs.
+/// Color area shown: square or wheel. Choice remembered for the session,
+/// common to all pickers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum PickerShape {
     #[default]
@@ -391,33 +389,33 @@ enum PickerShape {
     Wheel,
 }
 
-/// État du nuancier entre deux images : la couleur en TSV, gardée à part de
-/// la chaîne pour ne pas perdre la teinte sur un gris (où elle n'est pas
-/// définie) pendant qu'on glisse.
+/// State of the color area between two frames: the color as HSV, kept apart
+/// from the string so as not to lose the hue on a gray (where it is not
+/// defined) while dragging.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PickerMemory {
-    /// La couleur à laquelle `hsv` correspond ; si le modèle change (autre
-    /// champ, annulation), la mémoire est recalculée depuis la chaîne.
+    /// The color `hsv` corresponds to; if the model changes (other
+    /// field, undo), the memory is recomputed from the string.
     rgb: [u8; 3],
     hsv: (f32, f32, f32),
 }
 
-/// Hauteur de la bande d'aperçu d'un nuancier.
+/// Height of the preview strip of a color gradient.
 const GRADIENT_STRIP_HEIGHT: f32 = 14.0;
-/// Largeur de la pastille d'un nuancier dans une liste.
+/// Width of the swatch of a color gradient in a list.
 const GRADIENT_SWATCH_WIDTH: f32 = 64.0;
 
-/// Aperçu d'un nuancier (#178) : une bande de tranches, une par couleur
-/// `#RRGGBB` de `colors`, sur toute la largeur disponible. Une couleur
-/// illisible laisse sa tranche vide ; sans couleur (#213), la bande est un
-/// fond grisé.
+/// Preview of a color gradient (#178): a strip of slices, one per
+/// `#RRGGBB` color of `colors`, over the whole available width. An unreadable
+/// color leaves its slice empty; with no color (#213), the strip is a
+/// grayed background.
 pub(crate) fn gradient_strip(ui: &mut egui::Ui, colors: &[String]) {
     let width = ui.available_width();
     paint_gradient(ui, colors, width, egui::Sense::hover());
 }
 
-/// La même bande en pastille de largeur fixe, pour une entrée de liste (#213) ;
-/// elle reçoit le clic, comme le nom qui la suit.
+/// The same strip as a fixed-width swatch, for a list entry (#213);
+/// it receives the click, like the name that follows it.
 pub(crate) fn gradient_swatch(ui: &mut egui::Ui, colors: &[String]) -> egui::Response {
     paint_gradient(ui, colors, GRADIENT_SWATCH_WIDTH, egui::Sense::click())
 }
@@ -446,7 +444,7 @@ fn paint_gradient(
     response
 }
 
-/// Peint `rgba` dans `rect`, sur un damier si elle n'est pas opaque.
+/// Paints `rgba` in `rect`, on a checkerboard if it is not opaque.
 fn paint_swatch(painter: &egui::Painter, rect: Rect, [r, g, b, a]: [u8; 4]) {
     if a < 255 {
         painter.rect_filled(rect, 0.0, Color32::WHITE);
@@ -466,9 +464,9 @@ fn paint_swatch(painter: &egui::Painter, rect: Rect, [r, g, b, a]: [u8; 4]) {
     painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
 }
 
-/// Le bouton-échantillon et sa fenêtre surgissante. `value` est la chaîne
-/// du modèle (vide = automatique quand `auto_label` est donné). Rend `true`
-/// quand un geste vient de se terminer — voir la doc du module.
+/// The swatch button and its popup. `value` is the model string
+/// (empty = automatic when `auto_label` is given). Returns `true`
+/// when a gesture has just ended — see the module doc.
 pub fn color_button(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -490,8 +488,8 @@ pub fn color_button(
         let stroke = ui.visuals().widgets.inactive.fg_stroke;
         match current {
             Some(rgba) => paint_swatch(painter, rect, rgba),
-            // Couleur non définie = automatique : carré clair barré d'un trait
-            // rouge en travers (#89).
+            // Undefined color = automatic: a light square crossed by a red
+            // stroke (#89).
             None => {
                 painter.rect_filled(rect, 2.0, Color32::WHITE);
                 let inner = rect.shrink(1.5);
@@ -510,10 +508,10 @@ pub fn color_button(
         set_picker_open(ui.ctx(), popup_id, !was_open);
     }
     let mut commit = false;
-    // Une `Area` à nous, pas `egui::Popup` : egui ne retient qu'une fenêtre
-    // surgissante ouverte par viewport, donc la liste d'un `ComboBox` placé
-    // dans le sélecteur le refermerait (issue #9). La fermeture (Échap, clic
-    // extérieur) est écrite ici, en épargnant les couches surgissantes filles.
+    // Our own `Area`, not `egui::Popup`: egui keeps only one popup open
+    // per viewport, so the list of a `ComboBox` placed in the picker would
+    // close it (issue #9). Closing (Escape, click outside) is written
+    // here, sparing the child popup layers.
     if picker_is_open(ui.ctx(), popup_id) {
         let area = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
@@ -525,8 +523,8 @@ pub fn color_button(
                     commit |= picker_contents(ui, popup_id, value, usage, auto_label, env);
                 });
             });
-        // Échap est consommé : le dialogue qui contient le sélecteur ne doit
-        // pas se fermer avec lui.
+        // Escape is consumed: the dialog that contains the picker must not
+        // close with it.
         let escape =
             ui.input_mut(|input| input.consume_shortcut(&crate::app::shortcuts::KEY_ESCAPE));
         let pressed_at = ui.input(|input| {
@@ -540,9 +538,9 @@ pub fn color_button(
         let outside = pressed_at.is_some_and(|pos| {
             !response.rect.contains(pos)
                 && !ui.ctx().layer_id_at(pos).is_some_and(|layer| {
-                    // Une liste de menu déroulant (couche surgissante fille)
-                    // compte comme « dedans » ; le dialogue et son calque
-                    // bloquant, eux, sont au même ordre mais sont « dehors ».
+                    // A dropdown list (child popup layer) counts as
+                    // "inside"; the dialog and its blocking layer are at
+                    // the same order but are "outside".
                     layer == area.response.layer_id
                         || (list_open && layer.order == egui::Order::Foreground)
                 })
@@ -552,14 +550,14 @@ pub fn color_button(
         }
     }
     let is_open = picker_is_open(ui.ctx(), popup_id);
-    // Refermer la fenêtre surgissante valide ce qui a pu être modifié sans
-    // geste de fin explicite (champ encore en saisie).
+    // Closing the popup commits whatever may have been modified without an
+    // explicit end gesture (field still being typed in).
     commit || (was_open && !is_open)
 }
 
-/// Une icône qui dit *quelle* couleur on règle, suivie de son échantillon
-/// compact : la forme des barres d'outils (#89). Les formulaires, eux, gardent
-/// un libellé devant l'échantillon (`color_field`). `tooltip` vient de `tr!`.
+/// An icon that says *which* color is being set, followed by its compact
+/// swatch: the form of the toolbars (#89). Forms keep a label in front
+/// of the swatch (`color_field`). `tooltip` comes from `tr!`.
 pub fn color_icon_button(
     ui: &mut egui::Ui,
     (icon, tooltip): (crate::icons::Icon, &str),
@@ -588,18 +586,18 @@ fn set_picker_open(ctx: &egui::Context, id: egui::Id, open: bool) {
     ctx.data_mut(|data| {
         data.insert_temp(id, open);
         if !open {
-            // Le sélecteur se rouvre toujours replié sur la palette (#10).
+            // The picker always reopens folded onto the palette (#10).
             data.remove::<bool>(custom_id(id));
         }
     });
 }
 
-/// Clé du dépli « Personnalisée » du sélecteur `popup_id` (#10).
+/// Key of the "Custom color" expander of the picker `popup_id` (#10).
 fn custom_id(popup_id: egui::Id) -> egui::Id {
     popup_id.with("custom")
 }
 
-/// Contenu de la fenêtre surgissante.
+/// Content of the popup.
 fn picker_contents(
     ui: &mut egui::Ui,
     popup_id: egui::Id,
@@ -618,7 +616,7 @@ fn picker_contents(
         .memory(|memory| memory.data.get_temp(curve_palette_id))
         .unwrap_or(0);
     if usage == ColorUsage::Curves {
-        // L'outil des courbes : un choix de palettes nommées.
+        // The curves tool: a choice of named palettes.
         egui::ComboBox::from_id_salt(popup_id.with("curve_palette"))
             .width(PICKER_SIDE + 20.0)
             .selected_text(curve_palette_name(curve_palette))
@@ -644,9 +642,9 @@ fn picker_contents(
         });
         ui.add_space(crate::theme::SPACE_ITEM);
     }
-    // Le nuancier, l'opacité, RVB/TSL et l'enregistrement sont cachés : la
-    // case « Custom color » en fin de palette les déplie (#10 ; une case
-    // à cocher depuis S-C5, #227).
+    // The color area, opacity, RGB/HSL and saving are hidden: the
+    // "Custom color" checkbox at the end of the palette unfolds them (#10; a
+    // checkbox since S-C5, #227).
     let mut custom = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(custom_id(popup_id)))
@@ -662,7 +660,7 @@ fn picker_contents(
                 close = true;
             }
         }
-        // Une bascule est une case à cocher, libellé à droite (S-C5, #227).
+        // A toggle is a checkbox, label on the right (S-C5, #227).
         crate::app::hover_help::help_beside(ui, tr!("color-custom", "hint"), |ui| {
             ui.checkbox(&mut custom, tr!("color-custom"))
         });
@@ -670,7 +668,7 @@ fn picker_contents(
     ui.ctx()
         .data_mut(|data| data.insert_temp(custom_id(popup_id), custom));
 
-    // -- Couleurs enregistrées ------------------------------------------
+    // -- Saved colors ---------------------------------------------------
     ui.separator();
     for (target, title) in [
         (SaveTarget::Project, tr!("color-saved-project")),
@@ -740,7 +738,7 @@ fn picker_contents(
         ui.separator();
     }
 
-    // -- Nuancier --------------------------------------------------------
+    // -- Color area ------------------------------------------------------
     let [r0, g0, b0, a0] = current.unwrap_or([0x80, 0x80, 0x80, 255]);
     let rgb = [r0, g0, b0];
     let memory_id = popup_id.with("hsv");
@@ -758,8 +756,8 @@ fn picker_contents(
         let mut shape: PickerShape = ui
             .memory(|memory| memory.data.get_temp(shape_id))
             .unwrap_or_default();
-        // Deux vues du même nuancier : un petit jeu d'onglets, donc la bande
-        // commune (#170, point 7), pas des boutons sélectionnables.
+        // Two views of the same color area: a small set of tabs, so the
+        // common strip (#170, point 7), not selectable buttons.
         let mut chosen = shape;
         tab_strip(
             ui,
@@ -786,7 +784,7 @@ fn picker_contents(
         }
         commit |= gestures.iter().any(|gesture| gesture.finished);
 
-        // -- Opacité ---------------------------------------------------------
+        // -- Opacity ---------------------------------------------------------
         let mut opacity = (f32::from(a0) / 255.0 * 100.0).round() as i32;
         let opacity_changed = ui
             .horizontal(|ui| {
@@ -805,7 +803,7 @@ fn picker_contents(
             commit = true;
         }
 
-        // -- RVB ---------------------------------------------------------------
+        // -- RGB ---------------------------------------------------------------
         ui.add_space(crate::theme::SPACE_ITEM);
         let shown = new_rgb.unwrap_or(rgb);
         let mut channels = shown.map(i32::from);
@@ -835,7 +833,7 @@ fn picker_contents(
             commit = true;
         }
 
-        // -- TSL ---------------------------------------------------------------
+        // -- HSL ---------------------------------------------------------------
         let (th, ts, tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
         let (mut th, mut ts, mut tl) = (th.round() as i32, ts.round() as i32, tl.round() as i32);
         let mut hsl_changed = false;
@@ -859,7 +857,7 @@ fn picker_contents(
         }
     }
 
-    // -- Hexadécimal : appliqué seulement lisible, à la validation ---------
+    // -- Hexadecimal: applied only when readable, on commit ----------------
     let hex_id = popup_id.with("hex");
     let [r1, g1, b1] = new_rgb.unwrap_or(rgb);
     let mut hex_text: String = ui
@@ -887,7 +885,7 @@ fn picker_contents(
         }
     }
 
-    // -- Application -------------------------------------------------------
+    // -- Apply -------------------------------------------------------------
     if let Some(rgba) = chosen {
         *value = to_hex(rgba);
         commit = true;
@@ -903,8 +901,8 @@ fn picker_contents(
     commit
 }
 
-/// Infobulle d'un échantillon : son code, ou « Aucune couleur » s'il est
-/// entièrement transparent.
+/// Tooltip of a swatch: its code, or "No color" if it is
+/// fully transparent.
 fn swatch_label(rgba: [u8; 4]) -> String {
     if rgba[3] == 0 {
         tr!("color-none-swatch")
@@ -913,7 +911,7 @@ fn swatch_label(rgba: [u8; 4]) -> String {
     }
 }
 
-/// Un échantillon de palette cliquable.
+/// A clickable palette swatch.
 fn palette_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(PALETTE_SWATCH), Sense::click());
     let response = response.on_hover_text(swatch_label(rgba));
@@ -930,13 +928,13 @@ fn palette_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> egui::Res
     response
 }
 
-/// Résultat d'un élément du nuancier cette image.
+/// Result of a color-area element this frame.
 struct PickerGesture {
     changed: bool,
     finished: bool,
 }
 
-/// Position du pointeur pendant un appui ou un clic sur `response`.
+/// Pointer position during a press or click on `response`.
 fn pressed_pos(response: &egui::Response) -> Option<Pos2> {
     response
         .interact_pointer_pos()
@@ -950,7 +948,7 @@ fn gesture(response: &egui::Response) -> PickerGesture {
     }
 }
 
-/// Le carré saturation (horizontale) × valeur (verticale) à la teinte `h`.
+/// The saturation (horizontal) × value (vertical) square at hue `h`.
 fn sv_square(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> PickerGesture {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::splat(PICKER_SIDE), Sense::click_and_drag());
@@ -1005,8 +1003,8 @@ fn sv_square(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> PickerGestu
     result
 }
 
-/// La roue chromatique : teinte selon l'angle, saturation selon la distance
-/// au centre, à la valeur `v`.
+/// The color wheel: hue by angle, saturation by distance
+/// from the center, at value `v`.
 fn color_wheel(ui: &mut egui::Ui, h: &mut f32, s: &mut f32, v: f32) -> PickerGesture {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::splat(PICKER_SIDE), Sense::click_and_drag());
@@ -1074,8 +1072,8 @@ fn color_wheel(ui: &mut egui::Ui, h: &mut f32, s: &mut f32, v: f32) -> PickerGes
     result
 }
 
-/// Une barre horizontale peinte d'un dégradé `color(f)`, f de 0 à 1, avec
-/// un curseur en `position`. Rend la nouvelle position si on l'a bougée.
+/// A horizontal bar painted with a gradient `color(f)`, f from 0 to 1, with
+/// a cursor at `position`. Returns the new position if it was moved.
 fn gradient_bar(
     ui: &mut egui::Ui,
     position: f32,
@@ -1116,7 +1114,7 @@ fn gradient_bar(
     (moved, result)
 }
 
-/// La barre de teinte, de 0 à 360°.
+/// The hue bar, from 0 to 360°.
 fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
     let (moved, mut result) = gradient_bar(ui, *h, |f| {
         let [r, g, b] = hsv_to_rgb(f, 1.0, 1.0);
@@ -1129,7 +1127,7 @@ fn hue_bar(ui: &mut egui::Ui, h: &mut f32) -> PickerGesture {
     result
 }
 
-/// La barre de valeur (du noir à la couleur pleine), sous la roue.
+/// The value bar (from black to the full color), under the wheel.
 fn value_bar(ui: &mut egui::Ui, h: f32, s: f32, v: &mut f32) -> PickerGesture {
     let (moved, mut result) = gradient_bar(ui, *v, |f| {
         let [r, g, b] = hsv_to_rgb(h, s, f);
@@ -1147,7 +1145,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn l_hexadecimal_se_lit_et_s_ecrit_opacite_comprise() {
+    fn hexadecimal_reads_and_writes_with_opacity() {
         assert_eq!(parse_hex("#4C78a8"), Some([0x4c, 0x78, 0xa8, 255]));
         assert_eq!(parse_hex(" 4c78a8 "), Some([0x4c, 0x78, 0xa8, 255]));
         assert_eq!(parse_hex("#4c78a880"), Some([0x4c, 0x78, 0xa8, 0x80]));
@@ -1157,18 +1155,18 @@ mod tests {
         assert_eq!(
             to_hex([0x4c, 0x78, 0xa8, 255]),
             "#4c78a8",
-            "opaque : 6 chiffres"
+            "opaque: 6 digits"
         );
         assert_eq!(to_hex([0x4c, 0x78, 0xa8, 0x80]), "#4c78a880");
         assert_eq!(
             parse_hex(NO_COLOR).map(|c| c[3]),
             Some(0),
-            "« Aucune » est transparente"
+            "\"No color\" is transparent"
         );
     }
 
     #[test]
-    fn tsl_des_couleurs_de_reference() {
+    fn hsl_of_reference_colors() {
         assert_eq!(rgb_to_hsl([255, 0, 0]), (0.0, 100.0, 50.0));
         assert_eq!(rgb_to_hsl([255, 255, 255]), (0.0, 0.0, 100.0));
         assert_eq!(hsl_to_rgb(120.0, 100.0, 50.0), [0, 255, 0]);
@@ -1176,35 +1174,39 @@ mod tests {
         assert_eq!(hsv_to_rgb(0.0, 0.0, 0.0), [0, 0, 0]);
     }
 
-    /// Un aller-retour RVB → TSL → RVB et RVB → TSV → RVB rend la couleur de
-    /// départ, sur un échantillon de tout le cube.
+    /// A round trip RGB → HSL → RGB and RGB → HSV → RGB gives back the
+    /// starting color, over a sample of the whole cube.
     #[test]
-    fn les_conversions_font_l_aller_retour() {
+    fn conversions_round_trip() {
         for r in (0..=255).step_by(17) {
             for g in (0..=255).step_by(51) {
                 for b in (0..=255).step_by(85) {
                     let rgb = [r as u8, g as u8, b as u8];
                     let (h, s, l) = rgb_to_hsl(rgb);
-                    assert_eq!(hsl_to_rgb(h, s, l), rgb, "TSL de {rgb:?}");
+                    assert_eq!(hsl_to_rgb(h, s, l), rgb, "HSL of {rgb:?}");
                     let (h, s, v) = rgb_to_hsv(rgb);
-                    assert_eq!(hsv_to_rgb(h, s, v), rgb, "TSV de {rgb:?}");
+                    assert_eq!(hsv_to_rgb(h, s, v), rgb, "HSV of {rgb:?}");
                 }
             }
         }
     }
 
-    /// La roue : rouge à droite, vert (1/3) en haut à gauche, saturation
-    /// nulle au centre et pleine au bord — et l'aller-retour tient.
+    /// The wheel: red on the right, green (1/3) at the top left, zero
+    /// saturation at the center and full at the edge — and the round trip holds.
     #[test]
-    fn la_roue_place_les_teintes_comme_attendu() {
+    fn the_wheel_places_hues_as_expected() {
         assert_eq!(wheel_to_hue_saturation(1.0, 0.0), (0.0, 1.0));
         let (h, s) = wheel_to_hue_saturation(0.0, -1.0);
         assert!(
             (h - 0.25).abs() < 1e-6 && (s - 1.0).abs() < 1e-6,
-            "haut : 90°"
+            "top: 90°"
         );
         assert_eq!(wheel_to_hue_saturation(0.0, 0.0).1, 0.0);
-        assert_eq!(wheel_to_hue_saturation(3.0, 4.0).1, 1.0, "bornée au bord");
+        assert_eq!(
+            wheel_to_hue_saturation(3.0, 4.0).1,
+            1.0,
+            "capped at the edge"
+        );
         for (hue, saturation) in [(0.1, 0.5), (0.6, 0.9), (0.95, 0.2)] {
             let (x, y) = hue_saturation_to_wheel(hue, saturation);
             let (h, s) = wheel_to_hue_saturation(x, y);
@@ -1212,12 +1214,12 @@ mod tests {
         }
     }
 
-    /// Dessine, sans fenêtre, un sélecteur ouvert — pour chaque usage et
-    /// chaque forme de nuancier — et vérifie qu'il peint son contenu (dont
-    /// les couleurs enregistrées) sans paniquer. La capture d'écran ne sait
-    /// pas ouvrir une fenêtre surgissante ; ce test en est le filet.
+    /// Draws, without a window, an open picker — for each usage and
+    /// each shape of color area — and checks that it paints its content
+    /// (saved colors included) without panicking. The screenshot cannot
+    /// open a popup; this test is the safety net.
     #[test]
-    fn un_selecteur_ouvert_se_dessine_pour_chaque_usage_et_chaque_nuancier() {
+    fn an_open_picker_draws_for_each_usage_and_each_color_area() {
         for shape in [PickerShape::Square, PickerShape::Wheel] {
             for usage in [ColorUsage::Curves, ColorUsage::Text, ColorUsage::Background] {
                 let context = egui::Context::default();
@@ -1235,31 +1237,27 @@ mod tests {
                 let mut shapes = 0;
                 for frame in 0..3 {
                     let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-                        let popup_id =
-                            ui.make_persistent_id(("stokesforge_color_popup", "Couleur"));
+                        let popup_id = ui.make_persistent_id(("stokesforge_color_popup", "Color"));
                         if frame == 0 {
                             set_picker_open(ui.ctx(), popup_id, true);
-                            // Le nuancier est replié par défaut (#10) : on le
-                            // déplie pour éprouver tout le contenu.
+                            // The color area is folded by default (#10): unfold
+                            // it to exercise the whole content.
                             ui.ctx()
                                 .data_mut(|data| data.insert_temp(custom_id(popup_id), true));
                         }
-                        color_button(ui, "Couleur", &mut value, usage, Some("Auto"), &mut env);
+                        color_button(ui, "Color", &mut value, usage, Some("Auto"), &mut env);
                     });
                     output.textures_delta.clear();
                     shapes = output.shapes.len();
                 }
-                assert!(
-                    shapes > 40,
-                    "{usage:?}/{shape:?} : {shapes} formes seulement"
-                );
-                assert_eq!(value, "#ff000080", "rien n'a été modifié sans geste");
+                assert!(shapes > 40, "{usage:?}/{shape:?}: only {shapes} shapes");
+                assert_eq!(value, "#ff000080", "nothing changed without a gesture");
                 assert!(env.requests.is_empty());
             }
         }
     }
 
-    /// Position du texte `needle` parmi les formes peintes.
+    /// Position of the text `needle` among the painted shapes.
     fn find_text(output: &egui::FullOutput, needle: &str) -> Option<egui::Pos2> {
         fn walk(shape: &egui::Shape, needle: &str) -> Option<egui::Pos2> {
             match shape {
@@ -1276,13 +1274,13 @@ mod tests {
             .find_map(|clipped| walk(&clipped.shape, needle))
     }
 
-    /// #170, point 7 : « Square | Wheel » est un jeu d'onglets soulignés, comme
-    /// le reste de l'application, pas deux boutons sélectionnables : le trait
-    /// d'accent est sous l'onglet actif, aucun fond `selection.bg_fill` ne
-    /// couvre un libellé, et un clic sur « Wheel » change de vue (et le garde
-    /// en mémoire pour les sélecteurs suivants).
+    /// #170, point 7: "Square | Wheel" is a set of underlined tabs, like
+    /// the rest of the application, not two selectable buttons: the accent
+    /// stroke is under the active tab, no `selection.bg_fill` background
+    /// covers a label, and a click on "Wheel" changes view (and keeps it
+    /// in memory for the following pickers).
     #[test]
-    fn carre_et_roue_sont_des_onglets_soulignes() {
+    fn square_and_wheel_are_underlined_tabs() {
         let context = egui::Context::default();
         let mut env = PickerEnv {
             project: SavedColors::default(),
@@ -1293,8 +1291,8 @@ mod tests {
         let selection_fill = std::cell::Cell::new(egui::Color32::TRANSPARENT);
         let mut clock = 0.0_f64;
         let mut run = |events: Vec<egui::Event>, open: bool| {
-            // Le temps avance d'un dixième de seconde par image : la fenêtre surgissante
-            // s'ouvre en fondu, sa teinte doit être pleine pour la comparer.
+            // Time advances by a tenth of a second per frame: the popup
+            // fades in, its tint must be full to compare it.
             clock += 0.1;
             let input = egui::RawInput {
                 events,
@@ -1303,7 +1301,7 @@ mod tests {
             };
             let mut output = context.run_ui(input, |ui| {
                 selection_fill.set(ui.visuals().selection.bg_fill);
-                let popup_id = ui.make_persistent_id(("stokesforge_color_popup", "Couleur"));
+                let popup_id = ui.make_persistent_id(("stokesforge_color_popup", "Color"));
                 if open {
                     set_picker_open(ui.ctx(), popup_id, true);
                     ui.ctx()
@@ -1311,7 +1309,7 @@ mod tests {
                 }
                 color_button(
                     ui,
-                    "Couleur",
+                    "Color",
                     &mut value,
                     ColorUsage::Background,
                     Some("Auto"),
@@ -1346,25 +1344,25 @@ mod tests {
                 .collect()
         };
         let under = |output: &egui::FullOutput, label: &str| -> bool {
-            let at = find_text(output, label).expect("onglet peint");
+            let at = find_text(output, label).expect("tab painted");
             marks(output).iter().any(|mark| {
                 mark.height() <= 2.5 && mark.x_range().contains(at.x) && mark.top() > at.y
             })
         };
         assert!(
             under(&output, &tr!("color-shape-square")),
-            "trait sous Square"
+            "stroke under Square"
         );
         assert!(
             !under(&output, &tr!("color-shape-wheel")),
-            "témoin : pas de trait sous l'onglet inactif"
+            "witness: no stroke under the inactive tab"
         );
         let filled_label = |output: &egui::FullOutput| {
             let fill = selection_fill.get();
             [tr!("color-shape-square"), tr!("color-shape-wheel")]
                 .iter()
                 .any(|label| {
-                    let at = find_text(output, label).expect("onglet peint");
+                    let at = find_text(output, label).expect("tab painted");
                     flat_rects(output)
                         .iter()
                         .any(|rect| rect.fill == fill && rect.rect.contains(at))
@@ -1372,7 +1370,7 @@ mod tests {
         };
         assert!(
             !filled_label(&output),
-            "aucun fond de sélection derrière un libellé : des onglets, pas des boutons"
+            "no selection background behind a label: tabs, not buttons"
         );
         let click = |at, pressed| egui::Event::PointerButton {
             pos: at,
@@ -1387,7 +1385,7 @@ mod tests {
         output = run(vec![], false);
         assert!(
             under(&output, &tr!("color-shape-wheel")),
-            "un clic sur Wheel y déplace le trait"
+            "a click on Wheel moves the stroke there"
         );
         assert!(!under(&output, &tr!("color-shape-square")));
         let kept: PickerShape = context
@@ -1397,14 +1395,14 @@ mod tests {
                     .get_temp(egui::Id::new("stokesforge_picker_shape"))
             })
             .unwrap();
-        assert_eq!(kept, PickerShape::Wheel, "le choix reste en mémoire");
+        assert_eq!(kept, PickerShape::Wheel, "the choice stays in memory");
     }
 
-    /// Bug #9 : le menu déroulant de destination de « Enregistrer » s'ouvre
-    /// sans refermer le sélecteur, on y choisit « utilisateur », et un clic
-    /// réellement extérieur referme bien le sélecteur.
+    /// Bug #9: the dropdown for the destination of "Save Color" opens
+    /// without closing the picker, "user" is chosen in it, and a click
+    /// truly outside does close the picker.
     #[test]
-    fn un_menu_deroulant_du_selecteur_ne_le_ferme_pas() {
+    fn a_picker_dropdown_does_not_close_it() {
         let context = egui::Context::default();
         let mut env = PickerEnv {
             project: SavedColors::default(),
@@ -1420,7 +1418,7 @@ mod tests {
             let mut output = context.run_ui(input, |ui| {
                 color_button(
                     ui,
-                    "Couleur",
+                    "Color",
                     &mut value,
                     ColorUsage::Background,
                     Some("Auto"),
@@ -1430,7 +1428,7 @@ mod tests {
             output.textures_delta.clear();
             output
         };
-        // Ouvre le sélecteur puis laisse la mise en page se stabiliser.
+        // Open the picker, then let the layout settle.
         let mut output = run(vec![]);
         let button = egui::pos2(14.0, 14.0);
         let click = |at, pressed| egui::Event::PointerButton {
@@ -1445,26 +1443,27 @@ mod tests {
         for _ in 0..2 {
             output = run(vec![]);
         }
-        let plus = find_text(&output, &tr!("color-custom")).expect("case « Custom color » peinte");
+        let plus =
+            find_text(&output, &tr!("color-custom")).expect("\"Custom color\" checkbox painted");
         run(vec![egui::Event::PointerMoved(plus)]);
         run(vec![click(plus, true)]);
         run(vec![click(plus, false)]);
         for _ in 0..2 {
             output = run(vec![]);
         }
-        let combo = find_text(&output, &tr!("color-target-project")).expect("menu déroulant peint");
+        let combo = find_text(&output, &tr!("color-target-project")).expect("dropdown painted");
         run(vec![egui::Event::PointerMoved(combo)]);
         run(vec![click(combo, true)]);
         run(vec![click(combo, false)]);
         output = run(vec![]);
-        let entry = find_text(&output, &tr!("color-target-user")).expect("liste du menu ouverte");
+        let entry = find_text(&output, &tr!("color-target-user")).expect("menu list open");
         run(vec![egui::Event::PointerMoved(entry)]);
         run(vec![click(entry, true)]);
         run(vec![click(entry, false)]);
         output = run(vec![]);
         assert!(
             find_text(&output, &tr!("color-save")).is_some(),
-            "le sélecteur est resté ouvert après le choix dans la liste"
+            "the picker stayed open after the choice in the list"
         );
         let away = egui::pos2(700.0, 500.0);
         run(vec![egui::Event::PointerMoved(away)]);
@@ -1473,15 +1472,15 @@ mod tests {
         output = run(vec![]);
         assert!(
             find_text(&output, &tr!("color-save")).is_none(),
-            "un clic extérieur referme le sélecteur"
+            "a click outside closes the picker"
         );
     }
 
-    /// #10 : le sélecteur s'ouvre replié sur la palette (avec l'hexadécimal) ;
-    /// le dépli « Custom color » montre nuancier, opacité, RVB/TSL et
-    /// enregistrement ; refermé, il se rouvre replié.
+    /// #10: the picker opens folded onto the palette (with the hexadecimal);
+    /// the "Custom color" expander shows color area, opacity, RGB/HSL and
+    /// saving; closed, it reopens folded.
     #[test]
-    fn le_selecteur_est_replie_par_defaut_et_se_deplie_a_la_demande() {
+    fn the_picker_is_folded_by_default_and_unfolds_on_demand() {
         let context = egui::Context::default();
         let mut env = PickerEnv {
             project: SavedColors::default(),
@@ -1492,7 +1491,7 @@ mod tests {
         let popup_id = std::cell::Cell::new(egui::Id::NULL);
         let mut run = |open: Option<bool>, custom: Option<bool>| {
             let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-                popup_id.set(ui.make_persistent_id(("stokesforge_color_popup", "Couleur")));
+                popup_id.set(ui.make_persistent_id(("stokesforge_color_popup", "Color")));
                 if let Some(open) = open {
                     set_picker_open(ui.ctx(), popup_id.get(), open);
                 }
@@ -1502,7 +1501,7 @@ mod tests {
                 }
                 color_button(
                     ui,
-                    "Couleur",
+                    "Color",
                     &mut value,
                     ColorUsage::Background,
                     Some("Auto"),
@@ -1517,50 +1516,50 @@ mod tests {
             run(None, None)
         };
         run(Some(true), None);
-        let replie = settle(&mut run);
+        let folded = settle(&mut run);
         assert!(
-            find_text(&replie, &tr!("color-hex")).is_some(),
-            "hexa toujours visible"
+            find_text(&folded, &tr!("color-hex")).is_some(),
+            "hex always visible"
         );
-        assert!(find_text(&replie, &tr!("color-custom")).is_some());
-        let derriere_le_plus = [
+        assert!(find_text(&folded, &tr!("color-custom")).is_some());
+        let behind_the_checkbox = [
             tr!("color-opacity"),
             tr!("color-rgb"),
             tr!("color-hsl"),
             tr!("color-save"),
             tr!("color-shape-square"),
         ];
-        for cache in &derriere_le_plus {
-            assert!(find_text(&replie, cache).is_none(), "{cache} est replié");
+        for hidden in &behind_the_checkbox {
+            assert!(find_text(&folded, hidden).is_none(), "{hidden} is folded");
         }
         run(None, Some(true));
-        let deplie = settle(&mut run);
-        for montre in std::iter::once(&tr!("color-hex")).chain(&derriere_le_plus) {
-            assert!(find_text(&deplie, montre).is_some(), "{montre} est déplié");
+        let unfolded = settle(&mut run);
+        for shown in std::iter::once(&tr!("color-hex")).chain(&behind_the_checkbox) {
+            assert!(find_text(&unfolded, shown).is_some(), "{shown} is unfolded");
         }
-        // Fermé puis rouvert : de nouveau replié.
+        // Closed then reopened: folded again.
         run(Some(false), None);
         run(Some(true), None);
-        let rouvert = settle(&mut run);
-        assert!(find_text(&rouvert, &tr!("color-opacity")).is_none());
+        let reopened = settle(&mut run);
+        assert!(find_text(&reopened, &tr!("color-opacity")).is_none());
     }
 
     fn luminance([r, g, b]: [u8; 3]) -> f32 {
         (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
     }
 
-    /// Les palettes sont distinctes par usage ; celle des courbes suit la
-    /// palette nommée choisie, avec ses nuances ; celle des fonds sépare
-    /// clairs et sombres.
+    /// The palettes are distinct per usage; the curves one follows the
+    /// chosen named palette, with its shades; the backgrounds one separates
+    /// light and dark.
     #[test]
-    fn chaque_palette_de_courbes_a_son_nom_dans_le_catalogue() {
-        // Une clé `color-palette-*` par palette de `stokesforge-plot`, dans l'ordre :
-        // une palette ajoutée à la table sans sa clé retomberait sur le nom
-        // de `stokesforge-plot`, qui n'est pas traduit.
+    fn each_curve_palette_has_its_name_in_the_catalog() {
+        // One `color-palette-*` key per palette of `stokesforge-plot`, in order:
+        // a palette added to the table without its key would fall back on the
+        // name from `stokesforge-plot`, which is not translated.
         assert_eq!(
             CURVE_PALETTES.len(),
             9,
-            "`curve_palette_name` écrit les neuf palettes : en ajouter une demande sa clé              `color-palette-*` et sa branche"
+            "`curve_palette_name` writes the nine palettes: adding one requires its key              `color-palette-*` and its branch"
         );
         for index in 0..CURVE_PALETTES.len() {
             assert!(!curve_palette_name(index).is_empty());
@@ -1568,62 +1567,62 @@ mod tests {
     }
 
     #[test]
-    fn chaque_usage_a_sa_palette() {
-        let courbes = palette(ColorUsage::Curves, 0);
-        let texte = palette(ColorUsage::Text, 0);
-        let fonds = palette(ColorUsage::Background, 0);
-        assert_ne!(courbes, texte);
-        assert_ne!(texte, fonds);
+    fn each_usage_has_its_palette() {
+        let curves = palette(ColorUsage::Curves, 0);
+        let text = palette(ColorUsage::Text, 0);
+        let backgrounds = palette(ColorUsage::Background, 0);
+        assert_ne!(curves, text);
+        assert_ne!(text, backgrounds);
         assert_eq!(
-            courbes[0].colors,
+            curves[0].colors,
             parse_all(&stokesforge_plot::DEFAULT_PALETTE)
         );
-        assert_eq!(courbes.len(), 3, "teintes, foncées, claires");
+        assert_eq!(curves.len(), 3, "hues, darker, lighter");
         let okabe = palette(ColorUsage::Curves, 2);
         assert_eq!(okabe[0].colors, parse_all(CURVE_PALETTES[2].colors));
         assert_eq!(
             palette(ColorUsage::Curves, 999)[0].title,
             curve_palette_name(CURVE_PALETTES.len() - 1),
-            "indice ramené dans les bornes"
+            "index clamped into bounds"
         );
         assert_eq!(
-            fonds[0].colors[0],
+            backgrounds[0].colors[0],
             [0xff, 0xff, 0xff, 0],
-            "« Aucune couleur » en premier"
+            "\"No color\" first"
         );
         assert!(
-            fonds[0].colors[1..]
+            backgrounds[0].colors[1..]
                 .iter()
                 .all(|&[r, g, b, _]| luminance([r, g, b]) > 0.85),
-            "fonds clairs"
+            "light backgrounds"
         );
         assert!(
-            fonds[1]
+            backgrounds[1]
                 .colors
                 .iter()
                 .all(|&[r, g, b, _]| luminance([r, g, b]) < 0.2),
-            "fonds sombres"
+            "dark backgrounds"
         );
     }
 
-    /// Les couleurs enregistrées publiées par la racine dans la mémoire
-    /// d'egui se relisent, sous [`saved_colors_id`], comme les lisent les
-    /// fenêtres détachées (`(projet, utilisateur)`) : le projet reste le
-    /// projet, l'utilisateur l'utilisateur. Le témoin : les deux jeux
-    /// diffèrent (une couleur chacun), une inversion se verrait. Une
-    /// nouvelle publication remplace l'ancienne. Les couleurs de
-    /// l'utilisateur vont dans un fichier temporaire, jamais dans les
-    /// préférences de la machine.
+    /// The saved colors published by the root into egui's memory
+    /// are read back, under [`saved_colors_id`], as the detached
+    /// windows read them (`(project, user)`): the project stays the
+    /// project, the user the user. The witness: the two sets
+    /// differ (one color each), a swap would show. A
+    /// new publication replaces the old one. The user's colors
+    /// go to a temporary file, never into the machine's
+    /// preferences.
     #[test]
-    fn les_couleurs_publiees_se_relisent_projet_et_utilisateur_a_leur_place() {
+    fn published_colors_read_back_with_project_and_user_in_place() {
         use stokesforge_app_state::state::Action;
         use stokesforge_core::Project;
         use stokesforge_session::Session;
 
-        let dir = tempfile::tempdir().expect("dossier temporaire");
-        let session = Session::spawn(Project::new("Couleurs").unwrap(), None).unwrap();
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let session = Session::spawn(Project::new("Colors").unwrap(), None).unwrap();
         let mut state = AppState::new(session.handle(), String::new()).unwrap();
-        state.use_user_colors_file(dir.path().join("couleurs.json"));
+        state.use_user_colors_file(dir.path().join("colors.json"));
         for (color, target) in [
             ("#aa0000", SaveTarget::Project),
             ("#00bb00", SaveTarget::User),
@@ -1634,18 +1633,18 @@ mod tests {
                 target,
             });
         }
-        let projet = state.saved_colors(SaveTarget::Project);
-        let utilisateur = state.saved_colors(SaveTarget::User);
-        assert_eq!(projet.get(ColorUsage::Curves), ["#aa0000"]);
-        assert_eq!(utilisateur.get(ColorUsage::Curves), ["#00bb00"]);
+        let project = state.saved_colors(SaveTarget::Project);
+        let user = state.saved_colors(SaveTarget::User);
+        assert_eq!(project.get(ColorUsage::Curves), ["#aa0000"]);
+        assert_eq!(user.get(ColorUsage::Curves), ["#00bb00"]);
 
         let context = egui::Context::default();
-        let relire = |context: &egui::Context| -> Option<(SavedColors, SavedColors)> {
+        let read_back = |context: &egui::Context| -> Option<(SavedColors, SavedColors)> {
             context.data(|data| data.get_temp(saved_colors_id()))
         };
-        assert_eq!(relire(&context), None, "rien avant la publication");
+        assert_eq!(read_back(&context), None, "nothing before the publication");
         publish_saved_colors(&context, &state);
-        assert_eq!(relire(&context), Some((projet, utilisateur.clone())));
+        assert_eq!(read_back(&context), Some((project, user.clone())));
 
         state.dispatch(Action::SaveColor {
             usage: ColorUsage::Text,
@@ -1653,8 +1652,8 @@ mod tests {
             target: SaveTarget::Project,
         });
         publish_saved_colors(&context, &state);
-        let (projet, relu_utilisateur) = relire(&context).expect("republiées");
-        assert_eq!(projet.get(ColorUsage::Text), ["#0000cc"], "republiées");
-        assert_eq!(relu_utilisateur, utilisateur);
+        let (project, read_user) = read_back(&context).expect("republished");
+        assert_eq!(project.get(ColorUsage::Text), ["#0000cc"], "republished");
+        assert_eq!(read_user, user);
     }
 }

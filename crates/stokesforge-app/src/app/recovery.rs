@@ -1,13 +1,13 @@
-//! La fenêtre de récupération (#317), ouverte au démarrage quand des copies de
-//! secours de processus disparus sont plus récentes que leurs `.stf`.
+//! The recovery window (#317), opened at startup when backup copies left by
+//! dead processes are newer than their `.stf` files.
 //!
-//! Lecture seule (`[Close]`, S-F2) dont chaque ligne porte ses boutons :
-//! `Open` charge la copie dans la fenêtre courante (derrière « Enregistrer ? »
-//! s'il y a du travail) et la liste reste ouverte pour les autres, `Ignore`
-//! laisse la copie sur disque (reproposée au démarrage suivant), `Delete`
-//! demande confirmation (`confirmations.rs`, la suppression ne s'annule pas).
-//! `Close` ignore ce qui reste. La liste vient de `AppState::recovery_rows` ;
-//! la fenêtre ne décide rien. Jumelle de référence : `column_use.rs`.
+//! Read-only (`[Close]`, S-F2); each row carries its own buttons: `Open`
+//! loads the copy into the current window (behind "Save?" if there is work)
+//! and the list stays open for the others, `Ignore` leaves the copy on disk
+//! (offered again at the next startup), `Delete` asks for confirmation
+//! (`confirmations.rs`, a deletion cannot be undone). `Close` ignores what is
+//! left. The list comes from `AppState::recovery_rows`; the window decides
+//! nothing. Reference twin: `column_use.rs`.
 
 use eframe::egui;
 
@@ -15,8 +15,7 @@ use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
 use stokesforge_app_state::state::{Action, AppState, RecoveryRow};
 use stokesforge_app_state::tr;
 
-/// Peint la fenêtre tant qu'il reste des copies à proposer, et pousse la
-/// réponse.
+/// Paints the window while copies remain to offer, and pushes the answer.
 pub(super) fn recovery_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     let Some(rows) = state.recovery_rows() else {
         return;
@@ -44,12 +43,12 @@ pub(super) fn recovery_window(ctx: &egui::Context, state: &AppState, actions: &m
     }
 }
 
-/// Une copie : son nom et sa date, puis `Open · Ignore · Delete` à droite.
+/// One copy: its name and date, then `Open · Ignore · Delete` on the right.
 fn row_buttons(ui: &mut egui::Ui, row: &RecoveryRow, requested: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         ui.label(&row.text);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Posés de droite à gauche : à l'écran, Open · Ignore · Delete.
+            // Placed right to left: on screen, Open · Ignore · Delete.
             if ui
                 .button(tr!("recovery-delete"))
                 .on_hover_text(tr!("recovery-delete", "hint"))
@@ -80,18 +79,18 @@ mod tests {
     use super::*;
     use egui_kittest::kittest::Queryable;
 
-    struct Banc {
+    struct Bench {
         _session: stokesforge_session::Session,
         _dir: tempfile::TempDir,
         state: AppState,
     }
 
-    /// Deux copies de processus disparus (une avec chemin d'origine, une sans),
-    /// listées au démarrage.
-    fn banc() -> egui_kittest::Harness<'static, Banc> {
+    /// Two copies from dead processes (one with an original path, one
+    /// without), listed at startup.
+    fn bench() -> egui_kittest::Harness<'static, Bench> {
         let dir = tempfile::tempdir().unwrap();
         let session = stokesforge_session::Session::spawn(
-            stokesforge_core::Project::new("Secours").unwrap(),
+            stokesforge_core::Project::new("Recovery").unwrap(),
             None,
         )
         .unwrap();
@@ -103,7 +102,7 @@ mod tests {
         .unwrap();
         let snapshot = session.handle().snapshot().unwrap();
         let recovery = dir.path().join("recovery");
-        stokesforge_app_state::recovery::write_copy(&recovery, "/x/mesures.stf", &snapshot)
+        stokesforge_app_state::recovery::write_copy(&recovery, "/x/measurements.stf", &snapshot)
             .unwrap();
         stokesforge_app_state::recovery::write_copy(&recovery, "", &snapshot).unwrap();
         state.set_recovery_dir(Some(recovery));
@@ -111,14 +110,14 @@ mod tests {
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(800.0, 600.0))
             .build_ui_state(
-                |ui, banc: &mut Banc| {
+                |ui, bench: &mut Bench| {
                     let mut actions = Vec::new();
-                    recovery_window(ui.ctx(), &banc.state, &mut actions);
+                    recovery_window(ui.ctx(), &bench.state, &mut actions);
                     for action in actions {
-                        banc.state.dispatch(action);
+                        bench.state.dispatch(action);
                     }
                 },
-                Banc {
+                Bench {
                     _session: session,
                     _dir: dir,
                     state,
@@ -132,7 +131,7 @@ mod tests {
         harness
     }
 
-    fn fichiers(harness: &egui_kittest::Harness<'static, Banc>) -> usize {
+    fn files(harness: &egui_kittest::Harness<'static, Bench>) -> usize {
         let dir = harness.state()._dir.path().join("recovery");
         std::fs::read_dir(dir)
             .unwrap()
@@ -141,19 +140,19 @@ mod tests {
             .count()
     }
 
-    /// La fenêtre peint son titre, ses deux lignes (nom ou Untitled, date) et
-    /// leurs trois boutons.
+    /// The window paints its title, its two rows (name or Untitled, date) and
+    /// their three buttons.
     #[test]
-    fn la_fenetre_peint_ses_lignes_et_ses_boutons() {
-        let harness = banc();
+    fn the_window_paints_its_rows_and_buttons() {
+        let harness = bench();
         harness.get_by_label(&tr!("recovery-message"));
-        let rows = harness.state().state.recovery_rows().expect("deux copies");
+        let rows = harness.state().state.recovery_rows().expect("two copies");
         assert_eq!(rows.len(), 2);
         for row in &rows {
             harness.get_by_label(&row.text);
         }
         assert!(
-            rows.iter().any(|r| r.text.contains("mesures.stf")),
+            rows.iter().any(|r| r.text.contains("measurements.stf")),
             "{rows:?}"
         );
         assert!(
@@ -161,23 +160,23 @@ mod tests {
                 .any(|r| r.text.contains(&tr!("recovery-untitled"))),
             "{rows:?}"
         );
-        for bouton in [
+        for button in [
             tr!("recovery-open"),
             tr!("recovery-ignore"),
             tr!("recovery-delete"),
         ] {
             assert_eq!(
-                harness.get_all_by_label(&bouton).count(),
+                harness.get_all_by_label(&button).count(),
                 2,
-                "un {bouton} par ligne"
+                "one {button} per row"
             );
         }
     }
 
-    /// Open charge la copie et la liste reste ouverte pour l'autre.
+    /// Open loads the copy and the list stays open for the other one.
     #[test]
-    fn open_charge_la_copie_et_garde_la_liste_ouverte() {
-        let mut harness = banc();
+    fn open_loads_the_copy_and_keeps_the_list_open() {
+        let mut harness = bench();
         harness
             .get_all_by_label(&tr!("recovery-open"))
             .next()
@@ -187,17 +186,17 @@ mod tests {
         assert_eq!(
             harness.state().state.recovery_rows().map(|r| r.len()),
             Some(1),
-            "l'autre copie reste proposée"
+            "the other copy is still offered"
         );
         assert!(harness.state().state.alert().is_none());
     }
 
-    /// Ignore retire la ligne sans toucher le fichier ; Delete passe par la
-    /// confirmation (rien n'est effacé avant elle).
+    /// Ignore removes the row without touching the file; Delete goes through
+    /// the confirmation (nothing is erased before it).
     #[test]
-    fn ignore_garde_le_fichier_et_delete_attend_sa_confirmation() {
-        let mut harness = banc();
-        assert_eq!(fichiers(&harness), 2);
+    fn ignore_keeps_the_file_and_delete_waits_for_its_confirmation() {
+        let mut harness = bench();
+        assert_eq!(files(&harness), 2);
         harness
             .get_all_by_label(&tr!("recovery-ignore"))
             .next()
@@ -205,7 +204,7 @@ mod tests {
             .click();
         harness.run();
         assert_eq!(harness.state().state.recovery_rows().unwrap().len(), 1);
-        assert_eq!(fichiers(&harness), 2, "Ignore garde le fichier");
+        assert_eq!(files(&harness), 2, "Ignore keeps the file");
         harness
             .get_all_by_label(&tr!("recovery-delete"))
             .next()
@@ -214,9 +213,9 @@ mod tests {
         harness.run();
         assert!(harness.state().state.pending_recovery_delete().is_some());
         assert_eq!(
-            fichiers(&harness),
+            files(&harness),
             2,
-            "rien n'est effacé avant la confirmation"
+            "nothing is erased before the confirmation"
         );
     }
 }

@@ -1,12 +1,12 @@
-//! Le classeur : [`book_contents`], contenu commun d'un [`Tab::Book`]
-//! flottant **ou** détaché (une seule écriture : il ne dépend que de
-//! `(ui, état, actions, classeur)`, jamais d'un champ d'`app`), ses onglets de
-//! feuille ([`sheet_tabs`]) et le menu Classeur ([`workbook_menu`]). La grille
-//! elle-même vit dans `grid.rs`.
+//! The workbook: [`book_contents`], the content shared by a floating **or**
+//! detached [`Tab::Book`] (a single implementation: it depends only on
+//! `(ui, state, actions, workbook)`, never on an `app` field), its sheet tabs
+//! ([`sheet_tabs`]) and the Workbook menu ([`workbook_menu`]). The grid itself
+//! lives in `grid.rs`.
 //!
-//! Sorti d'`app.rs` tel quel (#120). Les tests, en fin de fichier, portent
-//! sur la disposition (grille, onglets, barres déportées, rognage) et les
-//! menus du classeur ; ceux du clavier et de l'en-tête sont dans `grid.rs`.
+//! Moved out of `app.rs` as is (#120). The tests, at the end of the file, cover
+//! the layout (grid, tabs, detached bars, clipping) and the workbook menus; those
+//! of the keyboard and of the header are in `grid.rs`.
 //!
 //! [`Tab::Book`]: super::tab::Tab::Book
 
@@ -32,11 +32,11 @@ use super::tab_strip::{
     tab_strip_with, TabEvent, TabOps, TabStripOutput, TabStripSide, TAB_STRIP_HEIGHT,
 };
 
-/// Menu « Classeur » : les gestes sur la feuille affichée, miroir du menu
-/// contextuel des onglets et du raccourci Ctrl+D (F2 édite les cellules, jamais le nom des feuilles, #130/#143).
-/// Le menu du haut **enveloppe** les mêmes contenus que les clics droits
-/// (#152) : Feuille ▸, Colonnes ▸ et Tracer ▸ nomment la cible que le clic
-/// droit, lui, désigne déjà.
+/// "Workbook" menu: the gestures on the displayed sheet, mirror of the tabs'
+/// context menu and of the Ctrl+D shortcut (F2 edits the cells, never the name
+/// of the sheets, #130/#143). The top menu **wraps** the same contents as the
+/// right-clicks (#152): Sheet ▸, Columns ▸ and Plot ▸ name the target that the
+/// right-click, for its part, already designates.
 pub(super) fn workbook_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -57,8 +57,8 @@ pub(super) fn workbook_menu(
         ui.menu_button(tr!("menu-columns"), |ui| {
             columns_menu_contents(ui, state, actions, sheet, &columns);
         });
-        // Des lignes entières sur une feuille à x' se tracent comme des lignes
-        // (#166), pas comme les colonnes qu'elles traversent.
+        // Whole rows on an x' sheet are plotted as rows (#166), not as the columns
+        // they cross.
         if let Some(payload) = state.row_drag_payload(sheet) {
             plot_rows_menu(ui, actions, &payload);
             send_rows_to_graph_menu(ui, state.tree(), actions, &payload);
@@ -72,8 +72,8 @@ pub(super) fn workbook_menu(
     });
 }
 
-/// Contenu du menu Feuille : Add Worksheet ─ Rename · Duplicate ─ Delete,
-/// dans l'ordre du clic droit des onglets.
+/// Contents of the Sheet menu: Add Worksheet ─ Rename · Duplicate ─ Delete, in
+/// the order of the tabs' right-click.
 fn sheet_menu(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -124,8 +124,8 @@ fn sheet_menu(
     });
 }
 
-/// Bande d'onglets des feuilles d'un classeur : [`tab_strip`](crate::app::tab_strip::tab_strip) avec, en plus,
-/// « Ajouter une feuille » au clic droit.
+/// Strip of a workbook's sheet tabs: [`tab_strip`](crate::app::tab_strip::tab_strip)
+/// with, in addition, "Add Worksheet" on right-click.
 fn sheet_tabs(
     ui: &mut egui::Ui,
     sheets: &[(NodeId, String)],
@@ -149,15 +149,14 @@ fn sheet_tabs(
     )
 }
 
-/// Contenu commun d'un [`Tab::Book`](crate::app::tab::Tab::Book) flottant ou détaché : la grille
-/// ([`grid_contents`]) scopée à la feuille choisie *dans ce classeur*, et
-/// la sous-navigation entre les feuilles — des onglets compacts en **bas**
-/// de la grille (choix assumé, pas une convention préexistante du crate :
-/// aucun autre onglet de sheet de ce genre n'existait à imiter). Les
-/// boutons « Insérer/Supprimer 1 ligne » ont disparu : l'ajout de ligne se
-/// fait désormais en pressant Entrée sur la dernière cellule d'une colonne
-/// ([`Action::CommitCellAndAdvance`]), la suppression par la touche Suppr
-/// sur la sélection ([`Action::DeleteSelectedCells`]).
+/// Shared content of a floating or detached [`Tab::Book`](crate::app::tab::Tab::Book): the grid
+/// ([`grid_contents`]) scoped to the sheet chosen *in this workbook*, and the
+/// sub-navigation between sheets — compact tabs at the **bottom** of the grid
+/// (deliberate choice, not a preexisting convention of the crate: no other tab
+/// of this kind existed to imitate). The "Insert/Delete 1 row" buttons are
+/// gone: adding a row is now done by pressing Enter on the last cell of a column
+/// ([`Action::CommitCellAndAdvance`]), deletion by the Delete key on the
+/// selection ([`Action::DeleteSelectedCells`]).
 pub(super) fn book_contents(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -167,8 +166,8 @@ pub(super) fn book_contents(
     claim_file_drop(ui, book);
     let sheets = state.worksheets_of(book);
     let selected = state.selected_sheet_in(book).unwrap_or(book);
-    // Le viewport racine consomme déjà ce geste sur le classeur actif.
-    // Dans une fenêtre OS séparée, le même contenu reçoit son propre clavier.
+    // The root viewport already consumes this gesture on the active workbook.
+    // In a separate OS window, the same content receives its own keyboard.
     if ui.ctx().viewport_id() != egui::ViewportId::ROOT
         && !ui.ctx().text_edit_focused()
         && state.renaming_sheet().is_none()
@@ -178,29 +177,27 @@ pub(super) fn book_contents(
     }
     let mut chosen_sheet = None;
     let mut add_sheet = false;
-    // La bande d'onglets est retranchée du rectangle du classeur **avant**
-    // de construire la grille : réserver une hauteur dans `allocate_ui` ne
-    // suffisait pas, sa `ScrollArea` pouvait ensuite faire grandir la taille
-    // consommée et repousser les onglets hors du cadre. Pas d'`egui::Panel`
-    // pour ce découpage : il remplace le rognage de son parent par le sien
-    // au lieu de le combiner, et dessinait les onglets sous la vue quand la
-    // fenêtre y était coupée (`show_floating_window`). Deux sous-`Ui` bornés,
-    // chacun rogné à l'intersection de son rectangle et du rognage parent.
+    // The tab strip is cut from the workbook's rectangle **before** building the
+    // grid: reserving a height in `allocate_ui` was not enough, its `ScrollArea`
+    // could then make the consumed size grow and push the tabs out of the frame. No
+    // `egui::Panel` for this split: it replaces its parent's clipping with its own
+    // instead of combining it, and drew the tabs under the view when the window was
+    // cut there (`show_floating_window`). Two bounded sub-`Ui`s, each clipped to
+    // the intersection of its rectangle and the parent clip.
     let ctx = ui.ctx().clone();
     let area = ui.available_rect_before_wrap();
-    // Le bord droit de la fenêtre est réservé, sur toute sa hauteur, à la
-    // barre de défilement verticale (B10) : la zone de défilement
-    // horizontale et les onglets de feuille ne portent que le reste, et la
-    // barre reste plaquée au bord de la fenêtre quelle que soit la largeur
-    // des colonnes. Le bas est réservé à la barre horizontale de la grille,
-    // **sous** les onglets de feuille, comme dans un tableur. Du haut vers le
-    // bas : grille, onglets, barre horizontale.
+    // The right edge of the window is reserved, over its whole height, for the
+    // vertical scroll bar (B10): the horizontal scroll area and the sheet tabs
+    // carry only the rest, and the bar stays stuck to the window edge whatever the
+    // width of the columns. The bottom is reserved for the grid's horizontal bar,
+    // **under** the sheet tabs, as in a spreadsheet. From top to bottom: grid,
+    // tabs, horizontal bar.
     let bar_width = theme::scroll_bar_allocated_width();
     let (main_area, vertical_bar_strip) =
         area.split_left_right_at_x(area.right() - bar_width.min(area.width()));
-    // #51 : la bande de la barre horizontale n'est réservée que si la grille
-    // déborde en largeur — l'état vient de l'image précédente (la hauteur de
-    // la bande ne change pas la largeur du contenu : pas d'oscillation).
+    // #51: the horizontal bar's strip is reserved only if the grid overflows in
+    // width — the state comes from the previous frame (the strip's height does not
+    // change the content's width: no oscillation).
     let horizontal_bar_present_id = ui.id().with("grid_horizontal_bar_present");
     let horizontal_bar_present = ui
         .memory(|memory| memory.data.get_temp::<bool>(horizontal_bar_present_id))
@@ -213,13 +210,13 @@ pub(super) fn book_contents(
     let (upper_area, horizontal_bar_strip) = main_area
         .split_top_bottom_at_y(main_area.bottom() - horizontal_bar_height.min(main_area.height()));
     let tabs_height = TAB_STRIP_HEIGHT.min(upper_area.height());
-    // Le volet Results (#181) se loge entre la grille et les onglets ; sans
-    // résultat gardé sa hauteur est nulle et la disposition ne change pas.
+    // The Results pane (#181) sits between the grid and the tabs; with no kept
+    // result its height is zero and the layout does not change.
     let results_height = results_pane::pane_height(ui, state, book)
         .min((upper_area.height() - tabs_height).max(0.0) / 2.0);
     let (grid_with_banner, lower_area) =
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height - results_height);
-    // La bande d'une feuille transposée liée (#253) prend le haut de la grille.
+    // The banner of a linked transposed sheet (#253) takes the top of the grid.
     let banner_height = if state.transpose_info(selected).is_some() {
         super::transpose_ui::BANNER_HEIGHT.min(grid_with_banner.height())
     } else {
@@ -229,9 +226,9 @@ pub(super) fn book_contents(
         grid_with_banner.split_top_bottom_at_y(grid_with_banner.top() + banner_height);
     let (results_rect, tabs_rect) =
         lower_area.split_top_bottom_at_y(lower_area.top() + results_height);
-    // Avec la barre, les onglets descendent de la moitié de la bande : l'espace
-    // sous eux est réduit de moitié et le même espace apparaît au-dessus
-    // (#51). Sans barre, aucune réserve ni décalage.
+    // With the bar, the tabs go down by half the strip: the space under them is
+    // halved and the same space appears above (#51). Without a bar, no reserve and
+    // no shift.
     let tabs_rect = tabs_rect.translate(egui::vec2(0.0, horizontal_bar_height / 2.0));
     let mut bounded = |rect: egui::Rect| {
         let mut child = ui.new_child(
@@ -333,33 +330,32 @@ pub(super) fn book_contents(
 
 #[cfg(test)]
 mod tests {
-    //! Tests du classeur, sans fenêtre : disposition (grille, onglets de
-    //! feuille, barres de défilement déportées), rognage, menus. Ils lisent
-    //! ce qui est peint (rectangles, textes, rognages) ou les actions
-    //! poussées, jamais le texte source.
+    //! Tests of the workbook, without a window: layout (grid, sheet tabs, detached
+    //! scroll bars), clipping, menus. They read what is painted (rectangles,
+    //! texts, clips) or the pushed actions, never the source text.
 
     use super::super::window_chrome::show_floating_window;
     use super::*;
     use stokesforge_core::{Column, Project};
     use stokesforge_session::Session;
 
-    /// Un classeur d'une feuille, `colonnes` colonnes de `lignes` lignes.
-    fn classeur(colonnes: usize, lignes: usize) -> (Session, NodeId) {
-        let mut project = Project::new("Classeur").unwrap();
+    /// A workbook of one sheet, `columns` columns of `rows` rows.
+    fn workbook(columns: usize, rows: usize) -> (Session, NodeId) {
+        let mut project = Project::new("Workbook").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
         let sheet = project.add_worksheet(book, None).unwrap();
-        let valeurs: Vec<f64> = (0..lignes).map(|ligne| ligne as f64).collect();
-        for _ in 0..colonnes {
+        let values: Vec<f64> = (0..rows).map(|row| row as f64).collect();
+        for _ in 0..columns {
             project
-                .add_column(sheet, None, None, Column::from_f64(&valeurs))
+                .add_column(sheet, None, None, Column::from_f64(&values))
                 .unwrap();
         }
         (Session::spawn(project, None).unwrap(), book)
     }
 
-    /// Centre du premier texte peint égal à `needle`.
-    fn centre_du_texte(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Pos2 {
+    /// Center of the first painted text equal to `needle`.
+    fn text_center(shapes: &[egui::epaint::ClippedShape], needle: &str) -> egui::Pos2 {
         shapes
             .iter()
             .find_map(|painted| match &painted.shape {
@@ -368,12 +364,12 @@ mod tests {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("aucun texte peint ne porte {needle:?}"))
+            .unwrap_or_else(|| panic!("no painted text carries {needle:?}"))
     }
 
-    /// Clic gauche en `pos`, réparti sur trois images (survol, pression,
-    /// relâchement).
-    fn cliquer(paint: &mut impl FnMut(Vec<egui::Event>) -> egui::FullOutput, pos: egui::Pos2) {
+    /// Left click at `pos`, spread over three frames (hover, press,
+    /// release).
+    fn click(paint: &mut impl FnMut(Vec<egui::Event>) -> egui::FullOutput, pos: egui::Pos2) {
         paint(vec![egui::Event::PointerMoved(pos)]);
         for pressed in [true, false] {
             paint(vec![egui::Event::PointerButton {
@@ -385,18 +381,17 @@ mod tests {
         }
     }
 
-    // Un classeur coupé par le bas de la vue : sa bande d'onglets de
-    // feuille, posée au bas de la fenêtre, ne doit pas être dessinée sous la
-    // vue (sur la barre de défilement ou la console). `egui::Panel` remplace
-    // le rognage de son parent au lieu de le combiner : c'est lui qui
-    // faisait déborder les onglets.
+    // A workbook cut by the bottom of the view: its sheet tab strip, placed at the
+    // bottom of the window, must not be drawn under the view (on the scroll bar or
+    // the console). `egui::Panel` replaces its parent's clipping instead of
+    // combining it: it is what made the tabs overflow.
     #[test]
-    fn un_classeur_coupe_par_le_bas_de_la_vue_ne_dessine_rien_dessous() {
-        let (session, book) = classeur(2, 2);
+    fn a_workbook_cut_by_the_bottom_of_the_view_draws_nothing_below() {
+        let (session, book) = workbook(2, 2);
         let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
-        let id = egui::Id::new("classeur_coupe");
+        let id = egui::Id::new("workbook_cut");
         let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1400.0, 400.0));
         let window_rect =
             egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(500.0, 400.0));
@@ -426,8 +421,8 @@ mod tests {
         }
         let output = output.unwrap();
         assert!(!output.shapes.is_empty());
-        // Une forme dont le rognage est vide (onglets entièrement sous la
-        // vue) ne dessine rien : seule compte une découpe non vide.
+        // A shape whose clip is empty (tabs entirely under the view) draws nothing:
+        // only a non-empty cut counts.
         for painted in output
             .shapes
             .iter()
@@ -435,61 +430,57 @@ mod tests {
         {
             assert!(
                 viewport.contains_rect(painted.clip_rect),
-                "une forme du classeur est découpée hors de la vue : {:?}",
+                "a workbook shape is clipped outside the view: {:?}",
                 painted.clip_rect,
             );
         }
     }
 
-    /// Rectangles pleins peints par `shapes`, à plat, avec leur rognage.
-    fn rectangles_et_rognages(
+    /// Solid rectangles painted by `shapes`, flattened, with their clip.
+    fn rectangles_and_clips(
         shapes: &[egui::epaint::ClippedShape],
     ) -> Vec<(egui::Rect, egui::Rect)> {
-        fn visiter(
-            shape: &egui::Shape,
-            clip: egui::Rect,
-            sortie: &mut Vec<(egui::Rect, egui::Rect)>,
-        ) {
+        fn visit(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<(egui::Rect, egui::Rect)>) {
             match shape {
-                egui::Shape::Rect(rect) => sortie.push((rect.rect, clip)),
+                egui::Shape::Rect(rect) => out.push((rect.rect, clip)),
                 egui::Shape::Vec(shapes) => {
                     for shape in shapes {
-                        visiter(shape, clip, sortie);
+                        visit(shape, clip, out);
                     }
                 }
                 _ => {}
             }
         }
-        let mut sortie = Vec::new();
+        let mut out = Vec::new();
         for painted in shapes {
-            visiter(&painted.shape, painted.clip_rect, &mut sortie);
+            visit(&painted.shape, painted.clip_rect, &mut out);
         }
-        sortie
+        out
     }
 
-    /// Écran de 300 x 320 : `book_contents` d'un classeur de 12 colonnes
-    /// (bien plus larges que l'écran) et 200 lignes, peint six images, la
-    /// cinquième (indice 4) recevant `events`. Renvoie l'écran et les
-    /// rectangles (avec rognage) de la dernière image.
-    fn peindre_classeur_large(
+    /// Screen of 300 x 320: `book_contents` of a workbook of 12 columns (much wider
+    /// than the screen) and 200 rows, painted six frames, the fifth (index 4)
+    /// receiving `events`. Returns the screen and the rectangles (with clip) of the
+    /// last frame.
+    fn paint_wide_workbook(
         events: Vec<egui::Event>,
     ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
-        peindre_classeur(12, events)
+        paint_workbook(12, events)
     }
 
-    /// [`peindre_classeur_large`] pour un classeur de `colonnes` colonnes.
-    fn peindre_classeur(
-        colonnes: usize,
+    /// [`paint_wide_workbook`] for a workbook of `columns` columns.
+    fn paint_workbook(
+        columns: usize,
         events: Vec<egui::Event>,
     ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
-        let (session, book) = classeur(colonnes, 200);
+        let (session, book) = workbook(columns, 200);
         let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         theme::install(&context);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 320.0));
         let mut actions = Vec::new();
-        let mut derniere = None;
+        let mut last_frame = None;
         for frame_index in 0..6 {
             let input = egui::RawInput {
                 screen_rect: Some(screen),
@@ -504,58 +495,57 @@ mod tests {
                 book_contents(ui, &mut state, &mut actions, book);
             });
             frame.textures_delta.clear();
-            derniere = Some(frame);
+            last_frame = Some(frame);
         }
-        (screen, rectangles_et_rognages(&derniere.unwrap().shapes))
+        (screen, rectangles_and_clips(&last_frame.unwrap().shapes))
     }
 
-    /// La poignée de la barre verticale (pas sa piste) : mince, courte, dans la bande de
-    /// droite de l'écran.
-    fn poignees_de_barre(
+    /// The handle of the vertical bar (not its track): thin, short, in the right
+    /// strip of the screen.
+    fn bar_handles(
         screen: egui::Rect,
         rectangles: &[(egui::Rect, egui::Rect)],
     ) -> Vec<(egui::Rect, egui::Rect)> {
-        let largeur_barre = theme::scroll_bar_allocated_width();
+        let bar_width = theme::scroll_bar_allocated_width();
         rectangles
             .iter()
             .copied()
             .filter(|(rect, _)| {
-                rect.width() <= largeur_barre
+                rect.width() <= bar_width
                     && rect.height() >= 11.9
                     && rect.height() < 100.0
-                    && rect.left() >= screen.right() - largeur_barre - 0.5
+                    && rect.left() >= screen.right() - bar_width - 0.5
             })
             .collect()
     }
 
-    /// B10 : la barre de
-    /// défilement verticale de la grille est plaquée au bord droit de la
-    /// fenêtre, même quand les colonnes débordent (elle suivait auparavant
-    /// la largeur des colonnes et sortait de la vue).
+    /// B10: the grid's vertical scroll bar is stuck to the right edge of the window,
+    /// even when the columns overflow (it used to follow the width of the columns
+    /// and left the view).
     #[test]
-    fn la_barre_verticale_de_la_grille_reste_au_bord_droit_de_la_fenetre() {
-        let (screen, rectangles) = peindre_classeur_large(Vec::new());
-        let poignees = poignees_de_barre(screen, &rectangles);
+    fn the_grid_vertical_bar_stays_at_the_right_edge_of_the_window() {
+        let (screen, rectangles) = paint_wide_workbook(Vec::new());
+        let handles = bar_handles(screen, &rectangles);
         assert!(
-            !poignees.is_empty(),
-            "la poignée de la barre verticale doit être dans la bande de droite de la fenêtre \
-             ({screen:?}) ; rectangles peints : {rectangles:?}",
+            !handles.is_empty(),
+            "the vertical bar handle must be in the right strip of the window \
+             ({screen:?}); painted rectangles: {rectangles:?}",
         );
-        for (rect, clip) in poignees {
+        for (rect, clip) in handles {
             assert!(
                 screen.contains_rect(rect) && clip.is_positive(),
-                "la poignée {rect:?} sort de la fenêtre {screen:?} (rognage {clip:?})"
+                "the handle {rect:?} leaves the window {screen:?} (clip {clip:?})"
             );
         }
     }
 
-    /// La barre déportée au bord de la fenêtre suit le défilement de la
-    /// table (molette sur la table) : sa poignée descend.
+    /// The bar moved to the window edge follows the table's scrolling (wheel on the
+    /// table): its handle goes down.
     #[test]
-    fn la_barre_verticale_de_la_grille_suit_la_molette_sur_la_table() {
-        let (screen, repos) = peindre_classeur_large(Vec::new());
-        let avant = poignees_de_barre(screen, &repos);
-        let (_, defile) = peindre_classeur_large(vec![
+    fn the_grid_vertical_bar_follows_the_wheel_on_the_table() {
+        let (screen, at_rest) = paint_wide_workbook(Vec::new());
+        let before = bar_handles(screen, &at_rest);
+        let (_, scrolled) = paint_wide_workbook(vec![
             egui::Event::PointerMoved(egui::pos2(100.0, 150.0)),
             egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
@@ -564,61 +554,62 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             },
         ]);
-        let apres = poignees_de_barre(screen, &defile);
-        assert_eq!(avant.len(), 1, "une poignée au repos : {avant:?}");
-        assert_eq!(apres.len(), 1, "une poignée après défilement : {apres:?}");
+        let after = bar_handles(screen, &scrolled);
+        assert_eq!(before.len(), 1, "one handle at rest: {before:?}");
+        assert_eq!(after.len(), 1, "one handle after scrolling: {after:?}");
         assert!(
-            apres[0].0.top() > avant[0].0.top() + 1.0,
-            "la poignée doit descendre : {:?} -> {:?}",
-            avant[0].0,
-            apres[0].0
+            after[0].0.top() > before[0].0.top() + 1.0,
+            "the handle must go down: {:?} -> {:?}",
+            before[0].0,
+            after[0].0
         );
     }
 
-    /// l'écran, en-tête figé et onglets de feuille compris.
+    /// The bar covers the whole height of the screen, frozen header and sheet tabs
+    /// included.
     #[test]
-    fn la_barre_verticale_de_la_grille_couvre_toute_la_hauteur_de_la_fenetre() {
-        let (screen, rectangles) = peindre_classeur_large(Vec::new());
-        let largeur_barre = theme::scroll_bar_allocated_width();
-        let pistes: Vec<_> = rectangles
+    fn the_grid_vertical_bar_covers_the_whole_window_height() {
+        let (screen, rectangles) = paint_wide_workbook(Vec::new());
+        let bar_width = theme::scroll_bar_allocated_width();
+        let tracks: Vec<_> = rectangles
             .iter()
             .filter(|(rect, _)| {
-                rect.width() <= largeur_barre
-                    && rect.left() >= screen.right() - largeur_barre - 0.5
-                    && rect.height() >= screen.height() - largeur_barre
+                rect.width() <= bar_width
+                    && rect.left() >= screen.right() - bar_width - 0.5
+                    && rect.height() >= screen.height() - bar_width
             })
             .collect();
         assert!(
-            !pistes.is_empty(),
-            "une piste de barre verticale sur toute la hauteur de {screen:?} ; \
-             rectangles peints : {rectangles:?}"
+            !tracks.is_empty(),
+            "a vertical bar track over the whole height of {screen:?}; \
+             painted rectangles: {rectangles:?}"
         );
     }
 
-    /// La barre horizontale de la grille est déportée **sous** les onglets de
-    /// feuille : sa piste occupe le bas de la fenêtre, sur presque toute sa
-    /// largeur (moins la bande de la barre verticale).
+    /// The grid's horizontal bar is moved **under** the sheet tabs: its track
+    /// occupies the bottom of the window, over almost its whole width (minus the
+    /// vertical bar's strip).
     #[test]
-    fn la_barre_horizontale_de_la_grille_est_sous_les_onglets() {
-        let (screen, rectangles) = peindre_classeur_large(Vec::new());
-        let hauteur_barre = theme::scroll_bar_allocated_width();
-        let pistes: Vec<_> = rectangles
+    fn the_grid_horizontal_bar_is_under_the_tabs() {
+        let (screen, rectangles) = paint_wide_workbook(Vec::new());
+        let bar_height = theme::scroll_bar_allocated_width();
+        let tracks: Vec<_> = rectangles
             .iter()
             .filter(|(rect, _)| {
-                rect.height() <= hauteur_barre
-                    && rect.top() >= screen.bottom() - hauteur_barre - 0.5
-                    && rect.width() >= screen.width() - 2.0 * hauteur_barre
+                rect.height() <= bar_height
+                    && rect.top() >= screen.bottom() - bar_height - 0.5
+                    && rect.width() >= screen.width() - 2.0 * bar_height
             })
             .collect();
         assert!(
-            !pistes.is_empty(),
-            "une piste de barre horizontale en bas de {screen:?}, sous les onglets ; \
-             rectangles peints : {rectangles:?}"
+            !tracks.is_empty(),
+            "a horizontal bar track at the bottom of {screen:?}, under the tabs; \
+             painted rectangles: {rectangles:?}"
         );
     }
 
     #[test]
-    fn clic_droit_dans_le_vide_de_grille_et_sur_les_onglets_propose_les_ajouts() {
+    fn right_click_in_the_empty_grid_and_on_the_tabs_offers_the_additions() {
         let mut project = Project::new("Menus").unwrap();
         let book = project.add_workbook(project.root(), None).unwrap();
         let sheet = project.tree().node(book).unwrap().children()[0];
@@ -657,12 +648,9 @@ mod tests {
                         .contains(shape.pos + shape.galley.rect.center().to_vec2()),
                     _ => false,
                 });
-                assert!(
-                    tab_is_visible,
-                    "la bande d'onglets doit rester dans la fenêtre"
-                );
+                assert!(tab_is_visible, "the tab strip must stay in the window");
                 let pos = if on_tabs {
-                    centre_du_texte(&first.shapes, "Sheet1")
+                    text_center(&first.shapes, "Sheet1")
                 } else {
                     egui::pos2(450.0, 180.0)
                 };
@@ -679,15 +667,15 @@ mod tests {
                     pressed: false,
                     modifiers: egui::Modifiers::NONE,
                 }]);
-                // Le clic droit désigne déjà la cible : l'ajout est direct,
-                // sans sous-menu « Sheet ▸ » ni « Columns ▸ » (#152).
+                // The right-click already designates the target: the add is direct, with no
+                // "Sheet ▸" or "Columns ▸" submenu (#152).
                 let output = paint(Vec::new());
                 assert!(
                     output.shapes.iter().any(|painted| match &painted.shape {
                         egui::Shape::Text(shape) => shape.galley.job.text == *label,
                         _ => false,
                     }),
-                    "le menu contextuel doit proposer {label} : {:?}",
+                    "the context menu must offer {label}: {:?}",
                     output
                         .shapes
                         .iter()
@@ -697,7 +685,7 @@ mod tests {
                         })
                         .collect::<Vec<_>>()
                 );
-                let menu_pos = centre_du_texte(&output.shapes, &label);
+                let menu_pos = text_center(&output.shapes, &label);
                 paint(vec![egui::Event::PointerMoved(menu_pos)]);
                 paint(vec![egui::Event::PointerButton {
                     pos: menu_pos,
@@ -724,52 +712,51 @@ mod tests {
         }
     }
 
-    /// #51 : la bande de la barre horizontale n'est réservée que si la grille
-    /// déborde en largeur. Une seule colonne étroite : aucune piste au bas de
-    /// la fenêtre (témoin de `la_barre_horizontale_de_la_grille_est_sous_les_onglets`,
-    /// dont le filtre de rectangles pourrait sinon attraper n'importe quoi).
+    /// #51: the horizontal bar's strip is reserved only if the grid overflows in
+    /// width. A single narrow column: no track at the bottom of the window (witness
+    /// of `the_grid_horizontal_bar_is_under_the_tabs`, whose rectangle filter could
+    /// otherwise catch anything).
     #[test]
-    fn sans_debordement_aucune_barre_horizontale_n_est_reservee() {
-        let (screen, rectangles) = peindre_classeur(1, Vec::new());
-        let hauteur_barre = theme::scroll_bar_allocated_width();
-        let pistes: Vec<_> = rectangles
+    fn without_overflow_no_horizontal_bar_is_reserved() {
+        let (screen, rectangles) = paint_workbook(1, Vec::new());
+        let bar_height = theme::scroll_bar_allocated_width();
+        let tracks: Vec<_> = rectangles
             .iter()
             .filter(|(rect, _)| {
-                rect.height() <= hauteur_barre
-                    && rect.top() >= screen.bottom() - hauteur_barre - 0.5
-                    && rect.width() >= screen.width() - 2.0 * hauteur_barre
+                rect.height() <= bar_height
+                    && rect.top() >= screen.bottom() - bar_height - 0.5
+                    && rect.width() >= screen.width() - 2.0 * bar_height
             })
             .collect();
         assert!(
-            pistes.is_empty(),
-            "une colonne tient dans {screen:?} : pas de piste horizontale ; {pistes:?}"
+            tracks.is_empty(),
+            "one column fits in {screen:?}: no horizontal track; {tracks:?}"
         );
     }
 
-    /// Deux feuilles : leurs onglets sont peints sous la grille (sous la
-    /// première ligne de données), et un clic sur le second affiche sa
-    /// feuille.
+    /// Two sheets: their tabs are painted under the grid (under the first data
+    /// row), and a click on the second shows its sheet.
     #[test]
-    fn les_onglets_de_feuille_sont_sous_la_grille_et_choisissent_la_feuille() {
-        let mut project = Project::new("Feuilles").unwrap();
+    fn the_sheet_tabs_are_under_the_grid_and_choose_the_sheet() {
+        let mut project = Project::new("Sheets").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
-        let premiere = project.add_worksheet(book, None).unwrap();
-        let seconde = project.add_worksheet(book, None).unwrap();
-        for sheet in [premiere, seconde] {
+        let first = project.add_worksheet(book, None).unwrap();
+        let second = project.add_worksheet(book, None).unwrap();
+        for sheet in [first, second] {
             project
                 .add_column(sheet, None, None, Column::from_f64(&[42.0]))
                 .unwrap();
         }
         let session = Session::spawn(project, None).unwrap();
         let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
-        let noms: Vec<String> = state
+        let names: Vec<String> = state
             .worksheets_of(book)
             .into_iter()
-            .map(|(_, nom)| nom)
+            .map(|(_, name)| name)
             .collect();
-        assert_eq!(noms.len(), 2);
-        assert_eq!(state.selected_sheet_in(book), Some(premiere));
+        assert_eq!(names.len(), 2);
+        assert_eq!(state.selected_sheet_in(book), Some(first));
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         theme::install(&context);
@@ -791,34 +778,34 @@ mod tests {
         };
         paint(Vec::new());
         let output = paint(Vec::new());
-        let donnee = centre_du_texte(&output.shapes, "42");
-        for nom in &noms {
-            let onglet = centre_du_texte(&output.shapes, nom);
+        let data_pos = text_center(&output.shapes, "42");
+        for name in &names {
+            let tab_pos = text_center(&output.shapes, name);
             assert!(
-                onglet.y > donnee.y,
-                "l'onglet {nom:?} ({onglet:?}) doit être sous la grille ({donnee:?})"
+                tab_pos.y > data_pos.y,
+                "the tab {name:?} ({tab_pos:?}) must be under the grid ({data_pos:?})"
             );
         }
-        let seconde_pos = centre_du_texte(&output.shapes, &noms[1]);
-        cliquer(&mut paint, seconde_pos);
+        let second_pos = text_center(&output.shapes, &names[1]);
+        click(&mut paint, second_pos);
         assert_eq!(
             state.selected_sheet_in(book),
-            Some(seconde),
-            "le clic sur l'onglet affiche sa feuille"
+            Some(second),
+            "the click on the tab shows its sheet"
         );
     }
 
-    /// Menu Classeur : « Ajouter une feuille » pousse son action ;
-    /// « Supprimer la feuille » est grisé quand le classeur n'a qu'une
-    /// feuille (un clic n'y pousse rien), actif sinon.
+    /// Workbook menu: "Add Worksheet" pushes its action; "Delete Sheet" is grayed
+    /// out when the workbook has only one sheet (a click pushes nothing there),
+    /// active otherwise.
     #[test]
-    fn le_menu_classeur_grise_la_suppression_de_la_derniere_feuille() {
-        for feuilles in [1, 2] {
+    fn the_workbook_menu_grays_out_deleting_the_last_sheet() {
+        for sheet_count in [1, 2] {
             let mut project = Project::new("Menu").unwrap();
             let root = project.root();
             let book = project.add_empty_workbook(root, None).unwrap();
             let mut sheets = Vec::new();
-            for _ in 0..feuilles {
+            for _ in 0..sheet_count {
                 sheets.push(project.add_worksheet(book, None).unwrap());
             }
             let sheet = sheets[0];
@@ -844,17 +831,17 @@ mod tests {
                 output
             };
             let output = paint(Vec::new());
-            let supprimer = centre_du_texte(&output.shapes, &tr!("action-delete-sheet"));
-            let ajouter = centre_du_texte(&output.shapes, &tr!("workbook-worksheet-add"));
-            cliquer(&mut paint, supprimer);
-            cliquer(&mut paint, ajouter);
-            let suppression = actions
+            let delete = text_center(&output.shapes, &tr!("action-delete-sheet"));
+            let add = text_center(&output.shapes, &tr!("workbook-worksheet-add"));
+            click(&mut paint, delete);
+            click(&mut paint, add);
+            let deletion = actions
                 .iter()
                 .any(|action| matches!(action, Action::DeleteSheet(s) if *s == sheet));
             assert_eq!(
-                suppression,
-                feuilles > 1,
-                "{feuilles} feuille(s) : suppression demandée = {suppression} ({actions:?})"
+                deletion,
+                sheet_count > 1,
+                "{sheet_count} sheet(s): deletion requested = {deletion} ({actions:?})"
             );
             assert!(
                 actions

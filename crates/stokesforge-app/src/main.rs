@@ -1,26 +1,26 @@
-//! Binaire du banc d'essai : démarre l'acteur de session, construit l'état et
-//! ouvre la fenêtre.
+//! Binary of the test bench: starts the session actor, builds the state and
+//! opens the window.
 //!
-//! Usage : `stokesforge-app [chemin]`. Si `chemin` existe, le projet est chargé
-//! depuis ce fichier (et marqué enregistré) ; sinon un projet vide est
-//! construit et `chemin` devient simplement la cible d'un futur enregistrement.
+//! Usage: `stokesforge-app [path]`. If `path` exists, the project is loaded
+//! from that file (and marked saved); otherwise an empty project is built and
+//! `path` simply becomes the target of a future save.
 //!
-//! Sans argument (#333) : à la **toute première ouverture**, la démonstration
-//! est écrite dans `demo.stf`, à côté des préférences, et ouverte depuis ce
-//! fichier ; ensuite un projet vide, comme Fichier > Nouveau. La décision est
-//! `stokesforge_app_state::startup::plan`. `STOKESFORGE_DEMO=1` garde la
-//! démonstration en mémoire, sans chemin, à chaque lancement (développement,
-//! captures) : le premier Ctrl+S ouvre alors le sélecteur (#315).
+//! Without argument (#333): at the **very first launch**, the demo is written
+//! to `demo.stf`, next to the preferences, and opened from that file; then an
+//! empty project, like File > New. The decision is
+//! `stokesforge_app_state::startup::plan`. `STOKESFORGE_DEMO=1` keeps the demo
+//! in memory, without a path, at every launch (development, captures): the
+//! first Ctrl+S then opens the picker (#315).
 //!
-//! Le projet de démonstration vit dans le module [`demo`] (code, pas fichier) :
-//! `Book1` et `Graph1` pour le script d'exemple, puis des classeurs de types de
-//! colonnes, un dossier d'analyses (dont quelques calculs déjà faits) et six
-//! graphes qui éprouvent le tracé. Ses colonnes à formule n'ont leurs valeurs
-//! qu'après le recalcul de `demo_session`.
+//! The demo project lives in the [`demo`] module (code, not a file): `Book1`
+//! and `Graph1` for the example script, then workbooks of column types, a
+//! folder of analyses (with a few calculations already done) and six graphs
+//! that exercise plotting. Its formula columns get their values only after the
+//! recalculation of `demo_session`.
 
-// Windows, release : sous-système fenêtré, pas de console noire derrière la
-// fenêtre (#332). `console_windows::attach_parent` rend les messages au terminal
-// qui a lancé l'application, s'il y en a un.
+// Windows, release: windowed subsystem, no black console behind the window
+// (#332). `console_windows::attach_parent` gives the messages back to the
+// terminal that launched the application, if there is one.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 #[cfg(all(windows, not(debug_assertions)))]
@@ -37,14 +37,13 @@ use stokesforge_app_state::state::AppState;
 use stokesforge_core::Project;
 use stokesforge_session::{LoadReport, Session};
 
-/// Script d'exemple qui pré-remplit la zone de script : il fonctionne tel
-/// quel sur le projet de démonstration ([`demo::demo_project`]) et illustre le
-/// critère de fin du socle (lecture sans copie d'une colonne). Affiché même
-/// sans la feature `python` : un banc d'essai doit montrer ce qui manque, pas
-/// le cacher.
+/// Example script that pre-fills the script area: it works as is on the demo
+/// project ([`demo::demo_project`]) and illustrates the end criterion of the
+/// foundation (copy-free read of a column). Shown even without the `python`
+/// feature: a test bench must show what is missing, not hide it.
 const EXAMPLE_SCRIPT: &str = "a = pyst.resolve(\"[Book1]Sheet1!A\")\n\
 v = pyst.column(a)\n\
-print(\"longueur :\", len(v), \"premier :\", v[0])\n";
+print(\"length:\", len(v), \"first:\", v[0])\n";
 
 fn main() -> anyhow::Result<()> {
     #[cfg(all(windows, not(debug_assertions)))]
@@ -60,15 +59,15 @@ fn main() -> anyhow::Result<()> {
     );
     let (session, path, report) = session_for_startup(&startup.source, preferences.load_limits())?;
     let mut state = AppState::new(session.handle(), path.display().to_string())
-        .context("premier instantané du projet")?;
+        .context("first snapshot of the project")?;
     if let Some(report) = &report {
         state.mark_loaded(report);
     }
-    // Copies de secours de processus disparus (#317) : la fenêtre racine seule
-    // les propose.
+    // Backup copies of vanished processes (#317): only the root window offers
+    // them.
     state.scan_recovery();
-    // La démonstration forcée est jetable : pas de question à la fermeture. Un
-    // projet existant passé en argument, lui, garde la question.
+    // The forced demo is disposable: no question on close. An existing project
+    // passed as argument keeps the question.
     state.set_quit_without_prompt(
         demo_forced && matches!(startup.source, StartupSource::DemoMemory(_)),
     );
@@ -77,8 +76,8 @@ fn main() -> anyhow::Result<()> {
     }
     configure_script_engine(&mut state);
     if startup.mark_first_run {
-        // Un échec (pas de dossier de configuration, deux premiers lancements
-        // simultanés) est sans gravité : la démonstration reviendra.
+        // A failure (no configuration folder, two first launches at the same
+        // time) is harmless: the demo will come back.
         let _ = preferences.save_first_run_done();
     }
 
@@ -87,34 +86,32 @@ fn main() -> anyhow::Result<()> {
             .with_title(state.window_title())
             .with_inner_size([1100.0, 700.0]),
         event_loop_builder: Some(Box::new(configure_window_backend)),
-        // egui-wgpu met par défaut deux images en file d'attente (débit
-        // maximal) ; une seule (faible latence) retire une image de retard
-        // entre le pointeur et ce qui est peint — sensible au déplacement
-        // d'une fenêtre, que rien ne masque. Le coût d'une image est ~0,3 ms
-        // en release (`mesure_deplacement_de_fenetre`) : le débit n'est pas
-        // ce qui manque.
+        // egui-wgpu queues two frames by default (maximum throughput); a
+        // single one (low latency) removes a frame of delay between the
+        // pointer and what is painted — noticeable when moving a window, which
+        // nothing masks. The cost of a frame is ~0.3 ms in release
+        // (`window_move_measurement`): throughput is not what is missing.
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default()
             .with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY),
         ..Default::default()
     };
-    // `run_native` bloque jusqu'à la fermeture de la fenêtre ; `session` reste
-    // donc vivante pendant toute la durée de l'application.
+    // `run_native` blocks until the window is closed; `session` thus stays
+    // alive for the whole duration of the application.
     let outcome = eframe::run_native(
         "stokesforge-app",
         options,
         Box::new(|cc| {
-            // Tâche R4.1 : poser explicitement **les** définitions de police
-            // du projet sur le contexte, plutôt que de compter sur le fait
-            // qu'egui a par défaut les mêmes. C'est ce qui fait de l'accord
-            // écran/export une propriété et non une coïncidence — si egui
-            // changeait son défaut, la figure resterait la même des deux
-            // côtés.
+            // Task R4.1: explicitly set **the** project's font definitions on
+            // the context, rather than counting on egui's defaults being the
+            // same. This is what makes the screen/export agreement a property
+            // and not a coincidence — if egui changed its default, the figure
+            // would stay the same on both sides.
             cc.egui_ctx
                 .set_fonts(stokesforge_render_egui::font_definitions());
-            // Thème maison, clair, indépendant du thème système (voir la doc
-            // de tête de `stokesforge_app::theme`) — posé ici, une seule fois, aux
-            // côtés des polices : les deux relèvent du même geste (« ce que
-            // l'appli impose sur le `Context` avant le premier rendu »).
+            // House theme, light, independent of the system theme (see the top
+            // doc of `stokesforge_app::theme`) — set here, once, next to the
+            // fonts: both belong to the same gesture ("what the app imposes on
+            // the `Context` before the first rendering").
             stokesforge_app::theme::install(&cc.egui_ctx);
             let mut app = StokesForgeApp::new(state);
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
@@ -122,19 +119,19 @@ fn main() -> anyhow::Result<()> {
         }),
     );
 
-    // L'arrêt propre de l'acteur passe avant la remontée d'une erreur de
-    // fenêtre : sans cela, le thread survivrait à la sortie du processus.
+    // The clean shutdown of the actor comes before reporting a window error:
+    // without it, the thread would outlive the process exit.
     let shutdown = session.shutdown();
-    outcome.map_err(|err| anyhow::anyhow!("échec de la fenêtre : {err}"))?;
-    shutdown.map_err(|err| anyhow::anyhow!("arrêt de la session : {err}"))?;
+    outcome.map_err(|err| anyhow::anyhow!("window failure: {err}"))?;
+    shutdown.map_err(|err| anyhow::anyhow!("session shutdown: {err}"))?;
     Ok(())
 }
 
-/// Wayland natif par défaut (#72). Les correctifs winit/smithay-clipboard
-/// partagent le récepteur de dépôt avec le presse-papiers, pour chaque viewport.
-/// STOKESFORGE_X11=1 conserve une échappatoire X11/XWayland ; sans override,
-/// winit choisit Wayland puis X11 selon les connexions disponibles. L'ancien
-/// STOKESFORGE_WAYLAND n'est plus nécessaire.
+/// Native Wayland by default (#72). The winit/smithay-clipboard fixes share
+/// the drop receiver with the clipboard, for each viewport. STOKESFORGE_X11=1
+/// keeps an X11/XWayland escape hatch; without override, winit picks Wayland
+/// then X11 according to the available connections. The former
+/// STOKESFORGE_WAYLAND is no longer needed.
 #[cfg(target_os = "linux")]
 fn configure_window_backend(builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {
     use winit::platform::x11::EventLoopBuilderExtX11;
@@ -146,13 +143,13 @@ fn configure_window_backend(builder: &mut eframe::EventLoopBuilder<eframe::UserE
 #[cfg(not(target_os = "linux"))]
 fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>) {}
 
-/// Construit la session selon le plan de démarrage ([`startup::plan`]).
+/// Builds the session according to the startup plan ([`startup::plan`]).
 ///
-/// Rend aussi le rapport de lecture si le projet a été **chargé** depuis un
-/// fichier (`None` sinon) : seul ce cas pose le repère « enregistré », et le
-/// rapport est transmis à `mark_loaded` pour que l'écarté soit dit (#309). Sans
-/// argument, la démonstration en mémoire n'a pas de chemin, donc un `demo.stf`
-/// du dossier courant n'est ni lu ni écrasé (#315).
+/// Also returns the read report if the project was **loaded** from a file
+/// (`None` otherwise): only this case sets the "saved" marker, and the report
+/// is passed to `mark_loaded` so that what was discarded is told (#309).
+/// Without argument, the in-memory demo has no path, so a `demo.stf` in the
+/// current folder is neither read nor overwritten (#315).
 fn session_for_startup(
     source: &StartupSource,
     max_limits: stokesforge_app_state::preferences::LoadLimits,
@@ -162,21 +159,20 @@ fn session_for_startup(
         StartupSource::DemoMemory(target) => Ok((demo_session()?, target.clone(), None)),
         StartupSource::Empty(target) => {
             let project = Project::new(stokesforge_session::NEW_PROJECT_NAME)?;
-            let session =
-                Session::spawn(project, None).context("démarrage du thread de session")?;
+            let session = Session::spawn(project, None).context("starting the session thread")?;
             Ok((session, target.clone(), None))
         }
         StartupSource::DemoFile(file) => {
             let session = demo_session()?;
-            // Écrire puis relire : la démonstration ouverte est celle du
-            // fichier, que l'utilisateur retrouvera. Un échec (dossier
-            // impossible à créer, disque plein) laisse la démonstration en
-            // mémoire, sans chemin : jamais de démarrage manqué pour cela.
+            // Write then read back: the opened demo is the one of the file,
+            // which the user will find again. A failure (folder that cannot be
+            // created, full disk) leaves the demo in memory, without a path:
+            // never a missed startup because of that.
             match write_and_reload_demo(&session, file, max_limits) {
                 Ok(report) => Ok((session, file.clone(), Some(report))),
                 Err(err) => {
                     eprintln!(
-                        "[stokesforge-app] démonstration non enregistrée dans {} : {err:#}",
+                        "[stokesforge-app] demo not saved in {}: {err:#}",
                         file.display()
                     );
                     Ok((session, PathBuf::new(), None))
@@ -186,32 +182,32 @@ fn session_for_startup(
     }
 }
 
-/// Le chargement passe par l'acteur pour restaurer aussi les géométries,
-/// conservées à côté du modèle. Charger seulement `Project` les perdrait.
+/// Loading goes through the actor so as to also restore the geometries, kept
+/// next to the model. Loading only `Project` would lose them.
 fn load_session(
     path: &std::path::Path,
     max_limits: stokesforge_app_state::preferences::LoadLimits,
 ) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
-    let session = Session::spawn(Project::new("Chargement")?, None)
-        .context("démarrage du thread de session")?;
+    let session =
+        Session::spawn(Project::new("Loading")?, None).context("starting the session thread")?;
     let (_, report) = session
         .handle()
         .load_with_limits(path, max_limits)
-        .with_context(|| format!("chargement de {}", path.display()))?;
+        .with_context(|| format!("loading {}", path.display()))?;
     Ok((session, path.to_path_buf(), Some(report)))
 }
 
-/// La démonstration en mémoire, ses colonnes à formule calculées.
+/// The in-memory demo, its formula columns computed.
 fn demo_session() -> anyhow::Result<Session> {
     let session =
-        Session::spawn(demo::demo_project()?, None).context("démarrage du thread de session")?;
-    // Les colonnes à formule de la démonstration ne portent que leur formule
-    // (invariant 11) : un recalcul complet, tout de suite, leur donne leurs
-    // valeurs avant le premier instantané, et avant d'être enregistrées.
+        Session::spawn(demo::demo_project()?, None).context("starting the session thread")?;
+    // The demo's formula columns carry only their formula (invariant 11): a
+    // full recalculation, right away, gives them their values before the first
+    // snapshot, and before being saved.
     session
         .handle()
         .recalculate(&[])
-        .context("recalcul de la démonstration")?;
+        .context("recalculation of the demo")?;
     Ok(session)
 }
 
@@ -222,42 +218,40 @@ fn write_and_reload_demo(
 ) -> anyhow::Result<LoadReport> {
     if let Some(folder) = file.parent() {
         std::fs::create_dir_all(folder)
-            .with_context(|| format!("création de {}", folder.display()))?;
+            .with_context(|| format!("creating {}", folder.display()))?;
     }
-    session.handle().save(file).context("enregistrement")?;
+    session.handle().save(file).context("saving")?;
     let (_, report) = session
         .handle()
         .load_with_limits(file, max_limits)
-        .context("relecture")?;
+        .context("reading back")?;
     Ok(report)
 }
 
-/// Localise l'interpréteur embarqué et le pose sur `state`, **sans le
-/// démarrer** — `EmbeddedPython::locate`/`with_home` ne touchent pas à
-/// CPython, seul le premier script le fait (voir `stokesforge_app_state::state`, section
-/// « Le script Python »). C'est délibérément le binaire, pas `AppState`, qui
-/// décide d'où vient l'interpréteur : `AppState` reste indépendante de la
-/// disposition d'une distribution empaquetée.
+/// Locates the embedded interpreter and sets it on `state`, **without starting
+/// it** — `EmbeddedPython::locate`/`with_home` do not touch CPython, only the
+/// first script does (see `stokesforge_app_state::state`, section "The Python
+/// script"). It is deliberately the binary, not `AppState`, that decides where
+/// the interpreter comes from: `AppState` stays independent of the layout of a
+/// packaged distribution.
 ///
-/// Un préfixe introuvable (dev sans `STOKESFORGE_PYTHON_HOME`, ou binaire non
-/// empaqueté) n'est **pas** fatal : la fenêtre s'ouvre quand même, la
-/// console de script reste visible et [`AppState::script_available`] reste
-/// vrai (le pont est compilé) — c'est au premier essai d'exécution que
-/// l'absence d'interpréteur se rapporte, comme toute autre erreur de ce banc.
+/// A missing prefix (dev without `STOKESFORGE_PYTHON_HOME`, or unpackaged
+/// binary) is **not** fatal: the window opens anyway, the script console stays
+/// visible and [`AppState::script_available`] stays true (the bridge is
+/// compiled) — the absence of an interpreter is reported at the first attempt
+/// to run, like any other error of this bench.
 #[cfg(feature = "python")]
 fn configure_script_engine(state: &mut AppState) {
     match stokesforge_python::interpreter::EmbeddedPython::locate() {
         Ok(python) => state.set_python(python),
         Err(err) => {
-            eprintln!(
-                "[stokesforge-app] pont Python compilé, mais interpréteur introuvable : {err}"
-            );
+            eprintln!("[stokesforge-app] Python bridge compiled, but interpreter not found: {err}");
         }
     }
 }
 
-/// Sans la feature `python`, il n'y a rien à configurer : `AppState` n'a même
-/// pas de champ pour un interpréteur.
+/// Without the `python` feature, there is nothing to configure: `AppState` has
+/// no field for an interpreter at all.
 #[cfg(not(feature = "python"))]
 fn configure_script_engine(_state: &mut AppState) {}
 
@@ -268,10 +262,10 @@ mod startup_tests {
     use stokesforge_session::WindowGeometry;
 
     #[test]
-    fn le_demarrage_restaure_les_geometries_du_fichier() {
+    fn startup_restores_the_geometries_of_the_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("geometries.stf");
-        let mut project = Project::new("Disposition sauvegardée").unwrap();
+        let mut project = Project::new("Saved layout").unwrap();
         let book = project.add_workbook(project.root(), None).unwrap();
         let geometry = WindowGeometry {
             x: 42.0,
@@ -295,7 +289,7 @@ mod startup_tests {
         .unwrap();
         assert!(
             report.is_some_and(|r| r.is_clean()),
-            "un fichier existant est chargé"
+            "an existing file is loaded"
         );
         let snapshot = loaded.handle().snapshot().unwrap();
         assert_eq!(actual_path, path);
@@ -304,13 +298,13 @@ mod startup_tests {
         loaded.shutdown().unwrap();
     }
 
-    /// #325 : une largeur de colonne enregistrée dans le `.stf` est celle de
-    /// l'instantané au démarrage (même chemin que les géométries).
+    /// #325: a column width saved in the `.stf` is the one of the snapshot at
+    /// startup (same path as the geometries).
     #[test]
-    fn le_demarrage_restaure_les_largeurs_de_colonne_du_fichier() {
+    fn startup_restores_the_column_widths_of_the_file() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("largeurs.stf");
-        let mut project = Project::new("Largeurs").unwrap();
+        let path = directory.path().join("widths.stf");
+        let mut project = Project::new("Widths").unwrap();
         let book = project.add_workbook(project.root(), None).unwrap();
         let sheet = project.tree().children(book).unwrap()[0];
         let column = project
@@ -345,11 +339,11 @@ mod startup_tests {
         snapshot.tree.resolve("[Book1]Sheet1!A").is_ok()
     }
 
-    /// #315 : la démonstration forcée (`STOKESFORGE_DEMO=1`) n'a pas de chemin
-    /// et n'est pas « chargée » : un `demo.stf` du dossier courant ne doit être
-    /// ni pris pour le projet ni écrasé sans contrôle.
+    /// #315: the forced demo (`STOKESFORGE_DEMO=1`) has no path and is not
+    /// "loaded": a `demo.stf` in the current folder must be neither taken for
+    /// the project nor overwritten without a check.
     #[test]
-    fn la_demo_en_memoire_n_a_ni_chemin_ni_repere_charge() {
+    fn the_in_memory_demo_has_neither_path_nor_loaded_marker() {
         let (session, path, report) =
             session_for_startup(&StartupSource::DemoMemory(PathBuf::new()), limits()).unwrap();
         assert!(path.as_os_str().is_empty());
@@ -358,45 +352,45 @@ mod startup_tests {
         session.shutdown().unwrap();
     }
 
-    /// #333 : un projet vide ne contient rien, pas même un classeur : c'est celui
-    /// de Fichier > Nouveau.
+    /// #333: an empty project contains nothing, not even a workbook: it is the
+    /// one of File > New.
     #[test]
-    fn le_projet_vide_n_a_aucun_classeur_et_vise_son_chemin_cible() {
+    fn the_empty_project_has_no_workbook_and_targets_its_path() {
         let target = PathBuf::from("absent.stf");
         let (session, path, report) =
             session_for_startup(&StartupSource::Empty(target.clone()), limits()).unwrap();
         assert_eq!(
             path, target,
-            "un chemin absent est la cible d'un futur enregistrement"
+            "a missing path is the target of a future save"
         );
-        assert!(report.is_none(), "ce n'est pas un chargement");
+        assert!(report.is_none(), "this is not a load");
         let tree = session.handle().snapshot().unwrap().tree;
         assert!(tree.children(tree.root()).unwrap().is_empty());
         session.shutdown().unwrap();
     }
 
-    /// #333 : la première ouverture écrit la démonstration dans le dossier de
-    /// configuration et l'ouvre depuis ce fichier, relu sans rien écarter.
+    /// #333: the first launch writes the demo into the configuration folder and
+    /// opens it from that file, read back without discarding anything.
     #[test]
-    fn la_demo_de_premiere_ouverture_est_ecrite_puis_ouverte_depuis_son_fichier() {
+    fn the_first_launch_demo_is_written_then_opened_from_its_file() {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("config").join("demo.stf");
         let (session, path, report) =
             session_for_startup(&StartupSource::DemoFile(file.clone()), limits()).unwrap();
-        assert!(file.is_file(), "demo.stf est écrit");
+        assert!(file.is_file(), "demo.stf is written");
         assert_eq!(path, file);
         assert!(report.is_some_and(|r| r.is_clean()));
         assert!(demo_column_resolves(&session));
         session.shutdown().unwrap();
     }
 
-    /// #333, invariant 10 : si `demo.stf` ne peut pas s'écrire, la démonstration
-    /// reste ouverte en mémoire, sans chemin, et le démarrage n'échoue pas.
+    /// #333, invariant 10: if `demo.stf` cannot be written, the demo stays open
+    /// in memory, without a path, and the startup does not fail.
     #[test]
-    fn une_demo_qui_ne_peut_pas_s_ecrire_reste_en_memoire_sans_chemin() {
+    fn a_demo_that_cannot_be_written_stays_in_memory_without_a_path() {
         let directory = tempfile::tempdir().unwrap();
         let blocker = directory.path().join("config");
-        std::fs::write(&blocker, b"un fichier tient la place du dossier").unwrap();
+        std::fs::write(&blocker, b"a file holds the place of the folder").unwrap();
         let file = blocker.join("demo.stf");
         let (session, path, report) =
             session_for_startup(&StartupSource::DemoFile(file), limits()).unwrap();
@@ -406,17 +400,17 @@ mod startup_tests {
         session.shutdown().unwrap();
     }
 
-    /// #309 : le rapport de la lecture de démarrage est rendu à l'appelant ;
-    /// un calcul écarté n'y est pas perdu.
+    /// #309: the report of the startup read is returned to the caller; a
+    /// discarded calculation is not lost in it.
     #[test]
-    fn le_demarrage_rend_le_rapport_des_calculs_ecartes() {
+    fn startup_returns_the_report_of_discarded_calculations() {
         use stokesforge_analysis::correct::CorrectOp;
         use stokesforge_analysis::ops::Operation;
         use stokesforge_core::{
             CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult,
         };
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("ecarte.stf");
+        let path = directory.path().join("discarded.stf");
         let mut project = Project::new("P").unwrap();
         let book = project.add_workbook(project.root(), None).unwrap();
         let sheet = project.tree().children(book).unwrap()[0];
@@ -454,7 +448,7 @@ mod startup_tests {
         let at = bytes
             .windows(8)
             .position(|w| w == b"subtract")
-            .expect("l'opération est dans le fichier");
+            .expect("the operation is in the file");
         bytes[at..at + 8].copy_from_slice(b"subtraXX");
         std::fs::write(&path, bytes).unwrap();
 
@@ -463,7 +457,7 @@ mod startup_tests {
             stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
-        let report = report.expect("fichier chargé");
+        let report = report.expect("file loaded");
         assert!(!report.is_clean());
         assert_eq!(report.discarded_calculations.len(), 1);
         session.shutdown().unwrap();

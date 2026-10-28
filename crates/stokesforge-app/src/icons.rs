@@ -1,31 +1,31 @@
-//! Icônes de l'interface : le seul endroit qui connaît les fichiers SVG.
+//! Interface icons: the only place that knows the SVG files.
 //!
-//! Les icônes sont du Phosphor duotone, cuites par `scripts/icons-build.sh`
-//! en **une variante par (icône, rôle de couleur)** — `Image::tint` multiplie
-//! les pixels et ne sait pas recolorer séparément trait et fond. Règles
-//! d'emploi et palette : `docs/icones.md`.
+//! The icons are Phosphor duotone, baked by `scripts/icons-build.sh`
+//! into **one variant per (icon, color role)** — `Image::tint` multiplies
+//! the pixels and cannot recolor stroke and fill separately. Usage rules
+//! and palette: `docs/icones.md`.
 //!
-//! Tout affichage d'icône passe par [`icon_image`] ou [`icon_button`] : taille
-//! ([`ICON_SIZE`]) et alignement uniformes, info-bulle obligatoire (texte déjà
-//! traduit par l'appelant, via `tr!`). Aucun autre module ne cite
-//! `assets/icons` ni un `.svg` — verrouillé par le test
-//! `aucune_icone_hors_du_composant`.
+//! Every icon display goes through [`icon_image`] or [`icon_button`]: uniform
+//! size ([`ICON_SIZE`]) and alignment, mandatory tooltip (text already
+//! translated by the caller, via `tr!`). No other module cites
+//! `assets/icons` or an `.svg` — locked by the test
+//! `no_icon_outside_the_component`.
 //!
-//! Les SVG sont embarqués (`include_bytes!`) et rastérisés **à la demande** par
-//! `egui_extras` (une fois par taille × `pixels_per_point`, puis gardés en
-//! texture) : seules les icônes réellement affichées coûtent. Le thème de
-//! l'application est clair et fixe (`theme.rs`) : les couleurs de rôle sont
-//! donc constantes, sans variante sombre.
+//! The SVGs are embedded (`include_bytes!`) and rasterized **on demand** by
+//! `egui_extras` (once per size × `pixels_per_point`, then kept as a
+//! texture): only the icons actually displayed cost anything. The theme of the
+//! application is light and fixed (`theme.rs`): the role colors are
+//! therefore constant, with no dark variant.
 
 use eframe::egui::{self, Response, Ui, WidgetText};
 
-/// Côté d'une icône, en points. Unique : une icône plus grosse ou plus petite
-/// que ses voisines est un défaut, pas un choix local.
+/// Side of an icon, in points. Unique: an icon bigger or smaller
+/// than its neighbors is a defect, not a local choice.
 pub const ICON_SIZE: f32 = 16.0;
 
-/// Ce que dit la couleur d'une icône. `Neutral` par défaut ; les autres
-/// rôles ne servent que quand la couleur porte une information que la forme
-/// ne porte pas (types d'objets, action destructive).
+/// What the color of an icon says. `Neutral` by default; the other
+/// roles are used only when the color carries information that the shape
+/// does not (object types, destructive action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IconRole {
     Neutral,
@@ -37,8 +37,8 @@ pub enum IconRole {
     Danger,
 }
 
-/// Icônes disponibles — un enum fermé : ajouter une icône, c'est ajouter une
-/// variante, ses lignes de [`VARIANTS`] et son entrée dans `icons.tsv`.
+/// Available icons — a closed enum: adding an icon means adding a
+/// variant, its lines in [`VARIANTS`] and its entry in `icons.tsv`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Close,
@@ -89,17 +89,17 @@ pub enum Icon {
     FillColor,
     TextColor,
     Axis,
-    /// L'aide au survol d'un champ (#197) : un point d'interrogation.
+    /// The hover help of a field (#197): a question mark.
     Help,
-    /// Un calcul d'analyse pas à jour (#200) : triangle d'avertissement, en tête
-    /// de la colonne produite et sur la série qui la trace.
+    /// An analysis computation that is out of date (#200): warning triangle, at the top
+    /// of the produced column and on the series that plots it.
     Stale,
-    /// Une colonne corrigée en place (#212), distincte d’un calcul périmé.
+    /// A column corrected in place (#212), distinct from a stale computation.
     ModifiedData,
     /// Barre Edit (#238).
     Undo,
     Redo,
-    /// La poignée d'une ligne que l'on réordonne au glisser.
+    /// The handle of a row that is reordered by dragging.
     Grip,
 }
 
@@ -112,9 +112,9 @@ macro_rules! svg {
     };
 }
 
-/// Variantes cuites. La première ligne d'une icône est son repli quand le
-/// rôle demandé n'existe pas pour elle.
-/// URI egui et octets d'un SVG embarqué.
+/// Baked variants. The first line of an icon is its fallback when the
+/// requested role does not exist for it.
+/// egui URI and bytes of an embedded SVG.
 type Svg = (&'static str, &'static [u8]);
 
 const VARIANTS: &[(Icon, IconRole, Svg)] = &[
@@ -343,7 +343,7 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     ),
 ];
 
-/// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).
+/// Unreachable as long as every icon has a variant (test `the_variants_table_…`).
 const FALLBACK: Svg = svg!("x.neutral.svg");
 
 fn variant(icon: Icon, role: IconRole) -> (&'static str, &'static [u8]) {
@@ -355,14 +355,14 @@ fn variant(icon: Icon, role: IconRole) -> (&'static str, &'static [u8]) {
         .map_or(FALLBACK, |(_, _, file)| *file)
 }
 
-/// L'icône comme image egui, à la taille standard.
+/// The icon as an egui image, at the standard size.
 pub fn icon_image(icon: Icon, role: IconRole) -> egui::Image<'static> {
     let (uri, bytes) = variant(icon, role);
     egui::Image::from_bytes(uri, bytes).fit_to_exact_size(egui::Vec2::splat(ICON_SIZE))
 }
 
-/// Bouton-icône sans cadre. `tooltip` est obligatoire : une icône seule ne
-/// dit pas ce qu'elle fait (texte issu de `tr!`, fourni par l'appelant).
+/// Frameless icon button. `tooltip` is mandatory: an icon alone does not
+/// say what it does (text from `tr!`, supplied by the caller).
 pub fn icon_button(
     ui: &mut Ui,
     icon: Icon,
@@ -378,67 +378,67 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    /// Les lignes qui chargent une icône hors d'`icons.rs`, `src/chemin:ligne`
-    /// (commentaires exclus, tests compris).
-    fn icones_hors_du_composant(sources: &[crate::sources::Fichier]) -> Vec<String> {
-        let mut fautifs = Vec::new();
-        for fichier in sources {
-            if fichier.chemin == "icons.rs" {
+    /// The lines that load an icon outside `icons.rs`, `src/path:line`
+    /// (comments excluded, tests included).
+    fn icons_outside_component(sources: &[crate::sources::SourceFile]) -> Vec<String> {
+        let mut offenders = Vec::new();
+        for file in sources {
+            if file.path == "icons.rs" {
                 continue;
             }
-            for (index, ligne) in fichier.code().lines().enumerate() {
-                if ligne.contains("assets/icons") || ligne.contains("stokesforge-icons") {
-                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
+            for (index, line) in file.code().lines().enumerate() {
+                if line.contains("assets/icons") || line.contains("stokesforge-icons") {
+                    offenders.push(format!("src/{}:{}", file.path, index + 1));
                 }
             }
         }
-        fautifs
+        offenders
     }
 
-    /// Garde-fou du standard : aucune icône n'est chargée hors de ce module.
-    /// Toutes les sources de `src/` sont lues, sous-dossiers compris (#116).
+    /// Guard of the standard: no icon is loaded outside this module.
+    /// All the sources of `src/` are read, subdirectories included (#116).
     #[test]
-    fn aucune_icone_hors_du_composant() {
-        let fautifs = icones_hors_du_composant(&crate::sources::sources());
+    fn no_icon_outside_the_component() {
+        let offenders = icons_outside_component(&crate::sources::sources());
         assert!(
-            fautifs.is_empty(),
-            "icône chargée hors de icons.rs — passer par icons::icon_image / \
-             icons::icon_button : {fautifs:?}"
+            offenders.is_empty(),
+            "icon loaded outside icons.rs — use icons::icon_image / \
+             icons::icon_button: {offenders:?}"
         );
     }
 
-    /// Le témoin : une icône chargée dans un module de `src/app/` est vue ;
-    /// un commentaire et `icons.rs` lui-même passent.
+    /// The witness: an icon loaded in a module of `src/app/` is seen;
+    /// a comment and `icons.rs` itself pass.
     #[test]
-    fn la_garde_des_icones_voit_un_chargement_hors_d_app_rs() {
-        let fichier = |chemin: &str, texte: &str| crate::sources::Fichier {
-            chemin: chemin.to_string(),
-            texte: texte.to_string(),
-            de_test: false,
+    fn the_icons_guard_sees_a_load_outside_app_rs() {
+        let file = |path: &str, text: &str| crate::sources::SourceFile {
+            path: path.to_string(),
+            text: text.to_string(),
+            is_test: false,
         };
         let sources = [
-            fichier(
-                "app/barre.rs",
+            file(
+                "app/bar.rs",
                 "// assets/icons\nconst X: &[u8] = include_bytes!(\"../../assets/icons/x.svg\");",
             ),
-            fichier(
-                "app/autre.rs",
+            file(
+                "app/other.rs",
                 "fn f() { image(\"stokesforge-icons://x\"); }",
             ),
-            fichier("icons.rs", "const Y: &str = \"assets/icons\";"),
+            file("icons.rs", "const Y: &str = \"assets/icons\";"),
         ];
         assert_eq!(
-            icones_hors_du_composant(&sources),
-            ["src/app/barre.rs:2", "src/app/autre.rs:1"]
+            icons_outside_component(&sources),
+            ["src/app/bar.rs:2", "src/app/other.rs:1"]
         );
     }
 
-    /// `icons.tsv` (ce que le script produit) et `VARIANTS` (ce que le code
-    /// emploie) disent la même chose, et chaque fichier cuit est un SVG.
+    /// `icons.tsv` (what the script produces) and `VARIANTS` (what the code
+    /// uses) say the same thing, and every baked file is an SVG.
     #[test]
-    fn le_tableau_des_variantes_suit_icons_tsv() {
+    fn the_variants_table_follows_icons_tsv() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons");
-        let mut attendus = BTreeSet::new();
+        let mut expected = BTreeSet::new();
         for line in std::fs::read_to_string(dir.join("icons.tsv"))
             .unwrap()
             .lines()
@@ -448,14 +448,14 @@ mod tests {
             }
             let (name, roles) = line.split_once('\t').unwrap();
             for role in roles.split(',') {
-                attendus.insert(format!("{name}.{role}.svg"));
+                expected.insert(format!("{name}.{role}.svg"));
             }
         }
-        let employes: BTreeSet<String> = VARIANTS
+        let used: BTreeSet<String> = VARIANTS
             .iter()
             .map(|(_, _, (uri, _))| uri.rsplit('/').next().unwrap().to_owned())
             .collect();
-        assert_eq!(employes, attendus);
+        assert_eq!(used, expected);
         for (_, _, (uri, bytes)) in VARIANTS {
             assert!(
                 std::str::from_utf8(bytes).unwrap().starts_with("<svg"),
@@ -464,9 +464,9 @@ mod tests {
         }
     }
 
-    /// Chaque variante se rastérise vraiment (chargeur SVG installé).
+    /// Every variant really rasterizes (SVG loader installed).
     #[test]
-    fn chaque_icone_se_charge() {
+    fn every_icon_loads() {
         let ctx = egui::Context::default();
         egui_extras::install_image_loaders(&ctx);
         for (icon, role, _) in VARIANTS {
@@ -488,7 +488,7 @@ mod tests {
             }
             assert!(
                 matches!(loaded, Some(Ok(egui::load::TexturePoll::Ready { .. }))),
-                "{icon:?}/{role:?} ne se charge pas : {:?}",
+                "{icon:?}/{role:?} does not load: {:?}",
                 loaded.as_ref().map(|r| r.as_ref().err())
             );
         }

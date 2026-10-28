@@ -21,7 +21,7 @@ Each interface element has **one** building block; it is not redone by hand.
   A file picker: `file_picker.rs`.
 
 These rules do not rest on everyone's memory: guards in
-`crates/stokesforge-app/tests/gardes.rs` make them fail. List and state:
+`crates/stokesforge-app/tests/guards.rs` make them fail. List and state:
 standard, table "Building blocks and guards".
 
 ## 2. Windows have a type

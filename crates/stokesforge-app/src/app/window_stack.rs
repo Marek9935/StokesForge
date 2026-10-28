@@ -1,119 +1,118 @@
-//! Pile des fenêtres de contenu (désignées par l'onglet [`Tab`], de `tab.rs`) :
-//! l'ordre de pile `floating_tabs` (le dernier est l'onglet actif), son
-//! alignement sur les calques d'egui, le masquage, le repli, la maximisation
-//! et le dessin de l'espace de travail (`show_workspace`).
+//! Stack of content windows (designated by the [`Tab`] of `tab.rs`):
+//! the stack order `floating_tabs` (the last one is the active tab), its
+//! alignment with egui's layers, hiding, collapsing, maximizing
+//! and the drawing of the workspace (`show_workspace`).
 //!
-//! Un clic reçu par une fenêtre reprend explicitement le suivi du Project
-//! Manager (#154), même si cette fenêtre était déjà active. Le suivi passif
-//! conserve les multi-sélections pour les actions groupées du panneau ; seul
-//! le geste sur le contenu les remplace, après vérification du calque touché.
+//! A click received by a window explicitly resumes the Project
+//! Manager follow (#154), even if that window was already active. Passive
+//! following keeps multi-selections for the panel's grouped actions; only
+//! the gesture on the content replaces them, after checking the touched layer.
 //!
-//! Déplacé tel quel d'`app.rs` (#101), puis redécoupé sur place (#124) :
-//! maximisation, défilement et peinture d’une fenêtre partagent uniquement
-//! les emprunts disjoints de l’image, sans ajouter de sous-Ui.
+//! Moved as is from `app.rs` (#101), then split up in place (#124):
+//! maximizing, scrolling and painting of a window share only
+//! the frame's disjoint borrows, without adding sub-Uis.
 //!
-//! # Repris de la doc de tête d'`app.rs`
+//! # Taken from the top doc of `app.rs`
 //!
-//! # Fenêtres flottantes confinées
+//! # Confined floating windows
 //!
-//! Les quatre natures de fenêtre ci-dessus s'ouvrent par défaut en fenêtres
-//! flottantes à l'intérieur du [`egui::CentralPanel`], plutôt qu'amarrées en
-//! tuiles plein cadre — une par [`StokesForgeApp::floating_tabs`], jamais
-//! dupliquée (même invariant que l'ancien dock : [`StokesForgeApp::open_tab`]
-//! tranche « ouvrir » vs « focaliser »). Ni le Project Manager ni la console
-//! de script n'y participent, voir les deux sections précédentes : ce sont
-//! des panneaux fixes peints *avant* le `CentralPanel`.
+//! The four window kinds above open by default as floating windows
+//! inside the [`egui::CentralPanel`], rather than docked as full-frame
+//! tiles — one per [`StokesForgeApp::floating_tabs`], never
+//! duplicated (same invariant as the old dock: [`StokesForgeApp::open_tab`]
+//! decides "open" vs "focus"). Neither the Project Manager nor the script
+//! console takes part in it, see the two previous sections: they are
+//! fixed panels painted *before* the `CentralPanel`.
 //!
-//! **Une `egui::Area` par fenêtre, pas une `egui::Window`** : voir la doc de
-//! [`show_floating_window`]. `egui::Window` est une boîte de dialogue ; ses
-//! fonctions (barre de titre, glisser, redimensionnement, bornage) avaient
-//! toutes été coupées et refaites ici, et chaque image devait accorder le
-//! rectangle demandé avec celui qu'egui recalait — la source commune des
-//! bugs de contour et de débordement des rapports du 2026-09-23 et du
-//! 2026-09-24. Désormais ce module possède seul la géométrie : cadre, contour,
-//! rognage, poignées et géométrie persistée viennent du même rectangle.
+//! **One `egui::Area` per window, not an `egui::Window`**: see the doc of
+//! [`show_floating_window`]. `egui::Window` is a dialog box; its
+//! functions (title bar, drag, resize, clamping) had
+//! all been cut and redone here, and each frame had to reconcile the
+//! requested rectangle with the one egui readjusted — the common source of
+//! the outline and overflow bugs of the 2026-09-23 and 2026-09-24
+//! reports. Now this module alone owns the geometry: frame, outline,
+//! clipping, handles and persisted geometry come from the same rectangle.
 //!
-//! **Espace de travail défilable** : l'aire qui porte les fenêtres
-//! flottantes a une taille logique **fixe** (`WORKSPACE_SIZE`), indépendante
-//! de la fenêtre `eframe` — avant cette tâche, cette aire était `ui.max_rect()`
-//! du `CentralPanel`, donc rétrécissait avec la fenêtre principale et
-//! écrasait les fenêtres flottantes contre ses bords. `window_positions`/
-//! `window_sizes` (ci-dessous) et la géométrie persistée dans le projet sont
-//! exprimées dans ces coordonnées logiques ; [`StokesForgeApp::ui`](eframe::App::ui) les convertit
-//! en coordonnées écran juste avant la peinture (`workspace_to_screen`), à
-//! partir de `viewport_rect` (ce que laissent les panneaux fixes et les
-//! barres de défilement) et de [`StokesForgeApp::workspace_scroll`] (0,0 au
-//! démarrage). Sous `WORKSPACE_SIZE`, `viewport_rect` ne montre donc qu'une
-//! portion de l'espace de travail — un `egui::ScrollArea` invisible (rien
-//! peint dans son contenu, seulement réservé à `WORKSPACE_SIZE`) donne
-//! gratuitement poignées de défilement/molette et alimente
-//! `workspace_scroll` ; les fenêtres flottantes, elles, peignent chacune sur
-//! leur propre calque et ne peuvent pas vivre à l'intérieur de cette zone de
-//! défilement, d'où la conversion manuelle.
+//! **Scrollable workspace**: the area that carries the floating
+//! windows has a **fixed** logical size (`WORKSPACE_SIZE`), independent
+//! of the `eframe` window — before this task, that area was the `ui.max_rect()`
+//! of the `CentralPanel`, so it shrank with the main window and
+//! crushed the floating windows against its edges. `window_positions`/
+//! `window_sizes` (below) and the geometry persisted in the project are
+//! expressed in these logical coordinates; [`StokesForgeApp::ui`](eframe::App::ui) converts them
+//! to screen coordinates just before painting (`workspace_to_screen`), from
+//! `viewport_rect` (what the fixed panels and the scroll bars leave) and from
+//! [`StokesForgeApp::workspace_scroll`] (0,0 at startup). Below
+//! `WORKSPACE_SIZE`, `viewport_rect` thus shows only a portion of the
+//! workspace — an invisible `egui::ScrollArea` (nothing painted in its
+//! content, only reserved to `WORKSPACE_SIZE`) gives scroll handles/wheel
+//! for free and feeds `workspace_scroll`; the floating windows each paint
+//! on their own layer and cannot live inside that scroll area, hence the
+//! manual conversion.
 //!
-//! **Confinement** : la position logique de chaque fenêtre est bornée à
-//! l'espace de travail par [`clamp_to_workspace`], et réécrite telle quelle —
-//! c'est la seule borne. Le rendu, lui, est rogné à `viewport_rect` par
-//! [`show_floating_window`], pour le dessin **et** pour les clics : une
-//! fenêtre ne peut donc ni peindre par-dessus le Project Manager, la console
-//! ou les barres de défilement, ni y capter un clic, même à cheval sur le
-//! bord de la vue. Entièrement hors de la portion visible (l'utilisateur a
-//! défilé ailleurs), elle n'est pas peinte du tout cette image-là ; redéfiler
-//! la fait réapparaître telle quelle, à la même position logique.
+//! **Confinement**: each window's logical position is clamped to the
+//! workspace by [`clamp_to_workspace`], and rewritten as is —
+//! that is the only clamp. The rendering, in turn, is clipped to `viewport_rect` by
+//! [`show_floating_window`], for the drawing **and** for the clicks: a
+//! window can thus neither paint over the Project Manager, the console
+//! or the scroll bars, nor capture a click there, even straddling the
+//! edge of the view. Entirely outside the visible portion (the user
+//! scrolled elsewhere), it is not painted at all that frame; scrolling back
+//! makes it reappear as is, at the same logical position.
 //!
-//! **Cascade** : une fenêtre nouvellement ouverte (pas une simple
-//! refocalisation) reçoit une position par défaut décalée par rapport à la
-//! précédente ([`StokesForgeApp::next_cascade`], remis à zéro tous les huit
-//! onglets pour ne pas dériver hors de `WORKSPACE_SIZE`) — l'utilisateur voit
-//! immédiatement qu'une nouvelle fenêtre est apparue plutôt que de la trouver
-//! exactement superposée à la précédente.
+//! **Cascade**: a newly opened window (not a mere refocus) gets a default
+//! position offset from the previous one
+//! ([`StokesForgeApp::next_cascade`], reset to zero every eight
+//! tabs so as not to drift out of `WORKSPACE_SIZE`) — the user
+//! immediately sees that a new window appeared rather than finding it
+//! exactly stacked on the previous one.
 //!
-//! **Refocaliser une fenêtre défilée hors vue** : rouvrir depuis le Project
-//! Manager une entrée déjà ouverte (§ z-order, juste en dessous) ajuste aussi
-//! `workspace_scroll` si besoin (`workspace_scroll_to_reveal`), pour que la
-//! fenêtre visée redevienne visible plutôt que de simplement remonter dans un
-//! calque qu'on ne voit pas.
+//! **Refocusing a window scrolled out of view**: reopening from the Project
+//! Manager an entry that is already open (§ z-order, just below) also adjusts
+//! `workspace_scroll` if needed (`workspace_scroll_to_reveal`), so that the
+//! targeted window becomes visible again rather than just rising in a
+//! layer one cannot see.
 //!
-//! **Z-order** : l'`egui::Area` d'une fenêtre remonte déjà seule au premier
-//! plan au clic (`Sense::CLICK` par défaut) — mais dans son propre ordre de
-//! calques, indépendant de [`StokesForgeApp::floating_tabs`], qui reste la seule
-//! source d'`active_tab` (donc du contour de surbrillance). Sans
-//! synchronisation, un clic direct dans une fenêtre la faisait passer au
-//! premier plan sans jamais la surligner (B2,
-//! `retours-2026-09-23-bugs.md`). [`StokesForgeApp::ui`](eframe::App::ui) relit donc
-//! `Context::top_layer_id` juste après avoir peint les fenêtres flottantes
-//! et ramène le tab trouvé en fin de `floating_tabs` via
-//! `sync_floating_tabs_order_to_top_layer` — un cadre de retard tout au plus,
-//! `egui` redemandant lui-même un repaint immédiat au clic. Le seul cas que
-//! ce module doit encore gérer *avant* qu'`egui` n'ait peint quoi que ce soit
-//! est « rouvrir depuis le Project Manager une entrée déjà ouverte doit la
-//! ramener au premier plan sans qu'on ait cliqué dedans » :
-//! [`StokesForgeApp::open_tab`] pose alors [`StokesForgeApp::focus_next`], consommé au
-//! rendu suivant par un appel à `Context::move_to_top` sur le calque
-//! ([`FLOATING_WINDOW_ORDER`]) de la fenêtre concernée. Jusqu'au passage à
-//! `egui::Area`, cet appel visait `Order::Foreground` alors que les
-//! `egui::Window` vivaient sur `Order::Middle` : il remontait le calque du
-//! contour, pas la fenêtre elle-même.
+//! **Z-order**: a window's `egui::Area` already rises to the front on its
+//! own on click (`Sense::CLICK` by default) — but in its own layer order,
+//! independent of [`StokesForgeApp::floating_tabs`], which stays the only
+//! source of `active_tab` (thus of the highlight outline). Without
+//! synchronization, a direct click in a window brought it to the
+//! front without ever highlighting it (B2,
+//! `retours-2026-09-23-bugs.md`). [`StokesForgeApp::ui`](eframe::App::ui) thus rereads
+//! `Context::top_layer_id` right after painting the floating windows
+//! and moves the tab found to the end of `floating_tabs` through
+//! `sync_floating_tabs_order_to_top_layer` — one frame behind at most,
+//! `egui` itself asking for an immediate repaint on click. The only case
+//! this module still has to handle *before* `egui` has painted anything
+//! is "reopening from the Project Manager an entry that is already open must
+//! bring it to the front without it being clicked":
+//! [`StokesForgeApp::open_tab`] then sets [`StokesForgeApp::focus_next`], consumed at the
+//! next render by a call to `Context::move_to_top` on the layer
+//! ([`FLOATING_WINDOW_ORDER`]) of the window concerned. Until the switch to
+//! `egui::Area`, that call targeted `Order::Foreground` while the
+//! `egui::Window`s lived on `Order::Middle`: it raised the outline's
+//! layer, not the window itself.
 //!
-//! # Maximiser un onglet
+//! # Maximizing a tab
 //!
-//! [`StokesForgeApp::maximized_tab`] est un état **à côté** de
-//! [`StokesForgeApp::floating_tabs`], qui ne le touche jamais : quand il vaut
-//! `Some`, [`StokesForgeApp::ui`](eframe::App::ui) ne peint aucune fenêtre flottante cette
-//! image-là — à la place, une zone séparée montre uniquement l'onglet
-//! maximisé, plein cadre du `CentralPanel`. Restaurer (`maximized_tab =
-//! None`) revient à peindre les fenêtres flottantes normalement : leurs
-//! positions/tailles (retenues par `egui` via leur `Id`, pas par ce module)
-//! n'ont jamais bougé pendant la maximisation, donc « restaurer » est
-//! exactement « comme avant », pas un recalcul.
+//! [`StokesForgeApp::maximized_tab`] is a state **beside**
+//! [`StokesForgeApp::floating_tabs`], which it never touches: when it is
+//! `Some`, [`StokesForgeApp::ui`](eframe::App::ui) paints no floating window that
+//! frame — instead, a separate area shows only the maximized tab, filling
+//! the `CentralPanel`. Restoring (`maximized_tab =
+//! None`) goes back to painting the floating windows normally: their
+//! positions/sizes (kept by `egui` through their `Id`, not by this module)
+//! never moved during the maximization, so "restoring" is
+//! exactly "as before", not a recomputation.
 //!
-//! Le Project Manager n'a jamais de valeur dans `maximized_tab` : ce n'est
-//! pas une fenêtre flottante, et un panneau fixe toujours entièrement
-//! visible n'a de toute façon rien à gagner à être « maximisé ». Il reste
-//! visible sans rien de spécial pendant qu'un *autre* onglet est maximisé,
-//! puisque [`StokesForgeApp::project_manager_panel`] est peint avant la zone de
-//! maximisation comme avant le `CentralPanel` — un panneau fixe séparé,
-//! jamais dédoublé, n'a besoin d'aucun cas particulier ici.
+//! The Project Manager never has a value in `maximized_tab`: it is
+//! not a floating window, and a fixed panel that is always entirely
+//! visible has nothing to gain from being "maximized" anyway. It stays
+//! visible with nothing special while *another* tab is maximized,
+//! since [`StokesForgeApp::project_manager_panel`] is painted before the
+//! maximization area just as before the `CentralPanel` — a separate fixed
+//! panel, never duplicated, needs no special case here.
 //!
 
 use std::collections::{HashMap, HashSet};
@@ -142,8 +141,8 @@ use super::window_placement::{
 };
 use super::StokesForgeApp;
 
-/// Un clic ne réactive le contenu que sur son calque : Object Manager
-/// flottant peut le recouvrir tout en gardant un autre graphe comme cible.
+/// A click reactivates the content only on its layer: a floating Object
+/// Manager can cover it while keeping another graph as the target.
 pub(super) fn window_pointer_pressed(
     ctx: &egui::Context,
     layer: egui::LayerId,
@@ -152,7 +151,7 @@ pub(super) fn window_pointer_pressed(
     ctx.input(|input| input.pointer.any_pressed()) && ctx.rect_contains_pointer(layer, rect)
 }
 
-/// Les fenêtres de l'arbre du Project Manager, à plat.
+/// The windows of the Project Manager tree, flattened.
 pub(super) fn window_nodes(
     tree: &[stokesforge_app_state::state::ProjectTreeNode],
 ) -> Vec<(NodeId, WindowKind)> {
@@ -170,13 +169,13 @@ pub(super) fn window_nodes(
     out
 }
 
-/// Bascule le repli du contenu d'un onglet. Réservé à `Tab::Graph` et
+/// Toggles the collapse of a tab's content. Reserved for `Tab::Graph` and
 /// `Tab::Book` (B5, `retours-2026-09-23-bugs.md`) — `Matrix`
-/// et `Note` n'ont pas ce contrôle et restent donc toujours affichés ; rien
-/// dans la peinture du contenu replié (voir la boucle des fenêtres
-/// flottantes et détachées dans `StokesForgeApp::ui`) ne dépend du type de `tab`,
-/// l'extension à ces deux natures n'est donc qu'une question d'icône visible,
-/// pas de comportement caché à revérifier.
+/// and `Note` do not have this control and so always stay shown; nothing
+/// in the painting of the collapsed content (see the loop over floating
+/// and detached windows in `StokesForgeApp::ui`) depends on the type of `tab`,
+/// so extending to these two kinds is only a matter of a visible icon,
+/// not of hidden behavior to recheck.
 pub(super) fn toggle_collapse(collapsed_tabs: &mut HashSet<Tab>, tab: Tab) {
     if !matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         return;
@@ -186,10 +185,10 @@ pub(super) fn toggle_collapse(collapsed_tabs: &mut HashSet<Tab>, tab: Tab) {
     }
 }
 
-/// Pose le repli à une valeur précise plutôt que de le basculer — utilisé
-/// par [`StokesForgeApp::reattach_tab`] pour reverser dans
-/// `collapsed_tabs` l'état propre à la fenêtre détachée
-/// (`DetachedTabViewModel::collapsed`) plutôt que de le deviner.
+/// Sets the collapse to a precise value rather than toggling it — used
+/// by [`StokesForgeApp::reattach_tab`] to pour back into
+/// `collapsed_tabs` the state proper to the detached window
+/// (`DetachedTabViewModel::collapsed`) rather than guess it.
 pub(super) fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, collapsed: bool) {
     if !matches!(tab, Tab::Graph(_) | Tab::Book(_)) {
         return;
@@ -201,13 +200,13 @@ pub(super) fn toggle_collapse_to(collapsed_tabs: &mut HashSet<Tab>, tab: Tab, co
     }
 }
 
-/// Ramène `top_layer_tab` en fin de `floating_tabs` (§ ordre de pile,
-/// `active_tab = floating_tabs.last()`), sans rien faire s'il n'y est déjà,
-/// s'il n'existe pas, ou si aucune fenêtre flottante n'est au premier plan
-/// (B2, `retours-2026-09-23-bugs.md`). `egui` gère seul son
-/// propre ordre de calques (un clic direct dans une fenêtre l'amène déjà au
-/// premier plan visuellement) ; cette fonction ne fait que réaligner
-/// `floating_tabs`, seule source de `active_tab`, dessus.
+/// Brings `top_layer_tab` to the end of `floating_tabs` (§ stack order,
+/// `active_tab = floating_tabs.last()`), doing nothing if it is already there,
+/// if it does not exist, or if no floating window is in the foreground
+/// (B2, `retours-2026-09-23-bugs.md`). `egui` manages its own
+/// layer order alone (a direct click in a window already brings it to the
+/// foreground visually); this function only realigns
+/// `floating_tabs`, the only source of `active_tab`, with it.
 pub(super) fn sync_floating_tabs_order_to_top_layer(
     floating_tabs: &mut Vec<Tab>,
     top_layer_tab: Option<Tab>,
@@ -223,9 +222,9 @@ pub(super) fn sync_floating_tabs_order_to_top_layer(
     }
 }
 
-/// Emprunts disjoints limités à une peinture : ni nouvel état ni nouvelle Ui.
-/// L’extraction de chaque fenêtre ne peut prendre `&mut StokesForgeApp`
-/// pendant que les contenus empruntent déjà son AppState et ses GraphView.
+/// Disjoint borrows limited to one paint: neither new state nor new Ui.
+/// Extracting each window cannot take `&mut StokesForgeApp`
+/// while the contents already borrow its AppState and its GraphView.
 struct Workspace<'a> {
     state: &'a mut AppState,
     floating_tabs: &'a mut Vec<Tab>,
@@ -253,16 +252,16 @@ impl Workspace<'_> {
         self.pm_selection.clear();
         self.pm_selection.insert(PmEntry::Window(tab));
         super::project_manager::follow_selection_anchor(ctx, Some(tab));
-        // Le panneau et son viewport détaché ont déjà été publiés cette image.
+        // The panel and its detached viewport have already been published this frame.
         ctx.request_repaint();
     }
 
     fn show_maximized(&mut self, ui: &mut egui::Ui, tab: Tab) {
-        // § maximiser (doc de tête du module) : aucune fenêtre
-        // flottante n'est peinte du tout cette image-ci. Le Project
-        // Manager n'a besoin d'aucun traitement particulier ici : son
-        // panneau fixe est peint plus haut, avant ce `CentralPanel`,
-        // qu'un autre onglet soit maximisé ou non.
+        // § maximize (top doc of the module): no floating
+        // window is painted at all this frame. The Project
+        // Manager needs no special handling here: its
+        // fixed panel is painted above, before this `CentralPanel`,
+        // whether another tab is maximized or not.
         ui.horizontal(|ui| {
             ui.heading(tab_title(self.state, tab));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -286,29 +285,29 @@ impl Workspace<'_> {
     }
 
     fn show_floating(&mut self, ui: &mut egui::Ui, active_tab: Option<Tab>) {
-        // Ce que les panneaux fixes peints plus haut (menu, outils,
-        // statut, script, Project Manager) laissent — voir la doc de
-        // tête du module, § Fenêtres flottantes confinées. L'espace
-        // de travail a une taille fixe (`WORKSPACE_SIZE`), indépendante
-        // de `viewport_rect` : sous cette taille, il défile
-        // (`self.workspace_scroll`) plutôt que d'écraser les fenêtres
-        // qu'il porte contre les bords du `CentralPanel`.
-        // `self.window_positions`/`self.window_sizes`, et la géométrie
-        // persistée dans le projet, sont donc en coordonnées
-        // logiques de cet espace — bornées à lui par
-        // `clamp_to_workspace`, puis converties en coordonnées écran
-        // juste avant la peinture (`workspace_to_screen`). Une
-        // fenêtre ne sort donc jamais de l'espace de travail ; elle
-        // peut sortir de sa portion visible, auquel cas elle est
-        // rognée au bord de la vue, ou pas peinte du tout si elle
-        // en sort entièrement (`show_floating_window`).
+        // What the fixed panels painted above (menu, tools,
+        // status, script, Project Manager) leave — see the top
+        // doc of the module, § Confined floating windows. The workspace
+        // has a fixed size (`WORKSPACE_SIZE`), independent
+        // of `viewport_rect`: below this size, it scrolls
+        // (`self.workspace_scroll`) rather than crushing the windows
+        // it carries against the edges of the `CentralPanel`.
+        // `self.window_positions`/`self.window_sizes`, and the geometry
+        // persisted in the project, are thus in logical
+        // coordinates of this space — clamped to it by
+        // `clamp_to_workspace`, then converted to screen coordinates
+        // just before painting (`workspace_to_screen`). A
+        // window thus never leaves the workspace; it
+        // may leave its visible portion, in which case it is
+        // clipped at the edge of the view, or not painted at all if it
+        // leaves it entirely (`show_floating_window`).
         let viewport_rect = ui.max_rect();
 
-        // Une fenêtre déjà ouverte mais actuellement défilée hors vue
-        // redevient visible au clic qui la refocalise (Project
-        // Manager, double-clic…) — lu avant le défilement de cette
-        // image pour que ça prenne effet dès maintenant, pas à la
-        // suivante.
+        // A window already open but currently scrolled out of view
+        // becomes visible again on the click that refocuses it (Project
+        // Manager, double-click…) — read before this frame's scrolling
+        // so that it takes effect right now, not on the
+        // next one.
         if let Some(tab) = *self.focus_next {
             if let (Some(&position), Some(&size)) =
                 (self.window_positions.get(&tab), self.window_sizes.get(&tab))
@@ -322,15 +321,15 @@ impl Workspace<'_> {
             }
         }
 
-        // Un `egui::ScrollArea` invisible (rien n'est peint dans son
-        // contenu, juste réservé à `WORKSPACE_SIZE`) plutôt qu'un
-        // défilement maison : il donne gratuitement poignées de
-        // glissement, molette et bornage, au style commun des barres
-        // de défilement (`theme::scroll_style`, posé globalement). Les fenêtres flottantes ne sont
-        // **pas** peintes à l'intérieur de sa fermeture : chacune
-        // peint sur son propre calque (`show_floating_window`),
-        // indépendant de toute zone de défilement ambiante — seul le
-        // décalage qui en résulte sert, appliqué à la main ci-dessous.
+        // An invisible `egui::ScrollArea` (nothing is painted in its
+        // content, just reserved to `WORKSPACE_SIZE`) rather than a
+        // home-made scroll: it gives drag handles, wheel
+        // and clamping for free, in the common style of the scroll bars
+        // (`theme::scroll_style`, set globally). The floating windows are
+        // **not** painted inside its closure: each one
+        // paints on its own layer (`show_floating_window`),
+        // independent of any ambient scroll area — only the
+        // resulting offset is used, applied by hand below.
         let workspace_scroll_output = egui::ScrollArea::both()
             .id_salt("stokesforge_workspace")
             .auto_shrink([false, false])
@@ -339,35 +338,35 @@ impl Workspace<'_> {
                 ui.allocate_exact_size(WORKSPACE_SIZE, egui::Sense::hover());
             });
         *self.workspace_scroll = workspace_scroll_output.state.offset;
-        // Ce qui reste visible une fois les barres de défilement
-        // posées : les fenêtres flottantes sont rognées à ce
-        // rectangle, pour ne jamais recouvrir ces barres.
+        // What stays visible once the scroll bars are
+        // placed: the floating windows are clipped to this
+        // rectangle, so as never to cover these bars.
         let viewport_rect = workspace_scroll_output.inner_rect;
 
         for index in 0..self.floating_tabs.len() {
-            // La pile n’est réordonnée qu’après son parcours, comme avant #124.
+            // The stack is reordered only after its traversal, as before #124.
             let tab = self.floating_tabs[index];
             self.show_floating_tab(ui, tab, active_tab, viewport_rect);
         }
         let refocused = self.focus_next.take().is_some();
 
-        // B2 (`retours-2026-09-23-bugs.md`) :
-        // `egui::Area` amène déjà la fenêtre cliquée au premier plan
-        // de son propre ordre de calques dès qu'on clique dedans
-        // (`Sense::CLICK`, indépendamment du Project Manager) — mais
-        // `self.floating_tabs`, seule source de `active_tab` (donc de
-        // `is_active`/la surbrillance, voir plus haut), ne le sait
-        // pas : un clic direct amenait la fenêtre au premier plan
-        // sans jamais la surligner. On resynchronise ici sur ce
-        // qu'egui vient d'établir, une fois la mutation de
-        // `self.floating_tabs` de nouveau sûre (la boucle qui l'itère est
-        // refermée).
+        // B2 (`retours-2026-09-23-bugs.md`):
+        // `egui::Area` already brings the clicked window to the front
+        // of its own layer order as soon as it is clicked
+        // (`Sense::CLICK`, independently of the Project Manager) — but
+        // `self.floating_tabs`, the only source of `active_tab` (thus of
+        // `is_active`/the highlight, see above), does not know
+        // it: a direct click brought the window to the front
+        // without ever highlighting it. We resynchronize here on what
+        // egui has just established, once mutating
+        // `self.floating_tabs` is safe again (the loop that iterates it is
+        // closed).
         //
-        // Une réouverture depuis le Project Manager vient de demander
-        // `move_to_top` : egui ne la reflète dans `top_layer_id` qu'à l'image
-        // suivante. Resynchroniser maintenant remettrait l'ancienne fenêtre en
-        // fin de pile (et la sélection du Project Manager avec elle) ; on
-        // attend donc l'image suivante, réclamée ici.
+        // A reopening from the Project Manager has just requested
+        // `move_to_top`: egui reflects it in `top_layer_id` only on the next
+        // frame. Resynchronizing now would put the old window back at the
+        // end of the stack (and the Project Manager selection with it); so we
+        // wait for the next frame, requested here.
         if refocused {
             ui.ctx().request_repaint();
             return;
@@ -399,8 +398,8 @@ impl Workspace<'_> {
             rank
         });
         let cascade = CASCADE_STEP * (*rank % CASCADE_WRAP) as f32;
-        // Coordonnées logiques de l'espace de travail, pas
-        // coordonnées écran — voir la doc juste au-dessus.
+        // Logical coordinates of the workspace, not screen
+        // coordinates — see the doc just above.
         let default_pos = egui::pos2(cascade, cascade);
         let natural_size = match tab {
             Tab::Book(_) => egui::vec2(BOOK_WINDOW_WIDTH, FLOATING_WINDOW_SIZE.y),
@@ -408,8 +407,8 @@ impl Workspace<'_> {
             _ => FLOATING_WINDOW_SIZE,
         };
         let default_size = natural_size.min(WORKSPACE_SIZE);
-        // Le dernier rectangle flottant connu de l'application
-        // prime sur l'instantané (périmé après un déplacement).
+        // The last floating rectangle known to the application
+        // takes precedence over the snapshot (stale after a move).
         let saved_rect = self
             .floating_rects
             .get(&tab_node(tab))
@@ -428,14 +427,14 @@ impl Workspace<'_> {
             .min(WORKSPACE_SIZE);
         self.window_positions.entry(tab).or_insert(saved_pos);
         let current_size = *self.window_sizes.entry(tab).or_insert(saved_size);
-        // Seule source de vérité de la position : bornée ici, à
-        // l'espace de travail, et réécrite telle quelle. egui ne
-        // recale plus rien de son côté (plus de `constrain_to` sur
-        // l'espace de travail), donc le rectangle peint, le
-        // contour, les poignées et la géométrie persistée
-        // viennent tous du même rectangle — c'est l'écart entre
-        // un rectangle demandé et un rectangle recalé par egui
-        // qui produisait le bug 1 de
+        // Only source of truth for the position: clamped here, to
+        // the workspace, and rewritten as is. egui no longer
+        // readjusts anything on its side (no more `constrain_to` on
+        // the workspace), so the painted rectangle, the
+        // outline, the handles and the persisted geometry
+        // all come from the same rectangle — it is the gap between
+        // a requested rectangle and a rectangle readjusted by egui
+        // that produced bug 1 of
         // `retours-2026-09-24-bugs.md`.
         let logical_rect = clamp_to_workspace(egui::Rect::from_min_size(
             self.window_positions[&tab],
@@ -445,13 +444,13 @@ impl Workspace<'_> {
         let mut header_actions = WindowHeaderActions::default();
         let was_collapsed = self.collapsed_tabs.contains(&tab);
         let is_active = Some(tab) == active_tab;
-        // Fenêtre repliée (B3) : `window_header` ne peint que sa
-        // bande d'en-tête, `tab_contents` est sauté — peindre la
-        // fenêtre à `current_size` dessinerait un cadre (et un
-        // contour) à la taille dépliée autour d'une zone vide.
-        // `current_size` reste la taille logique conservée dans
-        // `self.window_sizes`/persistée ; seul le rectangle peint
-        // cette image se réduit.
+        // Collapsed window (B3): `window_header` paints only its
+        // header band, `tab_contents` is skipped — painting the
+        // window at `current_size` would draw a frame (and an
+        // outline) at the expanded size around an empty area.
+        // `current_size` stays the logical size kept in
+        // `self.window_sizes`/persisted; only the rectangle painted
+        // this frame shrinks.
         let frame = floating_window_frame(ui.style());
         let display_size = floating_window_display_size(
             current_size,
@@ -464,10 +463,10 @@ impl Workspace<'_> {
             display_size,
         );
         let title = tab_title(self.state, tab);
-        // Hors de la portion visible : `None`, ni peinte ni
-        // interactive — « cachée », pas écrasée. Partiellement
-        // visible : rognée au bord de `viewport_rect`, pour le
-        // dessin comme pour les clics (bug 2 du même rapport).
+        // Outside the visible portion: `None`, neither painted nor
+        // interactive — "hidden", not crushed. Partially
+        // visible: clipped at the edge of `viewport_rect`, for the
+        // drawing as for the clicks (bug 2 of the same report).
         let shown = show_floating_window(
             ui.ctx(),
             id,
@@ -484,18 +483,18 @@ impl Workspace<'_> {
                     HeaderPlacement::Floating,
                 );
                 if !(was_collapsed ^ header_actions.toggle_collapse) {
-                    // Le sous-Ui borné empêche le contenu de
-                    // déborder de la fenêtre. La grille seule
-                    // reçoit un défilement horizontal (F8).
+                    // The bounded sub-Ui keeps the content from
+                    // overflowing the window. Only the grid
+                    // gets horizontal scrolling (F8).
                     show_window_contents_bounded(ui, |ui| {
                         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
                     });
                 }
             },
             |ui, rect| {
-                // Poignées maison (§3) : mutent `self.window_positions`/
-                // `self.window_sizes` directement ; la prochaine image
-                // les bornera puis les peindra.
+                // Home-made handles (§3): mutate `self.window_positions`/
+                // `self.window_sizes` directly; the next frame
+                // clamps then paints them.
                 if let (Some(position), Some(size)) = (
                     self.window_positions.get_mut(&tab),
                     self.window_sizes.get_mut(&tab),
@@ -528,9 +527,9 @@ impl Workspace<'_> {
                 *position += header_actions.drag_delta;
             }
         }
-        // Géométrie persistée : le rectangle logique borné de
-        // cette image, taille logique comprise (pas la taille
-        // repliée, voir `floating_window_geometry_to_persist`).
+        // Persisted geometry: this frame's clamped logical
+        // rectangle, logical size included (not the collapsed
+        // size, see `floating_window_geometry_to_persist`).
         self.geometry_updates.push((
             tab,
             floating_window_geometry_to_persist(logical_rect, current_size),
@@ -542,12 +541,12 @@ impl Workspace<'_> {
 }
 
 impl StokesForgeApp {
-    /// Ouvre l'onglet `tab`, ou le focalise s'il est déjà ouvert.
+    /// Opens the tab `tab`, or focuses it if it is already open.
     ///
-    /// Le seul endroit qui décide entre les deux, pour toute nature de
-    /// fenêtre (classeur, graphe, matrice, note) : cliquer une seconde fois
-    /// la même entrée du Project Manager ne doit jamais dupliquer son
-    /// onglet, seulement l'amener au premier plan.
+    /// The only place that decides between the two, for every kind of
+    /// window (workbook, graph, matrix, note): clicking the same Project
+    /// Manager entry a second time must never duplicate its tab, only
+    /// bring it to the front.
     pub(super) fn open_tab(&mut self, tab: Tab) {
         self.active_detached = None;
         if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
@@ -559,10 +558,10 @@ impl StokesForgeApp {
         }
     }
 
-    /// Ajoute `tab` à [`StokesForgeApp::floating_tabs`] avec un nouveau rang de
-    /// cascade — partagé par [`StokesForgeApp::open_tab`] (première ouverture) et
-    /// [`StokesForgeApp::reattach_tab`] (retour d'une fenêtre OS séparée), les deux
-    /// seuls endroits où une fenêtre flottante apparaît sans exister déjà.
+    /// Adds `tab` to [`StokesForgeApp::floating_tabs`] with a new cascade
+    /// rank — shared by [`StokesForgeApp::open_tab`] (first opening) and
+    /// [`StokesForgeApp::reattach_tab`] (return of a separate OS window), the two
+    /// only places where a floating window appears without already existing.
     pub(super) fn push_floating_tab(&mut self, tab: Tab) {
         self.floating_tabs.push(tab);
         self.cascade_rank.insert(tab, self.next_cascade);
@@ -571,12 +570,12 @@ impl StokesForgeApp {
 }
 
 impl StokesForgeApp {
-    /// Peint l'espace de travail (`CentralPanel`) : la fenêtre maximisée, ou
-    /// les fenêtres flottantes dans l'ordre de `floating_tabs` avec leur
-    /// cascade, leur repli, leur masquage et leurs poignées. Les demandes de
-    /// détachement, de fermeture et de géométrie sont rendues à l'appelant, qui
-    /// les applique une fois l'image peinte (muter `floating_tabs` en plein
-    /// parcours l'invaliderait).
+    /// Paints the workspace (`CentralPanel`): the maximized window, or
+    /// the floating windows in the order of `floating_tabs` with their
+    /// cascade, their collapse, their hiding and their handles. The requests
+    /// for detaching, closing and geometry are handed back to the caller, who
+    /// applies them once the frame is painted (mutating `floating_tabs` in the
+    /// middle of the traversal would invalidate it).
     pub(super) fn show_workspace(
         &mut self,
         ui: &mut egui::Ui,
@@ -586,9 +585,9 @@ impl StokesForgeApp {
         close_requests: &mut Vec<Tab>,
         geometry_updates: &mut Vec<(Tab, egui::Rect)>,
     ) {
-        // Emprunts disjoints des champs (édition 2021) : la disposition et
-        // les contenus qu'elle porte ont besoin, chacun, d'un accès distinct
-        // à `self`, simultanément le temps de peindre une image.
+        // Disjoint borrows of the fields (edition 2021): the layout and
+        // the contents it carries each need distinct access
+        // to `self`, simultaneously while painting a frame.
         let Self {
             state,
             floating_tabs,
@@ -636,7 +635,7 @@ impl StokesForgeApp {
         });
     }
 
-    /// Applique les fermetures demandées par l'en-tête des fenêtres flottantes.
+    /// Applies the closings requested by the header of the floating windows.
     pub(super) fn close_floating_tabs(&mut self, close_requests: Vec<Tab>) {
         for tab in close_requests {
             if let Some(pos) = self.floating_tabs.iter().position(|t| *t == tab) {
@@ -646,10 +645,10 @@ impl StokesForgeApp {
                 self.window_sizes.remove(&tab);
             }
             if self.maximized_tab == Some(tab) {
-                // Garde de cohérence, comme dans `detach_tab` — ne devrait
-                // pas arriver : un onglet maximisé n'est pas peint comme
-                // fenêtre flottante, donc son bouton de fermeture natif n'est
-                // pas accessible pendant qu'il l'est.
+                // Consistency guard, as in `detach_tab` — should not
+                // happen: a maximized tab is not painted as a
+                // floating window, so its native close button is not
+                // reachable while it is.
                 self.maximized_tab = None;
             }
         }
@@ -658,14 +657,14 @@ impl StokesForgeApp {
 
 #[cfg(test)]
 mod tests {
-    use super::super::project_manager::tests::fenetres;
+    use super::super::project_manager::tests::windows;
     use super::super::window_chrome::show_window_in_layer;
     use super::*;
     use stokesforge_app_state::state::ProjectTreeNode;
 
-    /// #154 : le clic explicite reprend le suivi, même sans changement d'onglet.
+    /// #154: the explicit click resumes following, even without a tab change.
     #[test]
-    fn le_clic_workspace_remplace_la_multiselection_du_project_manager() {
+    fn the_workspace_click_replaces_the_project_manager_multi_selection() {
         for (maximized, already_active, header) in [
             (false, false, false),
             (false, true, false),
@@ -676,7 +675,7 @@ mod tests {
             (true, false, true),
             (true, true, true),
         ] {
-            let (session, graph) = crate::app::graph_window::tests::graphe();
+            let (session, graph) = crate::app::graph_window::tests::plotted_graph();
             let state = AppState::new(session.handle(), String::new()).unwrap();
             let book = window_nodes(&state.project_tree())
                 .into_iter()
@@ -693,7 +692,7 @@ mod tests {
             app.window_positions.insert(tab, egui::pos2(30.0, 30.0));
             app.window_positions.insert(book, egui::pos2(750.0, 30.0));
             app.maximized_tab = maximized.then_some(tab);
-            app.pm_selection = fenetres([tab, book]);
+            app.pm_selection = windows([tab, book]);
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             crate::theme::install(&context);
@@ -731,8 +730,8 @@ mod tests {
             for _ in 0..3 {
                 assert_eq!(
                     paint(Vec::new()),
-                    fenetres([tab, book]),
-                    "le repos conserve les actions groupées"
+                    windows([tab, book]),
+                    "rest keeps the grouped actions"
                 );
             }
             if !maximized {
@@ -745,8 +744,8 @@ mod tests {
                         pressed: true,
                         modifiers: egui::Modifiers::NONE,
                     }]),
-                    fenetres([tab, book]),
-                    "le vide du workspace conserve la sélection"
+                    windows([tab, book]),
+                    "the empty part of the workspace keeps the selection"
                 );
                 paint(vec![egui::Event::PointerButton {
                     pos: empty,
@@ -769,8 +768,8 @@ mod tests {
             );
             assert_eq!(
                 paint(vec![egui::Event::PointerMoved(pos)]),
-                fenetres([tab, book]),
-                "le survol conserve la sélection"
+                windows([tab, book]),
+                "hovering keeps the selection"
             );
             let selection = paint(vec![egui::Event::PointerButton {
                 pos,
@@ -780,32 +779,32 @@ mod tests {
             }]);
             assert_eq!(
                 selection,
-                fenetres([tab]),
-                "maximisée={maximized}, déjà active={already_active}, en-tête={header}"
+                windows([tab]),
+                "maximized={maximized}, already active={already_active}, header={header}"
             );
             session.shutdown().unwrap();
         }
     }
 
-    /// #337 : la largeur d'une colonne jamais réglée est celle du défaut, que le
-    /// classeur soit flottant ou maximisé. Dans une fenêtre flottante, la
-    /// première image d'un `egui::Window` est une passe de mesure
-    /// (`Ui::is_sizing_pass`) pendant laquelle egui_extras réduit chaque
-    /// colonne à la largeur que son contenu a utilisée, puis la garde.
+    /// #337: the width of a column that was never set is the default one,
+    /// whether the workbook is floating or maximized. In a floating window, the
+    /// first frame of an `egui::Window` is a measuring pass
+    /// (`Ui::is_sizing_pass`) during which egui_extras shrinks each
+    /// column to the width its content used, then keeps it.
     #[test]
-    fn la_largeur_par_defaut_d_une_colonne_est_la_meme_flottante_et_maximisee() {
-        let mut project = stokesforge_core::Project::new("Largeur").unwrap();
+    fn the_default_width_of_a_column_is_the_same_floating_and_maximized() {
+        let mut project = stokesforge_core::Project::new("Width").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
         let sheet = project.add_worksheet(book, None).unwrap();
-        for colonne in 1..=3_u32 {
-            let valeurs: Vec<f64> = (1..=20_u32).map(|r| f64::from(colonne * 100 + r)).collect();
+        for column in 1..=3_u32 {
+            let values: Vec<f64> = (1..=20_u32).map(|r| f64::from(column * 100 + r)).collect();
             project
                 .add_column(
                     sheet,
                     None,
                     None,
-                    stokesforge_core::Column::from_f64(&valeurs),
+                    stokesforge_core::Column::from_f64(&values),
                 )
                 .unwrap();
         }
@@ -814,13 +813,13 @@ mod tests {
         let tab = Tab::Book(book);
         let mut app = StokesForgeApp::new(state);
         app.floating_tabs = vec![tab];
-        let context = super::super::test_support::contexte();
+        let context = super::super::test_support::context();
         egui_extras::install_image_loaders(&context);
-        // Écart entre les centres des lettres de colonne « A(Y) », « B(Y) »…
-        let pas = |app: &mut StokesForgeApp| {
-            let mut sortie = None;
+        // Gap between the centers of the column letters "A(Y)", "B(Y)"…
+        let step = |app: &mut StokesForgeApp| {
+            let mut output = None;
             for _ in 0..6 {
-                sortie = Some(super::super::test_support::image_de(
+                output = Some(super::super::test_support::frame_of(
                     &context,
                     egui::vec2(1400.0, 900.0),
                     Vec::new(),
@@ -836,44 +835,44 @@ mod tests {
                     },
                 ));
             }
-            let centres: Vec<f32> = sortie
+            let centers: Vec<f32> = output
                 .unwrap()
                 .shapes
                 .iter()
-                .filter_map(|peint| match &peint.shape {
+                .filter_map(|painted| match &painted.shape {
                     egui::Shape::Text(shape) if shape.galley.job.text.ends_with("(Y)") => {
                         Some(shape.pos.x + shape.galley.rect.center().x)
                     }
                     _ => None,
                 })
                 .collect();
-            assert_eq!(centres.len(), 3, "trois lettres de colonne : {centres:?}");
-            centres[1] - centres[0]
+            assert_eq!(centers.len(), 3, "three column letters: {centers:?}");
+            centers[1] - centers[0]
         };
-        let attendu = super::super::grid::DEFAULT_COLUMN_WIDTH
+        let expected = super::super::grid::DEFAULT_COLUMN_WIDTH
             + context.global_style().spacing.item_spacing.x;
-        let flottant = pas(&mut app);
+        let floating = step(&mut app);
         app.maximized_tab = Some(tab);
-        let maximise = pas(&mut app);
+        let maximized = step(&mut app);
         app.maximized_tab = None;
-        let restaure = pas(&mut app);
+        let restored = step(&mut app);
         assert!(
-            (flottant - attendu).abs() < 0.6,
-            "flottant : {flottant}, attendu {attendu}"
+            (floating - expected).abs() < 0.6,
+            "floating: {floating}, expected {expected}"
         );
         assert!(
-            (maximise - attendu).abs() < 0.6,
-            "maximisé : {maximise}, attendu {attendu}"
+            (maximized - expected).abs() < 0.6,
+            "maximized: {maximized}, expected {expected}"
         );
         assert!(
-            (restaure - attendu).abs() < 0.6,
-            "restauré : {restaure}, attendu {attendu}"
+            (restored - expected).abs() < 0.6,
+            "restored: {restored}, expected {expected}"
         );
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_repli_ne_concerne_que_longlet_vise() {
+    fn collapsing_concerns_only_the_targeted_tab() {
         let node = NodeId::from_raw(1);
         let graph_tab = Tab::Graph(node);
         let mut collapsed = HashSet::new();
@@ -881,10 +880,10 @@ mod tests {
         toggle_collapse(&mut collapsed, graph_tab);
         assert_eq!(collapsed, HashSet::from([graph_tab]));
 
-        // B5 (`retours-2026-09-23-bugs.md`) : `Tab::Book` a
-        // aussi ce contrôle depuis ce correctif, suivi indépendamment du
-        // graphe même quand son identifiant de nœud coïncide (test de
-        // présentation).
+        // B5 (`retours-2026-09-23-bugs.md`): `Tab::Book` also has
+        // this control since that fix, tracked independently of the
+        // graph even when its node identifier coincides (display
+        // test).
         let book_tab = Tab::Book(node);
         toggle_collapse(&mut collapsed, book_tab);
         assert_eq!(collapsed, HashSet::from([graph_tab, book_tab]));
@@ -897,33 +896,33 @@ mod tests {
     }
 
     #[test]
-    fn le_repli_reste_refuse_aux_matrices_et_aux_notes() {
+    fn collapsing_stays_refused_for_matrices_and_notes() {
         let node = NodeId::from_raw(1);
         let mut collapsed = HashSet::new();
 
         toggle_collapse(&mut collapsed, Tab::Matrix(node));
         assert!(
             collapsed.is_empty(),
-            "une matrice n'a pas ce contrôle : rien à replier"
+            "a matrix does not have this control: nothing to collapse"
         );
 
         toggle_collapse(&mut collapsed, Tab::Note(node));
         assert!(
             collapsed.is_empty(),
-            "une note n'a pas ce contrôle : rien à replier"
+            "a note does not have this control: nothing to collapse"
         );
 
-        // Le refus ne touche pas au repli des autres onglets.
+        // The refusal does not touch the collapse of the other tabs.
         toggle_collapse(&mut collapsed, Tab::Graph(node));
         toggle_collapse(&mut collapsed, Tab::Matrix(node));
         assert_eq!(collapsed, HashSet::from([Tab::Graph(node)]));
     }
 
-    /// [`toggle_collapse_to`] (réattachement d'une fenêtre détachée) pose la
-    /// valeur demandée au lieu de basculer : la reposer deux fois ne la
-    /// retourne pas. Mêmes natures que [`toggle_collapse`].
+    /// [`toggle_collapse_to`] (reattaching a detached window) sets the
+    /// requested value instead of toggling: setting it twice does not
+    /// flip it. Same kinds as [`toggle_collapse`].
     #[test]
-    fn le_repli_pose_une_valeur_sans_basculer() {
+    fn collapsing_sets_a_value_without_toggling() {
         let node = NodeId::from_raw(1);
         let mut collapsed = HashSet::new();
 
@@ -939,14 +938,14 @@ mod tests {
         toggle_collapse_to(&mut collapsed, Tab::Note(node), true);
         assert!(
             collapsed.is_empty(),
-            "matrices et notes n'ont pas de repli, même posé"
+            "matrices and notes have no collapse, even when set"
         );
     }
 
-    /// Les fenêtres de l'arbre, à plat, dans l'ordre de l'arbre (le contenu
-    /// d'un dossier à sa place) ; les dossiers eux-mêmes n'en sont pas.
+    /// The tree's windows, flattened, in tree order (the content of a
+    /// folder in its place); the folders themselves are not windows.
     #[test]
-    fn les_fenetres_de_l_arbre_sont_mises_a_plat_dans_l_ordre() {
+    fn the_tree_windows_are_flattened_in_order() {
         let window = |raw, kind| ProjectTreeNode::Window {
             id: NodeId::from_raw(raw),
             name: format!("{raw}"),
@@ -956,12 +955,12 @@ mod tests {
             window(1, WindowKind::Book),
             ProjectTreeNode::Folder {
                 id: NodeId::from_raw(2),
-                name: "Dossier".to_string(),
+                name: "Folder".to_string(),
                 children: vec![
                     window(3, WindowKind::Graph),
                     ProjectTreeNode::Folder {
                         id: NodeId::from_raw(4),
-                        name: "Vide".to_string(),
+                        name: "Empty".to_string(),
                         children: Vec::new(),
                     },
                     window(5, WindowKind::Note),
@@ -980,59 +979,59 @@ mod tests {
         );
     }
 
-    // B2 (`retours-2026-09-23-bugs.md`) : `sync_floating_tabs_order_to_top_layer`
-    // teste la logique pure de réalignement.
+    // B2 (`retours-2026-09-23-bugs.md`): `sync_floating_tabs_order_to_top_layer`
+    // tests the pure realignment logic.
 
     #[test]
-    fn le_tab_au_premier_plan_est_ramene_en_fin_de_floating_tabs() {
+    fn the_foreground_tab_is_moved_to_the_end_of_floating_tabs() {
         let tab_a = Tab::Graph(NodeId::from_raw(1));
         let tab_b = Tab::Graph(NodeId::from_raw(2));
         let tab_c = Tab::Book(NodeId::from_raw(3));
         let mut floating_tabs = vec![tab_a, tab_b, tab_c];
 
-        // `tab_c` est déjà en fin de liste (donc déjà « actif ») : rien à
-        // faire.
+        // `tab_c` is already at the end of the list (thus already "active"): nothing to
+        // do.
         sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_c));
         assert_eq!(floating_tabs, vec![tab_a, tab_b, tab_c]);
 
-        // `tab_a` est au premier plan (clic direct) sans être en fin de
-        // liste : il doit passer en dernier, les autres gardant leur ordre
-        // relatif (l'ordre de pile des fenêtres de dessous).
+        // `tab_a` is in the foreground (direct click) without being at the end of
+        // the list: it must go last, the others keeping their relative
+        // order (the stack order of the windows underneath).
         sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_a));
         assert_eq!(floating_tabs, vec![tab_b, tab_c, tab_a]);
     }
 
     #[test]
-    fn aucun_calque_au_premier_plan_ou_tab_inconnu_laisse_floating_tabs_intact() {
+    fn no_foreground_layer_or_an_unknown_tab_leaves_floating_tabs_intact() {
         let tab_a = Tab::Graph(NodeId::from_raw(1));
         let tab_b = Tab::Graph(NodeId::from_raw(2));
-        let tab_inconnu = Tab::Graph(NodeId::from_raw(3));
+        let unknown_tab = Tab::Graph(NodeId::from_raw(3));
         let mut floating_tabs = vec![tab_a, tab_b];
 
         sync_floating_tabs_order_to_top_layer(&mut floating_tabs, None);
         assert_eq!(floating_tabs, vec![tab_a, tab_b]);
 
-        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(tab_inconnu));
+        sync_floating_tabs_order_to_top_layer(&mut floating_tabs, Some(unknown_tab));
         assert_eq!(
             floating_tabs,
             vec![tab_a, tab_b],
-            "un tab qui n'est plus dans floating_tabs (fermé entretemps) ne doit rien perturber"
+            "a tab that is no longer in floating_tabs (closed in the meantime) must disturb nothing"
         );
     }
 
-    // B2, bout à bout : un clic direct dans une fenêtre flottante qui n'est
-    // pas déjà en fin de `floating_tabs` amène egui à réordonner son propre
-    // calque (`Area`, `Sense::CLICK`) *avant* que `floating_tabs` ne le
-    // sache — c'est exactement l'écart que corrige
-    // `sync_floating_tabs_order_to_top_layer`. Ce test peint deux fenêtres
-    // avec les mêmes `egui::Id` que la production (`egui::Id::new(tab)`),
-    // simule un clic dans celle qui n'est pas en fin de liste, puis vérifie
-    // que la résolution utilisée en production (`ctx.top_layer_id()` +
-    // recherche du tab correspondant) place bien `tab_a` au premier plan —
-    // et que sans la resynchronisation, `floating_tabs.last()`
-    // (`active_tab`) resterait sur `tab_b`, périmé.
+    // B2, end to end: a direct click in a floating window that is not
+    // already at the end of `floating_tabs` makes egui reorder its own
+    // layer (`Area`, `Sense::CLICK`) *before* `floating_tabs` knows
+    // it — that is exactly the gap fixed by
+    // `sync_floating_tabs_order_to_top_layer`. This test paints two windows
+    // with the same `egui::Id`s as production (`egui::Id::new(tab)`),
+    // simulates a click in the one that is not at the end of the list, then checks
+    // that the resolution used in production (`ctx.top_layer_id()` +
+    // lookup of the matching tab) does put `tab_a` in the foreground —
+    // and that without the resynchronization, `floating_tabs.last()`
+    // (`active_tab`) would stay on `tab_b`, stale.
     #[test]
-    fn un_clic_direct_dans_une_fenetre_en_arriere_plan_la_ramene_active() {
+    fn a_direct_click_in_a_background_window_makes_it_active() {
         let tab_a = Tab::Graph(NodeId::from_raw(1));
         let tab_b = Tab::Graph(NodeId::from_raw(2));
         let mut floating_tabs = vec![tab_a, tab_b];
@@ -1075,22 +1074,22 @@ mod tests {
             })
         };
 
-        // Image de repos : `floating_tabs` place `tab_b` en dernier, comme
-        // s'il avait été ouvert (ou cliqué) en dernier légitimement — et egui
-        // aussi, puisqu'il l'a peinte en dernier.
+        // Rest frame: `floating_tabs` puts `tab_b` last, as if
+        // it had legitimately been opened (or clicked) last — and so does egui,
+        // since it painted it last.
         paint(vec![]);
         assert_eq!(top_layer_tab(&floating_tabs), Some(tab_b));
 
-        // Clic dans `tab_a`, qui n'est pas en fin de `floating_tabs` — sur
-        // deux images distinctes, comme les autres tests d'interaction
-        // (déplacer la souris, puis presser) : `layer_id_at` doit pouvoir
-        // s'appuyer sur une position de pointeur déjà connue.
+        // Click in `tab_a`, which is not at the end of `floating_tabs` — over
+        // two distinct frames, like the other interaction tests
+        // (move the mouse, then press): `layer_id_at` must be able to
+        // rely on an already known pointer position.
         let click_pos = rect_a.center();
         paint(vec![egui::Event::PointerMoved(click_pos)]);
         assert_eq!(
             top_layer_tab(&floating_tabs),
             Some(tab_b),
-            "survoler une fenêtre ne la ramène pas au premier plan"
+            "hovering a window does not bring it to the foreground"
         );
         paint(vec![egui::Event::PointerButton {
             pos: click_pos,
@@ -1103,32 +1102,32 @@ mod tests {
         assert_eq!(
             top,
             Some(tab_a),
-            "egui doit avoir amené la fenêtre cliquée au premier plan de son propre ordre \
-             de calques, indépendamment de floating_tabs"
+            "egui must have brought the clicked window to the front of its own \
+             layer order, independently of floating_tabs"
         );
 
-        // Sans la resynchronisation (B2), `active_tab` resterait périmé sur
-        // `tab_b` malgré le clic.
+        // Without the resynchronization (B2), `active_tab` would stay stale on
+        // `tab_b` despite the click.
         assert_eq!(
             floating_tabs.last().copied(),
             Some(tab_b),
-            "avant resynchronisation, floating_tabs (donc active_tab) ignore encore le clic"
+            "before resynchronization, floating_tabs (thus active_tab) still ignores the click"
         );
 
         sync_floating_tabs_order_to_top_layer(&mut floating_tabs, top);
         assert_eq!(
             floating_tabs.last().copied(),
             Some(tab_a),
-            "après resynchronisation, la fenêtre cliquée doit devenir active_tab \
-             (donc se surligner)"
+            "after resynchronization, the clicked window must become active_tab \
+             (thus highlight itself)"
         );
     }
 
-    /// #85 : un clic dans l'Object Manager flottant (calque au-dessus) ne
-    /// réactive pas la fenêtre de contenu qu'il recouvre ; un clic sur la
-    /// partie découverte de cette même fenêtre, si (témoin).
+    /// #85: a click in the floating Object Manager (layer above) does not
+    /// reactivate the content window it covers; a click on the uncovered
+    /// part of that same window does (witness).
     #[test]
-    fn cliquer_le_gestionnaire_flottant_ne_reactive_pas_le_contenu_derriere() {
+    fn clicking_the_floating_manager_does_not_reactivate_the_content_behind() {
         let ctx = egui::Context::default();
         let content_id = egui::Id::new("object_manager_content_test");
         let manager_id = egui::Id::new("object_manager_float_test");

@@ -1,38 +1,37 @@
-//! Lecture des sources de `stokesforge-app` **et de `stokesforge-app-state`**
-//! pour les garde-fous qui lisent le code (#116, chantier #115 ; #263).
+//! Reading the sources of `stokesforge-app` **and `stokesforge-app-state`**
+//! for the guards that read the code (#116, work package #115; #263).
 //!
-//! # Une seule liste de fichiers
+//! # A single list of files
 //!
-//! [`sources`] lit **récursivement** `src/` : un module déplacé dans `src/app/`
-//! reste lu sans rien déclarer. Toutes les gardes qui lisent le code passent
-//! par elle — `tests/libelles.rs`, `tests/history_text.rs`, `tests/gardes.rs`
-//! et, par `src/lib.rs`, les tests d'`icons`, de `theme` et d'`i18n`. Aucune ne
-//! nomme plus un fichier : déplacer une fonction ne la fait sortir d'aucune
-//! garde.
+//! [`sources`] reads `src/` **recursively**: a module moved into `src/app/`
+//! is still read without declaring anything. Every guard that reads the code
+//! goes through it — `tests/labels.rs`, `tests/history_text.rs`, `tests/guards.rs`
+//! and, through `src/lib.rs`, the tests of `icons`, `theme` and `i18n`. None of
+//! them names a file anymore: moving a function does not take it out of any
+//! guard.
 //!
-//! # Une seule vue « production »
+//! # A single "production" view
 //!
-//! [`Fichier::production`] blanchit les commentaires et **chaque** item
-//! `#[cfg(test)]` — pas seulement ce qui suit le premier : `errors.rs` alterne
-//! code et modules de test. Un module de test écrit dans son propre fichier
-//! (`#[cfg(test)] mod tests;`, avec ou sans `#[path]`) rend ce fichier entier
-//! de test ([`Fichier::de_test`]), et tout module qu'il déclare à son tour.
-//! Les blancs gardent les fins de ligne : les numéros de ligne rapportés
-//! restent justes.
+//! [`SourceFile::production`] blanks the comments and **every** `#[cfg(test)]`
+//! item — not only what follows the first one: `errors.rs` alternates code
+//! and test modules. A test module written in its own file
+//! (`#[cfg(test)] mod tests;`, with or without `#[path]`) makes that whole file
+//! test code ([`SourceFile::is_test`]), and every module it declares in turn.
+//! The blanks keep the line ends: the reported line numbers stay right.
 //!
-//! # Limites, toutes bruyantes
+//! # Limits, all loud
 //!
-//! Non reconnus : `#[cfg(all(test, …))]` / `#[cfg(any(test, …))]`, et un
-//! `#[cfg(test)] mod x;` déclaré **dans un module en ligne** (`mod a { … }`),
-//! dont le fichier est cherché au mauvais endroit. Dans les deux cas, du code
-//! de test est lu comme de la production : faux positif d'une garde, jamais un
-//! trou. Écrire `#[cfg(test)]` seul, sur un module déclaré au niveau du fichier.
+//! Not recognized: `#[cfg(all(test, …))]` / `#[cfg(any(test, …))]`, and a
+//! `#[cfg(test)] mod x;` declared **inside an inline module** (`mod a { … }`),
+//! whose file is looked up in the wrong place. In both cases, test code is read
+//! as production: a false positive of a guard, never a hole. Write `#[cfg(test)]`
+//! alone, on a module declared at file level.
 //!
 //! # Inclusion
 //!
-//! Ce fichier n'est pas un test à lui seul (Cargo ne découvre que
-//! `tests/*.rs`) : il est inclus par `#[path]` là où on s'en sert. Ses témoins
-//! sont dans `tests/gardes.rs`.
+//! This file is not a test by itself (Cargo only discovers `tests/*.rs`): it is
+//! included through `#[path]` where it is used. Its witnesses are in
+//! `tests/guards.rs`.
 
 #![allow(dead_code)]
 
@@ -40,165 +39,161 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
-// La liste des fichiers
+// The list of files
 // ---------------------------------------------------------------------------
 
-/// Un fichier source de `src/`.
+/// A source file of `src/`.
 #[derive(Debug, Clone)]
-pub struct Fichier {
-    /// Chemin relatif à `src/`, séparé par `/` : `app.rs`, `i18n/pseudo.rs`.
-    pub chemin: String,
-    pub texte: String,
-    /// Le fichier entier est du test : il porte un module déclaré sous
-    /// `#[cfg(test)]` (ou déclaré par un fichier qui est lui-même de test).
-    pub de_test: bool,
+pub struct SourceFile {
+    /// Path relative to `src/`, separated by `/`: `app.rs`, `i18n/pseudo.rs`.
+    pub path: String,
+    pub text: String,
+    /// The whole file is test code: it carries a module declared under
+    /// `#[cfg(test)]` (or declared by a file that is itself test code).
+    pub is_test: bool,
 }
 
-impl Fichier {
-    /// Le fichier vu comme du code de production : commentaires et items
-    /// `#[cfg(test)]` blanchis ; tout blanchi si le fichier est de test.
-    pub fn production(&self) -> Masque {
-        let mut source = masquer(&self.texte);
-        if self.de_test || entierement_de_test(&source.masque) {
-            let fin = source.masque.len();
-            blanchir(&mut source, 0, fin);
+impl SourceFile {
+    /// The file seen as production code: comments and `#[cfg(test)]` items
+    /// blanked; everything blanked if the file is test code.
+    pub fn production(&self) -> Mask {
+        let mut source = mask_source(&self.text);
+        if self.is_test || is_entirely_test(&source.mask) {
+            let end = source.mask.len();
+            blank_out(&mut source, 0, end);
         } else {
-            for zone in zones_de_test(&source.masque) {
-                blanchir(&mut source, zone.0, zone.1);
+            for zone in test_zones(&source.mask) {
+                blank_out(&mut source, zone.0, zone.1);
             }
         }
         source
     }
 
-    /// Le texte sans ses commentaires, chaînes intactes, tests compris.
+    /// The text without its comments, strings intact, tests included.
     pub fn code(&self) -> String {
-        masquer(&self.texte).code.into_iter().collect()
+        mask_source(&self.text).code.into_iter().collect()
     }
 }
 
-/// Le dossier `src/` de `stokesforge-app`.
-pub fn dossier_src() -> PathBuf {
+/// The `src/` directory of `stokesforge-app`.
+pub fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Le dossier `src/` de `stokesforge-app-state`, l'état sans egui (#263).
-pub fn dossier_src_etat() -> PathBuf {
+/// The `src/` directory of `stokesforge-app-state`, the state without egui (#263).
+pub fn state_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("stokesforge-app-state")
         .join("src")
 }
 
-/// Le préfixe des chemins des sources de `stokesforge-app-state` dans la liste
-/// de [`sources`] : `app-state/state.rs`, `app-state/i18n/pseudo.rs`. Les
-/// sources de `stokesforge-app` n'en ont pas (`app.rs`, `app/menus.rs`).
-pub const PREFIXE_ETAT: &str = "app-state/";
+/// The prefix of the `stokesforge-app-state` source paths in the list of
+/// [`sources`]: `app-state/state.rs`, `app-state/i18n/pseudo.rs`. The sources
+/// of `stokesforge-app` have none (`app.rs`, `app/menus.rs`).
+pub const STATE_PREFIX: &str = "app-state/";
 
-/// Toutes les sources de l'application, sous-dossiers compris, triées par
-/// chemin : celles de `stokesforge-app` (chemin relatif à son `src/`) **et**
-/// celles de `stokesforge-app-state` (même chemin, préfixé de
-/// [`PREFIXE_ETAT`]). Le texte d'interface, lui, se pose dans les deux.
-pub fn sources() -> Vec<Fichier> {
-    lire_dossiers(&[
-        (dossier_src().as_path(), ""),
-        (dossier_src_etat().as_path(), PREFIXE_ETAT),
+/// All the application sources, subdirectories included, sorted by path:
+/// those of `stokesforge-app` (path relative to its `src/`) **and** those of
+/// `stokesforge-app-state` (same path, prefixed with [`STATE_PREFIX`]). The
+/// interface text lives in both.
+pub fn sources() -> Vec<SourceFile> {
+    read_dirs(&[
+        (src_dir().as_path(), ""),
+        (state_src_dir().as_path(), STATE_PREFIX),
     ])
 }
 
-/// Toutes les sources `.rs` sous `racine`, sous-dossiers compris, triées par
-/// chemin ; les fichiers de test sont marqués.
-pub fn lire(racine: &Path) -> Vec<Fichier> {
-    lire_dossiers(&[(racine, "")])
+/// All the `.rs` sources under `root`, subdirectories included, sorted by
+/// path; the test files are marked.
+pub fn read_sources(root: &Path) -> Vec<SourceFile> {
+    read_dirs(&[(root, "")])
 }
 
-/// Les sources `.rs` de chaque `(racine, préfixe)`, sous-dossiers compris, dont
-/// le chemin est précédé de son préfixe ; triées par chemin, fichiers de test
-/// marqués.
-pub fn lire_dossiers(dossiers: &[(&Path, &str)]) -> Vec<Fichier> {
-    let mut chemins: Vec<(PathBuf, String)> = Vec::new();
-    for (racine, prefixe) in dossiers {
-        let mut relatifs = Vec::new();
-        parcourir(racine, "", &mut relatifs);
-        for relatif in relatifs {
-            chemins.push((racine.join(&relatif), format!("{prefixe}{relatif}")));
+/// The `.rs` sources of each `(root, prefix)`, subdirectories included, whose
+/// path is preceded by its prefix; sorted by path, test files marked.
+pub fn read_dirs(dirs: &[(&Path, &str)]) -> Vec<SourceFile> {
+    let mut paths: Vec<(PathBuf, String)> = Vec::new();
+    for (root, prefix) in dirs {
+        let mut relatives = Vec::new();
+        walk(root, "", &mut relatives);
+        for relative in relatives {
+            paths.push((root.join(&relative), format!("{prefix}{relative}")));
         }
     }
-    chemins.sort_by(|a, b| a.1.cmp(&b.1));
-    let mut fichiers: Vec<Fichier> = chemins
+    paths.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut files: Vec<SourceFile> = paths
         .into_iter()
-        .map(|(complet, chemin)| {
-            let texte = std::fs::read_to_string(complet).expect("source lisible");
-            Fichier {
-                chemin,
-                texte,
-                de_test: false,
+        .map(|(full, path)| {
+            let text = std::fs::read_to_string(full).expect("readable source");
+            SourceFile {
+                path,
+                text,
+                is_test: false,
             }
         })
         .collect();
-    marquer_les_fichiers_de_test(&mut fichiers);
-    fichiers
+    mark_test_files(&mut files);
+    files
 }
 
-fn parcourir(dossier: &Path, prefixe: &str, sortie: &mut Vec<String>) {
-    for entree in std::fs::read_dir(dossier)
-        .expect("dossier de sources")
-        .flatten()
-    {
-        let chemin = entree.path();
-        let nom = entree.file_name().to_string_lossy().into_owned();
-        let relatif = format!("{prefixe}{nom}");
-        if chemin.is_dir() {
-            parcourir(&chemin, &format!("{relatif}/"), sortie);
-        } else if chemin.extension().is_some_and(|ext| ext == "rs") {
-            sortie.push(relatif);
+fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+    for entry in std::fs::read_dir(dir).expect("sources directory").flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = format!("{prefix}{name}");
+        if path.is_dir() {
+            walk(&path, &format!("{relative}/"), out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(relative);
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Les fichiers de test
+// The test files
 // ---------------------------------------------------------------------------
 
-/// Une déclaration `mod nom;` dont le module vit dans un autre fichier.
+/// A `mod name;` declaration whose module lives in another file.
 struct Declaration {
     position: usize,
-    nom: String,
-    /// La valeur d'un `#[path = "…"]` posé sur la déclaration.
-    chemin: Option<String>,
+    name: String,
+    /// The value of a `#[path = "…"]` placed on the declaration.
+    path: Option<String>,
 }
 
-/// Marque, jusqu'à point fixe, les fichiers des modules déclarés sous
-/// `#[cfg(test)]` et ceux que déclare un fichier déjà de test.
-fn marquer_les_fichiers_de_test(fichiers: &mut [Fichier]) {
-    let connus: BTreeSet<String> = fichiers.iter().map(|f| f.chemin.clone()).collect();
-    for fichier in fichiers.iter_mut() {
-        fichier.de_test = fichier.de_test || entierement_de_test(&masquer(&fichier.texte).masque);
+/// Marks, up to a fixed point, the files of the modules declared under
+/// `#[cfg(test)]` and those declared by a file that is already test code.
+fn mark_test_files(files: &mut [SourceFile]) {
+    let known: BTreeSet<String> = files.iter().map(|f| f.path.clone()).collect();
+    for file in files.iter_mut() {
+        file.is_test = file.is_test || is_entirely_test(&mask_source(&file.text).mask);
     }
     loop {
         let mut nouveaux = BTreeSet::new();
-        for fichier in fichiers.iter() {
-            let source = masquer(&fichier.texte);
-            let zones = zones_de_test(&source.masque);
+        for file in files.iter() {
+            let source = mask_source(&file.text);
+            let zones = test_zones(&source.mask);
             for declaration in declarations(&source) {
-                let sous_test = fichier.de_test
+                let under_test = file.is_test
                     || zones
                         .iter()
-                        .any(|(debut, fin)| (*debut..*fin).contains(&declaration.position));
-                if !sous_test {
+                        .any(|(start, end)| (*start..*end).contains(&declaration.position));
+                if !under_test {
                     continue;
                 }
-                if let Some(cible) = fichier_du_module(&fichier.chemin, &declaration)
+                if let Some(target) = module_file(&file.path, &declaration)
                     .into_iter()
-                    .find(|candidat| connus.contains(candidat))
+                    .find(|candidate| known.contains(candidate))
                 {
-                    nouveaux.insert(cible);
+                    nouveaux.insert(target);
                 }
             }
         }
         let mut change = false;
-        for fichier in fichiers.iter_mut() {
-            if !fichier.de_test && nouveaux.contains(&fichier.chemin) {
-                fichier.de_test = true;
+        for file in files.iter_mut() {
+            if !file.is_test && nouveaux.contains(&file.path) {
+                file.is_test = true;
                 change = true;
             }
         }
@@ -208,169 +203,173 @@ fn marquer_les_fichiers_de_test(fichiers: &mut [Fichier]) {
     }
 }
 
-/// Les déclarations `mod nom;` (hors module en ligne `mod nom { … }`).
-fn declarations(source: &Masque) -> Vec<Declaration> {
-    let masque = &source.masque;
-    let mut trouvees = Vec::new();
-    for i in 0..masque.len() {
-        if !mot_en(masque, i, "mod") {
+/// The `mod name;` declarations (not the inline module `mod name { … }`).
+fn declarations(source: &Mask) -> Vec<Declaration> {
+    let mask = &source.mask;
+    let mut found = Vec::new();
+    for i in 0..mask.len() {
+        if !word_at(mask, i, "mod") {
             continue;
         }
         let mut j = i + 3;
-        while masque.get(j).is_some_and(|c| c.is_whitespace()) {
+        while mask.get(j).is_some_and(|c| c.is_whitespace()) {
             j += 1;
         }
-        let nom = ident_en(masque, j);
-        if nom.is_empty() {
+        let name = ident_at(mask, j);
+        if name.is_empty() {
             continue;
         }
-        j += nom.chars().count();
-        while masque.get(j).is_some_and(|c| c.is_whitespace()) {
+        j += name.chars().count();
+        while mask.get(j).is_some_and(|c| c.is_whitespace()) {
             j += 1;
         }
-        if masque.get(j) != Some(&';') {
+        if mask.get(j) != Some(&';') {
             continue;
         }
-        let debut = debut_d_item(masque, i);
-        trouvees.push(Declaration {
+        let start = item_start(mask, i);
+        found.push(Declaration {
             position: i,
-            nom,
-            chemin: attribut_path(source, debut, i),
+            name,
+            path: path_attribute(source, start, i),
         });
     }
-    trouvees
+    found
 }
 
-/// La valeur du `#[path = "…"]` écrit entre `debut` et `fin`, s'il y en a un.
-fn attribut_path(source: &Masque, debut: usize, fin: usize) -> Option<String> {
-    let masque = &source.masque;
-    let attribut = (debut..fin).find(|k| commence_par(masque, *k, "#[path"))?;
-    let ouvrant = (attribut..fin).find(|k| masque[*k] == '"')?;
-    let fermant = (ouvrant + 1..fin).find(|k| masque[*k] == '"')?;
-    Some(source.original[ouvrant + 1..fermant].iter().collect())
+/// The value of the `#[path = "…"]` written between `start` and `end`, if any.
+fn path_attribute(source: &Mask, start: usize, end: usize) -> Option<String> {
+    let mask = &source.mask;
+    let attribute = (start..end).find(|k| starts_with_at(mask, *k, "#[path"))?;
+    let open_quote = (attribute..end).find(|k| mask[*k] == '"')?;
+    let close_quote = (open_quote + 1..end).find(|k| mask[*k] == '"')?;
+    Some(
+        source.original[open_quote + 1..close_quote]
+            .iter()
+            .collect(),
+    )
 }
 
-/// Les fichiers où peut vivre le module `declaration`, déclaré dans `chemin` —
-/// règles de rustc : à côté d'un `lib.rs` / `main.rs` / `mod.rs`, dans le
-/// dossier du même nom sinon ; un `#[path]` est relatif au dossier du fichier.
-fn fichier_du_module(chemin: &str, declaration: &Declaration) -> Vec<String> {
-    let (dossier, fichier) = match chemin.rsplit_once('/') {
-        Some((dossier, fichier)) => (format!("{dossier}/"), fichier),
-        None => (String::new(), chemin),
+/// The files where the module `declaration`, declared in `path`, can live —
+/// rustc rules: next to a `lib.rs` / `main.rs` / `mod.rs`, otherwise in the
+/// directory of the same name; a `#[path]` is relative to the file's directory.
+fn module_file(path: &str, declaration: &Declaration) -> Vec<String> {
+    let (dir, file) = match path.rsplit_once('/') {
+        Some((dir, file)) => (format!("{dir}/"), file),
+        None => (String::new(), path),
     };
-    if let Some(attribut) = &declaration.chemin {
-        // Un chemin qui sort de `src/` ne désigne aucune source lue.
-        return normaliser(&format!("{dossier}{attribut}"))
+    if let Some(attribute) = &declaration.path {
+        // A path that leaves `src/` designates no source read.
+        return normalize(&format!("{dir}{attribute}"))
             .into_iter()
             .collect();
     }
-    let base = if ["lib.rs", "main.rs", "mod.rs"].contains(&fichier) {
-        dossier
+    let base = if ["lib.rs", "main.rs", "mod.rs"].contains(&file) {
+        dir
     } else {
-        format!("{dossier}{}/", fichier.trim_end_matches(".rs"))
+        format!("{dir}{}/", file.trim_end_matches(".rs"))
     };
-    let nom = &declaration.nom;
-    vec![format!("{base}{nom}.rs"), format!("{base}{nom}/mod.rs")]
+    let name = &declaration.name;
+    vec![format!("{base}{name}.rs"), format!("{base}{name}/mod.rs")]
 }
 
-/// `a/./b/../c.rs` → `a/c.rs` ; `None` si le chemin remonte au-dessus de
-/// `src/` (`../tests/support/sources.rs`).
-fn normaliser(chemin: &str) -> Option<String> {
-    let mut parties: Vec<&str> = Vec::new();
-    for partie in chemin.split('/') {
-        match partie {
+/// `a/./b/../c.rs` → `a/c.rs`; `None` if the path goes above `src/`
+/// (`../tests/support/sources.rs`).
+fn normalize(path: &str) -> Option<String> {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
             "" | "." => {}
             ".." => {
-                parties.pop()?;
+                parts.pop()?;
             }
-            _ => parties.push(partie),
+            _ => parts.push(part),
         }
     }
-    Some(parties.join("/"))
+    Some(parts.join("/"))
 }
 
 // ---------------------------------------------------------------------------
-// Les items de test
+// The test items
 // ---------------------------------------------------------------------------
 
-/// Le fichier s'ouvre sur un attribut intérieur `#![cfg(test)]` (parmi ses
-/// attributs intérieurs de tête) : il est entier de test.
-fn entierement_de_test(masque: &[char]) -> bool {
+/// The file opens with an inner attribute `#![cfg(test)]` (among its leading
+/// inner attributes): it is entirely test code.
+fn is_entirely_test(mask: &[char]) -> bool {
     let mut k = 0;
     loop {
-        while masque.get(k).is_some_and(|c| c.is_whitespace()) {
+        while mask.get(k).is_some_and(|c| c.is_whitespace()) {
             k += 1;
         }
-        if commence_par(masque, k, "#![cfg(test)]") {
+        if starts_with_at(mask, k, "#![cfg(test)]") {
             return true;
         }
-        if !commence_par(masque, k, "#![") {
+        if !starts_with_at(mask, k, "#![") {
             return false;
         }
-        match fermante(masque, k + 2) {
-            Some(fin) => k = fin + 1,
+        match closing(mask, k + 2) {
+            Some(end) => k = end + 1,
             None => return false,
         }
     }
 }
 
-/// Les étendues `[début, fin)` des éléments `#[cfg(test)]` : leurs attributs,
-/// puis l'item jusqu'à son `;` ou à l'accolade qui ferme son corps — ou, pour
-/// un champ, un bras de `match`, un argument, jusqu'à sa virgule.
-pub fn zones_de_test(masque: &[char]) -> Vec<(usize, usize)> {
-    const ATTRIBUT: &str = "#[cfg(test)]";
+/// The ranges `[start, end)` of the `#[cfg(test)]` elements: their attributes,
+/// then the item up to its `;` or to the brace that closes its body — or, for
+/// a field, a `match` arm, an argument, up to its comma.
+pub fn test_zones(mask: &[char]) -> Vec<(usize, usize)> {
+    const ATTRIBUTE: &str = "#[cfg(test)]";
     let mut zones = Vec::new();
     let mut i = 0;
-    while i < masque.len() {
-        if !commence_par(masque, i, ATTRIBUT) {
+    while i < mask.len() {
+        if !starts_with_at(mask, i, ATTRIBUTE) {
             i += 1;
             continue;
         }
-        let debut = debut_d_item(masque, i);
-        let fin = fin_d_item(masque, i + ATTRIBUT.len());
-        zones.push((debut, fin));
-        i = fin.max(i + 1);
+        let start = item_start(mask, i);
+        let end = item_end(mask, i + ATTRIBUTE.len());
+        zones.push((start, end));
+        i = end.max(i + 1);
     }
     zones
 }
 
-/// Le début de l'item dont un attribut ou le mot-clé est en `position` :
-/// recule sur les blancs, les attributs extérieurs `#[…]` et la visibilité.
-fn debut_d_item(masque: &[char], position: usize) -> usize {
-    let mut debut = position;
+/// The start of the item whose attribute or keyword is at `position`: steps
+/// back over whitespace, outer attributes `#[…]` and visibility.
+fn item_start(mask: &[char], position: usize) -> usize {
+    let mut start = position;
     loop {
-        let mut k = debut;
-        while k > 0 && masque[k - 1].is_whitespace() {
+        let mut k = start;
+        while k > 0 && mask[k - 1].is_whitespace() {
             k -= 1;
         }
-        if k > 0 && masque[k - 1] == ']' {
-            match ouvrante(masque, k - 1) {
-                Some(crochet) if crochet > 0 && masque[crochet - 1] == '#' => {
-                    debut = crochet - 1;
+        if k > 0 && mask[k - 1] == ']' {
+            match opening(mask, k - 1) {
+                Some(bracket) if bracket > 0 && mask[bracket - 1] == '#' => {
+                    start = bracket - 1;
                     continue;
                 }
                 _ => {}
             }
         }
-        if k > 0 && masque[k - 1] == ')' {
-            if let Some(parenthese) = ouvrante(masque, k - 1) {
-                if parenthese >= 3 && mot_en(masque, parenthese - 3, "pub") {
-                    debut = parenthese - 3;
+        if k > 0 && mask[k - 1] == ')' {
+            if let Some(paren) = opening(mask, k - 1) {
+                if paren >= 3 && word_at(mask, paren - 3, "pub") {
+                    start = paren - 3;
                     continue;
                 }
             }
         }
-        if k >= 3 && mot_en(masque, k - 3, "pub") {
-            debut = k - 3;
+        if k >= 3 && word_at(mask, k - 3, "pub") {
+            start = k - 3;
             continue;
         }
-        return debut;
+        return start;
     }
 }
 
-/// Les mots qui ouvrent un item ou une instruction terminés par `;` ou par un
-/// corps entre accolades.
-const MOTS_D_ITEM: &[&str] = &[
+/// The words that open an item or a statement ended by `;` or by a body
+/// between braces.
+const ITEM_KEYWORDS: &[&str] = &[
     "fn",
     "mod",
     "use",
@@ -390,127 +389,126 @@ const MOTS_D_ITEM: &[&str] = &[
     "let",
 ];
 
-/// La fin (exclue) de l'élément qui suit l'attribut fini en `position`,
-/// attributs suivants compris. Un item (`fn`, `mod`, `struct`…) finit après son
-/// `;` de premier niveau, ou après l'accolade fermante de son corps. Tout autre
-/// élément (champ, bras de `match`, argument) finit à sa virgule, ou avant
-/// l'accolade ou la parenthèse fermante qui l'englobe : il n'avale jamais le
-/// code qui le suit.
-fn fin_d_item(masque: &[char], position: usize) -> usize {
+/// The end (excluded) of the element that follows the attribute ending at
+/// `position`, following attributes included. An item (`fn`, `mod`, `struct`…)
+/// ends after its top-level `;`, or after the closing brace of its body. Any
+/// other element (field, `match` arm, argument) ends at its comma, or before
+/// the closing brace or parenthesis that encloses it: it never swallows the
+/// code that follows it.
+fn item_end(mask: &[char], position: usize) -> usize {
     let mut k = position;
     loop {
-        while masque.get(k).is_some_and(|c| c.is_whitespace()) {
+        while mask.get(k).is_some_and(|c| c.is_whitespace()) {
             k += 1;
         }
-        if !commence_par(masque, k, "#[") {
+        if !starts_with_at(mask, k, "#[") {
             break;
         }
-        match fermante(masque, k + 1) {
-            Some(fin) => k = fin + 1,
-            None => return masque.len(),
+        match closing(mask, k + 1) {
+            Some(end) => k = end + 1,
+            None => return mask.len(),
         }
     }
-    let item = MOTS_D_ITEM.iter().any(|mot| mot_en(masque, k, mot));
-    let mut profondeur = 0usize;
-    while k < masque.len() {
-        match masque[k] {
-            '(' | '[' => profondeur += 1,
-            ')' | ']' | '}' if profondeur == 0 => return k,
-            ')' | ']' => profondeur -= 1,
-            ';' if profondeur == 0 => return k + 1,
-            ',' if profondeur == 0 && !item => return k + 1,
-            '{' if profondeur == 0 => {
-                let fin = fermante(masque, k).map_or(masque.len(), |fin| fin + 1);
+    let item = ITEM_KEYWORDS.iter().any(|word| word_at(mask, k, word));
+    let mut depth = 0usize;
+    while k < mask.len() {
+        match mask[k] {
+            '(' | '[' => depth += 1,
+            ')' | ']' | '}' if depth == 0 => return k,
+            ')' | ']' => depth -= 1,
+            ';' if depth == 0 => return k + 1,
+            ',' if depth == 0 && !item => return k + 1,
+            '{' if depth == 0 => {
+                let end = closing(mask, k).map_or(mask.len(), |end| end + 1);
                 if item {
-                    return fin;
+                    return end;
                 }
-                k = fin;
+                k = end;
                 continue;
             }
-            '{' => profondeur += 1,
-            '}' => profondeur -= 1,
+            '{' => depth += 1,
+            '}' => depth -= 1,
             _ => {}
         }
         k += 1;
     }
-    masque.len()
+    mask.len()
 }
 
-fn blanchir(source: &mut Masque, debut: usize, fin: usize) {
-    for k in debut..fin.min(source.masque.len()) {
+fn blank_out(source: &mut Mask, start: usize, end: usize) {
+    for k in start..end.min(source.mask.len()) {
         if source.original[k] != '\n' {
-            source.masque[k] = ' ';
+            source.mask[k] = ' ';
             source.code[k] = ' ';
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Le masque
+// The mask
 // ---------------------------------------------------------------------------
 
-/// Une source sous trois vues de même longueur (en caractères), donc aux mêmes
-/// positions.
+/// A source under three views of the same length (in characters), hence at the
+/// same positions.
 #[derive(Debug, Clone)]
-pub struct Masque {
-    /// Commentaires blanchis, contenu des chaînes remplacé : `A` pour une
-    /// lettre, `_` pour le reste. Un motif cherché ici n'est jamais dans un
-    /// commentaire ni dans une chaîne.
-    pub masque: Vec<char>,
-    /// Commentaires blanchis, chaînes intactes.
+pub struct Mask {
+    /// Comments blanked, string contents replaced: `A` for a letter, `_` for
+    /// the rest. A pattern searched here is never in a comment or in a string.
+    pub mask: Vec<char>,
+    /// Comments blanked, strings intact.
     pub code: Vec<char>,
     pub original: Vec<char>,
 }
 
-impl Masque {
-    pub fn code_en_texte(&self) -> String {
+impl Mask {
+    pub fn code_as_text(&self) -> String {
         self.code.iter().collect()
     }
 }
 
-/// Le masque du texte, sans vue de fichier : tests compris.
-pub fn masquer(texte: &str) -> Masque {
-    let original: Vec<char> = texte.chars().collect();
-    let mut masque = original.clone();
+/// The mask of the text, without a file view: tests included.
+pub fn mask_source(text: &str) -> Mask {
+    let original: Vec<char> = text.chars().collect();
+    let mut mask = original.clone();
     let mut code = original.clone();
     let n = original.len();
     let mut i = 0;
     while i < n {
         let c = original[i];
-        let suivant = original.get(i + 1).copied();
-        // Commentaire de ligne.
-        if c == '/' && suivant == Some('/') {
+        let following = original.get(i + 1).copied();
+        // Line comment.
+        if c == '/' && following == Some('/') {
             while i < n && original[i] != '\n' {
-                masque[i] = ' ';
+                mask[i] = ' ';
                 code[i] = ' ';
                 i += 1;
             }
             continue;
         }
-        // Commentaire de bloc, imbriqué.
-        if c == '/' && suivant == Some('*') {
-            let mut profondeur = 0;
+        // Block comment, nested.
+        if c == '/' && following == Some('*') {
+            let mut depth = 0;
             while i < n {
                 if original[i] == '/' && original.get(i + 1) == Some(&'*') {
-                    profondeur += 1;
+                    depth += 1;
                     for k in [i, i + 1] {
-                        masque[k] = ' ';
+                        mask[k] = ' ';
                         code[k] = ' ';
                     }
                     i += 2;
                 } else if original[i] == '*' && original.get(i + 1) == Some(&'/') {
-                    profondeur -= 1;
+                    depth -= 1;
                     for k in [i, i + 1] {
-                        masque[k] = ' ';
+                        mask[k] = ' ';
                         code[k] = ' ';
                     }
                     i += 2;
-                    if profondeur == 0 {
+                    if depth == 0 {
                         break;
                     }
                 } else {
                     if original[i] != '\n' {
-                        masque[i] = ' ';
+                        mask[i] = ' ';
                         code[i] = ' ';
                     }
                     i += 1;
@@ -518,99 +516,99 @@ pub fn masquer(texte: &str) -> Masque {
             }
             continue;
         }
-        let precedent_ident = i > 0 && est_ident(original[i - 1]);
-        // Chaîne brute : r"…", r#"…"#, br#"…"#.
-        if (c == 'r' || (c == 'b' && suivant == Some('r'))) && !precedent_ident {
+        let prev_is_ident = i > 0 && is_ident(original[i - 1]);
+        // Raw string: r"…", r#"…"#, br#"…"#.
+        if (c == 'r' || (c == 'b' && following == Some('r'))) && !prev_is_ident {
             let mut j = i + if c == 'b' { 2 } else { 1 };
-            let mut dieses = 0;
+            let mut hashes = 0;
             while original.get(j) == Some(&'#') {
-                dieses += 1;
+                hashes += 1;
                 j += 1;
             }
             if original.get(j) == Some(&'"') {
                 j += 1;
                 while j < n {
                     if original[j] == '"'
-                        && (0..dieses).all(|k| original.get(j + 1 + k) == Some(&'#'))
+                        && (0..hashes).all(|k| original.get(j + 1 + k) == Some(&'#'))
                     {
                         break;
                     }
-                    masquer_caractere(&original, &mut masque, j);
+                    mask_char(&original, &mut mask, j);
                     j += 1;
                 }
-                i = (j + 1 + dieses).min(n);
+                i = (j + 1 + hashes).min(n);
                 continue;
             }
         }
-        // Chaîne ordinaire.
+        // Ordinary string.
         if c == '"' {
             let mut j = i + 1;
             while j < n && original[j] != '"' {
                 if original[j] == '\\' {
-                    masque[j] = '_';
+                    mask[j] = '_';
                     j += 1;
                     if j < n {
-                        let echappe = original[j];
-                        masquer_neutre(&original, &mut masque, j);
+                        let escaped = original[j];
+                        mask_neutral(&original, &mut mask, j);
                         j += 1;
-                        if echappe == 'u' && original.get(j) == Some(&'{') {
+                        if escaped == 'u' && original.get(j) == Some(&'{') {
                             while j < n && original[j] != '}' {
-                                masquer_neutre(&original, &mut masque, j);
+                                mask_neutral(&original, &mut mask, j);
                                 j += 1;
                             }
                             if j < n {
-                                masquer_neutre(&original, &mut masque, j);
+                                mask_neutral(&original, &mut mask, j);
                                 j += 1;
                             }
                         }
                     }
                     continue;
                 }
-                // Un champ de format (`{code}`, `{label:>4}`) n'est pas du texte :
-                // son contenu est neutre. `{{` est une accolade littérale.
+                // A format field (`{code}`, `{label:>4}`) is not text: its content
+                // is neutral. `{{` is a literal brace.
                 if original[j] == '{' && original.get(j + 1) != Some(&'{') {
                     while j < n && original[j] != '}' && original[j] != '"' {
-                        masquer_neutre(&original, &mut masque, j);
+                        mask_neutral(&original, &mut mask, j);
                         j += 1;
                     }
                     continue;
                 }
-                masquer_caractere(&original, &mut masque, j);
+                mask_char(&original, &mut mask, j);
                 j += 1;
             }
             i = (j + 1).min(n);
             continue;
         }
-        // Littéral de caractère (et non une durée de vie).
+        // Character literal (and not a lifetime).
         if c == '\'' {
-            if suivant == Some('\\') {
+            if following == Some('\\') {
                 let mut j = i + 2;
                 while j < n && original[j] != '\'' {
-                    masque[j] = '_';
+                    mask[j] = '_';
                     j += 1;
                 }
-                masque[i + 1] = '_';
+                mask[i + 1] = '_';
                 i = (j + 1).min(n);
                 continue;
             }
             if original.get(i + 2) == Some(&'\'') {
-                masque[i + 1] = '_';
+                mask[i + 1] = '_';
                 i += 3;
                 continue;
             }
         }
         i += 1;
     }
-    Masque {
-        masque,
+    Mask {
+        mask,
         code,
         original,
     }
 }
 
-/// Dans une chaîne : une lettre devient `A`, le reste `_`, sauf les fins de ligne.
-fn masquer_caractere(original: &[char], masque: &mut [char], i: usize) {
-    masque[i] = if original[i] == '\n' {
+/// In a string: a letter becomes `A`, the rest `_`, except line ends.
+fn mask_char(original: &[char], mask: &mut [char], i: usize) {
+    mask[i] = if original[i] == '\n' {
         '\n'
     } else if original[i].is_alphabetic() {
         'A'
@@ -619,28 +617,28 @@ fn masquer_caractere(original: &[char], masque: &mut [char], i: usize) {
     };
 }
 
-/// Dans une séquence d'échappement : jamais une lettre de texte.
-fn masquer_neutre(original: &[char], masque: &mut [char], i: usize) {
-    masque[i] = if original[i] == '\n' { '\n' } else { '_' };
+/// In an escape sequence: never a text letter.
+fn mask_neutral(original: &[char], mask: &mut [char], i: usize) {
+    mask[i] = if original[i] == '\n' { '\n' } else { '_' };
 }
 
 // ---------------------------------------------------------------------------
-// Outils de lecture du masque
+// Tools to read the mask
 // ---------------------------------------------------------------------------
 
-pub fn est_ident(c: char) -> bool {
+pub fn is_ident(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Position du délimiteur fermant qui répond à celui ouvert en `ouvrante`.
-pub fn fermante(masque: &[char], ouvrante: usize) -> Option<usize> {
-    let mut profondeur = 0usize;
-    for (i, c) in masque.iter().enumerate().skip(ouvrante) {
+/// Position of the closing delimiter that matches the one opened at `opening`.
+pub fn closing(mask: &[char], opening: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, c) in mask.iter().enumerate().skip(opening) {
         match c {
-            '(' | '[' | '{' => profondeur += 1,
+            '(' | '[' | '{' => depth += 1,
             ')' | ']' | '}' => {
-                profondeur = profondeur.checked_sub(1)?;
-                if profondeur == 0 {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
                     return Some(i);
                 }
             }
@@ -650,15 +648,15 @@ pub fn fermante(masque: &[char], ouvrante: usize) -> Option<usize> {
     None
 }
 
-/// Position du délimiteur ouvrant qui répond à celui fermé en `fermante`.
-pub fn ouvrante(masque: &[char], fermante: usize) -> Option<usize> {
-    let mut profondeur = 0usize;
-    for i in (0..=fermante).rev() {
-        match masque[i] {
-            ')' | ']' | '}' => profondeur += 1,
+/// Position of the opening delimiter that matches the one closed at `closing`.
+pub fn opening(mask: &[char], closing: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for i in (0..=closing).rev() {
+        match mask[i] {
+            ')' | ']' | '}' => depth += 1,
             '(' | '[' | '{' => {
-                profondeur = profondeur.checked_sub(1)?;
-                if profondeur == 0 {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
                     return Some(i);
                 }
             }
@@ -668,174 +666,173 @@ pub fn ouvrante(masque: &[char], fermante: usize) -> Option<usize> {
     None
 }
 
-pub fn commence_par(masque: &[char], position: usize, motif: &str) -> bool {
-    motif
+pub fn starts_with_at(mask: &[char], position: usize, pattern: &str) -> bool {
+    pattern
         .chars()
         .enumerate()
-        .all(|(k, c)| masque.get(position + k) == Some(&c))
+        .all(|(k, c)| mask.get(position + k) == Some(&c))
 }
 
-/// `motif` écrit en `position` comme un mot entier : ni précédé ni suivi d'un
-/// caractère d'identifiant.
-pub fn mot_en(masque: &[char], position: usize, motif: &str) -> bool {
-    commence_par(masque, position, motif)
-        && (position == 0 || !est_ident(masque[position - 1]))
-        && !masque
-            .get(position + motif.chars().count())
-            .is_some_and(|c| est_ident(*c))
+/// `pattern` written at `position` as a whole word: neither preceded nor followed
+/// by an identifier character.
+pub fn word_at(mask: &[char], position: usize, pattern: &str) -> bool {
+    starts_with_at(mask, position, pattern)
+        && (position == 0 || !is_ident(mask[position - 1]))
+        && !mask
+            .get(position + pattern.chars().count())
+            .is_some_and(|c| is_ident(*c))
 }
 
-pub fn ident_en(masque: &[char], position: usize) -> String {
-    masque[position.min(masque.len())..]
+pub fn ident_at(mask: &[char], position: usize) -> String {
+    mask[position.min(mask.len())..]
         .iter()
-        .take_while(|c| est_ident(**c))
+        .take_while(|c| is_ident(**c))
         .collect()
 }
 
-pub fn ligne_de(original: &[char], position: usize) -> usize {
+pub fn line_of(original: &[char], position: usize) -> usize {
     1 + original[..position].iter().filter(|c| **c == '\n').count()
 }
 
 // ---------------------------------------------------------------------------
-// Les fonctions
+// The functions
 // ---------------------------------------------------------------------------
 
-/// Les fonctions du masque : position du `fn`, nom qualifié par le bloc `impl`
-/// qui la contient (`Type::nom`, `nom` hors `impl`).
-pub fn fonctions(masque: &[char]) -> Vec<(usize, String)> {
-    let impls = blocs_impl(masque);
-    let mut trouvees = Vec::new();
-    for i in 0..masque.len() {
-        if commence_par(masque, i, "fn ") && (i == 0 || !est_ident(masque[i - 1])) {
-            let nom = ident_en(masque, i + 3);
-            if nom.is_empty() {
+/// The functions of the mask: position of the `fn`, name qualified by the
+/// `impl` block that contains it (`Type::name`, `name` outside an `impl`).
+pub fn functions(mask: &[char]) -> Vec<(usize, String)> {
+    let impls = impl_blocks(mask);
+    let mut found = Vec::new();
+    for i in 0..mask.len() {
+        if starts_with_at(mask, i, "fn ") && (i == 0 || !is_ident(mask[i - 1])) {
+            let name = ident_at(mask, i + 3);
+            if name.is_empty() {
                 continue;
             }
-            let qualifie = impls
+            let qualified = impls
                 .iter()
-                .find(|(debut, fin, _)| *debut < i && i < *fin)
-                .map_or(nom.clone(), |(_, _, cible)| format!("{cible}::{nom}"));
-            trouvees.push((i, qualifie));
+                .find(|(start, end, _)| *start < i && i < *end)
+                .map_or(name.clone(), |(_, _, target)| format!("{target}::{name}"));
+            found.push((i, qualified));
         }
     }
-    trouvees
+    found
 }
 
-/// Le dernier segment d'un nom qualifié : `nom` pour `Type::nom`.
-pub fn nom_court(qualifie: &str) -> &str {
-    qualifie.rsplit("::").next().unwrap_or(qualifie)
+/// The last segment of a qualified name: `name` for `Type::name`.
+pub fn short_name(qualified: &str) -> &str {
+    qualified.rsplit("::").next().unwrap_or(qualified)
 }
 
-/// L'étendue `[accolade ouvrante, accolade fermante]` du corps de la fonction
-/// dont le `fn` est en `position` ; `None` pour une déclaration sans corps.
-pub fn corps(masque: &[char], position: usize) -> Option<(usize, usize)> {
-    // Le `;` d'un type tableau (`[u8; 4]`) de la signature n'est pas la fin
-    // d'une déclaration : seuls comptent ceux de premier niveau.
-    let mut profondeur = 0usize;
-    for k in position..masque.len() {
-        match masque[k] {
-            '(' | '[' => profondeur += 1,
-            ')' | ']' => profondeur = profondeur.saturating_sub(1),
-            ';' if profondeur == 0 => return None,
-            '{' if profondeur == 0 => return Some((k, fermante(masque, k)?)),
+/// The range `[opening brace, closing brace]` of the body of the function whose
+/// `fn` is at `position`; `None` for a declaration without a body.
+pub fn body(mask: &[char], position: usize) -> Option<(usize, usize)> {
+    // The `;` of an array type (`[u8; 4]`) in the signature is not the end of
+    // a declaration: only top-level ones count.
+    let mut depth = 0usize;
+    for k in position..mask.len() {
+        match mask[k] {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ';' if depth == 0 => return None,
+            '{' if depth == 0 => return Some((k, closing(mask, k)?)),
             _ => {}
         }
     }
     None
 }
 
-/// Une fonction de production trouvée par [`fonctions_nommees`].
+/// A production function found by [`functions_named`].
 #[derive(Debug, Clone)]
-pub struct Fonction {
-    pub chemin: String,
-    pub qualifie: String,
-    pub ligne: usize,
-    /// Le corps, commentaires blanchis, chaînes intactes.
-    pub corps: String,
+pub struct Function {
+    pub path: String,
+    pub qualified: String,
+    pub line: usize,
+    /// The body, comments blanked, strings intact.
+    pub body: String,
 }
 
-/// Les fonctions de production nommées `nom` (dernier segment du nom qualifié :
-/// une méthode `Type::nom` compte), où qu'elles soient dans `sources`.
-pub fn fonctions_nommees(sources: &[Fichier], nom: &str) -> Vec<Fonction> {
-    let mut trouvees = Vec::new();
-    for fichier in sources {
-        let source = fichier.production();
-        for (position, qualifie) in fonctions(&source.masque) {
-            if nom_court(&qualifie) != nom {
+/// The production functions named `name` (last segment of the qualified name:
+/// a `Type::name` method counts), wherever they are in `sources`.
+pub fn functions_named(sources: &[SourceFile], name: &str) -> Vec<Function> {
+    let mut found = Vec::new();
+    for file in sources {
+        let source = file.production();
+        for (position, qualified) in functions(&source.mask) {
+            if short_name(&qualified) != name {
                 continue;
             }
-            let Some((debut, fin)) = corps(&source.masque, position) else {
+            let Some((start, end)) = body(&source.mask, position) else {
                 continue;
             };
-            trouvees.push(Fonction {
-                chemin: fichier.chemin.clone(),
-                qualifie,
-                ligne: ligne_de(&source.original, position),
-                corps: source.code[debut..=fin].iter().collect(),
+            found.push(Function {
+                path: file.path.clone(),
+                qualified,
+                line: line_of(&source.original, position),
+                body: source.code[start..=end].iter().collect(),
             });
         }
     }
-    trouvees
+    found
 }
 
-/// L'unique fonction de production nommée `nom` — libre ou méthode
-/// `Type::nom` : une fonction devenue méthode reste trouvée (#122). Échoue, en
-/// le disant, si elle est introuvable ou en plusieurs exemplaires.
-pub fn fonction_unique(sources: &[Fichier], nom: &str) -> Fonction {
-    let mut trouvees = fonctions_nommees(sources, nom);
+/// The only production function named `name` — free or `Type::name` method:
+/// a function that became a method is still found (#122). Fails, saying so,
+/// if it is not found or if there are several.
+pub fn unique_function(sources: &[SourceFile], name: &str) -> Function {
+    let mut found = functions_named(sources, name);
     assert!(
-        trouvees.len() == 1,
-        "`fn {nom}` attendue une fois dans les sources de production de src/, trouvée {} fois : {:?}",
-        trouvees.len(),
-        trouvees
+        found.len() == 1,
+        "`fn {name}` expected once in the production sources of src/, found {} times: {:?}",
+        found.len(),
+        found
             .iter()
-            .map(|f| format!("{}:{}", f.chemin, f.ligne))
+            .map(|f| format!("{}:{}", f.path, f.line))
             .collect::<Vec<_>>()
     );
-    trouvees.remove(0)
+    found.remove(0)
 }
 
-/// Les blocs `impl` : (début, fin, type visé).
-pub fn blocs_impl(masque: &[char]) -> Vec<(usize, usize, String)> {
-    let mut blocs = Vec::new();
-    for i in 0..masque.len() {
-        if !commence_par(masque, i, "impl")
-            || (i > 0 && est_ident(masque[i - 1]))
-            || masque.get(i + 4).is_some_and(|c| est_ident(*c))
+/// The `impl` blocks: (start, end, target type).
+pub fn impl_blocks(mask: &[char]) -> Vec<(usize, usize, String)> {
+    let mut blocks = Vec::new();
+    for i in 0..mask.len() {
+        if !starts_with_at(mask, i, "impl")
+            || (i > 0 && is_ident(mask[i - 1]))
+            || mask.get(i + 4).is_some_and(|c| is_ident(*c))
         {
             continue;
         }
-        let Some(accolade) = (i..masque.len()).find(|k| masque[*k] == '{' || masque[*k] == ';')
-        else {
+        let Some(brace) = (i..mask.len()).find(|k| mask[*k] == '{' || mask[*k] == ';') else {
             continue;
         };
-        if masque[accolade] != '{' {
+        if mask[brace] != '{' {
             continue;
         }
-        let Some(fin) = fermante(masque, accolade) else {
+        let Some(end) = closing(mask, brace) else {
             continue;
         };
-        let entete: String = masque[i + 4..accolade].iter().collect();
-        blocs.push((i, fin, cible_de_impl(&entete)));
+        let header: String = mask[i + 4..brace].iter().collect();
+        blocks.push((i, end, impl_target(&header)));
     }
-    blocs
+    blocks
 }
 
-/// Le type visé par l'en-tête d'un `impl` : `Type` pour `impl Type`,
+/// The type targeted by the header of an `impl`: `Type` for `impl Type`,
 /// `impl<T> Type<T>`, `impl Trait for Type`.
-fn cible_de_impl(entete: &str) -> String {
-    let mut reste = entete.trim();
-    if let Some((_, apres)) = reste.rsplit_once(" for ") {
-        reste = apres.trim();
-    } else if reste.starts_with('<') {
-        let mut profondeur = 0usize;
-        for (k, c) in reste.char_indices() {
+fn impl_target(header: &str) -> String {
+    let mut rest = header.trim();
+    if let Some((_, after)) = rest.rsplit_once(" for ") {
+        rest = after.trim();
+    } else if rest.starts_with('<') {
+        let mut depth = 0usize;
+        for (k, c) in rest.char_indices() {
             match c {
-                '<' => profondeur += 1,
+                '<' => depth += 1,
                 '>' => {
-                    profondeur = profondeur.saturating_sub(1);
-                    if profondeur == 0 {
-                        reste = reste[k + 1..].trim();
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        rest = rest[k + 1..].trim();
                         break;
                     }
                 }
@@ -843,5 +840,5 @@ fn cible_de_impl(entete: &str) -> String {
             }
         }
     }
-    reste.chars().take_while(|c| est_ident(*c)).collect()
+    rest.chars().take_while(|c| is_ident(*c)).collect()
 }

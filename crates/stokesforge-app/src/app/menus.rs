@@ -1,30 +1,30 @@
-//! Barre de menu et barre d'état de la fenêtre principale :
-//! [`StokesForgeApp::menu_bar`] (« Fichier », « Édition », « Classeur »,
-//! « Graphique », « Affichage », « Fenêtre ») et [`StokesForgeApp::status_bar`].
+//! Menu bar and status bar of the main window:
+//! [`StokesForgeApp::menu_bar`] ("File", "Edit", "Workbook", "Graph", "View",
+//! "Window") and [`StokesForgeApp::status_bar`].
 //!
-//! Le grisage de chaque entrée se décide ici, d'après l'état et l'onglet
-//! actif que [`StokesForgeApp::ui`](eframe::App::ui) calcule une fois par image ; les entrées
-//! poussent des [`Action`], appliquées après la peinture par la boucle de
-//! dispatch d'`app.rs`. L'ordre des panneaux (la barre de menu est le premier
-//! `egui::Panel::top`, la barre d'état le premier `egui::Panel::bottom`) reste
-//! décidé dans `ui()`.
+//! The greying of each entry is decided here, from the state and the active
+//! tab that [`StokesForgeApp::ui`](eframe::App::ui) computes once per frame; the
+//! entries push [`Action`]s, applied after painting by the dispatch loop of
+//! `app.rs`. The order of the panels (the menu bar is the first
+//! `egui::Panel::top`, the status bar the first `egui::Panel::bottom`) stays
+//! decided in `ui()`.
 //!
-//! # Sous-menus (#114)
-//! Les listes se regroupent par thème, avec les mêmes composants que les
-//! clics droits. Les bascules d'affichage doivent rester ouvertes, les actions
-//! et les choix exclusifs fermer la chaîne : `CloseOnClickOutside` hérité par
-//! les sous-menus évite la fermeture automatique d'egui sur une case ; chaque
-//! action appelle `ui.close()`, propagé par egui aux parents.
+//! # Submenus (#114)
+//! Lists are grouped by theme, with the same components as the right-clicks.
+//! Display toggles must stay open, actions and exclusive choices close the
+//! chain: `CloseOnClickOutside` inherited by the submenus avoids egui's
+//! automatic closing on a checkbox; each action calls `ui.close()`, propagated
+//! by egui to the parents.
 //!
-//! # Grammaire (#152)
-//! Chaque menu range ses entrées par sections (`MenuSections::section`,
-//! `menu_sections.rs`) selon `docs/menus.md` : ici, la barre **enveloppe**
-//! les contenus partagés avec les clics droits (Selection, Sheet, Columns…),
-//! qui, eux, les affichent à plat.
+//! # Grammar (#152)
+//! Each menu arranges its entries by sections (`MenuSections::section`,
+//! `menu_sections.rs`) according to `docs/menus.md`: here, the bar **wraps**
+//! the contents shared with the right-clicks (Selection, Sheet, Columns…),
+//! which display them flat.
 //!
-//! Chaque menu possède sa fonction (#124), appelée dans la même Ui et dans
-//! le même ordre ; les demandes de l'Object Manager restent différées après
-//! la fermeture du panneau. Aucun scope egui ne dépend du découpage Rust.
+//! Each menu has its own function (#124), called in the same Ui and in the same
+//! order; the Object Manager requests stay deferred after the panel is closed.
+//! No egui scope depends on the Rust split.
 
 use eframe::egui;
 use stokesforge_core::compose::overlays_full;
@@ -53,22 +53,20 @@ use super::workbook::workbook_menu;
 use super::StokesForgeApp;
 
 impl StokesForgeApp {
-    /// Barre de menu : « Fichier », « Édition », « Classeur » (seulement
-    /// quand un classeur est au premier plan), « Graphique » (seulement
-    /// quand l'onglet actif est un graphe, voir [`active_graph`]),
-    /// « Affichage » et « Fenêtre ».
+    /// Menu bar: "File", "Edit", "Workbook" (only when a workbook is in the
+    /// foreground), "Graph" (only when the active tab is a graph, see
+    /// [`active_graph`]), "View" and "Window".
     ///
-    /// « Graphique » ouvre la fenêtre des propriétés du graphe sur chacun de
-    /// ses onglets ([`plot_settings_window`](crate::app::plot_settings::plot_settings_window)) — les mêmes pages que le clic
-    /// droit sur un composant du graphe ([`graph_view_contents`](crate::app::graph_window::graph_view_contents)), pour
-    /// qu'aucun réglage ne soit atteignable **seulement** au clic droit — et
-    /// réinitialise le zoom.
+    /// "Graph" opens the graph properties window on each of its tabs
+    /// ([`plot_settings_window`](crate::app::plot_settings::plot_settings_window)) — the same pages as the right-click
+    /// on a graph component ([`graph_view_contents`](crate::app::graph_window::graph_view_contents)), so
+    /// that no setting is reachable **only** by right-click — and resets the
+    /// zoom.
     ///
-    /// « Fenêtre » porte les deux fonctionnalités qui touchent à la
-    /// disposition elle-même plutôt qu'au modèle : maximiser/restaurer
-    /// l'onglet actif, et détacher/réattacher le Project Manager en fenêtre
-    /// OS séparée — voir la doc de tête de `window_stack.rs` et de
-    /// `window_detach.rs`.
+    /// "Window" carries the two features that concern the layout itself
+    /// rather than the model: maximize/restore the active tab, and
+    /// detach/reattach the Project Manager in a separate OS window — see the
+    /// head doc of `window_stack.rs` and `window_detach.rs`.
     pub(super) fn menu_bar(
         &mut self,
         ui: &mut egui::Ui,
@@ -84,21 +82,21 @@ impl StokesForgeApp {
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
                 )
                 .ui(ui, |ui| {
-                    let mut titres = vec![self.file_menu(ui, ctx, actions)];
-                    titres.push(self.edit_menu(ui, ctx, actions));
-                    titres.extend(self.workbook_menu(ui, ctx, actions));
+                    let mut titles = vec![self.file_menu(ui, ctx, actions)];
+                    titles.push(self.edit_menu(ui, ctx, actions));
+                    titles.extend(self.workbook_menu(ui, ctx, actions));
                     if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
-                        titres.push(self.graph_menu(ui, ctx, graph, actions, &mut object_requests));
+                        titles.push(self.graph_menu(ui, ctx, graph, actions, &mut object_requests));
                     }
-                    titres.push(self.analysis_menu(
+                    titles.push(self.analysis_menu(
                         ui,
                         actions,
                         active_graph(active_tab_kind(active_tab)),
                     ));
-                    titres.push(self.view_menu(ui, actions));
-                    titres.push(self.window_menu(ui));
-                    titres.push(help_menu(ui, actions));
-                    bascule_au_survol(ctx, &titres);
+                    titles.push(self.view_menu(ui, actions));
+                    titles.push(self.window_menu(ui));
+                    titles.push(help_menu(ui, actions));
+                    toggle_on_hover(ctx, &titles);
                 });
         });
         if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
@@ -108,8 +106,8 @@ impl StokesForgeApp {
         }
     }
 
-    // Chaque fonction garde les mêmes Ui de menu : extraire du Rust ne doit
-    // ajouter aucun scope egui ni déplacer l'application différée des demandes.
+    // Each function keeps the same menu Uis: extracting Rust must not add any
+    // egui scope nor move the deferred application of the requests.
     fn file_menu(
         &mut self,
         ui: &mut egui::Ui,
@@ -278,9 +276,9 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
     ) -> egui::Response {
         ui.menu_button(tr!("menu-edit"), |ui| {
-            // Le libellé complet (« Undo Edit Cells in Column A ») et le
-            // grisage sont deux lignes distinctes ici ; Qt les tenait
-            // ensemble dans une seule `QAction`.
+            // The full label ("Undo Edit Cells in Column A") and the greying
+            // are two distinct lines here; Qt kept them together in a single
+            // `QAction`.
             let mut sections = MenuSections::new();
             sections.section(ui, true, |ui| {
                 let undo = self
@@ -382,8 +380,8 @@ impl StokesForgeApp {
         )
     }
 
-    /// Menu Analysis (#181, #210) : la sélection du graphe actif prend
-    /// priorité ; sinon les colonnes Y du classeur. Sans cible : grisé.
+    /// Analysis menu (#181, #210): the selection of the active graph takes
+    /// priority; otherwise the Y columns of the workbook. With no target: greyed out.
     fn analysis_menu(
         &mut self,
         ui: &mut egui::Ui,
@@ -426,8 +424,8 @@ impl StokesForgeApp {
                     spec,
                 }),
                 None if graph.is_some() => None,
-                // Des lignes entières d'une feuille à x' (#253) : on analyse
-                // des lignes, pas les colonnes qu'elles traversent.
+                // Whole rows of a sheet at x' (#253): we analyze
+                // rows, not the columns they cross.
                 None if !row_pairs.is_empty() => {
                     Some(super::analysis_menu::AnalysisTarget::Rows { rows: &row_pairs })
                 }
@@ -472,8 +470,8 @@ impl StokesForgeApp {
                     ui.close();
                 }
             });
-            // Textes libres (issue #35) : le pendant, dans la barre de menus,
-            // du clic droit sur le fond.
+            // Free texts (issue #35): the counterpart, in the menu bar, of
+            // the right-click on the background.
             sections.section(ui, true, |ui| {
                 if ui
                     .button(tr!("action-add-text"))
@@ -490,8 +488,8 @@ impl StokesForgeApp {
                     }
                     ui.close();
                 }
-                // Calque superposé (#167), à la manière du « New Layer (Axes) »
-                // d'Origin, sur le calque actif.
+                // Overlaid layer (#167), in the manner of Origin's "New Layer (Axes)",
+                // on the active layer.
                 ui.menu_button(tr!("menu-new-layer"), |ui| {
                     let panel = published_active_panel(ctx, graph);
                     for (label, hint, x_top, y_right) in [
@@ -514,7 +512,7 @@ impl StokesForgeApp {
                             true,
                         ),
                     ] {
-                        // Trois calques superposés au plus par case (#168).
+                        // At most three overlaid layers per box (#168).
                         let full = spec.as_ref().is_some_and(|spec| overlays_full(spec, panel));
                         if ui
                             .add_enabled(!full, egui::Button::new(label))
@@ -535,8 +533,8 @@ impl StokesForgeApp {
                 .response
                 .on_hover_text(tr!("menu-new-layer", "hint"));
             });
-            // Le menu de l'objet sélectionné est celui du clic droit et de
-            // l'Object Manager ; sans sélection, l'entrée est grisée.
+            // The menu of the selected object is that of the right-click and of
+            // the Object Manager; with no selection, the entry is greyed out.
             sections.section(ui, true, |ui| {
                 if let (Some(target), Some(spec)) = (target, spec.as_ref()) {
                     ui.menu_button(tr!("menu-selected-content"), |ui| {
@@ -556,8 +554,8 @@ impl StokesForgeApp {
                     ui.close();
                 }
             });
-            // Axes miroirs (#176) du calque actif : de vraies bascules
-            // d'affichage, elles gardent le menu ouvert.
+            // Mirror axes (#176) of the active layer: real display toggles,
+            // they keep the menu open.
             sections.section(ui, true, |ui| {
                 let panel = published_active_panel(ctx, graph);
                 for (side, label, hint) in [
@@ -694,9 +692,9 @@ impl StokesForgeApp {
 
     fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
         ui.menu_button(tr!("menu-view"), |ui| {
-            // Ni panneaux ni barres d'outils à masquer : le menu ne porte que
-            // les réglages de chaque panneau (Object Manager, plus tard
-            // Project Manager et console de script).
+            // No panels or toolbars to hide: the menu only carries the
+            // settings of each panel (Object Manager, later Project Manager
+            // and script console).
             ui.menu_button(tr!("action-object-manager"), |ui| {
                 object_manager_settings_menu(ui, self.state.object_manager_settings(), actions);
             });
@@ -721,11 +719,11 @@ impl StokesForgeApp {
                         ui.close();
                     }
                 } else {
-                    // La fenêtre flottante la plus récemment focalisée —
-                    // dernier élément de `floating_tabs`, voir la doc de
-                    // tête de `window_stack.rs`. Le Project Manager n'y
-                    // figure jamais, ce n'est pas une fenêtre flottante,
-                    // donc rien de spécial à exclure ici.
+                    // The most recently focused floating window —
+                    // last element of `floating_tabs`, see the head doc of
+                    // `window_stack.rs`. The Project Manager never appears
+                    // there, it is not a floating window, so there is
+                    // nothing special to exclude here.
                     let active = self.floating_tabs.last().copied();
                     let can_maximize = active.is_some();
                     if ui
@@ -761,31 +759,30 @@ impl StokesForgeApp {
                     ui.close();
                 }
             });
-            // Pas d'« Attacher à gauche/à droite » ici : le Project
-            // Manager est un panneau fixe, figé à gauche, depuis
-            // cette tâche (voir la doc de tête d'`app.rs`, § attacher
-            // à gauche ou à droite — le côté droit et le
-            // repositionnement par glisser sont un travail futur
-            // délibérément hors périmètre).
+            // No "Attach Left/Right" here: the Project Manager is a fixed
+            // panel, pinned to the left, since this task (see the head doc of
+            // `app.rs`, § attaching left or right — the right side and the
+            // repositioning by dragging are future work deliberately out of
+            // scope).
         })
         .response
     }
 
-    /// Barre d'état : le dernier message, à trois niveaux (S-M4) ; un clic ouvre
-    /// l'historique des 50 derniers (S-M6). Ni révision ni « Reopen Last
-    /// Import… » (S-R15 : il reste dans File).
+    /// Status bar: the last message, at three levels (S-M4); a click opens
+    /// the history of the last 50 (S-M6). No revision nor "Reopen Last
+    /// Import…" (S-R15: it stays in File).
     ///
-    /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
-    /// « la » feuille sélectionnée globale : chaque onglet de classeur les
-    /// montre pour sa propre feuille, dans [`book_contents`](crate::app::workbook::book_contents).
+    /// The dimensions (rows × columns) it used to show disappeared with the
+    /// global selected "the" sheet: each workbook tab shows them for its own
+    /// sheet, in [`book_contents`](crate::app::workbook::book_contents).
     pub(super) fn status_bar(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::Panel::bottom("stokesforge_status")
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Un travail qui dure remplace le message (#232, S-P1/S-P2) ;
-                    // sous 0,5 s la brique ne peint rien et le message
-                    // « Importing… » reste la ligne d'état.
+                    // A long-running task replaces the message (#232, S-P1/S-P2);
+                    // under 0.5 s the building block paints nothing and the
+                    // "Importing…" message stays the status line.
                     let line = ui.scope(|ui| {
                         if let Some(elapsed) = self.state.recalc_work() {
                             let work = Work {
@@ -816,8 +813,8 @@ impl StokesForgeApp {
                             }
                         }
                     });
-                    // La zone cliquable couvre toute la ligne, par-dessus ses
-                    // éléments (un `Label` ne porte pas le clic).
+                    // The clickable area covers the whole line, over its
+                    // elements (a `Label` does not carry the click).
                     let response = super::cursors::clickable(
                         ui.interact(
                             line.response.rect,
@@ -829,9 +826,9 @@ impl StokesForgeApp {
                     if response.clicked() {
                         actions.push(Action::OpenStatusHistory);
                     }
-                    // La pastille des R² faibles du projet (#290) : un état,
-                    // visible tant qu'il en reste, même si la boîte s'est
-                    // ouverte ou n'a pas pu s'ouvrir.
+                    // The badge of the project's weak R² (#290): a state,
+                    // visible as long as any remain, even if the box was
+                    // opened or could not open.
                     let total = self.state.low_r2_total();
                     if total > 0 {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -843,8 +840,8 @@ impl StokesForgeApp {
     }
 }
 
-/// Texte et teinte de la pastille des R² faibles (#290), sans contexte egui :
-/// `None` quand il n'y en a aucun (pas de pastille).
+/// Text and tint of the weak R² badge (#290), without an egui context:
+/// `None` when there are none (no badge).
 fn low_r2_badge_content(total: usize, dark_mode: bool) -> Option<(String, egui::Color32)> {
     use stokesforge_app_state::r_squared::{badge_text, RSquaredLevel};
     (total > 0).then(|| {
@@ -855,9 +852,9 @@ fn low_r2_badge_content(total: usize, dark_mode: bool) -> Option<(String, egui::
     })
 }
 
-/// La pastille « ⚠ 13 R² faibles » (#290) : icône d'avertissement et texte dans
-/// la teinte rouge de R² (`theme::r_squared_color`) ; un clic ouvre la liste par
-/// type, l'infobulle le dit.
+/// The "⚠ 13 low R²" badge (#290): warning icon and text in
+/// the red tint of R² (`theme::r_squared_color`); a click opens the list by
+/// type, the tooltip says so.
 fn low_r2_badge(ui: &mut egui::Ui, total: usize, actions: &mut Vec<Action>) {
     use crate::icons::{icon_image, Icon, IconRole};
     let Some((text, color)) = low_r2_badge_content(total, ui.visuals().dark_mode) else {
@@ -882,9 +879,9 @@ fn low_r2_badge(ui: &mut egui::Ui, total: usize, actions: &mut Vec<Action>) {
     }
 }
 
-/// Une ligne de message selon son niveau : texte courant, texte en teinte
-/// d'avertissement avec son triangle, ou texte rouge avec sa croix. Partagée
-/// par la barre d'état et la fenêtre d'historique.
+/// A message line according to its level: normal text, text in the warning
+/// tint with its triangle, or red text with its cross. Shared by the status
+/// bar and the history window.
 pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::state::StatusMessage) {
     use crate::icons::{icon_image, Icon, IconRole};
     use stokesforge_app_state::state::StatusLevel;
@@ -905,56 +902,55 @@ pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::sta
     }
 }
 
-/// Bascule au survol (#343) : un titre de la barre est déjà ouvert et le
-/// pointeur passe sur un autre titre, celui-ci s'ouvre et l'ouvert se ferme,
-/// sans clic. egui ne le fait que pour les sous-menus. Barre au repos : rien
-/// (pas d'ouverture au simple survol). Le titre ouvert est reconnu par
-/// l'identifiant de son popup, jamais par `Popup::is_any_open` (un menu
-/// contextuel ouvert ne doit rien faire basculer). Quand le pointeur se
-/// dirige vers le popup ouvert (diagonale vers une entrée), on ne bascule pas
-/// et on repeint pour détecter la fin du geste, comme egui pour ses
-/// sous-menus.
-fn bascule_au_survol(ctx: &egui::Context, titres: &[egui::Response]) {
-    let popup_de = |titre: &egui::Response| egui::Popup::default_response_id(titre);
-    let Some(ouvert) = titres
+/// Toggle on hover (#343): a bar title is already open and the pointer
+/// passes over another title, which opens while the open one closes,
+/// without a click. egui only does this for submenus. Bar at rest: nothing
+/// (no opening on a mere hover). The open title is recognized by the
+/// identifier of its popup, never by `Popup::is_any_open` (an open context
+/// menu must not toggle anything). When the pointer is heading toward the
+/// open popup (diagonal toward an entry), we do not toggle and we repaint to
+/// detect the end of the gesture, like egui does for its submenus.
+fn toggle_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
+    let popup_of = |title: &egui::Response| egui::Popup::default_response_id(title);
+    let Some(open_title) = titles
         .iter()
-        .find(|titre| egui::Popup::is_id_open(ctx, popup_de(titre)))
+        .find(|title| egui::Popup::is_id_open(ctx, popup_of(title)))
     else {
         return;
     };
     let Some(pos) = ctx.input(|input| input.pointer.hover_pos()) else {
         return;
     };
-    let Some(cible) = titres
+    let Some(target_title) = titles
         .iter()
-        .find(|titre| titre.id != ouvert.id && titre.rect.contains(pos))
+        .find(|title| title.id != open_title.id && title.rect.contains(pos))
     else {
         return;
     };
-    let vers_le_popup = ctx
-        .memory(|mem| mem.area_rect(popup_de(ouvert)))
+    let toward_popup = ctx
+        .memory(|mem| mem.area_rect(popup_of(open_title)))
         .is_some_and(|rect| {
             ctx.input(|input| {
                 let pointer = &input.pointer;
-                // `Rect::intersects_ray` ignore l'autre axe quand la
-                // direction est exactement horizontale ou verticale : on
-                // écarte ces cas ici (le rayon manque le rectangle).
+                // `Rect::intersects_ray` ignores the other axis when the
+                // direction is exactly horizontal or vertical: we
+                // rule out these cases here (the ray misses the rectangle).
                 let direction = pointer.direction();
-                let manque = (direction.y == 0.0 && !(rect.min.y..=rect.max.y).contains(&pos.y))
+                let misses = (direction.y == 0.0 && !(rect.min.y..=rect.max.y).contains(&pos.y))
                     || (direction.x == 0.0 && !(rect.min.x..=rect.max.x).contains(&pos.x));
-                !manque && pointer.is_moving_towards_rect(&rect)
+                !misses && pointer.is_moving_towards_rect(&rect)
             })
         });
-    if vers_le_popup {
+    if toward_popup {
         ctx.request_repaint();
         return;
     }
-    egui::Popup::open_id(ctx, popup_de(cible));
+    egui::Popup::open_id(ctx, popup_of(target_title));
     ctx.request_repaint();
 }
 
-/// Menu Help (#231, S-K5) : l'aide qui se génère du code, aujourd'hui les
-/// raccourcis clavier. Une seule entrée, directe.
+/// Help menu (#231, S-K5): the help generated from the code, today the
+/// keyboard shortcuts. A single entry, direct.
 fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
     ui.menu_button(tr!("menu-help"), |ui| {
         let mut sections = MenuSections::new();
@@ -976,62 +972,62 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
 mod tests {
     use super::super::project_manager::tests::find_text_center;
     use super::super::shortcuts::shortcut_text_delete;
-    use super::super::test_support::{self, colonnes_xy};
+    use super::super::test_support::{self, xy_columns};
     use super::*;
     use stokesforge_app_state::state::AppState;
     use stokesforge_core::{NodeId, Project};
     use stokesforge_plot::{AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
 
-    /// La langue est globale : les tests de la pastille la fixent à l'anglais
-    /// sous ce verrou.
-    static LANGUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// The language is global: the badge tests set it to English
+    /// under this lock.
+    static LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
-    fn la_pastille_des_r2_faibles_n_existe_que_s_il_y_en_a() {
+    fn the_weak_r2_badge_exists_only_if_there_are_any() {
         assert_eq!(low_r2_badge_content(0, false), None);
         assert_eq!(low_r2_badge_content(0, true), None);
     }
 
     #[test]
-    fn la_pastille_des_r2_faibles_dit_le_compte() {
+    fn the_weak_r2_badge_states_the_count() {
         use stokesforge_app_state::i18n::{set_language, Language};
-        let _verrou = LANGUE.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_language(Language::English);
-        for (total, attendu) in [(1, "1 low R²"), (2, "2 low R²"), (13, "13 low R²")] {
-            let (texte, _) = low_r2_badge_content(total, false).unwrap();
-            assert_eq!(texte, attendu);
+        for (total, expected) in [(1, "1 low R²"), (2, "2 low R²"), (13, "13 low R²")] {
+            let (text, _) = low_r2_badge_content(total, false).unwrap();
+            assert_eq!(text, expected);
         }
     }
 
     #[test]
-    fn la_pastille_des_r2_faibles_prend_la_teinte_de_la_boite_et_contraste() {
+    fn the_weak_r2_badge_takes_the_box_tint_and_contrasts() {
         use stokesforge_app_state::r_squared::RSquaredLevel::Dialog;
         use stokesforge_render::color::contrast_ratio;
         let rgb = |c: egui::Color32| (c.r(), c.g(), c.b());
-        let mut teintes = Vec::new();
-        for (dark, fond) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
-            let (_, couleur) = low_r2_badge_content(3, dark).unwrap();
-            assert_eq!(couleur, crate::theme::r_squared_color(Dialog, dark));
-            let ratio = contrast_ratio(rgb(couleur), fond);
-            assert!(ratio >= 3.0, "dark = {dark} : contraste {ratio:.2} < 3");
-            teintes.push(couleur);
+        let mut tints = Vec::new();
+        for (dark, background) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
+            let (_, color) = low_r2_badge_content(3, dark).unwrap();
+            assert_eq!(color, crate::theme::r_squared_color(Dialog, dark));
+            let ratio = contrast_ratio(rgb(color), background);
+            assert!(ratio >= 3.0, "dark = {dark}: contrast {ratio:.2} < 3");
+            tints.push(color);
         }
-        assert_ne!(teintes[0], teintes[1]);
+        assert_ne!(tints[0], tints[1]);
     }
 
-    /// Un classeur (une feuille, deux colonnes) et un graphe qui les trace,
-    /// avec un texte libre. `StokesForgeApp::new` ouvre le classeur puis le
-    /// graphe : le graphe est au premier plan.
-    fn banc() -> (Session, StokesForgeApp, NodeId) {
+    /// A workbook (one sheet, two columns) and a graph that plots them,
+    /// with a free text. `StokesForgeApp::new` opens the workbook then the
+    /// graph: the graph is in the foreground.
+    fn bench() -> (Session, StokesForgeApp, NodeId) {
         let mut project = Project::new("Menus").unwrap();
         let root = project.root();
-        let (x, y) = colonnes_xy(&mut project);
+        let (x, y) = xy_columns(&mut project);
         let mut panel = PanelSpec::at(0, 0);
         panel.series.push(SeriesSpec::new_xy(x, y));
         panel
             .annotations
-            .push(AnnotationSpec::new("Texte", 0.5, 0.5));
+            .push(AnnotationSpec::new("Text", 0.5, 0.5));
         let graph = project
             .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
             .unwrap();
@@ -1040,36 +1036,36 @@ mod tests {
         (session, StokesForgeApp::new(state), graph)
     }
 
-    /// Un fichier importable, et l'état après son import dans un classeur
-    /// neuf : « Reopen Last Import » a de quoi rouvrir, et ce classeur a une
-    /// source à relire.
-    fn importe(state: &mut AppState, dir: &tempfile::TempDir) {
-        let file = dir.path().join("mesure.csv");
+    /// An importable file, and the state after its import into a new
+    /// workbook: "Reopen Last Import" has something to reopen, and this workbook
+    /// has a source to re-read.
+    fn import_file(state: &mut AppState, dir: &tempfile::TempDir) {
+        let file = dir.path().join("measurement.csv");
         std::fs::write(&file, "1,10\n2,20\n").unwrap();
         state.dispatch(Action::ImportFiles {
             destination: stokesforge_app_state::state::ImportDestination::NewBookForAll,
-            recipe: stokesforge_import::ImportRecipe::new("Sans titre"),
+            recipe: stokesforge_import::ImportRecipe::new("Untitled"),
             paths: vec![file],
         });
     }
 
-    /// Une entrée de la barre de menu (titre ou contenu d'un menu ouvert),
-    /// telle qu'egui la décrit à l'accessibilité : son libellé, son grisage,
-    /// l'état d'une case à cocher et le centre de son rectangle.
+    /// An entry of the menu bar (title or content of an open menu),
+    /// as egui describes it to accessibility: its label, its greying,
+    /// the state of a checkbox and the center of its rectangle.
     #[derive(Debug)]
-    struct Entree {
+    struct MenuEntry {
         label: String,
         enabled: bool,
         toggled: Option<bool>,
         center: egui::Pos2,
     }
 
-    /// Les textes de raccourci qu'un bouton de menu ajoute à son libellé
-    /// d'accessibilité (« Save Ctrl+S ») : retirés, pour comparer au seul
-    /// libellé du catalogue.
-    fn raccourcis() -> Vec<String> {
+    /// The shortcut texts that a menu button adds to its accessibility
+    /// label ("Save Ctrl+S"): removed, to compare with the catalog label
+    /// alone.
+    fn shortcut_texts() -> Vec<String> {
         let ctx = egui::Context::default();
-        let mut textes: Vec<String> = [
+        let mut texts: Vec<String> = [
             SHORTCUT_NEW_PROJECT,
             SHORTCUT_OPEN,
             SHORTCUT_SAVE,
@@ -1081,39 +1077,39 @@ mod tests {
         .iter()
         .map(|shortcut| ctx.format_shortcut(shortcut))
         .collect();
-        textes.push(SHORTCUT_IMPORT_TEXT.to_string());
-        textes.push(shortcut_text_delete());
-        textes.push(ctx.format_shortcut(&egui::KeyboardShortcut::new(
+        texts.push(SHORTCUT_IMPORT_TEXT.to_string());
+        texts.push(shortcut_text_delete());
+        texts.push(ctx.format_shortcut(&egui::KeyboardShortcut::new(
             egui::Modifiers::COMMAND,
             egui::Key::C,
         )));
-        textes.push(ctx.format_shortcut(&super::super::SHORTCUT_DUPLICATE_SHEET));
-        textes.push("F2".into());
-        textes
+        texts.push(ctx.format_shortcut(&super::super::SHORTCUT_DUPLICATE_SHEET));
+        texts.push("F2".into());
+        texts
     }
 
-    fn entrees(output: &egui::FullOutput) -> Vec<Entree> {
-        let raccourcis = raccourcis();
+    fn entries(output: &egui::FullOutput) -> Vec<MenuEntry> {
+        let shortcut_texts = shortcut_texts();
         let update = output
             .platform_output
             .accesskit_update
             .as_ref()
-            .expect("l'accessibilité est activée par `peint`");
+            .expect("accessibility is enabled by `paint_bar`");
         update
             .nodes
             .iter()
             .filter_map(|(_, node)| {
                 let mut label = node.label()?.to_string();
-                if let Some(court) = raccourcis
+                if let Some(short) = shortcut_texts
                     .iter()
                     .map(|r| format!(" {r}"))
                     .chain([" ⏵".to_string()])
-                    .find_map(|suffixe| label.strip_suffix(&suffixe).map(str::to_string))
+                    .find_map(|suffix| label.strip_suffix(&suffix).map(str::to_string))
                 {
-                    label = court;
+                    label = short;
                 }
                 let bounds = node.bounds()?;
-                Some(Entree {
+                Some(MenuEntry {
                     label,
                     enabled: !node.is_disabled(),
                     toggled: node
@@ -1128,30 +1124,30 @@ mod tests {
             .collect()
     }
 
-    fn entree<'a>(entrees: &'a [Entree], label: &str) -> Option<&'a Entree> {
-        entrees.iter().find(|entree| entree.label == label)
+    fn find_entry<'a>(entries: &'a [MenuEntry], label: &str) -> Option<&'a MenuEntry> {
+        entries.iter().find(|entry| entry.label == label)
     }
 
-    fn active<'a>(entrees: &'a [Entree], label: &str) -> &'a Entree {
-        entrees
+    fn active<'a>(entries: &'a [MenuEntry], label: &str) -> &'a MenuEntry {
+        entries
             .iter()
-            .filter(|entree| entree.label == label)
+            .filter(|entry| entry.label == label)
             .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
-            .unwrap_or_else(|| panic!("entrée {label:?} absente de {entrees:#?}"))
+            .unwrap_or_else(|| panic!("entry {label:?} missing from {entries:#?}"))
     }
 
-    /// Une image de la seule barre de menu, sur l'onglet actif `tab`.
-    fn peint(
+    /// A frame of the menu bar alone, on the active tab `tab`.
+    fn paint_bar(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, Vec<Action>) {
-        peint_avec(app, ctx, tab, events, egui::Modifiers::NONE)
+        paint_bar_with(app, ctx, tab, events, egui::Modifiers::NONE)
     }
 
-    /// Comme [`peint`], touches de modification tenues (Ctrl+clic).
-    fn peint_avec(
+    /// Like [`paint_bar`], with modifier keys held (Ctrl+click).
+    fn paint_bar_with(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
@@ -1165,7 +1161,7 @@ mod tests {
                     egui::Pos2::ZERO,
                     egui::vec2(1200.0, 900.0),
                 )),
-                // egui 0.36 : les touches tenues passent par un événement.
+                // egui 0.36: held keys go through an event.
                 events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
                     .chain(events)
                     .collect(),
@@ -1180,36 +1176,36 @@ mod tests {
         (output, actions)
     }
 
-    /// Le contexte commun des tests, avec en plus les chargeurs d'images, des
-    /// animations instantanées et AccessKit (les entrées de menu se lisent
-    /// par l'arbre d'accessibilité).
-    fn contexte() -> egui::Context {
-        let ctx = test_support::contexte();
+    /// The common test context, plus image loaders, instant
+    /// animations and AccessKit (menu entries are read through the
+    /// accessibility tree).
+    fn context() -> egui::Context {
+        let ctx = test_support::context();
         egui_extras::install_image_loaders(&ctx);
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         ctx.enable_accesskit();
         ctx
     }
 
-    /// Les titres de la barre, menus fermés.
-    fn titres(app: &mut StokesForgeApp, tab: Option<Tab>) -> Vec<String> {
-        let ctx = contexte();
-        let (output, _) = peint(app, &ctx, tab, Vec::new());
-        entrees(&output).into_iter().map(|e| e.label).collect()
+    /// The bar titles, menus closed.
+    fn titles(app: &mut StokesForgeApp, tab: Option<Tab>) -> Vec<String> {
+        let ctx = context();
+        let (output, _) = paint_bar(app, &ctx, tab, Vec::new());
+        entries(&output).into_iter().map(|e| e.label).collect()
     }
 
-    /// Clique `pos`, en recueillant les actions de toutes les images du clic.
-    fn clique(
+    /// Clicks `pos`, collecting the actions of all the frames of the click.
+    fn click_at(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
         pos: egui::Pos2,
     ) -> Vec<Action> {
-        clique_avec(app, ctx, tab, pos, egui::Modifiers::NONE)
+        click_at_with(app, ctx, tab, pos, egui::Modifiers::NONE)
     }
 
-    /// Un clic gauche, `modifiers` tenues pendant tout le geste.
-    fn clique_avec(
+    /// A left click, `modifiers` held during the whole gesture.
+    fn click_at_with(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
@@ -1232,188 +1228,191 @@ mod tests {
                 modifiers,
             }],
         ] {
-            actions.extend(peint_avec(app, ctx, tab, events, modifiers).1);
+            actions.extend(paint_bar_with(app, ctx, tab, events, modifiers).1);
         }
         actions
     }
 
-    /// Ouvre le menu `titre` et rend son contenu, avec le contexte où il est
-    /// ouvert (pour y cliquer ensuite).
-    fn ouvre(
+    /// Opens the menu `title` and returns its content, with the context where it
+    /// is open (to click in it afterwards).
+    fn open_menu(
         app: &mut StokesForgeApp,
         tab: Option<Tab>,
-        titre: &str,
-    ) -> (egui::Context, Vec<Entree>) {
-        let ctx = contexte();
-        let (output, _) = peint(app, &ctx, tab, Vec::new());
-        let pos = active(&entrees(&output), titre).center;
-        clique(app, &ctx, tab, pos);
-        let (output, _) = peint(app, &ctx, tab, Vec::new());
-        let contenu = entrees(&output);
+        title: &str,
+    ) -> (egui::Context, Vec<MenuEntry>) {
+        let ctx = context();
+        let (output, _) = paint_bar(app, &ctx, tab, Vec::new());
+        let pos = active(&entries(&output), title).center;
+        click_at(app, &ctx, tab, pos);
+        let (output, _) = paint_bar(app, &ctx, tab, Vec::new());
+        let content = entries(&output);
         assert!(
-            contenu.len() > titres(app, tab).len(),
-            "le menu {titre:?} doit s'être ouvert : {contenu:#?}"
+            content.len() > titles(app, tab).len(),
+            "menu {title:?} must have opened: {content:#?}"
         );
-        (ctx, contenu)
+        (ctx, content)
     }
 
-    /// Chaque niveau s'ouvre par un vrai clic, avec le contexte des parents.
-    fn ouvre_chemin(
+    /// Each level opens through a real click, with the parents' context.
+    fn open_path(
         app: &mut StokesForgeApp,
         tab: Option<Tab>,
-        chemin: &[String],
-    ) -> (egui::Context, Vec<Entree>) {
-        let (ctx, mut menu) = ouvre(app, tab, &chemin[0]);
-        for parent in &chemin[1..] {
+        path: &[String],
+    ) -> (egui::Context, Vec<MenuEntry>) {
+        let (ctx, mut menu) = open_menu(app, tab, &path[0]);
+        for parent in &path[1..] {
             let pos = menu
                 .iter()
-                .filter(|entree| &entree.label == parent)
+                .filter(|entry| &entry.label == parent)
                 .max_by(|a, b| a.center.y.total_cmp(&b.center.y))
-                .unwrap_or_else(|| panic!("sous-menu {parent} absent : {menu:#?}"))
+                .unwrap_or_else(|| panic!("submenu {parent} missing: {menu:#?}"))
                 .center;
-            assert!(clique(app, &ctx, tab, pos).is_empty());
-            menu = entrees(&peint(app, &ctx, tab, Vec::new()).0);
+            assert!(click_at(app, &ctx, tab, pos).is_empty());
+            menu = entries(&paint_bar(app, &ctx, tab, Vec::new()).0);
         }
         (ctx, menu)
     }
 
-    fn assert_ferme(app: &mut StokesForgeApp, ctx: &egui::Context, tab: Option<Tab>) {
-        let menu = entrees(&peint(app, ctx, tab, Vec::new()).0);
-        let mut visibles: Vec<_> = menu.iter().map(|e| e.label.clone()).collect();
-        let mut fermes = titres(app, tab);
-        visibles.sort();
-        fermes.sort();
-        assert_eq!(visibles, fermes, "le choix ferme tous les niveaux");
+    fn assert_closed(app: &mut StokesForgeApp, ctx: &egui::Context, tab: Option<Tab>) {
+        let menu = entries(&paint_bar(app, ctx, tab, Vec::new()).0);
+        let mut visible_labels: Vec<_> = menu.iter().map(|e| e.label.clone()).collect();
+        let mut closed_titles = titles(app, tab);
+        visible_labels.sort();
+        closed_titles.sort();
+        assert_eq!(
+            visible_labels, closed_titles,
+            "the choice closes all levels"
+        );
     }
 
-    /// Une image par position : le pointeur glisse sans cliquer. Rend la
-    /// sortie de la dernière image.
-    fn glisse(
+    /// One frame per position: the pointer drags without clicking. Returns the
+    /// output of the last frame.
+    fn drag_pointer(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
         positions: &[egui::Pos2],
     ) -> egui::FullOutput {
-        let mut sortie = None;
+        let mut output = None;
         for pos in positions {
-            sortie = Some(peint(app, ctx, tab, vec![egui::Event::PointerMoved(*pos)]).0);
+            output = Some(paint_bar(app, ctx, tab, vec![egui::Event::PointerMoved(*pos)]).0);
         }
-        sortie.expect("au moins une position")
+        output.expect("at least one position")
     }
 
-    /// #343 : un menu de la barre est ouvert, le pointeur glisse à l'horizontale
-    /// sur le titre voisin : celui-ci s'ouvre, le premier se ferme.
+    /// #343: a bar menu is open, the pointer slides horizontally
+    /// onto the neighboring title: it opens, the first one closes.
     #[test]
-    fn le_survol_d_un_autre_titre_bascule_le_menu_ouvert() {
-        let (session, mut app, _) = banc();
+    fn hovering_another_title_toggles_the_open_menu() {
+        let (session, mut app, _) = bench();
         let tab = app.floating_tabs.last().copied();
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
-        let fichier = active(&menu, &tr!("menu-file")).center;
-        let edition = active(&menu, &tr!("menu-edit")).center;
-        assert!(entree(&menu, &tr!("action-save")).is_some(), "témoin");
-        let sortie = glisse(
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-file"));
+        let file_title = active(&menu, &tr!("menu-file")).center;
+        let edit_title = active(&menu, &tr!("menu-edit")).center;
+        assert!(find_entry(&menu, &tr!("action-save")).is_some(), "witness");
+        let output = drag_pointer(
             &mut app,
             &ctx,
             tab,
             &[
-                fichier,
-                egui::pos2((fichier.x + edition.x) / 2.0, fichier.y),
-                edition,
-                edition,
+                file_title,
+                egui::pos2((file_title.x + edit_title.x) / 2.0, file_title.y),
+                edit_title,
+                edit_title,
             ],
         );
-        drop(sortie);
-        let apres = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+        drop(output);
+        let after = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
         assert!(
-            entree(&apres, &tr!("action-save")).is_none(),
-            "Fichier fermé"
+            find_entry(&after, &tr!("action-save")).is_none(),
+            "File closed"
         );
         assert!(
-            entree(&apres, &tr!("history-undo")).is_some(),
-            "Édition ouvert : {apres:#?}"
+            find_entry(&after, &tr!("history-undo")).is_some(),
+            "Edit open: {after:#?}"
         );
         session.shutdown().unwrap();
     }
 
-    /// #343 : barre au repos, le survol seul n'ouvre rien.
+    /// #343: bar at rest, hovering alone opens nothing.
     #[test]
-    fn le_survol_d_une_barre_au_repos_n_ouvre_rien() {
-        let (session, mut app, _) = banc();
+    fn hovering_a_bar_at_rest_opens_nothing() {
+        let (session, mut app, _) = bench();
         let tab = app.floating_tabs.last().copied();
-        let ctx = contexte();
-        let (sortie, _) = peint(&mut app, &ctx, tab, Vec::new());
-        let edition = active(&entrees(&sortie), &tr!("menu-edit")).center;
-        glisse(
+        let ctx = context();
+        let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
+        let edit_title = active(&entries(&output), &tr!("menu-edit")).center;
+        drag_pointer(
             &mut app,
             &ctx,
             tab,
-            &[edition - egui::vec2(30.0, 0.0), edition, edition],
+            &[edit_title - egui::vec2(30.0, 0.0), edit_title, edit_title],
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
-    /// Les entrées visibles après `images` images sans mouvement : la vitesse
-    /// du pointeur retombe, il finit par être immobile.
-    fn attend(
+    /// The entries visible after `frames` frames without movement: the pointer
+    /// speed drops, it ends up stationary.
+    fn wait_frames(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         tab: Option<Tab>,
-        images: usize,
-    ) -> Vec<Entree> {
-        let mut sortie = None;
-        for _ in 0..images {
-            sortie = Some(peint(app, ctx, tab, Vec::new()).0);
+        frames: usize,
+    ) -> Vec<MenuEntry> {
+        let mut output = None;
+        for _ in 0..frames {
+            output = Some(paint_bar(app, ctx, tab, Vec::new()).0);
         }
-        entrees(&sortie.expect("au moins une image"))
+        entries(&output.expect("at least one frame"))
     }
 
-    /// #343 : en visant le popup ouvert (diagonale qui traverse le titre
-    /// voisin), le menu ouvert reste ; une fois le pointeur immobile sur le
-    /// voisin, la bascule se fait.
+    /// #343: when aiming at the open popup (diagonal crossing the
+    /// neighboring title), the open menu stays; once the pointer is still on the
+    /// neighbor, the toggle happens.
     #[test]
-    fn la_diagonale_vers_le_popup_ne_bascule_pas_puis_l_immobilite_bascule() {
-        let (session, mut app, _) = banc();
+    fn the_diagonal_toward_the_popup_does_not_toggle_then_stillness_toggles() {
+        let (session, mut app, _) = bench();
         let tab = app.floating_tabs.last().copied();
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
-        let edition = active(&menu, &tr!("menu-edit")).center;
-        let sortie = glisse(
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-file"));
+        let edit_title = active(&menu, &tr!("menu-edit")).center;
+        let output = drag_pointer(
             &mut app,
             &ctx,
             tab,
             &[
-                edition + egui::vec2(-34.0, -3.0),
-                edition + egui::vec2(-17.0, 2.0),
-                edition + egui::vec2(0.0, 7.0),
+                edit_title + egui::vec2(-34.0, -3.0),
+                edit_title + egui::vec2(-17.0, 2.0),
+                edit_title + egui::vec2(0.0, 7.0),
             ],
         );
-        drop(sortie);
-        let en_route = attend(&mut app, &ctx, tab, 1);
+        drop(output);
+        let on_the_way = wait_frames(&mut app, &ctx, tab, 1);
         assert!(
-            entree(&en_route, &tr!("action-save")).is_some(),
-            "Fichier reste ouvert : {en_route:#?}"
+            find_entry(&on_the_way, &tr!("action-save")).is_some(),
+            "File stays open: {on_the_way:#?}"
         );
-        assert!(entree(&en_route, &tr!("history-undo")).is_none());
+        assert!(find_entry(&on_the_way, &tr!("history-undo")).is_none());
 
-        let apres = attend(&mut app, &ctx, tab, 40);
+        let after = wait_frames(&mut app, &ctx, tab, 40);
         assert!(
-            entree(&apres, &tr!("action-save")).is_none(),
-            "Fichier fermé"
+            find_entry(&after, &tr!("action-save")).is_none(),
+            "File closed"
         );
         assert!(
-            entree(&apres, &tr!("history-undo")).is_some(),
-            "Édition ouvert"
+            find_entry(&after, &tr!("history-undo")).is_some(),
+            "Edit open"
         );
         session.shutdown().unwrap();
     }
 
-    /// Les extractions de menus gardent leur ordre ; changer le contenu
-    /// actif remplace seulement le menu propre au classeur ou au graphique.
+    /// The menu extractions keep their order; changing the active content
+    /// only replaces the menu specific to the workbook or the graph.
     #[test]
-    fn les_menus_gardent_leur_ordre_selon_le_contenu_actif() {
-        let (session, mut app, graph) = banc();
+    fn the_menus_keep_their_order_according_to_the_active_content() {
+        let (session, mut app, graph) = bench();
         assert_eq!(
-            titres(&mut app, Some(Tab::Graph(graph))),
+            titles(&mut app, Some(Tab::Graph(graph))),
             [
                 tr!("menu-file"),
                 tr!("menu-edit"),
@@ -1427,7 +1426,7 @@ mod tests {
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         assert_eq!(
-            titres(&mut app, Some(Tab::Book(book))),
+            titles(&mut app, Some(Tab::Book(book))),
             [
                 tr!("menu-file"),
                 tr!("menu-edit"),
@@ -1437,76 +1436,79 @@ mod tests {
                 tr!("menu-window"),
                 tr!("menu-help")
             ],
-            "témoin : le menu propre au contenu actif change à la même place",
+            "witness: the menu specific to the active content changes in the same place",
         );
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_menu_fichier_grise_selon_le_classeur_actif_et_le_dernier_import() {
-        // Sans import : rien à relire ni à rouvrir.
-        let (session, mut app, _) = banc();
+    fn the_file_menu_greys_out_according_to_the_active_workbook_and_the_last_import() {
+        // Without an import: nothing to re-read or reopen.
+        let (session, mut app, _) = bench();
         let tab = app.floating_tabs.last().copied();
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
-        assert!(active(&menu, &tr!("action-save")).enabled, "témoin");
-        assert!(entree(&menu, &tr!("action-add-workbook")).is_none());
-        assert!(entree(&menu, &tr!("action-refresh-from-source")).is_none());
-        let (_, nouveau) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
-        assert!(active(&nouveau, &tr!("action-add-workbook")).enabled);
-        assert!(active(&nouveau, &tr!("action-add-folder")).enabled);
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-file"));
+        assert!(active(&menu, &tr!("action-save")).enabled, "witness");
+        assert!(find_entry(&menu, &tr!("action-add-workbook")).is_none());
+        assert!(find_entry(&menu, &tr!("action-refresh-from-source")).is_none());
+        let (_, new_menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
+        assert!(active(&new_menu, &tr!("action-add-workbook")).enabled);
+        assert!(active(&new_menu, &tr!("action-add-folder")).enabled);
         assert_eq!(
-            active(&nouveau, &tr!("action-new-project")).enabled,
+            active(&new_menu, &tr!("action-new-project")).enabled,
             app.state.can_new_project()
         );
-        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
+        let (_, menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
         assert!(!active(&menu, &tr!("action-reopen-last-import")).enabled);
         assert!(!active(&menu, &tr!("action-refresh-from-source")).enabled);
         session.shutdown().unwrap();
 
-        // Après un import dans un classeur neuf : la relecture suit le
-        // classeur au premier plan, pas la seule existence d'une source.
-        let (session, app, _) = banc();
+        // After an import into a new workbook: the re-read follows the
+        // foreground workbook, not the mere existence of a source.
+        let (session, app, _) = bench();
         let mut state = app.state;
         let dir = tempfile::tempdir().unwrap();
-        importe(&mut state, &dir);
+        import_file(&mut state, &dir);
         let imported = state.books().last().unwrap().0;
         let mut app = StokesForgeApp::new(state);
         let tab = app.floating_tabs.last().copied();
         assert!(matches!(tab, Some(Tab::Graph(_))));
-        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
+        let (_, menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
         assert!(active(&menu, &tr!("action-reopen-last-import")).enabled);
         assert!(
             !active(&menu, &tr!("action-refresh-from-source")).enabled,
-            "un graphe au premier plan n'a pas de feuille à relire"
+            "a graph in the foreground has no sheet to re-read"
         );
         app.open_tab(Tab::Book(imported));
         let tab = app.floating_tabs.last().copied();
-        let (_, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
+        let (_, menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-import")]);
         assert!(active(&menu, &tr!("action-refresh-from-source")).enabled);
 
-        // Une entrée cliquée pousse son action, rien de plus.
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
+        // A clicked entry pushes its action, nothing more.
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
         let pos = active(&menu, &tr!("action-add-workbook")).center;
-        assert_eq!(clique(&mut app, &ctx, tab, pos), vec![Action::AddWorkbook]);
-        assert_ferme(&mut app, &ctx, tab);
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, pos),
+            vec![Action::AddWorkbook]
+        );
+        assert_closed(&mut app, &ctx, tab);
 
-        // #326 : Add Folder vise la racine du projet.
-        let racine = app.state.tree().root();
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
+        // #326: Add Folder targets the project root.
+        let root = app.state.tree().root();
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
         let pos = active(&menu, &tr!("action-add-folder")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
-            vec![Action::AddFolder { parent: racine }]
+            click_at(&mut app, &ctx, tab, pos),
+            vec![Action::AddFolder { parent: root }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_menu_edition_nomme_et_grise_annuler_et_retablir() {
-        let (session, mut app, _) = banc();
+    fn the_edit_menu_names_and_greys_out_undo_and_redo() {
+        let (session, mut app, _) = bench();
         let tab = app.floating_tabs.last().copied();
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-edit"));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-edit"));
         assert!(!active(&menu, &tr!("history-undo")).enabled);
         assert!(!active(&menu, &tr!("history-redo")).enabled);
 
@@ -1518,29 +1520,29 @@ mod tests {
             row: 0,
             text: "42".into(),
         });
-        let undo = app.state.undo_label().expect("une commande à annuler");
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-edit"));
-        assert!(active(&menu, &undo).enabled, "le libellé nomme la commande");
-        assert!(entree(&menu, &tr!("history-undo")).is_none());
+        let undo = app.state.undo_label().expect("a command to undo");
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-edit"));
+        assert!(active(&menu, &undo).enabled, "the label names the command");
+        assert!(find_entry(&menu, &tr!("history-undo")).is_none());
         assert!(!active(&menu, &tr!("history-redo")).enabled);
 
         app.state.dispatch(Action::Undo);
-        let redo = app.state.redo_label().expect("une commande à rétablir");
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-edit"));
+        let redo = app.state.redo_label().expect("a command to redo");
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-edit"));
         assert!(!active(&menu, &tr!("history-undo")).enabled);
         let pos = active(&menu, &redo).center;
-        assert_eq!(clique(&mut app, &ctx, tab, pos), vec![Action::Redo]);
+        assert_eq!(click_at(&mut app, &ctx, tab, pos), vec![Action::Redo]);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn selection_d_edition_garde_les_actions_et_le_grisage_du_project_manager() {
-        let (session, mut app, graph) = banc();
+    fn edit_selection_keeps_the_actions_and_greying_of_the_project_manager() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-edit"));
-        assert!(entree(&menu, &tr!("action-delete-project-object")).is_none());
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-edit"));
+        assert!(find_entry(&menu, &tr!("action-delete-project-object")).is_none());
         app.pm_selection.clear();
-        let (_, menu) = ouvre_chemin(
+        let (_, menu) = open_path(
             &mut app,
             tab,
             &[tr!("menu-edit"), tr!("menu-selected-content")],
@@ -1549,13 +1551,13 @@ mod tests {
         assert!(!active(&menu, &tr!("action-copy")).enabled);
         assert!(
             active(&menu, &tr!("action-paste")).enabled,
-            "témoin indépendant de la sélection"
+            "witness independent of the selection"
         );
         app.pm_selection
             .insert(super::super::project_manager::PmEntry::Window(Tab::Graph(
                 graph,
             )));
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[tr!("menu-edit"), tr!("menu-selected-content")],
@@ -1563,29 +1565,29 @@ mod tests {
         let copy = active(&menu, &tr!("action-copy"));
         assert!(copy.enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, copy.center),
+            click_at(&mut app, &ctx, tab, copy.center),
             vec![Action::CopyObjects(vec![graph])]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
-    /// Menu Analysis (#181) : grisé tant qu'aucune colonne Y n'est visée, puis
-    /// chaque entrée ouvre la fenêtre sur sa famille et sa méthode ;
-    /// « Recalculate Out of Date » reste grisé quand tout est à jour.
+    /// Analysis menu (#181): greyed out as long as no Y column is targeted, then
+    /// each entry opens the window on its family and method;
+    /// "Recalculate Out of Date" stays greyed out when everything is up to date.
     #[test]
-    fn le_menu_analyse_ouvre_la_serie_du_graphe_actif() {
-        let (_session, mut app, graph) = banc();
+    fn the_analysis_menu_opens_the_series_of_the_active_graph() {
+        let (_session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
         });
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
         let entry = active(&menu, &tr!("action-analysis-integrate"));
         assert!(entry.enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::OpenGraphAnalysis {
                 preset: stokesforge_app_state::analysis::Preset::Integrate,
                 graph,
@@ -1596,27 +1598,27 @@ mod tests {
     }
 
     #[test]
-    fn le_menu_analyse_se_grise_sans_colonne_y_et_ouvre_la_fenetre() {
+    fn the_analysis_menu_greys_out_without_a_y_column_and_opens_the_window() {
         use stokesforge_app_state::analysis::Preset;
-        let (session, mut app, _) = banc();
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
         let tab = Some(Tab::Book(book));
         app.state.deselect_all(sheet);
 
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
         for label in [
             tr!("analysis-category-data-manipulation"),
             tr!("analysis-category-fitting"),
             tr!("analysis-category-peaks"),
             tr!("action-analysis-integrate"),
         ] {
-            assert!(!active(&menu, &label).enabled, "sans colonne : {label}");
+            assert!(!active(&menu, &label).enabled, "no column: {label}");
         }
         assert!(
             !active(&menu, &tr!("action-analysis-recalculate-stale")).enabled,
-            "tout est à jour"
+            "everything is up to date"
         );
 
         let columns: Vec<_> = app
@@ -1632,20 +1634,20 @@ mod tests {
             .selection(sheet)
             .map(|selection| selection.columns(app.state.tree(), sheet))
             .unwrap();
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
         let integrate = active(&menu, &tr!("action-analysis-integrate"));
-        assert!(integrate.enabled, "une colonne Y est sélectionnée");
+        assert!(integrate.enabled, "a Y column is selected");
         assert_eq!(
-            clique(&mut app, &ctx, tab, integrate.center),
+            click_at(&mut app, &ctx, tab, integrate.center),
             vec![Action::OpenAnalysis {
                 preset: Preset::Integrate,
                 sheet,
                 columns: selected.clone(),
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -1655,23 +1657,23 @@ mod tests {
         );
         let anchors = active(&menu, &tr!("analysis-baseline-anchors"));
         assert_eq!(
-            clique(&mut app, &ctx, tab, anchors.center),
+            click_at(&mut app, &ctx, tab, anchors.center),
             vec![Action::OpenAnalysis {
                 preset: Preset::BaselineAnchors,
                 sheet,
                 columns: selected,
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
-    /// #248 : le menu Analysis a une entrée par catégorie, et les méthodes de
-    /// chaque catégorie sont dans son sous-menu — « Reference Correction » est
-    /// du ressort de Data Manipulation, pas de Fitting.
+    /// #248: the Analysis menu has one entry per category, and the methods of
+    /// each category are in its submenu — "Reference Correction" belongs to
+    /// Data Manipulation, not to Fitting.
     #[test]
-    fn le_menu_analyse_range_les_methodes_par_categorie() {
-        let (session, mut app, _) = banc();
+    fn the_analysis_menu_files_methods_by_category() {
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -1685,14 +1687,14 @@ mod tests {
         app.state.select_column(sheet, columns[0]);
         app.state.extend_column_selection(sheet, columns[1]);
 
-        let chemin = |app: &mut StokesForgeApp, categorie: &str| {
-            let (_, menu) = ouvre_chemin(app, tab, &[tr!("menu-analysis"), categorie.to_string()]);
+        let path = |app: &mut StokesForgeApp, category: &str| {
+            let (_, menu) = open_path(app, tab, &[tr!("menu-analysis"), category.to_string()]);
             menu.into_iter()
-                .map(|entree| entree.label)
+                .map(|entry| entry.label)
                 .collect::<Vec<_>>()
         };
-        let data = chemin(&mut app, &tr!("analysis-category-data-manipulation"));
-        for attendu in [
+        let data = path(&mut app, &tr!("analysis-category-data-manipulation"));
+        for expected in [
             tr!("analysis-baseline-constant"),
             tr!("analysis-baseline-linear"),
             tr!("analysis-baseline-polynomial"),
@@ -1700,11 +1702,11 @@ mod tests {
             tr!("action-analysis-correct"),
         ] {
             assert!(
-                data.contains(&attendu),
-                "Data Manipulation : {attendu} dans {data:?}"
+                data.contains(&expected),
+                "Data Manipulation: {expected} in {data:?}"
             );
         }
-        let fitting = chemin(&mut app, &tr!("analysis-category-fitting"));
+        let fitting = path(&mut app, &tr!("analysis-category-fitting"));
         assert!(
             fitting.contains(&tr!("analysis-fit-gaussian")),
             "{fitting:?}"
@@ -1712,25 +1714,25 @@ mod tests {
         assert!(fitting.contains(&tr!("analysis-fit-custom")), "{fitting:?}");
         assert!(
             !fitting.contains(&tr!("action-analysis-correct")),
-            "témoin : la correction n'est pas un ajustement"
+            "witness: the correction is not a fit"
         );
-        let peaks = chemin(&mut app, &tr!("analysis-category-peaks"));
-        for attendu in [
+        let peaks = path(&mut app, &tr!("analysis-category-peaks"));
+        for expected in [
             tr!("action-analysis-peaks"),
             tr!("action-analysis-reconvolution"),
             tr!("action-analysis-direct"),
         ] {
-            assert!(peaks.contains(&attendu), "{attendu} dans {peaks:?}");
+            assert!(peaks.contains(&expected), "{expected} in {peaks:?}");
         }
         session.shutdown().unwrap();
     }
 
-    /// #249 : les dernières analyses lancées sont listées en bas du menu ; un
-    /// clic ouvre la fenêtre, Ctrl+clic lance (même geste, `run` en plus).
+    /// #249: the last analyses run are listed at the bottom of the menu; a
+    /// click opens the window, Ctrl+click runs (same gesture, `run` in addition).
     #[test]
-    fn le_menu_analyse_liste_les_dernieres_analyses_et_ctrl_clic_les_lance() {
+    fn the_analysis_menu_lists_the_last_analyses_and_ctrl_click_runs_them() {
         use stokesforge_app_state::analysis::{Preset, RecentTarget};
-        let (session, mut app, _) = banc();
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -1749,13 +1751,10 @@ mod tests {
             .map(|selection| selection.columns(app.state.tree(), sheet))
             .unwrap();
 
-        // Témoin : rien n'a été lancé, rien n'est listé.
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
-        let numerote = |label: &str| label.starts_with("1 ");
-        assert!(
-            menu.iter().all(|entree| !numerote(&entree.label)),
-            "{menu:?}"
-        );
+        // Witness: nothing has been run, nothing is listed.
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
+        let numbered = |label: &str| label.starts_with("1 ");
+        assert!(menu.iter().all(|entry| !numbered(&entry.label)), "{menu:?}");
 
         app.state.dispatch(Action::OpenAnalysis {
             preset: Preset::Integrate,
@@ -1770,7 +1769,7 @@ mod tests {
             rank = 1_i64,
             label = app.state.analysis_recent()[0].label()
         );
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
         let entry = active(&menu, &label);
         assert!(entry.enabled);
         let target = RecentTarget::Columns {
@@ -1778,19 +1777,19 @@ mod tests {
             columns: selected,
         };
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::OpenRecentAnalysis {
                 index: 0,
                 run: false,
                 target: target.clone(),
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-analysis"));
         let entry = active(&menu, &label);
         assert_eq!(
-            clique_avec(&mut app, &ctx, tab, entry.center, egui::Modifiers::COMMAND),
+            click_at_with(&mut app, &ctx, tab, entry.center, egui::Modifiers::COMMAND),
             vec![Action::OpenRecentAnalysis {
                 index: 0,
                 run: true,
@@ -1801,32 +1800,31 @@ mod tests {
     }
 
     #[test]
-    fn le_menu_classeur_n_existe_qu_avec_un_classeur_au_premier_plan() {
-        let (session, mut app, graph) = banc();
+    fn the_workbook_menu_exists_only_with_a_workbook_in_the_foreground() {
+        let (session, mut app, graph) = bench();
         let book = app.state.books()[0].0;
         assert_eq!(app.floating_tabs.last(), Some(&Tab::Graph(graph)));
-        let menus = titres(&mut app, Some(Tab::Graph(graph)));
-        assert!(menus.contains(&tr!("menu-file")), "témoin : {menus:?}");
+        let menus = titles(&mut app, Some(Tab::Graph(graph)));
+        assert!(menus.contains(&tr!("menu-file")), "witness: {menus:?}");
         assert!(!menus.contains(&tr!("menu-workbook")), "{menus:?}");
 
         app.open_tab(Tab::Book(book));
-        let (_, menu) = ouvre(&mut app, Some(Tab::Book(book)), &tr!("menu-workbook"));
+        let (_, menu) = open_menu(&mut app, Some(Tab::Book(book)), &tr!("menu-workbook"));
         assert!(
-            menu.iter()
-                .any(|entree| entree.label != tr!("menu-workbook")
-                    && !titres(&mut app, Some(Tab::Book(book))).contains(&entree.label)),
-            "le menu Classeur a un contenu : {menu:#?}"
+            menu.iter().any(|entry| entry.label != tr!("menu-workbook")
+                && !titles(&mut app, Some(Tab::Book(book))).contains(&entry.label)),
+            "the Workbook menu has content: {menu:#?}"
         );
         session.shutdown().unwrap();
     }
 
-    /// #330 : la remise des largeurs est dans Workbook > Sheet (toute la
-    /// feuille) et Workbook > Columns (la sélection), grisée sans largeur
-    /// retenue. Témoins éprouvés : entrée toujours active, ou une seule colonne
-    /// visée pour la feuille (rouges).
+    /// #330: the width reset is in Workbook > Sheet (the whole
+    /// sheet) and Workbook > Columns (the selection), greyed out with no remembered
+    /// width. Witnesses tried out: always-enabled entry, or a single column
+    /// targeted for the sheet (red).
     #[test]
-    fn la_remise_des_largeurs_est_dans_workbook_sheet_et_columns() {
-        let (session, mut app, _) = banc();
+    fn the_width_reset_is_in_workbook_sheet_and_columns() {
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -1837,37 +1835,37 @@ mod tests {
             .map(|c| c.0)
             .collect();
         let tab = Some(Tab::Book(book));
-        let chemin_feuille = [tr!("menu-workbook"), tr!("menu-sheet")];
-        let chemin_colonnes = [tr!("menu-workbook"), tr!("menu-columns")];
-        let feuille = tr!("action-reset-sheet-column-widths");
-        let colonne = tr!("action-reset-column-widths");
+        let sheet_path = [tr!("menu-workbook"), tr!("menu-sheet")];
+        let columns_path = [tr!("menu-workbook"), tr!("menu-columns")];
+        let sheet_label = tr!("action-reset-sheet-column-widths");
+        let column_label = tr!("action-reset-column-widths");
 
         app.state.select_column(sheet, columns[0]);
-        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin_feuille);
-        assert!(!active(&menu, &feuille).enabled, "aucune largeur retenue");
-        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin_colonnes);
-        assert!(!active(&menu, &colonne).enabled, "aucune largeur retenue");
+        let (_, menu) = open_path(&mut app, tab, &sheet_path);
+        assert!(!active(&menu, &sheet_label).enabled, "no width remembered");
+        let (_, menu) = open_path(&mut app, tab, &columns_path);
+        assert!(!active(&menu, &column_label).enabled, "no width remembered");
 
         app.state.dispatch(Action::SetColumnWidth {
             column: columns[0],
             width: 80.0,
         });
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin_feuille);
-        let entry = active(&menu, &feuille);
+        let (ctx, menu) = open_path(&mut app, tab, &sheet_path);
+        let entry = active(&menu, &sheet_label);
         assert!(entry.enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::ResetColumnWidths {
                 columns: columns.clone()
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin_colonnes);
-        let entry = active(&menu, &colonne);
+        let (ctx, menu) = open_path(&mut app, tab, &columns_path);
+        let entry = active(&menu, &column_label);
         assert!(entry.enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::ResetColumnWidths {
                 columns: vec![columns[0]]
             }]
@@ -1876,9 +1874,9 @@ mod tests {
     }
 
     #[test]
-    fn le_classeur_range_feuilles_colonnes_et_metadata_sans_changer_les_actions() {
+    fn the_workbook_files_sheets_columns_and_metadata_without_changing_the_actions() {
         use stokesforge_core::{ColumnRole, ColumnType};
-        let (session, mut app, _) = banc();
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -1889,35 +1887,35 @@ mod tests {
             .map(|c| c.0)
             .collect();
         let tab = Some(Tab::Book(book));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
-        assert!(entree(&menu, &tr!("action-rename-sheet")).is_none());
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-sheet")]);
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-workbook"));
+        assert!(find_entry(&menu, &tr!("action-rename-sheet")).is_none());
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-sheet")]);
         assert!(!active(&menu, &tr!("action-delete-sheet")).enabled);
         let pos = active(&menu, &tr!("action-duplicate-sheet")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::DuplicateSheet(sheet)]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
         app.state.deselect_all(sheet);
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-workbook"));
         assert!(!active(&menu, &tr!("workbook-plot-menu")).enabled);
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-columns")]);
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-workbook"), tr!("menu-columns")]);
         assert!(active(&menu, &tr!("workbook-column-add")).enabled);
         for label in [
             tr!("column-type"),
             tr!("column-role"),
             tr!("workbook-plot-menu"),
         ] {
-            assert!(!active(&menu, &label).enabled, "aucune sélection : {label}");
+            assert!(!active(&menu, &label).enabled, "no selection: {label}");
         }
         let pos = active(&menu, &tr!("workbook-column-add")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::AddColumn { sheet }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
         app.state.select_column(sheet, columns[0]);
         app.state.extend_column_selection(sheet, columns[1]);
@@ -1929,7 +1927,7 @@ mod tests {
             column: columns[0],
             role: ColumnRole::X,
         });
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -1948,15 +1946,15 @@ mod tests {
         );
         let pos = active(&menu, &tr!("column-type-mixed")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::SetColumnsType {
                 columns: columns.clone(),
                 column_type: ColumnType::Mixed
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
-        // X et Y sont différents : aucun rôle n'est indiqué comme sélectionné.
-        let (ctx, menu) = ouvre_chemin(
+        assert_closed(&mut app, &ctx, tab);
+        // X and Y are different: no role is shown as selected.
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -1970,14 +1968,14 @@ mod tests {
         }
         let pos = active(&menu, &tr!("workbook-role-z")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::SetColumnsRole {
                 columns: columns.clone(),
                 role: ColumnRole::Z
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
-        let (ctx, menu) = ouvre_chemin(
+        assert_closed(&mut app, &ctx, tab);
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -1988,31 +1986,31 @@ mod tests {
         );
         let pos = active(&menu, &tr!("plot-type-line")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::PlotColumns {
                 sheet,
                 columns: columns.clone(),
                 plot_type: stokesforge_plot::PlotType::Line
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-workbook"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-workbook"));
         let label = tr!("menu-window-show-metadata-row");
-        let case = active(&menu, &label);
-        let visible = case.toggled.unwrap();
-        assert!(clique(&mut app, &ctx, tab, case.center).is_empty());
-        let menu = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+        let checkbox = active(&menu, &label);
+        let visible = checkbox.toggled.unwrap();
+        assert!(click_at(&mut app, &ctx, tab, checkbox.center).is_empty());
+        let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
         assert_eq!(active(&menu, &label).toggled, Some(!visible));
         session.shutdown().unwrap();
     }
 
-    /// #319 : `Move ▸` est dans Workbook › Columns comme au clic droit des
-    /// lettres (une seule peinture, `column_type_role_menus`), avec ses quatre
-    /// entrées et le même grisage ; entre Add Column et Type.
+    /// #319: `Move ▸` is in Workbook › Columns as in the right-click of the
+    /// letters (a single painting, `column_type_role_menus`), with its four
+    /// entries and the same greying; between Add Column and Type.
     #[test]
-    fn le_menu_colonnes_porte_move_avec_ses_quatre_entrees_et_le_meme_grisage() {
-        let (session, mut app, _) = banc();
+    fn the_columns_menu_carries_move_with_its_four_entries_and_the_same_greying() {
+        let (session, mut app, _) = bench();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
         let sheet = app.state.selected_sheet_in(book).unwrap();
@@ -2023,47 +2021,47 @@ mod tests {
             .iter()
             .map(|c| c.0)
             .collect();
-        assert!(columns.len() >= 3, "une colonne au milieu : {columns:?}");
+        assert!(columns.len() >= 3, "a column in the middle: {columns:?}");
         let tab = Some(Tab::Book(book));
-        let chemin = [
+        let path = [
             tr!("menu-workbook"),
             tr!("menu-columns"),
             tr!("column-move"),
         ];
-        let quatre = [
+        let four = [
             tr!("action-move-columns-first"),
             tr!("action-move-columns-left"),
             tr!("action-move-columns-right"),
             tr!("action-move-columns-last"),
         ];
 
-        // Une colonne du milieu : tout est possible, dans l'ordre du menu.
+        // A middle column: everything is possible, in the order of the menu.
         app.state.select_column(sheet, columns[1]);
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin);
+        let (ctx, menu) = open_path(&mut app, tab, &path);
         let y = |label: &str| active(&menu, label).center.y;
         assert!(y(&tr!("workbook-column-add")) < y(&tr!("column-move")));
         assert!(y(&tr!("column-move")) < y(&tr!("column-type")));
         assert!(y(&tr!("column-type")) < y(&tr!("column-role")));
-        for label in &quatre {
-            assert!(active(&menu, label).enabled, "{label} : {menu:#?}");
+        for label in &four {
+            assert!(active(&menu, label).enabled, "{label}: {menu:#?}");
         }
-        let ys: Vec<f32> = quatre.iter().map(|label| y(label)).collect();
-        assert!(ys.windows(2).all(|paire| paire[0] < paire[1]), "{ys:?}");
+        let ys: Vec<f32> = four.iter().map(|label| y(label)).collect();
+        assert!(ys.windows(2).all(|pair| pair[0] < pair[1]), "{ys:?}");
         let pos = active(&menu, &tr!("action-move-columns-right")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::MoveColumns {
                 sheet,
                 columns: vec![columns[1]],
                 to: stokesforge_app_state::column_move::ColumnMove::Right
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
 
-        // La première colonne : ni First ni Left (même règle qu'au clic droit).
+        // The first column: neither First nor Left (same rule as in the right-click).
         app.state.select_column(sheet, columns[0]);
-        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin);
-        let actives: Vec<bool> = quatre
+        let (_, menu) = open_path(&mut app, tab, &path);
+        let actives: Vec<bool> = four
             .iter()
             .map(|label| active(&menu, label).enabled)
             .collect();
@@ -2072,31 +2070,31 @@ mod tests {
     }
 
     #[test]
-    fn afficher_les_donnees_suit_les_references_du_graphique() {
-        let (session, mut app, graph) = banc();
+    fn show_data_follows_the_graph_references() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
         let entry = active(&menu, &tr!("action-show-graph-data"));
         assert!(entry.enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::ShowGraphData { graph }]
         );
         app.state.dispatch(Action::AddGraph);
         let graph = app.state.graphs().last().unwrap().0;
         app.open_tab(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, Some(Tab::Graph(graph)), &tr!("menu-graph"));
+        let (_, menu) = open_menu(&mut app, Some(Tab::Graph(graph)), &tr!("menu-graph"));
         assert!(!active(&menu, &tr!("action-show-graph-data")).enabled);
         session.shutdown().unwrap();
     }
 
-    /// #176 : les axes miroirs se cochent depuis le menu Graphique, comme la
-    /// case de l'Object Manager (même `Action::SetPlotVisibility`), et la case
-    /// garde le menu ouvert.
+    /// #176: the mirror axes are checked from the Graph menu, like the
+    /// Object Manager checkbox (same `Action::SetPlotVisibility`), and the checkbox
+    /// keeps the menu open.
     #[test]
-    fn les_axes_miroirs_se_cochent_depuis_le_menu_graphique() {
+    fn mirror_axes_are_checked_from_the_graph_menu() {
         use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
-        let (session, mut app, graph) = banc();
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
         for (label, side) in [
             (
@@ -2108,80 +2106,83 @@ mod tests {
                 stokesforge_plot::AxisSide::Right,
             ),
         ] {
-            let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
-            let case = active(&menu, &label);
-            assert_eq!(case.toggled, Some(false));
+            let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
+            let checkbox = active(&menu, &label);
+            assert_eq!(checkbox.toggled, Some(false));
             assert_eq!(
-                clique(&mut app, &ctx, tab, case.center),
+                click_at(&mut app, &ctx, tab, checkbox.center),
                 vec![Action::SetPlotVisibility {
                     graph,
                     target: VisibilityTarget::Axis(AxisRef { panel: 0, side }),
                     visible: true,
                 }]
             );
-            let ouvert = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
-            assert!(entree(&ouvert, &label).is_some(), "la case garde le menu");
+            let opened = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+            assert!(
+                find_entry(&opened, &label).is_some(),
+                "the checkbox keeps the menu open"
+            );
         }
         session.shutdown().unwrap();
     }
 
-    /// #149 : « Copier le graphique » est dans le menu Graphique, comme
-    /// l'export, et pousse la figure cadrée par la vue — le même chemin que
-    /// Ctrl+C, sans condition de sélection (un clic de menu est explicite).
+    /// #149: "Copy Graph" is in the Graph menu, like
+    /// the export, and pushes the figure framed by the view — the same path as
+    /// Ctrl+C, with no selection condition (a menu click is explicit).
     #[test]
-    fn copier_le_graphique_est_dans_le_menu_graphique() {
-        let (session, mut app, graph) = banc();
+    fn copy_graph_is_in_the_graph_menu() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
-        // Une série sélectionnée ne grise pas l'entrée : Ctrl+C se tait alors,
-        // le menu non.
+        // A selected series does not grey out the entry: Ctrl+C is then silent,
+        // the menu is not.
         app.with_graph_view(graph, |view| {
             view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
         });
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
         let entry = active(&menu, &tr!("action-copy-graph"));
         assert!(entry.enabled);
-        let attendu = app
+        let expected = app
             .read_graph_view(graph, |view| view.framed_spec(&spec))
             .unwrap();
         assert_eq!(
-            clique(&mut app, &ctx, tab, entry.center),
+            click_at(&mut app, &ctx, tab, entry.center),
             vec![Action::CopyGraphFigure {
-                spec: Box::new(attendu)
+                spec: Box::new(expected)
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
-        // Témoin : sans graphique actif, le menu Graphique n'existe pas.
+        assert_closed(&mut app, &ctx, tab);
+        // Witness: with no active graph, the Graph menu does not exist.
         let book = app.state.books()[0].0;
-        assert!(!titres(&mut app, Some(Tab::Book(book))).contains(&tr!("menu-graph")));
+        assert!(!titles(&mut app, Some(Tab::Book(book))).contains(&tr!("menu-graph")));
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_menu_graphique_suit_le_graphe_actif_et_sa_selection() {
-        let (session, mut app, graph) = banc();
+    fn the_graph_menu_follows_the_active_graph_and_its_selection() {
+        let (session, mut app, graph) = bench();
         let book = app.state.books()[0].0;
-        let menus = titres(&mut app, Some(Tab::Book(book)));
+        let menus = titles(&mut app, Some(Tab::Book(book)));
         assert!(!menus.contains(&tr!("menu-graph")), "{menus:?}");
 
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
-        assert!(active(&menu, &tr!("action-add-text")).enabled, "témoin");
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
+        assert!(active(&menu, &tr!("action-add-text")).enabled, "witness");
         assert!(
             !active(&menu, &tr!("menu-selected-content")).enabled,
-            "aucune sélection"
+            "no selection"
         );
-        let (_, export) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
+        let (_, export) = open_path(&mut app, tab, &[tr!("menu-graph"), tr!("menu-export")]);
         assert!(active(&export, &tr!("action-export-graph")).enabled);
         assert!(
             !active(&menu, &tr!("action-reset-text-positions")).enabled,
-            "aucun texte déplacé"
+            "no text moved"
         );
 
         let target = AnnotationRef { panel: 0, index: 0 };
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(target), &spec));
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[tr!("menu-graph"), tr!("menu-selected-content")],
@@ -2189,7 +2190,7 @@ mod tests {
         let pos = active(&menu, &tr!("action-delete-content")).center;
         assert!(active(&menu, &tr!("action-delete-content")).enabled);
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::RemovePlotObject {
                 graph,
                 target: stokesforge_app_state::object_manager::VisibilityTarget::Annotation(target),
@@ -2198,36 +2199,36 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// « Contenu sélectionné » reprend le menu de l'Object Manager : grisé
-    /// sans sélection, et ses demandes passent par
-    /// `run_object_manager_request`, comme celles de l'arbre.
+    /// "Selection" reuses the Object Manager menu: greyed out
+    /// without a selection, and its requests go through
+    /// `run_object_manager_request`, like those of the tree.
     #[test]
-    fn le_contenu_selectionne_du_menu_graphique_passe_par_l_object_manager() {
+    fn the_selection_of_the_graph_menu_goes_through_the_object_manager() {
         use stokesforge_app_state::object_manager::VisibilityTarget;
-        let (session, mut app, graph) = banc();
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let ouvre_le_contenu = |app: &mut StokesForgeApp| {
-            let (ctx, menu) = ouvre(app, tab, &tr!("menu-graph"));
+        let open_the_content = |app: &mut StokesForgeApp| {
+            let (ctx, menu) = open_menu(app, tab, &tr!("menu-graph"));
             let pos = active(&menu, &tr!("menu-selected-content")).center;
-            clique(app, &ctx, tab, pos);
-            let (output, _) = peint(app, &ctx, tab, Vec::new());
-            (ctx, entrees(&output))
+            click_at(app, &ctx, tab, pos);
+            let (output, _) = paint_bar(app, &ctx, tab, Vec::new());
+            (ctx, entries(&output))
         };
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
         assert!(
             !active(&menu, &tr!("menu-selected-content")).enabled,
-            "sans sélection, l'entrée est grisée et n'ouvre pas de sous-menu"
+            "with no selection, the entry is greyed out and opens no submenu"
         );
 
         let series = stokesforge_plot::SeriesRef::new(0, 0);
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_series(Some(series), &spec));
-        let (ctx, menu) = ouvre_le_contenu(&mut app);
+        let (ctx, menu) = open_the_content(&mut app);
         let properties = active(&menu, &tr!("action-properties"));
         assert!(properties.enabled);
         let pos = properties.center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::OpenObjectProperties {
                 graph,
                 target: VisibilityTarget::Series(series),
@@ -2237,44 +2238,44 @@ mod tests {
     }
 
     #[test]
-    fn le_menu_affichage_ne_porte_que_les_reglages_des_panneaux() {
-        let (session, mut app, graph) = banc();
+    fn the_view_menu_carries_only_the_panel_settings() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
-        assert!(entree(&menu, &tr!("project-manager-title")).is_none());
-        assert!(entree(&menu, &tr!("script-title")).is_none());
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-view"));
+        assert!(find_entry(&menu, &tr!("project-manager-title")).is_none());
+        assert!(find_entry(&menu, &tr!("script-title")).is_none());
         assert!(
-            entree(&menu, &tr!("action-object-manager")).is_some(),
-            "seul l'Object Manager porte des réglages aujourd'hui (#214)"
+            find_entry(&menu, &tr!("action-object-manager")).is_some(),
+            "only the Object Manager carries settings today (#214)"
         );
         for open in [false, true] {
             app.state.set_object_manager_open_for_test(open);
-            let (_, menu) = ouvre_chemin(
+            let (_, menu) = open_path(
                 &mut app,
                 tab,
                 &[tr!("menu-view"), tr!("action-object-manager")],
             );
-            assert!(entree(&menu, &tr!("action-show-content")).is_none());
+            assert!(find_entry(&menu, &tr!("action-show-content")).is_none());
             for label in [
                 tr!("object-manager-show-axes"),
                 tr!("object-manager-show-objects"),
             ] {
                 assert!(
                     active(&menu, &label).enabled,
-                    "réglage actif, panneau ouvert ou non"
+                    "setting enabled, panel open or not"
                 );
             }
         }
         session.shutdown().unwrap();
     }
 
-    /// #162 : « Texte SVG » est un choix exclusif sous Export ; le choix
-    /// courant (Texte, par défaut) ne fait rien de plus qu'un clic sur l'autre.
+    /// #162: "SVG Text" is an exclusive choice under Export; the current
+    /// choice (Text, by default) does nothing more than a click on the other.
     #[test]
-    fn le_texte_svg_est_un_choix_exclusif_sous_export() {
-        let (session, mut app, graph) = banc();
+    fn svg_text_is_an_exclusive_choice_under_export() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -2283,9 +2284,9 @@ mod tests {
                 tr!("menu-graph-svg-text"),
             ],
         );
-        assert!(entree(&menu, &tr!("menu-graph-svg-text-text")).is_some());
+        assert!(find_entry(&menu, &tr!("menu-graph-svg-text-text")).is_some());
         assert_eq!(
-            clique(
+            click_at(
                 &mut app,
                 &ctx,
                 tab,
@@ -2293,15 +2294,15 @@ mod tests {
             ),
             vec![Action::SetSvgTextMode(SvgTextMode::Outlines)]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn la_resolution_png_est_un_choix_exclusif_qui_ferme_trois_niveaux() {
-        let (session, mut app, graph) = banc();
+    fn png_resolution_is_an_exclusive_choice_that_closes_three_levels() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (ctx, menu) = ouvre_chemin(
+        let (ctx, menu) = open_path(
             &mut app,
             tab,
             &[
@@ -2323,54 +2324,54 @@ mod tests {
             height = ((h as f32 * scale) as u32)
         );
         assert_eq!(
-            clique(&mut app, &ctx, tab, active(&menu, &label).center),
+            click_at(&mut app, &ctx, tab, active(&menu, &label).center),
             vec![Action::SetPngExportScale(scale)]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn les_proprietes_du_graphique_ouvrent_le_bon_onglet_et_ferment_les_parents() {
-        let (session, mut app, graph) = banc();
+    fn the_graph_properties_open_the_right_tab_and_close_the_parents() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-graph"));
-        for feuille in [
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
+        for page in [
             tr!("menu-graph-axes"),
             tr!("action-export-graph"),
             tr!("action-delete-content"),
         ] {
             assert!(
-                entree(&menu, &feuille).is_none(),
-                "la feuille {feuille} doit être rangée"
+                find_entry(&menu, &page).is_none(),
+                "the page {page} must be filed away"
             );
         }
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-graph"), tr!("menu-properties")]);
+        let (ctx, menu) = open_path(&mut app, tab, &[tr!("menu-graph"), tr!("menu-properties")]);
         let pos = active(&menu, &tr!("menu-graph-axes")).center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::OpenPlotSettings {
                 graph,
                 tab: stokesforge_app_state::state::PlotSettingsTab::Axes,
                 axis: None
             }]
         );
-        assert_ferme(&mut app, &ctx, tab);
+        assert_closed(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn les_sous_menus_des_reglages_emettent_les_actions_communes() {
+    fn the_settings_submenus_emit_the_common_actions() {
         use stokesforge_app_state::preferences::ObjectManagerGroup;
-        let (session, mut app, _) = banc();
+        let (session, mut app, _) = bench();
         app.state.set_object_manager_open_for_test(true);
-        // Les réglages restent accessibles sans graphique actif.
+        // The settings stay accessible without an active graph.
         let open = |app: &mut StokesForgeApp, child: Option<&str>| {
             let mut path = vec![tr!("menu-view"), tr!("action-object-manager")];
             if let Some(label) = child {
                 path.push(label.to_string());
             }
-            ouvre_chemin(app, None, &path)
+            open_path(app, None, &path)
         };
         for (label, current, action) in [
             (
@@ -2390,11 +2391,11 @@ mod tests {
             let row = active(&menu, &label);
             assert!(row.enabled);
             assert_eq!(row.toggled, Some(current));
-            assert_eq!(clique(&mut app, &ctx, None, row.center), vec![action]);
-            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            assert_eq!(click_at(&mut app, &ctx, None, row.center), vec![action]);
+            let still_open = entries(&paint_bar(&mut app, &ctx, None, Vec::new()).0);
             assert!(
-                entree(&still_open, &label).is_some(),
-                "la bascule garde le menu ouvert"
+                find_entry(&still_open, &label).is_some(),
+                "the toggle keeps the menu open"
             );
         }
         for (group, label) in [
@@ -2415,21 +2416,21 @@ mod tests {
             let row = active(&menu, &label);
             assert_eq!(row.toggled, Some(current));
             assert_eq!(
-                clique(&mut app, &ctx, None, row.center),
+                click_at(&mut app, &ctx, None, row.center),
                 vec![Action::SetObjectManagerGroupOpen {
                     group,
                     open: !current
                 }]
             );
-            let still_open = entrees(&peint(&mut app, &ctx, None, Vec::new()).0);
+            let still_open = entries(&paint_bar(&mut app, &ctx, None, Vec::new()).0);
             assert!(
-                entree(&still_open, &label).is_some(),
-                "la bascule garde Expand by Default ouvert"
+                find_entry(&still_open, &label).is_some(),
+                "the toggle keeps Expand by Default open"
             );
         }
         let (ctx, menu) = open(&mut app, None);
         assert_eq!(
-            clique(
+            click_at(
                 &mut app,
                 &ctx,
                 None,
@@ -2437,68 +2438,68 @@ mod tests {
             ),
             vec![Action::ResetObjectManagerSettings]
         );
-        assert_ferme(&mut app, &ctx, None);
+        assert_closed(&mut app, &ctx, None);
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_menu_fenetre_suit_la_fenetre_active_et_le_project_manager() {
-        let (session, mut app, graph) = banc();
+    fn the_window_menu_follows_the_active_window_and_the_project_manager() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-window"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-window"));
         assert!(active(&menu, &tr!("action-detach-project-manager")).enabled);
-        assert!(entree(&menu, &tr!("action-reattach-project-manager")).is_none());
+        assert!(find_entry(&menu, &tr!("action-reattach-project-manager")).is_none());
         let maximize = active(&menu, &tr!("action-maximize-window"));
         assert!(maximize.enabled);
         let pos = maximize.center;
-        assert!(clique(&mut app, &ctx, tab, pos).is_empty());
+        assert!(click_at(&mut app, &ctx, tab, pos).is_empty());
         assert_eq!(
             app.maximized_tab,
             Some(Tab::Graph(graph)),
-            "maximise la fenêtre au premier plan"
+            "maximizes the foreground window"
         );
 
         let restore = tr!(
             "action-restore-window",
             title = tab_title(&app.state, Tab::Graph(graph))
         );
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-window"));
-        assert!(entree(&menu, &tr!("action-maximize-window")).is_none());
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-window"));
+        assert!(find_entry(&menu, &tr!("action-maximize-window")).is_none());
         let pos = active(&menu, &restore).center;
-        clique(&mut app, &ctx, tab, pos);
+        click_at(&mut app, &ctx, tab, pos);
         assert_eq!(app.maximized_tab, None);
 
-        // Aucune fenêtre flottante : rien à maximiser.
+        // No floating window: nothing to maximize.
         app.floating_tabs.clear();
-        let (_, menu) = ouvre(&mut app, None, &tr!("menu-window"));
+        let (_, menu) = open_menu(&mut app, None, &tr!("menu-window"));
         assert!(!active(&menu, &tr!("action-maximize-window")).enabled);
 
-        // Project Manager détaché : l'entrée devient « réattacher ».
+        // Detached Project Manager: the entry becomes "reattach".
         app.pm_detached = true;
-        let (_, menu) = ouvre(&mut app, None, &tr!("menu-window"));
-        assert!(entree(&menu, &tr!("action-detach-project-manager")).is_none());
+        let (_, menu) = open_menu(&mut app, None, &tr!("menu-window"));
+        assert!(find_entry(&menu, &tr!("action-detach-project-manager")).is_none());
         assert!(active(&menu, &tr!("action-reattach-project-manager")).enabled);
         session.shutdown().unwrap();
     }
 
-    /// Help › Keyboard Shortcuts (#231, S-K5) : l'entrée existe, s'active, et
-    /// demande l'ouverture de la fenêtre des raccourcis.
+    /// Help › Keyboard Shortcuts (#231, S-K5): the entry exists, is enabled, and
+    /// requests the opening of the shortcuts window.
     #[test]
-    fn le_menu_aide_ouvre_les_raccourcis_clavier() {
-        let (session, mut app, graph) = banc();
+    fn the_help_menu_opens_the_keyboard_shortcuts() {
+        let (session, mut app, graph) = bench();
         let tab = Some(Tab::Graph(graph));
-        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-help"));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-help"));
         let entry = active(&menu, &tr!("action-keyboard-shortcuts"));
         let pos = entry.center;
         assert_eq!(
-            clique(&mut app, &ctx, tab, pos),
+            click_at(&mut app, &ctx, tab, pos),
             vec![Action::OpenKeyboardShortcuts]
         );
         session.shutdown().unwrap();
     }
 
-    /// Une image de la seule barre d'état.
-    fn barre_d_etat(app: &StokesForgeApp, ctx: &egui::Context) -> egui::FullOutput {
+    /// A frame of the status bar alone.
+    fn status_bar_frame(app: &StokesForgeApp, ctx: &egui::Context) -> egui::FullOutput {
         let mut actions = Vec::new();
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -2515,8 +2516,8 @@ mod tests {
         output
     }
 
-    /// La couleur du texte peint qui contient `needle`, s'il est peint.
-    fn couleur_du_texte(output: &egui::FullOutput, needle: &str) -> Option<egui::Color32> {
+    /// The color of the painted text that contains `needle`, if it is painted.
+    fn text_color_of(output: &egui::FullOutput, needle: &str) -> Option<egui::Color32> {
         output
             .shapes
             .iter()
@@ -2535,50 +2536,46 @@ mod tests {
             })
     }
 
-    /// « Prêt » sans message ; trois niveaux (S-M4) : l'information garde la
-    /// couleur courante, l'avertissement la teinte d'avertissement, l'erreur
-    /// la couleur d'erreur ; ni révision ni lien d'import (S-R15).
+    /// "Ready" with no message; three levels (S-M4): information keeps the
+    /// current color, the warning the warning tint, the error
+    /// the error color; no revision nor import link (S-R15).
     #[test]
-    fn la_barre_d_etat_distingue_les_trois_niveaux() {
-        let (session, mut app, _) = banc();
-        let ctx = contexte();
-        let output = barre_d_etat(&app, &ctx);
-        assert!(couleur_du_texte(&output, &tr!("status-ready")).is_some());
-        assert!(couleur_du_texte(&output, "Revision").is_none());
+    fn the_status_bar_distinguishes_the_three_levels() {
+        let (session, mut app, _) = bench();
+        let ctx = context();
+        let output = status_bar_frame(&app, &ctx);
+        assert!(text_color_of(&output, &tr!("status-ready")).is_some());
+        assert!(text_color_of(&output, "Revision").is_none());
         let visuals = &ctx.global_style().visuals;
-        let (erreur, avertissement) = (visuals.error_fg_color, visuals.warn_fg_color);
+        let (error, warning) = (visuals.error_fg_color, visuals.warn_fg_color);
 
-        app.state.notice("Avis".into());
-        let output = barre_d_etat(&app, &ctx);
-        assert!(couleur_du_texte(&output, &tr!("status-ready")).is_none());
-        assert_ne!(couleur_du_texte(&output, "Avis"), Some(erreur), "témoin");
-        assert_ne!(
-            couleur_du_texte(&output, "Avis"),
-            Some(avertissement),
-            "témoin"
-        );
+        app.state.notice("Notice".into());
+        let output = status_bar_frame(&app, &ctx);
+        assert!(text_color_of(&output, &tr!("status-ready")).is_none());
+        assert_ne!(text_color_of(&output, "Notice"), Some(error), "witness");
+        assert_ne!(text_color_of(&output, "Notice"), Some(warning), "witness");
 
-        app.state.warn("Attention".into());
-        let output = barre_d_etat(&app, &ctx);
-        assert_eq!(couleur_du_texte(&output, "Attention"), Some(avertissement));
+        app.state.warn("Warning".into());
+        let output = status_bar_frame(&app, &ctx);
+        assert_eq!(text_color_of(&output, "Warning"), Some(warning));
 
-        // Un geste refusé (la dernière feuille d'un classeur) ; un projet
-        // illisible, lui, est un échec grave dit par un dialogue (S-M8, #229).
+        // A refused gesture (the last sheet of a workbook); an unreadable
+        // project, on the other hand, is a serious failure told by a dialog (S-M8, #229).
         let book = app.state.books()[0].0;
         let sheet = app.state.selected_sheet_in(book).unwrap();
         app.state.dispatch(Action::DeleteSheet(sheet));
-        let status = app.state.status().expect("un refus se dit");
+        let status = app.state.status().expect("a refusal is reported");
         assert!(status.is_error());
         let text = status.text.clone();
-        let output = barre_d_etat(&app, &ctx);
-        assert_eq!(couleur_du_texte(&output, &text), Some(erreur));
+        let output = status_bar_frame(&app, &ctx);
+        assert_eq!(text_color_of(&output, &text), Some(error));
         session.shutdown().unwrap();
     }
 
-    /// Un clic sur la barre d'état demande l'historique des messages (S-M6).
+    /// A click on the status bar requests the message history (S-M6).
     #[test]
-    fn un_clic_sur_la_barre_d_etat_ouvre_l_historique() {
-        let (session, mut app, _) = banc();
+    fn a_click_on_the_status_bar_opens_the_history() {
+        let (session, mut app, _) = bench();
         app.state.notice("Message".into());
         let context = egui::Context::default();
         crate::theme::install(&context);
