@@ -61,8 +61,8 @@ pub struct State {
     data_sources: Vec<CopyPasteSource>,
     data_selection_content: Rc<[u8]>,
     /// Représentations non textuelles offertes par [`State::store_formats`]
-    /// (StokesForge, #149) : un type MIME et ses octets, dans l'ordre de
-    /// préférence. Vide tant que la sélection est du texte.
+    /// (StokesForge, #149): a MIME type and its bytes, in order of
+    /// preference. Empty as long as the selection is text.
     data_selection_formats: Vec<(String, Rc<[u8]>)>,
 }
 

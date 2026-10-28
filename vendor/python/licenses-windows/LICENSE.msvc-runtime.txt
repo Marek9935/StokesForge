@@ -1,14 +1,12 @@
 Microsoft Visual C++ runtime (vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll)
 
-Ces bibliotheques sont des fichiers redistribuables de Microsoft. StokesForge
-les livre, sans les modifier, a cote de son executable pour que l'application
-demarre sur un poste Windows vierge. Leur redistribution releve des conditions
-de redistribution de Microsoft Visual Studio ("Distributable Code"), publiees
-par Microsoft :
+These libraries are redistributable Microsoft files. StokesForge ships them,
+unmodified, next to its executable so that the application starts on a clean
+Windows machine. Their redistribution is governed by the Microsoft Visual
+Studio redistribution terms ("Distributable Code"), published by Microsoft:
 
   https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
   https://visualstudio.microsoft.com/license-terms/
 
-Microsoft ne fournit pas de fichier de licence separe avec ces DLL. Ce
-document en tient lieu de notice ; il ne remplace pas les conditions
-de Microsoft.
+Microsoft does not provide a separate license file with these DLLs. This
+document serves as the notice; it does not replace Microsoft's terms.

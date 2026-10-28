@@ -1,10 +1,10 @@
-//! Conversion transitoire #72 : URI de dépôt vers chemins locaux.
+//! Transitional conversion #72: drop URIs to local paths.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-/// URI locales seulement : décodage percent-encoded, commentaires et CRLF.
-/// Une entrée distante/invalide ne devient jamais un chemin relatif.
+/// Local URIs only: percent-encoded decoding, comments and CRLF.
+/// A remote/invalid entry never becomes a relative path.
 pub(super) fn local_files(bytes: &[u8]) -> Vec<PathBuf> {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return Vec::new();
@@ -16,8 +16,8 @@ pub(super) fn local_files(bytes: &[u8]) -> Vec<PathBuf> {
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {
-        // url::Url normalise aussi « file:relatif » en chemin absolu : ce
-        // n'est pas une URI de fichier absolue fournie par la source.
+        // url::Url also normalizes "file:relative" into an absolute path: that
+        // is not an absolute file URI provided by the source.
         if !line
             .split_once(':')
             .is_some_and(|(_, rest)| rest.starts_with('/'))

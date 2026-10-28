@@ -68,7 +68,7 @@ pub struct EventLoop<T: 'static> {
     /// Connection to the wayland server.
     connection: Connection,
 
-    /// Transition #72 : ne survit pas à la boucle, callbacks faibles.
+    /// Transition #72: does not outlive the loop, weak callbacks.
     _file_drop_bridge: super::file_drop_bridge::Registration,
 
     /// Event loop window target.

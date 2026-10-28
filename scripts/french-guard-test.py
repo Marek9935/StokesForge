@@ -102,12 +102,12 @@ class Detector(unittest.TestCase):
 
     def test_exempt_paths(self):
         ex = guard.is_exempt_path
-        for p in ["crates/x/i18n/fr/a.ftl", "docs/archive/a.md", "test/import/a.csv", "vendor/a/b.rs",
+        for p in ["crates/x/i18n/fr/a.ftl", "docs/archive/a.md", "test/import/a.csv",
                   ".claude/skills/stokesforge-bug-report/references/decision-form.html",
                   "scripts/french-guard-test.py"]:
             self.assertTrue(ex(p), p)
         for p in ["docs/archived.md", "crates/x/i18n/fr-extra/a", "crates/x/i18n/en/a.ftl",
-                  "src/vendor/a.rs", "docs/archive", "scripts/french-guard.py"]:
+                  "vendor/a/b.rs", "src/vendor/a.rs", "docs/archive", "scripts/french-guard.py"]:
             self.assertFalse(ex(p), p)
 
     def test_guard_passes_on_itself(self):
@@ -164,14 +164,15 @@ class EndToEnd(unittest.TestCase):
         self.assertLessEqual(len(out.splitlines()[0].split(": ", 1)[1]), 120)
 
     def test_exempt_and_near_miss_paths(self):
-        for name in ["docs/archive/a.md", "crates/x/i18n/fr/a.ftl", "vendor/v.rs"]:
+        for name in ["docs/archive/a.md", "crates/x/i18n/fr/a.ftl"]:
             self.add(name, FR + "\n")
         self.add("docs/archived.md", FR + "\n")
+        self.add("vendor/v.rs", FR + "\n")
         self.add("crates/x/i18n/fr-extra/a", FR + "\n")
         code, out, _ = self.run_guard()
         self.assertEqual(code, 1)
         self.assertEqual([l.split(":")[0] for l in out.splitlines()],
-                         ["crates/x/i18n/fr-extra/a", "docs/archived.md"])
+                         ["crates/x/i18n/fr-extra/a", "docs/archived.md", "vendor/v.rs"])
 
     def test_untracked_symlink_binary_ignored(self):
         self.add("untracked.md", FR + "\n", track=False)

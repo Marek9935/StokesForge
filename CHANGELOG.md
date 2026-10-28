@@ -42,6 +42,8 @@ without a message, see `docs/persistence.md`).
   places or a `lang: fr` marker. Run it locally with
   `python3 scripts/french-guard.py`; contributors mark deliberate French test
   data as described in `docs/tests.md`.
+- Language (#380): our own files under `vendor/` (fork notes, comments, notices) are
+  translated to English, and the French guard no longer exempts `vendor/`.
 - Interaction language setting (#377): one line in `CLAUDE.md` and `AGENTS.md`
   sets the language agents use to talk to the developer; the repository stays
   English.

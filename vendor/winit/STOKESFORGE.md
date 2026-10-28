@@ -1,79 +1,79 @@
-# Dépôt Wayland — transition #72
+# Wayland drop: transition #72
 
-Cette copie est **winit 0.30.13**, sous sa licence Apache-2.0 (`LICENSE`).
-Le `[patch.crates-io]` racine la sélectionne aussi pour eframe/egui-winit
-0.36.2. Elle reste hors des membres du workspace.
+This copy is **winit 0.30.13**, under its Apache-2.0 license (`LICENSE`).
+The root `[patch.crates-io]` selects it for eframe/egui-winit 0.36.2 as well.
+It stays outside the workspace members.
 
-Source : paquet crates.io `winit` 0.30.13, SHA-256 du paquet amont
-`a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d`. Les fichiers de production amont
-sont conservés, sauf les modifications explicitement recensées ci-dessous.
-Les fichiers générés du cache Cargo ne font pas partie de cette copie.
+Source: crates.io package `winit` 0.30.13, SHA-256 of the upstream package
+`a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d`. The
+upstream production files are kept, except for the changes explicitly listed
+below. Files generated in the Cargo cache are not part of this copy.
 
-## Récepteur partagé : correction du premier prototype
+## Shared receiver: fix of the first prototype
 
-Le premier prototype ajoutait un `wl_data_device` dans winit, qui n'en
-possédait pas. C'était insuffisant : egui-winit crée ensuite
-`smithay-clipboard` **sur le même wl_display**, avec sa propre file. Sur
-Mutter, les offres n'étaient envoyées qu'au récepteur du presse-papiers,
-dont les handlers de dépôt amont sont vides. Le problème a été reproduit
-par un dépôt réel depuis Fichiers : `text/uri-list`, `enter`, `motion` et
-`leave` sur le récepteur du presse-papiers, aucune acceptation ni réception.
-Le second récepteur du ticket était donc bien un risque réel.
+The first prototype added a `wl_data_device` in winit, which had none. That
+was not enough: egui-winit then creates `smithay-clipboard` **on the same
+wl_display**, with its own queue. On Mutter, the offers were sent only to the
+clipboard receiver, whose upstream drop handlers are empty. The problem was
+reproduced with a real drop from Files: `text/uri-list`, `enter`, `motion` and
+`leave` on the clipboard receiver, with no acceptance or reception. The
+ticket's second receiver was therefore a real risk.
 
-Le correctif utilise maintenant **le récepteur existant du presse-papiers**.
-`vendor/smithay-clipboard` est la copie 0.7.3 sous licence MIT, avec le dépôt
-ajouté à ses handlers. Un seul worker et un seul récepteur par siège sont
-partagés entre les viewports d'egui. Les requêtes/réponses de collage sont
-sérialisées ; le copier-coller et la sélection primaire restent disponibles.
-La dernière vue ferme le worker avant que le display emprunté soit détruit.
+The fix now uses **the clipboard's existing receiver**.
+`vendor/smithay-clipboard` is the 0.7.3 copy under the MIT license, with the
+drop added to its handlers. One worker and one receiver per seat are shared
+among egui's viewports. Paste requests/replies are serialized; copy-paste and
+the primary selection stay available. The last view closes the worker before
+the borrowed display is destroyed.
 
-winit ne crée plus aucun `wl_data_device`. Un canal calloop reçoit les
-événements du worker existant : identifiant de surface, position logique et
-chemins. La boucle winit retrouve la fenêtre et son échelle puis émet les
-événements habituels. Aucun objet Wayland ni pointeur emprunté ne traverse
-le canal ; le callback possède une référence faible et devient inactif à
-l'arrêt de la boucle. Aucun nouveau fil n'est créé.
+winit no longer creates any `wl_data_device`. A calloop channel receives the
+events from the existing worker: surface identifier, logical position and
+paths. The winit loop finds the window and its scale, then emits the usual
+events. No Wayland object or borrowed pointer crosses the channel; the
+callback holds a weak reference and becomes inactive when the loop stops. No
+new thread is created.
 
-Estimations de développement et coûts de validation, avant validation réelle
-du dépôt (ordres de grandeur, pas des mesures) :
+Development estimates and validation costs, before real validation of the
+drop (orders of magnitude, not measurements):
 
-| Option | Développement | Mémoire et maintenance | Détection des défauts |
+| Option | Development | Memory and maintenance | Defect detection |
 |---|---|---|---|
-| Module externe sur pointeur emprunté | 1–2 jours avec fenêtres détachées | fil et file supplémentaires ; gestion de durée de vie et correspondance surface/viewport | élevée : concurrence, fermeture et plusieurs fenêtres |
-| Récepteur partagé presse-papiers/winit, retenu | environ une journée avec tests et doc | deux patches de versions déjà compilées ; un récepteur par siège et un worker pour toutes les vues | élevée pour le protocole ; parseur, canal et durée de vie couverts automatiquement |
-| Backport du backend 0.31 | plusieurs jours | adaptation des API événementielles remaniées ; diff plus large | élevée : tous les événements de fenêtre |
-| Sélecteur XDG seul | quelques heures | composant `rfd` déjà présent | faible, mais ne permet pas de déposer un fichier |
-| X11 conservé par défaut | quelques minutes | aucune transition | faible pour le dépôt ; conserve la latence constatée sous XWayland |
-| Migration immédiate vers winit 0.31 bêta | plusieurs jours au moins | migration coordonnée d'eframe/egui-winit | très élevée : ensemble de l'interface |
+| External module on a borrowed pointer | 1-2 days with detached windows | extra thread and queue; lifetime handling and surface/viewport mapping | high: concurrency, closing and several windows |
+| Receiver shared between clipboard and winit, chosen | about one day with tests and docs | two patches of versions already compiled; one receiver per seat and one worker for all views | high for the protocol; parser, channel and lifetime covered automatically |
+| Backport of the 0.31 backend | several days | adapting the reworked event APIs; wider diff | high: all window events |
+| XDG picker only | a few hours | `rfd` component already present | low, but does not allow dropping a file |
+| X11 kept as default | a few minutes | no transition | low for the drop; keeps the latency seen under XWayland |
+| Immediate migration to winit 0.31 beta | several days at least | coordinated migration of eframe/egui-winit | very high: the whole interface |
 
-État amont consulté le 2026-10-02 :
+Upstream state checked on 2026-10-02:
 [winit 0.31.0-beta.3](https://github.com/rust-windowing/winit/releases),
 [egui-winit](https://github.com/emilk/egui/blob/main/crates/egui-winit/Cargo.toml).
-Vérifier ces sources de nouveau avant de migrer.
+Check these sources again before migrating.
 
-## Diff de production à relire
+## Production diff to review
 
-winit : `src/platform/wayland.rs`, `src/platform_impl/linux/wayland/mod.rs`,
-`state.rs`, `event_loop/mod.rs` et le nouveau `file_drop_bridge.rs`.
-Le manifeste et les handlers de siège sont ceux d'amont.
+winit: `src/platform/wayland.rs`, `src/platform_impl/linux/wayland/mod.rs`,
+`state.rs`, `event_loop/mod.rs` and the new `file_drop_bridge.rs`.
+The manifest and the seat handlers are the upstream ones.
 
-smithay-clipboard : `Cargo.toml` (winit et url, déjà présents dans le graphe),
-`src/lib.rs` (worker partagé), `worker.rs` (callback), `state.rs` (raccordement),
-les nouveaux `file_drop.rs` et `file_drop_uri.rs`. **#149** ajoute
-`Clipboard::store_formats` (`lib.rs`, `Command::StoreFormats` de `worker.rs`,
-`State::store_formats` et la recherche du type MIME demandé dans `send_request`
-de `state.rs`) : une sélection du presse-papiers à plusieurs types MIME (SVG, PNG,
-PDF d'une figure), consommée par `stokesforge-clipboard`. Le chemin texte est
-inchangé ; une sélection texte efface les représentations, et inversement. Les manifestes d'origine
-restent les témoins amont. Source crates.io 0.7.3, SHA-256 :
+smithay-clipboard: `Cargo.toml` (winit and url, already in the graph),
+`src/lib.rs` (shared worker), `worker.rs` (callback), `state.rs` (wiring),
+the new `file_drop.rs` and `file_drop_uri.rs`. **#149** adds
+`Clipboard::store_formats` (`lib.rs`, `Command::StoreFormats` of `worker.rs`,
+`State::store_formats` and the lookup of the requested MIME type in
+`send_request` of `state.rs`): a clipboard selection with several MIME types
+(SVG, PNG, PDF of a figure), consumed by `stokesforge-clipboard`. The text
+path is unchanged; a text selection clears the representations, and vice
+versa. The original manifests remain the upstream witnesses. crates.io 0.7.3
+source, SHA-256:
 `71704c03f739f7745053bde45fa203a46c58d25bc5c4efba1d9a60e9dba81226`.
 
-Le parseur et le canal exacts sont aussi compilés par les tests ordinaires
-`stokesforge-app/tests/wayland_uri.rs` et `wayland_bridge.rs`.
-Les deux copies restent hors workspace ; `rustfmt` ciblé doit compléter
-`cargo fmt`. Aucun autre code amont n'est modifié.
+The exact parser and channel are also compiled by the ordinary tests
+`stokesforge-app/tests/wayland_uri.rs` and `wayland_bridge.rs`.
+Both copies stay outside the workspace; a targeted `rustfmt` must complement
+`cargo fmt`. No other upstream code is modified.
 
-Contrôles du patch, depuis la racine (Linux) :
+Patch checks, from the root (Linux):
 
 ```sh
 cargo test -p stokesforge-app --test wayland_uri --test wayland_bridge
@@ -86,78 +86,79 @@ rustfmt --edition 2024 --config-path /dev/null --config skip_children=true --che
   vendor/smithay-clipboard/src/{file_drop,file_drop_uri,lib,state,worker}.rs
 ```
 
-Le fichier de configuration amont de smithay-clipboard contient des options
-nightly ; `/dev/null` choisit le formatage stable pour les fichiers modifiés.
-`skip_children=true` laisse les modules amont inchangés.
+The upstream smithay-clipboard configuration file contains nightly options;
+`/dev/null` selects the stable formatting for the modified files.
+`skip_children=true` leaves the unchanged upstream modules alone.
 
-## Interface et limites
+## Interface and limits
 
-Le pont n'émet que `CursorMoved` (position du dépôt), `HoveredFile`,
-`HoveredFileCancelled` et `DroppedFile`, avec l'identité native de la fenêtre.
-egui-winit les traduit en `hovered_files`/`dropped_files` comme sous X11.
-L'application conserve `Action::DropFiles` et son import partagé.
+The bridge emits only `CursorMoved` (drop position), `HoveredFile`,
+`HoveredFileCancelled` and `DroppedFile`, with the window's native identity.
+egui-winit translates them into `hovered_files`/`dropped_files` as under X11.
+The application keeps `Action::DropFiles` and its shared import.
 
-`text/uri-list` et l'action **Copy** sont acceptés. Aucune suppression de
-fichier source n'est demandée. Les URI `file:` locales sont décodées par
-`url`, avec commentaires, CRLF, espaces échappés et dédoublonnage. Les URI
-distantes, relatives, à fragment/requête, ou contenant NUL sont rejetées.
-Un marqueur de survol à chemin vide indique l'offre avant réception ; il ne
-devient jamais un dépôt. Les chemins sont demandés seulement après `drop`.
+`text/uri-list` and the **Copy** action are accepted. No deletion of the
+source file is requested. Local `file:` URIs are decoded by `url`, with
+comments, CRLF, escaped spaces and deduplication. Remote or relative URIs,
+URIs with a fragment/query, and URIs containing NUL are rejected. A hover
+marker with an empty path signals the offer before reception; it never
+becomes a drop. Paths are requested only after `drop`.
 
-La lecture du pipe passe par calloop : une lecture par notification,
-**1 Mio maximum de liste d'URI par dépôt**, délai maximum **10 secondes**.
-Ces limites portent sur les noms, pas sur la taille des fichiers importés.
-Une source lente n'immobilise donc pas l'interface. Le siège, la fenêtre et
-l'offre doivent rester valides ; une erreur est journalisée. La position
-du dépôt est réémise quand les chemins arrivent pour conserver sa destination.
-Le support tactile et les compositeurs autres que ceux testés restent à vérifier.
+Reading the pipe goes through calloop: one read per notification,
+**1 MiB maximum of URI list per drop**, maximum delay **10 seconds**.
+These limits apply to the names, not to the size of the imported files. A
+slow source therefore does not freeze the interface. The seat, the window and
+the offer must stay valid; an error is logged. The drop position is re-emitted
+when the paths arrive, to keep its destination. Touch support and compositors
+other than the tested ones remain to be checked.
 
-## Vérification manuelle obligatoire
+## Mandatory manual check
 
-Sur **GNOME/Mutter**, **KDE/KWin**, puis un compositeur **wlroots**, lancer :
+On **GNOME/Mutter**, **KDE/KWin**, then a **wlroots** compositor, run:
 
 ```sh
 cargo run -p stokesforge-app
 STOKESFORGE_X11=1 cargo run -p stokesforge-app
 ```
 
-Pour chaque backend, déposer depuis le gestionnaire de fichiers :
+For each backend, drop from the file manager:
 
-1. Un CSV, puis plusieurs fichiers avec espaces, accents et `%` dans leurs
-   noms : survol visible, une feuille par fichier, une entrée d'import
-   annulable, sans suppression à la source.
-2. Sur un classeur flottant précis, puis hors des classeurs : bonne
-   destination ; bouger le pointeur juste après avoir lâché le fichier.
-3. Sur un classeur détaché, puis sur un graphe et le Project Manager
-   détachés : même décision de destination que sous X11.
-4. Sortir de la fenêtre sans déposer, puis déposer une nouvelle fois :
-   aucun marqueur de survol persistant, aucun fichier importé à l'annulation.
-5. Déposer un `.stf` : ouverture par le second processus existant.
-6. Essayer avec les propriétés d'un graphe ouvertes et avec l'assistant
-   d'import ouvert : refus ou ajout aux fichiers selon les règles actuelles.
-7. Fermer une fenêtre pendant le survol, puis l'application après un dépôt :
-   pas d'erreur de protocole ni de fil survivant.
-8. Répéter les dépôts, dont une offre non fichier ; tester deux sièges si
-   disponibles. Aucun dépôt ne doit être doublé.
+1. A CSV, then several files with spaces, accents and `%` in their names:
+   visible hover, one sheet per file, one undoable import entry, no deletion
+   at the source.
+2. On a specific floating workbook, then outside the workbooks: correct
+   destination; move the pointer right after releasing the file.
+3. On a detached workbook, then on a detached graph and Project Manager: same
+   destination decision as under X11.
+4. Leave the window without dropping, then drop again: no persistent hover
+   marker, no file imported on cancel.
+5. Drop a `.stf`: opened by the existing second process.
+6. Try with a graph's properties open and with the import wizard open:
+   refusal or addition to the files according to the current rules.
+7. Close a window during the hover, then the application after a drop: no
+   protocol error and no surviving thread.
+8. Repeat the drops, including a non-file offer; test two seats if available.
+   No drop must be doubled.
 
-Le **démarrage/arrêt natif GNOME**, le secours **X11/XWayland** et le défaut
-du premier prototype ont été observés. Après correction, le dépôt depuis
-Fichiers en Wayland natif sur GNOME/Mutter est confirmé par l'utilisateur
-le 2026-10-02. Les autres cas de la matrice, notamment les fenêtres détachées,
-KDE/KWin et wlroots, restent à valider ; les tests Rust ne les remplacent pas.
-X11 reste disponible en secours.
+The **native GNOME start/stop**, the **X11/XWayland** fallback and the defect
+of the first prototype have been observed. After the fix, the drop from Files
+in native Wayland on GNOME/Mutter was confirmed by the user on 2026-10-02.
+The other cases of the matrix, notably detached windows, KDE/KWin and
+wlroots, remain to be validated; Rust tests do not replace them. X11 stays
+available as a fallback.
 
-## Retrait
+## Removal
 
-Quand la version stable d'eframe choisie emploie winit avec dépôt Wayland :
+When the chosen stable eframe version uses a winit with Wayland drop:
 
-1. Monter eframe/egui-winit/egui ensemble, puis adapter le transport de dépôt
-   si l'API de winit 0.31 diffère. Garder `Action::DropFiles`.
-2. Retirer les entrées `[patch.crates-io]`, les exclusions `vendor/winit` et
-   `vendor/smithay-clipboard`, les deux copies, les tests `wayland_uri.rs` et
-   `wayland_bridge.rs` et leurs dev-dépendances `url`/`calloop`.
-3. Régénérer `Cargo.lock` ; vérifier qu'une seule version de winit est utilisée.
-4. Réexaminer `configure_window_backend` : le choix natif doit rester celui
-   de winit ; conserver le secours `STOKESFORGE_X11=1` s'il reste utile.
-5. Rejouer la matrice manuelle et les tests du workspace, puis actualiser
-   `docs/application/`, `.codex/README.md`, `AGENTS.md` et `CLAUDE.md`.
+1. Bump eframe/egui-winit/egui together, then adapt the drop transport if the
+   winit 0.31 API differs. Keep `Action::DropFiles`.
+2. Remove the `[patch.crates-io]` entries, the `vendor/winit` and
+   `vendor/smithay-clipboard` exclusions, the two copies, the tests
+   `wayland_uri.rs` and `wayland_bridge.rs` and their `url`/`calloop`
+   dev-dependencies.
+3. Regenerate `Cargo.lock`; check that a single winit version is used.
+4. Re-examine `configure_window_backend`: the native choice must remain
+   winit's; keep the `STOKESFORGE_X11=1` fallback if it is still useful.
+5. Replay the manual matrix and the workspace tests, then update
+   `docs/application/`, `.codex/README.md`, `AGENTS.md` and `CLAUDE.md`.

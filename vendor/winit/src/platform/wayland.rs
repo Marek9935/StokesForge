@@ -23,7 +23,7 @@ use crate::window::{Window, WindowAttributes};
 
 pub use crate::window::Theme;
 
-// Transition StokesForge #72 : le récepteur du presse-papiers partage le dépôt.
+// StokesForge transition #72: the clipboard receiver shares the drop.
 pub use crate::platform_impl::wayland::file_drop_bridge::{
     file_drop_callback, FileDropCallback, FileDropEvent,
 };

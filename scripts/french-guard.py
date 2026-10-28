@@ -21,7 +21,7 @@ from pathlib import Path
 # CHANGELOG sections `## [X.Y.Z]` up to this version are French and exempt.
 FRENCH_CHANGELOG_UP_TO = (1, 0, 0)
 
-EXEMPT_PREFIXES = ("docs/archive/", "test/import/", "vendor/")
+EXEMPT_PREFIXES = ("docs/archive/", "test/import/")
 EXEMPT_FILES = {
     ".claude/skills/stokesforge-bug-report/references/decision-form.html",
     "scripts/french-guard-test.py",
