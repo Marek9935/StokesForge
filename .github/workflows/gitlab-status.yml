@@ -1,5 +1,5 @@
-# Rapport indépendant de CI : il s'exécute aussi après un échec ou une annulation.
-name: Résultats GitLab
+# Report independent of CI: it also runs after a failure or a cancellation.
+name: GitLab results
 
 on:
   workflow_run:
@@ -10,7 +10,7 @@ permissions:
   actions: read
   contents: read
 
-# Sérialiser les rapports d'un même commit, sans en annuler un à mi-publication.
+# Serialize the reports of one commit, without canceling one mid-publication.
 concurrency:
   group: gitlab-status-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
@@ -24,14 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # workflow_run ne doit jamais exécuter le code d'une pull request avec le secret.
+      # workflow_run must never run the code of a pull request with the secret.
       - uses: actions/checkout@v4
         with:
           ref: main
           persist-credentials: false
-      - name: Vérifier le rapporteur
+      - name: Check the reporter
         run: python3 scripts/gitlab-status-test.py
-      - name: Publier les résultats dans GitLab
+      - name: Publish the results to GitLab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLAB_STATUS_TOKEN: ${{ secrets.GITLAB_STATUS_TOKEN }}

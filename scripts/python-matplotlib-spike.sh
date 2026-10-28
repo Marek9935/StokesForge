@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Spike #69 : copie du runtime normal, roues figées, test embarqué hors écran.
-# La copie vit dans extracted/ (ignoré par Git), pas dans la distribution normale.
+# Spike #69: copy of the normal runtime, frozen wheels, embedded off-screen test.
+# The copy lives in extracted/ (ignored by Git), not in the normal distribution.
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="$REPO_ROOT/vendor/python/extracted/python"
@@ -17,12 +17,12 @@ fi
 "$PREFIX/bin/python3" -I -m pip check
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
-# Même libpython ABI que la base : conserver son rpath évite un second build.
+# Same libpython ABI as the base: keeping its rpath avoids a second build.
 export RUSTFLAGS="-C link-arg=-Wl,-rpath,$BASE/lib"
 export STOKESFORGE_PYTHON_HOME="$PREFIX"
 cd "$REPO_ROOT"
 cargo run -p stokesforge-script --features python --example matplotlib-spike
-# Coût d'import en processus frais : premier échantillon puis médiane des suivants.
+# Import cost in a fresh process: first sample, then median of the following ones.
 "$BASE/bin/python3" -I - "$BASE" "$PREFIX" <<'PY'
 import json, pathlib, statistics, subprocess, sys, tempfile
 base, spike = map(pathlib.Path, sys.argv[1:])

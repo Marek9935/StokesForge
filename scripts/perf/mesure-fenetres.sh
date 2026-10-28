@@ -1,9 +1,9 @@
 #!/bin/bash
-# Mesure le coût par image pendant le déplacement d'une fenêtre flottante
-# (#340/#341). Prérequis : `git apply scripts/perf/instrumentation.patch`,
-# puis build du profil voulu. Détails : docs/mesure-performance.md.
+# Measures the cost per frame while a floating window is being moved
+# (#340/#341). Prerequisite: `git apply scripts/perf/instrumentation.patch`,
+# then build of the wanted profile. Details: docs/mesure-performance.md.
 #
-# usage : scripts/perf/mesure-fenetres.sh debug|release [nb_graphes_a_ouvrir (0-6)]
+# usage: scripts/perf/mesure-fenetres.sh debug|release [number_of_graphs_to_open (0-6)]
 set -euo pipefail
 profil=${1:?debug|release}
 nb=${2:-6}
@@ -12,27 +12,27 @@ driver="$racine/.claude/skills/run-stokesforge/driver.py"
 dir_perf="$racine/scripts/perf"
 export SF_APP="$racine/target/$profil/stokesforge-app"
 export STOKESFORGE_PROF=1
-[ -x "$SF_APP" ] || { echo "$SF_APP absent : cargo build [--release] -p stokesforge-app" >&2; exit 1; }
+[ -x "$SF_APP" ] || { echo "$SF_APP missing: cargo build [--release] -p stokesforge-app" >&2; exit 1; }
 
 essai() {
     python3 "$driver" start > /dev/null
-    # Double-clic sur les graphes du Project Manager (Panneaux … Lignes).
+    # Double-click on the graphs in the Project Manager (Panneaux … Lignes).
     for ((i = 0; i < nb; i++)); do python3 "$driver" click 60 $((216 + 27 * i)) double; done
-    python3 "$driver" key Escape   # sort du renommage laissé par le dernier double-clic
+    python3 "$driver" key Escape   # leaves the rename left by the last double-click
     sleep 6
-    # Glisse la barre de titre d'une fenêtre qui n'occupe pas toute la largeur.
+    # Drag the title bar of a window that does not take the full width.
     python3 "$dir_perf/drag.py" 440 138
-    # Le tableau ne s'imprime qu'à la 1re image suivant 2 s : deux mouvements de
-    # souris espacés en réclament une, sinon le dernier bloc reste muet.
+    # The table is printed only at the 1st frame after 2 s: two spaced mouse
+    # moves request one, otherwise the last block stays silent.
     sleep 2.5; python3 "$driver" move 700 400; sleep 2.5; python3 "$driver" move 710 410
     sortie=$(python3 "$dir_perf/summ.py")
-    python3 "$driver" stop app   # garde Xwayland pour l'essai suivant
+    python3 "$driver" stop app   # keeps Xwayland for the next attempt
 }
-# Le glisser est parfois perdu (surtout en debug, où l'app est lente) : 3 essais.
+# The drag is sometimes lost (mostly in debug, where the app is slow): 3 attempts.
 for tentative in 1 2 3; do
     essai
-    case "$sortie" in *"raté"*) echo "essai $tentative : glissement raté" >&2 ;; *) break ;; esac
+    case "$sortie" in *"missed"*) echo "attempt $tentative: drag missed" >&2 ;; *) break ;; esac
 done
 python3 "$driver" stop
-echo "### $profil, $nb graphes ouverts (+ Book1 et Graph1)"
+echo "### $profil, $nb graphs open (+ Book1 and Graph1)"
 echo "$sortie"

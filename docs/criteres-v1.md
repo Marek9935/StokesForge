@@ -65,7 +65,7 @@ Each line is observed by a command or a page; none is declared
 ### Version and documentation
 
 - [x] All crates are at `1.0.0` (`scripts/versions-alignees.sh` checks it on every push, `scripts/release-notes.sh v1.0.0` at the tag).
-- [x] `CHANGELOG.md` has a dated `## [1.0.0]` section, without « à dater ».
+- [x] `CHANGELOG.md` has a dated `## [1.0.0]` section, without "undated".
 - [x] The pages of `docs/` cited by the promises above describe the code
   as it is (review, no reference to an issue that is still open).
 
@@ -95,7 +95,7 @@ steps are the same, with what changes:
 
 1. A dedicated version commit: `version = "X.Y.Z"` in all crates,
    `cargo update --workspace`, section `## [X.Y.Z] - date` of the CHANGELOG (the
-   `[Non publié]` section is renamed and dated there).
+   `[Unreleased]` section is renamed and dated there).
 2. Green CI on this commit (`scripts/ci-statuts.sh <commit>`), `test-python-windows`
    and `dist-windows` included.
 3. Tag `vX.Y.Z` on this commit of `main` (or of `release/N.x` for a fix

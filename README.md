@@ -1,31 +1,30 @@
-# StokesForge — branche `main`
+# StokesForge — `main` branch
 
-Le dépôt de référence est sur GitLab (`gitlab.com/askrzypczak/stokesforge`) :
-issues, releases et téléchargements s'y trouvent. Le dépôt GitHub est un miroir
-en lecture seule, qui sert à la CI Linux.
+The reference repository is on GitLab (`gitlab.com/askrzypczak/stokesforge`):
+issues, releases and downloads live there. The GitHub repository is a
+read-only mirror, used for the Linux CI.
 
-Cette branche est dédiée au portage de StokesForge vers Rust. PyQt/PySide n'est
-plus à l'ordre du jour ici — le développement actif se fait dans le
-workspace Cargo à la racine.
+This branch is dedicated to the port of StokesForge to Rust. PyQt/PySide is
+no longer on the agenda here — active development happens in the Cargo
+workspace at the root.
 
 ## Layout
 
-- **`crates/`** — le workspace Cargo : quatorze crates, du modèle de données
-  à la fenêtre. Le graphe de dépendances et le rôle de chacun sont dans
+- **`crates/`** — the Cargo workspace: fourteen crates, from the data model
+  to the window. The dependency graph and the role of each crate are in
   [`docs/architecture.md`](docs/architecture.md).
-- **`docs/`** — la documentation du code, [`docs/README.md`](docs/README.md)
-  en point d'entrée. `docs/archive/` conserve les documents de conception
-  antérieurs (cahier des charges, roadmaps, rapports) : historique, pas
-  référence.
-- **`scripts/`** — vendorisation de CPython, configuration PyO3, assemblage
-  des distributions de `dist/`.
-- **`vendor/`** — l'interpréteur CPython figé (non versionné) et les polices
-  embarquées.
+- **`docs/`** — the code documentation, with [`docs/README.md`](docs/README.md)
+  as the entry point. `docs/archive/` keeps the earlier design documents
+  (specifications, roadmaps, reports): history, not reference.
+- **`scripts/`** — vendoring of CPython, PyO3 configuration, assembly of the
+  distributions in `dist/`.
+- **`vendor/`** — the frozen CPython interpreter (not versioned) and the
+  embedded fonts.
 
-L'ancienne implémentation Python/Qt a été supprimée de cette branche ; elle
-continue d'exister sous le tag `legacy-python`.
+The old Python/Qt implementation was removed from this branch; it still exists
+under the `legacy-python` tag.
 
-## Démarrer
+## Getting started
 
 ```sh
 cargo build --workspace
@@ -33,33 +32,33 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-`rust-toolchain.toml` épingle la chaîne stable + `rustfmt`/`clippy`.
+`rust-toolchain.toml` pins the stable toolchain + `rustfmt`/`clippy`.
 
-La feature `python` (pont PyO3) est absente de `default` : les commandes
-ci-dessus ne la compilent pas. Typst (notations scientifiques) est une
-dépendance ferme, toujours compilée. Voir
+The `python` feature (PyO3 bridge) is absent from `default`: the commands
+above do not compile it. Typst (scientific notation) is a hard dependency,
+always compiled. See
 [`docs/architecture.md`](docs/architecture.md#features).
 
-## Licence et contributions
+## License and contributions
 
-Copyright © 2026 Aliocha Skrzypczak. Cette branche est sous
-**[GPL-3.0-or-later](LICENSE)**, sans permission supplémentaire.
+Copyright © 2026 Aliocha Skrzypczak. This branch is under
+**[GPL-3.0-or-later](LICENSE)**, with no additional permission.
 
-**Usage non couvert par la GPL** (par exemple un connecteur propriétaire pour
-un appareil) : une permission supplémentaire ou une licence séparée peut être
-demandée à l'auteur, qui l'étudie au cas par cas et l'accorde, le cas échéant,
-par écrit. Aucune n'est accordée par défaut. Les notices tierces sont décrites
-dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+**Use not covered by the GPL** (for example a proprietary connector for an
+instrument): an additional permission or a separate license can be requested
+from the author, who considers it case by case and grants it, if at all, in
+writing. None is granted by default. The third-party notices are described in
+[`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 
-Les distributions livrent `LICENSE`,
-`THIRD-PARTY-LICENSES.txt` et un dossier `licenses/` (polices, icônes, patches,
-CPython, numpy et scipy). Les outils de contrôle et de génération des notices
-doivent être installés avant d'exécuter les scripts de distribution ; voir
-la page de licence. Le travail CI `licenses` vérifie la politique et génère
-les notices.
+The distributions ship `LICENSE`,
+`THIRD-PARTY-LICENSES.txt` and a `licenses/` folder (fonts, icons, patches,
+CPython, numpy and scipy). The tools that check and generate the notices
+must be installed before running the distribution scripts; see
+the license page. The `licenses` CI job checks the policy and generates
+the notices.
 
-Les contributions extérieures suivent [`CONTRIBUTING.md`](CONTRIBUTING.md)
-et le [DCO 1.1](DCO) en attendant un CLA (#348). Cette licence concerne `main` ;
-l'ancienne implémentation Python/Qt (tag `legacy-python`) conserve son statut propre.
-La version 1.0.0 portait une exception d'extension pour `pyst` ; elle n'a pas
-été reprise après 1.0.0.
+External contributions follow [`CONTRIBUTING.md`](CONTRIBUTING.md)
+and the [DCO 1.1](DCO) until a CLA exists (#348). This license applies to `main`;
+the old Python/Qt implementation (`legacy-python` tag) keeps its own status.
+Version 1.0.0 carried an extension exception for `pyst`; it was not
+kept after 1.0.0.

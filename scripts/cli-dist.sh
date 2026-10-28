@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Distribution Linux headless #71 : même disposition Python que app-dist.sh.
-# Vérifie depuis le paquet lecture numpy, écritures, graphe, .stf et annulation.
+# Headless Linux distribution #71: same Python layout as app-dist.sh.
+# Checks from the package: numpy reading, writes, graph, .stf and undo.
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../vendor/python/lock.env
@@ -26,8 +26,8 @@ find "$PREFIX/lib" -maxdepth 1 -name '*.so*' ! -name 'libpython*' \
     -exec cp -a {} "$DIST/lib/python/lib/" \;
 rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
        "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip-"*.dist-info
-# __pycache__ conservés, libpython une seule fois, aucun pip livré : cf. pyhello.
-# Licences du code, des ressources et du runtime effectivement livré (#129).
+# __pycache__ kept, libpython only once, no pip delivered: see pyhello.
+# Licenses of the code, the resources and the runtime actually delivered (#129).
 "$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
 
 LINKS="$(ldd "$DIST/stokesforge-cli")"
@@ -62,11 +62,11 @@ assert pyst.undo()
 assert pyst.values(y) == (0.,1.,4.,9.)
 print('packaged reload and undo OK')
 PY
-# Aucun STOKESFORGE_PYTHON_HOME : le préfixe doit être trouvé à côté du binaire.
+# No STOKESFORGE_PYTHON_HOME: the prefix must be found next to the binary.
 env -i PATH=/usr/bin:/bin HOME="$PROBE" \
     PYTHONPATH=/tmp/stokesforge-piege PYTHONHOME=/tmp/stokesforge-piege2 \
     "$DIST/stokesforge-cli" run --out "$PROBE/resultat.stf" "$PROBE/calcul.pyst"
 env -i PATH=/usr/bin:/bin HOME="$PROBE" \
     PYTHONPATH=/tmp/stokesforge-piege PYTHONHOME=/tmp/stokesforge-piege2 \
     "$DIST/stokesforge-cli" run --project "$PROBE/resultat.stf" "$PROBE/lecture.pyst"
-echo "[dist] OK — CLI autonome, isolé, $(du -sm "$DIST" | cut -f1) Mo"
+echo "[dist] OK: standalone, isolated CLI, $(du -sm "$DIST" | cut -f1) MB"

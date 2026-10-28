@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Génère la configuration PyO3 pointant sur l'interpréteur embarqué (piège n°1).
+# Generates the PyO3 configuration pointing at the embedded interpreter (pitfall no. 1).
 #
-# Écrit target/pyo3-config.txt à partir du gabarit versionné
-# crates/stokesforge-python/pyo3-config.template.txt, puis affiche sur stdout le
-# chemin absolu du fichier produit — de sorte qu'un appelant puisse faire :
+# Writes target/pyo3-config.txt from the versioned template
+# crates/stokesforge-python/pyo3-config.template.txt, then prints the absolute
+# path of the produced file on stdout, so that a caller can do:
 #     export PYO3_CONFIG_FILE="$(scripts/python-config.sh)"
-# Les messages d'avancement partent sur stderr pour ne pas polluer cette sortie.
+# Progress messages go to stderr so they do not pollute that output.
 #
-# À appeler en sous-shell, pas à sourcer : il se termine par `exit 1` si le
-# préfixe embarqué manque.
+# Call it in a subshell, do not source it: it ends with `exit 1` if the
+# embedded prefix is missing.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,8 +17,8 @@ TEMPLATE="$REPO_ROOT/crates/stokesforge-python/pyo3-config.template.txt"
 PY_REL="bin/python3"
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-        # Windows (#332) : python.exe et python312.lib (libs/) ; chemins en
-        # style Windows (C:/…) pour pyo3-build-config.
+        # Windows (#332): python.exe and python312.lib (libs/); Windows-style
+        # paths (C:/…) for pyo3-build-config.
         TEMPLATE="$REPO_ROOT/crates/stokesforge-python/pyo3-config.windows.template.txt"
         PY_REL="python.exe"
         PREFIX="$(cygpath -m "$PREFIX")" ;;
@@ -26,15 +26,14 @@ esac
 OUT="$REPO_ROOT/target/pyo3-config.txt"
 
 if [[ ! -x "$PREFIX/$PY_REL" ]]; then
-    echo "[config] ERREUR : préfixe embarqué absent ($PREFIX). Lance d'abord scripts/python-vendor.sh" >&2
+    echo "[config] ERROR: embedded prefix missing ($PREFIX). Run scripts/python-vendor.sh first" >&2
     exit 1
 fi
 
 mkdir -p "$(dirname "$OUT")"
-# Substitution du seul champ dépendant de la machine, puis retrait des lignes
-# de commentaire et des lignes vides : pyo3-build-config ne lit que des paires
-# clé=valeur. Le préfixe ne contient pas de « | », choisi comme séparateur sed
-# pour éviter d'échapper les « / ».
+# Substitute the only machine-dependent field, then remove comment lines and
+# empty lines: pyo3-build-config reads only key=value pairs. The prefix has no
+# "|", which is chosen as the sed delimiter to avoid escaping the "/".
 sed -e "s|@PYTHON_PREFIX@|$PREFIX|g" -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
     "$TEMPLATE" > "$OUT"
 

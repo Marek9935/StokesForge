@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Empaquette la distribution Linux déjà assemblée et éprouvée par
-# `scripts/app-dist.sh` en archive publiable (#333) :
+# Packs the Linux distribution, already assembled and tested by
+# `scripts/app-dist.sh`, into a publishable archive (#333):
 #   dist/StokesForge-<version>-linux-x86_64.tar.gz
-# contenant un dossier `StokesForge-<version>/` (exécutables, lib/python,
-# notices de licences).
+# containing a folder `StokesForge-<version>/` (executables, lib/python,
+# license notices).
 #
-# Usage : scripts/release-linux.sh vX.Y.Z   (le tag, ou STOKESFORGE_VERSION=X.Y.Z)
-# Ne reconstruit rien : lancer d'abord scripts/python-vendor.sh puis
-# scripts/app-dist.sh, qui sont les verrous de la distribution.
+# Usage: scripts/release-linux.sh vX.Y.Z   (the tag, or STOKESFORGE_VERSION=X.Y.Z)
+# Rebuilds nothing: run scripts/python-vendor.sh first, then
+# scripts/app-dist.sh, which are the guards of the distribution.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,17 +16,17 @@ VERSION="${1:+${1#v}}"
 VERSION="${VERSION:-${STOKESFORGE_VERSION:-}}"
 
 if [ -z "$VERSION" ]; then
-    echo "[release] ERREUR : version absente (argument vX.Y.Z ou STOKESFORGE_VERSION)" >&2
+    echo "[release] ERROR: version missing (argument vX.Y.Z or STOKESFORGE_VERSION)" >&2
     exit 1
 fi
 for needed in stokesforge-app stokesforge-selftest lib/python; do
     if [ ! -e "$DIST/$needed" ]; then
-        echo "[release] ERREUR : $DIST/$needed manquant, lancer scripts/app-dist.sh" >&2
+        echo "[release] ERROR: $DIST/$needed missing, run scripts/app-dist.sh" >&2
         exit 1
     fi
 done
 if ! ls "$DIST" | grep -qi licen; then
-    echo "[release] ERREUR : aucune notice de licences dans $DIST" >&2
+    echo "[release] ERROR: no license notice in $DIST" >&2
     exit 1
 fi
 

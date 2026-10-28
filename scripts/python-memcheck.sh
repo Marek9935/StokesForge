@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
-# Contrôle instrumenté du pont zéro-copie (tâche 5.2) : lance le binaire de
-# tests de tests/zerocopy.rs sous valgrind memcheck.
+# Instrumented check of the zero-copy bridge (task 5.2): runs the test binary of
+# tests/zerocopy.rs under valgrind memcheck.
 #
-# Ce que ça cherche : des lectures ou écritures INVALIDES à la frontière
-# Rust/PyO3/numpy — pas des fuites. C'est pourquoi :
-#   - aucune option --leak-check n'est passée : les allocations « encore
-#     joignables » de l'allocateur CPython (interpréteur jamais finalisé,
-#     cf. src/interpreter.rs) sont nombreuses et ATTENDUES ; les compter comme
-#     des fuites noierait le signal utile sous du bruit connu et accepté ;
-#   - PYTHONMALLOC=malloc est posé AVANT de lancer le binaire : sans ça,
-#     l'allocateur de petits objets ("pymalloc") de CPython réutilise des
-#     zones mémoire d'une manière que valgrind ne comprend pas, et produit un
-#     torrent de faux positifs « lecture non initialisée ». `malloc` route
-#     toutes les allocations Python par le malloc du système, seul chemin que
-#     memcheck sait suivre correctement ;
-#   - --error-exitcode=1 : un memcheck qui trouve une erreur doit faire
-#     échouer ce script, pas se contenter d'un rapport ignoré.
+# What it looks for: INVALID reads or writes at the Rust/PyO3/numpy boundary,
+# not leaks. That is why:
+#   - no --leak-check option is passed: the "still reachable" allocations of
+#     the CPython allocator (interpreter never finalized, see
+#     src/interpreter.rs) are many and EXPECTED; counting them as leaks would
+#     drown the useful signal in known, accepted noise;
+#   - PYTHONMALLOC=malloc is set BEFORE running the binary: without it,
+#     CPython's small-object allocator ("pymalloc") reuses memory areas in a
+#     way valgrind does not understand, and produces a flood of false
+#     "uninitialized read" positives. `malloc` routes all Python allocations
+#     through the system malloc, the only path memcheck can follow correctly;
+#   - --error-exitcode=1: a memcheck that finds an error must make this script
+#     fail, not just produce an ignored report.
 #
-# `miri` n'est PAS une alternative ici : miri n'exécute pas d'appel de
-# bibliothèque étrangère (FFI), donc rien de ce qui traverse PyO3 (tout ce
-# module). Il reste l'outil pertinent pour le reste du modèle StokesForge, qui est
-# du Rust pur sans FFI.
+# `miri` is NOT an alternative here: miri does not run foreign library calls
+# (FFI), so nothing that crosses PyO3 (this whole module). It remains the
+# relevant tool for the rest of the StokesForge model, which is pure Rust
+# without FFI.
 #
-# `valgrind` n'est PAS installé sur cette machine de développement (vérifié :
-# `which valgrind` échoue). Ce script le détecte, l'écrit clairement sur
-# stderr, et sort en 0 : l'absence de l'outil n'est pas un échec du pont
-# zéro-copie, mais un contrôle non exécuté. Personne ne doit pouvoir lire
-# « ce script est passé » comme « le contrôle instrumenté a eu lieu ».
+# `valgrind` is NOT installed on this development machine (checked:
+# `which valgrind` fails). This script detects it, says so clearly on
+# stderr, and exits 0: the absence of the tool is not a failure of the
+# zero-copy bridge, but a check that did not run. Nobody must be able to read
+# "this script passed" as "the instrumented check took place".
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,18 +33,18 @@ PREFIX="$REPO_ROOT/vendor/python/extracted/python"
 
 if ! command -v valgrind >/dev/null 2>&1; then
     cat >&2 <<'EOF'
-[memcheck] valgrind absent : le contrôle instrumenté n'a pas tourné.
+[memcheck] valgrind missing: the instrumented check did not run.
 [memcheck]   sudo dnf install valgrind
-[memcheck] puis relance ce script.
-[memcheck] (rien n'a été vérifié ici — ceci n'est PAS une confirmation que le
-[memcheck]  pont zéro-copie est mémoire-sûr, seulement que l'outil manque.)
+[memcheck] then rerun this script.
+[memcheck] (nothing was verified here; this is NOT a confirmation that the
+[memcheck]  zero-copy bridge is memory-safe, only that the tool is missing.)
 EOF
     exit 0
 fi
 
-# --- 1. Construction du binaire de tests ------------------------------------
-# Mêmes trois variables que scripts/python-test.sh (voir son en-tête pour le
-# détail des trois pièges qu'elles couvrent).
+# --- 1. Building the test binary --------------------------------------------
+# Same three variables as scripts/python-test.sh (see its header for the
+# detail of the three pitfalls they cover).
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
@@ -53,15 +52,15 @@ export STOKESFORGE_PYTHON_HOME="$PREFIX"
 
 cd "$REPO_ROOT"
 
-# Le nom du binaire produit contient un hash de build non prévisible
-# (target/debug/deps/zerocopy-<hash>) ; on le retrouve après coup en prenant,
-# parmi les binaires exécutables « zerocopy-* », le plus récemment modifié —
-# repère posé juste avant la construction.
+# The name of the produced binary contains an unpredictable build hash
+# (target/debug/deps/zerocopy-<hash>); we find it afterwards by taking, among
+# the executable "zerocopy-*" binaries, the most recently modified one (marker
+# set just before the build).
 REPERE="$REPO_ROOT/target/.memcheck-repere"
 mkdir -p "$REPO_ROOT/target"
 touch "$REPERE"
 
-echo "[memcheck] construction du binaire de tests/zerocopy.rs" >&2
+echo "[memcheck] building the tests/zerocopy.rs binary" >&2
 cargo test -p stokesforge-python --features python --test zerocopy --no-run
 
 BINARY="$(find "$REPO_ROOT/target/debug/deps" -maxdepth 1 -type f -executable \
@@ -69,33 +68,32 @@ BINARY="$(find "$REPO_ROOT/target/debug/deps" -maxdepth 1 -type f -executable \
 rm -f "$REPERE"
 
 if [[ -z "$BINARY" ]]; then
-    echo "[memcheck] ERREUR : binaire de tests/zerocopy.rs introuvable après construction" >&2
+    echo "[memcheck] ERROR: tests/zerocopy.rs binary not found after the build" >&2
     exit 1
 fi
-echo "[memcheck] binaire : $BINARY" >&2
+echo "[memcheck] binary: $BINARY" >&2
 
-# --- 2. Exécution sous valgrind ----------------------------------------------
-# --test-threads=1 : un seul fil de test à la fois. CPython ne démarre qu'une
-# fois par processus (Once, cf. tests/zerocopy.rs) donc le parallélisme ne
-# change rien à la couverture ; en série, un rapport valgrind qui pointe une
-# erreur reste lisible pile sur le test qui l'a déclenchée.
+# --- 2. Running under valgrind -----------------------------------------------
+# --test-threads=1: one test thread at a time. CPython starts only once per
+# process (Once, see tests/zerocopy.rs), so parallelism changes nothing for
+# coverage; run serially, a valgrind report that points at an error stays
+# readable right on the test that triggered it.
 #
-# STOKESFORGE_UNDER_VALGRIND=1 : posée pour le binaire de tests, pas pour valgrind
-# lui-même. Le test de mesure (emprunt vs copie) la lit pour savoir qu'il
-# tourne sous instrumentation : valgrind ralentit l'emprunt (dominé par
-# quelques appels) et la copie (dominée par un transfert mémoire) de façons
-# très différentes, ce qui rend le RAPPORT mesuré sous instrumentation
-# dépourvu de sens — voir tests/zerocopy.rs pour le détail. Le test affiche
-# alors ses deux mesures sans affirmer le rapport, plutôt que d'échouer sur un
-# faux négatif.
-# --nocapture : sans quoi libtest avale la sortie des tests qui réussissent —
-# et c'est précisément sous valgrind qu'on veut VOIR les deux mesures du test
-# emprunt_au_moins_vingt_fois_plus_rapide_que_la_copie, pas seulement savoir
-# qu'il est passé.
-echo "[memcheck] lancement sous valgrind (PYTHONMALLOC=malloc, sans --leak-check)" >&2
+# STOKESFORGE_UNDER_VALGRIND=1: set for the test binary, not for valgrind
+# itself. The measurement test (borrow vs copy) reads it to know that it runs
+# under instrumentation: valgrind slows the borrow (dominated by a few calls)
+# and the copy (dominated by a memory transfer) in very different ways, which
+# makes the RATIO measured under instrumentation meaningless; see
+# tests/zerocopy.rs for the detail. The test then prints its two measurements
+# without asserting the ratio, rather than failing on a false negative.
+# --nocapture: without it, libtest swallows the output of passing tests, and
+# it is precisely under valgrind that we want to SEE the two measurements of
+# the test emprunt_au_moins_vingt_fois_plus_rapide_que_la_copie, not only to
+# know that it passed.
+echo "[memcheck] running under valgrind (PYTHONMALLOC=malloc, without --leak-check)" >&2
 PYTHONMALLOC=malloc STOKESFORGE_UNDER_VALGRIND=1 valgrind \
     --error-exitcode=1 \
     --track-origins=yes \
     "$BINARY" --test-threads=1 --nocapture
 
-echo "[memcheck] OK — aucune lecture/écriture invalide détectée par valgrind" >&2
+echo "[memcheck] OK: no invalid read/write detected by valgrind" >&2

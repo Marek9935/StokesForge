@@ -1,59 +1,59 @@
-# Journal des modifications
+# Changelog
 
-Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/).
-Les versions suivent la numérotation `MAJEUR.MINEUR.CORRECTIF` ; les critères
-de la V1 sont dans [`docs/criteres-v1.md`](docs/criteres-v1.md).
+Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versions follow the numbering `MAJOR.MINOR.PATCH`; the V1 criteria are in
+[`docs/criteres-v1.md`](docs/criteres-v1.md).
 
-Ce qui compte comme compatibilité à partir de la V1 : le format de fichier
-`.stf` (un fichier V1 se relit et se migre jusqu'en V3, invariant 12) et
-l'API `pyst` ([« API figée V1 »](docs/python-et-script.md)). Le reste du code
-n'a pas de promesse de compatibilité.
+What counts as compatibility from V1 on: the `.stf` file format (a V1 file can
+be read back and migrated up to V3, invariant 12) and the `pyst` API
+(["V1 frozen API"](docs/python-et-script.md)). The rest of the code has no
+compatibility promise.
 
-Une section par version, titrée `## [X.Y.Z] - date`. Le travail de publication
-(`scripts/release-notes.sh`) lit la section de la version du tag et refuse un
-tag dont la section est absente, vide ou encore « à dater » (toléré sur un
-`-rcN`).
+One section per version, titled `## [X.Y.Z] - date`. The release job
+(`scripts/release-notes.sh`) reads the section of the tag's version and
+refuses a tag whose section is missing, empty or still "undated" (tolerated
+on an `-rcN`).
 
-Qui remplit `[Non publié]` : chaque changement visible de l'utilisateur y ajoute
-une ligne, dans le commit qui le porte. Le commit de version renomme cette
-section en `[X.Y.Z] - date` et en rouvre une vide. Un correctif repris par
-cherry-pick vers `release/N.x` y porte aussi sa ligne. Un champ additif du
-format `.stf` y est annoncé (une version plus ancienne qui réenregistre le
-fichier le perd sans message, voir `docs/persistance.md`).
+Who fills in `[Unreleased]`: every change visible to the user adds a line
+there, in the commit that carries it. The version commit renames this section
+to `[X.Y.Z] - date` and opens a new empty one. A fix cherry-picked to
+`release/N.x` also carries its line there. An additive field of the `.stf`
+format is announced there (an older version that saves the file again loses it
+without a message, see `docs/persistance.md`).
 
-## [Non publié]
+## [Unreleased]
 
-### Ajouté
+### Added
 
-- Sous-graduations des axes (#344) : une case « Afficher les sous-graduations »
-  par axe (allumée sur un graphe neuf, éteinte dans un fichier existant), seules
-  ou avec les graduations, leur nombre entre deux graduations, et « Un nombre
-  sur » n pour n'écrire qu'une graduation sur n. Champs additifs du format `.stf`
-  (`minor_ticks`, `minor_tick_count`, `label_every`) : une version plus ancienne
-  qui réenregistre le fichier les perd.
-- Bloc repliable « Avancé » de la section Graduations (#344), fermé par
-  défaut, par axe (miroirs compris) : longueur des grands et des petits tirets
-  (px), épaisseur (pt) et couleur des tirets, tous Auto tant qu'on n'y touche
-  pas (le petit tiret Auto vaut la moitié du grand). Champs additifs du format
-  `.stf` (`tick_length`, `minor_tick_length`, `tick_width`,
-  `tick_mark_color`) : une version plus ancienne qui réenregistre le fichier
-  les perd.
+- Minor ticks on axes (#344): a "Show minor ticks" box per axis (on in a new
+  graph, off in an existing file), alone or together with the major ticks, the
+  number of minor ticks between two ticks, and "Label every" n to write only
+  one tick label out of n. Additive fields of the `.stf` format
+  (`minor_ticks`, `minor_tick_count`, `label_every`): an older version that
+  saves the file again loses them.
+- Collapsible "Advanced" block in the Ticks section (#344), closed by
+  default, per axis (mirrors included): length of the major and minor tick
+  marks (px), thickness (pt) and color of the tick marks, all Auto until they
+  are touched (the Auto minor tick mark is half the major one). Additive
+  fields of the `.stf` format (`tick_length`, `minor_tick_length`,
+  `tick_width`, `tick_mark_color`): an older version that saves the file again
+  loses them.
 
-### Modifié
+### Changed
 
-- Page Axes des propriétés (#344) : les cases « Axe inversé » et « Plage
-  auto » disparaissent. Le sens de l'axe se lit sur l'ordre des bornes (De >
-  À inverse l'axe) ; De et À sont toujours éditables, suivent les données tant
-  qu'on n'a rien saisi, et une saisie fige les deux bornes (le bouton « Auto »
-  de la rangée les rend aux données, sens conservé). Les graduations ont leur
-  section « Graduations ».
-- À l'ouverture d'un fichier `.stf`, un axe qui porte `inverted` à côté de
-  bornes croissantes voit ses bornes échangées (le champ `inverted` reste
-  écrit dans le fichier, la figure ne change pas) ; la surface `pyst`
-  (`x_inverted`, `x_auto_range`…) ne change pas, mais `x_inverted=True` échange
-  aussi les bornes.
-- La case « Cadre fermé » (page Axes et menu du calque) disparaît de
-  l'interface ; ses réglages se font par axe (miroirs, graduations).
+- Axes page of the properties (#344): the "Reverse axis" and "Auto range"
+  boxes disappear. The direction of the axis is read from the order of the
+  bounds (From > To inverts the axis); From and To are always editable, follow
+  the data until something is typed, and typing freezes both bounds (the
+  "Auto" button of the row gives them back to the data, direction kept). The
+  ticks have their own "Ticks" section.
+- When a `.stf` file is opened, an axis that carries `inverted` next to
+  increasing bounds has its bounds swapped (the `inverted` field is still
+  written in the file, the figure does not change); the `pyst` surface
+  (`x_inverted`, `x_auto_range`…) does not change, but `x_inverted=True` also
+  swaps the bounds.
+- The "Closed Frame" box (Axes page and layer menu) disappears from the
+  interface; its settings are made per axis (mirrors, ticks).
 
 ## [1.0.0] - 2026-10-27
 

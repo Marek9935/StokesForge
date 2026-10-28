@@ -1,6 +1,6 @@
 # Checks a change adds to the base ones
 
-Read at step 3 of `stokesforge-verification`. CI: Linux, Windows and the publication all run on GitHub (`.github/workflows/ci.yml`); GitLab keeps only disabled Linux jobs, and statuses come back to GitLab through `gitlab-status.yml`. A missing report means reading the « Résultats GitLab » workflow and its secret, never concluding the tests are green. Details and job table: `docs/tests.md` § CI (GitHub Actions for Linux and Windows).
+Read at step 3 of `stokesforge-verification`. CI: Linux, Windows and the publication all run on GitHub (`.github/workflows/ci.yml`); GitLab keeps only disabled Linux jobs, and statuses come back to GitLab through `gitlab-status.yml`. A missing report means reading the "GitLab results" workflow and its secret, never concluding the tests are green. Details and job table: `docs/tests.md` § CI (GitHub Actions for Linux and Windows).
 
 | The change touches… | Also run |
 |---|---|
