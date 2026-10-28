@@ -526,7 +526,7 @@ and numbers keep theirs). The style is set **in `draw_marks` only**
 length is 0 (no tick mark) and `MAX_TICK_LENGTH` (50 px) bounds it, the thickness
 goes through `paint::stroke_width` (1 to 64): the raw value stays in the file,
 rendering bounds it (invariant 10). A setting moves the axis to home-made tick marks
-(`custom_ticks`), like a direction other than "outward"; the numbers
+(`custom_ticks`), like a direction other than "Outward"; the numbers
 then keep their original gap, so a long tick mark (outward) can
 touch them. Tests: `miroirs.rs` (length, Auto minor, color, thickness,
 out-of-bounds values), `accord.rs` (screen = export; the color is invisible there,
@@ -737,7 +737,7 @@ were omitted from the rendering. The context menu keeps this address at the clic
 takes the long name or the column name, often imported from an instrument
 (`Abs_280 #1`). Read as markup, `_` would open italics and `#` code.
 The legend therefore gives it `formula::literal_style` (family
-`stokesforge-typst-litteral`), like the "… and N others" line: the Typst branch
+`stokesforge-typst-litteral`), like the « … et N autres » line: the Typst branch
 of the backends passes it through `formula::source`, which wraps it in a Typst string
 `#"…"` (`formula::escape`) — composed by Typst, displayed as is, without
 typographic quotes or `...` turned into an ellipsis. The path

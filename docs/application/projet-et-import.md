@@ -155,13 +155,13 @@ measurement ("n/a") in X. It remains a choice of the wizard, and the Jasco
 templates ask for it. It arms at the first numeric X, then cuts at the first
 non-numeric X (empty line included). The text and empty lines that precede that
 first number are kept; text in Y does not cut. The `skip_chars` prefix is
-removed before this test; with the spaces delimiter, X is the first non-empty
+removed before this test; with the Whitespace delimiter, X is the first non-empty
 token. The "Header and Data End" step also offers "No cut",
 first empty line, marker, N lines after the header or N lines before the end.
 The right-click on the preview allows cancelling the automatic cut; the preview
 and the import use the same split (`stokesforge_import::layout`, `data_end`).
 
-**Number format, dates and encoding (#314).** A "spaces" delimiter (chosen, or
+**Number format, dates and encoding (#314).** A "Whitespace" delimiter (chosen, or
 resolved from Auto) with the space as thousands separator is refused, in the
 preview (message in the window) as in the import: `1 234,5` would be split into
 two columns; `;` and tab accept these thousands. The "Date order" setting

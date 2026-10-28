@@ -298,7 +298,7 @@ Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`; group
   a modified sheet is never overwritten except by `RecalculateTranspose` (the
   interface asks for confirmation first).
 - Every write of values goes through `Project::restore_column` / `add_column`:
-  a fresh version per column ("Known pitfalls" of `CLAUDE.md`).
+  a fresh version per column (« Pièges connus » of `CLAUDE.md`).
 
 ## Removing a formula (#236)
 

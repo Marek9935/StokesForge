@@ -509,8 +509,8 @@ in `stokesforge-plot` (read before writing, as requested):
   `PanelSpec::uses_right_axis()` (the top axis, hidden by default and with no
   UI in this bench to enable it, has no section): `AxisSpec::label`,
   `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, the
-  De / À limits (#344: **neither an "Inverted axis" box nor an "Auto range" box**;
-  De and À are always editable, show the computed limits as long as
+  "From" / "to" limits (#344: **neither an "Inverted axis" box nor an "Auto range" box**;
+  "From" and "to" are always editable, show the computed limits as long as
   `auto_range` is true (in display order, the upper limit first
   on an inverted axis), an input freezes both limits (`auto_range` false,
   `inverted = De > À`), the "Auto" button makes `auto_range` true again keeping

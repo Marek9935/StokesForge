@@ -428,7 +428,7 @@ Nothing in it mutates: the caller sends the result through an undoable command
 ## What to know before modifying
 
 - Data read by an analysis calculation enters the recalculation fingerprint,
-  as for formulas: see "Formula recalculation" in `CLAUDE.md`.
+  as for formulas: see « Recalcul des formules » in `CLAUDE.md`.
 - Adding a mutating `pub` method to `Project` without a matching command
   in `stokesforge-commands` opens a non-undoable write path
   (invariant 1).

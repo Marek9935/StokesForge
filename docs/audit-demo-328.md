@@ -44,11 +44,11 @@ missing feature.
    adds a `PanelSpec::at(l, c)` to an existing graph. The only calls are
    `app.rs:2678` (new graph in 1×1), and `analysis_preview` / `object_drag` /
    `state.rs:9413` for layers. `graphe.md:594` explicitly rules it out
-   ("no adding/removing a series or a panel from the window").
+   ("no adding/removing of a series or panel from the window").
    A work package in its own right. It is not a duplicate of #168, which covers
    only the X3/Y3 layers and following.
 2. **Number of bins of a histogram: B.** `SeriesSpec::histogram_bins` has
-   no widget. `graphe.md:592` acknowledges it as "left to a later iteration".
+   no widget. `graphe.md:592` acknowledges it as "left for a later iteration".
    Small work package: one more field in Series.
 3. **Series on the right Y axis of the same panel: B.** `SeriesAxis::Right`
    is assigned only by the demo, `pyst` and persistence. The only neighboring

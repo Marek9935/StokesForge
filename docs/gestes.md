@@ -227,7 +227,7 @@ never changed for real.
 - **Not replayed, read in the code**: Shift + wheel of the graph; click
   Text and shape tools; double-click of a text, the title, a legend entry, a shape, an axis;
   width handle; drag of the analysis
-  handles on the graph; preview: Points tool (disabled in Integral),
+  handles on the graph; preview: Point tool (disabled in Integral),
   Shift + snapped click, Shift + wheel; Ctrl + wheel of the grid (sheet
   too short to scroll); double-click and right-click of the PM rows;
   the whole Object Manager (drag, double-click, right-click); right-click on

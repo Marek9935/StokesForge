@@ -178,7 +178,7 @@ Already in place and reused by this standard: `modal_dialog_with`
 ## Numeric fields
 
 Building block: `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
-&quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
+&quantities::GRANDEUR)` (`src/number_field.rs`), table: `src/quantities.rs`
 (`Quantity`: bounds, step, large step, decimals, integer or not, offered
 values). A new quantity is added to the table, never to the call; the 28
 `DragValue` and the opacity `Slider` are migrated, the object format bar
