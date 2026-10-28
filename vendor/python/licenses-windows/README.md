@@ -1,23 +1,23 @@
-# Notices du Python embarqué, Windows
+# Notices for the embedded Python, Windows
 
-Pendant Windows de [`../licenses-linux/`](../licenses-linux/README.md) (#332) :
-**CPython 3.12.14, python-build-standalone 20260901,
-x86_64-pc-windows-msvc**, archive `install_only_stripped`. Cette archive ne
-livre pas de répertoire de licences ; le texte de CPython est dans son
-`LICENSE.txt` (copié dans le paquet), les autres notices sont ici.
+Windows counterpart of [`../licenses-linux/`](../licenses-linux/README.md)
+(#332): **CPython 3.12.14, python-build-standalone 20260901,
+x86_64-pc-windows-msvc**, `install_only_stripped` archive. This archive does
+not ship a licenses directory; CPython's text is in its `LICENSE.txt` (copied
+into the package), the other notices are here.
 
-**Statut à lever avant de publier une V1 :** ces textes sont ceux de la
-distribution Linux de la même release (mêmes composants amont, mêmes versions :
-bzip2, expat, libffi, liblzma, mpdecimal, OpenSSL 3, SQLite, zlib). Ils n'ont
-**pas** été recoupés avec le répertoire `python/licenses/` ni le `PYTHON.json`
-de l'archive complète Windows (`pgo-full`) : `provenance.json` porte
-`verified_against_windows_full_archive: false`. Vérifier, puis passer ce champ
-à `true`.
+**Status to lift before publishing a V1:** these texts are those of the Linux
+distribution of the same release (same upstream components, same versions:
+bzip2, expat, libffi, liblzma, mpdecimal, OpenSSL 3, SQLite, zlib). They were
+**not** cross-checked against the `python/licenses/` directory or the
+`PYTHON.json` of the full Windows archive (`pgo-full`): `provenance.json`
+carries `verified_against_windows_full_archive: false`. Check, then set this
+field to `true`.
 
-Retirés du paquet Windows (donc sans notice) : tkinter, Tcl/Tk, `_msi`, les
-modules de test. `LICENSE.msvc-runtime.txt` couvre les DLL Visual C++ livrées.
-numpy et scipy livrent leurs propres textes (OpenBLAS, `msvcp140` de numpy),
-copiés depuis leurs roues par `scripts/licenses-dist.sh`.
+Removed from the Windows package (hence without notice): tkinter, Tcl/Tk,
+`_msi`, the test modules. `LICENSE.msvc-runtime.txt` covers the Visual C++
+DLLs shipped. numpy and scipy ship their own texts (OpenBLAS, numpy's
+`msvcp140`), copied from their wheels by `scripts/licenses-dist.sh`.
 
-Mise à jour du verrou `vendor/python/lock.env` : même marche que pour Linux
-(`../licenses-linux/README.md`), avec l'archive Windows.
+Updating the `vendor/python/lock.env` lock: same procedure as for Linux
+(`../licenses-linux/README.md`), with the Windows archive.

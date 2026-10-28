@@ -1,9 +1,9 @@
-//! Transition StokesForge #72 : le même wl_data_device reçoit sélection et dépôt.
+//! StokesForge transition #72: the same wl_data_device receives selection and drop.
 //!
-//! Mutter envoie le dépôt à un seul récepteur du client. Créer un récepteur
-//! dans winit puis un autre dans le presse-papiers perd donc les offres.
-//! Ce module réutilise le fil et les sièges du presse-papiers ; un canal
-//! faible remet les événements à winit, sans transporter d'objet Wayland.
+//! Mutter sends the drop to a single receiver of the client. Creating one
+//! receiver in winit and another in the clipboard therefore loses the offers.
+//! This module reuses the clipboard's thread and seats; a weak channel hands
+//! the events to winit, without carrying any Wayland object.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -82,7 +82,7 @@ impl Transfer {
             position: (self.offer.x, self.offer.y),
             paths: uri_list::local_files(bytes),
         });
-        // Seule Copy a été annoncée ; finish est permis après le Drop.
+        // Only Copy was announced; finish is allowed after the Drop.
         if self.offer.inner().is_alive() {
             self.offer.finish();
             self.offer.destroy();
@@ -160,7 +160,7 @@ impl DataDeviceHandler for State {
     }
 
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
-        // Les offres du presse-papiers restent traitées par load_selection.
+        // Clipboard offers are still handled by load_selection.
     }
 
     fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, device: &WlDataDevice) {
@@ -185,13 +185,13 @@ impl DataDeviceHandler for State {
             transfer.dropped = true;
             transfer.left();
         }
-        // Réception après Drop : les sources qui ne fournissent rien au survol
-        // fonctionnent aussi. Un seul read par readiness, jamais read_to_end.
+        // Reception after Drop: sources that provide nothing on hover work too.
+        // A single read per readiness, never read_to_end.
         let received = transfer.borrow().offer.receive(URI_LIST.to_owned());
         let pipe = match received {
             Ok(pipe) => pipe,
             Err(error) => {
-                eprintln!("[stokesforge-wayland] réception du dépôt : {error}");
+                eprintln!("[stokesforge-wayland] drop reception: {error}");
                 transfer.borrow_mut().cancel();
                 return;
             }
@@ -215,7 +215,7 @@ impl DataDeviceHandler for State {
                     Err(error) if error.kind() == ErrorKind::Interrupted => PostAction::Continue,
                     _ => {
                         reader_transfer.borrow_mut().cancel();
-                        eprintln!("[stokesforge-wayland] liste d'URI illisible ou trop grande");
+                        eprintln!("[stokesforge-wayland] URI list unreadable or too large");
                         PostAction::Remove
                     }
                 }
@@ -223,7 +223,7 @@ impl DataDeviceHandler for State {
             Ok(token) => token,
             Err(error) => {
                 transfer.borrow_mut().cancel();
-                eprintln!("[stokesforge-wayland] pipe du dépôt : {error}");
+                eprintln!("[stokesforge-wayland] drop pipe: {error}");
                 return;
             }
         };
@@ -235,14 +235,14 @@ impl DataDeviceHandler for State {
                 if !transfer.completed {
                     transfer.cancel();
                     state.loop_handle.remove(token);
-                    eprintln!("[stokesforge-wayland] délai de réception du dépôt dépassé");
+                    eprintln!("[stokesforge-wayland] drop reception timed out");
                 }
                 TimeoutAction::Drop
             },
         ) {
             self.loop_handle.remove(token);
             transfer.borrow_mut().cancel();
-            eprintln!("[stokesforge-wayland] délai du dépôt : {error}");
+            eprintln!("[stokesforge-wayland] drop timer: {error}");
         }
     }
 }

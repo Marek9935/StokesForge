@@ -118,7 +118,7 @@ pub struct WinitState {
 }
 
 impl WinitState {
-    /// Transition #72 : reçoit le dépôt depuis l'unique récepteur du presse-papiers.
+    /// Transition #72: receives the drop from the clipboard's single receiver.
     pub fn file_drop(&mut self, event: super::file_drop_bridge::FileDropEvent) {
         use super::file_drop_bridge::FileDropEvent;
         use crate::event::WindowEvent;

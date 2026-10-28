@@ -21,7 +21,7 @@ mod worker;
 
 /// Access to a Wayland clipboard.
 pub struct Clipboard {
-    // Un seul worker/récepteur par display, partagé entre les viewports d'egui.
+    // A single worker/receiver per display, shared among egui's viewports.
     inner: Arc<Mutex<ClipboardInner>>,
 }
 

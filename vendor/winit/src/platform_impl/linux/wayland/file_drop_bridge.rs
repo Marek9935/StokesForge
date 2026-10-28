@@ -1,9 +1,9 @@
-//! Transition #72 : dépôt reçu par le presse-papiers, remis à la boucle winit.
+//! Transition #72: drop received by the clipboard, handed to the winit loop.
 //!
-//! Un deuxième wl_data_device peut voler le dépôt au premier sur Mutter.
-//! Aucun objet Wayland ne traverse ce canal : identifiant de surface, position
-//! et chemins seulement. Le callback faible cesse de fonctionner à l'arrêt
-//! de la boucle, même si l'adresse du display est ensuite réutilisée.
+//! A second wl_data_device can steal the drop from the first on Mutter.
+//! No Wayland object crosses this channel: surface identifier, position
+//! and paths only. The weak callback stops working when the loop stops,
+//! even if the display address is reused afterwards.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use calloop::channel::{self, Channel, Sender};
 
-/// Événement transitoire #72 produit par le récepteur du presse-papiers.
+/// Transitional event #72 produced by the clipboard receiver.
 #[derive(Debug, PartialEq)]
 pub enum FileDropEvent {
     Entered {
@@ -38,12 +38,12 @@ fn routes() -> &'static Mutex<Routes> {
     ROUTES.get_or_init(Mutex::default)
 }
 
-/// Ne possède ni le display ni la boucle ; peut être appelé depuis le fil du presse-papiers.
+/// Owns neither the display nor the loop; may be called from the clipboard thread.
 #[derive(Clone)]
 pub struct FileDropCallback(Weak<Sender<FileDropEvent>>);
 
 impl FileDropCallback {
-    /// Faux si la boucle a été détruite. Aucun pointeur natif n'est déréférencé.
+    /// False if the loop was destroyed. No native pointer is dereferenced.
     pub fn send(&self, event: FileDropEvent) -> bool {
         self.0
             .upgrade()
@@ -51,8 +51,8 @@ impl FileDropCallback {
     }
 }
 
-/// Recherche la boucle par le jeton d'adresse wl_display emprunté par egui.
-/// L'adresse sert uniquement de clé ; le callback possède une référence faible.
+/// Looks up the loop by the wl_display address token borrowed by egui.
+/// The address serves only as a key; the callback holds a weak reference.
 pub fn file_drop_callback(display: usize) -> Option<FileDropCallback> {
     let routes = routes().lock().ok()?;
     let sender = routes.get(&display)?;

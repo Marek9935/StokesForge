@@ -1,8 +1,8 @@
-# Transition du dépôt Wayland (#72)
+# Wayland drop transition (#72)
 
-Copie de smithay-clipboard 0.7.3 (crates.io), licence MIT conservée dans
-`LICENSE`. Le presse-papiers reste disponible ; son récepteur traite aussi
-le dépôt et son worker est partagé entre les viewports d'egui.
+Copy of smithay-clipboard 0.7.3 (crates.io), MIT license kept in `LICENSE`.
+The clipboard stays available; its receiver also handles the drop, and its
+worker is shared among egui's viewports.
 
-Provenance, diff, cause du premier prototype, contrôles et retrait des deux
-patches : [`../winit/STOKESFORGE.md`](../winit/STOKESFORGE.md).
+Provenance, diff, cause of the first prototype, checks and removal of the two
+patches: [`../winit/STOKESFORGE.md`](../winit/STOKESFORGE.md).

@@ -1,4 +1,4 @@
-# Spike #69 uniquement. numpy vient du verrou principal, jamais remplacé.
+# Spike #69 only. numpy comes from the main lock, never replaced.
 matplotlib==3.11.2
 contourpy==1.4.0
 cycler==0.12.1

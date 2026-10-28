@@ -1,7 +1,7 @@
-Notices des polices embarquées par epaint_default_fonts 0.36.2
+Notices for the fonts embedded by epaint_default_fonts 0.36.2
 
-Copyrights et permissions extraits sans modification des champs name des polices.
-Les textes OFL-1.1 et Ubuntu-font-1.0 figurent aussi dans THIRD-PARTY-LICENSES.txt.
+Copyrights and permissions extracted unmodified from the fonts' name fields.
+The OFL-1.1 and Ubuntu-font-1.0 texts are also in THIRD-PARTY-LICENSES.txt.
 
 
 ======================================================================

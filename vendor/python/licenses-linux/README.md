@@ -1,34 +1,34 @@
-# Notices du Python embarqué
+# Notices for the embedded Python
 
-Ces textes proviennent du répertoire `python/licenses/` de l'archive complète
-officielle **CPython 3.12.14, python-build-standalone 20260901,
-x86_64-unknown-linux-gnu, pgo+lto**. L'archive `install_only_stripped` utilisée
-par StokesForge ne livre pas ce répertoire : elle conserve le texte de CPython
-dans `lib/python3.12/LICENSE.txt`, mais pas toutes les notices de ses
-bibliothèques natives. Les fichiers sont copiés intégralement, sans traduction.
+These texts come from the `python/licenses/` directory of the official full
+archive **CPython 3.12.14, python-build-standalone 20260901,
+x86_64-unknown-linux-gnu, pgo+lto**. The `install_only_stripped` archive used
+by StokesForge does not ship this directory: it keeps CPython's text in
+`lib/python3.12/LICENSE.txt`, but not all the notices of its native
+libraries. The files are copied in full, untranslated.
 
-[Release d'origine](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901).
-`provenance.json` conserve le nom et le SHA-256 de l'archive complète ainsi que
-les indications de licence de son `PYTHON.json`. Il s'agit des indications
-amont, y compris les notices de composants qui ne sont pas utilisés par tous
-les modules. Par exemple, l'amont énumère OpenSSL 1.1 et 3 ; cela ne signifie
-pas que les deux versions sont chargées ensemble. Certains chemins
-`LICENSE.zlib-ng.txt` énumérés par l'amont sont absents de cette archive ; son
-texte `LICENSE.zlib.txt` est conservé tel quel.
+[Original release](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901).
+`provenance.json` keeps the name and SHA-256 of the full archive as well as
+the license indications of its `PYTHON.json`. These are upstream indications,
+including the notices of components that are not used by every module. For
+example, upstream lists OpenSSL 1.1 and 3; this does not mean that both
+versions are loaded together. Some `LICENSE.zlib-ng.txt` paths listed by
+upstream are missing from this archive; its `LICENSE.zlib.txt` text is kept
+as is.
 
-Les distributions livrent ces notices, le `LICENSE.txt` du CPython réellement
-empaqueté et **tous les textes du répertoire de licences de la roue numpy**,
-y compris ceux de ses composants natifs, et le `LICENSE.txt` de la roue scipy
-(#191), qui reprend les licences de ses bibliothèques natives. La licence du code Python de
-StokesForge ne remplace aucune de ces licences.
+The distributions ship these notices, the `LICENSE.txt` of the CPython that
+is actually packaged and **all the texts of the numpy wheel's license
+directory**, including those of its native components, and the `LICENSE.txt`
+of the scipy wheel (#191), which carries the licenses of its native
+libraries. The license of StokesForge's Python code replaces none of these
+licenses.
 
-Lors d'une mise à jour de `vendor/python/lock.env` :
+When updating `vendor/python/lock.env`:
 
-1. Récupérer l'archive complète correspondant à la nouvelle release et à la
-   plateforme, puis vérifier les licences et les bibliothèques effectivement
-   livrées.
-2. Remplacer ces textes par ceux de `python/licenses/` et actualiser
-   `provenance.json` et `versions.env`.
-3. Rejouer les scripts de distribution ; `scripts/licenses-dist.sh` refuse
-   des notices dont la version, la release ou la plateforme ne correspondent
-   plus au verrou Python.
+1. Fetch the full archive matching the new release and the platform, then
+   check the licenses and the libraries actually shipped.
+2. Replace these texts with those of `python/licenses/` and refresh
+   `provenance.json` and `versions.env`.
+3. Replay the distribution scripts; `scripts/licenses-dist.sh` refuses
+   notices whose version, release or platform no longer match the Python
+   lock.
