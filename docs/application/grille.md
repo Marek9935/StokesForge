@@ -189,8 +189,8 @@ history: resizing **cannot be undone**, but Ctrl+Z that brings back a
 deleted column gives it back its width (the identifier is never reused,
 invariant 7, and the table is not purged on mutation).
 
-On every frame, `grid_contents` gives egui back `TableColumn::initial(width of
-the column or DEFAULT_COLUMN_WIDTH)` for each column, and calls
+On every frame, `grid_contents` gives egui back `TableColumn::initial(largeur de
+la colonne ou DEFAULT_COLUMN_WIDTH)` for each column, and calls
 `TableBuilder::reset()` when the ordered list of identifiers (with the epoch
 of the project) differs from that of the previous frame — never a variable
 `id_salt`, from which the identifier of the vertical scroll area would drift (the

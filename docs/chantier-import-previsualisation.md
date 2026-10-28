@@ -81,8 +81,8 @@ roles.
 **Two-level bound**, see the head doc of
 `crates/stokesforge-import/src/preview.rs`:
 
-- splitting the file into lines (`layout::split_lines`: `\r\n`, `\n` or a lone `\r`) stays `O(file
-  size)` — incompressible, and already the case of the old `import_preview`
+- splitting the file into lines (`layout::split_lines`: `\r\n`, `\n` or a lone `\r`) stays `O(taille du
+  fichier)` — incompressible, and already the case of the old `import_preview`
   (which, for its part, analyzed **all** the data lines cell by
   cell, on every frame);
 - building an owned line and analyzing it cell by cell is bounded to the
