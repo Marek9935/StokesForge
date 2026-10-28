@@ -24,7 +24,6 @@ FRENCH_CHANGELOG_UP_TO = (1, 0, 0)
 EXEMPT_PREFIXES = ("docs/archive/", "test/import/", "vendor/")
 EXEMPT_FILES = {
     ".claude/skills/stokesforge-bug-report/references/decision-form.html",
-    ".claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.html",
     "scripts/french-guard-test.py",
 }
 THRESHOLD = 2
