@@ -216,6 +216,12 @@ grid-drag-rows =
        *[other] { $count } lignes
     }
 graph-row-series = Ligne { $number }
+graph-series-broken-reference = (référence rompue)
+graph-series-broken-reference-named = { $name } — référence rompue
+graph-legend-more = { $count ->
+    [one] … et { $count } autre
+   *[other] … et { $count } autres
+}
 status-row-no-x-prime = Aucune colonne de cette feuille n'a de valeur x' : rien à tracer
 row-drop-title = Tracer les lignes
 row-drop-confirm = Ce graphique a déjà un axe X. Tracer les lignes contre un nouvel axe X, ou contre l'axe présent ?
@@ -912,6 +918,8 @@ plot-legend-bottom-right = Bas droite
 # Onglet Thème
 
 plot-theme-themes = Thèmes
+plot-theme-light = Clair
+plot-theme-dark = Sombre
 plot-theme-global-colors = Couleurs globales
 plot-theme-background = Fond
 plot-theme-text = Texte
@@ -1669,6 +1677,9 @@ error-import-partial = { $imported ->
     [one] { $imported } fichier importé
    *[other] { $imported } fichiers importés
 } sur { $total } : { $failures }
+error-import-close-group = l'entrée d'historique de l'import n'a pas pu être fermée
+error-import-create-book = { $name } : le classeur n'a pas pu être créé
+error-import-create-sheet = { $name } : la feuille n'a pas pu être créée
 error-plot-no-y = Aucune colonne Y sélectionnée. Sélectionner une colonne Y à tracer
 error-add-no-y = Aucune colonne Y sélectionnée. Sélectionner une colonne Y à ajouter
 error-script-unavailable = Les scripts ne sont pas disponibles dans cette version de StokesForge

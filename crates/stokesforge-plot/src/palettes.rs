@@ -22,8 +22,9 @@ pub enum PaletteNature {
 /// A named palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamedPalette {
-    /// Displayed name.
-    pub name: &'static str,
+    /// Stable English identifier. Not shown: the interface names palettes
+    /// through its catalog (`color-palette-*` keys), in the order of the table.
+    pub id: &'static str,
     /// Nature.
     pub nature: PaletteNature,
     /// Colors, in order.
@@ -34,12 +35,12 @@ pub struct NamedPalette {
 /// first.
 pub const CURVE_PALETTES: [NamedPalette; 9] = [
     NamedPalette {
-        name: "StokesForge (par défaut)",
+        id: "StokesForge (default)",
         nature: PaletteNature::Qualitative,
         colors: &crate::style::DEFAULT_PALETTE,
     },
     NamedPalette {
-        name: "Tableau 10",
+        id: "Tableau 10",
         nature: PaletteNature::Qualitative,
         colors: &[
             "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
@@ -47,14 +48,14 @@ pub const CURVE_PALETTES: [NamedPalette; 9] = [
         ],
     },
     NamedPalette {
-        name: "Okabe-Ito (lisible par les daltoniens)",
+        id: "Okabe-Ito (color-blind safe)",
         nature: PaletteNature::Qualitative,
         colors: &[
             "#000000", "#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7",
         ],
     },
     NamedPalette {
-        name: "ColorBrewer Set1",
+        id: "ColorBrewer Set1",
         nature: PaletteNature::Qualitative,
         colors: &[
             "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf",
@@ -62,14 +63,14 @@ pub const CURVE_PALETTES: [NamedPalette; 9] = [
         ],
     },
     NamedPalette {
-        name: "ColorBrewer Dark2",
+        id: "ColorBrewer Dark2",
         nature: PaletteNature::Qualitative,
         colors: &[
             "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02", "#a6761d", "#666666",
         ],
     },
     NamedPalette {
-        name: "ColorBrewer Paired",
+        id: "ColorBrewer Paired",
         nature: PaletteNature::Qualitative,
         colors: &[
             "#a6cee3", "#1f78b4", "#b2df8a", "#33a02c", "#fb9a99", "#e31a1c", "#fdbf6f", "#ff7f00",
@@ -77,7 +78,7 @@ pub const CURVE_PALETTES: [NamedPalette; 9] = [
         ],
     },
     NamedPalette {
-        name: "Viridis (dégradé)",
+        id: "Viridis (gradient)",
         nature: PaletteNature::Sequential,
         colors: &[
             "#440154", "#482878", "#3e4989", "#31688e", "#26828e", "#1f9e89", "#35b779", "#6ece58",
@@ -85,7 +86,7 @@ pub const CURVE_PALETTES: [NamedPalette; 9] = [
         ],
     },
     NamedPalette {
-        name: "Plasma (dégradé)",
+        id: "Plasma (gradient)",
         nature: PaletteNature::Sequential,
         colors: &[
             "#0d0887", "#46039f", "#7201a8", "#9c179e", "#bd3786", "#d8576b", "#ed7953", "#fb9f3a",
@@ -93,7 +94,7 @@ pub const CURVE_PALETTES: [NamedPalette; 9] = [
         ],
     },
     NamedPalette {
-        name: "Niveaux de gris (dégradé)",
+        id: "Grayscale (gradient)",
         nature: PaletteNature::Sequential,
         colors: &[
             "#000000", "#262626", "#404040", "#595959", "#737373", "#8c8c8c", "#a6a6a6", "#bfbfbf",
@@ -110,14 +111,14 @@ mod tests {
     fn every_palette_is_non_empty_and_well_formed() {
         assert_eq!(CURVE_PALETTES[0].colors, &crate::style::DEFAULT_PALETTE);
         for palette in CURVE_PALETTES {
-            assert!(palette.colors.len() >= 8, "{}", palette.name);
+            assert!(palette.colors.len() >= 8, "{}", palette.id);
             for color in palette.colors {
                 assert!(
                     color.len() == 7
                         && color.starts_with('#')
                         && color[1..].chars().all(|c| c.is_ascii_hexdigit()),
                     "{} : {color}",
-                    palette.name
+                    palette.id
                 );
             }
         }

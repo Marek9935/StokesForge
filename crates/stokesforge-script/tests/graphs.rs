@@ -222,7 +222,7 @@ pyst.plot(t, graph=g)
     let resolved = stokesforge_core::resolve_spec(&snap.tree, &spec);
     assert_eq!(
         resolved.panels[0].series[6].label,
-        "#fonction_inconnue[x] $alpha$"
+        stokesforge_core::SeriesLabel::Text("#fonction_inconnue[x] $alpha$".to_string())
     );
     let svg = stokesforge_render_svg::render_spec(
         &snap.tree,

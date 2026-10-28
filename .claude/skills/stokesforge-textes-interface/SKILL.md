@@ -19,6 +19,8 @@ Any task that adds, changes or removes a text the user sees: menu, context menu,
 6. **A new rule or term** goes into the glossary in the same commit.
 7. **Look at it**: capture with `STOKESFORGE_LANG=en-XA` (`run-stokesforge`) — a text without `[[ ]]` escaped the catalogue, a missing `]]` is truncated.
 
+A crate below `stokesforge-app-state` never holds a sentence for the user (renderer, core): it takes the texts as data (`SeriesLabel`) or from a struct the application supplies (`stokesforge_render::FigureTexts`, built by `figure_texts::figure_texts()`), with a fixed English default for script and CLI exports (#369).
+
 Names chosen by the user or by default (*Book1*, *Sheet1*) are never translated. One notion = one key, shared across zones (`common-auto`, `column-type-*`…), except `history-*` keys and words whose French agreement changes.
 
 Done when every new text has its key in `en` and `fr`, follows the glossary, passes `aucun_libelle_en_dur`, `aucune_cle_du_catalogue_n_est_morte` and the `fr = en` completeness test, and was looked at in `en-XA` when visible.

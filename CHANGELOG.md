@@ -55,6 +55,15 @@ without a message, see `docs/persistance.md`).
 - The "Closed Frame" box (Axes page and layer menu) disappears from the
   interface; its settings are made per axis (mirrors, ticks).
 
+### Fixed
+
+- Texts written in French in the English interface (#369): the "(broken
+  reference)" placeholder and the "… and N more" line of the legend, the
+  Light and Dark theme names, and the import failure messages of the status
+  bar now follow the interface language (en/fr); the "Row N" name of an
+  unnamed row series too. Figures exported by a `pyst` script or the CLI keep
+  English.
+
 ## [1.0.0] - 2026-10-27
 
 Première version publiée. Portage de StokesForge de Python/Qt vers Rust

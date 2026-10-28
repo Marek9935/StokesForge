@@ -421,6 +421,18 @@ result is cached and a frame without change costs one
   so it must invalidate. A counter rather than the bounds: an integer is enough to
   invalidate, the framing value does not have to pass through there.
 
+- the **language of the figure texts** (#369) — the placeholder of a broken
+  reference, the « … and N more » line and the name of a row series are not in
+  the graph description: the application supplies a `FigureTexts`
+  (`stokesforge-app-state/src/figure_texts.rs`) and `GraphView::set_figure_texts`
+  folds a change of its language **tag** into `preview_generation` (same
+  counter as the previews; never compare closures, never rebuild every frame).
+  The plain `pipeline::draw`, `export_*` and `render_to_string` keep the English
+  default (script, CLI); `*_with_texts` variants take the struct. Both backends
+  must receive the same texts, since the legend text is measured once and
+  places the axes (invariants 4 and 5). A broken series is drawn as literal
+  text (never Typst markup), in every language (invariant 10).
+
 What is deliberately **not** in it: *feathering* (invariant 6).
 
 ### Zoom and pan are not model mutations
@@ -737,7 +749,7 @@ were omitted from the rendering. The context menu keeps this address at the clic
 takes the long name or the column name, often imported from an instrument
 (`Abs_280 #1`). Read as markup, `_` would open italics and `#` code.
 The legend therefore gives it `formula::literal_style` (family
-`stokesforge-typst-literal`), like the « … et N autres » line: the Typst branch
+`stokesforge-typst-literal`), like the « … and N more » line: the Typst branch
 of the backends passes it through `formula::source`, which wraps it in a Typst string
 `#"…"` (`formula::escape`) — composed by Typst, displayed as is, without
 typographic quotes or `...` turned into an ellipsis. The path

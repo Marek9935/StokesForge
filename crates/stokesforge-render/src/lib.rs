@@ -85,6 +85,7 @@ pub mod series_selection;
 pub mod shapes;
 pub mod subpixel;
 pub mod text;
+pub mod texts;
 pub mod view;
 
 #[cfg(test)]
@@ -125,9 +126,10 @@ pub use interact::{
     PanelTransform, SnapZone,
 };
 pub use pipeline::{
-    draw, draw_on, AxisArea, AxisAreas, DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot,
-    DrawnText,
+    draw, draw_on, draw_on_with_texts, draw_with_texts, AxisArea, AxisAreas, DrawnAnnotation,
+    DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText,
 };
 pub use series::{Geometry, Prepared};
 pub use shapes::DrawnShape;
 pub use text::{estimate, font_definitions, font_id, text_options, TextMeasurer, TextSource};
+pub use texts::FigureTexts;

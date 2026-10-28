@@ -329,6 +329,7 @@ pub(super) fn graph_view_contents(
     if let Some(backdrop) = display_backdrop(&background) {
         figure_ui.painter().rect_filled(rect, 0.0, backdrop);
     }
+    view.set_figure_texts(&stokesforge_app_state::figure_texts::figure_texts());
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             publish_axis_bounds(ui.ctx(), view, graph_id);

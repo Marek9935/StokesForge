@@ -80,6 +80,7 @@ use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
 use crate::series::{self, Geometry, Prepared};
+use crate::texts::FigureTexts;
 
 /// Size (in Plotters' sense) of the graph title.
 pub const TITLE_SIZE: f64 = 24.0;
@@ -369,8 +370,18 @@ pub fn draw<DB: DrawingBackend>(
     backend: DB,
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
+    draw_with_texts(backend, plot, &FigureTexts::default())
+}
+
+/// [`draw`] with the texts of the figure ([`FigureTexts`]) in the language of
+/// the caller. [`draw`] uses the English default.
+pub fn draw_with_texts<DB: DrawingBackend>(
+    backend: DB,
+    plot: &ResolvedPlot<'_>,
+    texts: &FigureTexts,
+) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
     let root = backend.into_drawing_area();
-    draw_on(&root, plot)
+    draw_on_with_texts(&root, plot, texts)
 }
 
 /// Draws the resolved graph on an already built drawing area.
@@ -380,6 +391,15 @@ pub fn draw<DB: DrawingBackend>(
 pub fn draw_on<DB: DrawingBackend>(
     root: &DrawingArea<DB, Shift>,
     plot: &ResolvedPlot<'_>,
+) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
+    draw_on_with_texts(root, plot, &FigureTexts::default())
+}
+
+/// [`draw_on`] with the texts of the figure ([`FigureTexts`]).
+pub fn draw_on_with_texts<DB: DrawingBackend>(
+    root: &DrawingArea<DB, Shift>,
+    plot: &ResolvedPlot<'_>,
+    figure_texts: &FigureTexts,
 ) -> Result<DrawnPlot, DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = plot.spec;
     let background = figure_background(spec);
@@ -521,6 +541,7 @@ pub fn draw_on<DB: DrawingBackend>(
             bases.get(&cell_index),
             &overlay_panels,
             plot.spec.decimal_comma,
+            figure_texts,
         )?;
         if panel.spec.overlay.is_none() {
             bases.insert(cell_index, frame);
@@ -836,6 +857,7 @@ fn draw_panel<DB: DrawingBackend>(
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
     decimal_comma: bool,
+    figure_texts: &FigureTexts,
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     let figure_width = canvas.dim_in_pixel().0;
@@ -1816,6 +1838,7 @@ fn draw_panel<DB: DrawingBackend>(
                 spec.legend.font.family(),
             ),
         },
+        figure_texts,
         legend::LegendColors { background, ink },
         legend_center,
     )?;
