@@ -94,8 +94,9 @@ confirmation on the usual choices covered by the request.
   the legend of the shared rendering.
 - Follow the local naming conventions. Commit messages and technical docs
   (`docs/`) are in English (since #368; the earlier history stays in French);
-  `docs/archive/` stays in French. Code comments and French identifiers are
-  being translated crate by crate (#372–#376). Explain non-obvious
+  `docs/archive/` stays in French. New code, comments, test names and
+  identifiers are written in English from now on, even in a crate not yet
+  translated; existing French ones are translated crate by crate (#372–#376). Explain non-obvious
   decisions as close to the code as possible.
 - Check the features actually exercised: the default Cargo commands
   do not validate the Python bridge (feature `python`). Typst is compiled and tested
