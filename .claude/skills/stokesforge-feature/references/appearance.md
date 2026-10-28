@@ -4,10 +4,10 @@ Read when painting a scroll bar, tabs, a selectable list or tree, a section titl
 
 ## Where the rule lives
 
-- Scroll bars: `docs/application/theme-i18n-systeme.md` § Theme ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes (`theme::scroll_style`).
+- Scroll bars: `docs/application/theme-i18n-systeme.md` § Theme ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards (`theme::scroll_style`).
 - Four roles (tabs, list, exclusive choice, tool toggle): `docs/application/fenetres-et-panneaux.md` § Tabs, lists and selection: four aspects, four roles (#169).
-- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `aspect commun (#169)` ; `docs/standard-interface.md` § Choices, layout.
-- Colour picker, usages, saved colours: `docs/application/graphe.md` § Graph properties ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `color_picker::color_field`.
+- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "common appearance (#169)" ; `docs/standard-interface.md` § Choices, layout.
+- Colour picker, usages, saved colours: `docs/application/graphe.md` § Graph properties ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point `color_picker::color_field`.
 - Empty colour = automatic, automatic ink: `docs/rendu.md` § Text and scale colors: automatic ink.
 - New colour field in the model (`#[serde(default)]`): `docs/persistance.md` § The format is not written into the model.
 - Icons: `docs/icones.md` § When to put an icon — and when not ; `docs/icones.md` § Every action has its logo (rule set with #110) ; `docs/icones.md` § Color: neutral by default, color is rare ; `docs/icones.md` § Adding an icon ; `docs/icones.md` § Color swatches (#89).

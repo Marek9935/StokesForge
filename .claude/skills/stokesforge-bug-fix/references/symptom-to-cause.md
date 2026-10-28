@@ -21,5 +21,5 @@ Read at step 3 of `stokesforge-bug-fix`. The costly reflex is repairing where th
 | dialog painted or validated wrongly | `app/plot_settings.rs`, `app/import_wizard.rs`; shared frame and blocking in `app/dialogs.rs` |
 | file drop freezes the window | `state::drop_files` keeps only refusals on the UI thread; reading and import run in `start_import`, applied by `poll_import` (#266) |
 | file dropped in the wrong place | `app/file_drop.rs` (who claims the drop) then `state::file_drop_plan` (the decision) |
-| works floating, not in a detached window | two writings where one is needed, or an `AppState` field never copied (`fork_for_detached_view`, `sync_detached_snapshot`, `adopt_detached_book_view`): `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue) |
+| works floating, not in a detached window | two writings where one is needed, or an `AppState` field never copied (`fork_for_detached_view`, `sync_detached_snapshot`, `adopt_detached_book_view`): `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog) |
 | interface freezes | something blocking called from the render loop (model: `ScriptEngine::run`, solved by a detached thread + `poll_script`) |

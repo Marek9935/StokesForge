@@ -25,7 +25,7 @@ Placed and drawn by `stokesforge_render::series_selection` (generic over the bac
 
 ## Typst (firm dependency)
 
-Always compiled; `cargo test --workspace` covers it (`docs/rendu.md` § Typst (R8)). Backends switch on `formula::is_rich`, at measurement **and** drawing, never on the presence of `$`. `collect_shapes` / `render_to_string` draw everything as plain text — the tests' témoin; `collect_shapes_with_typst`, `render_to_string_with_typst` and `with_typst()` go through Typst. `GraphView` always does, with a bounded `FormulaCache`. Text colour (`formula::ink`) enters compilation and cache key: a formula is never tinted afterwards. SVG text stays `<text>` by default (`SvgTextMode`), outlines being an option. A formula that fails to compile shows as raw text, `$…$` included (invariant 10). Interface word: Typst text between `$…$` is « Math » on screen and in keys (`plot-math-*`); « Formula » is reserved for a column computation.
+Always compiled; `cargo test --workspace` covers it (`docs/rendu.md` § Typst (R8)). Backends switch on `formula::is_rich`, at measurement **and** drawing, never on the presence of `$`. `collect_shapes` / `render_to_string` draw everything as plain text — the tests' witness; `collect_shapes_with_typst`, `render_to_string_with_typst` and `with_typst()` go through Typst. `GraphView` always does, with a bounded `FormulaCache`. Text colour (`formula::ink`) enters compilation and cache key: a formula is never tinted afterwards. SVG text stays `<text>` by default (`SvgTextMode`), outlines being an option. A formula that fails to compile shows as raw text, `$…$` included (invariant 10). Interface word: Typst text between `$…$` is « Math » on screen and in keys (`plot-math-*`); « Formula » is reserved for a column computation.
 
 ## Preview on the view, one write in the model
 
@@ -37,4 +37,4 @@ A continuous gesture (dragging free text, editing in place, moving a title or th
 
 ## Tests
 
-The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`mesure.rs`, `accord.rs`, `feathering.rs`, `frontiere.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/formes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text témoin stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).
+The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`mesure.rs`, `accord.rs`, `feathering.rs`, `frontiere.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/formes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text witness stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).

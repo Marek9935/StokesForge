@@ -1,124 +1,126 @@
-# Consignes Codex — StokesForge
+# Codex instructions — StokesForge
 
-## Avant toute implémentation
+## Before any implementation
 
-Lire [.codex/README.md](.codex/README.md), puis suivre son parcours de lecture
-pour le domaine concerné. **Inspecter l'existant avant d'écrire du code** :
-documentation, modules, appelants, tests, dépendances et scripts disponibles.
-Rechercher une implémentation analogue et réutiliser les outils du dépôt.
-Ne pas introduire une bibliothèque, un utilitaire ou une nouvelle couche sans
-avoir vérifié ce qui répond déjà au besoin.
+Read [.codex/README.md](.codex/README.md), then follow its reading path
+for the domain concerned. **Inspect what exists before writing code**:
+documentation, modules, callers, tests, dependencies and available scripts.
+Look for a similar implementation and reuse the repository's tools.
+Do not introduce a library, a utility or a new layer without
+checking what already meets the need.
 
-Commencer par `git status --short` et examiner les différences pertinentes.
-Préserver les modifications et les fichiers non suivis de l'utilisateur.
-Avant de modifier, indiquer brièvement les composants à réutiliser, la zone
-à changer et les vérifications prévues ; poursuivre sans demander une
-confirmation pour les choix courants couverts par la demande.
+Start with `git status --short` and examine the relevant differences.
+Preserve the user's changes and untracked files.
+Before changing anything, state briefly the components to reuse, the area
+to change and the planned checks. Then proceed without asking for
+confirmation on the usual choices covered by the request.
 
-## Repères permanents
+## Standing landmarks
 
-- Pendant le signalement et la création ou l'enrichissement d'issues, les
-  retours suivants complètent les issues, même formulés comme « ajoute »,
-  « enlève » ou « supprime ». Ne passer au code que sur demande explicite
-  d'implémentation dans le dépôt ; voir la règle de contexte du skill
+- While reporting and while creating or enriching issues, the feedback that
+  follows completes the issues, even when phrased as « ajoute »,
+  « enlève » or « supprime ». Move to code only on an explicit request to
+  implement in the repository; see the context rule of the skill
   `stokesforge-bug-report`.
-- La licence du dépôt est GPL-3.0-or-later pure (#348, exception retirée ;
-  un CLA doit précéder toute contribution extérieure). Conserver les notices tierces et les actualiser avec les
-  dépendances ou le runtime ; `scripts/licenses-dist.sh` les livre et le
-  travail CI `licenses` contrôle la politique par `cargo deny check licenses`.
-  Les compléments de `vendor/crate-license-notices/` sont liés au verrou
-  Cargo ; une modification de `Cargo.lock` exige leur revalidation avant
+- The repository license is pure GPL-3.0-or-later (#348, exception removed;
+  a CLA must precede any external contribution). Keep the third-party notices and update them with
+  dependencies or the runtime; `scripts/licenses-dist.sh` ships them and the
+  CI job `licenses` checks the policy with `cargo deny check licenses`.
+  The supplements in `vendor/crate-license-notices/` are tied to the Cargo
+  lock; a change to `Cargo.lock` requires revalidating them before
   distribution.
-- Le développement actif est le workspace Rust dans `crates/`. Lire
-  `Cargo.toml`, les manifestes concernés et `rust-toolchain.toml` pour les
-  outils, versions et features effectifs.
-- `docs/README.md` oriente ; `docs/invariants.md` décrit les frontières à
-  préserver ; les commentaires de tête de module expliquent les décisions.
-  Le code et les tests décrivent l'état implémenté. Une note de chantier ou
-  `docs/archive/` ne prouve pas qu'une fonctionnalité existe ou reste à faire.
-- Quand un travail installe une règle nouvelle (standard d'interface, motif à
-  suivre, frontière), mettre à jour au besoin les skills concernés
-  (`.claude/skills/`) et `CLAUDE.md` ou `.claude/conventions.md` dans le même
-  commit que le code.
-- Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
-  dans `.claude/skills/`. Consulter le skill pertinent selon la table de
-  `.codex/README.md` et ses références utiles, sans charger toute la collection.
-  Les liens partagent aussi les fiches et les scripts : une mise à jour par
-  Claude s'applique directement à Codex, sans copie à synchroniser.
-- Les conventions détaillées sont partagées dans `.claude/conventions.md` :
-  lire la section du domaine avant d'écrire du code (table dans `CLAUDE.md`).
-  `.claude/rules.md` précise le périmètre de lecture. Le skill `run-stokesforge`
-  pilote et capture l'application réelle sous Linux pour les vérifications
-  interactives ; son chemin X11 sous Xwayland ne valide ni Wayland natif,
-  ni `rfd`, ni le glisser.
-- Standard de comportement (#217) : champs, messages, dialogues, confirmations,
-  grisage, clavier et souris suivent `docs/standard-interface.md`, source
-  unique. Section *à venir* (#219–#232) : la règle vaut déjà pour tout code
-  neuf, mais sa brique ou sa garde n'existe pas encore.
-- Menus et clics droits (#152) : la grammaire de `docs/menus.md` est la source
-  unique (sections dans l'ordre canonique, séparateurs par
-  `MenuSections::section` seulement — garde
-  `aucun_separateur_brut_dans_un_menu` —, sous-menu pour un choix exclusif ou
-  ≥ 3 entrées, entrée absente ou grisée avec `.disabled`, verbes nus,
-  `Properties…` en dernier). Les peintures partagées peignent le contenu ; le
-  menu du haut l'enveloppe, le clic droit l'affiche à plat.
-- Les mutations métier passent par les commandes annulables et l'acteur de
-  session. Respecter les exceptions documentées pour l'état de vue et la
-  géométrie ; ne pas créer de voie d'écriture métier parallèle.
-- `new_project`, comme `load`, est un remplacement d'identité par l'acteur,
-  avec historique vidé et macro ouverte refusée ; la confirmation vit dans
-  l'application. Le graphique vide réutilise `Command::AddGraph`.
-- Le dépôt Wayland partage le récepteur du presse-papiers via les patches
-  `vendor/winit` et `vendor/smithay-clipboard` (#72), hors workspace : lire
-  `vendor/winit/STOKESFORGE.md` avant de modifier ou mettre à jour ces
-  dépendances/eframe. `STOKESFORGE_X11=1` force le secours X11.
-- L'import de l'application, du CLI et des scripts partage les plans et la
-  conversion de `stokesforge-importer` ; `pyst.import_file` écrit par les commandes
-  de sa session, GIL relâché, dans une macro annulable.
-- Les copies d’objets (#105–106) réutilisent `NodeCopy` / `InsertCopy`, sans
-  allocateur ni projet source transporté. Toute nature est copiable par défaut ;
-  les IDs sont créés dans la destination et un échec restaure l’arbre. Unicité
-  des noms par dossier, chemins canoniques enracinés ; les graphes entre projets
-  emportent leurs colonnes dans un classeur caché persisté (#107), révélé par Show
-  Data. F2 renomme dans les gestionnaires (#130) et édite dans la grille (#143), selon le focus ; jamais le nom des feuilles.
-- Panneaux Python, PM et OM repliés : seul Déployer est visible, sans cible
-  ni espace réservé à Détacher (`panel_header`). Le détachement par bouton
-  exige un panneau déployé ; une fenêtre OS garde Rattacher.
-- Le rendu partagé appartient à `stokesforge-render`. Préserver l'accord entre
-  l'écran et les exports, ainsi que la mesure de texte unique.
-  Le banc des grandes courbes (#141) reste manuel (`#[ignore]`, `--release`),
-  sans API dédiée ; son protocole et les mesures vivent dans `docs/rendu.md`.
-- Object Manager projette l'instantané dans `object_manager.rs` ; la sélection
-  reste dans `GraphView`, y compris en fenêtre détachée. La visibilité passe
-  par `EditPlotSpec` (même delta que `SetPlotSpec`) et les vignettes réutilisent
-  la légende du rendu partagé.
-- Suivre les conventions locales de nommage ; écrire les commentaires
-  et les messages de commit en français, la documentation de `docs/` en anglais
-  (hors `docs/archive/`, resté en français, #368). Expliquer les
-  décisions non évidentes au plus près du code.
-- Vérifier les features réellement exercées : les commandes Cargo par défaut
-  ne valident pas le pont Python (feature `python`). Typst est compilé et testé
-  par défaut. `scripts/python-test.sh` couvre aussi l'application et le CLI,
-  et le travail CI `test-python` est automatique et bloquant. La distribution
-  CLI se vérifie par `scripts/cli-dist.sh` ; Matplotlib reste un spike isolé
-  (`scripts/python-matplotlib-spike.sh`). Les commandes adaptées sont dans
+- Active development is the Rust workspace in `crates/`. Read
+  `Cargo.toml`, the manifests concerned and `rust-toolchain.toml` for the
+  effective tools, versions and features.
+- `docs/README.md` routes; `docs/invariants.md` describes the boundaries to
+  preserve; module header comments explain the decisions.
+  The code and tests describe the implemented state. A work package note or
+  `docs/archive/` does not prove that a feature exists or remains to be done.
+- When a work package installs a new rule (interface standard, pattern to
+  follow, boundary), update as needed the skills concerned
+  (`.claude/skills/`) and `CLAUDE.md` or `.claude/conventions.md` in the same
+  commit as the code.
+- The project skills in `.agents/skills/` point to the sources maintained
+  in `.claude/skills/`. Consult the relevant skill following the table in
+  `.codex/README.md` and its useful references, without loading the whole collection.
+  The links also share the reference files and scripts: an update by
+  Claude applies directly to Codex, with no copy to synchronize.
+- The detailed conventions are shared in `.claude/conventions.md`:
+  read the section of the domain before writing code (table in `CLAUDE.md`).
+  `.claude/rules.md` specifies the reading scope. The skill `run-stokesforge`
+  drives and captures the real application on Linux for interactive checks;
+  its X11 path under Xwayland validates neither native Wayland,
+  nor `rfd`, nor drag.
+- Behavior standard (#217): fields, messages, dialogs, confirmations,
+  disabled state (greyed out), keyboard and mouse follow `docs/standard-interface.md`, the single
+  source. Section *planned* (#219–#232): the rule already applies to all
+  new code, but its building block or guard does not exist yet.
+- Menus and right-clicks (#152): the grammar of `docs/menus.md` is the single
+  source (sections in canonical order, separators only through
+  `MenuSections::section` — guard
+  `aucun_separateur_brut_dans_un_menu` —, submenu for an exclusive choice or
+  ≥ 3 entries, entry absent or disabled with `.disabled`, bare verbs,
+  `Properties…` last). The shared painting code draws the content; the
+  top menu wraps it, the right-click shows it flat.
+- Business mutations go through undoable commands and the session
+  actor. Respect the documented exceptions for view state and
+  geometry; do not create a parallel business write path.
+- `new_project`, like `load`, is an identity replacement by the actor,
+  with history cleared and an open macro refused; the confirmation lives
+  in the application. The empty graph reuses `Command::AddGraph`.
+- The Wayland repository shares the clipboard receiver through the patches
+  `vendor/winit` and `vendor/smithay-clipboard` (#72), outside the workspace: read
+  `vendor/winit/STOKESFORGE.md` before changing or updating these
+  dependencies/eframe. `STOKESFORGE_X11=1` forces the X11 fallback.
+- Import from the application, the CLI and the scripts shares the plans and the
+  conversion of `stokesforge-importer`; `pyst.import_file` writes through the commands
+  of its session, GIL released, in an undoable macro.
+- Object copies (#105–106) reuse `NodeCopy` / `InsertCopy`, with no
+  allocator and no source project carried over. Every kind is copyable by default;
+  IDs are created in the destination and a failure restores the tree. Names are
+  unique per folder, canonical paths are rooted; graphs between projects
+  carry their columns in a hidden persisted workbook (#107), revealed by Show
+  Data. F2 renames in the managers (#130) and edits in the grid (#143), depending on focus; never the name of sheets.
+- Collapsed Python, PM and OM panels: only Expand is visible, with no target
+  or space reserved for Detach (`panel_header`). Detaching by button
+  requires an expanded panel; an OS window keeps Reattach.
+- Shared rendering belongs to `stokesforge-render`. Preserve the agreement between
+  screen and exports, and the single text measurement.
+  The large-curves bench (#141) stays manual (`#[ignore]`, `--release`),
+  with no dedicated API; its protocol and measurements live in `docs/rendu.md`.
+- Object Manager projects the snapshot in `object_manager.rs`; the selection
+  stays in `GraphView`, including in a detached window. Visibility goes
+  through `EditPlotSpec` (same delta as `SetPlotSpec`) and thumbnails reuse
+  the legend of the shared rendering.
+- Follow the local naming conventions. Commit messages and technical docs
+  (`docs/`) are in English (since #368; the earlier history stays in French);
+  `docs/archive/` stays in French. New code, comments, test names and
+  identifiers are written in English from now on, even in a crate not yet
+  translated; existing French ones are translated crate by crate (#372–#376). Explain non-obvious
+  decisions as close to the code as possible.
+- Check the features actually exercised: the default Cargo commands
+  do not validate the Python bridge (feature `python`). Typst is compiled and tested
+  by default. `scripts/python-test.sh` also covers the application and the CLI,
+  and the CI job `test-python` is automatic and blocking. The CLI
+  distribution is checked with `scripts/cli-dist.sh`; Matplotlib remains an isolated spike
+  (`scripts/python-matplotlib-spike.sh`). The adapted commands are in
   `.codex/README.md`.
-- CI : Linux tourne sur le miroir GitHub, Windows sur GitLab. Maintenir les
-  commandes de `.gitlab-ci.yml` et `.github/workflows/ci.yml` ensemble ; le
-  rapporteur `gitlab-status.yml` / `scripts/gitlab-status.py` renvoie les
-  statuts Linux vers GitLab (secret GitHub `GITLAB_STATUS_TOKEN`, procédure
-  dans `docs/tests.md`). `STOKESFORGE_CI_LINUX=gitlab` réactive les travaux
-  Linux GitLab ; sans runner Linux, les laisser désactivés.
+- CI: Linux runs on the GitHub mirror, Windows on GitLab. Keep the
+  commands of `.gitlab-ci.yml` and `.github/workflows/ci.yml` together; the
+  reporter `gitlab-status.yml` / `scripts/gitlab-status.py` sends the Linux
+  statuses back to GitLab (GitHub secret `GITLAB_STATUS_TOKEN`, procedure
+  in `docs/tests.md`). `STOKESFORGE_CI_LINUX=gitlab` re-enables the
+  Linux GitLab jobs; without a Linux runner, leave them disabled.
 
-## Pour terminer une modification
+## Finishing a change
 
-- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Clean up after a merge on `main` ».
+- After a merge and push on `main`, clean up the task's temporary worktree and its merged local branch automatically, unless asked to keep them; follow `stokesforge-verification`, "Clean up after a merge on `main`".
 
-Exécuter les vérifications adaptées au changement, relire le diff et mettre
-à jour la documentation concernée. Ne pas masquer une régression en
-affaiblissant un test d'architecture. Rapporter ce qui a changé, les contrôles
-réellement exécutés et les éventuelles limites de validation.
+Run the checks suited to the change, re-read the diff and update
+the documentation concerned. Do not hide a regression by
+weakening an architecture test. Report what changed, the checks
+actually run and any validation limits.
 
-Si le changement fait évoluer les outils, les chemins, les scripts ou les
-frontières du projet, mettre aussi à jour `.codex/README.md` et ces consignes
-pour que la prochaine session parte d'informations exactes.
+If the change alters the project's tools, paths, scripts or
+boundaries, also update `.codex/README.md` and these instructions
+so that the next session starts from exact information.

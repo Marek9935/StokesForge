@@ -2,96 +2,95 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Contexte
+## Context
 
-Branche `main` : portage de StokesForge (analyse/tracé de données scientifiques, façon OriginLab) de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine — l'ancienne implémentation Python/Qt (`legacy-python/`, qui servait de spec de comportement) a été supprimée de cette branche ; elle continue d'exister sous le tag `legacy-python`.
+Branch `main`: port of StokesForge (analysis and plotting of scientific data, OriginLab-style) from Python/Qt to Rust. All the code lives in the Cargo workspace at the root. The old Python/Qt implementation (`legacy-python/`, which served as the behavior spec) was deleted from this branch. It still exists under the tag `legacy-python`.
 
-Documentation du code : `docs/` — [`docs/README.md`](docs/README.md) est le point d'entrée et route par tâche. `docs/invariants.md` liste les règles à ne pas casser ; les lire avant de toucher au rendu, à l'historique ou à l'acteur. `docs/principes-ui.md` pose les principes d'interface (E3) ; `docs/fenetres.md` catalogue les fenêtres existantes, à consulter avant toute fenêtre neuve.
+Code documentation: `docs/`. [`docs/README.md`](docs/README.md) is the entry point and routes by task. `docs/invariants.md` lists the rules not to break; read them before touching rendering, history or the actor. `docs/principes-ui.md` sets the interface principles (E3). `docs/fenetres.md` catalogs the existing windows; check it before adding any new window.
 
-`docs/archive/` conserve les documents de conception antérieurs (cahier des charges technique, roadmaps 0-5 et R0-R8, rapports de robustesse, options explorées). Ils ne sont plus maintenus, mais **les commentaires du code les citent par leur nom de fichier** (`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6…) : toute citation de ce genre se résout dans `docs/archive/`. Là où ils divergent du code, c'est le code qui a raison. Ils datent d'avant le renommage (#87) : ils parlent encore de PlotYx, `plotyx-*`, `.plx` et `pyx`, qui se lisent aujourd'hui StokesForge, `stokesforge-*`, `.stf` et `pyst` (le fichier `format-fichier-plx.md` garde son nom).
+`docs/archive/` keeps the earlier design documents (technical specification, roadmaps 0-5 and R0-R8, robustness reports, explored options). They are no longer maintained, but **code comments cite them by file name** (`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6…): every such citation resolves in `docs/archive/`. Where they differ from the code, the code is right. They predate the renaming (#87): they still say PlotYx, `plotyx-*`, `.plx` and `pyx`, which now read StokesForge, `stokesforge-*`, `.stf` and `pyst` (the file `format-fichier-plx.md` keeps its name).
 
-Exception : les rapports de bugs `retours-2026-09-23-bugs.md` et `retours-2026-09-24-bugs.md` (B1…B9, « Bug 1 »…), cités dans `crates/stokesforge-app/src/app.rs` et `src/app/`, ont été supprimés — tous leurs bugs sont corrigés. Ils se lisent par `git show a6fd933^:docs/chantiers/<fichier>`. Les bugs se suivent désormais en issues GitLab (`glab issue list --label bug`), plus en `.md`.
+Exception: the bug reports `retours-2026-09-23-bugs.md` and `retours-2026-09-24-bugs.md` (B1…B9, "Bug 1"…), cited in `crates/stokesforge-app/src/app.rs` and `src/app/`, were deleted. All their bugs are fixed. Read them with `git show a6fd933^:docs/chantiers/<file>`. Bugs are now tracked as GitLab issues (`glab issue list --label bug`), no longer in `.md` files.
 
-## Commandes
+## Commands
 
 ```sh
 cargo build --workspace
-cargo test --workspace                       # inclut stokesforge-robustesse (sauf #[ignore])
-cargo test -p <crate> <nom_test>              # un seul test
-cargo test -p stokesforge-robustesse -- --ignored  # bancs coûteux
+cargo test --workspace                       # includes stokesforge-robustesse (except #[ignore])
+cargo test -p <crate> <test_name>             # a single test
+cargo test -p stokesforge-robustesse -- --ignored  # costly benches
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Architecture (crates/, dépendances bas→haut)
+## Architecture (crates/, dependencies bottom→top)
 
-`stokesforge-id` (clés stables) + `stokesforge-plot` (description de graphe neutre vis-à-vis du renderer) + `stokesforge-analysis` (calcul pur, #181 : lignes de base, correction, intégrale, ajustement, pics, déconvolution ; aucune dépendance du workspace, ni UI ni Python) → `stokesforge-core` (modèle Project/Folder/Workbook/Worksheet/Column, zéro dépendance UI) → `stokesforge-commands` (bus de commandes annulables) et `stokesforge-persistence` (format `.stf`), deux crates **parallèles** au-dessus de `core`/`plot` → `stokesforge-session` (acteur propriétaire du modèle pour ses clients, concurrence ; dépend de commands **et** persistence) → `stokesforge-script`/`stokesforge-python` (pont PyO3) → `stokesforge-app-state` (l'état de l'application, ses textes Fluent et ses erreurs mises en phrase : **aucune** dépendance egui/eframe/winit, tenue par le compilateur et `tests/no_ui_dependency.rs`, #263) → `stokesforge-app` (coquille UI sur eframe : peint l'état, traduit clavier et souris en actions ; garde aussi l'offre de la figure au presse-papiers, `stokesforge-clipboard` tirant winit). `stokesforge-cli import` construit un `Project` neuf directement, sans session ; `stokesforge-cli run` (feature `python`) passe par `ScriptEngine` et une session headless, avec les mêmes commandes et groupes annulables que la console. `stokesforge-import` (fichiers d'appareil) ne dépend d'aucun crate du workspace ; `stokesforge-importer` en fait des colonnes du modèle (partagé par l'application, le CLI et les scripts `pyst.import_file`, sans commandes) ; `stokesforge-clipboard` (offre multi-format au presse-papiers système : SVG, PNG, PDF d'une figure ; Wayland par le patch `vendor/smithay-clipboard`, X11, Windows, macOS) ne dépend d'aucun crate du workspace ; `stokesforge-arch-guard` est l'outil de test des garde-fous de dépendances. Le graphe exact est dans `docs/architecture.md`.
+`stokesforge-id` (stable keys) + `stokesforge-plot` (graph description, neutral toward the renderer) + `stokesforge-analysis` (pure computation, #181: baselines, correction, integral, fit, peaks, deconvolution; no workspace dependency, no UI, no Python) → `stokesforge-core` (model Project/Folder/Workbook/Worksheet/Column, zero UI dependency) → `stokesforge-commands` (bus of undoable commands) and `stokesforge-persistence` (`.stf` format), two **parallel** crates above `core`/`plot` → `stokesforge-session` (actor that owns the model for its clients, concurrency; depends on commands **and** persistence) → `stokesforge-script`/`stokesforge-python` (PyO3 bridge) → `stokesforge-app-state` (the application state, its Fluent texts and its errors put into sentences: **no** egui/eframe/winit dependency, enforced by the compiler and `tests/no_ui_dependency.rs`, #263) → `stokesforge-app` (UI shell on eframe: paints the state, translates keyboard and mouse into actions; it also keeps the offer of the figure to the clipboard, `stokesforge-clipboard` pulling in winit). `stokesforge-cli import` builds a fresh `Project` directly, without a session. `stokesforge-cli run` (feature `python`) goes through `ScriptEngine` and a headless session, with the same commands and undoable groups as the console. `stokesforge-import` (instrument files) depends on no workspace crate. `stokesforge-importer` turns them into model columns (shared by the application, the CLI and the `pyst.import_file` scripts, without commands). `stokesforge-clipboard` (multi-format offer to the system clipboard: SVG, PNG, PDF of a figure; Wayland through the `vendor/smithay-clipboard` patch, X11, Windows, macOS) depends on no workspace crate. `stokesforge-arch-guard` is the test tool for the dependency guards. The exact graph is in `docs/architecture.md`.
 
-Rendu (phases R0-R8 closes) : `stokesforge-render` (mesure de texte unique via `epaint`, pipeline Plotters générique sur le backend, et **tout le rendu** : types de série, échelles d'axe, primitives en pixels, rognage, légende, LTTB, interaction, formules Typst, graphes d'exemple) → `stokesforge-render-egui` (backend `DrawingBackend` collectant des `egui::Shape`, cache `(revision, rect, pixels_per_point, view_generation)`, zoom/pan, levier de *feathering*) et `stokesforge-render-svg` (export SVG, et par-dessus PDF et PNG). Détail : `docs/rendu.md`.
+Rendering (phases R0-R8 closed): `stokesforge-render` (single text measurement through `epaint`, Plotters pipeline generic over the backend, and **all the rendering**: series types, axis scales, pixel primitives, clipping, legend, LTTB, interaction, Typst formulas, example graphs) → `stokesforge-render-egui` (`DrawingBackend` backend collecting `egui::Shape`s, cache `(revision, rect, pixels_per_point, view_generation)`, zoom/pan, *feathering* lever) and `stokesforge-render-svg` (SVG export, and PDF and PNG on top). Details: `docs/rendu.md`.
 
-`stokesforge-robustesse` : pas de code de prod, dépend de tout le workspace — vingt-deux batteries de tests (`b1`…`b22`, voir son `src/lib.rs`) qui éprouvent le socle aux limites.
+`stokesforge-robustesse`: no production code, depends on the whole workspace. Twenty-two batteries of tests (`b1`…`b22`, see its `src/lib.rs`) that test the base at its limits.
 
-Feature hors `default` : `python` (pont PyO3, exige `PYO3_CONFIG_FILE` — voir `scripts/python-test.sh`), seule du dépôt ; `cargo build --workspace` ne la compile pas. `scripts/python-test.sh` teste pont, scripts, robustesse, application et CLI ; le travail CI `test-python` est automatique et bloquant. Typst (notations scientifiques) est une dépendance ferme des trois crates de rendu : `cargo build/test --workspace` le compilent et le testent.
+Feature outside `default`: `python` (PyO3 bridge, requires `PYO3_CONFIG_FILE`; see `scripts/python-test.sh`), the only one in the repository. `cargo build --workspace` does not compile it. `scripts/python-test.sh` tests the bridge, scripts, robustness, application and CLI; the CI job `test-python` is automatic and blocking. Typst (scientific notation) is a firm dependency of the three rendering crates: `cargo build/test --workspace` compile and test it.
 
-Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.claude/rules.md`.
+Loading rules by domain (which crate/doc to load for a task): `.claude/rules.md`.
 
-**Conventions par domaine : `.claude/conventions.md`**, à lire avant d'écrire du code dans le domaine — elles valent autant que celles de ce fichier :
+**Conventions by domain: `.claude/conventions.md`**. Read them before writing code in the domain. They carry the same weight as those of this file:
 
-| Avant de toucher… | Lire la section |
+| Before touching… | Read the section |
 |---|---|
-| `stokesforge-app` / `stokesforge-app-state` (fenêtre, champ, icône, couleur, texte, barre d'outils, onglets, arbre, défilement, Wayland ; état, préférences, textes) | « Application » |
-| Object Manager, panneaux PM/OM/console, menus et clics droits | « Object Manager, panneaux fixes, menus » |
-| création de graphe, fenêtres détachées | « Graphes neufs et fenêtres détachées » |
-| séries, groupes de séries | « Séries et groupes » |
-| copier/coller d'objets, copie de figure | « Copie d'objets et de figures » |
-| analyse (`stokesforge-analysis`, calculs) | « Analyse » |
-| `pyst` (écritures, navigation) | « Script `pyst` » |
-| erreurs (`Display`, `error_message`, clés `error-*`, messages d'état) | « Erreurs » |
-| fenêtre ou dialogue neuf | `docs/fenetres.md` (catalogue : ouvrir une fenêtre jumelle de référence, #300), `docs/principes-ui.md` (E3) |
-| rendu (`stokesforge-render*`) | « Rendu : pièges silencieux » (+ skill `stokesforge-rendu`) |
+| `stokesforge-app` / `stokesforge-app-state` (window, field, icon, color, text, toolbar, tabs, tree, scrolling, Wayland; state, preferences, texts) | "Application" |
+| Object Manager, PM/OM/console panels, menus and right-clicks | "Object Manager, fixed panels, menus" |
+| graph creation, detached windows | "New graphs and detached windows" |
+| series, series groups | "Series and groups" |
+| copy/paste of objects, figure copy | "Copying objects and figures" |
+| analysis (`stokesforge-analysis`, computations) | "Analysis" |
+| `pyst` (writes, navigation) | "`pyst` scripts" |
+| errors (`Display`, `error_message`, `error-*` keys, status messages) | "Errors" |
+| new window or dialog | `docs/fenetres.md` (catalog: open a sister reference window, #300), `docs/principes-ui.md` (E3) |
+| rendering (`stokesforge-render*`) | "Rendering: silent pitfalls" (+ skill `stokesforge-rendu`) |
 
-Skills de projet : `.claude/skills/` — onze compétences par type de tâche
-(implémenter une fonctionnalité, signaler puis corriger un bug, ajouter une
-commande annulable, rendu, import, pont Python, vérifier avant de committer,
-piloter l'application réelle, répondre sur les fonctionnalités et
-l'architecture, écrire un texte d'interface), rédigées en anglais. Index et
-enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
+Project skills: `.claude/skills/`. Eleven skills by type of task
+(implement a feature, report then fix a bug, add an undoable command,
+rendering, import, Python bridge, verify before committing,
+drive the real application, answer about features and
+architecture, write an interface text), written in English. Index and
+sequences: [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Conventions
 
-- Licence (#129) : GPL-3.0-or-later pure (#348 : l'exception d'extension de 1.0.0 est retirée ; une permission supplémentaire ne s'accorde que par écrit, au cas par cas, et exige un CLA de licence pour le code des contributeurs). Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; **ne fusionner aucune contribution extérieure avant le CLA de licence** (#348).
-- Notices Rust : `scripts/licenses-rust.sh` ajoute les copyrights amont manquants de `vendor/crate-license-notices/`. Leur empreinte lie le rapport au `Cargo.lock` exact ; toute modification du verrou exige de revalider ces compléments avant de générer les notices.
-- `rustfmt` + `clippy -D warnings` obligatoires (CI GitHub `.github/workflows/ci.yml`).
-- CI : `.github/workflows/ci.yml` (Linux et Windows, runners hébergés) reprend
-  les commandes GitLab ; il construit les paquets de publication et crée la
-  release GitLab (`publier`, #333). Le workflow `gitlab-status.yml` renvoie les
-  résultats des contrôles via `scripts/gitlab-status.py`, testé sans réseau par `gitlab-status-test.py`.
-  Secret GitHub `GITLAB_STATUS_TOKEN`, mode d'emploi, pièges du runner et
-  maintenance dans `docs/tests.md` (« Using CI day to day »). Résultats
-  d'un commit, lus depuis GitLab : `scripts/ci-statuts.sh [commit]`.
-- Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier ou `.claude/conventions.md`, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
-- Décisions à faire trancher : jusqu'à quatre, `AskUserQuestion` (une diapositive par question) ; **cinq ou plus**, un formulaire de décisions (QCM) publié en Artifact, jamais une liste de questions dans le terminal (une carte par décision : contexte, avant, après schématisés, avantage et défaut de chaque option ; l'utilisateur est dyslexique). Gabarit et marche à suivre : `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
-- Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.
-- Pendant le signalement et la création ou l'enrichissement d'issues, les retours suivants complètent les issues, même formulés comme « ajoute » ou « supprime ». Ne passer au code que sur demande explicite d'implémentation dans le dépôt ; voir la règle de contexte de `stokesforge-bug-report`.
-- Versions (#333) : tous les crates sont à la même version `X.Y.Z` (aujourd'hui `1.0.0`), changée par un commit dédié avec `cargo update --workspace` et une section de `CHANGELOG.md`. `main` est la ligne livrable : corrections et petits ajouts y sont tagués directement (`v1.0.1`, `v1.1.0`) ; une branche `vN` ne s'ouvre que le jour où un chantier cassant empêcherait de livrer un correctif, et reçoit `main` par fusion régulière. Pas de promesse de compatibilité du code d'une majeure à l'autre ; seuls tiennent les fichiers `.stf` (invariant 12, `docs/persistance.md`) et l'API `pyst` (`docs/python-et-script.md`). La règle « on peut casser le format `.stf` en développement » est **levée** depuis la V1. Le bug se corrige là où il est né (`release/N.x` seulement pour maintenir une ancienne majeure) ; travail sur `feature/<n>-<sujet>`, fusion `--no-ff` dans `main`. Tag `vX.Y.Z` → publication ; critères et marche à suivre : `docs/criteres-v1.md`. **Ne jamais poser ni pousser un tag (`v1.0.0-rc1`, `v1.0.0`, tout `v*`) sans ordre explicite de l'utilisateur** : un tag lance la publication, visible et difficile à défaire (miroir GitHub compris).
-- Docs techniques (`docs/`, hors `docs/archive/` resté en français) en anglais (#368) ; commits en français.
-- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Clean up after a merge on `main` ».
-- Toute mutation du modèle passe par une commande annulable de `stokesforge-commands`, jamais par une primitive `core` en direct.
-- Un libellé d'historique est une **donnée** (`stokesforge_commands::HistoryLabel`, `MacroKind` fermé pour `begin_macro`), jamais une phrase : les crates du dessous ne mettent rien en phrase, `stokesforge-app-state` le fait par `history_text` et les clés `history-*` (#46).
-- Erreurs : le `Display` (`#[error(...)]`) des crates du dessous est en **anglais brut**, jamais traduit (CLI, `pyst`, journaux). `stokesforge-app-state` les met en phrase par `errors::<famille>::error_message`, qui associe chaque variante à une clé `error-*` du catalogue `en` (seule exception, `ClipboardError` : `app/figure_copy.rs`, car `stokesforge-clipboard` reste dans la coquille) ; un `match` exhaustif, sans `_`, force à associer toute variante nouvelle. Jamais de `to_string()` ni de `{err}` d'une erreur affichée à l'utilisateur. Les `std::io::Error` passent par `errors::io::error_message` (clés `error-io-*`) ; `ErrorKind` étant `#[non_exhaustive]`, son `match` garde un repli `_` (`error-io-other`), seule exception à « sans `_` », commentée dans le code. Les messages de la barre d'état (`AppState::notice`/`fail`) sont des `tr!` (clés `status-*` / `error-*`), gardés par `aucun_libelle_en_dur` (`stokesforge-app/tests/libelles.rs`, qui lit les sources des deux crates).
+- License (#129): pure GPL-3.0-or-later (#348: the extension exception of 1.0.0 is removed; an additional permission is granted only in writing, case by case, and requires a license CLA for contributors' code). Preserve the licenses of third-party components; a changed dependency or runtime updates the notices and passes `cargo deny check licenses`. Distributions use `scripts/licenses-dist.sh`. External contributions carry the DCO of `CONTRIBUTING.md`; **merge no external contribution before the license CLA** (#348).
+- Rust notices: `scripts/licenses-rust.sh` adds the missing upstream copyrights of `vendor/crate-license-notices/`. Their fingerprint ties the report to the exact `Cargo.lock`; any change to the lock requires revalidating these supplements before generating the notices.
+- `rustfmt` + `clippy -D warnings` are mandatory (GitHub CI `.github/workflows/ci.yml`).
+- CI: `.github/workflows/ci.yml` (Linux and Windows, hosted runners) mirrors
+  the GitLab commands. It builds the release packages and creates the
+  GitLab release (`publier`, #333). The workflow `gitlab-status.yml` sends back the
+  check results via `scripts/gitlab-status.py`, tested without network by `gitlab-status-test.py`.
+  GitHub secret `GITLAB_STATUS_TOKEN`, instructions, runner pitfalls and
+  maintenance are in `docs/tests.md` ("Using CI day to day"). Results of a commit, read from GitLab: `scripts/ci-statuts.sh [commit]`.
+- When a work package installs a new rule (interface standard, pattern to follow, boundary), update **as needed** the skills concerned (`.claude/skills/`) and this file or `.claude/conventions.md`, in the same commit as the code, to keep development consistent. See `.claude/skills/README.md` (cross-cutting rules).
+- Decisions for the user to make: up to four, `AskUserQuestion` (one slide per question); **five or more**, a decision form (multiple-choice) published as an Artifact, never a list of questions in the terminal (one card per decision: context, before and after as diagrams, advantage and flaw of each option; the user is dyslexic). The form itself stays in French (the user reads French). Template and procedure: `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
+- Bugs and changes are tracked as GitLab issues (`glab issue list`), not in `.md` files. Each issue carries a line "**Cohérence**" that says which skills and docs to update.
+- While reporting and while creating or enriching issues, the feedback that follows completes the issues, even when phrased as « ajoute » or « supprime ». Move to code only on an explicit request to implement in the repository; see the context rule of `stokesforge-bug-report`.
+- Versions (#333): all crates share the same version `X.Y.Z` (today `1.0.0`), changed by a dedicated commit with `cargo update --workspace` and a section of `CHANGELOG.md`. `main` is the shippable line: fixes and small additions are tagged there directly (`v1.0.1`, `v1.1.0`). A `vN` branch opens only the day a breaking work package would prevent shipping a fix, and receives `main` by regular merge. No promise of code compatibility from one major to the next; only `.stf` files (invariant 12, `docs/persistance.md`) and the `pyst` API (`docs/python-et-script.md`) hold. The rule "the `.stf` format may be broken during development" has been **lifted** since V1. A bug is fixed where it was born (`release/N.x` only to maintain an old major); work on `feature/<n>-<topic>`, `--no-ff` merge into `main`. Tag `vX.Y.Z` → release; criteria and procedure: `docs/criteres-v1.md`. **Never create or push a tag (`v1.0.0-rc1`, `v1.0.0`, any `v*`) without an explicit order from the user**: a tag starts the release, which is visible and hard to undo (GitHub mirror included).
+- Commit messages and technical docs are in English (since #368; the earlier history stays in French). `docs/archive/` stays in French. New code, comments, test names and identifiers are written in English from now on, even in a crate not yet translated; existing French comments and identifiers are translated crate by crate (#372–#376). The decision form for the user (multiple-choice Artifact) stays in French.
+- After a merge and push on `main`, clean up the task's temporary worktree and its merged local branch automatically, unless asked to keep them; follow `stokesforge-verification`, "Clean up after a merge on `main`".
+- Every model mutation goes through an undoable command of `stokesforge-commands`, never through a direct `core` primitive.
+- A history label is **data** (`stokesforge_commands::HistoryLabel`, closed `MacroKind` for `begin_macro`), never a sentence: the crates below put nothing into sentences, `stokesforge-app-state` does it through `history_text` and the `history-*` keys (#46).
+- Errors: the `Display` (`#[error(...)]`) of the crates below is in **raw English**, never translated (CLI, `pyst`, logs). `stokesforge-app-state` puts them into sentences through `errors::<family>::error_message`, which maps each variant to an `error-*` key of the `en` catalog (only exception, `ClipboardError`: `app/figure_copy.rs`, because `stokesforge-clipboard` stays in the shell). An exhaustive `match`, without `_`, forces any new variant to be mapped. Never `to_string()` or `{err}` of an error shown to the user. `std::io::Error`s go through `errors::io::error_message` (keys `error-io-*`). Since `ErrorKind` is `#[non_exhaustive]`, its `match` keeps a `_` fallback (`error-io-other`), the only exception to "without `_`", commented in the code. Status bar messages (`AppState::notice`/`fail`) are `tr!` calls (keys `status-*` / `error-*`), guarded by `aucun_libelle_en_dur` (`stokesforge-app/tests/libelles.rs`, which reads the sources of both crates).
 
-## Pièges connus
+## Known pitfalls
 
-- Avant undo/historique ou format `.stf` : `docs/commandes-et-historique.md`, `docs/persistance.md`, puis `docs/archive/rustrewrite/format-fichier-plx.md` pour les options déjà écartées.
-- `docs/archive/rustrewrite/questions-ouvertes.md` §11 : plafonds/compteurs documentés — vérifier avant de "corriger" un comportement qui ressemble à un bug.
-- Recalcul des formules (#193) : ciblé par empreinte (`stokesforge-session/src/recalc.rs`, invariant 11). **Toute donnée lue par un calcul de formule entre dans l'empreinte** (la version d'une colonne ne couvre que type et valeurs, ni nom, ni méta, ni position ; l'appartenance à la feuille d'une colonne lue y entre, les lettres affichées non — une formule retient ses colonnes par identifiant, #321), et **toute écriture de données d'une colonne tire une version neuve** par `Project`. Le recalcul complet reste comme oracle (`FormulaRecalc::Full`, batterie `b22`). Étendre le mécanisme (fonction de formule, #184, #186) : tests à écrire dans `docs/tests.md`, « Targeted recalculation ».
+- Before undo/history or the `.stf` format: `docs/commandes-et-historique.md`, `docs/persistance.md`, then `docs/archive/rustrewrite/format-fichier-plx.md` for the options already ruled out.
+- `docs/archive/rustrewrite/questions-ouvertes.md` §11: documented caps/counters. Check before "fixing" a behavior that looks like a bug.
+- Formula recalculation (#193): targeted by fingerprint (`stokesforge-session/src/recalc.rs`, invariant 11). **Any data read by a formula computation enters the fingerprint** (a column's version covers only type and values, not name, meta or position; membership of a read column in the sheet enters it, the displayed letters do not: a formula keeps its columns by identifier, #321), and **any data write to a column draws a fresh version** per `Project`. Full recalculation remains as the oracle (`FormulaRecalc::Full`, battery `b22`). To extend the mechanism (formula function, #184, #186): tests to write are in `docs/tests.md`, "Targeted recalculation".
 
-## Délégation et choix du modèle
+## Delegation and model choice
 
-Objectif : garder le contexte de la session principale petit, et réserver Opus au jugement, avec une sortie courte.
+Goal: keep the main session's context small, and reserve Opus for judgment, with short output.
 
-- **Implémentation (fonctionnalité, correctif, restructuration)** : Opus fixe seulement le périmètre, par l'agent `perimetre` (`.claude/agents/perimetre.md` : fichiers à toucher, cas de test et témoins, pièges, 40 lignes au plus, sans code). **Sonnet** implémente et écrit les tests d'après ce périmètre, puis vérifie chaque témoin par mutation. Pas de relecture Opus en fin de tâche, sauf demande.
-- Une recherche qui demande de lire **beaucoup** (plus d'une dizaine de fichiers, ou sans savoir où chercher) part à l'agent `recherche` (`.claude/agents/recherche.md`, Haiku). Lire soi-même un fichier connu ou faire une recherche ciblée (un `rg`, deux fichiers) : le démarrage à froid d'un agent coûte plus cher.
-- Sa réponse cite `fichier:ligne` ; revérifier soi-même toute conclusion **d'absence** (« n'existe pas », « personne n'appelle ») et tout extrait sur lequel on s'appuie pour écrire du code.
-- Jamais délégués à Haiku : conception, modèle de données, commandes, invariants, tests (périmètre par `perimetre`, écriture par Sonnet), textes d'interface, choix à faire trancher.
-- Sortie longue d'une commande (`cargo test`, `clippy`, `cargo build`) : pas d'agent — rediriger le journal complet vers un fichier (`> "$tmp/test.log" 2>&1`) et n'afficher que le résumé (`rg -n 'FAILED|panicked|^error|^warning' …`, `tail`) ; relire le fichier au besoin plutôt que relancer.
+- **Implementation (feature, fix, restructuring)**: Opus only sets the scope, through the `perimetre` agent (`.claude/agents/perimetre.md`: files to touch, test cases and witnesses, pitfalls, 40 lines at most, no code). **Sonnet** implements and writes the tests from this scope, then checks each witness by mutation. No Opus review at the end of a task, unless asked.
+- A search that needs reading **a lot** (more than ten files, or not knowing where to look) goes to the `recherche` agent (`.claude/agents/recherche.md`, Haiku). Read a known file yourself, or do a targeted search (one `rg`, two files): an agent's cold start costs more.
+- Its answer cites `file:line`; re-check yourself any conclusion of **absence** ("does not exist", "nobody calls") and any excerpt you rely on to write code.
+- Never delegated to Haiku: design, data model, commands, invariants, tests (scope by `perimetre`, writing by Sonnet), interface texts, choices to be decided.
+- Long output of a command (`cargo test`, `clippy`, `cargo build`): no agent. Redirect the full log to a file (`> "$tmp/test.log" 2>&1`) and show only the summary (`rg -n 'FAILED|panicked|^error|^warning' …`, `tail`); re-read the file if needed rather than rerun.

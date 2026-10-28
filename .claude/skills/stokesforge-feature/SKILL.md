@@ -9,15 +9,15 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
-Branch `feature/<n>-<sujet>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches and versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
+Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches and versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
 
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
-2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routage, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
+2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routing, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
 3. Search what exists (`rg`): an `Action`, a `Command`, a helper that already does most of it. Reuse beats writing.
 4. A limit that looks wrong may be arbitrated: `docs/archive/rustrewrite/questions-ouvertes.md` §11.
 5. Resolve edge-case ambiguities now, in one batch: [`../stokesforge-bug-report/references/formulaire-de-decisions.md`](../stokesforge-bug-report/references/formulaire-de-decisions.md) says when and how to ask.
 6. New window, dialog or gesture: name the existing twin you imitate (`docs/fenetres.md`, `docs/gestes.md`), compare screenshots with `run-stokesforge`; a new window gets a mockup the user validates before code.
-7. Announce what you reuse, the zone you change and the checks you will run, then code. Scope and delegation: `CLAUDE.md` § Délégation et choix du modèle (agent `perimetre`, Sonnet implements).
+7. Announce what you reuse, the zone you change and the checks you will run, then code. Scope and delegation: `CLAUDE.md` § Delegation and model choice (agent `perimetre`, Sonnet implements).
 
 A work note (`docs/chantier-*.md`, `docs/chantiers/`) proves nothing: the code is the truth.
 
@@ -55,7 +55,7 @@ Texts: `stokesforge-textes-interface`. Commands, rendering, import, Python: thei
 
 ## 4. Test, look, document
 
-- `AppState` logic: `crates/stokesforge-app-state/tests/shell.rs`; a painted gesture: the surface module's `tests`. Placement and témoins: `stokesforge-verification`.
+- `AppState` logic: `crates/stokesforge-app-state/tests/shell.rs`; a painted gesture: the surface module's `tests`. Placement and witnesses: `stokesforge-verification`.
 - Tests cover geometry, not appearance: a visual change is **looked at** (`run-stokesforge`), before and after, also with `STOKESFORGE_LANG=en-XA`.
 - `//!` of the module carries the *why*; the `docs/` page describes the code as it is. A new rule goes to `.claude/conventions.md` or `docs/`, in the same commit.
 

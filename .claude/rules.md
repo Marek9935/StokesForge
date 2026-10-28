@@ -1,94 +1,93 @@
-# Règles de chargement contextuel
+# Context loading rules
 
-Un seul domaine actif : le portage Rust (`crates/`). `legacy-python/` a été
-supprimé de cette branche et rien n'y fait plus référence.
+One active domain: the Rust port (`crates/`). `legacy-python/` was removed
+from this branch and nothing refers to it any more.
 
-**Charger ce que la tâche demande, pas le workspace.** Chaque domaine ci-dessous
-dit quoi ouvrir, dans quel ordre, et surtout **quoi ne pas ouvrir**.
+**Load what the task needs, not the workspace.** Each domain below says what to
+open, in which order, and above all **what not to open**.
 
-L'ordre est toujours le même : la page `docs/` **d'abord** (elle route et donne
-les invariants), le code ensuite. `docs/invariants.md` vaut pour tous les
-domaines — 12 règles, une table ; le lire avant de toucher au rendu, à
-l'historique ou à l'acteur.
+The order is always the same: the `docs/` page **first** (it routes and gives
+the invariants), the code after. `docs/invariants.md` applies to all domains —
+12 rules, one table; read it before touching rendering, history or the actor.
 
-## Routage
+## Routing
 
-| Tâche | Lire d'abord | Charger | Ne pas ouvrir |
+| Task | Read first | Load | Do not open |
 |---|---|---|---|
-| Arbre, colonnes, `PlotSpec` | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` | `commands`, `session`, `persistence`, `app` |
-| Undo/redo, macros | `docs/commandes-et-historique.md` | `stokesforge-commands` + `stokesforge-core` en lecture | `session`, `persistence`, `app` |
-| Format `.stf`, `save`/`load` | `docs/persistance.md` | `stokesforge-persistence`, `stokesforge-core`, `stokesforge-plot` | `session`, `render*`, `app` |
-| Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, `stokesforge-core`, `stokesforge-commands`, `stokesforge-persistence` | `python`, `script`, `app` |
-| Tracé, axes, export, formules | `docs/rendu.md` | `stokesforge-render` **d'abord**, puis le backend visé, + `stokesforge-plot` et `stokesforge-core::resolve` en lecture | `commands`, `persistence`, `python`, `script` |
-| Pont PyO3, surface `pyst` | `docs/python-et-script.md` | `stokesforge-python`, `stokesforge-script` | `render*`, `persistence` |
-| Fenêtre, raccourcis, grille | `docs/application/coquille-et-code.md` (§ Code split : la table module → rôle) | `stokesforge-app-state/src/state.rs` (l'état sans egui, #263) pour la décision, puis **le seul module** de la surface dans `src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, fenêtres `window_*.rs`…) ; `app.rs` seulement pour l'orchestration (ordre des panneaux, `collect_shortcuts`, application différée, confirmations) ; `stokesforge-session` ; `stokesforge-render-egui` si la tâche touche au graphe | `render-svg`, `persistence`, les autres modules de `src/app/` (sauf fenêtre ou dialogue neuf : voir la règle sous le tableau) |
-| Menu, clic droit (entrée, section, grisage) | `docs/menus.md` | `stokesforge-app/src/app/menus.rs` + la peinture partagée de la surface (`object_menu`, `columns_menu_contents`…), `app/menu_sections.rs` | les autres modules de `src/app/` |
-| Comportement d'un champ, message, dialogue, confirmation, grisage, geste clavier/souris | `docs/standard-interface.md` (#217 : état *en place* / *à venir* de chaque section) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` | les autres modules de `src/app/` |
-| Texte d'interface (libellé, infobulle, message) | `docs/textes-interface.md` + skill `stokesforge-textes-interface` | le seul fichier de `stokesforge-app` ou `stokesforge-app-state` qui porte le texte (catalogues dans `stokesforge-app-state/i18n/`) | le reste du crate, les autres crates |
-| Test de robustesse `bN` | `docs/tests.md` | `stokesforge-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
-| Question transverse (« où vit X ? ») | `docs/README.md` | rien encore | tout |
+| Tree, columns, `PlotSpec` | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` | `commands`, `session`, `persistence`, `app` |
+| Undo/redo, macros | `docs/commandes-et-historique.md` | `stokesforge-commands` + `stokesforge-core` read-only | `session`, `persistence`, `app` |
+| `.stf` format, `save`/`load` | `docs/persistance.md` | `stokesforge-persistence`, `stokesforge-core`, `stokesforge-plot` | `session`, `render*`, `app` |
+| Actor, concurrency, snapshots | `docs/session.md` | `stokesforge-session`, `stokesforge-core`, `stokesforge-commands`, `stokesforge-persistence` | `python`, `script`, `app` |
+| Plot, axes, export, formulas | `docs/rendu.md` | `stokesforge-render` **first**, then the target backend, + `stokesforge-plot` and `stokesforge-core::resolve` read-only | `commands`, `persistence`, `python`, `script` |
+| PyO3 bridge, `pyst` surface | `docs/python-et-script.md` | `stokesforge-python`, `stokesforge-script` | `render*`, `persistence` |
+| Window, shortcuts, grid | `docs/application/coquille-et-code.md` (§ Code split: `app.rs` and `src/app/` (#115) — the module → role table) | `stokesforge-app-state/src/state.rs` (the state without egui, #263) for the decision, then **the single module** of the surface in `src/app/` (grid `grid.rs`, workbook `workbook.rs`, graph `graph_window.rs`, menus `menus.rs`, windows `window_*.rs`…); `app.rs` only for orchestration (panel order, `collect_shortcuts`, deferred application, confirmations); `stokesforge-session`; `stokesforge-render-egui` if the task touches the graph | `render-svg`, `persistence`, the other modules of `src/app/` (except a new window or dialog: see the rule under the table) |
+| Menu, right-click (entry, section, disabling) | `docs/menus.md` | `stokesforge-app/src/app/menus.rs` + the shared painting of the surface (`object_menu`, `columns_menu_contents`…), `app/menu_sections.rs` | the other modules of `src/app/` |
+| Behaviour of a field, message, dialog, confirmation, disabling, keyboard/mouse gesture | `docs/standard-interface.md` (#217: *in place* / *planned* state of each section) | the module of the surface in `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` | the other modules of `src/app/` |
+| Interface text (label, tooltip, message) | `docs/textes-interface.md` + skill `stokesforge-textes-interface` | the single file of `stokesforge-app` or `stokesforge-app-state` that holds the text (catalogs in `stokesforge-app-state/i18n/`) | the rest of the crate, the other crates |
+| Robustness test `bN` | `docs/tests.md` | `stokesforge-robustesse/src/lib.rs` (index) + the **single** `bN` file concerned + the crate it tests | the 20 other files of `tests/` |
+| Cross-cutting question ("where does X live?") | `docs/README.md` | nothing yet | everything |
 
-**Fenêtre ou dialogue neuf (#300, E1).** Choisir sa **nature** (`DialogNature` dans `app/dialogs.rs`, S-F11 : elle fixe le pied, la classe de taille Petite / Moyenne / Grande, le focus initial) et l'ajouter au catalogue avec son identifiant `stokesforge_…`. Ouvrir la liste des fenêtres existantes (`docs/fenetres.md`) et **une fenêtre de référence du même type** (son module dans `src/app/` : `window_*.rs`, `dialogs.rs`…) : on imite un jumeau, on n'invente pas. Ces modules ne sont alors plus « à ne pas ouvrir ». Lire aussi `docs/principes-ui.md`.
+**New window or dialog (#300, E1).** Choose its **nature** (`DialogNature` in `app/dialogs.rs`, S-F11: it sets the footer, the size class Small / Medium / Large, the initial focus) and add it to the catalog with its `stokesforge_…` identifier. Open the list of existing windows (`docs/fenetres.md`) and **a reference window of the same type** (its module in `src/app/`: `window_*.rs`, `dialogs.rs`…): imitate a twin, do not invent. These modules then leave the "Do not open" column. Also read `docs/principes-ui.md`.
 
-## Les pièges qui coûtent le plus cher
+## The most expensive pitfalls
 
-Quatre seulement, parce qu'ils ne lèvent aucune erreur et qu'on ne les voit pas
-en relisant son propre diff.
+Only four, because they raise no error and you do not see them
+when rereading your own diff.
 
-**Mesure de texte (rendu).** `plotters` est pris sans ses fonts. Un backend qui
-ne surcharge pas `draw_text` panique ; un qui ne surcharge pas
-`estimate_text_size` mesure le texte au nombre d'octets UTF-8, **silencieusement**.
-Toute mesure passe par `stokesforge_render::text` et par nulle part ailleurs. Le
-filet est `stokesforge-render-egui/tests/accord.rs` : s'il change, lire ses deux
-familles de **témoins** avant — sans elles, un test d'égalité passe aussi bien
-parce que les deux chemins sont justes que parce qu'ils sont faux de la même
-façon.
+**Text measurement (rendering).** `plotters` is taken without its fonts. A backend that
+does not override `draw_text` panics; one that does not override
+`estimate_text_size` measures the text by its number of UTF-8 bytes, **silently**.
+All measurement goes through `stokesforge_render::text` and nowhere else. The
+safety net is `stokesforge-render-egui/tests/accord.rs`: if it changes, read its two
+families of **witnesses** first. Without them, an equality test passes when both
+paths are right, and also when both are wrong in the same
+way.
 
-**Une fonctionnalité de tracé ne s'écrit pas dans un backend.** Elle va dans
-`stokesforge-render`, générique sur `DrawingBackend`. Seule exception vivante :
-`stokesforge-render-egui::feathering` (la tessellation n'existe que pour l'écran).
-Et le feathering n'entre **pas** dans la clé de cache.
+**A plotting feature is not written in a backend.** It goes in
+`stokesforge-render`, generic over `DrawingBackend`. The only living exception:
+`stokesforge-render-egui::feathering` (tessellation exists only for the screen).
+And feathering is **not** in the cache key.
 
-**Zoom et pan ne sont pas des mutations du modèle.** `ViewState` (`stokesforge_render::view`, sans egui) vit à côté, sur
-`GraphView`, et ne touche jamais au `PlotSpec` du `Tree` — personne ne veut
-annuler un zoom avec `Ctrl+Z`. La règle « toute mutation passe par une commande »
-ne s'applique donc pas au cadrage de vue.
+**Zoom and pan are not model mutations.** `ViewState` (`stokesforge_render::view`, without egui) lives alongside, on
+`GraphView`, and never touches the `PlotSpec` of the `Tree` — nobody wants to
+undo a zoom with `Ctrl+Z`. The rule "every mutation goes through a command"
+therefore does not apply to view framing.
 
-**Un plafond n'est pas forcément un bug.** Longueur de nom, `MAX_NODE_ID`,
-`MAX_CELLS`, nombre de classes d'histogramme, limites d'historique : déjà
-arbitrés, documentés à l'endroit de leur constante et recensés dans
-`docs/archive/rustrewrite/questions-ouvertes.md` §11. Vérifier avant de
-« corriger ».
+**A cap is not necessarily a bug.** Name length, `MAX_NODE_ID`,
+`MAX_CELLS`, number of histogram bins, history limits: already
+decided, documented next to their constant and listed in
+`docs/archive/rustrewrite/questions-ouvertes.md` §11. Check before
+"fixing".
 
-## Features : ce que `cargo build --workspace` ne compile pas
+## Features: what `cargo build --workspace` does not compile
 
-Seule `python` est hors `default`. Une tâche qui la touche doit compiler et
-tester **explicitement**, sinon elle valide du code mort. Typst n'est plus une
-feature : c'est une dépendance ferme des crates de rendu, que `cargo build` et
-`cargo test --workspace` compilent et testent.
+Only `python` is outside `default`. A task that touches it must build and
+test **explicitly**, otherwise it validates dead code. Typst is no longer a
+feature: it is a firm dependency of the rendering crates, which `cargo build` and
+`cargo test --workspace` build and test.
 
-- `python` → `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE` et les autres
-  variables ; sans lui, PyO3 ne compile pas). L'interpréteur est vendorisé dans
-  `vendor/python/` et **n'est pas versionné**.
+- `python` → `scripts/python-test.sh` (sets `PYO3_CONFIG_FILE` and the other
+  variables; without it, PyO3 does not build). The interpreter is vendored in
+  `vendor/python/` and is **not versioned**.
 
 ## `docs/archive/`
 
-Les commentaires du code citent des documents par leur nom de fichier
+Code comments cite documents by their file name
 (`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6,
-`roadmap-rendu.md`…) : ils sont tous dans `docs/archive/`. Non maintenus —
-utiles pour le *pourquoi* d'une décision et pour les options déjà écartées,
-jamais comme description de l'état actuel. Deux valent le détour avant d'agir :
-`format-fichier-plx.md` avant toute modification de schéma, et
-`questions-ouvertes.md` avant de traiter un comportement qui ressemble à un bug.
+`roadmap-rendu.md`…): they are all in `docs/archive/`. Not maintained —
+useful for the *why* of a decision and for options already ruled out,
+never as a description of the current state. Two are worth reading before acting:
+`format-fichier-plx.md` before any schema change, and
+`questions-ouvertes.md` before dealing with behaviour that looks like a bug.
 
-Les phases citées un peu partout (0-5 pour le socle, R0-R8 pour le rendu) sont
-**toutes closes** : un `R6`/`R7`/`R8` dans un commentaire désigne du travail
-fait, pas du travail à venir.
+The phases cited here and there (0-5 for the foundation, R0-R8 for rendering) are
+**all closed**: an `R6`/`R7`/`R8` in a comment names work
+done, not work to come.
 
-## Conventions par domaine
+## Conventions by domain
 
-Les règles détaillées par domaine (briques de `stokesforge-app`, menus,
-séries, copie, analyse, `pyst`, pièges du rendu) sont dans
-[`conventions.md`](conventions.md) ; la table de `CLAUDE.md` dit quelle section
-lire. Une grande recherche (beaucoup de lecture) part à l'agent `recherche`
-(`agents/recherche.md`, Haiku) : voir `CLAUDE.md`, « Délégation ».
+The detailed rules by domain (building blocks of `stokesforge-app`, menus,
+series, copy, analysis, `pyst`, rendering pitfalls) are in
+[`conventions.md`](conventions.md); the table in `CLAUDE.md` says which section
+to read. A large search (a lot of reading) goes to the `recherche` agent
+(`agents/recherche.md`, Haiku): see `CLAUDE.md`, "Delegation and model choice".

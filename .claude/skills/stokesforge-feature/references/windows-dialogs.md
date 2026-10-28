@@ -7,9 +7,9 @@ Read when creating or changing a content window, dialog, wizard, confirmation or
 - Catalogue, natures and size classes (S-F11), types, model window per type, anatomy: `docs/fenetres.md` § Natures and size classes ; `docs/fenetres.md` § The types ; `docs/fenetres.md` § Anatomy of a new window ; `docs/fenetres.md` § Reference window by type.
 - What the building block does alone (size, position, Escape, focus): `docs/fenetres.md` § Size, position, Esc, focus: what the building block does by itself.
 - Dialogs, footer, buttons, errors, confirmations: `docs/standard-interface.md` § Windows and dialogs ; `docs/standard-interface.md` § Confirmations.
-- Building blocks (`show_window_in_layer`, `modal_dialog_with`, `modal_wizard`, `modal_live_settings`, `modal_read_only`, `modal_confirm`…): `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `toute fenêtre passe par la brique commune`.
-- Fixed panels: `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/fenetres-et-panneaux.md` § Collapsible and detached panels (#100).
-- Failure of a dialog gesture: `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
+- Building blocks (`show_window_in_layer`, `modal_dialog_with`, `modal_wizard`, `modal_live_settings`, `modal_read_only`, `modal_confirm`…): `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "every window goes through the common building block".
+- Fixed panels: `.claude/conventions.md` § Object Manager, fixed panels, menus ; `docs/application/fenetres-et-panneaux.md` § Collapsible and detached panels (#100).
+- Failure of a dialog gesture: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog).
 - History macro of an editing dialog: `docs/commandes-et-historique.md` § Macros.
 - Screenshot to compare: `docs/fenetres.md` § Taking a screenshot.
 

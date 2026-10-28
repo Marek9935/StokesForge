@@ -20,7 +20,7 @@ Stop at the links the command really touches; detail and traps of each link: [re
 5. `stokesforge-session`: usually nothing; check whether a new response type is needed.
 6. `stokesforge-app-state`: an `Action`, its `dispatch`, the `history-*` sentence; then the UI surfaces with `stokesforge-feature`.
 
-Object copy (#105–107) and definitive analysis corrections (#212) reuse existing commands: `.claude/conventions.md` § Copie d'objets et de figures ; `.claude/conventions.md` § Analyse (#181).
+Object copy (#105–107) and definitive analysis corrections (#212) reuse existing commands: `.claude/conventions.md` § Copying objects and figures ; `.claude/conventions.md` § Analysis (#181).
 
 ## Tests
 

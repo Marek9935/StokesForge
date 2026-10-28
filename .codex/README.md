@@ -1,194 +1,194 @@
-# Développer et maintenir StokesForge avec Codex
+# Developing and maintaining StokesForge with Codex
 
-Ce guide est le contexte durable du projet. Le fichier `AGENTS.md` à la
-racine demande de le lire avant toute implémentation. Un document placé
-seulement dans le dossier `.codex/` du dépôt n'est pas une consigne racine
-automatiquement chargée : voir la
-[documentation officielle](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+This guide is the lasting context of the project. The `AGENTS.md` file at the
+root asks to read it before any implementation. A document placed
+only in the `.codex/` folder of the repository is not a root instruction
+loaded automatically: see the
+[official documentation](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
-## 1. Reconnaître le terrain avant de coder
+## 1. Survey the ground before coding
 
-1. Lire `git status --short`, puis `git diff` sur les fichiers concernés.
-   Identifier les modifications existantes avant d'y intervenir.
-2. Lire `docs/README.md`, puis la page du domaine ci-dessous. Consulter
-   `docs/invariants.md` avant de changer les contrats du modèle, l'historique,
-   la session, le rendu ou le pont Python.
-   Lire aussi la section utile de [`.claude/conventions.md`](../.claude/conventions.md)
-   avant d'écrire dans le domaine ; la table « Conventions par domaine » de
-   [`CLAUDE.md`](../CLAUDE.md) oriente. [`.claude/rules.md`](../.claude/rules.md)
-   précise le périmètre de lecture par tâche.
-3. Rechercher avec `rg` et `rg --files` les symboles, usages, composants
-   analogues et tests existants. Lire les commentaires `//!` des modules
-   concernés et suivre le chemin depuis l'appelant jusqu'à l'implémentation.
-4. Vérifier les `Cargo.toml` concernés, `Cargo.lock`, `rust-toolchain.toml`,
-   les scripts pertinents et `.gitlab-ci.yml`. Utiliser les versions et les
-   API réellement présentes. Pour inspecter le workspace sans compilation :
+1. Read `git status --short`, then `git diff` on the files concerned.
+   Identify the existing changes before working on them.
+2. Read `docs/README.md`, then the page of the domain below. Consult
+   `docs/invariants.md` before changing the contracts of the model, history,
+   the session, rendering or the Python bridge.
+   Also read the useful section of [`.claude/conventions.md`](../.claude/conventions.md)
+   before writing in the domain; the table "Before touching… | Read the section" of
+   [`CLAUDE.md`](../CLAUDE.md) points to the right section. [`.claude/rules.md`](../.claude/rules.md)
+   sets the reading scope for each task.
+3. Search with `rg` and `rg --files` for the symbols, uses, similar
+   components and existing tests. Read the `//!` comments of the modules
+   concerned and follow the path from the caller to the implementation.
+4. Check the `Cargo.toml` files concerned, `Cargo.lock`, `rust-toolchain.toml`,
+   the relevant scripts and `.gitlab-ci.yml`. Use the versions and the
+   APIs actually present. To inspect the workspace without building:
    `cargo metadata --no-deps --format-version 1 --offline`.
-5. Identifier ce qui sera réutilisé et choisir les contrôles **avant** de
-   modifier. Étendre le composant responsable du comportement ; justifier
-   toute nouvelle dépendance ou abstraction par un manque constaté.
+5. Identify what will be reused and choose the checks **before**
+   changing. Extend the component responsible for the behaviour; justify
+   any new dependency or abstraction by an observed gap.
 
-Charger d'abord le domaine utile, puis élargir aux appelants et dépendants
-quand le contrat l'exige. Les sources font foi sur l'état implémenté ; les
-demandes de l'utilisateur définissent le changement attendu. Signaler et
-corriger les divergences documentaires pertinentes sans transformer la tâche
-en refonte générale.
+Load the useful domain first, then widen to callers and dependents
+when the contract requires it. The sources are authoritative on the implemented state; the
+user's requests define the expected change. Report and
+fix the relevant documentation divergences without turning the task
+into a general overhaul.
 
-### Skills de projet repris de Claude
+### Project skills shared with Claude
 
-Les onze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md), rédigés en anglais,
-sont également disponibles pour Codex via les liens de `.agents/skills/`.
-Ce sont les mêmes fichiers : modifier le skill source dans `.claude/skills/`
-met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
-concerné et ses seules références utiles, après le parcours de lecture
-ci-dessus ; ne pas charger les onze systématiquement.
+The eleven skills maintained in [`.claude/skills/`](../.claude/skills/README.md), written in English,
+are also available to Codex through the links in `.agents/skills/`.
+They are the same files: changing the source skill in `.claude/skills/`
+updates both assistants. For a given task, read the relevant `SKILL.md`
+and only its useful references, after the reading path
+above; do not load all eleven systematically.
 
-Les liens partagent le dossier entier, y compris `references/` et les scripts.
-Les skills renvoient aux sections de `docs/` ou de `.claude/conventions.md`
-au lieu de recopier les règles ; les fiches thématiques de
-`stokesforge-feature` (#301) ne portent que ces renvois : lire seulement
-celles du thème touché, puis les sources citées. Maintenir les règles dans
-ces sources ; le test `stokesforge-arch-guard/tests/renvois_fiches.rs`
-contrôle les renvois de tous les skills de projet.
+The links share the whole folder, including `references/` and the scripts.
+The skills point to sections of `docs/` or of `.claude/conventions.md`
+instead of copying the rules; the topic sheets of
+`stokesforge-feature` (#301) hold only these pointers: read only
+those of the topic touched, then the cited sources. Maintain the rules in
+these sources; the test `stokesforge-arch-guard/tests/renvois_fiches.rs`
+checks the pointers of all project skills.
 
-| Besoin | Skill à consulter |
+| Need | Skill to consult |
 |---|---|
-| Ajouter une fonctionnalité | [`stokesforge-feature`](../.agents/skills/stokesforge-feature/SKILL.md) |
-| Diagnostiquer un symptôme, trier des retours | [`stokesforge-bug-report`](../.agents/skills/stokesforge-bug-report/SKILL.md) |
-| Corriger un bug reproduit | [`stokesforge-bug-fix`](../.agents/skills/stokesforge-bug-fix/SKILL.md) |
-| Modifier le modèle ou ajouter une action annulable | [`stokesforge-commande`](../.agents/skills/stokesforge-commande/SKILL.md) |
-| Tracé, axes, légendes et exports | [`stokesforge-rendu`](../.agents/skills/stokesforge-rendu/SKILL.md) |
-| Import CSV/TXT/ASC et prévisualisation | [`stokesforge-import`](../.agents/skills/stokesforge-import/SKILL.md) |
-| Pont PyO3, scripts et console Python | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
-| Tests, vérification finale et commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
-| Lancer, piloter et capturer l'application réelle sous Linux | [`run-stokesforge`](../.agents/skills/run-stokesforge/SKILL.md) |
-| Expliquer ce que le logiciel sait faire et comment il est découpé | [`stokesforge-expliquer`](../.agents/skills/stokesforge-expliquer/SKILL.md) |
-| Écrire ou modifier un texte visible | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
+| Add a feature | [`stokesforge-feature`](../.agents/skills/stokesforge-feature/SKILL.md) |
+| Diagnose a symptom, triage feedback | [`stokesforge-bug-report`](../.agents/skills/stokesforge-bug-report/SKILL.md) |
+| Fix a reproduced bug | [`stokesforge-bug-fix`](../.agents/skills/stokesforge-bug-fix/SKILL.md) |
+| Change the model or add an undoable action | [`stokesforge-commande`](../.agents/skills/stokesforge-commande/SKILL.md) |
+| Plotting, axes, legends and exports | [`stokesforge-rendu`](../.agents/skills/stokesforge-rendu/SKILL.md) |
+| CSV/TXT/ASC import and preview | [`stokesforge-import`](../.agents/skills/stokesforge-import/SKILL.md) |
+| PyO3 bridge, scripts and Python console | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
+| Tests, final verification and commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
+| Launch, drive and capture the real application on Linux | [`run-stokesforge`](../.agents/skills/run-stokesforge/SKILL.md) |
+| Explain what the software can do and how it is split | [`stokesforge-expliquer`](../.agents/skills/stokesforge-expliquer/SKILL.md) |
+| Write or change a visible text | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
 
-Les skills s'enchaînent selon le besoin : `stokesforge-feature` ou
-`stokesforge-bug-report` → `stokesforge-bug-fix` si une correction dans le code est explicitement demandée →
-`stokesforge-verification` après une modification. Ajouter `stokesforge-commande`,
-`stokesforge-rendu`, `stokesforge-import` ou `stokesforge-python` seulement pour les domaines
-touchés. Dans Codex, on peut invoquer explicitement un skill avec
-`$stokesforge-feature` (et non la syntaxe `/stokesforge-feature` de Claude).
-Les mentions d'outils propres à Claude, comme `AskUserQuestion`, désignent
-l'intention du workflow : utiliser l'outil de question disponible dans Codex
-si un arbitrage utilisateur est réellement nécessaire. En cas de divergence,
-suivre la demande de l'utilisateur, `AGENTS.md`, ce guide et le code actuel.
+The skills chain as needed: `stokesforge-feature` or
+`stokesforge-bug-report` → `stokesforge-bug-fix` if a fix in the code is explicitly requested →
+`stokesforge-verification` after a change. Add `stokesforge-commande`,
+`stokesforge-rendu`, `stokesforge-import` or `stokesforge-python` only for the domains
+touched. In Codex, you can invoke a skill explicitly with
+`$stokesforge-feature` (not Claude's `/stokesforge-feature` syntax).
+Tool mentions specific to Claude, such as `AskUserQuestion`, name
+the intent of the workflow: use the question tool available in Codex
+if a user decision is really needed. In case of divergence,
+follow the user's request, `AGENTS.md`, this guide and the current code.
 
-`run-stokesforge` complète la vérification pour les scénarios interactifs
-(menus, dialogues, saisie, annulation). Son pilote partagé est
-`.claude/skills/run-stokesforge/driver.py` ; lire les captures avec l'outil
-d'image disponible dans Codex. Il tourne en X11 sous Xwayland et ne valide
-ni Wayland natif, ni le sélecteur `rfd`, ni le glisser. Les fenêtres ouvertes
-pour la vérification sont fermées à la fin du scénario selon le skill.
+`run-stokesforge` completes verification for interactive scenarios
+(menus, dialogs, input, undo). Its shared driver is
+`.claude/skills/run-stokesforge/driver.py`; read the captures with the image
+tool available in Codex. It runs on X11 under Xwayland and validates
+neither native Wayland, nor the `rfd` picker, nor drag. The windows opened
+for verification are closed at the end of the scenario, as the skill says.
 
-Pendant la création ou l'enrichissement d'issues, conserver le contexte de
-signalement entre les messages : « ajoute », « enlève » ou « supprime »
-décrivent les changements à consigner. Ne modifier l'application que sur
-demande explicite de passer à l'implémentation dans le dépôt, selon la
-[règle du triage](../.agents/skills/stokesforge-bug-report/SKILL.md#keep-the-reporting-context).
+While creating or enriching issues, keep the reporting context
+between messages: « ajoute », « enlève » or « supprime »
+describe the changes to record. Change the application only on an
+explicit request to move to implementation in the repository, following the
+[triage rule](../.agents/skills/stokesforge-bug-report/SKILL.md#keep-the-reporting-context).
 
-## 2. Où chercher
+## 2. Where to look
 
-Les chemins de ce tableau sont relatifs à la racine du dépôt.
+The paths in this table are relative to the repository root.
 
-| Domaine | Documentation de départ | Code à examiner |
+| Domain | Starting documentation | Code to examine |
 |---|---|---|
-| Découpage et dépendances | `docs/architecture.md` | `Cargo.toml`, manifestes des crates |
-| Arbre, colonnes, identifiants, description de graphe | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
-| Copie d’objets et presse-papiers | `docs/application/gestionnaires.md` (§ Project Manager), `docs/persistance.md` (§ Presse-papiers) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
-| Undo/redo et macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, méthodes de `stokesforge-core` appelées |
-| Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
-| Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
-| Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
-| Menus et clics droits | `docs/menus.md` (grammaire), `docs/application/menus-et-barres.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
-| Comportement de l'interface (champs, messages, dialogues, grisage, clavier) | `docs/standard-interface.md` (#217, sections *en place* / *à venir*) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
-| Fenêtre, grille, raccourcis | `docs/application/coquille-et-code.md` (§ Découpage du code) | `stokesforge-app-state/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs` (aussi dans `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs` ; `stokesforge-session` |
-| Fenêtre ou dialogue neuf, gestes d'interface | `docs/fenetres.md`, `docs/principes-ui.md`, `docs/gestes.md` | une fenêtre de référence de même nature dans `stokesforge-app/src/app/`, `app/dialogs.rs` (`DialogNature`) |
-| Fluidité de l'interface | `docs/mesure-performance.md` | `scripts/perf/`, `.claude/skills/run-stokesforge/driver.py` (`SF_APP` pour choisir le binaire) ; mesure en release ou comparaison debug/release |
-| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app-state/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
-| Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
-| Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
-| CI Linux GitHub, Windows GitLab et retour des résultats | `docs/tests.md` (§ CI et Résultats GitHub visibles dans GitLab) | `.gitlab-ci.yml`, `.github/workflows/{ci,gitlab-status}.yml`, `scripts/gitlab-status{,-test}.py` |
+| Split and dependencies | `docs/architecture.md` | `Cargo.toml`, crate manifests |
+| Tree, columns, identifiers, graph description | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
+| Object copy and clipboard | `docs/application/gestionnaires.md` (§ Project Manager and windows by content), `docs/persistance.md` (§ Object clipboard (#105)) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
+| Undo/redo and macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, the `stokesforge-core` methods called |
+| Save, load and `.stf` format | `docs/persistance.md` | `stokesforge-persistence`, model and graph types |
+| Actor, concurrency, snapshots | `docs/session.md` | `stokesforge-session`, commands and persistence called |
+| Plotting, axes, legends, export, Typst | `docs/rendu.md` | `stokesforge-render` first, then `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
+| Menus and right-clicks | `docs/menus.md` (grammar), `docs/application/menus-et-barres.md` (§ Themed menus (#114)) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
+| Interface behaviour (fields, messages, dialogs, disabling, keyboard) | `docs/standard-interface.md` (#217, *in place* / *planned* sections) | the module of the surface in `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
+| Window, grid, shortcuts | `docs/application/coquille-et-code.md` (§ Code split: `app.rs` and `src/app/` (#115)) | `stokesforge-app-state/src/state.rs`, the module of the surface in `src/app/` (`app.rs` for orchestration only), `selection.rs`, `object_manager.rs` (also in `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs`; `stokesforge-session` |
+| New window or dialog, interface gestures | `docs/fenetres.md`, `docs/principes-ui.md`, `docs/gestes.md` | a reference window of the same nature in `stokesforge-app/src/app/`, `app/dialogs.rs` (`DialogNature`) |
+| Interface smoothness | `docs/mesure-performance.md` | `scripts/perf/`, `.claude/skills/run-stokesforge/driver.py` (`SF_APP` to choose the binary); measure in release or compare debug/release |
+| CSV/TXT/ASC import and preview | `docs/chantier-import-previsualisation.md` (handover) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, integration in `stokesforge-app-state/src/state.rs` and `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
+| Embedded Python and `pyst` scripts | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
+| Tests and robustness | `docs/tests.md` | tests of the crate; index `stokesforge-robustesse/src/lib.rs`, then the battery `bN` concerned |
+| Linux CI on GitHub, Windows on GitLab and results feedback | `docs/tests.md` (§ CI (GitHub Actions for Linux and Windows) and GitHub results visible in GitLab) | `.gitlab-ci.yml`, `.github/workflows/{ci,gitlab-status}.yml`, `scripts/gitlab-status{,-test}.py` |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
-| Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
+| License, contributions and extension interfaces | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
 
-Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut
-`stokesforge-import`, même si certaines anciennes pages ne le recensent pas.
-Le CLI `stokesforge-cli` permet aussi de vérifier le socle sans interface.
+Crate names mean `crates/<name>/`. The root manifest includes
+`stokesforge-import`, even if some older pages do not list it.
+The `stokesforge-cli` CLI also lets you check the foundation without an interface.
 
-Les documents de `docs/archive/` expliquent les arbitrages historiques.
-Les références anciennes à `architecture-choisie.md`, `format-fichier-plx.md`
-ou `questions-ouvertes.md` s'y résolvent. Les notes `docs/chantier-*.md` et
-`docs/chantiers/` demandent une confrontation au code avant de reprendre un
-« reste à faire ». `legacy-python/` a été supprimé de cette branche ;
-l'ancienne implémentation reste accessible sous le tag `legacy-python`.
+The documents in `docs/archive/` explain the historical decisions.
+Old references to `architecture-choisie.md`, `format-fichier-plx.md`
+or `questions-ouvertes.md` resolve there. The notes `docs/chantier-*.md` and
+`docs/chantiers/` need a check against the code before taking up a
+"remaining to do". `legacy-python/` was removed from this branch;
+the old implementation stays available under the `legacy-python` tag.
 
-## 3. Réutiliser les frontières existantes
+## 3. Reuse the existing boundaries
 
-- Les clients soumettent les mutations métier via
-  `SessionHandle::execute(Command)` ; l'acteur possède le modèle, les clients
-  lisent des instantanés. Préserver undo/redo, macros, révisions et identifiants.
-- La licence du projet est GPL-3.0-or-later pure, sans permission
-  supplémentaire (#348). Les composants tiers gardent leurs licences ; ne pas
-  leur appliquer la GPL du projet en remplaçant leurs notices.
-- `SessionHandle::new_project`, comme `load`, remplace l'identité du projet
-  et vide l'historique et les géométries ; il refuse une macro ouverte.
-  La confirmation avant perte de travail appartient à `AppState`.
-- La copie d’objets réutilise `NodeCopy` / `InsertCopy` : contenu figé au geste
-  Copier, identifiants créés dans la destination, rollback atomique. Les noms
-  sont uniques par dossier et les chemins canoniques sont enracinés. Le
-  transport texte système réutilise les conversions `.stf`, sans numéro de
-  version ; les graphes entre projets emportent leurs colonnes dans un classeur caché
-  persisté (#107), révélé par Show Data. F2 renomme dans les gestionnaires et édite dans la grille (#143), selon le focus,
-  jamais le nom des feuilles ; Ctrl+D des feuilles au viewport du classeur (#130).
-- Copier une figure vers une application externe (#149) passe par
-  `stokesforge-clipboard` (SVG, PNG, PDF offerts ensemble ; Wayland par le patch
-  `vendor/smithay-clipboard`) et `app/figure_copy.rs`, jamais par `copy_text`.
-- Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
-  actions concernées. Garder la logique testable dans `state.rs` (crate `stokesforge-app-state`, sans egui) et la
-  traduction des événements et l'affichage dans le module de la surface
-  (`src/app/`), `app.rs` ne gardant que l'orchestration de l'image.
-- L'import reste indépendant de l'UI, de `core`, des commandes et de la
-  session. `stokesforge-importer` convertit ses résultats vers les colonnes du modèle
-  pour l'application, le CLI et `pyst.import_file` ; les scripts écrivent via
-  les commandes de leur session, GIL relâché, dans une macro annulable.
-  Réutiliser recettes, parseur et aperçu avant de créer un second chemin.
-- Les fonctionnalités de tracé partagées vont dans `stokesforge-render`, générique
-  sur le backend. Les mesures de texte passent par `stokesforge_render::text`.
-  Plotters sans ses polices exige les surcharges `draw_text` et
-  `estimate_text_size` ; ses helpers de légende peuvent contourner ces mesures.
-- Zoom/pan relèvent de `ViewState`, pas d'une mutation du `PlotSpec`.
-  Le feathering reste hors de la clé de cache ; `view_generation` y reste.
-- Préserver les tests de frontière (`no_ui_dependency.rs`, `frontiere.rs`).
-  Une nouvelle dépendance doit respecter l'architecture avant de mettre à
-  jour une liste blanche.
-- Aucun objet Python ne traverse le canal de l'acteur ; le script relâche le
-  GIL pendant l'attente. L'interpréteur démarre à la première exécution de
-  script, sans bloquer le fil UI.
-- La surface `pyst` est figée (#331) : toute évolution du contrat public met
-  à jour les blocs `pyst-api` de `docs/python-et-script.md` dans le même commit.
-  Lire le skill `stokesforge-python` ; `stokesforge-script/tests/surface_figee.rs`
-  garde l'accord entre ces blocs et l'API.
-- Préserver les distinctions entre valeurs manquantes, texte vide, nombres
-  et cellules mixtes. Pour les fichiers enregistrés, relire les conversions,
-  les valeurs inconnues et les tests de compatibilité avant de changer le schéma.
+- Clients submit business mutations through
+  `SessionHandle::execute(Command)`; the actor owns the model, clients
+  read snapshots. Preserve undo/redo, macros, revisions and identifiers.
+- The project license is pure GPL-3.0-or-later, with no additional
+  permission (#348). Third-party components keep their licenses; do not
+  apply the project GPL to them by replacing their notices.
+- `SessionHandle::new_project`, like `load`, replaces the project identity
+  and empties the history and the geometries; it refuses an open macro.
+  The confirmation before losing work belongs to `AppState`.
+- Object copy reuses `NodeCopy` / `InsertCopy`: content frozen at the Copy
+  gesture, identifiers created in the destination, atomic rollback. Names
+  are unique per folder and canonical paths are rooted. The system
+  text transport reuses the `.stf` conversions, without a version
+  number; graphs between projects carry their columns in a persisted hidden
+  workbook (#107), revealed by Show Data. F2 renames in the managers and edits in the grid (#143), depending on the focus,
+  never the name of the sheets; Ctrl+D of sheets at the workbook viewport (#130).
+- Copying a figure to an external application (#149) goes through
+  `stokesforge-clipboard` (SVG, PNG, PDF offered together; Wayland through the patch
+  `vendor/smithay-clipboard`) and `app/figure_copy.rs`, never through `copy_text`.
+- In the application, reuse `Action` / `AppState::dispatch` for the
+  actions concerned. Keep the testable logic in `state.rs` (crate `stokesforge-app-state`, without egui) and the
+  translation of events and the display in the module of the surface
+  (`src/app/`), with `app.rs` keeping only the orchestration of the frame.
+- Import stays independent of the UI, of `core`, of commands and of the
+  session. `stokesforge-importer` converts its results to the model columns
+  for the application, the CLI and `pyst.import_file`; scripts write through
+  the commands of their session, GIL released, in an undoable macro.
+  Reuse recipes, parser and preview before creating a second path.
+- Shared plot features go in `stokesforge-render`, generic
+  over the backend. Text measurements go through `stokesforge_render::text`.
+  Plotters without its fonts requires the overrides `draw_text` and
+  `estimate_text_size`; its legend helpers can bypass these measurements.
+- Zoom/pan belong to `ViewState`, not to a mutation of the `PlotSpec`.
+  Feathering stays out of the cache key; `view_generation` stays in it.
+- Preserve the boundary tests (`no_ui_dependency.rs`, `frontiere.rs`).
+  A new dependency must respect the architecture before updating
+  an allowlist.
+- No Python object crosses the actor channel; the script releases the
+  GIL while waiting. The interpreter starts at the first script
+  run, without blocking the UI thread.
+- The `pyst` surface is frozen (#331): any change to the public contract updates
+  the `pyst-api` blocks of `docs/python-et-script.md` in the same commit.
+  Read the skill `stokesforge-python`; `stokesforge-script/tests/surface_figee.rs`
+  guards the agreement between these blocks and the API.
+- Preserve the distinctions between missing values, empty text, numbers
+  and mixed cells. For saved files, reread the conversions,
+  the unknown values and the compatibility tests before changing the schema.
 
-## 4. Choisir les bons contrôles
+## 4. Choose the right checks
 
-Commandes à lancer depuis la racine. La chaîne Rust est déclarée `stable`,
-avec `rustfmt` et `clippy`, dans `rust-toolchain.toml`.
+Commands to run from the root. The Rust toolchain is declared `stable`,
+with `rustfmt` and `clippy`, in `rust-toolchain.toml`.
 
-Pour une modification Rust, commencer par les tests du crate et du comportement
-touchés (`<crate>` et `<fichier>` sont à remplacer) :
+For a Rust change, start with the tests of the crate and the behaviour
+touched (`<crate>` and `<file>` are to be replaced):
 
 ```sh
 cargo test -p <crate>
-cargo test -p <crate> --test <fichier>
+cargo test -p <crate> --test <file>
 ```
 
-Avant de livrer une modification Rust, reprendre les contrôles de CI :
+Before delivering a Rust change, repeat the CI checks:
 
 ```sh
 cargo fmt --all -- --check
@@ -196,99 +196,99 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Linux tourne sur GitHub ; Windows reste sur GitLab. Le workflow séparé
-`gitlab-status.yml` retourne les statuts Linux après la fin de `CI`, avec le
-secret GitHub `GITLAB_STATUS_TOKEN` ; configuration dans `docs/tests.md`.
-Une modification du rapporteur se vérifie par
-`python3 scripts/gitlab-status-test.py` et validation des YAML. Les travaux
-Linux de `.gitlab-ci.yml` ne s'activent qu'avec `STOKESFORGE_CI_LINUX=gitlab`.
+Linux runs on GitHub; Windows stays on GitLab. The separate workflow
+`gitlab-status.yml` sends the Linux statuses back after `CI` ends, with the
+GitHub secret `GITLAB_STATUS_TOKEN`; configuration in `docs/tests.md`.
+A change to the reporter is checked with
+`python3 scripts/gitlab-status-test.py` and validation of the YAML files. The Linux
+jobs of `.gitlab-ci.yml` are enabled only with `STOKESFORGE_CI_LINUX=gitlab`.
 
-`cargo build --workspace` construit les cibles par défaut. Éviter un
-reformatage sans rapport avec la tâche. Pour un changement uniquement
-documentaire, vérifier les chemins, les commandes et le diff suffit ; il
-n'est pas nécessaire de reconstruire le workspace.
+`cargo build --workspace` builds the default targets. Avoid a
+reformat unrelated to the task. For a documentation-only change,
+checking the paths, the commands and the diff is enough; there is
+no need to rebuild the workspace.
 
-### Fonctionnalités optionnelles
+### Optional features
 
-La feature `python` n'est pas activée par défaut (c'est la seule hors
-`default`). Un contrôle sans la feature ne valide pas le code qu'elle protège.
+The `python` feature is not enabled by default (it is the only one outside
+`default`). A check without the feature does not validate the code it guards.
 
-Typst n'est plus une feature (issue #29) : c'est une dépendance ferme des trois
-crates de rendu. `cargo test --workspace` et `cargo clippy --workspace
---all-targets -- -D warnings` le compilent et le testent ; aucune commande
-ciblée n'est nécessaire. `--all-features` n'active plus que Python et exige son
-environnement.
+Typst is no longer a feature (issue #29): it is a firm dependency of the three
+rendering crates. `cargo test --workspace` and `cargo clippy --workspace
+--all-targets -- -D warnings` build and test it; no targeted command
+is needed. `--all-features` now enables only Python and needs its
+environment.
 
-Pour Python, examiner d'abord l'interpréteur dans
-`vendor/python/extracted/python/` et lire les scripts. Si nécessaire,
-`scripts/python-vendor.sh` télécharge les versions déclarées dans
-`vendor/python/lock.env`. Puis `scripts/python-test.sh` configure PyO3, le
-rpath et le préfixe embarqué, et teste `stokesforge-python`, `stokesforge-script`,
-`stokesforge-robustesse` (en série), `stokesforge-app-state`, `stokesforge-app` et `stokesforge-cli` avec `python`.
-Le travail CI `test-python` exécute ce script automatiquement et bloque en
-cas d'échec. Les reproductions `#[ignore]` exigent encore `-- --ignored`.
-Appliquer le même environnement aux vérifications Clippy avec
-`--features python`. Ne pas utiliser le Python système comme substitut.
-Le spike optionnel Matplotlib se rejoue par `scripts/python-matplotlib-spike.sh`
-dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
+For Python, first examine the interpreter in
+`vendor/python/extracted/python/` and read the scripts. If needed,
+`scripts/python-vendor.sh` downloads the versions declared in
+`vendor/python/lock.env`. Then `scripts/python-test.sh` configures PyO3, the
+rpath and the embedded prefix, and tests `stokesforge-python`, `stokesforge-script`,
+`stokesforge-robustesse` (serially), `stokesforge-app-state`, `stokesforge-app` and `stokesforge-cli` with `python`.
+The CI job `test-python` runs this script automatically and blocks on
+failure. The `#[ignore]` reproductions still need `-- --ignored`.
+Apply the same environment to the Clippy checks with
+`--features python`. Do not use the system Python as a substitute.
+The optional Matplotlib spike is replayed with `scripts/python-matplotlib-spike.sh`
+in a separate copy of the runtime; see `docs/python-matplotlib-spike.md`.
 
-### Contrôles spécifiques
+### Specific checks
 
-- Rendu : vérifier mesure, accord écran/SVG et témoins qui doivent différer ;
-  exercer les exports concernés et les features modifiées.
-  Le banc manuel des grandes courbes (#141),
-  `stokesforge-render-egui/tests/mesure_courbes.rs`, se lance en `--release`
-  avec `--ignored` ; protocole, commande et mesures dans `docs/rendu.md`.
-- UI : tester la logique via `AppState` ; pour le clavier, le focus ou la
-  présentation, compléter par une vérification dans l'application réelle
-  avec `run-stokesforge` si un affichage est disponible. Pour les textes,
-  capturer aussi en `STOKESFORGE_LANG=en-XA` (catalogue et troncature).
-  Préciser les limites X11 du pilote et ce qui reste non vérifié.
-- Wayland (#72) : les patches `vendor/winit` et `vendor/smithay-clipboard`
-  partagent le récepteur de dépôt et de presse-papiers entre les viewports.
-  Les deux copies sont hors workspace. Le parseur et le canal exacts sont
-  testés par `stokesforge-app/tests/wayland_{uri,bridge}.rs`. Compléter `fmt`
-  par les commandes ciblées de `vendor/winit/STOKESFORGE.md` ; ne pas
-  reformater les fichiers amont sans rapport avec le correctif.
-  Wayland est le défaut ; `STOKESFORGE_X11=1` force le secours X11. Le protocole
-  manuel, les alternatives et le retrait sont dans `vendor/winit/STOKESFORGE.md`.
-- Robustesse : lire le motif de chaque `#[ignore]` avant de le lancer.
-  `cargo test -p stokesforge-robustesse -- --ignored` rejoue ces cas ; certains
-  peuvent être coûteux ou dépendre de l'ordonnancement. Ne pas retirer un
-  `ignore` sans vérifier que le test devient un garde-fou fiable.
-- Distribution : lire les scripts avant exécution ; ils reconstruisent leur
-  sortie dans `dist/`. `app-dist.sh` exige un affichage X11/Xwayland pour sa
-  vérification de fenêtre ; `cli-dist.sh` vérifie le CLI empaqueté sans écran,
-  environnement vidé et piégé. Utiliser ces scripts dans le cadre d'un travail
-  sur l'empaquetage, pas comme simple contrôle documentaire.
-- Licences (#129) : installer les versions de `scripts/licenses-tools.env`
-  selon `docs/licence-et-extensions.md`, puis `cargo deny --locked check licenses`.
-  Le travail CI `licenses` génère aussi les notices avec `cargo-about`, toutes
-  plateformes et features. Les distributions appellent `scripts/licenses-dist.sh`
-  et refusent des notices Python périmées ou un runtime privé de ses textes.
-  Une mise à jour de `vendor/python/lock.env` actualise `vendor/python/licenses-{linux,windows}/`
-  depuis l'archive complète correspondante, et les notices numpy viennent de
-  la roue réellement empaquetée. Conserver `deny.toml` et `about.toml` en accord.
-  `scripts/licenses-rust.sh` ajoute les copyrights amont manquants conservés
-  dans `vendor/crate-license-notices/` ; une modification de `Cargo.lock`
-  impose de les relire et d'actualiser leurs empreintes avant génération.
+- Rendering: check measurement, screen/SVG agreement and witnesses that must differ;
+  exercise the exports concerned and the features changed.
+  The manual bench for large curves (#141),
+  `stokesforge-render-egui/tests/mesure_courbes.rs`, runs with `--release`
+  and `--ignored`; protocol, command and measurements in `docs/rendu.md`.
+- UI: test the logic through `AppState`; for keyboard, focus or
+  presentation, complete with a check in the real application
+  with `run-stokesforge` if a display is available. For texts,
+  also capture with `STOKESFORGE_LANG=en-XA` (catalog and truncation).
+  State the X11 limits of the driver and what stays unchecked.
+- Wayland (#72): the patches `vendor/winit` and `vendor/smithay-clipboard`
+  share the drop and clipboard receiver between viewports.
+  Both copies are outside the workspace. The parser and the exact channel are
+  tested by `stokesforge-app/tests/wayland_{uri,bridge}.rs`. Complete `fmt`
+  with the targeted commands of `vendor/winit/STOKESFORGE.md`; do not
+  reformat upstream files unrelated to the fix.
+  Wayland is the default; `STOKESFORGE_X11=1` forces the X11 fallback. The manual
+  protocol, the alternatives and the removal are in `vendor/winit/STOKESFORGE.md`.
+- Robustness: read the reason of each `#[ignore]` before running it.
+  `cargo test -p stokesforge-robustesse -- --ignored` replays these cases; some
+  may be costly or depend on scheduling. Do not remove an
+  `ignore` without checking that the test becomes a reliable guard.
+- Distribution: read the scripts before running them; they rebuild their
+  output in `dist/`. `app-dist.sh` needs an X11/Xwayland display for its
+  window check; `cli-dist.sh` checks the packaged CLI without a screen,
+  with an emptied and trapped environment. Use these scripts as part of work
+  on packaging, not as a simple documentation check.
+- Licenses (#129): install the versions of `scripts/licenses-tools.env`
+  following `docs/licence-et-extensions.md`, then `cargo deny --locked check licenses`.
+  The CI job `licenses` also generates the notices with `cargo-about`, all
+  platforms and features. Distributions call `scripts/licenses-dist.sh`
+  and refuse outdated Python notices or a runtime without its texts.
+  An update of `vendor/python/lock.env` refreshes `vendor/python/licenses-{linux,windows}/`
+  from the matching full archive, and the numpy notices come from
+  the wheel actually packaged. Keep `deny.toml` and `about.toml` in agreement.
+  `scripts/licenses-rust.sh` adds the missing upstream copyrights kept
+  in `vendor/crate-license-notices/`; a change to `Cargo.lock`
+  requires rereading them and refreshing their fingerprints before generation.
 
-## 5. Laisser une base cohérente pour la session suivante
+## 5. Leave a consistent base for the next session
 
-Relire `git diff --check`, le diff des fichiers modifiés et `git status --short`
-(les fichiers nouveaux ne figurent pas dans un simple `git diff`). Ne pas
-inclure de données personnelles, de projets de démonstration locaux ou
-d'artefacts générés dans une modification sans lien avec eux.
+Reread `git diff --check`, the diff of the changed files and `git status --short`
+(new files do not appear in a plain `git diff`). Do not
+include personal data, local demo projects or
+generated artifacts in a change unrelated to them.
 
-Actualiser la page `docs/` concernée lorsque le comportement ou un contrat
-change, et les commentaires de module lorsque le raisonnement change.
-Actualiser ce guide si les outils ou chemins évoluent. Éviter d'y copier les
-détails volatils déjà maintenus dans le code ou les manifestes.
+Update the `docs/` page concerned when the behaviour or a contract
+changes, and the module comments when the reasoning changes.
+Update this guide if the tools or paths change. Avoid copying into it the
+volatile details already maintained in the code or the manifests.
 
-Dans le compte rendu, distinguer les tests exécutés, les échecs rencontrés
-et les vérifications non réalisées. Ne pas annoncer une validation Python
-ou visuelle à partir des seuls tests Rust par défaut.
+In the report, separate the tests run, the failures met
+and the checks not done. Do not announce a Python
+or visual validation from the default Rust tests alone.
 
-Après fusion et push sur `main`, la livraison comprend le retrait du worktree
-temporaire et de sa branche locale fusionnée, selon
-[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#clean-up-after-a-merge-on-main).
+After a merge and push on `main`, delivery includes removing the temporary
+worktree and its merged local branch, following
+[the cleanup in the verification skill](../.agents/skills/stokesforge-verification/SKILL.md#clean-up-after-a-merge-on-main).

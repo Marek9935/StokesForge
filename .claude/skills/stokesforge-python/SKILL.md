@@ -7,7 +7,7 @@ Two crates behind the `python` feature, **absent from `default`**: `stokesforge-
 
 ## Read first
 
-`docs/python-et-script.md` § What to know before modifying and `crates/stokesforge-python/README.md`; rules: `.claude/conventions.md` § Script `pyst`.
+`docs/python-et-script.md` § What to know before modifying and `crates/stokesforge-python/README.md`; rules: `.claude/conventions.md` § `pyst` scripts.
 
 ## Steps
 
