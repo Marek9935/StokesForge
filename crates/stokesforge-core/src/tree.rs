@@ -1,15 +1,15 @@
-//! Arbre persistant du projet : une carte plate `NodeId → Arc<Node>` et une racine.
+//! Persistent project tree: a flat map `NodeId → Arc<Node>` and a root.
 //!
-//! Muter un arbre, c'est faire `Arc::make_mut` dessus (ce qui clone la carte —
-//! des paires de 16 octets, pas les nœuds) puis `Arc::make_mut` sur les seuls
-//! nœuds touchés. Un client qui détient un ancien `Arc<Tree>` voit donc un
-//! instantané figé, et tous les nœuds non touchés restent physiquement
-//! partagés entre l'ancien et le nouvel arbre. C'est le mécanisme de l'undo
-//! « snapshot de structure ».
+//! Mutating a tree means doing `Arc::make_mut` on it (which clones the map —
+//! 16-byte pairs, not the nodes) then `Arc::make_mut` on the touched
+//! nodes only. A client holding an old `Arc<Tree>` therefore sees a frozen
+//! snapshot, and all untouched nodes stay physically
+//! shared between the old and the new tree. This is the mechanism of the
+//! "structure snapshot" undo.
 //!
-//! Les mutations sont `pub(crate)` : `Project` est la seule façade publique de
-//! mutation du crate. Chacune valide **tout** avant d'écrire quoi que ce soit,
-//! pour qu'un échec laisse l'arbre inchangé.
+//! Mutations are `pub(crate)`: `Project` is the crate's only public mutation
+//! facade. Each one validates **everything** before writing anything,
+//! so that a failure leaves the tree unchanged.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -26,9 +26,9 @@ use crate::node::{containment_message, Node, NodeKind};
 use crate::path::{format_path, parse_path, ObjectPath};
 use crate::transpose::TransposeLink;
 
-/// Forme lisible d'une suite de dossiers pour les messages d'erreur, `/` pour
-/// la racine. `pub(crate)` parce que `Project::resolve` s'appuyait dessus avant
-/// de déléguer, et que son test unitaire vit encore dans `project.rs`.
+/// Readable form of a sequence of folders for error messages, `/` for
+/// the root. `pub(crate)` because `Project::resolve` relied on it before
+/// delegating, and its unit test still lives in `project.rs`.
 pub(crate) fn display_folders(folders: &[String]) -> String {
     if folders.is_empty() {
         "/".to_string()
@@ -37,29 +37,29 @@ pub(crate) fn display_folders(folders: &[String]) -> String {
     }
 }
 
-/// Arbre du projet : carte plate `NodeId → Arc<Node>` et racine. Partagé par
-/// `Arc<Tree>` ; toute mutation passe par `Project`, qui fait `Arc::make_mut`
-/// dessus.
+/// Project tree: flat map `NodeId → Arc<Node>` and root. Shared as
+/// `Arc<Tree>`; every mutation goes through `Project`, which does `Arc::make_mut`
+/// on it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     nodes: HashMap<NodeId, Arc<Node>>,
     root: NodeId,
-    /// Couleurs enregistrées dans le projet, par usage — portées par l'arbre
-    /// pour voyager avec lui : un instantané de session, un retour arrière
-    /// structurel et la persistance les voient sans chemin à part.
+    /// Colors saved in the project, by use — carried by the tree
+    /// to travel with it: a session snapshot, a structural undo
+    /// and persistence see them without a separate path.
     saved_colors: SavedColors,
-    /// Calculs d'analyse (#181) — voir [`crate::calc`]. Portés par l'arbre pour
-    /// voyager avec lui, comme les couleurs enregistrées.
+    /// Analysis calculations (#181) — see [`crate::calc`]. Carried by the tree to
+    /// travel with it, like the saved colors.
     calculations: BTreeMap<NodeId, Arc<Calculation>>,
     correction_traces: BTreeMap<NodeId, Arc<CorrectionRecord>>,
-    /// Liens des feuilles transposées (#253), par feuille transposée — voir
-    /// [`crate::transpose`]. Portés par l'arbre comme les calculs.
+    /// Links of the transposed sheets (#253), by transposed sheet — see
+    /// [`crate::transpose`]. Carried by the tree like calculations.
     transposes: BTreeMap<NodeId, Arc<TransposeLink>>,
 }
 
 impl Tree {
-    /// Arbre réduit à un dossier racine. `Err(Structure)` si `root` n'est pas un
-    /// dossier ou porte déjà un parent.
+    /// Tree reduced to a root folder. `Err(Structure)` if `root` is not a
+    /// folder or already has a parent.
     pub(crate) fn new(root: Node) -> CoreResult<Self> {
         if !root.kind().is_folder() {
             return Err(CoreError::Structure(format!(
@@ -75,8 +75,8 @@ impl Tree {
         Ok(Self::with_root(root))
     }
 
-    /// Arbre réduit à `root`, sans validation. Réservé aux racines construites
-    /// par le crate (chemin de construction infaillible, sans `unwrap`).
+    /// Tree reduced to `root`, without validation. Reserved for roots built
+    /// by the crate (infallible construction path, no `unwrap`).
     pub(crate) fn with_root(root: Node) -> Self {
         let id = root.id();
         let mut nodes = HashMap::new();
@@ -91,17 +91,17 @@ impl Tree {
         }
     }
 
-    /// Les feuilles transposées liées, par feuille transposée (#253).
+    /// The linked transposed sheets, by transposed sheet (#253).
     pub fn transposes(&self) -> &BTreeMap<NodeId, Arc<TransposeLink>> {
         &self.transposes
     }
 
-    /// Le lien de la feuille transposée `sheet`, si c'en est une.
+    /// The link of the transposed sheet `sheet`, if it is one.
     pub fn transpose_link(&self, sheet: NodeId) -> Option<&TransposeLink> {
         self.transposes.get(&sheet).map(Arc::as_ref)
     }
 
-    /// La feuille transposée liée à la feuille `source`, avec son lien.
+    /// The transposed sheet linked to the sheet `source`, with its link.
     pub fn transposed_from(&self, source: NodeId) -> Option<(NodeId, &TransposeLink)> {
         self.transposes
             .iter()
@@ -109,7 +109,7 @@ impl Tree {
             .map(|(sheet, link)| (*sheet, link.as_ref()))
     }
 
-    /// Le même arbre, avec ces liens — pour la persistance.
+    /// The same tree, with these links — for persistence.
     pub fn with_transposes(mut self, transposes: BTreeMap<NodeId, Arc<TransposeLink>>) -> Self {
         self.transposes = transposes;
         self
@@ -119,12 +119,12 @@ impl Tree {
         &mut self.transposes
     }
 
-    /// Les corrections définitives des données sources, sans lien de calcul.
+    /// The final corrections of the source data, without a calculation link.
     pub fn correction_traces(&self) -> &BTreeMap<NodeId, Arc<CorrectionRecord>> {
         &self.correction_traces
     }
 
-    /// Reconstruit les traces lues du fichier, sans réactiver un calcul.
+    /// Rebuilds the traces read from the file, without reactivating a calculation.
     pub fn with_correction_traces(
         mut self,
         traces: BTreeMap<NodeId, Arc<CorrectionRecord>>,
@@ -137,14 +137,14 @@ impl Tree {
         &mut self.correction_traces
     }
 
-    /// Les couleurs enregistrées dans le projet.
+    /// The colors saved in the project.
     pub fn saved_colors(&self) -> &SavedColors {
         &self.saved_colors
     }
 
-    /// Le même arbre, avec ces couleurs enregistrées (bornées à
-    /// [`stokesforge_plot::MAX_SAVED_COLORS`] par usage) — pour la persistance,
-    /// qui reconstruit l'arbre puis y repose ce que le fichier portait.
+    /// The same tree, with these saved colors (bounded to
+    /// [`stokesforge_plot::MAX_SAVED_COLORS`] per use) — for persistence,
+    /// which rebuilds the tree then puts back what the file carried.
     pub fn with_saved_colors(mut self, colors: SavedColors) -> Self {
         self.saved_colors = colors.bounded();
         self
@@ -154,18 +154,18 @@ impl Tree {
         &mut self.saved_colors
     }
 
-    /// Les calculs d'analyse, par identifiant.
+    /// The analysis calculations, by identifier.
     pub fn calculations(&self) -> &BTreeMap<NodeId, Arc<Calculation>> {
         &self.calculations
     }
 
-    /// Le calcul `id`, s'il existe.
+    /// The calculation `id`, if it exists.
     pub fn calculation(&self, id: NodeId) -> Option<&Arc<Calculation>> {
         self.calculations.get(&id)
     }
 
-    /// Le calcul qui a produit `column`, et le rang de la sortie correspondante
-    /// dans `Calculation::outputs`.
+    /// The calculation that produced `column`, and the rank of the matching output
+    /// in `Calculation::outputs`.
     pub fn calculation_of_column(&self, column: NodeId) -> Option<(NodeId, usize)> {
         self.calculations.iter().find_map(|(id, calc)| {
             calc.outputs
@@ -175,8 +175,8 @@ impl Tree {
         })
     }
 
-    /// Le même arbre, avec ces calculs — pour la persistance, qui reconstruit
-    /// l'arbre puis y repose ce que le fichier portait.
+    /// The same tree, with these calculations — for persistence, which rebuilds
+    /// the tree then puts back what the file carried.
     pub fn with_calculations(mut self, calculations: BTreeMap<NodeId, Arc<Calculation>>) -> Self {
         self.calculations = calculations;
         self
@@ -186,11 +186,11 @@ impl Tree {
         &mut self.calculations
     }
 
-    /// Reconstruit un arbre depuis une liste de nœuds (persistance). Valide
-    /// tout : unicité des identifiants ; racine présente, dossier, sans parent ;
-    /// cohérence croisée parent ↔ enfants ; natures acceptées ; unicité des
-    /// noms ; accessibilité depuis la racine. `Err(Structure(..))` nomme le
-    /// nœud fautif.
+    /// Rebuilds a tree from a list of nodes (persistence). Validates
+    /// everything: identifier uniqueness; root present, a folder, without a parent;
+    /// cross-consistency parent ↔ children; accepted kinds; name
+    /// uniqueness; reachability from the root. `Err(Structure(..))` names the
+    /// faulty node.
     pub fn from_nodes(root: NodeId, nodes: Vec<Node>) -> CoreResult<Self> {
         let mut map: HashMap<NodeId, Arc<Node>> = HashMap::with_capacity(nodes.len());
         for node in nodes {
@@ -213,7 +213,7 @@ impl Tree {
         Ok(tree)
     }
 
-    /// Vérifie l'intégralité des invariants d'un arbre fraîchement chargé.
+    /// Checks all the invariants of a freshly loaded tree.
     fn validate_loaded(&self) -> CoreResult<()> {
         let root_node = self.nodes.get(&self.root).ok_or_else(|| {
             CoreError::Structure(format!("root missing from the node list: {}", self.root))
@@ -232,9 +232,9 @@ impl Tree {
             )));
         }
 
-        // Une passe : occurrences de chaque (parent, enfant) dans les listes
-        // d'enfants — évite un `filter().count()` par frère (quadratique sur
-        // un dossier à grand nombre d'enfants, #316).
+        // One pass: occurrences of each (parent, child) in the child
+        // lists — avoids a `filter().count()` per sibling (quadratic on
+        // a folder with many children, #316).
         let mut listed: HashMap<(NodeId, NodeId), usize> = HashMap::new();
         for (id, node) in &self.nodes {
             for child in node.children() {
@@ -300,9 +300,9 @@ impl Tree {
         Ok(())
     }
 
-    /// Unicité entre tous les frères directs, fenêtres comprises (#105).
-    /// La résolution canonique porte le dossier ; un nom de fenêtre seul
-    /// reste utilisable s'il désigne une seule fenêtre dans le projet.
+    /// Uniqueness among all direct siblings, windows included (#105).
+    /// The canonical resolution carries the folder; a bare window name
+    /// stays usable if it designates a single window in the project.
     fn validate_loaded_names(&self) -> CoreResult<()> {
         for (id, node) in &self.nodes {
             let mut seen: HashMap<&str, NodeId> = HashMap::new();
@@ -310,11 +310,11 @@ impl Tree {
                 let Some(child_node) = self.nodes.get(&child) else {
                     continue;
                 };
-                // Aucune exception pour les fenêtres ici : `check_name_
-                // available` (voir sa doc, A8) refuse maintenant qu'une
-                // fenêtre prenne le nom d'un dossier frère tout autant que
-                // l'inverse — deux frères directs ne partagent jamais un
-                // nom, quelle que soit leur nature.
+                // No exception for windows here: `check_name_
+                // available` (see its doc, A8) now refuses a
+                // window taking the name of a sibling folder just as much as
+                // the reverse — two direct siblings never share a
+                // name, whatever their kind.
                 if let Some(&earlier) = seen.get(child_node.name()) {
                     return Err(CoreError::Structure(format!(
                         "{child} ({}) cannot be named {} in {id}: {earlier} \
@@ -329,56 +329,56 @@ impl Tree {
         Ok(())
     }
 
-    // -- lecture --
+    // -- reading --
 
-    /// Identifiant du dossier racine.
+    /// Identifier of the root folder.
     pub fn root(&self) -> NodeId {
         self.root
     }
 
-    /// Nombre de nœuds, racine comprise.
+    /// Number of nodes, root included.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Toujours faux : un arbre contient au moins sa racine. Fourni pour la
-    /// symétrie avec `len` (et pour clippy).
+    /// Always false: a tree contains at least its root. Provided for
+    /// symmetry with `len` (and for clippy).
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Vrai si `id` est présent dans l'arbre.
+    /// True if `id` is present in the tree.
     pub fn contains(&self, id: NodeId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    /// Nœud `id`, ou `None`.
+    /// Node `id`, or `None`.
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(&id).map(Arc::as_ref)
     }
 
-    /// Nœud `id`, ou `Err(UnknownNode)`.
+    /// Node `id`, or `Err(UnknownNode)`.
     pub fn get(&self, id: NodeId) -> CoreResult<&Node> {
         self.node(id).ok_or(CoreError::UnknownNode(id))
     }
 
-    /// L'`Arc` du nœud `id` : sert aux tests de partage structurel et à la
-    /// persistance incrémentale.
+    /// The `Arc` of node `id`: used by structural-sharing tests and by
+    /// incremental persistence.
     pub fn node_arc(&self, id: NodeId) -> Option<&Arc<Node>> {
         self.nodes.get(&id)
     }
 
-    /// Enfants ordonnés de `id`.
+    /// Ordered children of `id`.
     pub fn children(&self, id: NodeId) -> CoreResult<&[NodeId]> {
         Ok(self.get(id)?.children())
     }
 
-    /// Parent de `id` (`None` pour la racine).
+    /// Parent of `id` (`None` for the root).
     pub fn parent(&self, id: NodeId) -> CoreResult<Option<NodeId>> {
         Ok(self.get(id)?.parent())
     }
 
-    /// Ancêtres de `id`, du plus proche à la racine. Exclut `id`.
+    /// Ancestors of `id`, from the nearest to the root. Excludes `id`.
     pub fn ancestors(&self, id: NodeId) -> CoreResult<Vec<NodeId>> {
         let mut out = Vec::new();
         let mut current = self.get(id)?.parent();
@@ -389,8 +389,8 @@ impl Tree {
         Ok(out)
     }
 
-    /// Index de `id` dans la liste d'enfants de son parent. `Err(Structure)`
-    /// pour la racine (elle n'a pas de parent).
+    /// Index of `id` in the child list of its parent. `Err(Structure)`
+    /// for the root (it has no parent).
     pub fn index_in_parent(&self, id: NodeId) -> CoreResult<usize> {
         let node = self.get(id)?;
         let Some(parent) = node.parent() else {
@@ -409,7 +409,7 @@ impl Tree {
             })
     }
 
-    /// Parcours préfixe de `id` et de toute sa descendance (`id` en premier).
+    /// Pre-order walk of `id` and all its descendants (`id` first).
     pub fn walk(&self, id: NodeId) -> CoreResult<Vec<NodeId>> {
         self.get(id)?;
         let mut out = Vec::new();
@@ -425,12 +425,12 @@ impl Tree {
         Ok(out)
     }
 
-    /// Parcours préfixe depuis la racine.
+    /// Pre-order walk from the root.
     pub fn walk_all(&self) -> Vec<NodeId> {
         self.walk(self.root).unwrap_or_default()
     }
 
-    /// Toutes les fenêtres du projet, en ordre de parcours.
+    /// All the windows of the project, in walk order.
     pub fn windows(&self) -> Vec<NodeId> {
         self.walk_all()
             .into_iter()
@@ -438,16 +438,16 @@ impl Tree {
             .collect()
     }
 
-    /// Nombre de fenêtres dont le nom commence par `prefix`.
+    /// Number of windows whose name starts with `prefix`.
     ///
-    /// D1/D2 — même parcours que [`Tree::find_window`] : sert à `Project::
-    /// next_window_name` à deviner un point de départ proche du bon nom,
-    /// sans passer par `windows()` (qui, lui, retient effectivement la liste
-    /// et alloue en conséquence — nécessaire là où l'appelant veut les
-    /// identifiants, pas ici où seul le compte importe). Compté **par
-    /// préfixe** et non toutes fenêtres confondues : un projet avec deux
-    /// classeurs (« Book1 », « Book2 ») et zéro graphe doit proposer
-    /// « Graph1 » pour le premier graphe, pas « Graph3 ».
+    /// D1/D2 — same walk as [`Tree::find_window`]: used by `Project::
+    /// next_window_name` to guess a starting point close to the right name,
+    /// without going through `windows()` (which actually keeps the list
+    /// and allocates accordingly — needed where the caller wants the
+    /// identifiers, not here where only the count matters). Counted **by
+    /// prefix** and not all windows together: a project with two
+    /// workbooks ("Book1", "Book2") and zero graphs must offer
+    /// "Graph1" for the first graph, not "Graph3".
     pub fn window_count_with_prefix(&self, prefix: &str) -> u64 {
         let mut count = 0u64;
         self.visit_windows(|id| {
@@ -462,13 +462,13 @@ impl Tree {
         count
     }
 
-    /// Première fenêtre portant ce nom, ou `None`. Sert à éviter les noms
-    /// automatiques déjà pris ; `resolve_parsed` refuse les noms ambigus.
+    /// First window with this name, or `None`. Used to avoid automatic
+    /// names already taken; `resolve_parsed` refuses ambiguous names.
     ///
-    /// D2 (option 2, `guide-de-correction-robustesse.md` §F7) — parcours
-    /// direct qui s'arrête au premier nœud trouvé, au lieu de passer par
-    /// `windows()` → `walk_all()`, qui allouaient un `Vec` de **tous** les
-    /// nœuds du projet à chaque résolution de chemin.
+    /// D2 (option 2, `guide-de-correction-robustesse.md` §F7) — direct
+    /// walk that stops at the first node found, instead of going through
+    /// `windows()` → `walk_all()`, which allocated a `Vec` of **all** the
+    /// nodes of the project at every path resolution.
     pub fn find_window(&self, name: &str) -> Option<NodeId> {
         let mut found = None;
         self.visit_windows(|id| {
@@ -481,20 +481,20 @@ impl Tree {
         found
     }
 
-    /// Visite chaque fenêtre du projet, sans jamais empiler la totalité des
-    /// enfants d'un nœud d'un coup. `on_window` rend `true` pour arrêter le
-    /// parcours dès cette fenêtre (utilisé par `find_window`), `false` pour
-    /// continuer.
+    /// Visits each window of the project, without ever stacking all the
+    /// children of a node at once. `on_window` returns `true` to stop the
+    /// walk at this window (used by `find_window`), `false` to
+    /// continue.
     ///
-    /// Une fenêtre ne contient jamais d'autre fenêtre (seuls les dossiers en
-    /// contiennent) : il suffit donc de descendre dans les enfants qui sont
-    /// des dossiers, et de visiter les autres sur place sans les empiler. Sur
-    /// un dossier qui contient N fenêtres et aucun sous-dossier — le cas
-    /// courant, une racine qui contient tous les classeurs —, la pile ne
-    /// grandit jamais : `stack.extend` sur tous les enfants d'un coup (la
-    /// première version de ce correctif) aurait alloué un tampon de taille N
-    /// même en s'arrêtant à la première fenêtre visitée, ce qu'une visite
-    /// nœud par nœud ne fait pas.
+    /// A window never contains another window (only folders
+    /// do): it is therefore enough to descend into the children that are
+    /// folders, and to visit the others in place without stacking them. On
+    /// a folder that contains N windows and no subfolder — the usual
+    /// case, a root that contains all the workbooks —, the stack
+    /// never grows: `stack.extend` on all the children at once (the
+    /// first version of this fix) would have allocated a buffer of size N
+    /// even when stopping at the first window visited, which a
+    /// node-by-node visit does not do.
     fn visit_windows(&self, mut on_window: impl FnMut(NodeId) -> bool) {
         let mut stack = vec![self.root];
         while let Some(current) = stack.pop() {
@@ -516,7 +516,7 @@ impl Tree {
         }
     }
 
-    /// Enfant direct de `parent` portant ce nom, ou `None`.
+    /// Direct child of `parent` with this name, or `None`.
     pub fn child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
         Ok(self
             .get(parent)?
@@ -526,17 +526,17 @@ impl Tree {
             .find(|child| self.node(*child).is_some_and(|node| node.name() == name)))
     }
 
-    /// Enfant **dossier** de `parent` portant ce nom, ou `None`.
+    /// **Folder** child of `parent` with this name, or `None`.
     ///
-    /// A8 (`guide-de-correction-robustesse.md` §F9) — distinct de
-    /// `child_by_name` : un dossier n'est le seul parent du modèle à
-    /// accueillir deux catégories d'enfants (dossiers et fenêtres,
-    /// `NodeKind::accepts_child`), et `check_name_available` n'empêche pas
-    /// une fenêtre de prendre le nom d'un dossier frère. Chercher par nom
-    /// *puis* filtrer par nature choisirait le frère homonyme rencontré en
-    /// premier dans `children()`, que ce soit le bon ou non ; chercher
-    /// directement parmi les enfants dossiers rend la résolution d'un
-    /// segment de chemin indépendante de cet ordre.
+    /// A8 (`guide-de-correction-robustesse.md` §F9) — distinct from
+    /// `child_by_name`: a folder is not the only parent in the model to
+    /// welcome two categories of children (folders and windows,
+    /// `NodeKind::accepts_child`), and `check_name_available` does not prevent
+    /// a window from taking the name of a sibling folder. Searching by name
+    /// *then* filtering by kind would pick the namesake sibling met first
+    /// in `children()`, whether it is the right one or not; searching
+    /// directly among the folder children makes the resolution of a path
+    /// segment independent of that order.
     fn folder_child_by_name(&self, parent: NodeId, name: &str) -> CoreResult<Option<NodeId>> {
         Ok(self.get(parent)?.children().iter().copied().find(|child| {
             self.node(*child)
@@ -544,9 +544,9 @@ impl Tree {
         }))
     }
 
-    /// Nombre de lignes d'une feuille : le maximum des longueurs de ses
-    /// colonnes, 0 si elle n'en a aucune. `Err(Structure)` si `sheet` n'est pas
-    /// une feuille.
+    /// Number of rows of a sheet: the maximum of the lengths of its
+    /// columns, 0 if it has none. `Err(Structure)` if `sheet` is not
+    /// a sheet.
     pub fn row_count(&self, sheet: NodeId) -> CoreResult<usize> {
         let node = self.get(sheet)?;
         if !node.kind().is_worksheet() {
@@ -564,9 +564,9 @@ impl Tree {
             .unwrap_or(0))
     }
 
-    /// Colonnes de la feuille de `column` (ses sœurs, elle comprise), dans
-    /// l'ordre de la feuille — ce qui fait les lettres. Vide si `column` n'a
-    /// pas de parent.
+    /// Columns of the sheet of `column` (its siblings, itself included), in
+    /// the order of the sheet — which makes the letters. Empty if `column` has
+    /// no parent.
     fn sheet_columns_of(&self, column: NodeId) -> &[NodeId] {
         self.parent(column)
             .ok()
@@ -575,16 +575,16 @@ impl Tree {
             .unwrap_or(&[])
     }
 
-    /// Lit une formule **saisie en lettres** pour `column` : chaque lettre
-    /// devient l'identifiant de la colonne qu'elle désigne dans la feuille de
-    /// `column` (voir [`ColumnFormula::from_letters`] pour les refus).
+    /// Reads a formula **typed in letters** for `column`: each letter
+    /// becomes the identifier of the column it designates in the sheet of
+    /// `column` (see [`ColumnFormula::from_letters`] for the refusals).
     ///
-    /// C'est, avec [`Tree::formula_letters`], le **seul** passage lettres ↔
-    /// identifiants — partagé par l'application et par `pyst`. Il se fait
-    /// *au-dessus* des commandes : `Command::SetColumnMeta` ne valide jamais
-    /// les références, et le geste qui modifie un autre champ garde la
-    /// formule stockée telle quelle (sinon un `#REF` bloquerait toute
-    /// modification de l'unité).
+    /// This is, with [`Tree::formula_letters`], the **only** letters ↔
+    /// identifiers pass — shared by the application and by `pyst`. It is done
+    /// *above* the commands: `Command::SetColumnMeta` never validates
+    /// the references, and the gesture that changes another field keeps the
+    /// stored formula as is (otherwise a `#REF` would block any
+    /// change to the unit).
     pub fn formula_from_letters(
         &self,
         column: NodeId,
@@ -593,18 +593,18 @@ impl Tree {
         ColumnFormula::from_letters(text, self.sheet_columns_of(column), column)
     }
 
-    /// Texte à afficher pour la formule de `column` : les lettres **actuelles**
-    /// de ses colonnes lues, `#REF` pour une colonne qui n'est plus dans la
-    /// feuille. `None` si `column` n'est pas une colonne ou n'a pas de
-    /// formule. Affichage seulement : jamais relu pour calculer.
+    /// Text to show for the formula of `column`: the **current** letters
+    /// of its read columns, `#REF` for a column that is no longer in the
+    /// sheet. `None` if `column` is not a column or has no
+    /// formula. Display only: never read back to compute.
     pub fn formula_letters(&self, column: NodeId) -> Option<String> {
         let formula = self.node(column)?.as_column()?.meta().formula.as_ref()?;
         Some(formula.letters(self.sheet_columns_of(column)))
     }
 
-    /// Vrai si la formule de `column` lit une colonne qui n'est plus dans sa
-    /// feuille (supprimée, ou déplacée ailleurs) : elle s'affiche avec
-    /// [`REF_TOKEN`](crate::REF_TOKEN) et se calcule en
+    /// True if the formula of `column` reads a column that is no longer in its
+    /// sheet (deleted, or moved elsewhere): it is shown with
+    /// [`REF_TOKEN`](crate::REF_TOKEN) and computes to
     /// [`FormulaError::DeletedColumn`].
     pub fn formula_has_deleted_reference(&self, column: NodeId) -> bool {
         self.node(column)
@@ -613,55 +613,55 @@ impl Tree {
             .is_some_and(|formula| formula.has_deleted_reference(self.sheet_columns_of(column)))
     }
 
-    /// Itère sur `(NodeId, &Node)` sans ordre garanti (persistance, statistiques).
+    /// Iterates over `(NodeId, &Node)` in no guaranteed order (persistence, statistics).
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node)> {
         self.nodes.iter().map(|(id, node)| (*id, node.as_ref()))
     }
 
-    // -- résolution de chemins --
+    // -- path resolution --
 
-    /// Résout un chemin textuel de la grammaire `[Book1]Sheet1!ColA` vers
-    /// l'identifiant du nœud qu'il désigne.
+    /// Resolves a text path of the `[Book1]Sheet1!ColA` grammar to
+    /// the identifier of the node it designates.
     ///
-    /// C'est **l'unique implémentation de la résolution du dépôt** :
-    /// `Project::resolve_path` s'y ramène, et un client qui ne détient qu'un
-    /// instantané `Arc<Tree>` (le pont Python, demain le rendu de graphes)
-    /// l'appelle directement au lieu d'en réécrire une copie contre l'API de
-    /// lecture. C'est la raison d'être de cette méthode : la résolution ne
-    /// demande que de la lecture, elle n'avait donc rien à faire dans la façade
-    /// de mutation.
+    /// This is **the repository's only implementation of resolution**:
+    /// `Project::resolve_path` boils down to it, and a client that holds only an
+    /// `Arc<Tree>` snapshot (the Python bridge, tomorrow graph rendering)
+    /// calls it directly instead of rewriting a copy against the read
+    /// API. That is the reason for this method to exist: resolution
+    /// needs only reading, so it had no business in the mutation
+    /// facade.
     ///
-    /// Toute erreur est un [`CoreError::Path`], que la faute soit de syntaxe ou
-    /// que l'objet manque : vu du dehors, c'est le même cas — un chemin qu'on
-    /// ne sait pas suivre — et seul le message distingue les deux.
+    /// Every error is a [`CoreError::Path`], whether the fault is syntax or
+    /// the object is missing: seen from outside, it is the same case — a path we
+    /// cannot follow — and only the message tells the two apart.
     pub fn resolve(&self, text: &str) -> CoreResult<NodeId> {
         self.resolve_parsed(&parse_path(text)?)
     }
 
-    /// Résout un chemin déjà analysé, pour l'appelant qui tient un
-    /// [`ObjectPath`] et n'a pas à le re-sérialiser pour le faire re-analyser.
+    /// Resolves an already parsed path, for the caller that holds an
+    /// [`ObjectPath`] and need not re-serialize it to have it re-parsed.
     ///
-    /// Deux propriétés de la grammaire, faciles à perdre en la réécrivant :
+    /// Two properties of the grammar, easy to lose when rewriting it:
     ///
-    /// - le drapeau `rooted` n'est **pas** consulté. Il n'y a pas de dossier
-    ///   courant dans le modèle — c'est une notion d'interface, pas de données —
-    ///   donc la descente part toujours de la racine et `Manips/[Book1]Sheet1`
-    ///   désigne le même nœud que `/Manips/[Book1]Sheet1` ;
-    /// - une fenêtre avec un préfixe se cherche dans ce dossier ;
-    /// - sans préfixe, son nom doit être non ambigu à l'échelle du projet.
+    /// - the `rooted` flag is **not** consulted. There is no current folder
+    ///   in the model — that is an interface notion, not a data one —
+    ///   so the descent always starts at the root and `Experiments/[Book1]Sheet1`
+    ///   designates the same node as `/Experiments/[Book1]Sheet1`;
+    /// - a window with a prefix is searched for in that folder;
+    /// - without a prefix, its name must be unambiguous project-wide.
     ///
-    /// Le chemin canonique est enraciné, même pour une fenêtre de la racine.
+    /// The canonical path is rooted, even for a window at the root.
     ///
-    /// La comparaison des noms est celle de `child_by_name` et `find_window` :
-    /// égalité exacte, donc **sensible à la casse**.
+    /// Name comparison is that of `child_by_name` and `find_window`:
+    /// exact equality, hence **case-sensitive**.
     pub fn resolve_parsed(&self, path: &ObjectPath) -> CoreResult<NodeId> {
-        // Chemin sans fenêtre : une descente de dossiers depuis la racine.
-        // `folder_child_by_name` ne considère que les enfants dossiers dès la
-        // recherche elle-même (A8) : `check_name_available` n'empêche pas une
-        // fenêtre de prendre le nom d'un dossier frère (voir sa doc), donc un
-        // `child_by_name` générique pourrait tomber sur la fenêtre plutôt que
-        // sur le dossier et rendre ce dernier « introuvable » selon l'ordre
-        // des enfants — ce qui casserait `path_of ∘ resolve_path = identité`.
+        // Path without a window: a descent through folders from the root.
+        // `folder_child_by_name` considers only folder children from the
+        // search itself (A8): `check_name_available` does not prevent a
+        // window from taking the name of a sibling folder (see its doc), so a
+        // generic `child_by_name` could land on the window rather than
+        // on the folder and make the latter "not found" depending on the order
+        // of the children — which would break `path_of ∘ resolve_path = identity`.
         let Some(window_name) = path.window.as_deref() else {
             let mut current = self.root();
             for segment in &path.folders {
@@ -711,8 +711,8 @@ impl Tree {
         let Some(sheet_name) = path.sheet.as_deref() else {
             return Ok(window);
         };
-        // Un graphe ou une note n'a pas de feuille : le dire vaut mieux que
-        // rendre « feuille introuvable » sur une fenêtre qui n'en aura jamais.
+        // A graph or a note has no sheet: saying so is better than
+        // returning "sheet not found" on a window that will never have one.
         if !matches!(self.get(window)?.kind(), NodeKind::Workbook { .. }) {
             return Err(CoreError::Path(format!(
                 "[{window_name}] is not a workbook, it has no worksheet"
@@ -725,17 +725,17 @@ impl Tree {
         let Some(column_name) = path.column.as_deref() else {
             return Ok(sheet);
         };
-        // Le message reprend la forme canonique du chemin, pas la chaîne
-        // d'entrée : c'est la seule branche qui nomme le chemin entier, et
-        // `resolve_parsed` n'a de toute façon plus le texte d'origine.
+        // The message reuses the canonical form of the path, not the input
+        // string: it is the only branch that names the whole path, and
+        // `resolve_parsed` no longer has the original text anyway.
         self.child_by_name(sheet, column_name)?
             .ok_or_else(|| CoreError::Path(format!("column not found: {}", format_path(path))))
     }
 
-    /// Noms des dossiers au-dessus de `id`, de la racine (exclue) vers `id`.
+    /// Names of the folders above `id`, from the root (excluded) towards `id`.
     ///
-    /// Sert des deux côtés du chemin : la résolution s'en sert pour vérifier un
-    /// préfixe, `Project::path_of` pour le reconstruire.
+    /// Serves both sides of the path: resolution uses it to check a
+    /// prefix, `Project::path_of` to rebuild it.
     pub(crate) fn folder_names_above(&self, id: NodeId) -> CoreResult<Vec<String>> {
         let root = self.root();
         let mut names: Vec<String> = self
@@ -750,10 +750,10 @@ impl Tree {
         Ok(names)
     }
 
-    // -- validation (lecture seule) --
+    // -- validation (read-only) --
 
-    /// Vérifie qu'un nom est libre dans la portée d'unicité de `kind`.
-    /// `ignore` exclut un nœud de la comparaison (renommage, déplacement sur place).
+    /// Checks that a name is free within the uniqueness scope of `kind`.
+    /// `ignore` excludes a node from the comparison (rename, in-place move).
     fn check_name_available(
         &self,
         parent: Option<NodeId>,
@@ -762,7 +762,7 @@ impl Tree {
         ignore: Option<NodeId>,
     ) -> CoreResult<()> {
         let Some(parent) = parent else {
-            return Ok(()); // nœud sans parent (racine) : pas de frère
+            return Ok(()); // node without a parent (root): no sibling
         };
         let Some(parent_node) = self.node(parent) else {
             return Ok(());
@@ -781,7 +781,7 @@ impl Tree {
         Ok(())
     }
 
-    /// Valide une insertion sans rien écrire : nom, nature, parent, index.
+    /// Validates an insertion without writing anything: name, kind, parent, index.
     pub(crate) fn validate_insert(
         &self,
         parent: NodeId,
@@ -814,7 +814,7 @@ impl Tree {
         Ok(())
     }
 
-    /// Valide une suppression sans rien écrire. Rend l'index occupé.
+    /// Validates a removal without writing anything. Returns the index occupied.
     pub(crate) fn validate_remove(&self, id: NodeId) -> CoreResult<usize> {
         if id == self.root {
             return Err(CoreError::Structure(
@@ -824,7 +824,7 @@ impl Tree {
         self.index_in_parent(id)
     }
 
-    /// Valide un déplacement sans rien écrire. Rend `(ancien parent, ancien index)`.
+    /// Validates a move without writing anything. Returns `(old parent, old index)`.
     pub(crate) fn validate_move(
         &self,
         id: NodeId,
@@ -869,7 +869,7 @@ impl Tree {
         Ok((old_parent, old_index))
     }
 
-    /// Valide un renommage sans rien écrire. Rend le nom actuel.
+    /// Validates a rename without writing anything. Returns the current name.
     pub(crate) fn validate_rename(&self, id: NodeId, name: &str) -> CoreResult<String> {
         let node = self.get(id)?;
         check_name(name)?;
@@ -881,9 +881,9 @@ impl Tree {
         Ok(previous)
     }
 
-    // -- mutations pub(crate) — appelées uniquement par Project --
+    // -- pub(crate) mutations — called only by Project --
 
-    /// Insère un nœud détaché et sans enfants à `index` dans `parent`.
+    /// Inserts a detached node without children at `index` in `parent`.
     pub(crate) fn insert(
         &mut self,
         parent: NodeId,
@@ -922,8 +922,8 @@ impl Tree {
         Ok(id)
     }
 
-    /// Retire `id` et toute sa descendance de la carte, et `id` de la liste
-    /// d'enfants de son parent. Rend l'index qu'il occupait. Refuse la racine.
+    /// Removes `id` and all its descendants from the map, and `id` from the child
+    /// list of its parent. Returns the index it occupied. Refuses the root.
     pub(crate) fn remove(&mut self, id: NodeId) -> CoreResult<usize> {
         let index = self.validate_remove(id)?;
         let Some(parent) = self.parent(id)? else {
@@ -942,8 +942,8 @@ impl Tree {
         Ok(index)
     }
 
-    /// Déplace `id` sous `new_parent` à `index`. Toute la validation a lieu
-    /// avant le moindre détachement. Rend `(ancien parent, ancien index)`.
+    /// Moves `id` under `new_parent` at `index`. All validation happens
+    /// before the slightest detachment. Returns `(old parent, old index)`.
     pub(crate) fn move_node(
         &mut self,
         id: NodeId,
@@ -971,8 +971,8 @@ impl Tree {
         Ok((old_parent, old_index))
     }
 
-    /// Renomme `id`. Rend l'ancien nom. Un renommage vers le nom courant est un
-    /// no-op qui ne touche même pas l'`Arc` du nœud.
+    /// Renames `id`. Returns the old name. A rename to the current name is a
+    /// no-op that does not even touch the node's `Arc`.
     pub(crate) fn rename(&mut self, id: NodeId, name: &str) -> CoreResult<String> {
         let previous = self.validate_rename(id, name)?;
         if previous == name {
@@ -984,8 +984,8 @@ impl Tree {
         Ok(previous)
     }
 
-    /// Colonne mutable (`Arc::make_mut` sur le nœud). `Err(Structure)` si `id`
-    /// n'est pas une colonne.
+    /// Mutable column (`Arc::make_mut` on the node). `Err(Structure)` if `id`
+    /// is not a column.
     pub(crate) fn column_mut(&mut self, id: NodeId) -> CoreResult<&mut Column> {
         let kind_label = {
             let node = self.get(id)?;
@@ -1006,8 +1006,8 @@ impl Tree {
             .ok_or_else(|| CoreError::Structure(format!("{id} is not a column")))
     }
 
-    /// Nœud mutable (`Arc::make_mut`). Aucune validation : l'appelant est
-    /// responsable des invariants qu'il touche.
+    /// Mutable node (`Arc::make_mut`). No validation: the caller is
+    /// responsible for the invariants it touches.
     pub(crate) fn node_mut(&mut self, id: NodeId) -> CoreResult<&mut Node> {
         let node_arc = self.nodes.get_mut(&id).ok_or(CoreError::UnknownNode(id))?;
         Ok(Arc::make_mut(node_arc))
@@ -1043,7 +1043,7 @@ mod tests {
         NodeKind::Column(Column::new(ColumnType::Numeric))
     }
 
-    /// Petit arbre : racine `Projet` → dossier `Manips` → `Book1` → `Sheet1` → `A`.
+    /// Small tree: root `Project` → folder `Experiments` → `Book1` → `Sheet1` → `A`.
     struct Fixture {
         tree: Tree,
         root: NodeId,
@@ -1056,7 +1056,7 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let root_node = Node::new(NodeId::from_raw(1), "Projet", folder_kind()).unwrap();
+            let root_node = Node::new(NodeId::from_raw(1), "Project", folder_kind()).unwrap();
             let mut fixture = Fixture {
                 tree: Tree::new(root_node).unwrap(),
                 root: NodeId::from_raw(1),
@@ -1066,7 +1066,7 @@ mod tests {
                 column: NodeId::from_raw(0),
                 next: 2,
             };
-            fixture.folder = fixture.add(fixture.root, "Manips", folder_kind());
+            fixture.folder = fixture.add(fixture.root, "Experiments", folder_kind());
             fixture.book = fixture.add(fixture.folder, "Book1", workbook_kind());
             fixture.sheet = fixture.add(fixture.book, "Sheet1", worksheet_kind());
             fixture.column = fixture.add(fixture.sheet, "A", column_kind());
@@ -1083,12 +1083,16 @@ mod tests {
         }
     }
 
-    /// Charge un arbre dont la racine (1) liste `listed` et dont les nœuds
-    /// `others` sont des dossiers déclarant la racine pour parent.
+    /// Loads a tree whose root (1) lists `listed` and whose nodes
+    /// `others` are folders declaring the root as their parent.
     fn load_flat(listed: Vec<u64>, others: &[u64]) -> CoreResult<Tree> {
         let children = listed.into_iter().map(NodeId::from_raw).collect();
-        let mut nodes =
-            vec![Node::new(NodeId::from_raw(1), "Projet", NodeKind::Folder { children }).unwrap()];
+        let mut nodes = vec![Node::new(
+            NodeId::from_raw(1),
+            "Project",
+            NodeKind::Folder { children },
+        )
+        .unwrap()];
         for raw in others {
             nodes.push(
                 Node::with_parent(
@@ -1106,7 +1110,7 @@ mod tests {
     fn structure_message(result: CoreResult<Tree>) -> String {
         match result {
             Err(CoreError::Structure(message)) => message,
-            other => panic!("attendu Structure, obtenu {:?}", other.map(|_| ())),
+            other => panic!("expected Structure, got {:?}", other.map(|_| ())),
         }
     }
 
@@ -1137,7 +1141,7 @@ mod tests {
     fn new_refuses_a_root_with_a_parent() {
         let node = Node::with_parent(
             NodeId::from_raw(1),
-            "Projet",
+            "Project",
             Some(NodeId::from_raw(9)),
             folder_kind(),
         )
@@ -1171,7 +1175,7 @@ mod tests {
         ));
         assert_eq!(f.tree.windows(), vec![f.book]);
         assert_eq!(f.tree.find_window("Book1"), Some(f.book));
-        assert_eq!(f.tree.find_window("Absent"), None);
+        assert_eq!(f.tree.find_window("Missing"), None);
         assert_eq!(f.tree.child_by_name(f.sheet, "A").unwrap(), Some(f.column));
         assert_eq!(f.tree.child_by_name(f.sheet, "Z").unwrap(), None);
         assert_eq!(f.tree.iter().count(), 5);
@@ -1275,11 +1279,11 @@ mod tests {
     #[test]
     fn move_node_refuses_a_cycle() {
         let mut f = Fixture::new();
-        let inner = f.add(f.folder, "Interne", folder_kind());
+        let inner = f.add(f.folder, "Inner", folder_kind());
         let error = f.tree.move_node(f.folder, inner, 0).unwrap_err();
         match error {
             CoreError::Structure(message) => assert!(message.contains("circular"), "{message}"),
-            other => panic!("attendu Structure, obtenu {other:?}"),
+            other => panic!("expected Structure, got {other:?}"),
         }
     }
 
@@ -1314,43 +1318,49 @@ mod tests {
         ));
     }
 
-    // -- résolution de chemins --
+    // -- path resolution --
     //
-    // La résolution vit désormais ici, et non plus dans `Project` ni recopiée
-    // dans le pont Python : ces tests couvrent ce qui a déménagé, y compris les
-    // deux points sur lesquels les deux anciennes copies pouvaient diverger
-    // sans qu'aucun test ne le voie (le message de colonne introuvable, et le
-    // fait que `rooted` ne change rien).
+    // Resolution now lives here, and no longer in `Project` nor copied
+    // into the Python bridge: these tests cover what moved, including the
+    // two points on which the two old copies could diverge
+    // without any test seeing it (the message for a column not found, and the
+    // fact that `rooted` changes nothing).
 
     #[test]
     fn resolve_follows_the_four_levels_of_the_grammar() {
         let f = Fixture::new();
         assert_eq!(f.tree.resolve("/").unwrap(), f.root);
-        assert_eq!(f.tree.resolve("/Manips").unwrap(), f.folder);
+        assert_eq!(f.tree.resolve("/Experiments").unwrap(), f.folder);
         assert_eq!(f.tree.resolve("[Book1]").unwrap(), f.book);
         assert_eq!(f.tree.resolve("[Book1]Sheet1").unwrap(), f.sheet);
         assert_eq!(f.tree.resolve("[Book1]Sheet1!A").unwrap(), f.column);
-        assert_eq!(f.tree.resolve("/Manips/[Book1]Sheet1!A").unwrap(), f.column);
+        assert_eq!(
+            f.tree.resolve("/Experiments/[Book1]Sheet1!A").unwrap(),
+            f.column
+        );
     }
 
     #[test]
     fn resolve_ignores_the_rooted_flag() {
-        // Il n'y a pas de dossier courant dans le modèle : la descente part
-        // toujours de la racine, avec ou sans `/` initial.
+        // There is no current folder in the model: the descent always starts
+        // at the root, with or without a leading `/`.
         let f = Fixture::new();
-        assert_eq!(f.tree.resolve("Manips").unwrap(), f.folder);
-        assert_eq!(f.tree.resolve("Manips/[Book1]Sheet1!A").unwrap(), f.column);
+        assert_eq!(f.tree.resolve("Experiments").unwrap(), f.folder);
+        assert_eq!(
+            f.tree.resolve("Experiments/[Book1]Sheet1!A").unwrap(),
+            f.column
+        );
     }
 
     #[test]
     fn resolve_finds_a_window_without_its_folder_prefix() {
-        // Un nom non ambigu peut s’écrire sans préfixe ; le chemin canonique
-        // désigne toujours le dossier précis, sans résolution implicite.
+        // An unambiguous name can be written without a prefix; the canonical path
+        // still designates the precise folder, with no implicit resolution.
         let f = Fixture::new();
         assert_eq!(f.tree.resolve("[Book1]Sheet1").unwrap(), f.sheet);
-        let err = f.tree.resolve("/Ailleurs/[Book1]Sheet1").unwrap_err();
+        let err = f.tree.resolve("/Elsewhere/[Book1]Sheet1").unwrap_err();
         let CoreError::Path(message) = err else {
-            panic!("attendu Path, obtenu {err:?}");
+            panic!("expected Path, got {err:?}");
         };
         assert!(message.contains("folder not found"), "{message}");
     }
@@ -1384,18 +1394,18 @@ mod tests {
             },
         );
         for text in [
-            "",                      // syntaxe : chemin vide
-            "[Book1",                // syntaxe : crochet non fermé
-            "Sheet1!A",              // syntaxe : colonne sans classeur
-            "[Absent]",              // fenêtre inconnue
-            "[Book1]SheetX",         // feuille inconnue
-            "[Book1]Sheet1!Absente", // colonne inconnue
-            "/Inconnu",              // dossier inconnu
-            "[Fig1]Sheet1",          // fenêtre sans feuille
+            "",                      // syntax: empty path
+            "[Book1",                // syntax: unclosed bracket
+            "Sheet1!A",              // syntax: column without a workbook
+            "[Missing]",             // unknown window
+            "[Book1]SheetX",         // unknown sheet
+            "[Book1]Sheet1!Missing", // unknown column
+            "/Unknown",              // unknown folder
+            "[Fig1]Sheet1",          // window without a sheet
         ] {
             assert!(
                 matches!(f.tree.resolve(text), Err(CoreError::Path(_))),
-                "attendu Path pour {text:?}, obtenu {:?}",
+                "expected Path for {text:?}, got {:?}",
                 f.tree.resolve(text)
             );
         }
@@ -1403,28 +1413,31 @@ mod tests {
 
     #[test]
     fn resolve_does_not_mistake_a_window_for_a_folder() {
-        // `Manips/Book1` descend en dossiers : `Book1` est un classeur, donc le
-        // segment ne doit pas être suivi.
+        // `Experiments/Book1` descends through folders: `Book1` is a workbook, so the
+        // segment must not be followed.
         let f = Fixture::new();
         assert!(matches!(
-            f.tree.resolve("/Manips/Book1"),
+            f.tree.resolve("/Experiments/Book1"),
             Err(CoreError::Path(_))
         ));
     }
 
     #[test]
     fn resolve_names_the_canonical_path_when_a_column_is_missing() {
-        // Le message reprend la forme canonique, pas la chaîne d'entrée : les
-        // espaces de bordure et les `//` en trop n'y ressortent pas.
+        // The message reuses the canonical form, not the input string: the
+        // edge spaces and the extra `//` do not show up in it.
         let f = Fixture::new();
         let err = f
             .tree
-            .resolve("  /Manips//[Book1]Sheet1!Absente  ")
+            .resolve("  /Experiments//[Book1]Sheet1!Missing  ")
             .unwrap_err();
         let CoreError::Path(message) = err else {
-            panic!("attendu Path, obtenu {err:?}");
+            panic!("expected Path, got {err:?}");
         };
-        assert_eq!(message, "column not found: /Manips/[Book1]Sheet1!Absente");
+        assert_eq!(
+            message,
+            "column not found: /Experiments/[Book1]Sheet1!Missing"
+        );
     }
 
     #[test]
@@ -1440,12 +1453,15 @@ mod tests {
     #[test]
     fn folder_names_above_lists_folders_from_the_root_down() {
         let mut f = Fixture::new();
-        let jour1 = f.add(f.folder, "Jour1", folder_kind());
-        let book2 = f.add(jour1, "Book2", workbook_kind());
-        assert_eq!(f.tree.folder_names_above(f.book).unwrap(), vec!["Manips"]);
+        let day1 = f.add(f.folder, "Day1", folder_kind());
+        let book2 = f.add(day1, "Book2", workbook_kind());
+        assert_eq!(
+            f.tree.folder_names_above(f.book).unwrap(),
+            vec!["Experiments"]
+        );
         assert_eq!(
             f.tree.folder_names_above(book2).unwrap(),
-            vec!["Manips", "Jour1"]
+            vec!["Experiments", "Day1"]
         );
         assert!(f.tree.folder_names_above(f.root).unwrap().is_empty());
     }
@@ -1460,8 +1476,8 @@ mod tests {
 
     #[test]
     fn from_nodes_refuses_a_duplicate_id() {
-        let a = Node::new(NodeId::from_raw(1), "Projet", folder_kind()).unwrap();
-        let b = Node::new(NodeId::from_raw(1), "Autre", folder_kind()).unwrap();
+        let a = Node::new(NodeId::from_raw(1), "Project", folder_kind()).unwrap();
+        let b = Node::new(NodeId::from_raw(1), "Other", folder_kind()).unwrap();
         assert!(matches!(
             Tree::from_nodes(NodeId::from_raw(1), vec![a, b]),
             Err(CoreError::Structure(_))
@@ -1470,8 +1486,8 @@ mod tests {
 
     #[test]
     fn from_nodes_refuses_an_unreachable_node() {
-        let root = Node::new(NodeId::from_raw(1), "Projet", folder_kind()).unwrap();
-        let orphan = Node::new(NodeId::from_raw(2), "Ailleurs", folder_kind()).unwrap();
+        let root = Node::new(NodeId::from_raw(1), "Project", folder_kind()).unwrap();
+        let orphan = Node::new(NodeId::from_raw(2), "Elsewhere", folder_kind()).unwrap();
         assert!(matches!(
             Tree::from_nodes(NodeId::from_raw(1), vec![root, orphan]),
             Err(CoreError::Structure(_))
@@ -1480,7 +1496,7 @@ mod tests {
 
     #[test]
     fn from_nodes_refuses_a_mutual_cycle_outside_the_root() {
-        let root = Node::new(NodeId::from_raw(1), "Projet", folder_kind()).unwrap();
+        let root = Node::new(NodeId::from_raw(1), "Project", folder_kind()).unwrap();
         let a = Node::with_parent(
             NodeId::from_raw(2),
             "A",

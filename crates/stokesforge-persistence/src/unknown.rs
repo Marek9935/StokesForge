@@ -1,62 +1,62 @@
-//! Mécanique partagée de dégradation gracieuse d'une variante d'énumération
-//! inconnue (C5, niveau 2, `guide-de-correction-robustesse.md` §F3).
+//! Shared mechanics for the graceful degradation of an unknown enum variant
+//! (C5, level 2, `guide-de-correction-robustesse.md` §F3).
 //!
-//! # Le principe : capturer par valeur d'abord, choisir ensuite
+//! # The principle: capture by value first, choose afterwards
 //!
-//! `serde` dérive normalement un décodage d'enum externally-tagged qui **ne
-//! sait pas se rattraper** : dès que le nom de variante lu ne correspond à
-//! aucune des variantes connues, l'échec remonte immédiatement — c'était le
-//! bug (C5, niveau 1 l'avait déjà nommé sans le corriger : l'erreur devenait
-//! `UnknownVariant` plutôt que `Corrupt`, mais le fichier restait perdu en
-//! entier).
+//! `serde` normally derives a decoding of an externally-tagged enum that
+//! **cannot recover**: as soon as the variant name read matches none of the
+//! known variants, the failure comes straight back up — this was the bug
+//! (C5, level 1 had already named it without fixing it: the error became
+//! `UnknownVariant` rather than `Corrupt`, but the file was still lost
+//! entirely).
 //!
-//! Le correctif : décoder d'abord la valeur MessagePack qui suit le nom de
-//! variante en un arbre générique (`rmpv::Value`, qui sait représenter
-//! n'importe quelle valeur du format sans connaître le schéma), la
-//! réencoder, puis *essayer* de la redécoder comme l'une des variantes
-//! connues — via `rmp_serde`, pas `rmpv::ext::from_value` : ce dernier
-//! représente les enums Rust par indice de variante (`[indice, contenu]`),
-//! une convention différente de celle qu'écrit ce format
-//! (« externally tagged » par nom, `schema.rs` §tête) ; seul `rmp_serde` —
-//! le même décodeur que pour le reste du fichier — sait relire ce que ce
-//! format a réellement écrit. Si cet essai échoue — variante inconnue, ou
-//! un type de tracé inconnu enfoui trois niveaux plus bas dans le spec
-//! d'un graphe — le nom et le contenu bruts sont conservés tels quels dans
-//! un [`stokesforge_plot::RawVariant`] plutôt que de faire échouer l'appelant.
-//! C'est ce qui borne la perte à **ce seul nœud** (ou cette seule série) au
-//! lieu du fichier entier.
+//! The fix: first decode the MessagePack value that follows the variant
+//! name into a generic tree (`rmpv::Value`, which can represent
+//! any value of the format without knowing the schema), re-encode it, then
+//! *try* to decode it again as one of the known variants
+//! — via `rmp_serde`, not `rmpv::ext::from_value`: the latter
+//! represents Rust enums by variant index (`[index, content]`),
+//! a different convention from the one this format writes
+//! (« externally tagged » by name, `schema.rs` head doc); only `rmp_serde` —
+//! the same decoder as for the rest of the file — can read back what this
+//! format actually wrote. If this attempt fails — unknown variant, or
+//! an unknown plot type buried three levels deeper in the spec
+//! of a graph — the raw name and content are kept as they are in
+//! a [`stokesforge_plot::RawVariant`] rather than making the caller fail.
+//! This is what bounds the loss to **this single node** (or this single series)
+//! instead of the whole file.
 //!
-//! # Le compromis assumé
+//! # The accepted trade-off
 //!
-//! Passer par `rmpv::Value` puis réencoder avant de retenter `rmp_serde`
-//! copie les octets d'une colonne `Float` (un `Vec<u8>` déjà présent dans le
-//! fichier) une ou deux fois de plus qu'un décodage direct : un `load()`
-//! alloue et copie les mesures d'une colonne plusieurs fois plutôt qu'une
-//! seule. Rien dans ce dépôt ne mesure aujourd'hui le coût de `load()`/
-//! `save()` (B17, `b4_allocateur.rs` comptent d'autres opérations) ; ce
-//! n'est donc pas un correctif qui casse un garde-fou existant, seulement un
-//! coût à surveiller si le format finit par porter des colonnes bien plus
-//! grandes.
+//! Going through `rmpv::Value` then re-encoding before retrying `rmp_serde`
+//! copies the bytes of a `Float` column (a `Vec<u8>` already present in the
+//! file) once or twice more than a direct decoding: a `load()`
+//! allocates and copies the measurements of a column several times rather than
+//! once. Nothing in this repository measures the cost of `load()`/
+//! `save()` today (B17, `b4_allocateur.rs` count other operations); this
+//! is therefore not a fix that breaks an existing guard, only a
+//! cost to watch if the format ends up carrying much larger
+//! columns.
 //!
-//! # Comment le nœud redevient les mêmes octets à la sauvegarde suivante
+//! # How the node becomes the same bytes again at the next save
 //!
-//! [`RawVariant::payload`] porte le contenu associé, déjà encodé en
-//! MessagePack — vide pour une variante sans contenu (un futur variant
-//! unitaire, sérialisé comme une simple chaîne). `serialize_raw_variant`
-//! réinjecte ces octets tels quels (redécodés en `rmpv::Value` puis
-//! sérialisés par ce même `Value`, qui produit le même encodage canonique
-//! que celui qui les a écrits — c'est la même bibliothèque des deux côtés) :
-//! rien n'est renommé, réordonné ou normalisé, ce qui est la condition de
-//! B20 (deux sauvegardes successives byte-identiques).
+//! [`RawVariant::payload`] carries the associated content, already encoded in
+//! MessagePack — empty for a variant without content (a future unit
+//! variant, serialized as a plain string). `serialize_raw_variant`
+//! re-injects these bytes as they are (decoded again into `rmpv::Value`, then
+//! serialized by this same `Value`, which produces the same canonical encoding
+//! as the one that wrote them — it is the same library on both sides):
+//! nothing is renamed, reordered or normalized, which is the condition of
+//! B20 (two successive saves byte-identical).
 
 use serde::de::{DeserializeOwned, Error as _};
 use serde::ser::{Error as _, SerializeMap};
 use serde::{Deserialize, Deserializer, Serializer};
 use stokesforge_plot::RawVariant;
 
-/// Résultat de la lecture du tag externally-tagged d'un enum : soit une
-/// simple chaîne (variante unitaire, sans contenu), soit une map à une
-/// entrée `{nom: contenu}`.
+/// Result of reading the tag of an externally-tagged enum: either a
+/// plain string (unit variant, without content), or a single-entry
+/// map `{name: content}`.
 enum Tag {
     Bare(String),
     Tagged(String, rmpv::Value),
@@ -83,9 +83,9 @@ fn split_tag(value: &rmpv::Value) -> Result<Tag, String> {
     }
 }
 
-/// Décode un enum externally-tagged en essayant d'abord `Known` (le schéma
-/// d'aujourd'hui) ; à l'échec, capture le nom et le contenu bruts dans un
-/// [`RawVariant`] plutôt que de propager l'erreur.
+/// Decodes an externally-tagged enum by first trying `Known` (today's
+/// schema); on failure, captures the raw name and content in a
+/// [`RawVariant`] rather than propagating the error.
 pub(crate) fn deserialize_with_fallback<'de, D, Known, Public>(
     deserializer: D,
 ) -> Result<Public, D::Error>
@@ -95,15 +95,15 @@ where
     Public: From<RawVariant>,
 {
     let value = rmpv::Value::deserialize(deserializer)?;
-    // Réencodage canonique de la valeur capturée, puis nouvelle tentative
-    // par le vrai décodeur `rmp_serde` (voir la doc de tête du module) :
-    // c'est lui, pas `rmpv`, qui sait interpréter le tag externally-tagged
-    // par nom que ce format écrit partout ailleurs.
+    // Canonical re-encoding of the captured value, then a new attempt
+    // through the real `rmp_serde` decoder (see the module head doc):
+    // it, not `rmpv`, can interpret the externally-tagged tag
+    // by name that this format writes everywhere else.
     //
-    // La valeur est libérée **avant** la tentative : une colonne de plusieurs
-    // centaines de Mo ne coexiste ainsi pas en trois copies (valeur, octets
-    // réencodés, enregistrement connu). Le chemin d'échec, rare, relit la
-    // valeur depuis les octets réencodés (#316).
+    // The value is freed **before** the attempt: a column of several
+    // hundred MB thus does not coexist in three copies (value, re-encoded
+    // bytes, known record). The rare failure path re-reads the
+    // value from the re-encoded bytes (#316).
     let Ok(reencoded) = rmp_serde::to_vec_named(&value) else {
         return raw_variant(&value)
             .map(Public::from)
@@ -120,7 +120,7 @@ where
         .map_err(D::Error::custom)
 }
 
-/// Nom et contenu bruts d'une variante qu'on ne sait pas lire.
+/// Raw name and content of a variant that cannot be read.
 fn raw_variant(value: &rmpv::Value) -> Result<RawVariant, String> {
     let (name, payload) = match split_tag(value)? {
         Tag::Bare(name) => (name, Vec::new()),
@@ -132,11 +132,11 @@ fn raw_variant(value: &rmpv::Value) -> Result<RawVariant, String> {
     Ok(RawVariant { name, payload })
 }
 
-/// Réécrit une variante capturée à l'identique : `payload` vide → la simple
-/// chaîne du nom (variante unitaire) ; sinon → `{nom: contenu}`, le contenu
-/// étant redécodé depuis les octets bruts puis sérialisé par le `Serializer`
-/// donné (celui de l'appelant, pas nécessairement `rmp_serde` — `rmpv::Value`
-/// se sérialise vers n'importe quel format `serde`).
+/// Rewrites a captured variant identically: empty `payload` → the plain
+/// string of the name (unit variant); otherwise → `{name: content}`, the content
+/// being decoded again from the raw bytes then serialized by the given
+/// `Serializer` (the caller's, not necessarily `rmp_serde` — `rmpv::Value`
+/// serializes to any `serde` format).
 pub(crate) fn serialize_raw_variant<S: Serializer>(
     raw: &RawVariant,
     serializer: S,

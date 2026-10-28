@@ -1,50 +1,48 @@
-//! Type d'erreur unique du crate.
+//! The single error type of the crate.
 //!
-//! Les erreurs du modèle remontent telles quelles (`Core`, transparente) :
-//! une commande qui échoue échoue pour une raison du cœur, pas pour une
-//! raison inventée ici. Les trois autres variantes décrivent les seuls
-//! refus propres à la pile d'historique.
+//! Model errors come up unchanged (`Core`, transparent): a command that fails
+//! fails for a reason of the core, not for a reason invented here. The three
+//! other variants describe the only refusals specific to the history stack.
 
 use stokesforge_core::CoreError;
 
-/// Erreur d'une opération du bus de commandes.
+/// Error of a command bus operation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
-    /// Échec rendu par le modèle (`stokesforge-core`), transmis sans réécriture.
+    /// Failure returned by the model (`stokesforge-core`), passed on unchanged.
     #[error(transparent)]
     Core(#[from] CoreError),
-    /// `end_macro`/`abort_macro` sans `begin_macro`.
+    /// `end_macro`/`abort_macro` without `begin_macro`.
     #[error("no macro in progress")]
     NotInMacro,
-    /// `undo`/`redo`/`set_limit`/`clear` pendant qu'une macro est ouverte.
-    /// Le champ nomme l'opération refusée.
+    /// `undo`/`redo`/`set_limit`/`clear` while a macro is open.
+    /// The field names the refused operation.
     #[error("operation refused while a macro is open: {0}")]
     MacroOpen(&'static str),
-    /// Changement de limite refusé : la pile n'est pas vide.
+    /// Limit change refused: the stack is not empty.
     #[error("the history limit can only be changed when the stack is empty")]
     StackNotEmpty,
-    /// `begin_macro` refusé : l'imbrication a déjà atteint
-    /// [`crate::history::MAX_MACRO_DEPTH`] niveaux (B7,
-    /// `guide-de-correction-robustesse.md` §F4 — option 1 : une constante
-    /// nommée et une erreur, plutôt que de rendre `revert`/`Drop` itératifs
-    /// sur `Entry::Macro`). Rien n'empilait cette limite avant ce correctif
-    /// : au-delà de ~10 891 niveaux, annuler une imbrication aussi profonde
-    /// débordait la pile du fil de l'acteur et faisait `abort()` le
-    /// processus — voir `stokesforge-robustesse/src/bin/sonde_pile.rs`. Le champ
-    /// nomme la limite refusée.
+    /// `begin_macro` refused: nesting has already reached
+    /// [`crate::history::MAX_MACRO_DEPTH`] levels (B7,
+    /// `guide-de-correction-robustesse.md` §F4 — option 1: a named constant
+    /// and an error, rather than making `revert`/`Drop` iterative on
+    /// `Entry::Macro`). Nothing capped this nesting before this fix: beyond
+    /// ~10,891 levels, undoing such a deep nesting overflowed the actor
+    /// thread's stack and `abort()`ed the process — see
+    /// `stokesforge-robustesse/src/bin/sonde_pile.rs`. The field names the
+    /// refused limit.
     #[error("macro nesting too deep (limit: {0})")]
     MacroTooDeep(usize),
-    /// A4 (`guide-de-correction-robustesse.md` §F6) — refus d'un
-    /// `Execute`/`BeginMacro`/`EndMacro`/`AbortMacro` dont l'émetteur n'est
-    /// pas celui qui a ouvert la macro courante. Distinct de `MacroOpen` :
-    /// `MacroOpen` refuse une opération pour **quiconque** pendant qu'une
-    /// macro — n'importe laquelle — est ouverte (`undo`, `save`...) ; ici,
-    /// une macro **est** ouverte, l'opération lui serait normalement
-    /// permise, mais son émetteur n'est pas le propriétaire de celle-ci. Le
-    /// champ nomme l'opération refusée.
+    /// A4 (`guide-de-correction-robustesse.md` §F6) — refusal of an
+    /// `Execute`/`BeginMacro`/`EndMacro`/`AbortMacro` whose sender is not the
+    /// one that opened the current macro. Distinct from `MacroOpen`:
+    /// `MacroOpen` refuses an operation for **anyone** while a macro — any
+    /// macro — is open (`undo`, `save`...); here, a macro **is** open, the
+    /// operation would normally be allowed to it, but its sender is not the
+    /// owner of that macro. The field names the refused operation.
     #[error("operation refused: a macro is open by another client ({0})")]
     ForeignMacro(&'static str),
 }
 
-/// Alias de résultat du crate.
+/// Result alias of the crate.
 pub type CommandResult<T> = Result<T, CommandError>;

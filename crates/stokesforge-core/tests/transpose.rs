@@ -1,5 +1,5 @@
-//! Feuilles transposées liées (#253) : création, complément, refus, états
-//! dérivés (périmée, modifiée), remise à jour et vie du lien.
+//! Linked transposed sheets (#253): creation, completion, refusals, derived
+//! states (stale, modified), refresh and life of the link.
 
 use stokesforge_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, CoreError, MixedCell, NodeId, Project, ValueBlock,
@@ -13,7 +13,7 @@ struct Fixture {
     cols: Vec<NodeId>,
 }
 
-/// Trois colonnes (t = 0, 10, 20) de trois lignes, unité « a.u. ».
+/// Three columns (t = 0, 10, 20) of three rows, unit "a.u.".
 fn fixture() -> Fixture {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -73,7 +73,7 @@ fn creates_the_sheet_after_the_source_with_x_prime_then_the_row() {
     let sheet = f.project.transpose_rows(f.sheet, &[1]).unwrap();
     assert_eq!(name(&f.project, sheet), format!("Sheet1{TRANSPOSE_MARK}"));
     let books = children(&f.project, f.book);
-    assert_eq!(books, vec![f.sheet, sheet], "juste après la source");
+    assert_eq!(books, vec![f.sheet, sheet], "right after the source");
     let cols = children(&f.project, sheet);
     assert_eq!(cols.len(), 2);
     assert_eq!(name(&f.project, cols[0]), "x'");
@@ -129,7 +129,7 @@ fn a_short_column_gives_a_missing_cell() {
 fn refuses_a_column_without_x_prime_and_names_its_letter() {
     let mut f = fixture();
     f.project
-        .add_column(f.sheet, None, Some("Temps"), Column::from_f64(&[1.0]))
+        .add_column(f.sheet, None, Some("Time"), Column::from_f64(&[1.0]))
         .unwrap();
     let before = f.project.tree().clone();
     let error = f.project.transpose_rows(f.sheet, &[0]).unwrap_err();
@@ -137,13 +137,13 @@ fn refuses_a_column_without_x_prime_and_names_its_letter() {
         error,
         CoreError::TransposeNoXPrime {
             letter: "D".into(),
-            name: "Temps".into()
+            name: "Time".into()
         }
     );
     assert_eq!(
         f.project.tree().as_ref(),
         before.as_ref(),
-        "rien n'est créé"
+        "nothing is created"
     );
 }
 
@@ -156,7 +156,7 @@ fn only_y_columns_are_transposed_and_an_x_column_without_x_prime_is_skipped() {
         ..ColumnMeta::default()
     });
     f.project
-        .add_column(f.sheet, Some(0), Some("Temps"), x)
+        .add_column(f.sheet, Some(0), Some("Time"), x)
         .unwrap();
     let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
     let cols = children(&f.project, sheet);
@@ -226,7 +226,7 @@ fn stale_when_a_source_value_an_x_prime_or_the_columns_change() {
     assert_eq!(
         state(&f.project, sheet),
         (true, false),
-        "x' lu avec la version"
+        "x' read with the version"
     );
     f.project.recalculate_transpose(sheet).unwrap();
     assert_eq!(
@@ -243,10 +243,10 @@ fn stale_when_a_source_value_an_x_prime_or_the_columns_change() {
         .project
         .add_column(f.sheet, None, Some("S3"), extra)
         .unwrap();
-    assert_eq!(state(&f.project, sheet), (true, false), "colonne ajoutée");
+    assert_eq!(state(&f.project, sheet), (true, false), "column added");
     f.project.recalculate_transpose(sheet).unwrap();
     f.project.remove(added).unwrap();
-    assert_eq!(state(&f.project, sheet), (true, false), "colonne supprimée");
+    assert_eq!(state(&f.project, sheet), (true, false), "column removed");
 }
 
 #[test]
@@ -254,11 +254,11 @@ fn only_a_value_edit_of_a_linked_column_marks_the_sheet_modified() {
     let mut f = fixture();
     let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
     let row = children(&f.project, sheet)[1];
-    f.project.rename(row, "Mon spectre").unwrap();
+    f.project.rename(row, "My spectrum").unwrap();
     f.project.set_column_type(row, ColumnType::Mixed).unwrap();
     f.project.set_column_type(row, ColumnType::Numeric).unwrap();
     f.project
-        .add_column(sheet, None, Some("Mienne"), Column::from_f64(&[1.0]))
+        .add_column(sheet, None, Some("Mine"), Column::from_f64(&[1.0]))
         .unwrap();
     assert_eq!(state(&f.project, sheet), (false, false));
     f.project
@@ -292,11 +292,7 @@ fn recalculating_writes_fresh_column_versions() {
     let version = |p: &Project| p.tree().node(row).unwrap().as_column().unwrap().version();
     let before = version(&f.project);
     f.project.recalculate_transpose(sheet).unwrap();
-    assert_ne!(
-        version(&f.project),
-        before,
-        "écriture de données : version neuve"
-    );
+    assert_ne!(version(&f.project), before, "data write: new version");
 }
 
 #[test]
@@ -318,25 +314,25 @@ fn completing_a_stale_untouched_sheet_refreshes_it() {
 fn the_link_follows_a_rename_and_loses_nothing_when_the_source_goes() {
     let mut f = fixture();
     let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
-    f.project.rename(f.sheet, "Nouveau").unwrap();
-    assert_eq!(name(&f.project, sheet), format!("Nouveau{TRANSPOSE_MARK}"));
-    // Un nom que l'utilisateur a donné lui-même n'est plus écrasé.
-    f.project.rename(sheet, "Cinétique").unwrap();
-    f.project.rename(f.sheet, "Autre").unwrap();
-    assert_eq!(name(&f.project, sheet), "Cinétique");
+    f.project.rename(f.sheet, "New").unwrap();
+    assert_eq!(name(&f.project, sheet), format!("New{TRANSPOSE_MARK}"));
+    // A name the user gave themselves is no longer overwritten.
+    f.project.rename(sheet, "Kinetics").unwrap();
+    f.project.rename(f.sheet, "Other").unwrap();
+    assert_eq!(name(&f.project, sheet), "Kinetics");
     let cols = children(&f.project, sheet);
     f.project.remove(f.sheet).unwrap();
     assert!(f.project.tree().transposes().is_empty());
-    assert_eq!(children(&f.project, sheet), cols, "aucune donnée perdue");
+    assert_eq!(children(&f.project, sheet), cols, "no data lost");
 }
 
 #[test]
 fn removing_the_transposed_sheet_drops_the_link_and_a_copy_is_ordinary() {
     let mut f = fixture();
     let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
-    let copy = f.project.duplicate_worksheet(f.sheet, "Copie").unwrap();
+    let copy = f.project.duplicate_worksheet(f.sheet, "Copy").unwrap();
     assert!(f.project.tree().transposed_from(copy).is_none());
-    let copy_of_transposed = f.project.duplicate_worksheet(sheet, "Copie ᵀ").unwrap();
+    let copy_of_transposed = f.project.duplicate_worksheet(sheet, "Copy ᵀ").unwrap();
     assert!(f
         .project
         .tree()

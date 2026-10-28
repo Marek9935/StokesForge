@@ -1,6 +1,6 @@
-//! Les feuilles transposées liées (#253) traversent le fichier `.stf` : le
-//! lien, ses empreintes, et les états dérivés (périmée, modifiée) sont les
-//! mêmes après un aller-retour.
+//! Linked transposed sheets (#253) go through the `.stf` file: the link,
+//! its fingerprints, and the derived states (stale, modified) are the same
+//! after a round trip.
 
 use stokesforge_core::{Column, ColumnMeta, NodeId, Project, ValueBlock};
 use stokesforge_persistence::{load, save};
@@ -42,7 +42,7 @@ fn the_link_and_its_derived_states_survive_a_round_trip() {
     assert_eq!(back.tree().transposes(), project.tree().transposes());
     assert_eq!(state(&back, sheet), (false, false));
 
-    // Périmée et modifiée : l'état se retrouve, rien n'est stocké en dur.
+    // Stale and modified: the state is found again, nothing is stored as is.
     let first = project.tree().children(source).unwrap()[0];
     project
         .set_values(first, 0, ValueBlock::Float(vec![99.0]))

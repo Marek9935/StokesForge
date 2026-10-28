@@ -1,37 +1,37 @@
-//! Palettes nommées de couleurs de courbes.
+//! Named palettes of curve colors.
 //!
-//! Proposées par l'outil de couleur des courbes de l'application : chaque
-//! palette est une suite ordonnée de couleurs `#RRGGBB`, pensée pour que des
-//! courbes voisines restent distinguables. Elles vivent ici, dans la
-//! description neutre du graphe, et non dans l'interface : l'ordre d'une
-//! palette est exactement ce qu'il faudra pour colorer **plusieurs** courbes
-//! d'un coup (une palette qualitative), ou en dégradé (une palette
-//! séquentielle comme Viridis) — une évolution prévue, qui n'aura pas à
-//! déplacer ces données.
+//! Offered by the application's curve color tool: each
+//! palette is an ordered list of `#RRGGBB` colors, designed so that neighboring
+//! curves stay distinguishable. They live here, in the neutral
+//! graph description, and not in the interface: the order of a
+//! palette is exactly what will be needed to color **several** curves
+//! at once (a qualitative palette), or as a gradient (a
+//! sequential palette such as Viridis) — a planned change, which will not have to
+//! move this data.
 
-/// Nature d'une palette.
+/// Nature of a palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaletteNature {
-    /// Couleurs distinctes, sans ordre de valeur (séries différentes).
+    /// Distinct colors, with no value order (different series).
     Qualitative,
-    /// Dégradé ordonné (séries qui suivent un paramètre : température,
-    /// concentration, temps…).
+    /// Ordered gradient (series that follow a parameter: temperature,
+    /// concentration, time…).
     Sequential,
 }
 
-/// Une palette nommée.
+/// A named palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamedPalette {
-    /// Nom affiché.
+    /// Displayed name.
     pub name: &'static str,
     /// Nature.
     pub nature: PaletteNature,
-    /// Couleurs, dans l'ordre.
+    /// Colors, in order.
     pub colors: &'static [&'static str],
 }
 
-/// Les palettes de courbes proposées, la palette par défaut de StokesForge en
-/// premier.
+/// The curve palettes offered, the StokesForge default palette
+/// first.
 pub const CURVE_PALETTES: [NamedPalette; 9] = [
     NamedPalette {
         name: "StokesForge (par défaut)",
@@ -107,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chaque_palette_est_non_vide_et_bien_formee() {
+    fn every_palette_is_non_empty_and_well_formed() {
         assert_eq!(CURVE_PALETTES[0].colors, &crate::style::DEFAULT_PALETTE);
         for palette in CURVE_PALETTES {
             assert!(palette.colors.len() >= 8, "{}", palette.name);

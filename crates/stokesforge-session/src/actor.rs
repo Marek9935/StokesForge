@@ -1,4 +1,4 @@
-//! Boucle de l'acteur : le seul endroit du processus qui détient un
+//! The actor's loop: the only place in the process that holds a
 //! `&mut Project`.
 
 use std::collections::HashMap;
@@ -15,168 +15,165 @@ use crate::recalc::{FormulaRecalc, Recalculator};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
 use crate::{ClientId, LoadReport, WindowGeometry};
 
-/// Requête envoyée à l'acteur par un [`crate::SessionHandle`]. Privée au
-/// crate : les clients ne construisent jamais de `Request` eux-mêmes, ils
-/// passent par les méthodes de `SessionHandle`, qui portent chacune leur
-/// canal de réponse à usage unique.
-// `Execute` porte une `Command` entière (colonne et métadonnées comprises), bien
-// plus grosse que les autres requêtes : le message est consommé aussitôt par
-// l'acteur, le boîter n'y gagnerait qu'une allocation par commande.
+/// Request sent to the actor by a [`crate::SessionHandle`]. Private to the
+/// crate: clients never build a `Request` themselves, they go through the
+/// methods of `SessionHandle`, each of which carries its own single-use reply
+/// channel.
+// `Execute` carries a whole `Command` (column and metadata included), much
+// bigger than the other requests: the message is consumed at once by the
+// actor, so boxing it would only add one allocation per command.
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum Request {
-    /// Exécute une commande. Répond la nouvelle révision, ou l'erreur rendue
-    /// par `History::execute` — l'arbre et l'historique restent alors
-    /// inchangés. Refusée (`ForeignMacro`) si une macro est ouverte par un
-    /// autre émetteur que `client` (A4, voir la table en tête de crate).
+    /// Executes a command. Replies with the new revision, or the error
+    /// returned by `History::execute` — the tree and the history then stay
+    /// unchanged. Refused (`ForeignMacro`) if a macro is open by a sender
+    /// other than `client` (A4, see the table at the top of the crate).
     Execute {
-        /// Commande à appliquer.
+        /// Command to apply.
         command: Command,
-        /// Émetteur de la requête.
+        /// Sender of the request.
         client: ClientId,
-        /// Réponse : nouvelle révision, ou erreur.
+        /// Reply: new revision, or error.
         reply: Sender<CommandResult<Revision>>,
-        /// Vrai (#239) : répondre dès la commande appliquée, puis recalculer
-        /// les formules en pouvant être arrêté par la [`RecalcGauge`]. La
-        /// révision rendue est alors celle d'avant recalcul ; une révision
-        /// de plus la suit quand il est fini.
+        /// True (#239): reply as soon as the command is applied, then
+        /// recalculate the formulas, able to be stopped by the
+        /// [`RecalcGauge`]. The revision returned is then the one before
+        /// recalculation; one more revision follows when it is finished.
         interruptible: bool,
     },
-    /// Annule l'entrée du sommet. `Ok(None)` si la pile est vide.
+    /// Undoes the top entry. `Ok(None)` if the stack is empty.
     Undo {
-        /// Réponse : nouvelle révision si quelque chose a été annulé.
+        /// Reply: new revision if something was undone.
         reply: Sender<CommandResult<Option<Revision>>>,
     },
-    /// Rétablit l'entrée annulée la plus récente. `Ok(None)` si rien à rétablir.
+    /// Redoes the most recently undone entry. `Ok(None)` if there is nothing to redo.
     Redo {
-        /// Réponse : nouvelle révision si quelque chose a été rétabli.
+        /// Reply: new revision if something was redone.
         reply: Sender<CommandResult<Option<Revision>>>,
     },
-    /// Ouvre une macro. `Err(MacroTooDeep)` au-delà de
-    /// `History::MAX_MACRO_DEPTH` niveaux d'imbrication (B7,
-    /// `guide-de-correction-robustesse.md` §F4). `Err(ForeignMacro)` si une
-    /// macro est déjà ouverte par un autre émetteur que `client` (A4) — un
-    /// même émetteur peut toujours imbriquer la sienne.
+    /// Opens a macro. `Err(MacroTooDeep)` beyond `History::MAX_MACRO_DEPTH`
+    /// nesting levels (B7, `guide-de-correction-robustesse.md` §F4).
+    /// `Err(ForeignMacro)` if a macro is already open by a sender other than
+    /// `client` (A4) — the same sender can always nest its own.
     BeginMacro {
-        /// Nature du groupe.
+        /// Kind of the group.
         kind: MacroKind,
-        /// Émetteur de la requête.
+        /// Sender of the request.
         client: ClientId,
-        /// Réponse : nouvelle révision (l'état de l'historique a changé), ou
-        /// l'erreur de `History::begin_macro`.
+        /// Reply: new revision (the history state changed), or the error of
+        /// `History::begin_macro`.
         reply: Sender<CommandResult<Revision>>,
     },
-    /// Ferme la macro courante. `Err(ForeignMacro)` si l'émetteur n'est pas
-    /// celui qui l'a ouverte (A4).
+    /// Closes the current macro. `Err(ForeignMacro)` if the sender is not the
+    /// one that opened it (A4).
     EndMacro {
-        /// Émetteur de la requête.
+        /// Sender of the request.
         client: ClientId,
-        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`,
-        /// `ForeignMacro`).
+        /// Reply: new revision, or error (`NotInMacro`, `ForeignMacro`).
         reply: Sender<CommandResult<Revision>>,
     },
-    /// Annule la macro courante et tout ce qu'elle avait appliqué.
-    /// `Err(ForeignMacro)` si l'émetteur n'est pas celui qui l'a ouverte —
-    /// c'est exactement le refus qui ferme A4 : un `abort_macro` ne peut
-    /// plus défaire le travail validé d'un autre client.
+    /// Aborts the current macro and everything it had applied.
+    /// `Err(ForeignMacro)` if the sender is not the one that opened it — this
+    /// is exactly the refusal that closes A4: an `abort_macro` can no longer
+    /// undo another client's validated work.
     AbortMacro {
-        /// Émetteur de la requête.
+        /// Sender of the request.
         client: ClientId,
-        /// Réponse : nouvelle révision, ou erreur (`NotInMacro`,
-        /// `ForeignMacro`).
+        /// Reply: new revision, or error (`NotInMacro`, `ForeignMacro`).
         reply: Sender<CommandResult<Revision>>,
     },
-    /// Demande un instantané de l'état courant.
+    /// Requests a snapshot of the current state.
     Snapshot {
-        /// Réponse : l'instantané demandé.
+        /// Reply: the requested snapshot.
         reply: Sender<Snapshot>,
     },
-    /// Pose (ou remplace) la géométrie de fenêtre d'un nœud. Ne touche ni
-    /// `History` ni `revision` (voir la doc de tête de crate) : ce n'est pas
-    /// une mutation du modèle, donc pas une entrée annulable. Toujours
-    /// acceptée, y compris pour un `NodeId` qui n'existe pas (ou plus) dans
-    /// l'arbre courant — l'entrée serait de toute façon purgée à la
-    /// prochaine mutation qui constate son absence (voir `run`) ; valider ici
-    /// n'apporterait rien qu'un aller-retour de plus.
+    /// Sets (or replaces) the window geometry of a node. Touches neither
+    /// `History` nor `revision` (see the crate-level docs): it is not a model
+    /// mutation, so not an undoable entry. Always accepted, including for a
+    /// `NodeId` that does not (or no longer) exist in the current tree — the
+    /// entry would be purged anyway at the next mutation that notices its
+    /// absence (see `run`); validating here would bring nothing but one more
+    /// round trip.
     SetWindowGeometry {
-        /// Nœud dont la fenêtre a bougé ou changé de taille.
+        /// Node whose window moved or changed size.
         node: NodeId,
-        /// Nouvelle géométrie.
+        /// New geometry.
         geometry: WindowGeometry,
-        /// Réponse : nouvelle valeur de `geometry_revision` (voir la doc de
-        /// tête de crate — un compteur distinct de `revision`, pour que
-        /// déplacer une fenêtre ne fasse pas croire à un client de rendu que
-        /// le modèle a changé).
+        /// Reply: new value of `geometry_revision` (see the crate-level docs
+        /// — a counter distinct from `revision`, so that moving a window does
+        /// not make a rendering client think the model changed).
         reply: Sender<u64>,
     },
-    /// Pose (ou remplace) la largeur de la colonne `column` (#325). Même statut
-    /// que `SetWindowGeometry` : ni `History` ni `revision`, pas une mutation
-    /// du modèle, donc rien à annuler. Une largeur qui n'est pas un réel fini
-    /// strictement positif est **ignorée** (invariant 10) : la réponse rend
-    /// alors la valeur inchangée de `geometry_revision`. Un `NodeId` absent est
-    /// accepté, comme pour la géométrie : la table n'est **pas** purgée à la
-    /// mutation (la colonne supprimée puis restaurée par Ctrl+Z retrouve sa
-    /// largeur, invariant 7) ; la sauvegarde filtre les clés mortes.
+    /// Sets (or replaces) the width of column `column` (#325). Same status as
+    /// `SetWindowGeometry`: neither `History` nor `revision`, not a model
+    /// mutation, so nothing to undo. A width that is not a finite, strictly
+    /// positive real is **ignored** (invariant 10): the reply then returns the
+    /// unchanged value of `geometry_revision`. An absent `NodeId` is accepted,
+    /// as for geometry: the table is **not** purged on mutation (a column
+    /// deleted then restored by Ctrl+Z finds its width again, invariant 7);
+    /// saving filters the dead keys.
     SetColumnWidth {
-        /// Colonne redimensionnée.
+        /// Column that was resized.
         column: NodeId,
-        /// Nouvelle largeur, en points logiques.
+        /// New width, in logical points.
         width: f32,
-        /// Réponse : valeur de `geometry_revision`, qui sert aussi aux
-        /// largeurs (un seul compteur de « vue »).
+        /// Reply: value of `geometry_revision`, which also serves the widths
+        /// (a single "view" counter).
         reply: Sender<u64>,
     },
-    /// Remet les colonnes `columns` à la largeur par défaut (#330) : retire
-    /// leur clé de la table (le défaut est une constante de l'application, la
-    /// session n'écrit aucune valeur). Même statut que `SetColumnWidth` : ni
-    /// `History` ni `revision`. `geometry_revision` n'avance que si au moins
-    /// une clé a réellement été retirée ; un `NodeId` sans largeur est ignoré.
+    /// Resets columns `columns` to the default width (#330): removes their key
+    /// from the table (the default is an application constant, the session
+    /// writes no value). Same status as `SetColumnWidth`: neither `History`
+    /// nor `revision`. `geometry_revision` advances only if at least one key
+    /// was actually removed; a `NodeId` without a width is ignored.
     ResetColumnWidths {
-        /// Colonnes à remettre au défaut.
+        /// Columns to reset to the default.
         columns: Vec<NodeId>,
-        /// Réponse : valeur de `geometry_revision`.
+        /// Reply: value of `geometry_revision`.
         reply: Sender<u64>,
     },
-    /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
-    /// sauvegarder ne modifie pas le modèle.
+    /// Saves the current project to `path`. Does not change the revision:
+    /// saving does not modify the model.
     Save {
-        /// Chemin de destination.
+        /// Destination path.
         path: PathBuf,
-        /// Réponse : succès, ou erreur de persistance.
+        /// Reply: success, or persistence error.
         reply: Sender<SessionResult<()>>,
     },
-    /// Charge un projet complet depuis `path` et le substitue au projet
-    /// courant. Vide l'historique. Refusé si une macro est ouverte.
+    /// Loads a complete project from `path` and substitutes it for the
+    /// current project. Clears the history. Refused if a macro is open.
     Load {
-        /// Chemin source.
+        /// Source path.
         path: PathBuf,
-        /// Plafonds de lecture : taille (A2) et cellules (B1), #316.
+        /// Read caps: size (A2) and cells (B1), #316.
         limits: stokesforge_persistence::LoadLimits,
-        /// Réponse : nouvelle révision, ou erreur (persistance, ou
-        /// `Command(MacroOpen)` si une macro est ouverte).
+        /// Reply: new revision, or error (persistence, or
+        /// `Command(MacroOpen)` if a macro is open).
         reply: Sender<SessionResult<(Revision, LoadReport)>>,
     },
-    /// Remplace le projet par un projet vide, avec les mêmes gardes que Load.
+    /// Replaces the project with an empty project, with the same guards as Load.
     NewProject {
         reply: Sender<SessionResult<Revision>>,
     },
-    /// Relance des calculs d'analyse (#181), hors historique : `ids` vide pour
-    /// tous les calculs périmés. Refusée (`ForeignMacro`) si une macro est
-    /// ouverte par un autre émetteur, comme toute écriture.
+    /// Reruns analysis calculations (#181), outside the history: empty `ids`
+    /// for all stale calculations. Refused (`ForeignMacro`) if a macro is open
+    /// by another sender, like any write.
     Recalculate {
         ids: Vec<NodeId>,
         client: ClientId,
         reply: Sender<CommandResult<Revision>>,
     },
-    /// Demande l'arrêt de l'acteur.
+    /// Requests the actor's stop.
     Shutdown,
-    /// Test seulement : fait paniquer l'acteur, pour éprouver la mort visible.
+    /// Tests only: makes the actor panic, to exercise the visible death.
     #[cfg(test)]
     PanicForTest,
 }
 
-/// Signale à la jauge que l'acteur a quitté sa boucle. Son `Drop` joue aussi
-/// pendant un déroulement de panic : c'est ce qui rend la mort visible
-/// (`SessionHandle::actor_alive`) et libère un recalcul interrompu en plein vol.
+/// Tells the gauge that the actor left its loop. Its `Drop` also runs during a
+/// panic unwind: this is what makes the death visible
+/// (`SessionHandle::actor_alive`) and frees a recalculation interrupted
+/// mid-flight.
 struct ActorExit(Arc<RecalcGauge>);
 
 impl Drop for ActorExit {
@@ -185,10 +182,10 @@ impl Drop for ActorExit {
     }
 }
 
-/// Boucle de l'acteur : sert les requêtes dans l'ordre FIFO où elles arrivent
-/// sur `rx`, jusqu'à ce que tous les émetteurs soient lâchés ou qu'un
-/// `Shutdown` arrive. Rend le `Project` final, pour que l'appelant
-/// (`Session::shutdown`) puisse le récupérer.
+/// The actor's loop: serves the requests in the FIFO order in which they
+/// arrive on `rx`, until all the senders are dropped or a `Shutdown` arrives.
+/// Returns the final `Project`, so that the caller (`Session::shutdown`) can
+/// recover it.
 pub(crate) fn run(
     mut project: Project,
     history_limit: Option<usize>,
@@ -202,37 +199,34 @@ pub(crate) fn run(
         None => History::new(),
     };
     let mut revision: Revision = 0;
-    // A3 (`guide-de-correction-robustesse.md` §F2/F6) — époque du projet
-    // courant : locale à ce fil, **jamais persistée** (voir la doc de
-    // `Snapshot::epoch`). Avance sur `Load` ou `NewProject` réussi : ni
-    // `Execute`/`Undo`/`Redo`, qui font déjà avancer `revision`, ni les
-    // macros ne changent l'identité du projet.
+    // A3 (`guide-de-correction-robustesse.md` §F2/F6) — epoch of the current
+    // project: local to this thread, **never persisted** (see the docs of
+    // `Snapshot::epoch`). Advances on a successful `Load` or `NewProject`:
+    // neither `Execute`/`Undo`/`Redo`, which already advance `revision`, nor
+    // macros change the project's identity.
     let mut epoch: u64 = 0;
-    // A4 (`guide-de-correction-robustesse.md` §F6) — émetteur qui a ouvert la
-    // macro courante, `None` hors macro. Remis à `None` dès que
-    // `history.in_macro()` redevient faux, que la fermeture ait réussi ou
-    // non (voir les branches `EndMacro`/`AbortMacro` : `History::end_macro`/
-    // `abort_macro` peuvent avoir dépilé un niveau avant qu'une erreur ne
-    // remonte).
+    // A4 (`guide-de-correction-robustesse.md` §F6) — sender that opened the
+    // current macro, `None` outside a macro. Reset to `None` as soon as
+    // `history.in_macro()` becomes false again, whether the closing succeeded
+    // or not (see the `EndMacro`/`AbortMacro` branches: `History::end_macro`/
+    // `abort_macro` may have popped a level before an error comes back).
     let mut macro_owner: Option<ClientId> = None;
-    // Table `NodeId -> WindowGeometry`, à côté du `Project` (voir la doc de
-    // tête de crate) : mutée uniquement par `SetWindowGeometry`, jamais par
-    // une commande. `geometry_revision` est un compteur **distinct** de
-    // `revision` — voir la doc de tête de crate pour la décision et le
-    // pourquoi.
+    // `NodeId -> WindowGeometry` table, beside the `Project` (see the
+    // crate-level docs): mutated only by `SetWindowGeometry`, never by a
+    // command. `geometry_revision` is a counter **distinct** from `revision`
+    // — see the crate-level docs for the decision and the reason.
     let mut geometries: HashMap<NodeId, WindowGeometry> = HashMap::new();
     let mut geometry_revision: u64 = 0;
-    // Largeur des colonnes (#325), par `NodeId` : même statut que les
-    // géométries — hors du `Project`, jamais dans l'historique, partage
-    // `geometry_revision` —, mais **jamais purgée** à la mutation : la largeur
-    // d'une colonne supprimée doit revenir quand Ctrl+Z la restaure
-    // (invariant 7). Les clés mortes tombent à la sauvegarde.
+    // Column widths (#325), by `NodeId`: same status as the geometries —
+    // outside the `Project`, never in the history, shares `geometry_revision`
+    // —, but **never purged** on mutation: the width of a deleted column must
+    // come back when Ctrl+Z restores it (invariant 7). Dead keys drop at save.
     let mut column_widths: HashMap<NodeId, f32> = HashMap::new();
-    // #193 — ce que le recalcul des formules a vu à son dernier passage
-    // (voir `recalc`) : à côté du `Project`, comme les géométries, jamais
-    // dans l'historique ni dans le `.stf`. Le projet reçu à la création n'a
-    // jamais été recalculé par cet acteur : le mémo vide le fera entièrement
-    // à la première requête mutante, comme avant #193.
+    // #193 — what the formula recalculation saw on its last pass (see
+    // `recalc`): beside the `Project`, like the geometries, never in the
+    // history nor in the `.stf`. The project received at creation was never
+    // recalculated by this actor: the empty memo will do it entirely at the
+    // first mutating request, as before #193.
     let mut formulas = Recalculator::new(recalc);
 
     for request in rx {
@@ -243,8 +237,8 @@ pub(crate) fn run(
                 reply,
                 interruptible,
             } => {
-                // A4 — une macro ouverte par un autre émetteur n'absorbe plus
-                // silencieusement le travail de celui-ci : c'était le bug.
+                // A4 — a macro opened by another sender no longer silently
+                // absorbs that sender's work: that was the bug.
                 if history.in_macro() && macro_owner != Some(client) {
                     let _ = reply.send(Err(CommandError::ForeignMacro("execute")));
                     continue;
@@ -258,8 +252,8 @@ pub(crate) fn run(
                 };
                 revision += 1;
                 if interruptible {
-                    // #239 — la commande est appliquée : on répond sans
-                    // attendre le recalcul, que Stop peut interrompre.
+                    // #239 — the command is applied: reply without waiting
+                    // for the recalculation, which Stop can interrupt.
                     let id = gauge.begin();
                     let _ = reply.send(Ok(revision));
                     let stop_gauge = Arc::clone(&gauge);
@@ -267,13 +261,13 @@ pub(crate) fn run(
                         .run_interruptible(&mut project, move || stop_gauge.stop_requested(id));
                     let mut end = RecalcEnd::Done;
                     if !completed {
-                        // Stop : annuler la commande comme Ctrl+Z, puis
-                        // recalculer ce qui a changé (la passe interrompue a
-                        // pu réécrire des colonnes). Dans une macro l'annulation
-                        // est refusée : la commande reste, le recalcul s'achève.
-                        // Une commande sans effet n'a rangé aucune entrée : un
-                        // `undo` défairait alors l'action précédente, sans
-                        // rapport — on n'annule que ce qu'on vient de ranger.
+                        // Stop: undo the command like Ctrl+Z, then
+                        // recalculate what changed (the interrupted pass may
+                        // have rewritten columns). Inside a macro the undo is
+                        // refused: the command stays, the recalculation
+                        // completes. A no-op command stored no entry: an
+                        // `undo` would then undo the previous action,
+                        // unrelated — only what was just stored is undone.
                         if recorded && matches!(history.undo(&mut project), Ok(true)) {
                             end = RecalcEnd::Stopped;
                         }
@@ -282,9 +276,9 @@ pub(crate) fn run(
                     if purge_orphaned_geometries(&project, &mut geometries) {
                         geometry_revision += 1;
                     }
-                    // Les formules ont changé sous la même révision : un
-                    // client qui compare des révisions (cache de rendu) doit
-                    // voir qu'il y a du neuf.
+                    // The formulas changed under the same revision: a client
+                    // that compares revisions (rendering cache) must see that
+                    // there is something new.
                     revision += 1;
                     gauge.finish(id, end);
                 } else {
@@ -326,18 +320,18 @@ pub(crate) fn run(
                 client,
                 reply,
             } => {
-                // A4 — une macro déjà ouverte par un autre émetteur refuse
-                // qu'on s'y imbrique ; le même émetteur le peut toujours
-                // (jusqu'à `MAX_MACRO_DEPTH`, B7 ci-dessous).
+                // A4 — a macro already open by another sender refuses to be
+                // nested into; the same sender always can (up to
+                // `MAX_MACRO_DEPTH`, B7 below).
                 let outcome = if history.in_macro() && macro_owner != Some(client) {
                     Err(CommandError::ForeignMacro("begin_macro"))
                 } else {
                     // B7 (`guide-de-correction-robustesse.md` §F4) —
-                    // `begin_macro` peut refuser (`MacroTooDeep`) : la
-                    // révision n'avance que si l'imbrication a réellement
-                    // changé d'état. Un succès, en revanche, avance la
-                    // révision même sans mutation du modèle (l'état de
-                    // l'historique, `in_macro`, a changé).
+                    // `begin_macro` can refuse (`MacroTooDeep`): the revision
+                    // advances only if the nesting actually changed state. A
+                    // success, on the other hand, advances the revision even
+                    // without a model mutation (the history state, `in_macro`,
+                    // changed).
                     let result = history.begin_macro(kind);
                     if result.is_ok() {
                         macro_owner = Some(client);
@@ -350,9 +344,9 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::EndMacro { client, reply } => {
-                // A4 — `NotInMacro` reste réservé au cas où aucune macro
-                // n'est ouverte ; `ForeignMacro` couvre le cas où une macro
-                // EST ouverte, mais pas par `client`.
+                // A4 — `NotInMacro` stays reserved for the case where no
+                // macro is open; `ForeignMacro` covers the case where a macro
+                // IS open, but not by `client`.
                 let outcome = if history.in_macro() && macro_owner != Some(client) {
                     Err(CommandError::ForeignMacro("end_macro"))
                 } else {
@@ -368,8 +362,8 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::AbortMacro { client, reply } => {
-                // A4 — c'est ici que le bug se produisait : `abort_macro`
-                // défaisait le travail d'un autre client sans le refuser.
+                // A4 — this is where the bug occurred: `abort_macro` undid
+                // another client's work without refusing.
                 let outcome = if history.in_macro() && macro_owner != Some(client) {
                     Err(CommandError::ForeignMacro("abort_macro"))
                 } else {
@@ -379,14 +373,13 @@ pub(crate) fn run(
                     }
                     result.map(|()| {
                         revision += 1;
-                        // Un `abort_macro` revient à rejouer, d'un bloc,
-                        // l'annulation de chaque commande absorbée dans la
-                        // macro — exactement ce que ferait une suite
-                        // d'`Undo` (qui, eux, recalculent après coup) : les
-                        // colonnes-formule touchées par le travail défait
-                        // doivent l'être aussi ici, sans quoi elles
-                        // resteraient sur des valeurs qu'aucune formule
-                        // actuellement en vigueur ne justifie plus.
+                        // An `abort_macro` amounts to replaying, in one
+                        // block, the undo of each command absorbed into the
+                        // macro — exactly what a series of `Undo`s would do
+                        // (which recalculate afterwards): the formula columns
+                        // touched by the undone work must be recalculated
+                        // here too, otherwise they would stay on values that
+                        // no formula currently in force justifies any more.
                         formulas.run(&mut project);
                         revision
                     })
@@ -420,9 +413,9 @@ pub(crate) fn run(
                 geometry,
                 reply,
             } => {
-                // Ne touche ni `history` ni `revision` : voir la doc de tête
-                // de crate — ce n'est pas une mutation du modèle. Toujours
-                // acceptée (voir la doc de `Request::SetWindowGeometry`).
+                // Touches neither `history` nor `revision`: see the
+                // crate-level docs — it is not a model mutation. Always
+                // accepted (see the docs of `Request::SetWindowGeometry`).
                 geometries.insert(node, geometry);
                 geometry_revision += 1;
                 let _ = reply.send(geometry_revision);
@@ -451,25 +444,22 @@ pub(crate) fn run(
                 let _ = reply.send(geometry_revision);
             }
             Request::Save { path, reply } => {
-                // A11 — palliatif déclaré (guide-de-correction-robustesse.md
-                // §F6) : recopie de la garde de `load_project`, pas une
-                // réponse à « lesquelles des huit requêtes une macro ouverte
-                // doit-elle suspendre ? ». Sans elle, sauvegarder pendant une
-                // macro écrit sur le disque un état qu'un `abort_macro`
-                // ultérieur défera en mémoire — le fichier garde alors ce que
-                // l'annulation a effacé. Ne touche ni au projet ni à
-                // l'historique : la révision n'avance pas, sauvegarder ne
-                // change pas le modèle. Refusée pour **quiconque** pendant
-                // une macro, pas seulement son propriétaire (voir la table de
-                // tête de crate) : l'état intermédiaire d'une macro que
-                // n'importe qui pourrait encore avorter ne doit pas atteindre
-                // le disque.
+                // A11 — declared stopgap (guide-de-correction-robustesse.md
+                // §F6): a copy of the guard of `load_project`, not an answer
+                // to "which of the eight requests must an open macro
+                // suspend?". Without it, saving during a macro writes to disk
+                // a state that a later `abort_macro` will undo in memory — the
+                // file then keeps what the undo erased. Touches neither the
+                // project nor the history: the revision does not advance,
+                // saving does not change the model. Refused for **anyone**
+                // during a macro, not only its owner (see the table at the top
+                // of the crate): the intermediate state of a macro that
+                // anyone could still abort must not reach the disk.
                 //
-                // `save_with_geometries` (et non `save`) : la géométrie des
-                // fenêtres doit survivre à un rechargement (voir la doc de
-                // tête de crate) — écrite dans le bloc séparé que
-                // `stokesforge-persistence` lui réserve, jamais mêlée à l'arbre
-                // annulable.
+                // `save_with_geometries` (not `save`): the window geometry
+                // must survive a reload (see the crate-level docs) — written
+                // in the separate block that `stokesforge-persistence`
+                // reserves for it, never mixed into the undoable tree.
                 let outcome = if history.in_macro() {
                     Err(SessionError::Command(CommandError::MacroOpen("save")))
                 } else {
@@ -497,47 +487,45 @@ pub(crate) fn run(
                 )
                 .map(|report| {
                     revision += 1;
-                    // Les valeurs d'une colonne-formule sont écrites sur
-                    // le disque (`stokesforge-persistence`, voir sa doc) mais
-                    // traitées comme un cache qu'on ne fait pas confiance
-                    // à l'aveugle : un fichier a pu être modifié par un
-                    // autre processus, une version antérieure de StokesForge,
-                    // ou porter des colonnes dont l'ordre a changé sans que
-                    // les valeurs suivent.
-                    // Recalculer les formules ici est le choix retenu (peu
-                    // coûteux — voir `recalc_formulas`). Le mémo est vidé :
-                    // il décrit un projet qui n'existe plus.
+                    // The values of a formula column are written to disk
+                    // (`stokesforge-persistence`, see its docs) but treated as
+                    // a cache that is not trusted blindly: a file may have
+                    // been modified by another process, an earlier version of
+                    // StokesForge, or carry columns whose order changed
+                    // without the values following.
+                    // Recalculating the formulas here is the chosen option
+                    // (cheap — see `recalc_formulas`). The memo is cleared:
+                    // it describes a project that no longer exists.
                     //
-                    // A1 (#316) : les **calculs d'analyse** (ajustement,
-                    // déconvolution…) ne sont PAS relancés — un fichier
-                    // d'un tiers peut imposer des milliers d'itérations,
-                    // non interruptibles. Les valeurs du fichier sont
-                    // gardées ; un calcul dont les entrées ont changé hors
-                    // de StokesForge est déjà marqué périmé par la
-                    // persistance, et se relance à la demande.
+                    // A1 (#316): the **analysis calculations** (fit,
+                    // deconvolution…) are NOT rerun — a third party's file can
+                    // demand thousands of iterations, not interruptible. The
+                    // file's values are kept; a calculation whose inputs
+                    // changed outside StokesForge is already marked stale by
+                    // persistence, and is rerun on demand.
                     formulas.forget();
                     formulas.run_after_load(&mut project);
-                    // A3 — l'identité du projet change : une poignée
-                    // (`stokesforge_script::surface::Handle`) qui a mémorisé
-                    // l'ancienne époque ne doit plus pouvoir désigner un
-                    // `NodeId` du projet neuf sans être détectée. Un `Load`
-                    // vide aussi l'historique (`load_project`), donc il n'y a
-                    // plus de macro ouverte à ce point : pas besoin de
-                    // remettre `macro_owner` à `None` ici, `load_project`
-                    // l'a déjà refusé si une macro était ouverte.
+                    // A3 — the project's identity changes: a handle
+                    // (`stokesforge_script::surface::Handle`) that memorized
+                    // the old epoch must no longer be able to name a `NodeId`
+                    // of the new project without being detected. A `Load` also
+                    // clears the history (`load_project`), so there is no open
+                    // macro at this point: no need to reset `macro_owner` to
+                    // `None` here, `load_project` already refused if a macro
+                    // was open.
                     epoch += 1;
-                    // La table de géométries est entièrement remplacée par
-                    // celle du fichier chargé (`load_project`, ci-dessous) :
-                    // un client de rendu doit le savoir même si son contenu,
-                    // par coïncidence, ressemblait à l'ancien.
+                    // The geometry table is entirely replaced by the loaded
+                    // file's (`load_project`, below): a rendering client must
+                    // know it even if its content, by coincidence, looked like
+                    // the old one.
                     geometry_revision += 1;
                     (revision, report)
                 });
                 let _ = reply.send(outcome);
             }
             Request::NewProject { reply } => {
-                // Cycle de vie, comme Load : aucune entrée annulable ne peut
-                // survivre au remplacement de l'identité du projet.
+                // Lifecycle, like Load: no undoable entry can survive the
+                // replacement of the project's identity.
                 let outcome = if history.in_macro() {
                     Err(SessionError::Command(CommandError::MacroOpen(
                         "new project",
@@ -561,21 +549,19 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             #[cfg(test)]
-            Request::PanicForTest => panic!("panic de test de l'acteur"),
+            Request::PanicForTest => panic!("actor test panic"),
             Request::Shutdown => {
-                // Constat non reproductible (guide-de-correction-robustesse.md
-                // §7.3, table de tête de `stokesforge-session`) : une macro encore
-                // ouverte à l'arrêt ne doit pas être commise en silence. Elle
-                // est annulée, niveau par niveau, comme si son propriétaire
-                // l'avait abandonnée avant de partir — il n'y a plus de
-                // client à qui répondre, donc pas de vérification de
-                // propriétaire ici (`abort_macro` prend `&mut project`
-                // directement, hors du protocole `Request`). Une erreur en
-                // cours de dépilement (cas déjà documenté par
-                // `History::abort_macro` : « l'arbre peut alors être à moitié
-                // défait ») ne doit pas transformer cette boucle en boucle
-                // infinie : elle arrête le dépilement plutôt que de
-                // l'ignorer.
+                // Non-reproducible finding (guide-de-correction-robustesse.md
+                // §7.3, table at the top of `stokesforge-session`): a macro
+                // still open at shutdown must not be committed silently. It is
+                // aborted, level by level, as if its owner had abandoned it
+                // before leaving — there is no client left to answer, so no
+                // owner check here (`abort_macro` takes `&mut project`
+                // directly, outside the `Request` protocol). An error during
+                // the unwinding (case already documented by
+                // `History::abort_macro`: "the tree may then be half undone")
+                // must not turn this loop into an infinite loop: it stops the
+                // unwinding rather than ignoring it.
                 while history.in_macro() {
                     if history.abort_macro(&mut project).is_err() {
                         break;
@@ -589,15 +575,14 @@ pub(crate) fn run(
     project
 }
 
-/// Charge un projet complet depuis `path` et le substitue à `*project` ; vide
-/// l'historique et remplace entièrement `*geometries` par le bloc de
-/// géométries lu dans le fichier (`stokesforge_persistence::load_with_geometries`
-/// filtre déjà les entrées orphelines — voir sa doc). Refuse
-/// (`Err(Command(MacroOpen))`) si une macro est ouverte, **avant** de toucher
-/// au disque : dans ce cas ni le projet, ni l'historique, ni les géométries
-/// ne sont affectés. Si le chargement lui-même échoue (fichier absent,
-/// corrompu, ...), l'erreur remonte telle quelle et, là aussi, rien n'a été
-/// touché.
+/// Loads a complete project from `path` and substitutes it for `*project`;
+/// clears the history and entirely replaces `*geometries` with the geometry
+/// block read from the file (`stokesforge_persistence::load_with_geometries`
+/// already filters the orphan entries — see its docs). Refuses
+/// (`Err(Command(MacroOpen))`) if a macro is open, **before** touching the
+/// disk: in that case neither the project, nor the history, nor the geometries
+/// are affected. If the load itself fails (missing, corrupt file, ...), the
+/// error comes back as is and, here too, nothing was touched.
 fn load_project(
     project: &mut Project,
     history: &mut History,
@@ -614,20 +599,20 @@ fn load_project(
     *project = loaded;
     *geometries = view.window_geometries;
     *column_widths = view.column_widths;
-    // L'acteur est mono-thread et rien n'a pu rouvrir de macro entre la
-    // vérification ci-dessus et cet appel : `clear()` ne peut pas échouer
-    // ici. On ignore tout de même le résultat plutôt que d'appeler
-    // `unwrap`/`expect`, bannis hors tests.
+    // The actor is single-threaded and nothing could reopen a macro between
+    // the check above and this call: `clear()` cannot fail here. The result is
+    // ignored all the same rather than calling `unwrap`/`expect`, banned
+    // outside tests.
     let _ = history.clear();
     Ok(report)
 }
 
-/// Ramène les axes de chaque graphe d'un projet qui vient d'être lu à leur
-/// forme canonique (#344) : le sens se lit sur l'ordre des bornes, un fichier
-/// qui portait `inverted` à côté de bornes croissantes les reçoit échangées
-/// (`AxisSpec::orient`). Le rendu ne change pas. Le projet n'est pas encore
-/// installé et personne n'en détient une copie : pas de commande ni
-/// d'historique (invariant 1), et la persistance ne normalise rien.
+/// Brings the axes of every graph of a project that was just read back to
+/// their canonical form (#344): the direction is read from the order of the
+/// bounds, a file that carried `inverted` next to increasing bounds gets them
+/// swapped (`AxisSpec::orient`). The rendering does not change. The project is
+/// not installed yet and nobody holds a copy of it: no command and no history
+/// (invariant 1), and persistence normalizes nothing.
 fn orient_graphs(project: &mut Project) {
     for id in project.tree().walk_all() {
         let Some(NodeKind::Graph { spec, .. }) = project.tree().node(id).map(|n| n.kind()) else {
@@ -636,19 +621,19 @@ fn orient_graphs(project: &mut Project) {
         let mut oriented = spec.clone();
         oriented.orient_axes();
         if oriented != *spec {
-            // `id` est un graphe : `set_plot_spec` ne peut pas refuser.
+            // `id` is a graph: `set_plot_spec` cannot refuse.
             let _ = project.set_plot_spec(id, oriented);
         }
     }
 }
 
-/// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans
-/// l'arbre de `project` (nœud supprimé par une commande d'`Execute`, ou par
-/// un `Undo`/`Redo` qui restaure un arbre où il n'existait pas) — nettoyage
-/// sans risque d'une entrée de `HashMap` non référencée (voir la doc de tête
-/// de crate : le choix retenu est de purger plutôt que de laisser traîner).
-/// Rend `true` si quelque chose a effectivement été retiré, pour que
-/// l'appelant décide s'il doit faire avancer `geometry_revision`.
+/// Removes from `geometries` every entry whose `NodeId` no longer exists in
+/// the tree of `project` (node deleted by an `Execute` command, or by an
+/// `Undo`/`Redo` that restores a tree where it did not exist) — a risk-free
+/// cleanup of an unreferenced `HashMap` entry (see the crate-level docs: the
+/// chosen option is to purge rather than leave it lying around). Returns
+/// `true` if something was actually removed, so that the caller decides
+/// whether to advance `geometry_revision`.
 fn purge_orphaned_geometries(
     project: &Project,
     geometries: &mut HashMap<NodeId, WindowGeometry>,
@@ -659,11 +644,11 @@ fn purge_orphaned_geometries(
     geometries.len() != before
 }
 
-/// Construit l'instantané courant : l'arbre et la table de géométries sont
-/// partagés (`Arc::clone`/`Arc::new`), rien n'est recopié pour l'arbre ; la
-/// table de géométries, elle, est recopiée dans un `Arc` neuf à chaque
-/// instantané — un coût négligeable, borné par le nombre de fenêtres
-/// ouvertes, pas par la taille du modèle.
+/// Builds the current snapshot: the tree and the geometry table are shared
+/// (`Arc::clone`/`Arc::new`), nothing is copied for the tree; the geometry
+/// table, on the other hand, is copied into a fresh `Arc` at each snapshot — a
+/// negligible cost, bounded by the number of open windows, not by the size of
+/// the model.
 fn build_snapshot(
     project: &Project,
     history: &History,
@@ -677,9 +662,9 @@ fn build_snapshot(
         tree: Arc::clone(project.tree()),
         revision,
         history: HistoryState {
-            // C6 — pendant une macro, `undo` est toujours refusé
-            // (`Err(MacroOpen)`) quoi que dise la pile : l'instantané ne doit
-            // pas annoncer une annulation que l'acteur refusera.
+            // C6 — during a macro, `undo` is always refused
+            // (`Err(MacroOpen)`) whatever the stack says: the snapshot must
+            // not announce an undo that the actor will refuse.
             can_undo: history.can_undo() && !history.in_macro(),
             can_redo: history.can_redo(),
             undo_label: history.undo_label().cloned(),
@@ -697,8 +682,8 @@ fn build_snapshot(
 mod tests {
     use super::*;
 
-    /// N'existe que pour que le compilateur vérifie l'invariant `Send` — ce
-    /// n'est pas un test comportemental.
+    /// Exists only so that the compiler checks the `Send` invariant — it is
+    /// not a behavioral test.
     fn assert_send<T: Send>() {}
 
     #[test]

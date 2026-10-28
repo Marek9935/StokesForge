@@ -1,35 +1,35 @@
-//! Légende d'un panneau.
+//! Legend of a panel.
 
 use crate::text_anchor::TextAnchor;
 
-/// Coin du panneau où s'ancre la légende.
+/// Corner of the panel where the legend is anchored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LegendPosition {
-    /// En haut à gauche.
+    /// Top left.
     TopLeft,
-    /// En haut à droite (défaut).
+    /// Top right (default).
     #[default]
     TopRight,
-    /// En bas à gauche.
+    /// Bottom left.
     BottomLeft,
-    /// En bas à droite.
+    /// Bottom right.
     BottomRight,
 }
 
-/// Légende d'un panneau : visible ou non, et où.
+/// Legend of a panel: visible or not, and where.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LegendSpec {
-    /// Légende affichée.
+    /// Legend is displayed.
     pub visible: bool,
-    /// Coin d'ancrage.
+    /// Anchor corner.
     pub position: LegendPosition,
-    /// Position du cadre (son centre) s'il a été déplacé (issue #53) ;
-    /// prime sur [`Self::position`]. `None` = le coin d'ancrage.
+    /// Position of the frame (its center) if it was moved (issue #53);
+    /// takes precedence over [`Self::position`]. `None` = the anchor corner.
     pub anchor: Option<TextAnchor>,
-    /// Police et corps des noms de série de la légende (issue #77).
+    /// Font and size of the series names in the legend (issue #77).
     pub font: crate::TextFont,
-    /// Couleur des noms de série de la légende (issue #90) ; vide =
-    /// automatique, comme [`crate::PlotSpec::title_color`].
+    /// Color of the series names in the legend (issue #90); empty =
+    /// automatic, like [`crate::PlotSpec::title_color`].
     pub color: String,
 }
 

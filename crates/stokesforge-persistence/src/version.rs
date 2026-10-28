@@ -1,30 +1,30 @@
-//! Lecture de l'en-tête et aiguillage du corps selon la version (S4, #323).
+//! Header reading and routing of the body by version (S4, #323).
 //!
-//! Le corps ne se décode jamais sans passer par [`decode_body`] : c'est le
-//! seul endroit qui connaît une version. Le jour où le format change de sens
-//! (retrait, renommage, changement de sens d'un champ), `FORMAT_VERSION`
-//! monte, le type de l'ancienne version est copié ici (`schema/v1.rs`…) et
-//! son bras du `match` le migre vers le `FileBody` courant. `docs/persistance.md`,
-//! « Version rule », dit quand monter le numéro et quand rester additif.
+//! The body is never decoded without going through [`decode_body`]: it is the
+//! only place that knows a version. The day the format changes meaning
+//! (removal, rename, change of meaning of a field), `FORMAT_VERSION`
+//! goes up, the type of the old version is copied here (`schema/v1.rs`…) and
+//! its `match` arm migrates it to the current `FileBody`. `docs/persistance.md`,
+//! « Version rule », says when to bump the number and when to stay additive.
 
 use crate::schema::{FileBody, FORMAT_VERSION, MAGIC};
 
-/// Ce que dit l'en-tête d'un fichier.
+/// What the header of a file says.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Header {
-    /// Pas de signature `STKF`.
+    /// No `STKF` signature.
     NotStokesForge,
-    /// Signature présente, mais pas les quatre octets de version.
+    /// Signature present, but not the four version bytes.
     Truncated,
-    /// Version 0 : n'a jamais existé.
+    /// Version 0: never existed.
     ZeroVersion,
-    /// Version plus récente que ce lecteur.
+    /// Version newer than this reader.
     TooNew(u32),
-    /// Version que ce lecteur sait décoder.
+    /// Version that this reader knows how to decode.
     Known(u32),
 }
 
-/// Lit l'en-tête (signature, puis version `u32` little-endian).
+/// Reads the header (signature, then little-endian `u32` version).
 pub(crate) fn read_header(bytes: &[u8]) -> Header {
     if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
         return Header::NotStokesForge;
@@ -41,21 +41,21 @@ pub(crate) fn read_header(bytes: &[u8]) -> Header {
     }
 }
 
-/// Octets du corps, après l'en-tête.
+/// Bytes of the body, after the header.
 pub(crate) fn payload(bytes: &[u8]) -> &[u8] {
     &bytes[MAGIC.len() + 4..]
 }
 
-/// Échec du décodage d'un corps.
+/// Failure to decode a body.
 #[derive(Debug)]
 pub(crate) enum BodyError {
-    /// MessagePack invalide pour cette version.
+    /// Invalid MessagePack for this version.
     Decode(rmp_serde::decode::Error),
-    /// Version sans décodeur : ne peut pas arriver après [`read_header`].
+    /// Version without a decoder: cannot happen after [`read_header`].
     UnknownVersion(u32),
 }
 
-/// Décode le corps écrit par la version `version` en `FileBody` courant.
+/// Decodes the body written by version `version` into the current `FileBody`.
 pub(crate) fn decode_body(version: u32, payload: &[u8]) -> Result<FileBody, BodyError> {
     match version {
         1 => rmp_serde::from_slice::<FileBody>(payload).map_err(BodyError::Decode),

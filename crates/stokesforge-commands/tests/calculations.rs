@@ -1,5 +1,5 @@
-//! Les commandes de calcul d'analyse (#181) : une entrée d'historique par
-//! geste, annulable et rétablissable, refus d'écrire dans une colonne produite.
+//! The analysis calculation commands (#181): one history entry per
+//! gesture, undoable and redoable, refusal to write into a produced column.
 
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::ops::Operation;
@@ -78,11 +78,11 @@ fn calc_id(w: &World) -> NodeId {
 }
 
 #[test]
-fn ajout_annulation_et_retablissement_en_une_seule_entree() {
+fn adding_undoing_and_redoing_is_a_single_entry() {
     let mut w = world();
     let before = w.project.tree().clone();
     add(&mut w, vec![1.0, 2.0, 3.0]);
-    assert_eq!(w.history.len(), 1, "colonne et enregistrement : une entrée");
+    assert_eq!(w.history.len(), 1, "column and record: one entry");
     let after = w.project.tree().clone();
     assert_eq!(after.calculations().len(), 1);
     assert_eq!(w.project.tree().children(w.sheet).unwrap().len(), 3);
@@ -96,7 +96,7 @@ fn ajout_annulation_et_retablissement_en_une_seule_entree() {
 }
 
 #[test]
-fn la_modification_se_defait_par_un_seul_undo() {
+fn the_update_is_undone_by_a_single_undo() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -129,7 +129,7 @@ fn la_modification_se_defait_par_un_seul_undo() {
 }
 
 #[test]
-fn le_reglage_de_boite_r2_faible_se_modifie_et_s_annule() {
+fn the_low_r2_dialog_setting_can_be_changed_and_undone() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -153,7 +153,7 @@ fn le_reglage_de_boite_r2_faible_se_modifie_et_s_annule() {
 }
 
 #[test]
-fn detacher_garde_les_colonnes_et_supprimer_les_emporte() {
+fn detaching_keeps_the_columns_and_deleting_removes_them() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -191,7 +191,7 @@ fn detacher_garde_les_colonnes_et_supprimer_les_emporte() {
 }
 
 #[test]
-fn une_colonne_produite_refuse_la_saisie_jusqu_a_etre_detachee() {
+fn a_produced_column_refuses_input_until_detached() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -218,7 +218,7 @@ fn une_colonne_produite_refuse_la_saisie_jusqu_a_etre_detachee() {
         ),
         "{err:?}"
     );
-    // La colonne source reste éditable (témoin : le refus n'est pas général).
+    // The source column stays editable (witness: the refusal is not general).
     w.history
         .execute(
             &mut w.project,
@@ -230,7 +230,7 @@ fn une_colonne_produite_refuse_la_saisie_jusqu_a_etre_detachee() {
             },
         )
         .unwrap();
-    // Détachée, la colonne est ordinaire.
+    // Detached, the column is ordinary.
     w.history
         .execute(
             &mut w.project,
@@ -244,7 +244,7 @@ fn une_colonne_produite_refuse_la_saisie_jusqu_a_etre_detachee() {
 }
 
 #[test]
-fn un_echec_ne_laisse_ni_entree_ni_changement() {
+fn a_failure_leaves_neither_entry_nor_change() {
     let mut w = world();
     let before = w.project.tree().clone();
     let mut bad = draft(&w, vec![1.0]);
@@ -268,15 +268,15 @@ fn un_echec_ne_laisse_ni_entree_ni_changement() {
     assert_eq!(w.history.len(), 0);
 }
 
-/// Une formule quelconque : seule sa présence compte pour ces tests.
-fn formule_constante() -> stokesforge_core::ColumnFormula {
+/// Any formula: only its presence counts for these tests.
+fn constant_formula() -> stokesforge_core::ColumnFormula {
     stokesforge_core::ColumnFormula::from_parts(vec![stokesforge_core::FormulaPart::Text(
         "2".to_string(),
     )])
 }
 
 #[test]
-fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
+fn a_formula_cannot_be_set_on_a_produced_column() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -291,7 +291,7 @@ fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
             Command::SetColumnMeta {
                 column: out,
                 meta: ColumnMeta {
-                    formula: Some(formule_constante()),
+                    formula: Some(constant_formula()),
                     ..Default::default()
                 },
             },
@@ -302,14 +302,14 @@ fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
         stokesforge_commands::CommandError::Core(CoreError::CalculatedColumnReadOnly { .. })
     ));
     assert_eq!(w.project.tree(), &before);
-    // Un autre réglage de métadonnées (nom long, unité) reste permis.
+    // Another metadata setting (long name, unit) stays allowed.
     w.history
         .execute(
             &mut w.project,
             Command::SetColumnMeta {
                 column: out,
                 meta: ColumnMeta {
-                    long_name: "Corrigé".into(),
+                    long_name: "Corrected".into(),
                     ..Default::default()
                 },
             },
@@ -317,10 +317,10 @@ fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
         .unwrap();
 }
 
-/// Le type et la suppression de cellules changent la forme d'une colonne
-/// produite : le recalcul les défairait, ou échouerait sans rien dire.
+/// The type and the deletion of cells change the shape of a produced
+/// column: the recalculation would undo them, or fail without saying anything.
 #[test]
-fn le_type_et_la_suppression_de_cellules_d_une_sortie_sont_refuses() {
+fn type_change_and_cell_deletion_on_an_output_are_refused() {
     let mut w = world();
     add(&mut w, vec![1.0, 2.0, 3.0]);
     let id = calc_id(&w);
@@ -349,13 +349,13 @@ fn le_type_et_la_suppression_de_cellules_d_une_sortie_sont_refuses() {
             ),
             "{err:?}"
         );
-        assert_eq!(w.project.tree(), &before, "aucun état partiel");
+        assert_eq!(w.project.tree(), &before, "no partial state");
     }
 }
 
-/// #212 : les valeurs changent dans la même colonne, sans calcul vivant.
+/// #212: the values change in the same column, with no live calculation.
 #[test]
-fn remplacer_garde_une_trace_et_se_defait_en_un_seul_pas() {
+fn replacing_keeps_a_trace_and_is_undone_in_a_single_step() {
     let mut w = world();
     let before = w.project.tree().clone();
     let d = draft(&w, vec![1., 2., 3.]);
@@ -408,12 +408,12 @@ fn remplacer_garde_une_trace_et_se_defait_en_un_seul_pas() {
     assert_eq!(
         w.project.tree().correction_traces().len(),
         1,
-        "la saisie garde la trace"
+        "typing keeps the trace"
     );
 }
 
 #[test]
-fn remplacement_refuse_longueur_et_versions_sans_ecriture_partielle() {
+fn replacement_refuses_length_and_versions_without_partial_write() {
     let mut w = world();
     let before = w.project.tree().clone();
     let versions = [w.x, w.y]
@@ -461,7 +461,7 @@ fn remplacement_refuse_longueur_et_versions_sans_ecriture_partielle() {
 }
 
 #[test]
-fn remplacement_preserve_lignes_non_exploitables_et_nan_de_resultat() {
+fn replacement_preserves_unusable_rows_and_result_nan() {
     let mut w = world();
     w.project
         .set_values(w.x, 1, ValueBlock::Float(vec![f64::NAN]))
@@ -506,7 +506,7 @@ fn remplacement_preserve_lignes_non_exploitables_et_nan_de_resultat() {
 }
 
 #[test]
-fn remplacement_dedoublonne_sources_et_refuse_corrections_contradictoires() {
+fn replacement_deduplicates_sources_and_refuses_contradictory_corrections() {
     let mut w = world();
     let before = w.project.tree().clone();
     let mut d = draft(&w, vec![1., 2., 3.]);
@@ -545,7 +545,7 @@ fn remplacement_dedoublonne_sources_et_refuse_corrections_contradictoires() {
 }
 
 #[test]
-fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline() {
+fn replacement_refuses_formula_and_calculated_output_then_removes_orphan_trace() {
     let mut w = world();
     let d = draft(&w, vec![1., 2., 3.]);
     let mut versions = [w.x, w.y]
@@ -571,7 +571,7 @@ fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline(
         .unwrap()
         .meta()
         .clone();
-    meta.formula = Some(formule_constante());
+    meta.formula = Some(constant_formula());
     w.project.set_column_meta(w.y, meta).unwrap();
     versions.iter_mut().for_each(|(id, version)| {
         *version = w
@@ -674,9 +674,9 @@ fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline(
     assert_eq!(w.project.tree(), &before);
 }
 
-// ── Référence figée et originaux gardés (#248) ──────────────────────────
+// ── Frozen reference and kept originals (#248) ──────────────────────────
 
-/// Un monde avec une colonne de référence (RX, RY) en plus de la série (X, Y).
+/// A world with a reference column (RX, RY) in addition to the series (X, Y).
 fn reference_world() -> (World, NodeId, NodeId) {
     let mut w = world();
     let rx = w
@@ -734,7 +734,7 @@ fn store_columns(project: &Project) -> Vec<NodeId> {
 }
 
 #[test]
-fn la_reference_d_une_correction_est_figee_dans_un_classeur_cache() {
+fn a_correction_reference_is_frozen_in_a_hidden_workbook() {
     let (mut w, rx, ry) = reference_world();
     add_corrected(&mut w, rx, ry);
     let aux = w
@@ -747,7 +747,7 @@ fn la_reference_d_une_correction_est_figee_dans_un_classeur_cache() {
         .unwrap();
     assert_ne!(
         aux.y, ry,
-        "le calcul lit une copie, pas la colonne d'origine"
+        "the calculation reads a copy, not the original column"
     );
     assert!(w.project.is_analysis_copy(aux.y));
     assert!(w.project.is_analysis_copy(aux.x.unwrap()));
@@ -755,21 +755,21 @@ fn la_reference_d_une_correction_est_figee_dans_un_classeur_cache() {
     assert_eq!(
         store_columns(&w.project).len(),
         2,
-        "le Y et son X, rien d'autre"
+        "the Y and its X, nothing else"
     );
-    // Le classeur est caché et marqué : books() et le Project Manager le taisent.
+    // The workbook is hidden and marked: books() and the Project Manager keep quiet about it.
     let sheet = w.project.analysis_store_sheet().unwrap();
     let book = w.project.tree().parent(sheet).unwrap().unwrap();
     assert!(matches!(
         w.project.tree().get(book).unwrap().kind(),
         stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden
     ));
-    // La feuille de l'utilisateur n'a gagné que la colonne produite.
+    // The user's sheet gained only the produced column.
     assert_eq!(w.project.tree().children(w.sheet).unwrap().len(), 5);
 }
 
 #[test]
-fn supprimer_ou_modifier_la_reference_d_origine_ne_casse_rien() {
+fn deleting_or_changing_the_original_reference_breaks_nothing() {
     let (mut w, rx, ry) = reference_world();
     add_corrected(&mut w, rx, ry);
     let id = calc_id(&w);
@@ -795,7 +795,7 @@ fn supprimer_ou_modifier_la_reference_d_origine_ne_casse_rien() {
     assert_eq!(
         values_of(&w.project, aux.y),
         vec![2.0, 2.0, 2.0],
-        "témoin : copie intacte"
+        "witness: copy intact"
     );
     w.history
         .execute(&mut w.project, Command::RemoveNode { id: ry })
@@ -803,21 +803,21 @@ fn supprimer_ou_modifier_la_reference_d_origine_ne_casse_rien() {
     w.history
         .execute(&mut w.project, Command::RemoveNode { id: rx })
         .unwrap();
-    let calc = w.project.tree().calculation(id).expect("le calcul reste");
+    let calc = w
+        .project
+        .tree()
+        .calculation(id)
+        .expect("the calculation stays");
     assert_eq!(calc.aux.as_ref(), Some(&aux));
     assert_eq!(values_of(&w.project, aux.y), vec![2.0, 2.0, 2.0]);
 }
 
 #[test]
-fn deux_calculs_partagent_la_copie_jusqu_au_dernier() {
+fn two_calculations_share_the_copy_until_the_last_one() {
     let (mut w, rx, ry) = reference_world();
     add_corrected(&mut w, rx, ry);
     add_corrected(&mut w, rx, ry);
-    assert_eq!(
-        store_columns(&w.project).len(),
-        2,
-        "une copie pour les deux"
-    );
+    assert_eq!(store_columns(&w.project).len(), 2, "one copy for both");
     let ids: Vec<NodeId> = w.project.tree().calculations().keys().copied().collect();
     let before = w.project.tree().clone();
     w.history
@@ -832,7 +832,7 @@ fn deux_calculs_partagent_la_copie_jusqu_au_dernier() {
     assert_eq!(
         store_columns(&w.project).len(),
         2,
-        "le second la lit encore"
+        "the second still reads it"
     );
     w.history
         .execute(
@@ -845,7 +845,7 @@ fn deux_calculs_partagent_la_copie_jusqu_au_dernier() {
         .unwrap();
     assert!(
         w.project.analysis_store_sheet().is_none(),
-        "la dernière analyse emporte les copies et leur classeur"
+        "the last analysis takes the copies and their workbook with it"
     );
     assert!(w.project.tree().windows().iter().all(|id| {
         !matches!(
@@ -853,14 +853,14 @@ fn deux_calculs_partagent_la_copie_jusqu_au_dernier() {
             stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden
         )
     }));
-    // Annuler ramène tout, copies comprises.
+    // Undo brings everything back, copies included.
     w.history.undo(&mut w.project).unwrap();
     w.history.undo(&mut w.project).unwrap();
     assert_eq!(w.project.tree(), &before);
 }
 
 #[test]
-fn modifier_la_reference_d_un_calcul_fige_la_nouvelle_et_libere_l_ancienne() {
+fn changing_a_calculation_reference_freezes_the_new_one_and_releases_the_old_one() {
     let (mut w, rx, ry) = reference_world();
     add_corrected(&mut w, rx, ry);
     let id = calc_id(&w);
@@ -872,7 +872,7 @@ fn modifier_la_reference_d_un_calcul_fige_la_nouvelle_et_libere_l_ancienne() {
         .aux
         .clone()
         .unwrap();
-    // Un autre état de la référence : une copie neuve.
+    // Another state of the reference: a new copy.
     w.history
         .execute(
             &mut w.project,
@@ -903,11 +903,11 @@ fn modifier_la_reference_d_un_calcul_fige_la_nouvelle_et_libere_l_ancienne() {
     assert_eq!(values_of(&w.project, second.y), vec![4.0, 4.0, 4.0]);
     assert!(
         w.project.tree().node(first.y).is_none(),
-        "l'ancienne copie ne sert plus"
+        "the old copy is no longer used"
     );
     assert_eq!(store_columns(&w.project).len(), 2);
-    // Rouvrir le calcul sans toucher à la référence garde la copie : le
-    // formulaire repasse l'AuxRef du calcul, déjà une copie.
+    // Reopening the calculation without touching the reference keeps the copy:
+    // the form passes the AuxRef of the calculation again, already a copy.
     let reopen = CalculationDraft {
         aux: Some(second.clone()),
         ..draft(&w, vec![5.0, 10.0, 15.0])
@@ -949,16 +949,16 @@ fn replace_with_reference(w: &mut World, rx: NodeId, ry: NodeId) {
 }
 
 #[test]
-fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
+fn restoring_gives_back_the_originals_overwrites_inputs_and_can_be_undone() {
     let (mut w, rx, ry) = reference_world();
     replace_with_reference(&mut w, rx, ry);
     assert_eq!(
         values_of(&w.project, w.y),
         vec![5.0, 10.0, 15.0],
-        "remplacé"
+        "replaced"
     );
     let trace = *w.project.tree().correction_traces().keys().next().unwrap();
-    // Un original (Y) et la référence figée (Y, X) vivent dans le classeur caché.
+    // An original (Y) and the frozen reference (Y, X) live in the hidden workbook.
     assert_eq!(store_columns(&w.project).len(), 3);
     let record = w.project.tree().correction_traces()[&trace].clone();
     assert_eq!(record.originals.len(), 1);
@@ -967,7 +967,7 @@ fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
         vec![10.0, 20.0, 30.0]
     );
 
-    // Une saisie faite depuis, et une ligne ajoutée : « il restaure tout ».
+    // An input made since, and a row added: "it restores everything".
     w.history
         .execute(
             &mut w.project,
@@ -987,7 +987,7 @@ fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
     assert!(w.project.tree().correction_traces().is_empty());
     assert!(
         w.project.analysis_store_sheet().is_none(),
-        "plus de trace : plus de copie"
+        "no trace: no copy"
     );
     let restored = w.project.tree().clone();
 
@@ -995,14 +995,14 @@ fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
     assert_eq!(
         w.project.tree(),
         &typed,
-        "Ctrl+Z rend la correction et ses copies"
+        "Ctrl+Z gives back the correction and its copies"
     );
     assert_eq!(w.project.tree().correction_traces().len(), 1);
     w.history.redo(&mut w.project).unwrap();
     assert_eq!(w.project.tree(), &restored);
 }
 
-/// Seconde correction de la même colonne Y, avec ses nouveaux résultats.
+/// Second correction of the same column Y, with its new results.
 fn replace_again(w: &mut World, rx: NodeId, ry: NodeId, results: Vec<f64>) {
     let d = CalculationDraft {
         aux: Some(AuxRef { x: Some(rx), y: ry }),
@@ -1032,11 +1032,11 @@ fn replace_again(w: &mut World, rx: NodeId, ry: NodeId, results: Vec<f64>) {
         .unwrap();
 }
 
-/// #308 : deux corrections successives de la même colonne gardent **la même**
-/// donnée brute. La copie de la seconde n'est pas une photo de l'état déjà
-/// corrigé par la première.
+/// #308: two successive corrections of the same column keep **the same**
+/// raw data. The copy of the second is not a snapshot of the state already
+/// corrected by the first.
 #[test]
-fn deux_corrections_de_la_meme_colonne_partagent_la_donnee_brute() {
+fn two_corrections_of_the_same_column_share_the_raw_data() {
     let (mut w, rx, ry) = reference_world();
     replace_with_reference(&mut w, rx, ry);
     replace_again(&mut w, rx, ry, vec![1.0, 2.0, 3.0]);
@@ -1044,14 +1044,14 @@ fn deux_corrections_de_la_meme_colonne_partagent_la_donnee_brute() {
     let traces = w.project.tree().correction_traces().clone();
     assert_eq!(traces.len(), 2);
     let copies: Vec<NodeId> = traces.values().map(|t| t.originals[0].1).collect();
-    assert_eq!(copies[0], copies[1], "une seule copie de la donnée brute");
+    assert_eq!(copies[0], copies[1], "a single copy of the raw data");
     assert_eq!(values_of(&w.project, copies[0]), vec![10.0, 20.0, 30.0]);
 }
 
-/// #308 : « Restore original data » rend toujours la donnée brute, quelle que
-/// soit la correction restaurée, et retire toutes les corrections de la colonne.
+/// #308: "Restore original data" always gives back the raw data, whichever
+/// correction is restored, and removes all the corrections of the column.
 #[test]
-fn restaurer_n_importe_quelle_correction_rend_la_donnee_brute() {
+fn restoring_any_correction_gives_back_the_raw_data() {
     for restore_first in [true, false] {
         let (mut w, rx, ry) = reference_world();
         replace_with_reference(&mut w, rx, ry);
@@ -1071,20 +1071,24 @@ fn restaurer_n_importe_quelle_correction_rend_la_donnee_brute() {
         assert_eq!(
             values_of(&w.project, w.y),
             vec![10.0, 20.0, 30.0],
-            "donnée brute (première trace : {restore_first})"
+            "raw data (first trace: {restore_first})"
         );
         assert!(
             w.project.tree().correction_traces().is_empty(),
-            "plus aucune correction à restaurer sur cette colonne"
+            "no correction left to restore on this column"
         );
         assert!(w.project.analysis_store_sheet().is_none());
         w.history.undo(&mut w.project).unwrap();
-        assert_eq!(w.project.tree(), &before_restore, "Ctrl+Z rend tout");
+        assert_eq!(
+            w.project.tree(),
+            &before_restore,
+            "Ctrl+Z gives back everything"
+        );
     }
 }
 
 #[test]
-fn supprimer_la_colonne_remplacee_emporte_la_trace_et_les_copies() {
+fn deleting_the_replaced_column_removes_the_trace_and_the_copies() {
     let (mut w, rx, ry) = reference_world();
     replace_with_reference(&mut w, rx, ry);
     let trace = *w.project.tree().correction_traces().keys().next().unwrap();
@@ -1092,7 +1096,7 @@ fn supprimer_la_colonne_remplacee_emporte_la_trace_et_les_copies() {
     w.history
         .execute(&mut w.project, Command::RemoveNode { id: w.y })
         .unwrap();
-    // Plus de ligne de Results, donc plus de bouton : rien à restaurer.
+    // No more Results row, hence no more button: nothing to restore.
     assert!(w.project.tree().correction_traces().is_empty());
     assert!(w.project.analysis_store_sheet().is_none());
     let error = w
@@ -1103,7 +1107,7 @@ fn supprimer_la_colonne_remplacee_emporte_la_trace_et_les_copies() {
         error,
         stokesforge_commands::CommandError::Core(CoreError::UnknownNode(_))
     ));
-    // Annuler la suppression ramène la trace, les copies et la restauration.
+    // Undoing the deletion brings back the trace, the copies and the restoration.
     w.history.undo(&mut w.project).unwrap();
     assert_eq!(w.project.tree(), &with_trace);
     w.history

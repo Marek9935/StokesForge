@@ -1,4 +1,4 @@
-//! Constructions partagées par les tests d'intégration de `stokesforge-persistence`.
+//! Constructions shared by the integration tests of `stokesforge-persistence`.
 
 #![allow(dead_code)]
 
@@ -10,24 +10,24 @@ use stokesforge_plot::{
     PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
 };
 
-/// Construit le projet de fixture décrit par le critère 1 : dossiers
-/// imbriqués, classeurs, feuilles, colonnes de tous les types avec cas
-/// limites, fenêtres non triviales.
+/// Builds the fixture project described by criterion 1: nested folders,
+/// workbooks, sheets, columns of all types with edge cases, non-trivial
+/// windows.
 pub fn fixture_project() -> Project {
-    let mut project = Project::new("Demo").expect("projet valide");
+    let mut project = Project::new("Demo").expect("valid project");
     let root = project.root();
 
-    let manips = project.add_folder(root, "Manips").expect("dossier créé");
+    let manips = project.add_folder(root, "Manips").expect("folder created");
     project
         .add_folder(manips, "Sous-dossier")
-        .expect("sous-dossier créé");
+        .expect("subfolder created");
 
     let book_in_manips = project
         .add_empty_workbook(manips, Some("BookManips"))
-        .expect("classeur créé");
+        .expect("workbook created");
     let book_at_root = project
         .add_empty_workbook(root, Some("BookRacine"))
-        .expect("classeur créé");
+        .expect("workbook created");
 
     project
         .set_window_meta(
@@ -38,15 +38,15 @@ pub fn fixture_project() -> Project {
                 ..Default::default()
             },
         )
-        .expect("métadonnées de fenêtre valides");
+        .expect("valid window metadata");
 
     for book in [book_in_manips, book_at_root] {
         let sheet1 = project
             .add_worksheet(book, Some("Sheet1"))
-            .expect("feuille créée");
+            .expect("sheet created");
         project
             .add_worksheet(book, Some("Sheet2"))
-            .expect("feuille créée");
+            .expect("sheet created");
 
         let numeric = Column::from_block(
             ColumnType::Numeric,
@@ -63,20 +63,20 @@ pub fn fixture_project() -> Project {
                 import_source: None,
             },
         )
-        .expect("colonne numérique valide");
+        .expect("valid numeric column");
         project
             .add_column(sheet1, None, Some("A"), numeric)
-            .expect("colonne ajoutée");
+            .expect("column added");
 
         let datetime = Column::from_block(
             ColumnType::DateTime,
             ValueBlock::Float(vec![0.0, 86_400.0]),
             ColumnMeta::default(),
         )
-        .expect("colonne date-heure valide");
+        .expect("valid date-time column");
         project
             .add_column(sheet1, None, Some("B"), datetime)
-            .expect("colonne ajoutée");
+            .expect("column added");
 
         let text = Column::from_block(
             ColumnType::Mixed,
@@ -87,20 +87,20 @@ pub fn fixture_project() -> Project {
             ]),
             ColumnMeta::default(),
         )
-        .expect("colonne texte valide");
+        .expect("valid text column");
         project
             .add_column(sheet1, None, Some("C"), text)
-            .expect("colonne ajoutée");
+            .expect("column added");
 
         let empty = Column::new(ColumnType::Numeric);
         project
             .add_column(sheet1, None, Some("D"), empty)
-            .expect("colonne vide ajoutée");
+            .expect("empty column added");
 
-        // Colonne à types mixtes : les trois variantes de cellule, plus les
-        // trois « manquantes » qui doivent rester distinctes au disque
-        // (`Empty`, `Number(NaN)`, `Text("")`), plus un `-0.0` — dont le
-        // motif binaire ne survit qu'à un encodage brut.
+        // Mixed-type column: the three cell variants, plus the three
+        // "missing" ones that must stay distinct on disk
+        // (`Empty`, `Number(NaN)`, `Text("")`), plus a `-0.0` — whose
+        // bit pattern only survives a raw encoding.
         let mixed = Column::from_block(
             ColumnType::Mixed,
             ValueBlock::Mixed(vec![
@@ -124,18 +124,18 @@ pub fn fixture_project() -> Project {
                 import_source: None,
             },
         )
-        .expect("colonne mixte valide");
+        .expect("valid mixed column");
         project
             .add_column(sheet1, None, Some("E"), mixed)
-            .expect("colonne mixte ajoutée");
+            .expect("mixed column added");
 
-        // `Sheet2` reste une feuille vide (aucune colonne).
+        // `Sheet2` stays an empty sheet (no column).
         let _ = sheet1;
     }
 
     let graph = project
         .add_graph(root, Some("Graph1"), Default::default())
-        .expect("graphe créé");
+        .expect("graph created");
     project
         .set_window_meta(
             graph,
@@ -145,23 +145,23 @@ pub fn fixture_project() -> Project {
                 ..Default::default()
             },
         )
-        .expect("métadonnées de fenêtre valides");
+        .expect("valid window metadata");
 
     project
         .add_matrix(root, Some("MBook1"))
-        .expect("matrice créée");
+        .expect("matrix created");
 
     project
         .add_note(root, Some("Note1"), "Texte de la note, avec accents éàü.")
-        .expect("note créée");
+        .expect("note created");
 
     project
 }
 
-/// Un `PlotSpec` non trivial : deux panneaux, plusieurs séries, des styles
-/// qui ne sont **pas** ceux par défaut — pour que l'égalité de la tâche 3.5
-/// ne puisse pas passer par accident sur des champs restés à leur valeur par
-/// défaut des deux côtés du disque.
+/// A non-trivial `PlotSpec`: two panels, several series, styles that are
+/// **not** the default ones — so that the equality of task 3.5 cannot
+/// pass by accident on fields left at their default value on both sides
+/// of the disk.
 pub fn non_trivial_spec(
     x: stokesforge_core::NodeId,
     y1: stokesforge_core::NodeId,
@@ -185,16 +185,16 @@ pub fn non_trivial_spec(
         visible: false,
         show_in_legend: false,
         bar_width: Some(0.42),
-        // Série « ligne » (#166) : la ligne 4 de la feuille de `y1`.
+        // "Line" series (#166): row 4 of the sheet of `y1`.
         row: Some(4),
-        // Groupe de courbes (#177).
+        // Curve group (#177).
         group: Some(3),
         ..SeriesSpec::new_xy(x, y1)
     };
     let histogram = SeriesSpec {
         name: String::new(),
         plot_type: PlotType::Histogram,
-        histogram_bins: stokesforge_plot::BinCount::new(17).expect("17 est dans les bornes"),
+        histogram_bins: stokesforge_plot::BinCount::new(17).expect("17 is within the bounds"),
         ..SeriesSpec::new(y2)
     };
 
@@ -212,10 +212,10 @@ pub fn non_trivial_spec(
             visible: true,
             inverted: true,
             title_color: "#aa3311".to_string(),
-            // Issue #53 : textes déplacés, une ancre par sorte de texte.
+            // Issue #53: moved texts, one anchor per kind of text.
             title_visible: true,
             title_anchor: Some(stokesforge_plot::TextAnchor::new(3.5, -0.75)),
-            // Issues #77 et #78 : police et corps, un jeu par sorte de texte.
+            // Issues #77 and #78: font and size, one set per kind of text.
             title_font: stokesforge_plot::TextFont {
                 family: "Fira Sans".to_string(),
                 size: Some(18.0),
@@ -223,17 +223,17 @@ pub fn non_trivial_spec(
                 align: stokesforge_plot::TextAlign::Right,
             },
             tick_color: "#fefefe".to_string(),
-            // #176 : axe miroir, sans étiquettes de graduation.
+            // #176: mirror axis, without tick labels.
             mirror: true,
             tick_labels: false,
-            // #344 : tirets coupés, sens vers l'intérieur (hors défaut).
+            // #344: ticks off, direction inward (non-default).
             ticks: false,
             tick_direction: stokesforge_plot::TickDirection::In,
-            // #344 : sous-graduations allumées (hors défaut).
+            // #344: minor ticks on (non-default).
             minor_ticks: true,
             minor_tick_count: Some(3),
             label_every: 2,
-            // #344 « Avancé » : tirets réglés à la main (hors défaut).
+            // #344 "Advanced": ticks set by hand (non-default).
             tick_length: Some(8.0),
             minor_tick_length: Some(3.5),
             tick_width: Some(2.0),
@@ -256,7 +256,7 @@ pub fn non_trivial_spec(
             color: "#118899".to_string(),
         },
         title_color: "#aa8811".to_string(),
-        // Issue #35 : textes libres, tous champs non défaut.
+        // Issue #35: free texts, all fields non-default.
         annotations: vec![
             stokesforge_plot::AnnotationSpec::new("Pic $lambda_\"max\"$", 1.5, 2.5),
             stokesforge_plot::AnnotationSpec {
@@ -271,7 +271,7 @@ pub fn non_trivial_spec(
                 ..stokesforge_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
             },
         ],
-        // Issue #76 : objets graphiques, un de chaque sorte, dans l'ordre.
+        // Issue #76: graphic objects, one of each kind, in order.
         shapes: vec![
             stokesforge_plot::ShapeSpec {
                 visible: false,
@@ -303,9 +303,9 @@ pub fn non_trivial_spec(
                 0.5,
             ),
         ],
-        // Nom du groupe 3 (#197).
+        // Name of group 3 (#197).
         group_names: [(3, "Séries d'été".to_string())].into(),
-        // Nuancier retenu par le groupe 3 (#213).
+        // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
         ..PanelSpec::at(0, 0)
     };
@@ -317,7 +317,7 @@ pub fn non_trivial_spec(
             position: LegendPosition::TopLeft,
             anchor: None,
             font: stokesforge_plot::TextFont::default(),
-            // Issue #90 : couleur de la légende et du titre du panneau.
+            // Issue #90: color of the legend and of the title of the panel.
             color: "#228833".to_string(),
         },
         title_font: stokesforge_plot::TextFont {
@@ -343,10 +343,10 @@ pub fn non_trivial_spec(
     }
 }
 
-/// Une recette dont chaque champ s'écarte de sa valeur par défaut : un champ
-/// oublié par le miroir du fichier reviendrait à sa valeur par défaut et
-/// ferait échouer l'égalité (S2, #323).
-pub fn recipe_hors_defaut() -> stokesforge_import::recipe::ImportRecipe {
+/// A recipe in which every field differs from its default value: a field
+/// forgotten by the file mirror would come back to its default value and
+/// make the equality fail (S2, #323).
+pub fn recipe_non_default() -> stokesforge_import::recipe::ImportRecipe {
     use stokesforge_import::recipe::*;
     ImportRecipe {
         name: "Spectro".into(),

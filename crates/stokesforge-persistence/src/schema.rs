@@ -1,30 +1,30 @@
-//! Structures de transport (« schéma sur disque »), privées au crate.
+//! Transport structures ("on-disk schema"), private to the crate.
 //!
-//! Ce module ne connaît **pas** `stokesforge-core` au sens inverse : c'est
-//! `convert.rs` qui sait construire un `NodeRecord` depuis un `Node` et
-//! réciproquement, jamais l'inverse. Le schéma est volontairement
-//! indépendant du modèle en mémoire (voir la doc de crate) : il évolue selon la
-//! règle de version de `docs/persistance.md` (ajout de champs
-//! `#[serde(default)]` additif ; retrait ou renommage = nouvelle version, avec
-//! migration) sans jamais dériver `Serialize` sur
-//! les types de `stokesforge-core`.
+//! This module does **not** know `stokesforge-core` the other way round: it is
+//! `convert.rs` that knows how to build a `NodeRecord` from a `Node` and
+//! the reverse, never the other way. The schema is deliberately
+//! independent of the in-memory model (see the crate doc): it evolves according to the
+//! version rule of `docs/persistance.md` (additive `#[serde(default)]`
+//! fields; removal or rename = new version, with
+//! migration) without ever deriving `Serialize` on
+//! the types of `stokesforge-core`.
 //!
-//! Toutes ces structures sont sérialisées **comme des maps nommées**
-//! (`rmp_serde::to_vec_named`), ce qui rend le fichier auto-descriptif : un
-//! champ absent à la lecture prend sa valeur par défaut (`#[serde(default)]`,
-//! à ajouter sur tout champ créé après la version 1) et un champ inconnu à la
-//! lecture est silencieusement ignoré — c'est le mécanisme qui permettra
-//! d'ajouter des données (par exemple une spécification de graphe) sans
-//! casser les fichiers déjà écrits.
+//! All these structures are serialized **as named maps**
+//! (`rmp_serde::to_vec_named`), which makes the file self-describing: a
+//! field missing at read takes its default value (`#[serde(default)]`,
+//! to be added on every field created after version 1) and a field unknown at
+//! read is silently ignored — this is the mechanism that will make it possible
+//! to add data (for example a graph specification) without
+//! breaking the files already written.
 //!
-//! Ce mécanisme ne couvrait, jusqu'ici, que les **champs** — pas les
-//! **variantes** des enums externally-tagged (`KindRecord`, `PlotTypeRecord`,
-//! …) : une variante inconnue faisait échouer tout l'enum qui la porte, donc
-//! tout le nœud, donc tout le fichier (C5, niveau 2,
-//! `guide-de-correction-robustesse.md` §F3). `KindRecord` et `PlotTypeRecord`
-//! écrivent maintenant `Serialize`/`Deserialize` à la main (voir
-//! `unknown.rs`) pour capturer une variante inconnue dans une variante
-//! `Unknown` plutôt que de propager l'échec.
+//! Until now this mechanism only covered the **fields** — not the
+//! **variants** of the externally-tagged enums (`KindRecord`, `PlotTypeRecord`,
+//! …): an unknown variant made the whole enum that carries it fail, hence
+//! the whole node, hence the whole file (C5, level 2,
+//! `guide-de-correction-robustesse.md` §F3). `KindRecord` and `PlotTypeRecord`
+//! now write `Serialize`/`Deserialize` by hand (see
+//! `unknown.rs`) to capture an unknown variant in an
+//! `Unknown` variant rather than propagating the failure.
 
 use serde::{Deserialize, Serialize};
 use stokesforge_plot::RawVariant;
@@ -32,91 +32,91 @@ use stokesforge_plot::RawVariant;
 use crate::recipe_record::ImportSourceRecord;
 use crate::unknown::{deserialize_with_fallback, serialize_raw_variant};
 
-/// Signature de fichier : les quatre premiers octets, avant même le numéro
-/// de version.
+/// File signature: the first four bytes, even before the version
+/// number.
 pub(crate) const MAGIC: &[u8; 4] = b"STKF";
 
-/// Numéro de version du format que ce lecteur/écrivain sait produire et
-/// comprendre. Un fichier dont le numéro de version est supérieur est
-/// refusé sans que son corps soit lu (`PersistenceError::UnsupportedVersion`).
+/// Version number of the format that this reader/writer can produce and
+/// understand. A file whose version number is higher is
+/// refused without its body being read (`PersistenceError::UnsupportedVersion`).
 pub(crate) const FORMAT_VERSION: u32 = 1;
 
-/// Corps du fichier (après l'en-tête magique + version) : un `Project`
-/// complet, à plat.
+/// Body of the file (after the magic header + version): a complete
+/// `Project`, flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FileBody {
-    /// Identifiant du nœud racine.
+    /// Identifier of the root node.
     pub(crate) root: u64,
-    /// Valeur persistée du compteur d'identifiants (`Project::next_id_hint`).
+    /// Persisted value of the identifier counter (`Project::next_id_hint`).
     pub(crate) next_id_hint: u64,
-    /// Tous les nœuds de l'arbre, en parcours préfixe depuis la racine — cet
-    /// ordre est ce qui rend deux sauvegardes du même projet identiques
-    /// octet à octet.
+    /// All the nodes of the tree, in pre-order from the root — this
+    /// order is what makes two saves of the same project identical
+    /// byte for byte.
     pub(crate) nodes: Vec<NodeRecord>,
-    /// Couleurs enregistrées dans le projet, par usage
-    /// (`stokesforge_plot::SavedColors`, portées par l'arbre). Absentes des
-    /// fichiers écrits avant leur ajout : `#[serde(default)]` les ramène à
-    /// des listes vides. Placé avant `window_geometries` et `save_counter`,
-    /// pour la même raison qu'eux (voir ci-dessous).
+    /// Colors saved in the project, by usage
+    /// (`stokesforge_plot::SavedColors`, carried by the tree). Absent from
+    /// files written before they were added: `#[serde(default)]` brings them back to
+    /// empty lists. Placed before `window_geometries` and `save_counter`,
+    /// for the same reason as theirs (see below).
     #[serde(default)]
     pub(crate) saved_colors: SavedColorsRecord,
-    /// Calculs d'analyse (#181). Absents des fichiers antérieurs : liste
-    /// vide. Placé avant `window_geometries` et `save_counter`, pour la même
-    /// raison que `saved_colors`.
+    /// Analysis calculations (#181). Absent from earlier files: empty
+    /// list. Placed before `window_geometries` and `save_counter`, for the same
+    /// reason as `saved_colors`.
     #[serde(default)]
     pub(crate) calculations: Vec<crate::calculations::CalculationRecord>,
     #[serde(default)]
     pub(crate) correction_traces: Vec<crate::calculations::CorrectionTraceRecord>,
-    /// Feuilles transposées liées (#253). Absentes des fichiers antérieurs :
-    /// liste vide. Placé avant `window_geometries` et `save_counter`, pour la
-    /// même raison que `calculations`.
+    /// Linked transposed sheets (#253). Absent from earlier files:
+    /// empty list. Placed before `window_geometries` and `save_counter`, for the
+    /// same reason as `calculations`.
     #[serde(default)]
     pub(crate) transposes: Vec<crate::transposes::TransposeRecord>,
-    /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
-    /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
-    /// `stokesforge-session` : la géométrie ne vit pas dans `Project`, ne passe
-    /// jamais par une commande, et n'apparaît jamais dans `nodes` ci-dessus).
-    /// Absent des fichiers écrits avant l'ajout de ce bloc :
-    /// `#[serde(default)]` le ramène alors à une table vide, ce qui est le
-    /// comportement voulu — un ancien fichier ne décrivait aucune position de
-    /// fenêtre, il n'y a rien à retrouver. Les clés sont des `NodeId` bruts,
-    /// comme partout ailleurs dans ce schéma (`root`, `parent`, …) ; une clé
-    /// qui ne correspond à aucun nœud de `nodes` (fichier corrompu, ou nœud
-    /// supprimé par un outil tiers sans purger sa géométrie) est filtrée
-    /// silencieusement au chargement plutôt que de faire échouer tout le
-    /// fichier (invariant 10 : un défaut de donnée dégrade, il ne plante
-    /// pas) — voir `load_with_geometries`. Placé **avant** `save_counter`
-    /// ci-dessous : `tests/roundtrip.rs` (`saving_over_an_existing_valid_file_replaces_it_atomically`)
-    /// tient à ce que seul le dernier octet du fichier change entre deux
-    /// sauvegardes successives, ce qui suppose que `save_counter` reste le
-    /// tout dernier champ sérialisé.
+    /// Geometry of the windows (position/size), by node identifier —
+    /// block **separate from the undoable tree** (see the head doc of
+    /// `stokesforge-session`: the geometry does not live in `Project`, never goes
+    /// through a command, and never appears in `nodes` above).
+    /// Absent from files written before this block was added:
+    /// `#[serde(default)]` then brings it back to an empty table, which is the
+    /// intended behavior — an old file described no window position,
+    /// there is nothing to recover. The keys are raw `NodeId`s,
+    /// as everywhere else in this schema (`root`, `parent`, …); a key
+    /// that matches no node of `nodes` (corrupted file, or node
+    /// deleted by a third-party tool without purging its geometry) is silently
+    /// filtered at load rather than making the whole
+    /// file fail (invariant 10: a data defect degrades, it does not
+    /// crash) — see `load_with_geometries`. Placed **before** `save_counter`
+    /// below: `tests/roundtrip.rs` (`saving_over_an_existing_valid_file_replaces_it_atomically`)
+    /// relies on only the last byte of the file changing between two
+    /// successive saves, which assumes that `save_counter` stays the
+    /// very last serialized field.
     #[serde(default)]
     pub(crate) window_geometries: std::collections::BTreeMap<u64, WindowGeometryRecord>,
-    /// Largeur des colonnes d'une feuille (#325), en points logiques, par
-    /// identifiant de colonne — même statut que `window_geometries` : bloc
-    /// **hors de l'arbre annulable**, absent des fichiers antérieurs
-    /// (`#[serde(default)]` : table vide, les colonnes prennent la largeur par
-    /// défaut), clés `NodeId` brutes bornées par `check_node_id`. À la lecture,
-    /// une clé sans nœud et une valeur qui n'est pas un réel fini strictement
-    /// positif sont écartées une à une (invariant 10). Placé **avant**
-    /// `save_counter`, qui reste le dernier champ sérialisé (voir ci-dessus).
+    /// Width of the columns of a sheet (#325), in logical points, by
+    /// column identifier — same status as `window_geometries`: block
+    /// **outside the undoable tree**, absent from earlier files
+    /// (`#[serde(default)]`: empty table, the columns take the default
+    /// width), raw `NodeId` keys bounded by `check_node_id`. At read,
+    /// a key without a node and a value that is not a strictly positive
+    /// finite real are dropped one by one (invariant 10). Placed **before**
+    /// `save_counter`, which stays the last serialized field (see above).
     #[serde(default)]
     pub(crate) column_widths: std::collections::BTreeMap<u64, f32>,
-    /// Compteur de sauvegarde du fichier (B8,
-    /// `guide-de-correction-robustesse.md` §F2) : incrémenté à chaque `save`
-    /// réussi. C'est ce qui permet à `save` de détecter qu'un autre écrivain
-    /// a modifié le fichier depuis le dernier chargement/sauvegarde de ce
-    /// processus, sans confondre deux instances distinctes chargées du même
-    /// fichier. Absent des fichiers écrits avant le 2026-09-11 :
-    /// `#[serde(default)]` le ramène alors à 0, ce qui est le comportement
-    /// voulu — un fichier sans compteur n'a de toute façon aucun lecteur qui
-    /// en retienne un.
+    /// Save counter of the file (B8,
+    /// `guide-de-correction-robustesse.md` §F2): incremented at each successful
+    /// `save`. This is what lets `save` detect that another writer
+    /// modified the file since the last load/save of this
+    /// process, without confusing two distinct instances loaded from the same
+    /// file. Absent from files written before 2026-09-11:
+    /// `#[serde(default)]` then brings it back to 0, which is the intended
+    /// behavior — a file without a counter has no reader anyway that
+    /// retains one.
     #[serde(default)]
     pub(crate) save_counter: u64,
 }
 
-/// [`stokesforge_plot::SavedColors`], à plat. Chaque liste est bornée à la
-/// lecture (`SavedColors::bounded`), un fichier n'étant pas borné.
+/// [`stokesforge_plot::SavedColors`], flat. Each list is bounded at
+/// read (`SavedColors::bounded`), a file not being bounded.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) struct SavedColorsRecord {
     #[serde(default)]
@@ -125,154 +125,154 @@ pub(crate) struct SavedColorsRecord {
     pub(crate) text: Vec<String>,
     #[serde(default)]
     pub(crate) backgrounds: Vec<String>,
-    /// Nuanciers enregistrés (#178). Absents des fichiers antérieurs.
+    /// Saved color gradients (#178). Absent from earlier files.
     #[serde(default)]
     pub(crate) gradients: Vec<SavedGradientRecord>,
 }
 
-/// [`stokesforge_plot::SavedGradient`], à plat.
+/// [`stokesforge_plot::SavedGradient`], flat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SavedGradientRecord {
     pub(crate) name: String,
     pub(crate) stops: Vec<String>,
 }
 
-/// Un nœud de l'arbre, à plat (l'appartenance aux enfants d'un parent est
-/// reconstruite par `Tree::from_nodes`, pas portée deux fois ici — sauf pour
-/// les conteneurs, où l'ordre des enfants doit être persisté explicitement).
+/// A node of the tree, flat (membership in the children of a parent is
+/// rebuilt by `Tree::from_nodes`, not carried twice here — except for
+/// containers, where the order of the children must be persisted explicitly).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct NodeRecord {
-    /// Identifiant du nœud.
+    /// Identifier of the node.
     pub(crate) id: u64,
-    /// Nom court.
+    /// Short name.
     pub(crate) name: String,
-    /// Identifiant du parent, `None` pour la racine.
+    /// Identifier of the parent, `None` for the root.
     pub(crate) parent: Option<u64>,
-    /// Nature et contenu propre.
+    /// Kind and own content.
     pub(crate) kind: KindRecord,
 }
 
-/// Nature d'un nœud, à plat. Enum étiqueté « externally tagged » (le
-/// comportement par défaut de `serde`) : chaque valeur se sérialise comme
-/// une map à une seule clé (le nom de la variante) dont la valeur est le
-/// contenu — c'est ce qui garde le fichier auto-descriptif jusque dans ses
+/// Kind of a node, flat. "Externally tagged" enum (the
+/// default behavior of `serde`): each value serializes as
+/// a single-key map (the name of the variant) whose value is the
+/// content — this is what keeps the file self-describing down to its
 /// enums.
 ///
-/// `Serialize`/`Deserialize` sont écrits à la main, pas dérivés (C5, niveau
-/// 2, `guide-de-correction-robustesse.md` §F3 — voir `unknown.rs` pour le
-/// mécanisme) : une variante que ce lecteur ne connaît pas devient
-/// [`KindRecord::Unknown`] au lieu de faire échouer tout le fichier.
+/// `Serialize`/`Deserialize` are written by hand, not derived (C5, level
+/// 2, `guide-de-correction-robustesse.md` §F3 — see `unknown.rs` for the
+/// mechanism): a variant that this reader does not know becomes
+/// [`KindRecord::Unknown`] instead of making the whole file fail.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KindRecord {
-    /// Dossier.
+    /// Folder.
     Folder {
-        /// Enfants ordonnés.
+        /// Ordered children.
         children: Vec<u64>,
     },
-    /// Classeur.
+    /// Workbook.
     Workbook {
-        /// Feuilles, dans l'ordre des onglets.
+        /// Sheets, in tab order.
         sheets: Vec<u64>,
         hidden: bool,
-        /// Étiquette de fenêtre.
+        /// Window label.
         label: String,
-        /// Commentaire de fenêtre.
+        /// Window comment.
         comment: String,
     },
-    /// Feuille de calcul.
+    /// Worksheet.
     Worksheet {
-        /// Colonnes, de gauche à droite.
+        /// Columns, from left to right.
         columns: Vec<u64>,
     },
-    /// Colonne de données.
+    /// Data column.
     Column {
-        /// Type de données.
+        /// Data type.
         column_type: TypeRecord,
-        /// Rôle de tracé.
+        /// Plot role.
         role: RoleRecord,
-        /// Unité affichée.
+        /// Displayed unit.
         unit: String,
-        /// Nom long / description.
+        /// Long name / description.
         long_name: String,
-        /// Commentaire.
+        /// Comment.
         comment: String,
-        /// Format d'affichage.
+        /// Display format.
         display_format: String,
-        /// Valeurs de la colonne.
+        /// Values of the column.
         values: ValuesRecord,
-        /// Compteur de modification des données (`Column::version`). Absent
-        /// des fichiers écrits avant le 2026-09-10 : `KindRecordKnown` (plus
-        /// bas) ramène ce champ à 0 via `#[serde(default)]`, ce qui est le
-        /// comportement voulu — un fichier sans compteur n'a de toute façon
-        /// aucun lecteur qui en retienne un.
+        /// Modification counter of the data (`Column::version`). Absent
+        /// from files written before 2026-09-10: `KindRecordKnown` (further
+        /// down) brings this field back to 0 via `#[serde(default)]`, which is the
+        /// intended behavior — a file without a counter has no reader anyway
+        /// that retains one.
         version: u64,
-        /// Formule de calcul (`ColumnMeta::formula`), `None` pour une colonne
-        /// ordinaire : fragments de texte et **identifiants** de colonnes lues
-        /// (#321), jamais des lettres de position. Champ `formula_parts`,
-        /// absent des fichiers antérieurs : `KindRecordKnown` le ramène à
-        /// `None` via `#[serde(default)]`. L'ancien champ `formula` (texte en
-        /// lettres, d'avant #321) n'est plus lu — le format n'a pas à rester
-        /// compatible en développement : la colonne se charge avec ses valeurs
-        /// et sans formule. Les valeurs présentes dans `values` ci-dessus sont
-        /// traitées comme un cache : `stokesforge-session::actor` déclenche un
-        /// recalcul après tout chargement (voir sa doc de tête), donc un
-        /// désaccord entre un fichier écrit par un tiers et ce que la formule
-        /// recalculerait ne survit pas au premier `load`.
+        /// Calculation formula (`ColumnMeta::formula`), `None` for an ordinary
+        /// column: text fragments and **identifiers** of the columns read
+        /// (#321), never position letters. Field `formula_parts`,
+        /// absent from earlier files: `KindRecordKnown` brings it back to
+        /// `None` via `#[serde(default)]`. The old `formula` field (text
+        /// in letters, from before #321) is no longer read — the format does not have to stay
+        /// compatible during development: the column loads with its values
+        /// and without a formula. The values present in `values` above are
+        /// treated as a cache: `stokesforge-session::actor` triggers a
+        /// recalculation after every load (see its head doc), so a
+        /// disagreement between a file written by a third party and what the formula
+        /// would recalculate does not survive the first `load`.
         formula_parts: Option<Vec<FormulaPartRecord>>,
-        /// Métadonnées du fichier d'origine (`ColumnMeta::file_metadata`),
-        /// paires clé / valeur dans l'ordre. Absentes des fichiers écrits
-        /// avant ce champ : `KindRecordKnown` les ramène à une liste vide.
+        /// Metadata of the original file (`ColumnMeta::file_metadata`),
+        /// key / value pairs in order. Absent from files written
+        /// before this field: `KindRecordKnown` brings them back to an empty list.
         file_metadata: Vec<(String, String)>,
-        /// Source d'import (`ColumnMeta::import_source`) : chemin, recette, index
-        /// de colonne et de bloc. Absente des fichiers antérieurs.
+        /// Import source (`ColumnMeta::import_source`): path, recipe, column
+        /// and block index. Absent from earlier files.
         import_source: Option<Box<ImportSourceRecord>>,
-        /// Valeur de la ligne spéciale x' (`ColumnMeta::x_prime`, #164).
-        /// Absente des fichiers antérieurs : `None`.
+        /// Value of the special x' row (`ColumnMeta::x_prime`, #164).
+        /// Absent from earlier files: `None`.
         x_prime: Option<f64>,
     },
-    /// Graphe.
+    /// Graph.
     Graph {
         hidden: bool,
-        /// Étiquette de fenêtre.
+        /// Window label.
         label: String,
-        /// Commentaire de fenêtre.
+        /// Window comment.
         comment: String,
-        /// Description du graphe (`PlotSpec`). Absente des fichiers écrits
-        /// avant la phase R3 : `KindRecordKnown` ramène ce champ à
-        /// [`PlotSpecRecord::default`] via `#[serde(default)]`, qui convertit
-        /// vers le `PlotSpec::default()` de `stokesforge-plot` (un panneau,
-        /// aucune série) — exactement ce qu'un fichier sans spec décrivait
-        /// déjà en mémoire avant cette phase.
+        /// Description of the graph (`PlotSpec`). Absent from files written
+        /// before phase R3: `KindRecordKnown` brings this field back to
+        /// [`PlotSpecRecord::default`] via `#[serde(default)]`, which converts
+        /// to the `PlotSpec::default()` of `stokesforge-plot` (one panel,
+        /// no series) — exactly what a file without a spec already described
+        /// in memory before this phase.
         spec: PlotSpecRecord,
     },
-    /// Matrice.
+    /// Matrix.
     Matrix {
         hidden: bool,
-        /// Étiquette de fenêtre.
+        /// Window label.
         label: String,
-        /// Commentaire de fenêtre.
+        /// Window comment.
         comment: String,
     },
     /// Note.
     Note {
         hidden: bool,
-        /// Étiquette de fenêtre.
+        /// Window label.
         label: String,
-        /// Commentaire de fenêtre.
+        /// Window comment.
         comment: String,
-        /// Texte de la note.
+        /// Text of the note.
         text: String,
     },
-    /// Nature de nœud qu'aucune des variantes ci-dessus ne nomme : une
-    /// version plus récente de StokesForge a écrit ce fichier. Nom et contenu
-    /// bruts, conservés pour une ré-écriture fidèle.
+    /// Kind of node that none of the variants above names: a
+    /// newer version of StokesForge wrote this file. Raw name and content,
+    /// kept for a faithful rewrite.
     Unknown(RawVariant),
 }
 
-/// Miroir strict de [`KindRecord`], sans [`KindRecord::Unknown`] : c'est le
-/// schéma qu'un fichier écrit par ce lecteur peut produire. `unknown.rs`
-/// l'utilise pour *essayer* le décodage strict avant de se rabattre sur
-/// [`KindRecord::Unknown`] — voir la doc de tête de ce module.
+/// Strict mirror of [`KindRecord`], without [`KindRecord::Unknown`]: it is the
+/// schema that a file written by this reader can produce. `unknown.rs`
+/// uses it to *try* the strict decoding before falling back on
+/// [`KindRecord::Unknown`] — see the head doc of this module.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 enum KindRecordKnown {
     Folder {
@@ -423,20 +423,20 @@ impl<'de> Deserialize<'de> for KindRecord {
     }
 }
 
-/// Un fragment d'une formule de colonne (`stokesforge_core::FormulaPart`) :
-/// du texte saisi, ou l'identifiant brut de la colonne lue (#321).
+/// A fragment of a column formula (`stokesforge_core::FormulaPart`):
+/// typed text, or the raw identifier of the column read (#321).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum FormulaPartRecord {
-    /// Opérateurs, nombres, espaces, parenthèses, tels que saisis.
+    /// Operators, numbers, spaces, parentheses, as typed.
     Text(String),
-    /// Identifiant d'une colonne lue ; borné à la lecture (`MAX_NODE_ID`).
+    /// Identifier of a column read; bounded at read (`MAX_NODE_ID`).
     Column(u64),
 }
 
-/// Miroir de [`KindRecord`] **par référence** : sérialise une variante
-/// connue sans en cloner le contenu — en particulier les octets d'une
-/// colonne `Float`, potentiellement gros, que `Serialize` n'a besoin que de
-/// lire.
+/// Mirror of [`KindRecord`] **by reference**: serializes a known
+/// variant without cloning its content — in particular the bytes of a
+/// `Float` column, potentially large, which `Serialize` only needs to
+/// read.
 #[derive(Serialize)]
 enum KindRecordRef<'a> {
     Folder {
@@ -575,159 +575,159 @@ impl Serialize for KindRecord {
     }
 }
 
-/// Type de données d'une colonne, à plat.
+/// Data type of a column, flat.
 ///
-/// `Mixed` n'existe que depuis les colonnes à types mixtes. Un fichier qui en
-/// porte une reste lisible par un lecteur **plus ancien**, mais pas
-/// intégralement : ce lecteur-là ne connaît pas le nom de variante, son
-/// décodage strict de `KindRecordKnown::Column` échoue, et `unknown.rs`
-/// range le nœud en [`KindRecord::Unknown`] — la perte est bornée à cette
-/// colonne, le reste du projet s'ouvre, et une ré-écriture la restitue à
-/// l'identique (b20). C'est exactement le mécanisme de dégradation décrit en
-/// tête de ce module, appliqué ici sans qu'aucun code lui soit propre.
+/// `Mixed` only exists since the mixed-type columns. A file that
+/// carries one stays readable by an **older** reader, but not
+/// entirely: that reader does not know the variant name, its strict
+/// decoding of `KindRecordKnown::Column` fails, and `unknown.rs`
+/// files the node as [`KindRecord::Unknown`] — the loss is bounded to this
+/// column, the rest of the project opens, and a rewrite restores it
+/// identically (b20). This is exactly the degradation mechanism described at the
+/// head of this module, applied here without any code of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum TypeRecord {
-    /// Numérique.
+    /// Numeric.
     Numeric,
-    /// Date-heure.
+    /// Date-time.
     DateTime,
-    /// Types mixtes : le type est porté par la cellule.
+    /// Mixed types: the type is carried by the cell.
     Mixed,
 }
 
-/// Rôle de tracé d'une colonne, à plat.
+/// Plot role of a column, flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum RoleRecord {
-    /// Abscisse.
+    /// Abscissa.
     X,
-    /// Ordonnée.
+    /// Ordinate.
     Y,
-    /// Abscisse du second calque (#167).
+    /// Abscissa of the second layer (#167).
     X2,
-    /// Ordonnée du second calque (#167).
+    /// Ordinate of the second layer (#167).
     Y2,
-    /// Abscisse du troisième calque (#168).
+    /// Abscissa of the third layer (#168).
     X3,
-    /// Ordonnée du troisième calque (#168).
+    /// Ordinate of the third layer (#168).
     Y3,
-    /// Abscisse du quatrième calque (#168).
+    /// Abscissa of the fourth layer (#168).
     X4,
-    /// Ordonnée du quatrième calque (#168).
+    /// Ordinate of the fourth layer (#168).
     Y4,
-    /// Troisième axe.
+    /// Third axis.
     Z,
-    /// Barre d'erreur en X.
+    /// Error bar in X.
     XError,
-    /// Barre d'erreur en Y.
+    /// Error bar in Y.
     YError,
-    /// Étiquette textuelle.
+    /// Text label.
     Label,
-    /// Aucun rôle de tracé.
+    /// No plot role.
     None,
 }
 
-/// Valeurs d'une colonne, à plat.
+/// Values of a column, flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum ValuesRecord {
-    /// `f64` little-endian concaténés (8 octets chacun, `NaN` préservés bit à
-    /// bit) : un octet brut par octet de donnée, jamais un tableau
-    /// MessagePack d'éléments — c'est ce qui garde la taille du fichier
-    /// proportionnelle aux données plutôt qu'à leur encodage.
+    /// Concatenated little-endian `f64` (8 bytes each, `NaN` preserved bit for
+    /// bit): one raw byte per byte of data, never a MessagePack
+    /// array of elements — this is what keeps the file size
+    /// proportional to the data rather than to their encoding.
     Float(#[serde(with = "serde_bytes")] Vec<u8>),
-    /// Colonne à types mixtes, en **trois tableaux parallèles** plutôt qu'un
-    /// tableau d'énumérations.
+    /// Mixed-type column, in **three parallel arrays** rather than an
+    /// array of enums.
     ///
-    /// La raison est la même que pour `Float` ci-dessus : `to_vec_named`
-    /// sérialise une énumération par le **nom** de sa variante, donc un
-    /// `Vec<MixedCellRecord>` écrirait la chaîne `"Number"` — sept octets —
-    /// devant chacun des huit octets d'une valeur. Un octet d'étiquette par
-    /// ligne, puis les seules valeurs qui existent, coûte moins qu'une
-    /// colonne texte d'aujourd'hui et garde les `NaN` bit à bit.
+    /// The reason is the same as for `Float` above: `to_vec_named`
+    /// serializes an enum by the **name** of its variant, so a
+    /// `Vec<MixedCellRecord>` would write the string `"Number"` — seven bytes —
+    /// in front of each of the eight bytes of a value. One tag byte per
+    /// row, then only the values that exist, costs less than a
+    /// text column today and keeps the `NaN`s bit for bit.
     Mixed {
-        /// Une étiquette par ligne, dans l'ordre : `0` = cellule vide,
-        /// `1` = nombre, `2` = texte. Tout autre octet fait échouer la
-        /// lecture de la colonne (`ConvertError::BadMixedTag`) : les trois
-        /// tableaux ne se relisent pas si l'on ne sait pas dans lequel
-        /// chercher la ligne suivante.
+        /// One tag per row, in order: `0` = empty cell,
+        /// `1` = number, `2` = text. Any other byte makes the
+        /// reading of the column fail (`ConvertError::BadMixedTag`): the three
+        /// arrays cannot be read back if we do not know in which one to
+        /// look for the next row.
         #[serde(with = "serde_bytes")]
         tags: Vec<u8>,
-        /// Les valeurs des lignes étiquetées `1`, dans l'ordre, huit octets
-        /// little-endian chacune — même encodage que `Float`.
+        /// The values of the rows tagged `1`, in order, eight bytes
+        /// little-endian each — same encoding as `Float`.
         #[serde(with = "serde_bytes")]
         numbers: Vec<u8>,
-        /// Les valeurs des lignes étiquetées `2`, dans l'ordre.
+        /// The values of the rows tagged `2`, in order.
         texts: Vec<String>,
     },
 }
 
-/// Étiquette d'une cellule vide dans [`ValuesRecord::Mixed`].
+/// Tag of an empty cell in [`ValuesRecord::Mixed`].
 pub(crate) const MIXED_TAG_EMPTY: u8 = 0;
-/// Étiquette d'une cellule numérique dans [`ValuesRecord::Mixed`].
+/// Tag of a numeric cell in [`ValuesRecord::Mixed`].
 pub(crate) const MIXED_TAG_NUMBER: u8 = 1;
-/// Étiquette d'une cellule texte dans [`ValuesRecord::Mixed`].
+/// Tag of a text cell in [`ValuesRecord::Mixed`].
 pub(crate) const MIXED_TAG_TEXT: u8 = 2;
 
 // -- PlotSpec (phase R3) ------------------------------------------------
 //
-// Même patron que `Column`/`ColumnValues`/`ValuesRecord` ci-dessus, étendu à
-// un arbre de structures : un enregistrement par type de `stokesforge-plot`,
-// converti à la main par `convert.rs`, jamais dérivé du modèle. Les `NodeId`
-// référencés par une série voyagent en `u64`, comme ceux des listes
-// d'enfants de `Folder`/`Workbook`/`Worksheet` plus haut — même
-// représentation, réutilisée plutôt que réinventée.
+// Same pattern as `Column`/`ColumnValues`/`ValuesRecord` above, extended to
+// a tree of structures: one record per `stokesforge-plot` type,
+// converted by hand by `convert.rs`, never derived from the model. The `NodeId`s
+// referenced by a series travel as `u64`, like those of the child
+// lists of `Folder`/`Workbook`/`Worksheet` further up — same
+// representation, reused rather than reinvented.
 //
-// Chaque `Default` ci-dessous reproduit *à la main* celui du type
-// `stokesforge-plot` correspondant : ce module ne connaît toujours pas
-// `stokesforge-plot` (voir la doc de tête du fichier), donc pas de raccourci du
-// genre `PlotSpecRecord::from(PlotSpec::default())`. Un test de
-// `convert.rs` verrouille que les deux mondes restent d'accord.
+// Each `Default` below reproduces *by hand* that of the matching
+// `stokesforge-plot` type: this module still does not know
+// `stokesforge-plot` (see the head doc of the file), so no shortcut of the
+// kind `PlotSpecRecord::from(PlotSpec::default())`. A test in
+// `convert.rs` locks that the two worlds stay in agreement.
 
-/// [`stokesforge_plot::PlotSpec`], à plat.
+/// [`stokesforge_plot::PlotSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PlotSpecRecord {
     pub(crate) title: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     #[serde(default = "visible_by_default")]
     pub(crate) title_visible: bool,
     pub(crate) panels: Vec<PanelSpecRecord>,
     pub(crate) background: String,
-    /// Ajouté après coup : absent des fichiers plus anciens, ramené à la
-    /// chaîne vide (couleur automatique) par `#[serde(default)]`.
+    /// Added afterwards: absent from older files, brought back to the
+    /// empty string (automatic color) by `#[serde(default)]`.
     #[serde(default)]
     pub(crate) title_color: String,
-    /// Titre déplacé (issue #53) : absent d'un fichier plus ancien, donc à sa
-    /// place par défaut.
+    /// Moved title (issue #53): absent from an older file, hence at its
+    /// default place.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
-    /// Police et corps du titre (issue #78) : absent d'un fichier plus
-    /// ancien, donc ceux du graphe.
+    /// Font and size of the title (issue #78): absent from an older
+    /// file, hence those of the graph.
     #[serde(default)]
     pub(crate) title_font: TextFontRecord,
-    /// Avertissement des séries pas à jour (#198) : absent d'un fichier plus
-    /// ancien, donc actif.
+    /// Warning of out-of-date series (#198): absent from an older
+    /// file, hence active.
     #[serde(default = "visible_by_default")]
     pub(crate) stale_warning: bool,
-    /// Séparateur décimal des graduations (#223) : absent d'un fichier plus
-    /// ancien, donc le point.
+    /// Decimal separator of the ticks (#223): absent from an older
+    /// file, hence the point.
     #[serde(default)]
     pub(crate) decimal_comma: bool,
 }
 
-/// [`stokesforge_plot::TextFont`], à plat.
+/// [`stokesforge_plot::TextFont`], flat.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TextFontRecord {
     #[serde(default)]
     pub(crate) family: String,
     #[serde(default)]
     pub(crate) size: Option<f64>,
-    /// Largeur et alignement de la boîte (#244) ; absents d'un fichier plus ancien.
+    /// Width and alignment of the box (#244); absent from an older file.
     #[serde(default)]
     pub(crate) width: Option<f64>,
     #[serde(default)]
     pub(crate) align: TextAlignRecord,
 }
 
-/// [`stokesforge_plot::TextAnchor`], à plat.
+/// [`stokesforge_plot::TextAnchor`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TextAnchorRecord {
     pub(crate) x: f64,
@@ -751,21 +751,21 @@ impl Default for PlotSpecRecord {
     }
 }
 
-/// [`stokesforge_plot::PanelSpec`], à plat.
+/// [`stokesforge_plot::PanelSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PanelSpecRecord {
     pub(crate) title: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     #[serde(default = "visible_by_default")]
     pub(crate) title_visible: bool,
-    /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
+    /// Moved title (issue #53), like `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
-    /// Police et corps du titre du panneau (issue #78).
+    /// Font and size of the panel title (issue #78).
     #[serde(default)]
     pub(crate) title_font: TextFontRecord,
-    /// Couleur du titre du panneau (issue #90) ; absente d'un fichier plus
-    /// ancien, donc automatique.
+    /// Color of the panel title (issue #90); absent from an older
+    /// file, hence automatic.
     #[serde(default)]
     pub(crate) title_color: String,
     pub(crate) series: Vec<SeriesSpecRecord>,
@@ -774,54 +774,54 @@ pub(crate) struct PanelSpecRecord {
     pub(crate) right: AxisSpecRecord,
     pub(crate) top: AxisSpecRecord,
     pub(crate) legend: LegendSpecRecord,
-    /// Calque superposé (#167) ; absent d'un fichier plus ancien.
+    /// Overlaid layer (#167); absent from an older file.
     #[serde(default)]
     pub(crate) overlay: Option<OverlaySpecRecord>,
     pub(crate) row: u64,
     pub(crate) column: u64,
-    /// Textes libres (issue #35) : absents d'un fichier plus ancien,
-    /// `#[serde(default)]` les ramène à une liste vide.
+    /// Free texts (issue #35): absent from an older file,
+    /// `#[serde(default)]` brings them back to an empty list.
     #[serde(default)]
     pub(crate) annotations: Vec<AnnotationSpecRecord>,
-    /// Objets graphiques (issue #76) : absents d'un fichier plus ancien.
+    /// Graphic objects (issue #76): absent from an older file.
     #[serde(default)]
     pub(crate) shapes: Vec<ShapeSpecRecord>,
-    /// Noms des groupes de séries (#197) ; absents d'un fichier plus ancien,
-    /// donc tous automatiques.
+    /// Names of the series groups (#197); absent from an older file,
+    /// hence all automatic.
     #[serde(default)]
     pub(crate) group_names: Vec<GroupNameRecord>,
-    /// Nuanciers retenus par les groupes de séries (#213) ; absents d'un
-    /// fichier plus ancien, donc aucun groupe n'a de nuancier.
+    /// Color gradients kept by the series groups (#213); absent from an
+    /// older file, hence no group has a color gradient.
     #[serde(default)]
     pub(crate) group_gradients: Vec<GroupGradientRecord>,
 }
 
-/// Les arrêts du nuancier d'un groupe de séries (#213), à plat.
+/// The stops of the color gradient of a series group (#213), flat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GroupGradientRecord {
     pub(crate) group: u32,
     pub(crate) stops: Vec<String>,
 }
 
-/// Le nom d'un groupe de séries (#197), à plat.
+/// The name of a series group (#197), flat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GroupNameRecord {
     pub(crate) group: u32,
     pub(crate) name: String,
 }
 
-/// [`stokesforge_plot::OverlaySpec`], à plat.
+/// [`stokesforge_plot::OverlaySpec`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct OverlaySpecRecord {
     pub(crate) x_top: bool,
     pub(crate) y_right: bool,
-    /// Numéro du calque de rôle (#168) ; absent des fichiers plus anciens :
-    /// 0, calque sans rôle.
+    /// Number of the role layer (#168); absent from older files:
+    /// 0, layer without a role.
     #[serde(default)]
     pub(crate) layer: u8,
 }
 
-/// [`stokesforge_plot::ShapeKind`], à plat.
+/// [`stokesforge_plot::ShapeKind`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ShapeKindRecord {
     Rectangle,
@@ -830,7 +830,7 @@ pub(crate) enum ShapeKindRecord {
     Arrow,
 }
 
-/// [`stokesforge_plot::ShapeSpec`], à plat.
+/// [`stokesforge_plot::ShapeSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ShapeSpecRecord {
     #[serde(default = "visible_by_default")]
@@ -848,7 +848,7 @@ pub(crate) struct ShapeSpecRecord {
     pub(crate) fill_color: String,
 }
 
-/// [`stokesforge_plot::AnnotationSpec`], à plat.
+/// [`stokesforge_plot::AnnotationSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AnnotationSpecRecord {
     #[serde(default = "visible_by_default")]
@@ -860,18 +860,18 @@ pub(crate) struct AnnotationSpecRecord {
     pub(crate) color: String,
     pub(crate) size: f64,
     pub(crate) rotation: f64,
-    /// Police du texte (issue #78) ; absente d'un fichier plus ancien.
+    /// Font of the text (issue #78); absent from an older file.
     #[serde(default)]
     pub(crate) font: String,
-    /// Largeur en fraction de la figure (#244) ; absente = une ligne.
+    /// Width as a fraction of the figure (#244); absent = one line.
     #[serde(default)]
     pub(crate) width: Option<f64>,
-    /// Alignement dans la boîte (#244) ; absent = centré.
+    /// Alignment in the box (#244); absent = centered.
     #[serde(default)]
     pub(crate) align: TextAlignRecord,
 }
 
-/// [`stokesforge_plot::TextAlign`], à plat.
+/// [`stokesforge_plot::TextAlign`], flat.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum TextAlignRecord {
     Left,
@@ -905,11 +905,11 @@ impl Default for PanelSpecRecord {
     }
 }
 
-/// [`stokesforge_plot::AxisSpec`], à plat.
+/// [`stokesforge_plot::AxisSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AxisSpecRecord {
     pub(crate) label: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     #[serde(default = "visible_by_default")]
     pub(crate) title_visible: bool,
     pub(crate) unit: String,
@@ -920,58 +920,58 @@ pub(crate) struct AxisSpecRecord {
     pub(crate) grid: bool,
     pub(crate) visible: bool,
     pub(crate) inverted: bool,
-    /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
+    /// Added afterwards, like `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) title_color: String,
-    /// Titre déplacé (issue #53), comme `PlotSpecRecord::title_anchor`.
+    /// Moved title (issue #53), like `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) title_anchor: Option<TextAnchorRecord>,
-    /// Police et corps du titre de l'axe (issue #78).
+    /// Font and size of the axis title (issue #78).
     #[serde(default)]
     pub(crate) title_font: TextFontRecord,
-    /// Ajouté après coup, comme `PlotSpecRecord::title_color`.
+    /// Added afterwards, like `PlotSpecRecord::title_color`.
     #[serde(default)]
     pub(crate) tick_color: String,
-    /// Axe miroir (#176).
+    /// Mirror axis (#176).
     #[serde(default)]
     pub(crate) mirror: bool,
-    /// Libellés des graduations (#176).
+    /// Tick labels (#176).
     #[serde(default = "visible_by_default")]
     pub(crate) tick_labels: bool,
-    /// Tirets des graduations (#344) ; vrai par défaut, sinon les anciens
-    /// fichiers perdraient leurs tirets.
+    /// Ticks (#344); true by default, otherwise the old
+    /// files would lose their ticks.
     #[serde(default = "visible_by_default")]
     pub(crate) ticks: bool,
-    /// Sens des tirets (#344).
+    /// Direction of the ticks (#344).
     #[serde(default)]
     pub(crate) tick_direction: TickDirectionRecord,
-    /// Sous-graduations (#344) ; faux par défaut : un ancien fichier n'en avait pas.
+    /// Minor ticks (#344); false by default: an old file had none.
     #[serde(default)]
     pub(crate) minor_ticks: bool,
-    /// Sous-graduations entre deux principales (#344) ; absent = automatique.
+    /// Minor ticks between two major ones (#344); absent = automatic.
     #[serde(default)]
     pub(crate) minor_tick_count: Option<u8>,
-    /// Un nombre sur n écrit (#344) ; 1 par défaut.
+    /// One number out of n written (#344); 1 by default.
     #[serde(default = "one")]
     pub(crate) label_every: u8,
-    /// Longueur des grands tirets, en pixels (#344, « Avancé ») ; absent =
-    /// automatique. La valeur brute est gardée : le rendu la borne.
+    /// Length of the major ticks, in pixels (#344, "Advanced"); absent =
+    /// automatic. The raw value is kept: the renderer bounds it.
     #[serde(default)]
     pub(crate) tick_length: Option<f64>,
-    /// Longueur des petits tirets ; absent = la moitié des grands.
+    /// Length of the minor ticks; absent = half the major ones.
     #[serde(default)]
     pub(crate) minor_tick_length: Option<f64>,
-    /// Épaisseur des tirets, en points ; absent = automatique.
+    /// Thickness of the ticks, in points; absent = automatic.
     #[serde(default)]
     pub(crate) tick_width: Option<f64>,
-    /// Couleur des tirets ; vide = celle de l'échelle.
+    /// Color of the ticks; empty = that of the scale.
     #[serde(default)]
     pub(crate) tick_mark_color: String,
 }
 
 impl AxisSpecRecord {
-    /// Axe masqué — la valeur par défaut de l'axe du haut d'un panneau
-    /// (`AxisSpec::hidden` côté `stokesforge-plot`).
+    /// Hidden axis — the default value of the top axis of a panel
+    /// (`AxisSpec::hidden` on the `stokesforge-plot` side).
     fn hidden() -> Self {
         Self {
             visible: false,
@@ -1001,8 +1001,8 @@ impl Default for AxisSpecRecord {
             tick_labels: true,
             ticks: true,
             tick_direction: TickDirectionRecord::Out,
-            // Un axe absent du fichier prend les défauts d'un axe neuf ; un axe
-            // présent sans le champ (`#[serde(default)]`) n'en avait pas.
+            // An axis absent from the file takes the defaults of a new axis; an axis
+            // present without the field (`#[serde(default)]`) had none.
             minor_ticks: true,
             minor_tick_count: None,
             label_every: 1,
@@ -1014,8 +1014,8 @@ impl Default for AxisSpecRecord {
     }
 }
 
-/// [`stokesforge_plot::TickDirection`], à plat. Une valeur inconnue se lit
-/// `Out` (dégradation gracieuse, invariant 10).
+/// [`stokesforge_plot::TickDirection`], flat. An unknown value reads as
+/// `Out` (graceful degradation, invariant 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) enum TickDirectionRecord {
     In,
@@ -1025,18 +1025,18 @@ pub(crate) enum TickDirectionRecord {
     Out,
 }
 
-/// [`stokesforge_plot::AxisScale`], à plat.
+/// [`stokesforge_plot::AxisScale`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum AxisScaleRecord {
     Linear,
     Log,
 }
 
-/// [`stokesforge_plot::SeriesSpec`], à plat. Les colonnes référencées voyagent en
-/// `u64` brut, comme partout ailleurs dans ce schéma — un `NodeId` que la
-/// colonne visée ait ou non survécu au fichier : une référence pendante
-/// n'est pas une erreur de chargement, elle se découvre à la résolution
-/// (`stokesforge_core::resolve`), jamais avant.
+/// [`stokesforge_plot::SeriesSpec`], flat. The referenced columns travel as
+/// raw `u64`, as everywhere else in this schema — a `NodeId` whether the
+/// targeted column survived the file or not: a dangling reference
+/// is not a load error, it is discovered at resolution
+/// (`stokesforge_core::resolve`), never before.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SeriesSpecRecord {
     pub(crate) y: u64,
@@ -1052,20 +1052,20 @@ pub(crate) struct SeriesSpecRecord {
     pub(crate) show_in_legend: bool,
     pub(crate) bar_width: Option<f64>,
     pub(crate) histogram_bins: u32,
-    /// `SeriesSpec::row` (#166). Absente des fichiers antérieurs.
+    /// `SeriesSpec::row` (#166). Absent from earlier files.
     #[serde(default)]
     pub(crate) row: Option<u64>,
-    /// `SeriesSpec::group` (#177). Absent des fichiers antérieurs.
+    /// `SeriesSpec::group` (#177). Absent from earlier files.
     #[serde(default)]
     pub(crate) group: Option<u32>,
 }
 
-/// [`stokesforge_plot::PlotType`], à plat.
+/// [`stokesforge_plot::PlotType`], flat.
 ///
-/// `Serialize`/`Deserialize` écrits à la main, comme [`KindRecord`] (C5,
-/// niveau 2) : un type de tracé qu'une version future ajouterait devient
-/// [`PlotTypeRecord::Unknown`] plutôt que de faire échouer tout le graphe qui
-/// le porte — et le fichier entier avec lui, avant ce correctif.
+/// `Serialize`/`Deserialize` written by hand, like [`KindRecord`] (C5,
+/// level 2): a plot type that a future version would add becomes
+/// [`PlotTypeRecord::Unknown`] rather than making the whole graph that
+/// carries it fail — and the whole file with it, before this fix.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlotTypeRecord {
     Scatter,
@@ -1074,11 +1074,11 @@ pub(crate) enum PlotTypeRecord {
     Bar,
     Histogram,
     ErrorBar,
-    /// Type de tracé d'une version plus récente de StokesForge.
+    /// Plot type of a newer version of StokesForge.
     Unknown(RawVariant),
 }
 
-/// Miroir strict de [`PlotTypeRecord`] (sans `Unknown`) — même rôle que
+/// Strict mirror of [`PlotTypeRecord`] (without `Unknown`) — same role as
 /// `KindRecordKnown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum PlotTypeRecordKnown {
@@ -1136,14 +1136,14 @@ impl Serialize for PlotTypeRecord {
     }
 }
 
-/// [`stokesforge_plot::SeriesAxis`], à plat.
+/// [`stokesforge_plot::SeriesAxis`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum SeriesAxisRecord {
     Left,
     Right,
 }
 
-/// [`stokesforge_plot::LineSpec`], à plat.
+/// [`stokesforge_plot::LineSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LineSpecRecord {
     pub(crate) color: String,
@@ -1151,7 +1151,7 @@ pub(crate) struct LineSpecRecord {
     pub(crate) width: f64,
 }
 
-/// [`stokesforge_plot::LineStyle`], à plat.
+/// [`stokesforge_plot::LineStyle`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum LineStyleRecord {
     None,
@@ -1161,7 +1161,7 @@ pub(crate) enum LineStyleRecord {
     DashDot,
 }
 
-/// [`stokesforge_plot::SymbolSpec`], à plat.
+/// [`stokesforge_plot::SymbolSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SymbolSpecRecord {
     pub(crate) shape: SymbolShapeRecord,
@@ -1170,7 +1170,7 @@ pub(crate) struct SymbolSpecRecord {
     pub(crate) edge_color: String,
 }
 
-/// [`stokesforge_plot::SymbolShape`], à plat.
+/// [`stokesforge_plot::SymbolShape`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum SymbolShapeRecord {
     None,
@@ -1182,28 +1182,28 @@ pub(crate) enum SymbolShapeRecord {
     Cross,
 }
 
-/// [`stokesforge_plot::LegendSpec`], à plat.
+/// [`stokesforge_plot::LegendSpec`], flat.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct LegendSpecRecord {
     pub(crate) visible: bool,
     pub(crate) position: LegendPositionRecord,
-    /// Légende déplacée (issue #53), comme `PlotSpecRecord::title_anchor`.
+    /// Legend moved (issue #53), like `PlotSpecRecord::title_anchor`.
     #[serde(default)]
     pub(crate) anchor: Option<TextAnchorRecord>,
-    /// Police et corps de la légende (issue #77).
+    /// Font and size of the legend (issue #77).
     #[serde(default)]
     pub(crate) font: TextFontRecord,
-    /// Couleur des noms de série (issue #90) ; absente d'un fichier plus
-    /// ancien, donc automatique.
+    /// Color of the series names (issue #90); absent from an older
+    /// file, hence automatic.
     #[serde(default)]
     pub(crate) color: String,
 }
 
 impl Default for LegendSpecRecord {
     fn default() -> Self {
-        // `LegendSpec::default()` : visible, ancrée en haut à droite — pas de
-        // `#[derive(Default)]` ici précisément parce que `bool::default()`
-        // (`false`) contredirait cette valeur par défaut.
+        // `LegendSpec::default()`: visible, anchored at the top right — no
+        // `#[derive(Default)]` here precisely because `bool::default()`
+        // (`false`) would contradict this default value.
         Self {
             visible: true,
             position: LegendPositionRecord::default(),
@@ -1214,7 +1214,7 @@ impl Default for LegendSpecRecord {
     }
 }
 
-/// [`stokesforge_plot::LegendPosition`], à plat.
+/// [`stokesforge_plot::LegendPosition`], flat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) enum LegendPositionRecord {
     TopLeft,
@@ -1224,12 +1224,12 @@ pub(crate) enum LegendPositionRecord {
     BottomRight,
 }
 
-// Les objets des fichiers antérieurs étaient tous visibles.
+// The objects of earlier files were all visible.
 fn visible_by_default() -> bool {
     true
 }
 
-// Un axe d'un fichier antérieur écrivait tous ses nombres (#344).
+// An axis of an earlier file wrote all its numbers (#344).
 fn one() -> u8 {
     1
 }
@@ -1238,30 +1238,30 @@ fn one() -> u8 {
 mod tests {
     use super::*;
 
-    /// Un sens de tirets inconnu (fichier d'une version plus récente) se lit
-    /// « vers l'extérieur », sans échec (invariant 10).
+    /// An unknown tick direction (file of a newer version) reads as
+    /// "outward", without failure (invariant 10).
     #[test]
-    fn un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur() {
+    fn an_unknown_tick_direction_reads_as_outward() {
         #[derive(Serialize)]
-        enum Futur {
-            Diagonale,
+        enum Future {
+            Diagonal,
             In,
         }
-        let inconnu = rmp_serde::to_vec_named(&Futur::Diagonale).expect("encodage");
-        let relu: TickDirectionRecord = rmp_serde::from_slice(&inconnu).expect("relecture");
-        assert_eq!(relu, TickDirectionRecord::Out);
-        let connu = rmp_serde::to_vec_named(&Futur::In).expect("encodage");
-        let relu: TickDirectionRecord = rmp_serde::from_slice(&connu).expect("relecture");
-        assert_eq!(relu, TickDirectionRecord::In);
+        let unknown = rmp_serde::to_vec_named(&Future::Diagonal).expect("encoding");
+        let reloaded: TickDirectionRecord = rmp_serde::from_slice(&unknown).expect("decoding");
+        assert_eq!(reloaded, TickDirectionRecord::Out);
+        let known = rmp_serde::to_vec_named(&Future::In).expect("encoding");
+        let reloaded: TickDirectionRecord = rmp_serde::from_slice(&known).expect("decoding");
+        assert_eq!(reloaded, TickDirectionRecord::In);
     }
 
-    /// Un fichier écrit avant l'ajout des couleurs de texte (titre du
-    /// graphe, titre et échelle des axes) se relit : les champs absents
-    /// reviennent vides, c'est-à-dire en couleur automatique.
+    /// A file written before the addition of the text colors (graph
+    /// title, title and scale of the axes) reads back: the absent fields
+    /// come back empty, that is to say in automatic color.
     #[test]
-    fn un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique() {
+    fn a_spec_from_before_the_text_colors_reads_back_as_automatic() {
         #[derive(Serialize)]
-        struct AncienAxe {
+        struct OldAxis {
             label: String,
             unit: String,
             scale: AxisScaleRecord,
@@ -1273,13 +1273,13 @@ mod tests {
             inverted: bool,
         }
         #[derive(Serialize)]
-        struct AncienSpec {
+        struct OldSpec {
             title: String,
             panels: Vec<PanelSpecRecord>,
             background: String,
         }
-        let axe = AncienAxe {
-            label: "Temps".to_string(),
+        let axis = OldAxis {
+            label: "Time".to_string(),
             unit: "s".to_string(),
             scale: AxisScaleRecord::Linear,
             auto_range: true,
@@ -1289,43 +1289,46 @@ mod tests {
             visible: true,
             inverted: false,
         };
-        let octets = rmp_serde::to_vec_named(&axe).expect("encodage");
-        let relu: AxisSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
-        assert_eq!(relu.label, "Temps");
-        assert_eq!(relu.title_color, "");
-        assert_eq!(relu.tick_color, "");
-        assert!(relu.title_visible, "un ancien axe garde son titre visible");
-        // #344 : un ancien axe garde ses tirets, vers l'extérieur.
-        assert!(relu.ticks, "un ancien axe garde ses tirets");
-        assert_eq!(relu.tick_direction, TickDirectionRecord::Out);
+        let bytes = rmp_serde::to_vec_named(&axis).expect("encoding");
+        let reloaded: AxisSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        assert_eq!(reloaded.label, "Time");
+        assert_eq!(reloaded.title_color, "");
+        assert_eq!(reloaded.tick_color, "");
         assert!(
-            !relu.minor_ticks,
-            "un ancien axe n'a pas de sous-graduations"
+            reloaded.title_visible,
+            "an old axis keeps its title visible"
         );
-        assert_eq!(relu.minor_tick_count, None);
-        assert_eq!(relu.label_every, 1, "un ancien axe écrit tous ses nombres");
-        // #344 : les réglages « Avancé » des tirets sont absents = automatiques.
-        assert_eq!(relu.tick_length, None);
-        assert_eq!(relu.minor_tick_length, None);
-        assert_eq!(relu.tick_width, None);
-        assert_eq!(relu.tick_mark_color, "");
+        // #344: an old axis keeps its ticks, outward.
+        assert!(reloaded.ticks, "an old axis keeps its ticks");
+        assert_eq!(reloaded.tick_direction, TickDirectionRecord::Out);
+        assert!(!reloaded.minor_ticks, "an old axis has no minor ticks");
+        assert_eq!(reloaded.minor_tick_count, None);
+        assert_eq!(
+            reloaded.label_every, 1,
+            "an old axis writes all its numbers"
+        );
+        // #344: the "Advanced" tick settings are absent = automatic.
+        assert_eq!(reloaded.tick_length, None);
+        assert_eq!(reloaded.minor_tick_length, None);
+        assert_eq!(reloaded.tick_width, None);
+        assert_eq!(reloaded.tick_mark_color, "");
 
-        let spec = AncienSpec {
-            title: "Ancien".to_string(),
+        let spec = OldSpec {
+            title: "Old".to_string(),
             panels: vec![PanelSpecRecord::default()],
             background: "#000000".to_string(),
         };
-        let octets = rmp_serde::to_vec_named(&spec).expect("encodage");
-        let relu: PlotSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
-        assert_eq!(relu.title, "Ancien");
+        let bytes = rmp_serde::to_vec_named(&spec).expect("encoding");
+        let reloaded: PlotSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        assert_eq!(reloaded.title, "Old");
         assert!(
-            relu.title_visible,
-            "un ancien graphe garde son titre visible"
+            reloaded.title_visible,
+            "an old graph keeps its title visible"
         );
-        assert_eq!(relu.title_color, "");
+        assert_eq!(reloaded.title_color, "");
         assert!(
-            relu.stale_warning,
-            "un ancien graphe garde l'avertissement des données pas à jour"
+            reloaded.stale_warning,
+            "an old graph keeps the out-of-date data warning"
         );
     }
 }
@@ -1334,7 +1337,7 @@ mod tests {
 mod visibility_tests {
     use super::*;
     #[test]
-    fn objets_anterieurs_sans_champ_visible_se_relisent_visibles() {
+    fn earlier_objects_without_a_visible_field_read_back_visible() {
         #[derive(Serialize)]
         struct OldText {
             text: String,
@@ -1356,7 +1359,7 @@ mod visibility_tests {
             line_width: f64,
         }
         let bytes = rmp_serde::to_vec_named(&OldText {
-            text: "Pic".into(),
+            text: "Peak".into(),
             x: 1.0,
             y: 2.0,
             axis: SeriesAxisRecord::Left,
@@ -1386,7 +1389,7 @@ mod visibility_tests {
 mod title_visibility_tests {
     use super::*;
     #[test]
-    fn titres_masques_et_anciens_champs_absents() {
+    fn hidden_titles_and_old_absent_fields() {
         let mut record = PlotSpecRecord {
             title_visible: false,
             ..Default::default()
@@ -1430,21 +1433,21 @@ mod title_visibility_tests {
     }
 }
 
-/// Géométrie d'une fenêtre, telle qu'elle s'écrit dans le fichier
-/// (`crate::WindowGeometry` côté API).
+/// Geometry of a window, as it is written in the file
+/// (`crate::WindowGeometry` on the API side).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WindowGeometryRecord {
     pub(crate) x: f64,
     pub(crate) y: f64,
     pub(crate) width: f64,
     pub(crate) height: f64,
-    /// `None` : jamais enregistré, l'application applique sa disposition par
-    /// défaut.
+    /// `None`: never saved, the application applies its default
+    /// layout.
     #[serde(default)]
     pub(crate) view: Option<WindowViewRecord>,
 }
 
-/// État d'affichage d'une fenêtre (`crate::WindowView`).
+/// Display state of a window (`crate::WindowView`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct WindowViewRecord {
     pub(crate) mode: WindowModeRecord,
@@ -1454,8 +1457,8 @@ pub(crate) struct WindowViewRecord {
     pub(crate) stack: u32,
 }
 
-/// Mode d'une fenêtre (`crate::WindowMode`). Une valeur inconnue se lit
-/// `Closed` : dégradation gracieuse, jamais un échec de chargement
+/// Mode of a window (`crate::WindowMode`). An unknown value reads as
+/// `Closed`: graceful degradation, never a load failure
 /// (invariant 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum WindowModeRecord {

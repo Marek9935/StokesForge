@@ -1,18 +1,19 @@
-//! Propriété centrale du bus : **quoi qu'on lui fasse subir, annuler tout
-//! ramène l'arbre initial bit à bit, et tout rétablir ramène l'arbre final**.
+//! Central property of the bus: **whatever it is put through, undoing
+//! everything brings back the initial tree bit for bit, and redoing everything
+//! brings back the final tree**.
 //!
-//! C'est le test qui vaut le plus cher ici, parce que l'historique est hybride :
-//! des instantanés de structure et des deltas de données s'entremêlent dans la
-//! même pile, et seule une séquence aléatoire un peu longue met en évidence les
-//! ordres d'annulation qui ne marchent pas.
+//! This is the most valuable test here, because the history is hybrid:
+//! structure snapshots and data deltas are intermixed in the
+//! same stack, and only a somewhat long random sequence brings out the
+//! undo orders that do not work.
 //!
-//! Le tirage est **déterministe** (`TestRng::deterministic_rng`) : un échec se
-//! reproduit à l'identique, et aucun fichier de régression n'est écrit.
+//! The draw is **deterministic** (`TestRng::deterministic_rng`): a failure is
+//! reproduced identically, and no regression file is written.
 //!
-//! Une commande refusée par le modèle (nom déjà pris, colonne disparue entre
-//! temps...) est un **rejet de tirage**, pas un échec : on passe au pas suivant.
-//! C'est la seule façon de tirer des séquences longues sans faire du générateur
-//! une deuxième implémentation des règles du cœur.
+//! A command refused by the model (name already taken, column gone in the
+//! meantime...) is a **draw rejection**, not a failure: we move on to the next step.
+//! This is the only way to draw long sequences without making the generator
+//! a second implementation of the rules of the core.
 
 use std::sync::Arc;
 
@@ -23,11 +24,11 @@ use stokesforge_commands::{Command, History, HistoryLabel, MacroKind};
 use stokesforge_core::{Column, ColumnType, MixedCell, Node, NodeId, Project, ValueBlock};
 use stokesforge_plot::{PlotSpec, SeriesSpec};
 
-// -- tirage ---------------------------------------------------------------
+// -- draw -----------------------------------------------------------------
 
-/// Valeurs tirées : des `NaN` en quantité (l'égalité du modèle est binaire,
-/// `NaN == NaN`), un zéro négatif (binairement distinct de `0.0`), et de quoi
-/// éprouver la conversion numérique ↔ texte.
+/// Values drawn: plenty of `NaN` (the model equality is binary,
+/// `NaN == NaN`), a negative zero (binary-distinct from `0.0`), and enough to
+/// exercise the numeric ↔ text conversion.
 const SAMPLE_VALUES: &[f64] = &[
     f64::NAN,
     f64::NAN,
@@ -41,9 +42,9 @@ const SAMPLE_VALUES: &[f64] = &[
     f64::INFINITY,
 ];
 
-/// Un pas de tirage : les indices sont **relatifs** (ils seront ramenés à
-/// l'état courant au moment de jouer), pour qu'un tirage reste jouable même
-/// après des ajouts et des suppressions de colonnes.
+/// A draw step: the indices are **relative** (they will be brought back to
+/// the current state at the time of playing), so that a draw stays playable
+/// even after columns have been added and removed.
 #[derive(Debug, Clone)]
 enum Step {
     Cells {
@@ -51,12 +52,12 @@ enum Step {
         start: usize,
         values: Vec<f64>,
     },
-    /// Saisie **tolérante** (`Command::SetCellsPromoting`) : le bloc est
-    /// toujours du texte, donc il ne convient à la colonne que si celle-ci
-    /// est déjà texte — les autres cas passent par la promotion en
-    /// `ColumnType::Mixed`, avec ou sans changement de type selon que la
-    /// colonne l'était déjà. C'est ce qui met les trois chemins de la
-    /// commande dans le même tirage que tout le reste.
+    /// **Tolerant** input (`Command::SetCellsPromoting`): the block is
+    /// always text, so it fits the column only if the column
+    /// is already text — the other cases go through promotion to
+    /// `ColumnType::Mixed`, with or without a type change depending on whether
+    /// the column already was. This is what puts the three paths of the
+    /// command in the same draw as everything else.
     CellsPromoting {
         column: usize,
         start: usize,
@@ -93,7 +94,7 @@ enum Step {
     },
 }
 
-/// Un pas isolé, ou un groupe de 2-3 pas joués dans une macro.
+/// A single step, or a group of 2-3 steps played in a macro.
 #[derive(Debug, Clone)]
 enum Script {
     Single(Step),
@@ -142,7 +143,7 @@ fn step() -> impl Strategy<Value = Step> {
     ]
 }
 
-/// ~15 % de macros de 2 à 3 commandes.
+/// ~15% of macros of 2 to 3 commands.
 fn script() -> impl Strategy<Value = Script> {
     prop_oneof![
         17 => step().prop_map(Script::Single),
@@ -150,8 +151,8 @@ fn script() -> impl Strategy<Value = Script> {
     ]
 }
 
-/// Runner à graine fixe : reproductible, et sans fichier de régression sur le
-/// disque du dépôt.
+/// Runner with a fixed seed: reproducible, and no regression file on the
+/// disk of the repository.
 fn deterministic_runner() -> TestRunner {
     let config = Config {
         cases: 32,
@@ -161,12 +162,12 @@ fn deterministic_runner() -> TestRunner {
     TestRunner::new_with_rng(config, TestRng::deterministic_rng(RngAlgorithm::ChaCha))
 }
 
-// -- interprétation -------------------------------------------------------
+// -- interpretation -------------------------------------------------------
 
-/// Le monde sur lequel un tirage est joué : la fixture des critères
-/// d'acceptation, plus un compteur qui fabrique des noms de renommage jamais
-/// pris (un renommage doit échouer pour de bonnes raisons, pas parce que le
-/// générateur retire toujours le même nom du chapeau).
+/// The world on which a draw is played: the acceptance criteria
+/// fixture, plus a counter that makes rename names never
+/// taken (a rename must fail for good reasons, not because the
+/// generator always pulls the same name out of the hat).
 struct World {
     project: Project,
     sheets: Vec<NodeId>,
@@ -175,20 +176,18 @@ struct World {
 
 impl World {
     fn new() -> Self {
-        let mut project = Project::new("Demo").expect("projet Demo");
+        let mut project = Project::new("Demo").expect("project Demo");
         let root = project.root();
         let book = project
             .add_workbook(root, Some("Book1"))
-            .expect("classeur Book1");
-        let sheet1 = project
-            .resolve_path("[Book1]Sheet1")
-            .expect("feuille Sheet1");
+            .expect("workbook Book1");
+        let sheet1 = project.resolve_path("[Book1]Sheet1").expect("sheet Sheet1");
         let col_a = project
             .add_column(sheet1, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
-            .expect("colonne A");
+            .expect("column A");
         project
             .add_column(sheet1, None, Some("B"), Column::from_f64(&[10.0, 20.0]))
-            .expect("colonne B");
+            .expect("column B");
         project
             .add_column(
                 sheet1,
@@ -196,18 +195,18 @@ impl World {
                 Some("T"),
                 Column::from_text(&[Some("a".to_string()), None, Some("c".to_string())]),
             )
-            .expect("colonne T");
+            .expect("column T");
         let sheet2 = project
             .add_worksheet(book, Some("Sheet2"))
-            .expect("feuille Sheet2");
+            .expect("sheet Sheet2");
         let col_x = project
             .add_column(sheet2, None, Some("X"), Column::from_f64(&[0.5, 1.5]))
-            .expect("colonne X");
-        // Un graphe à séries « ligne » (#307) : les insertions et suppressions
-        // de lignes tirées réécrivent ses `PlotSpec` (delta `plots`), donc
-        // l'égalité d'arbre couvre aussi leur annulation et leur rétablissement.
-        let mut spec = PlotSpec::empty("Lignes");
-        let panel = spec.panels.get_mut(0).expect("panneau");
+            .expect("column X");
+        // A graph with "row" series (#307): the drawn row insertions and
+        // deletions rewrite its `PlotSpec` (`plots` delta), so
+        // the tree equality also covers their undo and redo.
+        let mut spec = PlotSpec::empty("Rows");
+        let panel = spec.panels.get_mut(0).expect("panel");
         for (anchor, row) in [(col_a, 4), (col_a, 1), (col_x, 2), (col_x, 0)] {
             let mut series = SeriesSpec::new(anchor);
             series.row = Some(row);
@@ -215,8 +214,8 @@ impl World {
         }
         let root = project.root();
         project
-            .add_graph(root, Some("Lignes"), spec)
-            .expect("graphe de lignes");
+            .add_graph(root, Some("Rows"), spec)
+            .expect("rows graph");
         Self {
             project,
             sheets: vec![sheet1, sheet2],
@@ -232,7 +231,7 @@ impl World {
             .unwrap_or_default()
     }
 
-    /// Toutes les colonnes vivantes, les deux feuilles à la suite.
+    /// All the live columns, the two sheets one after the other.
     fn columns(&self) -> Vec<NodeId> {
         self.sheets
             .iter()
@@ -248,8 +247,8 @@ impl World {
             .map(Column::column_type)
     }
 
-    /// Traduit un pas en commande jouable sur l'état courant, ou `None` si le
-    /// pas n'a pas de cible (plus aucune colonne, par exemple).
+    /// Translates a step into a command playable on the current state, or `None` if the
+    /// step has no target (no column left, for example).
     fn command_for(&mut self, step: &Step) -> Option<Command> {
         let columns = self.columns();
         match step {
@@ -278,10 +277,10 @@ impl World {
                 values,
             } => {
                 let target = *columns.get(column % columns.len().max(1))?;
-                // Un bloc mixte à cellules texte, quel que soit le type de
-                // la colonne : c'est précisément ce que `SetCells`
-                // refuserait et que cette commande accepte en élargissant la
-                // colonne.
+                // A mixed block with text cells, whatever the type of
+                // the column: this is precisely what `SetCells`
+                // would refuse and what this command accepts by widening the
+                // column.
                 let block = ValueBlock::Mixed(
                     values
                         .iter()
@@ -312,7 +311,7 @@ impl World {
                 })
             }
             Step::DeleteColumn { column } => {
-                // Toujours garder de quoi jouer les pas suivants.
+                // Always keep enough to play the following steps.
                 if columns.len() <= 1 {
                     return None;
                 }
@@ -371,8 +370,8 @@ impl World {
         }
     }
 
-    /// Joue un pas. Rend `true` s'il a été accepté ; un refus est un rejet de
-    /// tirage, silencieux.
+    /// Plays a step. Returns `true` if it was accepted; a refusal is a draw
+    /// rejection, silent.
     fn play_step(&mut self, history: &mut History, step: &Step) -> bool {
         match self.command_for(step) {
             Some(command) => history.execute(&mut self.project, command).is_ok(),
@@ -380,7 +379,7 @@ impl World {
         }
     }
 
-    /// Joue un scénario complet et rend le nombre de commandes acceptées.
+    /// Plays a complete scenario and returns the number of accepted commands.
     fn play(&mut self, history: &mut History, scripts: &[Script]) -> usize {
         let mut accepted = 0;
         for script in scripts {
@@ -391,11 +390,11 @@ impl World {
                     }
                 }
                 Script::Group(steps) => {
-                    // B7 : un refus (profondeur d'imbrication au plafond) est
-                    // un rejet de tirage, silencieux comme les autres — voir
-                    // la doc de `play_step`. Non-imbriqué ici (un groupe ne
-                    // s'ouvre jamais avant que le précédent ne se soit
-                    // refermé), donc jamais atteint en pratique.
+                    // B7: a refusal (nesting depth at the cap) is
+                    // a draw rejection, silent like the others — see
+                    // the doc of `play_step`. Not nested here (a group
+                    // never opens before the previous one has
+                    // closed), so never reached in practice.
                     if history.begin_macro(MacroKind::Import).is_err() {
                         return accepted;
                     }
@@ -404,8 +403,8 @@ impl World {
                             accepted += 1;
                         }
                     }
-                    // Une macro vide ne laisse aucune entrée : rien à traiter à
-                    // part si toutes les commandes du groupe ont été refusées.
+                    // An empty macro leaves no entry: nothing to handle
+                    // unless all the commands of the group were refused.
                     if history.end_macro(&mut self.project).is_err() {
                         return accepted;
                     }
@@ -415,7 +414,7 @@ impl World {
         accepted
     }
 
-    /// Joue des pas isolés jusqu'à `target` commandes acceptées.
+    /// Plays single steps until `target` commands are accepted.
     fn play_until(&mut self, history: &mut History, steps: &[Step], target: usize) -> usize {
         let mut accepted = 0;
         for step in steps {
@@ -435,7 +434,7 @@ fn undo_all(history: &mut History, project: &mut Project) -> Result<(), TestCase
         match history.undo(project) {
             Ok(true) => {}
             Ok(false) => return Ok(()),
-            Err(err) => return Err(TestCaseError::fail(format!("annulation refusée : {err}"))),
+            Err(err) => return Err(TestCaseError::fail(format!("undo refused: {err}"))),
         }
     }
 }
@@ -445,16 +444,12 @@ fn redo_all(history: &mut History, project: &mut Project) -> Result<(), TestCase
         match history.redo(project) {
             Ok(true) => {}
             Ok(false) => return Ok(()),
-            Err(err) => {
-                return Err(TestCaseError::fail(format!(
-                    "rétablissement refusé : {err}"
-                )))
-            }
+            Err(err) => return Err(TestCaseError::fail(format!("redo refused: {err}"))),
         }
     }
 }
 
-// -- 22. aller-retour complet --------------------------------------------
+// -- 22. full round trip --------------------------------------------------
 
 #[test]
 fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
@@ -468,39 +463,39 @@ fn undoing_everything_restores_the_initial_tree_bit_for_bit() {
             let accepted = world.play(&mut history, &scripts);
             prop_assert!(
                 accepted >= 50,
-                "tirage trop dégénéré : seulement {accepted} commandes acceptées"
+                "draw too degenerate: only {accepted} commands accepted"
             );
 
             let last = Arc::clone(world.project.tree());
             prop_assert!(
                 *last != *initial,
-                "le tirage n'a rien changé : le test ne prouverait rien"
+                "the draw changed nothing: the test would prove nothing"
             );
 
             undo_all(&mut history, &mut world.project)?;
-            // Égalité binaire, `NaN` compris — et les `NodeId` vivent dans
-            // les nœuds, donc cette comparaison couvre aussi le retour d'un
-            // nœud supprimé sous son identifiant d'origine.
+            // Binary equality, `NaN` included — and the `NodeId`s live in
+            // the nodes, so this comparison also covers the return of a
+            // deleted node under its original identifier.
             prop_assert!(
                 **world.project.tree() == *initial,
-                "après annulation complète, l'arbre diffère de l'initial"
+                "after a full undo, the tree differs from the initial one"
             );
 
             redo_all(&mut history, &mut world.project)?;
             prop_assert!(
                 **world.project.tree() == *last,
-                "après rétablissement complet, l'arbre diffère du final"
+                "after a full redo, the tree differs from the final one"
             );
             Ok(())
         })
-        .expect("propriété d'aller-retour vérifiée");
+        .expect("round-trip property verified");
 }
 
-// -- 23. déterminisme ----------------------------------------------------
+// -- 23. determinism -------------------------------------------------------
 
 #[test]
 fn replaying_the_same_draw_yields_the_same_history_labels() {
-    /// Joue un tirage et rend les libellés de la pile, du sommet vers le fond.
+    /// Plays a draw and returns the labels of the stack, from the top to the bottom.
     fn labels(scripts: &[Script]) -> Vec<HistoryLabel> {
         let mut world = World::new();
         let mut history = History::with_limit(0);
@@ -521,10 +516,10 @@ fn replaying_the_same_draw_yields_the_same_history_labels() {
             prop_assert_eq!(labels(&scripts), labels(&scripts));
             Ok(())
         })
-        .expect("libellés déterministes");
+        .expect("deterministic labels");
 }
 
-// -- 24. sous limite -----------------------------------------------------
+// -- 24. under a limit -----------------------------------------------------
 
 #[test]
 fn a_bounded_history_still_round_trips_within_its_window() {
@@ -537,7 +532,7 @@ fn a_bounded_history_still_round_trips_within_its_window() {
             let accepted = world.play_until(&mut history, &steps, 30);
             prop_assert!(
                 accepted == 30,
-                "tirage trop dégénéré : {accepted} commandes acceptées sur 30 attendues"
+                "draw too degenerate: {accepted} commands accepted out of 30 expected"
             );
             prop_assert_eq!(history.len(), 5);
 
@@ -550,9 +545,9 @@ fn a_bounded_history_still_round_trips_within_its_window() {
             }
             prop_assert!(
                 **world.project.tree() == *before,
-                "trois annulations puis trois rétablissements doivent être neutres"
+                "three undos then three redos must be neutral"
             );
             Ok(())
         })
-        .expect("propriété sous limite vérifiée");
+        .expect("under-limit property verified");
 }

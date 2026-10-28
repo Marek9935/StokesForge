@@ -1,39 +1,39 @@
-//! Grammaire des chemins d'objets Origin : `[Book]Sheet!Col`, avec dossiers
-//! optionnels en préfixe (`/Manips/[Book1]Sheet1!ColA`).
+//! Grammar of Origin object paths: `[Book]Sheet!Col`, with optional folders
+//! as a prefix (`/Manips/[Book1]Sheet1!ColA`).
 
 use crate::error::{CoreError, CoreResult};
 use crate::name::RESERVED_NAME_CHARS;
 
-/// Niveau le plus fin désigné par un chemin.
+/// Deepest level designated by a path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathDepth {
-    /// Le chemin désigne un dossier (ou la racine).
+    /// The path designates a folder (or the root).
     Folder,
-    /// Le chemin désigne une fenêtre (classeur, graphe, matrice, note).
+    /// The path designates a window (workbook, graph, matrix, note).
     Window,
-    /// Le chemin désigne une feuille à l'intérieur d'un classeur.
+    /// The path designates a sheet inside a workbook.
     Sheet,
-    /// Le chemin désigne une colonne à l'intérieur d'une feuille.
+    /// The path designates a column inside a sheet.
     Column,
 }
 
-/// Chemin analysé. Les champs valent `None` quand ils sont absents.
+/// Parsed path. Fields are `None` when absent.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObjectPath {
-    /// Segments de dossier, de la racine (ou du point de départ relatif) vers la feuille.
+    /// Folder segments, from the root (or the relative starting point) towards the sheet.
     pub folders: Vec<String>,
-    /// Nom de la fenêtre (classeur, graphe, matrice, note), si présente.
+    /// Name of the window (workbook, graph, matrix, note), if present.
     pub window: Option<String>,
-    /// Nom de la feuille, si présente.
+    /// Name of the sheet, if present.
     pub sheet: Option<String>,
-    /// Nom de la colonne, si présente.
+    /// Name of the column, if present.
     pub column: Option<String>,
-    /// `true` si le chemin est ancré à la racine (préfixé par `/`).
+    /// `true` if the path is anchored at the root (prefixed by `/`).
     pub rooted: bool,
 }
 
 impl ObjectPath {
-    /// Niveau le plus fin désigné par ce chemin.
+    /// Deepest level designated by this path.
     pub fn depth(&self) -> PathDepth {
         if self.column.is_some() {
             PathDepth::Column
@@ -61,8 +61,8 @@ impl std::str::FromStr for ObjectPath {
     }
 }
 
-/// Valide un segment de chemin (dossier, fenêtre, feuille ou colonne) : non
-/// vide, sans espace de bordure, sans caractère réservé.
+/// Validates a path segment (folder, window, sheet or column): not
+/// empty, no edge space, no reserved character.
 fn check_segment(segment: &str) -> CoreResult<&str> {
     if segment.is_empty() || segment != segment.trim() {
         return Err(CoreError::Path(format!("invalid segment: {segment}")));
@@ -73,8 +73,8 @@ fn check_segment(segment: &str) -> CoreResult<&str> {
     Ok(segment)
 }
 
-/// Découpe un préfixe de dossiers (`Manips/Jour1/`) en segments validés,
-/// en ignorant les segments vides (`//` répétés).
+/// Splits a folder prefix (`Manips/Jour1/`) into validated segments,
+/// ignoring empty segments (repeated `//`).
 fn parse_folder_segments(prefix: &str) -> CoreResult<Vec<String>> {
     prefix
         .split('/')
@@ -83,7 +83,7 @@ fn parse_folder_segments(prefix: &str) -> CoreResult<Vec<String>> {
         .collect()
 }
 
-/// Analyse un chemin. `Err(CoreError::Path(_))` si la syntaxe est invalide.
+/// Parses a path. `Err(CoreError::Path(_))` if the syntax is invalid.
 pub fn parse_path(text: &str) -> CoreResult<ObjectPath> {
     let raw = text.trim();
     if raw.is_empty() {
@@ -157,7 +157,7 @@ pub fn parse_path(text: &str) -> CoreResult<ObjectPath> {
     })
 }
 
-/// Forme textuelle canonique.
+/// Canonical text form.
 pub fn format_path(path: &ObjectPath) -> String {
     let mut prefix = path.folders.join("/");
     if path.rooted {
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn parses_full_column_path() {
-        let path = parse_path("[Book1]Sheet1!ColA").expect("chemin valide");
+        let path = parse_path("[Book1]Sheet1!ColA").expect("valid path");
         assert!(path.folders.is_empty());
         assert_eq!(path.window.as_deref(), Some("Book1"));
         assert_eq!(path.sheet.as_deref(), Some("Sheet1"));
@@ -204,20 +204,20 @@ mod tests {
 
     #[test]
     fn parses_sheet_path() {
-        let path = parse_path("[Book1]Sheet1").expect("chemin valide");
+        let path = parse_path("[Book1]Sheet1").expect("valid path");
         assert_eq!(path.depth(), PathDepth::Sheet);
         assert_eq!(path.column, None);
     }
 
     #[test]
     fn parses_window_only_path() {
-        let path = parse_path("[Graph1]").expect("chemin valide");
+        let path = parse_path("[Graph1]").expect("valid path");
         assert_eq!(path.depth(), PathDepth::Window);
     }
 
     #[test]
     fn parses_root() {
-        let path = parse_path("/").expect("chemin valide");
+        let path = parse_path("/").expect("valid path");
         assert!(path.folders.is_empty());
         assert!(path.rooted);
         assert_eq!(path.depth(), PathDepth::Folder);
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn parses_rooted_folder_path() {
-        let path = parse_path("/Manips/Jour1").expect("chemin valide");
+        let path = parse_path("/Manips/Jour1").expect("valid path");
         assert_eq!(
             path.folders,
             vec!["Manips".to_string(), "Jour1".to_string()]
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn parses_relative_folder_path() {
-        let path = parse_path("Manips/Jour1").expect("chemin valide");
+        let path = parse_path("Manips/Jour1").expect("valid path");
         assert_eq!(
             path.folders,
             vec!["Manips".to_string(), "Jour1".to_string()]
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn ignores_empty_segments_between_double_slashes() {
-        let path = parse_path("/Manips//Jour1").expect("chemin valide");
+        let path = parse_path("/Manips//Jour1").expect("valid path");
         assert_eq!(
             path.folders,
             vec!["Manips".to_string(), "Jour1".to_string()]
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn parses_folder_prefixed_column_path() {
-        let path = parse_path("/Manips/Jour1/[Book1]Sheet1!ColA").expect("chemin valide");
+        let path = parse_path("/Manips/Jour1/[Book1]Sheet1!ColA").expect("valid path");
         assert_eq!(
             path.folders,
             vec!["Manips".to_string(), "Jour1".to_string()]
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn tolerates_surrounding_whitespace() {
-        let path = parse_path("  [Book1]Sheet1  ").expect("chemin valide");
+        let path = parse_path("  [Book1]Sheet1  ").expect("valid path");
         assert_eq!(path.sheet.as_deref(), Some("Sheet1"));
     }
 
@@ -286,7 +286,7 @@ mod tests {
         for case in cases {
             assert!(
                 matches!(parse_path(case), Err(CoreError::Path(_))),
-                "attendu CoreError::Path pour {case:?}"
+                "expected CoreError::Path for {case:?}"
             );
         }
     }
@@ -303,9 +303,9 @@ mod tests {
             "/Manips/[Book1]Sheet1!ColA",
         ];
         for case in cases {
-            let parsed = parse_path(case).expect("chemin valide");
-            assert_eq!(format_path(&parsed), case, "round-trip pour {case:?}");
-            assert_eq!(parsed.to_string(), case, "Display pour {case:?}");
+            let parsed = parse_path(case).expect("valid path");
+            assert_eq!(format_path(&parsed), case, "round-trip for {case:?}");
+            assert_eq!(parsed.to_string(), case, "Display for {case:?}");
         }
     }
 

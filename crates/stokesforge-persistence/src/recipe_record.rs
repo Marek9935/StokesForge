@@ -1,10 +1,10 @@
-//! Recette d'import, telle qu'elle s'écrit dans le fichier (S2, #323).
+//! Import recipe, as it is written in the file (S2, #323).
 //!
-//! Chaque type de `stokesforge_import::recipe` a ici son miroir : le format
-//! du fichier ne dépend plus de la forme interne de la recette, un champ ou
-//! une variante renommés dans `stokesforge-import` ne changent pas les octets
-//! écrits. Les champs apparus après la première recette portent un
-//! `#[serde(default)]`, comme dans le type d'origine.
+//! Each type of `stokesforge_import::recipe` has its mirror here: the format
+//! of the file no longer depends on the internal shape of the recipe, a field or
+//! variant renamed in `stokesforge-import` does not change the bytes
+//! written. The fields that appeared after the first recipe carry a
+//! `#[serde(default)]`, as in the original type.
 
 use serde::{Deserialize, Serialize};
 use stokesforge_import::recipe as r;
@@ -17,16 +17,16 @@ fn default_preview_lines() -> u64 {
     20
 }
 
-/// Source d'une colonne importée (`stokesforge_core::ImportSource`).
+/// Source of an imported column (`stokesforge_core::ImportSource`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ImportSourceRecord {
-    /// Chemin du fichier source.
+    /// Path of the source file.
     pub(crate) path: String,
-    /// La recette qui l'a lu.
+    /// The recipe that read it.
     pub(crate) recipe: ImportRecipeRecord,
-    /// Index de la colonne dans le fichier (0 = la première).
+    /// Index of the column in the file (0 = the first).
     pub(crate) column: u64,
-    /// Rang du bloc de données dans le fichier (0 = le premier).
+    /// Rank of the data block in the file (0 = the first).
     pub(crate) block: u64,
 }
 
@@ -220,8 +220,8 @@ pub(crate) struct SubheaderRolesRecord {
 
 // ── Conversions ─────────────────────────────────────────────────────────
 //
-// Un `match` exhaustif sans `_` par énumération : une variante ajoutée dans
-// `stokesforge-import` ne compile pas ici tant qu'elle n'a pas son miroir.
+// One exhaustive `match` without `_` per enum: a variant added in
+// `stokesforge-import` does not compile here until it has its mirror.
 
 fn to_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)

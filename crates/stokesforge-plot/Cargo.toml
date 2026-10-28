@@ -3,7 +3,7 @@ name = "stokesforge-plot"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Description d'un graphe (PlotSpec) indépendante de tout moteur de rendu — ni plotters, ni egui, ni typst."
+description = "Description of a graph (PlotSpec) independent of any renderer — no plotters, no egui, no typst."
 
 [lints]
 workspace = true

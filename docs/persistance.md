@@ -202,20 +202,20 @@ format N+1 changes the schema.
 
 When the number goes up (V → V+1): copy the schema of V to `schema/vV.rs`, add
 the function `vV → courant` there, add its arm in `version::decode_body`,
-freeze the witness (`tests/temoins/vV/`, never modified) and create the witness
-`vV+1/`. `FORMAT_VERSION` is never changed "just to try": the CI (`scripts/versions-alignees.sh`, `fmt` job) requires the file `tests/temoins/vN/projet.stf` as soon as `FORMAT_VERSION` = N.
+freeze the witness (`tests/witnesses/vV/`, never modified) and create the witness
+`vV+1/`. `FORMAT_VERSION` is never changed "just to try": the CI (`scripts/versions-alignees.sh`, `fmt` job) requires the file `tests/witnesses/vN/project.stf` as soon as `FORMAT_VERSION` = N.
 
-**Witness files** (`tests/fichiers_temoins.rs`, `tests/temoins/v1/projet.stf`):
+**Witness files** (`tests/witness_files.rs`, `tests/witnesses/v1/project.stf`):
 the witness project exercises all the node, column and series types, with
 non-default values everywhere. Two guards: the file reads back as exactly the
 project (tree, view tables, clean report); saving this project gives back
 exactly the bytes of the file (drift of the written format requires a
-decision). Explicit regeneration: `STOKESFORGE_REGENERER_TEMOINS=1 cargo
-test -p stokesforge-persistence --test fichiers_temoins regenerer -- --ignored`.
+decision). Explicit regeneration: `STOKESFORGE_REGENERATE_WITNESSES=1 cargo
+test -p stokesforge-persistence --test witness_files regenerate -- --ignored`.
 
 **Stable order**: the view tables are `BTreeMap`s in the body
 (`window_geometries`, `column_widths`); two saves of the same project
-give the same bytes (`tests/vues_deterministes.rs`).
+give the same bytes (`tests/deterministic_views.rs`).
 
 **Input fingerprint** (`inputs_digest`, S3): part of the format. Its input byte
 and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
@@ -312,7 +312,7 @@ allocation of a model column; above the limit, `PersistenceError::TooManyCells
 `DEFAULT_MAX_CELLS` = 1 billion; adjustable in File › Preferences › General
 (millions of cells, from 1 to 10,000, key `max_cells_m`, `Action::SetMaxCellsM`).
 CLI, scripts and `load_with_limit` keep the default value
-(`LoadLimits::default()`). Witnesses: `tests/budget_cellules.rs`, battery `b3`.
+(`LoadLimits::default()`). Witnesses: `tests/cell_budget.rs`, battery `b3`.
 
 **Decoding copies (#316).** `unknown::deserialize_with_fallback` frees the
 captured `rmpv::Value` as soon as it is re-encoded, before building the known
@@ -351,10 +351,10 @@ replaces "Saved to" and says how to raise it.
   `None` = automatic) and `tick_mark_color` (empty = scale color),
   the "Advanced" settings of the tick marks (#344; the raw value is kept, the
   rendering bounds it), and `tick_direction` (`TickDirectionRecord`, unknown value read
-  as `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`); the text colors (`PlotSpecRecord::title_color`,
+  as `Out`, test `an_unknown_tick_direction_reads_as_outward`); the text colors (`PlotSpecRecord::title_color`,
   `AxisSpecRecord::title_color`/`tick_color`) — an older file
   reads back with empty strings, that is, in automatic color (test
-  `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Or
+  `a_spec_from_before_the_text_colors_reads_back_as_automatic`). Or
   `FileBody::saved_colors` (saved colors of the project), placed before
   `window_geometries` and `save_counter`, which must stay the last field.
 - **The direction of an axis (#344) is not normalized by persistence.**

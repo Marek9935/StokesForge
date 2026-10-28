@@ -1,25 +1,25 @@
-//! Validation des noms d'objets (dossiers, classeurs, feuilles, colonnes...).
+//! Validation of object names (folders, workbooks, sheets, columns...).
 
 use crate::error::{CoreError, CoreResult};
 
-/// Caractères réservés par la grammaire de chemins `[Book]Sheet!Col`.
+/// Characters reserved by the `[Book]Sheet!Col` path grammar.
 pub const RESERVED_NAME_CHARS: &[char] = &['[', ']', '!', '/'];
 
-/// Longueur maximale d'un nom, en caractères Unicode (`chars().count()`, pas
-/// en octets) — C7 (`guide-de-correction-robustesse.md` §F4·F9). Un nom de
-/// cent mille caractères traversait le disque sans borne ; 255 est généreux
-/// pour un nom d'objet et reste une constante nommée, pas une devinette.
+/// Maximum length of a name, in Unicode characters (`chars().count()`, not
+/// in bytes) — C7 (`guide-de-correction-robustesse.md` §F4·F9). A name of
+/// a hundred thousand characters went through to disk unbounded; 255 is generous
+/// for an object name and stays a named constant, not a guess.
 pub const MAX_NAME_CHARS: usize = 255;
 
-/// Vrai pour un caractère que `check_name` refuse à l'intérieur d'un nom :
-/// tout caractère de contrôle C0/C1 (`char::is_control`, qui couvre
-/// `\0..=\x1F`, DEL `\x7F` et `\u{80}..=\u{9F}`), et les marques de
-/// formatage/direction Unicode invisibles ou trompeuses les plus courantes —
-/// espaces et joints de largeur nulle (`U+200B..=U+200F`) et les marques
-/// d'isolation/inversion de sens (`U+202A..=U+202E`, `U+2066..=U+2069`), dont
-/// RIGHT-TO-LEFT OVERRIDE (`U+202E`) : un nom qui les porte peut retourner
-/// visuellement le reste d'un chemin ou casser tout affichage tabulaire et
-/// tout message d'erreur qui le cite (C7).
+/// True for a character that `check_name` refuses inside a name:
+/// any C0/C1 control character (`char::is_control`, which covers
+/// `\0..=\x1F`, DEL `\x7F` and `\u{80}..=\u{9F}`), and the most common invisible
+/// or deceptive Unicode formatting/direction marks —
+/// zero-width spaces and joiners (`U+200B..=U+200F`) and the
+/// isolate/override direction marks (`U+202A..=U+202E`, `U+2066..=U+2069`), among them
+/// RIGHT-TO-LEFT OVERRIDE (`U+202E`): a name carrying them can visually
+/// reverse the rest of a path or break any tabular display and
+/// any error message that quotes it (C7).
 fn is_control_or_deceptive_format(c: char) -> bool {
     c.is_control()
         || matches!(c,
@@ -29,10 +29,10 @@ fn is_control_or_deceptive_format(c: char) -> bool {
         )
 }
 
-/// Valide un nom d'objet : non vide, sans espace de bordure, sans caractère
-/// réservé, sans caractère de contrôle ni marque de formatage/direction
-/// Unicode trompeuse, et d'au plus [`MAX_NAME_CHARS`] caractères. Rend le nom
-/// inchangé (emprunté) si valide.
+/// Validates an object name: not empty, no edge space, no
+/// reserved character, no control character nor deceptive Unicode
+/// formatting/direction mark, and at most [`MAX_NAME_CHARS`] characters. Returns the name
+/// unchanged (borrowed) if valid.
 pub fn check_name(name: &str) -> CoreResult<&str> {
     if name.is_empty() {
         return Err(CoreError::InvalidName("the name is empty".to_string()));
@@ -70,27 +70,27 @@ mod tests {
         for name in ["", "  ", " A", "A ", "A!B", "[A]", "a/b", "A]"] {
             assert!(
                 matches!(check_name(name), Err(CoreError::InvalidName(_))),
-                "attendu InvalidName pour {name:?}"
+                "expected InvalidName for {name:?}"
             );
         }
     }
 
     #[test]
     fn accepts_valid_names() {
-        for name in ["A", "Book1", "Température (K)", "x-y"] {
+        for name in ["A", "Book1", "Δ Temperature (K)", "x-y"] {
             assert_eq!(check_name(name), Ok(name));
         }
     }
 
-    /// C7 (`guide-de-correction-robustesse.md` §F4·F9) — reproduit ici le
-    /// scénario de `b21_les_noms_de_controle_sont_refuses`
-    /// (`stokesforge-robustesse`) au plus près de la fonction qu'il corrige.
+    /// C7 (`guide-de-correction-robustesse.md` §F4·F9) — reproduces here the
+    /// scenario of `b21_les_noms_de_controle_sont_refuses`
+    /// (`stokesforge-robustesse`) as close as possible to the function it fixes.
     #[test]
     fn rejects_control_and_deceptive_format_characters() {
         for name in [
-            "A\nB",       // saut de ligne
-            "A\tB",       // tabulation
-            "A\u{0}B",    // octet nul
+            "A\nB",       // line feed
+            "A\tB",       // tab
+            "A\u{0}B",    // null byte
             "A\u{202e}B", // RIGHT-TO-LEFT OVERRIDE
             "A\u{200b}B", // ZERO WIDTH SPACE
             "A\u{7f}B",   // DEL
@@ -99,20 +99,20 @@ mod tests {
         ] {
             assert!(
                 matches!(check_name(name), Err(CoreError::InvalidName(_))),
-                "attendu InvalidName pour {name:?}"
+                "expected InvalidName for {name:?}"
             );
         }
     }
 
     #[test]
     fn rejects_names_longer_than_the_limit() {
-        let trop_long = "x".repeat(MAX_NAME_CHARS + 1);
+        let too_long = "x".repeat(MAX_NAME_CHARS + 1);
         assert!(matches!(
-            check_name(&trop_long),
+            check_name(&too_long),
             Err(CoreError::InvalidName(_))
         ));
 
-        let a_la_limite = "x".repeat(MAX_NAME_CHARS);
-        assert_eq!(check_name(&a_la_limite), Ok(a_la_limite.as_str()));
+        let at_the_limit = "x".repeat(MAX_NAME_CHARS);
+        assert_eq!(check_name(&at_the_limit), Ok(at_the_limit.as_str()));
     }
 }

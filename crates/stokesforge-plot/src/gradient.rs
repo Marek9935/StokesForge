@@ -1,26 +1,26 @@
-//! Nuanciers (#178) : des dégradés de couleurs qu'on répartit sur les courbes
-//! d'un groupe (#177).
+//! Color gradients (#178): gradients spread over the curves
+//! of a group (#177).
 //!
-//! Un nuancier est une suite d'**arrêts** `#RRGGBB` (au moins un) ; les
-//! couleurs des `n` courbes d'un groupe sont prises à intervalles réguliers
-//! entre le premier et le dernier arrêt, quel que soit `n`, par interpolation
-//! linéaire des composantes RGB. Les nuanciers fournis sont des données
-//! (`GRADIENT_PRESETS`) ; leur nom affiché est une clé du catalogue de
-//! l'application, jamais un texte d'ici.
+//! A color gradient is a list of `#RRGGBB` **stops** (at least one); the
+//! colors of the `n` curves of a group are taken at regular intervals
+//! between the first and the last stop, whatever `n` is, by linear
+//! interpolation of the RGB components. The provided color gradients are data
+//! (`GRADIENT_PRESETS`); their displayed name is a key of the application
+//! catalog, never a text from here.
 
 use crate::style::parse_hex;
 
-/// Un nuancier fourni : un identifiant stable (clé de libellé de
-/// l'application) et ses arrêts.
+/// A provided color gradient: a stable identifier (label key of the
+/// application) and its stops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradientPreset {
-    /// Identifiant stable, en minuscules : `blue-red`.
+    /// Stable identifier, in lowercase: `blue-red`.
     pub id: &'static str,
-    /// Arrêts `#RRGGBB`, du premier au dernier.
+    /// `#RRGGBB` stops, from first to last.
     pub stops: &'static [&'static str],
 }
 
-/// Les nuanciers fournis.
+/// The provided color gradients.
 pub const GRADIENT_PRESETS: [GradientPreset; 8] = [
     GradientPreset {
         id: "blue-red",
@@ -56,14 +56,14 @@ pub const GRADIENT_PRESETS: [GradientPreset; 8] = [
     },
 ];
 
-/// Les `count` couleurs `#RRGGBB` d'un nuancier d'arrêts `stops`, régulièrement
-/// espacées entre le premier et le dernier arrêt.
+/// The `count` `#RRGGBB` colors of a color gradient with stops `stops`, evenly
+/// spaced between the first and the last stop.
 ///
-/// - `count == 0` : liste vide ; `count == 1` : le premier arrêt ;
-/// - un arrêt illisible est ignoré ; sans aucun arrêt lisible : liste vide
-///   (l'appelant ne change alors aucune couleur) ;
-/// - l'opacité d'un arrêt `#RRGGBBAA` est ignorée : un nuancier colore, il ne
-///   rend pas transparent.
+/// - `count == 0`: empty list; `count == 1`: the first stop;
+/// - an unreadable stop is ignored; with no readable stop: empty list
+///   (the caller then changes no color);
+/// - the opacity of a `#RRGGBBAA` stop is ignored: a color gradient colors, it does not
+///   make transparent.
 pub fn gradient_colors<S: AsRef<str>>(stops: &[S], count: usize) -> Vec<String> {
     let stops: Vec<[u8; 3]> = stops
         .iter()
@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn les_extremites_sont_les_premier_et_dernier_arrets() {
+    fn the_ends_are_the_first_and_last_stops() {
         let colors = gradient_colors(&["#0000ff", "#ff0000"], 5);
         assert_eq!(colors.len(), 5);
         assert_eq!(colors[0], "#0000ff");
@@ -109,19 +109,19 @@ mod tests {
     }
 
     #[test]
-    fn un_arret_intermediaire_est_atteint_exactement() {
+    fn an_intermediate_stop_is_reached_exactly() {
         let colors = gradient_colors(&["#000000", "#ffffff", "#ff0000"], 3);
         assert_eq!(colors, ["#000000", "#ffffff", "#ff0000"]);
     }
 
     #[test]
-    fn une_ou_zero_courbe() {
+    fn one_or_zero_curves() {
         assert_eq!(gradient_colors(&["#102030", "#ffffff"], 1), ["#102030"]);
         assert!(gradient_colors(&["#102030", "#ffffff"], 0).is_empty());
     }
 
     #[test]
-    fn arrets_illisibles_ignores_et_opacite_ecartee() {
+    fn unreadable_stops_are_ignored_and_opacity_is_dropped() {
         assert!(gradient_colors(&["nope"], 3).is_empty());
         assert_eq!(
             gradient_colors(&["nope", "#11223380"], 2),
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_nuancier_fourni_est_lisible() {
+    fn every_provided_gradient_is_readable() {
         for preset in GRADIENT_PRESETS {
             assert!(preset.stops.len() >= 2, "{}", preset.id);
             assert_eq!(gradient_colors(preset.stops, 4).len(), 4, "{}", preset.id);

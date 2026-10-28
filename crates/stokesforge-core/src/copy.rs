@@ -1,15 +1,15 @@
-//! Copie autonome d'un sous-arbre : des valeurs, sans projet ni allocateur.
-//! Les buffers de colonnes restent partagés jusqu'à une écriture. Les natures
-//! sont clonées sans liste fermée de types copiables ; leurs enfants sont
-//! reconstruits par le même chemin d'insertion que les créations ordinaires.
-//! Les graphes capturent uniquement leurs colonnes référencées, buffers partagés.
-//! `into_external` active leur insertion dans la destination ; les copies locales
-//! conservent leurs références, sans dépendances supplémentaires dans le modèle.
+//! Self-contained copy of a subtree: values, with no project or allocator.
+//! Column buffers stay shared until a write. Kinds are cloned without a
+//! closed list of copyable types; their children are rebuilt through the
+//! same insertion path as ordinary creations.
+//! Graphs capture only their referenced columns, with shared buffers.
+//! `into_external` enables their insertion into the destination; local copies
+//! keep their references, with no extra dependencies in the model.
 
 use crate::{CoreResult, Node, NodeId, NodeKind, Tree, WindowMeta};
 use std::collections::HashSet;
 
-/// Contenu figé à l'instant du geste Copier, indépendant du projet source.
+/// Content frozen at the moment of the Copy gesture, independent of the source project.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeCopy {
     nodes: Vec<Node>,
@@ -18,7 +18,7 @@ pub struct NodeCopy {
 }
 
 impl NodeCopy {
-    /// Capture un sous-arbre valide, en ordre préfixe.
+    /// Captures a valid subtree, in prefix order.
     pub fn capture(tree: &Tree, root: NodeId) -> CoreResult<Self> {
         let nodes: Vec<Node> = tree
             .walk(root)?
@@ -34,8 +34,8 @@ impl NodeCopy {
                     .flat_map(|p| &p.series)
                     .flat_map(|s| s.referenced_columns())
                     .collect();
-                // Une série « ligne » (#166) lit toutes les colonnes x' de la
-                // feuille de son ancre, pas seulement l'ancre.
+                // A "row" series (#166) reads all the x' columns of the
+                // sheet of its anchor, not only the anchor.
                 for series in spec.panels.iter().flat_map(|p| &p.series) {
                     if series.row.is_none() {
                         continue;
@@ -69,8 +69,8 @@ impl NodeCopy {
                 if sheets.is_empty() {
                     continue;
                 }
-                // Le graphe fournit une identité de transport libre parmi les
-                // données ; aucune identité nouvelle n’est allouée à la copie.
+                // The graph supplies a free transport identity among the
+                // data; no new identity is allocated for the copy.
                 let mut data = vec![Node::new(
                     node.id(),
                     node.name(),
@@ -97,8 +97,8 @@ impl NodeCopy {
                     let mut name = source.name().to_string();
                     let mut number = 1;
                     while names.contains(&name) {
-                        // Rester dans la limite de nom du modèle même avec
-                        // plusieurs feuilles homonymes de classeurs différents.
+                        // Stay within the model's name limit even with
+                        // several same-named sheets from different workbooks.
                         name = format!(
                             "{} {number}",
                             source.name().chars().take(230).collect::<String>()
@@ -117,10 +117,10 @@ impl NodeCopy {
                     for column in columns {
                         let mut value = tree.get(column)?.clone();
                         if let NodeKind::Column(column) = value.kind_mut() {
-                            // La feuille embarquée omet les colonnes non tracées :
-                            // une formule y lirait des colonnes absentes de la copie
-                            // (`#REF`, cellules vides) au lieu de ses résultats.
-                            // Conserver les résultats figés uniquement.
+                            // The embedded sheet omits the unplotted columns:
+                            // a formula there would read columns absent from the copy
+                            // (`#REF`, empty cells) instead of its results.
+                            // Keep the frozen results only.
                             let mut meta = column.meta().clone();
                             meta.formula = None;
                             column.set_meta(meta);
@@ -145,12 +145,12 @@ impl NodeCopy {
         })
     }
 
-    /// Dépendances figées de chaque graphe, pour le transport inter-projets.
+    /// Frozen dependencies of each graph, for inter-project transport.
     pub fn graph_data(&self) -> &[(NodeId, NodeCopy)] {
         &self.graph_data
     }
 
-    /// Associe les dépendances validées par le lecteur du presse-papiers.
+    /// Attaches the dependencies validated by the clipboard reader.
     pub fn with_graph_data(mut self, data: Vec<(NodeId, NodeCopy)>) -> CoreResult<Self> {
         let mut seen = HashSet::new();
         for (graph, copy) in &data {
@@ -170,7 +170,7 @@ impl NodeCopy {
         Ok(self)
     }
 
-    /// Active l’insertion des données et le remplacement de toutes les références.
+    /// Enables insertion of the data and replacement of all references.
     pub fn into_external(mut self) -> Self {
         self.external = true;
         self
@@ -180,12 +180,12 @@ impl NodeCopy {
         self.external
     }
 
-    /// Nœuds source, racine en premier ; jamais mutables par l'appelant.
+    /// Source nodes, root first; never mutable by the caller.
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
-    /// Racine du contenu copié.
+    /// Root of the copied content.
     pub fn root(&self) -> &Node {
         &self.nodes[0]
     }

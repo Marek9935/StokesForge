@@ -1,42 +1,37 @@
-//! Commandes du modèle et pile d'historique de StokesForge.
+//! Model commands and the history stack of StokesForge.
 //!
-//! # Rôle
+//! # Role
 //!
-//! Ce crate est la **seule** couche qui mute un `stokesforge_core::Project` en
-//! dehors des tests — c'est la règle d'or du socle : *aucune mutation hors
-//! d'une commande*. Il sera consommé par l'acteur de `stokesforge-session`, qui
-//! détiendra l'unique `&mut Project` du processus ; une [`Command`] est une
-//! valeur, sans état ni emprunt, faite pour traverser un canal inter-threads
-//! telle quelle.
+//! This crate is the **only** layer that mutates a `stokesforge_core::Project`
+//! outside tests. It is the golden rule of the foundation: *no mutation outside
+//! a command*. The `stokesforge-session` actor will consume it and hold the
+//! single `&mut Project` of the process. A [`Command`] is a value, with no
+//! state and no borrow, made to cross a channel between threads as it is.
 //!
-//! # Les deux natures d'entrée
+//! # The two kinds of entry
 //!
-//! L'historique est **hybride**, parce que structure et données n'ont pas le
-//! même coût :
+//! The history is **hybrid**, because structure and data do not cost the same:
 //!
-//! - une modification de **structure** (arbre, noms, ordre, ajout ou
-//!   suppression de nœuds) est retenue comme un couple d'instantanés
-//!   `Arc<Tree>` : l'arbre est persistant, les deux versions partagent tout ce
-//!   qui n'a pas bougé, et garder les deux coûte un pointeur. L'arbre d'avant
-//!   retient les nœuds supprimés — rien à libérer à la main, et un nœud
-//!   restauré revient sous son **identifiant d'origine** ;
-//! - une modification de **données** (contenu des colonnes) est retenue comme
-//!   un **delta** : anciennes et nouvelles valeurs des seules cellules
-//!   écrites, rejouées dans l'arbre courant. Un instantané retiendrait ici le
-//!   buffer entier de la colonne — 8 Mo pour un million de points — à chaque
-//!   frappe.
+//! - a **structure** change (tree, names, order, adding or removing nodes) is
+//!   kept as a pair of `Arc<Tree>` snapshots. The tree is persistent, the two
+//!   versions share everything that did not move, and keeping both costs one
+//!   pointer. The earlier tree keeps the removed nodes: nothing to free by
+//!   hand, and a restored node comes back under its **original identifier**;
+//! - a **data** change (column contents) is kept as a **delta**: old and new
+//!   values of only the cells written, replayed into the current tree. A
+//!   snapshot would keep the whole column buffer here (8 MB for a million
+//!   points) at every keystroke.
 //!
-//! De cette asymétrie découle un invariant non négociable : **LIFO strict**.
-//! Restaurer un arbre entier écrase tout ce qui a été écrit après lui, donc
-//! une entrée structurelle ne s'annule qu'une fois toutes les entrées
-//! postérieures annulées. La pile le garantit par construction, et une macro
-//! annule ses entrées strictement en ordre inverse d'insertion, quelles que
-//! soient leurs natures.
+//! This asymmetry gives a non-negotiable invariant: **strict LIFO**. Restoring
+//! a whole tree overwrites everything written after it, so a structural entry
+//! is undone only once all later entries are undone. The stack guarantees this
+//! by construction, and a macro undoes its entries strictly in reverse order of
+//! insertion, whatever their kinds.
 //!
-//! # Dépendance à sens unique
+//! # One-way dependency
 //!
-//! Ce crate connaît `stokesforge-core`, jamais l'inverse — et n'importe aucune
-//! dépendance UI (`tests/no_ui_dependency.rs`).
+//! This crate knows `stokesforge-core`, never the reverse, and imports no UI
+//! dependency (`tests/no_ui_dependency.rs`).
 //!
 //! # Exemple
 //!

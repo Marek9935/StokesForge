@@ -1,32 +1,32 @@
-//! Thèmes : régler d'un geste les couleurs globales d'un graphe (issue #11).
+//! Themes: set the global colors of a graph in one gesture (issue #11).
 //!
-//! Un thème n'est **pas** un champ du [`PlotSpec`] : appliquer un thème ou une
-//! couleur globale écrit la même couleur dans tous les champs locaux
-//! (titre du graphe, titre et échelle de chaque axe de chaque panneau, fond).
-//! Le dernier réglage écrase donc ce qui avait été réglé une à une, et rien
-//! n'est mémorisé au-delà des champs eux-mêmes — pas de changement du format
-//! `.stf`. Une couleur vide reste « automatique » : le rendu la résout par
-//! `stokesforge_render::color::auto_ink` (blanc sur fond sombre).
+//! A theme is **not** a field of the [`PlotSpec`]: applying a theme or a
+//! global color writes the same color into all the local fields
+//! (graph title, title and scale of each axis of each panel, background).
+//! The last setting therefore overwrites what was set one by one, and nothing
+//! is remembered beyond the fields themselves — no change to the `.stf`
+//! format. An empty color stays "automatic": rendering resolves it with
+//! `stokesforge_render::color::auto_ink` (white on a dark background).
 
 use crate::{AxisSide, PlotSpec};
 
-/// Un thème prédéfini : un fond, une couleur de texte, une couleur d'axes.
-/// Une chaîne vide veut dire « automatique » (`""`) pour le texte et les
-/// axes, et « blanc » pour le fond.
+/// A predefined theme: a background, a text color, an axes color.
+/// An empty string means "automatic" (`""`) for the text and the
+/// axes, and "white" for the background.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
-    /// Nom affiché.
+    /// Displayed name.
     pub name: &'static str,
-    /// Fond du graphe (`#RRGGBB[AA]`).
+    /// Background of the graph (`#RRGGBB[AA]`).
     pub background: &'static str,
-    /// Couleur du texte : titres du graphe et des axes.
+    /// Text color: titles of the graph and of the axes.
     pub text: &'static str,
-    /// Couleur des axes : ligne, graduations, libellés et grille.
+    /// Axes color: line, ticks, labels and grid.
     pub axes: &'static str,
 }
 
-/// Les thèmes prédéfinis. Texte et axes restent en automatique : ils suivent
-/// le fond (encre sombre sur fond clair, blanche sur fond sombre).
+/// The predefined themes. Text and axes stay automatic: they follow
+/// the background (dark ink on a light background, white on a dark one).
 pub const THEMES: [Theme; 2] = [
     Theme {
         name: "Clair",
@@ -50,22 +50,22 @@ const SIDES: [AxisSide; 4] = [
 ];
 
 impl PlotSpec {
-    /// Couleur globale du texte telle que l'onglet « Thème » la montre : celle
-    /// du titre du graphe.
+    /// Global text color as the « Thème » tab shows it: that
+    /// of the graph title.
     pub fn theme_text_color(&self) -> &str {
         &self.title_color
     }
 
-    /// Couleur globale des axes telle que l'onglet « Thème » la montre : celle
-    /// de l'échelle de l'axe du bas du premier panneau.
+    /// Global axes color as the « Thème » tab shows it: that
+    /// of the scale of the bottom axis of the first panel.
     pub fn theme_axes_color(&self) -> &str {
         self.panels
             .first()
             .map_or("", |panel| panel.bottom.tick_color.as_str())
     }
 
-    /// Écrit `color` comme couleur du texte : titre du graphe, titre de
-    /// chaque axe et textes libres (issue #35) de chaque panneau.
+    /// Writes `color` as the text color: graph title, title of
+    /// each axis and free texts (issue #35) of each panel.
     pub fn set_text_color(&mut self, color: &str) {
         self.title_color = color.to_string();
         for panel in self.panels.iter_mut() {
@@ -78,8 +78,8 @@ impl PlotSpec {
         }
     }
 
-    /// Écrit `color` comme couleur des axes : échelle (ligne, graduations,
-    /// libellés, grille) de chaque axe de chaque panneau.
+    /// Writes `color` as the axes color: scale (line, ticks,
+    /// labels, grid) of each axis of each panel.
     pub fn set_axes_color(&mut self, color: &str) {
         for panel in self.panels.iter_mut() {
             for side in SIDES {
@@ -88,7 +88,7 @@ impl PlotSpec {
         }
     }
 
-    /// Applique un thème prédéfini en entier.
+    /// Applies a predefined theme in full.
     pub fn apply_theme(&mut self, theme: &Theme) {
         self.background = theme.background.to_string();
         self.set_text_color(theme.text);
@@ -101,15 +101,15 @@ mod tests {
     use super::*;
     use crate::PanelSpec;
 
-    fn spec_a_deux_panneaux() -> PlotSpec {
+    fn two_panel_spec() -> PlotSpec {
         let mut spec = PlotSpec::empty("Figure").with_panels(PanelSpec::at(0, 0));
         spec.panels.push(PanelSpec::at(0, 1));
         spec
     }
 
     #[test]
-    fn une_couleur_globale_ecrase_les_reglages_locaux_partout() {
-        let mut spec = spec_a_deux_panneaux();
+    fn a_global_color_overwrites_local_settings_everywhere() {
+        let mut spec = two_panel_spec();
         spec.panels.get_mut(1).unwrap().left.title_color = "#ff0000".to_string();
         spec.panels.get_mut(0).unwrap().bottom.tick_color = "#00ff00".to_string();
         spec.set_text_color("#123456");
@@ -126,12 +126,12 @@ mod tests {
     }
 
     #[test]
-    fn un_theme_regle_fond_texte_et_axes() {
-        let mut spec = spec_a_deux_panneaux();
+    fn a_theme_sets_background_text_and_axes() {
+        let mut spec = two_panel_spec();
         spec.set_text_color("#ff0000");
         spec.apply_theme(&THEMES[1]);
         assert_eq!(spec.background, "#1e1e1e");
-        assert_eq!(spec.theme_text_color(), "", "texte automatique");
+        assert_eq!(spec.theme_text_color(), "", "automatic text");
         assert_eq!(spec.panels.as_slice()[1].right.title_color, "");
         spec.apply_theme(&THEMES[0]);
         assert_eq!(spec.background, "#ffffff");

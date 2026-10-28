@@ -1,10 +1,10 @@
-//! Budget global de cellules d'un `.stf` à l'ouverture (B1, #316).
+//! Global cell budget of a `.stf` at open (B1, #316).
 
 use stokesforge_core::{Column, Project};
 use stokesforge_persistence::{load_with_limits, save, LoadLimits, PersistenceError};
 
-/// Deux colonnes de 100 et 50 valeurs : 150 cellules déclarées.
-fn fichier(dir: &std::path::Path) -> std::path::PathBuf {
+/// Two columns of 100 and 50 values: 150 declared cells.
+fn write_file(dir: &std::path::Path) -> std::path::PathBuf {
     let mut project = Project::new("P").unwrap();
     let root = project.root();
     let book = project.add_workbook(root, Some("Book1")).unwrap();
@@ -20,7 +20,7 @@ fn fichier(dir: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
-fn limites(max_cells: u64) -> LoadLimits {
+fn limits(max_cells: u64) -> LoadLimits {
     LoadLimits {
         max_cells,
         ..LoadLimits::default()
@@ -28,25 +28,25 @@ fn limites(max_cells: u64) -> LoadLimits {
 }
 
 #[test]
-fn le_total_des_colonnes_est_compte_et_la_limite_exacte_passe() {
+fn the_total_of_the_columns_is_counted_and_the_exact_limit_passes() {
     let dir = tempfile::tempdir().unwrap();
-    let path = fichier(dir.path());
+    let path = write_file(dir.path());
 
-    // Exactement le total : s'ouvre (témoin : `>` changé en `>=`).
-    assert!(load_with_limits(&path, limites(150)).is_ok());
+    // Exactly the total: it opens (witness: `>` changed to `>=`).
+    assert!(load_with_limits(&path, limits(150)).is_ok());
 
-    // Une cellule de moins : refusé, par la somme des deux colonnes (aucune
-    // des deux n'atteint seule 149).
-    match load_with_limits(&path, limites(149)) {
+    // One cell fewer: refused, by the sum of the two columns (neither
+    // reaches 149 alone).
+    match load_with_limits(&path, limits(149)) {
         Err(PersistenceError::TooManyCells { cells, limit, .. }) => {
             assert_eq!(limit, 149);
             assert_eq!(cells, 150);
         }
-        other => panic!("TooManyCells attendu, obtenu {:?}", other.map(|_| ())),
+        other => panic!("TooManyCells expected, got {:?}", other.map(|_| ())),
     }
 }
 
 #[test]
-fn le_defaut_est_un_milliard() {
+fn the_default_is_one_billion() {
     assert_eq!(LoadLimits::default().max_cells, 1_000_000_000);
 }

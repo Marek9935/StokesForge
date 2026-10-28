@@ -1,12 +1,12 @@
-//! Feuilles transposées liées (#253) : enregistrement sur disque.
+//! Linked transposed sheets (#253): writing to disk.
 //!
-//! Le lien (`stokesforge_core::TransposeLink`) se range à plat : la feuille
-//! transposée, sa source, la colonne des x', les lignes demandées avec
-//! l'empreinte écrite par le lien, et les colonnes de la source telles que le
-//! lien les a lues. « Périmée » et « modifiée » ne sont pas écrites : elles se
-//! dérivent de l'arbre à la lecture. Lecture tolérante (invariant 10) : un
-//! lien dont la feuille ou la source n'existe plus, ou dont un identifiant
-//! dépasse la borne, est écarté — la feuille reste, ordinaire.
+//! The link (`stokesforge_core::TransposeLink`) is stored flat: the transposed
+//! sheet, its source, the x' column, the requested rows with the
+//! fingerprint written by the link, and the columns of the source as the
+//! link read them. "Stale" and "modified" are not written: they are
+//! derived from the tree at read. Tolerant reading (invariant 10): a
+//! link whose sheet or source no longer exists, or one of whose identifiers
+//! exceeds the bound, is dropped — the sheet stays, ordinary.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,8 +16,8 @@ use stokesforge_core::{
     NodeId, TransposeLink, TransposeSourceColumn, TransposedRow, Tree as ModelTree,
 };
 
-/// Une colonne « ligne » de la feuille transposée : la ligne de la source, la
-/// colonne qui la porte, l'empreinte de ses valeurs.
+/// A "row" column of the transposed sheet: the row of the source, the
+/// column that carries it, the fingerprint of its values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TransposedRowRecord {
     pub(crate) row: u64,
@@ -25,7 +25,7 @@ pub(crate) struct TransposedRowRecord {
     pub(crate) stamp: u64,
 }
 
-/// Une colonne de la source telle que le lien l'a lue.
+/// A column of the source as the link read it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TransposeInputRecord {
     pub(crate) column: u64,
@@ -33,12 +33,12 @@ pub(crate) struct TransposeInputRecord {
     pub(crate) x_prime_bits: u64,
 }
 
-/// Le lien d'une feuille transposée.
+/// The link of a transposed sheet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TransposeRecord {
-    /// La feuille transposée.
+    /// The transposed sheet.
     pub(crate) sheet: u64,
-    /// Sa source.
+    /// Its source.
     pub(crate) source: u64,
     pub(crate) x_column: u64,
     pub(crate) x_stamp: u64,
@@ -48,8 +48,8 @@ pub(crate) struct TransposeRecord {
     pub(crate) inputs: Vec<TransposeInputRecord>,
 }
 
-/// Les liens de l'arbre, dans l'ordre de leur feuille (deux sauvegardes du même
-/// projet restent identiques octet à octet).
+/// The links of the tree, in the order of their sheet (two saves of the same
+/// project stay byte-identical).
 pub(crate) fn transposes_to_records(tree: &ModelTree) -> Vec<TransposeRecord> {
     tree.transposes()
         .iter()
@@ -80,8 +80,8 @@ pub(crate) fn transposes_to_records(tree: &ModelTree) -> Vec<TransposeRecord> {
         .collect()
 }
 
-/// Relit les liens. `max_id` borne les identifiants ; un lien dont la feuille
-/// ou la source n'est pas un nœud de `tree` est écarté.
+/// Reads the links back. `max_id` bounds the identifiers; a link whose sheet
+/// or source is not a node of `tree` is dropped.
 pub(crate) fn records_to_transposes(
     records: Vec<TransposeRecord>,
     tree: &ModelTree,
@@ -143,15 +143,15 @@ mod tests {
         }
     }
 
-    /// Un fichier fabriqué ne fait pas échouer la lecture : le lien dont une
-    /// extrémité n'est pas une feuille, ou dont un identifiant dépasse la
-    /// borne, est écarté seul (invariant 10).
+    /// A crafted file does not make the read fail: a link one of whose
+    /// ends is not a sheet, or one of whose identifiers exceeds the
+    /// bound, is dropped alone (invariant 10).
     #[test]
     fn hostile_links_are_dropped_one_by_one() {
         let mut project = Project::new("P").unwrap();
         let book = project.add_workbook(project.root(), Some("B")).unwrap();
         let a = project.tree().children(book).unwrap()[0];
-        let b = project.add_worksheet(book, Some("Autre")).unwrap();
+        let b = project.add_worksheet(book, Some("Other")).unwrap();
         let ok = record(b, a);
         let ghost = record(NodeId::from_raw(9_999), a);
         let not_a_sheet = record(book, a);

@@ -1,109 +1,109 @@
-//! Recalcul des colonnes-formule, rejoué par l'acteur après chaque requête
-//! qui a pu changer le projet (voir `actor::run`) — hors historique.
+//! Recalculation of formula columns, replayed by the actor after every request
+//! that may have changed the project (see `actor::run`) — outside the history.
 //!
-//! # Ne recalculer que ce dont une source a changé (#193)
+//! # Recalculating only what a source changed (#193)
 //!
-//! Jusqu'à #193, chaque `Execute`/`Undo`/`Redo`/`AbortMacro` réussi
-//! recalculait **toutes** les colonnes-formule de toutes les feuilles, sur
-//! toutes leurs lignes — changer la couleur d'une courbe comprise. Le
-//! [`Recalculator`] garde désormais, pour chaque colonne-formule, une
-//! [`Fingerprint`] de ce qu'il a vu à son dernier calcul, et ne réécrit une
-//! colonne que si cette empreinte a changé.
+//! Until #193, every successful `Execute`/`Undo`/`Redo`/`AbortMacro`
+//! recalculated **all** formula columns of all sheets, on all their rows —
+//! changing a curve's color included. The [`Recalculator`] now keeps, for each
+//! formula column, a [`Fingerprint`] of what it saw at its last calculation,
+//! and rewrites a column only if that fingerprint changed.
 //!
-//! ## Pourquoi une comparaison, et pas « A prévient B »
+//! ## Why a comparison, and not "A notifies B"
 //!
-//! Un vrai abonnement (A tient la liste des formules qui la lisent)
-//! demanderait de maintenir ces listes à travers chaque annulation,
-//! déplacement, copie, suppression et chargement — autant de chemins où un
-//! oubli laisse une valeur fausse **en silence**. La comparaison n'a rien à
-//! maintenir : elle relit, après chaque commande, l'état courant et le
-//! confronte au mémo, ce qui ne coûte que des comparaisons d'entiers et de
-//! textes courts. Aucune donnée de colonne n'est lue pour une colonne propre.
+//! A real subscription (A keeps the list of the formulas that read it) would
+//! require maintaining these lists through every undo, move, copy, deletion
+//! and load — so many paths where an oversight leaves a wrong value
+//! **silently**. The comparison has nothing to maintain: after each command it
+//! rereads the current state and checks it against the memo, which costs only
+//! comparisons of integers and short texts. No column data is read for a clean
+//! column.
 //!
-//! ## Sur quoi repose la comparaison
+//! ## What the comparison rests on
 //!
-//! Sur le compteur de version des colonnes ([`stokesforge_core::Column::
-//! version`]) et sa doctrine : **un numéro ne désigne jamais deux contenus
-//! d'une même colonne** (A7, `guide-de-correction-robustesse.md` §F2). Toute
-//! écriture de données, ordinaire, d'annulation ou de recalcul, reçoit un
-//! numéro neuf du compteur unique du projet
-//! (`Project::next_column_version`) ; une colonne insérée avec un numéro
-//! (`AddColumn`, collage) fait passer ce compteur au-delà
-//! (`Project::insert_node`) ; une restauration d'arbre (`Entry::Structural`)
-//! ne ramène qu'une paire (version, contenu) qui a réellement coexisté.
-//! Égalité de version ⇒ égalité de contenu : c'est l'hypothèse dont dépend
-//! tout ce module, revérifiée dans l'acteur par la batterie `b22` et sur
-//! l'historique par `b14`. Le sens contraire n'est pas requis : un même
-//! contenu sous un numéro neuf ne coûte qu'un recalcul inutile.
+//! On the column version counter ([`stokesforge_core::Column::
+//! version`]) and its doctrine: **a number never names two contents of the
+//! same column** (A7, `guide-de-correction-robustesse.md` §F2). Every data
+//! write, ordinary, undo or recalculation, gets a fresh number from the
+//! project's single counter (`Project::next_column_version`); a column
+//! inserted with a number (`AddColumn`, paste) pushes that counter past it
+//! (`Project::insert_node`); a tree restoration (`Entry::Structural`) brings
+//! back only a (version, content) pair that really coexisted. Equal version ⇒
+//! equal content: this is the assumption the whole module depends on,
+//! rechecked in the actor by battery `b22` and on the history by `b14`. The
+//! converse is not required: the same content under a fresh number costs only
+//! a useless recalculation.
 //!
-//! ## Ce que l'empreinte doit contenir — la règle à ne pas casser
+//! ## What the fingerprint must contain — the rule not to break
 //!
-//! **Toute donnée qui entre dans le calcul d'une colonne-formule entre dans
-//! son empreinte** : la formule stockée (fragments de texte et **identifiants**
-//! des colonnes lues, #321 : jamais des lettres), pour chacune la version de
-//! son contenu — ou `None` quand elle n'est plus dans la feuille, car
-//! l'appartenance à la feuille est lue par le calcul —, la longueur du
-//! résultat (#194 : la plus longue des colonnes lues, à défaut celle des
-//! colonnes ordinaires de la feuille), la version de la colonne elle-même
-//! (une saisie directe dans une colonne-formule doit être écrasée), et
-//! l'issue (formule illisible, prise dans un cycle, calculée). Le texte
-//! **affiché** (les lettres) n'est pas lu par le calcul : il n'entre pas dans
-//! l'empreinte, et déplacer une colonne ne réécrit rien. Un calcul qui lirait
-//! une donnée de plus — le nom d'une
-//! colonne, son unité, une autre feuille, une fonction `row()` — sans
-//! l'ajouter ici serait « propre » à tort : la valeur affichée resterait
-//! fausse sans erreur. Ce qu'il faut tester alors : `docs/tests.md`,
-//! « Targeted recalculation ».
+//! **Any data that enters the calculation of a formula column enters its
+//! fingerprint**: the stored formula (text fragments and the **identifiers**
+//! of the columns read, #321: never letters), for each one the version of its
+//! content — or `None` when it is no longer in the sheet, because membership
+//! of the sheet is read by the calculation —, the length of the result (#194:
+//! the longest of the columns read, failing that the longest of the sheet's
+//! ordinary columns), the version of the column itself (a direct input into a
+//! formula column must be overwritten), and the outcome (unreadable formula,
+//! caught in a cycle, calculated). The **displayed** text (the letters) is not
+//! read by the calculation: it does not enter the fingerprint, and moving a
+//! column rewrites nothing. A calculation that read one more piece of data —
+//! a column's name, its unit, another sheet, a `row()` function — without
+//! adding it here would be wrongly "clean": the displayed value would stay
+//! wrong without an error. What to test then: `docs/tests.md`,
+//! "Targeted recalculation".
 //!
-//! ## L'oracle
+//! ## The oracle
 //!
-//! Le recalcul complet n'a pas disparu : c'est [`FormulaRecalc::Full`], la
-//! même boucle dont on ne consulte jamais le mémo. La batterie `b22` joue
-//! des suites de commandes tirées au sort dans deux sessions, l'une ciblée,
-//! l'autre complète, et exige des arbres égaux après chaque pas. Les deux
-//! modes partagent tout le code sauf la décision « propre / à recalculer » :
-//! c'est elle, et elle seule, que l'oracle éprouve.
+//! The full recalculation has not disappeared: it is [`FormulaRecalc::Full`],
+//! the same loop whose memo is never consulted. Battery `b22` plays random
+//! sequences of commands in two sessions, one targeted, the other full, and
+//! requires equal trees after each step. The two modes share all the code
+//! except the "clean / to recalculate" decision: that decision, and only it, is
+//! what the oracle exercises.
 
-//! # Calculs d'analyse (#181)
+//! # Analysis calculations (#181)
 //!
-//! Le même mécanisme suit les **calculs d'analyse** (`Tree::calculations`),
-//! rejoués après les formules, hors historique (`Project::refresh_calculation_from`
-//! réécrit les colonnes de sortie, les résultats et la péremption). Ce qui change :
+//! The same mechanism tracks the **analysis calculations**
+//! (`Tree::calculations`), replayed after the formulas, outside the history
+//! (`Project::refresh_calculation_from` rewrites the output columns, the
+//! results and the staleness). What changes:
 //!
-//! - l'**empreinte** d'un calcul est `CalcFingerprint` — la version de chaque
-//!   colonne qu'il lit, et sa *définition* (opération, drapeaux, colonnes de
-//!   sortie avec leur version). La règle du paragraphe précédent vaut ici aussi :
-//!   toute donnée lue par `stokesforge_core::compute` entre dans l'empreinte ;
-//! - un calcul **automatique** se recalcule quand l'empreinte change (toujours en
-//!   mode `Full`) ; un **échec** garde les dernières valeurs et pose
-//!   `Staleness::Failed`, sans nouvel essai tant que l'empreinte ne bouge pas ; une
-//!   entrée disparue pose `Staleness::InputMissing` ;
-//! - un calcul **manuel** (reconvolution, déconvolution, lots de plus de 20 séries)
-//!   ne se relance jamais seul : un changement d'entrée le marque `Manual`. Il
-//!   compare le **contenu** de ses entrées à celui du dernier calcul (`CalcMemo::seen`)
-//!   plutôt que leurs versions — le mode complet réécrit les colonnes-formule à
-//!   chaque passe, ce qui ferait changer les versions sans changer le contenu ;
-//!   un changement de *définition* (`UpdateCalculation`, annulation) est un geste
-//!   de l'utilisateur : le résultat est à jour par construction (`Trust`).
-//!   Un calcul **automatique** que le fichier a rendu `Manual` obéit à la même
-//!   comparaison de contenu tant que ses entrées ne changent pas vraiment, dans
-//!   les deux modes (sans elle, le mode complet l'effaçait et divergeait du
-//!   ciblé — latent avant #321, trouvé par `b22`) ;
-//! - au chargement le mémo est vidé et **aucun calcul n'est relancé** (A1, #316) :
-//!   automatiques comme manuels sont crus, valeurs du fichier gardées
-//!   (`Recalculator::run_after_load`, drapeau ponctuel `trust_loaded`, dans les
-//!   deux modes). Leur marqueur de péremption vient du fichier, complété par la
-//!   persistance : elle marque `Manual` un calcul dont l'empreinte du contenu
-//!   des entrées (`Calculation::inputs_digest`) ne correspond plus. Les
-//!   colonnes-formule, elles, restent recalculées au chargement ;
-//! - formules et calculs se nourrissent mutuellement : `run` alterne les deux
-//!   jusqu'à ce qu'un calcul n'écrive plus rien (au plus [`MAX_ROUNDS`] tours). Une
-//!   boucle qui traverse un calcul (sa sortie nourrit une formule qui nourrit son
-//!   entrée) ne se stabiliserait jamais : ses calculs sont marqués `Manual` et
-//!   laissés tels quels (`calculations_in_a_cycle`).
+//! - the **fingerprint** of a calculation is `CalcFingerprint` — the version of
+//!   each column it reads, and its *definition* (operation, flags, output
+//!   columns with their version). The rule of the previous paragraph applies
+//!   here too: any data read by `stokesforge_core::compute` enters the
+//!   fingerprint;
+//! - an **automatic** calculation recalculates when the fingerprint changes
+//!   (always in `Full` mode); a **failure** keeps the last values and sets
+//!   `Staleness::Failed`, with no new attempt as long as the fingerprint does
+//!   not move; a vanished input sets `Staleness::InputMissing`;
+//! - a **manual** calculation (reconvolution, deconvolution, batches of more
+//!   than 20 series) never reruns by itself: an input change marks it `Manual`.
+//!   It compares the **content** of its inputs with that of the last
+//!   calculation (`CalcMemo::seen`) rather than their versions — the full mode
+//!   rewrites the formula columns on every pass, which would change the
+//!   versions without changing the content; a change of *definition*
+//!   (`UpdateCalculation`, undo) is a user gesture: the result is up to date by
+//!   construction (`Trust`). An **automatic** calculation that the file made
+//!   `Manual` obeys the same content comparison as long as its inputs do not
+//!   really change, in both modes (without it, the full mode erased it and
+//!   diverged from the targeted one — latent before #321, found by `b22`);
+//! - on load the memo is cleared and **no calculation is rerun** (A1, #316):
+//!   automatic and manual ones alike are trusted, the file's values kept
+//!   (`Recalculator::run_after_load`, one-shot flag `trust_loaded`, in both
+//!   modes). Their staleness marker comes from the file, completed by
+//!   persistence: it marks `Manual` a calculation whose fingerprint of the
+//!   inputs' content (`Calculation::inputs_digest`) no longer matches. The
+//!   formula columns, on the other hand, are still recalculated on load;
+//! - formulas and calculations feed each other: `run` alternates the two until
+//!   a calculation writes nothing more (at most [`MAX_ROUNDS`] rounds). A loop
+//!   that crosses a calculation (its output feeds a formula that feeds its
+//!   input) would never stabilize: its calculations are marked `Manual` and
+//!   left as they are (`calculations_in_a_cycle`).
 //!
-//! Tests : `tests/analyse.rs` (cas nommés), batterie `b22` (pas `AjouterCalcul`,
-//! `RetirerCalcul`, `RecalculerPerimes`), mutants dans `docs/tests.md`.
+//! Tests: `tests/analysis.rs` (named cases), battery `b22` (step
+//! `AjouterCalcul`, `RetirerCalcul`, `RecalculerPerimes`), mutants in
+//! `docs/tests.md`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -115,48 +115,49 @@ use stokesforge_core::{
     Staleness, ValueBlock,
 };
 
-/// Façon dont l'acteur recalcule les colonnes-formule après chaque requête
-/// qui a pu changer le projet (voir [`crate::Session::spawn_with_recalc`]).
+/// How the actor recalculates formula columns after every request that may
+/// have changed the project (see [`crate::Session::spawn_with_recalc`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormulaRecalc {
-    /// Ne réécrit une colonne-formule que si une donnée de son calcul a
-    /// changé depuis le dernier (voir la doc de tête du module). Le mode de
-    /// toute session de production.
+    /// Rewrites a formula column only if a piece of data of its calculation
+    /// changed since the last one (see the module-level docs). The mode of
+    /// every production session.
     #[default]
     Targeted,
-    /// Réécrit toutes les colonnes-formule de toutes les feuilles, à chaque
-    /// fois — le comportement d'avant #193. Sert d'**oracle** au test
-    /// différentiel (`stokesforge-robustesse`, batterie `b22`) : aucun
-    /// client de production ne l'emploie.
+    /// Rewrites all formula columns of all sheets, every time — the behavior
+    /// before #193. Serves as the **oracle** of the differential test
+    /// (`stokesforge-robustesse`, battery `b22`): no production client uses
+    /// it.
     Full,
 }
 
-/// Le mémo du recalcul : ce que l'acteur a vu au dernier calcul de chaque
-/// colonne-formule. Vit dans l'acteur, à côté du `Project` — ni dans
-/// l'historique, ni dans le `.stf`.
+/// The recalculation memo: what the actor saw at the last calculation of each
+/// formula column. Lives in the actor, beside the `Project` — neither in the
+/// history, nor in the `.stf`.
 pub(crate) struct Recalculator {
     mode: FormulaRecalc,
     memo: HashMap<NodeId, Fingerprint>,
-    /// Pendant du mémo pour les calculs d'analyse (#181) : voir la section
-    /// « Calculs d'analyse » de la doc de tête.
+    /// Counterpart of the memo for analysis calculations (#181): see the
+    /// "Analysis calculations" section of the module-level docs.
     calc_memo: HashMap<NodeId, CalcMemo>,
-    /// Arrêt demandé de l'extérieur (#239), lu entre deux colonnes pendant
-    /// [`Recalculator::run_interruptible`] ; `None` le reste du temps.
+    /// Stop requested from outside (#239), read between two columns during
+    /// [`Recalculator::run_interruptible`]; `None` the rest of the time.
     stop: Option<Box<dyn Fn() -> bool + Send>>,
-    /// Vrai dès que `stop` a répondu oui pendant la passe en cours.
+    /// True as soon as `stop` has answered yes during the current pass.
     interrupted: bool,
-    /// Drapeau **ponctuel** armé par `Load` (A1, #316) : pendant la passe qui
-    /// suit, un calcul sans mémo est cru tel quel (`CalcAction::Trust`), même
-    /// automatique. Désarmé dès la fin de cette passe : un calcul sans mémo
-    /// après `AddCalculation` ou une annulation reste recalculé.
+    /// **One-shot** flag armed by `Load` (A1, #316): during the following
+    /// pass, a calculation without a memo is trusted as is
+    /// (`CalcAction::Trust`), even an automatic one. Disarmed at the end of
+    /// that pass: a calculation without a memo after `AddCalculation` or an
+    /// undo is still recalculated.
     trust_loaded: bool,
 }
 
-/// Nombre maximal de tours « formules → calculs » d'une passe : une chaîne
-/// formule → calcul → formule → calcul se stabilise en autant de tours que de
-/// maillons ; un cycle (la sortie d'un calcul qui nourrit sa propre entrée par
-/// une formule) ne se stabilise jamais et s'arrête ici, sur le dernier état
-/// calculé.
+/// Maximum number of "formulas → calculations" rounds of a pass: a chain
+/// formula → calculation → formula → calculation stabilizes in as many rounds
+/// as there are links; a cycle (the output of a calculation that feeds its own
+/// input through a formula) never stabilizes and stops here, on the last
+/// calculated state.
 const MAX_ROUNDS: usize = 8;
 
 impl Recalculator {
@@ -171,12 +172,12 @@ impl Recalculator {
         }
     }
 
-    /// Comme [`Recalculator::run`], mais s'arrête entre deux colonnes (ou deux
-    /// calculs) dès que `stop` répond oui (#239). Rend `true` si la passe est
-    /// allée à son terme. Une passe interrompue laisse un état cohérent : chaque
-    /// colonne est écrite d'un bloc et notée dans le mémo après coup, celles
-    /// qui n'ont pas été atteintes sont simplement vues périmées par la
-    /// passe suivante.
+    /// Like [`Recalculator::run`], but stops between two columns (or two
+    /// calculations) as soon as `stop` answers yes (#239). Returns `true` if
+    /// the pass ran to completion. An interrupted pass leaves a consistent
+    /// state: each column is written as a block and noted in the memo
+    /// afterwards, those that were not reached are simply seen as stale by the
+    /// next pass.
     pub(crate) fn run_interruptible(
         &mut self,
         project: &mut Project,
@@ -189,7 +190,7 @@ impl Recalculator {
         !std::mem::take(&mut self.interrupted)
     }
 
-    /// Point d'arrêt : vrai si la passe doit s'interrompre (sticky).
+    /// Stop point: true if the pass must stop (sticky).
     fn should_stop(&mut self) -> bool {
         if !self.interrupted {
             self.interrupted = self.stop.as_ref().is_some_and(|stop| stop());
@@ -197,69 +198,67 @@ impl Recalculator {
         self.interrupted
     }
 
-    /// Oublie tout : le prochain [`Recalculator::run`] recalcule chaque
-    /// colonne-formule. Appelé quand le projet est remplacé (`Load`,
-    /// `NewProject`) : un `.stf` porte des valeurs de formule qu'on ne croit
-    /// pas sur parole (voir `actor::run`, branche `Load`), et ses versions de
-    /// colonne n'ont aucun rapport avec celles du projet précédent.
+    /// Forgets everything: the next [`Recalculator::run`] recalculates every
+    /// formula column. Called when the project is replaced (`Load`,
+    /// `NewProject`): a `.stf` carries formula values that are not taken on
+    /// trust (see `actor::run`, `Load` branch), and its column versions have
+    /// nothing to do with those of the previous project.
     ///
-    /// Ne vide que le mémo : les **colonnes-formule** sont recalculées par la
-    /// passe suivante, mais les **calculs d'analyse** (A1, #316) ne le sont plus
-    /// à l'ouverture — voir [`Recalculator::run_after_load`].
+    /// Clears only the memo: the **formula columns** are recalculated by the
+    /// next pass, but the **analysis calculations** (A1, #316) no longer are
+    /// on open — see [`Recalculator::run_after_load`].
     pub(crate) fn forget(&mut self) {
         self.memo.clear();
         self.calc_memo.clear();
     }
 
-    /// La passe qui suit un `Load` (A1, #316) : les colonnes-formule sont
-    /// recalculées comme toujours, mais **aucun calcul d'analyse** ne l'est —
-    /// ses valeurs sont celles du fichier, recalcul à la demande (« Recalculate
-    /// »). Un calcul dont les entrées ont changé hors de StokesForge a déjà été
-    /// marqué périmé par la persistance (empreinte du contenu des entrées,
-    /// `stokesforge_persistence`), sans calcul non plus. Le drapeau est à usage
-    /// unique : rendu à `false` avant de revenir.
+    /// The pass that follows a `Load` (A1, #316): the formula columns are
+    /// recalculated as always, but **no analysis calculation** is — its values
+    /// are the file's, recalculation on demand ("Recalculate"). A calculation
+    /// whose inputs changed outside StokesForge was already marked stale by
+    /// persistence (fingerprint of the inputs' content,
+    /// `stokesforge_persistence`), without a calculation either. The flag is
+    /// single-use: reset to `false` before returning.
     pub(crate) fn run_after_load(&mut self, project: &mut Project) {
         self.trust_loaded = true;
         self.run(project);
         self.trust_loaded = false;
     }
 
-    /// Recalcule les colonnes-formule du projet qui en ont besoin — accès
-    /// **direct** à `Project` (`Project::set_length`/`Project::set_values`),
-    /// jamais via `History::apply`/`Command::execute` : c'est un effet de
-    /// bord silencieux rejoué après coup, pas une mutation annulable (voir la
-    /// doc de tête de crate, `docs/commandes-et-historique.md`) — exactement
-    /// le même statut que `actor::purge_orphaned_geometries`. Le texte de la
-    /// formule (`Command::SetColumnMeta`) et les cellules sources
-    /// (`Command::SetCells`, `InsertRows`, `DeleteRows`, ...) restent, eux,
-    /// annulables normalement : c'est seulement le recalcul qui ne pousse
-    /// jamais sa propre entrée.
+    /// Recalculates the project's formula columns that need it — **direct**
+    /// access to `Project` (`Project::set_length`/`Project::set_values`),
+    /// never via `History::apply`/`Command::execute`: it is a silent side
+    /// effect replayed afterwards, not an undoable mutation (see the
+    /// crate-level docs, `docs/commandes-et-historique.md`) — exactly the same
+    /// status as `actor::purge_orphaned_geometries`. The formula text
+    /// (`Command::SetColumnMeta`) and the source cells (`Command::SetCells`,
+    /// `InsertRows`, `DeleteRows`, ...) stay normally undoable: only the
+    /// recalculation never pushes its own entry.
     ///
-    /// # Portée du déclenchement
+    /// # Scope of the trigger
     ///
-    /// Appelée après **tout** `Execute`/`Undo`/`Redo`/`AbortMacro` qui a
-    /// réussi et après tout `Load` (voir `actor::run`, pour chaque site
-    /// d'appel et sa justification propre).
+    /// Called after **every** successful `Execute`/`Undo`/`Redo`/`AbortMacro`
+    /// and after every `Load` (see `actor::run`, for each call site and its
+    /// own justification).
     ///
-    /// Tout l'arbre est **inspecté**, pas seulement « la feuille que la
-    /// commande vient de toucher » : `Undo`/`Redo`/`AbortMacro` ne portent
-    /// aucune commande à inspecter (seule `History` sait ce qu'elle vient de
-    /// restaurer, et elle ne l'expose pas), et `Command::Move` peut déplacer
-    /// une colonne d'une feuille à une autre : les formules de l'ancienne
-    /// feuille qui la lisaient ne la trouvent plus (`#REF`).
-    /// Inspecter n'est pas recalculer : une colonne dont l'empreinte n'a pas
-    /// bougé n'est ni lue ni réécrite. Le coût d'une passe sans rien à
-    /// recalculer est linéaire dans le nombre de nœuds, plus l'analyse de
-    /// chaque texte de formule — jamais la taille des données.
+    /// The whole tree is **inspected**, not only "the sheet the command just
+    /// touched": `Undo`/`Redo`/`AbortMacro` carry no command to inspect (only
+    /// `History` knows what it just restored, and it does not expose it), and
+    /// `Command::Move` can move a column from one sheet to another: the
+    /// formulas of the old sheet that read it no longer find it (`#REF`).
+    /// Inspecting is not recalculating: a column whose fingerprint did not move
+    /// is neither read nor rewritten. The cost of a pass with nothing to
+    /// recalculate is linear in the number of nodes, plus the parsing of each
+    /// formula text — never the size of the data.
     pub(crate) fn run(&mut self, project: &mut Project) {
         self.run_formulas(project);
         self.run_calculation_rounds(project, None);
     }
 
-    /// Relance des calculs d'analyse, quel que soit leur état (action
-    /// « Recalculate »). `ids` vide : tous ceux qui portent un marqueur de
-    /// péremption (« Recalculate Out of Date »). Hors historique, comme
-    /// [`Recalculator::run`] dont elle reprend la propagation.
+    /// Reruns analysis calculations, whatever their state ("Recalculate"
+    /// action). Empty `ids`: all those that carry a staleness marker
+    /// ("Recalculate Out of Date"). Outside the history, like
+    /// [`Recalculator::run`], whose propagation it reuses.
     pub(crate) fn recalculate(&mut self, project: &mut Project, ids: &[NodeId]) {
         let forced: HashSet<NodeId> = if ids.is_empty() {
             project
@@ -286,22 +285,22 @@ impl Recalculator {
         let mut seen = HashSet::new();
         for sheet in sheets {
             if self.should_stop() {
-                // Passe interrompue : `seen` est incomplet, ne pas élaguer.
+                // Interrupted pass: `seen` is incomplete, do not prune.
                 return;
             }
             self.recalc_sheet(project, sheet, &mut seen);
         }
-        // Une colonne supprimée, ou qui a perdu sa formule, sort du mémo :
-        // hygiène, pour que le mémo reste borné par les colonnes-formule
-        // présentes. Ce n'est pas ce qui rend le mémo juste — un identifiant
-        // n'est jamais réattribué dans un même projet (invariant 7), et
-        // `forget` couvre le projet remplacé ; une entrée périmée ne pourrait
-        // donc jamais être prise pour une autre colonne.
+        // A deleted column, or one that lost its formula, leaves the memo:
+        // hygiene, so that the memo stays bounded by the formula columns
+        // present. This is not what makes the memo correct — an identifier is
+        // never reassigned within a project (invariant 7), and `forget` covers
+        // the replaced project; a stale entry could therefore never be taken
+        // for another column.
         self.memo.retain(|id, _| seen.contains(id));
     }
 
-    /// Vrai si `column` doit être (ré)écrite : mode complet, colonne absente
-    /// du mémo, ou empreinte différente.
+    /// True if `column` must be (re)written: full mode, column absent from the
+    /// memo, or different fingerprint.
     fn is_stale(&self, column: NodeId, fingerprint: &Fingerprint) -> bool {
         match self.mode {
             FormulaRecalc::Full => true,
@@ -309,9 +308,9 @@ impl Recalculator {
         }
     }
 
-    /// Note ce qui vient d'être écrit dans `column` : l'empreinte reçoit la
-    /// version **après** écriture, celle que la prochaine passe doit
-    /// retrouver si personne d'autre n'y a touché.
+    /// Notes what was just written into `column`: the fingerprint receives the
+    /// version **after** writing, the one the next pass must find again if
+    /// nobody else touched it.
     fn record(&mut self, project: &Project, column: NodeId, mut fingerprint: Fingerprint) {
         if self.mode == FormulaRecalc::Full {
             return;
@@ -327,35 +326,34 @@ impl Recalculator {
         }
     }
 
-    /// Recalcule les colonnes-formule d'une seule feuille qui en ont besoin,
-    /// dans l'ordre de leurs dépendances (tri topologique,
-    /// [`stokesforge_core::topological_order`]) — une colonne-formule qui en
-    /// référence une autre lit sa valeur **déjà recalculée**, jamais celle
-    /// d'avant cette passe. Un cycle de dépendance (direct ou transitif) est
-    /// détecté sans boucler : chaque colonne qui y participe reçoit un bloc
-    /// entièrement `NaN` plutôt qu'une valeur qui n'aurait de toute façon
-    /// aucun sens à choisir.
+    /// Recalculates the formula columns of a single sheet that need it, in the
+    /// order of their dependencies (topological sort,
+    /// [`stokesforge_core::topological_order`]) — a formula column that
+    /// references another reads its **already recalculated** value, never the
+    /// one from before this pass. A dependency cycle (direct or transitive) is
+    /// detected without looping: each column that takes part gets an entirely
+    /// `NaN` block rather than a value that would make no sense to choose
+    /// anyway.
     ///
-    /// La propagation est automatique : recalculer B écrit B, donc change sa
-    /// version, et C = B + 1, qui vient après B dans l'ordre, voit son
-    /// empreinte changer dans la même passe. L'ordre des étapes ci-dessous
-    /// (illisibles, puis types, puis cycles, puis l'ordre topologique) fait
-    /// qu'aucune colonne n'est écrite après qu'une colonne qui la lit a pris
-    /// son empreinte : une seconde passe immédiate ne réécrit rien.
+    /// Propagation is automatic: recalculating B writes B, so changes its
+    /// version, and C = B + 1, which comes after B in the order, sees its
+    /// fingerprint change in the same pass. The order of the steps below
+    /// (unreadable, then types, then cycles, then the topological order) means
+    /// that no column is written after a column that reads it took its
+    /// fingerprint: an immediate second pass rewrites nothing.
     fn recalc_sheet(&mut self, project: &mut Project, sheet: NodeId, seen: &mut HashSet<NodeId>) {
         let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
             return;
         };
-        // Longueur d'un résultat (#194) : celle de la plus longue des colonnes
-        // que la formule lit (calculée plus bas, colonne par colonne). À
-        // défaut — formule illisible, prise dans un cycle, ou sans aucune
-        // référence résolue — celle de la plus longue colonne **ordinaire**
-        // de la feuille. Jamais une longueur qui compte les colonnes-formule
-        // elles-mêmes : avant #194, `Tree::row_count` les comptait, et une
-        // colonne-formule une fois allongée s'entretenait à cette longueur
-        // (annuler l'allongement d'une source ne la raccourcissait plus).
-        // Les colonnes ordinaires ne sont jamais écrites par la passe : cette
-        // longueur est fixe pendant toute la passe.
+        // Length of a result (#194): that of the longest of the columns the
+        // formula reads (calculated below, column by column). Failing that —
+        // unreadable formula, caught in a cycle, or without any resolved
+        // reference — that of the longest **ordinary** column of the sheet.
+        // Never a length that counts the formula columns themselves: before
+        // #194, `Tree::row_count` counted them, and a formula column once
+        // lengthened sustained itself at that length (undoing the lengthening
+        // of a source no longer shortened it). Ordinary columns are never
+        // written by the pass: this length is fixed during the whole pass.
         let ordinary_len = columns
             .iter()
             .filter_map(|&id| project.tree().node(id).and_then(|node| node.as_column()))
@@ -364,10 +362,10 @@ impl Recalculator {
             .max()
             .unwrap_or(0);
 
-        // Formules analysées à l'avance : une erreur de *parse* est déjà un
-        // résultat final (bloc `NaN`), elle ne participe pas au graphe de
-        // dépendance — une colonne qui la référencerait la trouve
-        // immédiatement disponible (à `NaN`), pas « en attente ».
+        // Formulas parsed in advance: a *parse* error is already a final
+        // result (`NaN` block), it takes no part in the dependency graph — a
+        // column that referenced it finds it immediately available (as `NaN`),
+        // not "pending".
         let mut parsed: BTreeMap<NodeId, (ColumnFormula, Formula)> = BTreeMap::new();
         for &id in &columns {
             let Some(source) = project
@@ -399,17 +397,16 @@ impl Recalculator {
             }
         }
 
-        // Type de sortie d'une colonne-formule : voir
-        // `desired_formula_column_type`. Recalculé à chaque passe plutôt que
-        // figé à la création : une formule référence potentiellement une
-        // colonne qui apparaît ou disparaît ensuite. Appliqué directement au
-        // modèle plutôt que par une commande annulable, comme
-        // `write_formula_column` ci-dessous : c'est la même dérivation « hors
-        // historique » que le recalcul des valeurs, pas une saisie
-        // utilisateur à elle seule annulable. Pas de court-circuit par le
-        // mémo ici : la comparaison des types ne lit aucune donnée, et un
-        // changement de type change la version de la colonne, donc son
-        // empreinte — elle sera réécrite plus bas.
+        // Output type of a formula column: see
+        // `desired_formula_column_type`. Recalculated on every pass rather than
+        // fixed at creation: a formula may reference a column that appears or
+        // disappears later. Applied directly to the model rather than through
+        // an undoable command, like `write_formula_column` below: it is the
+        // same "outside the history" derivation as the recalculation of the
+        // values, not a user input that is undoable on its own. No shortcut
+        // through the memo here: comparing the types reads no data, and a type
+        // change changes the column's version, hence its fingerprint — it will
+        // be rewritten below.
         for (&id, (_, formula)) in &parsed {
             if let Some(desired) = desired_formula_column_type(formula, &columns, project) {
                 let current = project
@@ -423,14 +420,13 @@ impl Recalculator {
             }
         }
 
-        // Graphe de dépendance entre colonnes-formule uniquement : une
-        // référence vers une colonne ordinaire n'est pas une arête à
-        // ordonner, elle est déjà disponible (voir la doc de
-        // `stokesforge_core::topological_order`).
+        // Dependency graph between formula columns only: a reference to an
+        // ordinary column is not an edge to order, it is already available (see
+        // the docs of `stokesforge_core::topological_order`).
         let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
             parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
-        // `parsed` ne contient que des colonnes de cette feuille : une
-        // référence vers une autre feuille n'est jamais une arête.
+        // `parsed` holds only columns of this sheet: a reference to another
+        // sheet is never an edge.
         for (&id, (_, formula)) in &parsed {
             for dep_id in formula.referenced_columns() {
                 if parsed.contains_key(&dep_id) {
@@ -446,13 +442,13 @@ impl Recalculator {
             let Some((source, _)) = parsed.get(&id) else {
                 continue;
             };
-            // Un bloc `NaN` ne dépend que de la longueur et du type de la
-            // colonne, déjà couvert par sa propre version (le type est fixé
-            // juste au-dessus) : les sources n'entrent pas dans l'empreinte.
-            // Y mettre leurs versions ferait se réécrire les membres d'un
-            // cycle à chaque passe, chacun changeant la version de l'autre.
-            // Leur longueur non plus : dans un cycle, elle se définirait par
-            // elle-même ; c'est celle des colonnes ordinaires.
+            // A `NaN` block depends only on the length and the type of the
+            // column, already covered by its own version (the type is fixed
+            // just above): the sources do not enter the fingerprint. Putting
+            // their versions there would make the members of a cycle rewrite
+            // each other on every pass, each changing the other's version.
+            // Nor their length: in a cycle, it would be defined by itself; it
+            // is that of the ordinary columns.
             let fingerprint =
                 Fingerprint::new(project, id, source.clone(), Outcome::Blocked, ordinary_len);
             if self.is_stale(id, &fingerprint) {
@@ -472,13 +468,13 @@ impl Recalculator {
             let Some((source, formula)) = parsed.get(&id) else {
                 continue;
             };
-            // Lue ici, pas avant la boucle : les colonnes-formule déjà
-            // traitées dans cette boucle (celles dont `id` dépend, forcément
-            // plus tôt dans `order`) ont pu être réécrites, donc changer de
-            // version — c'est ce qui propage le recalcul le long d'une
-            // chaîne. Chaque identifiant se résout parmi les colonnes de la
-            // **feuille** seulement (jamais dans tout l'arbre) : `None` veut
-            // dire « hors de la feuille », et entre dans l'empreinte.
+            // Read here, not before the loop: the formula columns already
+            // processed in this loop (those `id` depends on, necessarily
+            // earlier in `order`) may have been rewritten, hence changed
+            // version — this is what propagates the recalculation along a
+            // chain. Each identifier is resolved among the columns of the
+            // **sheet** only (never in the whole tree): `None` means "outside
+            // the sheet", and enters the fingerprint.
             let sources: Vec<(NodeId, Option<u64>)> = formula
                 .referenced_columns()
                 .into_iter()
@@ -490,9 +486,9 @@ impl Recalculator {
                     (column_id, version)
                 })
                 .collect();
-            // La plus longue des colonnes lues, lue elle aussi après les
-            // colonnes-formule dont `id` dépend ; leur longueur suit leur
-            // version, déjà dans l'empreinte.
+            // The longest of the columns read, also read after the formula
+            // columns `id` depends on; their length follows their version,
+            // already in the fingerprint.
             let target_len = sources
                 .iter()
                 .filter(|(_, version)| version.is_some())
@@ -519,22 +515,22 @@ impl Recalculator {
                         .map(|column| (column_id, column.values().clone()))
                 })
                 .collect();
-            // Une colonne de `columns` a disparu entre la lecture de `columns`
-            // et maintenant : ne peut pas arriver (cette fonction ne touche
-            // jamais la structure de l'arbre), garde défensive plutôt qu'un
-            // panic si l'hypothèse venait à être fausse un jour (invariant 10).
-            // Rien n'est écrit, donc rien n'est noté : le mémo l'oublie, et la
-            // prochaine passe réessaiera.
+            // A column of `columns` vanished between reading `columns` and
+            // now: cannot happen (this function never touches the tree's
+            // structure), a defensive guard rather than a panic if the
+            // assumption were ever wrong (invariant 10). Nothing is written,
+            // so nothing is noted: the memo forgets it, and the next pass will
+            // retry.
             if values.iter().any(Option::is_none) {
                 self.memo.remove(&id);
                 continue;
             }
             let values: Vec<_> = values.into_iter().flatten().collect();
             let evaluation = evaluate_formula(formula, &values, target_len);
-            // Une colonne lue qui n'est plus dans la feuille (`#REF`) laisse
-            // des cellules **vides**, pas `---` : il n'y a pas de calcul qui
-            // a échoué, la formule n'a plus de quoi lire. Statuts vides =
-            // aucune ligne marquée (`write_formula_column`).
+            // A column read that is no longer in the sheet (`#REF`) leaves
+            // **empty** cells, not `---`: no calculation failed, the formula
+            // has nothing left to read. Empty statuses = no row marked
+            // (`write_formula_column`).
             let statuses: &[NumericStatus] = match evaluation.error {
                 Some(FormulaError::DeletedColumn) => &[],
                 _ => &evaluation.statuses,
@@ -545,27 +541,28 @@ impl Recalculator {
     }
 }
 
-/// Ce que l'acteur a vu au dernier calcul d'une colonne-formule : **toutes**
-/// les données dont dépend ce qu'il y a écrit (voir la doc de tête du
-/// module, « Ce que l'empreinte doit contenir »). Deux empreintes égales
-/// garantissent que recalculer écrirait exactement le même contenu.
+/// What the actor saw at the last calculation of a formula column: **all** the
+/// data on which what is written there depends (see the module-level docs,
+/// "What the fingerprint must contain"). Two equal fingerprints guarantee that
+/// recalculating would write exactly the same content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Fingerprint {
-    /// La formule stockée : fragments de texte et identifiants des colonnes
-    /// lues (#321). Jamais les lettres affichées, que le calcul ne lit pas.
+    /// The stored formula: text fragments and identifiers of the columns read
+    /// (#321). Never the displayed letters, which the calculation does not
+    /// read.
     source: ColumnFormula,
-    /// L'issue du calcul, et les sources qu'elle a lues.
+    /// The outcome of the calculation, and the sources it read.
     outcome: Outcome,
-    /// Longueur du résultat : la plus longue des colonnes lues, ou à défaut
-    /// la plus longue colonne ordinaire de la feuille (#194). Pour une
-    /// formule calculée, elle découle des versions des sources ; pour les
-    /// autres issues, c'est la seule trace de la feuille dans l'empreinte.
+    /// Length of the result: the longest of the columns read, or failing that
+    /// the longest ordinary column of the sheet (#194). For a calculated
+    /// formula, it follows from the versions of the sources; for the other
+    /// outcomes, it is the only trace of the sheet in the fingerprint.
     target_len: usize,
-    /// Version de la colonne-formule elle-même. Comparée à la version
-    /// courante avant d'écrire, remplacée par la version d'après écriture
-    /// dans le mémo ([`Recalculator::record`]) : une saisie directe dans la
-    /// colonne, l'annulation d'une telle saisie ou un changement de type la
-    /// font changer, et la colonne est réécrite.
+    /// Version of the formula column itself. Compared with the current version
+    /// before writing, replaced by the after-write version in the memo
+    /// ([`Recalculator::record`]): a direct input into the column, the undo of
+    /// such an input or a type change makes it change, and the column is
+    /// rewritten.
     own_version: u64,
 }
 
@@ -586,26 +583,26 @@ impl Fingerprint {
     }
 }
 
-/// L'issue d'un calcul de formule, avec ce qu'elle a lu.
+/// The outcome of a formula calculation, with what it read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
-    /// La formule ne s'analyse pas : `NaN` partout, rien de lu.
+    /// The formula does not parse: `NaN` everywhere, nothing read.
     Unparsable,
-    /// Prise dans un cycle, ou dépendante d'un cycle : `NaN` partout, rien
-    /// de lu. Le type de sortie, qui dépend des colonnes désignées, est fixé
-    /// avant l'écriture et changer de type change la version de la colonne.
+    /// Caught in a cycle, or dependent on a cycle: `NaN` everywhere, nothing
+    /// read. The output type, which depends on the columns named, is fixed
+    /// before writing and changing type changes the column's version.
     Blocked,
-    /// Calculée. Chaque colonne lue, avec la version de son contenu — ou
-    /// `None` : elle n'est pas dans la feuille (supprimée, ou dans une autre
-    /// feuille), le calcul dégrade (`FormulaError::DeletedColumn`, cellules
-    /// vides). L'appartenance à la feuille est lue par le calcul : elle entre
-    /// donc dans l'empreinte, et une colonne qui revient (annulation) fait
-    /// recalculer.
+    /// Calculated. Each column read, with the version of its content — or
+    /// `None`: it is not in the sheet (deleted, or in another sheet), the
+    /// calculation degrades (`FormulaError::DeletedColumn`, empty cells).
+    /// Membership of the sheet is read by the calculation: it therefore enters
+    /// the fingerprint, and a column that comes back (undo) triggers a
+    /// recalculation.
     Evaluated { sources: Vec<(NodeId, Option<u64>)> },
 }
 
-/// Longueur courante de `column`, `None` si ce n'est pas (ou plus) une
-/// colonne de l'arbre.
+/// Current length of `column`, `None` if it is not (or no longer) a column of
+/// the tree.
 fn column_len(project: &Project, column: NodeId) -> Option<usize> {
     project
         .tree()
@@ -614,8 +611,8 @@ fn column_len(project: &Project, column: NodeId) -> Option<usize> {
         .map(stokesforge_core::Column::len)
 }
 
-/// Version courante de `column`, `None` si ce n'est pas (ou plus) une
-/// colonne de l'arbre.
+/// Current version of `column`, `None` if it is not (or no longer) a column of
+/// the tree.
 fn column_version(project: &Project, column: NodeId) -> Option<u64> {
     project
         .tree()
@@ -624,23 +621,20 @@ fn column_version(project: &Project, column: NodeId) -> Option<u64> {
         .map(stokesforge_core::Column::version)
 }
 
-/// Type que devrait porter la colonne-résultat de `formula` d'après les
-/// colonnes qu'elle référence, ou `None` quand ça ne peut pas se décider
-/// (référence hors de la feuille, ou vers une colonne qui a disparu) — dans ce cas,
-/// l'appelant laisse le type de la colonne inchangé plutôt que de choisir au
-/// hasard.
+/// Type that the result column of `formula` should carry, from the columns it
+/// references, or `None` when it cannot be decided (reference outside the
+/// sheet, or to a column that vanished) — in that case, the caller leaves the
+/// column's type unchanged rather than choosing at random.
 ///
-/// `Mixed` dès que la formule référence au moins une colonne — pas
-/// seulement si l'une d'elles est déjà `Mixed`. N'importe quelle colonne,
-/// même purement `Numeric`, peut avoir une case vide sur une ligne
-/// quelconque ; or une colonne `Numeric` ne peut stocker que des nombres,
-/// jamais le texte `"---"` qu'[`write_formula_column`] écrit désormais
-/// aussi bien pour [`NumericStatus::Failed`] que pour
-/// [`NumericStatus::Missing`] (case manquante, pas seulement en échec) —
-/// sans quoi une opérande manquante resterait une case muette plutôt qu'un
-/// résultat marqué comme non calculé. Seule une formule sans la moindre
-/// référence (une constante pure, qui ne peut jamais manquer ni échouer)
-/// reste `Numeric`.
+/// `Mixed` as soon as the formula references at least one column — not only if
+/// one of them is already `Mixed`. Any column, even a purely `Numeric` one, can
+/// have an empty cell on some row; yet a `Numeric` column can store only
+/// numbers, never the text `"---"` that [`write_formula_column`] now writes for
+/// [`NumericStatus::Failed`] as well as for [`NumericStatus::Missing`] (missing
+/// cell, not only failure) — otherwise a missing operand would stay a mute
+/// cell rather than a result marked as not calculated. Only a formula without
+/// any reference (a pure constant, which can never be missing nor fail) stays
+/// `Numeric`.
 fn desired_formula_column_type(
     formula: &Formula,
     columns: &[NodeId],
@@ -664,37 +658,34 @@ fn desired_formula_column_type(
     })
 }
 
-/// Écrit `values`/`statuses` dans `column`, en le tronquant/étendant d'abord
-/// à sa longueur (`Project::set_length`) puisque `Project::set_values`
-/// n'écrase jamais une queue de colonne plus longue que le bloc écrit.
-/// Ignore silencieusement un échec (`column` disparu entre-temps, ce que
-/// rien dans cette fonction ne provoque) plutôt que de paniquer — invariant
-/// 10.
+/// Writes `values`/`statuses` into `column`, first truncating/extending it to
+/// its length (`Project::set_length`) since `Project::set_values` never
+/// overwrites a column tail longer than the written block. Silently ignores a
+/// failure (`column` vanished meanwhile, which nothing in this function
+/// causes) rather than panicking — invariant 10.
 ///
-/// Pour une colonne-formule **mixte**, une ligne au statut
-/// [`NumericStatus::Failed`] **ou** [`NumericStatus::Missing`] s'écrit
-/// `MixedCell::Text("---")` plutôt que `MixedCell::Empty` : un résultat non
-/// calculé, que ce soit parce qu'une colonne référencée porte du texte non
-/// numérique (`Failed`) ou parce qu'une opérande manque tout simplement
-/// (`Missing`), se voit toujours signalé plutôt que de laisser une case
-/// muette qu'on confondrait avec une valeur pas encore saisie. `statuses`
-/// doit avoir la même longueur que `values` ; sinon ce sont les valeurs
-/// seules qui gouvernent (aucune ligne n'est marquée), comme avant l'ajout
-/// de ce paramètre.
+/// For a **mixed** formula column, a row with status [`NumericStatus::Failed`]
+/// **or** [`NumericStatus::Missing`] is written as `MixedCell::Text("---")`
+/// rather than `MixedCell::Empty`: a result not calculated, whether because a
+/// referenced column holds non-numeric text (`Failed`) or because an operand
+/// is simply missing (`Missing`), is always flagged rather than leaving a mute
+/// cell that would be mistaken for a value not yet entered. `statuses` must
+/// have the same length as `values`; otherwise the values alone govern (no row
+/// is marked), as before this parameter was added.
 fn write_formula_column(
     project: &mut Project,
     column: NodeId,
     values: Vec<f64>,
     statuses: &[NumericStatus],
 ) {
-    // Le bloc doit correspondre au type de la colonne, sans quoi
-    // `set_values` refuse et le recalcul serait silencieusement perdu. Une
-    // colonne-formule sans référence (constante pure) reste numérique, mais
-    // dès qu'elle référence une colonne, `desired_formula_column_type` l'a
-    // déjà retypée en mixte : `ValueBlock::into_mixed` fait alors des `NaN`
-    // des cellules vides, ce que la formule voulait dire (invariant 10 —
-    // dégrader, pas avaler) ; une ligne `Failed` ou `Missing` s'y écrit
-    // `"---"` plutôt qu'une case vide, voir la doc ci-dessus.
+    // The block must match the column's type, otherwise `set_values` refuses
+    // and the recalculation would be silently lost. A formula column without
+    // reference (pure constant) stays numeric, but as soon as it references a
+    // column, `desired_formula_column_type` has already retyped it as mixed:
+    // `ValueBlock::into_mixed` then turns the `NaN`s into empty cells, which is
+    // what the formula meant (invariant 10 — degrade, do not swallow); a
+    // `Failed` or `Missing` row is written there as `"---"` rather than an
+    // empty cell, see the docs above.
     let is_mixed = project
         .tree()
         .node(column)
@@ -720,15 +711,15 @@ fn write_formula_column(
     let _ = project.set_values(column, 0, block);
 }
 
-// ── Calculs d'analyse (#181) ────────────────────────────────────────────
+// ── Analysis calculations (#181) ────────────────────────────────────────
 
-/// Ce que le recalcul a vu d'un calcul d'analyse à son dernier passage : les
-/// versions des colonnes qu'il **lit**, et ce qui le **définit** (opération,
-/// colonnes de sortie et leur version).
+/// What the recalculation saw of an analysis calculation at its last pass: the
+/// versions of the columns it **reads**, and what **defines** it (operation,
+/// output columns and their version).
 ///
-/// La séparation sert aux calculs manuels : un changement d'entrée les rend
-/// périmés ; un changement de définition (`UpdateCalculation`, annulation) est
-/// un geste de l'utilisateur dont le résultat est à jour par construction.
+/// The separation serves the manual calculations: an input change makes them
+/// stale; a change of definition (`UpdateCalculation`, undo) is a user gesture
+/// whose result is up to date by construction.
 #[derive(Debug, Clone, PartialEq)]
 struct CalcFingerprint {
     inputs: Vec<(NodeId, u64)>,
@@ -738,9 +729,9 @@ struct CalcFingerprint {
 #[derive(Debug, Clone, PartialEq)]
 struct CalcDefinition {
     operation: Operation,
-    /// La structure des entrées, pas seulement la liste à plat de leurs
-    /// colonnes : `{x: None, y: A, σ: B}` et `{x: A, y: B, σ: None}` lisent les
-    /// mêmes colonnes dans des rôles différents.
+    /// The structure of the inputs, not only the flat list of their columns:
+    /// `{x: None, y: A, σ: B}` and `{x: A, y: B, σ: None}` read the same
+    /// columns in different roles.
     series: Vec<SeriesRef>,
     aux: Option<AuxRef>,
     auto_recalc: bool,
@@ -748,7 +739,7 @@ struct CalcDefinition {
     outputs: Vec<(NodeId, Option<u64>)>,
 }
 
-/// L'empreinte de `calc`, ou la première colonne d'entrée qui n'existe plus.
+/// The fingerprint of `calc`, or the first input column that no longer exists.
 fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerprint, NodeId> {
     let mut inputs = Vec::new();
     for column in calc.input_columns() {
@@ -775,17 +766,17 @@ fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerp
     })
 }
 
-/// Le mémo d'un calcul : son empreinte et, pour un calcul **manuel** seulement,
-/// le contenu de ses entrées à son dernier calcul (un `Arc` cloné, pas une
-/// copie tant que la colonne n'est pas modifiée). Sans lui, une colonne
-/// réécrite à l'identique — ce que fait le recalcul complet des formules à
-/// chaque passe — périmerait un calcul que rien n'a changé.
+/// The memo of a calculation: its fingerprint and, for a **manual** calculation
+/// only, the content of its inputs at its last calculation (a cloned `Arc`, not
+/// a copy as long as the column is not modified). Without it, a column rewritten
+/// identically — which the full recalculation of the formulas does on every
+/// pass — would make stale a calculation that nothing changed.
 struct CalcMemo {
     fingerprint: CalcFingerprint,
     seen: Vec<ColumnValues>,
 }
 
-/// Le contenu de chaque entrée est-il celui qu'on a vu ?
+/// Is the content of each input the one that was seen?
 fn same_contents(project: &Project, inputs: &[(NodeId, u64)], seen: &[ColumnValues]) -> bool {
     inputs.len() == seen.len()
         && inputs.iter().zip(seen).all(|((column, _), before)| {
@@ -812,21 +803,22 @@ fn snapshot_inputs(project: &Project, inputs: &[(NodeId, u64)]) -> Vec<ColumnVal
 
 enum CalcAction {
     Skip,
-    /// Les versions ont changé, pas le contenu : on retient les nouvelles.
+    /// The versions changed, not the content: the new ones are kept.
     Renumber,
-    /// Fait confiance aux données présentes (calcul manuel jamais vu, ou
-    /// redéfini) : note l'empreinte, ne calcule rien.
+    /// Trusts the data present (manual calculation never seen, or redefined):
+    /// notes the fingerprint, calculates nothing.
     Trust,
-    /// Une entrée a changé sous un calcul manuel.
+    /// An input changed under a manual calculation.
     MarkStale,
     Recompute,
 }
 
 impl Recalculator {
-    /// Parcourt les calculs dans l'ordre de leurs dépendances (la sortie de l'un
-    /// peut être l'entrée d'un autre) ; si l'un a réécrit des données, repasse
-    /// sur les formules — qui peuvent lire ces sorties — puis recommence, dans
-    /// la limite de [`MAX_ROUNDS`]. Sans calcul dans le projet, ne coûte rien.
+    /// Walks the calculations in the order of their dependencies (the output of
+    /// one can be the input of another); if one rewrote data, goes over the
+    /// formulas again — which can read these outputs — then starts over, within
+    /// the limit of [`MAX_ROUNDS`]. With no calculation in the project, costs
+    /// nothing.
     fn run_calculation_rounds(&mut self, project: &mut Project, forced: Option<HashSet<NodeId>>) {
         if project.tree().calculations().is_empty() {
             self.calc_memo.clear();
@@ -847,13 +839,13 @@ impl Recalculator {
         self.calc_memo.retain(|id, _| present.contains_key(id));
     }
 
-    /// Un tour sur tous les calculs. Rend `true` si des données ont changé.
+    /// One round over all calculations. Returns `true` if data changed.
     fn run_calculations(
         &mut self,
         project: &mut Project,
         forced: Option<&HashSet<NodeId>>,
     ) -> bool {
-        // Qui produit quelle colonne ; un calcul dépend de ceux dont il lit une sortie.
+        // Who produces which column; a calculation depends on those whose output it reads.
         let mut producer: HashMap<NodeId, NodeId> = HashMap::new();
         for (&id, calc) in project.tree().calculations() {
             for column in calc.outputs.iter().filter_map(|o| o.column) {
@@ -885,16 +877,16 @@ impl Recalculator {
             changed |=
                 self.update_calculation(project, id, forced.is_some_and(|f| f.contains(&id)));
         }
-        // Un cycle (entre calculs, ou calcul → formule → calcul) n'a pas
-        // d'ordre de calcul, et le relancer ne se stabiliserait jamais : on
-        // les signale périmés sans y toucher.
+        // A cycle (between calculations, or calculation → formula →
+        // calculation) has no calculation order, and rerunning it would never
+        // stabilize: they are flagged stale without touching them.
         for id in blocked {
             let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
         }
         changed
     }
 
-    /// Note l'empreinte vue de `calc` (et le contenu de ses entrées s'il est manuel).
+    /// Notes the fingerprint seen of `calc` (and the content of its inputs if it is manual).
     fn remember(
         &mut self,
         project: &Project,
@@ -902,9 +894,10 @@ impl Recalculator {
         calc: &Calculation,
         fingerprint: CalcFingerprint,
     ) {
-        // Le contenu des entrées se retient pour un calcul manuel, et pour un
-        // automatique que le fichier a rendu périmé (`Manual`, ou `InputMissing`
-        // que `Trust` ramène à `Manual`) : voir `update_calculation`.
+        // The content of the inputs is kept for a manual calculation, and for
+        // an automatic one that the file made stale (`Manual`, or
+        // `InputMissing` that `Trust` brings back to `Manual`): see
+        // `update_calculation`.
         let waits_for_a_gesture = !calc.auto_recalc
             || matches!(
                 calc.stale,
@@ -925,9 +918,9 @@ impl Recalculator {
         let fingerprint = match calc_fingerprint(project, &calc) {
             Ok(fingerprint) => fingerprint,
             Err(_missing) => {
-                // Une colonne lue a disparu : les dernières valeurs restent, le
-                // calcul est périmé. Retrouver la colonne (annulation) fait
-                // repartir de zéro.
+                // A column read vanished: the last values stay, the calculation
+                // is stale. Finding the column again (undo) restarts from
+                // zero.
                 let _ = project.set_calculation_stale(id, Some(Staleness::InputMissing));
                 self.calc_memo.remove(&id);
                 return false;
@@ -937,23 +930,23 @@ impl Recalculator {
         let action = if force {
             CalcAction::Recompute
         } else if self.trust_loaded && previous.is_none() {
-            // Premier passage après un `Load`, dans les deux modes (sinon
-            // l'oracle `Full` divergerait) : les valeurs du fichier font foi.
+            // First pass after a `Load`, in both modes (otherwise the `Full`
+            // oracle would diverge): the file's values are authoritative.
             CalcAction::Trust
         } else if calc.auto_recalc {
             match (self.mode, previous) {
                 (FormulaRecalc::Targeted, Some(p)) if p.fingerprint == fingerprint => {
                     CalcAction::Skip
                 }
-                // Un calcul automatique marqué `Manual` (lu d'un fichier où
-                // il était périmé ou en échec, A1 #316) attend un geste : tant
-                // que le **contenu** de ses entrées est celui qu'il a vu, le
-                // recalculer le ferait passer de `Manual` à `Failed` ou à « à
-                // jour » sans que personne n'ait rien demandé — et le mode
-                // complet, qui réécrit les colonnes-formule (donc leurs
-                // versions) à chaque passe, divergerait du ciblé (batterie
-                // `b22`, latent avant #321). Une vraie modification d'une
-                // entrée le recalcule comme n'importe quel automatique.
+                // An automatic calculation marked `Manual` (read from a file
+                // where it was stale or failed, A1 #316) waits for a gesture:
+                // as long as the **content** of its inputs is the one it saw,
+                // recalculating it would move it from `Manual` to `Failed` or
+                // to "up to date" without anybody asking — and the full mode,
+                // which rewrites the formula columns (hence their versions) on
+                // every pass, would diverge from the targeted one (battery
+                // `b22`, latent before #321). A real modification of an input
+                // recalculates it like any automatic one.
                 (_, Some(p))
                     if calc.stale == Some(Staleness::Manual)
                         && p.fingerprint.definition == fingerprint.definition
@@ -971,8 +964,8 @@ impl Recalculator {
                 _ => CalcAction::Recompute,
             }
         } else {
-            // Un calcul manuel n'obéit pas au mode : ses entrées se comparent
-            // par le contenu, dans les deux modes (voir `CalcMemo`).
+            // A manual calculation does not obey the mode: its inputs are
+            // compared by content, in both modes (see `CalcMemo`).
             match previous {
                 None => CalcAction::Trust,
                 Some(p) if p.fingerprint.definition != fingerprint.definition => CalcAction::Trust,
@@ -993,8 +986,8 @@ impl Recalculator {
             }
             CalcAction::Trust => {
                 if calc.stale == Some(Staleness::InputMissing) {
-                    // Les colonnes sont revenues mais rien ne dit que les
-                    // valeurs gardées leur correspondent.
+                    // The columns came back but nothing says the kept values
+                    // correspond to them.
                     let _ = project.set_calculation_stale(id, Some(Staleness::Manual));
                 }
                 self.remember(project, id, &calc, fingerprint);
@@ -1017,10 +1010,10 @@ impl Recalculator {
                         let changed = match project.refresh_calculation_from(id, computed) {
                             Ok(changed) => changed,
                             Err(_) => {
-                                // Une sortie refuse le résultat (type changé,
-                                // colonne protégée) : le dire, au lieu de
-                                // mémoriser une empreinte et de laisser la
-                                // colonne figée sans signe.
+                                // An output refuses the result (type changed,
+                                // protected column): say so, instead of
+                                // memorizing a fingerprint and leaving the
+                                // column frozen with no sign.
                                 let _ = project.set_calculation_stale(
                                     id,
                                     Some(Staleness::Failed(AnalysisError::OutputUnwritable)),
@@ -1029,8 +1022,8 @@ impl Recalculator {
                                 return false;
                             }
                         };
-                        // L'empreinte d'après écriture : celle que le prochain
-                        // passage doit retrouver si personne n'y touche.
+                        // The after-write fingerprint: the one the next pass
+                        // must find again if nobody touches it.
                         if let Some((after, fresh)) = project
                             .tree()
                             .calculation(id)
@@ -1047,8 +1040,8 @@ impl Recalculator {
                         false
                     }
                     Err(ComputeError::Analysis(error)) => {
-                        // Les dernières valeurs valides restent ; pas de nouvel
-                        // essai tant qu'aucune entrée ne change.
+                        // The last valid values stay; no new attempt as long
+                        // as no input changes.
                         let _ = project.set_calculation_stale(id, Some(Staleness::Failed(error)));
                         self.remember(project, id, &calc, fingerprint);
                         false
@@ -1059,11 +1052,11 @@ impl Recalculator {
     }
 }
 
-/// Les calculs pris dans une boucle qui traverse des colonnes-formule : la
-/// sortie d'un calcul nourrit une formule qui nourrit (de proche en proche) une
-/// entrée du même calcul. Une boucle faite de formules seules est déjà traitée
-/// par `recalc_sheet` (colonnes à `NaN`) ; ici on cherche celles qui passent
-/// par un calcul — le graphe complet moins le graphe des formules.
+/// The calculations caught in a loop that crosses formula columns: the output
+/// of a calculation feeds a formula that feeds (step by step) an input of the
+/// same calculation. A loop made of formulas alone is already handled by
+/// `recalc_sheet` (`NaN` columns); here we look for those that go through a
+/// calculation — the full graph minus the graph of the formulas.
 fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
     let tree = project.tree();
     let mut formula_edges: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
@@ -1081,7 +1074,7 @@ fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
                 .and_then(|n| n.as_column())
                 .and_then(|c| c.meta().formula.clone());
             if let Some(Ok(formula)) = source.as_ref().map(ColumnFormula::compile) {
-                // Les colonnes de **cette feuille** seulement, comme `recalc_sheet`.
+                // The columns of **this sheet** only, like `recalc_sheet`.
                 deps.extend(
                     formula
                         .referenced_columns()
@@ -1124,14 +1117,14 @@ mod tests {
 
     use super::*;
 
-    /// Cellules numériques d'une colonne ; `None` pour ce qui ne l'est pas
-    /// (le « --- » d'une colonne-formule pas encore calculée).
-    fn nombres(project: &Project, column: NodeId) -> Vec<Option<f64>> {
+    /// Numeric cells of a column; `None` for what is not numeric (the "---" of
+    /// a formula column not yet calculated).
+    fn numbers(project: &Project, column: NodeId) -> Vec<Option<f64>> {
         let column = project
             .tree()
             .node(column)
             .and_then(|n| n.as_column())
-            .expect("colonne");
+            .expect("column");
         match column.values() {
             ColumnValues::Float(values) => values.iter().map(|v| Some(*v)).collect(),
             ColumnValues::Mixed(cells) => cells
@@ -1144,17 +1137,17 @@ mod tests {
         }
     }
 
-    fn valeurs(expected: &[f64]) -> Vec<Option<f64>> {
+    fn values_of(expected: &[f64]) -> Vec<Option<f64>> {
         expected.iter().map(|v| Some(*v)).collect()
     }
 
-    /// `A [1,2,3]` puis `B = A*2`, `C = B+1`, `D = C+1` (une chaîne : chaque
-    /// colonne attend la précédente).
-    fn chaine() -> (Project, [NodeId; 3]) {
-        let mut project = Project::new("Demo").expect("projet");
+    /// `A [1,2,3]` then `B = A*2`, `C = B+1`, `D = C+1` (a chain: each column
+    /// waits for the previous one).
+    fn chain() -> (Project, [NodeId; 3]) {
+        let mut project = Project::new("Demo").expect("project");
         let root = project.root();
-        project.add_workbook(root, Some("Book1")).expect("classeur");
-        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
         project
             .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
             .expect("A");
@@ -1162,11 +1155,11 @@ mod tests {
         for (name, text) in [("B", "A*2"), ("C", "B+1"), ("D", "C+1")] {
             let column = project
                 .add_column(sheet, None, Some(name), Column::new(ColumnType::Numeric))
-                .expect("colonne");
+                .expect("column");
             let formula = project
                 .tree()
                 .formula_from_letters(column, text)
-                .expect("formule saisie");
+                .expect("formula entered");
             project
                 .set_column_meta(
                     column,
@@ -1175,7 +1168,7 @@ mod tests {
                         ..Default::default()
                     },
                 )
-                .expect("formule");
+                .expect("formula");
             formulas.push(column);
         }
         (project, [formulas[0], formulas[1], formulas[2]])
@@ -1185,48 +1178,48 @@ mod tests {
         column_version(project, column).expect("version")
     }
 
-    /// #239 : l'arrêt tombe entre deux colonnes. Ce qui était écrit le reste,
-    /// le reste attend ; la passe suivante achève sans réécrire ce qui l'est
-    /// déjà (le mémo est resté juste) et retombe sur le résultat complet.
+    /// #239: the stop falls between two columns. What was written stays, the
+    /// rest waits; the next pass completes without rewriting what is already
+    /// written (the memo stayed correct) and ends up at the complete result.
     #[test]
-    fn un_arret_entre_deux_colonnes_laisse_un_etat_que_la_passe_suivante_acheve() {
-        let (mut project, [c, d, e]) = chaine();
+    fn a_stop_between_two_columns_leaves_a_state_that_the_next_pass_completes() {
+        let (mut project, [c, d, e]) = chain();
         let polls = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&polls);
         let mut recalc = Recalculator::new(FormulaRecalc::Targeted);
-        // 1er contrôle : avant la feuille ; 2e : avant C ; 3e : avant D.
+        // 1st check: before the sheet; 2nd: before C; 3rd: before D.
         let completed = recalc.run_interruptible(&mut project, move || {
             counter.fetch_add(1, Ordering::SeqCst) + 1 >= 3
         });
-        assert!(!completed, "la passe aurait dû être interrompue");
+        assert!(!completed, "the pass should have been interrupted");
         assert_eq!(
-            nombres(&project, c),
-            valeurs(&[2.0, 4.0, 6.0]),
-            "C est écrite"
+            numbers(&project, c),
+            values_of(&[2.0, 4.0, 6.0]),
+            "C is written"
         );
         assert!(
-            nombres(&project, d).iter().all(Option::is_none)
-                && nombres(&project, e).iter().all(Option::is_none),
-            "D et E n'ont pas été atteintes"
+            numbers(&project, d).iter().all(Option::is_none)
+                && numbers(&project, e).iter().all(Option::is_none),
+            "D and E were not reached"
         );
         let c_version = version(&project, c);
 
         recalc.run(&mut project);
-        assert_eq!(nombres(&project, d), valeurs(&[3.0, 5.0, 7.0]));
-        assert_eq!(nombres(&project, e), valeurs(&[4.0, 6.0, 8.0]));
+        assert_eq!(numbers(&project, d), values_of(&[3.0, 5.0, 7.0]));
+        assert_eq!(numbers(&project, e), values_of(&[4.0, 6.0, 8.0]));
         assert_eq!(
             version(&project, c),
             c_version,
-            "C, déjà à jour, n'est pas réécrite"
+            "C, already up to date, is not rewritten"
         );
     }
 
-    /// Témoin : sans demande d'arrêt, la passe interruptible va au bout.
+    /// Witness: without a stop request, the interruptible pass runs to the end.
     #[test]
-    fn sans_arret_la_passe_interruptible_va_au_bout() {
-        let (mut project, [_, _, e]) = chaine();
+    fn without_a_stop_the_interruptible_pass_runs_to_the_end() {
+        let (mut project, [_, _, e]) = chain();
         let mut recalc = Recalculator::new(FormulaRecalc::Targeted);
         assert!(recalc.run_interruptible(&mut project, || false));
-        assert_eq!(nombres(&project, e), valeurs(&[4.0, 6.0, 8.0]));
+        assert_eq!(numbers(&project, e), values_of(&[4.0, 6.0, 8.0]));
     }
 }

@@ -1,6 +1,6 @@
-//! Critères d'acceptation du bus de commandes, exercés par l'API publique
-//! seule : on n'inspecte jamais l'intérieur de `History`, seulement ce qu'un
-//! appelant peut observer (l'arbre du projet et les accesseurs de la pile).
+//! Acceptance criteria of the command bus, exercised through the public API
+//! only: we never inspect the inside of `History`, only what a
+//! caller can observe (the project tree and the accessors of the stack).
 
 use std::sync::Arc;
 
@@ -16,12 +16,12 @@ use stokesforge_plot::{ColorUsage, PlotSpec, SavedColors};
 
 // -- fixture --------------------------------------------------------------
 
-/// Projet « Demo » : `Book1` avec `Sheet1` (colonnes `A [1,2,3]`, `B [10,20]`,
-/// texte `T ["a", None, "c"]`) et `Sheet2` (colonne `X [0.5, 1.5]`).
+/// Project "Demo": `Book1` with `Sheet1` (columns `A [1,2,3]`, `B [10,20]`,
+/// text `T ["a", None, "c"]`) and `Sheet2` (column `X [0.5, 1.5]`).
 ///
-/// Le montage passe par les primitives de `Project` et non par des commandes :
-/// c'est le seul endroit où la règle d'or (« aucune mutation hors d'une
-/// commande ») souffre une exception, et c'est celle qu'elle prévoit — les
+/// The setup goes through the `Project` primitives and not through commands:
+/// this is the only place where the golden rule ("no mutation outside a
+/// command") tolerates an exception, and it is the one it provides for —
 /// tests.
 struct Fixture {
     project: Project,
@@ -35,20 +35,18 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
-    let mut project = Project::new("Demo").expect("projet Demo");
+    let mut project = Project::new("Demo").expect("project Demo");
     let root = project.root();
     let book = project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
-    let sheet1 = project
-        .resolve_path("[Book1]Sheet1")
-        .expect("feuille Sheet1");
+        .expect("workbook Book1");
+    let sheet1 = project.resolve_path("[Book1]Sheet1").expect("sheet Sheet1");
     let a = project
         .add_column(sheet1, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
-        .expect("colonne A");
+        .expect("column A");
     let b = project
         .add_column(sheet1, None, Some("B"), Column::from_f64(&[10.0, 20.0]))
-        .expect("colonne B");
+        .expect("column B");
     let t = project
         .add_column(
             sheet1,
@@ -56,13 +54,13 @@ fn fixture() -> Fixture {
             Some("T"),
             Column::from_text(&[Some("a".to_string()), None, Some("c".to_string())]),
         )
-        .expect("colonne T");
+        .expect("column T");
     let sheet2 = project
         .add_worksheet(book, Some("Sheet2"))
-        .expect("feuille Sheet2");
+        .expect("sheet Sheet2");
     let x = project
         .add_column(sheet2, None, Some("X"), Column::from_f64(&[0.5, 1.5]))
-        .expect("colonne X");
+        .expect("column X");
     Fixture {
         project,
         book,
@@ -75,7 +73,7 @@ fn fixture() -> Fixture {
     }
 }
 
-// -- lectures d'appoint ---------------------------------------------------
+// -- helper reads ---------------------------------------------------------
 
 fn snapshot(project: &Project) -> Arc<Tree> {
     Arc::clone(project.tree())
@@ -88,7 +86,7 @@ fn floats(project: &Project, column: NodeId) -> Vec<f64> {
         .and_then(Node::as_column)
         .and_then(|c| c.float_values().cloned())
         .map(|values| values.as_slice().to_vec())
-        .expect("colonne numérique")
+        .expect("numeric column")
 }
 
 fn texts(project: &Project, column: NodeId) -> Vec<Option<String>> {
@@ -96,11 +94,11 @@ fn texts(project: &Project, column: NodeId) -> Vec<Option<String>> {
     let target = tree
         .node(column)
         .and_then(Node::as_column)
-        .expect("colonne existante");
+        .expect("existing column");
     (0..target.len())
         .map(|row| match target.get(row) {
             Cell::Text(text) => text,
-            Cell::Float(_) => panic!("colonne numérique, texte attendu"),
+            Cell::Float(_) => panic!("numeric column, text expected"),
         })
         .collect()
 }
@@ -111,7 +109,7 @@ fn column_len(project: &Project, column: NodeId) -> usize {
         .node(column)
         .and_then(Node::as_column)
         .map(Column::len)
-        .expect("colonne existante")
+        .expect("existing column")
 }
 
 fn column_type(project: &Project, column: NodeId) -> ColumnType {
@@ -120,14 +118,14 @@ fn column_type(project: &Project, column: NodeId) -> ColumnType {
         .node(column)
         .and_then(Node::as_column)
         .map(Column::column_type)
-        .expect("colonne existante")
+        .expect("existing column")
 }
 
 fn names(project: &Project, parent: NodeId) -> Vec<String> {
     project
         .tree()
         .children(parent)
-        .expect("parent existant")
+        .expect("existing parent")
         .iter()
         .filter_map(|id| project.tree().node(*id))
         .map(|node| node.name().to_string())
@@ -143,7 +141,7 @@ fn set_cells(column: NodeId, start: usize, values: &[f64]) -> Command {
     }
 }
 
-// -- 1. bus : aller-retour élémentaire ------------------------------------
+// -- 1. bus: elementary round trip ----------------------------------------
 
 #[test]
 fn execute_undo_redo_round_trip() {
@@ -154,7 +152,7 @@ fn execute_undo_redo_round_trip() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[0.0]))
-        .expect("saisie acceptée");
+        .expect("input accepted");
 
     assert_eq!(history.len(), 1);
     assert!(history.can_undo());
@@ -181,12 +179,12 @@ fn execute_undo_redo_round_trip() {
     assert_eq!(history.redo(&mut f.project), Ok(true));
     assert_eq!(floats(&f.project, f.a), vec![0.0, 2.0, 3.0]);
 
-    // Pile vidée puis interrogée : rien à annuler n'est pas une erreur.
+    // Stack emptied then queried: nothing to undo is not an error.
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(history.undo(&mut f.project), Ok(false));
 }
 
-// -- 2. application avant empilement --------------------------------------
+// -- 2. apply before pushing ----------------------------------------------
 
 #[test]
 fn a_failed_command_changes_neither_tree_nor_stack() {
@@ -194,7 +192,7 @@ fn a_failed_command_changes_neither_tree_nor_stack() {
     let mut history = History::new();
     let before = snapshot(&f.project);
 
-    // Nom déjà pris par la colonne B de la même feuille.
+    // Name already taken by column B of the same sheet.
     let err = history
         .execute(
             &mut f.project,
@@ -203,7 +201,7 @@ fn a_failed_command_changes_neither_tree_nor_stack() {
                 name: "B".to_string(),
             },
         )
-        .expect_err("renommage refusé");
+        .expect_err("rename refused");
     assert!(matches!(
         err,
         CommandError::Core(CoreError::DuplicateName(_))
@@ -221,7 +219,7 @@ fn a_failed_command_changes_neither_tree_nor_stack() {
                 column: Column::from_f64(&[1.0]),
             },
         )
-        .expect_err("index refusé");
+        .expect_err("index refused");
     assert!(matches!(
         err,
         CommandError::Core(CoreError::IndexOutOfBounds(_))
@@ -232,14 +230,14 @@ fn a_failed_command_changes_neither_tree_nor_stack() {
     let unknown = NodeId::from_raw(9_999);
     let err = history
         .execute(&mut f.project, set_cells(unknown, 0, &[1.0]))
-        .expect_err("nœud inconnu refusé");
+        .expect_err("unknown node refused");
     assert_eq!(err, CommandError::Core(CoreError::UnknownNode(unknown)));
     assert_eq!(history.len(), 0);
     assert!(!history.can_undo());
     assert_eq!(**f.project.tree(), *before);
 }
 
-// -- 3. une nouvelle commande coupe la branche de rétablissement ----------
+// -- 3. a new command cuts the redo branch --------------------------------
 
 #[test]
 fn a_new_command_drops_the_redo_stack() {
@@ -248,13 +246,13 @@ fn a_new_command_drops_the_redo_stack() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
-        .expect("saisie");
+        .expect("input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(history.redo_len(), 1);
 
     history
         .execute(&mut f.project, set_cells(f.b, 0, &[8.0]))
-        .expect("saisie");
+        .expect("input");
     assert_eq!(history.redo_len(), 0);
     assert!(!history.can_redo());
 }
@@ -268,15 +266,15 @@ fn clear_empties_both_stacks_and_is_refused_in_a_macro() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
-        .expect("saisie");
+        .expect("input");
     history
         .execute(&mut f.project, set_cells(f.a, 1, &[8.0]))
-        .expect("saisie");
+        .expect("input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(history.len(), 1);
     assert_eq!(history.redo_len(), 1);
 
-    history.clear().expect("purge acceptée");
+    history.clear().expect("purge accepted");
     assert_eq!(history.len(), 0);
     assert_eq!(history.redo_len(), 0);
 
@@ -284,7 +282,7 @@ fn clear_empties_both_stacks_and_is_refused_in_a_macro() {
     assert_eq!(history.clear(), Err(CommandError::MacroOpen("clear")));
     history
         .abort_macro(&mut f.project)
-        .expect("macro vide abandonnée");
+        .expect("empty macro abandoned");
 }
 
 // -- 5. SetCells ----------------------------------------------------------
@@ -297,7 +295,7 @@ fn set_cells_beyond_the_end_restores_the_previous_length() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 5, &[42.0]))
-        .expect("saisie hors longueur");
+        .expect("input beyond the length");
     let after = snapshot(&f.project);
     assert_eq!(column_len(&f.project, f.a), 6);
     assert!(floats(&f.project, f.a)[3].is_nan());
@@ -326,7 +324,7 @@ fn set_cells_on_a_mixed_column() {
                 expected_version: None,
             },
         )
-        .expect("saisie texte");
+        .expect("text input");
     let after = snapshot(&f.project);
     assert_eq!(
         texts(&f.project, f.t),
@@ -359,7 +357,7 @@ fn set_cells_with_the_wrong_block_variant_is_refused() {
                 expected_version: None,
             },
         )
-        .expect_err("bloc mixte sur colonne numérique");
+        .expect_err("mixed block on a numeric column");
     assert!(matches!(
         err,
         CommandError::Core(CoreError::TypeMismatch(_))
@@ -386,14 +384,14 @@ fn add_column_round_trip() {
                 column: Column::from_f64(&[9.0]),
             },
         )
-        .expect("ajout de colonne");
+        .expect("column addition");
     let after = snapshot(&f.project);
-    // D1 (`guide-de-correction-robustesse.md` §F7) — le nom automatique part
-    // du NOMBRE de colonnes déjà présentes (trois : A, B, T), pas du premier
-    // nom libre façon tableur : reconstruire la liste des noms pris pour
-    // trouver le plus petit trou (« C » resterait libre ici) est précisément
-    // le coût en O(n³) que D1 supprime. Le premier candidat essayé est donc
-    // « D ».
+    // D1 (`guide-de-correction-robustesse.md` §F7) — the automatic name starts
+    // from the NUMBER of columns already present (three: A, B, T), not from the
+    // first free name spreadsheet-style: rebuilding the list of taken names to
+    // find the smallest gap ("C" would stay free here) is precisely the
+    // O(n³) cost that D1 removes. The first candidate tried is therefore
+    // "D".
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "D"]);
     assert_eq!(history.undo_label(), Some(&HistoryLabel::AddColumn));
 
@@ -421,7 +419,7 @@ fn add_column_with_an_explicit_name_and_position() {
                 column: Column::from_f64(&[4.0]),
             },
         )
-        .expect("ajout de colonne D");
+        .expect("addition of column D");
     let after = snapshot(&f.project);
     assert_eq!(names(&f.project, f.sheet1), vec!["D", "A", "B", "T"]);
 
@@ -441,7 +439,7 @@ fn delete_column_round_trip_restores_the_same_node_id() {
 
     history
         .execute(&mut f.project, Command::DeleteColumn { column: f.a })
-        .expect("suppression de A");
+        .expect("deletion of A");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -452,8 +450,8 @@ fn delete_column_round_trip_restores_the_same_node_id() {
     assert!(!f.project.tree().contains(f.a));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    // L'arbre d'avant retenait le nœud supprimé : il revient sous son
-    // identifiant d'origine, avec ses valeurs.
+    // The earlier tree kept the deleted node: it comes back under its
+    // original identifier, with its values.
     assert!(f.project.tree().contains(f.a));
     assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
     assert_eq!(**f.project.tree(), *before);
@@ -471,15 +469,15 @@ fn delete_column_refuses_a_node_that_is_not_a_column() {
 
     let err = history
         .execute(&mut f.project, Command::DeleteColumn { column: f.sheet1 })
-        .expect_err("une feuille n'est pas une colonne");
+        .expect_err("a sheet is not a column");
     match err {
         CommandError::Core(CoreError::Structure(message)) => {
             assert!(
                 message.contains("is not a column"),
-                "message inattendu : {message}"
+                "unexpected message: {message}"
             );
         }
-        other => panic!("erreur inattendue : {other:?}"),
+        other => panic!("unexpected error: {other:?}"),
     }
     assert!(history.is_empty());
     assert_eq!(**f.project.tree(), *before);
@@ -501,7 +499,7 @@ fn rename_round_trip() {
                 name: "Z".to_string(),
             },
         )
-        .expect("renommage");
+        .expect("rename");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -521,13 +519,13 @@ fn rename_round_trip() {
 
 #[test]
 fn renaming_to_the_current_name_is_not_an_entry() {
-    // B5, le cas « Rename » (`guide-de-correction-robustesse.md` §F5, §7.3 —
-    // consigné sans identifiant ni reproduction jusqu'ici). `Renommer M en
-    // M` réussissait déjà et n'écrivait déjà rien dans l'arbre, mais
-    // empilait quand même une entrée « Renommer M en M » : un cran
-    // d'annulation qui ne défait rien. `entry_has_no_effect` compare
-    // l'arbre d'avant à celui d'après pour toute entrée structurelle, donc
-    // n'a pas besoin de connaître `Rename` par son nom.
+    // B5, the "Rename" case (`guide-de-correction-robustesse.md` §F5, §7.3 —
+    // recorded without identifier or reproduction until now). "Rename M to
+    // M" already succeeded and already wrote nothing in the tree, but
+    // still pushed an entry "Rename M to M": an undo slot
+    // that undoes nothing. `entry_has_no_effect` compares
+    // the tree before to the one after for any structural entry, so
+    // it does not need to know `Rename` by its name.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
@@ -540,7 +538,7 @@ fn renaming_to_the_current_name_is_not_an_entry() {
                 name: "A".to_string(),
             },
         )
-        .expect("renommage vers le nom courant");
+        .expect("rename to the current name");
     assert!(history.is_empty());
     assert_eq!(history.undo_label(), None);
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
@@ -549,8 +547,8 @@ fn renaming_to_the_current_name_is_not_an_entry() {
 
 #[test]
 fn execute_recorded_says_whether_an_entry_was_stored() {
-    // L'acteur n'annule sur Stop que ce que la commande vient de ranger : le
-    // booléen vient de `execute` lui-même, pas d'une différence de `len()`.
+    // On Stop the actor undoes only what the command has just stored: the
+    // boolean comes from `execute` itself, not from a difference of `len()`.
     let mut f = fixture();
     let mut history = History::new();
     let rename = |id, name: &str| Command::Rename {
@@ -558,31 +556,31 @@ fn execute_recorded_says_whether_an_entry_was_stored() {
         name: name.to_string(),
     };
 
-    // Sans effet (« Renommer A en A ») : acceptée, aucune entrée.
+    // No effect ("Rename A to A"): accepted, no entry.
     assert!(!history
         .execute_recorded(&mut f.project, rename(f.a, "A"))
-        .expect("sans effet"));
+        .expect("no effect"));
     assert!(history.is_empty());
 
-    // Avec effet : une entrée rangée.
+    // With an effect: one entry stored.
     assert!(history
         .execute_recorded(&mut f.project, rename(f.a, "A2"))
-        .expect("avec effet"));
+        .expect("with an effect"));
     assert_eq!(history.len(), 1);
 
-    // Dans une macro ouverte, l'entrée est rangée dans la macro : vrai, sans
-    // que `len()` ne bouge forcément.
+    // In an open macro, the entry is stored in the macro: true, without
+    // `len()` necessarily moving.
     history.begin_macro(MacroKind::Import).unwrap();
     assert!(history
         .execute_recorded(&mut f.project, rename(f.a, "A3"))
-        .expect("dans la macro"));
+        .expect("in the macro"));
     history.end_macro(&mut f.project).unwrap();
 }
 
 #[test]
 fn execute_recorded_is_true_even_when_the_limit_evicts_an_older_entry() {
-    // Piège : avec une limite de 1, ranger une entrée en évince une autre et
-    // `len()` ne change pas. Déduire le booléen de `len()` dirait « rien rangé ».
+    // Trap: with a limit of 1, storing an entry evicts another and
+    // `len()` does not change. Deducing the boolean from `len()` would say "nothing stored".
     let mut f = fixture();
     let mut history = History::with_limit(1);
     for name in ["A2", "A3"] {
@@ -594,7 +592,7 @@ fn execute_recorded_is_true_even_when_the_limit_evicts_an_older_entry() {
                     name: name.to_string(),
                 },
             )
-            .expect("renommage"));
+            .expect("rename"));
         assert_eq!(history.len(), 1);
     }
 }
@@ -613,7 +611,7 @@ fn renaming_the_root_is_accepted() {
                 name: "P".to_string(),
             },
         )
-        .expect("renommage de la racine");
+        .expect("rename of the root");
     assert_eq!(f.project.name(), "P");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(f.project.name(), "Demo");
@@ -636,7 +634,7 @@ fn move_round_trip_restores_the_original_index() {
                 index: 0,
             },
         )
-        .expect("déplacement de A");
+        .expect("move of A");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -658,16 +656,10 @@ fn move_round_trip_restores_the_original_index() {
 fn a_circular_move_is_refused() {
     let mut f = fixture();
     let root = f.project.root();
-    // Montage local : deux dossiers imbriqués, pour pouvoir tenter le
-    // déplacement d'un ancêtre dans son propre descendant.
-    let outer = f
-        .project
-        .add_folder(root, "Outer")
-        .expect("dossier extérieur");
-    let inner = f
-        .project
-        .add_folder(outer, "Inner")
-        .expect("dossier intérieur");
+    // Local setup: two nested folders, to be able to try
+    // moving an ancestor into its own descendant.
+    let outer = f.project.add_folder(root, "Outer").expect("outer folder");
+    let inner = f.project.add_folder(outer, "Inner").expect("inner folder");
     let mut history = History::new();
     let before = snapshot(&f.project);
 
@@ -680,7 +672,7 @@ fn a_circular_move_is_refused() {
                 index: 0,
             },
         )
-        .expect_err("déplacement circulaire refusé");
+        .expect_err("circular move refused");
     assert!(matches!(err, CommandError::Core(CoreError::Structure(_))));
     assert!(history.is_empty());
     assert_eq!(**f.project.tree(), *before);
@@ -690,10 +682,10 @@ fn a_circular_move_is_refused() {
 
 #[test]
 fn set_column_type_mixed_to_numeric_round_trip() {
-    // Ancien `set_column_type_text_to_numeric_round_trip` : `f.t` est
-    // construite par `Column::from_text`, qui produit désormais directement
-    // une colonne `Mixed` (il n'y a plus de type `Text` homogène) — même
-    // couverture, sur `Mixed → Numeric`.
+    // Former `set_column_type_text_to_numeric_round_trip`: `f.t` is
+    // built by `Column::from_text`, which now directly produces
+    // a `Mixed` column (there is no longer a homogeneous `Text` type) — same
+    // coverage, on `Mixed → Numeric`.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
@@ -706,13 +698,13 @@ fn set_column_type_mixed_to_numeric_round_trip() {
                 column_type: ColumnType::Numeric,
             },
         )
-        .expect("conversion de T");
+        .expect("conversion of T");
     let after = snapshot(&f.project);
-    // « la colonne C », pas « T » : le libellé désigne la colonne par sa
-    // **position** dans la feuille, comme la grille l'affiche, jamais par son
-    // nom de nœud. Ce cas-ci est précisément celui qui motive
-    // `column_ref` — le nœud s'appelle `T` mais c'est la troisième colonne,
-    // donc « C » à l'écran, et « T » n'apparaît nulle part pour l'utilisateur.
+    // "column C", not "T": the label designates the column by its
+    // **position** in the sheet, as the grid shows it, never by its
+    // node name. This case is precisely the one that motivates
+    // `column_ref` — the node is called `T` but it is the third column,
+    // so "C" on screen, and "T" appears nowhere for the user.
     assert_eq!(
         history.undo_label(),
         Some(&HistoryLabel::SetColumnType {
@@ -723,11 +715,11 @@ fn set_column_type_mixed_to_numeric_round_trip() {
     assert_eq!(converted.len(), 3);
     assert!(
         converted.iter().all(|value| value.is_nan()),
-        "« a », rien et « c » ne s'analysent pas : {converted:?}"
+        "'a', nothing and 'c' do not parse: {converted:?}"
     );
 
-    // La conversion est destructrice : seule la copie retenue permet de
-    // retrouver le texte d'origine **exactement**.
+    // The conversion is destructive: only the retained copy makes it possible
+    // to get back the original text **exactly**.
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(column_type(&f.project, f.t), ColumnType::Mixed);
     assert_eq!(
@@ -741,12 +733,12 @@ fn set_column_type_mixed_to_numeric_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
-// `set_column_type_numeric_to_text_round_trip` a été retiré : il ciblait
-// `ColumnType::Text`, qui n'existe plus. `Numeric → Mixed` n'est pas son
-// équivalent — la conversion est sans perte (`MixedCell::Number`, pas une
-// reformulation en texte) — donc l'invariant qu'il vérifiait (le nombre
-// s'écrit sous sa forme d'affichage) n'a plus de prise ; il n'y a rien à
-// retargeter.
+// `set_column_type_numeric_to_text_round_trip` was removed: it targeted
+// `ColumnType::Text`, which no longer exists. `Numeric → Mixed` is not its
+// equivalent — the conversion is lossless (`MixedCell::Number`, not a
+// rewording as text) — so the invariant it checked (the number
+// is written in its display form) has no grip any more; there is nothing to
+// retarget.
 
 // -- 11. InsertRows -------------------------------------------------------
 
@@ -765,17 +757,17 @@ fn insert_rows_touches_only_the_columns_that_have_that_row() {
                 count: 2,
             },
         )
-        .expect("insertion de lignes");
+        .expect("row insertion");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
         Some(&HistoryLabel::InsertRows { count: 2 })
     );
     assert_eq!(column_len(&f.project, f.a), 5);
-    // B5 (`guide-de-correction-robustesse.md` §F5) — B fait 2 lignes :
-    // `at == len` (2 == 2) est désormais une cible, pas seulement `at <
-    // len` : c'est la seule façon d'ajouter une ligne en fin de colonne, la
-    // plage que `Column::insert_rows` accepte déjà (`at ∈ 0..=len`).
+    // B5 (`guide-de-correction-robustesse.md` §F5) — B has 2 rows:
+    // `at == len` (2 == 2) is now a target, not only `at <
+    // len`: it is the only way to add a row at the end of a column, the
+    // range that `Column::insert_rows` already accepts (`at ∈ 0..=len`).
     assert_eq!(column_len(&f.project, f.b), 4);
     assert_eq!(column_len(&f.project, f.t), 5);
     let values = floats(&f.project, f.a);
@@ -790,19 +782,19 @@ fn insert_rows_touches_only_the_columns_that_have_that_row() {
 
 #[test]
 fn an_insert_that_changes_nothing_is_not_an_entry() {
-    // B5 (`guide-de-correction-robustesse.md` §F5) — une commande acceptée
-    // qui ne change rien n'occupe pas de cran d'annulation : l'ancienne
-    // version de ce test l'affirmait pour la raison inverse (« la position
-    // du curseur d'historique dépendrait de l'état des données »), mais
-    // c'est précisément ce qui trompait l'utilisateur — un succès sans
-    // effet, et un « Annuler » qui ne défait rien. `History::execute`
-    // reconnaît maintenant ce cas (`entry_has_no_effect`) et ne pousse rien.
+    // B5 (`guide-de-correction-robustesse.md` §F5) — an accepted command
+    // that changes nothing takes no undo slot: the former
+    // version of this test asserted it for the opposite reason ("the position
+    // of the history cursor would depend on the state of the data"), but
+    // that is precisely what misled the user — a success with no
+    // effect, and an "Undo" that undoes nothing. `History::execute`
+    // now recognizes this case (`entry_has_no_effect`) and pushes nothing.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
 
-    // Aucune colonne n'a de ligne 10 : la commande est valide et ne change
-    // rien.
+    // No column has a row 10: the command is valid and changes
+    // nothing.
     history
         .execute(
             &mut f.project,
@@ -812,12 +804,12 @@ fn an_insert_that_changes_nothing_is_not_an_entry() {
                 count: 1,
             },
         )
-        .expect("insertion sans effet");
+        .expect("insertion with no effect");
     assert!(history.is_empty());
     assert_eq!(history.undo_label(), None);
     assert_eq!(**f.project.tree(), *before);
 
-    // Rien à annuler : `undo` rend `Ok(false)`, pas une régression.
+    // Nothing to undo: `undo` returns `Ok(false)`, not a regression.
     assert_eq!(history.undo(&mut f.project), Ok(false));
     assert_eq!(**f.project.tree(), *before);
 }
@@ -839,7 +831,7 @@ fn delete_rows_round_trip_even_when_a_column_is_emptied_to_its_end() {
                 count: 5,
             },
         )
-        .expect("suppression de lignes");
+        .expect("row deletion");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -849,9 +841,9 @@ fn delete_rows_round_trip_even_when_a_column_is_emptied_to_its_end() {
     assert_eq!(floats(&f.project, f.b), vec![10.0]);
     assert_eq!(texts(&f.project, f.t), vec![Some("a".to_string())]);
 
-    // Après coup, aucune colonne n'a plus de ligne 1 : `insert_rows` au
-    // niveau feuille ne les atteindrait pas. L'annulation doit donc opérer
-    // colonne par colonne, avec la liste retenue au moment de la suppression.
+    // Afterwards, no column has a row 1 any more: `insert_rows` at
+    // sheet level would not reach them. Undo must therefore work
+    // column by column, with the list retained at the time of the deletion.
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(**f.project.tree(), *before);
     assert_eq!(history.redo(&mut f.project), Ok(true));
@@ -866,11 +858,11 @@ fn delete_cells_removes_independently_per_column_ignoring_duplicates() {
     let mut history = History::new();
     let before = snapshot(&f.project);
 
-    // `f.a` en double : ignoré (une seule suppression par colonne). `f.b`
-    // (longueur 2) ne peut perdre qu'une seule ligne à partir de `at: 1`,
-    // même si `count: 5` en demande davantage — chaque colonne s'arrête à
-    // sa propre fin, indépendamment des autres. `f.t` n'est pas listée :
-    // intacte.
+    // `f.a` twice: ignored (a single deletion per column). `f.b`
+    // (length 2) can lose only a single row from `at: 1`,
+    // even if `count: 5` asks for more — each column stops at
+    // its own end, independently of the others. `f.t` is not listed:
+    // intact.
     history
         .execute(
             &mut f.project,
@@ -880,7 +872,7 @@ fn delete_cells_removes_independently_per_column_ignoring_duplicates() {
                 count: 5,
             },
         )
-        .expect("suppression de cellules");
+        .expect("cell deletion");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -901,9 +893,9 @@ fn delete_cells_removes_independently_per_column_ignoring_duplicates() {
 
 #[test]
 fn delete_cells_beyond_every_targeted_column_is_not_an_entry() {
-    // Même politique que `an_insert_that_changes_nothing_is_not_an_entry`
-    // (B5) : `at` au-delà de la fin de toutes les colonnes visées ne change
-    // rien, donc n'occupe pas de cran d'annulation.
+    // Same policy as `an_insert_that_changes_nothing_is_not_an_entry`
+    // (B5): `at` beyond the end of all the targeted columns changes
+    // nothing, so takes no undo slot.
     let mut f = fixture();
     let mut history = History::new();
     let before = snapshot(&f.project);
@@ -917,7 +909,7 @@ fn delete_cells_beyond_every_targeted_column_is_not_an_entry() {
                 count: 1,
             },
         )
-        .expect("suppression sans effet");
+        .expect("deletion with no effect");
     assert!(history.is_empty());
     assert_eq!(history.undo_label(), None);
     assert_eq!(**f.project.tree(), *before);
@@ -947,18 +939,18 @@ fn a_macro_is_a_single_entry() {
                     column: Column::from_f64(&[0.0]),
                 },
             )
-            .expect("ajout dans la macro");
+            .expect("addition in the macro");
     }
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[42.0]))
-        .expect("saisie dans la macro");
+        .expect("input in the macro");
     assert_eq!(
         history.len(),
         0,
-        "rien n'est empilé tant que la macro est ouverte"
+        "nothing is pushed while the macro is open"
     );
 
-    history.end_macro(&mut f.project).expect("macro fermée");
+    history.end_macro(&mut f.project).expect("macro closed");
     assert!(!history.in_macro());
     assert_eq!(history.len(), 1);
     assert_eq!(
@@ -991,7 +983,7 @@ fn nested_macros_collapse_into_one_entry() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout D");
+        .expect("addition of D");
     history.begin_macro(MacroKind::Import).unwrap();
     assert_eq!(history.macro_depth(), 2);
     history
@@ -1004,10 +996,10 @@ fn nested_macros_collapse_into_one_entry() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout E");
-    history.end_macro(&mut f.project).expect("macro interne");
+        .expect("addition of E");
+    history.end_macro(&mut f.project).expect("inner macro");
     assert_eq!(history.len(), 0);
-    history.end_macro(&mut f.project).expect("macro externe");
+    history.end_macro(&mut f.project).expect("outer macro");
 
     assert_eq!(history.len(), 1);
     assert_eq!(
@@ -1018,7 +1010,7 @@ fn nested_macros_collapse_into_one_entry() {
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
 }
 
-// -- 15. macros mixtes : le test qui fait tenir l'hybride -----------------
+// -- 15. mixed macros: the test that makes the hybrid hold ----------------
 
 #[test]
 fn a_macro_mixing_structure_then_data_undoes_in_reverse_order() {
@@ -1035,11 +1027,11 @@ fn a_macro_mixing_structure_then_data_undoes_in_reverse_order() {
                 name: "Z".to_string(),
             },
         )
-        .expect("renommage");
+        .expect("rename");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
-        .expect("saisie");
-    history.end_macro(&mut f.project).expect("macro fermée");
+        .expect("input");
+    history.end_macro(&mut f.project).expect("macro closed");
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(**f.project.tree(), *before);
@@ -1058,7 +1050,7 @@ fn a_macro_mixing_data_then_structure_undoes_in_reverse_order() {
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[7.0]))
-        .expect("saisie");
+        .expect("input");
     history
         .execute(
             &mut f.project,
@@ -1067,16 +1059,16 @@ fn a_macro_mixing_data_then_structure_undoes_in_reverse_order() {
                 name: "Z".to_string(),
             },
         )
-        .expect("renommage");
-    history.end_macro(&mut f.project).expect("macro fermée");
+        .expect("rename");
+    history.end_macro(&mut f.project).expect("macro closed");
 
-    // Pourquoi l'ordre compte : l'entrée structurelle du renommage retient un
-    // instantané de l'arbre pris **après** la saisie, donc un arbre où A vaut
-    // déjà [7,2,3]. La restaurer d'abord (ordre inverse) ramène cet état
-    // intermédiaire, et le delta de données, rejoué ensuite, remet [1,2,3].
-    // Dans l'autre sens — delta d'abord, snapshot ensuite — le snapshot
-    // écraserait la restauration des données et A resterait à [7,2,3] :
-    // c'est exactement la faille que l'ordre inverse strict ferme.
+    // Why the order matters: the structural entry of the rename keeps a
+    // snapshot of the tree taken **after** the input, so a tree where A is
+    // already [7,2,3]. Restoring it first (reverse order) brings back this
+    // intermediate state, and the data delta, replayed afterwards, puts [1,2,3] back.
+    // The other way round — delta first, snapshot afterwards — the snapshot
+    // would overwrite the restoration of the data and A would stay at [7,2,3]:
+    // this is exactly the flaw that strict reverse order closes.
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
@@ -1095,7 +1087,7 @@ fn a_macro_deleting_then_recreating_a_homonym_restores_the_original_node() {
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .execute(&mut f.project, Command::DeleteColumn { column: f.a })
-        .expect("suppression de A");
+        .expect("deletion of A");
     history
         .execute(
             &mut f.project,
@@ -1106,22 +1098,22 @@ fn a_macro_deleting_then_recreating_a_homonym_restores_the_original_node() {
                 column: Column::from_f64(&[100.0]),
             },
         )
-        .expect("nouvelle colonne homonyme");
-    history.end_macro(&mut f.project).expect("macro fermée");
+        .expect("new homonymous column");
+    history.end_macro(&mut f.project).expect("macro closed");
 
     let new_a = f
         .project
         .tree()
         .child_by_name(f.sheet1, "A")
-        .expect("feuille valide")
-        .expect("colonne A présente");
-    assert_ne!(new_a, f.a, "le nouvel homonyme est un autre nœud");
+        .expect("valid sheet")
+        .expect("column A present");
+    assert_ne!(new_a, f.a, "the new homonym is another node");
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    assert!(f.project.tree().contains(f.a), "l'ancien nœud A est revenu");
+    assert!(f.project.tree().contains(f.a), "the old node A came back");
     assert!(
         !f.project.tree().contains(new_a),
-        "le nouvel homonyme a disparu"
+        "the new homonym disappeared"
     );
     assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
 }
@@ -1143,7 +1135,7 @@ fn abort_macro_undoes_everything_it_applied() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout hors macro");
+        .expect("addition outside the macro");
 
     history.begin_macro(MacroKind::Import).unwrap();
     history
@@ -1156,13 +1148,13 @@ fn abort_macro_undoes_everything_it_applied() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout dans la macro");
+        .expect("addition in the macro");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[5.0]))
-        .expect("saisie dans la macro");
+        .expect("input in the macro");
     history
         .abort_macro(&mut f.project)
-        .expect("macro abandonnée");
+        .expect("macro abandoned");
 
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "Z"]);
     assert_eq!(floats(&f.project, f.a)[0], 1.0);
@@ -1187,7 +1179,7 @@ fn aborting_a_nested_macro_leaves_the_parent_alone() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout D");
+        .expect("addition of D");
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .execute(
@@ -1199,22 +1191,22 @@ fn aborting_a_nested_macro_leaves_the_parent_alone() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout E");
+        .expect("addition of E");
     history
         .abort_macro(&mut f.project)
-        .expect("macro interne abandonnée");
+        .expect("inner macro abandoned");
 
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "D"]);
     assert!(history.in_macro());
     assert_eq!(history.macro_depth(), 1);
 
-    history.end_macro(&mut f.project).expect("macro parente");
+    history.end_macro(&mut f.project).expect("parent macro");
     assert_eq!(history.len(), 1);
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
 }
 
-// -- 17. refus liés aux macros -------------------------------------------
+// -- 17. refusals tied to macros -----------------------------------------
 
 #[test]
 fn macro_api_refusals() {
@@ -1245,7 +1237,7 @@ fn macro_api_refusals() {
     );
     history
         .end_macro(&mut f.project)
-        .expect("macro vide fermée");
+        .expect("empty macro closed");
 }
 
 #[test]
@@ -1255,17 +1247,17 @@ fn an_empty_macro_leaves_no_entry() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.5]))
-        .expect("saisie");
+        .expect("input");
     let entries = history.len();
 
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .end_macro(&mut f.project)
-        .expect("macro vide fermée");
+        .expect("empty macro closed");
     assert_eq!(history.len(), entries);
 }
 
-// -- 18. échec dans une macro --------------------------------------------
+// -- 18. failure inside a macro ------------------------------------------
 
 #[test]
 fn a_failing_command_inside_a_macro_leaves_nothing_behind() {
@@ -1283,13 +1275,13 @@ fn a_failing_command_inside_a_macro_leaves_nothing_behind() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout D");
+        .expect("addition of D");
     let d = f
         .project
         .tree()
         .child_by_name(f.sheet1, "D")
-        .expect("feuille valide")
-        .expect("colonne D");
+        .expect("valid sheet")
+        .expect("column D");
 
     let err = history
         .execute(
@@ -1299,23 +1291,23 @@ fn a_failing_command_inside_a_macro_leaves_nothing_behind() {
                 name: "A".to_string(),
             },
         )
-        .expect_err("nom déjà pris");
+        .expect_err("name already taken");
     assert!(matches!(
         err,
         CommandError::Core(CoreError::DuplicateName(_))
     ));
 
-    // La macro reste ouverte, avec le seul ajout réussi.
+    // The macro stays open, with the only successful addition.
     assert!(history.in_macro());
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T", "D"]);
 
-    history.end_macro(&mut f.project).expect("macro fermée");
+    history.end_macro(&mut f.project).expect("macro closed");
     assert_eq!(history.len(), 1);
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(names(&f.project, f.sheet1), vec!["A", "B", "T"]);
 }
 
-// -- 19-20. limite et libération -----------------------------------------
+// -- 19-20. limit and release --------------------------------------------
 
 #[test]
 fn the_oldest_entries_are_evicted_silently() {
@@ -1328,7 +1320,7 @@ fn the_oldest_entries_are_evicted_silently() {
                 &mut f.project,
                 set_cells(f.a, 0, &[100.0 + f64::from(step)]),
             )
-            .expect("saisie");
+            .expect("input");
     }
     assert_eq!(history.len(), 3);
 
@@ -1336,8 +1328,8 @@ fn the_oldest_entries_are_evicted_silently() {
         assert_eq!(history.undo(&mut f.project), Ok(true));
     }
     assert_eq!(history.undo(&mut f.project), Ok(false));
-    // Les deux premières commandes ne sont plus annulables : on s'arrête à
-    // l'état qu'elles ont laissé.
+    // The first two commands are no longer undoable: we stop at
+    // the state they left.
     assert_eq!(floats(&f.project, f.a)[0], 102.0);
 }
 
@@ -1348,15 +1340,15 @@ fn set_limit_requires_an_empty_stack() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("saisie");
+        .expect("input");
     assert_eq!(history.set_limit(5), Err(CommandError::StackNotEmpty));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    // La pile de rétablissement compte aussi.
+    // The redo stack counts too.
     assert_eq!(history.set_limit(5), Err(CommandError::StackNotEmpty));
 
     history.clear().expect("purge");
-    history.set_limit(5).expect("limite acceptée");
+    history.set_limit(5).expect("limit accepted");
     assert_eq!(history.limit(), 5);
 }
 
@@ -1368,7 +1360,7 @@ fn a_zero_limit_means_unlimited() {
     for step in 0..200 {
         history
             .execute(&mut f.project, set_cells(f.a, 0, &[f64::from(step)]))
-            .expect("saisie");
+            .expect("input");
     }
     assert_eq!(history.len(), 200);
 }
@@ -1378,34 +1370,34 @@ fn eviction_releases_the_nodes_only_the_history_retained() {
     let mut f = fixture();
     let mut history = History::with_limit(1);
 
-    // Référence faible prise sans conserver le moindre `Arc<Tree>` de test :
-    // seul l'historique retiendra l'ancien nœud après la suppression.
+    // Weak reference taken without keeping any test `Arc<Tree>`:
+    // only the history will keep the old node after the deletion.
     let weak = Arc::downgrade(
         f.project
             .tree()
             .node_arc(f.a)
-            .expect("nœud A présent avant suppression"),
+            .expect("node A present before deletion"),
     );
 
     history
         .execute(&mut f.project, Command::DeleteColumn { column: f.a })
-        .expect("suppression de A");
+        .expect("deletion of A");
     assert!(
         weak.upgrade().is_some(),
-        "tant que l'entrée est dans la pile, l'ancien arbre retient A"
+        "as long as the entry is in the stack, the old tree keeps A"
     );
 
     history
         .execute(&mut f.project, set_cells(f.b, 0, &[0.0]))
-        .expect("saisie");
-    assert_eq!(history.len(), 1, "l'entrée la plus ancienne a été évincée");
+        .expect("input");
+    assert_eq!(history.len(), 1, "the oldest entry was evicted");
     assert!(
         weak.upgrade().is_none(),
-        "l'éviction relâche l'arbre d'avant, donc le nœud supprimé"
+        "eviction releases the tree before, hence the deleted node"
     );
 }
 
-// -- 21. rétablissement partiel ------------------------------------------
+// -- 21. partial redo ----------------------------------------------------
 
 #[test]
 fn partial_redo_then_a_new_command_cuts_the_branch() {
@@ -1418,7 +1410,7 @@ fn partial_redo_then_a_new_command_cuts_the_branch() {
                 &mut f.project,
                 set_cells(f.a, 0, &[100.0 + f64::from(step)]),
             )
-            .expect("saisie");
+            .expect("input");
     }
     for _ in 0..3 {
         assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1432,18 +1424,18 @@ fn partial_redo_then_a_new_command_cuts_the_branch() {
 
     history
         .execute(&mut f.project, set_cells(f.x, 0, &[9.0]))
-        .expect("saisie sur X");
+        .expect("input on X");
     assert_eq!(history.redo_len(), 0);
     assert!(!history.can_redo());
 }
 
-// -- 22. abort_macro restaure le redo d'avant la macro ---------------------
+// -- 22. abort_macro restores the redo from before the macro ---------------
 //
-// Décision : une macro avortée ne laisse aucune trace, y compris sur le
-// redo. À l'ouverture de la macro la plus externe, la pile de
-// rétablissement courante est mise de côté ; elle revient telle quelle si
-// cette macro est avortée (ou close vide), et n'est jetée que si elle
-// aboutit avec au moins une entrée — comme pour toute commande.
+// Decision: an aborted macro leaves no trace, including on the
+// redo. On opening the outermost macro, the current redo
+// stack is set aside; it comes back as it was if
+// this macro is aborted (or closed empty), and is dropped only if it
+// succeeds with at least one entry — as for any command.
 
 #[test]
 fn abort_macro_restores_the_redo_stack_that_predates_it() {
@@ -1452,10 +1444,10 @@ fn abort_macro_restores_the_redo_stack_that_predates_it() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("premiere saisie");
+        .expect("first input");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[2.0]))
-        .expect("deuxieme saisie");
+        .expect("second input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert!(history.can_redo());
     let before_macro = snapshot(&f.project);
@@ -1463,14 +1455,14 @@ fn abort_macro_restores_the_redo_stack_that_predates_it() {
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[9.0]))
-        .expect("saisie dans la macro");
+        .expect("input in the macro");
     history
         .abort_macro(&mut f.project)
-        .expect("macro abandonnee");
+        .expect("macro abandoned");
 
-    // La macro a rendu quelque chose de rétablissable en cours de route
-    // (chaque `execute` vide le redo, même en macro) : sitôt avortée, c'est
-    // le redo d'avant la macro qui doit être revenu, pas un redo vide.
+    // The macro made something redoable along the way
+    // (each `execute` empties the redo, even in a macro): as soon as it is aborted, it is
+    // the redo from before the macro that must have come back, not an empty redo.
     assert!(history.can_redo());
     assert_eq!(history.redo_len(), 1);
     assert_eq!(**f.project.tree(), *before_macro);
@@ -1486,21 +1478,21 @@ fn a_successful_macro_drops_the_redo_stack_like_any_command() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("premiere saisie");
+        .expect("first input");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[2.0]))
-        .expect("deuxieme saisie");
+        .expect("second input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert!(history.can_redo());
 
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[9.0]))
-        .expect("saisie dans la macro");
-    history.end_macro(&mut f.project).expect("macro fermee");
+        .expect("input in the macro");
+    history.end_macro(&mut f.project).expect("macro closed");
 
-    // La macro a abouti avec une entrée : le redo est perdu, comme pour
-    // toute commande qui réussit.
+    // The macro succeeded with an entry: the redo is lost, as for
+    // any command that succeeds.
     assert!(!history.can_redo());
 }
 
@@ -1511,10 +1503,10 @@ fn an_empty_macro_restores_the_redo_stack_on_close() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("premiere saisie");
+        .expect("first input");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[2.0]))
-        .expect("deuxieme saisie");
+        .expect("second input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert!(history.can_redo());
     let len_before = history.len();
@@ -1522,9 +1514,9 @@ fn an_empty_macro_restores_the_redo_stack_on_close() {
     history.begin_macro(MacroKind::Import).unwrap();
     history
         .end_macro(&mut f.project)
-        .expect("macro vide fermee");
+        .expect("empty macro closed");
 
-    // Une macro vide n'a rien changé : le redo d'avant revient.
+    // An empty macro changed nothing: the redo from before comes back.
     assert!(history.can_redo());
     assert_eq!(history.len(), len_before);
 }
@@ -1536,10 +1528,10 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("premiere saisie");
+        .expect("first input");
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[2.0]))
-        .expect("deuxieme saisie");
+        .expect("second input");
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert!(history.can_redo());
     let before_macro = snapshot(&f.project);
@@ -1555,7 +1547,7 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout D");
+        .expect("addition of D");
 
     history.begin_macro(MacroKind::Import).unwrap();
     history
@@ -1568,13 +1560,13 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
                 column: Column::from_f64(&[0.0]),
             },
         )
-        .expect("ajout E");
+        .expect("addition of E");
     history
         .abort_macro(&mut f.project)
-        .expect("macro interne abandonnee");
+        .expect("inner macro abandoned");
 
-    // La macro interne avortée ne touche pas à ce que l'externe a déjà
-    // appliqué, ni à la sauvegarde du redo (qui appartient à l'externe).
+    // The aborted inner macro does not touch what the outer one has already
+    // applied, nor the redo backup (which belongs to the outer one).
     let current_names = names(&f.project, f.sheet1);
     assert!(current_names.contains(&"D".to_string()));
     assert!(!current_names.contains(&"E".to_string()));
@@ -1582,7 +1574,7 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
 
     history
         .abort_macro(&mut f.project)
-        .expect("macro externe abandonnee");
+        .expect("outer macro abandoned");
 
     let current_names = names(&f.project, f.sheet1);
     assert!(!current_names.contains(&"D".to_string()));
@@ -1591,14 +1583,14 @@ fn aborting_the_outer_macro_of_a_nested_pair_restores_redo() {
     assert_eq!(**f.project.tree(), *before_macro);
 }
 
-// -- 23-29. seconde limite : octets de charge utile retenue ---------------
+// -- 23-29. second limit: bytes of retained payload -----------------------
 //
-// `History` borne désormais l'historique par deux limites, la plus
-// contraignante des deux gagnant : le nombre d'entrées (déjà couvert
-// ci-dessus) et les octets de charge utile que l'historique est seul à
-// maintenir vivants. Ces tests-ci n'exercent que l'API publique, sur un
-// projet léger (fixture) : la preuve à l'échelle (un million de flottants)
-// vit dans `tests/memory_pinning.rs`.
+// `History` now bounds the history by two limits, the stricter of the
+// two winning: the number of entries (already covered
+// above) and the payload bytes that the history alone
+// keeps alive. These tests exercise only the public API, on a
+// light project (fixture): the proof at scale (a million floats)
+// lives in `tests/memory_pinning.rs`.
 
 #[test]
 fn new_history_has_both_default_limits_and_starts_at_zero_retained_bytes() {
@@ -1625,7 +1617,7 @@ fn with_limits_zero_zero_is_fully_unbounded() {
     for step in 0..200 {
         history
             .execute(&mut f.project, set_cells(f.a, 0, &[f64::from(step)]))
-            .expect("saisie");
+            .expect("input");
     }
     assert_eq!(history.len(), 200);
 }
@@ -1633,13 +1625,13 @@ fn with_limits_zero_zero_is_fully_unbounded() {
 #[test]
 fn retained_bytes_grows_with_structure_then_write_and_falls_on_eviction() {
     let mut f = fixture();
-    // Limite en entrées à 2 : la troisième commande évince la première (le
-    // renommage), ce qui doit faire retomber les octets retenus.
+    // Entry limit at 2: the third command evicts the first (the
+    // rename), which must make the retained bytes fall.
     let mut history = History::with_limit(2);
     assert_eq!(history.retained_bytes(), 0);
 
-    // Renommer seul ne change rien : l'arbre `before` et l'arbre `after`
-    // référencent encore exactement les buffers de l'arbre courant.
+    // Renaming alone changes nothing: the `before` tree and the `after` tree
+    // still reference exactly the buffers of the current tree.
     history
         .execute(
             &mut f.project,
@@ -1648,34 +1640,34 @@ fn retained_bytes_grows_with_structure_then_write_and_falls_on_eviction() {
                 name: "A2".to_string(),
             },
         )
-        .expect("renommage");
+        .expect("rename");
     let after_rename = history.retained_bytes();
 
-    // L'écriture qui suit force une copie-à-l'écriture du buffer de A : la
-    // version que le renommage avait capturée dans son arbre `after`
-    // (partagé avec l'arbre `before`, puisque rien n'avait encore changé)
-    // n'est plus celle de l'arbre courant. Elle devient un coût pur de
-    // l'historique.
+    // The write that follows forces a copy-on-write of the buffer of A: the
+    // version that the rename had captured in its `after` tree
+    // (shared with the `before` tree, since nothing had changed yet)
+    // is no longer that of the current tree. It becomes a pure cost of the
+    // history.
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[42.0]))
-        .expect("saisie");
+        .expect("input");
     let after_write = history.retained_bytes();
     assert!(
         after_write > after_rename,
-        "l'écriture qui suit le renommage doit faire croître les octets retenus : \
+        "the write that follows the rename must make the retained bytes grow: \
          {after_rename} -> {after_write}"
     );
 
-    // Une troisième commande évince le renommage (limite = 2) : le buffer
-    // qu'il épinglait n'est plus référencé par aucune entrée de la pile.
+    // A third command evicts the rename (limit = 2): the buffer
+    // that it pinned is no longer referenced by any entry of the stack.
     history
         .execute(&mut f.project, set_cells(f.b, 0, &[0.0]))
-        .expect("saisie sur B");
+        .expect("input on B");
     let after_eviction = history.retained_bytes();
     assert!(
         after_eviction < after_write,
-        "évincer l'entrée structurelle qui épinglait le buffer doit faire retomber \
-         les octets retenus : {after_write} -> {after_eviction}"
+        "evicting the structural entry that pinned the buffer must make the \
+         retained bytes fall: {after_write} -> {after_eviction}"
     );
 }
 
@@ -1686,16 +1678,16 @@ fn a_lone_data_command_retains_only_its_delta() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[42.0]))
-        .expect("saisie");
+        .expect("input");
     let retained = history.retained_bytes();
 
-    // Aucune opération de structure autour : pas de buffer entier épinglé,
-    // seulement le delta (quelques `f64`), quelques dizaines d'octets tout
-    // au plus — très loin de la taille d'un buffer de colonne complet.
+    // No structure operation around: no whole buffer pinned,
+    // only the delta (a few `f64`), a few dozen bytes at
+    // most — very far from the size of a full column buffer.
     assert!(
         retained < 1024,
-        "une commande de données seule ne devrait retenir qu'un delta minuscule, \
-         pas {retained} octets"
+        "a lone data command should retain only a tiny delta, \
+         not {retained} bytes"
     );
 }
 
@@ -1706,14 +1698,14 @@ fn set_byte_limit_requires_an_empty_stack_and_no_open_macro() {
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[1.0]))
-        .expect("saisie");
+        .expect("input");
     assert_eq!(
         history.set_byte_limit(1024),
         Err(CommandError::StackNotEmpty)
     );
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    // La pile de rétablissement compte aussi.
+    // The redo stack counts too.
     assert_eq!(
         history.set_byte_limit(1024),
         Err(CommandError::StackNotEmpty)
@@ -1728,27 +1720,27 @@ fn set_byte_limit_requires_an_empty_stack_and_no_open_macro() {
     );
     history
         .end_macro(&mut f.project)
-        .expect("macro vide fermée");
+        .expect("empty macro closed");
 
-    history.set_byte_limit(2048).expect("limite acceptée");
+    history.set_byte_limit(2048).expect("limit accepted");
     assert_eq!(history.byte_limit(), 2048);
 }
 
 #[test]
 fn the_last_entry_is_never_evicted_even_over_the_byte_limit() {
     let mut f = fixture();
-    // `0` : illimité en nombre d'entrées. `1` octet : n'importe quelle
-    // entrée le dépasse à elle seule.
+    // `0`: unlimited in number of entries. `1` byte: any
+    // entry exceeds it by itself.
     let mut history = History::with_limits(0, 1);
 
     history
         .execute(&mut f.project, set_cells(f.a, 0, &[42.0]))
-        .expect("saisie");
+        .expect("input");
 
     assert_eq!(history.len(), 1);
     assert!(
         history.retained_bytes() > history.byte_limit(),
-        "le scénario suppose que l'unique entrée dépasse à elle seule la limite"
+        "the scenario assumes that the single entry alone exceeds the limit"
     );
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(floats(&f.project, f.a), vec![1.0, 2.0, 3.0]);
@@ -1762,20 +1754,17 @@ fn an_absurdly_low_byte_limit_still_settles_on_exactly_one_entry() {
     for step in 0..5 {
         history
             .execute(&mut f.project, set_cells(f.a, 0, &[f64::from(step)]))
-            .expect("saisie");
-        assert!(
-            !history.is_empty(),
-            "la dernière entrée ne doit jamais être évincée"
-        );
+            .expect("input");
+        assert!(!history.is_empty(), "the last entry must never be evicted");
     }
     assert_eq!(
         history.len(),
         1,
-        "la limite en octets, ici absurde, ramène la pile à une seule entrée"
+        "the byte limit, absurd here, brings the stack down to a single entry"
     );
 }
 
-// -- création/suppression de nœud ------------------------------------------
+// -- node creation/deletion ------------------------------------------------
 
 #[test]
 fn add_folder_round_trip() {
@@ -1789,18 +1778,18 @@ fn add_folder_round_trip() {
             &mut f.project,
             Command::AddFolder {
                 parent: root,
-                name: "Manips".to_string(),
+                name: "Experiments".to_string(),
             },
         )
-        .expect("ajout de dossier");
+        .expect("folder addition");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
         Some(&HistoryLabel::AddFolder {
-            name: "Manips".to_string()
+            name: "Experiments".to_string()
         })
     );
-    assert!(names(&f.project, root).contains(&"Manips".to_string()));
+    assert!(names(&f.project, root).contains(&"Experiments".to_string()));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
     assert_eq!(**f.project.tree(), *before);
@@ -1823,12 +1812,12 @@ fn add_workbook_round_trip_creates_a_default_sheet() {
                 name: Some("Book2".to_string()),
             },
         )
-        .expect("ajout de classeur");
+        .expect("workbook addition");
     let after = snapshot(&f.project);
     let sheet = f
         .project
         .resolve_path("[Book2]Sheet1")
-        .expect("feuille par défaut créée avec le classeur");
+        .expect("default sheet created with the workbook");
     assert!(f.project.tree().contains(sheet));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1852,14 +1841,14 @@ fn add_empty_workbook_round_trip_has_no_sheet() {
                 name: Some("Empty".to_string()),
             },
         )
-        .expect("ajout de classeur vide");
+        .expect("empty workbook addition");
     let after = snapshot(&f.project);
-    let book = f.project.resolve_path("[Empty]").expect("classeur vide");
+    let book = f.project.resolve_path("[Empty]").expect("empty workbook");
     assert!(f
         .project
         .tree()
         .children(book)
-        .expect("classeur")
+        .expect("workbook")
         .is_empty());
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1882,14 +1871,14 @@ fn add_worksheet_round_trip() {
                 name: None,
             },
         )
-        .expect("ajout de feuille");
+        .expect("sheet addition");
     let after = snapshot(&f.project);
-    // D1 — deux feuilles déjà présentes (Sheet1, Sheet2) : le premier
-    // candidat essayé est « Sheet3 ».
+    // D1 — two sheets already present (Sheet1, Sheet2): the first
+    // candidate tried is "Sheet3".
     let sheet3 = f
         .project
         .resolve_path("[Book1]Sheet3")
-        .expect("nom automatique Sheet3");
+        .expect("automatic name Sheet3");
     assert!(f.project.tree().contains(sheet3));
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1904,7 +1893,7 @@ fn add_graph_round_trip_carries_its_spec() {
     let mut history = History::new();
     let before = snapshot(&f.project);
     let root = f.project.root();
-    let spec = PlotSpec::empty("Courbe");
+    let spec = PlotSpec::empty("Curve");
 
     history
         .execute(
@@ -1915,12 +1904,12 @@ fn add_graph_round_trip_carries_its_spec() {
                 spec: spec.clone(),
             },
         )
-        .expect("ajout de graphe");
+        .expect("graph addition");
     let after = snapshot(&f.project);
-    let graph = f.project.resolve_path("[Fig1]").expect("graphe");
-    match f.project.tree().get(graph).expect("nœud").kind() {
+    let graph = f.project.resolve_path("[Fig1]").expect("graph");
+    match f.project.tree().get(graph).expect("node").kind() {
         NodeKind::Graph { spec: found, .. } => assert_eq!(found, &spec),
-        other => panic!("attendu un graphe, trouvé {other:?}"),
+        other => panic!("expected a graph, found {other:?}"),
     }
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1944,7 +1933,7 @@ fn add_matrix_round_trip() {
                 name: Some("Mat1".to_string()),
             },
         )
-        .expect("ajout de matrice");
+        .expect("matrix addition");
     let after = snapshot(&f.project);
     assert!(f.project.resolve_path("[Mat1]").is_ok());
 
@@ -1967,15 +1956,15 @@ fn add_note_round_trip_carries_its_text() {
             Command::AddNote {
                 parent: root,
                 name: Some("N1".to_string()),
-                text: "Bonjour".to_string(),
+                text: "Hello".to_string(),
             },
         )
-        .expect("ajout de note");
+        .expect("note addition");
     let after = snapshot(&f.project);
     let note = f.project.resolve_path("[N1]").expect("note");
-    match f.project.tree().get(note).expect("nœud").kind() {
-        NodeKind::Note { text, .. } => assert_eq!(text, "Bonjour"),
-        other => panic!("attendu une note, trouvé {other:?}"),
+    match f.project.tree().get(note).expect("node").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "Hello"),
+        other => panic!("expected a note, found {other:?}"),
     }
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
@@ -1992,7 +1981,7 @@ fn remove_node_round_trip_restores_the_same_node_id_and_its_descendants() {
 
     history
         .execute(&mut f.project, Command::RemoveNode { id: f.sheet2 })
-        .expect("suppression de Sheet2");
+        .expect("deletion of Sheet2");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -2014,7 +2003,7 @@ fn remove_node_round_trip_restores_the_same_node_id_and_its_descendants() {
     assert_eq!(**f.project.tree(), *after);
 }
 
-// -- édition de contenu : fenêtre, note, colonne, graphe --------------------
+// -- content editing: window, note, column, graph ---------------------------
 
 #[test]
 fn set_window_meta_round_trip() {
@@ -2022,8 +2011,8 @@ fn set_window_meta_round_trip() {
     let mut history = History::new();
     let before = snapshot(&f.project);
     let meta = WindowMeta {
-        label: "Manip 3".to_string(),
-        comment: "essai".to_string(),
+        label: "Experiment 3".to_string(),
+        comment: "trial".to_string(),
         ..Default::default()
     };
 
@@ -2035,7 +2024,7 @@ fn set_window_meta_round_trip() {
                 meta: meta.clone(),
             },
         )
-        .expect("métadonnées de fenêtre");
+        .expect("window metadata");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -2043,15 +2032,15 @@ fn set_window_meta_round_trip() {
             name: Some("Book1".to_string())
         })
     );
-    match f.project.tree().get(f.book).expect("nœud").kind() {
+    match f.project.tree().get(f.book).expect("node").kind() {
         NodeKind::Workbook { meta: found, .. } => assert_eq!(found, &meta),
-        other => panic!("attendu un classeur, trouvé {other:?}"),
+        other => panic!("expected a workbook, found {other:?}"),
     }
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    match f.project.tree().get(f.book).expect("nœud").kind() {
+    match f.project.tree().get(f.book).expect("node").kind() {
         NodeKind::Workbook { meta: found, .. } => assert_eq!(found, &WindowMeta::default()),
-        other => panic!("attendu un classeur, trouvé {other:?}"),
+        other => panic!("expected a workbook, found {other:?}"),
     }
     assert_eq!(**f.project.tree(), *before);
 
@@ -2073,7 +2062,7 @@ fn set_window_meta_refuses_a_node_that_is_not_a_window() {
                 meta: WindowMeta::default(),
             },
         )
-        .expect_err("une feuille n'est pas une fenêtre");
+        .expect_err("a sheet is not a window");
     assert!(matches!(err, CommandError::Core(CoreError::Structure(_))));
     assert!(history.is_empty());
     assert_eq!(**f.project.tree(), *before);
@@ -2083,7 +2072,10 @@ fn set_window_meta_refuses_a_node_that_is_not_a_window() {
 fn set_note_text_round_trip() {
     let mut f = fixture();
     let root = f.project.root();
-    let note = f.project.add_note(root, Some("N1"), "avant").expect("note");
+    let note = f
+        .project
+        .add_note(root, Some("N1"), "before")
+        .expect("note");
     let mut history = History::new();
     let before = snapshot(&f.project);
 
@@ -2092,10 +2084,10 @@ fn set_note_text_round_trip() {
             &mut f.project,
             Command::SetNoteText {
                 id: note,
-                text: "après".to_string(),
+                text: "after".to_string(),
             },
         )
-        .expect("texte de note");
+        .expect("note text");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -2103,15 +2095,15 @@ fn set_note_text_round_trip() {
             name: Some("N1".to_string())
         })
     );
-    match f.project.tree().get(note).expect("nœud").kind() {
-        NodeKind::Note { text, .. } => assert_eq!(text, "après"),
-        other => panic!("attendu une note, trouvé {other:?}"),
+    match f.project.tree().get(note).expect("node").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "after"),
+        other => panic!("expected a note, found {other:?}"),
     }
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    match f.project.tree().get(note).expect("nœud").kind() {
-        NodeKind::Note { text, .. } => assert_eq!(text, "avant"),
-        other => panic!("attendu une note, trouvé {other:?}"),
+    match f.project.tree().get(note).expect("node").kind() {
+        NodeKind::Note { text, .. } => assert_eq!(text, "before"),
+        other => panic!("expected a note, found {other:?}"),
     }
     assert_eq!(**f.project.tree(), *before);
 
@@ -2138,7 +2130,7 @@ fn set_column_meta_round_trip() {
                 meta: meta.clone(),
             },
         )
-        .expect("métadonnées de colonne");
+        .expect("column metadata");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -2150,9 +2142,9 @@ fn set_column_meta_round_trip() {
         f.project
             .tree()
             .get(f.a)
-            .expect("colonne")
+            .expect("column")
             .as_column()
-            .expect("colonne")
+            .expect("column")
             .meta(),
         &meta
     );
@@ -2162,9 +2154,9 @@ fn set_column_meta_round_trip() {
         f.project
             .tree()
             .get(f.a)
-            .expect("colonne")
+            .expect("column")
             .as_column()
-            .expect("colonne")
+            .expect("column")
             .meta(),
         &ColumnMeta::default()
     );
@@ -2174,18 +2166,18 @@ fn set_column_meta_round_trip() {
     assert_eq!(**f.project.tree(), *after);
 }
 
-/// Colonnes calculées (v1) — poser une formule sur une colonne qui portait
-/// déjà des valeurs, puis annuler, doit restaurer **ces valeurs**, pas
-/// seulement retirer la formule. `stokesforge-commands` ne recalcule jamais
-/// lui-même (c'est `stokesforge-session::recalc::recalc_formulas`, hors
-/// historique — voir `crates/stokesforge-session/tests/formula.rs` pour le test
-/// de bout en bout via l'acteur réel) : ce test simule ici, par un
-/// `project.set_values` direct après l'exécution de `SetColumnMeta`, l'effet
-/// de ce recalcul, pour vérifier que `DataDelta::ColumnMeta::values_before`
-/// (capturé par `History::execute` avant que ce recalcul n'ait eu lieu) est
-/// bien ce qui permet à `undo` de restaurer les valeurs d'origine — c'était
-/// le bug : sans cette capture, `undo` ne retirait que la formule et
-/// laissait les valeurs recalculées en place.
+/// Calculated columns (v1) — setting a formula on a column that already
+/// carried values, then undoing, must restore **those values**, not
+/// only remove the formula. `stokesforge-commands` never recalculates
+/// by itself (that is `stokesforge-session::recalc::recalc_formulas`, outside the
+/// history — see `crates/stokesforge-session/tests/formula.rs` for the
+/// end-to-end test through the real actor): this test simulates here, by a
+/// direct `project.set_values` after the execution of `SetColumnMeta`, the effect
+/// of this recalculation, to check that `DataDelta::ColumnMeta::values_before`
+/// (captured by `History::execute` before this recalculation took place) is
+/// indeed what lets `undo` restore the original values — that was
+/// the bug: without this capture, `undo` only removed the formula and
+/// left the recalculated values in place.
 #[test]
 fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
     let mut f = fixture();
@@ -2194,7 +2186,7 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
         .project
         .tree()
         .formula_from_letters(f.a, "B*2")
-        .expect("formule saisie");
+        .expect("formula entered");
 
     history
         .execute(
@@ -2207,13 +2199,13 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
                 },
             },
         )
-        .expect("poser une formule sur A, qui portait déjà [1,2,3]");
-    // Simule le recalcul immédiat que `stokesforge-session::actor` ferait ici,
-    // hors historique : écrase les valeurs de A par des valeurs qui n'ont
-    // rien à voir avec [1,2,3].
+        .expect("set a formula on A, which already carried [1,2,3]");
+    // Simulates the immediate recalculation that `stokesforge-session::actor` would do here,
+    // outside the history: overwrites the values of A with values that have
+    // nothing to do with [1,2,3].
     f.project
         .set_values(f.a, 0, ValueBlock::Float(vec![20.0, 40.0]))
-        .expect("simule le recalcul (hors historique, comme le ferait l'acteur)");
+        .expect("simulates the recalculation (outside the history, as the actor would)");
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
 
@@ -2221,26 +2213,26 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
         .project
         .tree()
         .get(f.a)
-        .expect("colonne A")
+        .expect("column A")
         .as_column()
-        .expect("le nœud est une colonne");
-    assert_eq!(column.meta().formula, None, "la formule doit être retirée");
+        .expect("the node is a column");
+    assert_eq!(column.meta().formula, None, "the formula must be removed");
     assert_eq!(
         (0..column.len())
             .map(|row| match column.get(row) {
                 Cell::Float(value) => value,
-                Cell::Text(_) => unreachable!("A est numérique"),
+                Cell::Text(_) => unreachable!("A is numeric"),
             })
             .collect::<Vec<_>>(),
         vec![1.0, 2.0, 3.0],
-        "les valeurs d'avant la formule doivent être restaurées"
+        "the values from before the formula must be restored"
     );
 }
 
-/// Colonnes calculées (v1) — `SetCells` direct sur une colonne dont
-/// `ColumnMeta.formula` est renseignée est refusé avant toute mutation, et
-/// ne pousse rien sur l'historique (ni de nouvelle entrée à annuler, ni de
-/// changement observable de l'arbre).
+/// Calculated columns (v1) — a direct `SetCells` on a column whose
+/// `ColumnMeta.formula` is set is refused before any mutation, and
+/// pushes nothing on the history (neither a new entry to undo, nor an
+/// observable change of the tree).
 #[test]
 fn set_cells_on_a_formula_column_is_refused() {
     let mut f = fixture();
@@ -2249,7 +2241,7 @@ fn set_cells_on_a_formula_column_is_refused() {
         .project
         .tree()
         .formula_from_letters(f.a, "B*2")
-        .expect("formule saisie");
+        .expect("formula entered");
     history
         .execute(
             &mut f.project,
@@ -2261,7 +2253,7 @@ fn set_cells_on_a_formula_column_is_refused() {
                 },
             },
         )
-        .expect("poser une formule sur A");
+        .expect("set a formula on A");
     let before = snapshot(&f.project);
     let undo_label_before = history.undo_label().cloned();
 
@@ -2275,19 +2267,19 @@ fn set_cells_on_a_formula_column_is_refused() {
                 expected_version: None,
             },
         )
-        .expect_err("une colonne-formule refuse une écriture directe de cellule");
+        .expect_err("a formula column refuses a direct cell write");
     assert_eq!(
         err,
         CommandError::Core(CoreError::FormulaColumnReadOnly { column: f.a })
     );
 
-    // Ni le modèle ni l'historique n'ont bougé.
+    // Neither the model nor the history moved.
     assert_eq!(**f.project.tree(), *before);
     assert_eq!(history.undo_label(), undo_label_before.as_ref());
 }
 
-/// Enregistrer une couleur dans le projet est une commande de données
-/// annulable : Annuler rend la liste d'avant, Rétablir celle d'après.
+/// Saving a color in the project is an undoable data command:
+/// Undo gives back the earlier list, Redo the later one.
 #[test]
 fn set_saved_colors_round_trip() {
     let mut f = fixture();
@@ -2302,7 +2294,7 @@ fn set_saved_colors_round_trip() {
                 colors: colors.clone(),
             },
         )
-        .expect("couleurs enregistrées");
+        .expect("colors saved");
     assert_eq!(history.undo_label(), Some(&HistoryLabel::SetSavedColors));
     assert_eq!(f.project.tree().saved_colors(), &colors);
     let after = snapshot(&f.project);
@@ -2322,10 +2314,10 @@ fn set_plot_spec_round_trip() {
     let graph = f
         .project
         .add_graph(root, Some("Fig1"), PlotSpec::default())
-        .expect("graphe");
+        .expect("graph");
     let mut history = History::new();
     let before = snapshot(&f.project);
-    let spec = PlotSpec::empty("Courbe");
+    let spec = PlotSpec::empty("Curve");
 
     history
         .execute(
@@ -2335,7 +2327,7 @@ fn set_plot_spec_round_trip() {
                 spec: spec.clone(),
             },
         )
-        .expect("spec de graphe");
+        .expect("graph spec");
     let after = snapshot(&f.project);
     assert_eq!(
         history.undo_label(),
@@ -2343,15 +2335,15 @@ fn set_plot_spec_round_trip() {
             name: Some("Fig1".to_string())
         })
     );
-    match f.project.tree().get(graph).expect("nœud").kind() {
+    match f.project.tree().get(graph).expect("node").kind() {
         NodeKind::Graph { spec: found, .. } => assert_eq!(found, &spec),
-        other => panic!("attendu un graphe, trouvé {other:?}"),
+        other => panic!("expected a graph, found {other:?}"),
     }
 
     assert_eq!(history.undo(&mut f.project), Ok(true));
-    match f.project.tree().get(graph).expect("nœud").kind() {
+    match f.project.tree().get(graph).expect("node").kind() {
         NodeKind::Graph { spec: found, .. } => assert_eq!(found, &PlotSpec::default()),
-        other => panic!("attendu un graphe, trouvé {other:?}"),
+        other => panic!("expected a graph, found {other:?}"),
     }
     assert_eq!(**f.project.tree(), *before);
 
@@ -2373,17 +2365,17 @@ fn set_plot_spec_refuses_a_node_that_is_not_a_graph() {
                 spec: PlotSpec::default(),
             },
         )
-        .expect_err("un classeur n'est pas un graphe");
+        .expect_err("a workbook is not a graph");
     assert!(matches!(err, CommandError::Core(CoreError::Structure(_))));
     assert!(history.is_empty());
     assert_eq!(**f.project.tree(), *before);
 }
 
-// -- 12 bis. séries « ligne » (#307) ----------------------------------------
+// -- 12 bis. "row" series (#307) -------------------------------------------
 
-/// Graphe dont chaque série trace la ligne `rows[i]` de la feuille de
-/// `anchors[i]`. Rend `(graphe, V)` où `V` est une colonne de 8 lignes
-/// (`0..8`) de `Sheet2`, porteuse d'un `x'`.
+/// Graph where each series plots the row `rows[i]` of the sheet of
+/// `anchors[i]`. Returns `(graph, V)` where `V` is a column of 8 rows
+/// (`0..8`) of `Sheet2`, carrying an `x'`.
 fn row_graph(f: &mut Fixture, series: &[(Option<NodeId>, Option<usize>)]) -> (NodeId, NodeId) {
     let v = f
         .project
@@ -2393,7 +2385,7 @@ fn row_graph(f: &mut Fixture, series: &[(Option<NodeId>, Option<usize>)]) -> (No
             Some("V"),
             Column::from_f64(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
         )
-        .expect("colonne V");
+        .expect("column V");
     f.project
         .set_column_meta(
             v,
@@ -2403,32 +2395,29 @@ fn row_graph(f: &mut Fixture, series: &[(Option<NodeId>, Option<usize>)]) -> (No
             },
         )
         .expect("x'");
-    let mut spec = PlotSpec::empty("Lignes");
-    let panel = spec.panels.get_mut(0).expect("panneau");
+    let mut spec = PlotSpec::empty("Rows");
+    let panel = spec.panels.get_mut(0).expect("panel");
     for (anchor, row) in series {
         let mut s = stokesforge_plot::SeriesSpec::new(anchor.unwrap_or(v));
         s.row = *row;
         panel.series.push(s);
     }
     let root = f.project.root();
-    let graph = f
-        .project
-        .add_graph(root, Some("Fig"), spec)
-        .expect("graphe");
+    let graph = f.project.add_graph(root, Some("Fig"), spec).expect("graph");
     (graph, v)
 }
 
 fn series_rows(project: &Project, graph: NodeId) -> Vec<Option<usize>> {
-    match project.tree().get(graph).expect("nœud").kind() {
+    match project.tree().get(graph).expect("node").kind() {
         NodeKind::Graph { spec, .. } => spec.panels[0].series.iter().map(|s| s.row).collect(),
-        other => panic!("attendu un graphe, trouvé {other:?}"),
+        other => panic!("expected a graph, found {other:?}"),
     }
 }
 
 fn plot_spec_of(project: &Project, graph: NodeId) -> PlotSpec {
-    match project.tree().get(graph).expect("nœud").kind() {
+    match project.tree().get(graph).expect("node").kind() {
         NodeKind::Graph { spec, .. } => spec.clone(),
-        other => panic!("attendu un graphe, trouvé {other:?}"),
+        other => panic!("expected a graph, found {other:?}"),
     }
 }
 
@@ -2448,10 +2437,10 @@ fn delete_rows_shifts_row_series_and_round_trips() {
                 count: 1,
             },
         )
-        .expect("suppression");
+        .expect("deletion");
     let after = snapshot(&f.project);
     assert_eq!(series_rows(&f.project, graph), vec![Some(4)]);
-    // Bout à bout : la série trace toujours l'ancienne ligne 5.
+    // End to end: the series still plots the old row 5.
     let spec = plot_spec_of(&f.project, graph);
     let resolved = stokesforge_core::resolve_series(f.project.tree(), &spec.panels[0].series[0]);
     assert_eq!(resolved.y.expect("y").as_slice(), &[5.0]);
@@ -2470,8 +2459,8 @@ fn delete_rows_leaves_row_series_before_or_inside_the_range() {
     let mut f = fixture();
     let (graph, _) = row_graph(&mut f, &[(None, Some(1)), (None, Some(3)), (None, Some(4))]);
     let mut history = History::new();
-    // Plage [3, 5) : la ligne 1 est avant, 3 et 4 sont dans la plage (cas
-    // ouvert, laissés tels quels).
+    // Range [3, 5): row 1 is before, 3 and 4 are in the range (open
+    // case, left as they are).
     history
         .execute(
             &mut f.project,
@@ -2481,7 +2470,7 @@ fn delete_rows_leaves_row_series_before_or_inside_the_range() {
                 count: 2,
             },
         )
-        .expect("suppression");
+        .expect("deletion");
     assert_eq!(
         series_rows(&f.project, graph),
         vec![Some(1), Some(3), Some(4)]
@@ -2493,7 +2482,7 @@ fn delete_rows_shifts_a_series_just_after_the_range() {
     let mut f = fixture();
     let (graph, _) = row_graph(&mut f, &[(None, Some(5))]);
     let mut history = History::new();
-    // Plage [3, 5) : la ligne 5 est la première après la plage.
+    // Range [3, 5): row 5 is the first after the range.
     history
         .execute(
             &mut f.project,
@@ -2503,7 +2492,7 @@ fn delete_rows_shifts_a_series_just_after_the_range() {
                 count: 2,
             },
         )
-        .expect("suppression");
+        .expect("deletion");
     assert_eq!(series_rows(&f.project, graph), vec![Some(3)]);
 }
 
@@ -2535,7 +2524,7 @@ fn insert_rows_shifts_row_series_from_the_insertion_row_on() {
 #[test]
 fn row_series_of_another_sheet_and_column_series_are_untouched() {
     let mut f = fixture();
-    // Une série ancrée dans Sheet1 (colonne A) ; une série « colonne ».
+    // A series anchored in Sheet1 (column A); a "column" series.
     let a = f.a;
     let (graph, _) = row_graph(&mut f, &[(Some(a), Some(5)), (None, None)]);
     let spec_before = plot_spec_of(&f.project, graph);
@@ -2549,7 +2538,7 @@ fn row_series_of_another_sheet_and_column_series_are_untouched() {
                 count: 1,
             },
         )
-        .expect("suppression");
+        .expect("deletion");
     assert_eq!(plot_spec_of(&f.project, graph), spec_before);
     history
         .execute(
@@ -2578,7 +2567,7 @@ fn row_series_beyond_the_sheet_resolve_to_nan_without_panicking() {
                 count: 1,
             },
         )
-        .expect("suppression");
+        .expect("deletion");
     assert_eq!(series_rows(&f.project, graph), vec![Some(19)]);
     let spec = plot_spec_of(&f.project, graph);
     let resolved = stokesforge_core::resolve_series(f.project.tree(), &spec.panels[0].series[0]);

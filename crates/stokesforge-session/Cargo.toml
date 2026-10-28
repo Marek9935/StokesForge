@@ -3,7 +3,7 @@ name = "stokesforge-session"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Acteur qui possède le Project de StokesForge et le sert à ses clients (UI, script) par un canal FIFO."
+description = "Actor that owns the StokesForge Project and serves it to its clients (UI, script) through a FIFO channel."
 
 [lints]
 workspace = true

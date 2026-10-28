@@ -1,39 +1,38 @@
-//! Pile d'historique à deux natures et exécution des commandes.
+//! Two-kind history stack and command execution.
 //!
-//! # Les deux natures
+//! # The two kinds
 //!
-//! - **structure** (arbre, noms, ordre, ajout/suppression de nœuds) →
-//!   *snapshot persistant*. L'entrée retient `before` et `after`, deux
-//!   `Arc<Tree>`. Annuler, c'est `replace_tree(before)`. Les deux arbres
-//!   partagent physiquement tout ce qui n'a pas changé : garder les deux coûte
-//!   un pointeur. L'arbre `before` retient les nœuds supprimés — il n'y a rien
-//!   à libérer explicitement, et un nœud restauré revient sous son
-//!   **identifiant d'origine** (`Project::replace_tree` ne fait pas reculer
-//!   l'allocateur d'identifiants).
-//! - **données** (contenu des colonnes) → *delta*. L'entrée retient les
-//!   anciennes **et** les nouvelles valeurs des seules cellules écrites, et les
-//!   rejoue dans l'arbre **courant**. Un snapshot retiendrait ici le buffer
-//!   entier de la colonne (8 Mo pour un million de points) à chaque frappe.
+//! - **structure** (tree, names, order, adding/removing nodes) →
+//!   *persistent snapshot*. The entry keeps `before` and `after`, two
+//!   `Arc<Tree>`. Undoing is `replace_tree(before)`. The two trees
+//!   physically share everything that did not change: keeping both costs
+//!   one pointer. The `before` tree keeps the removed nodes — there is nothing
+//!   to free explicitly, and a restored node comes back under its
+//!   **original identifier** (`Project::replace_tree` does not move the
+//!   identifier allocator back).
+//! - **data** (column contents) → *delta*. The entry keeps the
+//!   old **and** new values of only the cells written, and replays them
+//!   into the **current** tree. A snapshot would keep the whole column buffer
+//!   here (8 MB for a million points) at every keystroke.
 //!
-//! # Invariant LIFO
+//! # LIFO invariant
 //!
-//! Une entrée structurelle ne peut être annulée que si toutes les entrées
-//! postérieures l'ont déjà été : restaurer un arbre entier écrase tout ce qui a
-//! été écrit après lui. La pile le garantit par construction, et **dans une
-//! macro les entrées s'annulent strictement en ordre inverse d'insertion**,
-//! quelles que soient leurs natures — c'est ce qui fait tenir l'hybride.
+//! A structural entry can be undone only if all later entries have already
+//! been: restoring a whole tree overwrites everything written after it. The
+//! stack guarantees this by construction, and **in a macro the entries are
+//! undone strictly in reverse order of insertion**, whatever their kinds —
+//! this is what makes the hybrid hold.
 //!
-//! # Deux limites, la plus contraignante des deux gagnant
+//! # Two limits, the stricter of the two wins
 //!
-//! Une limite comptée en entrées (`limit`) ne voit pas le motif mesuré par
-//! `tests/memory_pinning.rs` : en alternant une opération de structure et
-//! une écriture sur une même grosse colonne, chaque entrée structurelle
-//! épingle une version complète du buffer que l'écriture suivante remplace —
-//! cent renommages ne pèsent rien, une seule suppression de classeur pèse des
-//! centaines de méga-octets. `byte_limit` borne directement les octets de
-//! charge utile que l'historique est seul à maintenir vivants (voir
-//! [`History::retained_bytes`] et [`History::evict`] pour la méthode et les
-//! règles d'éviction).
+//! A limit counted in entries (`limit`) does not see the pattern measured by
+//! `tests/memory_pinning.rs`: by alternating a structure operation and a
+//! write on the same big column, each structural entry pins a full version of
+//! the buffer that the next write replaces — a hundred renames weigh nothing,
+//! a single workbook deletion weighs hundreds of megabytes. `byte_limit`
+//! directly bounds the payload bytes that the history alone keeps alive (see
+//! [`History::retained_bytes`] and [`History::evict`] for the method and the
+//! eviction rules).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -46,195 +45,194 @@ use crate::command::Command;
 use crate::error::{CommandError, CommandResult};
 use crate::label::{HistoryLabel, MacroKind};
 
-/// Delta d'une entrée de données : tout ce qu'il faut pour annuler **et**
-/// rétablir, sans retenir d'arbre.
+/// Delta of a data entry: everything needed to undo **and** redo, without
+/// keeping a tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataDelta {
-    /// Écriture de cellules : `before` (+ `before_length`) pour annuler,
-    /// `after` pour rétablir.
+    /// Writing cells: `before` (+ `before_length`) to undo,
+    /// `after` to redo.
     Cells {
-        /// Colonne écrite.
+        /// Column written.
         column: NodeId,
-        /// Première ligne écrite.
+        /// First row written.
         start: usize,
-        /// Valeurs écrasées (partie recouvrant des lignes qui existaient).
+        /// Values overwritten (the part covering rows that existed).
         before: ValueBlock,
-        /// Longueur de la colonne avant l'écriture.
+        /// Length of the column before the write.
         before_length: usize,
-        /// Valeurs écrites.
+        /// Values written.
         after: ValueBlock,
     },
-    /// Insertion de lignes : les colonnes **effectivement** allongées, relevées
-    /// avant l'application.
+    /// Inserting rows: the columns **actually** extended, recorded before
+    /// applying.
     InsertRows {
-        /// Colonnes qui possédaient une ligne `at` au moment de l'insertion.
+        /// Columns that had a row `at` at the time of the insertion.
         columns: Vec<NodeId>,
-        /// Ligne d'insertion.
+        /// Insertion row.
         at: usize,
-        /// Nombre de lignes insérées.
+        /// Number of rows inserted.
         count: usize,
-        /// Graphes dont des séries « ligne » (`row = Some(r)`) ont suivi
-        /// l'insertion : `(graphe, spec avant, spec après)`, capturés à
-        /// l'application (invariant 8). Annuler remet l'avant, rétablir
-        /// l'après — aucun inverse recalculé.
+        /// Graphs whose "row" series (`row = Some(r)`) followed the
+        /// insertion: `(graph, spec before, spec after)`, captured at apply
+        /// time (invariant 8). Undo puts the before back, redo the
+        /// after — no inverse recomputed.
         plots: Vec<(NodeId, PlotSpec, PlotSpec)>,
     },
-    /// Suppression de lignes : les valeurs retirées, par colonne touchée.
+    /// Deleting rows: the values removed, per affected column.
     DeleteRows {
-        /// Feuille visée (conservée pour l'inspection ; l'annulation opère
-        /// colonne par colonne).
+        /// Target sheet (kept for inspection; undo works column by
+        /// column).
         sheet: NodeId,
-        /// Première ligne supprimée.
+        /// First row deleted.
         at: usize,
-        /// Nombre de lignes demandé (l'annulation utilise la taille réellement
-        /// retirée, qui peut être plus petite en fin de colonne).
+        /// Number of rows requested (undo uses the size actually removed,
+        /// which can be smaller at the end of a column).
         count: usize,
-        /// Valeurs retirées, par colonne touchée, dans l'ordre de la feuille.
+        /// Values removed, per affected column, in sheet order.
         removed: Vec<(NodeId, ValueBlock)>,
-        /// Graphes dont des séries « ligne » ont suivi la suppression :
-        /// `(graphe, spec avant, spec après)`. Même règle que pour
+        /// Graphs whose "row" series followed the deletion:
+        /// `(graph, spec before, spec after)`. Same rule as for
         /// `InsertRows`.
         plots: Vec<(NodeId, PlotSpec, PlotSpec)>,
     },
-    /// Suppression de cellules par colonnes explicites, indépendamment les
-    /// unes des autres (touche Suppr sur une sélection qui ne couvre pas
-    /// nécessairement toute la feuille) — le pendant de `DeleteRows` pour
-    /// `Command::DeleteCells`. Mêmes règles d'annulation que `DeleteRows` :
-    /// colonne par colonne, jamais au niveau feuille.
+    /// Deleting cells by explicit columns, independently of each
+    /// other (Delete key on a selection that does not necessarily cover the
+    /// whole sheet) — the counterpart of `DeleteRows` for
+    /// `Command::DeleteCells`. Same undo rules as `DeleteRows`:
+    /// column by column, never at sheet level.
     DeleteCells {
-        /// Première ligne supprimée.
+        /// First row deleted.
         at: usize,
-        /// Nombre de lignes demandé (l'annulation utilise la taille
-        /// réellement retirée par colonne, comme pour `DeleteRows`).
+        /// Number of rows requested (undo uses the size actually removed per
+        /// column, as for `DeleteRows`).
         count: usize,
-        /// Valeurs retirées, par colonne effectivement touchée, dans l'ordre
-        /// où `Command::DeleteCells::columns` les présentait.
+        /// Values removed, per column actually affected, in the order in
+        /// which `Command::DeleteCells::columns` presented them.
         removed: Vec<(NodeId, ValueBlock)>,
     },
-    /// Seul cas de snapshot de données assumé : la conversion de type est
-    /// destructrice dans les deux sens (« 3,5 » → 3.5 → « 3.5 »), donc ni
-    /// l'ancien ni le nouveau contenu ne se recalculent depuis l'autre.
+    /// The only accepted case of a data snapshot: type conversion is
+    /// destructive in both directions ("3,5" → 3.5 → "3.5"), so neither the
+    /// old nor the new content can be recomputed from the other.
     ColumnType {
-        /// Colonne convertie.
+        /// Column converted.
         column: NodeId,
-        /// Type et valeurs d'avant.
+        /// Type and values before.
         before: (ColumnType, ColumnValues),
-        /// Type et valeurs d'après.
+        /// Type and values after.
         after: (ColumnType, ColumnValues),
     },
-    /// Remplacement des métadonnées d'une fenêtre : ni un instantané de
-    /// structure (aucun nœud ne bouge), ni un gros buffer — `before`/`after`
-    /// directement, comme `ColumnType`.
+    /// Replacing the metadata of a window: neither a structure snapshot
+    /// (no node moves) nor a big buffer — `before`/`after` directly, like
+    /// `ColumnType`.
     WindowMeta {
-        /// Fenêtre visée.
+        /// Target window.
         id: NodeId,
-        /// Métadonnées d'avant.
+        /// Metadata before.
         before: WindowMeta,
-        /// Métadonnées d'après.
+        /// Metadata after.
         after: WindowMeta,
     },
-    /// Remplacement du texte d'une note.
+    /// Replacing the text of a note.
     NoteText {
-        /// Note visée.
+        /// Target note.
         id: NodeId,
-        /// Texte d'avant.
+        /// Text before.
         before: String,
-        /// Texte d'après.
+        /// Text after.
         after: String,
     },
-    /// Remplacement des métadonnées d'une colonne (rôle, unité, nom long,
-    /// commentaire, format d'affichage) — distinct de `ColumnType` : ce
-    /// delta ne touche en général jamais aux valeurs de la colonne, seulement
-    /// à ce petit enregistrement d'affichage.
+    /// Replacing the metadata of a column (role, unit, long name,
+    /// comment, display format) — distinct from `ColumnType`: this
+    /// delta generally never touches the values of the column, only
+    /// this small display record.
     ///
-    /// Exception : `values_before`. Quand cette commande fait passer
-    /// `formula` de `None` à `Some(_)`, la colonne cesse d'être une source de
-    /// vérité et devient, dans l'instant qui suit (`stokesforge-session::recalc::
-    /// recalc_formulas`, hors historique — voir sa doc de tête), une colonne
-    /// recalculée dont le contenu précédent est **écrasé sans qu'aucune
-    /// commande ne le rejoue**. Sans capturer ce contenu ici, annuler cette
-    /// entrée retire bien la formule (`before`) mais laisse les valeurs
-    /// calculées en place : `recalc_formulas` ne recalcule que les colonnes
-    /// qui *portent encore* une formule, elle ignore silencieusement une
-    /// colonne qui vient d'en perdre une — c'était le bug. `None` dans tous
-    /// les autres cas (formule déjà active avant cette commande, formule
-    /// retirée, ou aucun changement de formule) : ces transitions n'ont
-    /// besoin de rien de plus, le recalcul se rechargeant de lui-même sur la
-    /// base de la formule — encore active de part et d'autre de
-    /// l'annulation/rétablissement — sans jamais perdre de donnée utilisateur.
+    /// Exception: `values_before`. When this command turns
+    /// `formula` from `None` to `Some(_)`, the column stops being a source of
+    /// truth and becomes, the instant after (`stokesforge-session::recalc::
+    /// recalc_formulas`, outside the history — see its head doc), a
+    /// recalculated column whose previous content is **overwritten without any
+    /// command replaying it**. Without capturing this content here, undoing
+    /// this entry does remove the formula (`before`) but leaves the computed
+    /// values in place: `recalc_formulas` recalculates only the columns
+    /// that *still carry* a formula, it silently ignores a column that has
+    /// just lost one — that was the bug. `None` in all other cases (formula
+    /// already active before this command, formula removed, or no formula
+    /// change): these transitions need nothing more, the recalculation
+    /// reloading itself on the basis of the formula — still active on both
+    /// sides of the undo/redo — without ever losing user data.
     ColumnMeta {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Métadonnées d'avant (boîtées : `ColumnMeta` porte les métadonnées de
-        /// fichier et la source d'import, bien plus gros que les autres deltas).
+        /// Metadata before (boxed: `ColumnMeta` carries the file metadata and
+        /// the import source, much bigger than the other deltas).
         before: Box<ColumnMeta>,
-        /// Métadonnées d'après.
+        /// Metadata after.
         after: Box<ColumnMeta>,
-        /// Type et valeurs de la colonne juste avant cette commande,
-        /// seulement quand `before.formula` était `None` et
-        /// `after.formula` devient `Some(_)` — voir la doc ci-dessus.
+        /// Type and values of the column just before this command,
+        /// only when `before.formula` was `None` and
+        /// `after.formula` becomes `Some(_)` — see the doc above.
         values_before: Option<(ColumnType, ColumnValues)>,
     },
-    /// Remplacement du `PlotSpec` d'un graphe. Un spec ne porte que des
-    /// identités et du style, jamais de donnée (voir la tête de
-    /// `stokesforge-plot/src/lib.rs`) : `before`/`after` directement, comme pour
-    /// les trois deltas ci-dessus.
+    /// Replacing the `PlotSpec` of a graph. A spec carries only
+    /// identities and style, never data (see the head of
+    /// `stokesforge-plot/src/lib.rs`): `before`/`after` directly, as for
+    /// the three deltas above.
     PlotSpec {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Spec d'avant.
+        /// Spec before.
         before: PlotSpec,
-        /// Spec d'après.
+        /// Spec after.
         after: PlotSpec,
     },
-    /// Remplacement des couleurs enregistrées dans le projet — quelques
-    /// chaînes, `before`/`after` directement.
+    /// Replacing the colors saved in the project — a few
+    /// strings, `before`/`after` directly.
     SavedColors {
-        /// Couleurs d'avant.
+        /// Colors before.
         before: SavedColors,
-        /// Couleurs d'après.
+        /// Colors after.
         after: SavedColors,
     },
 }
 
-/// Une entrée d'historique : un snapshot de structure, un delta de données, ou
-/// un groupe (macro) qui s'annule d'un bloc.
+/// A history entry: a structure snapshot, a data delta, or
+/// a group (macro) that is undone as one block.
 #[derive(Debug, Clone)]
 pub enum Entry {
-    /// Snapshot de structure.
+    /// Structure snapshot.
     Structural {
-        /// Arbre d'avant la commande.
+        /// Tree before the command.
         before: Arc<Tree>,
-        /// Arbre d'après la commande.
+        /// Tree after the command.
         after: Arc<Tree>,
-        /// Libellé d'historique.
+        /// History label.
         label: HistoryLabel,
     },
-    /// Delta de données.
+    /// Data delta.
     Data {
-        /// Ce qu'il faut rejouer dans l'arbre courant. `Box`é : depuis
-        /// l'ajout de `ColumnMeta::formula` (colonnes calculées), la
-        /// variante `DataDelta::ColumnMeta { before, after }` porte deux
-        /// `ColumnMeta` complètes et fait de `DataDelta` la plus grosse
-        /// variante d'`Entry` de loin — `clippy::large_enum_variant`
-        /// (déclenché à cet ajout) recommande cette indirection plutôt que
-        /// de faire porter à *toutes* les entrées de structure/macro le coût
-        /// mémoire du plus gros delta possible.
+        /// What must be replayed into the current tree. `Box`ed: since
+        /// the addition of `ColumnMeta::formula` (computed columns), the
+        /// variant `DataDelta::ColumnMeta { before, after }` carries two
+        /// full `ColumnMeta` and makes `DataDelta` by far the biggest
+        /// variant of `Entry` — `clippy::large_enum_variant`
+        /// (triggered by that addition) recommends this indirection rather
+        /// than making *all* structure/macro entries carry the memory cost
+        /// of the biggest possible delta.
         delta: Box<DataDelta>,
-        /// Libellé d'historique.
+        /// History label.
         label: HistoryLabel,
     },
-    /// Groupe d'entrées, annulé en ordre inverse et rétabli en ordre direct.
+    /// Group of entries, undone in reverse order and redone in forward order.
     Macro {
-        /// Entrées dans leur ordre d'application.
+        /// Entries in their order of application.
         entries: Vec<Entry>,
-        /// Libellé du groupe : toujours [`HistoryLabel::Macro`].
+        /// Label of the group: always [`HistoryLabel::Macro`].
         label: HistoryLabel,
     },
 }
 
 impl Entry {
-    /// Libellé affichable de l'entrée (« Annuler : ... »).
+    /// Displayable label of the entry ("Undo: ...").
     pub fn label(&self) -> &HistoryLabel {
         match self {
             Entry::Structural { label, .. }
@@ -244,153 +242,152 @@ impl Entry {
     }
 }
 
-/// Empreinte mémoire d'une entrée : pour chaque buffer de colonne qu'elle
-/// retient — directement (un delta de données porte ses propres valeurs) ou
-/// par l'arbre qu'elle capture (un instantané de structure porte les
-/// colonnes de tout l'arbre) — l'adresse de son allocation et sa taille en
-/// octets.
+/// Memory footprint of an entry: for each column buffer it
+/// keeps — directly (a data delta carries its own values) or
+/// through the tree it captures (a structure snapshot carries the
+/// columns of the whole tree) — the address of its allocation and its size
+/// in bytes.
 ///
-/// L'adresse ne sert qu'à identifier un buffer, jamais à le déréférencer :
-/// c'est ce qui permet de dédupliquer les buffers partagés entre plusieurs
-/// entrées, ou entre une entrée et l'arbre courant, sans jamais lire la
-/// mémoire qu'elle désigne.
+/// The address only identifies a buffer, never dereferences it:
+/// this is what allows deduplicating the buffers shared between several
+/// entries, or between an entry and the current tree, without ever reading
+/// the memory it designates.
 ///
-/// Calculée une fois pour toutes au moment de l'empilement de l'entrée :
-/// l'arbre étant immuable, cet ensemble ne change plus jamais ensuite (voir
+/// Computed once and for all when the entry is pushed:
+/// the tree being immutable, this set never changes afterwards (see
 /// [`footprint_of`]).
 type Footprint = HashMap<usize, usize>;
 
-/// Ce que `just_orphaned_by_write` a besoin de savoir d'avant l'application
-/// d'une commande de données : pour chaque colonne qu'elle pourrait toucher,
-/// l'adresse et la taille du buffer qu'elle porte à cet instant.
+/// What `just_orphaned_by_write` needs to know from before the application
+/// of a data command: for each column it could touch,
+/// the address and size of the buffer it carries at that moment.
 ///
-/// Capturée par [`prior_columns`], par un simple emprunt de `project.tree()`
-/// **avant** d'appliquer la commande — jamais l'arbre entier, jamais gardé
-/// vivant au-delà de l'appel qui la construit (voir la doc de
-/// [`History::execute`], D3 (2ᵉ moitié) du guide) : c'est précisément ce qui
-/// permet à `Arc::make_mut` de muter la `Tree` en place plutôt que de la
-/// cloner.
+/// Captured by [`prior_columns`], by a simple borrow of `project.tree()`
+/// **before** applying the command — never the whole tree, never kept
+/// alive beyond the call that builds it (see the doc of
+/// [`History::execute`], D3 (2nd half) of the guide): this is precisely what
+/// allows `Arc::make_mut` to mutate the `Tree` in place rather than clone it.
 type PriorColumns = HashMap<NodeId, (usize, usize)>;
 
-/// Une entrée d'historique accompagnée de son empreinte mémoire.
+/// A history entry together with its memory footprint.
 ///
-/// Ce couplage vit à côté de [`Entry`] plutôt que dans ses variantes : c'est
-/// un détail de comptabilité propre à `History` (il ne sert ni à annuler ni
-/// à rétablir), et le garder hors de `Entry` laisse l'API publique de ce
-/// type inchangée.
+/// This coupling lives next to [`Entry`] rather than in its variants: it is
+/// an accounting detail specific to `History` (it serves neither to undo
+/// nor to redo), and keeping it out of `Entry` leaves the public API of this
+/// type unchanged.
 #[derive(Debug)]
 struct Pinned {
-    /// L'entrée elle-même — ce que `revert`/`reapply` consomment.
+    /// The entry itself — what `revert`/`reapply` consume.
     entry: Entry,
-    /// Son empreinte, calculée une fois pour toutes à l'empilement.
+    /// Its footprint, computed once and for all when pushed.
     footprint: Footprint,
 }
 
-/// Ce qu'on sait, en permanence, d'un buffer que **au moins une** entrée de
-/// `undo` (l'invariant « `redo` est toujours vide entre deux commandes » —
-/// voir la doc de [`History::push`] — vaut ici aussi, donc `redo` n'a jamais
-/// besoin d'être suivi séparément) retient dans son empreinte : combien
-/// d'entrées le retiennent, et s'il a déjà quitté l'arbre courant.
+/// What is permanently known about a buffer that **at least one** `undo`
+/// entry (the invariant "`redo` is always empty between two commands" —
+/// see the doc of [`History::push`] — holds here too, so `redo` never
+/// needs to be tracked separately) keeps in its footprint: how many
+/// entries keep it, and whether it has already left the current tree.
 ///
-/// C'est la contrepartie *vivante*, tenue à jour buffer par buffer, de ce
-/// que [`History::recompute_retained_bytes`] recalculait auparavant depuis
-/// zéro à chaque commande — voir [`History::pin_footprint`] et
-/// [`History::unpin_footprint`] pour comment elle est maintenue, et la
-/// section « Le suivi incrémental (anomalie D3) » sur [`History::evict`]
-/// pour pourquoi.
+/// It is the *live* counterpart, kept up to date buffer by buffer, of what
+/// [`History::recompute_retained_bytes`] used to recompute from
+/// zero at each command — see [`History::pin_footprint`] and
+/// [`History::unpin_footprint`] for how it is maintained, and the
+/// section "Incremental tracking (anomaly D3)" on [`History::evict`]
+/// for why.
 #[derive(Debug, Clone, Copy)]
 struct PinnedBuffer {
-    /// Octets du buffer — copiés depuis la `Footprint` de l'entrée qui l'a
-    /// introduit, jamais recalculés.
+    /// Bytes of the buffer — copied from the `Footprint` of the entry that
+    /// introduced it, never recomputed.
     bytes: usize,
-    /// Nombre d'entrées de `undo` qui le retiennent dans leur empreinte.
+    /// Number of `undo` entries that keep it in their footprint.
     refcount: usize,
-    /// Vrai s'il a déjà quitté l'arbre courant (compté dans
-    /// `retained_bytes`) ; faux s'il lui est encore commun (gratuit — pas un
-    /// coût de l'historique).
+    /// True if it has already left the current tree (counted in
+    /// `retained_bytes`); false if it is still shared with it (free — not
+    /// a cost of the history).
     orphaned: bool,
 }
 
-/// Limite d'historique par défaut, en nombre d'entrées : la profondeur
-/// d'annulation attendue, l'ordre de grandeur d'un tableur. Éviction
-/// silencieuse de la plus ancienne (`questions-ouvertes.md`, question 7 —
-/// recommandation appliquée, à confirmer).
+/// Default history limit, in number of entries: the expected undo
+/// depth, the order of magnitude of a spreadsheet. Silent eviction of the
+/// oldest (`questions-ouvertes.md`, question 7 —
+/// recommendation applied, to be confirmed).
 pub const DEFAULT_LIMIT: usize = 100;
 
-/// Limite d'historique par défaut, en octets de charge utile retenue
-/// (512 Mio). Protège le motif que `DEFAULT_LIMIT` seul ne voit pas : voir
-/// la section « Deux limites » en tête de module.
+/// Default history limit, in bytes of retained payload
+/// (512 MiB). Protects the pattern that `DEFAULT_LIMIT` alone does not see: see
+/// the section "Two limits" at the top of the module.
 pub const DEFAULT_BYTE_LIMIT: usize = 512 * 1024 * 1024;
 
-/// Profondeur maximale d'imbrication des macros (B7,
-/// `guide-de-correction-robustesse.md` §F4 — option 1, retenue par le
-/// guide : une constante nommée et une erreur, plutôt que de rendre
-/// `revert`/`Drop` itératifs sur `Entry::Macro`, « du code délicat sur un
-/// enum récursif »). Rien ne bornait l'imbrication avant ce correctif :
-/// `begin_macro`/`end_macro` sont eux-mêmes itératifs (les construire ne
-/// déborde jamais, la sonde le vérifie jusqu'à 200 000 niveaux), mais
-/// `History::revert` et le `Drop` dérivé d'`Entry` récursent sur
-/// `Entry::Macro` — au-delà de ~10 891 niveaux, l'un ou l'autre déborde la
-/// pile du fil de l'acteur (2 Mio par défaut) et fait `abort()` le
-/// processus entier, y compris tout travail non sauvegardé (voir
-/// `stokesforge-robustesse/src/bin/sonde_pile.rs`). Mille niveaux couvrent trois
-/// ordres de grandeur au-dessus de tout usage plausible (§7 du guide) tout
-/// en laissant une marge large sous le seuil mesuré de débordement.
+/// Maximum nesting depth of macros (B7,
+/// `guide-de-correction-robustesse.md` §F4 — option 1, chosen by the
+/// guide: a named constant and an error, rather than making
+/// `revert`/`Drop` iterative on `Entry::Macro`, « du code délicat sur un
+/// enum récursif »). Nothing bounded the nesting before this fix:
+/// `begin_macro`/`end_macro` are themselves iterative (building them never
+/// overflows, the probe checks it up to 200,000 levels), but
+/// `History::revert` and the derived `Drop` of `Entry` recurse on
+/// `Entry::Macro` — beyond ~10,891 levels, one or the other overflows the
+/// stack of the actor thread (2 MiB by default) and `abort()`s the whole
+/// process, including any unsaved work (see
+/// `stokesforge-robustesse/src/bin/sonde_pile.rs`). A thousand levels cover
+/// three orders of magnitude above any plausible use (§7 of the guide) while
+/// leaving a wide margin under the measured overflow threshold.
 pub const MAX_MACRO_DEPTH: usize = 1000;
 
-/// Pile d'historique à deux natures.
+/// Two-kind history stack.
 ///
-/// Elle **ne possède pas** le `Project` : chaque opération le reçoit en
-/// `&mut`. C'est l'acteur de `stokesforge-session` qui détient l'un et l'autre, ce
-/// qui évite d'enfermer le modèle dans l'historique.
+/// It does **not own** the `Project`: each operation receives it as
+/// `&mut`. The `stokesforge-session` actor holds both, which avoids locking
+/// the model inside the history.
 #[derive(Debug)]
 pub struct History {
-    /// Entrées annulables, la plus récente en fin, chacune accompagnée de
-    /// l'empreinte mémoire calculée à son empilement.
+    /// Undoable entries, the most recent last, each with the memory
+    /// footprint computed when it was pushed.
     undo: Vec<Pinned>,
-    /// Entrées rétablissables, la prochaine en fin.
+    /// Redoable entries, the next one last.
     redo: Vec<Pinned>,
-    /// Nombre maximal d'entrées de premier niveau ; `0` = illimité.
+    /// Maximum number of top-level entries; `0` = unlimited.
     limit: usize,
-    /// Octets maximaux de charge utile retenue ; `0` = illimité.
+    /// Maximum bytes of retained payload; `0` = unlimited.
     byte_limit: usize,
-    /// Octets de charge utile retenus — exact, maintenu à jour en continu
-    /// (voir [`History::retained_bytes`], et le suivi incrémental documenté
-    /// sur [`History::evict`]).
+    /// Bytes of retained payload — exact, kept up to date continuously
+    /// (see [`History::retained_bytes`], and the incremental tracking
+    /// documented on [`History::evict`]).
     retained_bytes: usize,
-    /// Comptabilité vivante, buffer par buffer, de ce que retient `undo` —
-    /// voir [`PinnedBuffer`]. `retained_bytes` est, en permanence, la somme
-    /// des `bytes` de ses entrées `orphaned`.
+    /// Live accounting, buffer by buffer, of what `undo` keeps —
+    /// see [`PinnedBuffer`]. `retained_bytes` is, at all times, the sum
+    /// of the `bytes` of its `orphaned` entries.
     pinned: HashMap<usize, PinnedBuffer>,
-    /// Macros ouvertes, de la plus externe à la plus interne : libellé et
-    /// entrées déjà empreintées, accumulées avant de devenir une seule
-    /// entrée `Macro` à la fermeture.
+    /// Open macros, from the outermost to the innermost: label and
+    /// entries already footprinted, accumulated before becoming a single
+    /// `Macro` entry on closing.
     macros: Vec<(MacroKind, Vec<Pinned>)>,
-    /// Pile de rétablissement telle qu'elle était avant l'ouverture de la
-    /// macro la plus externe (`None` hors macro). Sauvegardée à
-    /// `begin_macro`, elle est restaurée si cette macro est avortée — ou
-    /// close vide — et jetée si elle aboutit avec au moins une entrée : une
-    /// macro avortée ne doit laisser aucune trace, y compris sur le redo.
+    /// Redo stack as it was before the outermost macro was opened
+    /// (`None` outside a macro). Saved at `begin_macro`, it is restored if
+    /// this macro is aborted — or closed empty — and dropped if it succeeds
+    /// with at least one entry: an aborted macro must leave no trace,
+    /// including on redo.
     saved_redo: Option<Vec<Pinned>>,
 }
 
 impl History {
-    /// Pile neuve, aux deux limites par défaut ([`DEFAULT_LIMIT`] entrées,
-    /// [`DEFAULT_BYTE_LIMIT`] octets retenus).
+    /// New stack, with the two default limits ([`DEFAULT_LIMIT`] entries,
+    /// [`DEFAULT_BYTE_LIMIT`] retained bytes).
     pub fn new() -> Self {
         Self::with_limits(DEFAULT_LIMIT, DEFAULT_BYTE_LIMIT)
     }
 
-    /// Pile neuve limitée à `limit` entrées (`0` = illimité) ; garde
-    /// [`DEFAULT_BYTE_LIMIT`] pour la limite en octets.
+    /// New stack limited to `limit` entries (`0` = unlimited); keeps
+    /// [`DEFAULT_BYTE_LIMIT`] for the byte limit.
     pub fn with_limit(limit: usize) -> Self {
         Self::with_limits(limit, DEFAULT_BYTE_LIMIT)
     }
 
-    /// Pile neuve avec les deux limites explicites. `0` = illimité, pour
-    /// l'une comme pour l'autre. La plus contraignante des deux gagne :
-    /// après chaque empilement, l'éviction continue tant que l'une ou
-    /// l'autre est dépassée (voir [`History::evict`]).
+    /// New stack with both limits explicit. `0` = unlimited, for
+    /// either. The stricter of the two wins:
+    /// after each push, eviction continues as long as one or the
+    /// other is exceeded (see [`History::evict`]).
     pub fn with_limits(limit: usize, byte_limit: usize) -> Self {
         Self {
             undo: Vec::new(),
@@ -404,31 +401,31 @@ impl History {
         }
     }
 
-    /// Limite courante en nombre d'entrées ; `0` = illimité.
+    /// Current limit in number of entries; `0` = unlimited.
     pub fn limit(&self) -> usize {
         self.limit
     }
 
-    /// Limite courante en octets de charge utile retenue ; `0` = illimitée.
+    /// Current limit in bytes of retained payload; `0` = unlimited.
     pub fn byte_limit(&self) -> usize {
         self.byte_limit
     }
 
-    /// Octets de charge utile que l'historique est seul à maintenir
-    /// vivants — **exact**, en permanence (voir le suivi incrémental
-    /// documenté sur [`History::evict`] : `undo`/`redo`/`begin_macro`/
-    /// `abort_macro` n'ont pas besoin de le redéclencher, puisqu'aucun
-    /// d'eux n'ajoute, ne retire, ni ne change le statut « épinglé/orphelin »
-    /// d'aucun buffer — ils ne font que déplacer des entrées déjà comptées
-    /// entre les deux piles, ou les rejouer dans le projet).
+    /// Bytes of payload that the history alone keeps alive — **exact**, at
+    /// all times (see the incremental tracking documented on
+    /// [`History::evict`]: `undo`/`redo`/`begin_macro`/
+    /// `abort_macro` do not need to trigger it again, since none
+    /// of them adds, removes, or changes the "pinned/orphaned" status of
+    /// any buffer — they only move entries already counted between the two
+    /// stacks, or replay them into the project).
     pub fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }
 
-    /// Change la limite en nombre d'entrées. `Err(MacroOpen)` en macro ;
-    /// `Err(StackNotEmpty)` si `undo` ou `redo` n'est pas vide — changer la
-    /// limite au milieu d'un historique demanderait de décider quoi évincer,
-    /// et cette décision n'appartient pas à la pile.
+    /// Changes the limit in number of entries. `Err(MacroOpen)` in a macro;
+    /// `Err(StackNotEmpty)` if `undo` or `redo` is not empty — changing the
+    /// limit in the middle of a history would require deciding what to evict,
+    /// and that decision does not belong to the stack.
     pub fn set_limit(&mut self, limit: usize) -> CommandResult<()> {
         if self.in_macro() {
             return Err(CommandError::MacroOpen("set_limit"));
@@ -440,9 +437,9 @@ impl History {
         Ok(())
     }
 
-    /// Change la limite en octets de charge utile retenue. Mêmes règles que
-    /// [`History::set_limit`] : `Err(MacroOpen)` en macro, `Err(StackNotEmpty)`
-    /// si une pile n'est pas vide.
+    /// Changes the limit in bytes of retained payload. Same rules as
+    /// [`History::set_limit`]: `Err(MacroOpen)` in a macro, `Err(StackNotEmpty)`
+    /// if a stack is not empty.
     pub fn set_byte_limit(&mut self, bytes: usize) -> CommandResult<()> {
         if self.in_macro() {
             return Err(CommandError::MacroOpen("set_byte_limit"));
@@ -454,48 +451,48 @@ impl History {
         Ok(())
     }
 
-    /// Applique `command` puis l'empile (ou l'ajoute à la macro ouverte).
+    /// Applies `command` then pushes it (or adds it to the open macro).
     ///
-    /// **Deux chemins, un seul et même contrat.** Le contrat — en cas
-    /// d'`Err`, ni l'arbre ni la pile n'ont changé — est identique pour les
-    /// deux natures ; seul le **mécanisme** qui le tient diffère (D3 (2ᵉ
-    /// moitié), `guide-de-correction-robustesse.md` §6 « ne pas supprimer la
-    /// comptabilité, seulement sa fréquence ») :
+    /// **Two paths, one and the same contract.** The contract — on `Err`,
+    /// neither the tree nor the stack has changed — is identical for both
+    /// kinds; only the **mechanism** that holds it differs (D3 (2nd
+    /// half), `guide-de-correction-robustesse.md` §6 « ne pas supprimer la
+    /// comptabilité, seulement sa fréquence »):
     ///
-    /// - **structure** : `before` (un clone d'`Arc<Tree>`, un pointeur) est
-    ///   gardé vivant pendant toute l'application, puis remis par sécurité
-    ///   sur `Err` (`project.replace_tree(before)`), sans se reposer sur la
-    ///   promesse d'atomicité des primitives du cœur. `Entry::Structural` en
-    ///   a de toute façon besoin pour `before`/`after` : le coût est déjà
-    ///   payé, l'assurance est gratuite.
-    /// - **données** : garder `before` vivant forcerait `Arc::make_mut` (vu
-    ///   par `Project::set_values` et consorts) à cloner la `Tree` entière
-    ///   au lieu de muter en place — tout le sens de D3. On ne le fait donc
-    ///   pas ; le contrat repose alors sur ce que chaque primitive de
-    ///   donnée *valide avant de muter* (`Column::set_values`,
-    ///   `Column::insert_rows`... — testé dans `stokesforge-core`) : un rejet n'a
-    ///   jamais commencé à écrire, donc rien n'est à moitié fait à
-    ///   restaurer. Seul ce qu'il faut pour `just_orphaned_by_write` (le
-    ///   pointeur du buffer déjà présent dans la ou les colonnes visées) est
-    ///   capturé, par un simple emprunt, **avant** d'appliquer la commande —
-    ///   jamais l'arbre.
+    /// - **structure**: `before` (an `Arc<Tree>` clone, one pointer) is
+    ///   kept alive during the whole application, then put back as a
+    ///   safety on `Err` (`project.replace_tree(before)`), without relying
+    ///   on the atomicity promise of the core primitives. `Entry::Structural`
+    ///   needs it anyway for `before`/`after`: the cost is already
+    ///   paid, the insurance is free.
+    /// - **data**: keeping `before` alive would force `Arc::make_mut` (seen
+    ///   by `Project::set_values` and co.) to clone the whole `Tree`
+    ///   instead of mutating in place — the whole point of D3. So we do not
+    ///   do it; the contract then rests on each data primitive
+    ///   *validating before mutating* (`Column::set_values`,
+    ///   `Column::insert_rows`... — tested in `stokesforge-core`): a rejection
+    ///   never started writing, so nothing is half-done and needs
+    ///   restoring. Only what `just_orphaned_by_write` needs (the
+    ///   pointer of the buffer already present in the targeted column(s)) is
+    ///   captured, by a simple borrow, **before** applying the command —
+    ///   never the tree.
     ///
-    /// En cas de succès la pile de rétablissement est vidée, **y compris en
-    /// macro** : dès qu'une nouvelle mutation est appliquée, ce qui avait été
-    /// annulé n'a plus de branche où revenir.
+    /// On success the redo stack is emptied, **including in a macro**: as
+    /// soon as a new mutation is applied, what had been undone has no branch
+    /// left to return to.
     pub fn execute(&mut self, project: &mut Project, command: Command) -> CommandResult<()> {
         self.execute_recorded(project, command).map(|_| ())
     }
 
-    /// Comme [`execute`](Self::execute), mais dit si la commande a **rangé une
-    /// entrée** (en pile, ou dans la macro ouverte) : `Ok(false)` pour une
-    /// commande acceptée mais sans effet (B5), qui n'occupe aucun cran.
+    /// Like [`execute`](Self::execute), but tells whether the command **stored
+    /// an entry** (on the stack, or in the open macro): `Ok(false)` for an
+    /// accepted command with no effect (B5), which takes no slot.
     ///
-    /// L'acteur s'en sert pour que Stop n'annule que la commande qu'il vient
-    /// d'exécuter : sans ce booléen, un `undo` défaisait l'action *précédente*.
-    /// On ne le déduit pas de `len()` avant/après — l'éviction (limite
-    /// d'entrées ou d'octets) laisse la longueur inchangée, et une entrée rangée
-    /// dans une macro ne la change pas non plus.
+    /// The actor uses it so that Stop undoes only the command it has just
+    /// executed: without this boolean, an `undo` undid the *previous* action.
+    /// It is not deduced from `len()` before/after — eviction (entry or byte
+    /// limit) leaves the length unchanged, and an entry stored in a macro
+    /// does not change it either.
     pub fn execute_recorded(
         &mut self,
         project: &mut Project,
@@ -506,14 +503,14 @@ impl History {
             let label = command.label(&before);
             match Self::apply_structural(project, command, &before, label) {
                 Ok(entry) => {
-                    // B5 + le cas Rename (`guide-de-correction-robustesse.md`
-                    // §F5) — une commande acceptée qui n'a RIEN changé n'occupe
-                    // pas de cran d'annulation : « Renommer M en M »
-                    // (consigné sans identifiant ni reproduction en §7.3 du
-                    // guide) — une entrée structurelle dont `before == after`
-                    // couvre ce cas et tout autre qui lui ressemble, sans le
-                    // nommer un par un. Rien n'est à défaire : on rend
-                    // simplement `Ok` sans empiler.
+                    // B5 + the Rename case (`guide-de-correction-robustesse.md`
+                    // §F5) — an accepted command that changed NOTHING takes
+                    // no undo slot: "Rename M to M" (recorded without
+                    // identifier or reproduction in §7.3 of the
+                    // guide) — a structural entry whose `before == after`
+                    // covers this case and any other that resembles it, without
+                    // naming them one by one. Nothing to undo: we simply
+                    // return `Ok` without pushing.
                     if entry_has_no_effect(&entry) {
                         return Ok(false);
                     }
@@ -521,45 +518,45 @@ impl History {
                     Ok(true)
                 }
                 Err(err) => {
-                    // Les primitives de `Project` promettent de ne rien changer en
-                    // cas d'échec, mais rétablir `before` est gratuit (un pointeur)
-                    // et rend la garantie indépendante du cœur.
+                    // The `Project` primitives promise to change nothing on
+                    // failure, but restoring `before` is free (one pointer)
+                    // and makes the guarantee independent of the core.
                     project.replace_tree(before);
                     Err(err)
                 }
             }
         } else {
-            // Pas de clone de l'arbre ici : voir la doc ci-dessus. `label`
-            // et `prior` ne font qu'emprunter `project.tree()`, jamais le
-            // retenir au-delà de cette ligne.
+            // No tree clone here: see the doc above. `label`
+            // and `prior` only borrow `project.tree()`, never
+            // keeping it beyond this line.
             let label = command.label(project.tree());
             let prior = prior_columns(project.tree(), &command);
             match Self::apply_data(project, command, label) {
                 Ok(entry) => {
                     // B5 (`guide-de-correction-robustesse.md` §F5) —
-                    // `InsertRows`/`DeleteRows` sans colonne cible (voir
-                    // `Project::row_targets`) n'occupent pas de cran
-                    // d'annulation.
+                    // `InsertRows`/`DeleteRows` without a target column (see
+                    // `Project::row_targets`) take no undo
+                    // slot.
                     if entry_has_no_effect(&entry) {
                         return Ok(false);
                     }
                     self.push(entry, &prior, project);
                     Ok(true)
                 }
-                // Aucun `replace_tree` à faire ici : voir la doc ci-dessus —
-                // une primitive de donnée qui échoue n'a rien muté.
+                // No `replace_tree` to do here: see the doc above —
+                // a data primitive that fails has mutated nothing.
                 Err(err) => Err(err),
             }
         }
     }
 
-    /// Annule l'entrée du sommet. `Ok(false)` si la pile est vide — ce n'est
-    /// pas une erreur. `Err(MacroOpen)` si une macro est ouverte.
+    /// Undoes the top entry. `Ok(false)` if the stack is empty — that is
+    /// not an error. `Err(MacroOpen)` if a macro is open.
     ///
-    /// Une erreur rendue pendant l'annulation d'une entrée `Data` ne devrait
-    /// pas arriver (l'invariant LIFO garantit que l'état est celui attendu).
-    /// Si elle survient, la seule garantie est que **l'entrée n'a pas été
-    /// déplacée entre les piles** : l'arbre, lui, peut être à moitié annulé.
+    /// An error returned while undoing a `Data` entry should not
+    /// happen (the LIFO invariant guarantees the state is the expected one).
+    /// If it does, the only guarantee is that **the entry was not
+    /// moved between stacks**: the tree itself may be half-undone.
     pub fn undo(&mut self, project: &mut Project) -> CommandResult<bool> {
         if self.in_macro() {
             return Err(CommandError::MacroOpen("undo"));
@@ -569,16 +566,16 @@ impl History {
         };
         Self::revert(project, &pinned.entry)?;
         if let Some(pinned) = self.undo.pop() {
-            // `pinned`/`retained_bytes` comptent l'union de `undo` et
-            // `redo` (voir leur doc) : déplacer une entrée de l'une à
-            // l'autre ne change ni ce qu'elle retient, ni son statut
-            // épinglé/orphelin — rien à mettre à jour ici.
+            // `pinned`/`retained_bytes` count the union of `undo` and
+            // `redo` (see their doc): moving an entry from one to the
+            // other changes neither what it keeps, nor its
+            // pinned/orphaned status — nothing to update here.
             self.redo.push(pinned);
         }
         Ok(true)
     }
 
-    /// Rétablit l'entrée annulée la plus récente. Mêmes conventions que
+    /// Redoes the most recently undone entry. Same conventions as
     /// [`History::undo`].
     pub fn redo(&mut self, project: &mut Project) -> CommandResult<bool> {
         if self.in_macro() {
@@ -594,51 +591,51 @@ impl History {
         Ok(true)
     }
 
-    /// Vrai s'il y a quelque chose à annuler.
+    /// True if there is something to undo.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
-    /// Vrai s'il y a quelque chose à rétablir.
+    /// True if there is something to redo.
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
 
-    /// Libellé de la prochaine annulation.
+    /// Label of the next undo.
     pub fn undo_label(&self) -> Option<&HistoryLabel> {
         self.undo.last().map(|pinned| pinned.entry.label())
     }
 
-    /// Libellé du prochain rétablissement.
+    /// Label of the next redo.
     pub fn redo_label(&self) -> Option<&HistoryLabel> {
         self.redo.last().map(|pinned| pinned.entry.label())
     }
 
-    /// Nombre d'entrées annulables (une macro compte pour une).
+    /// Number of undoable entries (a macro counts as one).
     pub fn len(&self) -> usize {
         self.undo.len()
     }
 
-    /// Vrai si rien n'est annulable.
+    /// True if nothing is undoable.
     pub fn is_empty(&self) -> bool {
         self.undo.is_empty()
     }
 
-    /// Nombre d'entrées rétablissables.
+    /// Number of redoable entries.
     pub fn redo_len(&self) -> usize {
         self.redo.len()
     }
 
-    /// Ouvre une macro : les commandes suivantes s'y accumulent au lieu d'être
-    /// empilées. Les macros s'imbriquent, jusqu'à [`MAX_MACRO_DEPTH`]
-    /// niveaux : au-delà, `Err(MacroTooDeep)` (B7,
-    /// `guide-de-correction-robustesse.md` §F4) plutôt que d'empiler encore
-    /// — voir la doc de [`MAX_MACRO_DEPTH`] pour ce que cette limite évite.
-    /// Un refus ne modifie rien : ni `self.macros`, ni `self.saved_redo`.
+    /// Opens a macro: the following commands accumulate in it instead of being
+    /// pushed. Macros nest, up to [`MAX_MACRO_DEPTH`]
+    /// levels: beyond, `Err(MacroTooDeep)` (B7,
+    /// `guide-de-correction-robustesse.md` §F4) rather than pushing further
+    /// — see the doc of [`MAX_MACRO_DEPTH`] for what this limit avoids.
+    /// A refusal changes nothing: neither `self.macros` nor `self.saved_redo`.
     ///
-    /// À l'ouverture de la macro **la plus externe** (`macro_depth() == 0 →
-    /// 1`), la pile de rétablissement courante est mise de côté : elle
-    /// pourra être restaurée si cette macro est avortée, voir
+    /// On opening the **outermost** macro (`macro_depth() == 0 →
+    /// 1`), the current redo stack is set aside: it
+    /// can be restored if this macro is aborted, see
     /// [`History::abort_macro`].
     pub fn begin_macro(&mut self, kind: MacroKind) -> CommandResult<()> {
         if self.macros.len() >= MAX_MACRO_DEPTH {
@@ -651,19 +648,18 @@ impl History {
         Ok(())
     }
 
-    /// Ferme la macro courante : elle devient **une seule** entrée `Macro`,
-    /// empilée normalement (ou ajoutée à la macro parente s'il y en a une).
-    /// Une macro vide ne laisse **aucune** entrée. `Err(NotInMacro)` sinon.
+    /// Closes the current macro: it becomes **a single** `Macro` entry,
+    /// pushed normally (or added to the parent macro if there is one).
+    /// An empty macro leaves **no** entry. `Err(NotInMacro)` otherwise.
     ///
-    /// L'empreinte de l'entrée `Macro` est l'union de celles, déjà connues,
-    /// de ses entrées — une fusion de tables de hachage, jamais un nouveau
-    /// parcours d'arbre.
+    /// The footprint of the `Macro` entry is the union of those, already
+    /// known, of its entries — a merge of hash tables, never a new
+    /// tree walk.
     ///
-    /// À la fermeture de la macro **la plus externe**, la pile de
-    /// rétablissement sauvegardée à l'ouverture est jetée : le redo est bel
-    /// et bien perdu quand la macro aboutit avec au moins une entrée, comme
-    /// pour toute commande. **Sauf** si la macro est vide (aucune entrée
-    /// appliquée) : elle n'a rien changé, la sauvegarde est alors restaurée.
+    /// On closing the **outermost** macro, the redo stack saved on opening
+    /// is dropped: the redo is well and truly lost when the macro succeeds with
+    /// at least one entry, as for any command. **Except** if the macro is empty
+    /// (no entry applied): it changed nothing, so the saved stack is restored.
     pub fn end_macro(&mut self, project: &mut Project) -> CommandResult<()> {
         let Some((kind, entries)) = self.macros.pop() else {
             return Err(CommandError::NotInMacro);
@@ -676,12 +672,12 @@ impl History {
             return Ok(());
         }
         if is_outermost {
-            // Le redo sauvegardé à l'ouverture est bel et bien perdu : ses
-            // buffers doivent quitter la comptabilité (`self.pinned`)
-            // exactement comme s'il avait été vidé par un `push` ordinaire
-            // (voir [`History::push`]) — sans ça, `retained_bytes`
-            // continuerait de compter des buffers qu'aucune entrée vivante
-            // ne retient plus.
+            // The redo saved on opening is well and truly lost: its
+            // buffers must leave the accounting (`self.pinned`)
+            // exactly as if it had been emptied by an ordinary `push`
+            // (see [`History::push`]) — without that, `retained_bytes`
+            // would keep counting buffers that no live entry
+            // keeps any more.
             if let Some(discarded) = self.saved_redo.take() {
                 for pinned in discarded {
                     self.unpin_footprint(&pinned.footprint);
@@ -693,26 +689,26 @@ impl History {
             entries: entries.into_iter().map(|pinned| pinned.entry).collect(),
             label: HistoryLabel::Macro(kind),
         };
-        // `prior` n'est lu que sur la branche `Data` de `push_pinned` ; une
-        // entrée `Macro` retombe sur `resync_pinned`, qui ne le regarde pas.
+        // `prior` is read only on the `Data` branch of `push_pinned`; a
+        // `Macro` entry falls back on `resync_pinned`, which does not look at it.
         self.push_pinned(Pinned { entry, footprint }, &PriorColumns::new(), project);
         Ok(())
     }
 
-    /// Annule, en ordre inverse, tout ce que la macro courante a appliqué, puis
-    /// la jette. Une macro imbriquée avortée ne touche **pas** ce que la macro
-    /// parente a déjà appliqué. `Err(NotInMacro)` sinon.
+    /// Undoes, in reverse order, everything the current macro applied, then
+    /// drops it. An aborted nested macro does **not** touch what the parent
+    /// macro has already applied. `Err(NotInMacro)` otherwise.
     ///
-    /// Si une annulation échoue en cours de route, l'erreur remonte et la macro
-    /// est déjà retirée : l'arbre peut alors être à moitié défait (même
-    /// réserve que [`History::undo`]).
+    /// If an undo fails along the way, the error comes up and the macro
+    /// is already removed: the tree may then be half-undone (same
+    /// reservation as [`History::undo`]).
     ///
-    /// Une macro avortée ne laisse **aucune** trace, y compris sur le redo :
-    /// quand c'est la macro **la plus externe** qui est avortée, la pile de
-    /// rétablissement sauvegardée à `begin_macro` est restaurée une fois ses
-    /// entrées annulées — ce que la macro avait pu rendre rétablissable
-    /// entre-temps (chaque `execute` vide le redo, même en macro) disparaît,
-    /// et ce qui l'était **avant** la macro revient.
+    /// An aborted macro leaves **no** trace, including on redo:
+    /// when the **outermost** macro is aborted, the redo stack saved at
+    /// `begin_macro` is restored once its entries are undone — what the macro
+    /// may have made redoable in the meantime (each `execute` empties the redo,
+    /// even in a macro) disappears, and what was redoable **before** the
+    /// macro comes back.
     pub fn abort_macro(&mut self, project: &mut Project) -> CommandResult<()> {
         let Some((_, entries)) = self.macros.pop() else {
             return Err(CommandError::NotInMacro);
@@ -726,60 +722,58 @@ impl History {
         Ok(())
     }
 
-    /// Vrai si au moins une macro est ouverte.
+    /// True if at least one macro is open.
     pub fn in_macro(&self) -> bool {
         !self.macros.is_empty()
     }
 
-    /// Nombre de macros ouvertes (imbrication).
+    /// Number of open macros (nesting).
     pub fn macro_depth(&self) -> usize {
         self.macros.len()
     }
 
-    /// Vide les deux piles. `Err(MacroOpen)` en macro : jeter l'historique
-    /// sous une macro ouverte laisserait un groupe sans rien où atterrir.
+    /// Empties both stacks. `Err(MacroOpen)` in a macro: throwing away the history
+    /// under an open macro would leave a group with nowhere to land.
     pub fn clear(&mut self) -> CommandResult<()> {
         if self.in_macro() {
             return Err(CommandError::MacroOpen("clear"));
         }
         self.undo.clear();
         self.redo.clear();
-        // Exact, pas une simple économie de recalcul : l'union de deux piles
-        // vides est vide.
+        // Exact, not a mere recalculation saving: the union of two empty
+        // stacks is empty.
         self.retained_bytes = 0;
         self.pinned.clear();
         Ok(())
     }
 
-    // -- interne --
+    // -- internal --
 
-    /// Restaure la pile de rétablissement sauvegardée à l'ouverture de la
-    /// macro la plus externe, si `saved_redo` en retient une. Appelée à
-    /// `abort_macro` et à `end_macro` d'une macro vide, toutes deux au niveau
-    /// le plus externe.
+    /// Restores the redo stack saved when the outermost macro was opened,
+    /// if `saved_redo` holds one. Called on `abort_macro` and on
+    /// `end_macro` of an empty macro, both at the outermost level.
     fn restore_saved_redo(&mut self) {
         if let Some(saved) = self.saved_redo.take() {
             self.redo = saved;
         }
     }
 
-    /// Empile une entrée fraîchement appliquée (hors macro) : la pile de
-    /// rétablissement est vidée, l'empreinte de l'entrée est calculée une
-    /// fois pour toutes, puis l'entrée rejoint la macro ouverte ou la pile
-    /// principale.
+    /// Pushes a freshly applied entry (outside a macro): the redo stack is
+    /// emptied, the footprint of the entry is computed once and for all, then
+    /// the entry joins the open macro or the main stack.
     ///
-    /// `prior` est ce que [`prior_columns`] a capturé, par emprunt, sur
-    /// l'arbre **juste avant** cette commande — vide pour une entrée
-    /// `Structural` (elle ne s'en sert pas, voir [`History::push_pinned`]).
-    /// Une entrée `Data` ne garde pas trace de `prior` elle-même (elle ne
-    /// retient que son delta), mais [`History::push_pinned`] en a besoin
-    /// pour savoir si l'écriture vient d'orpheliner l'ancien buffer d'une
-    /// colonne qu'une entrée *antérieure* retenait déjà (voir sa doc).
+    /// `prior` is what [`prior_columns`] captured, by borrow, on the tree
+    /// **just before** this command — empty for a `Structural` entry
+    /// (it does not use it, see [`History::push_pinned`]).
+    /// A `Data` entry does not keep track of `prior` itself (it keeps
+    /// only its delta), but [`History::push_pinned`] needs it
+    /// to know whether the write has just orphaned the old buffer of a
+    /// column that an *earlier* entry already kept (see its doc).
     fn push(&mut self, entry: Entry, prior: &PriorColumns, project: &Project) {
-        // Le redo est perdu : ses buffers doivent quitter la comptabilité
-        // exactement comme ceux d'une macro abandonnée avec succès (voir
-        // `History::end_macro`) — sans ça, `retained_bytes` continuerait de
-        // compter des buffers qu'aucune entrée vivante ne retient plus.
+        // The redo is lost: its buffers must leave the accounting
+        // exactly as those of a successfully abandoned macro (see
+        // `History::end_macro`) — without that, `retained_bytes` would keep
+        // counting buffers that no live entry keeps any more.
         let discarded = std::mem::take(&mut self.redo);
         for pinned in discarded {
             self.unpin_footprint(&pinned.footprint);
@@ -788,58 +782,58 @@ impl History {
         self.push_pinned(Pinned { entry, footprint }, prior, project);
     }
 
-    /// Range une entrée déjà empreintée dans la macro ouverte, ou au sommet
-    /// de la pile principale (avec mise à jour de la comptabilité puis
-    /// éviction). **Rien ne change au milieu d'une macro ouverte** : ni
-    /// éviction, ni comptabilité des octets retenus — seule la fermeture de
-    /// la macro la plus externe qui aboutit avec au moins une entrée (voir
-    /// [`History::end_macro`]) rejoint la pile principale.
+    /// Stores an already footprinted entry in the open macro, or on top
+    /// of the main stack (with accounting update then
+    /// eviction). **Nothing changes in the middle of an open macro**: no
+    /// eviction, no accounting of retained bytes — only the closing of
+    /// the outermost macro that succeeds with at least one entry (see
+    /// [`History::end_macro`]) joins the main stack.
     ///
-    /// # Le suivi incrémental (anomalie D3)
+    /// # Incremental tracking (anomaly D3)
     ///
-    /// Avant ce correctif, atterrir ici déclenchait, à **chaque** commande —
-    /// y compris une simple écriture de cellule — un recalcul complet de
-    /// `retained_bytes` : parcourir l'arbre courant en entier (toutes les
-    /// colonnes du projet) puis refaire l'union des empreintes de toutes les
-    /// entrées des deux piles. Le coût d'une frappe suivait donc la taille
-    /// du projet *et* la profondeur de l'historique, même quand aucune
-    /// éviction n'avait lieu (voir
+    /// Before this fix, landing here triggered, at **each** command —
+    /// even a simple cell write — a full recomputation of
+    /// `retained_bytes`: walking the whole current tree (all the
+    /// columns of the project) then redoing the union of the footprints of all
+    /// the entries of the two stacks. The cost of a keystroke thus followed the
+    /// size of the project *and* the depth of the history, even when no
+    /// eviction took place (see
     /// `stokesforge-robustesse/tests/b21_cout_et_identite.rs`, reproductions
-    /// `b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique` et
+    /// `b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique` and
     /// `..._du_nombre_de_colonnes`).
     ///
-    /// La correction ne relâche **jamais** l'exactitude de `retained_bytes`
-    /// (voir `tests/memory_pinning.rs`) : au lieu de la recalculer depuis
-    /// zéro, elle la maintient **à jour buffer par buffer**, dans
-    /// [`History::pinned`], à chaque empilement — sans jamais parcourir
-    /// l'arbre entier ni relire l'historique complet :
+    /// The fix **never** relaxes the exactness of `retained_bytes`
+    /// (see `tests/memory_pinning.rs`): instead of recomputing it from
+    /// zero, it keeps it **up to date buffer by buffer**, in
+    /// [`History::pinned`], at each push — without ever walking
+    /// the whole tree or rereading the complete history:
     ///
-    /// - une entrée `Structural` capture déjà `before` et `after` dans ses
-    ///   deux champs : un buffer de sa propre empreinte est orphelin s'il
-    ///   n'est pas dans `after` (donc plus dans l'arbre courant), vivant
-    ///   sinon. Un seul parcours de `after` (inévitable : c'est déjà le
-    ///   travail que fait [`footprint_of`] pour construire l'empreinte de
-    ///   *cette* entrée, pas un nouveau parcours ajouté par ce correctif) ;
-    /// - une entrée `Data` ne partage jamais son propre delta avec l'arbre
-    ///   (voir [`footprint_of`]) : toute son empreinte est orpheline dès
-    ///   l'empilement. Ce qui *peut* changer ailleurs, c'est qu'elle vient
-    ///   de remplacer, par copie-à-l'écriture, le buffer que sa colonne
-    ///   avait *avant* elle — si ce buffer était déjà épinglé par une entrée
-    ///   plus ancienne (une recherche par identifiant dans `before`, O(1),
-    ///   jamais un parcours), il vient de quitter l'arbre : voir
-    ///   [`just_orphaned_by_write`] ;
-    /// - évincer une entrée (ci-dessous) retire simplement sa part du
-    ///   compte, buffer par buffer (voir [`History::unpin_footprint`]).
+    /// - a `Structural` entry already captures `before` and `after` in its
+    ///   two fields: a buffer of its own footprint is orphaned if it
+    ///   is not in `after` (so no longer in the current tree), alive
+    ///   otherwise. A single walk of `after` (unavoidable: it is already
+    ///   the work that [`footprint_of`] does to build the footprint of
+    ///   *this* entry, not a new walk added by this fix);
+    /// - a `Data` entry never shares its own delta with the tree
+    ///   (see [`footprint_of`]): its whole footprint is orphaned as soon
+    ///   as it is pushed. What *can* change elsewhere is that it has just
+    ///   replaced, by copy-on-write, the buffer its column
+    ///   had *before* it — if that buffer was already pinned by an
+    ///   older entry (a lookup by identifier in `before`, O(1),
+    ///   never a walk), it has just left the tree: see
+    ///   [`just_orphaned_by_write`];
+    /// - evicting an entry (below) simply removes its share from the
+    ///   count, buffer by buffer (see [`History::unpin_footprint`]).
     ///
-    /// Le seul cas non modélisé ici est la fermeture d'une macro
-    /// (`Entry::Macro`) : elle agrège des sous-commandes déjà appliquées à
-    /// des instants différents, et retrouver *quand* chacune a orpheliné
-    /// quoi demanderait de rejouer leur avant/après un par un. Comme les
-    /// macros ne sont pas déclenchées par frappe — l'anomalie mesurée —
-    /// cette entrée retombe sur l'ancien calcul exhaustif
-    /// ([`History::resync_pinned`]), qui reconstruit `self.pinned` en même
-    /// temps qu'il recalcule `retained_bytes`, pour que le suivi incrémental
-    /// reste juste ensuite.
+    /// The only case not modeled here is the closing of a macro
+    /// (`Entry::Macro`): it aggregates sub-commands applied at different
+    /// times, and finding *when* each one orphaned
+    /// what would require replaying their before/after one by one. As
+    /// macros are not triggered per keystroke — the measured anomaly —
+    /// this entry falls back on the old exhaustive computation
+    /// ([`History::resync_pinned`]), which rebuilds `self.pinned` at the same
+    /// time as it recomputes `retained_bytes`, so that the incremental
+    /// tracking stays correct afterwards.
     fn push_pinned(&mut self, pinned: Pinned, prior: &PriorColumns, project: &Project) {
         if let Some((_, entries)) = self.macros.last_mut() {
             entries.push(pinned);
@@ -853,16 +847,16 @@ impl History {
             Entry::Data { delta, .. } => {
                 let just_orphaned = just_orphaned_by_write(prior, delta);
                 self.mark_orphaned(&just_orphaned);
-                // Une entrée `Data` ne partage jamais son delta avec
-                // l'arbre : chacun de ses buffers propres est orphelin dès
-                // son introduction (voir la doc ci-dessus).
+                // A `Data` entry never shares its delta with the
+                // tree: each of its own buffers is orphaned as soon as
+                // it is introduced (see the doc above).
                 self.pin_footprint(&pinned.footprint, |_ptr| true);
                 self.undo.push(pinned);
             }
             Entry::Structural { .. } => {
-                // `after` (le champ de l'entrée) et `project.tree()` sont le
-                // même arbre à cet instant : rien n'a pu s'exécuter entre la
-                // fin de `apply` et cet appel.
+                // `after` (the field of the entry) and `project.tree()` are the
+                // same tree at this moment: nothing could run between the
+                // end of `apply` and this call.
                 let current = current_tree_pointers(project.tree());
                 self.pin_footprint(&pinned.footprint, |ptr| !current.contains(&ptr));
                 self.undo.push(pinned);
@@ -871,13 +865,13 @@ impl History {
         self.evict();
     }
 
-    /// Pour chaque buffer de `footprint` : incrémente son compteur de
-    /// référence s'il est déjà connu de [`History::pinned`] (son statut
-    /// épinglé/orphelin, décidé à sa toute première entrée, ne change pas ici
-    /// — voir [`History::mark_orphaned`] pour la seule façon dont un buffer
-    /// déjà vivant peut ensuite devenir orphelin) ; sinon l'y introduit,
-    /// orphelin si `is_orphan` le dit vrai pour ce pointeur (et alors compté
-    /// tout de suite dans `retained_bytes`), vivant sinon.
+    /// For each buffer of `footprint`: increments its reference count
+    /// if it is already known to [`History::pinned`] (its
+    /// pinned/orphaned status, decided at its very first entry, does not
+    /// change here — see [`History::mark_orphaned`] for the only way an
+    /// already live buffer can later become orphaned); otherwise adds it
+    /// there, orphaned if `is_orphan` says true for this pointer (and then
+    /// counted at once in `retained_bytes`), alive otherwise.
     fn pin_footprint(&mut self, footprint: &Footprint, is_orphan: impl Fn(usize) -> bool) {
         for (&ptr, &bytes) in footprint {
             match self.pinned.entry(ptr) {
@@ -899,11 +893,11 @@ impl History {
         }
     }
 
-    /// Pour chaque buffer de `just_left`, s'il est déjà épinglé (par une
-    /// entrée plus ancienne) et encore marqué vivant, le fait basculer
-    /// orphelin et ajoute ses octets à `retained_bytes`. Un buffer absent de
-    /// `self.pinned` n'est pas un coût de l'historique — il n'a jamais été
-    /// épinglé — et ne fait rien ici.
+    /// For each buffer of `just_left`, if it is already pinned (by an
+    /// older entry) and still marked alive, flips it to
+    /// orphaned and adds its bytes to `retained_bytes`. A buffer absent from
+    /// `self.pinned` is not a cost of the history — it was never
+    /// pinned — and does nothing here.
     fn mark_orphaned(&mut self, just_left: &Footprint) {
         for &ptr in just_left.keys() {
             if let Some(buffer) = self.pinned.get_mut(&ptr) {
@@ -915,11 +909,11 @@ impl History {
         }
     }
 
-    /// Retire la part d'une entrée évincée (ou d'une pile jetée) dans
-    /// [`History::pinned`] : décrémente le compteur de référence de chacun
-    /// de ses buffers, et quand il tombe à zéro (plus aucune entrée ne le
-    /// retient), l'ôte de la comptabilité — en retranchant ses octets de
-    /// `retained_bytes` s'il y était compté (orphelin).
+    /// Removes the share of an evicted entry (or a dropped stack) in
+    /// [`History::pinned`]: decrements the reference count of each
+    /// of its buffers, and when it falls to zero (no entry keeps it
+    /// any more), removes it from the accounting — subtracting its bytes from
+    /// `retained_bytes` if it was counted there (orphaned).
     fn unpin_footprint(&mut self, footprint: &Footprint) {
         for &ptr in footprint.keys() {
             if let std::collections::hash_map::Entry::Occupied(mut occupied) =
@@ -937,28 +931,26 @@ impl History {
         }
     }
 
-    /// Retire silencieusement les entrées les plus anciennes de `undo` tant
-    /// que l'une des deux limites (nombre d'entrées, octets retenus) est
-    /// dépassée. `retained_bytes` est déjà exact en entrée (voir
-    /// [`History::push_pinned`]) : évincer une entrée n'a plus qu'à
-    /// retrancher sa part (voir [`History::unpin_footprint`]), jamais à
-    /// reparcourir quoi que ce soit.
+    /// Silently removes the oldest entries of `undo` as long as
+    /// one of the two limits (number of entries, retained bytes) is
+    /// exceeded. `retained_bytes` is already exact on entry (see
+    /// [`History::push_pinned`]): evicting an entry only has to
+    /// subtract its share (see [`History::unpin_footprint`]), never to
+    /// walk anything again.
     ///
-    /// **La dernière entrée restante n'est jamais évincée**, même si elle
-    /// dépasse à elle seule la limite en octets : une opération lourde doit
-    /// rester annulable juste après avoir été faite, sinon la limite en
-    /// octets produit exactement le désagrément qu'elle cherche à éviter
-    /// (plus rien à annuler après la commande qui vient de s'exécuter). Une
-    /// pile à une entrée peut donc rester durablement au-dessus du plafond
-    /// en octets si cette entrée seule le dépasse déjà.
+    /// **The last remaining entry is never evicted**, even if it alone
+    /// exceeds the byte limit: a heavy operation must stay undoable
+    /// right after it was done, otherwise the byte limit produces exactly the
+    /// nuisance it seeks to avoid (nothing left to undo after the command that
+    /// has just run). A one-entry stack can therefore stay durably above the
+    /// byte cap if that entry alone already exceeds it.
     ///
-    /// L'éviction ne touche **jamais** la pile de rétablissement (`redo`) :
-    /// elle est vidée par le prochain empilement (voir [`History::push`]).
-    /// Le total retenu est l'union des deux piles, donc **une longue branche
-    /// de rétablissement peut maintenir le total au-dessus du plafond en
-    /// octets jusqu'à la commande suivante** — ce n'est pas un oubli : c'est
-    /// le prix de ne jamais faire disparaître une branche de rétablissement
-    /// autrement qu'à la prochaine mutation.
+    /// Eviction **never** touches the redo stack (`redo`):
+    /// it is emptied by the next push (see [`History::push`]).
+    /// The retained total is the union of the two stacks, so **a long redo
+    /// branch can keep the total above the byte cap until the next
+    /// command** — this is not an oversight: it is the price of never making a
+    /// redo branch disappear other than at the next mutation.
     fn evict(&mut self) {
         while self.undo.len() > 1 {
             let over_count = self.limit != 0 && self.undo.len() > self.limit;
@@ -966,23 +958,23 @@ impl History {
             if !over_count && !over_bytes {
                 break;
             }
-            // La pile reste courte (une centaine d'entrées par défaut) : le
-            // décalage d'un `Vec` est sans conséquence face au coût d'un
-            // `VecDeque` partout ailleurs.
+            // The stack stays short (about a hundred entries by default): the
+            // shifting of a `Vec` is of no consequence next to the cost of a
+            // `VecDeque` everywhere else.
             let evicted = self.undo.remove(0);
             self.unpin_footprint(&evicted.footprint);
         }
     }
 
-    /// Filet de sécurité : recalcule [`History::retained_bytes`] **et**
-    /// reconstruit [`History::pinned`] entièrement depuis zéro — l'ancien
-    /// calcul exhaustif (parcours complet de l'arbre courant, union de
-    /// toutes les empreintes de `undo` et `redo`), plus la reconstruction du
-    /// suivi incrémental sur lequel [`History::push_pinned`] s'appuie
-    /// ensuite. Réservé au seul cas que ce suivi ne modélise pas
-    /// (l'agrégation d'une macro à sa fermeture, voir
-    /// [`History::push_pinned`]) : jamais appelé sur le chemin d'une
-    /// commande simple, jamais le coût d'une frappe ordinaire.
+    /// Safety net: recomputes [`History::retained_bytes`] **and**
+    /// rebuilds [`History::pinned`] entirely from zero — the old
+    /// exhaustive computation (full walk of the current tree, union of
+    /// all the footprints of `undo` and `redo`), plus the rebuilding of the
+    /// incremental tracking on which [`History::push_pinned`] then relies.
+    /// Reserved for the only case this tracking does not model
+    /// (the aggregation of a macro on closing, see
+    /// [`History::push_pinned`]): never called on the path of a
+    /// simple command, never the cost of an ordinary keystroke.
     fn resync_pinned(&mut self, project: &Project) {
         self.pinned.clear();
         let current = current_tree_pointers(project.tree());
@@ -1006,14 +998,14 @@ impl History {
             .sum();
     }
 
-    /// Applique une commande **structurelle** et construit son entrée
-    /// d'historique. `before` est l'`Arc<Tree>` que [`History::execute`] a
-    /// cloné avant d'appeler cette fonction — nécessaire ici : `Entry::
-    /// Structural` le retient, et `DeleteColumn` doit lire le nœud visé tel
-    /// qu'il était avant toute mutation.
+    /// Applies a **structural** command and builds its history entry.
+    /// `before` is the `Arc<Tree>` that [`History::execute`] cloned before
+    /// calling this function — needed here: `Entry::
+    /// Structural` keeps it, and `DeleteColumn` must read the targeted node as
+    /// it was before any mutation.
     ///
-    /// N'est jamais appelée avec une commande de données — `execute` aiguille
-    /// sur [`Command::is_structural`] avant d'appeler l'une ou l'autre.
+    /// Never called with a data command — `execute` dispatches on
+    /// [`Command::is_structural`] before calling either one.
     fn apply_structural(
         project: &mut Project,
         command: Command,
@@ -1031,9 +1023,9 @@ impl History {
                 Ok(structural(before, project, label))
             }
             Command::DeleteColumn { column } => {
-                // Vérifié **avant** d'appeler `remove`, qui accepterait
-                // n'importe quel nœud : une commande nommée « supprimer une
-                // colonne » ne doit pas pouvoir emporter une feuille entière.
+                // Checked **before** calling `remove`, which would accept
+                // any node: a command named "delete a column" must not be
+                // able to take away a whole sheet.
                 let node = before.get(column)?;
                 if !node.kind().is_column() {
                     return Err(CoreError::Structure(format!(
@@ -1140,20 +1132,20 @@ impl History {
             | Command::SetPlotSpec { .. }
             | Command::EditPlotSpec { .. }
             | Command::SetSavedColors { .. } => {
-                unreachable!("apply_structural appelée avec une commande de données")
+                unreachable!("apply_structural called with a data command")
             }
         }
     }
 
-    /// Applique une commande de **données** et construit son entrée
-    /// d'historique. Aucun `Arc<Tree>` en paramètre — voir la doc de
-    /// [`History::execute`], D3 (2ᵉ moitié) du guide : le tenir vivant ici
-    /// forcerait `Arc::make_mut` à cloner la `Tree` entière plutôt que de
-    /// muter en place. Tout ce que ces commandes lisent avant de muter (la
-    /// version d'une colonne pour `SetCells`) passe par un simple emprunt de
-    /// `project.tree()`, jamais retenu au-delà de la ligne qui le lit.
+    /// Applies a **data** command and builds its history entry. No
+    /// `Arc<Tree>` parameter — see the doc of
+    /// [`History::execute`], D3 (2nd half) of the guide: keeping it alive here
+    /// would force `Arc::make_mut` to clone the whole `Tree` rather than
+    /// mutate in place. Everything these commands read before mutating (the
+    /// version of a column for `SetCells`) goes through a simple borrow of
+    /// `project.tree()`, never kept beyond the line that reads it.
     ///
-    /// N'est jamais appelée avec une commande structurelle — voir
+    /// Never called with a structural command — see
     /// [`History::apply_structural`].
     fn apply_data(
         project: &mut Project,
@@ -1187,30 +1179,30 @@ impl History {
                     .and_then(|node| node.as_column())
                     .map(stokesforge_core::Column::column_type);
                 let delta = match column_type {
-                    // Chemin 1 — le bloc convient déjà, ou la colonne n'en
-                    // est pas une (laisser `set_values` rendre l'erreur
-                    // naturelle plutôt que d'en inventer une ici, même
-                    // discipline que pour A2 ci-dessus).
+                    // Path 1 — the block already fits, or the column is not
+                    // one (let `set_values` return the natural error
+                    // rather than invent one here, same discipline as for A2
+                    // above).
                     None => write_cells(project, column, start, values)?,
                     Some(current) if values.fits(current) => {
                         write_cells(project, column, start, values)?
                     }
-                    // Chemin 2 — la colonne est déjà mixte : seul le bloc se
-                    // convertit, et l'écriture reste un delta de cellules,
-                    // proportionnel à ce qui est écrit.
+                    // Path 2 — the column is already mixed: only the block
+                    // is converted, and the write stays a cell delta,
+                    // proportional to what is written.
                     Some(ColumnType::Mixed) => write_cells(
                         project,
                         column,
                         start,
                         ValueBlock::Mixed(values.into_mixed()),
                     )?,
-                    // Chemin 3 — promotion. Le delta est celui de
-                    // `SetColumnType` : deux instantanés de colonne, parce
-                    // que la conversion n'est pas réversible par recalcul
-                    // (voir `DataDelta::ColumnType`). L'écriture qui suit est
-                    // **dans** le même instantané `after`, donc dans la même
-                    // entrée d'historique : une seule annulation ramène à la
-                    // fois le type et les valeurs d'avant.
+                    // Path 3 — promotion. The delta is that of
+                    // `SetColumnType`: two column snapshots, because
+                    // the conversion is not reversible by recomputation
+                    // (see `DataDelta::ColumnType`). The write that follows is
+                    // **inside** the same `after` snapshot, so in the same
+                    // history entry: a single undo brings back both the type
+                    // and the values from before.
                     Some(_) => {
                         let before = project.set_column_type(column, ColumnType::Mixed)?;
                         project.set_values(
@@ -1248,17 +1240,16 @@ impl History {
                 })
             }
             Command::InsertRows { sheet, at, count } => {
-                // Les colonnes effectivement allongées sont rendues par
-                // `Project::insert_rows` lui-même — la règle « `at < len` »
-                // ne vit qu'à cet unique endroit, dans le cœur — et
-                // l'annulation les reprend une à une (`delete_column_rows`)
-                // plutôt que de rappeler `delete_rows` au niveau feuille.
-                // C'est ce qui rend l'annulation symétrique de celle de
-                // `DeleteRows`, où le niveau feuille est de toute façon
-                // impossible (une colonne vidée jusqu'à sa fin n'a plus de
-                // ligne `at`).
-                // Les séries « ligne » du projet suivent : specs relevés avant
-                // la mutation, réécrits après (par `set_plot_spec`).
+                // The columns actually extended are returned by
+                // `Project::insert_rows` itself — the "`at < len`" rule
+                // lives in this single place, in the core — and
+                // undo takes them one by one (`delete_column_rows`)
+                // rather than calling `delete_rows` again at sheet level.
+                // This makes undo symmetric with that of
+                // `DeleteRows`, where the sheet level is impossible anyway
+                // (a column emptied to its end has no row `at` any more).
+                // The "row" series of the project follow: specs recorded before
+                // the mutation, rewritten after (by `set_plot_spec`).
                 let moved = shifted_row_specs(project.tree(), sheet, |r| {
                     (r >= at).then(|| r.saturating_add(count))
                 });
@@ -1275,11 +1266,11 @@ impl History {
                 })
             }
             Command::DeleteRows { sheet, at, count } => {
-                // Une série « ligne » après la plage supprimée recule de
-                // `count`. Une série dont la ligne est dans la plage supprimée
-                // reste telle quelle (décision ouverte, #307 D1) : elle trace
-                // alors la ligne qui a pris sa place, ou rien au-delà de la
-                // feuille (NaN, invariant 10).
+                // A "row" series after the deleted range moves back by
+                // `count`. A series whose row is inside the deleted range
+                // stays as it is (open decision, #307 D1): it then plots
+                // the row that took its place, or nothing beyond the
+                // sheet (NaN, invariant 10).
                 let moved = shifted_row_specs(project.tree(), sheet, |r| {
                     (r >= at.saturating_add(count)).then(|| r - count)
                 });
@@ -1297,16 +1288,16 @@ impl History {
                 })
             }
             Command::DeleteCells { columns, at, count } => {
-                // Avant toute mutation : un refus ne laisse aucun état partiel.
+                // Before any mutation: a refusal leaves no partial state.
                 for column in &columns {
                     check_not_calculated(project, *column)?;
                 }
-                // Colonne par colonne, indépendamment — contrairement à
-                // `DeleteRows`, `columns` n'est pas nécessairement "toutes
-                // les colonnes de la feuille" : c'est la sélection explicite
-                // de l'appelant (une colonne sans ligne `at`, ou listée en
-                // double, est ignorée silencieusement, comme `row_targets`
-                // le fait déjà pour `DeleteRows`).
+                // Column by column, independently — unlike
+                // `DeleteRows`, `columns` is not necessarily "all
+                // the columns of the sheet": it is the explicit selection
+                // of the caller (a column with no row `at`, or listed
+                // twice, is silently ignored, as `row_targets`
+                // already does for `DeleteRows`).
                 let mut removed = Vec::new();
                 let mut seen = HashSet::new();
                 for column in columns {
@@ -1353,8 +1344,8 @@ impl History {
                 })
             }
             Command::SetColumnMeta { column, meta } => {
-                // Une formule sur une colonne de sortie d'un calcul : deux
-                // sources de vérité pour les mêmes cellules.
+                // A formula on an output column of a calculation: two
+                // sources of truth for the same cells.
                 if meta.formula.is_some() {
                     if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
                         return Err(CoreError::CalculatedColumnReadOnly {
@@ -1365,14 +1356,14 @@ impl History {
                     }
                 }
                 let before = project.set_column_meta(column, meta.clone())?;
-                // Voir la doc de `DataDelta::ColumnMeta::values_before` :
-                // capturé seulement à la transition « pas de formule avant,
-                // formule après » — c'est la colonne qui perd, dans
-                // l'instant, sa qualité de source de vérité au profit du
-                // recalcul (`stokesforge-session::recalc::recalc_formulas`, hors
-                // historique). Lu **après** `set_column_meta` : cet appel ne
-                // touche jamais aux valeurs, seulement à `meta`, donc l'ordre
-                // ne change rien à ce qui est capturé ici.
+                // See the doc of `DataDelta::ColumnMeta::values_before`:
+                // captured only at the transition "no formula before,
+                // formula after" — it is the column that loses, at once,
+                // its quality of source of truth in favor of the
+                // recalculation (`stokesforge-session::recalc::recalc_formulas`,
+                // outside the history). Read **after** `set_column_meta`: that
+                // call never touches the values, only `meta`, so the order
+                // changes nothing about what is captured here.
                 let values_before = if before.formula.is_none() && meta.formula.is_some() {
                     Some(column_state(project, column)?)
                 } else {
@@ -1430,22 +1421,22 @@ impl History {
             | Command::RemoveCalculation { .. }
             | Command::TransposeRows { .. }
             | Command::RecalculateTranspose { .. } => {
-                unreachable!("apply_data appelée avec une commande structurelle")
+                unreachable!("apply_data called with a structural command")
             }
         }
     }
 
-    /// Annule une entrée. Une macro s'annule en ordre **inverse**.
+    /// Undoes an entry. A macro is undone in **reverse** order.
     fn revert(project: &mut Project, entry: &Entry) -> CommandResult<()> {
         match entry {
             Entry::Structural { before, .. } => {
                 // A7 (`guide-de-correction-robustesse.md` §F2) —
-                // `replace_tree` restaure l'arbre `before` tel quel,
-                // compteurs de version compris : une colonne peut alors
-                // reculer vers un numéro qu'un contenu différent (le sien,
-                // à un autre instant de son histoire) porte déjà. On
-                // mémorise l'arbre qu'on quitte avant de le remplacer, pour
-                // pouvoir comparer les deux ensuite — voir
+                // `replace_tree` restores the `before` tree as it is,
+                // version counters included: a column can then go
+                // back to a number that a different content (its own,
+                // at another moment of its history) already carries. We
+                // remember the tree we leave before replacing it, to
+                // be able to compare the two afterwards — see
                 // `restamp_regressed_versions`.
                 let discarded = Arc::clone(project.tree());
                 project.replace_tree(Arc::clone(before));
@@ -1462,7 +1453,7 @@ impl History {
         }
     }
 
-    /// Rétablit une entrée. Une macro se rejoue en ordre **direct**.
+    /// Redoes an entry. A macro is replayed in **forward** order.
     fn reapply(project: &mut Project, entry: &Entry) -> CommandResult<()> {
         match entry {
             Entry::Structural { after, .. } => {
@@ -1479,7 +1470,7 @@ impl History {
         }
     }
 
-    /// Rejoue un delta de données à l'envers, dans l'arbre courant.
+    /// Replays a data delta backwards, in the current tree.
     fn revert_delta(project: &mut Project, delta: &DataDelta) -> CommandResult<()> {
         match delta {
             DataDelta::Cells {
@@ -1489,9 +1480,9 @@ impl History {
                 before_length,
                 ..
             } => {
-                // Deux temps : réécrire ce qui a été écrasé, puis rendre à la
-                // colonne sa longueur (une écriture au-delà de la fin l'avait
-                // allongée, et `set_values` ne raccourcit jamais).
+                // Two steps: rewrite what was overwritten, then give the
+                // column back its length (a write beyond the end had
+                // extended it, and `set_values` never shortens).
                 project.set_values(*column, *start, before.clone())?;
                 project.set_length(*column, *before_length)?;
                 Ok(())
@@ -1548,12 +1539,12 @@ impl History {
                 ..
             } => {
                 project.set_column_meta(*column, ColumnMeta::clone(before))?;
-                // Voir la doc de `DataDelta::ColumnMeta::values_before` : la
-                // colonne redevient une source de vérité ordinaire, ses
-                // valeurs d'avant la formule doivent revenir avec elle — sans
-                // quoi le recalcul qui suit (`stokesforge-session::recalc::
-                // recalc_formulas`) ignore une colonne qui n'a plus de
-                // formule et laisse les valeurs calculées en place.
+                // See the doc of `DataDelta::ColumnMeta::values_before`: the
+                // column becomes an ordinary source of truth again, its
+                // values from before the formula must come back with it —
+                // otherwise the recalculation that follows (`stokesforge-session::recalc::
+                // recalc_formulas`) ignores a column that no longer has a
+                // formula and leaves the computed values in place.
                 if let Some((column_type, values)) = values_before {
                     project.restore_column(*column, *column_type, values.clone())?;
                 }
@@ -1570,7 +1561,7 @@ impl History {
         }
     }
 
-    /// Rejoue un delta de données à l'endroit, dans l'arbre courant.
+    /// Replays a data delta forwards, in the current tree.
     fn reapply_delta(project: &mut Project, delta: &DataDelta) -> CommandResult<()> {
         match delta {
             DataDelta::Cells {
@@ -1579,7 +1570,7 @@ impl History {
                 after,
                 ..
             } => {
-                // La longueur suit l'écriture : pas de `set_length` ici.
+                // The length follows the write: no `set_length` here.
                 project.set_values(*column, *start, after.clone())?;
                 Ok(())
             }
@@ -1600,9 +1591,9 @@ impl History {
             DataDelta::DeleteRows {
                 at, removed, plots, ..
             } => {
-                // Colonne par colonne, et non `delete_rows` au niveau feuille :
-                // seules les colonnes réellement touchées la première fois
-                // doivent l'être à nouveau.
+                // Column by column, and not `delete_rows` at sheet level:
+                // only the columns actually affected the first time
+                // must be affected again.
                 for (column, block) in removed {
                     project.delete_column_rows(*column, *at, block.len())?;
                 }
@@ -1612,9 +1603,9 @@ impl History {
                 Ok(())
             }
             DataDelta::DeleteCells { at, removed, .. } => {
-                // Colonne par colonne, comme pour `DeleteRows` : seules les
-                // colonnes réellement touchées la première fois le sont à
-                // nouveau.
+                // Column by column, as for `DeleteRows`: only the
+                // columns actually affected the first time are affected
+                // again.
                 for (column, block) in removed {
                     project.delete_column_rows(*column, *at, block.len())?;
                 }
@@ -1649,14 +1640,14 @@ impl History {
 }
 
 impl Default for History {
-    /// Pile neuve aux deux limites par défaut ([`DEFAULT_LIMIT`],
+    /// New stack with the two default limits ([`DEFAULT_LIMIT`],
     /// [`DEFAULT_BYTE_LIMIT`]).
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Entrée structurelle : l'arbre d'avant et celui d'après, deux pointeurs.
+/// Structural entry: the tree before and the tree after, two pointers.
 fn structural(before: &Arc<Tree>, project: &Project, label: HistoryLabel) -> Entry {
     Entry::Structural {
         before: Arc::clone(before),
@@ -1665,23 +1656,22 @@ fn structural(before: &Arc<Tree>, project: &Project, label: HistoryLabel) -> Ent
     }
 }
 
-/// Vrai si `entry`, quoique produite par une commande acceptée, n'a
-/// concrètement rien changé (F5, `guide-de-correction-robustesse.md`) : une
-/// entrée pareille ne doit pas occuper de cran d'annulation.
+/// True if `entry`, although produced by an accepted command, concretely
+/// changed nothing (F5, `guide-de-correction-robustesse.md`): such an
+/// entry must not take an undo slot.
 ///
-/// - `Structural` : `before == after` couvre tout command structurelle
-///   qui laisse l'arbre identique — `Rename` vers le nom déjà porté
-///   (« Renommer M en M », §7.3 du guide) en est un cas, `Move` vers sa
-///   position courante en serait un autre, sans qu'aucun des deux ait
-///   besoin d'être reconnu par son nom : la comparaison structurelle des
-///   deux arbres (`Tree` dérive `PartialEq`) les attrape tous les deux de
-///   la même façon.
-/// - `Data` : seuls `InsertRows`/`DeleteRows` peuvent cibler zéro colonne
-///   (voir `Project::row_targets`) — `Cells` et `ColumnType` écrivent
-///   toujours quelque chose dès qu'`apply` les a acceptés.
-/// - `Macro` : une macro refermée avec au moins une entrée a, par
-///   construction, appliqué au moins un delta réel (`end_macro` filtre déjà
-///   les macros vides) — jamais un no-op à ce niveau.
+/// - `Structural`: `before == after` covers any structural command
+///   that leaves the tree identical — `Rename` to the name already held
+///   ("Rename M to M", §7.3 of the guide) is one case, `Move` to its current
+///   position would be another, without either needing
+///   to be recognized by name: the structural comparison of the two trees
+///   (`Tree` derives `PartialEq`) catches both in the same way.
+/// - `Data`: only `InsertRows`/`DeleteRows` can target zero columns
+///   (see `Project::row_targets`) — `Cells` and `ColumnType` always
+///   write something once `apply` has accepted them.
+/// - `Macro`: a macro closed with at least one entry has, by
+///   construction, applied at least one real delta (`end_macro` already filters
+///   empty macros) — never a no-op at this level.
 fn entry_has_no_effect(entry: &Entry) -> bool {
     match entry {
         Entry::Structural { before, after, .. } => before == after,
@@ -1689,10 +1679,10 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
             DataDelta::InsertRows { columns, .. } => columns.is_empty(),
             DataDelta::DeleteRows { removed, .. } => removed.is_empty(),
             DataDelta::DeleteCells { removed, .. } => removed.is_empty(),
-            // Comme `Cells`/`ColumnType` : dès qu'`apply` les a acceptées,
-            // ces quatre commandes ont toujours remplacé quelque chose (un
-            // remplacement par une valeur égale reste un remplacement, pas
-            // un cas particulier à détecter ici).
+            // Like `Cells`/`ColumnType`: once `apply` has accepted them,
+            // these four commands have always replaced something (a
+            // replacement by an equal value is still a replacement, not
+            // a special case to detect here).
             DataDelta::Cells { .. }
             | DataDelta::ColumnType { .. }
             | DataDelta::WindowMeta { .. }
@@ -1705,10 +1695,10 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
     }
 }
 
-/// Une colonne produite par un calcul d'analyse (#181) refuse aussi les
-/// écritures qui changeraient sa forme (type, cellules supprimées) : le
-/// recalcul les défairait, ou échouerait sans le dire (`TypeMismatch` sur une
-/// colonne passée en texte).
+/// A column produced by an analysis calculation (#181) also refuses
+/// writes that would change its shape (type, deleted cells): the
+/// recalculation would undo them, or fail without saying so (`TypeMismatch` on a
+/// column switched to text).
 fn check_not_calculated(project: &Project, column: NodeId) -> CommandResult<()> {
     if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
         return Err(CoreError::CalculatedColumnReadOnly {
@@ -1720,24 +1710,24 @@ fn check_not_calculated(project: &Project, column: NodeId) -> CommandResult<()> 
     Ok(())
 }
 
-/// Les deux refus que toute écriture de cellules — `SetCells` comme
-/// `SetCellsPromoting` — doit opposer **avant** de toucher au modèle, pour
-/// qu'un échec ne laisse aucun état partiel.
+/// The two refusals that every cell write — `SetCells` as well as
+/// `SetCellsPromoting` — must raise **before** touching the model, so
+/// that a failure leaves no partial state.
 ///
-/// 1. **A2** (`guide-de-correction-robustesse.md` §F6) — la condition
-///    optimiste `expected_version`, vérifiée ICI, sur l'arbre courant au
-///    moment d'appliquer cette commande (pas un instantané que l'appelant a
-///    lu plus tôt), jamais avant l'envoi : c'est tout le sens du correctif.
-/// 2. **Colonnes calculées** (v1, `stokesforge_core::formula`) — une
-///    colonne-formule n'accepte l'écriture directe de cellules d'aucun
-///    client : ses valeurs ne sont recalculées que par
-///    `stokesforge-session::actor` après coup, en dehors de l'historique.
-///    Même refus pour une colonne produite par un calcul d'analyse (#181).
+/// 1. **A2** (`guide-de-correction-robustesse.md` §F6) — the optimistic
+///    condition `expected_version`, checked HERE, on the current tree at the
+///    moment of applying this command (not a snapshot that the caller
+///    read earlier), never before sending: that is the whole point of the fix.
+/// 2. **Calculated columns** (v1, `stokesforge_core::formula`) — a
+///    formula column accepts direct cell writes from no
+///    client: its values are recalculated only by
+///    `stokesforge-session::actor` afterwards, outside the history.
+///    Same refusal for a column produced by an analysis calculation (#181).
 ///
-/// Une colonne absente ou d'un autre type n'est traitée ni par l'un ni par
-/// l'autre : c'est `Project::set_values`, ensuite, qui rendra l'erreur
-/// naturelle (`UnknownNode`/`Structure`) — laquelle ne doit pas se faire
-/// maquiller en désaccord de version.
+/// A missing column or one of another type is handled by neither
+/// one: it is `Project::set_values`, afterwards, that will return the
+/// natural error (`UnknownNode`/`Structure`) — which must not be
+/// disguised as a version disagreement.
 fn check_writable_cells(
     project: &Project,
     column: NodeId,
@@ -1774,9 +1764,9 @@ fn check_writable_cells(
     Ok(())
 }
 
-/// Écrit `values` et construit le [`DataDelta::Cells`] correspondant. Le bloc
-/// est cloné avant application : c'est le `after` du delta, ce qu'il faudra
-/// réécrire pour rétablir.
+/// Writes `values` and builds the matching [`DataDelta::Cells`]. The block
+/// is cloned before applying: it is the `after` of the delta, what will have
+/// to be rewritten to redo.
 fn write_cells(
     project: &mut Project,
     column: NodeId,
@@ -1794,12 +1784,12 @@ fn write_cells(
     })
 }
 
-/// Type et valeurs actuels d'une colonne (snapshot d'un changement de type).
-/// Specs des graphes dont au moins une série « ligne » (`row = Some(r)`,
-/// ancre `y` dans `sheet`) bouge selon `shift` (`Some(nouvelle ligne)` ou
-/// `None` pour la laisser). Pur : lit l'arbre, ne mute rien. Une ancre
-/// rompue (colonne absente) est ignorée. Rend `(graphe, avant, après)` pour
-/// les seuls graphes modifiés.
+/// Current type and values of a column (snapshot of a type change).
+/// Specs of the graphs where at least one "row" series (`row = Some(r)`,
+/// `y` anchor in `sheet`) moves according to `shift` (`Some(new row)` or
+/// `None` to leave it). Pure: reads the tree, mutates nothing. A broken
+/// anchor (missing column) is ignored. Returns `(graph, before, after)` for
+/// the modified graphs only.
 fn shifted_row_specs(
     tree: &Tree,
     sheet: NodeId,
@@ -1832,8 +1822,8 @@ fn shifted_row_specs(
     out
 }
 
-/// Écrit les specs relevés par [`shifted_row_specs`] (par
-/// `Project::set_plot_spec`, invariant 1) et rend le delta `plots`.
+/// Writes the specs recorded by [`shifted_row_specs`] (through
+/// `Project::set_plot_spec`, invariant 1) and returns the `plots` delta.
 fn write_row_specs(
     project: &mut Project,
     moved: Vec<(NodeId, PlotSpec, PlotSpec)>,
@@ -1853,53 +1843,53 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
 }
 
 // ===========================================================================
-// A7 — le compteur de version d'une colonne ne recule jamais (§F2)
+// A7 — the version counter of a column never goes back (§F2)
 // ===========================================================================
 //
-// `Entry::Structural::revert` remplace l'arbre entier (`Project::replace_tree`),
-// ce qui restaure aussi le compteur de version de chaque colonne qu'il porte
-// — voir la doctrine des estampilles du guide (§F2, tableau) : une version de
-// contenu doit être monotone et ne jamais désigner deux contenus. Restaurer un
-// ancien arbre peut faire reculer le compteur d'une colonne dont le contenu a,
-// entre-temps, divergé (par une écriture normale, ou par l'annulation d'une
-// écriture normale — « annuler est une écriture de plus », §6 du guide) :
-// une écriture future repartant de ce numéro plus bas peut alors retomber sur
-// un numéro déjà porté par un autre contenu de cette même colonne.
+// `Entry::Structural::revert` replaces the whole tree (`Project::replace_tree`),
+// which also restores the version counter of each column it carries
+// — see the doctrine of the stamps in the guide (§F2, table): a content
+// version must be monotonic and never designate two contents. Restoring an
+// old tree can make the counter go back for a column whose content has,
+// in the meantime, diverged (by a normal write, or by the undo of a
+// normal write — « annuler est une écriture de plus », §6 of the guide):
+// a future write starting again from this lower number can then land on
+// a number already carried by another content of that same column.
 //
-// Deux versions antérieures de ce correctif calculaient un numéro « frais »
-// localement — d'abord depuis les deux arbres directement impliqués dans la
-// restauration, puis depuis tout ce que l'historique retenait encore — et
-// toutes deux se sont avérées insuffisantes : un balayage aléatoire
-// (`b14_une_version_ne_designe_jamais_deux_contenus`) a trouvé qu'une
-// écriture ORDINAIRE (jamais passée par un `revert`) peut, de son côté,
-// faire progresser une colonne jusqu'à un numéro que ni l'un ni l'autre
-// calcul local ne pouvait prévoir. Le seul calcul qui ferme la question pour
-// de bon est un compteur unique tenu par `Project` lui-même
-// (`Project::next_column_version`, doctrine des estampilles du guide :
-// « attribuée par le projet ») et consulté par **toute** écriture de
-// colonne, ordinaire ou restauration — jamais un calcul dérivé d'un
-// sous-ensemble de ce que le projet a vu.
+// Two earlier versions of this fix computed a "fresh" number
+// locally — first from the two trees directly involved in the
+// restoration, then from everything the history still kept — and
+// both proved insufficient: a random sweep
+// (`b14_une_version_ne_designe_jamais_deux_contenus`) found that an
+// ORDINARY write (never through a `revert`) can, for its part,
+// advance a column to a number that neither local
+// computation could foresee. The only computation that closes the question for
+// good is a single counter held by `Project` itself
+// (`Project::next_column_version`, doctrine of the stamps of the guide:
+// « attribuée par le projet ») and consulted by **every** column
+// write, ordinary or restoration — never a computation derived from a
+// subset of what the project has seen.
 
-/// Ré-attribue un numéro de version **frais** (tiré de [`Project::
-/// next_column_version`]) à chaque colonne dont le buffer n'est **pas** le
-/// même objet dans `discarded` et `restored` — appelée juste après que
-/// `revert` a remplacé l'arbre courant (`discarded`, celui qu'on quitte) par
+/// Reassigns a **fresh** version number (drawn from [`Project::
+/// next_column_version`]) to each column whose buffer is **not** the
+/// same object in `discarded` and `restored` — called just after
+/// `revert` has replaced the current tree (`discarded`, the one we leave) by
 /// `restored`.
 ///
-/// Comparée par **identité de pointeur** (voir [`column_footprint`]), jamais
-/// par égalité de valeurs : deux buffers distincts qui contiendraient par
-/// hasard les mêmes octets restent deux allocations différentes, donc deux
-/// moments distincts de l'histoire de cette colonne (la copie-à-l'écriture
-/// en crée une nouvelle dès qu'un buffer partagé est modifié — voir
-/// `Column::set_values`) ; son compteur a donc pu avancer sans que
-/// `restored` (figé au moment où l'entrée a été empilée) le sache, et
-/// pourrait reculer si on ne le touche pas. Une colonne dont le buffer est
-/// resté le **même** objet dans les deux arbres n'a subi aucune écriture
-/// entre les deux : rien n'a pu avancer, rien ne peut reculer, et la
-/// laisser intacte évite un `Arc::make_mut` pour rien (D3 du guide veille
-/// déjà sur ce genre de coût). Une colonne absente de `discarded` (elle
-/// vient de réapparaître) ou de `restored` (elle disparaît) n'est jamais
-/// concernée : voir le corps.
+/// Compared by **pointer identity** (see [`column_footprint`]), never
+/// by equality of values: two distinct buffers that happened to contain
+/// the same bytes remain two different allocations, so two distinct
+/// moments of the history of this column (copy-on-write
+/// creates a new one as soon as a shared buffer is modified — see
+/// `Column::set_values`); its counter may therefore have advanced without
+/// `restored` (frozen when the entry was pushed) knowing it, and
+/// could go back if we do not touch it. A column whose buffer
+/// stayed the **same** object in both trees has suffered no write
+/// between the two: nothing could advance, nothing can go back, and
+/// leaving it intact avoids an `Arc::make_mut` for nothing (D3 of the guide
+/// already watches over this kind of cost). A column absent from `discarded` (it
+/// has just reappeared) or from `restored` (it disappears) is never
+/// concerned: see the body.
 fn restamp_regressed_versions(
     project: &mut Project,
     discarded: &Tree,
@@ -1910,10 +1900,10 @@ fn restamp_regressed_versions(
         let Some(restored_column) = node.as_column() else {
             continue;
         };
-        // Absente de `discarded` : elle vient de réapparaître (annulation
-        // d'une suppression, par exemple) — rien n'a pu s'écrire dans un
-        // nœud qui n'existait pas encore, son compteur ne peut pas avoir
-        // régressé.
+        // Absent from `discarded`: it has just reappeared (undo
+        // of a deletion, for example) — nothing could be written to a
+        // node that did not exist yet, its counter cannot have
+        // regressed.
         let Some(discarded_column) = discarded.node(id).and_then(|node| node.as_column()) else {
             continue;
         };
@@ -1931,40 +1921,40 @@ fn restamp_regressed_versions(
 }
 
 // ===========================================================================
-// Empreinte mémoire des entrées
+// Memory footprint of entries
 // ===========================================================================
 //
-// Le principe : chaque entrée connaît, une fois pour toutes calculée à son
-// empilement, l'ensemble des buffers qu'elle retient — une collection de
-// paires (adresse, octets), l'adresse ne servant que d'identité. Le total
-// retenu par `History` (voir `History::recompute_retained_bytes`) est
-// ensuite l'union de ces ensembles déjà connus, moins les buffers de l'arbre
-// courant : une opération sur des tables de hachage, jamais un nouveau
-// parcours des arbres retenus par les entrées.
+// The principle: each entry knows, computed once and for all when it is
+// pushed, the set of buffers it keeps — a collection of
+// (address, bytes) pairs, the address serving only as identity. The total
+// retained by `History` (see `History::recompute_retained_bytes`) is
+// then the union of these already known sets, minus the buffers of the
+// current tree: an operation on hash tables, never a new
+// walk of the trees kept by the entries.
 
-/// Empreinte d'une entrée fraîchement construite par [`History::apply`] —
-/// toujours `Structural` ou `Data`, jamais `Macro` (une macro n'est produite
-/// que par [`History::end_macro`], à partir des empreintes déjà connues de
-/// ses entrées, sans repasser par cette fonction).
+/// Footprint of an entry freshly built by [`History::apply`] —
+/// always `Structural` or `Data`, never `Macro` (a macro is produced
+/// only by [`History::end_macro`], from the already known footprints of
+/// its entries, without going through this function again).
 fn footprint_of(entry: &Entry) -> Footprint {
     match entry {
         Entry::Structural { before, after, .. } => {
-            // Structure : le buffer de chaque colonne de l'arbre d'avant
-            // **et** de l'arbre d'après — un arbre immuable retient tous ses
-            // nœuds, donc toutes ses colonnes.
+            // Structure: the buffer of each column of the tree before
+            // **and** of the tree after — an immutable tree keeps all its
+            // nodes, so all its columns.
             let mut out = Footprint::new();
             insert_tree_footprint(&mut out, before);
             insert_tree_footprint(&mut out, after);
             out
         }
-        // Données : pas d'arbre retenu, donc pas de buffer de colonne — le
-        // coût propre est celui des valeurs du delta (anciennes et
-        // nouvelles), directement connu.
+        // Data: no tree kept, so no column buffer — the own
+        // cost is that of the values of the delta (old and
+        // new), directly known.
         Entry::Data { delta, .. } => data_delta_footprint(delta),
         Entry::Macro { entries, .. } => {
-            // N'arrive pas en pratique (voir la doc de la fonction) : filet
-            // de sécurité correct — l'union récursive des enfants — plutôt
-            // qu'un panic.
+            // Does not happen in practice (see the doc of the function): a
+            // correct safety net — the recursive union of the children — rather
+            // than a panic.
             let mut out = Footprint::new();
             for child in entries {
                 out.extend(footprint_of(child));
@@ -1974,9 +1964,9 @@ fn footprint_of(entry: &Entry) -> Footprint {
     }
 }
 
-/// Union de plusieurs empreintes déjà connues (les entrées d'une macro qui
-/// se referme, par exemple) : une fusion de tables de hachage, jamais un
-/// nouveau parcours d'arbre.
+/// Union of several already known footprints (the entries of a macro that
+/// is closing, for example): a merge of hash tables, never a
+/// new tree walk.
 fn union_footprint<'a>(footprints: impl Iterator<Item = &'a Footprint>) -> Footprint {
     let mut out = Footprint::new();
     for footprint in footprints {
@@ -1985,7 +1975,7 @@ fn union_footprint<'a>(footprints: impl Iterator<Item = &'a Footprint>) -> Footp
     out
 }
 
-/// Ajoute à `out` le buffer de chaque colonne de `tree`.
+/// Adds to `out` the buffer of each column of `tree`.
 fn insert_tree_footprint(out: &mut Footprint, tree: &Tree) {
     for (_, node) in tree.iter() {
         if let Some(column) = node.as_column() {
@@ -1994,17 +1984,17 @@ fn insert_tree_footprint(out: &mut Footprint, tree: &Tree) {
     }
 }
 
-/// Ajoute à `out` le buffer d'une colonne : adresse et taille en octets.
+/// Adds to `out` the buffer of a column: address and size in bytes.
 fn insert_column_footprint(out: &mut Footprint, values: &ColumnValues) {
     let (ptr, bytes) = column_footprint(values);
     out.insert(ptr, bytes);
 }
 
-/// Adresse (identité — jamais déréférencée) et taille en octets du buffer
-/// d'une colonne. `8 × longueur` pour un buffer de flottants ; pour une
-/// colonne mixte, une estimation (voir [`mixed_buffer_bytes`]), le coût
-/// exact d'allocation par `String` n'étant pas modélisable indépendamment de
-/// l'allocateur.
+/// Address (identity — never dereferenced) and size in bytes of the buffer
+/// of a column. `8 × length` for a float buffer; for a
+/// mixed column, an estimate (see [`mixed_buffer_bytes`]), the exact
+/// allocation cost per `String` not being modelable independently of
+/// the allocator.
 fn column_footprint(values: &ColumnValues) -> (usize, usize) {
     match values {
         ColumnValues::Float(arc) => (
@@ -2015,9 +2005,9 @@ fn column_footprint(values: &ColumnValues) -> (usize, usize) {
     }
 }
 
-/// Adresses des buffers de colonnes présents dans `tree` — le côté droit de
-/// la soustraction : un buffer que l'arbre courant utilise encore n'est pas
-/// un coût de l'historique, il serait là de toute façon.
+/// Addresses of the column buffers present in `tree` — the right side of
+/// the subtraction: a buffer that the current tree still uses is not
+/// a cost of the history, it would be there anyway.
 fn current_tree_pointers(tree: &Tree) -> HashSet<usize> {
     tree.iter()
         .filter_map(|(_, node)| node.as_column())
@@ -2025,11 +2015,11 @@ fn current_tree_pointers(tree: &Tree) -> HashSet<usize> {
         .collect()
 }
 
-/// Empreinte d'un delta de données : pas d'arbre retenu, donc pas de buffer
-/// de colonne partagé — seules les valeurs propres au delta comptent
-/// (anciennes **et** nouvelles, quand elles existent), directement connues
-/// sans qu'il soit besoin de les dédupliquer avec quoi que ce soit d'autre
-/// (elles ne sont jamais partagées avec l'arbre).
+/// Footprint of a data delta: no tree kept, so no shared column
+/// buffer — only the values specific to the delta count
+/// (old **and** new, when they exist), directly known
+/// without needing to deduplicate them with anything else
+/// (they are never shared with the tree).
 fn data_delta_footprint(delta: &DataDelta) -> Footprint {
     let mut out = Footprint::new();
     match delta {
@@ -2038,9 +2028,9 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             insert_block_footprint(&mut out, after);
         }
         DataDelta::InsertRows { .. } => {
-            // Rien à retenir : `InsertRows` ne relève que les colonnes
-            // touchées, la ligne et le compte — aucune valeur stockée (les
-            // lignes insérées sont manquantes par construction).
+            // Nothing to keep: `InsertRows` records only the affected
+            // columns, the row and the count — no stored value (the
+            // inserted rows are missing by construction).
         }
         DataDelta::DeleteRows { removed, .. } | DataDelta::DeleteCells { removed, .. } => {
             for (_, block) in removed {
@@ -2048,26 +2038,26 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
             }
         }
         DataDelta::ColumnType { before, after, .. } => {
-            // Seul delta de données qui porte un `ColumnValues` (donc un
-            // `Arc` potentiellement partagé avec l'arbre courant, par
-            // exemple juste après la conversion) plutôt qu'un `ValueBlock`
-            // possédé en propre : même fonction que pour une colonne
-            // d'arbre, pour que la déduplication par adresse joue son rôle.
+            // Only data delta that carries a `ColumnValues` (so an
+            // `Arc` potentially shared with the current tree, for
+            // example just after the conversion) rather than a `ValueBlock`
+            // owned by itself: same function as for a tree
+            // column, so that deduplication by address plays its role.
             insert_column_footprint(&mut out, &before.1);
             insert_column_footprint(&mut out, &after.1);
         }
-        // Métadonnées de fenêtre/note et spec de graphe : aucun buffer
-        // partagé avec l'arbre à comptabiliser, contrairement à
-        // `ColumnType` — juste quelques chaînes ou identités, jamais le
-        // volume qui justifie ce mécanisme (colonnes de données). Même
-        // choix que `InsertRows` ci-dessus.
+        // Window/note metadata and graph spec: no buffer
+        // shared with the tree to account for, unlike
+        // `ColumnType` — just a few strings or identities, never the
+        // volume that justifies this mechanism (data columns). Same
+        // choice as `InsertRows` above.
         DataDelta::WindowMeta { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::PlotSpec { .. }
         | DataDelta::SavedColors { .. } => {}
-        // `ColumnMeta` rejoint `ColumnType` dès qu'elle porte `values_before`
-        // (voir sa doc) : c'est alors, elle aussi, un `ColumnValues`
-        // potentiellement partagé avec l'arbre courant.
+        // `ColumnMeta` joins `ColumnType` as soon as it carries `values_before`
+        // (see its doc): it is then, too, a `ColumnValues`
+        // potentially shared with the current tree.
         DataDelta::ColumnMeta { values_before, .. } => {
             if let Some((_, values)) = values_before {
                 insert_column_footprint(&mut out, values);
@@ -2077,24 +2067,24 @@ fn data_delta_footprint(delta: &DataDelta) -> Footprint {
     out
 }
 
-/// Colonnes que `command` pourrait toucher, avec l'adresse et la taille du
-/// buffer que chacune porte **avant** son application — un simple emprunt de
-/// `tree`, jamais gardé vivant au-delà de cet appel (voir [`PriorColumns`] et
-/// la doc de [`History::execute`], D3 (2ᵉ moitié) du guide).
+/// Columns that `command` could touch, with the address and size of the
+/// buffer each one carries **before** its application — a simple borrow of
+/// `tree`, never kept alive beyond this call (see [`PriorColumns`] and
+/// the doc of [`History::execute`], D3 (2nd half) of the guide).
 ///
-/// Cible exactement la ou les colonnes que la commande *nomme* (`column`
-/// pour `SetCells`/`SetColumnType`) ou, pour `InsertRows`/`DeleteRows` qui ne
-/// connaissent leurs cibles exactes qu'une fois `Project::row_targets`
-/// consulté (privé à `stokesforge-core`), **toutes** les colonnes de la feuille
-/// visée — un sur-ensemble borné par la taille de cette feuille, jamais par
-/// celle du projet. [`just_orphaned_by_write`] n'y cherchera ensuite que les
-/// colonnes que le delta, une fois la commande appliquée, dit réellement
-/// touchées : le sur-ensemble ne fait jamais basculer orphelin un buffer qui
-/// ne l'est pas.
+/// Targets exactly the column(s) that the command *names* (`column`
+/// for `SetCells`/`SetColumnType`) or, for `InsertRows`/`DeleteRows` which
+/// know their exact targets only once `Project::row_targets` has been
+/// consulted (private to `stokesforge-core`), **all** the columns of the
+/// targeted sheet — a superset bounded by the size of that sheet, never by
+/// that of the project. [`just_orphaned_by_write`] will then look in it only for
+/// the columns that the delta, once the command is applied, says were really
+/// touched: the superset never marks as orphaned a buffer that
+/// is not one.
 ///
-/// Vide pour une commande structurelle (elle n'est jamais appelée avec l'une
-/// d'elles depuis [`History::execute`], mais rester total ici évite un
-/// panique pour un coût nul).
+/// Empty for a structural command (it is never called with one
+/// from [`History::execute`], but staying total here avoids a
+/// panic at no cost).
 fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
     let mut out = PriorColumns::new();
     let mut record = |id: NodeId| {
@@ -2120,11 +2110,11 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
                 record(id);
             }
         }
-        // Aucune de ces commandes ne cible une colonne dont il faudrait
-        // relever le buffer avant application : les huit structurelles
-        // n'atteignent jamais cette fonction (voir la doc ci-dessus), et les
-        // quatre commandes de métadonnées/spec ne touchent jamais aux
-        // valeurs d'une colonne — `SetColumnMeta` remplace `ColumnMeta`, pas
+        // None of these commands targets a column whose buffer would have
+        // to be recorded before applying: the eight structural ones
+        // never reach this function (see the doc above), and the
+        // four metadata/spec commands never touch the values of a column
+        // — `SetColumnMeta` replaces `ColumnMeta`, not
         // `ColumnValues`.
         Command::AddColumn { .. }
         | Command::DeleteColumn { .. }
@@ -2157,17 +2147,17 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
     out
 }
 
-/// Buffer(s) que les colonnes touchées par `delta` avaient dans `prior`
-/// (capturé par [`prior_columns`] avant cette commande) — ce que la
-/// copie-à-l'écriture vient de remplacer. Un buffer qui n'y figure pas
-/// n'était pas déjà épinglé (voir [`History::pin_footprint`], qui ne fait
-/// rien pour un pointeur inconnu) : le chercher est donc sûr même quand rien
-/// n'a besoin de basculer orphelin.
+/// Buffer(s) that the columns touched by `delta` had in `prior`
+/// (captured by [`prior_columns`] before this command) — what
+/// copy-on-write has just replaced. A buffer that is not in it
+/// was not already pinned (see [`History::pin_footprint`], which does
+/// nothing for an unknown pointer): looking for it is therefore safe even when
+/// nothing needs to flip to orphaned.
 ///
-/// Une seule recherche par identifiant dans `prior` par colonne touchée —
-/// jamais un parcours de l'arbre — d'où le nom : `just_orphaned_by_write`
-/// donne les buffers qui *viennent de* quitter l'arbre courant à l'instant
-/// de cette écriture, pas tous ceux qu'une entrée plus ancienne retient.
+/// A single lookup by identifier in `prior` per touched column —
+/// never a tree walk — hence the name: `just_orphaned_by_write`
+/// gives the buffers that *have just* left the current tree at the instant
+/// of this write, not all those that an older entry keeps.
 fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint {
     let mut out = Footprint::new();
     let previous_buffer_of = |out: &mut Footprint, column: NodeId| {
@@ -2189,8 +2179,8 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
                 previous_buffer_of(&mut out, *column);
             }
         }
-        // Voir `prior_columns` et `data_delta_footprint` : ces quatre deltas
-        // ne portent jamais de buffer de colonne, rien à orpheliner ici.
+        // See `prior_columns` and `data_delta_footprint`: these four deltas
+        // never carry a column buffer, nothing to orphan here.
         DataDelta::WindowMeta { .. }
         | DataDelta::NoteText { .. }
         | DataDelta::ColumnMeta { .. }
@@ -2200,16 +2190,16 @@ fn just_orphaned_by_write(prior: &PriorColumns, delta: &DataDelta) -> Footprint 
     out
 }
 
-/// Ajoute à `out` le bloc `block` : l'adresse de son `Vec` (jamais partagée
-/// avec l'arbre — un `ValueBlock` de delta est toujours possédé en propre,
-/// donc jamais nette par soustraction contre l'arbre courant) et sa taille
-/// en octets.
+/// Adds to `out` the block `block`: the address of its `Vec` (never shared
+/// with the tree — a delta `ValueBlock` is always owned by itself,
+/// so never net by subtraction against the current tree) and its size
+/// in bytes.
 fn insert_block_footprint(out: &mut Footprint, block: &ValueBlock) {
     let (ptr, bytes) = block_footprint(block);
     out.insert(ptr, bytes);
 }
 
-/// Adresse et taille en octets d'un `ValueBlock`.
+/// Address and size in bytes of a `ValueBlock`.
 fn block_footprint(block: &ValueBlock) -> (usize, usize) {
     match block {
         ValueBlock::Float(values) => (
@@ -2220,16 +2210,16 @@ fn block_footprint(block: &ValueBlock) -> (usize, usize) {
     }
 }
 
-/// Coût fixe par élément d'un buffer à types mixtes : la taille d'une
-/// [`MixedCell`] dans le `Vec`, soit celle de sa plus grosse variante
-/// (`String`, `{ptr, len, cap}`) plus le discriminant — un `f64` n'ouvre
-/// aucune niche exploitable, contrairement au pointeur d'une `String`, donc
-/// ce n'est pas la taille d'un `Option<String>`.
+/// Fixed cost per element of a mixed-type buffer: the size of a
+/// [`MixedCell`] in the `Vec`, that of its biggest variant
+/// (`String`, `{ptr, len, cap}`) plus the discriminant — an `f64` opens
+/// no usable niche, unlike the pointer of a `String`, so
+/// this is not the size of an `Option<String>`.
 const MIXED_ELEMENT_OVERHEAD: usize = std::mem::size_of::<MixedCell>();
 
-/// Estimation de la taille d'un buffer à types mixtes : somme des octets
-/// UTF-8 des textes présents, plus [`MIXED_ELEMENT_OVERHEAD`] par cellule,
-/// quelle que soit sa variante.
+/// Estimate of the size of a mixed-type buffer: sum of the UTF-8 bytes
+/// of the texts present, plus [`MIXED_ELEMENT_OVERHEAD`] per cell,
+/// whatever its variant.
 fn mixed_buffer_bytes(values: &[MixedCell]) -> usize {
     values.iter().fold(0usize, |total, cell| {
         total

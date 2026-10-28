@@ -1,7 +1,7 @@
-//! Conversions écrites à la main entre les structures de transport
-//! (`schema.rs`) et le modèle en mémoire (`stokesforge_core`). Le format ne se
-//! dérive pas du modèle (voir la doc de crate) : ces fonctions sont le seul
-//! endroit où les deux mondes se rencontrent.
+//! Hand-written conversions between the transport structures
+//! (`schema.rs`) and the in-memory model (`stokesforge_core`). The format is not
+//! derived from the model (see the crate doc): these functions are the only
+//! place where the two worlds meet.
 
 use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
@@ -28,73 +28,73 @@ use crate::schema::{
     MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
-/// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
-/// (B2, `guide-de-correction-robustesse.md` §F3/F4) : un écran ne fait pas
-/// 10 000 lignes ou colonnes de sous-graphes. Au-delà, `record.row as usize`
-/// ne panique pas lui-même, mais le débordement se déplace plus loin, dans
+/// Upper bound of a panel coordinate (`row`/`column`) read from a file
+/// (B2, `guide-de-correction-robustesse.md` §F3/F4): a screen does not hold
+/// 10,000 rows or columns of subgraphs. Beyond that, `record.row as usize`
+/// does not panic by itself, but the overflow moves further on, into
 /// `PlotSpec::rows()`/`columns()` (`max + 1`).
 pub(crate) const MAX_PANEL_POSITION: u64 = 10_000;
 
-/// Borne haute de `histogram_bins` lue d'un fichier (B4, même section du
-/// guide) — la même que celle que `stokesforge_plot::BinCount` impose désormais
-/// au niveau du type (`stokesforge_plot::MAX_HISTOGRAM_BINS`) : un seul chiffre à
-/// changer si jamais il devait bouger. `ConvertError::ZeroHistogramBins`
-/// borne déjà le bas ; ceci borne le haut, avant que le rendu ne demande
-/// l'allocation qui ferait `abort()` le processus (des dizaines de
-/// gigaoctets, `edges` et `counts` confondus).
+/// Upper bound of `histogram_bins` read from a file (B4, same section of the
+/// guide) — the same as the one `stokesforge_plot::BinCount` now imposes
+/// at the type level (`stokesforge_plot::MAX_HISTOGRAM_BINS`): a single figure to
+/// change if it ever had to move. `ConvertError::ZeroHistogramBins`
+/// already bounds the low end; this one bounds the high end, before the renderer asks for
+/// the allocation that would `abort()` the process (tens of
+/// gigabytes, `edges` and `counts` together).
 pub(crate) use stokesforge_plot::MAX_HISTOGRAM_BINS;
 
-/// Erreur de décodage schéma → modèle qui n'est pas du ressort du cœur : une
-/// longueur de buffer flottant incohérente, ou une colonne dont le
-/// type et les valeurs décodées ne s'accordent pas (ne devrait jamais
-/// survenir pour un fichier écrit par ce crate — signe d'un fichier
-/// corrompu).
+/// Schema → model decoding error that is not the core's business: an
+/// inconsistent float buffer length, or a column whose
+/// decoded type and values do not agree (should never
+/// happen for a file written by this crate — sign of a corrupted
+/// file).
 #[derive(Debug)]
 pub(crate) enum ConvertError {
-    /// Le buffer `Float` d'une colonne n'a pas une longueur multiple de 8
-    /// (un `f64` fait 8 octets).
+    /// The `Float` buffer of a column has a length that is not a multiple of 8
+    /// (an `f64` is 8 bytes).
     BadFloatLength(usize),
-    /// Une étiquette de `ValuesRecord::Mixed` n'est ni `0` (vide), ni `1`
-    /// (nombre), ni `2` (texte) : rien ne dit alors dans lequel des deux
-    /// tableaux de valeurs chercher les lignes suivantes.
+    /// A tag of `ValuesRecord::Mixed` is neither `0` (empty), nor `1`
+    /// (number), nor `2` (text): nothing then says in which of the two
+    /// value arrays to look for the following rows.
     BadMixedTag(u8),
-    /// Les trois tableaux de `ValuesRecord::Mixed` ne s'accordent pas : les
-    /// étiquettes annoncent plus (ou moins) de nombres ou de textes que les
-    /// tableaux n'en portent.
+    /// The three arrays of `ValuesRecord::Mixed` do not agree: the
+    /// tags announce more (or fewer) numbers or texts than the
+    /// arrays carry.
     BadMixedLength {
-        /// Ce que les étiquettes annoncent.
+        /// What the tags announce.
         expected: usize,
-        /// Ce que le tableau correspondant porte.
+        /// What the corresponding array carries.
         found: usize,
-        /// `"numbers"` ou `"texts"`, pour le message.
+        /// `"numbers"` or `"texts"`, for the message.
         what: &'static str,
     },
-    /// Une colonne du fichier annonce plus de lignes que
-    /// `stokesforge_core::column::MAX_COLUMN_ROWS` (#316) : refusée avant
-    /// toute allocation, pour qu'un fichier forgé ne réserve pas des
-    /// gigaoctets.
+    /// A column of the file announces more rows than
+    /// `stokesforge_core::column::MAX_COLUMN_ROWS` (#316): refused before
+    /// any allocation, so that a forged file does not reserve
+    /// gigabytes.
     TooManyRows {
-        /// Nombre de lignes annoncé par le fichier.
+        /// Number of rows announced by the file.
         found: usize,
-        /// Plafond accepté.
+        /// Accepted cap.
         limit: usize,
     },
-    /// `Column::from_block` a refusé la paire (type, valeurs) reconstruite.
+    /// `Column::from_block` refused the rebuilt (type, values) pair.
     Core(CoreError),
-    /// `histogram_bins` d'une série vaut 0 dans le fichier. `stokesforge-plot`
-    /// exprime ce champ en `NonZeroU32` (décision R2 : zéro classe n'a pas de
-    /// réparation intéressante, autant refuser de le construire) — ne
-    /// survient jamais pour un fichier écrit par ce crate, signe d'un
-    /// fichier corrompu ou écrit par un outil tiers.
+    /// `histogram_bins` of a series is 0 in the file. `stokesforge-plot`
+    /// expresses this field as `NonZeroU32` (decision R2: zero bins has no
+    /// interesting repair, better to refuse to build it) — never
+    /// happens for a file written by this crate, sign of a
+    /// corrupted file or one written by a third-party tool.
     ZeroHistogramBins,
-    /// `histogram_bins` dépasse [`MAX_HISTOGRAM_BINS`] (B4) : même esprit que
-    /// `ZeroHistogramBins`, l'autre bout de l'intervalle.
+    /// `histogram_bins` exceeds [`MAX_HISTOGRAM_BINS`] (B4): same spirit as
+    /// `ZeroHistogramBins`, the other end of the interval.
     HistogramBinsTooLarge(u32),
-    /// `row`/`column` d'un panneau dépasse [`MAX_PANEL_POSITION`] (B2).
+    /// `row`/`column` of a panel exceeds [`MAX_PANEL_POSITION`] (B2).
     PanelPositionOutOfBounds {
-        /// Ligne lue du fichier, hors bornes.
+        /// Row read from the file, out of bounds.
         row: u64,
-        /// Colonne lue du fichier, hors bornes.
+        /// Column read from the file, out of bounds.
         column: u64,
     },
 }
@@ -188,10 +188,10 @@ impl From<&PlotType> for PlotTypeRecord {
             PlotType::Bar => PlotTypeRecord::Bar,
             PlotType::Histogram => PlotTypeRecord::Histogram,
             PlotType::ErrorBar => PlotTypeRecord::ErrorBar,
-            // Le modèle en mémoire porte déjà le nom et le contenu bruts
-            // (C5, niveau 2) : les faire traverser de nouveau à l'identique
-            // est ce qui rend deux sauvegardes successives byte-identiques
-            // (B20) même quand une série a un type de tracé inconnu.
+            // The in-memory model already carries the raw name and content
+            // (C5, level 2): making them go through again identically
+            // is what makes two successive saves byte-identical
+            // (B20) even when a series has an unknown plot type.
             PlotType::Unknown(raw) => PlotTypeRecord::Unknown(raw.clone()),
         }
     }
@@ -479,8 +479,8 @@ impl From<LegendSpecRecord> for LegendSpec {
     }
 }
 
-/// `SeriesSpec` → enregistrement. Infaillible : le modèle en mémoire est
-/// toujours représentable (même patron que `kind_to_record`).
+/// `SeriesSpec` → record. Infallible: the in-memory model is
+/// always representable (same pattern as `kind_to_record`).
 fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
     SeriesSpecRecord {
         y: series.y.raw(),
@@ -501,25 +501,25 @@ fn series_spec_to_record(series: &SeriesSpec) -> SeriesSpecRecord {
     }
 }
 
-/// Enregistrement → `SeriesSpec`. `histogram_bins` doit être non nul
-/// ([`ConvertError::ZeroHistogramBins`]) et ne pas dépasser
+/// Record → `SeriesSpec`. `histogram_bins` must be non-zero
+/// ([`ConvertError::ZeroHistogramBins`]) and not exceed
 /// [`MAX_HISTOGRAM_BINS`] ([`ConvertError::HistogramBinsTooLarge`], B4).
 fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, ConvertError> {
-    // Zéro et « trop grand » sont deux erreurs distinctes malgré
-    // `BinCount::new` qui rend `None` pour les deux : c'est ce qui manque au
-    // fichier (rien vs. une valeur absurde), et les deux méritent un message
-    // différent.
+    // Zero and "too large" are two distinct errors even though
+    // `BinCount::new` returns `None` for both: it is what the
+    // file lacks (nothing vs. an absurd value), and both deserve a different
+    // message.
     if record.histogram_bins == 0 {
         return Err(ConvertError::ZeroHistogramBins);
     }
     if record.histogram_bins > MAX_HISTOGRAM_BINS {
         return Err(ConvertError::HistogramBinsTooLarge(record.histogram_bins));
     }
-    // Les deux bornes viennent d'être vérifiées ci-dessus : `BinCount::new`
-    // ne peut pas rendre `None` ici.
+    // Both bounds have just been checked above: `BinCount::new`
+    // cannot return `None` here.
     #[allow(clippy::expect_used)]
     let histogram_bins = stokesforge_plot::BinCount::new(record.histogram_bins)
-        .expect("bornes déjà vérifiées ci-dessus");
+        .expect("bounds already checked above");
     Ok(SeriesSpec {
         y: NodeId::from_raw(record.y),
         x: record.x.map(NodeId::from_raw),
@@ -539,7 +539,7 @@ fn record_to_series_spec(record: SeriesSpecRecord) -> Result<SeriesSpec, Convert
     })
 }
 
-/// `TextAnchor` → enregistrement. Infaillible.
+/// `TextAnchor` → record. Infallible.
 fn anchor_to_record(anchor: stokesforge_plot::TextAnchor) -> TextAnchorRecord {
     TextAnchorRecord {
         x: anchor.x,
@@ -548,8 +548,8 @@ fn anchor_to_record(anchor: stokesforge_plot::TextAnchor) -> TextAnchorRecord {
     }
 }
 
-/// Enregistrement → `TextAnchor`. Infaillible : une ancre non finie est
-/// gardée telle quelle, c'est le rendu qui l'ignore (`TextAnchor::is_finite`).
+/// Record → `TextAnchor`. Infallible: a non-finite anchor is
+/// kept as is, it is the renderer that ignores it (`TextAnchor::is_finite`).
 fn record_to_anchor(record: TextAnchorRecord) -> stokesforge_plot::TextAnchor {
     stokesforge_plot::TextAnchor {
         x: record.x,
@@ -558,7 +558,7 @@ fn record_to_anchor(record: TextAnchorRecord) -> stokesforge_plot::TextAnchor {
     }
 }
 
-/// `PanelSpec` → enregistrement. Infaillible.
+/// `PanelSpec` → record. Infallible.
 fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
     PanelSpecRecord {
         title: panel.title.clone(),
@@ -656,11 +656,11 @@ fn record_to_shape(record: ShapeSpecRecord) -> ShapeSpec {
     }
 }
 
-/// Enregistrement → `PanelSpec`. Propage l'échec de la première série
-/// fautive, s'il y en a une, et refuse une position qui dépasse
-/// [`MAX_PANEL_POSITION`] (B2) avant le cast vers `usize` — un `u64` hors
-/// bornes ne panique pas ici, mais fait déborder `PlotSpec::rows()`/
-/// `columns()` plus loin (`max + 1`).
+/// Record → `PanelSpec`. Propagates the failure of the first faulty
+/// series, if there is one, and refuses a position that exceeds
+/// [`MAX_PANEL_POSITION`] (B2) before the cast to `usize` — an out-of-bounds
+/// `u64` does not panic here, but makes `PlotSpec::rows()`/
+/// `columns()` overflow further on (`max + 1`).
 fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertError> {
     if record.row > MAX_PANEL_POSITION || record.column > MAX_PANEL_POSITION {
         return Err(ConvertError::PanelPositionOutOfBounds {
@@ -725,7 +725,7 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
     })
 }
 
-/// Couleurs enregistrées → enregistrement. Infaillible.
+/// Saved colors → record. Infallible.
 pub(crate) fn saved_colors_to_record(colors: &stokesforge_plot::SavedColors) -> SavedColorsRecord {
     SavedColorsRecord {
         curves: colors.curves.clone(),
@@ -742,9 +742,9 @@ pub(crate) fn saved_colors_to_record(colors: &stokesforge_plot::SavedColors) -> 
     }
 }
 
-/// Enregistrement → couleurs enregistrées. Infaillible : une chaîne
-/// illisible reste telle quelle (le rendu la remplace par une couleur de
-/// repli), une liste trop longue est bornée par `Tree::with_saved_colors`.
+/// Record → saved colors. Infallible: an unreadable string
+/// stays as it is (the renderer replaces it with a fallback
+/// color), a list that is too long is bounded by `Tree::with_saved_colors`.
 pub(crate) fn record_to_saved_colors(record: SavedColorsRecord) -> stokesforge_plot::SavedColors {
     stokesforge_plot::SavedColors {
         curves: record.curves,
@@ -761,7 +761,7 @@ pub(crate) fn record_to_saved_colors(record: SavedColorsRecord) -> stokesforge_p
     }
 }
 
-/// `PlotSpec` → enregistrement. Infaillible.
+/// `PlotSpec` → record. Infallible.
 pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
     PlotSpecRecord {
         title: spec.title.clone(),
@@ -776,10 +776,10 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
     }
 }
 
-/// Enregistrement → `PlotSpec`. `panels` vide n'est pas un échec : c'est le
-/// même cas que `Panels::new(Vec::new())` côté `stokesforge-plot`, qui fournit un
-/// panneau par défaut plutôt que de refuser — la conversion `.into()` sur
-/// `Vec<PanelSpec>` le fait déjà.
+/// Record → `PlotSpec`. An empty `panels` is not a failure: it is the
+/// same case as `Panels::new(Vec::new())` on the `stokesforge-plot` side, which supplies a
+/// default panel rather than refusing — the `.into()` conversion on
+/// `Vec<PanelSpec>` already does it.
 pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, ConvertError> {
     let panels = record
         .panels
@@ -799,9 +799,9 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
     })
 }
 
-/// Encode un buffer de `f64` en octets bruts little-endian, 8 octets par
-/// valeur, `NaN` préservé bit à bit (`to_le_bytes` conserve le motif binaire
-/// exact, y compris pour les `NaN`).
+/// Encodes an `f64` buffer into raw little-endian bytes, 8 bytes per
+/// value, `NaN` preserved bit for bit (`to_le_bytes` keeps the exact
+/// bit pattern, `NaN`s included).
 fn encode_floats(values: &[f64]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(values.len() * 8);
     for value in values {
@@ -810,9 +810,9 @@ fn encode_floats(values: &[f64]) -> Vec<u8> {
     bytes
 }
 
-/// Décode un buffer d'octets bruts little-endian en `f64`. `Err` si la
-/// longueur n'est pas un multiple de 8.
-/// Refuse une colonne de plus de `limit` lignes, avant toute allocation.
+/// Decodes a raw little-endian byte buffer into `f64`. `Err` if the
+/// length is not a multiple of 8.
+/// Refuses a column of more than `limit` rows, before any allocation.
 fn check_rows(len: usize, limit: usize) -> Result<(), ConvertError> {
     if len > limit {
         return Err(ConvertError::TooManyRows { found: len, limit });
@@ -829,10 +829,10 @@ fn decode_floats(bytes: &[u8], limit: usize) -> Result<Vec<f64>, ConvertError> {
     Ok(chunks.iter().copied().map(f64::from_le_bytes).collect())
 }
 
-/// Éclate un buffer à types mixtes en les trois tableaux parallèles de
-/// [`ValuesRecord::Mixed`] : une étiquette par ligne, puis les seules valeurs
-/// qui existent. Infaillible — le modèle en mémoire est toujours
-/// représentable.
+/// Splits a mixed-type buffer into the three parallel arrays of
+/// [`ValuesRecord::Mixed`]: one tag per row, then only the values
+/// that exist. Infallible — the in-memory model is always
+/// representable.
 fn encode_mixed(values: &[MixedCell]) -> ValuesRecord {
     let mut tags = Vec::with_capacity(values.len());
     let mut numbers = Vec::new();
@@ -857,13 +857,13 @@ fn encode_mixed(values: &[MixedCell]) -> ValuesRecord {
     }
 }
 
-/// Recompose un buffer à types mixtes depuis les trois tableaux parallèles.
+/// Rebuilds a mixed-type buffer from the three parallel arrays.
 ///
-/// `Err` sur toute incohérence entre eux — étiquette inconnue, ou tableau qui
-/// ne porte pas exactement ce que les étiquettes annoncent. Même politique
-/// que [`decode_floats`] : un fichier écrit par ce crate ne produit jamais
-/// ces cas, et il n'y a pas de réparation sensée à tenter (glisser d'une
-/// ligne décalerait toutes les suivantes, en silence).
+/// `Err` on any inconsistency between them — unknown tag, or an array that
+/// does not carry exactly what the tags announce. Same policy
+/// as [`decode_floats`]: a file written by this crate never produces
+/// these cases, and there is no sensible repair to attempt (slipping by one
+/// row would shift all the following ones, silently).
 fn decode_mixed(
     tags: &[u8],
     numbers: &[u8],
@@ -893,9 +893,9 @@ fn decode_mixed(
     tags.iter()
         .map(|&tag| match tag {
             MIXED_TAG_EMPTY => Ok(MixedCell::Empty),
-            // Les deux `unwrap_or` ne se produisent pas : les comptes
-            // ci-dessus viennent d'être vérifiés exacts. Garde défensive
-            // plutôt qu'un `expect` (invariant 10).
+            // The two `unwrap_or` do not happen: the counts
+            // above have just been checked exact. Defensive guard
+            // rather than an `expect` (invariant 10).
             MIXED_TAG_NUMBER => Ok(numbers.next().map_or(MixedCell::Empty, MixedCell::Number)),
             MIXED_TAG_TEXT => Ok(texts.next().map_or(MixedCell::Empty, MixedCell::Text)),
             other => Err(ConvertError::BadMixedTag(other)),
@@ -903,8 +903,8 @@ fn decode_mixed(
         .collect()
 }
 
-/// Nature d'un nœud → enregistrement de transport. Infaillible : le modèle
-/// en mémoire est toujours représentable.
+/// Kind of a node → transport record. Infallible: the in-memory
+/// model is always representable.
 pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
     match kind {
         NodeKind::Folder { children } => KindRecord::Folder {
@@ -950,8 +950,8 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                     .map(|line| (line.key.clone(), line.value.clone()))
                     .collect(),
                 x_prime: meta.x_prime,
-                // Une recette illisible (colonne fabriquée à la main) s'écrit
-                // sans source : l'enregistrement ne s'arrête jamais là-dessus.
+                // An unreadable recipe (column crafted by hand) is written
+                // without a source: the save never stops on that.
                 import_source: meta.import_source.as_ref().and_then(|source| {
                     let recipe = ImportRecipe::from_json(&source.recipe_json).ok()?;
                     Some(Box::new(ImportSourceRecord {
@@ -980,15 +980,15 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
             comment: meta.comment.clone(),
             text: text.clone(),
         },
-        // Le modèle porte déjà le nom et le contenu bruts (C5, niveau 2) :
-        // les faire traverser à l'identique est ce qui rend deux
-        // sauvegardes successives byte-identiques (B20) même pour un nœud
-        // d'une nature inconnue.
+        // The model already carries the raw name and content (C5, level 2):
+        // making them go through identically is what makes two
+        // successive saves byte-identical (B20) even for a node
+        // of an unknown kind.
         NodeKind::Unknown(raw) => KindRecord::Unknown(raw.clone()),
     }
 }
 
-/// Enregistrement de transport → nature d'un nœud.
+/// Transport record → kind of a node.
 pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertError> {
     Ok(match record {
         KindRecord::Folder { children } => NodeKind::Folder {
@@ -1041,10 +1041,10 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 long_name,
                 comment,
                 display_format,
-                // Les identifiants lus par la formule ont déjà passé
-                // `check_node_id` (`build_project_reported`). Une colonne qui
-                // n'est plus dans la feuille se dégrade au calcul (`#REF`),
-                // jamais en panic (invariant 10).
+                // The identifiers read by the formula have already passed
+                // `check_node_id` (`build_project_reported`). A column that
+                // is no longer in the sheet degrades at calculation (`#REF`),
+                // never into a panic (invariant 10).
                 formula: formula_parts.map(|parts| {
                     ColumnFormula::from_parts(
                         parts
@@ -1058,8 +1058,8 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                             .collect(),
                     )
                 }),
-                // Un fichier peut porter n'importe quel flottant : seule une
-                // valeur finie est une abscisse.
+                // A file can carry any float: only a finite
+                // value is an abscissa.
                 x_prime: x_prime.filter(|value| value.is_finite()),
                 file_metadata: file_metadata
                     .into_iter()
@@ -1075,8 +1075,8 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                     }
                 }),
             };
-            // `from_block_with_version`, pas `from_block` : le compteur doit
-            // traverser le disque, sinon il ment après un rechargement.
+            // `from_block_with_version`, not `from_block`: the counter must
+            // go through the disk, otherwise it lies after a reload.
             let column = Column::from_block_with_version(column_type, block, meta, version)
                 .map_err(ConvertError::Core)?;
             NodeKind::Column(column)
@@ -1122,7 +1122,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
     })
 }
 
-/// Nœud → enregistrement de transport. Infaillible.
+/// Node → transport record. Infallible.
 pub(crate) fn node_to_record(node: &Node) -> NodeRecord {
     NodeRecord {
         id: node.id().raw(),
@@ -1211,8 +1211,8 @@ mod tests {
         ));
     }
 
-    /// Un calque à deux groupes de deux séries, le premier nommé « Été ».
-    fn calque_a_deux_groupes() -> PanelSpec {
+    /// A layer with two groups of two series, the first named "Café".
+    fn layer_with_two_groups() -> PanelSpec {
         let mut panel = PanelSpec::default();
         for pair in [[1, 2], [3, 4]] {
             panel.push_series_batch(
@@ -1221,19 +1221,19 @@ mod tests {
                     .collect(),
             );
         }
-        assert!(panel.rename_group(1, "Été"));
+        assert!(panel.rename_group(1, "Café"));
         panel
     }
 
-    fn groupes(panel: &PanelSpec) -> Vec<Option<u32>> {
+    fn groups(panel: &PanelSpec) -> Vec<Option<u32>> {
         panel.series.iter().map(|s| s.group).collect()
     }
 
-    /// #209 : un nom de groupe vide lu dans le fichier est écarté (le groupe
-    /// garde son nom automatique) ; témoin : le nom non vide voisin reste.
+    /// #209: an empty group name read from the file is dropped (the group
+    /// keeps its automatic name); witness: the neighbouring non-empty name stays.
     #[test]
-    fn un_nom_de_groupe_vide_est_ecarte_au_chargement() {
-        let mut record = panel_spec_to_record(&calque_a_deux_groupes());
+    fn an_empty_group_name_is_dropped_at_load() {
+        let mut record = panel_spec_to_record(&layer_with_two_groups());
         record.group_names.push(GroupNameRecord {
             group: 2,
             name: String::new(),
@@ -1241,36 +1241,36 @@ mod tests {
         let panel = record_to_panel_spec(record).unwrap();
         assert_eq!(
             panel.group_names,
-            [(1, "Été".to_string())].into(),
-            "seul le nom vide disparaît"
+            [(1, "Café".to_string())].into(),
+            "only the empty name disappears"
         );
-        assert_eq!(groupes(&panel), [Some(1), Some(1), Some(2), Some(2)]);
+        assert_eq!(groups(&panel), [Some(1), Some(1), Some(2), Some(2)]);
     }
 
-    /// #209 : un fichier écrit avant les noms de groupe (#197), sans le champ
-    /// `group_names`, se relit avec ses groupes et sans nom ; témoin : le même
-    /// enregistrement avec le champ garde le nom.
+    /// #209: a file written before group names (#197), without the field
+    /// `group_names`, reads back with its groups and without a name; witness: the same
+    /// record with the field keeps the name.
     #[test]
-    fn un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes() {
-        let octets = rmp_serde::to_vec_named(&panel_spec_to_record(&calque_a_deux_groupes()))
-            .expect("encodage");
-        let relu: PanelSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
-        let panel = record_to_panel_spec(relu).unwrap();
-        assert_eq!(panel.group_names, [(1, "Été".to_string())].into());
+    fn a_layer_without_group_names_reads_back_with_its_groups() {
+        let bytes = rmp_serde::to_vec_named(&panel_spec_to_record(&layer_with_two_groups()))
+            .expect("encoding");
+        let reloaded: PanelSpecRecord = rmp_serde::from_slice(&bytes).expect("decoding");
+        let panel = record_to_panel_spec(reloaded).unwrap();
+        assert_eq!(panel.group_names, [(1, "Café".to_string())].into());
 
-        let mut valeur = rmpv::decode::read_value(&mut std::io::Cursor::new(octets)).unwrap();
-        let rmpv::Value::Map(champs) = &mut valeur else {
-            panic!("un calque s'écrit en table");
+        let mut value = rmpv::decode::read_value(&mut std::io::Cursor::new(bytes)).unwrap();
+        let rmpv::Value::Map(fields) = &mut value else {
+            panic!("a layer is written as a map");
         };
-        let avant = champs.len();
-        champs.retain(|(cle, _)| cle.as_str() != Some("group_names"));
-        assert_eq!(champs.len(), avant - 1, "le champ existait");
-        let mut ancien = Vec::new();
-        rmpv::encode::write_value(&mut ancien, &valeur).unwrap();
-        let relu: PanelSpecRecord =
-            rmp_serde::from_slice(&ancien).expect("un ancien calque se relit");
-        let panel = record_to_panel_spec(relu).unwrap();
+        let before = fields.len();
+        fields.retain(|(key, _)| key.as_str() != Some("group_names"));
+        assert_eq!(fields.len(), before - 1, "the field existed");
+        let mut old = Vec::new();
+        rmpv::encode::write_value(&mut old, &value).unwrap();
+        let reloaded: PanelSpecRecord =
+            rmp_serde::from_slice(&old).expect("an old layer reads back");
+        let panel = record_to_panel_spec(reloaded).unwrap();
         assert!(panel.group_names.is_empty());
-        assert_eq!(groupes(&panel), [Some(1), Some(1), Some(2), Some(2)]);
+        assert_eq!(groups(&panel), [Some(1), Some(1), Some(2), Some(2)]);
     }
 }

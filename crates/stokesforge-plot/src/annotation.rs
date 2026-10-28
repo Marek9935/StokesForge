@@ -1,68 +1,68 @@
-//! Les textes libres d'un panneau — l'outil Texte d'Origin (issue #35).
+//! The free texts of a panel — Origin's Text tool (issue #35).
 
 use crate::series::SeriesAxis;
 use crate::spec::PlotSpec;
 
-/// Un texte posé sur un panneau, **ancré aux données** : il suit le zoom et
-/// le déplacement de la vue comme un point de série.
+/// A text placed on a panel, **anchored to the data**: it follows the zoom and
+/// pan of the view like a series point.
 ///
-/// Le texte est du markup Typst, comme un titre (`$lambda$`, `*gras*`) ; son
-/// **centre** est posé au point `(x, y)`, en coordonnées de données du
-/// panneau (décision du 2026-10-01). Pas de cadre ni de fond dans cette
-/// première version.
+/// The text is Typst markup, like a title (`$lambda$`, `*gras*`); its
+/// **center** is placed at the point `(x, y)`, in data coordinates of the
+/// panel (decision of 2026-10-01). No frame or background in this
+/// first version.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnnotationSpec {
-    /// Le texte, en markup Typst.
+    /// The text, in Typst markup.
     pub text: String,
-    /// Visible au rendu ; masquer conserve le contenu et son adresse (#81).
+    /// Visible at rendering; hiding keeps the content and its address (#81).
     pub visible: bool,
-    /// Abscisse du centre du texte, en données.
+    /// Abscissa of the center of the text, in data.
     pub x: f64,
-    /// Ordonnée du centre du texte, en données de l'axe [`Self::axis`].
+    /// Ordinate of the center of the text, in data of the axis [`Self::axis`].
     pub y: f64,
-    /// Ordonnée de rattachement : gauche ou droite, comme une série.
+    /// Ordinate it is attached to: left or right, like a series.
     pub axis: SeriesAxis,
-    /// Couleur `#RRGGBB` ou `#RRGGBBAA` ; vide = automatique (contraste avec
-    /// le fond).
+    /// `#RRGGBB` or `#RRGGBBAA` color; empty = automatic (contrast with
+    /// the background).
     pub color: String,
-    /// Corps du texte, au sens de Plotters (comme les tailles du pipeline :
-    /// 16 = titre d'axe).
+    /// Text size in the Plotters sense (like the pipeline sizes:
+    /// 16 = axis title).
     pub size: f64,
-    /// Rotation en degrés, sens trigonométrique (antihoraire), autour du
-    /// centre du texte.
+    /// Rotation in degrees, counter-clockwise (trigonometric), around the
+    /// center of the text.
     pub rotation: f64,
-    /// Nom de famille de la police (issue #78) ; vide = la police du graphe.
+    /// Font family name (issue #78); empty = the graph's font.
     pub font: String,
-    /// Largeur de la boîte, en **fraction de la figure** (#244) ; `None` =
-    /// pas de largeur : le texte reste sur une ligne, comme avant. Fixée, elle
-    /// fait passer le texte à la ligne ; voir [`Self::effective_width`].
+    /// Width of the box, as a **fraction of the figure** (#244); `None` =
+    /// no width: the text stays on one line, as before. When set, it
+    /// wraps the text; see [`Self::effective_width`].
     pub width: Option<f64>,
-    /// Alignement du texte dans la boîte ; sans effet tant que
-    /// [`Self::width`] est `None`.
+    /// Alignment of the text in the box; no effect as long as
+    /// [`Self::width`] is `None`.
     pub align: TextAlign,
 }
 
-/// L'alignement d'un texte dans sa boîte (#244).
+/// The alignment of a text in its box (#244).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TextAlign {
-    /// Au bord gauche.
+    /// At the left edge.
     Left,
-    /// Centré.
+    /// Centered.
     #[default]
     Center,
-    /// Au bord droit.
+    /// At the right edge.
     Right,
 }
 
 impl AnnotationSpec {
-    /// Corps par défaut : celui des titres d'axe.
+    /// Default size: that of the axis titles.
     pub const DEFAULT_SIZE: f64 = 16.0;
-    /// Corps minimal et maximal accepté au rendu ; au-delà, le corps est
-    /// ramené dans ces bornes plutôt que de rastériser une texture démesurée.
+    /// Minimum and maximum size accepted at rendering; beyond that, the size is
+    /// clamped to these bounds rather than rasterizing a huge texture.
     pub const SIZE_RANGE: (f64, f64) = (4.0, 200.0);
 
-    /// Un texte au point `(x, y)` de l'ordonnée de gauche, dans le style
-    /// par défaut.
+    /// A text at the point `(x, y)` of the left ordinate, in the default
+    /// style.
     pub fn new(text: impl Into<String>, x: f64, y: f64) -> Self {
         Self {
             text: text.into(),
@@ -79,19 +79,19 @@ impl AnnotationSpec {
         }
     }
 
-    /// Plus petite largeur de boîte, en fraction de la figure.
+    /// Smallest box width, as a fraction of the figure.
     pub const MIN_WIDTH: f64 = 0.02;
 
-    /// La largeur tracée : [`Self::width`] bornée à `[MIN_WIDTH, 1]` (le
-    /// plafond est la figure), `None` pour une valeur absente ou non finie.
+    /// The plotted width: [`Self::width`] clamped to `[MIN_WIDTH, 1]` (the
+    /// cap is the figure), `None` for an absent or non-finite value.
     pub fn effective_width(&self) -> Option<f64> {
         self.width
             .filter(|width| width.is_finite())
             .map(|width| width.clamp(Self::MIN_WIDTH, 1.0))
     }
 
-    /// Le corps effectivement tracé : [`Self::size`] ramené dans
-    /// [`Self::SIZE_RANGE`], et le défaut pour une valeur non finie.
+    /// The size actually plotted: [`Self::size`] clamped to
+    /// [`Self::SIZE_RANGE`], and the default for a non-finite value.
     pub fn effective_size(&self) -> f64 {
         if self.size.is_finite() {
             self.size.clamp(Self::SIZE_RANGE.0, Self::SIZE_RANGE.1)
@@ -100,8 +100,8 @@ impl AnnotationSpec {
         }
     }
 
-    /// La rotation effectivement tracée, ramenée dans `]-180, 180]` ; 0 pour
-    /// une valeur non finie.
+    /// The rotation actually plotted, brought into `]-180, 180]`; 0 for
+    /// a non-finite value.
     pub fn effective_rotation(&self) -> f64 {
         if !self.rotation.is_finite() {
             return 0.0;
@@ -115,15 +115,15 @@ impl AnnotationSpec {
     }
 }
 
-/// L'adresse d'un texte libre dans un [`PlotSpec`] : son calque, par son
-/// indice dans [`PlotSpec::panels`] (plusieurs calques peuvent se superposer
-/// dans la même case de la grille), et son rang dans
+/// The address of a free text in a [`PlotSpec`]: its layer, by its
+/// index in [`PlotSpec::panels`] (several layers can overlap
+/// in the same cell of the grid), and its rank in
 /// [`crate::PanelSpec::annotations`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnnotationRef {
-    /// Indice du calque dans [`PlotSpec::panels`].
+    /// Index of the layer in [`PlotSpec::panels`].
     pub panel: usize,
-    /// Rang du texte dans son panneau.
+    /// Rank of the text in its panel.
     pub index: usize,
 }
 
@@ -136,14 +136,14 @@ impl AnnotationRef {
         (self.panel < spec.panels.len()).then_some(self.panel)
     }
 
-    /// Le texte désigné, s'il existe.
+    /// The designated text, if it exists.
     pub fn get<'a>(&self, spec: &'a PlotSpec) -> Option<&'a AnnotationSpec> {
         self.panel(spec)?.annotations.get(self.index)
     }
 
-    /// Pose `annotation` à cette adresse : remplace le texte existant, ou
-    /// l'ajoute si `index` est le rang qui suit le dernier. Rend `false` sans
-    /// rien changer si le panneau n'existe pas ou si `index` est plus loin.
+    /// Places `annotation` at this address: replaces the existing text, or
+    /// adds it if `index` is the rank after the last. Returns `false` without
+    /// changing anything if the panel does not exist or if `index` is further.
     pub fn set(&self, spec: &mut PlotSpec, annotation: AnnotationSpec) -> bool {
         let Some(panel) = self
             .panel_index(spec)
@@ -159,7 +159,7 @@ impl AnnotationRef {
         true
     }
 
-    /// Retire le texte désigné ; rend `false` s'il n'existe pas.
+    /// Removes the designated text; returns `false` if it does not exist.
     pub fn remove(&self, spec: &mut PlotSpec) -> bool {
         let Some(panel) = self
             .panel_index(spec)
@@ -174,8 +174,8 @@ impl AnnotationRef {
         true
     }
 
-    /// L'adresse du prochain texte ajouté au calque `panel`, ou `None` si ce
-    /// calque n'existe pas.
+    /// The address of the next text added to the layer `panel`, or `None` if that
+    /// layer does not exist.
     pub fn next_in(spec: &PlotSpec, panel: usize) -> Option<Self> {
         let source = spec.panels.get(panel)?;
         Some(Self {
@@ -190,16 +190,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn une_adresse_ajoute_remplace_et_retire() {
+    fn an_address_adds_replaces_and_removes() {
         let mut spec = PlotSpec::empty("A");
-        let new = AnnotationRef::next_in(&spec, 0).expect("panneau 0,0");
+        let new = AnnotationRef::next_in(&spec, 0).expect("panel 0,0");
         assert_eq!(new.index, 0);
         assert!(new.set(&mut spec, AnnotationSpec::new("a", 1.0, 2.0)));
         assert_eq!(new.get(&spec).map(|a| a.text.as_str()), Some("a"));
         assert!(new.set(&mut spec, AnnotationSpec::new("b", 1.0, 2.0)));
-        assert_eq!(spec.panels[0].annotations.len(), 1, "remplacé, pas ajouté");
-        let loin = AnnotationRef { index: 5, ..new };
-        assert!(!loin.set(&mut spec, AnnotationSpec::new("c", 0.0, 0.0)));
+        assert_eq!(spec.panels[0].annotations.len(), 1, "replaced, not added");
+        let far = AnnotationRef { index: 5, ..new };
+        assert!(!far.set(&mut spec, AnnotationSpec::new("c", 0.0, 0.0)));
         assert!(AnnotationRef::next_in(&spec, 3).is_none());
         assert!(new.remove(&mut spec));
         assert!(!new.remove(&mut spec));
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn corps_et_rotation_sont_ramenes_dans_leurs_bornes() {
+    fn size_and_rotation_are_clamped_to_their_bounds() {
         let mut a = AnnotationSpec::new("x", 0.0, 0.0);
         a.size = 1e9;
         assert_eq!(a.effective_size(), AnnotationSpec::SIZE_RANGE.1);

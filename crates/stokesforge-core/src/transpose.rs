@@ -1,17 +1,17 @@
-//! Feuilles transposées liées (#253) : analyser une **ligne** d'une feuille,
-//! c'est analyser une colonne d'une feuille transposée.
+//! Linked transposed sheets (#253): analyzing a **row** of a sheet
+//! means analyzing a column of a transposed sheet.
 //!
-//! L'analyse reste entièrement en colonnes. Une feuille « `<Source>ᵀ` » porte
-//! une colonne x' (les x' des colonnes de la source) puis une colonne par ligne
-//! demandée (« Row 10 »). Le lien est un **instantané recalculable**, pas un
-//! lien vivant : il retient ce qu'il a lu ([`TransposeSourceColumn`]) et la
-//! feuille est dite *périmée* quand la source ne le vaut plus, *modifiée*
-//! quand une valeur d'une colonne créée par le lien a été éditée. Aucun des
-//! deux états n'est stocké : ils se dérivent de l'arbre (comme le péremption
-//! d'un calcul), et ne passent pas par le recalcul ciblé des formules.
+//! Analysis stays entirely in columns. A sheet "`<Source>ᵀ`" carries
+//! an x' column (the x' of the source columns) then one column per requested
+//! row ("Row 10"). The link is a **recomputable snapshot**, not a
+//! live link: it remembers what it read ([`TransposeSourceColumn`]) and the
+//! sheet is called *stale* when the source no longer matches it, *modified*
+//! when a value of a column created by the link has been edited. Neither
+//! state is stored: they are derived from the tree (like the staleness
+//! of a calculation), and do not go through the targeted recalculation of formulas.
 //!
-//! Le lien est porté par l'arbre ([`Tree::transposes`]), comme les calculs :
-//! il voyage avec les instantanés d'historique et le fichier.
+//! The link is carried by the tree ([`Tree::transposes`]), like calculations:
+//! it travels with the history snapshots and the file.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,66 +23,66 @@ use crate::node::NodeKind;
 use crate::project::{spreadsheet_name, Project};
 use crate::tree::Tree;
 
-/// Le suffixe du nom d'une feuille transposée.
+/// The suffix of the name of a transposed sheet.
 pub const TRANSPOSE_MARK: char = '\u{1D40}';
 
-/// Nom de la colonne des x' dans la feuille transposée.
+/// Name of the x' column in the transposed sheet.
 pub const TRANSPOSE_X_NAME: &str = "x'";
 
-/// Ce qu'une colonne de la source avait au moment où le lien l'a lue : son
-/// identifiant, sa version (type et valeurs) et son x' (en bits, `NaN` si
-/// absent). Une version ne couvre pas les métadonnées : le x' y est donc
-/// retenu à part.
+/// What a source column had when the link read it: its
+/// identifier, its version (type and values) and its x' (as bits, `NaN` if
+/// absent). A version does not cover the metadata: the x' is therefore
+/// kept separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeSourceColumn {
-    /// La colonne de la source.
+    /// The source column.
     pub column: NodeId,
-    /// Sa version lue.
+    /// Its version as read.
     pub version: u64,
-    /// Son x' lu, en bits de `f64` (`NaN` : aucun).
+    /// Its x' as read, in `f64` bits (`NaN`: none).
     pub x_prime_bits: u64,
 }
 
-/// Une colonne « ligne » de la feuille transposée.
+/// A "row" column of the transposed sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposedRow {
-    /// La ligne de la source, 0 = la première.
+    /// The row of the source, 0 = the first.
     pub row: usize,
-    /// La colonne de la feuille transposée qui la porte.
+    /// The column of the transposed sheet that carries it.
     pub column: NodeId,
-    /// L'empreinte de ses valeurs à la dernière écriture par le lien.
+    /// The fingerprint of its values at the last write by the link.
     pub stamp: u64,
 }
 
-/// Le lien d'une feuille transposée avec sa source.
+/// The link of a transposed sheet with its source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransposeLink {
-    /// La feuille source.
+    /// The source sheet.
     pub source: NodeId,
-    /// La colonne des x' dans la feuille transposée.
+    /// The x' column in the transposed sheet.
     pub x_column: NodeId,
-    /// L'empreinte de ses valeurs à la dernière écriture par le lien.
+    /// The fingerprint of its values at the last write by the link.
     pub x_stamp: u64,
-    /// Les lignes demandées, dans l'ordre où elles l'ont été.
+    /// The requested rows, in the order they were requested.
     pub rows: Vec<TransposedRow>,
-    /// Les colonnes de la source telles que le lien les a lues, dans l'ordre
-    /// de la feuille.
+    /// The source columns as the link read them, in the order
+    /// of the sheet.
     pub inputs: Vec<TransposeSourceColumn>,
 }
 
-/// L'état dérivé d'une feuille transposée.
+/// The derived state of a transposed sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TransposeState {
-    /// Ce que la source contient ne vaut plus ce que le lien a lu.
+    /// What the source contains no longer matches what the link read.
     pub stale: bool,
-    /// Une valeur d'une colonne créée par le lien a été éditée.
+    /// A value of a column created by the link has been edited.
     pub modified: bool,
 }
 
-/// Ce que le lien d'une feuille transposée contient, pour l'écrire dans un
-/// fichier (la persistance ne touche pas aux champs du lien un par un).
+/// What the link of a transposed sheet contains, to write it into a
+/// file (persistence does not touch the link fields one by one).
 impl TransposeLink {
-    /// L'état du lien dans `tree`.
+    /// The state of the link in `tree`.
     pub fn state(&self, tree: &Tree) -> TransposeState {
         let current = read_inputs(tree, self.source);
         let stale = current != self.inputs;
@@ -97,10 +97,10 @@ impl TransposeLink {
     }
 }
 
-/// L'empreinte du **contenu numérique** d'une colonne (FNV-1a 64 bits, stable
-/// d'une version de Rust à l'autre : elle est écrite dans le fichier). Un
-/// changement de type qui garde les mêmes nombres ne la change pas ; une
-/// cellule vide vaut `NaN`, un texte se hache avec une marque.
+/// The fingerprint of the **numeric content** of a column (FNV-1a 64 bits, stable
+/// from one Rust version to another: it is written to the file). A
+/// type change that keeps the same numbers does not change it; an empty
+/// cell counts as `NaN`, a text is hashed with a mark.
 pub fn content_stamp(column: &Column) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -140,7 +140,7 @@ pub fn content_stamp(column: &Column) -> u64 {
     hash
 }
 
-/// Les colonnes de `source` telles qu'un lien les lirait maintenant.
+/// The columns of `source` as a link would read them now.
 fn read_inputs(tree: &Tree, source: NodeId) -> Vec<TransposeSourceColumn> {
     let Ok(children) = tree.children(source) else {
         return Vec::new();
@@ -149,8 +149,8 @@ fn read_inputs(tree: &Tree, source: NodeId) -> Vec<TransposeSourceColumn> {
         .iter()
         .filter_map(|id| {
             let column = tree.node(*id)?.as_column()?;
-            // Seules les colonnes Y se transposent (#253) : un X, une barre
-            // d'erreur ou une étiquette n'est pas une courbe de la ligne.
+            // Only Y columns are transposed (#253): an X, an error
+            // bar or a label is not a curve of the row.
             if column.meta().role != ColumnRole::Y {
                 return None;
             }
@@ -173,29 +173,29 @@ fn is_numeric(column: &Column) -> bool {
     }
 }
 
-/// Le nom d'une feuille transposée de la feuille nommée `source_name`.
+/// The name of the transposed sheet of the sheet named `source_name`.
 pub fn transposed_name(source_name: &str) -> String {
     format!("{source_name}{TRANSPOSE_MARK}")
 }
 
 impl Project {
-    /// Crée ou complète la feuille transposée de `source` avec les lignes
-    /// `rows` (0 = la première) et rend cette feuille. Atomique.
+    /// Creates or completes the transposed sheet of `source` with the rows
+    /// `rows` (0 = the first) and returns that sheet. Atomic.
     ///
-    /// - La feuille se nomme « `<Source>ᵀ` » ; si ce nom est pris par une
-    ///   feuille qui n'est pas liée à `source`, « `<Source>ᵀ 2` », etc. Seule
-    ///   une feuille déjà liée à `source` est réutilisée.
-    /// - Une ligne déjà présente réutilise sa colonne ; sinon une colonne
-    ///   « Row N » est ajoutée en fin de feuille.
-    /// - Seules les colonnes de rôle Y se transposent (les autres sont sautées).
-    /// - Chaque colonne Y de `source` doit être numérique et porter un x' : sinon
-    ///   le refus nomme la colonne (`CoreError::TransposeNotNumeric`,
-    ///   `TransposeNoXPrime`). Une colonne plus courte que la ligne donne
+    /// - The sheet is named "`<Source>ᵀ`"; if that name is taken by a
+    ///   sheet not linked to `source`, "`<Source>ᵀ 2`", etc. Only
+    ///   a sheet already linked to `source` is reused.
+    /// - A row already present reuses its column; otherwise a column
+    ///   "Row N" is added at the end of the sheet.
+    /// - Only columns with the Y role are transposed (the others are skipped).
+    /// - Every Y column of `source` must be numeric and carry an x': otherwise
+    ///   the refusal names the column (`CoreError::TransposeNotNumeric`,
+    ///   `TransposeNoXPrime`). A column shorter than the row gives
     ///   `NaN`.
-    /// - Si la feuille est périmée mais pas modifiée, ses colonnes liées sont
-    ///   d'abord remises à jour. Modifiée, elle n'est pas écrasée : les
-    ///   colonnes neuves sont lues dans l'état actuel de la source, et le lien
-    ///   garde sa lecture (elle reste périmée).
+    /// - If the sheet is stale but not modified, its linked columns are
+    ///   refreshed first. Modified, it is not overwritten: the new
+    ///   columns are read from the current state of the source, and the link
+    ///   keeps its reading (it stays stale).
     pub fn transpose_rows(&mut self, source: NodeId, rows: &[usize]) -> CoreResult<NodeId> {
         let before = self.tree().clone();
         let result = self.transpose_rows_inner(source, rows);
@@ -233,8 +233,8 @@ impl Project {
         } else {
             link.state(self.tree())
         };
-        // Une feuille périmée et intacte se remet d'abord à jour : elle serait
-        // sinon incohérente (colonnes neuves plus longues que les anciennes).
+        // A stale, untouched sheet is refreshed first: it would otherwise be
+        // inconsistent (new columns longer than the old ones).
         let refresh = fresh_sheet || (state.stale && !state.modified);
         let mut seen = Vec::new();
         for row in rows {
@@ -269,10 +269,10 @@ impl Project {
         Ok(sheet)
     }
 
-    /// Remet à jour la feuille transposée `sheet` depuis sa source : réécrit
-    /// les valeurs de toutes ses colonnes liées (celles que l'utilisateur a
-    /// éditées perdent leurs modifications), recrée celles qui ont disparu et
-    /// relit la source. Atomique.
+    /// Refreshes the transposed sheet `sheet` from its source: rewrites
+    /// the values of all its linked columns (those the user edited
+    /// lose their changes), recreates those that disappeared and
+    /// re-reads the source. Atomic.
     pub fn recalculate_transpose(&mut self, sheet: NodeId) -> CoreResult<()> {
         let before = self.tree().clone();
         let result = self.recalculate_transpose_inner(sheet);
@@ -297,7 +297,7 @@ impl Project {
         Ok(())
     }
 
-    /// Lit les colonnes de `source` et refuse la première qui n'est pas
+    /// Reads the columns of `source` and refuses the first one that is not
     /// transposable.
     fn checked_transpose_inputs(&self, source: NodeId) -> CoreResult<Vec<TransposeSourceColumn>> {
         let node = self.tree().get(source)?;
@@ -340,7 +340,7 @@ impl Project {
         Ok(inputs)
     }
 
-    /// Crée la feuille transposée de `source`, vide, juste après elle.
+    /// Creates the transposed sheet of `source`, empty, right after it.
     fn create_transposed_sheet(&mut self, source: NodeId) -> CoreResult<NodeId> {
         let book = self
             .tree()
@@ -365,7 +365,7 @@ impl Project {
         )
     }
 
-    /// `base`, ou « `base` 2 », « `base` 3 »… : le premier nom libre.
+    /// `base`, or "`base` 2", "`base` 3"…: the first free name.
     fn free_child_name(&self, parent: NodeId, base: &str) -> CoreResult<String> {
         let taken = |name: &str| {
             self.tree().children(parent).is_ok_and(|kids| {
@@ -383,9 +383,9 @@ impl Project {
         Ok(candidate)
     }
 
-    /// Écrit les colonnes du lien. `refresh` : toutes (x' et lignes déjà là),
-    /// sinon seulement celles de `fresh_rows` qui n'ont pas encore de colonne.
-    /// Les colonnes absentes sont créées. Remet à jour les empreintes écrites.
+    /// Writes the columns of the link. `refresh`: all of them (x' and rows already there),
+    /// otherwise only those of `fresh_rows` that have no column yet.
+    /// Missing columns are created. Updates the fingerprints written.
     fn write_transpose(
         &mut self,
         sheet: NodeId,
@@ -411,7 +411,7 @@ impl Project {
             .collect();
         let unit = common_unit(self.tree(), inputs);
 
-        // La colonne des x'.
+        // The x' column.
         let x_exists = link.x_column != sheet
             && self
                 .tree()
@@ -432,7 +432,7 @@ impl Project {
             link.x_stamp = self.stamp_of(link.x_column)?;
         }
 
-        // Les lignes.
+        // The rows.
         for index in 0..link.rows.len() {
             let TransposedRow { row, column, .. } = link.rows[index];
             let present = column != sheet
@@ -468,7 +468,7 @@ impl Project {
         Ok(())
     }
 
-    /// Remplace type et valeurs de `column` par ces nombres (version neuve).
+    /// Replaces type and values of `column` with these numbers (new version).
     fn overwrite(&mut self, column: NodeId, data: Vec<f64>) -> CoreResult<()> {
         self.restore_column(
             column,
@@ -485,10 +485,10 @@ impl Project {
             .ok_or(CoreError::UnknownNode(column))
     }
 
-    /// Fait suivre le nom des feuilles transposées d'une feuille renommée :
-    /// « Nouveauᵀ » pour la feuille qui portait « Ancienᵀ » (ou « Ancienᵀ 2 »).
-    /// Une feuille que l'utilisateur a renommée à sa façon garde son nom. Un
-    /// nom qui n'est pas libre ou pas valide laisse la feuille telle quelle.
+    /// Makes the name of the transposed sheets follow a renamed sheet:
+    /// "Newᵀ" for the sheet that carried "Oldᵀ" (or "Oldᵀ 2").
+    /// A sheet the user renamed in their own way keeps its name. A
+    /// name that is not free or not valid leaves the sheet as it is.
     pub(crate) fn follow_source_rename(&mut self, source: NodeId, old_name: &str) {
         let Some((sheet, _)) = self.tree().transposed_from(source) else {
             return;
@@ -519,8 +519,8 @@ impl Project {
         }
     }
 
-    /// Retire les liens dont la source ou la feuille transposée n'existe plus :
-    /// la feuille qui reste devient ordinaire, rien n'est perdu.
+    /// Removes the links whose source or transposed sheet no longer exists:
+    /// the remaining sheet becomes ordinary, nothing is lost.
     pub(crate) fn prune_transposes(&mut self) {
         let dead: Vec<NodeId> = self
             .tree()
@@ -541,7 +541,7 @@ impl Project {
     }
 }
 
-/// L'unité commune des colonnes de la source, vide si elles diffèrent.
+/// The common unit of the source columns, empty if they differ.
 fn common_unit(tree: &Tree, inputs: &[TransposeSourceColumn]) -> String {
     let mut units = inputs.iter().filter_map(|i| {
         tree.node(i.column)?
@@ -558,5 +558,5 @@ fn common_unit(tree: &Tree, inputs: &[TransposeSourceColumn]) -> String {
     }
 }
 
-/// Les liens, tels que l'arbre les porte.
+/// The links, as the tree carries them.
 pub type TransposeLinks = BTreeMap<NodeId, Arc<TransposeLink>>;

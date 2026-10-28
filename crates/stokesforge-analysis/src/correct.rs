@@ -1,14 +1,14 @@
-//! Correction par une colonne de référence d'une autre feuille (#186) : la
-//! référence (réponse spectrale d'un détecteur, blanc) est ramenée sur la grille
-//! X des données par interpolation linéaire, puis combinée.
+//! Correction by a reference column from another sheet (#186): the
+//! reference (spectral response of a detector, blank) is brought onto the data
+//! X grid by linear interpolation, then combined.
 //!
-//! Hors du domaine de la référence, la cellule corrigée est **vide** (`NaN`) et
-//! comptée (M11 A) : on ne prolonge pas une mesure qu'on n'a pas.
+//! Outside the reference domain, the corrected cell is **empty** (`NaN`) and
+//! counted (M11 A): a measurement we do not have is not extended.
 //!
-//! Une cellule vide ou non finie **au milieu** de la référence (X connu, Y non
-//! fini) est enjambée par l'interpolation entre ses voisines, et les points de
-//! données qui tombent dans ce trou sont comptés (`bridged`, C3 #313). Une ligne
-//! de référence dont X manque n'a pas de position : pas un trou.
+//! An empty or non-finite cell **in the middle** of the reference (X known, Y not
+//! finite) is bridged by interpolation between its neighbours, and the data
+//! points that fall in this hole are counted (`bridged`, C3 #313). A reference
+//! row whose X is missing has no position: it is not a hole.
 
 use crate::error::AnalysisError;
 use crate::series::{interpolate, Series};
@@ -20,24 +20,24 @@ pub enum CorrectOp {
     Subtract,
 }
 
-/// Résultat de la correction, point par point de la série d'entrée.
+/// Result of the correction, point by point of the input series.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Corrected {
     pub values: Vec<f64>,
-    /// La référence ramenée sur les X des données (`NaN` hors domaine).
+    /// The reference brought onto the data X values (`NaN` outside the domain).
     pub reference_on_grid: Vec<f64>,
-    /// Points hors du domaine de la référence.
+    /// Points outside the reference domain.
     pub out_of_reference: usize,
-    /// Points de données interpolés à travers un trou de la référence (C3).
+    /// Data points interpolated across a hole in the reference (C3).
     pub bridged: usize,
-    /// Divisions par une référence exactement nulle, rendues `NaN` (C5). Un
-    /// débordement à diviseur non nul n'est pas compté.
+    /// Divisions by an exactly zero reference, returned as `NaN` (C5). An
+    /// overflow with a non-zero divisor is not counted.
     pub division_by_zero: usize,
 }
 
-/// Corrige `data` par `reference`. Une division par zéro donne `NaN` et est
-/// comptée ; le domaine l'est aussi. `holes` : les X des lignes de la référence
-/// dont Y n'est pas fini (X fini), pour compter les points enjambés.
+/// Corrects `data` by `reference`. A division by zero gives `NaN` and is
+/// counted; so is the domain. `holes`: the X values of the reference rows
+/// whose Y is not finite (X finite), to count the bridged points.
 pub fn correct(
     data: &Series,
     reference: &Series,
@@ -86,9 +86,9 @@ pub fn correct(
     })
 }
 
-/// `x` tombe-t-il entre deux points gardés de la référence qui encadrent un
-/// trou ? Un `x` exactement sur un point gardé est exact, pas enjambé ; hors du
-/// domaine, rien à enjamber.
+/// Does `x` fall between two kept reference points that surround a hole?
+/// An `x` exactly on a kept point is exact, not bridged; outside the
+/// domain, there is nothing to bridge.
 fn bridges_hole(kept: &[f64], holes: &[f64], x: f64) -> bool {
     if holes.is_empty() {
         return false;
@@ -106,9 +106,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn division_par_une_reference_sur_une_autre_grille() {
+    fn division_by_a_reference_on_another_grid() {
         let data = Series::new(vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0]);
-        // Référence linéaire 1 + 0.5·(x−1) échantillonnée aux extrémités seulement.
+        // Linear reference 1 + 0.5·(x−1) sampled at the ends only.
         let reference = Series::new(vec![1.0, 5.0], vec![1.0, 3.0]);
         let c = correct(&data, &reference, &[], CorrectOp::Divide).unwrap();
         assert_eq!(c.out_of_reference, 0);
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn hors_du_domaine_la_cellule_est_vide_et_comptee() {
+    fn outside_the_domain_the_cell_is_empty_and_counted() {
         let data = Series::new(vec![0.0, 1.0, 2.0, 9.0], vec![1.0; 4]);
         let reference = Series::new(vec![1.0, 2.0], vec![2.0, 2.0]);
         let c = correct(&data, &reference, &[], CorrectOp::Multiply).unwrap();
@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn soustraction_et_reference_desordonnee() {
+    fn subtraction_and_unsorted_reference() {
         let data = Series::new(vec![1.0, 2.0], vec![5.0, 7.0]);
         let reference = Series::new(vec![2.0, 1.0], vec![3.0, 1.0]);
         let c = correct(&data, &reference, &[], CorrectOp::Subtract).unwrap();
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn division_par_zero_donne_une_cellule_vide() {
+    fn division_by_zero_gives_an_empty_cell() {
         let data = Series::new(vec![1.0, 2.0], vec![5.0, 7.0]);
         let reference = Series::new(vec![1.0, 2.0], vec![0.0, 1.0]);
         let c = correct(&data, &reference, &[], CorrectOp::Divide).unwrap();
@@ -148,22 +148,22 @@ mod tests {
     }
 
     #[test]
-    fn un_trou_de_la_reference_est_enjambe_et_compte() {
-        // Référence x=[1,2,3,4], y=[1,NaN,3,4] : le trou est en x = 2.
+    fn a_hole_in_the_reference_is_bridged_and_counted() {
+        // Reference x=[1,2,3,4], y=[1,NaN,3,4]: the hole is at x = 2.
         let reference = Series::new(vec![1.0, 3.0, 4.0], vec![1.0, 3.0, 4.0]);
         let data = Series::new(vec![1.5, 2.0, 2.5, 3.5], vec![1.0; 4]);
         let c = correct(&data, &reference, &[2.0], CorrectOp::Multiply).unwrap();
         assert_eq!(c.bridged, 3);
         assert_eq!(c.values, vec![1.5, 2.0, 2.5, 3.5]);
-        // Exactement sur un point gardé : pas enjambé.
+        // Exactly on a kept point: not bridged.
         let on_kept = Series::new(vec![1.0, 3.0, 4.0], vec![1.0; 3]);
         let c = correct(&on_kept, &reference, &[2.0], CorrectOp::Multiply).unwrap();
         assert_eq!(c.bridged, 0);
     }
 
     #[test]
-    fn un_trou_en_fin_de_reference_n_enjambe_rien() {
-        // y = [1, 2, 3, NaN] : le trou (x = 4) est hors du domaine gardé.
+    fn a_hole_at_the_end_of_the_reference_bridges_nothing() {
+        // y = [1, 2, 3, NaN]: the hole (x = 4) is outside the kept domain.
         let reference = Series::new(vec![1.0, 2.0, 3.0], vec![1.0, 2.0, 3.0]);
         let data = Series::new(vec![1.5, 2.5, 3.5], vec![1.0; 3]);
         let c = correct(&data, &reference, &[4.0], CorrectOp::Multiply).unwrap();
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn la_division_par_une_reference_nulle_est_comptee_pas_le_debordement() {
+    fn division_by_a_zero_reference_is_counted_not_the_overflow() {
         let data = Series::new(vec![1.0, 2.0, 3.0], vec![5.0, 1e300, 1.0]);
         let reference = Series::new(vec![1.0, 2.0, 3.0], vec![0.0, 1e-300, 1e-300]);
         let c = correct(&data, &reference, &[], CorrectOp::Divide).unwrap();
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn reference_vide() {
+    fn empty_reference() {
         let data = Series::new(vec![1.0], vec![1.0]);
         assert_eq!(
             correct(&data, &Series::default(), &[], CorrectOp::Divide).unwrap_err(),

@@ -1,67 +1,67 @@
-//! Lissage d'une courbe (#324) : moyenne adjacente, Savitzky-Golay, médiane
-//! glissante.
+//! Smoothing of a curve (#324): adjacent average, Savitzky-Golay, rolling
+//! median.
 //!
-//! Le lissage lit les voisins **par rang** après tri par X, pas par distance :
-//! une fenêtre de `n` points est `n` lignes consécutives de la courbe triée. La
-//! fenêtre se donne en points (`Points`) ou en unités de X (`XUnits`) ; en unités
-//! de X, elle est convertie en points par le pas **médian** de X (les pas nuls,
-//! X répétés, ne comptent pas), de sorte que les deux écritures n'ont qu'un
-//! calcul. Dans les deux cas elle est **impaire** : un lissage centré a autant de
-//! voisins de chaque côté, donc une fenêtre paire est refusée (`Points`) ou
-//! relevée au nombre impair suivant (`XUnits`, issu d'un arrondi).
+//! Smoothing reads the neighbours **by rank** after sorting by X, not by distance:
+//! a window of `n` points is `n` consecutive rows of the sorted curve. The
+//! window is given in points (`Points`) or in X units (`XUnits`); in X units,
+//! it is converted to points by the **median** X step (zero steps,
+//! repeated X, do not count), so that both forms share a single
+//! calculation. In both cases it is **odd**: a centerd smoothing has as many
+//! neighbours on each side, so an even window is refused (`Points`) or
+//! raised to the next odd number (`XUnits`, coming from a rounding).
 //!
-//! Aux extrémités, la courbe est prolongée par **réflexion** (le voisin au-delà du
-//! premier point est le deuxième, etc.) : la sortie a autant de points que
-//! l'entrée, sans biais d'une fenêtre qui rétrécit. Une fenêtre plus large que la
-//! courbe est ramenée au plus grand impair qui tient (au moins 1) : lisser une
-//! courbe courte donne un résultat, pas une erreur.
+//! At the ends, the curve is extended by **reflection** (the neighbour beyond the
+//! first point is the second one, etc.): the output has as many points as
+//! the input, without the bias of a shrinking window. A window wider than the
+//! curve is brought down to the largest odd number that fits (at least 1): smoothing a
+//! short curve gives a result, not an error.
 //!
-//! Savitzky-Golay suppose un pas **uniforme** (les coefficients sont ceux d'un
-//! ajustement polynomial sur des abscisses équidistantes) : un pas qui varie de
-//! plus de 1 % est signalé (`step_uniform` faux), le calcul est fait quand même.
+//! Savitzky-Golay assumes a **uniform** step (the coefficients are those of a
+//! polynomial fit on equidistant abscissae): a step that varies by
+//! more than 1 % is reported (`step_uniform` false), the calculation is done anyway.
 
 use crate::error::AnalysisError;
 use crate::linalg::{solve, Matrix};
 use crate::series::Series;
 
-/// La méthode de lissage.
+/// The smoothing method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmoothMethod {
-    /// Moyenne des points de la fenêtre.
+    /// Mean of the points of the window.
     AdjacentAverage,
-    /// Polynôme d'ordre `order` ajusté sur la fenêtre, évalué en son centre.
+    /// Polynomial of order `order` fitted on the window, evaluated at its center.
     SavitzkyGolay { order: usize },
-    /// Médiane des points de la fenêtre (robuste aux pics isolés).
+    /// Median of the points of the window (robust to isolated peaks).
     Median,
 }
 
-/// La largeur de la fenêtre.
+/// The window width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SmoothWindow {
-    /// Nombre de points, impair.
+    /// Number of points, odd.
     Points(usize),
-    /// Largeur en unités de X, convertie en points par le pas médian.
+    /// Width in X units, converted to points by the median step.
     XUnits(f64),
 }
 
-/// Les réglages d'un lissage.
+/// The settings of a smoothing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SmoothSpec {
     pub method: SmoothMethod,
     pub window: SmoothWindow,
 }
 
-/// Plafond de la fenêtre, en points : une fenêtre lue d'un fichier ne doit rien
-/// allouer d'absurde (`validate`, comme `MAX_DEGREE`).
+/// Cap on the window, in points: a window read from a file must not allocate
+/// anything absurd (`validate`, like `MAX_DEGREE`).
 pub const MAX_WINDOW: usize = 1001;
-/// Ordre minimal et maximal d'un Savitzky-Golay.
+/// Minimum and maximum order of a Savitzky-Golay.
 pub const MIN_ORDER: usize = 2;
 pub const MAX_ORDER: usize = 5;
-/// Fenêtre minimale d'un lissage, en points.
+/// Minimum window of a smoothing, in points.
 pub const MIN_WINDOW: usize = 3;
 
 impl SmoothSpec {
-    /// Refuse les réglages hors plafond avant tout calcul.
+    /// Refuses settings above the cap before any calculation.
     pub fn validate(&self) -> Result<(), AnalysisError> {
         let bad = |name: &str| {
             Err(AnalysisError::InvalidParameter {
@@ -89,18 +89,18 @@ impl SmoothSpec {
     }
 }
 
-/// Résultat d'un lissage, ligne à ligne de la série d'entrée.
+/// Result of a smoothing, row by row of the input series.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Smoothed {
     pub values: Vec<f64>,
-    /// La fenêtre réellement employée, en points (impaire).
+    /// The window actually used, in points (odd).
     pub window: usize,
-    /// Les pas de X sont égaux à 1 % près ; sinon Savitzky-Golay n'est
-    /// qu'approché (l'appelant le signale pour cette méthode seule).
+    /// The X steps are equal to within 1 %; otherwise Savitzky-Golay is only
+    /// approximate (the caller reports it for that method only).
     pub step_uniform: bool,
 }
 
-/// Lisse `data` (points finis, ordre quelconque).
+/// Smooths `data` (finite points, any order).
 pub fn smooth(data: &Series, spec: &SmoothSpec) -> Result<Smoothed, AnalysisError> {
     spec.validate()?;
     let n = data.len();
@@ -125,15 +125,15 @@ pub fn smooth(data: &Series, spec: &SmoothSpec) -> Result<Smoothed, AnalysisErro
             (points | 1).max(MIN_WINDOW)
         }
     };
-    // Une fenêtre plus large que la courbe : le plus grand impair qui tient.
+    // A window wider than the curve: the largest odd number that fits.
     let window = requested.min(if n % 2 == 1 { n } else { n - 1 }).max(1);
     let half = window / 2;
 
     let smoothed_sorted = match spec.method {
         SmoothMethod::AdjacentAverage => convolve(&y, half, &vec![1.0 / window as f64; window]),
         SmoothMethod::SavitzkyGolay { order } => {
-            // Un polynôme d'ordre ≥ fenêtre passe par tous les points : la
-            // fenêtre est relevée à `order + 1` (impair) quand la courbe le permet.
+            // A polynomial of order ≥ window passes through all the points: the
+            // window is raised to `order + 1` (odd) when the curve allows it.
             let kernel = savitzky_golay_kernel(half, order.min(window - 1))?;
             convolve(&y, half, &kernel)
         }
@@ -150,7 +150,7 @@ pub fn smooth(data: &Series, spec: &SmoothSpec) -> Result<Smoothed, AnalysisErro
     })
 }
 
-/// Le pas médian de X trié, sans les pas nuls ; `None` sans aucun pas positif.
+/// The median step of the sorted X, without zero steps; `None` with no positive step.
 fn median_step(x: &[f64]) -> Option<f64> {
     let mut steps: Vec<f64> = x
         .windows(2)
@@ -164,7 +164,7 @@ fn median_step(x: &[f64]) -> Option<f64> {
     Some(steps[steps.len() / 2])
 }
 
-/// Les pas de X trié sont-ils égaux à 1 % près du pas médian ?
+/// Are the steps of the sorted X equal to within 1 % of the median step?
 fn uniform_step(x: &[f64]) -> bool {
     match median_step(x) {
         None => true,
@@ -174,7 +174,7 @@ fn uniform_step(x: &[f64]) -> bool {
     }
 }
 
-/// L'indice `i` ramené dans `0..n` par réflexion sans répétition du bord.
+/// The index `i` brought back into `0..n` by reflection without repeating the edge.
 fn reflect(i: isize, n: usize) -> usize {
     if n == 1 {
         return 0;
@@ -188,8 +188,8 @@ fn reflect(i: isize, n: usize) -> usize {
     }
 }
 
-/// Convolution par `kernel` (`2·half + 1` coefficients, du plus ancien au plus
-/// récent), bords réfléchis.
+/// Convolution by `kernel` (`2·half + 1` coefficients, from the oldest to the
+/// newest), reflected edges.
 fn convolve(y: &[f64], half: usize, kernel: &[f64]) -> Vec<f64> {
     let n = y.len();
     (0..n)
@@ -212,10 +212,10 @@ fn window_median(y: &[f64], i: usize, half: usize) -> f64 {
     w[half]
 }
 
-/// Les coefficients de Savitzky-Golay (lissage, dérivée 0) d'une fenêtre de
-/// `2·half + 1` points et d'un polynôme d'ordre `order` : la première ligne de
-/// `(AᵀA)⁻¹Aᵀ` avec `A[j][k] = j^k`, j de `-half` à `half`. Les abscisses sont
-/// réduites par `half` pour garder le système bien conditionné.
+/// The Savitzky-Golay coefficients (smoothing, derivative 0) of a window of
+/// `2·half + 1` points and a polynomial of order `order`: the first row of
+/// `(AᵀA)⁻¹Aᵀ` with `A[j][k] = j^k`, j from `-half` to `half`. The abscissae are
+/// scaled down by `half` to keep the system well conditioned.
 fn savitzky_golay_kernel(half: usize, order: usize) -> Result<Vec<f64>, AnalysisError> {
     let size = 2 * half + 1;
     if half == 0 {
@@ -231,7 +231,7 @@ fn savitzky_golay_kernel(half: usize, order: usize) -> Result<Vec<f64>, Analysis
             p *= t;
         }
     }
-    // c = e₀ᵀ (AᵀA)⁻¹ Aᵀ : on résout (AᵀA) u = e₀, puis c = A u.
+    // c = e₀ᵀ (AᵀA)⁻¹ Aᵀ: we solve (AᵀA) u = e₀, then c = A u.
     let gram = a.gram();
     let mut e0 = vec![0.0; cols];
     e0[0] = 1.0;
@@ -257,26 +257,26 @@ mod tests {
     }
 
     #[test]
-    fn la_reflexion_ne_repete_pas_le_bord() {
+    fn reflection_does_not_repeat_the_edge() {
         let indices: Vec<usize> = (-3..8).map(|i| reflect(i, 5)).collect();
         assert_eq!(indices, [3, 2, 1, 0, 1, 2, 3, 4, 3, 2, 1]);
         assert_eq!(reflect(-4, 1), 0);
     }
 
     #[test]
-    fn la_moyenne_adjacente_garde_une_droite_en_dedans_et_ajuste_les_bords() {
+    fn adjacent_average_keeps_a_line_inside_and_adjusts_the_edges() {
         let s = smooth(&line(9), &spec(SmoothMethod::AdjacentAverage, 3)).unwrap();
-        // Au milieu, la moyenne de trois points alignés est le point central.
+        // In the middle, the mean of three aligned points is the central point.
         assert!((s.values[4] - 9.0).abs() < 1e-12);
-        // Au bord, la réflexion remplace le voisin manquant (point 1) : (3+1+3)/3.
+        // At the edge, reflection replaces the missing neighbour (point 1): (3+1+3)/3.
         assert!((s.values[0] - 7.0 / 3.0).abs() < 1e-12, "{:?}", s.values);
         assert_eq!(s.window, 3);
     }
 
-    /// Témoin : Savitzky-Golay d'ordre 2 rend **exactement** un polynôme de
-    /// degré 2 (hors bords), là où la moyenne le déforme.
+    /// Witness: order-2 Savitzky-Golay returns a degree-2 polynomial
+    /// **exactly** (away from the edges), where the average distorts it.
     #[test]
-    fn savitzky_golay_conserve_une_parabole_que_la_moyenne_deforme() {
+    fn savitzky_golay_keeps_a_parabola_that_the_average_distorts() {
         let x: Vec<f64> = (0..21).map(f64::from).collect();
         let y: Vec<f64> = x.iter().map(|x| 0.5 * x * x - 3.0 * x + 2.0).collect();
         let data = Series::new(x, y.clone());
@@ -285,11 +285,11 @@ mod tests {
             assert!((sg.values[i] - y[i]).abs() < 1e-9, "i={i}");
         }
         let avg = smooth(&data, &spec(SmoothMethod::AdjacentAverage, 7)).unwrap();
-        assert!((avg.values[10] - y[10]).abs() > 1.0, "la moyenne déforme");
+        assert!((avg.values[10] - y[10]).abs() > 1.0, "the average distorts");
     }
 
     #[test]
-    fn la_mediane_ecarte_un_pic_isole() {
+    fn the_median_drops_an_isolated_peak() {
         let mut data = line(11);
         data.y[5] = 1000.0;
         let s = smooth(&data, &spec(SmoothMethod::Median, 3)).unwrap();
@@ -297,28 +297,28 @@ mod tests {
     }
 
     #[test]
-    fn la_sortie_suit_les_lignes_de_l_entree_meme_non_triee() {
+    fn the_output_follows_the_input_rows_even_unsorted() {
         let data = Series::new(vec![3.0, 1.0, 2.0, 0.0], vec![30.0, 10.0, 20.0, 0.0]);
         let s = smooth(&data, &spec(SmoothMethod::Median, 3)).unwrap();
-        // Triée : 0,10,20,30 -> médianes réfléchies 10,10,20,20 ; remises à leur ligne.
+        // Sorted: 0,10,20,30 -> reflected medians 10,10,20,20; put back on their row.
         assert_eq!(s.values, [20.0, 10.0, 20.0, 10.0]);
     }
 
     #[test]
-    fn une_fenetre_en_unites_de_x_se_convertit_par_le_pas_median() {
+    fn a_window_in_x_units_is_converted_by_the_median_step() {
         let data = line(30);
-        let en_x = SmoothSpec {
+        let in_x = SmoothSpec {
             method: SmoothMethod::AdjacentAverage,
             window: SmoothWindow::XUnits(4.0),
         };
-        // 4 unités à pas 1 : 4 points, relevés à 5 (impair).
-        assert_eq!(smooth(&data, &en_x).unwrap().window, 5);
-        let cinq = smooth(&data, &spec(SmoothMethod::AdjacentAverage, 5)).unwrap();
-        assert_eq!(smooth(&data, &en_x).unwrap().values, cinq.values);
+        // 4 units at step 1: 4 points, raised to 5 (odd).
+        assert_eq!(smooth(&data, &in_x).unwrap().window, 5);
+        let five = smooth(&data, &spec(SmoothMethod::AdjacentAverage, 5)).unwrap();
+        assert_eq!(smooth(&data, &in_x).unwrap().values, five.values);
     }
 
     #[test]
-    fn une_fenetre_trop_large_est_ramenee_a_la_courbe() {
+    fn a_window_that_is_too_wide_is_brought_down_to_the_curve() {
         let s = smooth(&line(6), &spec(SmoothMethod::AdjacentAverage, 101)).unwrap();
         assert_eq!(s.window, 5);
         assert_eq!(s.values.len(), 6);
@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn les_reglages_hors_plafond_sont_refuses() {
+    fn settings_above_the_cap_are_refused() {
         for bad in [
             spec(SmoothMethod::AdjacentAverage, 4),
             spec(SmoothMethod::AdjacentAverage, 1),
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn un_pas_non_uniforme_est_signale() {
+    fn a_non_uniform_step_is_reported() {
         let data = Series::new(vec![0.0, 1.0, 2.0, 4.0, 8.0, 9.0, 10.0], vec![0.0; 7]);
         let s = smooth(&data, &spec(SmoothMethod::SavitzkyGolay { order: 2 }, 5)).unwrap();
         assert!(!s.step_uniform);

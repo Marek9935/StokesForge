@@ -1,76 +1,76 @@
-//! Style d'une courbe et de ses marqueurs, plus la palette par défaut.
+//! Style of a curve and its markers, plus the default palette.
 //!
-//! Rien ici n'emprunte son vocabulaire à un moteur : pas de `'o'`, pas de
-//! `linestyle='--'`, pas de `PenStyle`. Des énumérations nommées, que chaque
-//! renderer traduit chez lui — la table de traduction vit dans le renderer,
-//! jamais dans ce crate.
+//! Nothing here borrows its vocabulary from an engine: no `'o'`, no
+//! `linestyle='--'`, no `PenStyle`. Named enums, which each
+//! renderer translates on its own — the translation table lives in the renderer,
+//! never in this crate.
 
-/// Style de trait d'une courbe.
+/// Line style of a curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LineStyle {
-    /// Pas de trait du tout.
+    /// No line at all.
     None,
-    /// Trait plein (défaut).
+    /// Solid line (default).
     #[default]
     Solid,
-    /// Tirets.
+    /// Dashes.
     Dash,
-    /// Pointillés.
+    /// Dots.
     Dot,
-    /// Tiret-point.
+    /// Dash-dot.
     DashDot,
 }
 
-/// Forme d'un marqueur de point.
+/// Shape of a point marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SymbolShape {
-    /// Aucun marqueur.
+    /// No marker.
     None,
-    /// Disque (défaut).
+    /// Disc (default).
     #[default]
     Circle,
-    /// Carré.
+    /// Square.
     Square,
     /// Triangle.
     Triangle,
-    /// Losange.
+    /// Diamond.
     Diamond,
-    /// Croix droite `+`.
+    /// Straight cross `+`.
     Plus,
-    /// Croix oblique `×`.
+    /// Oblique cross `×`.
     Cross,
 }
 
-/// Palette par défaut, en hexadécimal `#RRGGBB` — la forme la plus neutre qui
-/// soit : tout moteur de rendu l'accepte telle quelle, et elle traverse une
-/// persistance sans conversion.
+/// Default palette, in hexadecimal `#RRGGBB` — the most neutral form
+/// there is: every renderer accepts it as is, and it passes through
+/// persistence without conversion.
 pub const DEFAULT_PALETTE: [&str; 10] = [
     "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#eeca3b", "#b279a2", "#ff9da6",
     "#9d755d", "#bab0ac",
 ];
 
-/// Couleur de la palette par défaut, cyclique.
+/// Color of the default palette, cyclic.
 pub fn palette_color(index: usize) -> &'static str {
     DEFAULT_PALETTE[index % DEFAULT_PALETTE.len()]
 }
 
-/// Trait d'une courbe. [`LineStyle::None`] = pas de trait du tout.
+/// Line of a curve. [`LineStyle::None`] = no line at all.
 ///
-/// La couleur est une chaîne `#RRGGBB` et non un type structuré : c'est le
-/// plus petit dénominateur commun entre les moteurs, et le crate n'a pas à
-/// savoir composer des couleurs pour décrire un graphe.
+/// The color is a `#RRGGBB` string and not a structured type: it is the
+/// lowest common denominator between engines, and the crate does not need to
+/// know how to compose colors to describe a graph.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LineSpec {
-    /// Couleur du trait, `#RRGGBB`.
+    /// Line color, `#RRGGBB`.
     pub color: String,
-    /// Style de trait.
+    /// Line style.
     pub style: LineStyle,
-    /// Épaisseur, en points.
+    /// Thickness, in points.
     pub width: f64,
 }
 
 impl LineSpec {
-    /// Trait par défaut, coloré avec la couleur `index` de la palette.
+    /// Default line, colored with the `index` color of the palette.
     pub fn from_palette(index: usize) -> Self {
         Self {
             color: palette_color(index).to_string(),
@@ -89,22 +89,22 @@ impl Default for LineSpec {
     }
 }
 
-/// Marqueur d'un point. [`SymbolShape::None`] = aucun marqueur.
+/// Marker of a point. [`SymbolShape::None`] = no marker.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolSpec {
-    /// Forme du marqueur.
+    /// Shape of the marker.
     pub shape: SymbolShape,
-    /// Taille, en points.
+    /// Size, in points.
     pub size: f64,
-    /// Couleur de remplissage, `#RRGGBB`.
+    /// Fill color, `#RRGGBB`.
     pub color: String,
-    /// Contour du marqueur. La chaîne vide signifie « la même couleur que le
-    /// remplissage » — un renderer n'a jamais à deviner une valeur absente.
+    /// Outline of the marker. The empty string means "the same color as the
+    /// fill" — a renderer never has to guess an absent value.
     pub edge_color: String,
 }
 
 impl SymbolSpec {
-    /// Marqueur par défaut, coloré avec la couleur `index` de la palette.
+    /// Default marker, colored with the `index` color of the palette.
     pub fn from_palette(index: usize) -> Self {
         Self {
             color: palette_color(index).to_string(),
@@ -112,8 +112,8 @@ impl SymbolSpec {
         }
     }
 
-    /// Couleur effective du contour : celle du remplissage si aucune n'est
-    /// désignée. Évite que chaque renderer réécrive la règle.
+    /// Effective outline color: that of the fill if none is
+    /// designated. Spares each renderer from rewriting the rule.
     pub fn effective_edge_color(&self) -> &str {
         if self.edge_color.is_empty() {
             &self.color
@@ -146,13 +146,13 @@ mod tests {
     }
 
     #[test]
-    fn default_styles_take_the_first_palette_colour() {
+    fn default_styles_take_the_first_palette_color() {
         assert_eq!(LineSpec::default().color, DEFAULT_PALETTE[0]);
         assert_eq!(SymbolSpec::default().color, DEFAULT_PALETTE[0]);
     }
 
     #[test]
-    fn from_palette_colours_without_touching_the_rest() {
+    fn from_palette_colors_without_touching_the_rest() {
         let line = LineSpec::from_palette(1);
         assert_eq!(line.color, DEFAULT_PALETTE[1]);
         assert_eq!(line.style, LineSpec::default().style);
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_edge_colour_means_the_fill_colour() {
+    fn an_empty_edge_color_means_the_fill_color() {
         let symbol = SymbolSpec::default();
         assert_eq!(symbol.effective_edge_color(), symbol.color);
         let outlined = SymbolSpec {
@@ -171,22 +171,22 @@ mod tests {
     }
 }
 
-/// Les composantes `[r, g, b, a]` d'une couleur `#RRGGBB` (opaque) ou
-/// `#RRGGBBAA`, ou `None`.
+/// The `[r, g, b, a]` components of a `#RRGGBB` (opaque) or
+/// `#RRGGBBAA` color, or `None`.
 ///
-/// **Source unique** de la syntaxe des couleurs du spec : le rendu
-/// (`stokesforge_render::color::parse_hex`) et le sélecteur de couleur de
-/// l'interface (`stokesforge-app::color_picker::parse_hex`) ne font qu'adapter son
-/// résultat à leur type, pour qu'une couleur acceptée d'un côté ne puisse pas
-/// être lue autrement de l'autre (issue #25). Tolérant sur ce qui est
-/// tolérable — casse indifférente, espaces de bordure ignorés, `#` facultatif —
-/// et net sur le reste : une chaîne mal formée (longueur, caractère non
-/// hexadécimal, non ASCII) rend `None` plutôt qu'une couleur inventée.
+/// **Single source** of the color syntax of the spec: rendering
+/// (`stokesforge_render::color::parse_hex`) and the interface color picker
+/// (`stokesforge-app::color_picker::parse_hex`) only adapt its
+/// result to their type, so that a color accepted on one side cannot
+/// be read differently on the other (issue #25). Tolerant of what is
+/// tolerable — case-insensitive, edge spaces ignored, `#` optional —
+/// and strict on the rest: a malformed string (length, non-hexadecimal
+/// character, non-ASCII) returns `None` rather than an invented color.
 pub fn parse_hex(text: &str) -> Option<[u8; 4]> {
     let text = text.trim();
     let text = text.strip_prefix('#').unwrap_or(text);
-    // Uniquement des chiffres hexadécimaux : `from_str_radix` accepterait
-    // aussi un `+` de tête (« +c78a8 » se lirait comme une couleur).
+    // Hexadecimal digits only: `from_str_radix` would also accept
+    // a leading `+` ("+c78a8" would read as a color).
     if !text.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }

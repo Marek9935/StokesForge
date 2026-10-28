@@ -1,14 +1,14 @@
-//! Détection de pics et décomposition en somme de pics (#189) : gaussiennes,
-//! lorentziennes ou profils de Voigt, avec un fond constant ou linéaire ajusté
-//! **en même temps** que les pics (M14 b).
+//! Peak detection and decomposition into a sum of peaks (#189): Gaussians,
+//! Lorentzians or Voigt profiles, with a constant or linear background fitted
+//! **at the same time** as the peaks (M14 b).
 //!
-//! Détection : maxima locaux filtrés par **proéminence relative** (hauteur
-//! au-dessus du plus haut des deux creux voisins, rapportée à l'étendue de Y)
-//! et plafonnés à un nombre maximal de pics (M14 a C).
+//! Detection: local maxima filtered by **relative prominence** (height
+//! above the higher of the two neighbouring troughs, relative to the Y range)
+//! and capped at a maximum number of peaks (M14 a C).
 //!
-//! La décomposition est un ajustement ordinaire du moteur [`crate::solver`] :
-//! les largeurs liées (même case pour tous les pics) et les positions bornées
-//! (centre ± fenêtre) sont des réglages de cases, pas du code propre aux pics.
+//! The decomposition is an ordinary fit of the [`crate::solver`] engine:
+//! linked widths (same slot for all peaks) and bounded positions
+//! (center ± window) are slot settings, not code specific to peaks.
 
 use crate::error::AnalysisError;
 use crate::model::peak_guess;
@@ -24,7 +24,7 @@ pub enum PeakShape {
 }
 
 impl PeakShape {
-    /// Paramètres d'un pic : hauteur, centre, puis une ou deux largeurs.
+    /// Parameters of a peak: height, center, then one or two widths.
     pub fn width_count(self) -> usize {
         match self {
             PeakShape::Voigt => 2,
@@ -50,7 +50,7 @@ impl PeakBackground {
     }
 }
 
-/// Un maximum local trouvé par [`detect`].
+/// A local maximum found by [`detect`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DetectedPeak {
     pub index: usize,
@@ -59,8 +59,8 @@ pub struct DetectedPeak {
     pub prominence: f64,
 }
 
-/// Maxima locaux de `y` dont la proéminence relative atteint `min_relative`,
-/// au plus `max_peaks`, rangés par X croissant. `y` est lu dans l'ordre donné.
+/// Local maxima of `y` whose relative prominence reaches `min_relative`,
+/// at most `max_peaks`, sorted by increasing X. `y` is read in the given order.
 pub fn detect(series: &Series, min_relative: f64, max_peaks: usize) -> Vec<DetectedPeak> {
     let n = series.len();
     if n < 3 || max_peaks == 0 {
@@ -80,7 +80,7 @@ pub fn detect(series: &Series, min_relative: f64, max_peaks: usize) -> Vec<Detec
     let mut i = 1;
     while i < n - 1 {
         if y[i] > y[i - 1] {
-            // Plateau éventuel : on prend son milieu.
+            // Possible plateau: take its middle.
             let mut j = i;
             while j + 1 < n && y[j + 1] == y[i] {
                 j += 1;
@@ -127,13 +127,13 @@ fn prominence(y: &[f64], peak: usize) -> f64 {
     h - left_min.max(right_min)
 }
 
-/// Position de départ d'un pic.
+/// Starting position of a peak.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PeakSeed {
     pub center: f64,
-    /// `None` : lue sur la courbe.
+    /// `None`: read from the curve.
     pub height: Option<f64>,
-    /// `None` : estimée d'après l'espacement des pics.
+    /// `None`: estimated from the peak spacing.
     pub fwhm: Option<f64>,
 }
 
@@ -142,37 +142,37 @@ pub struct PeaksSpec {
     pub shape: PeakShape,
     pub background: PeakBackground,
     pub seeds: Vec<PeakSeed>,
-    /// Même largeur pour tous les pics.
+    /// Same width for all peaks.
     pub link_widths: bool,
-    /// Le centre d'un pic reste dans `départ ± fenêtre`. `None` : libre.
+    /// The center of a peak stays within `start ± window`. `None`: free.
     pub center_window: Option<f64>,
 }
 
-/// Paramètres ajustés d'un pic.
+/// Fitted parameters of a peak.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PeakResult {
     pub height: f64,
     pub height_error: Option<f64>,
     pub center: f64,
     pub center_error: Option<f64>,
-    /// Largeur à mi-hauteur (Voigt : la largeur totale du profil).
+    /// Full width at half maximum (Voigt: the total width of the profile).
     pub fwhm: f64,
     pub fwhm_error: Option<f64>,
-    /// Voigt seulement : largeurs gaussienne et lorentzienne.
+    /// Voigt only: Gaussian and Lorentzian widths.
     pub fwhm_gauss: Option<f64>,
     pub fwhm_lorentz: Option<f64>,
     pub area: f64,
-    /// Part de l'aire de ce pic dans la somme des aires, en %.
+    /// Share of the area of this peak in the sum of the areas, in %.
     pub area_percent: f64,
 }
 
-/// Le modèle ajusté, évaluable en tout X.
+/// The fitted model, evaluable at any X.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PeakModel {
     shape: PeakShape,
     background: PeakBackground,
     bg: Vec<f64>,
-    /// `(hauteur, centre, largeurs)` par pic.
+    /// `(height, center, widths)` per peak.
     peaks: Vec<(f64, f64, Vec<f64>)>,
 }
 
@@ -181,13 +181,13 @@ impl PeakModel {
         self.peaks.len()
     }
 
-    /// Valeur du pic `i` seul (sans fond).
+    /// Value of peak `i` alone (without background).
     pub fn peak(&self, i: usize, x: f64) -> f64 {
         let (h, c, w) = &self.peaks[i];
         shape_value(self.shape, *h, *c, w, x)
     }
 
-    /// Valeur du fond en `x`.
+    /// Value of the background at `x`.
     pub fn background(&self, x: f64) -> f64 {
         match self.background {
             PeakBackground::None => 0.0,
@@ -196,7 +196,7 @@ impl PeakModel {
         }
     }
 
-    /// Fond + somme des pics.
+    /// Background + sum of the peaks.
     pub fn total(&self, x: f64) -> f64 {
         self.background(x) + (0..self.peaks.len()).map(|i| self.peak(i, x)).sum::<f64>()
     }
@@ -233,20 +233,20 @@ fn area_of(shape: PeakShape, h: f64, w: &[f64]) -> f64 {
 pub struct PeaksFit {
     pub model: PeakModel,
     pub peaks: Vec<PeakResult>,
-    /// Paramètres du fond et leurs incertitudes.
+    /// Background parameters and their uncertainties.
     pub background: Vec<(f64, Option<f64>)>,
     pub points: usize,
     pub r_squared: f64,
     pub reduced_chi2: f64,
     pub dof: usize,
-    /// Nombre de paramètres libres que les données ne déterminent pas (#203).
+    /// Number of free parameters that the data do not determine (#203).
     pub undetermined: usize,
-    /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1, #313) :
-    /// pas sur un minimum.
+    /// Stop on a plateau (#281) or solver blocked without an accepted step (C1, #313):
+    /// not on a minimum.
     pub plateau: bool,
 }
 
-/// Décompose `series` en pics selon `spec`.
+/// Decomposes `series` into peaks according to `spec`.
 pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, AnalysisError> {
     let np = spec.seeds.len();
     if np == 0 {
@@ -254,8 +254,8 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
             name: "peaks".into(),
         });
     }
-    // Une largeur imposée nulle ou négative ferait partir le solveur sur sa
-    // borne basse : ajustement faux, sans erreur (#285).
+    // A zero or negative imposed width would send the solver to its
+    // lower bound: a wrong fit, without error (#285).
     if spec.seeds.iter().any(|p| p.fwhm.is_some_and(|f| f <= 0.0)) {
         return Err(AnalysisError::InvalidParameter {
             name: "seeds".into(),
@@ -264,7 +264,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
     let wc = spec.shape.width_count();
     let s = series;
     if s.x.len() < 3 {
-        // Une série vide ou presque : rien à lire sous les graines posées.
+        // An empty or almost empty series: nothing to read under the placed seeds.
         return Err(AnalysisError::NotEnoughPoints {
             found: s.x.len(),
             needed: 3,
@@ -278,7 +278,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
     let span = (xmax - xmin).abs();
     let min_width = (span * 1e-6).max(f64::MIN_POSITIVE);
 
-    // Fond de départ : minimum de Y (constant), pente nulle.
+    // Starting background: minimum of Y (constant), zero slope.
     let ymin = s.y.iter().cloned().fold(f64::INFINITY, f64::min);
     let mut slots: Vec<Slot> = Vec::new();
     match spec.background {
@@ -296,7 +296,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
         ymin
     };
 
-    // Largeur de départ : demi-espacement moyen, ou largeur lue localement.
+    // Starting width: mean half-spacing, or locally read width.
     let mut centers: Vec<f64> = spec.seeds.iter().map(|p| p.center).collect();
     centers.sort_by(f64::total_cmp);
     let default_width = if np > 1 {
@@ -464,23 +464,23 @@ mod tests {
     }
 
     #[test]
-    fn detection_par_proeminence_relative() {
+    fn detection_by_relative_prominence() {
         let s = two_gaussians();
         let found = detect(&s, 0.1, 10);
         assert_eq!(found.len(), 2);
         assert!((found[0].x - 20.0).abs() < 0.2 && (found[1].x - 32.0).abs() < 0.2);
-        // Un seuil trop haut écarte le petit pic ; le plafond aussi.
+        // A threshold that is too high drops the small peak; so does the cap.
         assert_eq!(detect(&s, 0.7, 10).len(), 1);
         let capped = detect(&s, 0.1, 1);
         assert_eq!(capped.len(), 1);
         assert!(
             (capped[0].x - 20.0).abs() < 0.2,
-            "le pic le plus proéminent est gardé"
+            "the most prominent peak is kept"
         );
     }
 
     #[test]
-    fn le_bruit_sous_le_seuil_n_est_pas_un_pic() {
+    fn noise_below_the_threshold_is_not_a_peak() {
         let x = grid(500, 0.0, 50.0);
         let y: Vec<f64> = x
             .iter()
@@ -490,13 +490,13 @@ mod tests {
             })
             .collect();
         let s = Series::new(x, y);
-        // Témoin : sans seuil, le bruit fabrique des dizaines de maxima.
+        // Witness: without a threshold, the noise produces dozens of maxima.
         assert!(detect(&s, 0.0, 1000).len() > 20);
         assert_eq!(detect(&s, 0.1, 1000).len(), 1);
     }
 
     #[test]
-    fn courbe_plate_ou_trop_courte() {
+    fn flat_or_too_short_curve() {
         assert!(detect(
             &Series::new(vec![0.0, 1.0, 2.0], vec![1.0, 1.0, 1.0]),
             0.1,
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn un_plateau_donne_un_seul_pic_au_milieu() {
+    fn a_plateau_gives_a_single_peak_in_the_middle() {
         let y = vec![0.0, 1.0, 5.0, 5.0, 5.0, 1.0, 0.0];
         let s = Series::new((0..7).map(|i| i as f64).collect(), y);
         let f = detect(&s, 0.1, 5);
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn decomposition_de_deux_gaussiennes_avec_fond_lineaire() {
+    fn decomposition_of_two_gaussians_with_linear_background() {
         let s = two_gaussians();
         let spec = PeaksSpec {
             shape: PeakShape::Gaussian,
@@ -547,18 +547,18 @@ mod tests {
         assert!((p1.height - 10.0).abs() < 1e-4 && (p1.center - 20.0).abs() < 1e-4);
         assert!((p1.fwhm - 4.0).abs() < 1e-4);
         assert!((p2.height - 6.0).abs() < 1e-4 && (p2.fwhm - 5.0).abs() < 1e-4);
-        // Aire gaussienne : h·w·√(π/(4 ln 2)).
+        // Gaussian area: h·w·√(π/(4 ln 2)).
         let k = (std::f64::consts::PI / (4.0 * std::f64::consts::LN_2)).sqrt();
         assert!((p1.area - 10.0 * 4.0 * k).abs() < 1e-3);
         assert!((p1.area_percent + p2.area_percent - 100.0).abs() < 1e-9);
         assert!(r.r_squared > 1.0 - 1e-9);
-        // La somme du modèle reproduit la courbe.
+        // The sum of the model reproduces the curve.
         let i = nearest_index(&s.x, 20.0);
         assert!((r.model.total(s.x[i]) - s.y[i]).abs() < 1e-3);
     }
 
     #[test]
-    fn largeurs_liees_donnent_la_meme_largeur() {
+    fn linked_widths_give_the_same_width() {
         let x = grid(500, 0.0, 50.0);
         let y: Vec<f64> = x
             .iter()
@@ -590,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn centre_borne_par_la_fenetre() {
+    fn center_bounded_by_the_window() {
         let x = grid(300, 0.0, 30.0);
         let y: Vec<f64> = x.iter().map(|&v| gauss(v, 5.0, 15.0, 2.0)).collect();
         let s = Series::new(x, y);
@@ -603,13 +603,13 @@ mod tests {
                 fwhm: Some(2.0),
             }],
             link_widths: false,
-            // Le vrai centre (15) est hors de 14 ± 0,5.
+            // The true center (15) is outside 14 ± 0.5.
             center_window: Some(0.5),
         };
         let r = decompose(&s, &spec).unwrap();
         assert!(
             r.peaks[0].center <= 14.5 + 1e-12,
-            "centre {}",
+            "center {}",
             r.peaks[0].center
         );
     }
@@ -629,11 +629,11 @@ mod tests {
     }
 
     #[test]
-    fn graine_a_largeur_nulle_est_refusee_sans_ajustement_faux() {
+    fn a_seed_with_zero_width_is_refused_without_a_wrong_fit() {
         let x = grid(300, 0.0, 30.0);
         let y: Vec<f64> = x.iter().map(|&v| gauss(v, 5.0, 15.0, 2.0)).collect();
         let s = Series::new(x, y);
-        // Témoin : sans largeur imposée, l'ajustement retrouve le pic.
+        // Witness: without an imposed width, the fit recovers the peak.
         let ok = decompose(&s, &seed_spec(None, None)).unwrap();
         assert!((ok.peaks[0].center - 15.0).abs() < 1e-3 && ok.r_squared > 0.999);
         for fwhm in [0.0, -1.0] {
@@ -644,59 +644,59 @@ mod tests {
                 }
             );
         }
-        // Une hauteur imposée sensée (4.0) reste acceptée et ajuste bien.
+        // A sensible imposed height (4.0) is still accepted and fits well.
         let r = decompose(&s, &seed_spec(Some(4.0), None)).unwrap();
         assert!((r.peaks[0].height - 5.0).abs() < 1e-3 && r.r_squared > 0.999);
     }
 
-    fn une_gaussienne() -> Series {
+    fn a_gaussian() -> Series {
         let x = grid(300, 0.0, 30.0);
         let y: Vec<f64> = x.iter().map(|&v| gauss(v, 5.0, 15.0, 2.0)).collect();
         Series::new(x, y)
     }
 
-    fn graine_invalide() -> AnalysisError {
+    fn invalid_seed() -> AnalysisError {
         AnalysisError::InvalidParameter {
             name: "seeds".into(),
         }
     }
 
     #[test]
-    fn largeur_imposee_nulle_negative_ou_signee_est_refusee() {
-        let s = une_gaussienne();
+    fn zero_negative_or_signed_imposed_width_is_refused() {
+        let s = a_gaussian();
         for fwhm in [0.0, -0.0, -1.0, -f64::MIN_POSITIVE, f64::NEG_INFINITY] {
             assert_eq!(
                 decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
-                graine_invalide(),
+                invalid_seed(),
                 "fwhm = {fwhm:e}"
             );
         }
     }
 
     #[test]
-    fn largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose() {
-        // `decompose` ne refuse que `<= 0` ; le reste (NaN, inf, positif
-        // minuscule) est du ressort de `validate` ou du solveur, qui échoue
-        // sans rendre de faux ajustement (comportement actuel épinglé). Une
-        // largeur infinie donne une pente non finie : modèle non évaluable (C6).
-        let s = une_gaussienne();
+    fn tiny_or_non_finite_imposed_width_is_not_judged_by_decompose() {
+        // `decompose` only refuses `<= 0`; the rest (NaN, inf, tiny
+        // positive) is up to `validate` or the solver, which fails
+        // without returning a wrong fit (current behavior pinned). An
+        // infinite width gives a non-finite slope: model not evaluable (C6).
+        let s = a_gaussian();
         for fwhm in [f64::MIN_POSITIVE, 1e-300, 1e-9, f64::NAN, f64::INFINITY] {
-            let attendu = if fwhm.is_infinite() {
+            let expected = if fwhm.is_infinite() {
                 AnalysisError::ModelNotEvaluable
             } else {
                 AnalysisError::SingularSystem
             };
             assert_eq!(
                 decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
-                attendu,
+                expected,
                 "fwhm = {fwhm:e}"
             );
         }
     }
 
     #[test]
-    fn sans_largeur_imposee_le_resultat_est_inchange() {
-        let r = decompose(&une_gaussienne(), &seed_spec(None, None)).unwrap();
+    fn without_an_imposed_width_the_result_is_unchanged() {
+        let r = decompose(&a_gaussian(), &seed_spec(None, None)).unwrap();
         let p = &r.peaks[0];
         assert!((p.height - 5.0).abs() < 1e-3, "{}", p.height);
         assert!((p.center - 15.0).abs() < 1e-3, "{}", p.center);
@@ -705,33 +705,33 @@ mod tests {
     }
 
     #[test]
-    fn largeur_valide_imposee_proche_de_la_vraie_ajuste_bien() {
-        let r = decompose(&une_gaussienne(), &seed_spec(None, Some(2.5))).unwrap();
+    fn a_valid_imposed_width_close_to_the_true_one_fits_well() {
+        let r = decompose(&a_gaussian(), &seed_spec(None, Some(2.5))).unwrap();
         assert!((r.peaks[0].fwhm - 2.0).abs() < 2e-3 && r.r_squared > 0.999999);
     }
 
     #[test]
-    fn graine_valide_et_graine_fautive_donnent_la_meme_erreur_dans_les_deux_ordres() {
-        let s = une_gaussienne();
-        let bonne = PeakSeed {
+    fn a_valid_seed_and_a_faulty_seed_give_the_same_error_in_both_orders() {
+        let s = a_gaussian();
+        let good_seed = PeakSeed {
             center: 15.0,
             height: None,
             fwhm: Some(2.0),
         };
-        let mauvaise = PeakSeed {
+        let bad_seed = PeakSeed {
             center: 5.0,
             height: None,
             fwhm: Some(0.0),
         };
-        for seeds in [vec![bonne, mauvaise], vec![mauvaise, bonne]] {
+        for seeds in [vec![good_seed, bad_seed], vec![bad_seed, good_seed]] {
             let mut spec = seed_spec(None, None);
             spec.seeds = seeds;
-            assert_eq!(decompose(&s, &spec).unwrap_err(), graine_invalide());
+            assert_eq!(decompose(&s, &spec).unwrap_err(), invalid_seed());
         }
     }
 
     #[test]
-    fn plusieurs_graines_valides_retrouvent_leurs_pics() {
+    fn several_valid_seeds_recover_their_peaks() {
         let s = two_gaussians();
         let mut spec = seed_spec(None, None);
         spec.background = PeakBackground::Linear;
@@ -748,8 +748,8 @@ mod tests {
             },
         ];
         let r = decompose(&s, &spec).unwrap();
-        let attendu = [(10.0, 20.0, 4.0), (6.0, 32.0, 5.0)];
-        for (p, (h, c, w)) in r.peaks.iter().zip(attendu) {
+        let expected = [(10.0, 20.0, 4.0), (6.0, 32.0, 5.0)];
+        for (p, (h, c, w)) in r.peaks.iter().zip(expected) {
             assert!((p.height - h).abs() < 1e-3, "h {} vs {h}", p.height);
             assert!((p.center - c).abs() < 1e-3, "c {} vs {c}", p.center);
             assert!((p.fwhm - w).abs() < 2e-3, "w {} vs {w}", p.fwhm);
@@ -758,18 +758,18 @@ mod tests {
     }
 
     #[test]
-    fn hauteur_imposee_minuscule_est_signalee_non_convergee() {
-        // Pas refusée (la hauteur est de signe libre) : le solveur s'arrête
-        // sur un plateau, ce que `plateau` (donc `Warning::NotConverged`)
-        // signale ; le résultat n'est pas un ajustement.
-        let r = decompose(&une_gaussienne(), &seed_spec(Some(1e-9), None)).unwrap();
+    fn a_tiny_imposed_height_is_reported_as_not_converged() {
+        // Not refused (the height has a free sign): the solver stops
+        // on a plateau, which `plateau` (hence `Warning::NotConverged`)
+        // reports; the result is not a fit.
+        let r = decompose(&a_gaussian(), &seed_spec(Some(1e-9), None)).unwrap();
         assert!(r.plateau && r.r_squared < 1e-6, "{r:?}");
     }
 
     #[test]
-    fn hauteur_imposee_nulle_ou_negative_converge_comme_sans_hauteur() {
+    fn a_zero_or_negative_imposed_height_converges_like_without_a_height() {
         for h in [Some(0.0), Some(-4.0)] {
-            let r = decompose(&une_gaussienne(), &seed_spec(h, None)).unwrap();
+            let r = decompose(&a_gaussian(), &seed_spec(h, None)).unwrap();
             let p = &r.peaks[0];
             assert!((p.height - 5.0).abs() < 1e-3 && (p.center - 15.0).abs() < 1e-3);
             assert!(r.r_squared > 0.999999, "{h:?}");
@@ -777,10 +777,10 @@ mod tests {
     }
 
     #[test]
-    fn centre_hors_donnees_ou_sur_le_bord_comportement_actuel() {
-        // Graine loin du pic : hauteur lue ~0, gradient nul, le centre reste
-        // où il est posé (R² négatif, aucun drapeau). Comportement épinglé.
-        let s = une_gaussienne();
+    fn center_outside_the_data_or_on_the_edge_current_behavior() {
+        // Seed far from the peak: height read ~0, zero gradient, the center stays
+        // where it is placed (negative R², no flag). Pinned behavior.
+        let s = a_gaussian();
         for c in [-5.0, 0.0, 30.0] {
             let mut spec = seed_spec(None, None);
             spec.seeds[0].center = c;
@@ -800,19 +800,19 @@ mod tests {
     }
 
     #[test]
-    fn fenetre_de_centre_nulle_fige_le_centre() {
-        // Choix documenté (#285, « écarté ») : `center_window: Some(0.0)`
-        // verrouille le centre sur la graine. Ce test est là pour qu'on voie
-        // ce choix changer.
+    fn a_zero_center_window_freezes_the_center() {
+        // Documented choice (#285, "dismissed"): `center_window: Some(0.0)`
+        // locks the center on the seed. This test is here so that a change
+        // of this choice shows.
         let mut spec = seed_spec(None, None);
         spec.center_window = Some(0.0);
-        let r = decompose(&une_gaussienne(), &spec).unwrap();
+        let r = decompose(&a_gaussian(), &spec).unwrap();
         assert_eq!(r.peaks[0].center, 14.0);
         assert!(r.r_squared < 0.99);
     }
 
     #[test]
-    fn lorentzienne_et_voigt_retrouvent_leurs_parametres() {
+    fn lorentzian_and_voigt_recover_their_parameters() {
         let x = grid(800, -40.0, 40.0);
         let lor: Vec<f64> = x
             .iter()
@@ -872,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_pic_c_est_une_erreur() {
+    fn without_a_peak_it_is_an_error() {
         let s = two_gaussians();
         let spec = PeaksSpec {
             shape: PeakShape::Gaussian,

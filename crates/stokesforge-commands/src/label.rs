@@ -1,103 +1,104 @@
-//! Libellés d'historique **structurés** (issue #46, chantier #39).
+//! **Structured** history labels (issue #46, work package #39).
 //!
-//! Un libellé d'historique n'est pas une phrase : c'est une action et ses
-//! paramètres (« insérer *3* lignes », « renommer *A* en *Z* »). Ce crate rend
-//! la donnée ; la phrase, dans la langue de l'utilisateur, est celle de
-//! `stokesforge-app` (`tr!`, pluriels Fluent). Aucune dépendance à Fluent ici :
-//! `stokesforge-commands` reste sous la frontière de traduction (invariant 2).
+//! A history label is not a sentence: it is an action and its parameters
+//! ("insert *3* rows", "rename *A* to *Z*"). This crate returns the data; the
+//! sentence, in the user's language, belongs to `stokesforge-app` (`tr!`,
+//! Fluent plurals). No dependency on Fluent here: `stokesforge-commands`
+//! stays below the translation boundary (invariant 2).
 //!
-//! # Pourquoi pas une `String`
+//! # Why not a `String`
 //!
-//! Une phrase toute faite fige une langue au moment de l'application de la
-//! commande, et oblige chaque crate à refaire sa grammaire (le pluriel de
-//! « ligne » écrit à la main dans `Command::label`). Un libellé structuré se
-//! met en phrase **à l'affichage**, donc suit la langue courante ; il se
-//! compare (`==`) sans parser un texte (l'application demandait
-//! `label == "Importer"`), et il se transporte tel quel si l'historique est un
-//! jour écrit dans un fichier — l'historique n'est **pas** dans le `.stf`
-//! aujourd'hui (`docs/persistance.md`).
+//! A ready-made sentence freezes a language at the moment the command is
+//! applied, and forces each crate to redo its grammar (the plural of "row"
+//! written by hand in `Command::label`). A structured label is turned into a
+//! sentence **at display time**, so it follows the current language; it is
+//! compared (`==`) without parsing a text (the application used to ask
+//! `label == "Importer"`), and it is carried as is if the history is one day
+//! written to a file — the history is **not** in the `.stf` today
+//! (`docs/persistance.md`).
 //!
-//! # Le `Display` anglais
+//! # The English `Display`
 //!
-//! [`HistoryLabel`] s'affiche en **anglais** : c'est le texte des journaux et
-//! du CLI, qui ne traduisent pas (chantier #39). Il double le catalogue `en`
-//! de l'application (clés `history-*`) ; `stokesforge-app-state/tests/history_text.rs` vérifie
-//! que les deux disent la même chose, variante par variante.
+//! [`HistoryLabel`] is displayed in **English**: it is the text of the logs
+//! and of the CLI, which do not translate (work package #39). It mirrors the
+//! `en` catalog of the application (`history-*` keys);
+//! `stokesforge-app-state/tests/history_text.rs` checks that the two say the
+//! same thing, variant by variant.
 
 use std::fmt;
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_core::family_english;
 
-/// Désignation d'une **colonne** dans un libellé : sa position dans sa
-/// feuille, jamais son nom de nœud.
+/// Designation of a **column** in a label: its position in its
+/// sheet, never its node name.
 ///
-/// Une colonne porte deux identités et une seule est visible : son nom de
-/// nœud est une clé du modèle, la grille n'affiche que la lettre de position
-/// (A, B, C…). Un libellé qui nommerait le nœud annoncerait « Temps » pour une
-/// colonne que l'utilisateur ne connaît que sous le nom « A ». La lettre se
-/// calcule par [`stokesforge_core::spreadsheet_name`], la fonction de la grille.
+/// A column carries two identities and only one is visible: its node name is
+/// a key of the model, the grid shows only the position letter (A, B, C…). A
+/// label that named the node would announce "Time" for a column that the user
+/// knows only under the name "A". The letter is computed by
+/// [`stokesforge_core::spreadsheet_name`], the function of the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ColumnRef(pub usize);
 
 impl ColumnRef {
-    /// La lettre d'en-tête de la grille : `A`, `B`, … `Z`, `AA`…
+    /// The grid header letter: `A`, `B`, … `Z`, `AA`…
     pub fn letter(self) -> String {
         stokesforge_core::spreadsheet_name(self.0)
     }
 }
 
-/// Les groupes d'actions que l'application ouvre par `begin_macro` : une
-/// énumération **fermée**, pour qu'un groupe soit une donnée et non un texte.
+/// The groups of actions that the application opens with `begin_macro`: a
+/// **closed** enumeration, so that a group is data and not a text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MacroKind {
-    /// Coller des cellules.
+    /// Paste cells.
     PasteCells,
-    /// Coller des objets du projet.
+    /// Paste project objects.
     PasteObjects,
-    /// Dupliquer les objets sélectionnés.
+    /// Duplicate the selected objects.
     DuplicateObjects,
-    /// Supprimer les objets sélectionnés.
+    /// Delete the selected objects.
     DeleteObjects,
-    /// Déplacer les objets sélectionnés.
+    /// Move the selected objects.
     MoveObjects,
-    /// Renommer la sélection du Project Manager.
+    /// Rename the Project Manager selection.
     RenameObjects,
-    /// Effacer la sélection de la grille.
+    /// Clear the grid selection.
     ClearSelection,
-    /// Appliquer la fenêtre des propriétés d'un graphe.
+    /// Apply the properties window of a graph.
     GraphProperties,
-    /// Actualiser des colonnes depuis leur fichier source.
+    /// Refresh columns from their source file.
     RefreshFromFile,
-    /// Importer des fichiers d'appareil.
+    /// Import instrument files.
     Import,
-    /// Créer un classeur et le remplir (tracé, import dans un nouveau classeur).
+    /// Create a workbook and fill it (plot, import into a new workbook).
     AddWorkbook,
-    /// Créer une feuille et la remplir.
+    /// Create a worksheet and fill it.
     AddWorksheet,
-    /// Exécuter les écritures d’un script Python.
+    /// Run the writes of a Python script.
     Script,
-    /// Changer le type de plusieurs colonnes d'un coup.
+    /// Change the type of several columns at once.
     SetColumnsType,
-    /// Changer le rôle de plusieurs colonnes d'un coup.
+    /// Change the role of several columns at once.
     SetColumnsRole,
-    /// Un calcul d'analyse et le tracé de ses colonnes sur un graphe (#200).
+    /// An analysis calculation and the plotting of its columns on a graph (#200).
     AnalysisToGraph,
-    /// Retirer la formule d'une colonne, avec ou sans ses valeurs (#236).
+    /// Remove the formula of a column, with or without its values (#236).
     RemoveFormula,
-    /// Supprimer plusieurs colonnes entières d'une feuille.
+    /// Delete several whole columns of a worksheet.
     DeleteColumns,
-    /// Déplacer plusieurs colonnes d'une feuille d'un geste (#319) ; le
-    /// déplacement d'une seule colonne reste une entrée `Move`. Distinct de
-    /// `MoveObjects`, qui est celui du Project Manager.
+    /// Move several columns of a worksheet in one gesture (#319); moving a
+    /// single column stays a `Move` entry. Distinct from `MoveObjects`, which
+    /// is the Project Manager one.
     MoveColumns,
-    /// Analyser des lignes : la feuille transposée liée (créée ou complétée)
-    /// et le calcul sur sa colonne, annulés d'un bloc (#253).
+    /// Analyze rows: the linked transposed sheet (created or completed)
+    /// and the calculation on its column, undone as one block (#253).
     AnalyzeRows,
 }
 
 impl MacroKind {
-    /// Toutes les natures de groupe, pour les tests exhaustifs.
+    /// All the group kinds, for exhaustive tests.
     pub const ALL: [MacroKind; 20] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
@@ -122,133 +123,133 @@ impl MacroKind {
     ];
 }
 
-/// Le libellé d'une entrée d'historique : l'action et ses paramètres.
+/// The label of a history entry: the action and its parameters.
 ///
-/// Un champ `Option` vaut `None` quand le nœud visé n'est plus dans l'arbre au
-/// moment de calculer le libellé (une commande qui échouera de toute façon) :
-/// la phrase retombe alors sur une forme générique.
+/// An `Option` field is `None` when the targeted node is no longer in the tree
+/// at the time of computing the label (a command that will fail anyway): the
+/// sentence then falls back to a generic form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HistoryLabel {
-    /// Écriture de cellules (`SetCells`, `SetCellsPromoting`).
+    /// Writing cells (`SetCells`, `SetCellsPromoting`).
     SetCells {
-        /// Colonne écrite.
+        /// Column written.
         column: Option<ColumnRef>,
     },
-    /// Ajout d'une colonne.
+    /// Adding a column.
     AddColumn,
-    /// Suppression d'une colonne.
+    /// Deleting a column.
     DeleteColumn {
-        /// Colonne supprimée.
+        /// Column deleted.
         column: Option<ColumnRef>,
     },
-    /// Renommage d'un nœud.
+    /// Renaming a node.
     Rename {
-        /// Nom d'avant.
+        /// Name before.
         from: Option<String>,
-        /// Nom d'après.
+        /// Name after.
         to: String,
     },
-    /// Déplacement d'un nœud.
+    /// Moving a node.
     Move {
-        /// Nom du nœud déplacé.
+        /// Name of the moved node.
         name: Option<String>,
     },
-    /// Changement du type d'une colonne.
+    /// Changing the type of a column.
     SetColumnType {
-        /// Colonne convertie.
+        /// Column converted.
         column: Option<ColumnRef>,
     },
-    /// Insertion de lignes.
+    /// Inserting rows.
     InsertRows {
-        /// Nombre de lignes.
+        /// Number of rows.
         count: usize,
     },
-    /// Suppression de lignes.
+    /// Deleting rows.
     DeleteRows {
-        /// Nombre de lignes.
+        /// Number of rows.
         count: usize,
     },
-    /// Suppression de cellules avec remontée de celles du dessous.
+    /// Deleting cells, with those below moving up.
     DeleteCells {
-        /// Nombre de lignes retirées dans chaque colonne.
+        /// Number of rows removed in each column.
         count: usize,
     },
-    /// Ajout d'un dossier.
+    /// Adding a folder.
     AddFolder {
-        /// Nom du dossier.
+        /// Name of the folder.
         name: String,
     },
-    /// Ajout d'un classeur.
+    /// Adding a workbook.
     AddWorkbook,
-    /// Ajout d'un classeur sans feuille.
+    /// Adding a workbook without a worksheet.
     AddEmptyWorkbook,
-    /// Ajout d'une feuille.
+    /// Adding a worksheet.
     AddWorksheet,
-    /// Duplication d'une feuille.
+    /// Duplicating a worksheet.
     DuplicateWorksheet {
-        /// Nom de la feuille dupliquée.
+        /// Name of the duplicated worksheet.
         name: Option<String>,
     },
-    /// Ajout d'un graphique.
+    /// Adding a graph.
     AddGraph,
-    /// Ajout d'une matrice.
+    /// Adding a matrix.
     AddMatrix,
-    /// Ajout d'une note.
+    /// Adding a note.
     AddNote,
-    /// Suppression d'un nœud et de sa descendance.
+    /// Deleting a node and its descendants.
     RemoveNode {
-        /// Nom du nœud supprimé.
+        /// Name of the deleted node.
         name: Option<String>,
     },
-    /// Modification des propriétés d'une fenêtre.
+    /// Changing the properties of a window.
     SetWindowMeta {
-        /// Nom de la fenêtre.
+        /// Name of the window.
         name: Option<String>,
     },
-    /// Modification du texte d'une note.
+    /// Changing the text of a note.
     SetNoteText {
-        /// Nom de la note.
+        /// Name of the note.
         name: Option<String>,
     },
-    /// Modification des propriétés d'une colonne.
+    /// Changing the properties of a column.
     SetColumnMeta {
-        /// Colonne modifiée.
+        /// Column modified.
         column: Option<ColumnRef>,
     },
-    /// Modification du tracé d'un graphique.
+    /// Changing the plot of a graph.
     SetPlotSpec {
-        /// Nom du graphique.
+        /// Name of the graph.
         name: Option<String>,
     },
-    /// Modification des couleurs enregistrées du projet.
+    /// Changing the colors saved in the project.
     SetSavedColors,
-    /// Enregistrement d'un calcul d'analyse (#181).
+    /// Recording an analysis calculation (#181).
     AddCalculation(OperationKind),
-    /// Correction définitive des valeurs originales.
+    /// Final correction of the original values.
     ReplaceAnalysisData(OperationKind),
-    /// Restauration des valeurs originales qu'une correction avait remplacées
-    /// (#248), avec la famille de la correction si on la connaît encore.
+    /// Restoring the original values that a correction had replaced
+    /// (#248), with the family of the correction if it is still known.
     RestoreOriginalData(Option<OperationKind>),
-    /// Modification des paramètres d'un calcul d'analyse.
+    /// Changing the parameters of an analysis calculation.
     UpdateCalculation(OperationKind),
-    /// Retrait d'un calcul d'analyse.
+    /// Removing an analysis calculation.
     RemoveCalculation {
-        /// Famille du calcul retiré, si on la connaît encore.
+        /// Family of the removed calculation, if still known.
         kind: Option<OperationKind>,
-        /// Ses colonnes de sortie sont supprimées avec lui.
+        /// Its output columns are deleted with it.
         with_columns: bool,
     },
-    /// Création ou complément d'une feuille transposée liée (#253).
+    /// Creating or completing a linked transposed sheet (#253).
     TransposeRows,
-    /// Remise à jour d'une feuille transposée depuis sa source (#253).
+    /// Refreshing a transposed sheet from its source (#253).
     RecalculateTranspose,
-    /// Édition ciblée du contenu du graphe, toujours par remplacement du spec.
+    /// Targeted edit of the graph content, always by replacing the spec.
     EditPlotSpec(PlotEditKind),
-    /// Un groupe d'actions annulé d'un bloc.
+    /// A group of actions undone as one block.
     Macro(MacroKind),
 }
 
-/// Motif d'une édition de contenu du graphe (#84–85), sans texte traduit.
+/// Reason for an edit of the graph content (#84–85), with no translated text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlotEditKind {
     Visibility,
@@ -258,16 +259,16 @@ pub enum PlotEditKind {
     RemoveText,
     RemoveObject,
     ReorderObject,
-    /// Nom d'un groupe de séries (#197).
+    /// Name of a series group (#197).
     RenameGroup,
-    /// Un groupe de séries dissous : ses séries restent (#197).
+    /// A series group dissolved: its series stay (#197).
     DissolveGroup,
-    /// Un groupe de séries supprimé avec ses séries (#197).
+    /// A series group deleted with its series (#197).
     RemoveGroup,
-    /// Un groupe de séries déplacé en bloc (#197).
+    /// A series group moved as a block (#197).
     ReorderGroup,
-    /// Cadre fermé ou rouvert d'un calque : haut et droite en miroir, tirets
-    /// copiés (#344).
+    /// Closed or reopened frame of a layer: top and right mirrored, dashes
+    /// copied (#344).
     ClosedFrame,
 }
 impl PlotEditKind {
@@ -305,7 +306,7 @@ impl std::fmt::Display for PlotEditKind {
     }
 }
 
-/// « Row » ou « Rows » : en anglais seul 1 est au singulier.
+/// "Row" or "Rows": in English only 1 is singular.
 fn rows(count: usize) -> &'static str {
     if count == 1 {
         "Row"
@@ -342,8 +343,8 @@ impl fmt::Display for MacroKind {
 }
 
 impl fmt::Display for HistoryLabel {
-    /// Le libellé **en anglais**, pour les journaux et le CLI. L'interface ne
-    /// l'emploie pas : elle met la variante en phrase par son catalogue.
+    /// The label **in English**, for the logs and the CLI. The interface does
+    /// not use it: it turns the variant into a sentence through its catalog.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             HistoryLabel::SetCells { column: Some(c) } => {

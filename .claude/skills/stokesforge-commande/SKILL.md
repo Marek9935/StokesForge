@@ -29,7 +29,7 @@ Object copy (#105–107) and definitive analysis corrections (#212) reuse existi
 | undo / redo | full round trip: state before == state after undo |
 | structural nature | LIFO holds in a macro (`stokesforge-commands/tests/history.rs`) |
 | history label | the example in `stokesforge-commands/tests/labels.rs` (exhaustive) |
-| persistence | `.stf` round trip (`stokesforge-persistence/tests/roundtrip.rs`); additive field → regenerate the witness file (`tests/fichiers_temoins.rs`) |
+| persistence | `.stf` round trip (`stokesforge-persistence/tests/roundtrip.rs`); additive field → regenerate the witness file (`tests/witness_files.rs`) |
 | column data write | the gesture added to the draws of `b14` and `b22` |
 | memory | `stokesforge-commands/tests/memory_pinning.rs` |
 | interface | `stokesforge-app-state/tests/shell.rs` for the `Action` |

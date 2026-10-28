@@ -1,9 +1,9 @@
-//! Les erreurs du crate : structurées, sans phrase.
+//! The crate errors: structured, without sentences.
 //!
-//! Le `Display` est en **anglais brut** (CLI, `pyst`, journaux) ; c'est
-//! `stokesforge-app` qui met chaque variante en phrase traduite (convention du
-//! dépôt, `errors::<famille>::error_message`). Chaque variante porte donc des
-//! champs de données, jamais un texte composé.
+//! The `Display` is in **plain English** (CLI, `pyst`, logs); it is
+//! `stokesforge-app` that turns each variant into a translated sentence (repository
+//! convention, `errors::<family>::error_message`). Each variant therefore carries
+//! data fields, never a composed text.
 
 use crate::expr::ExprError;
 

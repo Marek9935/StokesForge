@@ -1,11 +1,11 @@
-//! Calculs d'analyse (#181) : enregistrement sur disque et conversion.
+//! Analysis calculations (#181): writing to disk and conversion.
 //!
-//! L'opération traverse le fichier sous la forme d'un arbre générique
-//! (`stokesforge_analysis::tree::Tree`, converti en `rmpv::Value`) : un réglage
-//! nouveau ne change donc pas le schéma. Lecture tolérante (invariant 10) :
-//! un calcul dont l'opération est illisible est écarté — ses colonnes restent
-//! des colonnes ordinaires —, une valeur de résultat ou un avertissement
-//! inconnu est ignoré.
+//! The operation goes through the file in the form of a generic tree
+//! (`stokesforge_analysis::tree::Tree`, converted to `rmpv::Value`): a new
+//! setting therefore does not change the schema. Tolerant reading (invariant 10):
+//! a calculation whose operation is unreadable is dropped — its columns stay
+//! ordinary columns —, an unknown result value or warning
+//! is ignored.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use stokesforge_core::{
 
 use crate::DiscardedCalculation;
 
-/// Valeur par défaut d'un booléen actif quand le champ manque au fichier.
+/// Default value of an active boolean when the field is missing from the file.
 fn default_true() -> bool {
     true
 }
@@ -42,16 +42,16 @@ pub(crate) struct CalculationRecord {
     pub(crate) keep_results: bool,
     #[serde(default)]
     pub(crate) auto_recalc: bool,
-    /// Boîte de dialogue quand R² est faible (#288) ; active par défaut.
+    /// Dialog when R² is low (#288); active by default.
     #[serde(default = "default_true")]
     pub(crate) low_r2_dialog: bool,
-    /// `"manual"` ou `"input_missing"` ; un échec de recalcul s'écrit
-    /// `"manual"` (le prochain recalcul retrouve l'erreur).
+    /// `"manual"` or `"input_missing"`; a recalculation failure is written
+    /// `"manual"` (the next recalculation finds the error again).
     #[serde(default)]
     pub(crate) stale: Option<String>,
-    /// Empreinte du contenu des colonnes d'entrée à l'enregistrement
-    /// (A1, #316 : `Calculation::inputs_digest`). Absente d'un fichier plus
-    /// ancien, ou quand une entrée manquait : le calcul est alors cru tel quel.
+    /// Fingerprint of the content of the input columns at save
+    /// (A1, #316: `Calculation::inputs_digest`). Absent from an older
+    /// file, or when an input was missing: the calculation is then taken as is.
     #[serde(default)]
     pub(crate) inputs_digest: Option<u64>,
 }
@@ -109,7 +109,7 @@ pub(crate) struct WarningRecord {
     pub(crate) count: u64,
 }
 
-// ── Arbre d'opération ↔ valeur MessagePack ──────────────────────────────
+// ── Operation tree ↔ MessagePack value ──────────────────────────────────
 
 fn tree_to_value(tree: &Tree) -> Value {
     match tree {
@@ -148,7 +148,7 @@ fn value_to_tree(value: &Value) -> Tree {
     }
 }
 
-// ── Modèle → enregistrement ─────────────────────────────────────────────
+// ── Model → record ──────────────────────────────────────────────────────
 
 fn warning_to_record(w: &Warning) -> WarningRecord {
     match w {
@@ -210,8 +210,8 @@ pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord
     map_to_records(tree.calculations(), Some(tree))
 }
 
-/// `digest_in` : l'arbre où lire les entrées pour en écrire l'empreinte
-/// (`None` pour les traces de correction, qui ne se périment pas).
+/// `digest_in`: the tree where to read the inputs to write their fingerprint
+/// (`None` for the correction traces, which do not go stale).
 fn map_to_records(
     calculations: &BTreeMap<NodeId, Arc<Calculation>>,
     digest_in: Option<&ModelTree>,
@@ -277,11 +277,11 @@ fn map_to_records(
         .collect()
 }
 
-/// Trace d'une correction qui a remplacé ses données sources (#212, #248).
-/// Un champ de fichier à part : une trace ne devient jamais un calcul actif à
-/// la lecture. Elle porte l'opération, les séries, la référence figée et les
-/// résultats comme un calcul, mais ni sorties, ni drapeaux de recalcul, ni
-/// empreinte : une trace ne se périme pas.
+/// Trace of a correction that replaced its source data (#212, #248).
+/// A separate file field: a trace never becomes an active calculation at
+/// read. It carries the operation, the series, the frozen reference and the
+/// results like a calculation, but no outputs, no recalculation flags, no
+/// fingerprint: a trace does not go stale.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CorrectionTraceRecord {
     pub(crate) id: u64,
@@ -289,19 +289,19 @@ pub(crate) struct CorrectionTraceRecord {
     pub(crate) series: Vec<SeriesRefRecord>,
     pub(crate) aux: Option<AuxRefRecord>,
     pub(crate) results: Vec<SeriesResultRecord>,
-    /// Les colonnes remplacées et la copie de leur original.
+    /// The replaced columns and the copy of their original.
     pub(crate) originals: Vec<OriginalRecord>,
 }
 
-/// Une colonne remplacée par une correction et la copie de son original
-/// (classeur caché des analyses), de quoi la restaurer (#248).
+/// A column replaced by a correction and the copy of its original
+/// (hidden workbook of the analyses), enough to restore it (#248).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct OriginalRecord {
     pub(crate) column: u64,
     pub(crate) copy: u64,
 }
 
-/// Les traces de correction, vers leur champ de fichier.
+/// The correction traces, to their file field.
 pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CorrectionTraceRecord> {
     let traces = tree
         .correction_traces()
@@ -349,9 +349,9 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CorrectionTraceRec
         .collect()
 }
 
-/// Rend les traces gardées et celles écartées : une trace illisible (ou qui
-/// échoue à la validation), ou dont l'opération n'est pas une correction,
-/// est comptée (#309) au lieu de disparaître sans bruit.
+/// Returns the kept traces and the discarded ones: a trace that is unreadable (or
+/// fails validation), or whose operation is not a correction,
+/// is counted (#309) instead of disappearing silently.
 pub(crate) fn records_to_corrections(
     records: Vec<CorrectionTraceRecord>,
     max_id: u64,
@@ -359,8 +359,8 @@ pub(crate) fn records_to_corrections(
     BTreeMap<NodeId, Arc<CorrectionRecord>>,
     Vec<DiscardedCalculation>,
 ) {
-    // Une trace dont un original dépasse la borne des identifiants est écartée
-    // entière, comme un calcul dont une colonne la dépasse.
+    // A trace whose original exceeds the identifier bound is dropped
+    // entirely, like a calculation one of whose columns exceeds it.
     let (within, beyond): (Vec<_>, Vec<_>) = records.into_iter().partition(|r| {
         r.originals
             .iter()
@@ -369,12 +369,12 @@ pub(crate) fn records_to_corrections(
     let originals: BTreeMap<u64, Vec<OriginalRecord>> = {
         let mut seen = BTreeMap::new();
         for r in &within {
-            // Deux traces de même id : la première fait foi (#309, F4).
+            // Two traces with the same id: the first prevails (#309, F4).
             seen.entry(r.id).or_insert_with(|| r.originals.clone());
         }
         seen
     };
-    // Deux enregistrements de même id : le premier fait foi (#309, F4).
+    // Two records with the same id: the first prevails (#309, F4).
     let mut named: BTreeMap<u64, DiscardedCalculation> = BTreeMap::new();
     let as_calculation = |r: &CorrectionTraceRecord| CalculationRecord {
         id: r.id,
@@ -433,12 +433,12 @@ pub(crate) fn records_to_corrections(
     (out, discarded)
 }
 
-// ── Enregistrement → modèle ─────────────────────────────────────────────
+// ── Record → model ──────────────────────────────────────────────────────
 
-/// Un identifiant au-delà de `max` écarte le calcul entier (même borne que
-/// les nœuds, B1) ; l'opération illisible, ou hors plafond (`validate`), aussi. Rend les calculs gardés et la
-/// liste de ceux qui sont écartés (#278) : un enregistrement illisible n'est
-/// pas conservé, mais il n'est plus perdu sans bruit.
+/// An identifier beyond `max` drops the whole calculation (same bound as
+/// the nodes, B1); so does an unreadable operation, or one over the cap (`validate`).
+/// Returns the kept calculations and the list of those that are dropped (#278): an unreadable
+/// record is not kept, but it is no longer lost silently.
 pub(crate) fn records_to_calculations(
     records: Vec<CalculationRecord>,
     max_id: u64,
@@ -450,15 +450,15 @@ pub(crate) fn records_to_calculations(
     (out, discarded)
 }
 
-/// Calculs gardés, calculs écartés, empreintes d'entrées écrites dans le fichier.
+/// Kept calculations, discarded calculations, input fingerprints written in the file.
 type ConvertedCalculations = (
     BTreeMap<NodeId, Arc<Calculation>>,
     Vec<DiscardedCalculation>,
     BTreeMap<NodeId, u64>,
 );
 
-/// Comme [`records_to_calculations`], avec en plus l'empreinte d'entrées
-/// écrite dans le fichier pour chaque calcul **gardé** qui en portait une.
+/// Like [`records_to_calculations`], with in addition the input fingerprint
+/// written in the file for each **kept** calculation that carried one.
 pub(crate) fn records_to_calculations_with_digests(
     records: Vec<CalculationRecord>,
     max_id: u64,
@@ -479,10 +479,10 @@ pub(crate) fn records_to_calculations_with_digests(
             discarded.push(discarded_calculation(&r));
             continue;
         }
-        // `from_tree` ne juge que la forme : un `NaN` lu tel quel s'y glisse.
-        // `validate` est le même filtre que celui de `add_calculation` (core) :
-        // un calcul qui l'échoue n'a jamais pu être enregistré par
-        // l'application, c'est un fichier modifié à la main (#291).
+        // `from_tree` only judges the shape: a `NaN` read as is slips through.
+        // `validate` is the same filter as that of `add_calculation` (core):
+        // a calculation that fails it could never have been saved by
+        // the application, it is a file modified by hand (#291).
         let Some(operation) = Operation::from_tree(&value_to_tree(&r.operation))
             .ok()
             .filter(|op| op.validate().is_ok())
@@ -544,13 +544,13 @@ pub(crate) fn records_to_calculations_with_digests(
                 None => None,
             },
         };
-        // Même règle de forme qu'à l'écriture (core, #309).
+        // Same shape rule as at write (core, #309).
         if calc.validate_shape().is_err() {
             discarded.push(discarded_calculation(&r));
             continue;
         }
-        // Un identifiant déjà gardé : le premier fait foi, le second est
-        // compté parmi les écartés au lieu de le remplacer sans bruit (#309).
+        // An identifier already kept: the first prevails, the second is
+        // counted among the discarded instead of replacing it silently (#309).
         if out.contains_key(&id) {
             discarded.push(discarded_calculation(&r));
             continue;
@@ -563,12 +563,12 @@ pub(crate) fn records_to_calculations_with_digests(
     (out, discarded, digests)
 }
 
-/// A1 (#316) : confronte, **sans rien recalculer**, l'empreinte écrite dans le
-/// fichier au contenu des entrées tel que le fichier le porte. Un calcul dont
-/// l'empreinte diffère est marqué périmé (`Manual`) ; ses valeurs restent
-/// celles du fichier. Un calcul sans empreinte (fichier ancien, entrée
-/// absente à l'écriture) ou dont une entrée manque aujourd'hui est laissé tel
-/// quel : l'invariant 10 veut une dégradation, jamais un échec.
+/// A1 (#316): compares, **without recomputing anything**, the fingerprint written in the
+/// file with the content of the inputs as the file carries it. A calculation whose
+/// fingerprint differs is marked stale (`Manual`); its values stay
+/// those of the file. A calculation without a fingerprint (old file, input
+/// absent at write) or one of whose inputs is missing today is left as
+/// it is: invariant 10 wants a degradation, never a failure.
 pub(crate) fn mark_changed_inputs(
     calculations: &mut BTreeMap<NodeId, Arc<Calculation>>,
     digests: &BTreeMap<NodeId, u64>,
@@ -590,8 +590,8 @@ pub(crate) fn mark_changed_inputs(
     }
 }
 
-/// Ce qu'on sait d'un calcul qu'on écarte : son identifiant, et la famille
-/// d'opération quand l'enregistrement la porte encore lisiblement.
+/// What is known of a calculation that is dropped: its identifier, and the family
+/// of operation when the record still carries it legibly.
 fn discarded_calculation(r: &CalculationRecord) -> DiscardedCalculation {
     let kind = match value_to_tree(&r.operation) {
         Tree::Map(entries) => entries
@@ -620,11 +620,11 @@ mod tests {
         }
     }
 
-    /// Les originaux d'une trace traversent le fichier, y compris celui d'une
-    /// colonne qui n'est le Y d'aucune série ; un original au-delà de la borne
-    /// écarte la trace entière.
+    /// The originals of a trace go through the file, including that of a
+    /// column that is the Y of no series; an original beyond the bound
+    /// drops the whole trace.
     #[test]
-    fn les_originaux_d_une_trace_traversent_l_enregistrement() {
+    fn the_originals_of_a_trace_go_through_the_record() {
         let mut r = trace(record(good_operation(), 7));
         r.originals = vec![
             OriginalRecord {
@@ -681,14 +681,14 @@ mod tests {
     }
 
     #[test]
-    fn une_operation_illisible_ecarte_le_calcul_sans_echec() {
+    fn an_unreadable_operation_discards_the_calculation_without_failure() {
         let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 7)], 1000);
         assert_eq!(kept.len(), 1);
         assert!(discarded.is_empty());
         let junk = Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
         let (kept, discarded) = records_to_calculations(vec![record(junk, 7)], 1000);
         assert!(kept.is_empty());
-        // L'écart est signalé, avec la famille quand elle se lit (#278).
+        // The discrepancy is reported, with the family when it can be read (#278).
         assert_eq!(
             discarded,
             vec![DiscardedCalculation {
@@ -702,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn un_identifiant_hors_borne_ecarte_le_calcul() {
+    fn an_identifier_out_of_bounds_discards_the_calculation() {
         let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 5000)], 1000);
         assert!(kept.is_empty());
         assert_eq!(
@@ -711,15 +711,15 @@ mod tests {
                 id: 50,
                 kind: Some("correct".into())
             }],
-            "l'identifiant hors borne est signalé, famille lue"
+            "the identifier out of bounds is reported, family read"
         );
-        // Pile sur la borne : gardé, rien à signaler.
+        // Right on the bound: kept, nothing to report.
         let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 1000)], 1000);
         assert_eq!(kept.len(), 1);
         assert!(discarded.is_empty());
-        // Chaque identifiant de l'enregistrement est borné : le sien, ceux d'une
-        // sortie, d'un x, d'un sigma, d'une référence ; la borne ne fait pas
-        // écarter la voisine saine.
+        // Every identifier of the record is bounded: its own, those of an
+        // output, of an x, of a sigma, of a reference; the bound does not
+        // drop the sound neighbour.
         let mut own = record(good_operation(), 7);
         own.id = 1001;
         let mut output = record(good_operation(), 7);
@@ -753,12 +753,12 @@ mod tests {
         assert_eq!(
             discarded.iter().map(|d| d.id).collect::<Vec<_>>(),
             vec![1001, 51, 53, 54, 55, 56],
-            "dans l'ordre des enregistrements"
+            "in the order of the records"
         );
     }
 
     #[test]
-    fn plusieurs_calculs_ecartes_sont_tous_listes_et_les_sains_gardes_dans_l_ordre() {
+    fn several_discarded_calculations_are_all_listed_and_the_sound_ones_kept_in_order() {
         let junk = || Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
         let mut records = Vec::new();
         for (id, operation) in [
@@ -793,10 +793,10 @@ mod tests {
         );
     }
 
-    /// #309 : la forme d'un calcul est revérifiée à la lecture (même règle que
-    /// l'écriture, core) ; l'écarté est nommé, jamais une panique.
+    /// #309: the shape of a calculation is checked again at read (same rule as
+    /// at write, core); the dropped one is named, never a panic.
     #[test]
-    fn une_forme_invalide_ecarte_et_nomme_le_calcul() {
+    fn an_invalid_shape_discards_and_names_the_calculation() {
         let mut bad_output = record(good_operation(), 7);
         bad_output.id = 60;
         bad_output.outputs = vec![OutputRefRecord {
@@ -823,10 +823,10 @@ mod tests {
         );
     }
 
-    /// #309 (F4) : deux calculs de même identifiant, le premier est gardé et
-    /// le second compté parmi les écartés.
+    /// #309 (F4): two calculations with the same identifier, the first is kept and
+    /// the second counted among the discarded.
     #[test]
-    fn un_doublon_d_identifiant_garde_le_premier_et_compte_le_second() {
+    fn a_duplicate_identifier_keeps_the_first_and_counts_the_second() {
         let mut a = record(good_operation(), 7);
         a.id = 70;
         let mut b = record(good_operation(), 8);
@@ -835,13 +835,13 @@ mod tests {
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
         assert_eq!(discarded.iter().map(|d| d.id).collect::<Vec<_>>(), vec![70]);
-        // Même règle pour les traces de correction : A gardée, B écartée.
+        // Same rule for the correction traces: A kept, B discarded.
         let (kept, discarded) = records_to_corrections(vec![trace(a), trace(b)], 1000);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
         assert_eq!(discarded.len(), 1);
-        // Premier = autre opération qu'une correction : l'écarté est nommé
-        // d'après le premier enregistrement, pas d'après le doublon.
+        // First = another operation than a correction: the discarded one is named
+        // after the first record, not after the duplicate.
         let integrate = tree_to_value(
             &Operation::Integrate {
                 spec: stokesforge_analysis::integrate::IntegrateSpec {
@@ -865,11 +865,11 @@ mod tests {
         assert_eq!(discarded.len(), 2);
     }
 
-    /// #309 : une trace de correction écartée est comptée, qu'elle soit
-    /// illisible, hors borne, de forme invalide ou d'une autre opération ; les
-    /// autres traces restent chargées.
+    /// #309: a discarded correction trace is counted, whether it is
+    /// unreadable, out of bounds, of invalid shape or of another operation; the
+    /// other traces stay loaded.
     #[test]
-    fn une_trace_ecartee_est_comptee() {
+    fn a_discarded_trace_is_counted() {
         let junk = Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
         let fit = tree_to_value(
             &Operation::Integrate {
@@ -905,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn un_avertissement_inconnu_est_ignore() {
+    fn an_unknown_warning_is_ignored() {
         let mut r = record(good_operation(), 7);
         r.results = vec![SeriesResultRecord {
             warnings: vec![
@@ -925,9 +925,9 @@ mod tests {
         assert_eq!(calc.results[0].warnings, vec![Warning::IrfStepMismatch]);
     }
 
-    /// Chaque variante de `Warning`, `match` exhaustif sans `_` : une variante
-    /// ajoutée ne compile pas ici tant qu'elle n'a pas sa ligne de transport.
-    fn rang(w: &Warning) -> usize {
+    /// Each variant of `Warning`, exhaustive `match` without `_`: a variant
+    /// added does not compile here until it has its transport line.
+    fn rank(w: &Warning) -> usize {
         match w {
             Warning::SignalStepNotUniform => 0,
             Warning::IrfStepMismatch => 1,
@@ -941,7 +941,7 @@ mod tests {
         }
     }
 
-    fn tous_les_avertissements() -> Vec<Warning> {
+    fn all_warnings() -> Vec<Warning> {
         let mut all = vec![
             Warning::SignalStepNotUniform,
             Warning::IrfStepMismatch,
@@ -959,19 +959,19 @@ mod tests {
     }
 
     #[test]
-    fn tout_avertissement_fait_l_aller_retour_des_enregistrements() {
-        let all = tous_les_avertissements();
-        let rangs: std::collections::BTreeSet<usize> = all.iter().map(rang).collect();
-        assert_eq!(rangs.len(), 9, "toutes les variantes sont éprouvées");
+    fn every_warning_round_trips_through_the_records() {
+        let all = all_warnings();
+        let ranks: std::collections::BTreeSet<usize> = all.iter().map(rank).collect();
+        assert_eq!(ranks.len(), 9, "all the variants are exercised");
         for w in &all {
             assert_eq!(record_to_warning(&warning_to_record(w)).as_ref(), Some(w));
         }
     }
 
     #[test]
-    fn les_noms_de_fichier_des_avertissements_sont_figes() {
-        // Ces chaînes sont le format `.stf` : les renommer casse les fichiers.
-        let attendu = [
+    fn the_file_names_of_the_warnings_are_frozen() {
+        // These strings are the `.stf` format: renaming them breaks the files.
+        let expected = [
             (Warning::SignalStepNotUniform, "signal_step_not_uniform", 0),
             (Warning::IrfStepMismatch, "irf_step_mismatch", 0),
             (Warning::NegativeClipped(4), "negative_clipped", 4),
@@ -982,14 +982,14 @@ mod tests {
             (Warning::DivisionByZero(1), "division_by_zero", 1),
             (Warning::ShiftedX, "shifted_x", 0),
         ];
-        for (w, kind, count) in attendu {
+        for (w, kind, count) in expected {
             let r = warning_to_record(&w);
             assert_eq!((r.kind.as_str(), r.count), (kind, count), "{w:?}");
         }
     }
 
     #[test]
-    fn un_avertissement_inconnu_n_en_prend_pas_un_connu_et_l_ordre_est_garde() {
+    fn an_unknown_warning_does_not_take_the_place_of_a_known_one_and_the_order_is_kept() {
         let rec = |kind: &str, count| WarningRecord {
             kind: kind.into(),
             count,
@@ -1008,7 +1008,7 @@ mod tests {
             ..Default::default()
         }];
         let (kept, discarded) = records_to_calculations(vec![r], 1000);
-        assert!(discarded.is_empty(), "le calcul n'est pas écarté");
+        assert!(discarded.is_empty(), "the calculation is not dropped");
         let calc = kept.values().next().unwrap();
         assert_eq!(
             calc.results[0].warnings,

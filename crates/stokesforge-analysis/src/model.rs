@@ -1,9 +1,9 @@
-//! Les modèles d'ajustement : formes, paramètres, valeurs initiales
-//! automatiques.
+//! The fit models: shapes, parameters, automatic initial
+//! values.
 //!
-//! Chaque modèle liste ses paramètres **par nom stable** (`tau`, `xc`, …) :
-//! ces noms sont les clés des résultats, que l'interface met en libellés
-//! traduits. Un modèle libre (`Custom`) tire les siens de l'expression.
+//! Each model lists its parameters **by stable name** (`tau`, `xc`, …):
+//! these names are the keys of the results, which the interface turns into
+//! translated labels. A free model (`Custom`) takes its own from the expression.
 
 use crate::error::AnalysisError;
 use crate::expr::Expr;
@@ -11,12 +11,12 @@ use crate::linalg::{least_squares, Matrix};
 use crate::ops::MAX_DEGREE;
 use crate::series::Series;
 
-/// Un modèle de courbe `y = f(x; p)`.
+/// A curve model `y = f(x; p)`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Model {
-    /// `a + b·x` — paramètres `intercept`, `slope`.
+    /// `a + b·x` — parameters `intercept`, `slope`.
     Linear,
-    /// `Σ cₖ·xᵏ`, `k = 0..=degree` — paramètres `c0`, `c1`, …
+    /// `Σ cₖ·xᵏ`, `k = 0..=degree` — parameters `c0`, `c1`, …
     Polynomial { degree: u32 },
     /// `A·exp(−x/τ)` — `A`, `tau`.
     Exponential,
@@ -32,11 +32,11 @@ pub enum Model {
     Gaussian,
     /// `y0 + A / (1 + 4(x−xc)²/w²)` — `y0`, `A`, `xc`, `fwhm`.
     Lorentzian,
-    /// Expression saisie, en `x` et paramètres libres (voir [`crate::expr`]).
+    /// Typed expression, in `x` and free parameters (see [`crate::expr`]).
     Custom { formula: String },
 }
 
-/// Un paramètre d'un modèle : son nom et ses bornes par défaut.
+/// A model parameter: its name and its default bounds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamDef {
     pub name: String,
@@ -62,8 +62,8 @@ impl ParamDef {
     }
 }
 
-/// Un modèle prêt à être évalué : l'expression d'un modèle libre est compilée
-/// une fois.
+/// A model ready to be evaluated: the expression of a free model is compiled
+/// once.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledModel {
     model: Model,
@@ -72,10 +72,10 @@ pub struct CompiledModel {
 }
 
 impl Model {
-    /// Compile le modèle. Un modèle libre peut échouer (syntaxe), un polynôme
-    /// au-delà de [`MAX_DEGREE`] aussi : `degree + 1` paramètres nommés seraient
-    /// fabriqués avant que `Operation::validate` ne puisse le refuser (un degré
-    /// lu tel quel des préférences ou d'un fichier).
+    /// Compiles the model. A free model can fail (syntax), and so can a polynomial
+    /// beyond [`MAX_DEGREE`]: `degree + 1` named parameters would be
+    /// built before `Operation::validate` could refuse it (a degree
+    /// read as is from preferences or from a file).
     pub fn compile(&self) -> Result<CompiledModel, AnalysisError> {
         let (expr, params) = match self {
             Model::Linear => (
@@ -136,7 +136,7 @@ impl Model {
         })
     }
 
-    /// Le modèle est linéaire en ses paramètres : moindres carrés exacts.
+    /// The model is linear in its parameters: exact least squares.
     pub fn is_linear_in_params(&self) -> bool {
         matches!(
             self,
@@ -145,9 +145,9 @@ impl Model {
     }
 }
 
-/// Rapport |moyenne X| / étendue de X au-delà duquel un polynôme contraint
-/// (Levenberg-Marquardt, non centré) est signalé (#296). Mesuré : à 10 d'étendue,
-/// un décalage de 1e2 reste juste, 1e3 et plus se dégrade.
+/// Ratio |mean X| / extent of X beyond which a constrained polynomial
+/// (Levenberg-Marquardt, not centerd) is reported (#296). Measured: at an extent of 10,
+/// a shift of 1e2 stays accurate, 1e3 and more degrades.
 pub const X_SHIFT_WARN_RATIO: f64 = 100.0;
 
 impl CompiledModel {
@@ -163,7 +163,7 @@ impl CompiledModel {
         self.params.len()
     }
 
-    /// `f(x; p)`. Un domaine invalide donne `NaN`.
+    /// `f(x; p)`. An invalid domain gives `NaN`.
     pub fn eval(&self, p: &[f64], x: f64) -> f64 {
         match &self.model {
             Model::Linear => p[0] + p[1] * x,
@@ -185,8 +185,8 @@ impl CompiledModel {
         }
     }
 
-    /// Colonnes de la matrice de conception d'un modèle linéaire en ses
-    /// paramètres (`None` sinon) : `A[i][k] = ∂f/∂pₖ (xᵢ)`.
+    /// Columns of the design matrix of a model linear in its
+    /// parameters (`None` otherwise): `A[i][k] = ∂f/∂pₖ (xᵢ)`.
     pub fn design_matrix(&self, x: &[f64]) -> Option<Matrix> {
         let k = self.params.len();
         let mut a = Matrix::zeros(x.len(), k);
@@ -213,9 +213,9 @@ impl CompiledModel {
         Some(a)
     }
 
-    /// Décalage de l'axe X pour un ajustement linéaire (#283) : la moyenne des
-    /// X pour une droite ou un polynôme (une base de puissances de `x - c` reste
-    /// conditionnée quand X est loin de 0), 0 pour les autres modèles.
+    /// Shift of the X axis for a linear fit (#283): the mean of the
+    /// X for a line or a polynomial (a basis of powers of `x - c` stays
+    /// well conditioned when X is far from 0), 0 for the other models.
     pub fn x_shift(&self, x: &[f64]) -> f64 {
         if !matches!(self.model, Model::Linear | Model::Polynomial { .. }) {
             return 0.0;
@@ -232,10 +232,10 @@ impl CompiledModel {
         }
     }
 
-    /// Le X est-il si loin de 0, au regard de son étendue, qu'une base de
-    /// puissances non centrée perd sa précision (#296) ? Vrai seulement pour
-    /// une droite ou un polynôme (les autres modèles ne sont pas centrés) dont
-    /// la moyenne des X dépasse [`X_SHIFT_WARN_RATIO`] fois l'étendue.
+    /// Is X so far from 0, relative to its extent, that a basis of
+    /// uncenterd powers loses its precision (#296)? True only for
+    /// a line or a polynomial (the other models are not centerd) whose
+    /// mean X exceeds [`X_SHIFT_WARN_RATIO`] times the extent.
     pub fn x_shift_is_large(&self, x: &[f64]) -> bool {
         let shift = self.x_shift(x);
         if shift == 0.0 {
@@ -249,9 +249,9 @@ impl CompiledModel {
         span > 0.0 && shift.abs() > X_SHIFT_WARN_RATIO * span
     }
 
-    /// Matrice `T` telle que `coefficients dans l'axe d'origine = T · coefficients
-    /// dans l'axe décalé de s` (`x' = x - s`) : développement binomial de
-    /// `Σ cⱼ (x - s)ʲ`. `None` si le modèle n'est pas un polynôme ou si `s = 0`.
+    /// Matrix `T` such that `coefficients in the original axis = T · coefficients
+    /// in the axis shifted by s` (`x' = x - s`): binomial expansion of
+    /// `Σ cⱼ (x - s)ʲ`. `None` if the model is not a polynomial or if `s = 0`.
     pub fn unshift_matrix(&self, s: f64) -> Option<Matrix> {
         if s == 0.0 || !matches!(self.model, Model::Linear | Model::Polynomial { .. }) {
             return None;
@@ -259,7 +259,7 @@ impl CompiledModel {
         let k = self.params.len();
         let mut t = Matrix::zeros(k, k);
         for j in 0..k {
-            // C(j, i) (-s)^(j-i), construit de proche en proche.
+            // C(j, i) (-s)^(j-i), built step by step.
             let mut binom = 1.0;
             for i in (0..=j).rev() {
                 t.set(i, j, binom * (-s).powi((j - i) as i32));
@@ -269,7 +269,7 @@ impl CompiledModel {
         Some(t)
     }
 
-    /// Valeurs initiales automatiques d'après les données (jamais `NaN`).
+    /// Automatic initial values from the data (never `NaN`).
     pub fn guess(&self, s: &Series) -> Vec<f64> {
         let n = s.len();
         if n == 0 {
@@ -284,7 +284,7 @@ impl CompiledModel {
         let y_last = first.y[n - 1];
         match &self.model {
             Model::Linear | Model::Polynomial { .. } | Model::Logarithm => {
-                // Linéaire en les paramètres : le point de départ importe peu.
+                // Linear in the parameters: the starting point matters little.
                 let shift = self.x_shift(x);
                 let xs: Vec<f64> = x.iter().map(|v| v - shift).collect();
                 if let Some(a) = self.design_matrix(&xs) {
@@ -314,7 +314,7 @@ impl CompiledModel {
                 vec![y0, a / 2.0, tau / 3.0, a / 2.0, tau * 3.0]
             }
             Model::Power => {
-                // ln y = ln a + b ln x, sur les points strictement positifs.
+                // ln y = ln a + b ln x, on the strictly positive points.
                 let (mut lx, mut ly) = (Vec::new(), Vec::new());
                 for (&xv, &yv) in x.iter().zip(y) {
                     if xv > 0.0 && yv > 0.0 {
@@ -342,11 +342,11 @@ impl CompiledModel {
         }
     }
 
-    /// Départ d'un modèle libre (#204, bouton « Auto ») : tous les paramètres à 1,
-    /// puis deux passes qui testent, un paramètre à la fois, une grille de
-    /// valeurs (0 et ±10ᵏ × l'échelle de 1, de Y, de X, de 1/X) et gardent
-    /// celle qui fait baisser la somme des carrés. Jamais pire que « tout à 1 » ;
-    /// sur au plus 400 points régulièrement espacés pour rester instantané.
+    /// Start of a free model (#204, "Auto" button): all parameters at 1,
+    /// then two passes that test, one parameter at a time, a grid of
+    /// values (0 and ±10ᵏ × the scale of 1, of Y, of X, of 1/X) and keep
+    /// the one that lowers the sum of squares. Never worse than "all at 1";
+    /// on at most 400 evenly spaced points to stay instantaneous.
     fn guess_free(&self, x: &[f64], y: &[f64]) -> Vec<f64> {
         let k = self.params.len();
         let mut p = vec![1.0; k];
@@ -407,8 +407,8 @@ impl CompiledModel {
     }
 }
 
-/// Estimation `(A, τ)` de `A·exp(−x/τ)` sur `y − y0` par régression de `ln|y−y0|`
-/// sur les points du signe dominant. Repli : `A = y₀ − y0`, `τ = étendue/3`.
+/// Estimate `(A, τ)` of `A·exp(−x/τ)` on `y − y0` by regression of `ln|y−y0|`
+/// on the points of the dominant sign. Fallback: `A = y₀ − y0`, `τ = extent/3`.
 fn log_linear_decay(x: &[f64], y: &[f64], y0: f64, span: f64) -> (f64, f64) {
     let shifted: Vec<f64> = y.iter().map(|v| v - y0).collect();
     let pos: f64 = shifted.iter().filter(|v| **v > 0.0).map(|v| v.abs()).sum();
@@ -444,7 +444,7 @@ fn log_linear_decay(x: &[f64], y: &[f64], y0: f64, span: f64) -> (f64, f64) {
     }
 }
 
-/// Estimation grossière d'un pic isolé.
+/// Rough estimate of an isolated peak.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PeakGuess {
     pub y0: f64,
@@ -453,8 +453,8 @@ pub struct PeakGuess {
     pub fwhm: f64,
 }
 
-/// Pic dominant de `(x, y)` : fond (10e centile côté du pic), hauteur signée,
-/// centre, largeur à mi-hauteur lue par interpolation.
+/// Dominant peak of `(x, y)`: background (10th percentile on the side of the peak), signed height,
+/// center, full width at half maximum read by interpolation.
 pub fn peak_guess(x: &[f64], y: &[f64]) -> PeakGuess {
     let n = x.len().min(y.len());
     let span = if n > 1 {
@@ -497,7 +497,7 @@ pub fn peak_guess(x: &[f64], y: &[f64]) -> PeakGuess {
     };
     let height = ytop - y0;
     let half = y0 + height / 2.0;
-    // Traversées du niveau mi-hauteur de part et d'autre du sommet.
+    // Crossings of the half-height level on either side of the top.
     let crossing = |dir: i64| -> Option<f64> {
         let mut i = ipeak as i64;
         while i + dir >= 0 && (i + dir) < n as i64 {
@@ -538,10 +538,10 @@ mod tests {
         Series::new(x, y)
     }
 
-    /// Le départ d'un modèle libre est meilleur que « tout à 1 » quand les
-    /// données sont loin de cette échelle, et reste fini (#204).
+    /// The start of a free model is better than "all at 1" when the
+    /// data are far from that scale, and stays finite (#204).
     #[test]
-    fn le_depart_d_un_modele_libre_suit_l_echelle_des_donnees() {
+    fn the_start_of_a_free_model_follows_the_scale_of_the_data() {
         let model = Model::Custom {
             formula: "a*exp(-x/b) + c".into(),
         }
@@ -558,14 +558,14 @@ mod tests {
         assert!(guess.iter().all(|v| v.is_finite()));
         assert!(
             sse(&guess) < 0.1 * sse(&[1.0, 1.0, 1.0]),
-            "départ {guess:?} : {} contre {}",
+            "start {guess:?}: {} against {}",
             sse(&guess),
             sse(&[1.0, 1.0, 1.0])
         );
     }
 
     #[test]
-    fn les_parametres_de_chaque_modele() {
+    fn the_parameters_of_each_model() {
         let names = |m: Model| -> Vec<String> {
             m.compile()
                 .unwrap()
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn un_modele_libre_mal_forme_est_une_erreur() {
+    fn a_malformed_free_model_is_an_error() {
         assert!(matches!(
             Model::Custom {
                 formula: "a +".into()
@@ -604,9 +604,9 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_des_modeles_connus() {
+    fn evaluation_of_the_known_models() {
         let g = Model::Gaussian.compile().unwrap();
-        // Au centre : y0 + A ; à ±fwhm/2 : y0 + A/2.
+        // At the center: y0 + A; at ±fwhm/2: y0 + A/2.
         assert!((g.eval(&[1.0, 4.0, 10.0, 2.0], 10.0) - 5.0).abs() < 1e-12);
         assert!((g.eval(&[1.0, 4.0, 10.0, 2.0], 11.0) - 3.0).abs() < 1e-12);
         let l = Model::Lorentzian.compile().unwrap();
@@ -618,17 +618,17 @@ mod tests {
     }
 
     #[test]
-    fn la_valeur_initiale_exponentielle_est_proche() {
+    fn the_exponential_initial_value_is_close() {
         let s = series(|x| 3.0 + 5.0 * libm::exp(-x / 2.0), 0.0, 10.0, 200);
         let m = Model::ExponentialOffset.compile().unwrap();
         let g = m.guess(&s);
-        // Un point de départ à un facteur 2 près suffit à Levenberg-Marquardt.
+        // A starting point within a factor 2 is enough for Levenberg-Marquardt.
         assert!(g[2] > 1.0 && g[2] < 4.0, "tau initial {}", g[2]);
-        assert!(g[1] > 2.5 && g[1] < 10.0, "A initial {}", g[1]);
+        assert!(g[1] > 2.5 && g[1] < 10.0, "initial A {}", g[1]);
     }
 
     #[test]
-    fn la_valeur_initiale_d_un_pic_negatif_est_negative() {
+    fn the_initial_value_of_a_negative_peak_is_negative() {
         let s = series(
             |x| 10.0 - 4.0 * libm::exp(-(x - 5.0).powi(2) / 2.0),
             0.0,
@@ -638,28 +638,28 @@ mod tests {
         let g = peak_guess(&s.x, &s.y);
         assert!(g.height < -3.0, "hauteur {}", g.height);
         assert!((g.center - 5.0).abs() < 0.1);
-        // fwhm = 2·sqrt(2 ln 2)·σ avec σ = 1.
+        // fwhm = 2·sqrt(2 ln 2)·σ with σ = 1.
         assert!((g.fwhm - 2.3548).abs() < 0.2, "fwhm {}", g.fwhm);
     }
 
     #[test]
-    fn la_valeur_initiale_de_puissance_vient_du_log_log() {
+    fn the_initial_value_of_a_power_comes_from_the_log_log() {
         let s = series(|x| 2.0 * libm::pow(x, 1.5), 1.0, 10.0, 50);
         let g = Model::Power.compile().unwrap().guess(&s);
         assert!((g[0] - 2.0).abs() < 1e-9 && (g[1] - 1.5).abs() < 1e-9);
     }
 
-    // ---- #283 : décalage de X et matrice de ré-expression des coefficients ----
+    // ---- #283: shift of X and re-expression matrix of the coefficients ------
 
     fn poly(degree: u32) -> CompiledModel {
         Model::Polynomial { degree }.compile().unwrap()
     }
 
-    /// `Σ cⱼ (x - s)ʲ` développé par multiplications successives (indépendant
-    /// de `unshift_matrix`) : coefficients en puissances de `x`.
-    fn developpe(c: &[f64], s: f64) -> Vec<f64> {
+    /// `Σ cⱼ (x - s)ʲ` expanded by successive multiplications (independent
+    /// of `unshift_matrix`): coefficients in powers of `x`.
+    fn expand_shift(c: &[f64], s: f64) -> Vec<f64> {
         let mut out = vec![0.0; c.len()];
-        // pow = (x - s)ʲ, coefficients en x.
+        // pow = (x - s)ʲ, coefficients in x.
         let mut pow = vec![1.0];
         for cj in c {
             for (i, p) in pow.iter().enumerate() {
@@ -676,19 +676,19 @@ mod tests {
     }
 
     #[test]
-    fn x_shift_est_la_moyenne_pour_la_droite_et_le_polynome() {
+    fn x_shift_is_the_mean_for_the_line_and_the_polynomial() {
         let x = [1.0, 2.0, 6.0];
         assert_eq!(Model::Linear.compile().unwrap().x_shift(&x), 3.0);
         for d in [0, 1, 2, 5] {
-            assert_eq!(poly(d).x_shift(&x), 3.0, "degré {d}");
+            assert_eq!(poly(d).x_shift(&x), 3.0, "degree {d}");
         }
-        // La moyenne, ni le minimum ni le milieu de plage (3,5).
+        // The mean, neither the minimum nor the middle of the range (3.5).
         let x = [10.0, 10.0, 10.0, 13.0];
         assert_eq!(poly(2).x_shift(&x), 10.75);
     }
 
     #[test]
-    fn x_shift_est_nul_pour_les_autres_modeles() {
+    fn x_shift_is_zero_for_the_other_models() {
         let x = [1e5, 1e5 + 1.0, 1e5 + 2.0];
         for m in [
             Model::Logarithm,
@@ -707,17 +707,17 @@ mod tests {
     }
 
     #[test]
-    fn x_shift_ignore_les_x_non_finis_et_se_replie_sur_zero() {
+    fn x_shift_ignores_non_finite_x_and_falls_back_to_zero() {
         let p = poly(2);
         assert_eq!(p.x_shift(&[2.0, f64::NAN, 4.0, f64::INFINITY]), 3.0);
         assert_eq!(p.x_shift(&[]), 0.0);
         assert_eq!(p.x_shift(&[f64::NAN, f64::NEG_INFINITY]), 0.0);
-        // Somme qui déborde : moyenne non finie, repli sur 0 (jamais inf).
+        // Sum that overflows: non-finite mean, fallback to 0 (never inf).
         assert_eq!(p.x_shift(&[f64::MAX, f64::MAX]), 0.0);
     }
 
     #[test]
-    fn unshift_matrix_absente_sans_decalage_ou_hors_polynome() {
+    fn unshift_matrix_absent_without_shift_or_outside_a_polynomial() {
         assert!(poly(3).unshift_matrix(0.0).is_none());
         assert!(poly(3).unshift_matrix(-0.0).is_none());
         assert!(Model::Linear
@@ -731,14 +731,14 @@ mod tests {
     }
 
     #[test]
-    fn unshift_matrix_degre_0_est_l_identite_1x1() {
+    fn unshift_matrix_degree_0_is_the_1x1_identity() {
         let t = poly(0).unshift_matrix(7.5).unwrap();
         assert_eq!((t.rows(), t.cols()), (1, 1));
         assert_eq!(t.get(0, 0), 1.0);
     }
 
     #[test]
-    fn unshift_matrix_droite_et_degre_1_coincident() {
+    fn unshift_matrix_line_and_degree_1_coincide() {
         // y = c0 + c1 (x - s) = (c0 - s c1) + c1 x.
         let want = [[1.0, -3.0], [0.0, 1.0]];
         for m in [Model::Linear, Model::Polynomial { degree: 1 }] {
@@ -753,8 +753,8 @@ mod tests {
     }
 
     #[test]
-    fn unshift_matrix_degre_2_developpe_le_carre() {
-        // (x-2)² = x² - 4x + 4 : colonne 2 = [4, -4, 1]. Colonne 1 : x-2.
+    fn unshift_matrix_degree_2_expands_the_square() {
+        // (x-2)² = x² - 4x + 4: column 2 = [4, -4, 1]. Column 1: x-2.
         let t = poly(2).unshift_matrix(2.0).unwrap();
         let want = [[1.0, -2.0, 4.0], [0.0, 1.0, -4.0], [0.0, 0.0, 1.0]];
         for (i, row) in want.iter().enumerate() {
@@ -765,63 +765,63 @@ mod tests {
     }
 
     #[test]
-    fn unshift_matrix_degre_3_developpe_le_cube() {
+    fn unshift_matrix_degree_3_expands_the_cube() {
         // (x-3)³ = x³ - 9x² + 27x - 27.
         let t = poly(3).unshift_matrix(3.0).unwrap();
         let col3 = [-27.0, 27.0, -9.0, 1.0];
         for (i, w) in col3.iter().enumerate() {
-            assert_eq!(t.get(i, 3), *w, "ligne {i}");
+            assert_eq!(t.get(i, 3), *w, "row {i}");
         }
         // (x-3)² = x² - 6x + 9.
         let col2 = [9.0, -6.0, 1.0, 0.0];
         for (i, w) in col2.iter().enumerate() {
-            assert_eq!(t.get(i, 2), *w, "ligne {i}");
+            assert_eq!(t.get(i, 2), *w, "row {i}");
         }
     }
 
     #[test]
-    fn unshift_matrix_degre_5_developpe_la_puissance_5() {
-        // (x-1)⁵ : coefficients binomiaux alternés.
+    fn unshift_matrix_degree_5_expands_the_power_5() {
+        // (x-1)⁵: alternating binomial coefficients.
         let t = poly(5).unshift_matrix(1.0).unwrap();
         let col5 = [-1.0, 5.0, -10.0, 10.0, -5.0, 1.0];
         for (i, w) in col5.iter().enumerate() {
-            assert_eq!(t.get(i, 5), *w, "ligne {i}");
+            assert_eq!(t.get(i, 5), *w, "row {i}");
         }
-        // (x-2)⁵ : 5·(-2)⁴ = 80 devant x, -32 en constante.
+        // (x-2)⁵: 5·(-2)⁴ = 80 in front of x, -32 as the constant.
         let t = poly(5).unshift_matrix(2.0).unwrap();
         let col5 = [-32.0, 80.0, -80.0, 40.0, -10.0, 1.0];
         for (i, w) in col5.iter().enumerate() {
-            assert_eq!(t.get(i, 5), *w, "ligne {i}");
+            assert_eq!(t.get(i, 5), *w, "row {i}");
         }
     }
 
     #[test]
-    fn unshift_matrix_est_triangulaire_superieure_a_diagonale_unite() {
+    fn unshift_matrix_is_upper_triangular_with_unit_diagonal() {
         for d in 0..=6u32 {
             let t = poly(d).unshift_matrix(-1.5).unwrap();
             let k = (d + 1) as usize;
             assert_eq!((t.rows(), t.cols()), (k, k));
             for i in 0..k {
-                assert_eq!(t.get(i, i), 1.0, "degré {d} diagonale {i}");
+                assert_eq!(t.get(i, i), 1.0, "degree {d} diagonal {i}");
                 for j in 0..i {
-                    assert_eq!(t.get(i, j), 0.0, "degré {d} ({i},{j})");
+                    assert_eq!(t.get(i, j), 0.0, "degree {d} ({i},{j})");
                 }
             }
         }
     }
 
     #[test]
-    fn unshift_matrix_applique_a_un_polynome_connu() {
+    fn unshift_matrix_applied_to_a_known_polynomial() {
         // 1 + 2(x-2) + 3(x-2)² = 3x² - 10x + 9.
         let t = poly(2).unshift_matrix(2.0).unwrap();
         assert_eq!(t.mul_vec(&[1.0, 2.0, 3.0]), vec![9.0, -10.0, 3.0]);
-        // Contre un développement indépendant, pour tous les degrés.
+        // Against an independent expansion, for all degrees.
         for d in 0..=5u32 {
             let c: Vec<f64> = (0..=d).map(|j| 1.0 + 0.5 * f64::from(j)).collect();
             for s in [2.0, -3.0, 0.25] {
                 let t = poly(d).unshift_matrix(s).unwrap();
                 let got = t.mul_vec(&c);
-                let want = developpe(&c, s);
+                let want = expand_shift(&c, s);
                 for (g, w) in got.iter().zip(&want) {
                     assert!((g - w).abs() <= 1e-12 * (1.0 + w.abs()), "d={d} s={s}");
                 }
@@ -830,8 +830,8 @@ mod tests {
     }
 
     #[test]
-    fn unshift_matrix_conserve_la_valeur_du_polynome() {
-        // eval(T·c, x) == eval(c, x - s) : la matrice change d'axe, pas de courbe.
+    fn unshift_matrix_preserves_the_value_of_the_polynomial() {
+        // eval(T·c, x) == eval(c, x - s): the matrix changes axis, not curve.
         for d in 0..=5u32 {
             let m = poly(d);
             let c: Vec<f64> = (0..=d).map(|j| libm::cos(f64::from(j) * 1.3)).collect();
@@ -845,8 +845,8 @@ mod tests {
     }
 
     #[test]
-    fn unshift_matrix_aller_retour_avec_le_decalage_oppose() {
-        // Décaler de s puis de -s ramène les coefficients de départ.
+    fn unshift_matrix_round_trip_with_the_opposite_shift() {
+        // Shifting by s then by -s brings back the starting coefficients.
         let m = poly(4);
         let c = [1.0, -2.0, 0.5, 3.0, -1.0];
         let a = m.unshift_matrix(1.75).unwrap().mul_vec(&c);
@@ -857,10 +857,10 @@ mod tests {
     }
 
     #[test]
-    fn la_covariance_de_la_droite_se_propage_par_t_cov_tt() {
-        // Droite centrée : colonnes orthogonales, cov = diag(1/n, 1/sxx). Après
-        // le décalage s : var(a0) = 1/n + s²/sxx, cov(a0,a1) = -s/sxx,
-        // var(a1) = 1/sxx (propagation à la main de T·cov·Tᵀ).
+    fn the_covariance_of_the_line_propagates_by_t_cov_tt() {
+        // Centerd line: orthogonal columns, cov = diag(1/n, 1/sxx). After
+        // the shift s: var(a0) = 1/n + s²/sxx, cov(a0,a1) = -s/sxx,
+        // var(a1) = 1/sxx (hand propagation of T·cov·Tᵀ).
         let (n, sxx, s) = (10.0_f64, 82.5_f64, 4.0_f64);
         let mut cov = Matrix::zeros(2, 2);
         cov.set(0, 0, 1.0 / n);

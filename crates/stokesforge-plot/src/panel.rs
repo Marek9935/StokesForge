@@ -1,5 +1,5 @@
-//! Un panneau : une zone de tracé, ses quatre axes, sa légende, ses séries,
-//! ses textes libres.
+//! A panel: a plot area, its four axes, its legend, its series,
+//! its free texts.
 
 use stokesforge_id::NodeId;
 
@@ -9,40 +9,40 @@ use crate::legend::LegendSpec;
 use crate::series::{SeriesAxis, SeriesSpec};
 use crate::text_anchor::TextAnchor;
 
-/// Calque superposé à un autre (#167), à la manière du « New Layer (Axes) »
-/// d'Origin : il partage la case de la grille **et la zone de tracé** du calque
-/// qu'il recouvre (dimension liée), sur un fond transparent.
+/// Layer overlaid on another (#167), in the manner of Origin's "New Layer (Axes)":
+/// it shares the grid cell **and the plot area** of the layer
+/// it covers (linked dimension), on a transparent background.
 ///
-/// Son axe `bottom` est son axe X, son axe `left` son axe Y. `x_top` le place
-/// en haut (échelle **propre** au calque) ; sinon l'axe n'est pas affiché et
-/// l'échelle X est celle du calque recouvert (échelle liée). Même règle pour
-/// `y_right` et l'axe Y, à droite. Un calque sans axe affiché (`false`,
-/// `false`) suit donc entièrement le calque recouvert.
+/// Its `bottom` axis is its X axis, its `left` axis its Y axis. `x_top` puts it
+/// at the top (the layer's **own** scale); otherwise the axis is not displayed and
+/// the X scale is that of the covered layer (linked scale). Same rule for
+/// `y_right` and the Y axis, on the right. A layer with no displayed axis (`false`,
+/// `false`) therefore fully follows the covered layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OverlaySpec {
-    /// L'axe X du calque est affiché en haut, avec son échelle propre.
+    /// The X axis of the layer is displayed at the top, with its own scale.
     pub x_top: bool,
-    /// L'axe Y du calque est affiché à droite, avec son échelle propre.
+    /// The Y axis of the layer is displayed on the right, with its own scale.
     pub y_right: bool,
-    /// Numéro du calque de rôle (#168) : 2 pour les colonnes X2/Y2, 3 pour
-    /// X3/Y3, 4 pour X4/Y4 ; 0 pour un calque qu'aucun rôle n'alimente
-    /// (séries « ligne », calque sans axe). C'est ce numéro, et non la
-    /// position du calque, qui dit où va une colonne de rôle Xn/Yn.
+    /// Number of the role layer (#168): 2 for the X2/Y2 columns, 3 for
+    /// X3/Y3, 4 for X4/Y4; 0 for a layer no role feeds
+    /// ("row" series, layer with no axis). This number, not the
+    /// position of the layer, says where a column with role Xn/Yn goes.
     pub layer: u8,
 }
 
 impl OverlaySpec {
-    /// Calque superposé dont les deux axes sont affichés, chacun à l'échelle
-    /// propre : le second calque des rôles X2/Y2 (#167).
+    /// Overlaid layer with both axes displayed, each at its own
+    /// scale: the second layer of the X2/Y2 roles (#167).
     pub const SECOND_AXES: Self = Self::role_layer(Self::FIRST_ROLE_LAYER);
 
-    /// Numéro du premier calque de rôle (X2/Y2) et du dernier (X4/Y4, #168).
+    /// Number of the first role layer (X2/Y2) and of the last (X4/Y4, #168).
     pub const FIRST_ROLE_LAYER: u8 = 2;
-    /// Dernier numéro de calque de rôle.
+    /// Last role layer number.
     pub const LAST_ROLE_LAYER: u8 = 4;
 
-    /// Calque superposé des rôles Xn/Yn : les deux axes affichés, chacun à
-    /// l'échelle propre (#168). `layer` va de [`Self::FIRST_ROLE_LAYER`] à
+    /// Overlaid layer of the Xn/Yn roles: both axes displayed, each at its
+    /// own scale (#168). `layer` goes from [`Self::FIRST_ROLE_LAYER`] to
     /// [`Self::LAST_ROLE_LAYER`].
     pub const fn role_layer(layer: u8) -> Self {
         Self {
@@ -52,13 +52,13 @@ impl OverlaySpec {
         }
     }
 
-    /// Calque superposé dont seul l'axe X est affiché, en haut : celui des
-    /// séries « ligne » (#166). Son axe Y suit celui du calque recouvert, donc
-    /// reste à gauche (`y_right: false`), voulu.
+    /// Overlaid layer with only the X axis displayed, at the top: that of the
+    /// "row" series (#166). Its Y axis follows that of the covered layer, so it
+    /// stays on the left (`y_right: false`), on purpose.
     pub const TOP_X: Self = Self::new(true, false);
 
-    /// Calque superposé affichant (`true`) ou non son axe X en haut et son
-    /// axe Y à droite.
+    /// Overlaid layer showing (`true`) or not its X axis at the top and its
+    /// Y axis on the right.
     pub const fn new(x_top: bool, y_right: bool) -> Self {
         Self {
             x_top,
@@ -68,23 +68,23 @@ impl OverlaySpec {
     }
 }
 
-/// Un emplacement de la liste des séries d'un panneau (#197), tel que le
-/// projette [`PanelSpec::slots`].
+/// A slot of the series list of a panel (#197), as
+/// [`PanelSpec::slots`] projects it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeriesSlot {
-    /// Une série hors groupe : son rang dans [`PanelSpec::series`].
+    /// A series outside any group: its rank in [`PanelSpec::series`].
     Single(usize),
-    /// Un groupe et les rangs de tous ses membres, dans l'ordre.
+    /// A group and the ranks of all its members, in order.
     Group {
-        /// Numéro du groupe dans le panneau.
+        /// Number of the group in the panel.
         id: u32,
-        /// Rangs des séries membres.
+        /// Ranks of the member series.
         members: Vec<usize>,
     },
 }
 
 impl SeriesSlot {
-    /// Vrai si la série de rang `index` est dans cet emplacement.
+    /// True if the series of rank `index` is in this slot.
     pub fn contains(&self, index: usize) -> bool {
         match self {
             Self::Single(i) => *i == index,
@@ -93,68 +93,68 @@ impl SeriesSlot {
     }
 }
 
-/// Un panneau et ses quatre axes.
+/// A panel and its four axes.
 ///
-/// `row`/`column` placent le panneau dans la grille du [`crate::PlotSpec`] —
-/// c'est la description du multi-panneaux, sans rien emprunter au système de
-/// disposition d'un moteur donné. Ce sont des `usize` : une position négative
-/// n'est pas ramenée à zéro, elle ne s'écrit pas.
+/// `row`/`column` place the panel in the grid of the [`crate::PlotSpec`] —
+/// this is the description of multi-panel layouts, borrowing nothing from the layout
+/// system of a given engine. They are `usize`: a negative position
+/// is not clamped to zero, it cannot be written.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PanelSpec {
-    /// Titre du panneau.
+    /// Title of the panel.
     pub title: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     pub title_visible: bool,
-    /// Position du titre du panneau s'il a été déplacé (issue #53).
+    /// Position of the panel title if it was moved (issue #53).
     pub title_anchor: Option<TextAnchor>,
-    /// Police et corps du titre du panneau (issue #78).
+    /// Font and size of the panel title (issue #78).
     pub title_font: crate::TextFont,
-    /// Couleur du titre du panneau (issue #90) ; vide = automatique, comme
+    /// Color of the panel title (issue #90); empty = automatic, like
     /// [`crate::PlotSpec::title_color`].
     pub title_color: String,
-    /// Séries tracées, dans l'ordre de superposition.
+    /// Plotted series, in stacking order.
     pub series: Vec<SeriesSpec>,
-    /// Axe du bas.
+    /// Bottom axis.
     pub bottom: AxisSpec,
-    /// Axe de gauche.
+    /// Left axis.
     pub left: AxisSpec,
-    /// Axe de droite (secondaire).
+    /// Right axis (secondary).
     pub right: AxisSpec,
-    /// Axe du haut, masqué par défaut.
+    /// Top axis, hidden by default.
     pub top: AxisSpec,
-    /// Légende.
+    /// Legend.
     pub legend: LegendSpec,
-    /// Calque superposé à un autre de la même case (#167) ; `None` pour un
-    /// calque ordinaire. Un calque superposé recouvre le dernier calque
-    /// ordinaire qui le précède dans la même case.
+    /// Layer overlaid on another one of the same cell (#167); `None` for an
+    /// ordinary layer. An overlaid layer covers the last ordinary layer
+    /// that precedes it in the same cell.
     pub overlay: Option<OverlaySpec>,
-    /// Ligne du panneau dans la grille.
+    /// Row of the panel in the grid.
     pub row: usize,
-    /// Colonne du panneau dans la grille.
+    /// Column of the panel in the grid.
     pub column: usize,
-    /// Textes libres posés sur le panneau, ancrés aux données (issue #35),
-    /// dans l'ordre de superposition.
+    /// Free texts placed on the panel, anchored to the data (issue #35),
+    /// in stacking order.
     pub annotations: Vec<AnnotationSpec>,
-    /// Objets graphiques (rectangle, ellipse, ligne, flèche — issue #76),
-    /// ancrés aux données, du dessous au dessus. Tracés sous les textes
-    /// libres.
+    /// Graphic objects (rectangle, ellipse, line, arrow — issue #76),
+    /// anchored to the data, from bottom to top. Plotted below the free
+    /// texts.
     pub shapes: Vec<crate::ShapeSpec>,
-    /// Noms donnés aux groupes de séries (#197), par numéro de groupe. Un
-    /// groupe sans entrée porte son nom automatique (« Group n »). Seules
-    /// les entrées de groupes existants comptent : [`PanelSpec::group_label`]
-    /// ignore les autres et [`PanelSpec::next_group_id`] ne réemploie pas leur
-    /// numéro, donc un nom resté derrière un groupe disparu ne repasse jamais
-    /// à un groupe neuf.
+    /// Names given to the series groups (#197), by group number. A
+    /// group with no entry has its automatic name ("Group n"). Only
+    /// the entries of existing groups count: [`PanelSpec::group_label`]
+    /// ignores the others and [`PanelSpec::next_group_id`] does not reuse their
+    /// number, so a name left behind a vanished group never passes
+    /// to a new group.
     pub group_names: std::collections::BTreeMap<u32, String>,
-    /// Arrêts du nuancier appliqué à chaque groupe (#213), par numéro de
-    /// groupe. Un groupe sans entrée n'a reçu aucun nuancier : ses membres
-    /// gardent leurs couleurs. Une série qui rejoint un groupe doté d'un
-    /// nuancier reçoit sa couleur ([`PanelSpec::set_series_group`]).
+    /// Stops of the color gradient applied to each group (#213), by group
+    /// number. A group with no entry received no color gradient: its members
+    /// keep their colors. A series that joins a group with a
+    /// color gradient gets its color ([`PanelSpec::set_series_group`]).
     pub group_gradients: std::collections::BTreeMap<u32, Vec<String>>,
 }
 
 impl PanelSpec {
-    /// Panneau par défaut placé en `(row, column)`.
+    /// Default panel placed at `(row, column)`.
     pub fn at(row: usize, column: usize) -> Self {
         Self {
             row,
@@ -163,9 +163,9 @@ impl PanelSpec {
         }
     }
 
-    /// Un calque superposé (#167) au calque `base` : même case, sans titre ni
-    /// légende, seuls les axes que `overlay` affiche sont visibles, sans
-    /// quadrillage.
+    /// A layer overlaid (#167) on the layer `base`: same cell, no title or
+    /// legend, only the axes that `overlay` displays are visible, with no
+    /// grid.
     pub fn overlay_on(base: &PanelSpec, overlay: OverlaySpec) -> Self {
         let axis = |visible| AxisSpec {
             visible,
@@ -187,7 +187,7 @@ impl PanelSpec {
         }
     }
 
-    /// L'axe d'un côté donné.
+    /// The axis of a given side.
     pub fn axis(&self, side: AxisSide) -> &AxisSpec {
         match side {
             AxisSide::Bottom => &self.bottom,
@@ -197,7 +197,7 @@ impl PanelSpec {
         }
     }
 
-    /// L'axe d'un côté donné, modifiable.
+    /// The axis of a given side, mutable.
     pub fn axis_mut(&mut self, side: AxisSide) -> &mut AxisSpec {
         match side {
             AxisSide::Bottom => &mut self.bottom,
@@ -207,36 +207,36 @@ impl PanelSpec {
         }
     }
 
-    /// Vrai si au moins une série est rattachée à l'axe de droite — c'est ce
-    /// qui décide de l'afficher.
+    /// True if at least one series is attached to the right axis — this is what
+    /// decides to display it.
     pub fn uses_right_axis(&self) -> bool {
         self.series.iter().any(|s| s.axis == SeriesAxis::Right)
     }
 
-    /// L'axe du haut est un miroir de celui du bas (#176).
+    /// The top axis is a mirror of the bottom one (#176).
     pub fn mirrors_top(&self) -> bool {
         self.overlay.is_none() && self.top.mirror
     }
 
-    /// L'axe de droite est un miroir de celui de gauche (#176) : seulement
-    /// quand aucune série n'y est rattachée, sinon c'est un vrai axe.
+    /// The right axis is a mirror of the left one (#176): only
+    /// when no series is attached to it, otherwise it is a real axis.
     pub fn mirrors_right(&self) -> bool {
         self.overlay.is_none() && self.right.mirror && !self.uses_right_axis()
     }
 
-    /// Le cadre est fermé (#344) : le haut est un miroir, et la droite aussi
-    /// tant qu'aucune série n'y est rattachée (sinon la droite est un vrai
-    /// axe et seul le haut compte). Faux sur un calque superposé.
+    /// The frame is closed (#344): the top is a mirror, and so is the right
+    /// as long as no series is attached to it (otherwise the right is a real
+    /// axis and only the top counts). False on an overlaid layer.
     pub fn frame_closed(&self) -> bool {
         self.overlay.is_none() && self.top.mirror && (self.uses_right_axis() || self.right.mirror)
     }
 
-    /// Ferme ou rouvre le cadre (#344), d'un seul geste. Fermer règle le haut
-    /// (et la droite, si aucune série n'y est rattachée) en miroir sans
-    /// nombres, et **copie une fois** les tirets du bas (haut) et de gauche
-    /// (droite) : présence, sens et sous-graduations ; ils se règlent ensuite séparément. Rouvrir
-    /// éteint ces miroirs et rend leurs nombres. Sans effet sur un calque
-    /// superposé (qui a ses propres axes, #167).
+    /// Closes or reopens the frame (#344), in one gesture. Closing sets the top
+    /// (and the right, if no series is attached to it) as a mirror without
+    /// numbers, and **copies once** the tick marks of the bottom (top) and left
+    /// (right): presence, direction and minor ticks; they are then set separately. Reopening
+    /// turns these mirrors off and gives their numbers back. No effect on an
+    /// overlaid layer (which has its own axes, #167).
     pub fn set_frame_closed(&mut self, closed: bool) {
         if self.overlay.is_some() {
             return;
@@ -259,8 +259,8 @@ impl PanelSpec {
         }
     }
 
-    /// Colonnes référencées par les séries du panneau, sans doublon, dans
-    /// l'ordre de première apparition.
+    /// Columns referenced by the series of the panel, without duplicates, in
+    /// order of first appearance.
     pub fn referenced_columns(&self) -> Vec<NodeId> {
         let mut seen: Vec<NodeId> = Vec::new();
         for series in &self.series {
@@ -273,8 +273,8 @@ impl PanelSpec {
         seen
     }
 
-    /// Le premier numéro de groupe (#177) qu'aucune série du panneau ne porte
-    /// et qu'aucun nom de groupe ne réserve (#197).
+    /// The first group number (#177) that no series of the panel carries
+    /// and that no group name reserves (#197).
     pub fn next_group_id(&self) -> u32 {
         self.series
             .iter()
@@ -284,9 +284,9 @@ impl PanelSpec {
             .map_or(1, |max| max.saturating_add(1))
     }
 
-    /// Ajoute des séries **ensemble** (#177) : à deux ou plus, elles forment un
-    /// nouveau groupe ; une série seule n'en a pas. Les numéros de groupe que
-    /// les séries portaient déjà sont écartés.
+    /// Adds series **together** (#177): two or more form a
+    /// new group; a single series has none. The group numbers the
+    /// series already carried are discarded.
     pub fn push_series_batch(&mut self, series: Vec<SeriesSpec>) {
         let group = (series.len() > 1).then(|| self.next_group_id());
         self.series.extend(series.into_iter().map(|mut s| {
@@ -295,7 +295,7 @@ impl PanelSpec {
         }));
     }
 
-    /// Rangs, dans [`PanelSpec::series`], des séries du groupe `group`.
+    /// Ranks, in [`PanelSpec::series`], of the series of the group `group`.
     pub fn group_members(&self, group: u32) -> Vec<usize> {
         self.series
             .iter()
@@ -304,7 +304,7 @@ impl PanelSpec {
             .collect()
     }
 
-    /// Les numéros de groupe présents, dans l'ordre de première apparition.
+    /// The group numbers present, in order of first appearance.
     pub fn group_ids(&self) -> Vec<u32> {
         let mut ids = Vec::new();
         for group in self.series.iter().filter_map(|s| s.group) {
@@ -315,8 +315,8 @@ impl PanelSpec {
         ids
     }
 
-    /// Le nom donné au groupe `group` (#197), s'il existe et n'est pas vide.
-    /// `None` : le groupe porte son nom automatique, ou n'existe pas.
+    /// The name given to the group `group` (#197), if it exists and is not empty.
+    /// `None`: the group has its automatic name, or does not exist.
     pub fn group_label(&self, group: u32) -> Option<&str> {
         self.group_names
             .get(&group)
@@ -324,8 +324,8 @@ impl PanelSpec {
             .filter(|name| !name.is_empty() && self.series.iter().any(|s| s.group == Some(group)))
     }
 
-    /// Nomme le groupe `group` ; un nom vide rend le nom automatique. Faux si
-    /// le groupe n'existe pas ou si rien ne change.
+    /// Names the group `group`; an empty name restores the automatic name. False if
+    /// the group does not exist or if nothing changes.
     pub fn rename_group(&mut self, group: u32, name: &str) -> bool {
         if !self.series.iter().any(|s| s.group == Some(group)) {
             return false;
@@ -343,10 +343,10 @@ impl PanelSpec {
         true
     }
 
-    /// Les emplacements de la liste des séries (#197), dans l'ordre : une
-    /// série seule, ou un groupe avec **tous** ses membres. Un groupe prend la
-    /// place de son premier membre — c'est la seule projection que l'Object
-    /// Manager et la fenêtre des séries se partagent.
+    /// The slots of the series list (#197), in order: a single
+    /// series, or a group with **all** its members. A group takes the
+    /// place of its first member — this is the only projection that the Object
+    /// Manager and the series window share.
     pub fn slots(&self) -> Vec<SeriesSlot> {
         let mut slots: Vec<SeriesSlot> = Vec::new();
         for (index, series) in self.series.iter().enumerate() {
@@ -369,16 +369,16 @@ impl PanelSpec {
         slots
     }
 
-    /// Range les séries dans l'ordre des emplacements `slots`, puis oublie les
-    /// noms de groupes disparus. Rend le rang final de la série `index`
-    /// (rang d'avant l'appel), qu'un déplacement fait bouger.
+    /// Sorts the series in the order of the slots `slots`, then forgets the
+    /// names of vanished groups. Returns the final rank of the series `index`
+    /// (rank before the call), which a move changes.
     fn apply_slots(&mut self, slots: &[SeriesSlot], index: usize) -> usize {
         let order = self.reorder_by_slots(slots);
         order.iter().position(|i| *i == index).unwrap_or(index)
     }
 
-    /// Le travail d'[`PanelSpec::apply_slots`], qui rend l'ordre obtenu :
-    /// `order[nouveau rang] = ancien rang`.
+    /// The work of [`PanelSpec::apply_slots`], which returns the order obtained:
+    /// `order[new rank] = old rank`.
     fn reorder_by_slots(&mut self, slots: &[SeriesSlot]) -> Vec<usize> {
         let order: Vec<usize> = slots
             .iter()
@@ -400,18 +400,18 @@ impl PanelSpec {
         order
     }
 
-    /// Place la série `index` dans le groupe `group`, **à la suite** de ses
-    /// membres (un groupe est toujours contigu, #197) ; `None` la sort de son
-    /// groupe, juste derrière lui. Un numéro que personne ne porte crée le
-    /// groupe. Rend le rang final de la série, `None` si rien ne change.
+    /// Puts the series `index` in the group `group`, **after** its
+    /// members (a group is always contiguous, #197); `None` takes it out of its
+    /// group, right behind it. A number no one carries creates the
+    /// group. Returns the final rank of the series, `None` if nothing changes.
     pub fn set_series_group(&mut self, index: usize, group: Option<u32>) -> Option<usize> {
         if index >= self.series.len() || self.series[index].group == group {
             return None;
         }
         let mut slots = self.slots();
         let rank = slots.iter().position(|slot| slot.contains(index))?;
-        // Où se poserait la série seule : à la place d'un emplacement qu'elle
-        // vide, sinon juste derrière le groupe qu'elle quitte.
+        // Where the lone series would land: in place of a slot it
+        // empties, otherwise right behind the group it leaves.
         let emptied = match &mut slots[rank] {
             SeriesSlot::Single(_) => true,
             SeriesSlot::Group { members, .. } => {
@@ -444,8 +444,8 @@ impl PanelSpec {
         }
         self.series[index].group = group;
         let rank = self.apply_slots(&slots, index);
-        // Dynamique (#213) : la série qui rejoint un groupe doté d'un nuancier
-        // en reçoit la couleur, et le nuancier se répartit de nouveau.
+        // Dynamic (#213): a series that joins a group with a color gradient
+        // gets its color, and the color gradient is spread again.
         if let Some(stops) = group.and_then(|id| self.group_gradients.get(&id).cloned()) {
             if let Some(id) = group {
                 self.apply_group_gradient(id, &stops);
@@ -454,10 +454,10 @@ impl PanelSpec {
         Some(rank)
     }
 
-    /// Où se trouve la série `index` : son groupe et son rang dans ce
-    /// conteneur — parmi les emplacements du panneau si elle est seule, parmi
-    /// les membres de son groupe sinon. C'est le couple que rend
-    /// [`PanelSpec::place_series`] pour la retrouver.
+    /// Where the series `index` is: its group and its rank in that
+    /// container — among the slots of the panel if it is alone, among
+    /// the members of its group otherwise. This is the pair that
+    /// [`PanelSpec::place_series`] returns to find it again.
     pub fn series_position(&self, index: usize) -> Option<(Option<u32>, usize)> {
         let group = self.series.get(index)?.group;
         let slots = self.slots();
@@ -476,15 +476,15 @@ impl PanelSpec {
         }
     }
 
-    /// Pose la série `index` dans le conteneur `group` au rang `position` de ce
-    /// conteneur, **comptée une fois la série retirée** (glisser-déposer) :
-    /// `None` la rend seule, au rang `position` parmi les emplacements ;
-    /// `Some(id)` la met dans ce groupe, au rang `position` de ses membres (un
-    /// numéro que personne ne porte crée le groupe). Un rang trop grand va à la
-    /// fin. Un groupe que la série vide disparaît avec son nom.
+    /// Places the series `index` in the container `group` at the rank `position` of that
+    /// container, **counted once the series is removed** (drag and drop):
+    /// `None` makes it alone, at the rank `position` among the slots;
+    /// `Some(id)` puts it in that group, at the rank `position` of its members (a
+    /// number no one carries creates the group). A rank that is too large goes to the
+    /// end. A group the series empties disappears with its name.
     ///
-    /// Rend l'ordre obtenu (`ordre[nouveau rang] = ancien rang`), `None` sans
-    /// rien changer si la série est déjà là ou n'existe pas.
+    /// Returns the order obtained (`order[new rank] = old rank`), `None` without
+    /// changing anything if the series is already there or does not exist.
     pub fn place_series(
         &mut self,
         index: usize,
@@ -529,8 +529,8 @@ impl PanelSpec {
         }
         self.series[index].group = group;
         let order = self.reorder_by_slots(&slots);
-        // Comme `set_series_group` : une série qui rejoint un groupe doté d'un
-        // nuancier en reçoit la couleur.
+        // Like `set_series_group`: a series that joins a group with a
+        // color gradient gets its color.
         if let Some(id) = group {
             if let Some(stops) = self.group_gradients.get(&id).cloned() {
                 self.apply_group_gradient(id, &stops);
@@ -539,10 +539,10 @@ impl PanelSpec {
         Some(order)
     }
 
-    /// Pose le groupe `group` au rang `position` parmi les emplacements, compté
-    /// une fois le groupe retiré (glisser-déposer). Rend l'ordre obtenu
-    /// (`ordre[nouveau rang] = ancien rang`), `None` si le groupe n'existe pas
-    /// ou ne bouge pas.
+    /// Places the group `group` at the rank `position` among the slots, counted
+    /// once the group is removed (drag and drop). Returns the order obtained
+    /// (`order[new rank] = old rank`), `None` if the group does not exist
+    /// or does not move.
     pub fn place_group(&mut self, group: u32, position: usize) -> Option<Vec<usize>> {
         let before = self.slots();
         let mut slots = before.clone();
@@ -557,11 +557,11 @@ impl PanelSpec {
         Some(self.reorder_by_slots(&slots))
     }
 
-    /// Rassemble les séries `indices` (rangs distincts, dans l'ordre voulu)
-    /// dans un groupe neuf, qui prend la place de la première rencontrée dans
-    /// la liste (#196). Un groupe d'où elles viennent et qu'elles vident
-    /// disparaît avec son nom. Rend le numéro du groupe ; `None`, sans rien
-    /// changer, si `indices` est vide, hors du panneau ou répète un rang.
+    /// Gathers the series `indices` (distinct ranks, in the wanted order)
+    /// into a new group, which takes the place of the first one met in
+    /// the list (#196). A group they come from and empty
+    /// disappears with its name. Returns the group number; `None`, without changing
+    /// anything, if `indices` is empty, outside the panel or repeats a rank.
     pub fn group_series(&mut self, indices: &[usize]) -> Option<u32> {
         let mut seen = indices.to_vec();
         seen.sort_unstable();
@@ -608,13 +608,13 @@ impl PanelSpec {
         Some(id)
     }
 
-    /// Sort la série `index` de son groupe (#197).
+    /// Takes the series `index` out of its group (#197).
     pub fn leave_group(&mut self, index: usize) -> Option<usize> {
         self.series.get(index)?.group?;
         self.set_series_group(index, None)
     }
 
-    /// Fait de la série `index` le premier membre d'un groupe neuf.
+    /// Makes the series `index` the first member of a new group.
     pub fn start_group(&mut self, index: usize) -> Option<u32> {
         let alone = self
             .series
@@ -629,8 +629,8 @@ impl PanelSpec {
         Some(id)
     }
 
-    /// Dissout le groupe `group` (#197) : ses séries deviennent simples, à la
-    /// même place, chacune gardant son style. Faux si le groupe n'existe pas.
+    /// Dissolves the group `group` (#197): its series become single, in the
+    /// same place, each keeping its style. False if the group does not exist.
     pub fn dissolve_group(&mut self, group: u32) -> bool {
         let mut changed = false;
         for series in &mut self.series {
@@ -644,8 +644,8 @@ impl PanelSpec {
         changed
     }
 
-    /// Retire la série de rang `index` (#257), sans toucher aux autres ni à
-    /// leurs groupes. Faux, sans rien changer, si le rang n'existe pas.
+    /// Removes the series of rank `index` (#257), without touching the others or
+    /// their groups. False, without changing anything, if the rank does not exist.
     pub fn remove_series(&mut self, index: usize) -> bool {
         if index >= self.series.len() {
             return false;
@@ -654,7 +654,7 @@ impl PanelSpec {
         true
     }
 
-    /// Supprime le groupe `group` et ses séries (#197). Faux s'il n'existe pas.
+    /// Deletes the group `group` and its series (#197). False if it does not exist.
     pub fn remove_group(&mut self, group: u32) -> bool {
         let before = self.series.len();
         self.series.retain(|s| s.group != Some(group));
@@ -663,9 +663,9 @@ impl PanelSpec {
         self.series.len() != before
     }
 
-    /// Remonte (`up`) ou descend la série `index` d'un cran (#197). Une série
-    /// d'un groupe reste dans son groupe ; une série seule saute par-dessus
-    /// un groupe entier. Rend son rang final, `None` en butée.
+    /// Moves the series `index` up (`up`) or down by one step (#197). A series
+    /// of a group stays in its group; a single series jumps over
+    /// a whole group. Returns its final rank, `None` at the limit.
     pub fn move_series(&mut self, index: usize, up: bool) -> Option<usize> {
         let mut slots = self.slots();
         let rank = slots.iter().position(|slot| slot.contains(index))?;
@@ -689,10 +689,10 @@ impl PanelSpec {
         Some(self.apply_slots(&slots, index))
     }
 
-    /// Répartit le nuancier d'arrêts `stops` sur les séries du groupe `group`
-    /// (#178), dans l'ordre du panneau : le trait et le remplissage des
-    /// symboles prennent la couleur. Faux, sans rien changer, si le groupe
-    /// n'existe pas ou si aucun arrêt n'est lisible.
+    /// Spreads the color gradient with stops `stops` over the series of the group `group`
+    /// (#178), in panel order: the line and the fill of the
+    /// symbols take the color. False, without changing anything, if the group
+    /// does not exist or if no stop is readable.
     pub fn apply_group_gradient<S: AsRef<str>>(&mut self, group: u32, stops: &[S]) -> bool {
         let members = self.group_members(group);
         let colors = crate::gradient_colors(stops, members.len());
@@ -706,10 +706,10 @@ impl PanelSpec {
         changed
     }
 
-    /// Retient `stops` comme nuancier du groupe `group` et l'applique à ses
-    /// membres (#213). Faux, sans rien changer, si le groupe n'existe pas ou
-    /// si aucun arrêt n'est lisible ; sinon vrai quand le nuancier retenu ou
-    /// une couleur a changé.
+    /// Retains `stops` as the color gradient of the group `group` and applies it to its
+    /// members (#213). False, without changing anything, if the group does not exist or
+    /// if no stop is readable; otherwise true when the retained color gradient or
+    /// a color changed.
     pub fn set_group_gradient<S: AsRef<str>>(&mut self, group: u32, stops: &[S]) -> bool {
         if self.group_members(group).is_empty() || crate::gradient_colors(stops, 1).is_empty() {
             return false;
@@ -720,7 +720,7 @@ impl PanelSpec {
         recolored || retained.as_ref() != Some(&stops)
     }
 
-    /// Le nuancier retenu pour le groupe `group` (#213), s'il en a reçu un.
+    /// The color gradient retained for the group `group` (#213), if it received one.
     pub fn group_gradient(&self, group: u32) -> Option<&[String]> {
         self.group_gradients
             .get(&group)
@@ -728,18 +728,18 @@ impl PanelSpec {
             .map(Vec::as_slice)
     }
 
-    /// Vrai si [`PanelSpec::move_series`] déplacerait la série `index`.
+    /// True if [`PanelSpec::move_series`] would move the series `index`.
     pub fn can_move_series(&self, index: usize, up: bool) -> bool {
         self.clone().move_series(index, up).is_some()
     }
 
-    /// Vrai si [`PanelSpec::move_group`] déplacerait le groupe `group`.
+    /// True if [`PanelSpec::move_group`] would move the group `group`.
     pub fn can_move_group(&self, group: u32, up: bool) -> bool {
         self.clone().move_group(group, up)
     }
 
-    /// Remonte (`up`) ou descend le groupe `group` d'un emplacement (#197).
-    /// Faux en butée ou si le groupe n'existe pas.
+    /// Moves the group `group` up (`up`) or down by one slot (#197).
+    /// False at the limit or if the group does not exist.
     pub fn move_group(&mut self, group: u32, up: bool) -> bool {
         let mut slots = self.slots();
         let Some(rank) = slots
@@ -761,7 +761,7 @@ impl PanelSpec {
         true
     }
 
-    /// Vrai si une série du panneau référence cette colonne.
+    /// True if a series of the panel references this column.
     pub fn references(&self, column: NodeId) -> bool {
         self.series.iter().any(|s| s.references(column))
     }
@@ -796,36 +796,36 @@ impl Default for PanelSpec {
 mod group_tests {
     use super::*;
 
-    fn serie(n: u64) -> SeriesSpec {
+    fn make_series(n: u64) -> SeriesSpec {
         SeriesSpec::new(NodeId::from_raw(n))
     }
 
-    /// #257 : `remove_series` retire exactement la série de rang `index`, sans
-    /// toucher aux autres ni à leurs groupes ; un rang hors borne ne change rien.
+    /// #257: `remove_series` removes exactly the series of rank `index`, without
+    /// touching the others or their groups; an out-of-range rank changes nothing.
     #[test]
-    fn remove_series_retire_la_serie_designee_et_pas_une_autre() {
+    fn remove_series_removes_the_designated_series_and_no_other() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(vec![serie(1)]);
-        panel.push_series_batch(vec![serie(2), serie(3)]);
-        let avant = panel.clone();
+        panel.push_series_batch(vec![make_series(1)]);
+        panel.push_series_batch(vec![make_series(2), make_series(3)]);
+        let before = panel.clone();
 
-        assert!(!panel.remove_series(3), "hors borne : rien ne change");
-        assert_eq!(panel, avant);
+        assert!(!panel.remove_series(3), "out of range: nothing changes");
+        assert_eq!(panel, before);
 
         assert!(panel.remove_series(1));
-        let colonnes: Vec<NodeId> = panel.series.iter().map(|s| s.y).collect();
-        assert_eq!(colonnes, [NodeId::from_raw(1), NodeId::from_raw(3)]);
-        assert_eq!(panel.series[1].group, Some(1), "le groupe garde son membre");
+        let referenced: Vec<NodeId> = panel.series.iter().map(|s| s.y).collect();
+        assert_eq!(referenced, [NodeId::from_raw(1), NodeId::from_raw(3)]);
+        assert_eq!(panel.series[1].group, Some(1), "the group keeps its member");
 
         assert!(panel.remove_series(0));
         assert_eq!(panel.series.len(), 1);
         assert_eq!(panel.series[0].y, NodeId::from_raw(3));
     }
 
-    /// #257 : les calques nommés — le second calque X2/Y2 a les deux axes, le
-    /// calque des lignes seulement X en haut (son Y suit le calque recouvert).
+    /// #257: the named layers — the second X2/Y2 layer has both axes, the
+    /// row layer only X at the top (its Y follows the covered layer).
     #[test]
-    fn les_calques_nommes_disent_quels_axes_ils_affichent() {
+    fn named_layers_say_which_axes_they_display() {
         assert_eq!(
             (
                 OverlaySpec::SECOND_AXES.x_top,
@@ -846,69 +846,72 @@ mod group_tests {
             }
         );
         assert_ne!(OverlaySpec::SECOND_AXES, OverlaySpec::TOP_X);
-        // Le constructeur de panneau en tire les axes affichés.
+        // The panel constructor derives the displayed axes from it.
         let base = PanelSpec::default();
-        let calque = PanelSpec::overlay_on(&base, OverlaySpec::TOP_X);
-        assert!(calque.bottom.visible && !calque.left.visible);
+        let layer = PanelSpec::overlay_on(&base, OverlaySpec::TOP_X);
+        assert!(layer.bottom.visible && !layer.left.visible);
     }
 
     #[test]
-    fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
+    fn series_added_together_form_a_group_a_single_one_does_not() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(vec![serie(1)]);
+        panel.push_series_batch(vec![make_series(1)]);
         assert_eq!(panel.series[0].group, None);
-        panel.push_series_batch(vec![serie(2), serie(3)]);
+        panel.push_series_batch(vec![make_series(2), make_series(3)]);
         assert_eq!(panel.group_members(1), [1, 2]);
-        panel.push_series_batch(vec![serie(4), serie(5)]);
+        panel.push_series_batch(vec![make_series(4), make_series(5)]);
         assert_eq!(panel.group_ids(), [1, 2]);
         assert_eq!(panel.next_group_id(), 3);
     }
 
     #[test]
-    fn le_nuancier_colore_les_series_du_groupe_dans_l_ordre_et_elles_seules() {
+    fn the_gradient_colors_the_series_of_the_group_in_order_and_only_them() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(vec![serie(1)]);
-        panel.push_series_batch((2..=4).map(serie).collect());
-        let seule = panel.series[0].clone();
+        panel.push_series_batch(vec![make_series(1)]);
+        panel.push_series_batch((2..=4).map(make_series).collect());
+        let alone = panel.series[0].clone();
         let stops = ["#000000", "#ff0000"];
         assert!(panel.apply_group_gradient(1, &stops));
-        assert_eq!(panel.series[0], seule, "la série hors groupe est intacte");
-        let couleurs: Vec<&str> = panel.series[1..]
+        assert_eq!(
+            panel.series[0], alone,
+            "the series outside the group is intact"
+        );
+        let colors: Vec<&str> = panel.series[1..]
             .iter()
             .map(|s| s.line.color.as_str())
             .collect();
-        assert_eq!(couleurs, ["#000000", "#800000", "#ff0000"]);
+        assert_eq!(colors, ["#000000", "#800000", "#ff0000"]);
         assert!(panel.series[1..]
             .iter()
             .all(|s| s.symbol.color == s.line.color));
-        assert!(!panel.apply_group_gradient(1, &stops), "déjà appliqué");
+        assert!(!panel.apply_group_gradient(1, &stops), "already applied");
     }
 
     #[test]
-    fn un_nuancier_illisible_ne_change_rien() {
+    fn an_unreadable_gradient_changes_nothing() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch((1..=3).map(serie).collect());
-        let avant = panel.clone();
-        assert!(!panel.apply_group_gradient(1, &["pas une couleur"]));
-        assert_eq!(panel, avant);
+        panel.push_series_batch((1..=3).map(make_series).collect());
+        let before = panel.clone();
+        assert!(!panel.apply_group_gradient(1, &["not a color"]));
+        assert_eq!(panel, before);
         assert!(!panel.apply_group_gradient(9, &["#000000", "#ffffff"]));
     }
 
-    /// #213 : le groupe retient son nuancier ; un groupe neuf n'en a pas et
-    /// ses couleurs ne bougent pas.
+    /// #213: the group retains its color gradient; a new group has none and
+    /// its colors do not move.
     #[test]
-    fn le_groupe_retient_son_nuancier() {
+    fn the_group_retains_its_gradient() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch((1..=3).map(serie).collect());
-        let avant = panel.clone();
+        panel.push_series_batch((1..=3).map(make_series).collect());
+        let before = panel.clone();
         assert_eq!(
             panel.group_gradient(1),
             None,
-            "groupe neuf : aucun nuancier"
+            "new group: no color gradient"
         );
-        assert!(!panel.set_group_gradient(1, &["pas une couleur"]));
+        assert!(!panel.set_group_gradient(1, &["not a color"]));
         assert!(!panel.set_group_gradient(9, &["#000000", "#ffffff"]));
-        assert_eq!(panel, avant, "un nuancier refusé ne retient rien");
+        assert_eq!(panel, before, "a refused color gradient retains nothing");
 
         assert!(panel.set_group_gradient(1, &["#000000", "#ff0000"]));
         assert_eq!(
@@ -917,57 +920,57 @@ mod group_tests {
         );
         assert!(
             !panel.set_group_gradient(1, &["#000000", "#ff0000"]),
-            "déjà là"
+            "already there"
         );
         assert!(panel.dissolve_group(1));
         assert_eq!(
             panel.group_gradient(1),
             None,
-            "dissoudre oublie le nuancier"
+            "dissolving forgets the color gradient"
         );
     }
 
-    /// #213 : une série qui rejoint le groupe est colorée par son nuancier,
-    /// qui se répartit de nouveau ; sans nuancier, elle garde sa couleur.
+    /// #213: a series that joins the group is colored by its color gradient,
+    /// which is spread again; without a color gradient, it keeps its color.
     #[test]
-    fn une_serie_ajoutee_au_groupe_recoit_le_nuancier() {
+    fn a_series_added_to_the_group_receives_the_gradient() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch((1..=2).map(serie).collect());
-        panel.push_series_batch(vec![serie(3)]);
-        let couleur = panel.series[2].line.color.clone();
-        panel.push_series_batch((4..=5).map(serie).collect());
-        // Groupe 2 sans nuancier : la série qui l'a rejoint garde sa couleur.
+        panel.push_series_batch((1..=2).map(make_series).collect());
+        panel.push_series_batch(vec![make_series(3)]);
+        let color = panel.series[2].line.color.clone();
+        panel.push_series_batch((4..=5).map(make_series).collect());
+        // Group 2 without a color gradient: the series that joined it keeps its color.
         assert!(panel.set_series_group(2, Some(2)).is_some());
-        assert_eq!(panel.series[4].line.color, couleur);
+        assert_eq!(panel.series[4].line.color, color);
 
         assert!(panel.set_group_gradient(1, &["#000000", "#ffffff"]));
         assert!(panel.set_series_group(4, Some(1)).is_some());
-        let couleurs: Vec<&str> = panel
+        let colors: Vec<&str> = panel
             .group_members(1)
             .iter()
             .map(|&m| panel.series[m].line.color.as_str())
             .collect();
-        assert_eq!(couleurs, ["#000000", "#808080", "#ffffff"]);
+        assert_eq!(colors, ["#000000", "#808080", "#ffffff"]);
     }
 
-    /// Un panneau « 1, [2 3], 4, [5 6] », les colonnes valant leur rang.
-    fn panneau() -> PanelSpec {
+    /// A panel "1, [2 3], 4, [5 6]", the columns being worth their rank.
+    fn sample_panel() -> PanelSpec {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(vec![serie(1)]);
-        panel.push_series_batch(vec![serie(2), serie(3)]);
-        panel.push_series_batch(vec![serie(4)]);
-        panel.push_series_batch(vec![serie(5), serie(6)]);
+        panel.push_series_batch(vec![make_series(1)]);
+        panel.push_series_batch(vec![make_series(2), make_series(3)]);
+        panel.push_series_batch(vec![make_series(4)]);
+        panel.push_series_batch(vec![make_series(5), make_series(6)]);
         panel
     }
 
-    /// Les colonnes Y dans l'ordre du panneau.
-    fn colonnes(panel: &PanelSpec) -> Vec<u64> {
+    /// The Y columns in panel order.
+    fn columns_of(panel: &PanelSpec) -> Vec<u64> {
         panel.series.iter().map(|s| s.y.raw()).collect()
     }
 
     #[test]
-    fn un_groupe_se_projette_en_un_emplacement_avec_tous_ses_membres() {
-        let slots = panneau().slots();
+    fn a_group_projects_into_one_slot_with_all_its_members() {
+        let slots = sample_panel().slots();
         assert_eq!(
             slots,
             [
@@ -986,8 +989,8 @@ mod group_tests {
     }
 
     #[test]
-    fn un_groupe_aux_membres_disperses_se_rassemble_a_la_place_du_premier() {
-        let mut panel = panneau();
+    fn a_group_with_scattered_members_gathers_at_the_place_of_the_first() {
+        let mut panel = sample_panel();
         panel.series.swap(2, 3); // 1, 2, 4, 3, …
         assert_eq!(
             panel.slots()[1],
@@ -999,248 +1002,248 @@ mod group_tests {
     }
 
     #[test]
-    fn un_nom_de_groupe_se_pose_se_lit_et_se_vide() {
-        let mut panel = panneau();
+    fn a_group_name_is_set_read_and_cleared() {
+        let mut panel = sample_panel();
         assert_eq!(panel.group_label(1), None);
-        assert!(panel.rename_group(1, "  Blancs  "));
-        assert_eq!(panel.group_label(1), Some("Blancs"));
+        assert!(panel.rename_group(1, "  Whites  "));
+        assert_eq!(panel.group_label(1), Some("Whites"));
         assert!(
-            !panel.rename_group(1, "Blancs"),
-            "même nom : rien ne change"
+            !panel.rename_group(1, "Whites"),
+            "same name: nothing changes"
         );
         assert!(panel.rename_group(1, ""));
         assert_eq!(panel.group_label(1), None);
-        assert!(!panel.rename_group(9, "Fantôme"), "groupe inexistant");
+        assert!(!panel.rename_group(9, "Ghost"), "nonexistent group");
         assert!(panel.group_names.is_empty());
     }
 
     #[test]
-    fn le_nom_d_un_groupe_disparu_ne_revient_pas_a_un_groupe_neuf() {
-        let mut panel = panneau();
-        panel.rename_group(2, "Rouges");
+    fn the_name_of_a_vanished_group_does_not_return_to_a_new_group() {
+        let mut panel = sample_panel();
+        panel.rename_group(2, "Reds");
         assert!(panel.dissolve_group(2));
-        assert!(panel.group_names.is_empty(), "dissoudre oublie le nom");
-        // Un nom resté seul (fichier édité) réserve son numéro sans nommer.
-        panel.group_names.insert(7, "Reste".into());
+        assert!(panel.group_names.is_empty(), "dissolving forgets the name");
+        // A name left alone (edited file) reserves its number without naming.
+        panel.group_names.insert(7, "Rest".into());
         assert_eq!(panel.next_group_id(), 8);
         assert_eq!(panel.group_label(7), None);
     }
 
     #[test]
-    fn entrer_dans_un_groupe_place_la_serie_a_la_suite_de_ses_membres() {
-        let mut panel = panneau();
-        // La série seule « 4 » (rang 3) rejoint le groupe 1 : 1, [2 3 4], [5 6].
+    fn entering_a_group_places_the_series_after_its_members() {
+        let mut panel = sample_panel();
+        // The single series "4" (rank 3) joins group 1: 1, [2 3 4], [5 6].
         assert_eq!(panel.set_series_group(3, Some(1)), Some(3));
-        assert_eq!(colonnes(&panel), [1, 2, 3, 4, 5, 6]);
-        // La première série seule rejoint le groupe 2 : [2 3 4], [5 6 1].
+        assert_eq!(columns_of(&panel), [1, 2, 3, 4, 5, 6]);
+        // The first single series joins group 2: [2 3 4], [5 6 1].
         assert_eq!(panel.set_series_group(0, Some(2)), Some(5));
-        assert_eq!(colonnes(&panel), [2, 3, 4, 5, 6, 1]);
+        assert_eq!(columns_of(&panel), [2, 3, 4, 5, 6, 1]);
         assert_eq!(panel.group_members(2), [3, 4, 5]);
     }
 
     #[test]
-    fn sortir_d_un_groupe_place_la_serie_juste_derriere_lui() {
-        let mut panel = panneau();
-        // « 2 » quitte le groupe 1 : 1, [3], 2, 4, [5 6].
+    fn leaving_a_group_places_the_series_right_behind_it() {
+        let mut panel = sample_panel();
+        // "2" leaves group 1: 1, [3], 2, 4, [5 6].
         assert_eq!(panel.leave_group(1), Some(2));
-        assert_eq!(colonnes(&panel), [1, 3, 2, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 3, 2, 4, 5, 6]);
         assert_eq!(panel.series[2].group, None);
-        // « 3 » est le dernier : le groupe 1 disparaît, la série reste en place.
+        // "3" is the last: group 1 disappears, the series stays in place.
         assert_eq!(panel.leave_group(1), Some(1));
         assert_eq!(panel.group_ids(), [2]);
-        assert_eq!(panel.leave_group(0), None, "déjà seule");
+        assert_eq!(panel.leave_group(0), None, "already alone");
     }
 
     #[test]
-    fn placer_une_serie_seule_entre_deux_emplacements() {
-        let mut panel = panneau();
-        // « 4 » (rang 3) passe en tête des emplacements : 4, 1, [2 3], [5 6].
-        let ordre = panel.place_series(3, None, 0).unwrap();
-        assert_eq!(colonnes(&panel), [4, 1, 2, 3, 5, 6]);
-        assert_eq!(ordre, [3, 0, 1, 2, 4, 5]);
-        // Déjà là : rien ne change.
+    fn placing_a_single_series_between_two_slots() {
+        let mut panel = sample_panel();
+        // "4" (rank 3) moves to the head of the slots: 4, 1, [2 3], [5 6].
+        let order = panel.place_series(3, None, 0).unwrap();
+        assert_eq!(columns_of(&panel), [4, 1, 2, 3, 5, 6]);
+        assert_eq!(order, [3, 0, 1, 2, 4, 5]);
+        // Already there: nothing changes.
         assert!(panel.place_series(0, None, 0).is_none());
-        // Au-delà de la fin : tout à la fin.
+        // Beyond the end: all the way to the end.
         panel.place_series(0, None, 99).unwrap();
-        assert_eq!(colonnes(&panel), [1, 2, 3, 5, 6, 4]);
+        assert_eq!(columns_of(&panel), [1, 2, 3, 5, 6, 4]);
         assert_eq!(panel.series_position(5), Some((None, 3)));
     }
 
     #[test]
-    fn placer_une_serie_dans_un_groupe_choisit_son_rang() {
-        let mut panel = panneau();
-        // « 4 » entre dans le groupe 1 entre ses deux membres : 1, [2 4 3], [5 6].
+    fn placing_a_series_in_a_group_chooses_its_rank() {
+        let mut panel = sample_panel();
+        // "4" enters group 1 between its two members: 1, [2 4 3], [5 6].
         panel.place_series(3, Some(1), 1).unwrap();
-        assert_eq!(colonnes(&panel), [1, 2, 4, 3, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 2, 4, 3, 5, 6]);
         assert_eq!(panel.series[2].group, Some(1));
         assert_eq!(panel.series_position(2), Some((Some(1), 1)));
-        // Réordonner au sein du groupe : [4 2 3].
+        // Reorder within the group: [4 2 3].
         panel.place_series(2, Some(1), 0).unwrap();
-        assert_eq!(colonnes(&panel), [1, 4, 2, 3, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 4, 2, 3, 5, 6]);
         assert!(panel.place_series(1, Some(1), 0).is_none());
     }
 
     #[test]
-    fn placer_une_serie_hors_de_son_groupe_la_rend_seule_au_rang_voulu() {
-        let mut panel = panneau();
-        // « 3 » quitte le groupe 1 pour la tête : 3, 1, [2], 4, [5 6].
+    fn placing_a_series_out_of_its_group_makes_it_single_at_the_wanted_rank() {
+        let mut panel = sample_panel();
+        // "3" leaves group 1 for the head: 3, 1, [2], 4, [5 6].
         panel.place_series(2, None, 0).unwrap();
-        assert_eq!(colonnes(&panel), [3, 1, 2, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [3, 1, 2, 4, 5, 6]);
         assert_eq!(panel.series[0].group, None);
         assert_eq!(panel.group_members(1), [2]);
-        // Le dernier membre quitte : le groupe et son nom disparaissent.
-        panel.rename_group(1, "Lot");
+        // The last member leaves: the group and its name disappear.
+        panel.rename_group(1, "Batch");
         panel.place_series(2, None, 4).unwrap();
         assert_eq!(panel.group_ids(), [2]);
         assert!(panel.group_names.is_empty());
     }
 
     #[test]
-    fn placer_une_serie_dans_un_groupe_vers_un_autre_groupe() {
-        let mut panel = panneau();
-        // « 2 » passe du groupe 1 au groupe 2, en tête : 1, [3], 4, [2 5 6].
+    fn placing_a_series_from_a_group_into_another_group() {
+        let mut panel = sample_panel();
+        // "2" moves from group 1 to group 2, at the head: 1, [3], 4, [2 5 6].
         panel.place_series(1, Some(2), 0).unwrap();
-        assert_eq!(colonnes(&panel), [1, 3, 4, 2, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 3, 4, 2, 5, 6]);
         assert_eq!(panel.group_members(2), [3, 4, 5]);
         assert_eq!(panel.group_members(1), [1]);
     }
 
     #[test]
-    fn placer_une_serie_dans_un_groupe_inconnu_le_cree_a_ce_rang() {
-        let mut panel = panneau();
+    fn placing_a_series_in_an_unknown_group_creates_it_at_that_rank() {
+        let mut panel = sample_panel();
         panel.place_series(0, Some(9), 1).unwrap();
-        assert_eq!(colonnes(&panel), [2, 3, 1, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [2, 3, 1, 4, 5, 6]);
         assert_eq!(panel.group_members(9), [2]);
     }
 
     #[test]
-    fn placer_un_groupe_le_deplace_en_bloc() {
-        let mut panel = panneau();
-        // Le groupe 2 passe en tête : [5 6], 1, [2 3], 4.
-        let ordre = panel.place_group(2, 0).unwrap();
-        assert_eq!(colonnes(&panel), [5, 6, 1, 2, 3, 4]);
-        assert_eq!(ordre, [4, 5, 0, 1, 2, 3]);
-        assert!(panel.place_group(2, 0).is_none(), "déjà en tête");
-        assert!(panel.place_group(7, 0).is_none(), "groupe inconnu");
+    fn placing_a_group_moves_it_as_a_block() {
+        let mut panel = sample_panel();
+        // Group 2 moves to the head: [5 6], 1, [2 3], 4.
+        let order = panel.place_group(2, 0).unwrap();
+        assert_eq!(columns_of(&panel), [5, 6, 1, 2, 3, 4]);
+        assert_eq!(order, [4, 5, 0, 1, 2, 3]);
+        assert!(panel.place_group(2, 0).is_none(), "already at the head");
+        assert!(panel.place_group(7, 0).is_none(), "unknown group");
         panel.place_group(2, 99).unwrap();
-        assert_eq!(colonnes(&panel), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
-    fn un_groupe_vide_par_depart_perd_son_nom() {
+    fn a_group_emptied_by_departure_loses_its_name() {
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(vec![serie(1), serie(2)]);
-        panel.rename_group(1, "Éphémère");
+        panel.push_series_batch(vec![make_series(1), make_series(2)]);
+        panel.rename_group(1, "Ephemeral");
         panel.leave_group(0);
         panel.leave_group(0);
         assert!(panel.group_names.is_empty());
     }
 
     #[test]
-    fn commencer_un_groupe_donne_un_numero_neuf() {
-        let mut panel = panneau();
+    fn starting_a_group_gives_a_new_number() {
+        let mut panel = sample_panel();
         assert_eq!(panel.start_group(0), Some(3));
         assert_eq!(panel.group_members(3), [0]);
-        assert_eq!(panel.start_group(0), None, "déjà seule dans son groupe");
+        assert_eq!(panel.start_group(0), None, "already alone in its group");
     }
 
     #[test]
-    fn dissoudre_garde_les_series_et_leur_style() {
-        let mut panel = panneau();
+    fn dissolving_keeps_the_series_and_their_style() {
+        let mut panel = sample_panel();
         panel.series[1].line.width = 3.5;
-        let avant = colonnes(&panel);
+        let before = columns_of(&panel);
         assert!(panel.dissolve_group(1));
-        assert_eq!(colonnes(&panel), avant);
+        assert_eq!(columns_of(&panel), before);
         assert_eq!(panel.series[1].group, None);
         assert_eq!(panel.series[1].line.width, 3.5);
         assert!(!panel.dissolve_group(1));
     }
 
     #[test]
-    fn supprimer_le_groupe_retire_ses_series_et_son_nom() {
-        let mut panel = panneau();
-        panel.rename_group(1, "À jeter");
+    fn deleting_the_group_removes_its_series_and_its_name() {
+        let mut panel = sample_panel();
+        panel.rename_group(1, "To discard");
         assert!(panel.remove_group(1));
-        assert_eq!(colonnes(&panel), [1, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 4, 5, 6]);
         assert!(panel.group_names.is_empty());
         assert!(!panel.remove_group(1));
     }
 
     #[test]
-    fn monter_et_descendre_une_serie_restent_dans_son_groupe() {
-        let mut panel = panneau();
-        assert_eq!(panel.move_series(1, true), None, "premier du groupe");
+    fn moving_a_series_up_and_down_stays_within_its_group() {
+        let mut panel = sample_panel();
+        assert_eq!(panel.move_series(1, true), None, "first of the group");
         assert_eq!(panel.move_series(1, false), Some(2));
-        assert_eq!(colonnes(&panel), [1, 3, 2, 4, 5, 6]);
-        assert_eq!(panel.move_series(2, false), None, "dernier du groupe");
+        assert_eq!(columns_of(&panel), [1, 3, 2, 4, 5, 6]);
+        assert_eq!(panel.move_series(2, false), None, "last of the group");
     }
 
     #[test]
-    fn une_serie_seule_saute_par_dessus_un_groupe_entier() {
-        let mut panel = panneau();
+    fn a_single_series_jumps_over_a_whole_group() {
+        let mut panel = sample_panel();
         assert_eq!(panel.move_series(3, true), Some(1));
-        assert_eq!(colonnes(&panel), [1, 4, 2, 3, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 4, 2, 3, 5, 6]);
         assert_eq!(panel.move_series(1, true), Some(0));
         assert_eq!(panel.move_series(0, true), None);
         assert_eq!(panel.move_series(0, false), Some(1));
     }
 
     #[test]
-    fn un_groupe_se_deplace_en_bloc() {
-        let mut panel = panneau();
+    fn a_group_moves_as_a_block() {
+        let mut panel = sample_panel();
         assert!(panel.move_group(2, true));
-        assert_eq!(colonnes(&panel), [1, 2, 3, 5, 6, 4]);
+        assert_eq!(columns_of(&panel), [1, 2, 3, 5, 6, 4]);
         assert!(panel.move_group(1, false));
-        assert_eq!(colonnes(&panel), [1, 5, 6, 2, 3, 4]);
+        assert_eq!(columns_of(&panel), [1, 5, 6, 2, 3, 4]);
         assert!(panel.move_group(2, true));
-        assert_eq!(colonnes(&panel), [5, 6, 1, 2, 3, 4]);
-        assert!(!panel.move_group(2, true), "butée");
-        assert!(!panel.move_group(9, true), "inexistant");
+        assert_eq!(columns_of(&panel), [5, 6, 1, 2, 3, 4]);
+        assert!(!panel.move_group(2, true), "limit");
+        assert!(!panel.move_group(9, true), "nonexistent");
     }
 
     #[test]
-    fn rassembler_des_series_cree_un_groupe_a_la_place_de_la_premiere() {
-        let mut panel = panneau(); // 1, [2 3], 4, [5 6]
-                                   // « 4 » (rang 3) et « 1 » (rang 0), dans cet ordre : le groupe prend la
-                                   // place de « 1 », la première rencontrée dans la liste.
-        let id = panel.group_series(&[3, 0]).expect("groupe");
+    fn gathering_series_creates_a_group_at_the_place_of_the_first() {
+        let mut panel = sample_panel(); // 1, [2 3], 4, [5 6]
+                                        // "4" (rank 3) and "1" (rank 0), in that order: the group takes the
+                                        // place of "1", the first met in the list.
+        let id = panel.group_series(&[3, 0]).expect("group");
         assert_eq!(id, 3);
-        assert_eq!(colonnes(&panel), [4, 1, 2, 3, 5, 6]);
+        assert_eq!(columns_of(&panel), [4, 1, 2, 3, 5, 6]);
         assert_eq!(panel.group_members(id), [0, 1]);
         assert_eq!(
             panel.group_members(1),
             [2, 3],
-            "les autres groupes sont intacts"
+            "the other groups are intact"
         );
     }
 
     #[test]
-    fn rassembler_vide_un_groupe_d_origine_et_oublie_son_nom() {
-        let mut panel = panneau();
-        panel.rename_group(1, "Vieux");
-        let id = panel.group_series(&[1, 2, 3]).expect("groupe");
-        assert_eq!(panel.group_ids(), [id, 2], "le groupe 1 a disparu");
+    fn gathering_empties_an_original_group_and_forgets_its_name() {
+        let mut panel = sample_panel();
+        panel.rename_group(1, "Old");
+        let id = panel.group_series(&[1, 2, 3]).expect("group");
+        assert_eq!(panel.group_ids(), [id, 2], "group 1 has disappeared");
         assert!(panel.group_names.is_empty());
-        assert_eq!(colonnes(&panel), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(columns_of(&panel), [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
-    fn rassembler_partiellement_un_groupe_garde_le_reste_et_son_nom() {
-        let mut panel = panneau();
-        panel.rename_group(1, "Reste");
-        let id = panel.group_series(&[1, 3]).expect("groupe");
-        assert_eq!(panel.group_label(1), Some("Reste"));
+    fn gathering_part_of_a_group_keeps_the_rest_and_its_name() {
+        let mut panel = sample_panel();
+        panel.rename_group(1, "Rest");
+        let id = panel.group_series(&[1, 3]).expect("group");
+        assert_eq!(panel.group_label(1), Some("Rest"));
         assert_eq!(panel.group_members(1).len(), 1);
         assert_eq!(panel.group_members(id).len(), 2);
     }
 
     #[test]
-    fn rassembler_refuse_une_demande_incorrecte_sans_rien_changer() {
-        let mut panel = panneau();
-        let avant = panel.clone();
+    fn gathering_rejects_an_invalid_request_without_changing_anything() {
+        let mut panel = sample_panel();
+        let before = panel.clone();
         assert_eq!(panel.group_series(&[]), None);
         assert_eq!(panel.group_series(&[1, 1]), None);
         assert_eq!(panel.group_series(&[0, 9]), None);
-        assert_eq!(panel, avant);
+        assert_eq!(panel, before);
     }
 }

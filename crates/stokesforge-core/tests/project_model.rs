@@ -1,6 +1,6 @@
-//! Tests d'acceptation du modèle de projet, écrits d'après le cahier de la
-//! tranche « nœuds, arbre persistant, Project ». Ils ne passent que par l'API
-//! publique du crate.
+//! Acceptance tests of the project model, written from the brief of the
+//! slice "nodes, persistent tree, Project". They go only through the public
+//! API of the crate.
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use stokesforge_core::{
     NodeKind, Project, Tree, ValueBlock, WindowMeta,
 };
 
-// -- utilitaires --
+// -- helpers --
 
 fn folder_kind() -> NodeKind {
     NodeKind::Folder {
@@ -32,7 +32,7 @@ fn name_of(project: &Project, id: NodeId) -> String {
     project
         .tree()
         .get(id)
-        .expect("nœud présent")
+        .expect("node present")
         .name()
         .to_string()
 }
@@ -41,7 +41,7 @@ fn child_names(project: &Project, parent: NodeId) -> Vec<String> {
     project
         .tree()
         .children(parent)
-        .expect("parent présent")
+        .expect("parent present")
         .iter()
         .map(|id| name_of(project, *id))
         .collect()
@@ -51,68 +51,68 @@ fn floats(project: &Project, column: NodeId) -> Vec<f64> {
     project
         .tree()
         .get(column)
-        .expect("colonne présente")
+        .expect("column present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .float_values()
-        .expect("colonne numérique")
+        .expect("numeric column")
         .as_ref()
         .clone()
 }
 
-/// Fixture du cahier : `Demo` → `Manips` → `[Book1]Sheet1` avec `Temps` et `Signal`.
+/// Brief fixture: `Demo` → `Experiments` → `[Book1]Sheet1` with `Time` and `Signal`.
 struct Demo {
     project: Project,
     root: NodeId,
     folder: NodeId,
     book: NodeId,
     sheet: NodeId,
-    temps: NodeId,
+    time: NodeId,
     signal: NodeId,
 }
 
 impl Demo {
     fn new() -> Self {
-        let mut project = Project::new("Demo").expect("nom valide");
+        let mut project = Project::new("Demo").expect("valid name");
         let root = project.root();
-        let folder = project.add_folder(root, "Manips").expect("dossier");
-        let book = project.add_workbook(folder, None).expect("classeur");
-        let sheet = project.tree().children(book).expect("classeur")[0];
-        let temps = project
+        let folder = project.add_folder(root, "Experiments").expect("folder");
+        let book = project.add_workbook(folder, None).expect("workbook");
+        let sheet = project.tree().children(book).expect("workbook")[0];
+        let time = project
             .add_column(
                 sheet,
                 None,
-                Some("Temps"),
+                Some("Time"),
                 Column::from_f64(&[0.0, 1.0, 2.0]),
             )
-            .expect("colonne Temps");
+            .expect("Time column");
         let signal = project
             .add_column(sheet, None, Some("Signal"), Column::from_f64(&[3.0, 4.0]))
-            .expect("colonne Signal");
+            .expect("Signal column");
         Self {
             project,
             root,
             folder,
             book,
             sheet,
-            temps,
+            time,
             signal,
         }
     }
 }
 
-/// Feuille vide dans un classeur neuf, pour les tests de données.
+/// Empty sheet in a new workbook, for the data tests.
 fn sheet_with(columns: &[(&str, &[f64])]) -> (Project, NodeId, Vec<NodeId>) {
-    let mut project = Project::new("Data").expect("nom valide");
+    let mut project = Project::new("Data").expect("valid name");
     let root = project.root();
-    let book = project.add_workbook(root, None).expect("classeur");
-    let sheet = project.tree().children(book).expect("classeur")[0];
+    let book = project.add_workbook(root, None).expect("workbook");
+    let sheet = project.tree().children(book).expect("workbook")[0];
     let ids = columns
         .iter()
         .map(|(name, values)| {
             project
                 .add_column(sheet, None, Some(name), Column::from_f64(values))
-                .expect("colonne")
+                .expect("column")
         })
         .collect();
     (project, sheet, ids)
@@ -121,62 +121,62 @@ fn sheet_with(columns: &[(&str, &[f64])]) -> (Project, NodeId, Vec<NodeId>) {
 // -- 1. construction --
 
 #[test]
-fn critere_1_projet_neuf() {
-    let project = Project::new("Vide").expect("nom valide");
-    assert_eq!(project.name(), "Vide");
+fn criterion_1_new_project() {
+    let project = Project::new("Empty").expect("valid name");
+    assert_eq!(project.name(), "Empty");
     assert_eq!(project.tree().len(), 1);
     let root = project.root();
-    let root_node = project.tree().get(root).expect("racine");
+    let root_node = project.tree().get(root).expect("root");
     assert!(root_node.kind().is_folder());
     assert!(root_node.children().is_empty());
-    assert_eq!(project.path_of(root).expect("chemin"), "/");
+    assert_eq!(project.path_of(root).expect("path"), "/");
     assert_eq!(project.next_id_hint(), 2);
 }
 
 #[test]
-fn critere_2_noms_par_defaut_des_fenetres() {
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_2_default_window_names() {
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
 
-    let book1 = project.add_workbook(root, None).expect("classeur");
+    let book1 = project.add_workbook(root, None).expect("workbook");
     assert_eq!(name_of(&project, book1), "Book1");
     assert_eq!(child_names(&project, book1), vec!["Sheet1".to_string()]);
 
-    let book2 = project.add_workbook(root, None).expect("classeur");
+    let book2 = project.add_workbook(root, None).expect("workbook");
     assert_eq!(name_of(&project, book2), "Book2");
 
     let graph = project
         .add_graph(root, None, Default::default())
-        .expect("graphe");
+        .expect("graph");
     assert_eq!(name_of(&project, graph), "Graph1");
 
-    let matrix = project.add_matrix(root, None).expect("matrice");
+    let matrix = project.add_matrix(root, None).expect("matrix");
     assert_eq!(name_of(&project, matrix), "MBook1");
 
-    let note = project.add_note(root, None, "bonjour").expect("note");
+    let note = project.add_note(root, None, "hello").expect("note");
     assert_eq!(name_of(&project, note), "Note1");
     match project.tree().get(note).expect("note").kind() {
-        NodeKind::Note { text, .. } => assert_eq!(text, "bonjour"),
-        other => panic!("attendu une note, obtenu {other:?}"),
+        NodeKind::Note { text, .. } => assert_eq!(text, "hello"),
+        other => panic!("expected a note, got {other:?}"),
     }
 }
 
 #[test]
-fn critere_3_noms_de_colonnes_facon_tableur() {
+fn criterion_3_spreadsheet_style_column_names() {
     let (mut project, sheet, _) = sheet_with(&[]);
     for expected in ["A", "B", "C"] {
         let id = project
             .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-            .expect("colonne");
+            .expect("column");
         assert_eq!(name_of(&project, id), expected);
     }
 
-    // 26 colonnes présentes → la suivante s'appelle AA.
+    // 26 columns present → the next one is named AA.
     let (mut project, sheet, _) = sheet_with(&[]);
     for _ in 0..26 {
         project
             .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-            .expect("colonne");
+            .expect("column");
     }
     assert_eq!(
         child_names(&project, sheet).last().map(String::as_str),
@@ -184,39 +184,39 @@ fn critere_3_noms_de_colonnes_facon_tableur() {
     );
     let id = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne");
+        .expect("column");
     assert_eq!(name_of(&project, id), "AA");
 
-    // Un nom déjà pris est sauté — jamais réattribué, même s'il occupe un
-    // rang antérieur au nombre de colonnes déjà présentes. D1
-    // (`guide-de-correction-robustesse.md` §F7) fait partir la recherche du
-    // NOMBRE de colonnes déjà présentes plutôt que de « A » : retrouver le
-    // plus petit trou libre coûterait de reconstruire la liste des noms pris
-    // à chaque colonne ajoutée, précisément le coût en O(n³) que D1
-    // supprime. Une seule colonne existe (« B ») quand la première
-    // automatique est demandée, donc le premier candidat essayé est « B »
-    // (déjà pris), puis « C » (libre) — pas « A », qui reste un nom valide
-    // mais n'est plus cherché.
+    // A name already taken is skipped — never reassigned, even if it occupies a
+    // rank earlier than the number of columns already present. D1
+    // (`guide-de-correction-robustesse.md` §F7) starts the search from the
+    // NUMBER of columns already present rather than from "A": finding the
+    // smallest free gap would mean rebuilding the list of taken names
+    // for every column added, precisely the O(n³) cost that D1
+    // removes. A single column exists ("B") when the first
+    // automatic one is requested, so the first candidate tried is "B"
+    // (already taken), then "C" (free) — not "A", which stays a valid name
+    // but is no longer searched.
     let (mut project, sheet, _) = sheet_with(&[]);
     project
         .add_column(sheet, None, Some("B"), Column::new(ColumnType::Numeric))
-        .expect("colonne B");
+        .expect("column B");
     let first = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne");
+        .expect("column");
     assert_eq!(name_of(&project, first), "C");
     let second = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne");
+        .expect("column");
     assert_eq!(name_of(&project, second), "D");
 }
 
 #[test]
-fn critere_4_nom_de_feuille_par_defaut() {
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_4_default_sheet_name() {
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    let book = project.add_workbook(root, None).expect("classeur");
-    let sheet2 = project.add_worksheet(book, None).expect("feuille");
+    let book = project.add_workbook(root, None).expect("workbook");
+    let sheet2 = project.add_worksheet(book, None).expect("sheet");
     assert_eq!(name_of(&project, sheet2), "Sheet2");
     assert_eq!(
         child_names(&project, book),
@@ -224,22 +224,22 @@ fn critere_4_nom_de_feuille_par_defaut() {
     );
 }
 
-// -- 5-10. unicité, structure --
+// -- 5-10. uniqueness, structure --
 
 #[test]
-fn critere_5_regles_d_unicite_des_noms() {
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_5_name_uniqueness_rules() {
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    let a = project.add_folder(root, "A").expect("dossier A");
-    let b = project.add_folder(root, "B").expect("dossier B");
+    let a = project.add_folder(root, "A").expect("folder A");
+    let b = project.add_folder(root, "B").expect("folder B");
 
-    // Deux fenêtres de même nom dans des dossiers distincts : accepté (#105).
+    // Two windows with the same name in distinct folders: accepted (#105).
     project
         .add_empty_workbook(a, Some("Book1"))
-        .expect("classeur");
+        .expect("workbook");
     project
         .add_empty_workbook(b, Some("Book1"))
-        .expect("homonyme dans un autre dossier");
+        .expect("same name in another folder");
     assert!(project.resolve_path("[Book1]").is_err());
     assert_ne!(
         project.resolve_path("A/[Book1]").unwrap(),
@@ -250,59 +250,59 @@ fn critere_5_regles_d_unicite_des_noms() {
         Err(CoreError::DuplicateName(_))
     ));
 
-    // Deux dossiers frères de même nom : refusé.
-    project.add_folder(a, "Jour1").expect("dossier");
+    // Two sibling folders with the same name: refused.
+    project.add_folder(a, "Day1").expect("folder");
     assert!(matches!(
-        project.add_folder(a, "Jour1"),
+        project.add_folder(a, "Day1"),
         Err(CoreError::DuplicateName(_))
     ));
 
-    // Deux dossiers de même nom dans des parents différents : accepté.
+    // Two folders with the same name in different parents: accepted.
     project
-        .add_folder(b, "Jour1")
-        .expect("dossier homonyme ailleurs");
+        .add_folder(b, "Day1")
+        .expect("same-named folder elsewhere");
 
-    // Un dossier et un classeur frères de même nom : refusé (A8,
-    // `guide-de-correction-robustesse.md` §F9 — voir
-    // `critere_5_bis_lunicite_entre_freres_ne_depend_pas_de_lordre`).
+    // A folder and a sibling workbook with the same name: refused (A8,
+    // `guide-de-correction-robustesse.md` §F9 — see
+    // `criterion_5_bis_sibling_uniqueness_does_not_depend_on_order`).
     project
-        .add_folder(root, "Mesures")
-        .expect("dossier Mesures");
+        .add_folder(root, "Measurements")
+        .expect("Measurements folder");
     assert!(
         matches!(
-            project.add_empty_workbook(root, Some("Mesures")),
+            project.add_empty_workbook(root, Some("Measurements")),
             Err(CoreError::DuplicateName(_))
         ),
-        "un classeur ne doit plus pouvoir prendre le nom d'un dossier frère"
+        "a workbook must no longer be able to take the name of a sibling folder"
     );
 }
 
 #[test]
-fn critere_5_bis_lunicite_entre_freres_ne_depend_pas_de_lordre() {
-    // A8 (`guide-de-correction-robustesse.md` §F9) — corrigée : la version
-    // Python (et le socle Rust jusqu'à ce correctif) laissait un dossier
-    // unique parmi ses frères toutes natures confondues, mais une fenêtre
-    // seulement parmi les fenêtres — asymétrie qui rendait un dossier
-    // homonyme d'une fenêtre introuvable par son chemin canonique selon
-    // l'ordre de création des deux
-    // (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). Cette
-    // asymétrie n'est plus « assumée » : refuser plus, jamais moins (§6 du
-    // guide) — un dossier et une fenêtre frères ne partagent jamais un nom,
-    // quel que soit l'ordre dans lequel chacun l'a pris.
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_5_bis_sibling_uniqueness_does_not_depend_on_order() {
+    // A8 (`guide-de-correction-robustesse.md` §F9) — fixed: the Python
+    // version (and the Rust core until this fix) let a folder be
+    // unique among its siblings of all kinds, but a window
+    // only among windows — an asymmetry that made a folder
+    // with the same name as a window unfindable by its canonical path depending on
+    // the creation order of the two
+    // (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). This
+    // asymmetry is no longer "accepted": refuse more, never less (§6 of the
+    // guide) — a folder and a sibling window never share a name,
+    // whichever order each one took it in.
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
     project
         .add_empty_workbook(root, Some("X"))
-        .expect("classeur X");
+        .expect("workbook X");
     assert!(matches!(
         project.add_folder(root, "X"),
         Err(CoreError::DuplicateName(_))
     ));
 
-    // Et dans l'autre sens désormais aussi.
-    let mut project = Project::new("Demo").expect("nom valide");
+    // And in the other direction now too.
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    project.add_folder(root, "Y").expect("dossier Y");
+    project.add_folder(root, "Y").expect("folder Y");
     assert!(matches!(
         project.add_empty_workbook(root, Some("Y")),
         Err(CoreError::DuplicateName(_))
@@ -310,12 +310,12 @@ fn critere_5_bis_lunicite_entre_freres_ne_depend_pas_de_lordre() {
 }
 
 #[test]
-fn critere_6_renommage() {
+fn criterion_6_rename() {
     let mut demo = Demo::new();
     let other = demo
         .project
         .add_empty_workbook(demo.folder, Some("Book2"))
-        .expect("classeur");
+        .expect("workbook");
 
     let before = demo.project.tree().clone();
     assert!(matches!(
@@ -328,17 +328,17 @@ fn critere_6_renommage() {
     assert_eq!(demo.project.rename(other, "Book2").expect("no-op"), "Book2");
 
     assert_eq!(
-        demo.project.rename(other, "Essais").expect("renommage"),
+        demo.project.rename(other, "Trials").expect("rename"),
         "Book2"
     );
-    assert_eq!(name_of(&demo.project, other), "Essais");
+    assert_eq!(name_of(&demo.project, other), "Trials");
 
-    assert_eq!(demo.project.rename(demo.root, "X").expect("racine"), "Demo");
+    assert_eq!(demo.project.rename(demo.root, "X").expect("root"), "Demo");
     assert_eq!(demo.project.name(), "X");
 }
 
 #[test]
-fn critere_7_natures_et_index_refuses() {
+fn criterion_7_refused_kinds_and_indexes() {
     let mut demo = Demo::new();
 
     assert!(matches!(
@@ -358,23 +358,23 @@ fn critere_7_natures_et_index_refuses() {
     let last = demo
         .project
         .add_column(demo.sheet, Some(2), None, Column::new(ColumnType::Numeric))
-        .expect("insertion en fin");
+        .expect("insertion at the end");
     assert_eq!(demo.project.tree().index_in_parent(last).expect("index"), 2);
 }
 
 #[test]
-fn critere_8_suppression() {
+fn criterion_8_removal() {
     let mut demo = Demo::new();
-    assert_eq!(demo.project.remove(demo.temps).expect("suppression"), 0);
-    assert!(!demo.project.tree().contains(demo.temps));
+    assert_eq!(demo.project.remove(demo.time).expect("removal"), 0);
+    assert!(!demo.project.tree().contains(demo.time));
     assert_eq!(
         child_names(&demo.project, demo.sheet),
         vec!["Signal".to_string()]
     );
 
     let before = demo.project.tree().len();
-    // Book1 + Sheet1 + Signal = 3 nœuds.
-    assert_eq!(demo.project.remove(demo.book).expect("suppression"), 0);
+    // Book1 + Sheet1 + Signal = 3 nodes.
+    assert_eq!(demo.project.remove(demo.book).expect("removal"), 0);
     assert_eq!(demo.project.tree().len(), before - 3);
     assert!(!demo.project.tree().contains(demo.sheet));
     assert!(!demo.project.tree().contains(demo.signal));
@@ -386,105 +386,105 @@ fn critere_8_suppression() {
 }
 
 #[test]
-fn critere_9_deplacements_acceptes() {
+fn criterion_9_accepted_moves() {
     let mut demo = Demo::new();
     let c = demo
         .project
         .add_column(
             demo.sheet,
             None,
-            Some("Autre"),
+            Some("Other"),
             Column::new(ColumnType::Numeric),
         )
-        .expect("colonne");
+        .expect("column");
 
-    // Réordonner : index 0 → 2 sur trois colonnes (Temps, Signal, Autre).
+    // Reorder: index 0 → 2 over three columns (Time, Signal, Other).
     assert_eq!(
         demo.project
-            .move_node(demo.temps, demo.sheet, 2)
-            .expect("réordonnancement"),
+            .move_node(demo.time, demo.sheet, 2)
+            .expect("reordering"),
         (demo.sheet, 0)
     );
     assert_eq!(
         child_names(&demo.project, demo.sheet),
         vec![
             "Signal".to_string(),
-            "Autre".to_string(),
-            "Temps".to_string()
+            "Other".to_string(),
+            "Time".to_string()
         ]
     );
     assert!(demo.project.tree().contains(c));
 
-    // Déplacer une feuille vers un autre classeur.
+    // Move a sheet to another workbook.
     let book2 = demo
         .project
         .add_empty_workbook(demo.root, None)
-        .expect("classeur vide");
+        .expect("empty workbook");
     assert_eq!(
         demo.project
             .move_node(demo.sheet, book2, 0)
-            .expect("déplacement de feuille"),
+            .expect("sheet move"),
         (demo.book, 0)
     );
     assert_eq!(
-        demo.project.path_of(demo.temps).expect("chemin"),
-        format!("/[{}]Sheet1!Temps", name_of(&demo.project, book2))
+        demo.project.path_of(demo.time).expect("path"),
+        format!("/[{}]Sheet1!Time", name_of(&demo.project, book2))
     );
 
-    // Déplacer un classeur vers un autre dossier.
-    let ailleurs = demo
+    // Move a workbook to another folder.
+    let elsewhere = demo
         .project
-        .add_folder(demo.root, "Ailleurs")
-        .expect("dossier");
+        .add_folder(demo.root, "Elsewhere")
+        .expect("folder");
     let (old_parent, old_index) = demo
         .project
-        .move_node(book2, ailleurs, 0)
-        .expect("déplacement de classeur");
+        .move_node(book2, elsewhere, 0)
+        .expect("workbook move");
     assert_eq!(old_parent, demo.root);
     assert_eq!(old_index, 1);
     assert_eq!(
-        demo.project.path_of(demo.temps).expect("chemin"),
-        format!("/Ailleurs/[{}]Sheet1!Temps", name_of(&demo.project, book2))
+        demo.project.path_of(demo.time).expect("path"),
+        format!("/Elsewhere/[{}]Sheet1!Time", name_of(&demo.project, book2))
     );
-    // Les identifiants n'ont pas bougé.
-    assert!(demo.project.tree().contains(demo.temps));
+    // The identifiers did not move.
+    assert!(demo.project.tree().contains(demo.time));
     assert!(demo.project.tree().contains(demo.sheet));
 }
 
 #[test]
-fn critere_10_deplacements_refuses_laissent_l_arbre_intact() {
+fn criterion_10_refused_moves_leave_the_tree_intact() {
     let mut demo = Demo::new();
-    let f1 = demo.project.add_folder(demo.root, "F1").expect("dossier");
-    let f2 = demo.project.add_folder(demo.root, "F2").expect("dossier");
-    let x1 = demo.project.add_folder(f1, "X").expect("dossier X dans F1");
-    demo.project.add_folder(f2, "X").expect("dossier X dans F2");
-    let interne = demo.project.add_folder(f1, "Interne").expect("dossier");
+    let f1 = demo.project.add_folder(demo.root, "F1").expect("folder");
+    let f2 = demo.project.add_folder(demo.root, "F2").expect("folder");
+    let x1 = demo.project.add_folder(f1, "X").expect("folder X in F1");
+    demo.project.add_folder(f2, "X").expect("folder X in F2");
+    let inner = demo.project.add_folder(f1, "Inner").expect("folder");
 
     let before = demo.project.tree().clone();
 
-    // Une colonne ne va pas dans un classeur.
+    // A column does not go into a workbook.
     assert!(matches!(
-        demo.project.move_node(demo.temps, demo.book, 0),
+        demo.project.move_node(demo.time, demo.book, 0),
         Err(CoreError::Structure(_))
     ));
-    // Un dossier ne va pas dans son propre descendant.
-    match demo.project.move_node(f1, interne, 0) {
+    // A folder does not go into its own descendant.
+    match demo.project.move_node(f1, inner, 0) {
         Err(CoreError::Structure(message)) => {
             assert!(message.contains("circular"), "{message}")
         }
-        other => panic!("attendu Structure circulaire, obtenu {other:?}"),
+        other => panic!("expected circular Structure, got {other:?}"),
     }
-    // Nom déjà pris dans la cible.
+    // Name already taken in the target.
     assert!(matches!(
         demo.project.move_node(x1, f2, 0),
         Err(CoreError::DuplicateName(_))
     ));
-    // Index trop grand (nom libre dans la cible : c'est bien l'index qui bloque).
+    // Index too large (name free in the target: it really is the index that blocks).
     assert!(matches!(
-        demo.project.move_node(interne, f2, 9),
+        demo.project.move_node(inner, f2, 9),
         Err(CoreError::IndexOutOfBounds(_))
     ));
-    // La racine ne se déplace pas.
+    // The root does not move.
     assert!(matches!(
         demo.project.move_node(demo.root, f1, 0),
         Err(CoreError::Structure(_))
@@ -494,54 +494,51 @@ fn critere_10_deplacements_refuses_laissent_l_arbre_intact() {
     assert_eq!(**demo.project.tree(), *before);
 }
 
-// -- 11-13. chemins --
+// -- 11-13. paths --
 
 #[test]
-fn critere_11_resolution_de_chemins() {
+fn criterion_11_path_resolution() {
     let demo = Demo::new();
     let p = &demo.project;
-    assert_eq!(p.resolve_path("/").expect("racine"), demo.root);
-    assert_eq!(p.resolve_path("/Manips").expect("dossier"), demo.folder);
-    assert_eq!(p.resolve_path("[Book1]").expect("classeur"), demo.book);
+    assert_eq!(p.resolve_path("/").expect("root"), demo.root);
+    assert_eq!(p.resolve_path("/Experiments").expect("folder"), demo.folder);
+    assert_eq!(p.resolve_path("[Book1]").expect("workbook"), demo.book);
+    assert_eq!(p.resolve_path("[Book1]Sheet1").expect("sheet"), demo.sheet);
     assert_eq!(
-        p.resolve_path("[Book1]Sheet1").expect("feuille"),
-        demo.sheet
+        p.resolve_path("[Book1]Sheet1!Time").expect("column"),
+        demo.time
     );
     assert_eq!(
-        p.resolve_path("[Book1]Sheet1!Temps").expect("colonne"),
-        demo.temps
+        p.resolve_path("/Experiments/[Book1]Sheet1!Time")
+            .expect("prefixed column"),
+        demo.time
     );
-    assert_eq!(
-        p.resolve_path("/Manips/[Book1]Sheet1!Temps")
-            .expect("colonne préfixée"),
-        demo.temps
-    );
-    match p.resolve_path("/Ailleurs/[Book1]Sheet1!Temps") {
+    match p.resolve_path("/Elsewhere/[Book1]Sheet1!Time") {
         Err(CoreError::Path(message)) => {
             assert!(message.contains("folder not found"), "{message}")
         }
-        other => panic!("attendu Path, obtenu {other:?}"),
+        other => panic!("expected Path, got {other:?}"),
     }
 }
 
 #[test]
-fn critere_12_chemins_irresolubles() {
+fn criterion_12_unresolvable_paths() {
     let mut demo = Demo::new();
     demo.project
         .add_graph(demo.root, Some("Fig1"), Default::default())
-        .expect("graphe");
+        .expect("graph");
     let p = &demo.project;
     for text in [
-        "[Absent]",
+        "[Missing]",
         "[Book1]SheetX",
-        "[Book1]Sheet1!Absente",
-        "/Inconnu",
-        "/Manips/Inconnu",
-        "/Manips/Book1/Inconnu",
+        "[Book1]Sheet1!Missing",
+        "/Unknown",
+        "/Experiments/Unknown",
+        "/Experiments/Book1/Unknown",
     ] {
         assert!(
             matches!(p.resolve_path(text), Err(CoreError::Path(_))),
-            "attendu Path pour {text:?}, obtenu {:?}",
+            "expected Path for {text:?}, got {:?}",
             p.resolve_path(text)
         );
     }
@@ -549,36 +546,36 @@ fn critere_12_chemins_irresolubles() {
         Err(CoreError::Path(message)) => {
             assert!(message.contains("is not a workbook"), "{message}")
         }
-        other => panic!("attendu Path, obtenu {other:?}"),
+        other => panic!("expected Path, got {other:?}"),
     }
 }
 
 #[test]
-fn critere_13_path_of_et_resolve_sont_reciproques() {
+fn criterion_13_path_of_and_resolve_are_inverse() {
     let mut demo = Demo::new();
-    // Une feuille vide et une colonne vide, plus une fenêtre hors dossier.
-    let vide = demo
+    // An empty sheet and an empty column, plus a window outside any folder.
+    let empty = demo
         .project
-        .add_empty_workbook(demo.root, Some("Vide"))
-        .expect("classeur vide");
-    let feuille_vide = demo
+        .add_empty_workbook(demo.root, Some("Empty"))
+        .expect("empty workbook");
+    let empty_sheet = demo
         .project
-        .add_worksheet(vide, None)
-        .expect("feuille vide");
+        .add_worksheet(empty, None)
+        .expect("empty sheet");
     demo.project
-        .add_column(feuille_vide, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne vide");
+        .add_column(empty_sheet, None, None, Column::new(ColumnType::Numeric))
+        .expect("empty column");
     demo.project
         .add_graph(demo.root, None, Default::default())
-        .expect("graphe");
+        .expect("graph");
     demo.project.add_note(demo.folder, None, "").expect("note");
 
     for id in demo.project.tree().walk_all() {
-        let path = demo.project.path_of(id).expect("chemin");
+        let path = demo.project.path_of(id).expect("path");
         assert_eq!(
             demo.project.resolve_path(&path).expect(&path),
             id,
-            "aller-retour pour {path}"
+            "round trip for {path}"
         );
     }
 
@@ -588,15 +585,15 @@ fn critere_13_path_of_et_resolve_sont_reciproques() {
     ));
 }
 
-// -- 14-17. données et lignes --
+// -- 14-17. data and rows --
 
 #[test]
-fn critere_14_ecriture_de_valeurs() {
+fn criterion_14_writing_values() {
     let (mut project, sheet, ids) = sheet_with(&[("A", &[1.0, 2.0, 3.0])]);
     let column = ids[0];
     let delta = project
         .set_values(column, 1, ValueBlock::Float(vec![20.0, 30.0]))
-        .expect("écriture");
+        .expect("write");
     assert_eq!(floats(&project, column), vec![1.0, 20.0, 30.0]);
     assert_eq!(delta.start, 1);
     assert_eq!(delta.previous, ValueBlock::Float(vec![2.0, 3.0]));
@@ -609,39 +606,37 @@ fn critere_14_ecriture_de_valeurs() {
 }
 
 #[test]
-fn critere_15_lignes_seules_les_colonnes_assez_longues() {
-    let (mut project, sheet, ids) = sheet_with(&[
-        ("longue", &[1.0, 2.0, 3.0, 4.0, 5.0]),
-        ("courte", &[1.0, 2.0]),
-    ]);
-    let (longue, courte) = (ids[0], ids[1]);
+fn criterion_15_rows_only_the_long_enough_columns() {
+    let (mut project, sheet, ids) =
+        sheet_with(&[("long", &[1.0, 2.0, 3.0, 4.0, 5.0]), ("short", &[1.0, 2.0])]);
+    let (long, short) = (ids[0], ids[1]);
 
     let lengthened = project.insert_rows(sheet, 3, 2).expect("insertion");
-    assert_eq!(lengthened, vec![longue]);
-    assert_eq!(floats(&project, longue).len(), 7);
-    assert_eq!(floats(&project, courte), vec![1.0, 2.0]);
+    assert_eq!(lengthened, vec![long]);
+    assert_eq!(floats(&project, long).len(), 7);
+    assert_eq!(floats(&project, short), vec![1.0, 2.0]);
 
-    let removed = project.delete_rows(sheet, 3, 2).expect("suppression");
+    let removed = project.delete_rows(sheet, 3, 2).expect("removal");
     assert_eq!(removed.len(), 1);
-    assert_eq!(removed[0].0, longue);
+    assert_eq!(removed[0].0, long);
     match &removed[0].1 {
         ValueBlock::Float(values) => {
             assert_eq!(values.len(), 2);
             assert!(values.iter().all(|v| v.is_nan()), "{values:?}");
         }
-        other => panic!("attendu un bloc Float, obtenu {other:?}"),
+        other => panic!("expected a Float block, got {other:?}"),
     }
-    assert_eq!(floats(&project, longue), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    assert_eq!(floats(&project, courte), vec![1.0, 2.0]);
+    assert_eq!(floats(&project, long), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    assert_eq!(floats(&project, short), vec![1.0, 2.0]);
 
-    // Au-delà de toutes les colonnes : no-op.
+    // Beyond all the columns: no-op.
     let before = project.tree().clone();
     let lengthened = project.insert_rows(sheet, 10, 3).expect("no-op");
     assert_eq!(lengthened, Vec::<NodeId>::new());
     assert_eq!(**project.tree(), *before);
 
     let (mut project, sheet, ids) = sheet_with(&[("A", &[1.0, 2.0, 3.0]), ("B", &[1.0])]);
-    let removed = project.delete_rows(sheet, 2, 1).expect("suppression");
+    let removed = project.delete_rows(sheet, 2, 1).expect("removal");
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].0, ids[0]);
     assert_eq!(floats(&project, ids[0]), vec![1.0, 2.0]);
@@ -649,11 +644,11 @@ fn critere_15_lignes_seules_les_colonnes_assez_longues() {
 }
 
 proptest::proptest! {
-    /// Critère 16 : sur une feuille de colonnes de longueurs quelconques,
-    /// `insert_rows` puis `delete_rows` aux mêmes coordonnées redonnent
-    /// exactement l'arbre initial.
+    /// Criterion 16: on a sheet of columns of arbitrary lengths,
+    /// `insert_rows` then `delete_rows` at the same coordinates give back
+    /// exactly the initial tree.
     #[test]
-    fn critere_16_insertion_puis_suppression_de_lignes_est_l_identite(
+    fn criterion_16_row_insertion_then_removal_is_the_identity(
         lengths in proptest::collection::vec(0usize..20, 1..5),
         at in 0usize..25,
         count in 0usize..10,
@@ -673,22 +668,22 @@ proptest::proptest! {
 
         let before = project.tree().clone();
         project.insert_rows(sheet, at, count).expect("insertion");
-        project.delete_rows(sheet, at, count).expect("suppression");
+        project.delete_rows(sheet, at, count).expect("removal");
         proptest::prop_assert_eq!(&**project.tree(), &*before);
     }
 }
 
 #[test]
-fn critere_17_row_count() {
+fn criterion_17_row_count() {
     let (project, sheet, _) = sheet_with(&[]);
-    assert_eq!(project.tree().row_count(sheet).expect("feuille vide"), 0);
+    assert_eq!(project.tree().row_count(sheet).expect("empty sheet"), 0);
 
     let (project, sheet, _) = sheet_with(&[("A", &[1.0, 2.0]), ("B", &[1.0, 2.0, 3.0, 4.0])]);
-    assert_eq!(project.tree().row_count(sheet).expect("feuille"), 4);
+    assert_eq!(project.tree().row_count(sheet).expect("sheet"), 4);
 }
 
 #[test]
-fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
+fn column_and_window_metadata_return_the_previous_ones() {
     let mut demo = Demo::new();
     let meta = ColumnMeta {
         role: ColumnRole::X,
@@ -697,29 +692,29 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
     };
     let previous = demo
         .project
-        .set_column_meta(demo.temps, meta.clone())
-        .expect("métadonnées");
+        .set_column_meta(demo.time, meta.clone())
+        .expect("metadata");
     assert_eq!(previous, ColumnMeta::default());
     assert_eq!(
         demo.project
             .tree()
-            .get(demo.temps)
-            .expect("colonne")
+            .get(demo.time)
+            .expect("column")
             .as_column()
-            .expect("colonne")
+            .expect("column")
             .meta(),
         &meta
     );
 
     let window_meta = WindowMeta {
-        label: "Manip 3".to_string(),
-        comment: "essai".to_string(),
+        label: "Experiment 3".to_string(),
+        comment: "trial".to_string(),
         ..Default::default()
     };
     assert_eq!(
         demo.project
             .set_window_meta(demo.book, window_meta)
-            .expect("métadonnées de fenêtre"),
+            .expect("window metadata"),
         WindowMeta::default()
     );
     assert!(matches!(
@@ -728,10 +723,10 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
         Err(CoreError::Structure(_))
     ));
 
-    let note = demo.project.add_note(demo.root, None, "un").expect("note");
+    let note = demo.project.add_note(demo.root, None, "one").expect("note");
     assert_eq!(
-        demo.project.set_note_text(note, "deux").expect("texte"),
-        "un"
+        demo.project.set_note_text(note, "two").expect("text"),
+        "one"
     );
     assert!(matches!(
         demo.project.set_note_text(demo.book, "x"),
@@ -741,7 +736,7 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
     let graph = demo
         .project
         .add_graph(demo.root, None, stokesforge_plot::PlotSpec::default())
-        .expect("graphe");
+        .expect("graph");
     let spec = stokesforge_plot::PlotSpec {
         title: "Figure".to_string(),
         ..Default::default()
@@ -756,7 +751,7 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
         demo.project
             .tree()
             .get(graph)
-            .expect("graphe")
+            .expect("graph")
             .kind()
             .clone(),
         stokesforge_core::NodeKind::Graph {
@@ -771,127 +766,124 @@ fn les_metadonnees_de_colonne_et_de_fenetre_rendent_les_precedentes() {
 }
 
 #[test]
-fn changement_de_type_et_restauration_d_une_colonne() {
+fn column_type_change_and_restoration() {
     let (mut project, _, ids) = sheet_with(&[("A", &[1.0, 2.0])]);
     let column = ids[0];
     let (old_type, old_values) = project
         .set_column_type(column, ColumnType::Mixed)
-        .expect("changement de type");
+        .expect("type change");
     assert_eq!(old_type, ColumnType::Numeric);
     assert_eq!(
         project
             .tree()
             .get(column)
-            .expect("colonne")
+            .expect("column")
             .as_column()
-            .expect("colonne")
+            .expect("column")
             .get(0),
-        // `Numeric → Mixed` est sans perte (`Column::set_column_type`) :
-        // `1.0` devient `MixedCell::Number(1.0)`, lu à travers `Cell::Float`
-        // — pas reformaté en texte, contrairement à l'ancienne conversion
-        // vers `Text`.
+        // `Numeric → Mixed` is lossless (`Column::set_column_type`):
+        // `1.0` becomes `MixedCell::Number(1.0)`, read through `Cell::Float`
+        // — not reformatted as text, unlike the old conversion
+        // to `Text`.
         Cell::Float(1.0)
     );
     project
         .restore_column(column, old_type, old_values)
-        .expect("restauration");
+        .expect("restoration");
     assert_eq!(floats(&project, column), vec![1.0, 2.0]);
 
-    let delta = project.set_length(column, 4).expect("longueur");
+    let delta = project.set_length(column, 4).expect("length");
     assert_eq!(delta.previous_length, 2);
     assert_eq!(floats(&project, column).len(), 4);
 }
 
-// -- 18-21. partage structurel, identité --
+// -- 18-21. structural sharing, identity --
 
 #[test]
-fn critere_18_partage_structurel_apres_renommage() {
+fn criterion_18_structural_sharing_after_rename() {
     let demo = Demo::new();
     let mut project = demo.project;
     let before = project.tree().clone();
 
-    project.rename(demo.temps, "Z").expect("renommage");
+    project.rename(demo.time, "Z").expect("rename");
 
-    assert_eq!(before.get(demo.temps).expect("colonne").name(), "Temps");
-    assert_eq!(name_of(&project, demo.temps), "Z");
+    assert_eq!(before.get(demo.time).expect("column").name(), "Time");
+    assert_eq!(name_of(&project, demo.time), "Z");
 
     for id in before.walk_all() {
-        let old = before.node_arc(id).expect("nœud");
-        let new = project.tree().node_arc(id).expect("nœud");
-        if id == demo.temps {
-            assert!(
-                !Arc::ptr_eq(old, new),
-                "la colonne renommée doit être clonée"
-            );
+        let old = before.node_arc(id).expect("node");
+        let new = project.tree().node_arc(id).expect("node");
+        if id == demo.time {
+            assert!(!Arc::ptr_eq(old, new), "the renamed column must be cloned");
         } else {
-            assert!(Arc::ptr_eq(old, new), "{id} doit rester partagé");
+            assert!(Arc::ptr_eq(old, new), "{id} must stay shared");
         }
     }
 }
 
 #[test]
-fn critere_18_bis_partage_structurel_apres_ecriture() {
+fn criterion_18_bis_structural_sharing_after_write() {
     let demo = Demo::new();
     let mut project = demo.project;
     let before = project.tree().clone();
 
     project
-        .set_values(demo.temps, 0, ValueBlock::Float(vec![9.0]))
-        .expect("écriture");
+        .set_values(demo.time, 0, ValueBlock::Float(vec![9.0]))
+        .expect("write");
 
     for id in before.walk_all() {
-        let old = before.node_arc(id).expect("nœud");
-        let new = project.tree().node_arc(id).expect("nœud");
-        if id == demo.temps {
+        let old = before.node_arc(id).expect("node");
+        let new = project.tree().node_arc(id).expect("node");
+        if id == demo.time {
             assert!(!Arc::ptr_eq(old, new));
         } else {
-            assert!(Arc::ptr_eq(old, new), "{id} doit rester partagé");
+            assert!(Arc::ptr_eq(old, new), "{id} must stay shared");
         }
     }
 
-    // Les buffers des autres colonnes sont physiquement partagés.
+    // The buffers of the other columns are physically shared.
     let old_signal = before
         .get(demo.signal)
-        .expect("colonne")
+        .expect("column")
         .as_column()
-        .expect("colonne")
+        .expect("column")
         .float_values()
-        .expect("numérique");
+        .expect("numeric");
     let new_signal = project
         .tree()
         .get(demo.signal)
-        .expect("colonne")
+        .expect("column")
         .as_column()
-        .expect("colonne")
+        .expect("column")
         .float_values()
-        .expect("numérique");
+        .expect("numeric");
     assert!(Arc::ptr_eq(old_signal, new_signal));
 }
 
 #[test]
-fn critere_19_copie_a_l_ecriture_sous_instantane() {
+fn criterion_19_copy_on_write_under_snapshot() {
     let demo = Demo::new();
     let mut project = demo.project;
 
     let before = project.tree().clone();
     project
-        .set_values(demo.temps, 0, ValueBlock::Float(vec![9.0]))
-        .expect("écriture");
+        .set_values(demo.time, 0, ValueBlock::Float(vec![9.0]))
+        .expect("write");
     let old = before
-        .get(demo.temps)
-        .expect("colonne")
+        .get(demo.time)
+        .expect("column")
         .as_column()
-        .expect("colonne");
+        .expect("column");
     assert_eq!(old.get(0), Cell::Float(0.0));
-    assert_eq!(floats(&project, demo.temps), vec![9.0, 1.0, 2.0]);
+    assert_eq!(floats(&project, demo.time), vec![9.0, 1.0, 2.0]);
     drop(before);
 
-    // Sans instantané vivant, l'écriture se fait en place : même buffer.
-    let ptr_before = buffer_ptr(&project, demo.temps);
+    // Without a live snapshot, the write happens in place: same buffer.
+    let ptr_before = buffer_ptr(&project, demo.time);
     project
-        .set_values(demo.temps, 0, ValueBlock::Float(vec![7.0]))
-        .expect("écriture");
-    assert_eq!(ptr_before, buffer_ptr(&project, demo.temps));
+        .set_values(demo.time, 0, ValueBlock::Float(vec![7.0]))
+        .expect("write");
+    assert_eq!(ptr_before, buffer_ptr(&project, demo.time));
 }
 
 fn buffer_ptr(project: &Project, column: NodeId) -> *const Vec<f64> {
@@ -899,23 +891,23 @@ fn buffer_ptr(project: &Project, column: NodeId) -> *const Vec<f64> {
         project
             .tree()
             .get(column)
-            .expect("colonne")
+            .expect("column")
             .as_column()
-            .expect("colonne")
+            .expect("column")
             .float_values()
-            .expect("numérique"),
+            .expect("numeric"),
     )
 }
 
 #[test]
-fn critere_20_les_identifiants_ne_sont_jamais_reutilises() {
+fn criterion_20_identifiers_are_never_reused() {
     let (mut project, sheet, _) = sheet_with(&[]);
     let x = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne A");
+        .expect("column A");
 
     let snapshot = project.tree().clone();
-    project.remove(x).expect("suppression");
+    project.remove(x).expect("removal");
     assert!(!project.tree().contains(x));
 
     project.replace_tree(snapshot);
@@ -924,91 +916,87 @@ fn critere_20_les_identifiants_ne_sont_jamais_reutilises() {
 
     let next = project
         .add_column(sheet, None, None, Column::new(ColumnType::Numeric))
-        .expect("colonne");
-    assert!(next.raw() > x.raw(), "{next} doit dépasser {x}");
+        .expect("column");
+    assert!(next.raw() > x.raw(), "{next} must exceed {x}");
     for (id, _) in project.tree().iter() {
         assert!(id == next || id.raw() < next.raw());
     }
 
-    // Sans restauration, l'identifiant libéré n'est pas recyclé non plus.
-    let mut project = Project::new("Demo").expect("nom valide");
+    // Without restoration, the freed identifier is not recycled either.
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    let y = project.add_folder(root, "Y").expect("dossier");
-    project.remove(y).expect("suppression");
-    let z = project.add_folder(root, "Z").expect("dossier");
+    let y = project.add_folder(root, "Y").expect("folder");
+    project.remove(y).expect("removal");
+    let z = project.add_folder(root, "Z").expect("folder");
     assert_ne!(z, y);
     assert!(z.raw() > y.raw());
 }
 
 #[test]
-fn critere_21_from_tree_reprend_le_compteur() {
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_21_from_tree_resumes_the_counter() {
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    // Identifiants 1..=7 : racine + 6 dossiers.
+    // Identifiers 1..=7: root + 6 folders.
     for n in 0..6 {
-        project.add_folder(root, &format!("D{n}")).expect("dossier");
+        project.add_folder(root, &format!("D{n}")).expect("folder");
     }
     assert_eq!(project.next_id_hint(), 8);
 
     let reloaded = Project::from_tree(project.tree().clone(), 3);
     assert_eq!(reloaded.next_id_hint(), 8);
 
-    // `next_id_hint` EST déjà le prochain identifiant à attribuer, pas le
-    // plus grand identifiant déjà attribué : avec un hint de 20, rien dans
-    // l'arbre (plus grand id : 7) ne le contredit, le compteur repart donc
-    // directement à 20. L'ancienne valeur attendue ici (21) venait de
-    // traiter `hint` comme « le plus grand identifiant déjà attribué » et de
-    // lui rajouter 1 après le `max` — confusion corrigée dans
+    // `next_id_hint` IS already the next identifier to assign, not the
+    // largest identifier already assigned: with a hint of 20, nothing in
+    // the tree (largest id: 7) contradicts it, so the counter restarts
+    // directly at 20. The old value expected here (21) came from
+    // treating `hint` as "the largest identifier already assigned" and
+    // adding 1 to it after the `max` — a confusion fixed in
     // `IdAllocator::resume`.
     let reloaded = Project::from_tree(project.tree().clone(), 20);
     assert_eq!(reloaded.next_id_hint(), 20);
 }
 
 #[test]
-fn critere_21_bis_aller_retour_sans_disque_preserve_next_id_hint() {
-    // Critère naturel qu'un aller-retour disque doit respecter, vérifié ici
-    // sans même passer par stokesforge-persistence : reconstruire un `Project`
-    // depuis son propre arbre et son propre `next_id_hint` ne doit ni le
-    // faire dériver, ni gaspiller un identifiant.
-    let mut project = Project::new("X").expect("nom valide");
+fn criterion_21_bis_round_trip_without_disk_preserves_next_id_hint() {
+    // A natural criterion that a disk round trip must respect, checked here
+    // without even going through stokesforge-persistence: rebuilding a `Project`
+    // from its own tree and its own `next_id_hint` must neither
+    // make it drift, nor waste an identifier.
+    let mut project = Project::new("X").expect("valid name");
     let root = project.root();
 
     let book1 = project
         .add_empty_workbook(root, Some("Book1"))
-        .expect("classeur");
-    let sheet1 = project
-        .add_worksheet(book1, Some("Sheet1"))
-        .expect("feuille");
+        .expect("workbook");
+    let sheet1 = project.add_worksheet(book1, Some("Sheet1")).expect("sheet");
     project
         .add_column(sheet1, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
-        .expect("colonne");
+        .expect("column");
 
     let book2 = project
         .add_empty_workbook(root, Some("Book2"))
-        .expect("classeur");
-    let sheet2 = project
-        .add_worksheet(book2, Some("Sheet2"))
-        .expect("feuille");
+        .expect("workbook");
+    let sheet2 = project.add_worksheet(book2, Some("Sheet2")).expect("sheet");
     project
         .add_column(sheet2, None, Some("B"), Column::from_f64(&[3.0]))
-        .expect("colonne");
+        .expect("column");
 
     let expected = project.next_id_hint();
     let mut reloaded = Project::from_tree(project.tree().clone(), expected);
     assert_eq!(reloaded.next_id_hint(), expected);
 
-    // Un nœud ajouté après reprise reçoit exactement l'identifiant annoncé
-    // par `next_id_hint()`, pas un de plus.
+    // A node added after resumption receives exactly the identifier announced
+    // by `next_id_hint()`, not one more.
     let new_id = reloaded
         .add_column(sheet2, None, Some("C"), Column::new(ColumnType::Numeric))
-        .expect("colonne ajoutée après reprise");
+        .expect("column added after resumption");
     assert_eq!(new_id.raw(), expected);
 }
 
 // -- 22-23. from_nodes --
 
 #[test]
-fn critere_22_from_nodes_reconstruit_la_fixture() {
+fn criterion_22_from_nodes_rebuilds_the_fixture() {
     let demo = Demo::new();
     let nodes: Vec<Node> = demo
         .project
@@ -1016,42 +1004,42 @@ fn critere_22_from_nodes_reconstruit_la_fixture() {
         .iter()
         .map(|(_, node)| node.clone())
         .collect();
-    let rebuilt = Tree::from_nodes(demo.root, nodes).expect("arbre valide");
+    let rebuilt = Tree::from_nodes(demo.root, nodes).expect("valid tree");
     assert_eq!(rebuilt, **demo.project.tree());
 }
 
 #[test]
-fn critere_23_from_nodes_refuse_les_arbres_incoherents() {
+fn criterion_23_from_nodes_refuses_inconsistent_trees() {
     let root_id = NodeId::from_raw(1);
     let a = NodeId::from_raw(2);
     let b = NodeId::from_raw(3);
 
     let root_with = |children: Vec<NodeId>| {
-        Node::new(root_id, "Projet", NodeKind::Folder { children }).expect("racine")
+        Node::new(root_id, "Project", NodeKind::Folder { children }).expect("root")
     };
     let child = |id: NodeId, name: &str, parent: NodeId, kind: NodeKind| {
-        Node::with_parent(id, name, Some(parent), kind).expect("nœud")
+        Node::with_parent(id, name, Some(parent), kind).expect("node")
     };
 
     let cases: Vec<(&str, NodeId, Vec<Node>)> = vec![
         (
-            "identifiant dupliqué",
+            "duplicate identifier",
             root_id,
             vec![root_with(vec![]), root_with(vec![])],
         ),
-        ("racine absente", root_id, vec![]),
+        ("missing root", root_id, vec![]),
         (
-            "racine non-dossier",
+            "non-folder root",
             root_id,
-            vec![Node::new(root_id, "Book1", workbook_kind()).expect("nœud")],
+            vec![Node::new(root_id, "Book1", workbook_kind()).expect("node")],
         ),
         (
-            "racine avec parent",
+            "root with a parent",
             root_id,
-            vec![Node::with_parent(root_id, "Projet", Some(a), folder_kind()).expect("nœud")],
+            vec![Node::with_parent(root_id, "Project", Some(a), folder_kind()).expect("node")],
         ),
         (
-            "parent absent",
+            "missing parent",
             root_id,
             vec![
                 root_with(vec![]),
@@ -1059,12 +1047,12 @@ fn critere_23_from_nodes_refuse_les_arbres_incoherents() {
             ],
         ),
         (
-            "absent de la liste d'enfants de son parent",
+            "missing from the child list of its parent",
             root_id,
             vec![root_with(vec![]), child(a, "A", root_id, folder_kind())],
         ),
         (
-            "enfant dont le parent est un autre nœud",
+            "child whose parent is another node",
             root_id,
             vec![
                 root_with(vec![a, b]),
@@ -1074,25 +1062,25 @@ fn critere_23_from_nodes_refuse_les_arbres_incoherents() {
                     Some(root_id),
                     NodeKind::Folder { children: vec![b] },
                 )
-                .expect("nœud"),
+                .expect("node"),
                 child(b, "B", root_id, folder_kind()),
             ],
         ),
         (
-            "nœud inaccessible (deux racines)",
+            "unreachable node (two roots)",
             root_id,
             vec![
                 root_with(vec![]),
-                Node::new(a, "Autre", folder_kind()).expect("nœud"),
+                Node::new(a, "Other", folder_kind()).expect("node"),
             ],
         ),
         (
-            "colonne sous un dossier",
+            "column under a folder",
             root_id,
             vec![root_with(vec![a]), child(a, "A", root_id, column_kind())],
         ),
         (
-            "deux fenêtres de même nom",
+            "two windows with the same name",
             root_id,
             vec![
                 root_with(vec![a, b]),
@@ -1106,26 +1094,25 @@ fn critere_23_from_nodes_refuse_les_arbres_incoherents() {
         let outcome = Tree::from_nodes(root, nodes);
         assert!(
             matches!(outcome, Err(CoreError::Structure(_))),
-            "attendu Structure pour « {label} », obtenu {outcome:?}"
+            "expected Structure for \"{label}\", got {outcome:?}"
         );
     }
 }
 
 #[test]
-fn from_nodes_refuse_un_dossier_et_une_fenetre_homonymes() {
-    // A8 (`guide-de-correction-robustesse.md` §F9) — ce test affirmait
-    // auparavant que « ce que `insert` peut produire, `from_nodes` doit
-    // pouvoir relire », en construisant précisément le cas qu'A8 corrige :
-    // un dossier et un classeur frères homonymes. `insert` (via
-    // `check_name_available`) refuse désormais cette paire lui-même — la
-    // prémisse du test n'a donc plus lieu d'être, mais l'esprit reste : ce
-    // que l'API de mutation refuse de produire, `from_nodes` doit aussi le
-    // refuser en le relisant (c'est `critere_23_from_nodes_refuse_les_
-    // arbres_incoherents` qui couvre ce sens-là) ; ce test-ci vérifie le
-    // premier maillon, que la paire n'est plus produisible du tout.
-    let mut project = Project::new("Demo").expect("nom valide");
+fn from_nodes_refuses_a_folder_and_a_window_with_the_same_name() {
+    // A8 (`guide-de-correction-robustesse.md` §F9) — this test used to claim
+    // that "what `insert` can produce, `from_nodes` must be able
+    // to read back", by building precisely the case that A8 fixes:
+    // a folder and a workbook that are siblings with the same name. `insert` (via
+    // `check_name_available`) now refuses this pair itself — the
+    // premise of the test no longer holds, but the spirit remains: what
+    // the mutation API refuses to produce, `from_nodes` must also
+    // refuse when reading it back (that direction is covered by `criterion_23_from_nodes_refuses_inconsistent_trees`); this test checks the
+    // first link, that the pair can no longer be produced at all.
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
-    project.add_folder(root, "X").expect("dossier");
+    project.add_folder(root, "X").expect("folder");
     assert!(matches!(
         project.add_empty_workbook(root, Some("X")),
         Err(CoreError::DuplicateName(_))
@@ -1133,81 +1120,81 @@ fn from_nodes_refuse_un_dossier_et_une_fenetre_homonymes() {
 }
 
 #[test]
-fn les_valeurs_typees_survivent_a_un_aller_retour_from_nodes() {
+fn typed_values_survive_a_from_nodes_round_trip() {
     let demo = Demo::new();
     let nodes: Vec<Node> = demo.project.tree().iter().map(|(_, n)| n.clone()).collect();
-    let rebuilt = Tree::from_nodes(demo.root, nodes).expect("arbre valide");
+    let rebuilt = Tree::from_nodes(demo.root, nodes).expect("valid tree");
     let column = rebuilt
         .get(demo.signal)
-        .expect("colonne")
+        .expect("column")
         .as_column()
-        .expect("colonne");
+        .expect("column");
     assert!(matches!(column.values(), ColumnValues::Float(_)));
     assert_eq!(column.len(), 2);
 }
 
-// -- 24-26. primitives par colonne, atomicité --
+// -- 24-26. per-column primitives, atomicity --
 
 #[test]
-fn critere_24_les_primitives_par_colonne_annulent_delete_rows() {
+fn criterion_24_per_column_primitives_undo_delete_rows() {
     let (mut project, sheet, ids) = sheet_with(&[("A", &[1.0, 2.0])]);
     let column = ids[0];
 
-    let removed = project.delete_rows(sheet, 1, 5).expect("suppression");
+    let removed = project.delete_rows(sheet, 1, 5).expect("removal");
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].0, column);
     assert_eq!(removed[0].1, ValueBlock::Float(vec![2.0]));
     assert_eq!(floats(&project, column), vec![1.0]);
 
-    // Recette d'annulation : réinsérer puis réécrire, colonne par colonne.
+    // Undo recipe: reinsert then rewrite, column by column.
     for (id, block) in removed {
         let len = block.len();
         project
             .insert_column_rows(id, 1, len)
-            .expect("insertion par colonne");
-        project.set_values(id, 1, block).expect("réécriture");
+            .expect("per-column insertion");
+        project.set_values(id, 1, block).expect("rewrite");
     }
     assert_eq!(floats(&project, column), vec![1.0, 2.0]);
 }
 
 #[test]
-fn critere_25_les_primitives_par_colonne_valident_leurs_bornes() {
+fn criterion_25_per_column_primitives_validate_their_bounds() {
     let (mut project, sheet, ids) = sheet_with(&[("A", &[1.0, 2.0])]);
     let column = ids[0];
 
-    // La cible doit être une colonne, pas la feuille.
+    // The target must be a column, not the sheet.
     assert!(matches!(
         project.insert_column_rows(sheet, 0, 1),
         Err(CoreError::Structure(_))
     ));
 
-    // Position au-delà de `len + 1` refusée.
+    // Position beyond `len + 1` refused.
     assert!(matches!(
         project.insert_column_rows(column, 3, 1),
         Err(CoreError::IndexOutOfBounds(_))
     ));
 
-    // Suppression de zéro ligne : no-op, bloc vide rendu.
+    // Removal of zero rows: no-op, empty block returned.
     let block = project
         .delete_column_rows(column, 0, 0)
-        .expect("suppression de zéro ligne");
+        .expect("removal of zero rows");
     assert!(block.is_empty());
     assert_eq!(floats(&project, column), vec![1.0, 2.0]);
 }
 
 #[test]
-fn critere_26_add_workbook_ajoute_exactement_deux_noeuds() {
-    let mut project = Project::new("Demo").expect("nom valide");
+fn criterion_26_add_workbook_adds_exactly_two_nodes() {
+    let mut project = Project::new("Demo").expect("valid name");
     let root = project.root();
     let before = project.tree().len();
 
-    project.add_workbook(root, None).expect("classeur");
+    project.add_workbook(root, None).expect("workbook");
 
     assert_eq!(project.tree().len(), before + 2);
 }
 
 #[test]
-fn duplication_de_feuille_atomique_meme_si_les_identifiants_sont_epuises() {
+fn worksheet_duplication_is_atomic_even_if_identifiers_are_exhausted() {
     let demo = Demo::new();
     let mut project = Project::from_tree(demo.project.tree().clone(), u64::MAX - 1);
     let before = project.tree().clone();

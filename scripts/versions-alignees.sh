@@ -13,7 +13,7 @@
 # Internal dependencies `stokesforge-x = { version = "…" }` must have the
 # same version (path only is allowed; table [dependencies.stokesforge-x] and
 # `package = "stokesforge-…"` refused, not read), and FORMAT_VERSION of
-# stokesforge-persistence requires the witness tests/temoins/vN/projet.stf (#353).
+# stokesforge-persistence requires the witness tests/witnesses/vN/project.stf (#353).
 # Cargo.lock must hold each workspace crate at the same version (#351):
 # refused (code 1) if the lock file is missing or behind (`cargo update --workspace`).
 # Called by the `fmt` job (GitHub and GitLab) and by scripts/release-notes.sh.
@@ -123,7 +123,7 @@ for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
     fi
 done
 
-# .stf format: FORMAT_VERSION = N requires the witness tests/temoins/vN/projet.stf
+# .stf format: FORMAT_VERSION = N requires the witness tests/witnesses/vN/project.stf
 # (invariant 12: a witness is never modified, a new format version brings
 # one). Git does not track an empty folder: the file is required.
 SCHEMA="$REPO_ROOT/crates/stokesforge-persistence/src/schema.rs"
@@ -134,9 +134,9 @@ if [ "$(printf '%s' "$fv_lines" | grep -c .)" != 1 ]; then
     bad=1
 else
     fv="$(printf '%s' "$fv_lines" | sed 's/^.*=[[:space:]]*\([0-9][0-9]*\)[[:space:]]*;.*$/\1/')"
-    temoin="$REPO_ROOT/crates/stokesforge-persistence/tests/temoins/v$fv/projet.stf"
-    if [ ! -f "$temoin" ]; then
-        echo "[versions] ERROR: FORMAT_VERSION = $fv without witness $temoin (invariant 12, docs/persistance.md)" >&2
+    witness="$REPO_ROOT/crates/stokesforge-persistence/tests/witnesses/v$fv/project.stf"
+    if [ ! -f "$witness" ]; then
+        echo "[versions] ERROR: FORMAT_VERSION = $fv without witness $witness (invariant 12, docs/persistance.md)" >&2
         bad=1
     fi
 fi

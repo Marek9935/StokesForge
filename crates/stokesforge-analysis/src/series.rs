@@ -1,21 +1,21 @@
-//! Une série (X, Y) nettoyée, et les opérations de base communes aux calculs.
+//! A cleaned (X, Y) series, and the basic operations shared by the calculations.
 //!
-//! Le modèle de données dit « vide », « texte » ou `NaN` par un `NaN` (le même
-//! vocabulaire que `stokesforge-import`) : un calcul ignore ces lignes et les
-//! **compte**, le compte figure dans le résultat (#181, §2).
+//! The data model says "empty", "text" or `NaN` with a `NaN` (the same
+//! vocabulary as `stokesforge-import`): a calculation skips those rows and
+//! **counts** them; the count appears in the result (#181, §2).
 
-/// Une série de points `(x, y)` finis, dans l'ordre donné.
+/// A series of finite `(x, y)` points, in the given order.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Series {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
 }
 
-/// Une série et le nombre de lignes écartées pour la fabriquer.
+/// A series and the number of rows dropped to build it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cleaned {
     pub series: Series,
-    /// Lignes dont X ou Y n'était pas un nombre fini.
+    /// Rows whose X or Y was not a finite number.
     pub skipped: usize,
 }
 
@@ -33,8 +33,8 @@ impl Series {
         self.x.is_empty()
     }
 
-    /// Les points dont X est dans `[lo, hi]` (bornes incluses, dans n'importe
-    /// quel ordre).
+    /// The points whose X is in `[lo, hi]` (bounds included, in either
+    /// order).
     pub fn restricted(&self, lo: f64, hi: f64) -> Series {
         let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
         let mut out = Series::default();
@@ -47,7 +47,7 @@ impl Series {
         out
     }
 
-    /// Copie triée par X croissant (tri stable).
+    /// Copy sorted by increasing X (stable sort).
     pub fn sorted(&self) -> Series {
         let mut idx: Vec<usize> = (0..self.len()).collect();
         idx.sort_by(|&a, &b| self.x[a].total_cmp(&self.x[b]));
@@ -57,15 +57,15 @@ impl Series {
         }
     }
 
-    /// `true` si X est croissant au sens large.
+    /// `true` if X is non-decreasing.
     pub fn is_ascending(&self) -> bool {
         self.x.windows(2).all(|w| w[0] <= w[1])
     }
 }
 
-/// Apparie `x` et `y` ligne à ligne et écarte les lignes où l'un des deux
-/// n'est pas fini. Seule la longueur commune est lue : une colonne plus longue
-/// que l'autre ne fabrique pas de lignes écartées.
+/// Pairs `x` and `y` row by row and drops the rows where either one is not
+/// finite. Only the common length is read: a column longer than the other
+/// does not produce dropped rows.
 pub fn clean(x: &[f64], y: &[f64]) -> Cleaned {
     let n = x.len().min(y.len());
     let mut series = Series::default();
@@ -81,8 +81,8 @@ pub fn clean(x: &[f64], y: &[f64]) -> Cleaned {
     Cleaned { series, skipped }
 }
 
-/// Interpolation linéaire de `(xs, ys)` (X croissants) en `at`. `None` hors du
-/// domaine `[xs.first, xs.last]`, ou si la série est vide.
+/// Linear interpolation of `(xs, ys)` (increasing X) at `at`. `None` outside
+/// the domain `[xs.first, xs.last]`, or if the series is empty.
 pub fn interpolate(xs: &[f64], ys: &[f64], at: f64) -> Option<f64> {
     let n = xs.len().min(ys.len());
     if n == 0 || !at.is_finite() {
@@ -94,7 +94,7 @@ pub fn interpolate(xs: &[f64], ys: &[f64], at: f64) -> Option<f64> {
     if at < xs[0] || at > xs[n - 1] {
         return None;
     }
-    // Premier indice dont X >= at.
+    // First index whose X >= at.
     let hi = xs[..n].partition_point(|&v| v < at);
     if hi == 0 {
         return Some(ys[0]);
@@ -107,8 +107,8 @@ pub fn interpolate(xs: &[f64], ys: &[f64], at: f64) -> Option<f64> {
     Some(y0 + (y1 - y0) * (at - x0) / (x1 - x0))
 }
 
-/// Moyenne des `count` valeurs de Y les plus proches (en X) de `x0` : l'ancrage
-/// « moyenne locale » des points posés à la souris. `count` vaut au moins 1.
+/// Mean of the `count` Y values closest (in X) to `x0`: the "local mean"
+/// anchor of points placed with the mouse. `count` is at least 1.
 pub fn local_mean(series: &Series, x0: f64, count: usize) -> Option<f64> {
     if series.is_empty() {
         return None;
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clean_ecarte_et_compte_les_lignes_non_finies() {
+    fn clean_drops_and_counts_non_finite_rows() {
         let x = [1.0, f64::NAN, 3.0, 4.0, 5.0];
         let y = [10.0, 20.0, f64::INFINITY, 40.0, 50.0];
         let c = clean(&x, &y);
@@ -139,20 +139,20 @@ mod tests {
     }
 
     #[test]
-    fn clean_ne_compte_pas_la_queue_d_une_colonne_plus_longue() {
+    fn clean_does_not_count_the_tail_of_a_longer_column() {
         let c = clean(&[1.0, 2.0, 3.0], &[1.0, 2.0]);
         assert_eq!(c.series.len(), 2);
         assert_eq!(c.skipped, 0);
     }
 
     #[test]
-    fn restricted_accepte_des_bornes_inversees() {
+    fn restricted_accepts_reversed_bounds() {
         let s = Series::new(vec![1.0, 2.0, 3.0, 4.0], vec![0.0; 4]);
         assert_eq!(s.restricted(3.0, 2.0).x, vec![2.0, 3.0]);
     }
 
     #[test]
-    fn sorted_range_par_x_croissant() {
+    fn sorted_range_by_increasing_x() {
         let s = Series::new(vec![3.0, 1.0, 2.0], vec![30.0, 10.0, 20.0]).sorted();
         assert_eq!(s.x, vec![1.0, 2.0, 3.0]);
         assert_eq!(s.y, vec![10.0, 20.0, 30.0]);
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn interpolate_est_lineaire_et_refuse_l_extrapolation() {
+    fn interpolate_is_linear_and_refuses_extrapolation() {
         let xs = [0.0, 1.0, 3.0];
         let ys = [0.0, 10.0, 30.0];
         assert_eq!(interpolate(&xs, &ys, 0.5), Some(5.0));
@@ -172,14 +172,14 @@ mod tests {
     }
 
     #[test]
-    fn local_mean_moyenne_les_voisins_en_x() {
+    fn local_mean_averages_the_neighbours_in_x() {
         let s = Series::new(
             vec![0.0, 1.0, 2.0, 3.0, 10.0],
             vec![1.0, 2.0, 3.0, 4.0, 100.0],
         );
         assert_eq!(local_mean(&s, 1.0, 1), Some(2.0));
         assert_eq!(local_mean(&s, 1.0, 3), Some(2.0));
-        // Plus de voisins que de points : tous.
+        // More neighbours than points: all of them.
         assert_eq!(local_mean(&s, 1.0, 99), Some(22.0));
     }
 }

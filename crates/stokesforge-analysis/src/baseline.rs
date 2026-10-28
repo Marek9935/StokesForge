@@ -1,17 +1,17 @@
-//! Lignes de base (#185, #211) : constante par un point ou une zone, droite
-//! par deux points, polynôme ajusté sur des
-//! zones de fond, ou courbe par points d'ancrage (segments ou spline).
+//! Baselines (#185, #211): constant from a point or a zone, line
+//! from two points, polynomial fitted on
+//! background zones, or curve through anchor points (segments or spline).
 //!
-//! Ce module ne fabrique que la **fonction** ligne de base ; soustraire ou
-//! diviser est [`apply`]. Les points d'ancrage posés « avec aimant et moyenne
-//! locale » (M4 b) sont calculés par l'interface avec
-//! [`crate::series::local_mean`] ; ici un ancrage est un point `(x, y)`.
+//! This module only builds the baseline **function**; subtracting or
+//! dividing is [`apply`]. Anchor points placed "with magnet and local
+//! mean" (M4 b) are computed by the interface with
+//! [`crate::series::local_mean`]; here an anchor is a point `(x, y)`.
 
 use crate::error::AnalysisError;
 use crate::linalg::{least_squares, Matrix};
 use crate::series::Series;
 
-/// Interpolation entre points d'ancrage.
+/// Interpolation between anchor points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interpolation {
     Segments,
@@ -20,49 +20,49 @@ pub enum Interpolation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaselineMethod {
-    /// Fond plat fixé par un point libre ou aimanté.
+    /// Flat background set by a free or magnetized point.
     Constant { point: (f64, f64) },
-    /// Fond plat : moyenne des Y dans une seule plage inclusive de X.
+    /// Flat background: mean of Y in a single inclusive X range.
     ConstantZone { zone: (f64, f64) },
-    /// Droite passant par deux points.
+    /// Line through two points.
     Line { p1: (f64, f64), p2: (f64, f64) },
-    /// Polynôme de degré `degree` ajusté par moindres carrés sur les points de
-    /// la série dont X tombe dans une des `zones` ; `degree = 1` est la droite.
+    /// Polynomial of degree `degree` fitted by least squares on the points of
+    /// the series whose X falls in one of the `zones`; `degree = 1` is the line.
     Zones { zones: Vec<(f64, f64)>, degree: u32 },
-    /// Courbe passant par les points d'ancrage.
+    /// Curve through the anchor points.
     Anchors {
         points: Vec<(f64, f64)>,
         interpolation: Interpolation,
     },
 }
 
-/// Ce qu'on fait de la ligne de base.
+/// What is done with the baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaselineOp {
     Subtract,
     Divide,
 }
 
-/// Une ligne de base évaluable en tout X.
+/// A baseline that can be evaluated at any X.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Baseline {
     shape: Shape,
-    /// Nombre de points qui ont servi à la déterminer (zones), sinon le nombre
-    /// d'ancrages.
+    /// Number of points used to determine it (zones), otherwise the number
+    /// of anchors.
     pub points_used: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum Shape {
-    /// Polynôme en `(x − center)/scale`, coefficients par puissances croissantes.
+    /// Polynomial in `(x − center)/scale`, coefficients by increasing powers.
     Poly {
         coeffs: Vec<f64>,
         center: f64,
         scale: f64,
     },
-    /// Segments : points triés par X.
+    /// Segments: points sorted by X.
     Segments(Vec<(f64, f64)>),
-    /// Spline cubique naturelle : points triés, dérivées secondes.
+    /// Natural cubic spline: sorted points, second derivatives.
     Spline {
         points: Vec<(f64, f64)>,
         second: Vec<f64>,
@@ -70,7 +70,7 @@ enum Shape {
 }
 
 impl Baseline {
-    /// Valeur de la ligne de base en `x`.
+    /// Value of the baseline at `x`.
     pub fn eval(&self, x: f64) -> f64 {
         match &self.shape {
             Shape::Poly {
@@ -86,7 +86,7 @@ impl Baseline {
         }
     }
 
-    /// Pente et ordonnée à l'origine, si la ligne de base est une droite.
+    /// Slope and intercept, if the baseline is a line.
     pub fn as_line(&self) -> Option<(f64, f64)> {
         match &self.shape {
             Shape::Poly {
@@ -105,7 +105,7 @@ impl Baseline {
 
 fn eval_segments(pts: &[(f64, f64)], x: f64) -> f64 {
     let n = pts.len();
-    // Prolongement linéaire des segments d'extrémité.
+    // Linear extension of the end segments.
     let i = pts.partition_point(|p| p.0 < x).clamp(1, n - 1);
     let (x0, y0) = pts[i - 1];
     let (x1, y1) = pts[i];
@@ -118,7 +118,7 @@ fn spline_second_derivatives(pts: &[(f64, f64)]) -> Vec<f64> {
     if n < 3 {
         return second;
     }
-    // Système tridiagonal de la spline naturelle (algorithme de Thomas).
+    // Tridiagonal system of the natural spline (Thomas algorithm).
     let mut c = vec![0.0; n];
     let mut d = vec![0.0; n];
     for i in 1..n - 1 {
@@ -142,7 +142,7 @@ fn eval_spline(pts: &[(f64, f64)], second: &[f64], x: f64) -> f64 {
         return eval_segments(pts, x);
     }
     if x < pts[0].0 {
-        // Prolongement par la tangente de l'extrémité (dérivée seconde nulle).
+        // Extension by the tangent at the end (second derivative zero).
         let h = pts[1].0 - pts[0].0;
         let slope = (pts[1].1 - pts[0].1) / h - h * (2.0 * second[0] + second[1]) / 6.0;
         return pts[0].1 + slope * (x - pts[0].0);
@@ -163,19 +163,19 @@ fn eval_spline(pts: &[(f64, f64)], second: &[f64], x: f64) -> f64 {
 }
 
 impl BaselineMethod {
-    /// Refuse une coordonnée non finie (NaN, ±inf) posée par l'utilisateur :
-    /// `f64::min/max` et les comparaisons l'ignoreraient en silence (une borne
-    /// de zone NaN deviendrait la zone `[b, b]`). Source unique de la règle,
-    /// appelée par [`build`] et par `Operation::validate` ; une méthode qui
-    /// porte des coordonnées s'ajoute ici.
+    /// Refuses a non-finite coordinate (NaN, ±inf) placed by the user:
+    /// `f64::min/max` and comparisons would silently ignore it (a NaN zone
+    /// bound would become the zone `[b, b]`). Single source of the rule,
+    /// called by [`build`] and by `Operation::validate`; a method that
+    /// carries coordinates is added here.
     pub(crate) fn check_finite(&self) -> Result<(), AnalysisError> {
         let (name, finite) = match self {
             BaselineMethod::Constant { point } => ("point", pair_finite(*point)),
             BaselineMethod::Line { p1, p2 } => ("points", pair_finite(*p1) && pair_finite(*p2)),
             BaselineMethod::ConstantZone { zone } => ("zone", pair_finite(*zone)),
             BaselineMethod::Zones { zones, .. } => ("zones", zones.iter().all(|z| pair_finite(*z))),
-            // Une ancre non posée (non finie) est ignorée par `build`, comme par
-            // `readiness` (#298) : jamais une erreur.
+            // An unplaced (non-finite) anchor is ignored by `build`, like by
+            // `readiness` (#298): never an error.
             BaselineMethod::Anchors { .. } => ("points", true),
         };
         if finite {
@@ -190,8 +190,8 @@ fn pair_finite(pair: (f64, f64)) -> bool {
     pair.0.is_finite() && pair.1.is_finite()
 }
 
-/// Fabrique la ligne de base de `method`. `series` ne sert qu'à la méthode par
-/// zones (les points de fond).
+/// Builds the baseline of `method`. `series` is only used by the
+/// zones method (the background points).
 pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, AnalysisError> {
     method.check_finite()?;
     match method {
@@ -223,13 +223,13 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
                     degree: 0,
                 });
             }
-            // Moyenne en ligne : évite la somme intermédiaire qui déborde.
+            // Running mean: avoids the intermediate sum that overflows.
             let mean = values.iter().enumerate().fold(0.0_f64, |mean, (i, y)| {
                 let n = (i + 1) as f64;
                 if mean.signum() == y.signum() {
                     mean + (y - mean) / n
                 } else {
-                    // La différence entre deux signes opposés peut déborder.
+                    // The difference between two opposite signs can overflow.
                     mean * (i as f64 / n) + y / n
                 }
             });
@@ -275,10 +275,10 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
             }
             let lo = xs.iter().cloned().fold(f64::INFINITY, f64::min);
             let hi = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            // Conditionnement : t = (x − centre)/demi-étendue ∈ [-1, 1].
-            // Moitiés calculées avant la somme/différence : `lo + hi` et `hi − lo`
-            // débordent pour des X extrêmes. Étendue nulle (X tous égaux) : échelle 1,
-            // t = 0 partout, sans quoi `t` deviendrait énorme et `0·inf` donnerait NaN.
+            // Conditioning: t = (x − center)/half-extent ∈ [-1, 1].
+            // Halves computed before the sum/difference: `lo + hi` and `hi − lo`
+            // overflow for extreme X. Zero extent (all X equal): scale 1,
+            // t = 0 everywhere, otherwise `t` would become huge and `0·inf` would give NaN.
             let center = lo / 2.0 + hi / 2.0;
             let half = hi / 2.0 - lo / 2.0;
             let scale = if half > 0.0 { half } else { 1.0 };
@@ -291,8 +291,8 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
                     v *= t;
                 }
             }
-            // Assez de points mais de rang insuffisant (X tous égaux) : ce n'est
-            // pas un manque de points, le dire autrement.
+            // Enough points but insufficient rank (all X equal): this is not
+            // a lack of points, say it differently.
             let ls = least_squares(&a, &ys).ok_or(AnalysisError::DuplicateX)?;
             Ok(Baseline {
                 shape: Shape::Poly {
@@ -338,8 +338,8 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
     }
 }
 
-/// Applique la ligne de base à une valeur Y. Une division par zéro (ou un
-/// résultat non fini) donne `NaN`.
+/// Applies the baseline to a Y value. A division by zero (or a
+/// non-finite result) gives `NaN`.
 pub fn apply(op: BaselineOp, y: f64, baseline: f64) -> f64 {
     let v = match op {
         BaselineOp::Subtract => y - baseline,
@@ -358,7 +358,7 @@ mod tests {
 
     fn line_series() -> Series {
         let x: Vec<f64> = (0..101).map(|i| i as f64).collect();
-        // Fond : 2 + 0.05 x ; un pic large au milieu.
+        // Background: 2 + 0.05 x; a wide peak in the middle.
         let y = x
             .iter()
             .map(|&v| 2.0 + 0.05 * v + 10.0 * libm::exp(-(v - 50.0).powi(2) / 20.0))
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn la_constante_n_a_aucune_pente_et_la_zone_prend_la_moyenne() {
+    fn the_constant_has_no_slope_and_the_zone_takes_the_mean() {
         let s = Series::new(
             vec![0.0, 1.0, 2.0, 3.0, 4.0],
             vec![100.0, 2.0, f64::NAN, 6.0, 100.0],
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn moyenne_de_zone_ne_deborde_pas_pour_un_fond_fini_tres_grand() {
+    fn zone_mean_does_not_overflow_for_a_very_large_finite_background() {
         let s = Series::new(vec![0.0, 1.0, 2.0], vec![f64::MAX; 3]);
         let b = build(&BaselineMethod::ConstantZone { zone: (0.0, 2.0) }, &s).unwrap();
         assert!(b.eval(1.0).is_finite());
@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn la_droite_par_deux_points_passe_par_eux() {
+    fn the_line_through_two_points_passes_through_them() {
         let b = build(
             &BaselineMethod::Line {
                 p1: (0.0, 2.0),
@@ -424,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn deux_points_de_meme_x_sont_refuses() {
+    fn two_points_with_the_same_x_are_refused() {
         assert_eq!(
             build(
                 &BaselineMethod::Line {
@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn les_zones_retrouvent_le_fond_malgre_le_pic() {
+    fn the_zones_recover_the_background_despite_the_peak() {
         let s = line_series();
         let b = build(
             &BaselineMethod::Zones {
@@ -450,16 +450,16 @@ mod tests {
         )
         .unwrap();
         let (slope, intercept) = b.as_line().unwrap();
-        assert!((slope - 0.05).abs() < 1e-6, "pente {slope}");
-        assert!((intercept - 2.0).abs() < 1e-4, "ordonnée {intercept}");
+        assert!((slope - 0.05).abs() < 1e-6, "slope {slope}");
+        assert!((intercept - 2.0).abs() < 1e-4, "intercept {intercept}");
         assert_eq!(b.points_used, 42);
-        // Corrigée au sommet du pic : ≈ 10.
+        // Corrected at the top of the peak: ≈ 10.
         let corrected = apply(BaselineOp::Subtract, s.y[50], b.eval(50.0));
         assert!((corrected - 10.0).abs() < 1e-3, "{corrected}");
     }
 
     #[test]
-    fn un_polynome_de_degre_2_suit_un_fond_courbe() {
+    fn a_degree_2_polynomial_follows_a_curved_background() {
         let x: Vec<f64> = (0..50).map(|i| i as f64).collect();
         let y: Vec<f64> = x.iter().map(|v| 1.0 + 0.1 * v + 0.01 * v * v).collect();
         let s = Series::new(x, y);
@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn une_borne_de_zone_non_finie_est_refusee() {
+    fn a_non_finite_zone_bound_is_refused() {
         let x: Vec<f64> = (0..5).map(f64::from).collect();
         let s = Series::new(x.clone(), x.iter().map(|v| v + 1.0).collect());
         for bad in [f64::NAN, f64::INFINITY] {
@@ -495,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn un_point_de_droite_non_fini_est_refuse() {
+    fn a_non_finite_line_point_is_refused() {
         let s = line_series();
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for (p1, p2) in [
@@ -515,8 +515,8 @@ mod tests {
     }
 
     #[test]
-    fn zones_x_tous_egaux_degre_0_reste_fini_loin_du_centre() {
-        // #274 : l'échelle plancher MIN_POSITIVE rendait t énorme, `0·inf` = NaN.
+    fn zones_with_all_x_equal_degree_0_stays_finite_far_from_the_center() {
+        // #274: the floor scale MIN_POSITIVE made t huge, `0·inf` = NaN.
         let s = Series::new(vec![0.0, 0.0], vec![1.0, 3.0]);
         let b = build(
             &BaselineMethod::Zones {
@@ -532,8 +532,8 @@ mod tests {
     }
 
     #[test]
-    fn zones_x_extremes_donnent_une_droite_et_non_duplicate_x() {
-        // #274 : `hi − lo` débordait en infini, d'où un DuplicateX trompeur.
+    fn extreme_x_zones_give_a_line_and_not_duplicate_x() {
+        // #274: `hi − lo` overflowed to infinity, hence a misleading DuplicateX.
         let s = Series::new(vec![-1e308, 0.0, 1e308], vec![-1.0, 0.0, 1.0]);
         let b = build(
             &BaselineMethod::Zones {
@@ -548,12 +548,12 @@ mod tests {
     }
 
     #[test]
-    fn toute_borne_non_finie_est_refusee_sur_lo_comme_sur_hi() {
+    fn any_non_finite_bound_is_refused_on_lo_as_on_hi() {
         let x: Vec<f64> = (0..10).map(f64::from).collect();
         let s = Series::new(x.clone(), x.iter().map(|v| 2.0 * v + 1.0).collect());
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for zone in [(bad, 2.0), (0.0, bad), (bad, bad)] {
-                // Seule, première ou seconde zone : l'ordre ne change rien.
+                // Alone, first or second zone: the order changes nothing.
                 for zones in [vec![zone], vec![zone, (6.0, 9.0)], vec![(0.0, 3.0), zone]] {
                     for degree in [0, 1, 9] {
                         let method = BaselineMethod::Zones {
@@ -574,8 +574,8 @@ mod tests {
     }
 
     #[test]
-    fn zones_finies_valeurs_de_reference_inchangees() {
-        // y = 2x + 1 sur 0..=9 ; deux zones : la droite est retrouvée.
+    fn finite_zones_reference_values_unchanged() {
+        // y = 2x + 1 on 0..=9; two zones: the line is recovered.
         let x: Vec<f64> = (0..10).map(f64::from).collect();
         let s = Series::new(x.clone(), x.iter().map(|v| 2.0 * v + 1.0).collect());
         let b = build(
@@ -590,7 +590,7 @@ mod tests {
         for v in [0.0, 3.5, 5.0, 9.0] {
             assert!((b.eval(v) - (2.0 * v + 1.0)).abs() < 1e-9, "x = {v}");
         }
-        // Degré 0 : la moyenne de y sur [1, 3] = (3 + 5 + 7) / 3 = 5.
+        // Degree 0: the mean of y on [1, 3] = (3 + 5 + 7) / 3 = 5.
         let s = Series::new(
             (0..6).map(f64::from).collect(),
             vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0],
@@ -608,11 +608,11 @@ mod tests {
         let b = mean((1.0, 3.0));
         assert_eq!(b.points_used, 3);
         assert!((b.eval(0.0) - 5.0).abs() < 1e-12);
-        // Zone inversée : normalisée, même ligne de base.
+        // Reversed zone: normalized, same baseline.
         let inv = mean((3.0, 1.0));
         assert_eq!(inv.points_used, 3);
         assert!((inv.eval(4.0) - 5.0).abs() < 1e-12);
-        // Zone dégénérée lo == hi : un point, accepté (degré 0).
+        // Degenerate zone lo == hi: one point, accepted (degree 0).
         let d = mean((2.0, 2.0));
         assert_eq!(d.points_used, 1);
         assert!((d.eval(0.0) - 5.0).abs() < 1e-12);
@@ -625,10 +625,10 @@ mod tests {
         }
     }
 
-    /// #298 : une ancre non posée (non finie) est ignorée, comme par
-    /// `readiness` ; seules les ancres posées comptent pour le minimum de 2.
+    /// #298: an unplaced (non-finite) anchor is ignored, like by
+    /// `readiness`; only placed anchors count towards the minimum of 2.
     #[test]
-    fn une_ancre_non_finie_est_ignoree_en_toute_position_et_coordonnee() {
+    fn a_non_finite_anchor_is_ignored_at_any_position_and_coordinate() {
         let s = line_series();
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for p in [(bad, 2.0), (2.0, bad), (bad, bad)] {
@@ -641,7 +641,7 @@ mod tests {
                         let b = build(&anchors(points.clone(), interpolation), &s).unwrap();
                         assert_eq!(b.points_used, 2, "{points:?}");
                     }
-                    // Une seule ancre posée sur deux : trop peu.
+                    // Only one anchor placed out of two: too few.
                     assert_eq!(
                         build(&anchors(vec![(1.0, 1.0), p], interpolation), &s).unwrap_err(),
                         AnalysisError::NotEnoughAnchors {
@@ -655,9 +655,9 @@ mod tests {
     }
 
     #[test]
-    fn les_ancres_valides_donnent_les_valeurs_de_reference() {
+    fn valid_anchors_give_the_reference_values() {
         let s = Series::default();
-        // Segments : deux pentes, ancres traversées exactement.
+        // Segments: two slopes, anchors crossed exactly.
         let seg = build(
             &anchors(
                 vec![(0.0, 0.0), (2.0, 4.0), (4.0, 0.0)],
@@ -670,8 +670,8 @@ mod tests {
         for (x, y) in [(0.0, 0.0), (1.0, 2.0), (2.0, 4.0), (3.0, 2.0), (4.0, 0.0)] {
             assert!((seg.eval(x) - y).abs() < 1e-12, "x={x}");
         }
-        // Spline naturelle sur (0,0) (1,1) (2,0) : dérivée seconde −3 au milieu,
-        // donc 0,5 + 3·0,375/6 = 0,6875 à mi-intervalle.
+        // Natural spline on (0,0) (1,1) (2,0): second derivative −3 in the middle,
+        // hence 0.5 + 3·0.375/6 = 0.6875 at mid-interval.
         let sp = build(
             &anchors(
                 vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)],
@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn les_ancres_non_triees_donnent_la_meme_ligne_que_triees() {
+    fn unsorted_anchors_give_the_same_line_as_sorted() {
         let s = Series::default();
         for interpolation in [Interpolation::Segments, Interpolation::Spline] {
             let sorted = build(
@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn trop_peu_d_ancres_ou_x_egaux_sont_refuses_sans_confusion() {
+    fn too_few_anchors_or_equal_x_are_refused_without_confusion() {
         let s = Series::default();
         for interpolation in [Interpolation::Segments, Interpolation::Spline] {
             for points in [vec![], vec![(1.0, 1.0)]] {
@@ -731,7 +731,7 @@ mod tests {
                     AnalysisError::NotEnoughAnchors { found, needed: 2 }
                 );
             }
-            // X égaux (y compris non adjacents dans la liste) : DuplicateAnchor.
+            // Equal X (including non-adjacent in the list): DuplicateAnchor.
             for points in [
                 vec![(1.0, 1.0), (1.0, 2.0)],
                 vec![(1.0, 1.0), (3.0, 2.0), (1.0, 5.0)],
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn zones_trop_petites() {
+    fn zones_too_small() {
         let s = line_series();
         let err = build(
             &BaselineMethod::Zones {
@@ -766,10 +766,10 @@ mod tests {
     }
 
     #[test]
-    fn segments_passent_par_les_ancrages_et_se_prolongent() {
+    fn segments_pass_through_the_anchors_and_extend() {
         let b = build(
             &BaselineMethod::Anchors {
-                // Désordonnés exprès : le tri est interne.
+                // Deliberately unordered: the sort is internal.
                 points: vec![(10.0, 4.0), (0.0, 0.0), (5.0, 1.0)],
                 interpolation: Interpolation::Segments,
             },
@@ -780,13 +780,13 @@ mod tests {
         assert_eq!(b.eval(5.0), 1.0);
         assert_eq!(b.eval(10.0), 4.0);
         assert!((b.eval(7.5) - 2.5).abs() < 1e-12);
-        // Prolongement du dernier segment (pente 0.6).
+        // Extension of the last segment (slope 0.6).
         assert!((b.eval(20.0) - 10.0).abs() < 1e-12);
         assert!((b.eval(-5.0) + 1.0).abs() < 1e-12);
     }
 
     #[test]
-    fn la_spline_passe_par_les_ancrages_et_reproduit_une_droite() {
+    fn the_spline_passes_through_the_anchors_and_reproduces_a_line() {
         let pts = vec![(0.0, 1.0), (2.0, 5.0), (4.0, 9.0), (6.0, 13.0)];
         let b = build(
             &BaselineMethod::Anchors {
@@ -799,15 +799,15 @@ mod tests {
         for (x, y) in &pts {
             assert!((b.eval(*x) - y).abs() < 1e-12);
         }
-        // Points alignés : la spline naturelle est la droite, extrapolation incluse.
+        // Aligned points: the natural spline is the line, extrapolation included.
         assert!((b.eval(3.0) - 7.0).abs() < 1e-12);
         assert!((b.eval(8.0) - 17.0).abs() < 1e-9);
         assert!((b.eval(-1.0) + 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn la_spline_est_lisse_la_ou_les_segments_cassent() {
-        // Ancrages d'une parabole : la spline est plus proche que les segments.
+    fn the_spline_is_smooth_where_segments_break() {
+        // Anchors of a parabola: the spline is closer than the segments.
         let pts: Vec<(f64, f64)> = (0..=6).map(|i| (i as f64, (i as f64).powi(2))).collect();
         let spline = build(
             &BaselineMethod::Anchors {
@@ -830,11 +830,11 @@ mod tests {
             (seg.eval(3.5) - 12.25).abs(),
         );
         assert!(es < eg, "spline {es} vs segments {eg}");
-        assert!(eg > 0.2, "témoin : les segments s'écartent de la parabole");
+        assert!(eg > 0.2, "witness: the segments deviate from the parabola");
     }
 
     #[test]
-    fn ancrages_insuffisants_ou_dupliques() {
+    fn insufficient_or_duplicated_anchors() {
         let one = BaselineMethod::Anchors {
             points: vec![(0.0, 0.0)],
             interpolation: Interpolation::Segments,
@@ -857,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_soustrait_divise_et_degrade_en_nan() {
+    fn apply_subtracts_divides_and_degrades_to_nan() {
         assert_eq!(apply(BaselineOp::Subtract, 5.0, 2.0), 3.0);
         assert_eq!(apply(BaselineOp::Divide, 6.0, 2.0), 3.0);
         assert!(apply(BaselineOp::Divide, 6.0, 0.0).is_nan());

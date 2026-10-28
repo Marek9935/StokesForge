@@ -1,6 +1,6 @@
-//! Ajustement d'un modèle à une ou plusieurs courbes (#188), avec paramètres
-//! fixés, bornés, pondération par un écart-type Y, et **ajustement global**
-//! (paramètres partagés entre les courbes, M13 b).
+//! Fit of a model to one or several curves (#188), with fixed
+//! and bounded parameters, weighting by a Y standard deviation, and **global fit**
+//! (parameters shared between curves, M13 b).
 
 use crate::error::AnalysisError;
 use crate::linalg::least_squares;
@@ -8,34 +8,34 @@ use crate::model::{CompiledModel, Model};
 use crate::series::Series;
 use crate::solver::{solve_problem, Options, Slot, Term};
 
-/// Réglage d'un paramètre du modèle, dans l'ordre de [`CompiledModel::params`].
+/// Setting of a model parameter, in the order of [`CompiledModel::params`].
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParamSetting {
-    /// `None` : valeur initiale automatique.
+    /// `None`: automatic initial value.
     pub initial: Option<f64>,
     pub fixed: bool,
-    /// `None` : borne par défaut du modèle.
+    /// `None`: default bound of the model.
     pub min: Option<f64>,
     pub max: Option<f64>,
-    /// Ajustement global : une seule valeur pour toutes les courbes.
+    /// Global fit: a single value for all the curves.
     pub shared: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitSpec {
     pub model: Model,
-    /// Réglages par paramètre ; les paramètres au-delà de la liste ont les
-    /// réglages par défaut.
+    /// Per-parameter settings; parameters beyond the list have the
+    /// default settings.
     pub params: Vec<ParamSetting>,
 }
 
 impl FitSpec {
-    /// Remplit les valeurs de départ avec l'estimation automatique du modèle
-    /// ([`CompiledModel::guess`]) sur les points de `series` dont X tombe dans
-    /// `range` (bornes incluses, dans n'importe quel ordre ; `None` : toute la
-    /// série, sauf les X non finis). Les réglages par paramètre sont ramenés à
-    /// la longueur du modèle ; un paramètre **fixé** garde sa valeur. Sans
-    /// effet si le modèle ne se compile pas.
+    /// Fills the starting values with the automatic estimate of the model
+    /// ([`CompiledModel::guess`]) on the points of `series` whose X falls in
+    /// `range` (bounds included, in either order; `None`: the whole
+    /// series, except non-finite X). The per-parameter settings are brought to
+    /// the length of the model; a **fixed** parameter keeps its value. No
+    /// effect if the model does not compile.
     pub fn auto_initial(&mut self, series: &Series, range: Option<(f64, f64)>) {
         let Ok(compiled) = self.model.compile() else {
             return;
@@ -52,36 +52,36 @@ impl FitSpec {
     }
 }
 
-/// Une courbe à ajuster : points finis, déjà restreints à la plage voulue.
+/// A curve to fit: finite points, already restricted to the wanted range.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitInput {
     pub series: Series,
-    /// Écart-type de chaque Y (pondération `1/σ`), de même longueur.
+    /// Standard deviation of each Y (weighting `1/σ`), of the same length.
     pub sigma: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FittedSeries {
     pub values: Vec<f64>,
-    /// `None` : paramètre fixé, ou incertitude non calculable.
+    /// `None`: fixed parameter, or uncertainty that cannot be computed.
     pub errors: Vec<Option<f64>>,
     pub points: usize,
     pub r_squared: f64,
-    /// χ² pondéré de cette courbe.
+    /// Weighted χ² of this curve.
     pub chi2: f64,
-    /// Degrés de liberté de cette courbe seule (ajustement global : de
-    /// l'ensemble, partagé par toutes les courbes).
+    /// Degrees of freedom of this curve alone (global fit: of the
+    /// whole, shared by all the curves).
     pub dof: usize,
-    /// χ² réduit de cette courbe seule (ajustement global : de l'ensemble).
+    /// Reduced χ² of this curve alone (global fit: of the whole).
     pub reduced_chi2: f64,
-    /// Nombre de paramètres libres que les données ne déterminent pas (#203).
+    /// Number of free parameters that the data do not determine (#203).
     pub undetermined: usize,
-    /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1,
-    /// #313) : à ne pas lire comme un ajustement convergé.
+    /// Stop on a plateau (#281) or solver stalled without an accepted step (C1,
+    /// #313): not to be read as a converged fit.
     pub plateau: bool,
-    /// Polynôme ajusté par Levenberg-Marquardt (contrainte) sur un X très
-    /// décalé de 0, sans le centrage du chemin QR : la précision peut s'être
-    /// dégradée (#296, avertir plutôt que centrer).
+    /// Polynomial fitted by Levenberg-Marquardt (constrained) on an X very
+    /// far from 0, without the centering of the QR path: the precision may have
+    /// degraded (#296, warn rather than center).
     pub shifted_x: bool,
 }
 
@@ -89,7 +89,7 @@ pub struct FittedSeries {
 pub struct FitReport {
     pub param_names: Vec<String>,
     pub series: Vec<FittedSeries>,
-    /// Degrés de liberté et χ² réduit de l'ajustement (global : de l'ensemble).
+    /// Degrees of freedom and reduced χ² of the fit (global: of the whole).
     pub dof: usize,
     pub reduced_chi2: f64,
     pub iterations: usize,
@@ -110,8 +110,8 @@ fn setting(spec: &FitSpec, j: usize) -> ParamSetting {
     spec.params.get(j).cloned().unwrap_or_default()
 }
 
-/// Ajuste le modèle. Sans paramètre partagé, chaque courbe est ajustée
-/// séparément ; dès qu'un paramètre est partagé, toutes le sont ensemble.
+/// Fits the model. Without a shared parameter, each curve is fitted
+/// separately; as soon as a parameter is shared, all are fitted together.
 pub fn fit(inputs: &[FitInput], spec: &FitSpec) -> Result<FitReport, AnalysisError> {
     let model = spec.model.compile()?;
     if inputs.is_empty() {
@@ -128,7 +128,7 @@ pub fn fit(inputs: &[FitInput], spec: &FitSpec) -> Result<FitReport, AnalysisErr
     if global {
         return fit_together(inputs, spec, &model);
     }
-    // Courbes indépendantes : rapport agrégé (dof et χ² réduit sommés).
+    // Independent curves: aggregated report (dof and reduced χ² summed).
     let mut series = Vec::new();
     let (mut dof, mut chi2_sum, mut iterations) = (0usize, 0.0, 0usize);
     for input in inputs {
@@ -151,8 +151,8 @@ pub fn fit(inputs: &[FitInput], spec: &FitSpec) -> Result<FitReport, AnalysisErr
     })
 }
 
-/// Une courbe seule : moindres carrés exacts si le modèle est linéaire et sans
-/// contrainte, sinon Levenberg-Marquardt.
+/// A single curve: exact least squares if the model is linear and
+/// unconstrained, otherwise Levenberg-Marquardt.
 fn fit_one(
     input: &FitInput,
     spec: &FitSpec,
@@ -214,7 +214,7 @@ fn fit_one(
     ))
 }
 
-/// Moindres carrés linéaires exacts (QR), pondérés par `1/σ`.
+/// Exact linear least squares (QR), weighted by `1/σ`.
 fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, usize)> {
     let s = &input.series;
     let n = s.len();
@@ -222,9 +222,9 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
     if n < k || (matches!(model.model(), Model::Logarithm) && s.x.iter().any(|v| *v <= 0.0)) {
         return None;
     }
-    // Polynôme : X centré avant le QR (#283), coefficients ramenés ensuite à
-    // l'axe d'origine ; le résidu se calcule dans l'axe centré (sans l'annulation
-    // catastrophique des grandes puissances de X).
+    // Polynomial: X centerd before the QR (#283), coefficients then brought back to
+    // the original axis; the residual is computed in the centerd axis (without the catastrophic
+    // cancellation of large powers of X).
     let shift = model.x_shift(&s.x);
     let xs: Vec<f64> = s.x.iter().map(|v| v - shift).collect();
     let mut a = model.design_matrix(&xs)?;
@@ -288,8 +288,8 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
     ))
 }
 
-/// Ajustement global : une case par paramètre partagé, une case par courbe pour
-/// les autres.
+/// Global fit: one slot per shared parameter, one slot per curve for
+/// the others.
 fn fit_together(
     inputs: &[FitInput],
     spec: &FitSpec,
@@ -298,7 +298,7 @@ fn fit_together(
     let k = model.param_count();
     let guesses: Vec<Vec<f64>> = inputs.iter().map(|i| model.guess(&i.series)).collect();
     let mut slots: Vec<Slot> = Vec::new();
-    // map[serie][param] = indice de la case.
+    // map[series][param] = slot index.
     let mut map = vec![vec![0usize; k]; inputs.len()];
     for j in 0..k {
         let s = setting(spec, j);
@@ -311,7 +311,7 @@ fn fit_together(
             max: s.max.unwrap_or(def.max),
         };
         if s.shared {
-            // Valeur de départ : moyenne des estimations des courbes.
+            // Starting value: mean of the estimates of the curves.
             let mean = guesses.iter().map(|g| g[j]).sum::<f64>() / inputs.len() as f64;
             slots.push(mk(mean));
             for m in map.iter_mut() {
@@ -358,7 +358,7 @@ fn fit_together(
             plateau: sol.plateau || sol.stalled,
             shifted_x: false,
             chi2: {
-                // χ² de la courbe seule.
+                // χ² of the curve alone.
                 let t = &terms[i];
                 let mut f = vec![0.0; t.x.len()];
                 (t.eval)(&sol.values, &mut f);
@@ -403,32 +403,32 @@ mod tests {
     }
 
     #[test]
-    fn modele_libre_trop_profond_est_refuse_a_l_ajustement() {
-        // Le plafond de l'analyseur remonte jusqu'à l'ajustement, avec la
-        // position d'erreur, sans parcourir la formule entière.
-        let formule = format!("a*{}x{}", "(".repeat(100), ")".repeat(100));
+    fn too_deep_free_model_is_refused_at_the_fit() {
+        // The parser cap reaches the fit, with the
+        // error position, without walking the whole formula.
+        let formula = format!("a*{}x{}", "(".repeat(100), ")".repeat(100));
         let e = fit(
             &[input(|v| v, vec![1.0, 2.0, 3.0])],
-            &spec(Model::Custom { formula: formule }),
+            &spec(Model::Custom { formula }),
         )
         .unwrap_err();
         assert_eq!(
             e,
             AnalysisError::BadExpression(crate::expr::ExprError {
                 kind: crate::expr::ExprErrorKind::TooDeep,
-                position: 102 // `*` coûte 1 : la 100e parenthèse dépasse déjà
+                position: 102 // `*` costs 1: the 100th parenthesis already exceeds
             })
         );
     }
 
     #[test]
-    fn modele_libre_log_est_en_base_10_de_bout_en_bout() {
-        // y = 2 log10(x) + 1 : avec `log` (base 10), a = 2 ; avec `ln`
-        // (naturel), a = 2 / ln 10 ; avec `logx(x, 10)`, a = 2. Si `log`
-        // redevenait naturel (#287), a vaudrait 2 ln 10 ≈ 4,6.
+    fn free_model_log_is_base_10_end_to_end() {
+        // y = 2 log10(x) + 1: with `log` (base 10), a = 2; with `ln`
+        // (natural), a = 2 / ln 10; with `logx(x, 10)`, a = 2. If `log`
+        // became natural again (#287), a would be 2 ln 10 ≈ 4.6.
         let x = grid(30, 0.5, 200.0);
-        let vrai = |v: f64| 2.0 * libm::log10(v) + 1.0;
-        for (formule, a_attendu) in [
+        let truth = |v: f64| 2.0 * libm::log10(v) + 1.0;
+        for (formula, a_expected) in [
             ("a*log(x)+b", 2.0),
             ("a*log10(x)+b", 2.0),
             ("a*logx(x, 10)+b", 2.0),
@@ -436,22 +436,22 @@ mod tests {
             ("a*log2(x)+b", 2.0 * libm::log(2f64) / libm::log(10f64)),
         ] {
             let r = fit(
-                &[input(vrai, x.clone())],
+                &[input(truth, x.clone())],
                 &spec(Model::Custom {
-                    formula: formule.into(),
+                    formula: formula.into(),
                 }),
             )
             .unwrap();
-            assert_eq!(r.param_names, ["a", "b"], "{formule}");
+            assert_eq!(r.param_names, ["a", "b"], "{formula}");
             let v = &r.series[0].values;
-            assert!((v[0] - a_attendu).abs() < 1e-8, "{formule} : a = {}", v[0]);
-            assert!((v[1] - 1.0).abs() < 1e-8, "{formule} : b = {}", v[1]);
-            assert!((r.series[0].r_squared - 1.0).abs() < 1e-12, "{formule}");
+            assert!((v[0] - a_expected).abs() < 1e-8, "{formula} : a = {}", v[0]);
+            assert!((v[1] - 1.0).abs() < 1e-8, "{formula} : b = {}", v[1]);
+            assert!((r.series[0].r_squared - 1.0).abs() < 1e-12, "{formula}");
         }
-        // Base libre : y = 2 ln(x) / ln(b) ne dépend que de a et b ensemble ;
-        // fixer la base à 10 retrouve a.
+        // Free base: y = 2 ln(x) / ln(b) depends only on a and b together;
+        // fixing the base at 10 recovers a.
         let r = fit(
-            &[input(vrai, x)],
+            &[input(truth, x)],
             &spec(Model::Custom {
                 formula: "a*logx(x, 10)+b".into(),
             }),
@@ -461,21 +461,21 @@ mod tests {
     }
 
     #[test]
-    fn droite_exacte_par_moindres_carres_lineaires() {
+    fn exact_line_by_linear_least_squares() {
         let i = input(|x| 1.5 - 0.25 * x, grid(20, 0.0, 10.0));
         let r = fit(&[i], &spec(Model::Linear)).unwrap();
         let s = &r.series[0];
         assert!((s.values[0] - 1.5).abs() < 1e-12 && (s.values[1] + 0.25).abs() < 1e-12);
         assert!((s.r_squared - 1.0).abs() < 1e-12);
         assert_eq!(r.dof, 18);
-        assert_eq!(r.iterations, 1, "chemin exact, sans itération");
+        assert_eq!(r.iterations, 1, "exact path, no iteration");
     }
 
     #[test]
-    fn zero_degre_de_liberte_aucune_incertitude_sur_les_deux_chemins() {
-        // Témoin : 2 points, 2 paramètres libres. Le chemin non linéaire
-        // donnait des incertitudes (non mises à l'échelle) là où le linéaire
-        // n'en donne pas.
+    fn zero_degrees_of_freedom_no_uncertainty_on_both_paths() {
+        // Witness: 2 points, 2 free parameters. The non-linear path
+        // gave uncertainties (not scaled) where the linear one
+        // gives none.
         let x = vec![0.0, 1.0];
         let lin = fit(&[input(|v| 3.0 - 0.5 * v, x.clone())], &spec(Model::Linear)).unwrap();
         let exp = fit(
@@ -488,7 +488,7 @@ mod tests {
             assert!(r.series[0].errors.iter().all(Option::is_none));
             assert!(r.series[0].reduced_chi2.is_nan() && r.reduced_chi2.is_nan());
         }
-        // Un paramètre fixé : 1 libre pour 2 points, dof = 1, incertitude.
+        // A fixed parameter: 1 free for 2 points, dof = 1, uncertainty.
         let mut sp = spec(Model::Exponential);
         sp.params = vec![
             ParamSetting {
@@ -504,9 +504,9 @@ mod tests {
     }
 
     #[test]
-    fn polynome_sur_x_decale_garde_sa_precision() {
-        // #283 : X = 1e5 + t, y = 1 + 2t - 3t². Avant le centrage de X avant le
-        // QR, le résidu valait ~1e-5 ; il doit rester au niveau de l'arrondi.
+    fn polynomial_on_shifted_x_keeps_its_precision() {
+        // #283: X = 1e5 + t, y = 1 + 2t - 3t². Before centering X before the
+        // QR, the residual was ~1e-5; it must stay at the rounding level.
         let t = grid(21, -5.0, 5.0);
         let x: Vec<f64> = t.iter().map(|v| 1e5 + v).collect();
         let y: Vec<f64> = t.iter().map(|v| 1.0 + 2.0 * v - 3.0 * v * v).collect();
@@ -518,7 +518,7 @@ mod tests {
         let s = &r.series[0];
         assert!(s.chi2 < 1e-18, "chi2 = {:e}", s.chi2);
         assert!((s.r_squared - 1.0).abs() < 1e-14);
-        // Coefficients dans l'axe d'origine : y = 1 + 2(X-S) - 3(X-S)², S = 1e5.
+        // Coefficients in the original axis: y = 1 + 2(X-S) - 3(X-S)², S = 1e5.
         let sh = 1e5;
         let want = [1.0 - 2.0 * sh - 3.0 * sh * sh, 2.0 + 6.0 * sh, -3.0];
         for (g, w) in s.values.iter().zip(want) {
@@ -527,11 +527,11 @@ mod tests {
     }
 
     #[test]
-    fn droite_decalee_memes_coefficients_et_erreurs_que_la_droite_centree() {
-        // Données bruitées déterministes. Référence : X centré en 0 (aucun
-        // décalage) ; décalée de S, la droite se déduit par y = c0 + c1 (X-S) :
-        // a1 = c1 (même erreur), a0 = c0 - S c1, var(a0) = var(c0) + S² var(c1)
-        // (colonnes orthogonales, t de moyenne nulle).
+    fn shifted_line_same_coefficients_and_errors_as_the_centerd_line() {
+        // Deterministic noisy data. Reference: X centerd at 0 (no
+        // shift); shifted by S, the line is deduced by y = c0 + c1 (X-S):
+        // a1 = c1 (same error), a0 = c0 - S c1, var(a0) = var(c0) + S² var(c1)
+        // (orthogonal columns, t of zero mean).
         let t = grid(11, -5.0, 5.0);
         let noise = |i: usize| 0.3 * libm::sin((i as f64) * 1.7);
         let mk = |off: f64| {
@@ -562,7 +562,7 @@ mod tests {
         assert!(rel(b.chi2, a.chi2));
     }
 
-    fn fixe(v: f64) -> ParamSetting {
+    fn fixed(v: f64) -> ParamSetting {
         ParamSetting {
             fixed: true,
             initial: Some(v),
@@ -570,18 +570,18 @@ mod tests {
         }
     }
 
-    /// Bruit déterministe d'amplitude ±1 (suite de Weyl).
-    fn bruit(i: usize) -> f64 {
+    /// Deterministic noise of amplitude ±1 (Weyl sequence).
+    fn noise(i: usize) -> f64 {
         ((i as f64 * 0.618_033_988_749_895).fract() - 0.5) * 2.0
     }
 
-    fn assert_incertitudes_presentes(r: &FitReport, libres: &[usize]) {
+    fn assert_uncertainties_present(r: &FitReport, free: &[usize]) {
         for (j, e) in r.series[0].errors.iter().enumerate() {
-            if libres.contains(&j) {
-                let e = e.unwrap_or_else(|| panic!("incertitude absente en {j}"));
-                assert!(e.is_finite() && e > 0.0, "incertitude {j} = {e}");
+            if free.contains(&j) {
+                let e = e.unwrap_or_else(|| panic!("uncertainty absent at {j}"));
+                assert!(e.is_finite() && e > 0.0, "uncertainty {j} = {e}");
             } else {
-                assert!(e.is_none(), "paramètre fixé {j} avec incertitude");
+                assert!(e.is_none(), "fixed parameter {j} with uncertainty");
             }
         }
         assert!(r.reduced_chi2.is_finite() && r.series[0].reduced_chi2.is_finite());
@@ -589,15 +589,15 @@ mod tests {
     }
 
     #[test]
-    fn linaire_et_exponentielle_coherents_a_n_egal() {
-        // n = 2 → dof 0 (rien), n ≥ 3 → dof = n − 2 (incertitudes sur les deux).
+    fn linear_and_exponential_consistent_at_equal_n() {
+        // n = 2 → dof 0 (nothing), n ≥ 3 → dof = n − 2 (uncertainties on both).
         for n in 2..=6usize {
             let x = grid(n, 0.0, 4.0);
             let mk = |f: &dyn Fn(f64) -> f64| {
                 let y: Vec<f64> = x
                     .iter()
                     .enumerate()
-                    .map(|(i, &v)| f(v) + 1e-3 * bruit(i + 1))
+                    .map(|(i, &v)| f(v) + 1e-3 * noise(i + 1))
                     .collect();
                 FitInput {
                     series: Series::new(x.clone(), y),
@@ -618,22 +618,24 @@ mod tests {
                     assert!(r.reduced_chi2.is_nan());
                     assert!(r.series[0].chi2.is_finite());
                 } else {
-                    assert_incertitudes_presentes(r, &[0, 1]);
-                    let attendu = r.series[0].chi2 / (n - 2) as f64;
-                    assert!((r.reduced_chi2 - attendu).abs() <= 1e-12 * attendu.abs().max(1e-300));
+                    assert_uncertainties_present(r, &[0, 1]);
+                    let expected = r.series[0].chi2 / (n - 2) as f64;
+                    assert!(
+                        (r.reduced_chi2 - expected).abs() <= 1e-12 * expected.abs().max(1e-300)
+                    );
                 }
             }
         }
     }
 
     #[test]
-    fn un_degre_de_liberte_donne_des_incertitudes_finies_pour_plusieurs_modeles() {
-        // Exponentielle : 3 points, 2 libres.
+    fn one_degree_of_freedom_gives_finite_uncertainties_for_several_models() {
+        // Exponential: 3 points, 2 free.
         let x = vec![0.0, 1.0, 2.5];
         let y: Vec<f64> = x
             .iter()
             .enumerate()
-            .map(|(i, &v): (usize, &f64)| 3.0 * libm::exp(-v / 2.0) + 1e-2 * bruit(i + 1))
+            .map(|(i, &v): (usize, &f64)| 3.0 * libm::exp(-v / 2.0) + 1e-2 * noise(i + 1))
             .collect();
         let inp = FitInput {
             series: Series::new(x, y),
@@ -641,21 +643,21 @@ mod tests {
         };
         let r = fit(&[inp], &spec(Model::Exponential)).unwrap();
         assert_eq!(r.dof, 1);
-        assert_incertitudes_presentes(&r, &[0, 1]);
+        assert_uncertainties_present(&r, &[0, 1]);
 
-        // Gaussienne : 4 points, y0 fixé → 3 libres.
+        // Gaussian: 4 points, y0 fixed → 3 free.
         let x = vec![-1.0, 0.0, 0.7, 2.0];
         let y: Vec<f64> = x
             .iter()
             .enumerate()
             .map(|(i, v)| {
                 2.0 * libm::exp(-4.0 * libm::log(2f64) * (v - 0.3) * (v - 0.3) / 1.5f64.powi(2))
-                    + 1e-2 * bruit(i + 1)
+                    + 1e-2 * noise(i + 1)
             })
             .collect();
         let mut sp = spec(Model::Gaussian);
         sp.params = vec![
-            fixe(0.0),
+            fixed(0.0),
             ParamSetting {
                 initial: Some(2.0),
                 ..Default::default()
@@ -675,14 +677,14 @@ mod tests {
         };
         let r = fit(&[inp], &sp).unwrap();
         assert_eq!(r.dof, 1);
-        assert_incertitudes_presentes(&r, &[1, 2, 3]);
+        assert_uncertainties_present(&r, &[1, 2, 3]);
 
-        // Expression libre : 3 points, 2 paramètres.
+        // Free expression: 3 points, 2 parameters.
         let x = vec![0.0, 1.0, 2.0];
         let y: Vec<f64> = x
             .iter()
             .enumerate()
-            .map(|(i, &v): (usize, &f64)| 2.0 * libm::exp(-0.7 * v) + 1e-2 * bruit(i + 1))
+            .map(|(i, &v): (usize, &f64)| 2.0 * libm::exp(-0.7 * v) + 1e-2 * noise(i + 1))
             .collect();
         let mut sp = spec(Model::Custom {
             formula: "a*exp(-b*x)".into(),
@@ -703,16 +705,16 @@ mod tests {
         };
         let r = fit(&[inp], &sp).unwrap();
         assert_eq!(r.dof, 1);
-        assert_incertitudes_presentes(&r, &[0, 1]);
+        assert_uncertainties_present(&r, &[0, 1]);
     }
 
     #[test]
-    fn zero_ddl_avec_parametre_fixe_et_modele_personnalise() {
-        // Gaussienne, y0 fixé, 3 libres pour 3 points : dof 0.
+    fn zero_dof_with_a_fixed_parameter_and_a_custom_model() {
+        // Gaussian, y0 fixed, 3 free for 3 points: dof 0.
         let x = vec![-1.0, 0.0, 1.5];
         let mut sp = spec(Model::Gaussian);
         sp.params = vec![
-            fixe(0.0),
+            fixed(0.0),
             ParamSetting {
                 initial: Some(1.8),
                 ..Default::default()
@@ -739,7 +741,7 @@ mod tests {
         assert!(r.reduced_chi2.is_nan() && r.series[0].reduced_chi2.is_nan());
         assert!(r.series[0].chi2.is_finite() && r.series[0].chi2 >= 0.0);
 
-        // Personnalisé, 2 points, 2 paramètres.
+        // Custom, 2 points, 2 parameters.
         let mut sp = spec(Model::Custom {
             formula: "a*exp(-b*x)".into(),
         });
@@ -760,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_ddl_avec_ponderation_sigma_sans_incertitude() {
+    fn zero_dof_with_sigma_weighting_no_uncertainty() {
         let mut i = input(|v| 3.0 * libm::exp(-v / 2.0), vec![0.0, 1.0]);
         i.sigma = Some(vec![0.1, 0.2]);
         let r = fit(&[i], &spec(Model::Exponential)).unwrap();
@@ -769,8 +771,8 @@ mod tests {
     }
 
     #[test]
-    fn dof_negatif_refuse_en_amont_pas_de_solveur() {
-        // n < k : NotEnoughPoints, sur les deux chemins, jamais d'incertitude.
+    fn negative_dof_refused_upstream_no_solver() {
+        // n < k: NotEnoughPoints, on both paths, never an uncertainty.
         for m in [Model::Linear, Model::Exponential] {
             let e = fit(&[input(|v| 1.0 + v, vec![1.0])], &spec(m)).unwrap_err();
             assert_eq!(
@@ -781,10 +783,10 @@ mod tests {
                 }
             );
         }
-        // Un paramètre fixé ramène le besoin à 1 libre : 1 point suffit (dof 0).
+        // A fixed parameter brings the need down to 1 free: 1 point is enough (dof 0).
         let mut sp = spec(Model::Exponential);
         sp.params = vec![
-            fixe(3.0),
+            fixed(3.0),
             ParamSetting {
                 initial: Some(1.5),
                 ..Default::default()
@@ -793,7 +795,7 @@ mod tests {
         let r = fit(&[input(|v| 3.0 * libm::exp(-v / 2.0), vec![1.0])], &sp).unwrap();
         assert_eq!(r.dof, 0);
         assert!(r.series[0].errors.iter().all(Option::is_none));
-        // Cubique sur 3 points : 4 libres > 3.
+        // Cubic on 3 points: 4 free > 3.
         let e = fit(
             &[input(|v| v, vec![0.0, 1.0, 2.0])],
             &spec(Model::Polynomial { degree: 3 }),
@@ -809,14 +811,14 @@ mod tests {
     }
 
     #[test]
-    fn ajustement_global_dof_sur_le_total() {
-        // A par courbe, τ partagé : 3 libres. 2 courbes × 3 points = 6 → dof 3.
+    fn global_fit_dof_on_the_total() {
+        // A per curve, τ shared: 3 free. 2 curves × 3 points = 6 → dof 3.
         let x = vec![0.0, 1.0, 2.5];
         let mk = |a: f64, s: usize| {
             let y: Vec<f64> = x
                 .iter()
                 .enumerate()
-                .map(|(i, &v): (usize, &f64)| a * libm::exp(-v / 3.0) + 1e-2 * bruit(i + s))
+                .map(|(i, &v): (usize, &f64)| a * libm::exp(-v / 3.0) + 1e-2 * noise(i + s))
                 .collect();
             FitInput {
                 series: Series::new(x.clone(), y),
@@ -840,8 +842,8 @@ mod tests {
             assert!(s.errors.iter().all(|e| e.is_some_and(f64::is_finite)));
         }
 
-        // Droite à pente partagée : 2 intercepts + 1 pente = 3 libres.
-        // Courbes de 2 et 1 points = 3 → dof 0, aucune incertitude.
+        // Line with shared slope: 2 intercepts + 1 slope = 3 free.
+        // Curves of 2 and 1 points = 3 → dof 0, no uncertainty.
         let mut sp = spec(Model::Linear);
         sp.params = vec![
             ParamSetting::default(),
@@ -860,7 +862,7 @@ mod tests {
             assert!(s.errors.iter().all(Option::is_none));
             assert!(s.chi2.is_finite());
         }
-        // Un point de plus (dof 1) : incertitudes présentes.
+        // One more point (dof 1): uncertainties present.
         let b2 = input(|v| 5.0 + 2.0 * v, vec![2.0, 3.0]);
         let r = fit(&[a, b2], &sp).unwrap();
         assert_eq!(r.dof, 1);
@@ -871,8 +873,8 @@ mod tests {
     }
 
     #[test]
-    fn ajustement_global_moins_de_points_que_de_libres_refuse() {
-        // 3 libres (2 A + τ), 2 courbes d'un point : 2 < 3.
+    fn global_fit_fewer_points_than_free_refused() {
+        // 3 free (2 A + τ), 2 curves of one point: 2 < 3.
         let mut sp = spec(Model::Exponential);
         sp.params = vec![
             ParamSetting::default(),
@@ -899,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn polynome_de_degre_3() {
+    fn degree_3_polynomial() {
         let i = input(
             |x| 1.0 - 2.0 * x + 0.5 * x * x + 0.1 * x * x * x,
             grid(40, -3.0, 3.0),
@@ -912,9 +914,9 @@ mod tests {
     }
 
     #[test]
-    fn logarithme_refuse_les_x_negatifs_puis_ajuste_sans_cheminer_par_le_lineaire() {
-        // x ≤ 0 présent : le chemin exact est écarté, Levenberg-Marquardt
-        // échoue proprement (modèle non fini au départ).
+    fn logarithm_refuses_negative_x_then_fits_without_going_through_the_linear_path() {
+        // x ≤ 0 present: the exact path is dropped, Levenberg-Marquardt
+        // fails cleanly (non-finite model at the start).
         let i = input(|x| 2.0 + 3.0 * libm::log(x.abs()), grid(11, -5.0, 5.0));
         assert!(fit(&[i], &spec(Model::Logarithm)).is_err());
         let ok = input(|x| 2.0 + 3.0 * libm::log(x), grid(30, 0.5, 20.0));
@@ -923,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn exponentielle_bruitee_dans_les_incertitudes() {
+    fn noisy_exponential_in_the_uncertainties() {
         let x = grid(300, 0.0, 12.0);
         let noise = |i: usize| ((i as f64 * 0.618_033_988_749_895).fract() - 0.5) * 0.1;
         let y: Vec<f64> = x
@@ -939,7 +941,7 @@ mod tests {
         let s = &r.series[0];
         assert!((s.values[2] - 2.0).abs() < 0.1, "tau {}", s.values[2]);
         let e = s.errors[2].unwrap();
-        // L'écart au vrai τ est de l'ordre de l'incertitude annoncée.
+        // The gap to the true τ is of the order of the stated uncertainty.
         assert!(
             (s.values[2] - 2.0).abs() < 6.0 * e,
             "τ={} ±{e}",
@@ -949,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn gaussienne_avec_parametre_fixe_et_bornes() {
+    fn gaussian_with_a_fixed_parameter_and_bounds() {
         let x = grid(200, 0.0, 20.0);
         let i = input(
             |v| 1.0 + 5.0 * libm::exp(-4.0 * std::f64::consts::LN_2 * ((v - 8.0) / 3.0).powi(2)),
@@ -979,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn modele_libre() {
+    fn free_model() {
         let x = grid(100, 0.0, 5.0);
         let i = input(|v| 2.0 * libm::sin(v * 1.3) + 0.5, x);
         let r = fit(
@@ -1009,7 +1011,7 @@ mod tests {
     }
 
     #[test]
-    fn ajustement_global_partage_tau_entre_trois_courbes() {
+    fn global_fit_shares_tau_between_three_curves() {
         let x = grid(120, 0.0, 10.0);
         let amplitudes = [2.0, 5.0, 9.0];
         let inputs: Vec<FitInput> = amplitudes
@@ -1029,16 +1031,16 @@ mod tests {
             assert!((s.values[0] - a).abs() < 1e-5, "A={}", s.values[0]);
             assert!((s.values[1] - 3.0).abs() < 1e-5);
         }
-        // Un seul τ pour les trois courbes.
+        // A single τ for the three curves.
         assert_eq!(r.series[0].values[1], r.series[2].values[1]);
-        // 360 points, 4 paramètres libres (3 A + 1 τ).
+        // 360 points, 4 free parameters (3 A + 1 τ).
         assert_eq!(r.dof, 356);
     }
 
     #[test]
-    fn le_global_tient_ou_les_courbes_seules_divergent() {
-        // Témoin : deux courbes bruitées dont le τ réel est identique ; l'ajustement
-        // global a une incertitude sur τ plus petite que chacune seule.
+    fn the_global_fit_holds_where_the_single_curves_diverge() {
+        // Witness: two noisy curves whose true τ is identical; the global
+        // fit has a smaller uncertainty on τ than each alone.
         let x = grid(60, 0.0, 6.0);
         let mk = |a: f64, phase: f64| {
             let y: Vec<f64> = x
@@ -1068,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn ponderation_par_sigma() {
+    fn weighting_by_sigma() {
         let x = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let y = vec![0.0, 1.0, 2.0, 3.0, 30.0];
         let i = FitInput {
@@ -1080,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn sigma_invalide() {
+    fn invalid_sigma() {
         let i = FitInput {
             series: Series::new(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]),
             sigma: Some(vec![1.0, 0.0, 1.0]),
@@ -1092,16 +1094,16 @@ mod tests {
     }
 
     #[test]
-    fn trop_peu_de_points() {
+    fn too_few_points() {
         let i = input(|x| x, vec![0.0, 1.0]);
         assert!(fit(&[i], &spec(Model::Polynomial { degree: 3 })).is_err());
     }
 
-    // ---- #283 : polynôme (QR) sur X décalé ----
+    // ---- #283: polynomial (QR) on shifted X ----
 
-    /// Coefficients en puissances de `x` de `Σ cⱼ (x - s)ʲ`, par multiplications
-    /// successives : référence indépendante de `CompiledModel::unshift_matrix`.
-    fn developpe(c: &[f64], s: f64) -> Vec<f64> {
+    /// Coefficients in powers of `x` of `Σ cⱼ (x - s)ʲ`, by successive multiplications:
+    /// independent reference of `CompiledModel::unshift_matrix`.
+    fn expand_shift(c: &[f64], s: f64) -> Vec<f64> {
         let mut out = vec![0.0; c.len()];
         let mut pow = vec![1.0];
         for cj in c {
@@ -1118,13 +1120,13 @@ mod tests {
         out
     }
 
-    /// Valeur de `Σ cⱼ tʲ` (Horner), en axe centré.
+    /// Value of `Σ cⱼ tʲ` (Horner), in the centerd axis.
     fn horner(c: &[f64], t: f64) -> f64 {
         c.iter().rev().fold(0.0, |a, cj| a * t + cj)
     }
 
-    /// `(AᵀA)⁻¹` de la base `1, t, …, tᵈ`, par Gauss-Jordan (référence).
-    fn covariance_brute(t: &[f64], d: usize) -> Vec<Vec<f64>> {
+    /// `(AᵀA)⁻¹` of the basis `1, t, …, tᵈ`, by Gauss-Jordan (reference).
+    fn raw_covariance(t: &[f64], d: usize) -> Vec<Vec<f64>> {
         let k = d + 1;
         let mut m = vec![vec![0.0; 2 * k]; k];
         for i in 0..k {
@@ -1155,15 +1157,15 @@ mod tests {
         m.into_iter().map(|r| r[k..].to_vec()).collect()
     }
 
-    /// Variances des coefficients en axe d'origine : diag(T·cov·Tᵀ), `T` étant
-    /// construite colonne par colonne par `developpe`.
-    fn variances_origine(cov: &[Vec<f64>], s: f64) -> Vec<f64> {
+    /// Variances of the coefficients in the original axis: diag(T·cov·Tᵀ), `T` being
+    /// built column by column by `expand_shift`.
+    fn original_variances(cov: &[Vec<f64>], s: f64) -> Vec<f64> {
         let k = cov.len();
         let cols: Vec<Vec<f64>> = (0..k)
             .map(|j| {
                 let mut e = vec![0.0; k];
                 e[j] = 1.0;
-                developpe(&e, s)
+                expand_shift(&e, s)
             })
             .collect();
         (0..k)
@@ -1179,9 +1181,9 @@ mod tests {
             .collect()
     }
 
-    /// Série à X = off + t, où `t` est recalculé *exactement* à partir des X
-    /// arrondis (Sterbenz) : les données sont alors un polynôme exact de X - off.
-    fn serie_decalee(off: f64, t: &[f64], f: impl Fn(usize, f64) -> f64) -> (FitInput, Vec<f64>) {
+    /// Series at X = off + t, where `t` is recomputed *exactly* from the rounded
+    /// X (Sterbenz): the data are then an exact polynomial of X - off.
+    fn shifted_series(off: f64, t: &[f64], f: impl Fn(usize, f64) -> f64) -> (FitInput, Vec<f64>) {
         let x: Vec<f64> = t.iter().map(|v| off + v).collect();
         let tt: Vec<f64> = x.iter().map(|v| v - off).collect();
         let y = tt.iter().enumerate().map(|(i, &v)| f(i, v)).collect();
@@ -1197,26 +1199,26 @@ mod tests {
     const COEFFS: [f64; 6] = [1.0, -2.0, 0.5, 1.5, -0.7, 0.3];
 
     #[test]
-    fn polynome_exact_degres_1_a_5_sur_x_decale() {
-        // Résidu max < 1e-10 (chi2 < 1e-20), coefficients ré-exprimés dans
-        // l'axe d'origine à 1e-8 relatif, chemin exact (aucune itération LM).
+    fn exact_polynomial_degrees_1_to_5_on_shifted_x() {
+        // Max residual < 1e-10 (chi2 < 1e-20), coefficients re-expressed in
+        // the original axis to 1e-8 relative, exact path (no LM iteration).
         let t = grid(21, -2.0, 2.0);
         for d in 1..=5usize {
             let c = &COEFFS[..=d];
             for off in [0.0, 1e2, 1e5, 1e6] {
-                let (i, _) = serie_decalee(off, &t, |_, v| horner(c, v));
+                let (i, _) = shifted_series(off, &t, |_, v| horner(c, v));
                 let r = fit(&[i], &spec(Model::Polynomial { degree: d as u32 })).unwrap();
                 let s = &r.series[0];
-                let ctx = format!("degré {d}, décalage {off:e}");
-                assert_eq!(r.iterations, 1, "{ctx} : chemin QR attendu");
+                let ctx = format!("degree {d}, shift {off:e}");
+                assert_eq!(r.iterations, 1, "{ctx}: QR path expected");
                 assert_eq!(s.dof, 21 - d - 1, "{ctx}");
                 assert!(s.chi2 < 1e-20, "{ctx} : chi2 = {:e}", s.chi2);
                 assert!((s.r_squared - 1.0).abs() < 1e-13, "{ctx}");
-                let want = developpe(c, off);
+                let want = expand_shift(c, off);
                 for (j, (g, w)) in s.values.iter().zip(&want).enumerate() {
                     assert!(
                         (g - w).abs() <= 1e-8 * w.abs(),
-                        "{ctx} : a{j} = {g:e} contre {w:e}"
+                        "{ctx}: a{j} = {g:e} against {w:e}"
                     );
                 }
                 assert!(
@@ -1229,57 +1231,57 @@ mod tests {
     }
 
     #[test]
-    fn polynome_bruite_coefficients_et_erreurs_invariants_par_translation_de_x() {
-        // Référence : même jeu centré (X = t). Décalé de S, le polynôme est le
-        // même en X - S : coefficients = développement, erreurs = diag(T·cov·Tᵀ)
-        // calculée à la main (cov inversée par Gauss-Jordan sur la base de t).
+    fn noisy_polynomial_coefficients_and_errors_invariant_by_translation_of_x() {
+        // Reference: same centerd set (X = t). Shifted by S, the polynomial is the
+        // same in X - S: coefficients = expansion, errors = diag(T·cov·Tᵀ)
+        // computed by hand (cov inverted by Gauss-Jordan on the basis of t).
         let t = grid(25, -2.0, 2.0);
         let noise = |i: usize| 0.05 * libm::sin((i as f64) * 1.7);
         for d in 1..=5usize {
             let c = &COEFFS[..=d];
             let model = Model::Polynomial { degree: d as u32 };
-            let (i0, t0) = serie_decalee(0.0, &t, |i, v| horner(c, v) + noise(i));
+            let (i0, t0) = shifted_series(0.0, &t, |i, v| horner(c, v) + noise(i));
             let r0 = fit(&[i0], &spec(model.clone())).unwrap();
             let a = &r0.series[0];
-            let cov = covariance_brute(&t0, d);
+            let cov = raw_covariance(&t0, d);
             for off in [1e2, 1e5, 1e6] {
-                let (i1, _) = serie_decalee(off, &t, |i, v| horner(c, v) + noise(i));
+                let (i1, _) = shifted_series(off, &t, |i, v| horner(c, v) + noise(i));
                 let r1 = fit(&[i1], &spec(model.clone())).unwrap();
                 let b = &r1.series[0];
-                let ctx = format!("degré {d}, décalage {off:e}");
-                // Statistiques de qualité inchangées.
+                let ctx = format!("degree {d}, shift {off:e}");
+                // Quality statistics unchanged.
                 assert!((b.chi2 - a.chi2).abs() <= 1e-6 * a.chi2, "{ctx}");
                 assert!((b.reduced_chi2 - a.reduced_chi2).abs() <= 1e-6 * a.reduced_chi2);
                 assert!((b.r_squared - a.r_squared).abs() < 1e-9, "{ctx}");
                 assert_eq!((b.dof, b.points), (a.dof, a.points), "{ctx}");
-                // Coefficients = ceux du jeu centré, ré-exprimés.
-                let want = developpe(&a.values, off);
+                // Coefficients = those of the centerd set, re-expressed.
+                let want = expand_shift(&a.values, off);
                 for (j, (g, w)) in b.values.iter().zip(&want).enumerate() {
                     assert!(
                         (g - w).abs() <= 1e-6 * w.abs(),
-                        "{ctx} : a{j} = {g:e} contre {w:e}"
+                        "{ctx}: a{j} = {g:e} against {w:e}"
                     );
                 }
-                // Erreurs = racine de scale · diag(T·cov·Tᵀ).
-                let var = variances_origine(&cov, off);
+                // Errors = root of scale · diag(T·cov·Tᵀ).
+                let var = original_variances(&cov, off);
                 for (j, (e, v)) in b.errors.iter().zip(&var).enumerate() {
                     let w = (v * a.reduced_chi2).sqrt();
                     let g = e.unwrap();
                     assert!(
                         (g - w).abs() <= 1e-5 * w,
-                        "{ctx} : erreur a{j} = {g:e} contre {w:e}"
+                        "{ctx}: error a{j} = {g:e} against {w:e}"
                     );
                 }
-                // Le coefficient de tête ne bouge pas avec l'axe : même erreur.
+                // The leading coefficient does not move with the axis: same error.
                 let (ga, gb) = (a.errors[d].unwrap(), b.errors[d].unwrap());
-                assert!((ga - gb).abs() <= 1e-6 * ga, "{ctx} : tête");
+                assert!((ga - gb).abs() <= 1e-6 * ga, "{ctx}: leading");
             }
         }
     }
 
-    /// Régression linéaire à la main : (pente, ordonnée à l'origine, erreurs
-    /// [ordonnée, pente]) pour des poids `w` (1 sans pondération).
-    fn droite_a_la_main(x: &[f64], y: &[f64], w: &[f64]) -> ([f64; 2], [f64; 2], f64) {
+    /// Linear regression by hand: (slope, intercept, errors
+    /// [intercept, slope]) for weights `w` (1 without weighting).
+    fn hand_line(x: &[f64], y: &[f64], w: &[f64]) -> ([f64; 2], [f64; 2], f64) {
         let sw: f64 = w.iter().sum();
         let xb = x.iter().zip(w).map(|(x, w)| x * w).sum::<f64>() / sw;
         let yb = y.iter().zip(w).map(|(y, w)| y * w).sum::<f64>() / sw;
@@ -1302,13 +1304,13 @@ mod tests {
     }
 
     #[test]
-    fn droite_bruitee_valeurs_et_erreurs_contre_la_regression_a_la_main() {
-        // Écart-type de l'ordonnée à l'origine = s·sqrt(1/n + x̄²/Sxx) : le terme
-        // x̄² est précisément ce que la propagation T·cov·Tᵀ doit restituer.
+    fn noisy_line_values_and_errors_against_the_hand_regression() {
+        // Standard deviation of the intercept = s·sqrt(1/n + x̄²/Sxx): the term
+        // x̄² is precisely what the T·cov·Tᵀ propagation must restore.
         let t = grid(15, -3.0, 3.0);
         let noise = |i: usize| 0.2 * libm::cos((i as f64) * 2.3);
         for off in [0.0, 5.0, 1e3, 1e5, 1e6] {
-            let (i, tt) = serie_decalee(off, &t, |k, v| 3.0 - 0.4 * v + noise(k));
+            let (i, tt) = shifted_series(off, &t, |k, v| 3.0 - 0.4 * v + noise(k));
             let x = i.series.x.clone();
             let y: Vec<f64> = tt
                 .iter()
@@ -1316,12 +1318,12 @@ mod tests {
                 .map(|(k, v)| 3.0 - 0.4 * v + noise(k))
                 .collect();
             let w = vec![1.0; x.len()];
-            // La référence à la main travaille en axe centré puis re-décale : on
-            // lui donne t pour la précision et on convertit l'ordonnée.
-            let (c, _, chi2) = droite_a_la_main(&tt, &y, &w);
+            // The hand reference works in the centerd axis then re-shifts: we
+            // give it t for precision and convert the intercept.
+            let (c, _, chi2) = hand_line(&tt, &y, &w);
             let r = fit(&[i], &spec(Model::Linear)).unwrap();
             let s = &r.series[0];
-            let ctx = format!("décalage {off:e}");
+            let ctx = format!("shift {off:e}");
             let (a0, a1) = (c[0] - off * c[1], c[1]);
             assert!((s.values[1] - a1).abs() <= 1e-9 * a1.abs(), "{ctx}");
             assert!(
@@ -1329,8 +1331,8 @@ mod tests {
                 "{ctx}"
             );
             assert!((s.chi2 - chi2).abs() <= 1e-9 * chi2, "{ctx}");
-            // Erreurs dans l'axe d'origine : x̄ = off + moyenne(t).
-            let (_, e_o, _) = droite_a_la_main(&x, &y, &w);
+            // Errors in the original axis: x̄ = off + mean(t).
+            let (_, e_o, _) = hand_line(&x, &y, &w);
             assert!(
                 (s.errors[1].unwrap() - e_o[1]).abs() <= 1e-6 * e_o[1],
                 "{ctx}"
@@ -1343,35 +1345,35 @@ mod tests {
     }
 
     #[test]
-    fn droite_ponderee_par_sigma_sur_x_decale() {
+    fn line_weighted_by_sigma_on_shifted_x() {
         let t = grid(12, -3.0, 3.0);
         let sig: Vec<f64> = (0..12).map(|i| 0.1 + 0.05 * i as f64).collect();
         let noise = |i: usize| 0.2 * libm::sin((i as f64) * 1.1);
         let w: Vec<f64> = sig.iter().map(|s| 1.0 / (s * s)).collect();
         for off in [0.0, 1e4, 1e6] {
-            let (mut i, tt) = serie_decalee(off, &t, |k, v| 1.0 + 0.5 * v + noise(k));
+            let (mut i, tt) = shifted_series(off, &t, |k, v| 1.0 + 0.5 * v + noise(k));
             i.sigma = Some(sig.clone());
             let y = i.series.y.clone();
-            let (c, e_t, chi2) = droite_a_la_main(&tt, &y, &w);
+            let (c, e_t, chi2) = hand_line(&tt, &y, &w);
             let r = fit(&[i.clone()], &spec(Model::Linear)).unwrap();
             let s = &r.series[0];
-            let ctx = format!("décalage {off:e}");
+            let ctx = format!("shift {off:e}");
             assert!((s.values[1] - c[1]).abs() <= 1e-9 * c[1].abs(), "{ctx}");
             assert!((s.chi2 - chi2).abs() <= 1e-9 * chi2, "{ctx}");
-            // Erreur de pente indépendante de l'axe ; celle de l'ordonnée suit
-            // s·sqrt(1/Σw + x̄_w²/Sxx) avec x̄_w pondérée, en axe d'origine.
+            // Slope error independent of the axis; the intercept one follows
+            // s·sqrt(1/Σw + x̄_w²/Sxx) with weighted x̄_w, in the original axis.
             assert!(
                 (s.errors[1].unwrap() - e_t[1]).abs() <= 1e-6 * e_t[1],
                 "{ctx}"
             );
             let x = &i.series.x;
-            let (_, e_o, _) = droite_a_la_main(x, &y, &w);
+            let (_, e_o, _) = hand_line(x, &y, &w);
             assert!(
                 (s.errors[0].unwrap() - e_o[0]).abs() <= 1e-6 * e_o[0],
                 "{ctx}"
             );
-            // Doubler tous les σ : mêmes coefficients et mêmes erreurs
-            // (variance résiduelle estimée), χ² divisé par 4.
+            // Doubling all the σ: same coefficients and same errors
+            // (estimated residual variance), χ² divided by 4.
             let mut j = i.clone();
             j.sigma = Some(sig.iter().map(|v| 2.0 * v).collect());
             let r2 = fit(&[j], &spec(Model::Linear)).unwrap();
@@ -1385,32 +1387,32 @@ mod tests {
     }
 
     #[test]
-    fn polynome_pondere_sur_x_decale_memes_coefficients_que_centre() {
+    fn weighted_polynomial_on_shifted_x_same_coefficients_as_centerd() {
         let t = grid(14, -2.0, 2.0);
         let sig: Vec<f64> = (0..14).map(|i| 0.05 + 0.02 * i as f64).collect();
         let noise = |i: usize| 0.04 * libm::sin((i as f64) * 0.9);
         let c = &COEFFS[..=3];
         let m = Model::Polynomial { degree: 3 };
-        let (mut i0, _) = serie_decalee(0.0, &t, |k, v| horner(c, v) + noise(k));
+        let (mut i0, _) = shifted_series(0.0, &t, |k, v| horner(c, v) + noise(k));
         i0.sigma = Some(sig.clone());
         let a = fit(&[i0], &spec(m.clone())).unwrap();
-        let (mut i1, _) = serie_decalee(1e5, &t, |k, v| horner(c, v) + noise(k));
+        let (mut i1, _) = shifted_series(1e5, &t, |k, v| horner(c, v) + noise(k));
         i1.sigma = Some(sig);
         let b = fit(&[i1], &spec(m)).unwrap();
-        let want = developpe(&a.series[0].values, 1e5);
+        let want = expand_shift(&a.series[0].values, 1e5);
         for (g, w) in b.series[0].values.iter().zip(&want) {
-            assert!((g - w).abs() <= 1e-6 * w.abs(), "{g:e} contre {w:e}");
+            assert!((g - w).abs() <= 1e-6 * w.abs(), "{g:e} against {w:e}");
         }
         assert!((b.series[0].chi2 - a.series[0].chi2).abs() <= 1e-6 * a.series[0].chi2);
     }
 
     #[test]
-    fn courbes_independantes_a_x_differents_ont_chacune_leur_decalage() {
-        // Sans paramètre partagé, chaque courbe passe par fit_linear avec la
-        // moyenne de *ses* X : le résultat est celui de l'ajustement isolé.
+    fn independent_curves_with_different_x_each_have_their_own_shift() {
+        // Without a shared parameter, each curve goes through fit_linear with the
+        // mean of *its* X: the result is that of the isolated fit.
         let t = grid(15, -3.0, 3.0);
         let mk = |off: f64, c0: f64| {
-            serie_decalee(off, &t, |k, v| {
+            shifted_series(off, &t, |k, v| {
                 c0 + 0.5 * v - 0.2 * v * v + 0.01 * libm::sin(k as f64)
             })
             .0
@@ -1426,13 +1428,13 @@ mod tests {
     }
 
     #[test]
-    fn ajustement_global_de_droites_a_x_differents_garde_les_bons_coefficients() {
-        // Le global passe par Levenberg-Marquardt, sans centrage : on épingle
-        // que pente partagée et ordonnées restent exactes pour une droite.
+    fn global_fit_of_lines_with_different_x_keeps_the_right_coefficients() {
+        // The global goes through Levenberg-Marquardt, without centering: we pin
+        // that shared slope and intercepts stay exact for a line.
         let t = grid(21, -5.0, 5.0);
         for off in [1e2, 1e5, 1e6] {
-            let (a, _) = serie_decalee(off, &t, |_, v| 1.0 + 2.0 * v);
-            let (b, _) = serie_decalee(2.0 * off, &t, |_, v| 5.0 + 2.0 * v);
+            let (a, _) = shifted_series(off, &t, |_, v| 1.0 + 2.0 * v);
+            let (b, _) = shifted_series(2.0 * off, &t, |_, v| 5.0 + 2.0 * v);
             let mut sp = spec(Model::Linear);
             sp.params = vec![
                 ParamSetting::default(),
@@ -1444,7 +1446,7 @@ mod tests {
             let r = fit(&[a, b], &sp).unwrap();
             let want = [(1.0 - 2.0 * off), (5.0 - 4.0 * off)];
             for (s, w) in r.series.iter().zip(want) {
-                assert!((s.values[1] - 2.0).abs() < 1e-8, "pente {}", s.values[1]);
+                assert!((s.values[1] - 2.0).abs() < 1e-8, "slope {}", s.values[1]);
                 assert!((s.values[0] - w).abs() <= 1e-8 * w.abs(), "{off:e}");
             }
             assert_eq!(r.dof, 42 - 3);
@@ -1452,12 +1454,12 @@ mod tests {
     }
 
     #[test]
-    fn polynome_contraint_sur_x_decale_precis_si_modere_et_signale_quand_il_se_degrade() {
-        // Un polynôme contraint (fixé, valeur initiale) passe par LM, sans
-        // centrage : sa précision se dégrade quand X s'éloigne de 0. Épinglé :
-        // (1) décalage modéré, résultat juste ; (2) sinon, un résultat dont le
-        // χ² dépasse 100 fois celui du jeu centré porte toujours un
-        // avertissement (plateau ou paramètres indéterminés), jamais silencieux.
+    fn constrained_polynomial_on_shifted_x_accurate_if_moderate_and_flagged_when_it_degrades() {
+        // A constrained polynomial (fixed, initial value) goes through LM, without
+        // centering: its precision degrades when X moves away from 0. Pinned:
+        // (1) moderate shift, accurate result; (2) otherwise, a result whose
+        // χ² exceeds 100 times that of the centerd set always carries a
+        // warning (plateau or undetermined parameters), never silent.
         let t = grid(21, -5.0, 5.0);
         let noise = |i: usize| 0.01 * libm::sin((i as f64) * 1.7);
         for d in 2..=4usize {
@@ -1471,24 +1473,24 @@ mod tests {
                     initial: Some(top),
                     ..Default::default()
                 });
-                let (i0, _) = serie_decalee(0.0, &t, |k, v| horner(&c, v) + noise(k));
+                let (i0, _) = shifted_series(0.0, &t, |k, v| horner(&c, v) + noise(k));
                 let ref0 = fit(&[i0], &sp).unwrap().series.remove(0);
                 for off in [1e2, 1e3, 1e4, 1e5, 1e6] {
-                    let (i, _) = serie_decalee(off, &t, |k, v| horner(&c, v) + noise(k));
+                    let (i, _) = shifted_series(off, &t, |k, v| horner(&c, v) + noise(k));
                     let s = fit(&[i], &sp).unwrap().series.remove(0);
-                    let ctx = format!("degré {d}, fixé {fixed}, décalage {off:e}");
+                    let ctx = format!("degree {d}, fixed {fixed}, shift {off:e}");
                     assert!(s.values.iter().all(|v| v.is_finite()), "{ctx}");
                     if s.chi2 > 100.0 * ref0.chi2 {
                         assert!(
                             s.plateau || s.undetermined > 0,
-                            "{ctx} : chi2 = {:e}",
+                            "{ctx}: chi2 = {:e}",
                             s.chi2
                         );
                     }
                     if off <= 1e2 && d <= 3 {
-                        let want = developpe(&ref0.values, off);
+                        let want = expand_shift(&ref0.values, off);
                         for (g, w) in s.values.iter().zip(&want) {
-                            assert!((g - w).abs() <= 1e-5 * w.abs(), "{ctx} : {g:e} / {w:e}");
+                            assert!((g - w).abs() <= 1e-5 * w.abs(), "{ctx}: {g:e} / {w:e}");
                         }
                     }
                 }
@@ -1496,14 +1498,14 @@ mod tests {
         }
     }
 
-    /// #296 : un polynôme contraint (LM, non centré) sur un X très décalé de 0
-    /// est signalé ; centré, modérément décalé ou sans contrainte (QR centré),
-    /// il ne l'est pas.
+    /// #296: a constrained polynomial (LM, uncenterd) on an X very far from 0
+    /// is flagged; centerd, moderately shifted or unconstrained (centerd QR),
+    /// it is not.
     #[test]
-    fn polynome_contraint_sur_x_tres_decale_est_signale() {
+    fn constrained_polynomial_on_very_shifted_x_is_flagged() {
         let t = grid(21, -5.0, 5.0);
         let c = [1.0, 0.5, 0.25];
-        let contraint = |fixed_top: bool| {
+        let constrained = |fixed_top: bool| {
             let mut sp = spec(Model::Polynomial { degree: 2 });
             sp.params = vec![ParamSetting::default(); 2];
             sp.params.push(ParamSetting {
@@ -1513,28 +1515,28 @@ mod tests {
             });
             sp
         };
-        let signale = |off: f64, sp: &FitSpec| {
-            let (i, _) = serie_decalee(off, &t, |_, v| horner(&c, v));
+        let flagged = |off: f64, sp: &FitSpec| {
+            let (i, _) = shifted_series(off, &t, |_, v| horner(&c, v));
             fit(&[i], sp).unwrap().series.remove(0).shifted_x
         };
-        assert!(signale(1e4, &contraint(true)), "contraint, X ≈ 1e4");
-        assert!(signale(1e4, &contraint(false)), "valeur initiale seule");
-        assert!(!signale(0.0, &contraint(true)), "témoin : X centré");
-        assert!(!signale(1e2, &contraint(true)), "témoin : décalage modéré");
-        let mut libre = spec(Model::Polynomial { degree: 2 });
-        libre.params = vec![ParamSetting::default(); 3];
+        assert!(flagged(1e4, &constrained(true)), "constrained, X ≈ 1e4");
+        assert!(flagged(1e4, &constrained(false)), "initial value only");
+        assert!(!flagged(0.0, &constrained(true)), "witness: centerd X");
+        assert!(!flagged(1e2, &constrained(true)), "witness: moderate shift");
+        let mut free_spec = spec(Model::Polynomial { degree: 2 });
+        free_spec.params = vec![ParamSetting::default(); 3];
         assert!(
-            !signale(1e4, &libre),
-            "témoin : sans contrainte (QR centré)"
+            !flagged(1e4, &free_spec),
+            "witness: unconstrained (centerd QR)"
         );
     }
 
     #[test]
-    fn x_tous_egaux_jamais_de_nan_silencieux() {
-        // Rang déficient : le QR refuse (colonne x - moyenne nulle), l'ajustement
-        // retombe sur Levenberg-Marquardt. Épinglé : pas d'erreur, valeurs
-        // finies, la droite passe par la moyenne des Y, et le défaut est signalé
-        // (plateau, paramètre indéterminé), sans NaN dans les incertitudes.
+    fn all_x_equal_never_a_silent_nan() {
+        // Rank deficient: the QR refuses (column x - mean zero), the fit
+        // falls back on Levenberg-Marquardt. Pinned: no error, finite
+        // values, the line goes through the mean of Y, and the defect is flagged
+        // (plateau, undetermined parameter), with no NaN in the uncertainties.
         for x0 in [0.0, 1e5] {
             let y = vec![0.0, 1.0, 2.0];
             let i = FitInput {
@@ -1551,9 +1553,9 @@ mod tests {
                 s.errors
             );
             let at = s.values[0] + s.values[1] * x0;
-            assert!((at - 1.0).abs() < 1e-6, "valeur ajustée en x0 : {at}");
+            assert!((at - 1.0).abs() < 1e-6, "fitted value at x0: {at}");
         }
-        // Polynôme degré 2, 3 points confondus : dof 0, aucune incertitude.
+        // Polynomial degree 2, 3 coinciding points: dof 0, no uncertainty.
         let i = FitInput {
             series: Series::new(vec![1e5; 3], vec![0.0, 1.0, 2.0]),
             sigma: None,
@@ -1567,8 +1569,8 @@ mod tests {
     }
 
     #[test]
-    fn n_egal_degre_plus_un_sur_x_decale_interpole_sans_incertitude() {
-        // dof = 0 : interpolation exacte, aucune incertitude, χ² réduit NaN.
+    fn n_equal_degree_plus_one_on_shifted_x_interpolates_without_uncertainty() {
+        // dof = 0: exact interpolation, no uncertainty, reduced χ² NaN.
         for off in [0.0, 1e5, 1e6] {
             let x = vec![off - 1.0, off, off + 2.0];
             let c = [2.0, -1.0, 0.5];
@@ -1579,7 +1581,7 @@ mod tests {
             };
             let r = fit(&[i], &spec(Model::Polynomial { degree: 2 })).unwrap();
             let s = &r.series[0];
-            let want = developpe(&c, off);
+            let want = expand_shift(&c, off);
             for (g, w) in s.values.iter().zip(&want) {
                 assert!((g - w).abs() <= 1e-8 * w.abs(), "{off:e} : {g:e} / {w:e}");
             }
@@ -1588,7 +1590,7 @@ mod tests {
             assert!(s.reduced_chi2.is_nan() && r.reduced_chi2.is_nan());
             assert!(s.chi2 < 1e-18);
         }
-        // Droite par deux points à X = 1e6.
+        // Line through two points at X = 1e6.
         let i = FitInput {
             series: Series::new(vec![1e6, 1e6 + 1.0], vec![1.0, 3.0]),
             sigma: None,
@@ -1601,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn un_seul_point_sur_x_decale_est_refuse() {
+    fn a_single_point_on_shifted_x_is_refused() {
         for (m, needed) in [(Model::Linear, 2), (Model::Polynomial { degree: 2 }, 3)] {
             let i = FitInput {
                 series: Series::new(vec![1e5], vec![1.0]),
@@ -1615,9 +1617,9 @@ mod tests {
     }
 
     #[test]
-    fn x_centre_en_zero_valeurs_de_reference_inchangees() {
-        // Non-régression : X symétrique (moyenne exactement 0, aucun décalage),
-        // valeurs calculées hors du dépôt (moindres carrés, numpy).
+    fn x_centerd_at_zero_reference_values_unchanged() {
+        // Non-regression: symmetric X (mean exactly 0, no shift),
+        // values computed outside the repository (least squares, numpy).
         let x = vec![-2.0, -1.0, 0.0, 1.0, 2.0];
         let y = vec![4.1, 1.9, 1.2, 1.8, 4.2];
         let mk = || FitInput {
@@ -1628,7 +1630,7 @@ mod tests {
         let r = fit(&[mk()], &spec(Model::Polynomial { degree: 2 })).unwrap();
         let s = &r.series[0];
         for (g, w) in s.values.iter().zip([1.14, 0.01, 0.75]) {
-            assert!(close(*g, w), "{g} contre {w}");
+            assert!(close(*g, w), "{g} against {w}");
         }
         assert!(close(s.chi2, 0.016) && s.dof == 2);
         let scale = 0.016 / 2.0;
@@ -1638,7 +1640,7 @@ mod tests {
             (scale * 5.0 / 70.0_f64).sqrt(),
         ];
         for (e, w) in s.errors.iter().zip(want) {
-            assert!(close(e.unwrap(), w), "{e:?} contre {w}");
+            assert!(close(e.unwrap(), w), "{e:?} against {w}");
         }
         let r = fit(&[mk()], &spec(Model::Linear)).unwrap();
         let s = &r.series[0];

@@ -1,6 +1,6 @@
-//! Garde-fous issus de la relecture du chantier #181 : entrées vides sans panique,
-//! ajustement indépendant de l'échelle des Y, statistiques par courbe d'un lot,
-//! plafonds des réglages.
+//! Guards from the review of work package #181: empty inputs without panic,
+//! fit independent of the Y scale, per-curve statistics of a batch, setting
+//! caps.
 
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use stokesforge_analysis::correct::CorrectOp;
@@ -16,7 +16,7 @@ fn value(o: &Outcome, key: &str) -> f64 {
     o.values
         .iter()
         .find(|v| v.key == key)
-        .unwrap_or_else(|| panic!("valeur '{key}' absente"))
+        .unwrap_or_else(|| panic!("value '{key}' missing"))
         .value
 }
 
@@ -89,7 +89,7 @@ fn every_operation() -> Vec<Operation> {
 }
 
 #[test]
-fn une_serie_vide_ou_minuscule_ne_fait_jamais_paniquer() {
+fn an_empty_or_tiny_series_never_panics() {
     let aux = AuxInput {
         x: vec![0.0, 1.0, 2.0],
         y: vec![1.0, 2.0, 1.0],
@@ -97,8 +97,8 @@ fn une_serie_vide_ou_minuscule_ne_fait_jamais_paniquer() {
     for n in 0..4 {
         let series = input((0..n).map(f64::from).collect(), vec![1.0; n as usize]);
         for op in every_operation() {
-            // Ok ou Err, peu importe : l'acteur de session n'a pas de
-            // `catch_unwind`, une panique y est fatale.
+            // Ok or Err, no matter: the session actor has no `catch_unwind`,
+            // a panic there is fatal.
             let _ = run(&op, std::slice::from_ref(&series), Some(&aux));
         }
         let _ = run(
@@ -119,7 +119,7 @@ fn une_serie_vide_ou_minuscule_ne_fait_jamais_paniquer() {
 }
 
 #[test]
-fn des_pics_poses_a_la_main_sur_une_colonne_videe_sont_une_erreur() {
+fn hand_placed_peaks_on_an_emptied_column_are_an_error() {
     let op = every_operation().remove(5);
     assert!(matches!(
         run(&op, &[input(vec![], vec![])], None),
@@ -128,8 +128,8 @@ fn des_pics_poses_a_la_main_sur_une_colonne_videe_sont_une_erreur() {
 }
 
 #[test]
-fn l_ajustement_ne_depend_pas_de_l_echelle_des_y() {
-    // y0 + A·exp(−x/τ), τ = 2, ajusté avec les valeurs initiales automatiques.
+fn the_fit_does_not_depend_on_the_y_scale() {
+    // y0 + A·exp(−x/τ), τ = 2, fitted with the automatic initial values.
     for scale in [1e-12, 1e-9, 1e-3, 1.0, 1e6] {
         let x: Vec<f64> = (0..60).map(|i| f64::from(i) * 0.25).collect();
         let y: Vec<f64> = x
@@ -144,15 +144,14 @@ fn l_ajustement_ne_depend_pas_de_l_echelle_des_y() {
             range: None,
             residuals: false,
         };
-        let out =
-            run(&op, &[input(x, y)], None).unwrap_or_else(|e| panic!("échelle {scale} : {e}"));
+        let out = run(&op, &[input(x, y)], None).unwrap_or_else(|e| panic!("scale {scale}: {e}"));
         let tau = value(&out[0], "param.tau");
-        assert!((tau - 2.0).abs() < 1e-4, "échelle {scale} : τ = {tau}");
+        assert!((tau - 2.0).abs() < 1e-4, "scale {scale}: τ = {tau}");
     }
 }
 
 #[test]
-fn un_lot_independant_porte_les_degres_de_liberte_de_chaque_courbe() {
+fn an_independent_batch_carries_the_degrees_of_freedom_of_each_curve() {
     let curves: Vec<SeriesInput> = (0..3)
         .map(|k| {
             let x: Vec<f64> = (0..20).map(f64::from).collect();
@@ -174,12 +173,12 @@ fn un_lot_independant_porte_les_degres_de_liberte_de_chaque_courbe() {
     };
     let out = run(&op, &curves, None).unwrap();
     for o in &out {
-        assert_eq!(value(o, "stat.dof"), 18.0, "20 points − 2 paramètres");
+        assert_eq!(value(o, "stat.dof"), 18.0, "20 points − 2 parameters");
     }
 }
 
 #[test]
-fn les_reglages_hors_plafond_sont_refuses_par_run() {
+fn settings_beyond_the_cap_are_refused_by_run() {
     let series = input((0..30).map(f64::from).collect(), vec![1.0; 30]);
     let poly = |degree| Operation::Fit {
         spec: FitSpec {

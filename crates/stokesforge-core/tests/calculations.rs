@@ -1,6 +1,6 @@
-//! Les calculs d'analyse du modèle (#181) : création de colonnes à la bonne
-//! place, mise à jour en place, retrait, écritures hors historique, égalité des
-//! arbres malgré des `NaN`.
+//! The analysis calculations of the model (#181): creation of columns at the right
+//! place, in-place update, removal, writes outside history, tree equality
+//! despite `NaN`s.
 
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::ops::Operation;
@@ -94,7 +94,7 @@ fn draft(f: &Fixture, outputs: Vec<OutputDraft>) -> CalculationDraft {
 }
 
 #[test]
-fn les_colonnes_de_sortie_suivent_chacune_leur_colonne_y() {
+fn each_output_column_follows_its_own_y_column() {
     let mut f = fixture();
     let d = draft(
         &f,
@@ -105,7 +105,7 @@ fn les_colonnes_de_sortie_suivent_chacune_leur_colonne_y() {
         ],
     );
     let id = f.project.add_calculation(d).unwrap();
-    // X, Y1, [2 sorties de Y1], Y2, [1 sortie de Y2] ; noms automatiques libres.
+    // X, Y1, [2 outputs of Y1], Y2, [1 output of Y2]; free automatic names.
     assert_eq!(f.project.tree().children(f.sheet).unwrap().len(), 6);
     let kids = f.project.tree().children(f.sheet).unwrap().to_vec();
     assert_eq!(kids[0], f.x);
@@ -115,7 +115,7 @@ fn les_colonnes_de_sortie_suivent_chacune_leur_colonne_y() {
     assert_eq!(calc.outputs[0].column, Some(kids[2]));
     assert_eq!(calc.outputs[1].column, Some(kids[3]));
     assert_eq!(calc.outputs[2].column, Some(kids[5]));
-    // La trace se lit depuis la colonne.
+    // The trace is read from the column.
     assert_eq!(
         f.project.tree().calculation_of_column(kids[3]),
         Some((id, 1))
@@ -128,20 +128,20 @@ fn les_colonnes_de_sortie_suivent_chacune_leur_colonne_y() {
 }
 
 #[test]
-fn un_echec_laisse_l_arbre_intact() {
+fn a_failure_leaves_the_tree_intact() {
     let mut f = fixture();
     let before = f.project.tree().clone();
-    // Série inconnue.
+    // Unknown series.
     let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
     d.series[0].y = NodeId::from_raw(99_999);
     assert!(f.project.add_calculation(d).is_err());
-    // Sortie qui vise une série absente.
+    // Output that targets a missing series.
     let d = draft(&f, vec![out(5, "corrected", vec![1.0], "a")]);
     assert!(matches!(
         f.project.add_calculation(d),
         Err(CoreError::Structure(_))
     ));
-    // Aucune série.
+    // No series.
     let mut d = draft(&f, vec![]);
     d.series.clear();
     d.results.clear();
@@ -149,10 +149,10 @@ fn un_echec_laisse_l_arbre_intact() {
     assert_eq!(f.project.tree(), &before);
 }
 
-/// Une opération à valeur non finie ne s'enregistre pas (#278) : elle serait
-/// écrite puis perdue à la relecture du `.stf`.
+/// A non-finite operation is not recorded (#278): it would be
+/// written then lost when the `.stf` is reread.
 #[test]
-fn une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour() {
+fn a_non_finite_operation_is_refused_on_add_and_on_update() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     let nan_baseline = || Operation::Baseline {
         method: BaselineMethod::Constant {
@@ -185,9 +185,9 @@ fn une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour() {
     assert_eq!(f.project.tree(), &before);
 }
 
-/// Une opération non finie par famille et par champ : `(nom attendu dans
-/// l'erreur, opération)`.
-fn operations_non_finies() -> Vec<(&'static str, Operation)> {
+/// A non-finite operation per family and per field: `(name expected in
+/// the error, operation)`.
+fn non_finite_operations() -> Vec<(&'static str, Operation)> {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
     use stokesforge_analysis::fit::FitSpec;
@@ -233,7 +233,7 @@ fn operations_non_finies() -> Vec<(&'static str, Operation)> {
                 p2: (nan, 2.0),
             }),
         ),
-        // Les ancres non posées sont ignorées, pas refusées (#298).
+        // Unplaced anchors are ignored, not refused (#298).
         (
             "zones",
             base(BaselineMethod::Zones {
@@ -300,12 +300,12 @@ fn operations_non_finies() -> Vec<(&'static str, Operation)> {
     ]
 }
 
-/// Chaque famille et chaque champ non fini (#278) : `add_calculation`,
-/// `update_calculation` et `replace_analysis_data` refusent par une
-/// `Structure` qui nomme le champ, sans toucher l'arbre ni consommer
-/// d'identifiant.
+/// Each family and each non-finite field (#278): `add_calculation`,
+/// `update_calculation` and `replace_analysis_data` refuses with a
+/// `Structure` that names the field, without touching the tree or consuming
+/// an identifier.
 #[test]
-fn toute_operation_non_finie_est_refusee_sans_toucher_l_arbre() {
+fn every_non_finite_operation_is_refused_without_touching_the_tree() {
     let mut f = fixture();
     let id = f
         .project
@@ -325,37 +325,37 @@ fn toute_operation_non_finie_est_refusee_sans_toucher_l_arbre() {
             (c, v)
         })
         .collect();
-    let refuse = |e: CoreError, nom: &str| match e {
+    let refuses = |e: CoreError, name: &str| match e {
         CoreError::Structure(message) => {
-            assert!(message.contains(&format!("'{nom}'")), "{message}")
+            assert!(message.contains(&format!("'{name}'")), "{message}")
         }
-        other => panic!("attendu Structure, reçu {other:?}"),
+        other => panic!("expected Structure, got {other:?}"),
     };
-    for (nom, operation) in operations_non_finies() {
+    for (name, operation) in non_finite_operations() {
         let before = f.project.tree().clone();
         let next = f.project.next_id_hint();
         let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
         d.operation = operation.clone();
-        refuse(f.project.add_calculation(d.clone()).unwrap_err(), nom);
-        refuse(
+        refuses(f.project.add_calculation(d.clone()).unwrap_err(), name);
+        refuses(
             f.project.update_calculation(id, d.clone()).unwrap_err(),
-            nom,
+            name,
         );
-        // La remise à la place des données valide d'abord l'opération : même
-        // refus, avant toute vérification de version ou d'entrée.
-        refuse(
+        // Putting the data back in place validates the operation first: same
+        // refusal, before any version or input check.
+        refuses(
             f.project.replace_analysis_data(d, &versions).unwrap_err(),
-            nom,
+            name,
         );
-        assert_eq!(f.project.tree(), &before, "{nom}");
-        assert_eq!(f.project.next_id_hint(), next, "{nom} : aucun id consommé");
+        assert_eq!(f.project.tree(), &before, "{name}");
+        assert_eq!(f.project.next_id_hint(), next, "{name}: no id consumed");
     }
 }
 
-/// Le contrôle de finitude n'écarte pas l'ordinaire : une opération finie
-/// s'ajoute, se met à jour, et la valeur extrême finie passe.
+/// The finiteness check does not reject the ordinary: a finite operation
+/// is added, updated, and the extreme finite value passes.
 #[test]
-fn une_operation_finie_s_ajoute_et_se_met_a_jour() {
+fn a_finite_operation_is_added_and_updated() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     let mut f = fixture();
     let constant = |v: f64| Operation::Baseline {
@@ -375,22 +375,22 @@ fn une_operation_finie_s_ajoute_et_se_met_a_jour() {
 }
 
 #[test]
-fn les_identifiants_de_calcul_ne_sont_jamais_reutilises() {
+fn calculation_ids_are_never_reused() {
     let mut f = fixture();
     let a = f.project.add_calculation(draft(&f, vec![])).unwrap();
     f.project.remove_calculation(a, false).unwrap();
     let b = f.project.add_calculation(draft(&f, vec![])).unwrap();
     assert_ne!(a, b);
     assert!(b.raw() > a.raw());
-    // Un projet rechargé ne réattribue pas non plus l'identifiant d'un calcul.
+    // A reloaded project does not reassign a calculation's identifier either.
     let tree = f.project.tree().clone();
     let mut reloaded = Project::from_tree(tree, 0);
     let c = reloaded.add_calculation(draft(&f, vec![])).unwrap();
-    assert!(c.raw() > b.raw(), "{c:?} doit dépasser {b:?}");
+    assert!(c.raw() > b.raw(), "{c:?} must exceed {b:?}");
 }
 
 #[test]
-fn la_mise_a_jour_reecrit_en_place_cree_et_supprime() {
+fn an_update_rewrites_in_place_creates_and_deletes() {
     let mut f = fixture();
     let id = f
         .project
@@ -404,7 +404,7 @@ fn la_mise_a_jour_reecrit_en_place_cree_et_supprime() {
         .unwrap();
     let kids = f.project.tree().children(f.sheet).unwrap().to_vec();
     let (corrected, fit) = (kids[2], kids[3]);
-    // « fit » disparaît, « residuals » apparaît, « corrected » est réécrite.
+    // "fit" disappears, "residuals" appears, "corrected" is rewritten.
     f.project
         .update_calculation(
             id,
@@ -419,13 +419,13 @@ fn la_mise_a_jour_reecrit_en_place_cree_et_supprime() {
         .unwrap();
     assert!(
         f.project.tree().node(fit).is_none(),
-        "colonne retirée avec sa sortie"
+        "column removed with its output"
     );
     let calc = f.project.tree().calculation(id).unwrap().clone();
     assert_eq!(
         calc.outputs[0].column,
         Some(corrected),
-        "réécrite en place, même colonne"
+        "rewritten in place, same column"
     );
     let col = f
         .project
@@ -442,7 +442,7 @@ fn la_mise_a_jour_reecrit_en_place_cree_et_supprime() {
 }
 
 #[test]
-fn retirer_un_calcul_garde_ou_supprime_ses_colonnes() {
+fn removing_a_calculation_keeps_or_deletes_its_columns() {
     let mut f = fixture();
     let id = f
         .project
@@ -458,7 +458,7 @@ fn retirer_un_calcul_garde_ou_supprime_ses_colonnes() {
     assert!(f.project.tree().calculation(id).is_none());
     assert!(
         f.project.tree().node(produced).is_some(),
-        "détachée : colonne ordinaire"
+        "detached: ordinary column"
     );
     assert_eq!(f.project.tree().calculation_of_column(produced), None);
 
@@ -478,7 +478,7 @@ fn retirer_un_calcul_garde_ou_supprime_ses_colonnes() {
 }
 
 #[test]
-fn le_rafraichissement_ne_reecrit_que_ce_qui_change() {
+fn a_refresh_rewrites_only_what_changes() {
     let mut f = fixture();
     let id = f
         .project
@@ -498,7 +498,7 @@ fn le_rafraichissement_ne_reecrit_que_ce_qui_change() {
         .as_column()
         .unwrap()
         .version();
-    // Mêmes valeurs (NaN compris) : aucune écriture, donc aucune cascade.
+    // Same values (NaN included): no write, hence no cascade.
     f.project
         .refresh_calculation(id, &[Some(vec![1.0, f64::NAN, 3.0])], vec![])
         .unwrap();
@@ -512,14 +512,14 @@ fn le_rafraichissement_ne_reecrit_que_ce_qui_change() {
             .version(),
         v0
     );
-    // Valeurs différentes : écrites, version neuve.
+    // Different values: written, fresh version.
     f.project
         .refresh_calculation(id, &[Some(vec![1.0, 2.0, 3.0, 4.0])], vec![])
         .unwrap();
     let col = f.project.tree().get(produced).unwrap().as_column().unwrap();
     assert!(col.version() > v0);
     assert_eq!(col.numeric_view().unwrap().len(), 4);
-    // `None` laisse la colonne.
+    // `None` leaves the column.
     f.project.refresh_calculation(id, &[None], vec![]).unwrap();
     assert_eq!(
         f.project
@@ -536,7 +536,7 @@ fn le_rafraichissement_ne_reecrit_que_ce_qui_change() {
 }
 
 #[test]
-fn l_etat_perime_se_pose_et_se_leve() {
+fn the_stale_state_is_set_and_cleared() {
     let mut f = fixture();
     let id = f.project.add_calculation(draft(&f, vec![])).unwrap();
     f.project
@@ -555,7 +555,7 @@ fn l_etat_perime_se_pose_et_se_leve() {
 }
 
 #[test]
-fn des_resultats_nan_ne_cassent_pas_l_egalite_des_arbres() {
+fn nan_results_do_not_break_tree_equality() {
     let mut f = fixture();
     let mut d = draft(&f, vec![]);
     d.results = vec![
@@ -574,11 +574,11 @@ fn des_resultats_nan_ne_cassent_pas_l_egalite_des_arbres() {
     let a = f.project.tree().clone();
     let calc = f.project.tree().calculation(id).unwrap().as_ref().clone();
     f.project.restore_calculation(id, Some(calc));
-    assert_eq!(&a, f.project.tree(), "un NaN égale un NaN dans un résultat");
+    assert_eq!(&a, f.project.tree(), "a NaN equals a NaN in a result");
 }
 
 #[test]
-fn sans_garder_les_resultats_rien_n_est_stocke() {
+fn without_keeping_results_nothing_is_stored() {
     let mut f = fixture();
     let mut d = draft(&f, vec![out(0, "corrected", vec![1.0, 2.0, 3.0], "c")]);
     d.keep_results = false;
@@ -606,7 +606,7 @@ fn sans_garder_les_resultats_rien_n_est_stocke() {
 }
 
 #[test]
-fn supprimer_les_entrees_retire_le_calcul_orphelin_mais_garde_un_calcul_partiel() {
+fn deleting_the_inputs_removes_the_orphan_calculation_but_keeps_a_partial_one() {
     let mut f = fixture();
     let id = f
         .project
@@ -615,16 +615,16 @@ fn supprimer_les_entrees_retire_le_calcul_orphelin_mais_garde_un_calcul_partiel(
             vec![out(0, "corrected", vec![1.0, 2.0, 3.0], "c")],
         ))
         .unwrap();
-    // Une seule des deux séries perd son Y : le calcul reste.
+    // Only one of the two series loses its Y: the calculation stays.
     f.project.remove(f.y2).unwrap();
     assert!(f.project.tree().calculation(id).is_some());
-    // La seconde aussi : plus rien à calculer.
+    // The second one too: nothing left to compute.
     f.project.remove(f.y1).unwrap();
     assert!(f.project.tree().calculation(id).is_none());
 }
 
 #[test]
-fn restaurer_l_arbre_d_avant_une_suppression_ramene_le_calcul() {
+fn restoring_the_tree_from_before_a_deletion_brings_the_calculation_back() {
     let mut f = fixture();
     let id = f
         .project
@@ -642,14 +642,14 @@ fn restaurer_l_arbre_d_avant_une_suppression_ramene_le_calcul() {
     assert!(f.project.tree().calculation(id).is_some());
 }
 
-// ── compute : la lecture du modèle partagée par la création et le recalcul ──
+// ── compute: the model read shared by creation and recalculation ──
 
 use stokesforge_core::{compute, AuxRef, ComputeError};
 
 #[test]
-fn compute_lit_les_colonnes_et_aligne_les_sorties_sur_les_lignes() {
+fn compute_reads_the_columns_and_aligns_the_outputs_on_the_rows() {
     let f = fixture();
-    // Référence : Y constant = 2 sur le même X → Divide donne y / 2.
+    // Reference: constant Y = 2 on the same X → Divide gives y / 2.
     let mut project = f.project;
     let rx = project
         .add_column(
@@ -687,7 +687,7 @@ fn compute_lit_les_colonnes_et_aligne_les_sorties_sur_les_lignes() {
 }
 
 #[test]
-fn compute_nomme_la_colonne_d_entree_disparue() {
+fn compute_names_the_vanished_input_column() {
     let mut f = fixture();
     f.project.remove(f.y1).unwrap();
     let err = compute(
@@ -707,7 +707,7 @@ fn compute_nomme_la_colonne_d_entree_disparue() {
 }
 
 #[test]
-fn refresh_dit_s_il_a_ecrit_quelque_chose() {
+fn refresh_says_whether_it_wrote_something() {
     let mut f = fixture();
     let id = f
         .project
@@ -724,7 +724,7 @@ fn refresh_dit_s_il_a_ecrit_quelque_chose() {
             vec![SeriesResult::default(), SeriesResult::default()],
         )
         .unwrap();
-    assert!(!same, "mêmes données, rien d'écrit");
+    assert!(!same, "same data, nothing written");
     let diff = f
         .project
         .refresh_calculation(
@@ -736,8 +736,8 @@ fn refresh_dit_s_il_a_ecrit_quelque_chose() {
     assert!(diff);
 }
 
-/// Un graphe qui trace la colonne de sortie d'un calcul et la colonne source.
-fn graph_des_deux(f: &mut Fixture, stale_warning: bool) -> (NodeId, NodeId) {
+/// A graph that plots the output column of a calculation and the source column.
+fn graph_of_both(f: &mut Fixture, stale_warning: bool) -> (NodeId, NodeId) {
     let id = f
         .project
         .add_calculation(draft(
@@ -761,12 +761,12 @@ fn graph_des_deux(f: &mut Fixture, stale_warning: bool) -> (NodeId, NodeId) {
     (id, produced)
 }
 
-fn drapeaux(f: &Fixture) -> Vec<bool> {
+fn flags(f: &Fixture) -> Vec<bool> {
     let graph = f.project.tree().children(f.project.root()).unwrap()[1];
     let stokesforge_core::NodeKind::Graph { spec, .. } =
         f.project.tree().node(graph).unwrap().kind()
     else {
-        panic!("un graphe attendu");
+        panic!("a graph was expected");
     };
     stokesforge_core::resolve_spec(f.project.tree(), spec).panels[0]
         .series
@@ -776,31 +776,31 @@ fn drapeaux(f: &Fixture) -> Vec<bool> {
 }
 
 #[test]
-fn une_serie_tracee_depuis_un_calcul_perime_est_marquee_et_le_graphe_peut_y_renoncer() {
+fn a_series_plotted_from_a_stale_calculation_is_flagged_and_the_graph_can_opt_out() {
     let mut f = fixture();
-    let (id, _) = graph_des_deux(&mut f, true);
-    assert_eq!(drapeaux(&f), [false, false], "calcul à jour : rien");
+    let (id, _) = graph_of_both(&mut f, true);
+    assert_eq!(flags(&f), [false, false], "up-to-date calculation: nothing");
     f.project
         .set_calculation_stale(id, Some(Staleness::Manual))
         .unwrap();
-    assert_eq!(drapeaux(&f), [true, false], "seule la sortie est marquée");
+    assert_eq!(flags(&f), [true, false], "only the output is flagged");
     f.project.refresh_calculation(id, &[None], vec![]).unwrap();
-    assert_eq!(drapeaux(&f), [false, false], "recalculé : plus de marque");
+    assert_eq!(flags(&f), [false, false], "recalculated: no more flag");
 
-    // Le graphe qui a désactivé l'avertissement ne marque plus rien.
+    // The graph that disabled the warning no longer flags anything.
     let mut g = fixture();
-    let (id, _) = graph_des_deux(&mut g, false);
+    let (id, _) = graph_of_both(&mut g, false);
     g.project
         .set_calculation_stale(id, Some(Staleness::Manual))
         .unwrap();
-    assert_eq!(drapeaux(&g), [false, false]);
+    assert_eq!(flags(&g), [false, false]);
 }
 
-// ── Colonnes de longueurs différentes (C4, #313) ───────────────────────
+// ── Columns of different lengths (C4, #313) ─────────────────────────
 
-/// Un classeur à X, Y de longueurs données, et une référence constante = 2 sur
-/// un large domaine : `Correct`/`Divide` rend y / 2.
-fn inegales(x: &[f64], y: &[f64]) -> (Project, NodeId, SeriesRef, AuxRef) {
+/// A workbook with X, Y of given lengths, and a constant reference = 2 over
+/// a wide domain: `Correct`/`Divide` gives y / 2.
+fn unequal(x: &[f64], y: &[f64]) -> (Project, NodeId, SeriesRef, AuxRef) {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -825,7 +825,7 @@ fn inegales(x: &[f64], y: &[f64]) -> (Project, NodeId, SeriesRef, AuxRef) {
     )
 }
 
-fn corrige(project: &Project, series: SeriesRef, aux: &AuxRef) -> Vec<f64> {
+fn corrects(project: &Project, series: SeriesRef, aux: &AuxRef) -> Vec<f64> {
     let computed = compute(
         project.tree(),
         &Operation::Correct {
@@ -839,29 +839,29 @@ fn corrige(project: &Project, series: SeriesRef, aux: &AuxRef) -> Vec<f64> {
 }
 
 #[test]
-fn la_sortie_a_la_longueur_de_x_quand_x_est_donne() {
-    // X plus court que Y : les lignes de Y au-delà de X n'ont pas d'abscisse.
-    let (p, _, s, aux) = inegales(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
-    assert_eq!(corrige(&p, s, &aux), vec![1.0, 2.0, 3.0]);
-    // X plus long que Y : les lignes de Y manquantes sont vides (NaN).
-    let (p, _, s, aux) = inegales(&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 6.0]);
-    let data = corrige(&p, s, &aux);
+fn the_output_has_the_length_of_x_when_x_is_given() {
+    // X shorter than Y: the rows of Y beyond X have no abscissa.
+    let (p, _, s, aux) = unequal(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
+    assert_eq!(corrects(&p, s, &aux), vec![1.0, 2.0, 3.0]);
+    // X longer than Y: the missing rows of Y are empty (NaN).
+    let (p, _, s, aux) = unequal(&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 6.0]);
+    let data = corrects(&p, s, &aux);
     assert_eq!(data.len(), 5);
     assert_eq!(&data[..3], &[1.0, 2.0, 3.0]);
     assert!(data[3].is_nan() && data[4].is_nan());
 }
 
 #[test]
-fn sans_x_la_sortie_a_la_longueur_de_y() {
-    let (p, _, mut s, aux) = inegales(&[1.0, 2.0], &[2.0, 4.0, 6.0, 8.0]);
+fn without_x_the_output_has_the_length_of_y() {
+    let (p, _, mut s, aux) = unequal(&[1.0, 2.0], &[2.0, 4.0, 6.0, 8.0]);
     s.x = None;
-    assert_eq!(corrige(&p, s, &aux), vec![1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(corrects(&p, s, &aux), vec![1.0, 2.0, 3.0, 4.0]);
 }
 
 #[test]
-fn le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x() {
-    let (mut p, y, s, aux) = inegales(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
-    let data = corrige(&p, s.clone(), &aux);
+fn replacement_with_y_longer_than_x_keeps_the_cells_beyond_x() {
+    let (mut p, y, s, aux) = unequal(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
+    let data = corrects(&p, s.clone(), &aux);
     let versions: Vec<(NodeId, u64)> = [s.x.unwrap(), y, aux.y, aux.x.unwrap()]
         .into_iter()
         .map(|c| (c, p.tree().get(c).unwrap().as_column().unwrap().version()))
@@ -878,7 +878,7 @@ fn le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x() {
         auto_recalc: false,
         low_r2_dialog: false,
     };
-    // Sans complétion, la garde de longueur du cœur refuse la sortie courte.
+    // Without completion, the core's length guard refuses the short output.
     assert!(matches!(
         p.replace_analysis_data(draft.clone(), &versions),
         Err(CoreError::Structure(_))
@@ -888,14 +888,14 @@ fn le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x() {
     p.replace_analysis_data(draft, &versions).unwrap();
     let col = p.tree().get(y).unwrap().as_column().unwrap();
     let got: Vec<f64> = (0..5).map(|r| col.values().number_at(r)).collect();
-    // Les trois premières lignes sont corrigées, les deux autres gardent l'original.
+    // The first three rows are corrected, the other two keep the original.
     assert_eq!(got, vec![1.0, 2.0, 3.0, 8.0, 10.0]);
 }
 
-/// #324 : un lissage remplace les Y par sa sortie `smoothed` (comme une
-/// correction par `corrected`) ; une sortie `corrected` ne lui convient pas.
+/// #324: a smoothing replaces the Ys with its `smoothed` output (like a
+/// correction with `corrected`); a `corrected` output does not suit it.
 #[test]
-fn un_lissage_remplace_les_y_par_sa_sortie_lissee() {
+fn a_smoothing_replaces_the_ys_with_its_smoothed_output() {
     use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
     let mut f = fixture();
     let versions: Vec<(NodeId, u64)> = [f.x, f.y1]

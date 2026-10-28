@@ -1,11 +1,11 @@
-//! Recalcul des calculs d'analyse (#181), vu depuis l'API publique de la
-//! session : un calcul automatique suit ses entrées, un calcul manuel se
-//! marque périmé sans bouger, un échec garde les dernières valeurs, une entrée
-//! perdue puis retrouvée repart de zéro.
+//! Recalculation of analysis calculations (#181), seen from the session's
+//! public API: an automatic calculation follows its inputs, a manual
+//! calculation marks itself stale without moving, a failure keeps the last
+//! values, an input lost then found again restarts from zero.
 //!
-//! Le contrat « le recalcul ciblé donne exactement le recalcul complet » est
-//! tenu par la batterie différentielle `stokesforge-robustesse` (`b22`) ; ces
-//! cas nomment chaque comportement.
+//! The contract "targeted recalculation gives exactly the full recalculation"
+//! is held by the differential battery `stokesforge-robustesse` (`b22`); these
+//! cases name each behavior.
 
 use stokesforge_analysis::fit::FitSpec;
 use stokesforge_analysis::model::Model;
@@ -19,13 +19,13 @@ use stokesforge_session::{
     DiscardedCalculation, FormulaRecalc, LoadReport, Session, SessionError, SessionHandle, Snapshot,
 };
 
-struct Montage {
+struct Setup {
     sheet: NodeId,
     x: NodeId,
     y: NodeId,
 }
 
-fn demarrer(mode: FormulaRecalc) -> (Session, SessionHandle, Montage) {
+fn start(mode: FormulaRecalc) -> (Session, SessionHandle, Setup) {
     let mut project = Project::new("Demo").unwrap();
     let root = project.root();
     project.add_workbook(root, Some("Book1")).unwrap();
@@ -48,10 +48,10 @@ fn demarrer(mode: FormulaRecalc) -> (Session, SessionHandle, Montage) {
         .unwrap();
     let session = Session::spawn_with_recalc(project, None, mode).unwrap();
     let handle = session.handle();
-    (session, handle, Montage { sheet, x, y })
+    (session, handle, Setup { sheet, x, y })
 }
 
-fn ajustement() -> Operation {
+fn fit_operation() -> Operation {
     Operation::Fit {
         spec: FitSpec {
             model: Model::Linear,
@@ -62,20 +62,20 @@ fn ajustement() -> Operation {
     }
 }
 
-/// Ajoute un ajustement linéaire de (X, Y), automatique ou non.
-fn ajouter(handle: &SessionHandle, m: &Montage, auto: bool) -> NodeId {
-    ajouter_sur(handle, m.x, m.y, auto)
+/// Adds a linear fit of (X, Y), automatic or not.
+fn add_fit(handle: &SessionHandle, m: &Setup, auto: bool) -> NodeId {
+    add_fit_on(handle, m.x, m.y, auto)
 }
 
-/// Ajoute un ajustement linéaire de (`x`, `y`), automatique ou non.
-fn ajouter_sur(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> NodeId {
+/// Adds a linear fit of (`x`, `y`), automatic or not.
+fn add_fit_on(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> NodeId {
     let snapshot = handle.snapshot().unwrap();
     let series = vec![SeriesRef {
         x: Some(x),
         y,
         sigma: None,
     }];
-    let op = ajustement();
+    let op = fit_operation();
     let computed = compute(&snapshot.tree, &op, &series, None).unwrap();
     let outputs = computed
         .columns
@@ -112,16 +112,16 @@ fn ajouter_sur(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> Node
         .unwrap()
 }
 
-fn saisir(column: NodeId, valeurs: &[f64]) -> Command {
+fn enter(column: NodeId, values: &[f64]) -> Command {
     Command::SetCells {
         column,
         start: 0,
-        values: ValueBlock::Float(valeurs.to_vec()),
+        values: ValueBlock::Float(values.to_vec()),
         expected_version: None,
     }
 }
 
-fn pente(snapshot: &Snapshot, id: NodeId) -> f64 {
+fn slope(snapshot: &Snapshot, id: NodeId) -> f64 {
     snapshot.tree.calculation(id).unwrap().results[0]
         .values
         .iter()
@@ -130,7 +130,7 @@ fn pente(snapshot: &Snapshot, id: NodeId) -> f64 {
         .value
 }
 
-fn colonne_fit(snapshot: &Snapshot, id: NodeId) -> Vec<f64> {
+fn fit_column(snapshot: &Snapshot, id: NodeId) -> Vec<f64> {
     let calc = snapshot.tree.calculation(id).unwrap();
     let out = calc.outputs.iter().find(|o| o.key == "fit").unwrap();
     snapshot
@@ -148,31 +148,30 @@ fn modes() -> [FormulaRecalc; 2] {
     [FormulaRecalc::Targeted, FormulaRecalc::Full]
 }
 
-/// #320 : une analyse insère ses colonnes de sortie **au milieu** de la feuille,
-/// ce qui faisait glisser les lettres de position — une formule lisait une
-/// autre colonne sans prévenir. Depuis #321 une formule retient la colonne
-/// elle-même.
+/// #320: an analysis inserts its output columns **in the middle** of the sheet,
+/// which made the position letters slide — a formula read another column
+/// without warning. Since #321 a formula remembers the column itself.
 ///
-/// Feuille `A [1,2,3,4]`, `B [10,20,30,41]`, `C [100,200,300,400]`, `D` vide ;
-/// `D = C*1`, puis un ajustement linéaire de (A, B) en recalcul automatique :
-/// la sortie s'insère juste après B (la feuille devient A, B, sortie, C, D).
-/// `D` vaut toujours `C`, et s'affiche `D*1` (C est désormais la quatrième
-/// colonne). Mutant : résolution par position (D lirait la courbe ajustée).
+/// Sheet `A [1,2,3,4]`, `B [10,20,30,41]`, `C [100,200,300,400]`, empty `D`;
+/// `D = C*1`, then a linear fit of (A, B) in automatic recalculation: the
+/// output is inserted right after B (the sheet becomes A, B, output, C, D).
+/// `D` still equals `C`, and displays `D*1` (C is now the fourth column).
+/// Mutant: resolution by position (D would read the fitted curve).
 #[test]
-fn une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule() {
+fn an_analysis_that_inserts_its_outputs_does_not_change_what_a_formula_reads() {
     for mode in modes() {
         let mut project = Project::new("Demo").unwrap();
         let root = project.root();
         project.add_workbook(root, Some("Book1")).unwrap();
         let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
-        let mut colonne = |nom: &str, valeurs: &[f64]| {
+        let mut column = |name: &str, values: &[f64]| {
             project
-                .add_column(sheet, None, Some(nom), Column::from_f64(valeurs))
+                .add_column(sheet, None, Some(name), Column::from_f64(values))
                 .unwrap()
         };
-        let a = colonne("A", &[1.0, 2.0, 3.0, 4.0]);
-        let b = colonne("B", &[10.0, 20.0, 30.0, 41.0]);
-        let c = colonne("C", &[100.0, 200.0, 300.0, 400.0]);
+        let a = column("A", &[1.0, 2.0, 3.0, 4.0]);
+        let b = column("B", &[10.0, 20.0, 30.0, 41.0]);
+        let c = column("C", &[100.0, 200.0, 300.0, 400.0]);
         let d = project
             .add_column(
                 sheet,
@@ -183,17 +182,17 @@ fn une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule() {
             .unwrap();
         let session = Session::spawn_with_recalc(project, None, mode).unwrap();
         let handle = session.handle();
-        let lire_d = |s: &Snapshot| -> Vec<f64> {
-            let colonne = s.tree.node(d).unwrap().as_column().unwrap();
-            (0..colonne.len())
-                .map(|row| match colonne.get(row) {
+        let read_d = |s: &Snapshot| -> Vec<f64> {
+            let column = s.tree.node(d).unwrap().as_column().unwrap();
+            (0..column.len())
+                .map(|row| match column.get(row) {
                     stokesforge_core::Cell::Float(v) => v,
-                    other => panic!("cellule inattendue : {other:?}"),
+                    other => panic!("unexpected cell: {other:?}"),
                 })
                 .collect()
         };
 
-        let formule = handle
+        let formula = handle
             .snapshot()
             .unwrap()
             .tree
@@ -203,112 +202,112 @@ fn une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule() {
             .execute(Command::SetColumnMeta {
                 column: d,
                 meta: ColumnMeta {
-                    formula: Some(formule),
+                    formula: Some(formula),
                     ..Default::default()
                 },
             })
             .unwrap();
         assert_eq!(
-            lire_d(&handle.snapshot().unwrap()),
+            read_d(&handle.snapshot().unwrap()),
             [100.0, 200.0, 300.0, 400.0]
         );
 
-        ajouter(&handle, &Montage { sheet, x: a, y: b }, true);
+        add_fit(&handle, &Setup { sheet, x: a, y: b }, true);
         let s = handle.snapshot().unwrap();
-        let colonnes = s.tree.children(sheet).unwrap().to_vec();
-        assert_eq!(colonnes.len(), 5, "la sortie de l'ajustement est insérée");
+        let columns = s.tree.children(sheet).unwrap().to_vec();
+        assert_eq!(columns.len(), 5, "the fit output is inserted");
         assert_eq!(
-            (colonnes[0], colonnes[1], colonnes[3], colonnes[4]),
+            (columns[0], columns[1], columns[3], columns[4]),
             (a, b, c, d),
-            "la sortie est insérée au milieu, juste après B : C et D glissent ({mode:?})"
+            "the output is inserted in the middle, right after B: C and D slide ({mode:?})"
         );
         assert_eq!(
-            lire_d(&s),
+            read_d(&s),
             [100.0, 200.0, 300.0, 400.0],
-            "D lit toujours C ({mode:?})"
+            "D still reads C ({mode:?})"
         );
         assert_eq!(
             s.tree.formula_letters(d).as_deref(),
             Some("D*1"),
-            "C est maintenant la quatrième colonne : la lettre affichée suit ({mode:?})"
+            "C is now the fourth column: the displayed letter follows ({mode:?})"
         );
     }
 }
 
 #[test]
-fn un_calcul_automatique_suit_ses_entrees() {
+fn an_automatic_calculation_follows_its_inputs() {
     for mode in modes() {
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, true);
-        assert!((pente(&handle.snapshot().unwrap(), id) - 10.0).abs() < 1e-9);
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        assert!((slope(&handle.snapshot().unwrap(), id) - 10.0).abs() < 1e-9);
 
-        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
-        let apres = handle.snapshot().unwrap();
-        assert!((pente(&apres, id) - 2.0).abs() < 1e-9, "{mode:?}");
-        assert!((colonne_fit(&apres, id)[3] - 8.0).abs() < 1e-9);
-        assert_eq!(apres.tree.calculation(id).unwrap().stale, None);
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let after = handle.snapshot().unwrap();
+        assert!((slope(&after, id) - 2.0).abs() < 1e-9, "{mode:?}");
+        assert!((fit_column(&after, id)[3] - 8.0).abs() < 1e-9);
+        assert_eq!(after.tree.calculation(id).unwrap().stale, None);
 
-        // L'annulation de la saisie ramène le calcul avec elle.
+        // Undoing the input brings the calculation back with it.
         handle.undo().unwrap();
-        let annule = handle.snapshot().unwrap();
-        assert!((pente(&annule, id) - 10.0).abs() < 1e-9, "{mode:?}");
+        let undone = handle.snapshot().unwrap();
+        assert!((slope(&undone, id) - 10.0).abs() < 1e-9, "{mode:?}");
     }
 }
 
 #[test]
-fn le_recalcul_n_entre_pas_dans_l_historique() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, true);
-    handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
-    handle.execute(saisir(m.y, &[3.0, 6.0, 9.0, 12.0])).unwrap();
-    // Un seul « annuler » défait la dernière saisie — pas le recalcul qui l'a
-    // suivie, qui n'a pas d'entrée à lui.
+fn recalculation_does_not_enter_the_history() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, true);
+    handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+    handle.execute(enter(m.y, &[3.0, 6.0, 9.0, 12.0])).unwrap();
+    // A single "undo" undoes the last input — not the recalculation that
+    // followed it, which has no entry of its own.
     handle.undo().unwrap();
-    assert!((pente(&handle.snapshot().unwrap(), id) - 2.0).abs() < 1e-9);
+    assert!((slope(&handle.snapshot().unwrap(), id) - 2.0).abs() < 1e-9);
 }
 
 #[test]
-fn un_calcul_manuel_se_perime_sans_bouger_puis_se_relance() {
+fn a_manual_calculation_goes_stale_without_moving_then_reruns() {
     for mode in modes() {
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, false);
-        let avant = handle.snapshot().unwrap();
-        assert_eq!(avant.tree.calculation(id).unwrap().stale, None);
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, false);
+        let before = handle.snapshot().unwrap();
+        assert_eq!(before.tree.calculation(id).unwrap().stale, None);
 
-        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
-        let perime = handle.snapshot().unwrap();
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let stale_calc = handle.snapshot().unwrap();
         assert_eq!(
-            perime.tree.calculation(id).unwrap().stale,
+            stale_calc.tree.calculation(id).unwrap().stale,
             Some(Staleness::Manual),
             "{mode:?}"
         );
-        assert!((pente(&perime, id) - 10.0).abs() < 1e-9, "valeurs gardées");
-        assert_eq!(colonne_fit(&perime, id), colonne_fit(&avant, id));
+        assert!((slope(&stale_calc, id) - 10.0).abs() < 1e-9, "values kept");
+        assert_eq!(fit_column(&stale_calc, id), fit_column(&before, id));
 
         handle.recalculate(&[id]).unwrap();
-        let frais = handle.snapshot().unwrap();
-        assert_eq!(frais.tree.calculation(id).unwrap().stale, None);
-        assert!((pente(&frais, id) - 2.0).abs() < 1e-9);
+        let fresh = handle.snapshot().unwrap();
+        assert_eq!(fresh.tree.calculation(id).unwrap().stale, None);
+        assert!((slope(&fresh, id) - 2.0).abs() < 1e-9);
     }
 }
 
 #[test]
-fn recalculer_sans_liste_relance_les_calculs_perimes() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, false);
-    handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+fn recalculating_without_a_list_reruns_the_stale_calculations() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, false);
+    handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
     handle.recalculate(&[]).unwrap();
     let snapshot = handle.snapshot().unwrap();
     assert_eq!(snapshot.tree.calculation(id).unwrap().stale, None);
-    assert!((pente(&snapshot, id) - 2.0).abs() < 1e-9);
+    assert!((slope(&snapshot, id) - 2.0).abs() < 1e-9);
 }
 
 #[test]
-fn modifier_la_definition_d_un_calcul_manuel_ne_le_perime_pas() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, false);
-    // Annuler puis rétablir l'ajout redéfinit le calcul : aucune entrée n'a
-    // bougé, il ne doit pas se déclarer périmé.
+fn changing_the_definition_of_a_manual_calculation_does_not_make_it_stale() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, false);
+    // Undoing then redoing the addition redefines the calculation: no input
+    // moved, so it must not declare itself stale.
     handle.undo().unwrap();
     handle.redo().unwrap();
     let snapshot = handle.snapshot().unwrap();
@@ -317,68 +316,64 @@ fn modifier_la_definition_d_un_calcul_manuel_ne_le_perime_pas() {
 }
 
 #[test]
-fn un_echec_garde_les_dernieres_valeurs_valides_puis_se_retablit() {
+fn a_failure_keeps_the_last_valid_values_then_recovers() {
     for mode in modes() {
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, true);
-        let avant = handle.snapshot().unwrap();
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        let before = handle.snapshot().unwrap();
 
-        // Plus aucun point exploitable : l'ajustement ne peut pas se faire.
+        // No usable point left: the fit cannot be done.
         handle
-            .execute(saisir(m.y, &[f64::NAN, f64::NAN, f64::NAN, f64::NAN]))
+            .execute(enter(m.y, &[f64::NAN, f64::NAN, f64::NAN, f64::NAN]))
             .unwrap();
-        let echec = handle.snapshot().unwrap();
+        let failure = handle.snapshot().unwrap();
         assert!(
             matches!(
-                echec.tree.calculation(id).unwrap().stale,
+                failure.tree.calculation(id).unwrap().stale,
                 Some(Staleness::Failed(_))
             ),
             "{mode:?}"
         );
-        assert_eq!(colonne_fit(&echec, id), colonne_fit(&avant, id));
-        assert!((pente(&echec, id) - 10.0).abs() < 1e-9);
+        assert_eq!(fit_column(&failure, id), fit_column(&before, id));
+        assert!((slope(&failure, id) - 10.0).abs() < 1e-9);
 
-        // Des données valides reviennent : le calcul se rétablit.
-        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
-        let repris = handle.snapshot().unwrap();
-        assert_eq!(repris.tree.calculation(id).unwrap().stale, None);
-        assert!((pente(&repris, id) - 2.0).abs() < 1e-9);
+        // Valid data comes back: the calculation recovers.
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let resumed = handle.snapshot().unwrap();
+        assert_eq!(resumed.tree.calculation(id).unwrap().stale, None);
+        assert!((slope(&resumed, id) - 2.0).abs() < 1e-9);
     }
 }
 
 #[test]
-fn une_entree_supprimee_perime_le_calcul_et_l_annulation_le_rend() {
+fn a_deleted_input_makes_the_calculation_stale_and_undo_restores_it() {
     for mode in modes() {
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, true);
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
         handle
             .execute(Command::DeleteColumn { column: m.x })
             .unwrap();
-        let perdu = handle.snapshot().unwrap();
+        let lost = handle.snapshot().unwrap();
         assert_eq!(
-            perdu.tree.calculation(id).unwrap().stale,
+            lost.tree.calculation(id).unwrap().stale,
             Some(Staleness::InputMissing),
             "{mode:?}"
         );
-        assert!((pente(&perdu, id) - 10.0).abs() < 1e-9, "valeurs gardées");
+        assert!((slope(&lost, id) - 10.0).abs() < 1e-9, "values kept");
 
         handle.undo().unwrap();
-        let retrouve = handle.snapshot().unwrap();
-        assert_eq!(
-            retrouve.tree.calculation(id).unwrap().stale,
-            None,
-            "{mode:?}"
-        );
+        let found = handle.snapshot().unwrap();
+        assert_eq!(found.tree.calculation(id).unwrap().stale, None, "{mode:?}");
     }
 }
 
 #[test]
-fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
+fn a_formula_feeds_a_calculation_and_a_calculation_feeds_a_formula() {
     for mode in modes() {
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, true);
-        // Une colonne-formule lit la sortie « fit » du calcul (même feuille).
-        let sortie = {
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
+        // A formula column reads the "fit" output of the calculation (same sheet).
+        let output = {
             let snapshot = handle.snapshot().unwrap();
             let calc = snapshot.tree.calculation(id).unwrap();
             calc.outputs
@@ -389,9 +384,9 @@ fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
                 .unwrap()
         };
         let snapshot = handle.snapshot().unwrap();
-        let colonnes = snapshot.tree.children(m.sheet).unwrap().to_vec();
-        let lettre = colonnes.iter().position(|&c| c == sortie).unwrap();
-        let nom = |i: usize| ((b'A' + i as u8) as char).to_string();
+        let columns = snapshot.tree.children(m.sheet).unwrap().to_vec();
+        let letter = columns.iter().position(|&c| c == output).unwrap();
+        let name = |i: usize| ((b'A' + i as u8) as char).to_string();
         handle
             .execute(Command::AddColumn {
                 sheet: m.sheet,
@@ -408,23 +403,23 @@ fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
             .unwrap()
             .last()
             .unwrap();
-        let formule_de_double = handle
+        let formula_of_double = handle
             .snapshot()
             .unwrap()
             .tree
-            .formula_from_letters(double, &format!("{}*2", nom(lettre)))
+            .formula_from_letters(double, &format!("{}*2", name(letter)))
             .unwrap();
         handle
             .execute(Command::SetColumnMeta {
                 column: double,
                 meta: ColumnMeta {
-                    formula: Some(formule_de_double),
+                    formula: Some(formula_of_double),
                     ..Default::default()
                 },
             })
             .unwrap();
-        let avant = handle.snapshot().unwrap();
-        let lu = |s: &Snapshot| {
+        let before = handle.snapshot().unwrap();
+        let read_cells = |s: &Snapshot| {
             s.tree
                 .node(double)
                 .unwrap()
@@ -433,44 +428,50 @@ fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
                 .numeric_view()
                 .map(|v| v.to_vec())
         };
-        assert!((lu(&avant).unwrap()[3] - 80.0).abs() < 1e-9, "{mode:?}");
+        assert!(
+            (read_cells(&before).unwrap()[3] - 80.0).abs() < 1e-9,
+            "{mode:?}"
+        );
 
-        // Changer la source du calcul traverse calcul puis formule.
-        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
-        let apres = handle.snapshot().unwrap();
-        assert!((lu(&apres).unwrap()[3] - 16.0).abs() < 1e-9, "{mode:?}");
+        // Changing the calculation's source goes through calculation then formula.
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let after = handle.snapshot().unwrap();
+        assert!(
+            (read_cells(&after).unwrap()[3] - 16.0).abs() < 1e-9,
+            "{mode:?}"
+        );
     }
 }
 
-/// Remplace, dans le fichier, la première occurrence des octets de `avant` par
-/// ceux de `apres` : une modification « hors StokesForge » des valeurs d'une
-/// colonne (un tampon `Float` s'écrit en `f64` petit-boutiste, sans enveloppe).
-fn alterer_fichier(path: &std::path::Path, avant: &[f64], apres: &[f64]) {
-    let octets = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
-    let (avant, apres) = (octets(avant), octets(apres));
-    assert_eq!(avant.len(), apres.len());
-    let mut contenu = std::fs::read(path).unwrap();
-    let position = contenu
-        .windows(avant.len())
-        .position(|fenetre| fenetre == avant.as_slice())
-        .expect("les valeurs à altérer sont dans le fichier");
-    contenu[position..position + avant.len()].copy_from_slice(&apres);
-    std::fs::write(path, contenu).unwrap();
+/// Replaces, in the file, the first occurrence of the bytes of `before` with
+/// those of `after`: a modification "outside StokesForge" of a column's values
+/// (a `Float` buffer is written as little-endian `f64`, without envelope).
+fn alter_file(path: &std::path::Path, before: &[f64], after: &[f64]) {
+    let bytes = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let (before, after) = (bytes(before), bytes(after));
+    assert_eq!(before.len(), after.len());
+    let mut content = std::fs::read(path).unwrap();
+    let position = content
+        .windows(before.len())
+        .position(|window| window == before.as_slice())
+        .expect("the values to alter are in the file");
+    content[position..position + before.len()].copy_from_slice(&after);
+    std::fs::write(path, content).unwrap();
 }
 
-/// A1 (#316) : à l'ouverture, aucun calcul d'analyse n'est relancé, automatique
-/// ou manuel. Les valeurs du fichier sont gardées ; l'empreinte du contenu des
-/// entrées, écrite à l'enregistrement, dit si elles ont changé depuis.
+/// A1 (#316): on open, no analysis calculation is rerun, automatic or manual.
+/// The file's values are kept; the fingerprint of the inputs' content, written
+/// at save, says whether they changed since.
 #[test]
-fn au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime() {
+fn on_load_no_calculation_is_rerun_and_the_fingerprint_says_whether_it_is_stale() {
     for auto in [true, false] {
         for mode in modes() {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("p.stf");
 
-            // Fichier intact : rien de périmé (témoin : comparaison toujours fausse).
-            let (_session, handle, m) = demarrer(mode);
-            let id = ajouter(&handle, &m, auto);
+            // Intact file: nothing stale (witness: comparison always false).
+            let (_session, handle, m) = start(mode);
+            let id = add_fit(&handle, &m, auto);
             handle.save(&path).unwrap();
             handle.load(&path).unwrap();
             let intact = handle.snapshot().unwrap();
@@ -479,52 +480,52 @@ fn au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime()
                 None,
                 "auto={auto} {mode:?}"
             );
-            assert!((pente(&intact, id) - 10.0).abs() < 1e-9);
+            assert!((slope(&intact, id) - 10.0).abs() < 1e-9);
 
-            // Entrée modifiée hors StokesForge : périmé, valeurs du fichier
-            // gardées, rien n'a été relancé (témoin : retirer le drapeau
-            // `trust_loaded` ; comparaison toujours vraie).
-            alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+            // Input modified outside StokesForge: stale, file's values kept,
+            // nothing was rerun (witness: remove the `trust_loaded` flag;
+            // comparison always true).
+            alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
             handle.load(&path).unwrap();
-            let altere = handle.snapshot().unwrap();
+            let altered = handle.snapshot().unwrap();
             assert_eq!(
-                altere.tree.calculation(id).unwrap().stale,
+                altered.tree.calculation(id).unwrap().stale,
                 Some(Staleness::Manual),
                 "auto={auto} {mode:?}"
             );
             assert!(
-                (pente(&altere, id) - 10.0).abs() < 1e-9,
-                "valeurs du fichier gardées, auto={auto} {mode:?}"
+                (slope(&altered, id) - 10.0).abs() < 1e-9,
+                "file values kept, auto={auto} {mode:?}"
             );
 
-            // Recalcul à la demande : les valeurs deviennent justes.
+            // Recalculation on demand: the values become right.
             handle.recalculate(&[id]).unwrap();
-            let apres = handle.snapshot().unwrap();
-            assert_eq!(apres.tree.calculation(id).unwrap().stale, None);
+            let after = handle.snapshot().unwrap();
+            assert_eq!(after.tree.calculation(id).unwrap().stale, None);
             assert!(
-                (pente(&apres, id) - 2.0).abs() < 1e-9,
+                (slope(&after, id) - 2.0).abs() < 1e-9,
                 "auto={auto} {mode:?}"
             );
         }
     }
 }
 
-/// Un calcul automatique que le fichier a rendu périmé (`Manual`) attend un
-/// geste : une commande sans rapport qui suit ne le recalcule pas, dans les deux
-/// modes (le mode complet le recalculait, passait à `Failed` ou « à jour » et
-/// divergeait du ciblé — trouvé par `b22` en posant #321). Une vraie
-/// modification de ses entrées, elle, le recalcule comme tout automatique.
-/// Mutant : retirer les deux armes `Manual` de `update_calculation` (le mode
-/// complet efface le marqueur).
+/// An automatic calculation that the file made stale (`Manual`) waits for a
+/// gesture: an unrelated command that follows does not recalculate it, in both
+/// modes (the full mode recalculated it, moved to `Failed` or "up to date" and
+/// diverged from the targeted one — found by `b22` while setting up #321). A
+/// real modification of its inputs does recalculate it like any automatic one.
+/// Mutant: remove the two `Manual` arms of `update_calculation` (the full mode
+/// erases the marker).
 #[test]
-fn un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet() {
+fn an_automatic_calculation_stale_on_load_waits_for_a_gesture_even_in_full_mode() {
     for mode in modes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.stf");
-        let (_session, handle, m) = demarrer(mode);
-        let id = ajouter(&handle, &m, true);
+        let (_session, handle, m) = start(mode);
+        let id = add_fit(&handle, &m, true);
         handle.save(&path).unwrap();
-        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
         handle.load(&path).unwrap();
         assert_eq!(
             handle
@@ -538,44 +539,44 @@ fn un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet() {
             "{mode:?}"
         );
 
-        // Une colonne sans rapport : une passe de recalcul, aucune entrée touchée.
+        // An unrelated column: a recalculation pass, no input touched.
         handle
             .execute(Command::AddColumn {
                 sheet: m.sheet,
                 index: None,
-                name: Some("Autre".into()),
+                name: Some("Other".into()),
                 column: Column::from_f64(&[7.0, 8.0]),
             })
             .unwrap();
-        let apres = handle.snapshot().unwrap();
+        let after = handle.snapshot().unwrap();
         assert_eq!(
-            apres.tree.calculation(id).unwrap().stale,
+            after.tree.calculation(id).unwrap().stale,
             Some(Staleness::Manual),
-            "toujours périmé, {mode:?}"
+            "still stale, {mode:?}"
         );
         assert!(
-            (pente(&apres, id) - 10.0).abs() < 1e-9,
-            "valeurs du fichier gardées, {mode:?}"
+            (slope(&after, id) - 10.0).abs() < 1e-9,
+            "file values kept, {mode:?}"
         );
 
-        // Témoin : changer vraiment une entrée le recalcule (la réécrire à l'identique, non).
-        handle.execute(saisir(m.y, &[3.0, 6.0, 9.0, 12.0])).unwrap();
-        let fin = handle.snapshot().unwrap();
-        assert_eq!(fin.tree.calculation(id).unwrap().stale, None, "{mode:?}");
-        assert!((pente(&fin, id) - 3.0).abs() < 1e-9, "{mode:?}");
+        // Witness: really changing an input recalculates it (rewriting it identically does not).
+        handle.execute(enter(m.y, &[3.0, 6.0, 9.0, 12.0])).unwrap();
+        let last = handle.snapshot().unwrap();
+        assert_eq!(last.tree.calculation(id).unwrap().stale, None, "{mode:?}");
+        assert!((slope(&last, id) - 3.0).abs() < 1e-9, "{mode:?}");
     }
 }
 
-/// Même cas, quand l'entrée est une colonne-formule : le mode complet la
-/// réécrit à chaque passe, donc change sa **version** sans changer son
-/// **contenu** — le calcul périmé reste périmé (`Renumber`), dans les deux
-/// modes. Mutant : retirer la comparaison de contenu (l'arme `Renumber`).
+/// Same case, when the input is a formula column: the full mode rewrites it on
+/// every pass, so changes its **version** without changing its **content** —
+/// the stale calculation stays stale (`Renumber`), in both modes. Mutant:
+/// remove the content comparison (the `Renumber` arm).
 #[test]
-fn un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet() {
+fn a_stale_automatic_calculation_reading_a_formula_stays_stale_in_full_mode() {
     for mode in modes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.stf");
-        let (_session, handle, m) = demarrer(mode);
+        let (_session, handle, m) = start(mode);
         handle
             .execute(Command::AddColumn {
                 sheet: m.sheet,
@@ -592,7 +593,7 @@ fn un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet() {
             .unwrap()
             .last()
             .unwrap();
-        let formule = handle
+        let formula = handle
             .snapshot()
             .unwrap()
             .tree
@@ -602,18 +603,18 @@ fn un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet() {
             .execute(Command::SetColumnMeta {
                 column: f,
                 meta: ColumnMeta {
-                    formula: Some(formule),
+                    formula: Some(formula),
                     ..Default::default()
                 },
             })
             .unwrap();
-        let id = ajouter_sur(&handle, m.x, f, true);
+        let id = add_fit_on(&handle, m.x, f, true);
         handle.save(&path).unwrap();
-        // Les valeurs de Y, puis celles de F (le même contenu, plus loin dans
-        // le fichier) : la formule recalculée au chargement retrouve les
-        // nouvelles, le calcul n'a pas vu les entrées changer.
-        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
-        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        // The values of Y, then those of F (the same content, further in the
+        // file): the formula recalculated on load finds the new ones, the
+        // calculation did not see the inputs change.
+        alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        alter_file(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
         handle.load(&path).unwrap();
         assert_eq!(
             handle
@@ -631,69 +632,67 @@ fn un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet() {
             .execute(Command::AddColumn {
                 sheet: m.sheet,
                 index: None,
-                name: Some("Autre".into()),
+                name: Some("Other".into()),
                 column: Column::from_f64(&[7.0, 8.0]),
             })
             .unwrap();
-        let apres = handle.snapshot().unwrap();
+        let after = handle.snapshot().unwrap();
         assert_eq!(
-            apres.tree.calculation(id).unwrap().stale,
+            after.tree.calculation(id).unwrap().stale,
             Some(Staleness::Manual),
-            "toujours périmé, {mode:?}"
+            "still stale, {mode:?}"
         );
         assert!(
-            (pente(&apres, id) - 10.0).abs() < 1e-9,
-            "valeurs du fichier gardées, {mode:?}"
+            (slope(&after, id) - 10.0).abs() < 1e-9,
+            "file values kept, {mode:?}"
         );
     }
 }
 
-/// Le drapeau de confiance est à usage unique : un calcul automatique sans
-/// mémo après le chargement (ajout, annulation) est recalculé comme avant.
+/// The trust flag is single-use: an automatic calculation without a memo after
+/// the load (addition, undo) is recalculated as before.
 #[test]
-fn la_confiance_au_chargement_ne_vaut_que_pour_le_chargement() {
+fn trust_on_load_applies_only_to_the_load() {
     for mode in modes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.stf");
-        let (_session, handle, m) = demarrer(mode);
+        let (_session, handle, m) = start(mode);
         handle.save(&path).unwrap();
         handle.load(&path).unwrap();
-        // Après le chargement : un calcul automatique ajouté suit ses entrées.
-        let id = ajouter(&handle, &m, true);
-        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        // After the load: an added automatic calculation follows its inputs.
+        let id = add_fit(&handle, &m, true);
+        handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
         let snapshot = handle.snapshot().unwrap();
         assert_eq!(snapshot.tree.calculation(id).unwrap().stale, None);
-        assert!((pente(&snapshot, id) - 2.0).abs() < 1e-9, "{mode:?}");
+        assert!((slope(&snapshot, id) - 2.0).abs() < 1e-9, "{mode:?}");
     }
 }
 
-/// Le marqueur de péremption écrit dans le fichier survit au chargement, et les
-/// valeurs du fichier sont crues telles quelles.
+/// The staleness marker written in the file survives loading, and the file's
+/// values are trusted as they are.
 #[test]
-fn un_manuel_perime_avant_la_sauvegarde_garde_son_marqueur() {
+fn a_manual_calculation_stale_before_saving_keeps_its_marker() {
     let dir = tempfile::tempdir().unwrap();
-    let (_session2, handle2, m2) = demarrer(FormulaRecalc::Targeted);
-    let manuel = ajouter(&handle2, &m2, false);
-    handle2
-        .execute(saisir(m2.y, &[2.0, 4.0, 6.0, 8.0]))
-        .unwrap();
+    let (_session2, handle2, m2) = start(FormulaRecalc::Targeted);
+    let manual = add_fit(&handle2, &m2, false);
+    handle2.execute(enter(m2.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
     let path2 = dir.path().join("q.stf");
     handle2.save(&path2).unwrap();
     handle2.load(&path2).unwrap();
-    let recharge = handle2.snapshot().unwrap();
-    let calc = recharge.tree.calculation(manuel).unwrap();
+    let reloaded = handle2.snapshot().unwrap();
+    let calc = reloaded.tree.calculation(manual).unwrap();
     assert_eq!(calc.stale, Some(Staleness::Manual));
     assert!(
-        (pente(&recharge, manuel) - 10.0).abs() < 1e-9,
-        "valeurs crues"
+        (slope(&reloaded, manual) - 10.0).abs() < 1e-9,
+        "values trusted"
     );
 }
 
 #[test]
-fn modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, false);
-    handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+fn editing_a_stale_manual_calculation_updates_it_without_making_it_stale_again() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, false);
+    handle.execute(enter(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
     assert_eq!(
         handle
             .snapshot()
@@ -704,8 +703,8 @@ fn modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer() {
             .stale,
         Some(Staleness::Manual)
     );
-    // « Edit Calculation… » : l'application recalcule les données puis envoie
-    // la commande — le calcul est à jour par construction.
+    // "Edit Calculation…": the application recalculates the data then sends
+    // the command — the calculation is up to date by construction.
     let snapshot = handle.snapshot().unwrap();
     let calc = snapshot.tree.calculation(id).unwrap();
     let computed = compute(&snapshot.tree, &calc.operation, &calc.series, None).unwrap();
@@ -735,15 +734,16 @@ fn modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer() {
             },
         })
         .unwrap();
-    let apres = handle.snapshot().unwrap();
-    assert_eq!(apres.tree.calculation(id).unwrap().stale, None);
-    assert!((pente(&apres, id) - 2.0).abs() < 1e-9);
+    let after = handle.snapshot().unwrap();
+    assert_eq!(after.tree.calculation(id).unwrap().stale, None);
+    assert!((slope(&after, id) - 2.0).abs() < 1e-9);
 }
 
-/// Une sortie qui n'accepte plus le résultat (un fichier abîmé, un type forcé
-/// hors commande) marque le calcul en échec au lieu de rester figée sans signe.
+/// An output that no longer accepts the result (a damaged file, a type forced
+/// outside a command) marks the calculation as failed instead of staying frozen
+/// with no sign.
 #[test]
-fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
+fn an_output_that_refuses_the_result_marks_the_calculation_as_failed() {
     for mode in modes() {
         let mut project = Project::new("Demo").unwrap();
         let root = project.root();
@@ -760,7 +760,7 @@ fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
             y,
             sigma: None,
         }];
-        let op = ajustement();
+        let op = fit_operation();
         let computed = compute(project.tree(), &op, &series, None).unwrap();
         let outputs = computed
             .columns
@@ -794,7 +794,7 @@ fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
 
         let session = Session::spawn_with_recalc(project, None, mode).unwrap();
         let handle = session.handle();
-        handle.execute(saisir(y, &[1.0, 2.0, 3.0])).unwrap();
+        handle.execute(enter(y, &[1.0, 2.0, 3.0])).unwrap();
         let snapshot = handle.snapshot().unwrap();
         assert!(
             matches!(
@@ -810,12 +810,12 @@ fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
 }
 
 #[test]
-fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
+fn replacing_updates_the_dependents_and_undo_restores_their_values() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
-    let (session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let calc = ajouter(&handle, &m, true);
+    let (session, handle, m) = start(FormulaRecalc::Targeted);
+    let calc = add_fit(&handle, &m, true);
     let before = handle.snapshot().unwrap();
-    let initial = colonne_fit(&before, calc);
+    let initial = fit_column(&before, calc);
     let series = vec![SeriesRef {
         x: Some(m.x),
         y: m.y,
@@ -865,7 +865,7 @@ fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
         })
         .unwrap();
     let after = handle.snapshot().unwrap();
-    let corrected = colonne_fit(&after, calc);
+    let corrected = fit_column(&after, calc);
     assert_ne!(initial, corrected);
     for (a, b) in initial.iter().zip(corrected) {
         assert!((a - b - 1.).abs() < 1e-8);
@@ -877,16 +877,16 @@ fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
     handle.undo().unwrap();
     let undone = handle.snapshot().unwrap();
     assert_eq!(undone.tree.correction_traces().len(), 0);
-    for (a, b) in initial.iter().zip(colonne_fit(&undone, calc)) {
+    for (a, b) in initial.iter().zip(fit_column(&undone, calc)) {
         assert!((a - b).abs() < 1e-8);
     }
     session.shutdown().unwrap();
 }
 
 #[test]
-fn le_recalcul_garde_le_reglage_de_boite_r2_faible() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, true);
+fn recalculation_keeps_the_low_r2_dialog_setting() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, true);
     let before = handle.snapshot().unwrap();
     let calc = before.tree.calculation(id).unwrap();
     let series = calc.series.clone();
@@ -918,29 +918,29 @@ fn le_recalcul_garde_le_reglage_de_boite_r2_faible() {
             },
         })
         .unwrap();
-    let slope_before = pente(&handle.snapshot().unwrap(), id);
-    handle.execute(saisir(m.y, &[3.0, 1.0, 7.0])).unwrap();
+    let slope_before = slope(&handle.snapshot().unwrap(), id);
+    handle.execute(enter(m.y, &[3.0, 1.0, 7.0])).unwrap();
     let after = handle.snapshot().unwrap();
     assert_ne!(
-        pente(&after, id),
+        slope(&after, id),
         slope_before,
-        "le calcul a bien été refait"
+        "the calculation was indeed redone"
     );
     assert!(!after.tree.calculation(id).unwrap().low_r2_dialog);
 }
 
-/// Une opération non finie (#278) est refusée par la session pour les trois
-/// commandes qui écrivent un calcul : erreur du modèle, et ni l'arbre, ni la
-/// révision, ni l'historique ne bougent (un refus n'est pas un geste annulable).
+/// A non-finite operation (#278) is refused by the session for the three
+/// commands that write a calculation: model error, and neither the tree, nor
+/// the revision, nor the history moves (a refusal is not an undoable gesture).
 #[test]
-fn la_session_refuse_une_operation_non_finie_sans_rien_changer() {
+fn the_session_refuses_a_non_finite_operation_without_changing_anything() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     use stokesforge_commands::CommandError;
     use stokesforge_core::CoreError;
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, false);
-    let avant = handle.snapshot().unwrap();
-    let calcul = avant.tree.calculation(id).unwrap().clone();
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, false);
+    let before = handle.snapshot().unwrap();
+    let calc = before.tree.calculation(id).unwrap().clone();
     let nan = Operation::Baseline {
         method: BaselineMethod::Constant {
             point: (f64::NAN, 1.0),
@@ -948,9 +948,9 @@ fn la_session_refuse_une_operation_non_finie_sans_rien_changer() {
         op: BaselineOp::Subtract,
         keep_baseline: false,
     };
-    let brouillon = CalculationDraft {
+    let draft = CalculationDraft {
         operation: nan,
-        series: calcul.series.clone(),
+        series: calc.series.clone(),
         aux: None,
         outputs: vec![OutputDraft {
             series: 0,
@@ -959,7 +959,7 @@ fn la_session_refuse_une_operation_non_finie_sans_rien_changer() {
             meta: ColumnMeta::default(),
             data: vec![0.0; 4],
         }],
-        results: calcul.results.clone(),
+        results: calc.results.clone(),
         keep_results: true,
         auto_recalc: false,
         low_r2_dialog: true,
@@ -967,89 +967,85 @@ fn la_session_refuse_une_operation_non_finie_sans_rien_changer() {
     let versions: Vec<(NodeId, u64)> = [m.x, m.y]
         .into_iter()
         .map(|c| {
-            let v = avant.tree.node(c).unwrap().as_column().unwrap().version();
+            let v = before.tree.node(c).unwrap().as_column().unwrap().version();
             (c, v)
         })
         .collect();
-    for commande in [
+    for command in [
         Command::AddCalculation {
-            draft: brouillon.clone(),
+            draft: draft.clone(),
         },
         Command::UpdateCalculation {
             id,
-            draft: brouillon.clone(),
+            draft: draft.clone(),
         },
         Command::ReplaceAnalysisData {
-            draft: brouillon,
+            draft,
             expected_versions: versions,
         },
     ] {
-        let erreur = handle.execute(commande).unwrap_err();
+        let error = handle.execute(command).unwrap_err();
         assert!(
             matches!(
-                erreur,
+                error,
                 SessionError::Command(CommandError::Core(CoreError::Structure(_)))
             ),
-            "{erreur:?}"
+            "{error:?}"
         );
-        let apres = handle.snapshot().unwrap();
-        assert_eq!(apres.revision, avant.revision, "révision inchangée");
-        assert!(std::sync::Arc::ptr_eq(&apres.tree, &avant.tree));
-        assert_eq!(apres.history, avant.history, "historique inchangé");
+        let after = handle.snapshot().unwrap();
+        assert_eq!(after.revision, before.revision, "revision unchanged");
+        assert!(std::sync::Arc::ptr_eq(&after.tree, &before.tree));
+        assert_eq!(after.history, before.history, "history unchanged");
     }
 }
 
-/// `load_with_report` relaie le rapport du fichier (#278) ; `load` charge le
-/// même projet sans rien dire ; un fichier sain rend un rapport vide.
+/// `load_with_report` relays the file's report (#278); `load` loads the same
+/// project without saying anything; a sound file returns an empty report.
 #[test]
-fn le_chargement_relaie_les_calculs_ecartes_de_la_persistance() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let id = ajouter(&handle, &m, false);
+fn loading_relays_the_calculations_dropped_by_persistence() {
+    let (_session, handle, m) = start(FormulaRecalc::Targeted);
+    let id = add_fit(&handle, &m, false);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
     handle.save(&path).unwrap();
 
-    let (revision, rapport) = handle.load_with_report(&path).unwrap();
-    assert_eq!(
-        rapport,
-        LoadReport::default(),
-        "fichier sain : rapport vide"
-    );
-    assert!(rapport.is_clean());
+    let (revision, report) = handle.load_with_report(&path).unwrap();
+    assert_eq!(report, LoadReport::default(), "sound file: empty report");
+    assert!(report.is_clean());
     assert_eq!(handle.snapshot().unwrap().revision, revision);
 
-    // Même longueur : le modèle « linear » devient illisible.
-    let mut octets = std::fs::read(&path).unwrap();
-    let at = octets
+    // Same length: the "linear" model becomes unreadable.
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = bytes
         .windows(6)
         .position(|w| w == b"linear")
-        .expect("le modèle est dans le fichier");
-    octets[at..at + 6].copy_from_slice(b"linexx");
-    std::fs::write(&path, &octets).unwrap();
+        .expect("the model is in the file");
+    bytes[at..at + 6].copy_from_slice(b"linexx");
+    std::fs::write(&path, &bytes).unwrap();
 
-    let (revision2, rapport) = handle.load_with_report(&path).unwrap();
-    assert!(revision2 > revision, "un chargement avance la révision");
+    let (revision2, report) = handle.load_with_report(&path).unwrap();
+    assert!(revision2 > revision, "a load advances the revision");
     assert_eq!(
-        rapport.discarded_calculations,
+        report.discarded_calculations,
         vec![DiscardedCalculation {
             id: id.raw(),
             kind: Some("fit".into())
         }]
     );
     assert!(handle.snapshot().unwrap().tree.calculations().is_empty());
-    // `load` : même chargement, la révision avance, rien ne casse.
+    // `load`: same loading, the revision advances, nothing breaks.
     let revision3 = handle.load(&path).unwrap();
     assert!(revision3 > revision2);
     assert!(handle.snapshot().unwrap().tree.calculations().is_empty());
-    // Un échec de lecture ne rapporte rien : rien n'a changé.
-    let absent = dir.path().join("absent.stf");
-    assert!(handle.load_with_report(&absent).is_err());
+    // A read failure reports nothing: nothing changed.
+    let missing = dir.path().join("missing.stf");
+    assert!(handle.load_with_report(&missing).is_err());
     assert_eq!(handle.snapshot().unwrap().revision, revision3);
 }
 
-/// #309 : le rapport relaie aussi les traces de correction écartées.
+/// #309: the report also relays the dropped correction traces.
 #[test]
-fn le_chargement_relaie_les_traces_de_correction_ecartees() {
+fn loading_relays_the_dropped_correction_traces() {
     use stokesforge_analysis::correct::CorrectOp;
     use stokesforge_core::{CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult};
     let mut project = stokesforge_core::Project::new("P").unwrap();
@@ -1103,16 +1099,16 @@ fn le_chargement_relaie_les_traces_de_correction_ecartees() {
     let path = dir.path().join("p.stf");
     handle.save(&path).unwrap();
     assert!(handle.load_with_report(&path).unwrap().1.is_clean());
-    let mut octets = std::fs::read(&path).unwrap();
-    let at = octets
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = bytes
         .windows(8)
         .position(|w| w == b"subtract")
-        .expect("l'opération est dans le fichier");
-    octets[at..at + 8].copy_from_slice(b"subtraXX");
-    std::fs::write(&path, &octets).unwrap();
-    let (_, rapport) = handle.load_with_report(&path).unwrap();
+        .expect("the operation is in the file");
+    bytes[at..at + 8].copy_from_slice(b"subtraXX");
+    std::fs::write(&path, &bytes).unwrap();
+    let (_, report) = handle.load_with_report(&path).unwrap();
     assert_eq!(
-        rapport.discarded_corrections,
+        report.discarded_corrections,
         vec![DiscardedCalculation {
             id: trace.raw(),
             kind: Some("correct".into())

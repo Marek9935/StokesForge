@@ -1,30 +1,30 @@
-//! Capture d'une variante d'énumération inconnue à la lecture (C5, niveau 2,
+//! Capture of an unknown enum variant at read time (C5, level 2,
 //! `guide-de-correction-robustesse.md` §F3).
 //!
-//! Un fichier `.stf` écrit par une version plus récente de StokesForge peut porter
-//! une variante qu'un lecteur plus ancien ne connaît pas (un nouveau type de
-//! tracé, une nouvelle nature de nœud). Plutôt que de faire échouer toute la
-//! désérialisation — ce que `serde` fait par défaut pour un enum externally
-//! tagged — `stokesforge-persistence` capture le nom de la variante et son
-//! contenu encodé, et les porte jusqu'ici pour que le reste du modèle (et
-//! l'affichage) puisse dégrader gracieusement au lieu de refuser le fichier
-//! entier.
+//! A `.stf` file written by a newer version of StokesForge can carry
+//! a variant that an older reader does not know (a new plot type,
+//! a new node kind). Rather than failing the whole
+//! deserialization — which `serde` does by default for an externally
+//! tagged enum — `stokesforge-persistence` captures the variant name and its
+//! encoded content, and carries them here so that the rest of the model (and
+//! the display) can degrade gracefully instead of refusing the whole
+//! file.
 //!
-//! Ce type ne connaît ni `serde` ni le format MessagePack : `stokesforge-plot` et
-//! `stokesforge-core` n'ont pas le droit d'en dépendre
-//! (`tests/no_ui_dependency.rs`). Il ne porte que des octets opaques, déjà
-//! encodés tels que lus du fichier ; seul `stokesforge-persistence` sait les
-//! réinterpréter, à la lecture comme à la ré-écriture — c'est ce qui garantit
-//! qu'une variante inconnue survit à deux sauvegardes successives à
-//! l'identique (B20).
+//! This type knows neither `serde` nor the MessagePack format: `stokesforge-plot` and
+//! `stokesforge-core` may not depend on them
+//! (`tests/no_ui_dependency.rs`). It only carries opaque bytes, already
+//! encoded as read from the file; only `stokesforge-persistence` knows how to
+//! reinterpret them, on read as on rewrite — this is what guarantees
+//! that an unknown variant survives two successive saves
+//! unchanged (B20).
 
-/// Nom et contenu bruts d'une variante d'énumération que ce lecteur ne
-/// connaît pas.
+/// Raw name and content of an enum variant that this reader does not
+/// know.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawVariant {
-    /// Nom de la variante tel qu'écrit dans le fichier.
+    /// Variant name as written in the file.
     pub name: String,
-    /// Contenu associé, encodé en MessagePack tel que lu — vide pour une
-    /// variante sans contenu (un futur variant unitaire).
+    /// Associated content, MessagePack-encoded as read — empty for a
+    /// variant with no content (a future unit variant).
     pub payload: Vec<u8>,
 }

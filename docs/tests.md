@@ -49,7 +49,7 @@ ones to understand before changing them.
 | Test | What it holds |
 |---|---|
 | `*/tests/no_ui_dependency.rs` (eleven crates, including `stokesforge-app-state` since #263: no `egui`, no `eframe`, no `winit`, no `stokesforge-clipboard`) | dependency allow-list: every addition to `Cargo.toml` must be added to it explicitly (invariant 2). Shared reading `stokesforge-arch-guard`: normal, build, `target.*` and renamed (`package`) dependencies; `dev-dependencies` excluded; negative witnesses in `stokesforge-arch-guard/src/lib.rs` |
-| `stokesforge-persistence/tests/fichiers_temoins.rs` (S4, #323) | the file `tests/temoins/v1/projet.stf` is read back to give exactly the witness project (all node, column and series types, non-default values), and saving the project gives back its bytes: the written format does not drift without a decision. Witness: renaming a field of `schema.rs` or `recipe_record.rs` fails both tests. Regeneration: see `persistance.md`, "Version rule: every V1 file can be read back up to V3" |
+| `stokesforge-persistence/tests/witness_files.rs` (S4, #323) | the file `tests/witnesses/v1/project.stf` is read back to give exactly the witness project (all node, column and series types, non-default values), and saving the project gives back its bytes: the written format does not drift without a decision. Witness: renaming a field of `schema.rs` or `recipe_record.rs` fails both tests. Regeneration: see `persistance.md`, "Version rule: every V1 file can be read back up to V3" |
 | `stokesforge-arch-guard/tests/renvois_fiches.rs` (F1, #301) | in all project skills (`.claude/skills/stokesforge-*` and `run-stokesforge`, `SKILL.md` and `references/*.md`), every reference "`fichier.md` § Title" names a file and a heading that exist, a `§` without a path is refused; every link `](references/x)` of a `SKILL.md` points to an existing file and no file of `references/` is orphaned. Witnesses on fake trees (missing heading or file, `§` without a path, dead link, orphan, third-party skill ignored) |
 | `stokesforge-arch-guard/tests/codes_standard.rs` (#301) | every `S-XN` code cited (docs, skills, comments, tests) appears in the rule index of `docs/standard-interface.md`; witness on an unknown code |
 | `stokesforge-arch-guard/tests/config_dir.rs` (#332) | `ProjectDirs::from` is called only by `stokesforge-import/src/config_dir.rs` (comment lines ignored): every profile path goes through `config_dir()`, which tests redirect with `STOKESFORGE_CONFIG_DIR`. Witness: a fake source that calls it is refused, a comment is not; proven mutant: the call added to `recent.rs` fails the guard |
@@ -176,13 +176,13 @@ new formula functions).
 | Test | What it holds |
 |---|---|
 | `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps; same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
-| `stokesforge-session/tests/recalc_cible.rs` | one named case per component of the fingerprint (stored formula, sheet membership and version of the sources, length of the result, own version, outcome), the gestures that make them change (move within the sheet or to another, deletion then undo, cycle created elsewhere, deletion of cells in a formula column, aborted macro, duplicated sheet…), stability of a chain and of a cycle, forgetting of the memo by `Load` and `NewProject` on a coincidence of identifiers and versions that is **manufactured and checked**. Each "not rewritten" assertion has its witness in full mode |
+| `stokesforge-session/tests/recalc_targeted.rs` | one named case per component of the fingerprint (stored formula, sheet membership and version of the sources, length of the result, own version, outcome), the gestures that make them change (move within the sheet or to another, deletion then undo, cycle created elsewhere, deletion of cells in a formula column, aborted macro, duplicated sheet…), stability of a chain and of a cycle, forgetting of the memo by `Load` and `NewProject` on a coincidence of identifiers and versions that is **manufactured and checked**. Each "not rewritten" assertion has its witness in full mode |
 | `stokesforge-session/src/lib.rs` (`tests`), `src/recalc.rs` (`tests`) | interruptible recalculation (#239): Stop cancels the command and allows redo (stop set in advance on the next recalculation, hence deterministic), Stop after a command **without effect** undoes nothing (`History::execute_recorded`), the death of the actor (panic simulated by `Request::PanicForTest`, or in the middle of a recalculation) frees the gauge and makes `actor_alive` false (#310), late Stop without effect on the next one, stop between two columns then next pass that finishes without rewriting what is already written. `stokesforge-app-state/tests/shell.rs` (`heavy`): the same gesture seen from the interface on a heavy project, with its witness without Stop, and the question "save?" asked at close during the recalculation |
 | Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`un_axe_oriente_se_trace_comme_l_axe_d_origine`, `stokesforge-render/tests/geometrie.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more "Inverted axis" / "Auto range" / "Closed frame" boxes, "Advanced" block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of "Advanced" counted twice) |
-| `stokesforge-session/tests/analyse.rs` (`au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime`, `la_confiance_au_chargement_ne_vaut_que_pour_le_chargement`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
+| `stokesforge-session/tests/analysis.rs` (`on_load_no_calculation_is_rerun_and_the_fingerprint_says_whether_it_is_stale`, `trust_on_load_applies_only_to_the_load`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
 | `stokesforge-session/tests/formula.rs` | the behavior of formulas itself (before #193, unchanged) |
 | `stokesforge-robustesse/tests/b14_balayage.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
-| `stokesforge-core` (`project.rs`, `une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version`) | inserting a column moves the counter beyond its version |
+| `stokesforge-core` (`project.rs`, `an_inserted_column_moves_the_counter_past_its_version`) | inserting a column moves the counter beyond its version |
 
 The oracle does not see an error **common** to both modes (calculation order,
 evaluation, output type): they share all the code except the decision
@@ -197,19 +197,19 @@ tests see it.
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| formula text removed from the fingerprint | `changer_le_texte_de_la_formule_recalcule`, `b22` |
-| length of the result removed (revised by #194: for a computed formula, it follows from the versions of the sources; it matters only for the other outcomes and constants) | `un_cycle_suit_la_longueur_de_la_feuille`, `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
-| length removed for a blocked formula only | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
-| own version ignored (on both sides) | `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
-| own version ignored for a blocked, or unreadable, formula only | `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
-| own version noted **before** the write, or never | the "targeted" cases (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`, `un_cycle_stable_ne_se_reecrit_pas`…), `b22` (property 3) |
+| formula text removed from the fingerprint | `changing_the_formula_text_recalculates`, `b22` |
+| length of the result removed (revised by #194: for a computed formula, it follows from the versions of the sources; it matters only for the other outcomes and constants) | `a_cycle_follows_the_length_of_the_sheet`, `a_constant_follows_the_ordinary_columns`, `an_unreadable_formula_follows_the_sheet_then_gets_corrected`, `b22` |
+| length removed for a blocked formula only | `a_cycle_follows_the_length_of_the_sheet`, `b22` |
+| own version ignored (on both sides) | `a_formula_column_modified_directly_is_recalculated`, `a_blocked_or_unreadable_formula_modified_directly_is_rewritten`, `b22` |
+| own version ignored for a blocked, or unreadable, formula only | `a_blocked_or_unreadable_formula_modified_directly_is_rewritten`, `b22` |
+| own version noted **before** the write, or never | the "targeted" cases (`an_unrelated_command_rewrites_no_formula`, `a_recalculated_chain_is_stable_at_the_next_command`, `a_stable_cycle_is_not_rewritten`…), `b22` (property 3) |
 | versions of the sources removed | eight named cases (propagation, aborted macro, promoted source…), `b22` |
-| resolution of identifiers **by position** instead of by identifier (#321, bug #320) | `deplacer_une_source_dans_la_feuille_la_formule_suit`, `une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule` |
-| sheet membership missing from the fingerprint (the version of a column that is read is taken in the whole tree) | `deplacer_une_source_vers_une_autre_feuille` — not `b22` |
-| an automatic `Manual` calculation read from a file is recalculated by full mode (`Manual` arm of `update_calculation`) | `un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet`, `b22`; the **content** comparison (`Renumber`): `un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet` |
-| memo not cleared by `Load` | `le_chargement_oublie_le_memo_du_projet_remplace` alone — the draw does not manufacture a coincidence between projects |
-| memo not cleared by `NewProject` | `un_nouveau_projet_oublie_le_memo_de_l_ancien` alone (a paste as first request: otherwise the purge of an ordinary pass is enough) |
-| insertion of a column without moving the counter beyond its version (`Project::insert_node`) | `une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero`, the unit test of `core`, `b14` — not `b22`, whose draw does not land on the number |
+| resolution of identifiers **by position** instead of by identifier (#321, bug #320) | `moving_a_source_within_the_sheet_the_formula_follows`, `an_analysis_that_inserts_its_outputs_does_not_change_what_a_formula_reads` |
+| sheet membership missing from the fingerprint (the version of a column that is read is taken in the whole tree) | `moving_a_source_to_another_sheet` — not `b22` |
+| an automatic `Manual` calculation read from a file is recalculated by full mode (`Manual` arm of `update_calculation`) | `an_automatic_calculation_stale_on_load_waits_for_a_gesture_even_in_full_mode`, `b22`; the **content** comparison (`Renumber`): `a_stale_automatic_calculation_reading_a_formula_stays_stale_in_full_mode` |
+| memo not cleared by `Load` | `loading_forgets_the_memo_of_the_replaced_project` alone — the draw does not manufacture a coincidence between projects |
+| memo not cleared by `NewProject` | `a_new_project_forgets_the_memo_of_the_old_one` alone (a paste as first request: otherwise the purge of an ordinary pass is enough) |
+| insertion of a column without moving the counter beyond its version (`Project::insert_node`) | `a_column_added_with_its_version_does_not_make_that_number_serve_again`, the unit test of `core`, `b14` — not `b22`, whose draw does not land on the number |
 | recalculate everything (the "targeted" is no longer targeted) | the "targeted" cases and their witnesses, `b22` (property 3) |
 | presence in the memo instead of fingerprint equality | fifteen named cases, `b22` |
 | self-reference | refused on input (`Tree::formula_from_letters`: `SelfReference`, test of `core`); a fabricated file that carries it ends up in the cycle, never in `evaluate_formula` |
@@ -235,39 +235,39 @@ its own.
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| back to the length of the sheet (all columns together) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
-| columns read ignored (always the length of the ordinary ones) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
-| formula columns counted in the fallback length | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
+| back to the length of the sheet (all columns together) | `the_result_follows_the_length_of_the_columns_read`, `lengthening_an_unread_column_does_not_change_the_formula`, `moving_a_source_to_another_sheet`, `a_formula_column_modified_directly_is_recalculated`, `an_unreadable_formula_follows_the_sheet_then_gets_corrected` — not `b22` |
+| columns read ignored (always the length of the ordinary ones) | `the_result_follows_the_length_of_the_columns_read`, `lengthening_an_unread_column_does_not_change_the_formula`, `moving_a_source_to_another_sheet`, `an_unreadable_formula_follows_the_sheet_then_gets_corrected` — not `b22` |
+| formula columns counted in the fallback length | `a_constant_follows_the_ordinary_columns`, `an_unreadable_formula_follows_the_sheet_then_gets_corrected` — not `b22` |
 
 ### Reliability of fits (#203, #205)
 
-`stokesforge-analysis/tests/indetermine.rs`: parameter without effect (warns, the
+`stokesforge-analysis/tests/undetermined.rs`: parameter without effect (warns, the
 others keep their uncertainty), X all equal (slope undetermined), no determined
 parameter (`SingularSystem`), well-posed fit (no
 warning), line with empty or zero σ discarded and counted.
 
 ### Fits on a shifted X (#282, #293, #294)
 
-`stokesforge-analysis/tests/decalage.rs`: free line `a + b*x` and Gaussian
+`stokesforge-analysis/tests/x_offset.rs`: free line `a + b*x` and Gaussian
 on an X shifted from 1e3 to 1e10, compared with the `Linear` model and the centered frame
 (values **and** uncertainties). Witnesses by mutation: without refinement of the
-difference step, `une_gaussienne_decalee_de_un_million_retrouve_ses_parametres` and
-`une_gaussienne_bruitee_decalee_de_un_million_a_les_incertitudes_du_repere_centre`
+difference step, `a_gaussian_offset_by_one_million_recovers_its_parameters` and
+`a_noisy_gaussian_offset_by_one_million_has_the_centerd_frame_uncertainties`
 fail; without the undamped verification step,
-`un_pas_amorti_minuscule_n_est_pas_une_convergence` (`solver.rs`) and
-`au_dela_le_resultat_est_celui_du_modele_lineaire` fail; with the old
-indetermination threshold (1e-6), `le_cas_de_l_issue_donne_les_incertitudes_du_modele_lineaire`
+`a_tiny_damped_step_is_not_a_convergence` (`solver.rs`) and
+`beyond_that_the_result_is_the_linear_model_one` fail; with the old
+indetermination threshold (1e-6), `the_issue_case_gives_the_linear_model_uncertainties`
 fails. Beyond X ≈ 3e7, the slope of a free line is declared undetermined
 (uncertainty omitted, warning): the noise of the finite differences (≈ 2e-10)
 no longer separates the weak direction there.
 
 ### Numerical determinism of analysis (#332)
 
-`stokesforge-analysis/tests/determinisme.rs`: results frozen **to the bit** (`to_bits()`) for all platforms, because the transcendental functions go through the `libm` crate; Linux CI confirms them. Peak decomposition of the series in steps of five rows (20 values, R² included); the sawtooth of #290 converges on no platform (`NotConverged { iterations: 400 }`); five expression values (`exp`, `ln`, `sin`, `pow`, `atan2`) and a sweep of 256 abscissas per function (FNV-1a fingerprint of the bits). Guard: `crates/stokesforge-analysis/clippy.toml` (`disallowed-methods`, checked by `cargo clippy -p stokesforge-analysis --all-targets -- -D warnings`). Proven mutants: `x.exp()` reintroduced in `peaks.rs` (clippy fails); `Func::Exp` computed by `exp2(a * LOG2_E)` (the five isolated values did not see it, the sweep did: hence the sweep).
+`stokesforge-analysis/tests/determinism.rs`: results frozen **to the bit** (`to_bits()`) for all platforms, because the transcendental functions go through the `libm` crate; Linux CI confirms them. Peak decomposition of the series in steps of five rows (20 values, R² included); the sawtooth of #290 converges on no platform (`NotConverged { iterations: 400 }`); five expression values (`exp`, `ln`, `sin`, `pow`, `atan2`) and a sweep of 256 abscissas per function (FNV-1a fingerprint of the bits). Guard: `crates/stokesforge-analysis/clippy.toml` (`disallowed-methods`, checked by `cargo clippy -p stokesforge-analysis --all-targets -- -D warnings`). Proven mutants: `x.exp()` reintroduced in `peaks.rs` (clippy fails); `Func::Exp` computed by `exp2(a * LOG2_E)` (the five isolated values did not see it, the sweep did: hence the sweep).
 
 ### Bounds, prerequisites and settings of analysis (#260)
 
-`stokesforge-analysis/tests/limites.rs`: `Model::compile` refuses a degree beyond
+`stokesforge-analysis/tests/limits.rs`: `Model::compile` refuses a degree beyond
 the cap (`u32::MAX`) without allocating anything (the test runs under `ulimit -v` to
 see the failure of a `compile` without a cap rather than a hang); `MAX_*` and
 their edges in `validate` (100 peaks, not 50); `validate` refuses a fit
@@ -285,15 +285,15 @@ degree in the preferences fabricates nothing).
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| `compile` without a cap | `compile_refuse_un_degre_hors_plafond_sans_allouer` |
-| `readiness` forgets `NeedsZone` | `readiness_dit_ce_qui_manque_a_une_ligne_de_base` |
-| `forget_positions` keeps `shared` | `forget_positions_efface_les_plages_et_les_reglages_par_parametre`, `rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages` |
-| `MAX_PEAKS` at 50 | `les_plafonds_sont_ceux_de_la_table_des_grandeurs`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
-| `auto_initial` without range filter | `auto_initial_suit_le_modele_sur_les_points_de_la_plage`, `auto_reads_only_the_fitted_range` |
-| `validate` without "zero free parameters" | `validate_refuse_un_ajustement_sans_parametre_libre` |
-| `validate` lets a non-finite range, seed, prominence, shift or window through (#278) | `validate_refuse_une_plage_non_finie`, `validate_refuse_une_graine_ou_une_proeminence_non_finie`, `validate_refuse_un_decalage_ou_une_fenetre_non_finis`, `validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_retour` (field-by-field table, NaN/±inf, round trip of the finite value) |
-| `add_/update_calculation` without `Operation::validate` (#278) | `une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour` (core), `toute_operation_non_finie_est_refusee_sans_toucher_l_arbre` (twelve families, add/update/replace, tree and identifiers intact), `la_session_refuse_une_operation_non_finie_sans_rien_changer` (session) |
-| unreadable calculation discarded without a report (#278) | `un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge` (persistence), `loading_a_file_with_an_unreadable_calculation_warns` (app-state), `plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_chargent`, `un_fichier_sans_calcul_ecarte_rend_un_rapport_vide`, `un_identifiant_hors_borne_ecarte_le_calcul` (bound, all id fields), `le_chargement_relaie_les_calculs_ecartes_de_la_persistance` (session), `the_discarded_calculations_warning_counts_and_abbreviates` (singular/plural, 5 ids then "…", fr/en), `une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie` (preferences); #309: `une_forme_invalide_ecarte_et_nomme_le_calcul`, `une_trace_ecartee_est_comptee`, `une_trace_de_correction_illisible_est_comptee_par_le_rapport` (persistence), `le_chargement_relaie_les_traces_de_correction_ecartees` (session), `mark_loaded_avertit_des_calculs_ecartes_du_rapport` (app-state), `un_doublon_d_identifiant_garde_le_premier_et_compte_le_second` (persistence, F4), `le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message` (F1), `run_project_avertit_des_ecarts_puis_execute_le_script` (CLI, feature python, F2), confirmation on save (F3, app-state `shell.rs`): `enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit`, `refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste`, `quitter_enregistrer_accepter_enregistre_puis_quitte`, `enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui`, `un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question`, `le_chargement_du_demarrage_pose_le_repere_de_la_source`, `le_demarrage_rend_le_rapport_des_calculs_ecartes` (main); `un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul` (persistence, #291: `validate` called on load) |
+| `compile` without a cap | `compile_refuses_a_degree_beyond_the_cap_without_allocating` |
+| `readiness` forgets `NeedsZone` | `readiness_says_what_a_baseline_lacks` |
+| `forget_positions` keeps `shared` | `forget_positions_clears_the_ranges_and_the_per_parameter_settings`, `rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages` |
+| `MAX_PEAKS` at 50 | `the_caps_are_those_of_the_quantities_table`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
+| `auto_initial` without range filter | `auto_initial_follows_the_model_on_the_points_of_the_range`, `auto_reads_only_the_fitted_range` |
+| `validate` without "zero free parameters" | `validate_refuses_a_fit_without_a_free_parameter` |
+| `validate` lets a non-finite range, seed, prominence, shift or window through (#278) | `validate_refuses_a_non_finite_range`, `validate_refuses_a_non_finite_seed_or_prominence`, `validate_refuses_a_non_finite_shift_or_window`, `validate_refuses_each_non_finite_field_and_accepts_the_finite_one_that_round_trips` (field-by-field table, NaN/±inf, round trip of the finite value) |
+| `add_/update_calculation` without `Operation::validate` (#278) | `a_non_finite_operation_is_refused_on_add_and_on_update` (core), `every_non_finite_operation_is_refused_without_touching_the_tree` (twelve families, add/update/replace, tree and identifiers intact), `the_session_refuses_a_non_finite_operation_without_changing_anything` (session) |
+| unreadable calculation discarded without a report (#278) | `an_unreadable_calculation_is_named_by_the_report_and_the_rest_loads` (persistence), `loading_a_file_with_an_unreadable_calculation_warns` (app-state), `several_discarded_calculations_are_all_listed_in_order_and_the_sound_ones_load`, `a_file_without_a_discarded_calculation_gives_an_empty_report`, `an_identifier_out_of_bounds_discards_the_calculation` (bound, all id fields), `loading_relays_the_calculations_dropped_by_persistence` (session), `the_discarded_calculations_warning_counts_and_abbreviates` (singular/plural, 5 ids then "…", fr/en), `une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie` (preferences); #309: `an_invalid_shape_discards_and_names_the_calculation`, `a_discarded_trace_is_counted`, `an_unreadable_correction_trace_is_counted_by_the_report` (persistence), `loading_relays_the_dropped_correction_traces` (session), `mark_loaded_avertit_des_calculs_ecartes_du_rapport` (app-state), `a_duplicate_identifier_keeps_the_first_and_counts_the_second` (persistence, F4), `le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message` (F1), `run_project_avertit_des_ecarts_puis_execute_le_script` (CLI, feature python, F2), confirmation on save (F3, app-state `shell.rs`): `enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit`, `refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste`, `quitter_enregistrer_accepter_enregistre_puis_quitte`, `enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui`, `un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question`, `le_chargement_du_demarrage_pose_le_repere_de_la_source`, `le_demarrage_rend_le_rapport_des_calculs_ecartes` (main); `a_nan_edited_by_hand_in_the_file_discards_and_reports_the_calculation` (persistence, #291: `validate` called on load) |
 
 ### Out-of-date series on the graph (#198)
 
@@ -320,15 +320,15 @@ methods through `pyst`, their refusals and the cancelation of the script (featur
 
 Same mechanism, another memo (`CalcFingerprint`, `CalcMemo`). `b22` plays the steps
 `AjouterCalcul` (fit or correction, automatic or manual), `RetirerCalcul`
-and `RecalculerPerimes` next to the formulas; `stokesforge-session/tests/analyse.rs`
+and `RecalculerPerimes` next to the formulas; `stokesforge-session/tests/analysis.rs`
 names the behaviors.
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| versions of the inputs removed from the fingerprint of an automatic calculation | `b22`, `un_calcul_automatique_suit_ses_entrees` |
+| versions of the inputs removed from the fingerprint of an automatic calculation | `b22`, `an_automatic_calculation_follows_its_inputs` |
 | manual: comparison by content (`seen`) removed | `b22` (full recalculation rewrites the formulas, hence their versions) |
 | guard of the calculation → formula → calculation loops removed | `b22` (property 3: an unrelated command rewrites columns) |
-| manual: definition change not "trusted" (`Trust`) | `modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer` alone |
+| manual: definition change not "trusted" (`Trust`) | `editing_a_stale_manual_calculation_updates_it_without_making_it_stale_again` alone |
 
 ### Proven mutants (#313, analysis warnings and errors)
 
@@ -341,15 +341,15 @@ green). The cases are named in `stokesforge-analysis` (`solver.rs`, `deconv.rs`,
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| stop without an accepted step always "converged" (`stalled` never raised) | `un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque`, `un_solveur_bloque_sur_une_pointe_avertit_non_converge` |
-| non-finite test removed before the `max` fold (slope `NaN` read as "converged") | `une_pente_non_finie_est_une_erreur_modele_non_evaluable` (solver and `tests/plateau.rs`), `largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose` |
+| stop without an accepted step always "converged" (`stalled` never raised) | `a_solver_with_no_accepted_step_and_a_steep_slope_is_flagged_stalled`, `a_solver_stuck_on_a_sharp_point_warns_not_converged` |
+| non-finite test removed before the `max` fold (slope `NaN` read as "converged") | `a_non_finite_slope_is_a_non_evaluable_model_error` (solver and `tests/plateau.rs`), `tiny_or_non_finite_imposed_width_is_not_judged_by_decompose` |
 | non-finite derivative reset to 0 ("no effect" box) | same cases (the error becomes `SingularSystem` again) |
-| exact-fit threshold removed (cosine read on rounding noise) | `un_ajustement_sain_ou_bruite_ne_previent_pas` (`tests/indetermine.rs`) |
-| cut IRF: 1% threshold moved (0.5% or 2%), edges or points outside the window ignored | `une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee` (0.5 / 0.9 / 1.1 / 5%), `un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage`, `la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation` |
-| hole in the reference: count removed, point exactly on a kept point counted | `un_trou_de_la_reference_est_enjambe_et_compte`, `un_trou_au_milieu_de_la_reference_est_enjambe_et_dit`, `un_trou_en_fin_ou_sans_position_n_est_pas_un_enjambement` |
-| division by zero: count of every non-finite (overflow included), baseline not counted, `±inf` of `sat/sa` | `la_division_par_une_reference_nulle_est_comptee_pas_le_debordement`, `une_ligne_de_base_passant_par_zero_compte_la_division`, `un_denominateur_nul_donne_nan_et_pas_l_infini`, `des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan` |
-| length of X replaced by the longest of the columns (C4) | `la_sortie_a_la_longueur_de_x_quand_x_est_donne`, `sans_x_la_sortie_a_la_longueur_de_y` |
-| "source length" refusal restored for an output shorter than Y | `le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x` |
+| exact-fit threshold removed (cosine read on rounding noise) | `a_sound_or_noisy_fit_does_not_warn` (`tests/undetermined.rs`) |
+| cut IRF: 1% threshold moved (0.5% or 2%), edges or points outside the window ignored | `an_irf_cut_above_one_percent_of_its_peak_is_reported` (0.5 / 0.9 / 1.1 / 5%), `an_irf_point_outside_the_window_is_reported_depending_on_the_shift`, `direct_deconvolution_reports_a_cut_irf_and_keeps_the_renormalization` |
+| hole in the reference: count removed, point exactly on a kept point counted | `a_hole_in_the_reference_is_bridged_and_counted`, `a_gap_in_the_middle_of_the_reference_is_bridged_and_reported`, `a_gap_at_the_end_or_without_a_position_is_not_a_bridge` |
+| division by zero: count of every non-finite (overflow included), baseline not counted, `±inf` of `sat/sa` | `division_by_a_zero_reference_is_counted_not_the_overflow`, `a_baseline_passing_through_zero_counts_the_division`, `a_zero_denominator_gives_nan_and_not_infinity`, `amplitudes_with_a_zero_sum_give_nan_mean_lifetimes` |
+| length of X replaced by the longest of the columns (C4) | `the_output_has_the_length_of_x_when_x_is_given`, `without_x_the_output_has_the_length_of_y` |
+| "source length" refusal restored for an output shorter than Y | `replacement_with_y_longer_than_x_keeps_the_cells_beyond_x` |
 
 Known equivalent mutant: `h >= lo && h <= hi` in `bridges_hole` (a hole
 at the same abscissa as a kept point assumes a duplicated X).
@@ -365,7 +365,7 @@ at the same abscissa as a kept point assumes a duplicated X).
    of a column **does not cover**: it changes only with the type and the
    values, never with the name, the unit, the formula, the position or the
    sheet — such a piece of data is compared directly.
-2. A named case in `recalc_cible.rs` that changes **only** this piece of data and
+2. A named case in `recalc_targeted.rs` that changes **only** this piece of data and
    requires the new value.
 3. A step in the draw of `b22` that makes it change. Without it, the oracle cannot
    see the omission: it compares only what the draw produces.
@@ -424,7 +424,7 @@ diverge; the calculated result submitted to both stays identical.
 formulas, new step): rerun `b22` with more cases
 (`runner(…)`) and the mutants; a step that writes after another has taken
 its fingerprint is seen by the "unrelated" property of `b22` and by
-`une_chaine_recalculee_est_stable_a_la_commande_suivante`.
+`a_recalculated_chain_is_stable_at_the_next_command`.
 
 ## Running
 
@@ -458,7 +458,7 @@ Linux runner is registered; Windows is not affected by this choice.
 
 | Job | Blocking | What it does |
 |---|---|---|
-| `fmt` | yes | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` and `scripts/versions-alignees.sh` (all crates in the same version `X.Y.Z`, #349/#350; only the `[package]` section is read, internal dependencies `stokesforge-x = { version = … }` equal to this version, `Cargo.lock` up to date, `FORMAT_VERSION` = N requires `tests/temoins/vN/projet.stf`, #351/#352/#353) |
+| `fmt` | yes | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` and `scripts/versions-alignees.sh` (all crates in the same version `X.Y.Z`, #349/#350; only the `[package]` section is read, internal dependencies `stokesforge-x = { version = … }` equal to this version, `Cargo.lock` up to date, `FORMAT_VERSION` = N requires `tests/witnesses/vN/project.stf`, #351/#352/#353) |
 | `licenses` | yes | policy and generation of third-party notices |
 | `clippy` | yes | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | yes | `cargo test --workspace` |
@@ -820,8 +820,8 @@ Gestures go through egui events, never through a direct call of the
 | graph: the "group selected" branch skipped, Del targets the first series | `les_raccourcis_d_un_groupe_selectionne_visent_le_groupe` (`app/graph_window.rs`) |
 | Ctrl+↑/↓ without the `can_move_group` bound | same |
 | F2 no longer opens the group rename | same |
-| `.stf`: empty group names kept on load | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
-| `.stf`: `#[serde(default)]` removed from `group_names` (old file unreadable) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
+| `.stf`: empty group names kept on load | `an_empty_group_name_is_dropped_at_load` (`stokesforge-persistence/src/convert.rs`) |
+| `.stf`: `#[serde(default)]` removed from `group_names` (old file unreadable) | `a_layer_without_group_names_reads_back_with_its_groups` |
 
 ## Copy/paste of cells (#259)
 
@@ -829,16 +829,16 @@ Gestures go through egui events, never through a direct call of the
 |---|---|
 | `tsv::needs_quotes` always false (plain `join("\t")`) | `stokesforge-core/src/tsv.rs` (round trip tab, line break, quote); `a_multiline_text_cell_pastes_into_another_session_without_shifting_anything` (`stokesforge-app-state/tests/shell.rs`) |
 | `decode` without quote handling | same + `a_single_multiline_text_cell_pastes_as_one_cell` |
-| `decode` without `\r\n` | `un_tableur_windows_termine_ses_lignes_par_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
+| `decode` without `\r\n` | `a_windows_spreadsheet_ends_its_rows_with_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
 | `cell_copy_text_in` that removes `MISSING_TEXT_DISPLAY` afterwards | `a_typed_non_breaking_space_survives_copy_and_paste` |
 | absent cell read as empty (`unwrap_or("")`, no more `value_block_keeping_absent_cells`) | `a_pasted_row_shorter_than_the_others_keeps_the_existing_cell`, `a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo` (#311) |
 | present and empty cell treated as absent | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
 | block not cut after the last present cell (column lengthened) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
 | status `status-paste-columns-dropped` removed / set without overflow | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
-| `looks_like_thousands_separator` widened to `\d+,\d+` (or to `1,5`) | `la_forme_milliers_est_reconnue_exactement` (`stokesforge-core/src/number_format.rs`) |
+| `looks_like_thousands_separator` widened to `\d+,\d+` (or to `1,5`) | `the_thousands_form_is_recognized_exactly` (`stokesforge-core/src/number_format.rs`) |
 | notice `status-cell-decimal-comma` removed, or set on paste | `typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma`, `the_decimal_comma_notice_also_applies_to_a_mixed_cell`, `pasting_a_thousands_looking_number_does_not_notice` (#311) |
 | discarded header rows not counted (`status-paste-fields-dropped`) / combined message broken | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `columns_and_header_fields_dropped_together_give_one_combined_notice` (#311) |
-| "2026" in Date/Time read as anything other than 2026 seconds | `from_texts_datetime_lit_un_nombre_nu_comme_des_secondes` (`stokesforge-core/src/column.rs`) |
+| "2026" in Date/Time read as anything other than 2026 seconds | `from_texts_datetime_reads_a_bare_number_as_seconds` (`stokesforge-core/src/column.rs`) |
 
 Paste replays the internal structure when the text is the one that was pushed:
 to test the "external text" path, paste into **another** session.
@@ -847,11 +847,11 @@ to test the "external text" path, paste into **another** session.
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| the widened block goes through `MixedCell::from_text` again (date lost, `inf` read as a number) | `from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi`, `from_texts_numeric_garde_infini_et_debordement_en_texte`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types` (`stokesforge-core/src/column.rs`); `a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed` (`stokesforge-app-state/tests/shell.rs`) |
-| the `Mixed` branch reads `inf` / `nan` as a number (without `from_texts`) | `from_texts_mixed_ne_lit_ni_infini_ni_nan`; `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
-| `parse_f64_text` instead of `parse_input` | `from_texts_mixed_ne_lit_ni_infini_ni_nan`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types`, `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
-| guard `kind == DateTime` removed (`Numeric` reads dates) | `from_texts_numeric_ne_lit_pas_les_dates` |
-| empty cell read as `Text("")` instead of missing | `from_texts_case_vide_est_une_valeur_manquante_pas_un_texte`, `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo` |
+| the widened block goes through `MixedCell::from_text` again (date lost, `inf` read as a number) | `from_texts_datetime_keeps_the_date_as_a_value_in_a_widened_block`, `from_texts_numeric_keeps_infinity_and_overflow_as_text`, `from_texts_on_a_whole_column_equals_cell_by_cell_for_the_three_types` (`stokesforge-core/src/column.rs`); `a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed` (`stokesforge-app-state/tests/shell.rs`) |
+| the `Mixed` branch reads `inf` / `nan` as a number (without `from_texts`) | `from_texts_mixed_reads_neither_infinity_nor_nan`; `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| `parse_f64_text` instead of `parse_input` | `from_texts_mixed_reads_neither_infinity_nor_nan`, `from_texts_on_a_whole_column_equals_cell_by_cell_for_the_three_types`, `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| guard `kind == DateTime` removed (`Numeric` reads dates) | `from_texts_numeric_does_not_read_dates` |
+| empty cell read as `Text("")` instead of missing | `from_texts_empty_cell_is_a_missing_value_not_a_text`, `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo` |
 | repromotion after paste removed (at the three paste points) | `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo`, `a_multi_column_paste_with_a_repromotion_is_one_undo`, `single_value_and_full_column_pastes_also_repromote_a_mixed_column` |
 | repromotion called after `end_grouped_macro` (two history entries) | `a_multi_column_paste_with_a_repromotion_is_one_undo`, `undo_state_is_fresh_right_after_a_grouped_paste` |
 | own macro opened even without repromotion | `a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry` |
@@ -863,15 +863,15 @@ now comes from `from_texts`.
 
 | Mutant (what is broken) | Seen by |
 |---|---|
-| pairing with the nearest X on the **right** (or the first on the left) | `chaque_y_prend_le_x_le_plus_proche_a_sa_gauche_meme_non_selectionne`, `un_y2_s_apparie_a_x2_et_va_au_second_calque`, `x_for_suit_la_meme_regle_que_series_from_columns` (`stokesforge-core/src/compose.rs`) |
-| `x_for` no longer distinguishes Y2 → X2 | `x_for_suit_la_meme_regle_que_series_from_columns` |
-| palette without rank offset (`start_index`, "line" series, rank of the panel in `pyst`) | `la_palette_suit_le_rang_avec_le_decalage_de_chaque_calque`, `les_series_ligne_prennent_la_palette_du_rang_et_le_nom_donne`; `plusieurs_colonnes_forment_un_groupe_et_une_seule_non` (`stokesforge-script/tests/graphs.rs`) |
-| second layer confused with the line layer, or base layer looked up among the overlaid ones | `le_second_calque_est_celui_des_deux_axes_pas_celui_des_lignes`, `un_calque_superpose_recouvre_le_dernier_calque_ordinaire_de_sa_case` |
-| `spec_has_x` without the "line" series; non-finite x' accepted | `le_graphe_a_un_x_par_une_colonne_x_ou_une_serie_ligne`, `les_colonnes_x_prime_sont_celles_dont_la_valeur_est_finie` |
-| `y3_et_y4_s_apparient_a_leur_x_et_vont_a_leur_calque`: Y3 paired with X2, or placed in layer 2 | `stokesforge-core/src/compose.rs` |
+| pairing with the nearest X on the **right** (or the first on the left) | `each_y_takes_the_nearest_x_to_its_left_even_if_unselected`, `a_y2_pairs_with_x2_and_goes_to_the_second_layer`, `x_for_follows_the_same_rule_as_series_from_columns` (`stokesforge-core/src/compose.rs`) |
+| `x_for` no longer distinguishes Y2 → X2 | `x_for_follows_the_same_rule_as_series_from_columns` |
+| palette without rank offset (`start_index`, "line" series, rank of the panel in `pyst`) | `the_palette_follows_the_rank_with_the_offset_of_each_layer`, `row_series_take_the_palette_of_the_rank_and_the_given_name`; `plusieurs_colonnes_forment_un_groupe_et_une_seule_non` (`stokesforge-script/tests/graphs.rs`) |
+| second layer confused with the line layer, or base layer looked up among the overlaid ones | `the_second_layer_is_the_two_axes_one_not_the_rows_one`, `an_overlay_layer_covers_the_last_ordinary_layer_of_its_cell` |
+| `spec_has_x` without the "line" series; non-finite x' accepted | `the_graph_has_an_x_through_an_x_column_or_a_row_series`, `x_prime_columns_are_those_whose_value_is_finite` |
+| `y3_and_y4_pair_with_their_x_and_go_to_their_layer`: Y3 paired with X2, or placed in layer 2 | `stokesforge-core/src/compose.rs` |
 | band offset ignored (axis of layer 3 on that of layer 2) | `les_axes_de_plusieurs_calques_superposes_s_empilent_vers_l_exterieur` (`geometrie.rs`), `une_bande_decalee_ne_designe_que_son_calque` (`hit.rs`) |
-| constructor `OverlaySpec::new` inverted, `TOP_X` that also shows Y | `les_calques_nommes_disent_quels_axes_ils_affichent` (`stokesforge-plot/src/panel.rs`) |
-| `PanelSpec::remove_series` that removes nothing or accepts an out-of-bounds rank | `remove_series_retire_la_serie_designee_et_pas_une_autre`; `object_manager_supprime_une_courbe_sans_toucher_aux_donnees` (`stokesforge-app-state/tests/shell.rs`) |
+| constructor `OverlaySpec::new` inverted, `TOP_X` that also shows Y | `named_layers_say_which_axes_they_display` (`stokesforge-plot/src/panel.rs`) |
+| `PanelSpec::remove_series` that removes nothing or accepts an out-of-bounds rank | `remove_series_removes_the_designated_series_and_no_other`; `object_manager_supprime_une_courbe_sans_toucher_aux_donnees` (`stokesforge-app-state/tests/shell.rs`) |
 | `pyst.plot(y)` without `x=` that keeps the row index despite an X column on the left | `plot_sans_x_prend_la_colonne_x_a_gauche_par_role` (`stokesforge-script/tests/graphs.rs`, feature `python`) |
 | `aux_for` that loses the paired X | `reference_candidates_exclude_the_processed_series_and_pair_their_x` (`stokesforge-app-state/tests/analysis.rs`) |
 
@@ -909,7 +909,7 @@ image test: only `theme::r_squared_color` is tested.
 length and positions, version conflict, refusal of read-only columns
 and contradictory corrections on a shared Y. `persistence/tests/calculations.rs`
 guards the successive traces and the allocator after reload.
-`session/tests/analyse.rs` checks that dependent calculations follow the
+`session/tests/analysis.rs` checks that dependent calculations follow the
 replacement and its undo. `stokesforge-app-state/tests/analysis_state.rs` exercises the
 confirmation of shared sources; `app::form::tests` refuses the disabled
 options in radios and lists. `script/tests/analysis.rs` checks the
@@ -929,7 +929,7 @@ return of the original handle and the Script macro with `replace_original=True`.
 | Close gives nothing back | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
 | Ctrl+Shift+C asks the question only if a column has a formula; Values empties the Formula row | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
 
-Limits: moving a column (#319) opens no window: the witness is `column_move.rs` ("Moving columns", further down); its effects on formulas are also held at the session level (`recalc_cible.rs`); the hidden reference of a correction (`aux`) is excluded by construction, without a dedicated witness.
+Limits: moving a column (#319) opens no window: the witness is `column_move.rs` ("Moving columns", further down); its effects on formulas are also held at the session level (`recalc_targeted.rs`); the hidden reference of a correction (`aux`) is excluded by construction, without a dedicated witness.
 
 ## Formulas by identifier (#321, #320)
 
@@ -940,7 +940,7 @@ A formula keeps its columns by identifier; letters exist only at the boundaries.
 | letters to identifiers: refusal of an unknown letter, of the column itself, of `#REF`; the exponent is not a column | `stokesforge-core`, `formula::tests::from_letters_*` |
 | `#REF` on display for a column outside the sheet | `a_column_outside_the_sheet_is_written_ref` |
 | duplicating a sheet makes the copy read its own columns; a broken reference stays `#REF`; a read identifier is never reassigned on load | `project::tests` (`dupliquer_une_feuille_…`, `une_reference_rompue_…`, `from_tree_ne_reattribue_pas_…`) |
-| an analysis that inserts its outputs in the middle does not change what a formula reads (#320); move, delete then undo | `analyse.rs` (`une_analyse_qui_insere_…`), `recalc_cible.rs` (`deplacer_une_source_*`, `supprimer_une_source_donne_ref_…`) |
+| an analysis that inserts its outputs in the middle does not change what a formula reads (#320); move, delete then undo | `analysis.rs` (`une_analyse_qui_insere_…`), `recalc_targeted.rs` (`deplacer_une_source_*`, `supprimer_une_source_donne_ref_…`) |
 | `.stf`: `formula_parts` round trip, id outside the sheet loaded as `#REF`, out-of-bounds id refused, old `formula` key ignored | `roundtrip.rs` (`a_formula_*`, `a_legacy_letters_formula_…`) |
 | input: unknown letter, self-reading, modified `#REF` refused in `app-state` (`header_edit_refusal`), never a syntax error; unmodified `#REF` writes nothing; `formula_issue` for the box | `shell.rs` (`a_formula_reading_its_own_column_is_refused_while_typing`, `a_ref_formula_is_refused_only_when_its_text_is_changed`, `a_formula_naming_a_missing_column_…`) |
 | paste: the refused formula alone is not pasted, the status bar says the refusal after the writes; Ctrl+Shift+C copies letters re-read in the destination sheet | `a_refused_formula_in_a_paste_…`, `copied_formulas_travel_as_letters_…` |
@@ -954,10 +954,10 @@ Limit: the red frame, the bubble and the field that stays open (grid) cannot be 
 
 | Rule | Witness |
 |---|---|
-| setting a width advances only `geometry_revision`; the same width, NaN, ≤ 0, ∞: ignored | `session/tests/largeurs.rs` `poser_une_largeur_n_avance_que_geometry_revision` (going through `revision`: red) |
-| the width of a deleted column comes back with Ctrl+Z | `la_largeur_revient_avec_la_colonne_apres_annulation` (purging widths at the mutation: red) |
-| `.stf` round trip; `NewProject` empties | `les_largeurs_font_l_aller_retour_du_fichier` (not writing the field: red) |
-| writing does not emit the key of a vanished column | `la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee`, `persistence` `save_drops_dead_keys_and_invalid_widths` (removing the filter: red) |
+| setting a width advances only `geometry_revision`; the same width, NaN, ≤ 0, ∞: ignored | `session/tests/column_widths.rs` `setting_a_width_only_advances_geometry_revision` (going through `revision`: red) |
+| the width of a deleted column comes back with Ctrl+Z | `the_width_comes_back_with_the_column_after_undo` (purging widths at the mutation: red) |
+| `.stf` round trip; `NewProject` empties | `the_widths_make_the_file_round_trip` (not writing the field: red) |
+| writing does not emit the key of a vanished column | `saving_does_not_write_the_width_of_a_deleted_column`, `persistence` `save_drops_dead_keys_and_invalid_widths` (removing the filter: red) |
 | file without the field → empty table; orphan key, NaN, ∞, 0, negative discarded one by one; identifier > `MAX_NODE_ID` refused | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustesse/b3` `b3_largeurs_de_colonne_hostiles` (reading without a filter, without `check_node_id`: red) |
 | the state sets the width through the actor without history, including a detached view | `app-state/tests/column_width.rs` |
 | the `.stf` gives its width to the startup snapshot | `main.rs` `le_demarrage_restaure_les_largeurs_de_colonne_du_fichier` |
@@ -973,8 +973,8 @@ The width is read in the bench on the flat fill of the column letter (`largeur_p
 
 | Guard | Test (witness) |
 |---|---|
-| reset: key removed, `geometry_revision` +1 only if it existed, neither `revision` nor history | `session/tests/largeurs.rs` `remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait` (unconditional `+= 1`: red) |
-| reset then save: no more key in the file | `une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier` (setting 54 instead of removing: red) |
+| reset: key removed, `geometry_revision` +1 only if it existed, neither `revision` nor history | `session/tests/column_widths.rs` `resetting_to_default_removes_the_key_and_advances_only_if_it_existed` (unconditional `+= 1`: red) |
+| reset then save: no more key in the file | `a_column_reset_to_default_is_no_longer_in_the_file` (setting 54 instead of removing: red) |
 | the action removes the width from the local copy before refresh | `app-state/tests/column_width.rs` `l_action_de_remise_retire_la_largeur_sans_historique` (key kept in the local copy: red) |
 | B reset to 54, A and C keep theirs | `grid::tests::remettre_une_colonne_au_defaut_ne_touche_pas_les_autres` (widths outside the layout key: red) |
 | the gutter keeps its width after a drag and a column reset, returns to 90 for the sheet | `un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere` (gutter not remembered: red) |
@@ -1003,7 +1003,7 @@ Limit: the look of the submenu and the text of the bubbles are re-read on screen
 
 ## Constrained polynomial on a shifted X (#296)
 
-`fit::tests::polynome_contraint_sur_x_tres_decale_est_signale`: flagged (`shifted_x`) for a fixed polynomial or one with an initial value on X ≈ 1e4; unflagged witnesses: centered X, moderate shift (1e2), unconstrained polynomial (centered QR). `.stf` transport: `shifted_x` in `persistence/src/calculations.rs` (round-trip and frozen-name tests).
+`fit::tests::constrained_polynomial_on_very_shifted_x_is_flagged`: flagged (`shifted_x`) for a fixed polynomial or one with an initial value on X ≈ 1e4; unflagged witnesses: centered X, moderate shift (1e2), unconstrained polynomial (centered QR). `.stf` transport: `shifted_x` in `persistence/src/calculations.rs` (round-trip and frozen-name tests).
 
 ## Demo project (`demo/`)
 

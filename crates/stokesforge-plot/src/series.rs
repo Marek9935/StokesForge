@@ -1,8 +1,8 @@
-//! Une série : ce qu'on trace, comment on le trace, et sur quel axe.
+//! A series: what is plotted, how it is plotted, and on which axis.
 //!
-//! C'est ici que le crate touche au modèle, et d'une seule façon : par des
-//! [`NodeId`]. Une série ne porte **aucune donnée** et **aucun nom de
-//! colonne** — seulement l'identité des colonnes qu'elle trace.
+//! This is where the crate touches the model, and in one way only: through
+//! [`NodeId`]s. A series carries **no data** and **no column
+//! name** — only the identity of the columns it plots.
 
 use std::num::NonZeroU32;
 
@@ -12,40 +12,40 @@ use crate::axis::AxisSide;
 use crate::raw::RawVariant;
 use crate::style::{LineSpec, SymbolSpec};
 
-/// Type de tracé d'une série. Jeu fermé — sauf pour [`PlotType::Unknown`],
-/// qui porte le type de tracé d'une version plus récente de StokesForge que ce
-/// lecteur ne connaît pas (C5, niveau 2,
-/// `guide-de-correction-robustesse.md` §F3) : une série ainsi marquée ne
-/// dessine rien et ne bloque rien, mais son contenu original est conservé
-/// pour une ré-écriture fidèle.
+/// Plot type of a series. Closed set — except for [`PlotType::Unknown`],
+/// which carries the plot type of a newer version of StokesForge that this
+/// reader does not know (C5, level 2,
+/// `guide-de-correction-robustesse.md` §F3): a series marked this way
+/// draws nothing and blocks nothing, but its original content is kept
+/// for a faithful rewrite.
 ///
-/// Cette variante retire `Copy`/`Eq`/`Hash` du jeu de dérivations : un
-/// `RawVariant` porte une chaîne et des octets, ni l'un ni l'autre `Copy`,
-/// et l'égalité/le hachage d'un contenu inconnu n'a pas d'utilité ici.
+/// This variant removes `Copy`/`Eq`/`Hash` from the set of derives: a
+/// `RawVariant` carries a string and bytes, neither of them `Copy`,
+/// and equality/hashing of unknown content has no use here.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum PlotType {
-    /// Nuage de points.
+    /// Scatter of points.
     Scatter,
-    /// Courbe (défaut).
+    /// Line (default).
     #[default]
     Line,
-    /// Courbe et marqueurs.
+    /// Line and markers.
     LineScatter,
-    /// Barres.
+    /// Bars.
     Bar,
-    /// Histogramme : une seule variable, répartie en classes.
+    /// Histogram: a single variable, split into bins.
     Histogram,
-    /// Courbe et barres d'erreur.
+    /// Line and error bars.
     ErrorBar,
-    /// Type de tracé d'une version plus récente de StokesForge, inconnu de ce
-    /// lecteur.
+    /// Plot type of a newer version of StokesForge, unknown to this
+    /// reader.
     Unknown(RawVariant),
 }
 
 impl PlotType {
-    /// Vrai si ce type de tracé relie les points par un trait. Toujours
-    /// faux pour [`PlotType::Unknown`] : sans savoir ce que c'est, le plus
-    /// sûr est de ne rien dessiner.
+    /// True if this plot type joins the points with a line. Always
+    /// false for [`PlotType::Unknown`]: without knowing what it is, the safest
+    /// is to draw nothing.
     pub fn draws_line(&self) -> bool {
         matches!(
             self,
@@ -53,8 +53,8 @@ impl PlotType {
         )
     }
 
-    /// Vrai si ce type de tracé pose un marqueur sur chaque point. Toujours
-    /// faux pour [`PlotType::Unknown`], même raison que `draws_line`.
+    /// True if this plot type puts a marker on each point. Always
+    /// false for [`PlotType::Unknown`], same reason as `draws_line`.
     pub fn draws_symbols(&self) -> bool {
         matches!(
             self,
@@ -62,30 +62,30 @@ impl PlotType {
         )
     }
 
-    /// `false` pour un histogramme : il ne consomme qu'une variable. Vrai
-    /// pour [`PlotType::Unknown`] : à défaut de savoir, autant garder
-    /// l'abscisse plutôt que la perdre.
+    /// `false` for a histogram: it only consumes one variable. True
+    /// for [`PlotType::Unknown`]: not knowing, better to keep
+    /// the abscissa than lose it.
     pub fn needs_x(&self) -> bool {
         !matches!(self, PlotType::Histogram)
     }
 }
 
-/// Axe des ordonnées auquel une série est rattachée.
+/// Y axis a series is attached to.
 ///
-/// Deux variantes et pas quatre, là où la version Python réutilisait son
-/// `AxisSide` et refusait `BOTTOM`/`TOP` à l'exécution : ici le refus n'a plus
-/// lieu d'être, l'appelant n'a pas de valeur à refuser sous la main.
+/// Two variants and not four, where the Python version reused its
+/// `AxisSide` and refused `BOTTOM`/`TOP` at run time: here the refusal no longer
+/// has a reason, the caller has no value to refuse at hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SeriesAxis {
-    /// Ordonnée principale, à gauche (défaut).
+    /// Main ordinate, on the left (default).
     #[default]
     Left,
-    /// Ordonnée secondaire, à droite.
+    /// Secondary ordinate, on the right.
     Right,
 }
 
 impl SeriesAxis {
-    /// Le côté du panneau correspondant, pour aller chercher l'[`crate::AxisSpec`].
+    /// The matching side of the panel, to look up the [`crate::AxisSpec`].
     pub fn side(self) -> AxisSide {
         match self {
             SeriesAxis::Left => AxisSide::Left,
@@ -100,23 +100,23 @@ impl From<SeriesAxis> for AxisSide {
     }
 }
 
-/// Plafond de [`BinCount`] (B4, `guide-de-correction-robustesse.md` §F4) :
-/// au-delà, un histogramme ne décrit plus rien qu'un écran puisse afficher
-/// (quelques milliers de pixels de large au plus, dix fois moins que ce
-/// plafond), et le calculer allouerait des dizaines de gigaoctets pour des
-/// classes qu'aucun rendu ne montrera jamais.
+/// Cap of [`BinCount`] (B4, `guide-de-correction-robustesse.md` §F4):
+/// beyond it, a histogram no longer describes anything a screen can show
+/// (a few thousand pixels wide at most, ten times less than this
+/// cap), and computing it would allocate tens of gigabytes for
+/// bins that no rendering will ever show.
 pub const MAX_HISTOGRAM_BINS: u32 = 1 << 16;
 
-/// Nombre de classes d'un histogramme : jamais nul (décision R2 — « les
-/// états illégaux ne s'écrivent pas »), jamais démesuré non plus (B4).
-/// `NonZeroU32` rendait déjà le zéro inexprimable ; ce type resserre l'autre
-/// bout du même intervalle, à la même échelle — au niveau du type, pas
-/// d'une validation qu'un appelant pourrait oublier d'appeler.
+/// Number of bins of a histogram: never zero (decision R2 — "illegal
+/// states cannot be written"), never huge either (B4).
+/// `NonZeroU32` already made zero inexpressible; this type tightens the other
+/// end of the same interval, at the same level — in the type, not in
+/// a validation that a caller could forget to call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BinCount(NonZeroU32);
 
 impl BinCount {
-    /// `None` si `value` vaut 0 ou dépasse [`MAX_HISTOGRAM_BINS`].
+    /// `None` if `value` is 0 or exceeds [`MAX_HISTOGRAM_BINS`].
     pub fn new(value: u32) -> Option<Self> {
         if value == 0 || value > MAX_HISTOGRAM_BINS {
             None
@@ -125,7 +125,7 @@ impl BinCount {
         }
     }
 
-    /// La valeur portée.
+    /// The carried value.
     pub fn get(self) -> u32 {
         self.0.get()
     }
@@ -137,74 +137,74 @@ impl std::fmt::Display for BinCount {
     }
 }
 
-/// Nombre de classes d'un histogramme par défaut.
+/// Default number of bins of a histogram.
 ///
-/// La forme `match` est le seul moyen d'écrire un [`NonZeroU32`] littéral dans
-/// un contexte constant sans passer par un `unwrap`, que le crate s'interdit.
+/// The `match` form is the only way to write a literal [`NonZeroU32`] in
+/// a constant context without going through an `unwrap`, which the crate forbids itself.
 pub const DEFAULT_HISTOGRAM_BINS: BinCount = match NonZeroU32::new(40) {
     Some(bins) => BinCount(bins),
     None => BinCount(NonZeroU32::MIN),
 };
 
-/// Une série : des **identités de colonnes**, un type de tracé, un style.
+/// A series: **column identities**, a plot type, a style.
 ///
-/// [`SeriesSpec::y`] est obligatoire et n'est donc pas optionnel ; `x` à
-/// `None` signifie « abscisse implicite » (l'indice de la ligne), ce qui est
-/// le comportement d'Origin quand aucune colonne X n'est désignée.
+/// [`SeriesSpec::y`] is required and so not optional; `x` set to
+/// `None` means "implicit abscissa" (the row index), which is
+/// Origin's behavior when no X column is designated.
 ///
-/// Les quatre références sont des [`NodeId`] et jamais des noms : renommer ou
-/// déplacer une colonne laisse le graphe intact, et supprimer une colonne
-/// produit une référence brisée **détectable** plutôt qu'une série
-/// silencieusement vide. La détection, elle, appartient à la résolution, qui
-/// est le seul endroit à voir un arbre.
+/// The four references are [`NodeId`]s and never names: renaming or
+/// moving a column leaves the graph intact, and deleting a column
+/// produces a **detectable** broken reference rather than a silently
+/// empty series. Detection belongs to resolution, which
+/// is the only place to see a tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeriesSpec {
-    /// Colonne des ordonnées. Obligatoire : une série sans Y ne décrit rien.
+    /// Ordinate column. Required: a series without Y describes nothing.
     pub y: NodeId,
-    /// Colonne des abscisses. `None` = abscisse implicite (indice de ligne).
+    /// Abscissa column. `None` = implicit abscissa (row index).
     pub x: Option<NodeId>,
-    /// Colonne des barres d'erreur en X.
+    /// Column of the X error bars.
     pub x_error: Option<NodeId>,
-    /// Colonne des barres d'erreur en Y.
+    /// Column of the Y error bars.
     pub y_error: Option<NodeId>,
-    /// Type de tracé.
+    /// Plot type.
     pub plot_type: PlotType,
-    /// Nom affiché en légende. Vide = dérivé de la colonne à l'affichage, donc
-    /// automatiquement à jour après un renommage.
+    /// Name shown in the legend. Empty = derived from the column at display time, so
+    /// automatically up to date after a rename.
     pub name: String,
-    /// Style du trait.
+    /// Line style.
     pub line: LineSpec,
-    /// Style des marqueurs.
+    /// Marker style.
     pub symbol: SymbolSpec,
-    /// Ordonnée de rattachement (axe secondaire).
+    /// Ordinate it is attached to (secondary axis).
     pub axis: SeriesAxis,
-    /// Série tracée ou non.
+    /// Series is plotted or not.
     pub visible: bool,
-    /// Série présente en légende ou non.
+    /// Series appears in the legend or not.
     pub show_in_legend: bool,
-    /// Largeur des barres. `None` = déduite du pas des abscisses.
+    /// Bar width. `None` = derived from the abscissa step.
     pub bar_width: Option<f64>,
-    /// Nombre de classes d'un histogramme, jamais nul, jamais démesuré (B4).
+    /// Number of bins of a histogram, never zero, never huge (B4).
     pub histogram_bins: BinCount,
-    /// Ligne de la feuille de `y` tracée **en série** (#166). Présente, la
-    /// série n'est plus « une colonne » mais « une ligne » : ses points sont
-    /// les valeurs de cette ligne (0 = la première) dans les colonnes de la
-    /// feuille qui portent une valeur x', placées à l'abscisse x' de leur
-    /// colonne (cinétique : une colonne = un instant). `y` ne sert alors
-    /// qu'à désigner la feuille (une de ses colonnes) et `x` est ignoré.
+    /// Row of the sheet of `y` plotted **as a series** (#166). When present, the
+    /// series is no longer "a column" but "a row": its points are
+    /// the values of that row (0 = the first) in the columns of the
+    /// sheet that carry an x' value, placed at the x' abscissa of their
+    /// column (kinetics: one column = one instant). `y` then only serves
+    /// to designate the sheet (one of its columns) and `x` is ignored.
     pub row: Option<usize>,
-    /// Groupe de courbes du panneau (#177) : les séries qui portent le même
-    /// numéro se règlent ensemble (style commun, nuancier). `None` : courbe
-    /// seule. Le numéro n'a de sens que dans son panneau ; voir
+    /// Curve group of the panel (#177): series that carry the same
+    /// number are set together (common style, color gradient). `None`: single
+    /// curve. The number only has meaning within its panel; see
     /// [`crate::PanelSpec::push_series_batch`].
     pub group: Option<u32>,
 }
 
 impl SeriesSpec {
-    /// Série au style par défaut traçant la colonne `y`.
+    /// Series with the default style plotting the column `y`.
     ///
-    /// Il n'y a pas d'implémentation de `Default` : une série sans colonne Y
-    /// n'existe pas, et c'est le constructeur qui le dit.
+    /// There is no `Default` implementation: a series without a Y column
+    /// does not exist, and the constructor says so.
     pub fn new(y: NodeId) -> Self {
         Self {
             y,
@@ -225,7 +225,7 @@ impl SeriesSpec {
         }
     }
 
-    /// Série traçant `y` contre `x`, au style par défaut.
+    /// Series plotting `y` against `x`, with the default style.
     pub fn new_xy(x: NodeId, y: NodeId) -> Self {
         Self {
             x: Some(x),
@@ -233,9 +233,9 @@ impl SeriesSpec {
         }
     }
 
-    /// Série au style par défaut, coloriée avec la couleur `index` de la
-    /// palette — trait et marqueurs ensemble, comme le fait l'UI quand on
-    /// ajoute une courbe à un graphe existant.
+    /// Series with the default style, colored with the `index` color of the
+    /// palette — line and markers together, as the UI does when a curve
+    /// is added to an existing graph.
     pub fn from_palette(y: NodeId, index: usize) -> Self {
         Self {
             line: LineSpec::from_palette(index),
@@ -244,7 +244,7 @@ impl SeriesSpec {
         }
     }
 
-    /// Toutes les colonnes référencées, dans l'ordre x, y, erreur X, erreur Y.
+    /// All referenced columns, in the order x, y, X error, Y error.
     pub fn referenced_columns(&self) -> Vec<NodeId> {
         [self.x, Some(self.y), self.x_error, self.y_error]
             .into_iter()
@@ -252,8 +252,8 @@ impl SeriesSpec {
             .collect()
     }
 
-    /// Vrai si la série référence cette colonne, à quelque titre que ce soit.
-    /// C'est la question que posera la suppression d'une colonne.
+    /// True if the series references this column, in any role.
+    /// This is the question that deleting a column will ask.
     pub fn references(&self, column: NodeId) -> bool {
         self.x == Some(column)
             || self.y == column
