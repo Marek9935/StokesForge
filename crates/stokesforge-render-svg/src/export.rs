@@ -14,11 +14,11 @@ use std::path::Path;
 
 use stokesforge_core::resolve::ResolvedPlot;
 use stokesforge_render::text::TextMeasurer;
-use stokesforge_render::FontChoice;
+use stokesforge_render::{FigureTexts, FontChoice};
 
 use crate::{
-    document_to_pdf, document_to_png, render_to_string_with_typst, PdfError, PngError, SvgError,
-    SvgTextMode,
+    document_to_pdf, document_to_png, render_to_string_with_typst_and_texts, PdfError, PngError,
+    SvgError, SvgTextMode,
 };
 
 /// The format of an export.
@@ -105,7 +105,33 @@ pub fn export_bytes(
     choice: &FontChoice,
     format: ExportFormat,
 ) -> Result<Vec<u8>, ExportError> {
-    let document = render_to_string_with_typst(plot, size, measurer, choice, format.text_mode())?;
+    export_bytes_with_texts(
+        plot,
+        size,
+        measurer,
+        choice,
+        format,
+        &FigureTexts::default(),
+    )
+}
+
+/// [`export_bytes`] with the texts of the figure in the caller's language.
+pub fn export_bytes_with_texts(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &FontChoice,
+    format: ExportFormat,
+    texts: &FigureTexts,
+) -> Result<Vec<u8>, ExportError> {
+    let document = render_to_string_with_typst_and_texts(
+        plot,
+        size,
+        measurer,
+        choice,
+        format.text_mode(),
+        texts,
+    )?;
     convert(&document, format)
 }
 
@@ -121,13 +147,32 @@ pub fn export_bytes_many(
     choice: &FontChoice,
     formats: &[ExportFormat],
 ) -> Result<Vec<Result<Vec<u8>, ExportError>>, ExportError> {
+    export_bytes_many_with_texts(
+        plot,
+        size,
+        measurer,
+        choice,
+        formats,
+        &FigureTexts::default(),
+    )
+}
+
+/// [`export_bytes_many`] with the texts of the figure in the caller's language.
+pub fn export_bytes_many_with_texts(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &FontChoice,
+    formats: &[ExportFormat],
+    texts: &FigureTexts,
+) -> Result<Vec<Result<Vec<u8>, ExportError>>, ExportError> {
     let mut documents: Vec<(SvgTextMode, String)> = Vec::new();
     for format in formats {
         let mode = format.text_mode();
         if !documents.iter().any(|(known, _)| *known == mode) {
             documents.push((
                 mode,
-                render_to_string_with_typst(plot, size, measurer, choice, mode)?,
+                render_to_string_with_typst_and_texts(plot, size, measurer, choice, mode, texts)?,
             ));
         }
     }
@@ -155,8 +200,29 @@ pub fn export_to_file(
     choice: &FontChoice,
     format: ExportFormat,
 ) -> Result<(), ExportError> {
+    export_to_file_with_texts(
+        path,
+        plot,
+        size,
+        measurer,
+        choice,
+        format,
+        &FigureTexts::default(),
+    )
+}
+
+/// [`export_to_file`] with the texts of the figure in the caller's language.
+pub fn export_to_file_with_texts(
+    path: impl AsRef<Path>,
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &FontChoice,
+    format: ExportFormat,
+    texts: &FigureTexts,
+) -> Result<(), ExportError> {
     let path = path.as_ref();
-    let bytes = export_bytes(plot, size, measurer, choice, format)?;
+    let bytes = export_bytes_with_texts(plot, size, measurer, choice, format, texts)?;
     std::fs::write(path, bytes).map_err(|source| ExportError::Write {
         path: path.display().to_string(),
         source,

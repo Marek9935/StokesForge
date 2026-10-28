@@ -794,20 +794,12 @@ pub(super) fn window_header(
     if collapse_width > 0.0 {
         let collapse_rect =
             egui::Rect::from_min_size(rect.min, egui::vec2(collapse_width, rect.height()));
-        let content_label = match tab {
-            Some(Tab::Book(_)) => "classeur",
-            _ => "graphe",
-        };
-        let (icon, tooltip) = if collapsed {
-            (
-                Icon::CaretRight,
-                format!("Afficher le contenu du {content_label}"),
-            )
-        } else {
-            (
-                Icon::CaretDown,
-                format!("Masquer le contenu du {content_label}"),
-            )
+        let is_book = matches!(tab, Some(Tab::Book(_)));
+        let (icon, tooltip) = match (collapsed, is_book) {
+            (true, true) => (Icon::CaretRight, tr!("window-header-show-workbook")),
+            (true, false) => (Icon::CaretRight, tr!("window-header-show-graph")),
+            (false, true) => (Icon::CaretDown, tr!("window-header-hide-workbook")),
+            (false, false) => (Icon::CaretDown, tr!("window-header-hide-graph")),
         };
         if header_icon(&mut header, id, "collapse", collapse_rect, icon, &tooltip) {
             actions.toggle_collapse = true;
@@ -828,7 +820,7 @@ pub(super) fn window_header(
         "close",
         action_rect(2.0),
         Icon::Close,
-        "Fermer la fenêtre",
+        &tr!("window-header-close"),
     ) {
         actions.close = true;
     }
@@ -843,9 +835,9 @@ pub(super) fn window_header(
     if show_detach_and_maximize {
         let (detach_icon, detach_tooltip) = match placement {
             HeaderPlacement::Floating | HeaderPlacement::Dialog => {
-                (Icon::Detach, "Détacher dans une fenêtre")
+                (Icon::Detach, tr!("window-header-detach"))
             }
-            HeaderPlacement::Detached => (Icon::Reattach, "Réattacher à la fenêtre principale"),
+            HeaderPlacement::Detached => (Icon::Reattach, tr!("window-header-reattach")),
         };
         if header_icon(
             &mut header,
@@ -853,7 +845,7 @@ pub(super) fn window_header(
             "detach",
             action_rect(28.0),
             detach_icon,
-            detach_tooltip,
+            &detach_tooltip,
         ) {
             actions.detach = true;
         }
@@ -863,7 +855,7 @@ pub(super) fn window_header(
             "maximize",
             action_rect(54.0),
             Icon::Maximize,
-            "Maximiser la fenêtre",
+            &tr!("window-header-maximize"),
         ) {
             actions.maximize = true;
         }

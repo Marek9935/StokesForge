@@ -21,10 +21,11 @@
 
 use std::num::NonZeroU32;
 
-use stokesforge_core::resolve::{bar_width, histogram, ResolvedSeries};
+use stokesforge_core::resolve::{bar_width, histogram, ResolvedSeries, SeriesLabel};
 use stokesforge_plot::{AxisScale, PlotType, SeriesAxis, SeriesSpec};
 
 use crate::scale::forward;
+use crate::texts::FigureTexts;
 
 /// A point in plot space.
 pub type Point = (f64, f64);
@@ -82,7 +83,7 @@ pub struct Prepared<'s> {
     /// The original spec — the style is read from it at paint time.
     pub spec: &'s SeriesSpec,
     /// Displayed name, as the resolution established it.
-    pub label: String,
+    pub label: SeriesLabel,
     /// Y axis it is attached to.
     pub axis: SeriesAxis,
     /// The geometry, in plot space.
@@ -115,25 +116,32 @@ impl Prepared<'_> {
         self.spec.show_in_legend && (self.draws() || self.broken)
     }
 
-    /// The text of the legend entry.
+    /// The text of the legend entry, in the language of `texts`.
     ///
-    /// A broken reference says so. The resolution already puts
-    /// `« (référence rompue) »` when the series has no explicit name; when it
-    /// has one, the name comes out, and it must be annotated — otherwise a
-    /// named series would silently vanish from the figure while keeping a
-    /// normal-looking legend entry.
-    pub fn legend_text(&self) -> String {
-        if !self.broken || self.label.contains("référence rompue") {
-            return self.label.clone();
+    /// A broken reference says so. An unnamed one shows the placeholder; one
+    /// that has a name keeps it and is annotated — otherwise a named series
+    /// would silently vanish from the figure while keeping a normal-looking
+    /// legend entry (invariant 10, in every language).
+    pub fn legend_text(&self, texts: &FigureTexts) -> String {
+        let name = match &self.label {
+            SeriesLabel::Missing => return texts.broken_reference.clone(),
+            SeriesLabel::Text(name) => name.clone(),
+            SeriesLabel::Row(row) => texts.row_series(row.saturating_add(1)),
+        };
+        if self.broken {
+            texts.broken_named(&name)
+        } else {
+            name
         }
-        format!("{} — référence rompue", self.label)
     }
 
     /// True if the legend text was **typed** (`SeriesSpec::name`): intended
     /// Typst markup. False if taken from the column, hence shown as is
-    /// (issue #33, `formula::literal_style`).
+    /// (issue #33, `formula::literal_style`). Also false for a broken
+    /// reference: the annotated text mixes the name with a sentence of the
+    /// interface, which would be markup too, so it is all drawn literally.
     pub fn legend_is_typed(&self) -> bool {
-        !self.spec.name.is_empty()
+        !self.spec.name.is_empty() && !self.broken
     }
 }
 

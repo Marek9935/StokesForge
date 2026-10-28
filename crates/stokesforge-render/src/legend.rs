@@ -39,6 +39,7 @@ use stokesforge_plot::{LegendPosition, LegendSpec, PlotType};
 
 use crate::paint::{self, BROKEN, SERIES_FALLBACK};
 use crate::series::{Geometry, Prepared};
+use crate::texts::FigureTexts;
 
 /// Margin between the legend frame and the edge of the plot area.
 const MARGIN: i32 = 8;
@@ -80,7 +81,7 @@ pub struct DrawnLegend {
 pub struct LegendText<'a> {
     /// Typed series name (`formula::rich_style`).
     pub typed: TextStyle<'a>,
-    /// Name taken from the column, « … et N autres » line
+    /// Name taken from the column, « … and N more » line
     /// (`formula::literal_style`).
     pub literal: TextStyle<'a>,
 }
@@ -115,6 +116,7 @@ pub fn draw<DB: DrawingBackend>(
     spec: &LegendSpec,
     entries: &[&Prepared<'_>],
     styles: &LegendText<'_>,
+    figure_texts: &FigureTexts,
     colors: LegendColors,
     center: Option<BackendCoord>,
 ) -> Result<DrawnLegend, DrawingAreaErrorKind<DB::ErrorType>> {
@@ -136,11 +138,11 @@ pub fn draw<DB: DrawingBackend>(
             } else {
                 &styles.literal
             };
-            (entry.legend_text(), style)
+            (entry.legend_text(figure_texts), style)
         })
         .collect();
     if omitted > 0 {
-        texts.push((format!("… et {omitted} autres"), &styles.literal));
+        texts.push((figure_texts.more_entries(omitted), &styles.literal));
     }
 
     let mut label_width = 0i32;

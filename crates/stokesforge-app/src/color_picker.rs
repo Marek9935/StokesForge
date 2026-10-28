@@ -90,7 +90,7 @@ pub fn curve_palette_name(index: usize) -> String {
         6 => tr!("color-palette-viridis"),
         7 => tr!("color-palette-plasma"),
         8 => tr!("color-palette-grayscale"),
-        _ => CURVE_PALETTES[index].name.to_string(),
+        _ => CURVE_PALETTES[index].id.to_string(),
     }
 }
 

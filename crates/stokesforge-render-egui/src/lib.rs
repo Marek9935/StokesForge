@@ -97,7 +97,7 @@ use stokesforge_render::interact;
 use stokesforge_render::pipeline::{self};
 use stokesforge_render::view::ViewState;
 // Moved down into `stokesforge-render` (#255): the app's `errors.rs` reads it without egui.
-pub use stokesforge_render::RenderError;
+pub use stokesforge_render::{FigureTexts, RenderError};
 use stokesforge_session::Revision;
 use stokesforge_session::Snapshot;
 
@@ -344,8 +344,21 @@ pub fn collect_shapes(
     text: &dyn TextSource,
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, RenderError> {
+    collect_shapes_with_texts(shapes, rect, text, plot, &FigureTexts::default())
+}
+
+/// Like [`collect_shapes`], with the texts of the figure in the caller's
+/// language ([`FigureTexts`]); the export must be given the same ones.
+pub fn collect_shapes_with_texts(
+    shapes: &mut Vec<Shape>,
+    rect: Rect,
+    text: &dyn TextSource,
+    plot: &ResolvedPlot<'_>,
+    texts: &FigureTexts,
+) -> Result<DrawnPlot, RenderError> {
     let backend = EguiBackend::in_rect(shapes, rect, text);
-    pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
+    pipeline::draw_with_texts(backend, plot, texts)
+        .map_err(|error| RenderError::Drawing(error.to_string()))
 }
 
 /// Swatch shared with the legend, for the Object Manager (#82).
@@ -434,8 +447,22 @@ pub fn collect_shapes_with_typst(
     typst: typst_screen::TypstScreen<'_>,
     plot: &ResolvedPlot<'_>,
 ) -> Result<DrawnPlot, RenderError> {
+    collect_shapes_with_typst_and_texts(shapes, rect, text, typst, plot, &FigureTexts::default())
+}
+
+/// Like [`collect_shapes_with_typst`], with the texts of the figure
+/// ([`FigureTexts`]).
+pub fn collect_shapes_with_typst_and_texts(
+    shapes: &mut Vec<Shape>,
+    rect: Rect,
+    text: &dyn TextSource,
+    typst: typst_screen::TypstScreen<'_>,
+    plot: &ResolvedPlot<'_>,
+    texts: &FigureTexts,
+) -> Result<DrawnPlot, RenderError> {
     let backend = EguiBackend::in_rect(shapes, rect, text).with_typst(typst);
-    pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
+    pipeline::draw_with_texts(backend, plot, texts)
+        .map_err(|error| RenderError::Drawing(error.to_string()))
 }
 
 /// A point designated on a curve — task R7.2.
@@ -509,6 +536,8 @@ pub struct GraphView {
     /// Counter of the preview, added to the view generation in the cache
     /// key.
     preview_generation: u64,
+    /// The texts the figure draws by itself, in the application's language.
+    figure_texts: FigureTexts,
     /// Revision of the model at which the preview was committed: it clears as
     /// soon as the model has changed, so as not to show an image of the old
     /// position between the commit and the update of the model.
@@ -634,6 +663,7 @@ impl GraphView {
             response: None,
             annotation_preview: None,
             preview_generation: 0,
+            figure_texts: FigureTexts::default(),
             preview_until: None,
             annotation_drag: None,
             text_preview: None,
@@ -961,6 +991,17 @@ impl GraphView {
         self.preview_until = None;
         if self.text_preview != preview {
             self.text_preview = preview;
+            self.preview_generation += 1;
+        }
+    }
+
+    /// Sets the texts the figure draws by itself (legend placeholders, #369).
+    ///
+    /// The cache is invalidated only when the language tag changes, so the
+    /// application can call this every frame.
+    pub fn set_figure_texts(&mut self, texts: &FigureTexts) {
+        if self.figure_texts.language != texts.language {
+            self.figure_texts = texts.clone();
             self.preview_generation += 1;
         }
     }
@@ -1356,6 +1397,7 @@ impl GraphView {
         let shape_preview = &self.shape_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
+        let figure_texts = &self.figure_texts;
         let typst_fonts = &self.typst_fonts;
         let outcome = self.cache.get_or_build(key, |shapes| {
             // R7.1: the framing override lives on a clone, never on the
@@ -1380,7 +1422,7 @@ impl GraphView {
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
             let Some(fonts) = typst_fonts.clone() else {
-                return collect_shapes(shapes, logical_rect, &text, &plot);
+                return collect_shapes_with_texts(shapes, logical_rect, &text, &plot, figure_texts);
             };
             // Cleared here only: the shapes this cache designated are
             // precisely being replaced (see `FormulaCache::clear`).
@@ -1388,7 +1430,14 @@ impl GraphView {
                 formulas.clear();
             }
             let typst = TypstScreen::with_fonts(&context, formulas, font_choice, fonts);
-            collect_shapes_with_typst(shapes, logical_rect, &text, typst, &plot)
+            collect_shapes_with_typst_and_texts(
+                shapes,
+                logical_rect,
+                &text,
+                typst,
+                &plot,
+                figure_texts,
+            )
         })?;
         if let Some(drawn) = outcome.built {
             self.last = Some(drawn);

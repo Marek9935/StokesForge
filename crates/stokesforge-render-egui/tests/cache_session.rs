@@ -1361,3 +1361,44 @@ fn ctrl_drag_started_on_an_object_pans_instead_of_moving_it() {
         );
     }
 }
+
+/// #369: the texts the figure draws by itself belong to the cache key through
+/// their language tag. The same tag is a hit (the application sets them every
+/// frame); a new tag rebuilds the shapes.
+#[test]
+fn a_new_figure_text_language_rebuilds_the_figure_and_the_same_one_does_not() {
+    let fixture = Fixture::new();
+    let context = new_context();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let snapshot = fixture.snapshot();
+    let texts = |language: &str| {
+        stokesforge_render_egui::FigureTexts::new(
+            language,
+            "(placeholder)",
+            |name| format!("{name} (broken)"),
+            |count| format!("{count} more"),
+            |number| format!("Row {number}"),
+        )
+    };
+
+    view.set_figure_texts(&texts("xx"));
+    assert!(!paint_frame(
+        &context,
+        &mut view,
+        &snapshot,
+        fixture.graph,
+        rect
+    ));
+    view.set_figure_texts(&texts("xx"));
+    assert!(
+        paint_frame(&context, &mut view, &snapshot, fixture.graph, rect),
+        "the same language tag must come from the cache"
+    );
+    view.set_figure_texts(&texts("yy"));
+    assert!(
+        !paint_frame(&context, &mut view, &snapshot, fixture.graph, rect),
+        "a new language tag must rebuild the shapes"
+    );
+    assert_eq!(view.cache().misses(), 2);
+}

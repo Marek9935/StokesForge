@@ -217,6 +217,9 @@ grid-drag-rows =
        *[other] { $count } rows
     }
 graph-row-series = Row { $number }
+graph-series-broken-reference = (broken reference)
+graph-series-broken-reference-named = { $name } — broken reference
+graph-legend-more = … and { $count } more
 status-row-no-x-prime = No column of this sheet has an x' value: nothing to plot
 row-drop-title = Plot Rows
 row-drop-confirm = This graph already has an X axis. Plot the rows against a new X axis, or against the existing one?
@@ -916,6 +919,8 @@ plot-legend-bottom-right = Bottom right
 # Theme tab
 
 plot-theme-themes = Themes
+plot-theme-light = Light
+plot-theme-dark = Dark
 plot-theme-global-colors = Global colors
 plot-theme-background = Background
 plot-theme-text = Text
@@ -1190,6 +1195,14 @@ panel-expand = Expand the panel
 panel-collapse = Collapse the panel
 panel-detach = Detach into a separate window
 panel-reattach = Reattach to the main window
+window-header-show-workbook = Show the workbook contents
+window-header-hide-workbook = Hide the workbook contents
+window-header-show-graph = Show the graph contents
+window-header-hide-graph = Hide the graph contents
+window-header-close = Close the window
+window-header-detach = Detach into a separate window
+window-header-reattach = Reattach to the main window
+window-header-maximize = Maximize the window
 
 history-macro-paste-objects = Paste Objects
 history-macro-duplicate-objects = Duplicate Objects
@@ -1673,6 +1686,9 @@ error-import-partial = { $imported ->
     [one] { $imported } file imported
    *[other] { $imported } files imported
 } of { $total }: { $failures }
+error-import-close-group = the import history entry could not be closed
+error-import-create-book = { $name }: the workbook could not be created
+error-import-create-sheet = { $name }: the sheet could not be created
 error-plot-no-y = No Y column selected. Select a Y column to plot
 error-add-no-y = No Y column selected. Select a Y column to add
 error-script-unavailable = Scripts are not available in this build of StokesForge

@@ -15,8 +15,9 @@ use crate::{AxisSide, PlotSpec};
 /// axes, and "white" for the background.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
-    /// Displayed name.
-    pub name: &'static str,
+    /// Stable identifier (`light`, `dark`). Not shown: the interface names
+    /// themes through its catalog (`plot-theme-*` keys).
+    pub id: &'static str,
     /// Background of the graph (`#RRGGBB[AA]`).
     pub background: &'static str,
     /// Text color: titles of the graph and of the axes.
@@ -29,13 +30,13 @@ pub struct Theme {
 /// the background (dark ink on a light background, white on a dark one).
 pub const THEMES: [Theme; 2] = [
     Theme {
-        name: "Clair",
+        id: "light",
         background: "#ffffff",
         text: "",
         axes: "",
     },
     Theme {
-        name: "Sombre",
+        id: "dark",
         background: "#1e1e1e",
         text: "",
         axes: "",
