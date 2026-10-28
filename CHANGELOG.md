@@ -23,6 +23,18 @@ without a message, see `docs/persistance.md`).
 
 ## [Unreleased]
 
+### Removed
+
+- No built-in import templates (#378): the five templates the program carried
+  (Jasco, AnalytikJena, RPE, generic CSV) are gone from the application, the
+  CLI and `pyst`. The first launch starts with an empty template list; only
+  the templates you saved exist. `pyst.import_file(recipe=...)` and
+  `stokesforge-cli import --recipe` refuse the former names ("Jasco
+  (point-virgule)", "Jasco (tabulation)", "AnalytikJena (sans en-tête)",
+  "RPE (tabulation)", "CSV avec noms de colonnes"). Templates embedded in
+  `.stf` files are unaffected: a file imported with one of them still
+  reimports.
+
 ### Added
 
 - Minor ticks on axes (#344): a "Show minor ticks" box per axis (on in a new
@@ -73,7 +85,7 @@ without a message, see `docs/persistance.md`).
   titre"), the encoding shown for UTF-16 files in the import window
   ("little-endian"/"big-endian"), and the name given to an imported file
   without a stem ("file"). Names and parameters of the `pyst` API do not
-  change; the built-in recipe names stay as they are (#378).
+  change.
 - The robustness probes are renamed `stokesforge-alloc-probe` and
   `stokesforge-stack-probe` (arguments `build`, `undo`, `clear`, `drop`).
 

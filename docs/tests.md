@@ -759,16 +759,20 @@ attempts, pagination, pipeline selection and HTTP retries.
   never `AppState::new` (guard in `stokesforge-app/tests/guards.rs`, which reads
   the two `tests/` folders). The write of the file
   is atomic (temporary + rename).
+- No import template exists in production code (#378). Tests that need some
+  copy `test/import/test_recipes.json` (a `RecipeStore` file) into their
+  redirected configuration folder as `import_recipes.json`; the others leave
+  it empty.
 - A test does not read the machine's import templates or recent files either
   (`import_recipes.json`, `import_recent.json`): a saved template "Jasco"
-  came before the built-in template and made the automatic choice fail
+  came before the template that recognizes the file and made the automatic choice fail
   (#195). It redirects the configuration folder to a temporary
   folder by setting `STOKESFORGE_CONFIG_DIR` **and**
   `XDG_CONFIG_HOME` (#332: `directories` honors only the latter,
   and only under Linux; under Windows the tests wrote to the real
   `%APPDATA%\StokesForge\config\` and fought over the file, "Access is
   denied") — under a lock if the test restores the values
-  (`stokesforge-import/src/store.rs`, `tests/builtin.rs`,
+  (`stokesforge-import/src/store.rs`, `tests/test_recipes.rs`,
   `stokesforge-app-state/tests/shell.rs`), or once per process
   before any bench (`hermetic_configuration`,
   `stokesforge-script/tests/script.rs`; `isolated`,

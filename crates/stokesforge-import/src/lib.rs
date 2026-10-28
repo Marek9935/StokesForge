@@ -22,7 +22,6 @@
 //! byte order mark, and as a fallback Windows-1252, the code page of device
 //! software on Windows.
 
-pub mod builtin;
 pub mod choose;
 pub mod config_dir;
 mod data_end;
@@ -40,7 +39,6 @@ pub mod recent;
 pub mod recipe;
 pub mod store;
 
-pub use builtin::builtin_recipes;
 pub use choose::choose_recipe;
 pub use decode::*;
 pub use metadata::MetadataLine;

@@ -440,7 +440,7 @@ fn export_graph(
 }
 
 /// Imports a file into a new workbook and returns the handles of its
-/// sheets. `recipe` names a saved or built-in template; without this name,
+/// sheets. `recipe` names a saved template; without this name,
 /// the template is chosen automatically, otherwise the permissive recipe.
 /// Columns, roles, metadata and source are those of the wizard.
 /// A single Ctrl+Z (or `pyst.undo()`) undoes the whole import. An unreadable file

@@ -107,8 +107,8 @@ fn exclusive_bench() -> Bench {
 ///
 /// `pyst.import_file` reads `import_recipes.json` from the user's
 /// configuration folder; a saved template named "Jasco" came ahead of the
-/// built-in template "Jasco (point-virgule)" and made the automatic choice
-/// fail (#195). The config folder is a *process* state
+/// template "Jasco (semicolon)" and made the automatic choice fail (#195).
+/// The folder holds `test/import/test_recipes.json`. The config folder is a *process* state
 /// (`STOKESFORGE_CONFIG_DIR`, the only variable that `directories` does not
 /// ignore outside Linux, #332; `XDG_CONFIG_HOME` is also still set): it is set
 /// once, to an empty folder kept until the end of the binary, before any
@@ -122,6 +122,13 @@ fn hermetic_configuration() {
             dir.path(),
         );
         std::env::set_var("XDG_CONFIG_HOME", dir.path());
+        // No template exists in the program (#378): the test templates are
+        // saved ones, copied from the fixture.
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/import/test_recipes.json"),
+            dir.path().join("import_recipes.json"),
+        )
+        .expect("copy of the test templates");
         dir
     });
 }
@@ -195,7 +202,7 @@ fn python_import_by_template_reads_and_undoes_in_one_gesture() {
     execute(
         &bench,
         &format!(
-            "sheets_handle = pyst.import_file({:?}, recipe='Jasco (point-virgule)')\n\
+            "sheets_handle = pyst.import_file({:?}, recipe='Jasco (semicolon)')\n\
          assert len(sheets_handle) == 1\n",
             path.to_str().unwrap()
         ),
@@ -267,7 +274,7 @@ fn python_import_chooses_the_template_automatically() {
         })
         .next()
         .unwrap();
-    assert!(source.recipe_json.contains("Jasco (point-virgule)"));
+    assert!(source.recipe_json.contains("Jasco (semicolon)"));
 }
 
 /// Unknown template, missing or binary file: no mutation and no macro left
@@ -283,6 +290,11 @@ fn python_import_refuses_without_touching_the_project_or_others_macros() {
     for source in [
         format!(
             "pyst.import_file({:?}, recipe='Nonexistent template')",
+            binary.to_str().unwrap()
+        ),
+        // The former built-in names are refused (#378).
+        format!(
+            "pyst.import_file({:?}, recipe='Jasco (point-virgule)')",
             binary.to_str().unwrap()
         ),
         format!("pyst.import_file({:?})", absent.to_str().unwrap()),

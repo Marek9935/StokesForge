@@ -480,16 +480,13 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
         {
             state.new_import_recipe();
         }
-        // A built-in template cannot be deleted (it would come back at the
-        // next launch): save it under another name to modify it.
-        let can_delete = names.contains(&current_name)
-            && !state
-                .import_state()
-                .is_some_and(|import| stokesforge_import::RecipeStore::is_builtin(&import.recipe));
+        // Only a saved template can be deleted: the one being edited may not
+        // be saved yet.
+        let can_delete = names.contains(&current_name);
         if ui
             .add_enabled(can_delete, egui::Button::new(tr!("import-files-delete")))
             .on_hover_text(tr!("import-files-delete", "hint"))
-            .on_disabled_hover_text(tr!("disabled-import-builtin-template"))
+            .on_disabled_hover_text(tr!("disabled-import-unsaved-template"))
             .clicked()
         {
             state.request_delete_import_recipe(&current_name);
