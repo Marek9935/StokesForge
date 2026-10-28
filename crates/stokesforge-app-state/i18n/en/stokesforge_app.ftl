@@ -1195,6 +1195,14 @@ panel-expand = Expand the panel
 panel-collapse = Collapse the panel
 panel-detach = Detach into a separate window
 panel-reattach = Reattach to the main window
+window-header-show-workbook = Show the workbook contents
+window-header-hide-workbook = Hide the workbook contents
+window-header-show-graph = Show the graph contents
+window-header-hide-graph = Hide the graph contents
+window-header-close = Close the window
+window-header-detach = Detach into a separate window
+window-header-reattach = Reattach to the main window
+window-header-maximize = Maximize the window
 
 history-macro-paste-objects = Paste Objects
 history-macro-duplicate-objects = Duplicate Objects

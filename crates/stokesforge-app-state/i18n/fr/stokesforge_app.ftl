@@ -1194,6 +1194,14 @@ panel-expand = Déployer le panneau
 panel-collapse = Replier le panneau
 panel-detach = Détacher dans une fenêtre séparée
 panel-reattach = Rattacher à la fenêtre principale
+window-header-show-workbook = Afficher le contenu du classeur
+window-header-hide-workbook = Masquer le contenu du classeur
+window-header-show-graph = Afficher le contenu du graphe
+window-header-hide-graph = Masquer le contenu du graphe
+window-header-close = Fermer la fenêtre
+window-header-detach = Détacher dans une fenêtre séparée
+window-header-reattach = Réattacher à la fenêtre principale
+window-header-maximize = Maximiser la fenêtre
 
 history-macro-paste-objects = Coller des objets
 history-macro-duplicate-objects = Dupliquer des objets
