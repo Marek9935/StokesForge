@@ -1,187 +1,185 @@
-# Évolutions à développer — retours du 2026-09-23
+# Features to develop — feedback of 2026-09-23
 
-Chantiers tirés des retours du 2026-09-23. Les défauts du même message,
-tous corrigés, ne sont plus suivis ici (voir les issues GitLab).
+Work packages drawn from the feedback of 2026-09-23. The defects from the same
+message, all fixed, are no longer tracked here (see the GitLab issues).
 
-Note de passation : elle rejoindra `docs/archive/` quand sa dernière case sera
-cochée. Les références `app.rs:N` datent du 2026-09-23, avant le découpage
-d'`app.rs` en modules (#115) : le code vit depuis dans `src/app/` (table
-module → rôle dans `docs/application/coquille-et-code.md`). Chaque chantier passe par le skill `stokesforge-feature` — les quatre
-surfaces d'une action (raccourci, menu, grisage, libellé) ne se tiennent en
-accord que si on y pense à chaque fois.
+Handover note: it will move to `docs/archive/` when its last box is checked.
+The `app.rs:N` references date from 2026-09-23, before `app.rs` was split into
+modules (#115): the code now lives in `src/app/` (module → role table in
+`docs/application/coquille-et-code.md`). Each work package goes through the
+`stokesforge-feature` skill — the four surfaces of an action (shortcut, menu,
+disabling, label) stay in agreement only if someone thinks about them each time.
 
-## Décisions déjà arbitrées le 2026-09-23
+## Decisions already made on 2026-09-23
 
-À ne pas rouvrir sans raison nouvelle :
+Not to be reopened without a new reason:
 
-| Sujet | Décision |
+| Topic | Decision |
 |---|---|
-| Tab dans les quatre lignes d'en-tête | **Étendre.** La circulation entre champs qu'on y perd est acceptée : les flèches, Entrée et Maj+Tab la remplacent. |
-| Poignée du glisser-déposer | **Bande autour de la sélection.** Le conflit redouté par le commentaire du code n'existe pas : l'extension de sélection est un appui-déplacement-relâchement, la poignée ne s'arme **qu'après** le relâchement. Les deux gestes se succèdent dans le temps, ils ne se disputent pas l'espace. |
-| Périmètre du redimensionnement | Le rognage est un bug (B4), le défilement horizontal une évolution (F8). Les deux se livrent ensemble : sans rognage, le glisseur n'a rien à faire défiler. |
+| Tab in the four header rows | **Extend.** The movement between fields that is lost there is accepted: the arrows, Enter and Shift+Tab replace it. |
+| Drag-and-drop handle | **Band around the selection.** The conflict feared by the code comment does not exist: extending the selection is a press-move-release, and the handle arms **only after** the release. The two gestures follow each other in time, they do not compete for space. |
+| Scope of the resizing | Clipping is a bug (B4), horizontal scrolling is a feature (F8). Both ship together: without clipping, the slider has nothing to scroll. |
 
 ---
 
-## Lot A — l'ajout de colonne quitte le bandeau
+## Batch A — adding a column leaves the banner
 
-Le bandeau du classeur disparaît entièrement ; ses deux gestes migrent vers le
-menu contextuel, le clavier et le panneau d'icônes.
+The workbook banner disappears entirely; its two gestures move to the context
+menu, the keyboard and the icon panel.
 
-### F1 — Supprimer le bandeau du classeur
+### F1 — Remove the workbook banner
 
-- [ ] Retirer les boutons « Ajouter une colonne » et « Importer… », ainsi que
-      l'affichage « N lignes × M colonnes ».
+- [ ] Remove the "Add Column" and "Import…" buttons, and the
+      "N rows × M columns" display.
 
-**Deux écritures à traiter** : `book_contents` (`app.rs:3653`) **et**
-`detached_book_contents` (`app.rs:5592`). Un commentaire du fichier dit déjà
-« *Même correctif B5 que `book_contents`* » — la duplication est connue et
-oblige à corriger deux fois.
+**Two writes to handle**: `book_contents` (`app.rs:3653`) **and**
+`detached_book_contents` (`app.rs:5592`). A comment in the file already says
+"*Même correctif B5 que `book_contents`*" — the duplication is known and forces
+a fix in two places.
 
-Objectif de fond : **factoriser plutôt que dupliquer**. `docs/application/fenetres-et-panneaux.md`
-explique ce qui doit rester séparé (les tampons de saisie transitoires, à cause
-de la fermeture `'static` de `show_viewport_deferred`) — un bandeau qui ne fait
-que pousser des `Action` n'y bute pas.
+Underlying goal: **factor out rather than duplicate**. `docs/application/fenetres-et-panneaux.md`
+explains what must stay separate (the transient input buffers, because of the
+`'static` closure of `show_viewport_deferred`) — a banner that only pushes
+`Action`s does not run into it.
 
-### F2 — Menu contextuel « Ajouter une colonne » en fin de grille
+### F2 — Context menu "Add Column" at the end of the grid
 
-- [ ] Clic droit dans la zone vide à droite de la dernière colonne → entrée
-      « Ajouter une colonne ».
+- [ ] Right-click in the empty area to the right of the last column → entry
+      "Add Column".
 
-Rappel de la règle maison : le menu contextuel de la grille est le **miroir
-exact du clavier**, et la décision (quoi proposer, quoi griser, comment nommer)
-vit dans `AppState::grid_menu` → `GridMenu`, jamais dans le code egui — c'est
-ce qui la rend testable sans fenêtre dans `tests/shell.rs`.
+Reminder of the house rule: the grid context menu is the **exact mirror of the
+keyboard**, and the decision (what to offer, what to disable, how to name it)
+lives in `AppState::grid_menu` → `GridMenu`, never in the egui code — that is
+what makes it testable without a window in `tests/shell.rs`.
 
-### F3 — Tab prolonge la grille depuis tout l'en-tête
+### F3 — Tab extends the grid from the whole header
 
-- [ ] Étendre la condition aux champs `Nom long`, `Unité` et `Commentaire`, en
-      plus de `Formule` : `app.rs:4459-4484` (raccourci clavier de
-      `grid_contents`), `app.rs:3395-3415` (`header_field_widget`), et le
-      duplicata détaché `app.rs:5453-5484`.
-- [ ] **Mettre à jour le commentaire `app.rs:4455-4467` et la section « Tab en
-      dernière colonne » de `docs/application/grille.md`** : ils décrivent la
-      décision que ce chantier renverse, ils deviendraient faux.
+- [ ] Extend the condition to the `Nom long`, `Unité` and `Commentaire` fields,
+      in addition to `Formule`: `app.rs:4459-4484` (keyboard shortcut of
+      `grid_contents`), `app.rs:3395-3415` (`header_field_widget`), and the
+      detached duplicate `app.rs:5453-5484`.
+- [ ] **Update the comment `app.rs:4455-4467` and the "Tab in
+      the last column" section of `docs/application/grille.md`**: they describe
+      the decision that this work package reverses, so they would become false.
 
-⚠️ Ce n'est pas la réparation d'un oubli : le comportement actuel est un choix
-documenté. Le renversement est assumé (voir les décisions ci-dessus).
+⚠️ This is not the repair of an oversight: the current behavior is a documented
+choice. The reversal is deliberate (see the decisions above).
 
-### F4 — Sélection et suppression de colonne depuis l'en-tête
+### F4 — Column selection and deletion from the header
 
-- [ ] **Vérifier d'abord à l'écran ce qui manque réellement.** La rangée des
-      lettres sélectionne déjà la colonne entière et ouvre déjà
-      `grid_edit_menu` (`app.rs:3095`, `app.rs:3145`). Reste à établir si un
-      clic sur un champ d'en-tête (`header_field_widget`, `app.rs:3350`)
-      sélectionne la colonne entière ou seulement ce champ.
-- [ ] **Câbler la suppression de colonne — tout est à faire.**
-      `Command::DeleteColumn` existe dans `stokesforge-commands`, mais
-      `rg DeleteColumn crates/stokesforge-app/src/` ne renvoie **rien** : il faut
-      une variante d'`Action`, son traitement dans `AppState::dispatch`,
-      l'entrée de menu, et un test dans `tests/shell.rs`. Ce n'est pas une
-      ligne d'interface.
-- [ ] Menu contextuel identique quelle que soit la zone dès qu'une colonne
-      entière est sélectionnée, en gardant celui de la rangée des lettres.
+- [ ] **First check on screen what is really missing.** The letters row already
+      selects the whole column and already opens `grid_edit_menu` (`app.rs:3095`,
+      `app.rs:3145`). It remains to establish whether a click on a header field
+      (`header_field_widget`, `app.rs:3350`) selects the whole column or only
+      that field.
+- [ ] **Wire up column deletion — everything is still to do.**
+      `Command::DeleteColumn` exists in `stokesforge-commands`, but
+      `rg DeleteColumn crates/stokesforge-app/src/` returns **nothing**: it needs
+      an `Action` variant, its handling in `AppState::dispatch`, the menu entry,
+      and a test in `tests/shell.rs`. This is not a one-line interface change.
+- [ ] Identical context menu whatever the area, as soon as a whole column is
+      selected, keeping the one of the letters row.
 
-## Lot B — fenêtres et chrome
+## Batch B — windows and chrome
 
-### F5 — Panneau d'icônes façon Origin
+### F5 — Origin-style icon panel
 
-- [ ] Sous la barre de menus, un panneau de raccourcis illustrés : nouveau
-      classeur, nouveau graphe, importer un fichier.
+- [ ] Below the menu bar, a panel of illustrated shortcuts: new workbook, new
+      graph, import a file.
 
-**Dépendance** : l'import quitte le bandeau du classeur avec F1. Livrer F5
-**avant ou avec** F1, sinon l'import n'a plus aucun point d'entrée.
+**Dependency**: import leaves the workbook banner with F1. Ship F5
+**before or with** F1, otherwise import has no entry point left.
 
-*À préciser avant de concevoir* : les actions à inclure au-delà des trois
-citées ; le jeu d'icônes (en existe-t-il déjà dans `stokesforge-app`, ou faut-il en
-choisir ?) ; panneau permanent ou repliable.
+*To clarify before designing*: the actions to include beyond the three
+mentioned; the icon set (is there one already in `stokesforge-app`, or must one
+be chosen?); permanent or collapsible panel.
 
-### F6 — Contour de fenêtre, sans ombre
+### F6 — Window outline, no shadow
 
-- [ ] Un trait gris fin, angles légèrement arrondis, sur la fenêtre détachée
-      **et** la fenêtre principale ; supprimer l'effet d'ombre actuel.
+- [ ] A thin grey line, slightly rounded corners, on the detached window
+      **and** the main window; remove the current shadow effect.
 
-À faire dans la même passe que B1/B3 (contour de surbrillance) : les deux
-peignent le bord de la même fenêtre, les traiter séparément reviendrait à
-repeindre deux fois la même zone.
+To be done in the same pass as B1/B3 (highlight outline): both paint the edge
+of the same window, so handling them separately would repaint the same area
+twice.
 
-### F7 — Largeur des colonnes × 4/3
+### F7 — Column width × 4/3
 
-- [ ] Augmenter la largeur par défaut d'un tiers.
+- [ ] Increase the default width by a third.
 
-Vérifier l'effet sur B4 : des colonnes plus larges débordent plus tôt.
+Check the effect on B4: wider columns overflow sooner.
 
-## Lot C — grille et glisser-déposer
+## Batch C — grid and drag and drop
 
-### F8 — Défilement horizontal du classeur
+### F8 — Horizontal scrolling of the workbook
 
-- [x] Glisseur horizontal dans la grille quand les colonnes dépassent.
-- [x] Maj+molette pilote ce glisseur via le comportement natif d'`egui::ScrollArea`.
-- [x] La bande d'onglets de feuille défile elle aussi horizontalement (sa
-      propre `egui::ScrollArea`, indépendante de celle de la grille) plutôt
-      que de rétrécir ses onglets ou de replier les feuilles cachées dans un
-      menu « … » (revu le 2026-09-23 : c'était l'approche initiale, abandonnée
-      pour garder le style d'onglet d'origine, taille naturelle).
+- [x] Horizontal slider in the grid when the columns overflow.
+- [x] Shift+wheel drives this slider through the native behavior of `egui::ScrollArea`.
+- [x] The sheet tab strip also scrolls horizontally (its own
+      `egui::ScrollArea`, independent from the grid's) instead of shrinking its
+      tabs or folding the hidden sheets into a "…" menu (revised on 2026-09-23:
+      that was the initial approach, dropped to keep the original tab style, at
+      natural size).
 
-Le bandeau d'actions reste hors de la zone défilable. La fenêtre flottante et
-la fenêtre détachée utilisent la même règle, et la même fonction
-(`sheet_tabs`, `crates/stokesforge-app/src/app/workbook.rs`). Sélectionner une feuille dont
-l'onglet est hors vue (clic, clavier, script) fait défiler la bande pour
-l'y ramener (`Response::scroll_to_me`, déclenché uniquement quand la
-sélection change réellement, pas à chaque image).
+The action banner stays outside the scrollable area. The floating window and
+the detached window use the same rule, and the same function
+(`sheet_tabs`, `crates/stokesforge-app/src/app/workbook.rs`). Selecting a sheet
+whose tab is out of view (click, keyboard, script) scrolls the strip to bring it
+back (`Response::scroll_to_me`, triggered only when the selection really
+changes, not on every frame).
 
-### F9 — Poignée de glisser autour de la sélection
+### F9 — Drag handle around the selection
 
-- [ ] Déplacer la zone de prise (`COLUMN_GRIP_WIDTH`, `app.rs:514` ; zone
-      actuelle `app.rs:4304-4340`) du bord de la grille vers le pourtour de la
-      sélection.
-- [ ] **La poignée ne s'arme qu'après le relâchement du clic** — c'est ce qui
-      la sépare du glisser d'extension de sélection.
-- [ ] Mettre à jour le commentaire `app.rs:4308-4321`, qui justifie
-      aujourd'hui la position au bord par un conflit que cette règle dissout.
+- [ ] Move the grip area (`COLUMN_GRIP_WIDTH`, `app.rs:514`; current area
+      `app.rs:4304-4340`) from the edge of the grid to the perimeter of the
+      selection.
+- [ ] **The handle arms only after the click is released** — this is what
+      separates it from the selection-extension drag.
+- [ ] Update the comment `app.rs:4308-4321`, which today justifies the position
+      at the edge by a conflict that this rule dissolves.
 
-### F10 — Réduire la hauteur de la bande d'en-tête
+### F10 — Reduce the height of the header strip
 
-- [ ] La bande d'en-tête des fenêtres flottantes/détachées (`window_header`,
-      `WINDOW_HEADER_HEIGHT = 28.0`, `crates/stokesforge-app/src/app.rs`) est
-      perçue comme plus haute que nécessaire — retour du 2026-09-23, en
-      référence à la zone grisée au survol du chevron de repli (« v »), qui
-      elle occupe déjà toute la hauteur de la bande (`header_icon`, le
-      rectangle de survol fait `rect.height()`, la même valeur).
+- [ ] The header strip of floating/detached windows (`window_header`,
+      `WINDOW_HEADER_HEIGHT = 28.0`, `crates/stokesforge-app/src/app.rs`) is
+      perceived as taller than necessary — feedback of 2026-09-23, in reference
+      to the greyed area on hover of the collapse chevron ("v"), which already
+      takes the full height of the strip (`header_icon`, the hover rectangle is
+      `rect.height()`, the same value).
 
-*À préciser avant de concevoir* : la gêne vient-elle de `WINDOW_HEADER_HEIGHT`
-lui-même, ou de l'espace ajouté autour (marge du `Frame`,
-`style.spacing.window_margin`, ou l'espacement par défaut entre la bande
-d'en-tête et la ligne d'outils qui suit, côté classeur) ? Une capture avec
-mesure de pixels y répondrait plus vite qu'une nouvelle question.
+*To clarify before designing*: does the discomfort come from
+`WINDOW_HEADER_HEIGHT` itself, or from the space added around it (margin of the
+`Frame`, `style.spacing.window_margin`, or the default spacing between the
+header strip and the tools row that follows, on the workbook side)? A capture
+with a pixel measurement would answer faster than a new question.
 
-**À faire dans la même zone que F6** (contour de fenêtre) : les deux
-retouchent l'apparence de la même bande, éviter deux passages séparés.
+**To be done in the same area as F6** (window outline): both retouch the
+appearance of the same strip, so avoid two separate passes.
 
-### F11 — Définir le comportement du graphe lors du redimensionnement
+### F11 — Define the graph behavior on resize
 
-- [x] Demandé à l'utilisateur (2026-09-23) : le graphe garde toujours le ratio
-      4:3 de `DEFAULT_FIGURE_SIZE` et se met à l'échelle « contain » —
-      maximisé dans l'espace disponible en prenant la dimension limitante
-      (largeur ou hauteur), en agrandissant comme en rétrécissant. Aucun
-      rognage, aucun défilement pour la figure elle-même. Règle identique en
-      mode flottant et détaché (une seule fonction, `graph_view_contents`,
-      couvre les deux).
-- [x] Implémenté dans `graph_view_contents`
-      (`crates/stokesforge-app/src/app.rs`) ; test adapté
-      (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`) ;
-      `docs/application/` mis à jour.
+- [x] Asked of the user (2026-09-23): the graph always keeps the 4:3 ratio of
+      `DEFAULT_FIGURE_SIZE` and scales "contain" — maximized in the available
+      space by taking the limiting dimension (width or height), growing as well
+      as shrinking. No clipping, no scrolling for the figure itself. Identical
+      rule in floating and detached mode (a single function,
+      `graph_view_contents`, covers both).
+- [x] Implemented in `graph_view_contents`
+      (`crates/stokesforge-app/src/app.rs`); test adapted
+      (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`);
+      `docs/application/` updated.
 
 ---
 
-## Ordre suggéré
+## Suggested order
 
-1. **F5** (panneau d'icônes) — préalable à F1, sinon l'import disparaît.
-2. **F1 + F2 + F3** — un seul chantier cohérent : le bandeau s'en va, le menu
-   contextuel et Tab le remplacent.
-3. **F4** — le plus lourd du lot A, à cause du câblage de `DeleteColumn`.
-4. **F6** avec B1/B3, **F7** quand on veut.
-5. **F8** après B4.
-6. **F9** — indépendant.
-7. **F10** avec F6 — même zone, et sa portée exacte reste à préciser (voir
-   ci-dessus).
-8. **F11** après définition du comportement attendu avec l'utilisateur.
+1. **F5** (icon panel) — prerequisite to F1, otherwise import disappears.
+2. **F1 + F2 + F3** — a single coherent work package: the banner goes away, the
+   context menu and Tab replace it.
+3. **F4** — the heaviest of batch A, because of the `DeleteColumn` wiring.
+4. **F6** with B1/B3, **F7** whenever wanted.
+5. **F8** after B4.
+6. **F9** — independent.
+7. **F10** with F6 — same area, and its exact scope remains to be clarified (see
+   above).
+8. **F11** after defining the expected behavior with the user.

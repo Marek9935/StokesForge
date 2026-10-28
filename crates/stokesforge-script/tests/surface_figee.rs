@@ -1,6 +1,6 @@
 //! Garde de l'API figée V1 de `pyst` (#331, lot 3).
 //!
-//! La liste de référence est la section « API figée V1 » de
+//! La liste de référence est la section « Frozen API V1 » de
 //! `docs/python-et-script.md`, en blocs ```` ```pyst-api <genre> <nom> ````.
 //! Ce test **lit ces blocs** (il n'en garde aucune copie) et les compare au
 //! module réellement construit :
@@ -32,7 +32,7 @@ use stokesforge_session::Session;
 
 /// Ce que le message d'échec rappelle à qui touche à la surface.
 const CONSIGNE: &str = "La surface `pyst` ne correspond plus a la liste figee \
-\"API figee V1\" de docs/python-et-script.md (#331). Un changement de surface \
+\"Frozen API V1\" de docs/python-et-script.md (#331). Un changement de surface \
 (appel, parametre, defaut, exception, cle, valeur enumeree) exige une DECISION \
 explicite et la mise a jour de cette liste dans le meme commit que le code.";
 

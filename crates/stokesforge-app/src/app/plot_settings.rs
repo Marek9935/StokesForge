@@ -1397,7 +1397,7 @@ mod tests {
 
             // Les données ne passent pas par le catalogue : noms des thèmes
             // (`stokesforge_plot::THEMES`, des données comme les noms saisis,
-            // `docs/application/graphe.md` § Propriétés des graphiques),
+            // `docs/application/graphe.md` § Graph properties),
             // libellé de la série tiré de ses colonnes, valeurs numériques,
             // champs de saisie vides (titres non renseignés).
             let tree = banc.state.tree().clone();

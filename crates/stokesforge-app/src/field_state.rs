@@ -1,7 +1,7 @@
 //! État d'un champ de saisie : **refusé** (cadre rouge) ou **ramené** (cadre
 //! orange), une seule brique pour tous les champs (#219, #217 S-N6/S-N7/S-N11, S-T2, S-T3).
 //!
-//! Règles (`docs/standard-interface.md`, § Saisie refusée ou ramenée) :
+//! Règles (`docs/standard-interface.md`, § Input refused or brought back) :
 //!
 //! - une saisie **illisible**, ou qui viole une contrainte entre deux champs,
 //!   est *refusée* : cadre rouge, bulle qui dit la règle, texte gardé tant que

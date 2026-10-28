@@ -92,8 +92,9 @@ confirmation pour les choix courants couverts par la demande.
   reste dans `GraphView`, y compris en fenêtre détachée. La visibilité passe
   par `EditPlotSpec` (même delta que `SetPlotSpec`) et les vignettes réutilisent
   la légende du rendu partagé.
-- Suivre les conventions locales de nommage ; écrire les commentaires,
-  la documentation et les messages de commit en français. Expliquer les
+- Suivre les conventions locales de nommage ; écrire les commentaires
+  et les messages de commit en français, la documentation de `docs/` en anglais
+  (hors `docs/archive/`, resté en français, #368). Expliquer les
   décisions non évidentes au plus près du code.
 - Vérifier les features réellement exercées : les commandes Cargo par défaut
   ne valident pas le pont Python (feature `python`). Typst est compilé et testé

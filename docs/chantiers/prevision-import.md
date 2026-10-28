@@ -1,149 +1,147 @@
-# Cahier des charges — chantier 2 : prévisualisation d'import façon Origin
+# Specification — work package 2: Origin-style import preview
 
-## Objectif
+## Goal
 
-**Le point important de ce chantier, et le seul qui ne doit pas se perdre en
-route** : pendant que l'utilisateur règle les paramètres d'import, il doit
-voir **en temps réel comment le fichier est effectivement découpé** —
-quelles lignes sont de l'en-tête, lesquelles alimentent quel rôle de
-colonne, où commencent les données — pas seulement une fois l'import validé.
-Tout le reste de ce document (widgets précis, rôles nommés comme chez
-OriginLab, options de configuration détaillées) est secondaire à ce
-principe et négociable ; ce principe ne l'est pas.
+**The important point of this work package, and the only one that must not get
+lost along the way**: while the user sets the import parameters, they must
+see **in real time how the file is actually split** — which lines are header,
+which feed which column role, where the data starts — not only once the import
+is confirmed. Everything else in this document (precise widgets, roles named
+as in OriginLab, detailed configuration options) is secondary to this
+principle and negotiable; this principle is not.
 
-Concrètement : refaire le panneau de prévisualisation de la fenêtre d'import
-(`import_window`, aujourd'hui `crates/stokesforge-app/src/app/import_wizard.rs`) pour qu'il affiche ce
-découpage en direct, à mesure que l'utilisateur ajuste les paramètres
-d'import, sur le modèle de l'assistant d'import ASCII d'OriginLab.
+Concretely: rebuild the preview panel of the import window
+(`import_window`, today `crates/stokesforge-app/src/app/import_wizard.rs`) so that it shows
+this split live, as the user adjusts the import parameters, modeled on the
+OriginLab ASCII import wizard.
 
-C'est le point le plus important des deux chantiers notés le 2026-09-15 : il
-englobe et corrige au passage le bug connu du champ de texte du module
-d'import (impossible d'y supprimer du texte sans d'abord le sélectionner),
-puisque cette zone est entièrement refaite ici.
+This is the most important point of the two work packages noted on 2026-09-15: it
+includes and fixes along the way the known bug of the text field of the import
+module (impossible to delete text there without first selecting it),
+since this area is entirely rebuilt here.
 
-## Référence : capture de l'assistant d'import ASCII d'OriginLab
+## Reference: screenshot of the OriginLab ASCII import wizard
 
-Capture fournie par l'utilisateur le 2026-09-15 (assistant d'import ASCII
-d'OriginLab), décrite ci-dessous faute de pouvoir l'intégrer telle quelle à
-la documentation versionnée.
+Screenshot provided by the user on 2026-09-15 (OriginLab ASCII import wizard),
+described below because it cannot be embedded as is in the versioned
+documentation.
 
-Le panneau qu'elle montre se découpe en trois zones :
+The panel it shows is divided into three areas:
 
-1. **Comptage des lignes d'en-tête**, en haut :
-   - `Number of main header lines (exclude subheader lines)` — nombre de
-     lignes d'en-tête « principal », dans un menu déroulant, avec un bouton
-     de réévaluation automatique à côté (icône de cycle) et une case
-     `Line number start from bottom` pour compter depuis la fin du fichier.
-   - `Number of subheader lines` — nombre de lignes de « sous-en-tête »
-     (celles qui portent les métadonnées de colonne : nom long, unité,
-     commentaire…), même genre de menu déroulant + bouton de réévaluation.
-   - `Auto determine header lines` — case à cocher qui laisse l'outil
-     déduire ces deux comptes du contenu du fichier plutôt que de les saisir
-     à la main.
+1. **Header line counts**, at the top:
+   - `Number of main header lines (exclude subheader lines)` — number of
+     "main" header lines, in a drop-down menu, with an automatic
+     re-evaluation button next to it (cycle icon) and a
+     `Line number start from bottom` checkbox to count from the end of the file.
+   - `Number of subheader lines` — number of "subheader" lines
+     (those that carry column metadata: long name, unit,
+     comment…), the same kind of drop-down menu + re-evaluation button.
+   - `Auto determine header lines` — checkbox that lets the tool
+     deduce these two counts from the file content rather than typing them
+     by hand.
 
-2. **Assignation des rôles de ligne** (« Column Label Assignment from
-   Subheader Lines ») : pour chacun des rôles `Long Names`, `Units`,
-   `Comments`, `System Parameters`, `User Parameters`, une paire de menus
-   déroulants « from … to … » qui choisit **quelle plage de lignes de
-   sous-en-tête** alimente ce rôle (une seule ligne dans la capture : `18` à
-   `18` pour `Comments`, par exemple), chacune avec son propre bouton de
-   réévaluation. Une case `Extract Long Names and Units from Same Line`
-   permet de lire les deux rôles sur une ligne partagée plutôt que sur deux
-   lignes séparées. À côté, `Characters to skip on each line` retire un
-   préfixe fixe de chaque ligne de données avant parsing.
+2. **Line role assignment** ("Column Label Assignment from Subheader Lines"):
+   for each of the roles `Long Names`, `Units`,
+   `Comments`, `System Parameters`, `User Parameters`, a pair of
+   "from … to …" drop-down menus that chooses **which range of subheader
+   lines** feeds this role (a single line in the screenshot: `18` to
+   `18` for `Comments`, for example), each with its own re-evaluation button.
+   An `Extract Long Names and Units from Same Line` checkbox
+   reads the two roles on a shared line rather than on two separate
+   lines. Next to it, `Characters to skip on each line` removes a fixed
+   prefix from each data line before parsing.
 
-3. **Aperçu texte en direct**, en bas, avec deux réglages qui le pilotent
-   (`Preview Font`, `Preview Lines` — nombre de lignes affichées) : le
-   contenu brut du fichier, numéroté, avec pour chaque ligne un **code de
-   préfixe** qui dit comment cette ligne va être interprétée avec les
-   réglages actuels — légende donnée en toutes lettres au-dessus du panneau :
+3. **Live text preview**, at the bottom, with two settings that drive it
+   (`Preview Font`, `Preview Lines` — number of lines displayed): the
+   raw content of the file, numbered, with for each line a **prefix
+   code** that says how this line will be interpreted with the current
+   settings — legend given in full above the panel:
    `S=Short Name, L=Long Name, U=Units, P=Parameters, C=Comment,
-   MH=Main Header, SH=Subheader`. Les lignes sont colorées selon leur rôle
-   (bleu pour les rôles d'en-tête reconnus, magenta pour un commentaire,
-   gris pour les lignes de données pas encore atteintes par `Preview
-   Lines`…). **Tout changement dans les deux zones du dessus retexte cet
-   aperçu immédiatement**, sans étape de validation intermédiaire — c'est le
-   comportement central à reproduire, plus que tel ou tel widget précis.
+   MH=Main Header, SH=Subheader`. The lines are colored according to their role
+   (blue for the recognized header roles, magenta for a comment,
+   gray for data lines not yet reached by `Preview
+   Lines`…). **Any change in the two areas above re-renders this
+   preview immediately**, with no intermediate confirmation step — this is the
+   central behavior to reproduce, more than any specific widget.
 
-## Ce qui existe déjà côté StokesForge (point de départ, pas à rejeter en bloc)
+## What already exists on the StokesForge side (starting point, not to reject wholesale)
 
-- `crates/stokesforge-import` : crate pur (zéro dépendance UI/core), qui modélise
-  déjà une **recette** (`ImportRecipe`) inspirée du même assistant OriginLab
-  — voir le commentaire de tête de `crates/stokesforge-import/src/lib.rs`. Champs
-  actuels : `separator` (`Separator`), `decimal` (`DecimalStyle`), `header`
-  (`HeaderSkip` : aucun saut, `N` lignes fixes, ou jusqu'à un marqueur),
-  `footer_skip_lines`, `has_column_header_row`, `name_source` (nom de fichier
-  ou clé lue en en-tête).
-- `crates/stokesforge-core/src/column.rs` : `ColumnMeta { unit, long_name,
-  comment }` existe déjà par colonne — les rôles `Long Names`/`Units`/
-  `Comments` d'OriginLab ont donc une destination naturelle dans le modèle
-  actuel. Rien d'équivalent à `System Parameters`/`User Parameters`
-  d'OriginLab n'existe : à trancher (les ignorer, ou les faire atterrir dans
-  `comment` faute de mieux — voir « Questions ouvertes »).
-- `crates/stokesforge-app/src/app.rs` (aujourd'hui `src/app/import_wizard.rs`), fonction `import_window` : la fenêtre
-  d'import actuelle (dialogue transitoire tant que `AppState::import_state`
-  est `Some`), avec ses champs de texte simples (dont le bug noté) et pas
-  d'aperçu en direct du découpage.
+- `crates/stokesforge-import`: a pure crate (zero UI/core dependency), which already models a
+  **recipe** (`ImportRecipe`) inspired by the same OriginLab wizard
+  — see the head comment of `crates/stokesforge-import/src/lib.rs`. Current fields:
+  `separator` (`Separator`), `decimal` (`DecimalStyle`), `header`
+  (`HeaderSkip`: no skip, `N` fixed lines, or up to a marker),
+  `footer_skip_lines`, `has_column_header_row`, `name_source` (file name
+  or key read from the header).
+- `crates/stokesforge-core/src/column.rs`: `ColumnMeta { unit, long_name,
+  comment }` already exists per column — the OriginLab roles `Long Names`/`Units`/
+  `Comments` therefore have a natural destination in the current
+  model. Nothing equivalent to OriginLab's `System Parameters`/`User Parameters`
+  exists: to decide (ignore them, or land them in
+  `comment` for lack of better — see "Open questions").
+- `crates/stokesforge-app/src/app.rs` (today `src/app/import_wizard.rs`), function `import_window`: the current
+  import window (transient dialog as long as `AppState::import_state`
+  is `Some`), with its simple text fields (including the noted bug) and no
+  live preview of the split.
 
-L'écart principal avec OriginLab : le modèle actuel de `HeaderSkip` traite
-l'en-tête comme un bloc à sauter, sans distinguer un « en-tête principal »
-d'un « sous-en-tête », et sans assigner des **plages de lignes** à des rôles
-sémantiques par colonne — c'est tout l'apport attendu de ce chantier.
+The main gap with OriginLab: the current `HeaderSkip` model treats the
+header as a block to skip, without distinguishing a "main header"
+from a "subheader", and without assigning **line ranges** to semantic
+roles per column — this is the whole contribution expected from this work package.
 
-## Fonctionnalités attendues
+## Expected features
 
-1. **Deux compteurs de lignes d'en-tête** distincts (principal / sous-en-tête)
-   avec option de comptage depuis le bas et une détection automatique
-   raisonnable (heuristique à documenter — ex. première ligne où le nombre
-   de champs façon `separator` redevient stable et numérique).
-2. **Assignation de plages de sous-en-tête aux rôles** `long_name`, `unit`,
-   `comment` de `ColumnMeta` (plus, si retenu, un traitement pour les
-   paramètres système/utilisateur d'OriginLab — voir questions ouvertes),
-   avec une option pour lire nom long et unité sur une même ligne.
-3. **Nombre de caractères à retirer en tête de chaque ligne** avant parsing
-   (utile pour les préfixes fixes de certains formats d'instrument).
-4. **Aperçu en direct, texte brut coloré/annoté par rôle de ligne**,
-   recalculé à chaque changement de paramètre, avec un nombre de lignes
-   affichées configurable. Doit rester utilisable sur de gros fichiers (pas
-   de re-parsing complet coûteux à chaque frappe — voir « Points de
-   vigilance »).
-5. **Correction du bug d'édition de texte** : tous les champs de texte du
-   panneau (nom de recette, marqueur d'en-tête, clé d'en-tête…) doivent
-   permettre suppression/insertion normales au clavier, pas seulement un
-   remplacement par sélection.
+1. **Two distinct header line counters** (main / subheader)
+   with a count-from-the-bottom option and a reasonable automatic
+   detection (heuristic to document — e.g. first line where the number
+   of fields per `separator` becomes stable and numeric again).
+2. **Assignment of subheader ranges to the roles** `long_name`, `unit`,
+   `comment` of `ColumnMeta` (plus, if retained, a treatment for the
+   OriginLab system/user parameters — see open questions),
+   with an option to read long name and unit on the same line.
+3. **Number of characters to remove at the start of each line** before parsing
+   (useful for the fixed prefixes of some instrument formats).
+4. **Live preview, raw text colored/annotated by line role**,
+   recomputed at every parameter change, with a configurable number of
+   displayed lines. It must stay usable on large files (no
+   costly full re-parsing at every keystroke — see "Points of
+   attention").
+5. **Fix of the text editing bug**: all text fields of the
+   panel (recipe name, header marker, header key…) must
+   allow normal deletion/insertion with the keyboard, not only a
+   replacement by selection.
 
-## Ce qui ne doit *pas* être fait ici
+## What must *not* be done here
 
-- Ne pas toucher au chantier 1 (colonnes à types mixtes) au-delà de
-  consommer son résultat : ce panneau doit refléter dans son aperçu le
-  typage par cellule maintenant que ce chantier est mergé (une valeur non
-  numérique dans une colonne par ailleurs numérique doit s'annoter dans
-  l'aperçu, pas faire échouer le parsing).
-- Ne pas copier le vocabulaire d'OriginLab tel quel si un rôle n'a pas
-  d'équivalent dans le modèle StokesForge (`System Parameters`/`User Parameters`
-  notamment) sans décision explicite — voir ci-dessous.
-- Rien de tout ceci ne passe par une commande annulable de
-  `stokesforge-commands` **tant que l'import n'est pas validé** : le panneau de
-  prévisualisation travaille sur un état local transitoire de la fenêtre
-  d'import, comme aujourd'hui — seule l'application finale du résultat au
-  classeur doit passer par une commande (c'est déjà le cas, à ne pas
-  régresser).
+- Do not touch work package 1 (mixed-type columns) beyond
+  consuming its result: this panel must reflect in its preview the
+  per-cell typing now that this work package is merged (a non-numeric value
+  in an otherwise numeric column must be annotated in the
+  preview, not make the parsing fail).
+- Do not copy OriginLab's vocabulary as is if a role has no
+  equivalent in the StokesForge model (`System Parameters`/`User Parameters`
+  in particular) without an explicit decision — see below.
+- None of this goes through an undoable command of
+  `stokesforge-commands` **as long as the import is not confirmed**: the preview
+  panel works on a transient local state of the import
+  window, as today — only the final application of the result to the
+  workbook must go through a command (this is already the case, do not
+  regress).
 
-## Questions ouvertes à trancher avant/pendant l'implémentation
+## Open questions to decide before/during implementation
 
-- **`System Parameters`/`User Parameters` d'OriginLab** : les ignorer (pas
-  de champ équivalent dans `ColumnMeta`), les fondre dans `comment`, ou
-  étendre `ColumnMeta` ? Impact sur le format `.stf` si extension — lire
-  `docs/persistance.md` avant de trancher.
-- **Coût de l'aperçu en direct** sur un gros fichier (des dizaines de
-  milliers de lignes) : reparser tout le fichier à chaque frappe dans un
-  champ, ou seulement la fenêtre visible (`Preview Lines`) + les lignes
-  d'en-tête ? OriginLab semble limiter explicitement via `Preview Lines`.
-- **Détection automatique des lignes d'en-tête** (`Auto determine header
-  lines`) : heuristique à définir et à documenter, avec ses limites
-  (`docs/archive/rustrewrite/questions-ouvertes.md` §11 recense déjà des
-  plafonds/heuristiques similaires ailleurs dans le projet — vérifier qu'un
-  comportement de bord qui semble étrange n'est pas déjà un choix assumé).
-- **Persistance de ces nouveaux réglages dans `ImportRecipe`** : rétro-
-  compatibilité du format JSON des recettes déjà enregistrées par
-  `RecipeStore` (`crates/stokesforge-import/src/store.rs`) à vérifier.
+- **OriginLab's `System Parameters`/`User Parameters`**: ignore them (no
+  equivalent field in `ColumnMeta`), merge them into `comment`, or
+  extend `ColumnMeta`? Impact on the `.stf` format if extended — read
+  `docs/persistance.md` before deciding.
+- **Cost of the live preview** on a large file (tens of thousands of
+  lines): re-parse the whole file at every keystroke in a field, or only the visible window (`Preview Lines`) + the header lines?
+  OriginLab seems to limit explicitly via `Preview Lines`.
+- **Automatic detection of header lines** (`Auto determine header
+  lines`): heuristic to define and document, with its limits
+  (`docs/archive/rustrewrite/questions-ouvertes.md` §11 already lists similar
+  caps/heuristics elsewhere in the project — check that an
+  odd-looking edge behavior is not already an accepted choice).
+- **Persistence of these new settings in `ImportRecipe`**: backward
+  compatibility of the JSON format of the recipes already saved by
+  `RecipeStore` (`crates/stokesforge-import/src/store.rs`) to check.

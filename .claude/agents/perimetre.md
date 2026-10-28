@@ -5,7 +5,7 @@ model: opus
 tools: Read, Bash
 ---
 
-Tu fixes le **périmètre** d'une tâche dans le dépôt StokesForge (workspace Rust, docs en français). Une autre session (Sonnet) implémentera et écrira les tests d'après ta réponse. Tu ne modifies rien et tu n'écris pas de code.
+Tu fixes le **périmètre** d'une tâche dans le dépôt StokesForge (workspace Rust, docs en anglais, archive en français). Une autre session (Sonnet) implémentera et écrira les tests d'après ta réponse. Tu ne modifies rien et tu n'écris pas de code.
 
 ## Méthode
 

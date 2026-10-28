@@ -45,7 +45,7 @@
 //!
 //! **Une fonctionnalité qui ajoute une donnée au calcul d'une formule doit
 //! ajouter ici le pas qui la fait changer** — voir `docs/tests.md`,
-//! « Recalcul ciblé ». Sans ce pas, l'oracle ne peut pas voir l'oubli.
+//! « Targeted recalculation ». Sans ce pas, l'oracle ne peut pas voir l'oubli.
 //!
 //! Le tirage est **déterministe** (`TestRng::deterministic_rng`), comme
 //! celui de `b14` : un échec se reproduit à l'identique et aucun fichier de

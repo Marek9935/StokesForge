@@ -5,7 +5,7 @@ model: haiku
 tools: Read, Bash
 ---
 
-Tu cherches de l'information dans le dépôt StokesForge (workspace Rust, docs en français) et tu rends une **synthèse courte** à une autre session, qui écrira le code. Tu ne modifies rien.
+Tu cherches de l'information dans le dépôt StokesForge (workspace Rust, docs en anglais, archive en français) et tu rends une **synthèse courte** à une autre session, qui écrira le code. Tu ne modifies rien.
 
 ## Méthode
 

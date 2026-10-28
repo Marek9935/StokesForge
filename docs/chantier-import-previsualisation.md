@@ -1,246 +1,245 @@
-# Chantier « prévisualisation d'import » — note de passation
+# Work package "import preview" — handover note
 
-**Ce document n'est pas une page de référence.** Contrairement au reste de
-`docs/`, qui décrit le code tel qu'il est, celui-ci décrit un *chantier* : ce
-qu'il visait, ce qu'il a trouvé en chemin, et ce qu'il laisse ouvert. Sa
-durée de vie est limitée — quand la colonne « ce qui reste » sera vide, il
-rejoint `docs/archive/`. Le cahier des charges complet, verbatim, vit dans
+**This document is not a reference page.** Unlike the rest of `docs/`, which
+describes the code as it is, this one describes a *work package*: what it
+aimed at, what it found along the way, and what it leaves open. Its lifetime
+is limited — when the "what remains" column is empty, it moves to
+`docs/archive/`. The full specification, verbatim, lives in
 `docs/chantiers/prevision-import.md`.
 
-Le *quoi* et le *pourquoi* du résultat, eux, vivent au plus près du code :
-`crates/stokesforge-import/src/preview.rs` (tête de module) pour le budget de
-coût de l'aperçu, `crates/stokesforge-import/src/recipe.rs` pour le modèle
+The *what* and the *why* of the result live closest to the code:
+`crates/stokesforge-import/src/preview.rs` (module head) for the cost budget
+of the preview, `crates/stokesforge-import/src/recipe.rs` for the model
 (`HeaderLayout`, `SubheaderRoles`), `crates/stokesforge-app/src/app/import_wizard.rs`
-(`import_window`, sorti d'`app.rs` par #118) pour le panneau, et
-`crates/stokesforge-app/src/app/grid.rs` (`grid_contents`) pour le bug de champ de
-texte.
+(`import_window`, moved out of `app.rs` by #118) for the panel, and
+`crates/stokesforge-app/src/app/grid.rs` (`grid_contents`) for the text field
+bug.
 
-## L'objectif
+## The goal
 
-Rappel du point non négociable du cahier des charges : pendant que
-l'utilisateur règle les paramètres d'import, voir **en temps réel** comment
-le fichier est découpé — pas seulement une fois l'import validé. Le reste
-(widgets précis, vocabulaire OriginLab) était négociable.
+A reminder of the non-negotiable point of the specification: while the user
+sets the import parameters, they see **in real time** how the file is split —
+not only once the import is confirmed. The rest (exact widgets, OriginLab
+vocabulary) was negotiable.
 
-## Ce qui est en place
+## What is in place
 
-| Crate | Ce qui a changé |
+| Crate | What changed |
 |---|---|
-| `stokesforge-import` | `ImportRecipe` gagne `header_layout` (`HeaderLayout` : lignes d'en-tête principal/sous-en-tête distinctes, détection auto), `subheader_roles` (`SubheaderRoles` : plages vers `long_name`/`unit`/`comment`, option même-ligne nom/unité), `skip_chars`, `preview_lines` — tous `#[serde(default)]`. `parse()` applique les rôles et garde, par cellule non numérique, le jeton d'origine (`ParsedColumn::texts`). Nouveau module `preview` : `preview()` classe chaque ligne montrée par rôle sans reparser tout le fichier ; `detect_header_layout()` est l'équivalent du bouton de réévaluation automatique d'OriginLab. |
-| `stokesforge-app` | `import_window` : contrôles du découpage structuré, assignation des rôles, caractères à retirer, panneau d'aperçu ligne par ligne coloré par rôle (remplace l'ancienne grille de valeurs figée). `AppState::import_line_preview`, `AppState::auto_detect_import_header`. `AppState::import_files` construit une colonne `Mixed` plutôt que `Numeric` dès qu'une cellule porte un texte conservé, et peuple `unit`/`comment` de `ColumnMeta` en plus de `long_name`. `grid_contents` ne consomme plus Retour arrière/Suppr pendant que la fenêtre d'import est ouverte (le bug de champ de texte, voir plus bas). |
-| `stokesforge-core`, `stokesforge-commands`, `stokesforge-render` | **rien** — le chantier consomme `ColumnType::Mixed`/`Column::from_mixed` déjà en place depuis le chantier « colonnes à types mixtes », il ne les étend pas. |
+| `stokesforge-import` | `ImportRecipe` gains `header_layout` (`HeaderLayout`: separate main header/subheader lines, auto detection), `subheader_roles` (`SubheaderRoles`: ranges to `long_name`/`unit`/`comment`, same-line name/unit option), `skip_chars`, `preview_lines` — all `#[serde(default)]`. `parse()` applies the roles and keeps, for each non-numeric cell, the original token (`ParsedColumn::texts`). New module `preview`: `preview()` classifies each shown line by role without re-parsing the whole file; `detect_header_layout()` is the equivalent of OriginLab's automatic re-evaluation button. |
+| `stokesforge-app` | `import_window`: controls for the structured split, role assignment, characters to remove, and a line-by-line preview panel colored by role (replaces the old frozen value grid). `AppState::import_line_preview`, `AppState::auto_detect_import_header`. `AppState::import_files` builds a `Mixed` column rather than a `Numeric` one as soon as a cell holds a kept text, and fills `unit`/`comment` of `ColumnMeta` in addition to `long_name`. `grid_contents` no longer consumes Backspace/Delete while the import window is open (the text field bug, see below). |
+| `stokesforge-core`, `stokesforge-commands`, `stokesforge-render` | **nothing** — the work package uses `ColumnType::Mixed`/`Column::from_mixed`, already in place since the "mixed-type columns" work package; it does not extend them. |
 
-## Le bug de champ de texte : ce que c'était vraiment
+## The text field bug: what it really was
 
-Il n'était pas dans la fenêtre d'import elle-même. `grid_contents`
-(`crates/stokesforge-app/src/app.rs` à l'époque, `src/app/grid.rs` depuis #120) consomme Retour arrière/Suppr via
-`ui.input_mut(|input| input.consume_key(...))` pour son propre raccourci
-« effacer la sélection ». `input_mut` agit sur l'`InputState` du `Context`
-**entier**, pas sur celui d'une `Ui` — donc pas seulement sur cette grille.
-Ce bloc était déjà gardé par `state.editing().is_none() &&
-state.header_editing().is_none()`, mais pas par
+It was not in the import window itself. `grid_contents`
+(`crates/stokesforge-app/src/app.rs` at the time, `src/app/grid.rs` since #120) consumes Backspace/Delete via
+`ui.input_mut(|input| input.consume_key(...))` for its own shortcut
+"clear the selection". `input_mut` acts on the `InputState` of the **whole**
+`Context`, not on that of one `Ui` — so not only on this grid.
+This block was already guarded by `state.editing().is_none() &&
+state.header_editing().is_none()`, but not by
 `state.import_state().is_none()`.
 
-Or `import_window` (un `egui::Window` flottant) est peinte *après* le dock
-dans `StokesForgeApp::update` (aujourd'hui `ui`) — donc *après* que `grid_contents` (qui continue de
-tourner en dessous, à chaque image, tant qu'un classeur est ouvert) ait déjà
-consommé l'événement clavier. Résultat : taper Retour arrière ou Suppr dans
-un champ texte de la fenêtre d'import ne faisait plus rien, la touche ayant
-déjà été retirée de la file d'événements avant que le `TextEdit` de la
-fenêtre d'import ne la voie. Sélectionner du texte puis taper un caractère
-de remplacement fonctionnait (c'est un `Event::Text`, jamais consommé ici) —
-d'où le symptôme exact rapporté : « impossible d'y supprimer du texte sans
-d'abord le sélectionner ».
+Now `import_window` (a floating `egui::Window`) is painted *after* the dock
+in `StokesForgeApp::update` (today `ui`) — so *after* `grid_contents` (which keeps
+running underneath, on every frame, as long as a workbook is open) has already
+consumed the keyboard event. Result: typing Backspace or Delete in
+a text field of the import window did nothing, because the key had
+already been removed from the event queue before the `TextEdit` of the
+import window saw it. Selecting text and then typing a replacement character
+worked (it is an `Event::Text`, never consumed here) —
+hence the exact symptom reported: "impossible to delete text there without
+selecting it first".
 
-Correctif : `grid_contents` inclut maintenant `state.import_state().is_none()`
-dans la garde. Pas de test automatisé pour ce correctif précis — `AppState`
-ne dépend pas d'egui et la saisie clavier réelle n'est testée nulle part
-dans ce dépôt (voir la doc de tête de `shell.rs`, critère 13 : « ce qu'elle
-ajoute n'est pas testable automatiquement »), donc pas une régression de
-couverture propre à ce chantier.
+Fix: `grid_contents` now includes `state.import_state().is_none()`
+in the guard. There is no automated test for this specific fix — `AppState`
+does not depend on egui and real keyboard input is tested nowhere
+in this repository (see the head doc of `shell.rs`, criterion 13: « ce qu'elle
+ajoute n'est pas testable automatiquement »), so this is not a coverage
+regression specific to this work package.
 
-## Décisions sur les questions ouvertes
+## Decisions on the open questions
 
-### `System Parameters`/`User Parameters` d'OriginLab
+### OriginLab `System Parameters`/`User Parameters`
 
-**Ignorés, pas de champ ajouté.** `ColumnMeta` porte déjà `role`, `unit`,
-`long_name`, `comment`, `display_format`, `formula` — rien de plus proche
-d'un « paramètre système/utilisateur » libre que `comment`, et le fondre
-dedans aurait mélangé deux informations distinctes (un commentaire de
-colonne vs. un paramètre d'acquisition de l'appareil) sans bénéfice clair.
-Étendre `ColumnMeta` avec deux nouveaux champs aurait touché la persistance
-`.stf` pour un besoin que personne n'a encore exprimé côté StokesForge — pas
-vérifié dans `docs/persistance.md` en détail parce que ce n'était pas
-nécessaire : `ImportRecipe`/`RecipeStore` ne touchent de toute façon jamais
-au format `.stf` (voir plus bas), la question ne se posait donc que pour
-`ColumnMeta`, tranchée en amont. À rouvrir si un usage réel réclame ces deux
-rôles.
+**Ignored, no field added.** `ColumnMeta` already carries `role`, `unit`,
+`long_name`, `comment`, `display_format`, `formula` — nothing closer
+to a free "system/user parameter" than `comment`, and merging it into
+that would have mixed two distinct pieces of information (a column comment
+vs. an acquisition parameter of the instrument) with no clear benefit.
+Extending `ColumnMeta` with two new fields would have touched `.stf`
+persistence for a need nobody has yet expressed on the StokesForge side — not
+checked in detail in `docs/persistance.md` because it was not
+necessary: `ImportRecipe`/`RecipeStore` never touch
+the `.stf` format anyway (see below), so the question only arose for
+`ColumnMeta`, decided upstream. To reopen if a real use asks for these two
+roles.
 
-### Coût de l'aperçu en direct sur un gros fichier
+### Cost of the live preview on a large file
 
-**Bornage à deux niveaux**, voir la doc de tête de
-`crates/stokesforge-import/src/preview.rs` :
+**Two-level bound**, see the head doc of
+`crates/stokesforge-import/src/preview.rs`:
 
-- découper le fichier en lignes (`layout::split_lines` : `\r\n`, `\n` ou `\r` seul) reste `O(taille du
-  fichier)` — incompressible, et déjà le cas de l'ancien `import_preview`
-  (qui, lui, analysait **toutes** les lignes de données cellule par
-  cellule, à chaque image) ;
-- construire une ligne possédée et l'analyser cellule à cellule est borné à
-  l'en-tête/pied de page (des comptes petits, fixés par l'utilisateur) plus
-  `recipe.preview_lines` lignes de données — jamais proportionnel au reste
-  du fichier, aussi long soit-il.
+- splitting the file into lines (`layout::split_lines`: `\r\n`, `\n` or a lone `\r`) stays `O(taille du
+  fichier)` — incompressible, and already the case of the old `import_preview`
+  (which, for its part, analyzed **all** the data lines cell by
+  cell, on every frame);
+- building an owned line and analyzing it cell by cell is bounded to the
+  header/footer (small counts, set by the user) plus
+  `recipe.preview_lines` data lines — never proportional to the rest
+  of the file, however long it is.
 
-Non fait, documenté comme limite restante : le découpage en lignes lui-même
-n'est pas paresseux (il matérialise un `Vec<&str>` pour tout le fichier,
-sans copie de contenu mais avec une allocation par ligne pour le vecteur de
-pointeurs). Sur un fichier de plusieurs millions de lignes, ce `Vec`
-resterait le coût dominant de l'aperçu. Pas mesuré, pas traité ici — un
-`str::lines().skip(n).take(m)` paresseux serait la suite naturelle si un cas
-réel le réclame.
+Not done, documented as a remaining limit: the line splitting itself
+is not lazy (it materializes a `Vec<&str>` for the whole file,
+without copying content but with one allocation per line for the vector of
+pointers). On a file of several million lines, this `Vec`
+would remain the dominant cost of the preview. Not measured, not handled here — a lazy
+`str::lines().skip(n).take(m)` would be the natural next step if a
+real case asks for it.
 
-### Détection automatique des lignes d'en-tête
+### Automatic detection of header lines
 
-Heuristique en deux passes (voir `detect_header_layout`, tête de
-`preview.rs`) : en-tête principal = lignes initiales dont le nombre de
-champs diffère de la dernière ligne du fichier (supposée être une ligne de
-données) ; sous-en-tête = lignes suivantes qui ont le bon nombre de champs
-mais dont au moins un jeton ne s'analyse pas en nombre. Plafonnée aux 500
-premières lignes non blanches — un plafond documenté dans le code, pas un
-bug, même esprit que les six plafonds de
-`docs/archive/rustrewrite/questions-ouvertes.md` §11 (non modifié : ce
-plafond est nouveau, propre à ce chantier, il n'avait pas sa place dans une
-page qui ne documente que les six déjà tranchés ailleurs).
+A two-pass heuristic (see `detect_header_layout`, head of
+`preview.rs`): main header = initial lines whose number of
+fields differs from that of the last line of the file (assumed to be a data
+line); subheader = following lines that have the right number of fields
+but where at least one token does not parse as a number. Capped at the 500
+first non-blank lines — a cap documented in the code, not a
+bug, in the same spirit as the six caps of
+`docs/archive/rustrewrite/questions-ouvertes.md` §11 (not modified: this
+cap is new, specific to this work package, and had no place in a
+page that only documents the six already decided elsewhere).
 
-Limite connue et non corrigée : un fichier sans aucune ligne de données
-parmi les 500 examinées fait dégénérer la détection à « tout en-tête
-principal, rien en sous-en-tête ». Pas un panic, une détection peu utile —
-à corriger à la main comme n'importe quelle détection automatique qui se
-trompe, cohérent avec l'esprit du bouton « Réévaluer » d'OriginLab (une
-action explicite, jamais appliquée en continu).
+Known and uncorrected limit: a file with no data line at all
+among the 500 examined makes the detection degenerate to "everything main
+header, nothing subheader". Not a panic, a barely useful detection —
+to correct by hand like any automatic detection that gets
+it wrong, consistent with the spirit of OriginLab's « Réévaluer » button (an
+explicit action, never applied continuously).
 
-`HeaderLayout::auto_detect` (la case à cocher) ne déclenche rien tout seul
-— c'est `AppState::auto_detect_import_header`, appelé sur clic du bouton
-« Réévaluer maintenant », qui lit le fichier et réécrit
-`main_header_lines`/`subheader_lines`. Décision délibérée : recalculer à
-chaque image aurait écrasé en continu une valeur que l'utilisateur viendrait
-de corriger à la main, l'empêchant de jamais s'en écarter — même défaut que
-si OriginLab appliquait sa détection en continu plutôt que sur un bouton.
+`HeaderLayout::auto_detect` (the checkbox) triggers nothing by itself
+— it is `AppState::auto_detect_import_header`, called on a click of the button
+"Re-evaluate Now", that reads the file and rewrites
+`main_header_lines`/`subheader_lines`. A deliberate decision: recomputing on
+every frame would have continuously overwritten a value the user had just
+corrected by hand, preventing them from ever departing from it — the same flaw as
+if OriginLab applied its detection continuously rather than on a button.
 
-### Persistance des nouveaux réglages dans `ImportRecipe`
+### Persistence of the new settings in `ImportRecipe`
 
-**Non concerné par le format `.stf`** — `ImportRecipe`/`RecipeStore`
-persistent dans un fichier JSON séparé
-(`ProjectDirs::config_dir()/import_recipes.json`, voir
-`crates/stokesforge-import/src/store.rs`), jamais dans le fichier de projet.
-`docs/persistance.md` ne les mentionne pas et n'avait pas besoin d'être lu
-en détail pour cette raison. La seule compatibilité qui comptait était
-JSON→JSON : tous les nouveaux champs portent `#[serde(default)]`
-(`header_layout`, `subheader_roles`, `skip_chars`, `preview_lines`), vérifié
-par un test dédié
+**Not concerned by the `.stf` format** — `ImportRecipe`/`RecipeStore`
+persist in a separate JSON file
+(`ProjectDirs::config_dir()/import_recipes.json`, see
+`crates/stokesforge-import/src/store.rs`), never in the project file.
+`docs/persistance.md` does not mention them and did not need to be read
+in detail for that reason. The only compatibility that mattered was
+JSON→JSON: all the new fields carry `#[serde(default)]`
+(`header_layout`, `subheader_roles`, `skip_chars`, `preview_lines`), checked
+by a dedicated test
 (`recette_json_anterieure_au_chantier_se_charge_avec_les_defauts`,
-`crates/stokesforge-import/src/recipe.rs`) qui désérialise un JSON écrit avant ce
-chantier et affirme que les nouveaux champs prennent leurs valeurs par
-défaut plutôt que de faire échouer le chargement.
+`crates/stokesforge-import/src/recipe.rs`) that deserializes a JSON written before this
+work package and asserts that the new fields take their default values
+rather than making the load fail.
 
-## Décisions à ne pas rouvrir sans raison nouvelle
+## Decisions not to reopen without a new reason
 
-- **Le modèle structuré (`header_layout`) ne remplace `HeaderSkip` que si
-  l'utilisateur s'en sert** (`main_header_lines + subheader_lines > 0`).
-  Une recette qui n'y touche jamais garde le comportement `HeaderSkip`
-  d'avant ce chantier à l'identique — minimiser la casse, même politique que
-  le chantier « colonnes à types mixtes ».
-- **Une plage de rôle de sous-en-tête n'est lue que sur sa première ligne**
-  (`SubheaderRoles::long_name`/`unit`/`comment`, champ `from`). Une plage
-  `18` à `18` (l'exemple de référence d'OriginLab) n'en souffre pas ; une
-  vraie plage multi-lignes répartie entre colonnes différentes n'est pas
-  implémentée — aucun format d'instrument rencontré dans les fixtures de
-  test n'en a eu besoin. À étendre si un cas réel l'exige, pas avant.
-- **`count_from_bottom` du cahier des charges (« Line number start from
-  bottom ») n'a pas été implémenté.** Contrairement aux autres champs, une
-  implémentation incorrecte aurait été pire que son absence (compter depuis
-  la fin d'un fichier dont l'en-tête est censé être en tête n'a de sens que
-  pour un usage qu'OriginLab ne documente pas clairement dans la capture
-  fournie). Absent de `HeaderLayout` plutôt que présent et non branché — pas
-  un champ mort dans le modèle.
-- **Une colonne entièrement numérique reste `Numeric`, jamais promue en
-  `Mixed`.** Seule une colonne qui rencontre réellement un jeton non
-  numérique devient `Mixed` — vérifié par
+- **The structured model (`header_layout`) replaces `HeaderSkip` only if
+  the user uses it** (`main_header_lines + subheader_lines > 0`).
+  A recipe that never touches it keeps the `HeaderSkip` behavior
+  from before this work package, identically — minimize breakage, the same policy
+  as the "mixed-type columns" work package.
+- **A subheader role range is read only on its first line**
+  (`SubheaderRoles::long_name`/`unit`/`comment`, field `from`). A range
+  `18` to `18` (OriginLab's reference example) does not suffer from it; a
+  real multi-line range spread across different columns is not
+  implemented — no instrument format met in the test fixtures
+  needed it. To extend if a real case requires it, not before.
+- **The specification's `count_from_bottom` ("Line number start from
+  bottom") was not implemented.** Unlike the other fields, an
+  incorrect implementation would have been worse than its absence (counting from
+  the end of a file whose header is supposed to be at the top only makes sense
+  for a use that OriginLab does not clearly document in the screenshot
+  provided). Absent from `HeaderLayout` rather than present and not wired — not
+  a dead field in the model.
+- **A fully numeric column stays `Numeric`, never promoted to
+  `Mixed`.** Only a column that actually meets a non-numeric token
+  becomes `Mixed` — checked by
   `importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text`
-  (`crates/stokesforge-app-state/tests/shell.rs`), qui affirme aussi l'inverse sur la
-  colonne numérique voisine dans le même fichier.
-- **Le correctif du bug de champ de texte vit dans `grid_contents`, pas dans
-  `import_window`.** C'est là que le problème naissait (`consume_key` sur
-  l'`InputState` global) — le corriger dans la fenêtre d'import elle-même
-  (par exemple en essayant de reconsommer/republier l'événement) aurait été
-  un correctif local à un problème structurel, fragile au prochain widget
-  flottant qui ouvrirait un champ texte par-dessus la grille.
+  (`crates/stokesforge-app-state/tests/shell.rs`), which also asserts the opposite on the
+  neighboring numeric column in the same file.
+- **The fix for the text field bug lives in `grid_contents`, not in
+  `import_window`.** That is where the problem was born (`consume_key` on the
+  global `InputState`) — fixing it in the import window itself
+  (for example by trying to re-consume/republish the event) would have been
+  a local fix to a structural problem, fragile at the next floating widget
+  that opens a text field on top of the grid.
 
-## Ce qui reste
+## What remains
 
-- L'allocation `Vec<&str>` du découpage en lignes de `preview()` n'est pas
-  paresseuse — voir « coût de l'aperçu » ci-dessus. Pas un problème
-  rencontré en pratique (pas de fixture de plusieurs millions de lignes
-  dans ce dépôt), documenté par prudence.
-- Pas de test automatisé pour la disparition du bug de champ de texte
-  lui-même (la correction est structurelle et vérifiée par lecture +
-  build/clippy, pas par un scénario de frappe simulée — voir la section
-  dédiée ci-dessus).
-- `System Parameters`/`User Parameters` d'OriginLab restent sans équivalent
-  StokesForge, par choix (voir plus haut) — à revisiter si un usage réel les
-  réclame.
-- Les six plafonds de `docs/archive/rustrewrite/questions-ouvertes.md` §11
-  ont été relus avant ce chantier ; aucun n'est concerné (`MAX_COLUMN_ROWS`
-  continue de s'appliquer aux colonnes mixtes importées par la même
-  fonction générique qu'avant, rien de nouveau à vérifier ici).
+- The `Vec<&str>` allocation of the line splitting in `preview()` is not
+  lazy — see "Cost of the live preview" above. Not a problem
+  met in practice (no fixture of several million lines
+  in this repository), documented out of caution.
+- No automated test for the disappearance of the text field bug
+  itself (the fix is structural and checked by reading +
+  build/clippy, not by a simulated typing scenario — see the dedicated
+  section above).
+- OriginLab's `System Parameters`/`User Parameters` remain without a
+  StokesForge equivalent, by choice (see above) — to revisit if a real use asks
+  for them.
+- The six caps of `docs/archive/rustrewrite/questions-ouvertes.md` §11
+  were re-read before this work package; none is concerned (`MAX_COLUMN_ROWS`
+  keeps applying to the mixed columns imported by the same
+  generic function as before, nothing new to check here).
 
 
-## Fin des données (issue #4)
+## End of data (issue #4)
 
-`ImportRecipe::data_end` (`DataEnd`, `#[serde(default)]` = `None` depuis la
-correction « n/a » en X ; `Auto` reste choisissable, les modèles Jasco le
-demandent) décide où
-s'arrêtent les données ; le reste est le pied de page (`LineRole::Footer`,
-`ParsedTable::footer_lines`). `Auto` s'arme à la première ligne dont la
-première colonne est un nombre, puis coupe à la première dont le X n'en est
-pas un (ligne vide comprise) ; un texte dans une autre colonne ne coupe pas.
-Autres options : aucune coupure, première ligne vide, marqueur, N lignes après
-l'en-tête, N lignes avant la fin. La règle vit dans `data_end.rs`, appelée par
-le découpage partagé `layout`, pour que `parse` **et** `preview` coupent au
-même endroit. `footer_skip_lines` s'applique d'abord. Les options et le clic
-droit sur la ligne de coupure sont disponibles dans l'assistant ; voir
-`docs/application/projet-et-import.md` § « Assistant d'import ». Le pied peut être conservé
-dans les métadonnées avec `keep_footer_metadata`.
+`ImportRecipe::data_end` (`DataEnd`, `#[serde(default)]` = `None` since the
+"n/a" fix in X; `Auto` stays selectable, the Jasco templates
+ask for it) decides where
+the data stops; the rest is the footer (`LineRole::Footer`,
+`ParsedTable::footer_lines`). `Auto` arms at the first line whose
+first column is a number, then cuts at the first one whose X is not
+one (an empty line included); a text in another column does not cut.
+Other options: no cut, first empty line, marker, N lines after
+the header, N lines before the end. The rule lives in `data_end.rs`, called by the
+shared `layout` split, so that `parse` **and** `preview` cut at the
+same place. `footer_skip_lines` applies first. The options and the right-click
+on the cut line are available in the wizard; see
+`docs/application/projet-et-import.md` § "Import wizard". The footer can be kept
+in the metadata with `keep_footer_metadata`.
 
-## Métadonnées de fichier par colonne (issue #5)
+## File metadata per column (issue #5)
 
-`ImportRecipe::keep_header_metadata` (vrai), `keep_footer_metadata` (faux) et
-`excluded_metadata` (clés ou sections écartées) pilotent `ParsedTable::metadata()`
-(`crate::metadata`, lignes clé / valeur, sections `[...]`, lignes sans clé
-gardées telles quelles). `stokesforge-app` les copie dans `ColumnMeta::file_metadata`
-de chaque colonne importée — dans la macro « Importer », sans commande
-d'édition : lecture seule. Affichage : ligne « Metadata » de l'en-tête (« 📋 N
-clés »), clic → fenêtre modale de consultation (`column_metadata_window`).
-La ligne se masque (menu Fenêtre) ; la sélection par clé est dans l'étape
-« Métadonnées » de l'assistant ; aucun remplissage automatique des unités
-(décidé).
+`ImportRecipe::keep_header_metadata` (true), `keep_footer_metadata` (false) and
+`excluded_metadata` (excluded keys or sections) drive `ParsedTable::metadata()`
+(`crate::metadata`, key / value lines, `[...]` sections, lines without a key
+kept as they are). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
+of each imported column — in the "Import" macro, with no
+edit command: read-only. Display: "Metadata" row of the header ("📋 N
+keys"), click → modal viewing window (`column_metadata_window`).
+The row can be hidden (Window menu); selection by key is in the
+"Metadata" step of the wizard; no automatic filling of units
+(decided).
 
-## Assistant en étapes (issue #6)
+## Step-by-step wizard (issue #6)
 
-`import_window` est maintenant un assistant en six étapes (voir
-`docs/application/projet-et-import.md` § « Assistant d'import »). Côté `stokesforge-import` :
-`ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignorer retire la colonne à
-l'import), `unify_header`, `detect_encoding`. Le réglage d'en-tête n'expose
-plus la case « Détection automatique » : seul le bouton « Détecter depuis le
-fichier » agit (`HeaderLayout::auto_detect` reste dans la recette, sans effet).
+`import_window` is now a six-step wizard (see
+`docs/application/projet-et-import.md` § "Import wizard"). On the `stokesforge-import` side:
+`ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignore removes the column
+at import), `unify_header`, `detect_encoding`. The header setting no longer
+exposes the "Automatic detection" checkbox: only the button "Detect Header" acts (`HeaderLayout::auto_detect` stays in the recipe, with no effect).
 
-Nombres : un résultat non fini (`inf`, `Infinity`, `1e400`) se lit `NaN` et le jeton reste visible en texte (colonne `Mixed`), comme `nan` ; la fin automatique des données et la détection des sous-en-têtes le comptent pourtant comme un nombre (`NumberFormat::is_numeric`).
+Numbers: a non-finite result (`inf`, `Infinity`, `1e400`) reads as `NaN` and the token stays visible as text (`Mixed` column), like `nan`; the automatic end of data and the subheader detection nevertheless count it as a number (`NumberFormat::is_numeric`).
 
-## Milliers espace, ordre des dates, encodage mixte (issue #314)
+## Space thousands separator, date order, mixed encoding (issue #314)
 
-Décisions du 2026-10-20. Séparateur « espaces » (choisi ou résolu depuis Auto)
-+ milliers espace : `ImportError::WhitespaceWithSpaceThousands`, rendu par
-`analyze` donc identique à l'aperçu et à l'import ; le maintien de U+00A0/U+202F
-(`keep_nbsp`) est retiré. `ImportRecipe::date_order` (`DayFirst` par défaut,
-`MonthFirst`) gouverne les dates à barres de l'import (`parse_datetime_with`) ;
-`stokesforge-core` garde le jour d'abord (#217). Encodage `Auto` : décodage
-mixte UTF-8 + Windows-1252 octet par octet, libellé « UTF-8 (+ Windows-1252) ».
+Decisions of 2026-10-20. "Whitespace" delimiter (chosen or resolved from Auto)
++ space thousands separator: `ImportError::WhitespaceWithSpaceThousands`, rendered by
+`analyze` so identical to the preview and to the import; keeping U+00A0/U+202F
+(`keep_nbsp`) is removed. `ImportRecipe::date_order` (`DayFirst` by default,
+`MonthFirst`) governs the slash dates of the import (`parse_datetime_with`);
+`stokesforge-core` keeps day first (#217). `Auto` encoding: mixed
+UTF-8 + Windows-1252 decoding byte by byte, label "UTF-8 (+ Windows-1252)".

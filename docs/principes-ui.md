@@ -1,95 +1,95 @@
-# Principes de l'interface (vue d'ensemble)
+# Interface principles (overview)
 
-Page d'entrée, courte, pour savoir **quoi respecter** avant de toucher à
-l'interface de `stokesforge-app`. Elle ne recopie rien : chaque principe
-renvoie à la page qui le détaille. En cas de divergence, le code fait foi,
-puis [`standard-interface.md`](standard-interface.md) (555 lignes, décisions
-de #217).
+Entry page, short, to know **what to respect** before touching the interface
+of `stokesforge-app`. It copies nothing: each principle points to the page
+that details it. In case of divergence, the code is authoritative, then
+[`standard-interface.md`](standard-interface.md) (555 lines, decisions
+of #217).
 
-## 1. Une brique, un geste
+## 1. One building block, one gesture
 
-Chaque élément d'interface a **une** brique ; on ne le refait pas à la main.
+Each interface element has **one** building block; it is not redone by hand.
 
-- Un nombre saisi : `number_field` et la table des grandeurs (`quantities`),
-  jamais un `DragValue` ni un `Slider`.
-- Un formulaire : `form` / `choice` (`app/form.rs`) ; des onglets :
-  `tab_strip` ; une liste : `list_row` ; un état vide : `empty_state` ; une aide
-  de champ : `hover_help` ; un travail long : `busy`.
-- Une couleur : `theme.rs` seul (et le sélecteur `color_field`). Un écart :
-  `theme::SPACE_ITEM` / `SPACE_SECTION`, jamais un nombre littéral.
-- Une touche : le registre `app/shortcuts.rs`. Un curseur : `app/cursors.rs`.
-  Un sélecteur de fichiers : `file_picker.rs`.
+- A typed number: `number_field` and the table of quantities (`quantities`),
+  never a `DragValue` nor a `Slider`.
+- A form: `form` / `choice` (`app/form.rs`); tabs:
+  `tab_strip`; a list: `list_row`; an empty state: `empty_state`; a field
+  help: `hover_help`; a long job: `busy`.
+- A color: `theme.rs` only (and the `color_field` picker). A spacing:
+  `theme::SPACE_ITEM` / `SPACE_SECTION`, never a literal number.
+- A key: the `app/shortcuts.rs` registry. A cursor: `app/cursors.rs`.
+  A file picker: `file_picker.rs`.
 
-Ces règles ne reposent pas sur la mémoire de chacun : des gardes de
-`crates/stokesforge-app/tests/gardes.rs` les font échouer. Liste et état :
-standard, tableau « Briques et gardes ».
+These rules do not rest on everyone's memory: guards in
+`crates/stokesforge-app/tests/gardes.rs` make them fail. List and state:
+standard, table "Building blocks and guards".
 
-## 2. Les fenêtres ont un type
+## 2. Windows have a type
 
-Toute fenêtre est modale (sauf celles de contenu : classeur, graphe, matrice,
-note) et construite par `app/dialogs.rs`, jamais par une `egui::Window` brute.
-Le type fixe le pied de page, l'ordre des boutons, Échap et le focus : réglages
-en direct, création sur brouillon, choix, assistant, lecture seule,
-confirmation. Taille et position sont mémorisées par dialogue.
+Every window is modal (except the content ones: workbook, graph, matrix,
+note) and built by `app/dialogs.rs`, never by a raw `egui::Window`.
+The type fixes the footer, the button order, Escape and the focus: live
+settings, creation on a draft, choice, wizard, read-only,
+confirmation. Size and position are remembered per dialog.
 
-- Ce qui existe, avec taille, pages et point d'ouverture :
-  [`fenetres.md`](fenetres.md) (à tenir à jour à chaque fenêtre).
-- Le comportement : standard, § Fenêtres et dialogues, § Confirmations.
-- **Une fenêtre neuve se maquette et se fait valider avant le code.**
+- What exists, with size, pages and opening point:
+  [`fenetres.md`](fenetres.md) (to be kept up to date with each window).
+- The behavior: standard, § Windows and dialogs, § Confirmations.
+- **A new window is mocked up and validated before the code.**
 
-## 3. Ce qui est annulable s'annule, ce qui ne l'est pas se confirme
+## 3. What can be undone is undone, what cannot is confirmed
 
-Toute modification du modèle passe par une commande annulable (Ctrl+Z).
-On ne demande confirmation que pour ce que Ctrl+Z ne rattrape pas. Un objet
-visible se règle en direct (OK garde, Cancel restaure) ; une action qui crée
-travaille sur un brouillon et son bouton porte son verbe.
-Détail : standard (S-F1, S-F3 à S-F5) ; mécanique : [`commandes-et-historique.md`](commandes-et-historique.md).
+Every modification of the model goes through an undoable command (Ctrl+Z).
+Confirmation is asked only for what Ctrl+Z does not recover. A
+visible object is set live (OK keeps, Cancel restores); an action that creates
+works on a draft and its button carries its verb.
+Detail: standard (S-F1, S-F3 to S-F5); mechanics: [`commandes-et-historique.md`](commandes-et-historique.md).
 
-## 4. Rien n'est grisé ou refusé en silence
+## 4. Nothing is greyed out or refused silently
 
-Un élément grisé dit pourquoi et ce qu'il faut faire ; une saisie refusée ou
-ramenée se voit (cadre rouge ou orange, bulle). Une erreur d'un dialogue
-s'écrit dans son pied, pas dans la barre d'état. Les messages d'état et
-d'erreur sont des textes du catalogue, jamais un `Display` brut.
-Détail : standard, § Grisé, § Saisie refusée ou ramenée, § Messages et aide.
+A greyed-out element says why and what to do; a refused or brought-back input
+is visible (red or orange frame, bubble). An error in a dialog
+is written in its footer, not in the status bar. Status and
+error messages are catalog texts, never a raw `Display`.
+Detail: standard, § Disabled, § Input refused or brought back, § Messages and help.
 
-## 5. Les mots viennent du glossaire
+## 5. Words come from the glossary
 
-Tout texte visible est une clé Fluent (anglais d'abord, puis français), écrit
-avec le glossaire : une notion, un mot, partout ; majuscules et ton y sont
-fixés. L'organisation des menus et des clics droits a sa grammaire.
-Détail : [`textes-interface.md`](textes-interface.md), [`menus.md`](menus.md),
+Every visible text is a Fluent key (English first, then French), written
+with the glossary: one notion, one word, everywhere; capitalization and tone are
+fixed there. The organization of menus and right-clicks has its grammar.
+Detail: [`textes-interface.md`](textes-interface.md), [`menus.md`](menus.md),
 skill `stokesforge-textes-interface`.
 
-## 6. Les nombres s'affichent d'une seule façon
+## 6. Numbers are displayed in a single way
 
-Un seul formateur (`stokesforge_core::number_format`), la virgule décimale
-acceptée en saisie, la valeur exacte en bulle, un résultat d'incertitude arrondi
-à l'incertitude. Un R² faible se lit à deux signaux, pas à la couleur seule.
-Détail : standard, § Affichage des nombres, § Virgule décimale, § R² faible.
+A single formatter (`stokesforge_core::number_format`), the decimal comma
+accepted on input, the exact value in a bubble, an uncertainty result rounded
+to the uncertainty. A low R² is read from two signals, not from color alone.
+Detail: standard, § Number display, § Decimal comma, § Low R².
 
-## 7. Clavier et souris suivent un registre
+## 7. Keyboard and mouse follow a registry
 
-Les raccourcis sont des constantes d'un seul module, et Help > Keyboard
-Shortcuts est généré de ce registre : il ne peut pas diverger. Détail :
-standard, § Clavier et souris.
+Shortcuts are constants of a single module, and Help > Keyboard
+Shortcuts is generated from this registry: it cannot diverge. Detail:
+standard, § Keyboard and mouse.
 
-## 8. L'état de l'interface vit hors de l'écran
+## 8. Interface state lives off screen
 
-`stokesforge-app-state` porte l'état, les textes et les erreurs mises en
-phrase, sans egui ; `stokesforge-app` ne fait que peindre et traduire les
-gestes en actions. Un dialogue ouvert est un drapeau de `AppState`, pas une
-variable locale de la coquille. Détail : [`application/`](application/README.md),
+`stokesforge-app-state` carries the state, the texts and the errors put into
+sentences, without egui; `stokesforge-app` only paints and translates
+gestures into actions. An open dialog is a flag of `AppState`, not a local
+variable of the shell. Detail: [`application/`](application/README.md),
 [`architecture.md`](architecture.md).
 
-## Où aller ensuite
+## Where to go next
 
-| Je veux… | Lire |
+| I want to… | Read |
 |---|---|
-| créer ou modifier une fenêtre | [`fenetres.md`](fenetres.md), puis le standard § Fenêtres |
-| poser un champ, un message, un grisage | [`standard-interface.md`](standard-interface.md) |
-| ajouter une entrée de menu | [`menus.md`](menus.md) |
-| écrire un texte visible | [`textes-interface.md`](textes-interface.md) |
-| ajouter une icône | [`icones.md`](icones.md) |
-| toucher à la fenêtre principale, à la grille | [`application/`](application/README.md) |
-| connaître les conventions par domaine | `.claude/conventions.md`, section « Application » |
+| create or modify a window | [`fenetres.md`](fenetres.md), then the standard § Windows and dialogs |
+| add a field, a message, a greyed-out state | [`standard-interface.md`](standard-interface.md) |
+| add a menu entry | [`menus.md`](menus.md) |
+| write a visible text | [`textes-interface.md`](textes-interface.md) |
+| add an icon | [`icones.md`](icones.md) |
+| touch the main window, the grid | [`application/`](application/README.md) |
+| know the conventions per domain | `.claude/conventions.md`, section "Application" |

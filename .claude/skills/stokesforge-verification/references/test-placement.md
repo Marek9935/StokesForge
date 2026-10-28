@@ -1,6 +1,6 @@
 # Where a test goes, and what makes it prove something
 
-Read at step 1 of `stokesforge-verification`. Families and guards: `docs/tests.md` § Trois familles ; `docs/tests.md` § Les garde-fous à ne pas casser ; before writing: `docs/tests.md` § Ce qu'il faut savoir avant d'écrire un test.
+Read at step 1 of `stokesforge-verification`. Families and guards: `docs/tests.md` § Three families ; `docs/tests.md` § Guards not to break ; before writing: `docs/tests.md` § What to know before writing a test.
 
 ## Placement
 
@@ -17,7 +17,7 @@ A decision that must live near the UI is extracted as a **pure function** and te
 
 ## The témoin
 
-A test comparing two paths can pass because both are right — or because **both are wrong the same way**. It needs a case that must stay **different**: `docs/tests.md` § Le témoin, sans lequel un test d'égalité ne prouve rien. Under `CLAUDE.md` § Délégation et choix du modèle, each témoin is checked by mutation (break the code, see the test fail, restore).
+A test comparing two paths can pass because both are right — or because **both are wrong the same way**. It needs a case that must stay **different**: `docs/tests.md` § The witness, without which an equality test proves nothing. Under `CLAUDE.md` § Délégation et choix du modèle, each témoin is checked by mutation (break the code, see the test fail, restore).
 
 ## Reproduction vs guard
 
@@ -29,4 +29,4 @@ A **reproduction** fails on purpose and carries `#[ignore = "<reason>"]` (with t
 
 ## Interface standard building blocks
 
-Which guards and building blocks are *in place* or *to come*: `docs/standard-interface.md` § Briques et gardes. A guard "to come" does not exist yet: never cite it as green. The commit that writes one switches it to *in place* there and in the skills.
+Which guards and building blocks are *in place* or *to come*: `docs/standard-interface.md` § Building blocks and guards. A guard "to come" does not exist yet: never cite it as green. The commit that writes one switches it to *in place* there and in the skills.

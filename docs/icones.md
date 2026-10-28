@@ -1,141 +1,139 @@
-# Icônes de l'interface
+# Interface icons
 
-Les icônes de `stokesforge-app` sont des **Phosphor Icons, variante duotone**
-(licence MIT, copiée dans `crates/stokesforge-app/assets/icons/LICENSE`). Le code
-qui les affiche est `crates/stokesforge-app/src/icons.rs` ; son `//!` dit le
-*pourquoi*, cette page dit le *quoi* et le *comment ajouter*.
+The icons of `stokesforge-app` are **Phosphor Icons, duotone variant**
+(MIT license, copied to `crates/stokesforge-app/assets/icons/LICENSE`). The code
+that displays them is `crates/stokesforge-app/src/icons.rs`; its `//!` says
+*why*, this page says *what* and *how to add one*.
 
-## Quand mettre une icône — et quand non
+## When to put an icon — and when not
 
-- **Oui** : une action répétée dont la forme se reconnaît d'un coup d'œil
-  (fermer, détacher, maximiser, replier, défiler les onglets), et le **type
-  d'objet** du projet (dossier, classeur, graphe, matrice, note) partout où il
-  apparaît.
-- **Non** : là où un mot est plus clair (« # » de la gouttière, un nom de
-  colonne, un résumé de métadonnées) ; là où l'icône ne ferait que décorer.
-  Pas d'icône dans chaque menu par principe : une icône qui ne distingue
-  rien est du bruit.
-- **Toujours une info-bulle** : une icône seule ne dit pas ce qu'elle fait.
-  Le texte vient de `tr!` (voir `stokesforge-textes-interface`) ; `icon_button`
-  l'exige.
-- **Jamais un emoji ni un glyphe Unicode** (« × », « ↗ », « 📁 ») comme icône.
+- **Yes**: a repeated action whose shape is recognized at a glance
+  (close, detach, maximize, collapse, scroll the tabs), and the **object
+  type** of the project (folder, workbook, graph, matrix, note) everywhere it
+  appears.
+- **No**: where a word is clearer ("#" of the gutter, a column name, a
+  metadata summary); where the icon would only decorate. No icon in every
+  menu on principle: an icon that distinguishes nothing is noise.
+- **Always a tooltip**: an icon alone does not say what it does.
+  The text comes from `tr!` (see `stokesforge-textes-interface`); `icon_button`
+  requires it.
+- **Never an emoji or a Unicode glyph** ("×", "↗", "📁") as an icon.
 
-## Chaque action a son logo (règle posée avec #110)
+## Every action has its logo (rule set with #110)
 
-Toute **action** de l'application — ce qui s'atteint par un menu, un raccourci
-ou une barre — **possède un logo**, même quand elle n'en affiche pas. Le logo
-est une donnée de l'action (son identité visuelle) : c'est ce qui permettra,
-plus tard, de la poser dans une barre personnalisée (#110) sans en attendre un.
-Ça ne change pas où l'icône **s'affiche** : les menus n'ont pas à en montrer
-(règle ci-dessus), et un mot reste préférable là où il est plus clair.
+Every **action** of the application — what is reached through a menu, a
+shortcut or a toolbar — **has a logo**, even when it does not display one. The
+logo is data of the action (its visual identity): this is what will allow it,
+later, to be placed in a custom toolbar (#110) without waiting for one.
+This does not change where the icon is **displayed**: menus do not have to show
+one (rule above), and a word remains preferable where it is clearer.
 
-Deux niveaux de qualité :
+Two quality levels:
 
-- **Action d'une barre fixe** : une icône Phosphor soignée, ajoutée comme
-  ci-dessous (planche-contact validée, rôle de couleur, info-bulle `tr!`).
-- **Autre action** (par exemple une manipulation de données qu'aucune barre
-  fixe ne porte) : un **logo standard par famille** — un gabarit commun à la
-  famille (manipulation de données, par exemple) avec **deux lettres** de la
-  fonctionnalité en surimpression. Pas de dessin sur mesure : le coût d'une
-  action nouvelle reste proche de zéro.
+- **Action of a fixed toolbar**: a polished Phosphor icon, added as
+  below (validated contact sheet, color role, `tr!` tooltip).
+- **Other action** (for example a data manipulation that no fixed toolbar
+  carries): a **standard logo per family** — a template common to the
+  family (data manipulation, for example) with **two letters** of the feature
+  overlaid. No custom drawing: the cost of a new action stays close to zero.
 
-État : la règle est posée, **pas encore verrouillée par un test** et le gabarit
-de logo standard n'existe pas encore (il viendra avec le registre d'actions,
-#110). D'ici là, une action nouvelle d'une barre fixe reçoit son icône ; pour
-les autres, le skill `stokesforge-feature` demande de **nommer le logo prévu**
-dans le compte rendu plutôt que de l'omettre en silence.
+State: the rule is set, **not yet locked by a test** and the standard logo
+template does not exist yet (it will come with the action registry,
+#110). Until then, a new action of a fixed toolbar gets its icon; for
+the others, the `stokesforge-feature` skill asks to **name the planned logo**
+in the report rather than silently omit it.
 
-### Icônes retouchées
+### Retouched icons
 
-Une icône Phosphor peut être retouchée : le fichier de `src/` porte alors un
-commentaire qui dit ce qui change (notice MIT du `LICENSE` voisin inchangée).
-Le nom du fichier porte `-modify` pour le signaler. Actuellement : `text-a-underline-modify` (soulignement épaissi, couleur du texte), `pen-nib-modify` (couleur du trait) et `paint-bucket-modify` (couleur du remplissage), #89.
+A Phosphor icon can be retouched: the file in `src/` then carries a
+comment that says what changes (MIT notice of the neighboring `LICENSE` unchanged).
+The file name carries `-modify` to flag it. Currently: `text-a-underline-modify` (thicker underline, text color), `pen-nib-modify` (stroke color) and `paint-bucket-modify` (fill color), #89.
 
-## Couleur : neutre par défaut, couleur rare
+## Color: neutral by default, color is rare
 
-Le trait est foncé et commun ; la couleur ne vient que du **rôle** (`IconRole`),
-et seulement quand elle porte une information que la forme ne porte pas :
+The stroke is dark and shared; color comes only from the **role** (`IconRole`),
+and only when it carries information that the shape does not:
 
-| Rôle | Pour | Teinte |
+| Role | For | Hue |
 |---|---|---|
-| `Neutral` | tout le reste (défaut) | gris-bleu foncé |
-| `Workbook`, `Graph`, `Matrix`, `Note`, `Folder` | l'objet du projet de ce type | jaune, bleu, violet, orange, sable |
-| `Danger` | l'action destructive d'un contexte | rouge |
+| `Neutral` | everything else (default) | dark blue-gray |
+| `Workbook`, `Graph`, `Matrix`, `Note`, `Folder` | the project object of this type | yellow, blue, violet, orange, sand |
+| `Danger` | the destructive action of a context | red |
 
-Budget indicatif : pas plus d'environ une icône colorée sur quatre dans une
-même vue. Pas de couleur par famille d'outils. Le thème de l'application est
-clair et fixe (`theme.rs`) : pas de variante sombre.
+Indicative budget: no more than about one colored icon in four in the same
+view. No color per tool family. The application theme is light and fixed
+(`theme.rs`): no dark variant.
 
-Le duotone Phosphor a deux calques (fond à 20 % d'opacité, trait
-`currentColor`). `Image::tint` multiplie les pixels et ne sait pas les
-recolorer séparément : **chaque variante (icône, rôle) est cuite dans le
-SVG** par `scripts/icons-build.sh`.
+Phosphor duotone has two layers (background at 20% opacity, stroke
+`currentColor`). `Image::tint` multiplies the pixels and cannot recolor them
+separately: **each variant (icon, role) is baked into the SVG** by
+`scripts/icons-build.sh`.
 
-## Ajouter une icône
+## Adding an icon
 
-1. Chercher sur <https://phosphoricons.com/?weight=duotone> ; le nom du fichier
-   est celui de `vendor/phosphor-icons/SVGs/duotone/<nom>-duotone.svg`
-   (`vendor/` n'est **pas** versionné).
-2. `scripts/icons-build.sh --add <nom>` copie le SVG dans `assets/icons/src/`.
-3. Ajouter une ligne à `assets/icons/icons.tsv` (`nom<TAB>rôle[,rôle]`) ; un
-   rôle nouveau va dans `palette.tsv` (trait, fond), après accord de
-   l'utilisateur.
-4. `scripts/icons-build.sh --sheet` cuit les variantes
-   (`assets/icons/<nom>.<rôle>.svg`) et la **planche-contact**
-   (`target/icons/sheet-color.png` et `sheet-gray.png`, via Inkscape). La
-   regarder : en niveaux de gris, les formes doivent rester distinctes.
-5. Dans `icons.rs` : une variante de `Icon` et ses lignes de `VARIANTS`.
-   Le test `le_tableau_des_variantes_suit_icons_tsv` échoue si l'une manque.
-6. Les variantes cuites et `src/` sont versionnées ; commiter les deux.
+1. Search on <https://phosphoricons.com/?weight=duotone>; the file name
+   is that of `vendor/phosphor-icons/SVGs/duotone/<nom>-duotone.svg`
+   (`vendor/` is **not** versioned).
+2. `scripts/icons-build.sh --add <nom>` copies the SVG into `assets/icons/src/`.
+3. Add a line to `assets/icons/icons.tsv` (`nom<TAB>rôle[,rôle]`); a new
+   role goes into `palette.tsv` (stroke, background), after the user's
+   agreement.
+4. `scripts/icons-build.sh --sheet` bakes the variants
+   (`assets/icons/<nom>.<rôle>.svg`) and the **contact sheet**
+   (`target/icons/sheet-color.png` and `sheet-gray.png`, via Inkscape). Look at
+   it: in grayscale, the shapes must stay distinct.
+5. In `icons.rs`: a variant of `Icon` and its lines of `VARIANTS`.
+   The test `le_tableau_des_variantes_suit_icons_tsv` fails if one is missing.
+6. The baked variants and `src/` are versioned; commit both.
 
-## Garde-fous
+## Guards
 
-- `aucune_icone_hors_du_composant` : aucun module hors `icons.rs` ne cite
-  `assets/icons` ni un URI d'icône.
-- `chaque_icone_se_charge` : toute variante se rastérise avec le vrai chargeur.
-- Largeur : `ICON_SIZE` (16 pt) est la seule taille ; la bande d'une icône
-  d'en-tête de fenêtre est `HEADER_ACTION_WIDTH` (`app/window_chrome.rs`, #50).
-- Dans un test d'interface, une icône peinte est un `Shape::Rect` à texture ;
-  installer `egui_extras::install_image_loaders` et peindre **deux images**
-  (la texture est prête à la seconde) — voir `find_icon_centers`.
+- `aucune_icone_hors_du_composant`: no module outside `icons.rs` cites
+  `assets/icons` or an icon URI.
+- `chaque_icone_se_charge`: every variant rasterizes with the real loader.
+- Width: `ICON_SIZE` (16 pt) is the only size; the strip of a window
+  header icon is `HEADER_ACTION_WIDTH` (`app/window_chrome.rs`, #50).
+- In an interface test, a painted icon is a `Shape::Rect` with a texture;
+  install `egui_extras::install_image_loaders` and paint **two images**
+  (the texture is ready in the second) — see `find_icon_centers`.
 
-## Perf
+## Performance
 
-SVG embarqués, rastérisés à la demande par `egui_extras` (resvg) une fois par
-taille × `pixels_per_point`, puis gardés en texture : seules les icônes
-affichées coûtent.
+Embedded SVGs, rasterized on demand by `egui_extras` (resvg) once per
+size × `pixels_per_point`, then kept as a texture: only the displayed icons
+cost anything.
 
-La réinitialisation du zoom (#74) utilise `arrows-out` : quatre flèches vers
-les limites du cadrage, distinctes des coins de maximisation. « New Project »
-(#73) utilise `file-plus` ; le nouveau graphique garde le rôle `Graph`.
+The zoom reset (#74) uses `arrows-out`: four arrows toward
+the framing limits, distinct from the maximize corners. "New Project"
+(#73) uses `file-plus`; the new graph keeps the `Graph` role.
 
-Object Manager (#82) réutilise l'icône `Graph` en rôle neutre pour son bouton
-de barre : son infobulle porte le nom du panneau. Les panneaux fixes (#100) réutilisent `Detach`, `Reattach` et les chevrons
-`CaretLeft`/`CaretRight`/`CaretUp`/`CaretDown` pour le repli ; aucune icône ajoutée.
+Object Manager (#82) reuses the `Graph` icon in neutral role for its toolbar
+button: its tooltip carries the panel name. The fixed panels (#100) reuse `Detach`, `Reattach` and the chevrons
+`CaretLeft`/`CaretRight`/`CaretUp`/`CaretDown` for collapsing; no icon added.
 
-La flèche d'un champ à liste (#234) n'est **pas** une icône : triangle plein peint par `list_frame::paint_arrow`, comme celui de la `ComboBox`.
-Leurs en-têtes ne proposent ni `Close` ni `Maximize`.
+The arrow of a list field (#234) is **not** an icon: a filled triangle painted by `list_frame::paint_arrow`, like that of the `ComboBox`.
+Their headers offer neither `Close` nor `Maximize`.
 
-L'aide au survol d'un champ (#197, `app/hover_help.rs`) utilise `question`
-(`Icon::Help`, rôle neutre) estompée par `theme::help_icon_tint` : le point
-d'interrogation ne distingue pas un type d'objet, il dit « un rappel existe ici ».
+The hover help of a field (#197, `app/hover_help.rs`) uses `question`
+(`Icon::Help`, neutral role) faded by `theme::help_icon_tint`: the
+question mark does not distinguish an object type, it says "a reminder exists here".
 
-L'état « pas à jour » d'un calcul d'analyse (#200) utilise `warning`
-(`Icon::Stale`, rôle neutre) : en-tête de la colonne produite, et ligne de la
-série qui la trace. La teinte d'avertissement reste celle de la lettre
-(`theme::stale_color`), pas un rôle de palette.
+The "out of date" state of an analysis computation (#200) uses `warning`
+(`Icon::Stale`, neutral role): header of the produced column, and row of the
+series that plots it. The warning hue stays that of the letter
+(`theme::stale_color`), not a palette role.
 
-## Échantillons de couleur (#89)
+## Color swatches (#89)
 
-Un réglage de couleur est un **petit carré** (`color_picker::color_button`).
-Une couleur non définie (valeur vide = automatique, pour un remplissage :
-aucun) se peint en carré clair **barré d'un trait rouge en travers** ; une
-couleur transparente garde le damier. Dans une barre d'outils, le carré est
-précédé d'une icône qui dit *quelle* couleur (`color_icon_button` : `LineColor`
-pour le trait, `FillColor` pour le remplissage, `TextColor` pour le texte) ;
-dans un formulaire, d'un libellé (`color_field`). Jamais un échantillon seul.
+A color setting is a **small square** (`color_picker::color_button`).
+An undefined color (empty value = automatic, for a fill:
+none) is painted as a light square **crossed by a red diagonal line**; a
+transparent color keeps the checkerboard. In a toolbar, the square is
+preceded by an icon that says *which* color (`color_icon_button`: `LineColor`
+for the stroke, `FillColor` for the fill, `TextColor` for the text);
+in a form, by a label (`color_field`). Never a swatch alone.
 
-Les colonnes corrigées en place (#212) portent un petit crayon neutre
-(`pencil-simple`, `Icon::ModifiedData`) dans la marge de l’en-tête, distinct du
-triangle d’un calcul périmé. La bulle renvoie aux réglages conservés dans
-Résultats ; aucune couleur d’état ni badge supplémentaire.
+Columns corrected in place (#212) carry a small neutral pencil
+(`pencil-simple`, `Icon::ModifiedData`) in the header margin, distinct from the
+triangle of an out-of-date computation. The bubble points to the settings kept in
+Results; no extra state color or badge.

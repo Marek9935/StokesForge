@@ -4,7 +4,7 @@ Read from `stokesforge-rendu` when the task touches the drawing order, layers, T
 
 ## Panel drawing order
 
-Each step depends on what the previous one learnt (`docs/rendu.md` § L'ordre dans lequel un panneau se trace):
+Each step depends on what the previous one learnt (`docs/rendu.md` § The order in which a panel is plotted):
 
 1. prepare each series as geometry (axis scale applied); framing and drawing read **the same** geometry;
 2. frame the axes on it;
@@ -13,7 +13,7 @@ Each step depends on what the previous one learnt (`docs/rendu.md` § L'ordre da
 5. paint in pixels;
 6. the legend last, measured by the same path as the axes.
 
-Two decisions already arbitrated: the log scale transforms **values**, not the coordinate type (`docs/rendu.md` § L'échelle logarithmique transforme les données, pas le type); clipping is done **in pixels**, after projection (`docs/rendu.md` § Rognage : en pixels, pas en données).
+Two decisions already arbitrated: the log scale transforms **values**, not the coordinate type (`docs/rendu.md` § The logarithmic scale transforms the data, not the type); clipping is done **in pixels**, after projection (`docs/rendu.md` § Clipping: in pixels, not in data).
 
 ## Overlaid layers (#167, #168)
 
@@ -37,4 +37,4 @@ A continuous gesture (dragging free text, editing in place, moving a title or th
 
 ## Tests
 
-The architecture guards of rendering are listed in `docs/tests.md` § Les garde-fous à ne pas casser (`mesure.rs`, `accord.rs`, `feathering.rs`, `frontiere.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/formes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text témoin stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).
+The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`mesure.rs`, `accord.rs`, `feathering.rs`, `frontiere.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/formes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text témoin stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).

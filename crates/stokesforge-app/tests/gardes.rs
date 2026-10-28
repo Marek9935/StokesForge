@@ -719,7 +719,8 @@ fn boutons_selectionnables_hors_d_un_choix(sources: &[Fichier]) -> Vec<String> {
     trouves
 }
 
-/// Règle #169 (`docs/application/fenetres-et-panneaux.md`, § Onglets, listes et sélection) : le
+/// Règle #169 (`docs/application/fenetres-et-panneaux.md`, § Tabs, lists and
+/// selection) : le
 /// fond vert arrondi d'un bouton sélectionné d'egui ne marque qu'un **choix
 /// exclusif** dans un menu, une liste déroulante ou le sélecteur de couleur.
 /// Une entrée de liste ou d'arbre est une ligne de liste (`list_row`,
@@ -1107,7 +1108,7 @@ fn champs_numeriques_d_egui(sources: &[Fichier]) -> Vec<String> {
     trouves
 }
 
-/// Règle #220 (`docs/standard-interface.md`, § Champs numériques) : un nombre
+/// Règle #220 (`docs/standard-interface.md`, § Numeric fields) : un nombre
 /// se saisit par `number_field::number_field`, avec sa grandeur de
 /// `quantities.rs` ; bornes, pas et décimales ne s'écrivent pas sur place.
 #[test]
@@ -1226,7 +1227,7 @@ fn bulles_sur_un_champ(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #225 (`docs/standard-interface.md`, § Messages et aide, S-M2) : un
+/// Règle #225 (`docs/standard-interface.md`, § Messages and help, S-M2) : un
 /// champ de formulaire n'a jamais de bulle nue ; son rappel est l'icône « ? »
 /// (`app/hover_help.rs`), son effet ou sa portée un texte en clair.
 #[test]
@@ -1326,7 +1327,7 @@ fn grises_sans_raison(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #226 (`docs/standard-interface.md`, § Grisé, S-G1/S-G2) : un élément
+/// Règle #226 (`docs/standard-interface.md`, § Disabled, S-G1/S-G2) : un élément
 /// grisé par `add_enabled` dit pourquoi et quoi faire, dans la bulle
 /// `.on_disabled_hover_text` de l'élément lui-même.
 #[test]
@@ -1432,7 +1433,7 @@ fn touches_hors_du_registre(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, S-K1) : un
+/// Règle #231 (`docs/standard-interface.md`, § Keyboard and mouse, S-K1) : un
 /// registre unique des touches, `app/shortcuts.rs`.
 #[test]
 fn aucun_consume_key_hors_du_registre() {
@@ -1498,7 +1499,7 @@ fn curseurs_hors_du_module(sources: &[Fichier]) -> Vec<String> {
     trouves
 }
 
-/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, S-X2) : un
+/// Règle #231 (`docs/standard-interface.md`, § Keyboard and mouse, S-X2) : un
 /// seul module nomme les curseurs.
 #[test]
 fn aucun_curseur_hors_du_module_des_curseurs() {
@@ -1539,7 +1540,7 @@ fn la_garde_des_curseurs_voit_un_curseur_ecrit_sur_place() {
     .is_empty());
 }
 
-/// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, S-L4) : deux
+/// Règle #227 (`docs/standard-interface.md`, § Choices, layout, S-L4) : deux
 /// constantes d'espacement dans `theme.rs`, aucun `add_space` numérique
 /// ailleurs.
 #[test]

@@ -4,10 +4,10 @@ Read when the task touches the Object Manager, a graph selection, object drag-an
 
 ## Where the rule lives
 
-- Object Manager (#81-85), view settings (#139), shared selection, `with_graph_view`: `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/gestionnaires.md` § Gestionnaire d'objets (Object Manager.
+- Object Manager (#81-85), view settings (#139), shared selection, `with_graph_view`: `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/gestionnaires.md` § Object Manager (#81–85).
 - Series, group, drag by the handle: `.claude/conventions.md` § Séries et groupes.
 - Preference isolation in tests: `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, piège `cfg(test)`.
-- Definitive corrections (#212), `ReplaceAnalysisData`: `.claude/conventions.md` § Analyse (#181) ; tests: `docs/tests.md` § Remplacement définitif d'une correction (#212).
+- Definitive corrections (#212), `ReplaceAnalysisData`: `.claude/conventions.md` § Analyse (#181) ; tests: `docs/tests.md` § Final replacement of a correction (#212).
 
 ## Check
 

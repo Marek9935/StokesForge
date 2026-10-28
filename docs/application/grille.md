@@ -1,554 +1,547 @@
-# Application : grille
+# Application: grid
 
-Suite du sommaire [`README.md`](README.md). Contenu : lignes Metadata et x', menus contextuels et sélection multiple de la grille, gouttière, Tab et flèches, alignement, saisie.
+Continuation of the index [`README.md`](README.md). Contents: Metadata and x' rows, context menus and multiple selection of the grid, gutter, Tab and arrows, alignment, input.
 
-### Lignes « Metadata » et x' de l'en-tête
+### The "Metadata" and x' header rows
 
-Deux rangées facultatives, **réglées par classeur** : Classeur › Afficher la
-ligne Metadata / Afficher la ligne x', le clic droit de la case « # » (sous la
-section de la sélection), et, pour Metadata, le clic droit de son libellé. Le
-réglage d'un classeur (`grid::HeaderRows`, `header_rows` / `set_header_rows`)
-est gardé dans la mémoire d'egui sous l'identifiant du classeur, partagé par
-ses fenêtres flottante et détachée, jamais dans le modèle ni le `.stf` ; il se
-perd à la fermeture de l'application.
+Two optional rows, **set per workbook**: Workbook › Show Metadata Row / Show x'
+Row, the right-click of the "#" cell (under the selection section), and, for
+Metadata, the right-click of its label. The setting of a workbook
+(`grid::HeaderRows`, `header_rows` / `set_header_rows`) is kept in egui's
+memory under the workbook's identifier, shared by its floating and detached
+windows, never in the model or the `.stf`; it is lost when the application
+closes.
 
-Le réglage des **nouveaux** classeurs est une préférence (Préférences ›
-Display ; `preferences.json`, `workbook_show_metadata` affichée par défaut,
-`workbook_show_x_prime` cachée par défaut ; `Action::SetWorkbookHeaderDefaults`).
-`app.rs` la publie à chaque image dans le `Context`
-(`grid::publish_header_row_defaults`) : un classeur que l'utilisateur n'a pas
-réglé la suit, un classeur réglé la garde. La hauteur de l'en-tête perd une
-sous-ligne par rangée masquée (`stacked_header_height`). Limite connue : la
-navigation clavier peut encore atteindre la rangée x' masquée.
+The setting for **new** workbooks is a preference (Preferences › Display;
+`preferences.json`, `workbook_show_metadata` shown by default,
+`workbook_show_x_prime` hidden by default; `Action::SetWorkbookHeaderDefaults`).
+`app.rs` publishes it in the `Context` on every frame
+(`grid::publish_header_row_defaults`): a workbook the user has not set follows
+it, a workbook that was set keeps its own. The header height loses one
+sub-row for each hidden row (`stacked_header_height`). Known limit: keyboard
+navigation can still reach the hidden x' row.
 
 
-### Menus contextuels de la grille
+### Grid context menus
 
-Le classeur n'a plus de bandeau d'actions au-dessus de la grille. Un clic droit
-dans l'espace vide à droite de la dernière colonne propose « Ajouter une
-colonne » ; un clic droit sur un onglet de feuille propose « Ajouter une
-feuille », « Renommer », « Dupliquer » et « Supprimer », sur la partie vide de
-sa bande « Ajouter une feuille » seule — directement, sans sous-menu (#158). La bande reste sous la grille dans les
-fenêtres flottantes et détachées. « Importer… » se trouve dans le menu File.
-Son dialogue choisit entre le classeur actif, un nouveau classeur par fichier
-et un seul nouveau classeur pour tout le lot. Chaque fichier valide crée sa
-propre feuille ; les nouveaux classeurs ne sont créés qu'après analyse
-réussie. Le lot est une seule entrée d'historique annulable.
+The workbook no longer has an action strip above the grid. A right-click
+in the empty space to the right of the last column offers "Add Column"; a right-click on a sheet tab offers "Add Sheet", "Rename", "Duplicate" and "Delete", and on the empty part of
+its strip only "Add Sheet" — directly, without a submenu (#158). The strip stays below the grid in the
+floating and detached windows. "Import…" is in the File menu.
+Its dialog chooses between the active workbook, one new workbook per file
+and a single new workbook for the whole batch. Each valid file creates its
+own sheet; the new workbooks are created only after a successful
+analysis. The batch is a single undoable history entry.
 
-Les cinq zones de la grille — cellule de données, champ d'en-tête d'une seule
-colonne, rangée des lettres, gouttière des numéros de ligne, libellés de champ
-entier dans cette même gouttière — portent le **même** bloc d'édition au clic
-droit (`app::grid::grid_edit_menu`) : un groupe presse-papiers (Couper, Copier,
-Copier avec l'en-tête, Coller, Coller à l'identique), puis Vider et Supprimer
-et décaler. Undo et Redo n'y sont plus (Edit et le clavier, #158) ; chaque
-entrée garde son équivalent au clavier, miroir du bloc de raccourcis de
-`grid_contents`. La rangée des lettres y entoure ce bloc de ce qui lui est
-propre : Tracer ▸ et Ajouter une colonne avant, Déplacer ▸, Type ▸ et Rôle ▸
-après le presse-papiers (ils décrivent la colonne plutôt qu'ils n'agissent sur
-son contenu).
+The five zones of the grid — data cell, header field of a single
+column, row of letters, row-number gutter, whole-field labels
+in that same gutter — carry the **same** editing block on right-click
+(`app::grid::grid_edit_menu`): a clipboard group (Cut, Copy,
+Copy with Header, Paste, Paste in Place), then Clear and Delete
+and Shift Up. Undo and Redo are no longer there (Edit and the keyboard, #158); each
+entry keeps its keyboard equivalent, a mirror of the shortcut block of
+`grid_contents`. The row of letters surrounds this block with what is specific
+to it: Plot ▸ and Add Column before, Move ▸, Type ▸ and Role ▸
+after the clipboard (they describe the column rather than act on
+its content).
 
-**Déplacer ▸** (#319, `grid::move_columns_menu`, peint par
-`column_type_role_menus` donc aussi dans Workbook › Columns) : quatre entrées,
-Move to First · Move Left · Move Right · Move to Last, qui font bouger les
-colonnes sélectionnées **dans leur feuille** (jamais d'une feuille à l'autre).
-Left et Right avancent chaque colonne d'une place, l'écart entre colonnes non
-contiguës reste (`A [B] C [D] E` → `B A D C E`) ; First et Last regroupent la
-sélection en tête ou en fin, dans son ordre. Tout ou rien : une entrée est
-**grisée**, raison en bulle, quand le geste ne changerait rien (Left si la
-première colonne sélectionnée est déjà en A, Right symétrique, First et Last si
-l'ordre ne change pas) ; une sélection de lignes entières, qui couvre toutes les
-colonnes, grise les quatre. Une colonne : une entrée `Move “B”` ; plusieurs : une
-macro `MacroKind::MoveColumns`, un seul Ctrl+Z. **Aucune** fenêtre « Colonne
-utilisée » : depuis #321 une formule suit sa colonne. Les graphes déjà tracés ne
-bougent pas ; seuls les tracés suivants apparient les Y aux X qui sont à leur
-nouvelle gauche. La logique d'ordre est pure (`stokesforge-app-state`,
-`column_move.rs`) et sert au grisage comme à l'exécution ; un enfant `Unknown`
-sous la feuille garde sa place (l'index se traduit dans la liste complète des
-enfants). La largeur d'une colonne suit son identifiant, donc sa colonne
+**Move ▸** (#319, `grid::move_columns_menu`, painted by
+`column_type_role_menus` so also in Workbook › Columns): four entries,
+Move to First · Move Left · Move Right · Move to Last, which move the
+selected columns **within their sheet** (never from one sheet to another).
+Left and Right move each column by one place, the gap between non-contiguous
+columns stays (`A [B] C [D] E` → `B A D C E`); First and Last gather the
+selection at the start or at the end, in its order. All or nothing: an entry is
+**disabled**, with the reason in a tooltip, when the gesture would change nothing (Left if the
+first selected column is already in A, Right symmetrically, First and Last if
+the order does not change); a selection of whole rows, which covers all the
+columns, disables all four. One column: one `Move “B”` entry; several: one
+`MacroKind::MoveColumns` macro, a single Ctrl+Z. **No** "Column in use" window: since #321 a formula follows its column. Graphs already plotted do not
+move; only later plots pair the Ys with the Xs that are to their
+new left. The ordering logic is pure (`stokesforge-app-state`,
+`column_move.rs`) and serves both the disabling and the execution; an `Unknown` child
+under the sheet keeps its place (the index is translated into the full list of
+children). The width of a column follows its identifier, so its column
 (#325).
 
-Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
-« Annuler », pas « Annuler Edit Cells in Column A ». Le clic droit vient de
-se poser sur ce qu'il vise, et le raccourci est déjà rappelé à droite de
-l'entrée — nommer la cible en plus allongeait chaque ligne sans rien
-apprendre. `GridMenu::target_label`/`copy_full_columns_label` et
-`AppState::undo_label`/`redo_label` restent **disponibles et testés** pour les
-surfaces où l'on ne voit *pas* ce qu'on vise (la barre de menus les utilise
-déjà pour Annuler/Rétablir, et une ligne de statut ou une confirmation en
-auront besoin) ; ils ne sont simplement pas appelés par le menu contextuel.
+The entries are **bare** verbs: "Copy", not "Copy the cell";
+"Undo", not "Undo Edit Cells in Column A". The right-click has just
+landed on its target, and the shortcut is already shown on the right of
+the entry — naming the target as well made every line longer without teaching
+anything. `GridMenu::target_label`/`copy_full_columns_label` and
+`AppState::undo_label`/`redo_label` remain **available and tested** for the
+surfaces where you do *not* see what you are aiming at (the menu bar already uses them
+for Undo/Redo, and a status line or a confirmation
+will need them); they are simply not called by the context menu.
 
-La **décision** (quels gestes ont un sens ici, lesquels griser, comment
-nommer la cible le jour où c'est utile) vit dans `AppState::grid_menu` →
-`GridMenu`, pas dans le code egui : c'est ce qui la rend vérifiable sans
-fenêtre dans `stokesforge-app-state/tests/shell.rs`, comme le reste de la matrice copier/coller.
-Deux contextualisations s'y jouent :
+The **decision** (which gestures make sense here, which to disable, how to
+name the target the day it is useful) lives in `AppState::grid_menu` →
+`GridMenu`, not in the egui code: that is what makes it verifiable without a
+window in `stokesforge-app-state/tests/shell.rs`, like the rest of the copy/paste matrix.
+Two contextualizations are played out there:
 
-- l'accord en nombre de `target_label` (« la cellule » / « les champs » /
-  « les colonnes » / « les lignes »), avec deux pluriels distincts — celui des
-  **cases** (`GridMenu::plural`) et celui des **colonnes**
-  (`GridMenu::multi_column`) : trois cellules empilées sont plurielles sans que
-  « Copier la colonne entière » doive passer au pluriel.
-  `GridZone::Rows` (la gouttière) fait exception à `plural` : ses libellés
-  parlent de **lignes**, pas de cases, donc une seule ligne sélectionnée reste
-  « la ligne » même sur une feuille à plusieurs colonnes — `plural` n'y compte
-  que le nombre de lignes couvertes, jamais `multi_column` ;
-- « Supprimer et décaler » **n'apparaît pas dans l'en-tête** : un champ n'est
-  pas répété par ligne, Suppr s'y contente de vider, et l'offrir ferait deux
-  entrées pour un seul effet — vrai aussi bien pour un champ d'une seule
-  colonne que pour un champ entier sur toutes les colonnes (`GridZone::
-  Header` couvre les deux, voir plus bas). Il apparaît en revanche pour une
-  plage de lignes entières : supprimer une ligne fait remonter ce qui suit
-  dans toutes les colonnes, exactement comme un rectangle de cellules.
+- the number agreement of `target_label` ("the cell" / "the fields" /
+  "the columns" / "the rows"), with two distinct plurals — that of the
+  **cells** (`GridMenu::plural`) and that of the **columns**
+  (`GridMenu::multi_column`): three stacked cells are plural without
+  "Copy the whole column" having to become plural.
+  `GridZone::Rows` (the gutter) is an exception to `plural`: its labels
+  speak of **rows**, not cells, so a single selected row stays
+  "the row" even on a sheet with several columns — `plural` counts there
+  only the number of rows covered, never `multi_column`;
+- "Delete and Shift Up" **does not appear in the header**: a field is not
+  repeated per row, Del just clears there, and offering it would make two
+  entries for a single effect — true both for a field of a single
+  column and for a whole field across all columns (`GridZone::
+  Header` covers both, see below). It does appear, however, for a
+  range of whole rows: deleting a row moves what follows up
+  in all columns, exactly like a rectangle of cells.
 
-### Sélection multiple de la grille (#159)
+### Multiple selection in the grid (#159)
 
-`selection.rs` porte la sélection de chaque feuille — état d'interface pur,
-hors historique. Elle est **d'une seule sorte** à la fois (colonnes, lignes
-ou cases), et la frontière en-tête/données reste infranchissable ; chaque
-sorte est un **ensemble** et non plus une plage `{ ancre, curseur }` :
+`selection.rs` holds the selection of each sheet — pure interface state,
+outside the history. It is of **one kind only** at a time (columns, rows
+or cells), and the header/data boundary stays uncrossable; each
+kind is a **set** and no longer a range `{ ancre, curseur }`:
 
-| Sorte | Contenu | Gestes |
+| Kind | Content | Gestures |
 |---|---|---|
-| colonnes (`Columns`) | `base` (colonnes posées une à une) ∪ plage `ancre..=curseur` | clic · Ctrl+clic bascule la colonne · Maj+clic remplace tout par la plage ancre → cible · Ctrl+Maj+clic et glisser ajoutent la plage |
-| lignes (`FullRows`) | intervalles de lignes (même modèle) | mêmes gestes sur les numéros de ligne |
-| cases (`Rows`) | rectangles déjà posés (`extra`) + dernier rectangle `ancre`–`curseur` | Ctrl+clic ajoute ou retire une case (le rectangle est découpé autour) · Ctrl+glisser ajoute un rectangle · Maj+clic étend le dernier rectangle |
+| columns (`Columns`) | `base` (columns set one by one) ∪ range `ancre..=curseur` | click · Ctrl+click toggles the column · Shift+click replaces everything with the range anchor → target · Ctrl+Shift+click and drag add the range |
+| rows (`FullRows`) | intervals of rows (same model) | same gestures on the row numbers |
+| cells (`Rows`) | rectangles already set (`extra`) + last rectangle `ancre`–`curseur` | Ctrl+click adds or removes a cell (the rectangle is split around it) · Ctrl+drag adds a rectangle · Shift+click extends the last rectangle |
 
-Un Ctrl+clic d'une autre sorte, ou de l'autre côté de la frontière
-en-tête/données, repose une sélection simple. Les champs d'en-tête entiers
-(`HeaderRows`) restent des plages simples. Retirer le dernier élément lève la
-sélection.
+A Ctrl+click of another kind, or on the other side of the
+header/data boundary, sets a simple selection again. The whole header fields
+(`HeaderRows`) stay simple ranges. Removing the last element clears the
+selection.
 
-Les consommateurs raisonnent par **blocs** (`Selection::blocks`, un bloc =
-colonnes de la feuille × plage de rangs) ; l'ordre est toujours celui de la
-feuille (gauche → droite, haut → bas), jamais celui des clics.
+The consumers reason in **blocks** (`Selection::blocks`, one block =
+columns of the sheet × range of ranks); the order is always that of the
+sheet (left → right, top → bottom), never that of the clicks.
 
-- **Case du coin « # »** et **Ctrl+A** (grille focalisée, hors édition ;
-  Edit › Select All) : `Action::SelectAll`, toutes les colonnes visibles,
-  en-tête compris, même sans ligne ; un second clic sur la case, ou Échap dans
-  la grille, lève la sélection. La case a une info-bulle et le curseur « main ».
-- **Copier / Couper** : colonnes non contiguës bout à bout dans l'ordre de la
-  feuille ; blocs de cases qui partagent leurs lignes (côte à côte) ou leurs
-  colonnes (empilés) — sinon Copy et Cut sont grisés (`GridMenu::copy_enabled`,
-  `Selection::copy_layout`). Copy with Header suit les colonnes touchées.
-- **Coller / Coller à l'identique** : grisés sur une sélection non contiguë
-  (`GridMenu::paste_enabled`, cible ambiguë) ; le collage au clavier est refusé
-  avec un message.
-- **Format du presse-papiers (#259)** : le texte système est du TSV au format
-  Excel/LibreOffice, écrit et lu par `stokesforge_core::tsv` (`encode`,
-  `decode`, `encode_cell`), sans egui : une case qui porte une tabulation, un
-  saut de ligne ou un guillemet est entourée de guillemets (guillemet doublé),
-  donc un texte multiligne ne décale rien au collage, ici comme dans un
-  tableur. À la lecture, `\r\n` et une fin de ligne terminale sont admis
-  (collage depuis un tableur sous Windows). Une case **manquante** se copie
-  vide : `cell_copy_text_in` la traite avant la mise en texte, jamais par un
-  `replace` de `MISSING_TEXT_DISPLAY` après coup, qui effacerait aussi les
-  espaces insécables vraiment tapés. L'app ne garde que le choix des cases.
-- **Saisie et collage (#258)** : une seule règle de lecture « texte → valeur de
-  cellule », `ValueBlock::from_texts(kind, &[&str])` (`stokesforge-core`,
-  `column.rs`), appelée par `commit_cell` (une case) et par
-  `value_block_from_tsv_column` (une colonne collée) : une date tapée ou collée
-  donne la même cellule. Chaque case est rognée ; vide = valeur manquante ;
-  `Numeric` lit un nombre fini (virgule décimale admise), `DateTime` lit d'abord
-  une date ou une heure ; `inf`, `nan` et `1e400` restent du **texte** (dans les
-  trois types, colonne `Mixed` déjà ouverte comprise — seule la conversion de
-  type par l'en-tête garde `inf` écrit = infini, règle C2). Un texte illisible
-  dans `Numeric`/`DateTime` rend un bloc `Mixed` et le drapeau « élargit » :
-  écriture par `SetCellsPromoting` (inchangé), les cases lues restant des
-  nombres, la date comprise. Après un collage qui écrase une colonne `Mixed`,
-  si toutes ses cases présentes sont des nombres, elle repasse en `Numeric`
-  (`SetColumnType`, comme après une saisie) ; la repromotion se fait **avant**
-  la clôture du groupe `PasteCells`, et un collage d'une seule colonne n'ouvre ce
-  groupe que lorsqu'une repromotion a lieu : un collage reste une entrée
-  d'historique, un seul Annuler. Une colonne `DateTime` élargie en `Mixed`
-  affiche ensuite la date comme un horodatage numérique, comme pour une date
-  tapée (comportement existant, non modifié).
-- **Effacer** vide chaque bloc, en un seul groupe annulable. **Supprimer et
-  remonter** n'est offert que pour un bloc unique (des trous rendraient la
-  remontée ambiguë) ; Suppr se contente alors de vider.
-- **Clic droit** : dans la sélection, le menu agit sur toute la sélection, même
-  non contiguë ; hors de la sélection, il la remplace par la case visée (#152).
-- **Tracer** reçoit la liste ordonnée des colonnes sélectionnées (A en X, C et
-  E en Y…). Type ▸ et Role ▸ passent par `Action::SetColumnsType`/`SetColumnsRole` : un seul
-  pas d'annulation (`MacroKind::SetColumnsType`/`SetColumnsRole`) pour toutes les colonnes.
+- **Corner cell "#"** and **Ctrl+A** (grid focused, outside editing;
+  Edit › Select All): `Action::SelectAll`, all the visible columns,
+  header included, even with no rows; a second click on the cell, or Esc in
+  the grid, clears the selection. The cell has a tooltip and the "hand" cursor.
+- **Copy / Cut**: non-contiguous columns end to end in the order of the
+  sheet; blocks of cells that share their rows (side by side) or their
+  columns (stacked) — otherwise Copy and Cut are disabled (`GridMenu::copy_enabled`,
+  `Selection::copy_layout`). Copy with Header follows the columns touched.
+- **Paste / Paste in Place**: disabled on a non-contiguous selection
+  (`GridMenu::paste_enabled`, ambiguous target); pasting with the keyboard is refused
+  with a message.
+- **Clipboard format (#259)**: the system text is TSV in the
+  Excel/LibreOffice format, written and read by `stokesforge_core::tsv` (`encode`,
+  `decode`, `encode_cell`), without egui: a cell that holds a tab, a
+  line break or a quote is wrapped in quotes (quote doubled),
+  so a multiline text shifts nothing on paste, here as in a
+  spreadsheet. On reading, `\r\n` and a trailing line end are accepted
+  (pasting from a spreadsheet on Windows). A **missing** cell is copied
+  empty: `cell_copy_text_in` handles it before the conversion to text, never by a
+  `replace` of `MISSING_TEXT_DISPLAY` afterwards, which would also erase the
+  non-breaking spaces that were really typed. The app keeps only the choice of cells.
+- **Input and paste (#258)**: a single "text → cell value" reading rule,
+  `ValueBlock::from_texts(kind, &[&str])` (`stokesforge-core`,
+  `column.rs`), called by `commit_cell` (one cell) and by
+  `value_block_from_tsv_column` (a pasted column): a typed or pasted date
+  gives the same cell. Each cell is trimmed; empty = missing value;
+  `Numeric` reads a finite number (decimal comma accepted), `DateTime` reads first
+  a date or a time; `inf`, `nan` and `1e400` stay **text** (in all
+  three types, an already open `Mixed` column included — only the type conversion
+  by the header keeps a written `inf` = infinity, rule C2). An unreadable text in
+  `Numeric`/`DateTime` returns a `Mixed` block and the "widens" flag:
+  written by `SetCellsPromoting` (unchanged), the cells read staying
+  numbers, the date included. After a paste that overwrites a `Mixed` column,
+  if all its present cells are numbers, it goes back to `Numeric`
+  (`SetColumnType`, as after an input); the repromotion happens **before**
+  the `PasteCells` group is closed, and a paste of a single column opens this
+  group only when a repromotion takes place: a paste stays one history
+  entry, a single Undo. A `DateTime` column widened to `Mixed`
+  then shows the date as a numeric timestamp, as for a
+  typed date (existing behavior, not modified).
+- **Clear** empties each block, in a single undoable group. **Delete and Shift
+  Up** is offered only for a single block (holes would make the
+  shift ambiguous); Del then just clears.
+- **Right-click**: inside the selection, the menu acts on the whole selection, even
+  non-contiguous; outside the selection, it replaces it with the targeted cell (#152).
+- **Plot** receives the ordered list of selected columns (A as X, C and
+  E as Y…). Type ▸ and Role ▸ go through `Action::SetColumnsType`/`SetColumnsRole`: a single
+  undo step (`MacroKind::SetColumnsType`/`SetColumnsRole`) for all the columns.
 
-Pendant un glisser, l'extension au survol ne s'applique qu'aux cases où
-l'appui n'a **pas** commencé (`press_started_in`) : sinon un Ctrl+clic, qui
-bascule au relâchement, aurait déjà étendu la sélection pendant l'appui.
+During a drag, the extension on hover applies only to the cells where
+the press did **not** start (`press_started_in`): otherwise a Ctrl+click, which
+toggles on release, would already have extended the selection during the press.
 
 
-### Largeur des colonnes : par colonne, pas par position (#325)
+### Column width: per column, not per position (#325)
 
-La grille est une `egui_extras::TableBuilder`, dont la mémoire garde les
-largeurs **par position** et les jette dès que le nombre de colonnes change :
-supprimer ou ajouter une colonne remettait toute la feuille à zéro, et un
-déplacement ne l'aurait pas suivie. La largeur est donc un fait de la
-**colonne** : `NodeId -> f32` dans l'acteur (`SessionHandle::set_column_width`,
+The grid is an `egui_extras::TableBuilder`, whose memory keeps the
+widths **by position** and drops them as soon as the number of columns changes:
+deleting or adding a column used to reset the whole sheet, and a
+move would not have followed it. The width is therefore a fact of the
+**column**: `NodeId -> f32` in the actor (`SessionHandle::set_column_width`,
 `Snapshot::column_widths`, `AppState::column_width` / `Action::SetColumnWidth`),
-enregistrée dans le `.stf` (`docs/persistance.md`). Hors du modèle, hors de
-l'historique : redimensionner **ne s'annule pas**, mais Ctrl+Z qui ramène une
-colonne supprimée lui rend sa largeur (l'identifiant n'est jamais réutilisé,
-invariant 7, et la table n'est pas purgée à la mutation).
+saved in the `.stf` (`docs/persistance.md`). Outside the model, outside the
+history: resizing **cannot be undone**, but Ctrl+Z that brings back a
+deleted column gives it back its width (the identifier is never reused,
+invariant 7, and the table is not purged on mutation).
 
-`grid_contents` redonne à egui, à chaque image, `TableColumn::initial(largeur de
-la colonne ou DEFAULT_COLUMN_WIDTH)` par colonne, et appelle
-`TableBuilder::reset()` quand la liste ordonnée des identifiants (avec l'époque
-du projet) diffère de celle de l'image précédente — jamais un `id_salt`
-variable, dont dériverait l'identifiant de la zone de défilement verticale (le
-défilement serait perdu). Une colonne neuve (ajout, collage, import, analyse)
-prend la largeur par défaut. Pas d'ajustement au contenu par double-clic.
+On every frame, `grid_contents` gives egui back `TableColumn::initial(largeur de
+la colonne ou DEFAULT_COLUMN_WIDTH)` for each column, and calls
+`TableBuilder::reset()` when the ordered list of identifiers (with the epoch
+of the project) differs from that of the previous frame — never a variable
+`id_salt`, from which the identifier of the vertical scroll area would drift (the
+scroll position would be lost). A new column (added, pasted, imported, analysis)
+takes the default width. No fit-to-content by double-click.
 
-La largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la main**
-(`finished_column_resizes` : poignée relâchée, largeur lue sur l'étendue de
-l'en-tête) : pousser la largeur rendue à chaque image marquerait le projet
-modifié à chaque ouverture. La vue détachée a son propre `AppState` ; sa
-largeur passe aussi par l'acteur, l'état principal la relit à son
-rafraîchissement.
+The width is pushed only at the **end of a resize done by hand**
+(`finished_column_resizes`: handle released, width read from the extent of the
+header): pushing the rendered width on every frame would mark the project
+as modified on every opening. The detached view has its own `AppState`; its
+width also goes through the actor, and the main state rereads it on its
+refresh.
 
-**Largeur par défaut identique flottant / maximisé (#337).** Remonté sous
-#330 : maximisée, la fenêtre du classeur faisait passer les colonnes jamais
-réglées de 57 à 62 px d'écart entre lettres. Cause : la première image d'un
-`egui::Window` est une passe de mesure (`Ui::is_sizing_pass`) pendant laquelle
-egui_extras réduit chaque colonne à la largeur que son contenu a utilisée (50
-au lieu de 54), puis garde cette valeur ; une fenêtre maximisée, peinte dans le
-`CentralPanel`, n'a pas de passe de mesure et gardait les 54. Ni les valeurs, ni
-la taille de la fenêtre n'y sont pour rien (le banc direct, sans `Window`, ne
-voyait rien). `grid_contents` oublie l'état de la table à l'image qui suit une
-passe de mesure, et ne retient pas la largeur de la gouttière pendant celle-ci.
+**Same default width floating / maximized (#337).** Reported under
+#330: maximized, the workbook window made the never-set columns go from 57 to 62 px of spacing between letters. Cause: the first frame of an
+`egui::Window` is a sizing pass (`Ui::is_sizing_pass`) during which
+egui_extras shrinks each column to the width its content used (50
+instead of 54), then keeps that value; a maximized window, painted in the
+`CentralPanel`, has no sizing pass and kept the 54. Neither the values nor
+the size of the window are to blame (the direct bench, without `Window`, saw
+nothing). `grid_contents` forgets the table state on the frame that follows a
+sizing pass, and does not retain the gutter width during it.
 
-**Remettre au défaut (#330).** Clic droit sur une lettre ou Workbook ▸ Columns :
-« Reset Width » (après Role ▸), sur toute la sélection ; Workbook ▸ Sheet et
-clic droit de l'onglet : « Reset Column Widths », toutes les colonnes de la
-feuille. `Action::ResetColumnWidths { columns }` →
-`SessionHandle::reset_column_widths` **retire les clés** de la table (le défaut
-est la constante `DEFAULT_COLUMN_WIDTH` de l'application, rien n'est écrit dans
-le `.stf`). Non annulable, sans confirmation, comme la pose. Entrée grisée
-(« Columns are already at the default width ») quand aucune colonne visée n'a de
-largeur retenue. La clé de mise en page de `grid_contents` contient les
-largeurs retenues des colonnes visibles : sans elles, `TableColumn::initial`
-n'est lu qu'après un `reset` et la remise ne changerait rien à l'écran.
-`TableBuilder::reset` remet **toutes** les colonnes, gouttière comprise : la
-largeur rendue de la gouttière est mémorisée par feuille en mémoire temporaire
-d'egui (`gutter_width_id`) et redonnée en `initial`, sinon chaque glisser la
-ramènerait à 90. La remise d'une colonne n'y touche pas ; celle de toute la
-feuille l'oublie (`forget_gutter_width`) : retour à 90, jamais enregistré.
+**Reset to default (#330).** Right-click on a letter or Workbook ▸ Columns:
+"Reset Width" (after Role ▸), on the whole selection; Workbook ▸ Sheet and
+the right-click of the tab: "Reset Column Widths", all the columns of the
+sheet. `Action::ResetColumnWidths { columns }` →
+`SessionHandle::reset_column_widths` **removes the keys** from the table (the default
+is the application constant `DEFAULT_COLUMN_WIDTH`, nothing is written to
+the `.stf`). Not undoable, no confirmation, like setting it. Entry disabled
+("Columns are already at the default width") when no targeted column has a
+retained width. The layout key of `grid_contents` contains the retained
+widths of the visible columns: without them, `TableColumn::initial`
+is read only after a `reset` and the reset would change nothing on screen.
+`TableBuilder::reset` resets **all** the columns, gutter included: the
+rendered width of the gutter is memorized per sheet in egui's temporary memory
+(`gutter_width_id`) and given back as `initial`, otherwise each drag would
+bring it back to 90. Resetting one column does not touch it; resetting the whole
+sheet forgets it (`forget_gutter_width`): back to 90, never saved.
 
-### Une colonne a deux identités, une seule est visible
+### A column has two identities, only one is visible
 
-Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »
-automatique de `Project::next_column_name`) est une clé du modèle : il résout
-une colonne depuis un script (`pyst.resolve("[Book1]Sheet1!Temps")`), l'adresse
-dans une spec de graphe, la retrouve dans un `.stf`. La grille ne l'affiche
-**nulle part** : elle montre la lettre de **position** (A, B, C…) et les
-quatre champs de `ColumnMeta` (Nom long, Unité, Commentaire, Formule), qui
-sont encore autre chose.
+Its **node name** (`Node::name` — "Temps", "Signal", or the automatic "A"/"B"
+of `Project::next_column_name`) is a key of the model: it resolves
+a column from a script (`pyst.resolve("[Book1]Sheet1!Temps")`), addresses it
+in a graph spec, finds it again in a `.stf`. The grid shows it
+**nowhere**: it shows the **position** letter (A, B, C…) and the
+four fields of `ColumnMeta` (Long Name, Units, Comments, Formula), which are
+yet another thing.
 
-**Ligne Formule (#321).** Une formule retient les colonnes qu'elle lit **par
-identifiant** ; les lettres que la case montre et que l'on tape ne sont qu'un
-affichage, relu à chaque image : insérer, supprimer ou déplacer des colonnes
-(dont les sorties d'une analyse) ne change jamais ce que la formule lit, la
-lettre affichée suit la colonne (`a*2` s'écrit `A*2`). Si une colonne lue n'est
-plus dans la feuille, la case affiche `#REF` et peint un cadre rouge avec la
-bulle « Colonne supprimée. Remplacer #REF par une lettre de colonne ». Trois
-saisies sont **refusées** : une lettre qui ne désigne aucune colonne de la
-feuille, la colonne elle-même, et `#REF` modifié. Entrée ou Tab sur un texte
-refusé laissent le champ ouvert (cadre rouge, bulle qui dit pourquoi) ; un clic
-ailleurs le ferme sans rien écrire. Valider le texte affiché tel quel (même avec
-`#REF`) n'écrit rien. Une **erreur de syntaxe** n'est pas un refus : elle
-s'enregistre et la colonne se remplit de `---`. Au collage d'un rectangle, la
-formule refusée est la seule à ne pas être collée : les autres champs le sont, et
-la barre d'état dit le refus après les écritures. La décision se prend dans
-`stokesforge-app-state` (`header_edit_refusal`, `formula_issue`), la grille ne
-fait que la peindre.
+**Formula row (#321).** A formula remembers the columns it reads **by
+identifier**; the letters that the cell shows and that one types are only
+a display, reread on every frame: inserting, deleting or moving columns
+(including the outputs of an analysis) never changes what the formula reads,
+the displayed letter follows the column (`a*2` is written `A*2`). If a column read is no
+longer in the sheet, the cell shows `#REF` and paints a red frame with the
+tooltip "Column deleted. Replace #REF with a column letter". Three
+inputs are **refused**: a letter that designates no column of the
+sheet, the column itself, and a modified `#REF`. Enter or Tab on a refused
+text leave the field open (red frame, tooltip that says why); a click
+elsewhere closes it without writing anything. Validating the displayed text as is (even with
+`#REF`) writes nothing. A **syntax error** is not a refusal: it is
+saved and the column fills with `---`. When pasting a rectangle, the refused
+formula is the only one not pasted: the other fields are, and
+the status bar states the refusal after the writes. The decision is made in
+`stokesforge-app-state` (`header_edit_refusal`, `formula_issue`), the grid only
+paints it.
 
-`stokesforge_commands::Command::label` construisait ses libellés d'historique sur
-le nom de nœud, et annonçait donc « Saisie dans Temps » pour une colonne que
-l'utilisateur ne connaît que comme « A » — un mot introuvable à l'écran, et
-carrément trompeur quand les deux divergent (un nœud nommé `T` en troisième
-position s'affiche « C »). Le libellé désigne désormais la colonne par sa
-position (`ColumnRef`, depuis #46 une donnée et non une phrase) : « Edit Cells
-in Column A ». Les autres natures de nœud
-(feuille, classeur, graphe, note) gardent leur nom réel — celui-là *est*
-affiché, dans le Project Manager.
+`stokesforge_commands::Command::label` used to build its history labels on
+the node name, and so announced "Input in Temps" for a column that
+the user only knows as "A" — a word not to be found on screen, and
+downright misleading when the two diverge (a node named `T` in third
+position is displayed "C"). The label now designates the column by its
+position (`ColumnRef`, since #46 a datum and not a sentence): "Edit Cells
+in Column A". The other kinds of node
+(sheet, workbook, graph, note) keep their real name — that one *is*
+displayed, in the Project Manager.
 
-La correspondance position → lettre est `stokesforge_core::spreadsheet_name`,
-rendue publique pour l'occasion : c'est la même fonction qui nomme les
-colonnes créées sans nom explicite, qui peint l'en-tête de la grille
-(`app::grid::column_letter` n'en est plus qu'un alias) et qui écrit les libellés
-d'historique. Trois copies de cet algorithme valaient trois façons d'appeler
-la même colonne.
+The position → letter mapping is `stokesforge_core::spreadsheet_name`,
+made public for the occasion: it is the same function that names the
+columns created without an explicit name, that paints the header of the grid
+(`app::grid::column_letter` is now only an alias for it) and that writes the history
+labels. Three copies of this algorithm meant three ways of calling
+the same column.
 
-La gouttière (`app::grid::row_number_widget`) est le miroir exact de la rangée des
-lettres (`app::grid::column_header_widget`) : toute sa largeur sélectionne, au clic,
-**toute la ligne** — les colonnes visibles de la feuille, à cette ligne, quelle
-que soit leur longueur propre (une colonne plus courte que la ligne visée
-reste touchée par la sélection, seule sa portion réellement écrite est
-affectée par Vider/Supprimer). `AppState::select_row`/`extend_row_selection`/
-`is_row_selected` en sont les pendants de `select_column`/
-`extend_column_selection`/`is_column_selected`, et `SelectionKind::FullRows`
-(`stokesforge_app_state::selection`) le pendant de `SelectionKind::Columns` — même règle de
-non-franchissement de frontière : un glisser qui part de la gouttière et croise
-une cellule ou la rangée des lettres repose une sélection simple plutôt que
-d'étendre silencieusement sans effet, et réciproquement.
+The gutter (`app::grid::row_number_widget`) is the exact mirror of the row of
+letters (`app::grid::column_header_widget`): its whole width selects, on click,
+**the whole row** — the visible columns of the sheet, at this row, whatever
+their own length (a column shorter than the targeted row
+is still touched by the selection, only its really written portion is
+affected by Clear/Delete). `AppState::select_row`/`extend_row_selection`/
+`is_row_selected` are the counterparts of `select_column`/
+`extend_column_selection`/`is_column_selected`, and `SelectionKind::FullRows`
+(`stokesforge_app_state::selection`) the counterpart of `SelectionKind::Columns` — same rule of
+not crossing the boundary: a drag that starts in the gutter and crosses
+a cell or the row of letters sets a simple selection again rather than
+silently extending with no effect, and conversely.
 
-### La gouttière côté en-tête : homogène, et elle aussi sélectionnable
+### The header-side gutter: uniform, and also selectable
 
-Côté en-tête empilée (`app::grid::row_number_header_widget`), la gouttière portait
-un « # » décoratif sur fond `header_letter_row_fill`, puis quatre rangées de
-libellés (« Long Name », « Units », « Comments », « F(x)= ») restées
-**transparentes** et inertes — la colonne de gauche n'était donc homogène ni
-visuellement (le fond s'arrêtait au « # ») ni fonctionnellement (rien n'y
-était cliquable). Les deux sont corrigés ensemble : chaque rangée de libellé
-porte désormais le même fond que le « # » (ou le surlignage de sélection),
-et un clic sur un libellé (`app::grid::header_row_label_widget`) sélectionne ce
-champ pour **toutes** les colonnes visibles de la feuille — symétrique de
-`row_number_widget` côté données. `AppState::select_header_row`/
-`extend_header_row_selection`/`is_header_row_selected` en sont les pendants
-de `select_row`/`extend_row_selection`/`is_row_selected`, et
-`SelectionKind::HeaderRows` (`stokesforge_app_state::selection`) le pendant de `FullRows`
-pour la zone d'en-tête : elle touche toutes les colonnes et, symétriquement,
-ne touche jamais les données (`row_range()` y vaut toujours `None`).
+On the stacked header side (`app::grid::row_number_header_widget`), the gutter carried
+a decorative "#" on a `header_letter_row_fill` background, then four rows of
+labels ("Long Name", "Units", "Comments", "F(x)=") that stayed
+**transparent** and inert — the left column was therefore uniform neither
+visually (the background stopped at the "#") nor functionally (nothing in it
+was clickable). Both are fixed together: each label row
+now carries the same background as the "#" (or the selection highlight),
+and a click on a label (`app::grid::header_row_label_widget`) selects that
+field for **all** the visible columns of the sheet — symmetrical to
+`row_number_widget` on the data side. `AppState::select_header_row`/
+`extend_header_row_selection`/`is_header_row_selected` are the counterparts
+of `select_row`/`extend_row_selection`/`is_row_selected`, and
+`SelectionKind::HeaderRows` (`stokesforge_app_state::selection`) the counterpart of `FullRows`
+for the header zone: it touches all the columns and, symmetrically,
+never touches the data (`row_range()` is always `None` there).
 
-Ce n'est **pas** la même chose qu'un champ sélectionné sur une seule colonne
-(`app::grid::header_field_widget`, `Selection::header_field`) : celui-ci reste
-strictement à une colonne, glisser peut l'étendre à d'autres colonnes mais
-jamais d'un seul geste à *toutes* les colonnes de la feuille — les deux
-widgets, les deux constructeurs et les deux gestes restent distincts, même
-si les deux finissent dans la même zone de menu (`GridZone::Header`) une fois
-posés : `cleared_header_fields`/`copy_selection`/`paste` sont tous les trois
-écrits en termes de `full_rank_range()`/`columns()`, qui rendent déjà la
-bonne réponse pour les deux sortes de sélection sans code dédié
-supplémentaire.
+This is **not** the same thing as a field selected on a single column
+(`app::grid::header_field_widget`, `Selection::header_field`): that one stays
+strictly on one column, dragging can extend it to other columns but
+never in a single gesture to *all* the columns of the sheet — the two
+widgets, the two constructors and the two gestures stay distinct, even
+if both end up in the same menu zone (`GridZone::Header`) once
+set: `cleared_header_fields`/`copy_selection`/`paste` are all three
+written in terms of `full_rank_range()`/`columns()`, which already return
+the right answer for both kinds of selection with no additional dedicated
+code.
 
-Le « # » lui-même sélectionne tout le tableau au clic (`AppState::
-select_all`), comme la case en coin de la plupart des tableurs : une
-sélection `SelectionKind::FullRows` couvrant `0..=row_count - 1` (`Selection::
-all_rows`), qui touche déjà toutes les colonnes visibles sans qu'il faille de
-sorte de sélection dédiée — `is_all_selected` en teste la couverture exacte
-pour teindre le « # » en retour.
+The "#" itself selects the whole table on click (`AppState::
+select_all`), like the corner cell of most spreadsheets: a
+`SelectionKind::FullRows` selection covering `0..=row_count - 1` (`Selection::
+all_rows`), which already touches all the visible columns without needing a
+dedicated kind of selection — `is_all_selected` tests its exact coverage
+to tint the "#" in return.
 
-Les libellés de la gouttière restent sur une seule ligne, même en français,
-en pseudo-langue ou après réduction de sa largeur (#125). Si la place
-manque, ils sont tronqués avec des points de suspension ; le survol affiche
-le texte complet. Ils ne débordent pas sur les rangées voisines.
+The gutter labels stay on a single line, even in French,
+in pseudo-locale or after its width is reduced (#125). If room
+is lacking, they are truncated with an ellipsis; hovering shows
+the full text. They do not overflow onto the neighboring rows.
 
-### Une palette à trois paliers pour la gouttière, et une teinte propre à son texte
+### A three-level palette for the gutter, and a tint of its own for its text
 
-La gouttière (rangée des lettres, « # », numéros de ligne, libellés de champ)
-utilisait le même vert que le reste de l'accent de marque, à pleine
-saturation pour son texte (`Visuals::strong_text_color()`, qui vaut
-`widgets.active.fg_stroke.color`, donc littéralement `ACCENT`) — trop
-appuyé pour une zone censée rester en retrait des données. `theme::
-gutter_text_color` lui donne une teinte propre, nettement plus sombre,
-indépendante de la couleur globale des éléments « actifs » pour ne pas
-déteindre sur des boutons ou onglets sans rapport.
+The gutter (row of letters, "#", row numbers, field labels)
+used the same green as the rest of the brand accent, at full
+saturation for its text (`Visuals::strong_text_color()`, which equals
+`widgets.active.fg_stroke.color`, so literally `ACCENT`) — too
+heavy for a zone meant to stay in the background of the data. `theme::
+gutter_text_color` gives it a tint of its own, clearly darker,
+independent of the global color of "active" elements so as not to
+rub off on unrelated buttons or tabs.
 
-Le fond, lui, gagne un troisième palier. `app::grid::gutter_fill(selected,
-touched)` choisit entre `theme::header_letter_row_fill` (repos),
-`header_letter_row_touched_fill` (la colonne ou la ligne d'une cellule de
-données sélectionnée, sans être elle-même cliquée) et
-`header_letter_row_selected_fill` (sélectionnée directement) — le repère
-« ta ligne/colonne est concernée » d'un tableur, porté par `Selection::
+The background, for its part, gains a third level. `app::grid::gutter_fill(selected,
+touched)` chooses between `theme::header_letter_row_fill` (rest),
+`header_letter_row_touched_fill` (the column or row of a selected data
+cell, without itself being clicked) and
+`header_letter_row_selected_fill` (selected directly) — the "your row/column is
+concerned" marker of a spreadsheet, carried by `Selection::
 touches_column`/`touches_row` (`AppState::column_touched_by_selection`/
-`row_touched_by_selection`), écrites en termes de `columns()`/`row_range()`
-donc valables pour **toute** sorte de sélection sans code dédié
-supplémentaire. Les 3 rangées de la gouttière qui en profitent :
-`column_header_widget`, `row_number_widget`, et le « # » de
-`row_number_header_widget` (`touched` toujours faux pour lui — rien ne
-« touche » le tableau entier sans le sélectionner en entier).
+`row_touched_by_selection`), written in terms of `columns()`/`row_range()`
+so valid for **every** kind of selection with no additional dedicated
+code. The 3 gutter rows that benefit from it:
+`column_header_widget`, `row_number_widget`, and the "#" of
+`row_number_header_widget` (`touched` always false for it — nothing
+"touches" the whole table without selecting it entirely).
 
-Enfin, `ui.spacing_mut().item_spacing.y = 0.0` avant de construire la table
-et dans les deux empilements verticaux de la gouttière côté en-tête
-(`column_header_widget`, `row_number_header_widget`) : sans ça, l'espacement
-par défaut d'egui entre rangées empilées laissait un mince filet blanc entre
-chaque case peinte d'un aplat, qui la faisait paraître flotter plutôt que
-remplir vraiment sa case.
+Finally, `ui.spacing_mut().item_spacing.y = 0.0` before building the table
+and in the two vertical stackings of the header-side gutter
+(`column_header_widget`, `row_number_header_widget`): without it, egui's default
+spacing between stacked rows left a thin white line between
+each cell painted with a flat fill, which made it look like it was floating rather than
+really filling its cell.
 
-### Tab en dernière colonne : même geste qu'Entrée en dernière ligne
+### Tab in the last column: same gesture as Enter in the last row
 
-Entrée sur la dernière ligne d'une feuille ajoute une ligne et y déplace la
-sélection (`Action::CommitCellAndAdvance` en édition, ou le raccourci
-clavier direct hors édition) — Tab sur la dernière colonne d'une ligne de
-données fait maintenant de même pour les colonnes plutôt que de revenir au
-début de la ligne suivante (l'ancien comportement de `move_selection_tab`
-aux bords).
+Enter on the last row of a sheet adds a row and moves the
+selection there (`Action::CommitCellAndAdvance` while editing, or the direct
+keyboard shortcut outside editing) — Tab on the last column of a row of
+data now does the same for columns rather than going back to the
+start of the next row (the old behavior of `move_selection_tab`
+at the edges).
 
-L'asymétrie entre les deux axes tient à l'identité de la cible : une ligne
-n'est qu'un indice, donc sélectionner `(colonne existante, row + 1)` *avant*
-que la commande d'ajout ne soit appliquée (elle ne l'est qu'après le rendu de
-l'image, voir `StokesForgeApp::ui`, `app.rs`) est sûr — la ligne existera à temps.
-Une colonne neuve, elle, n'a pas encore de `NodeId` tant que `Command::
-AddColumn` n'a pas tourné : la sélectionner à l'avance n'a pas de sens.
-`Action::AddColumnAndSelect { sheet, row }` fait donc les deux d'un coup
-dans son propre traitement (`AppState::add_column_and_select`) : ajoute la
-colonne, *puis* — une fois `self.snapshot` rafraîchi par `execute` — sélectionne
-`row` dans la dernière colonne visible. Câblé aux deux mêmes endroits que Tab
-normal : le raccourci clavier direct de `grid_contents`, et la validation
-d'édition de `cell_widget` — `app::grid::is_last_visible_column` factorise la
-condition commune aux deux.
+The asymmetry between the two axes comes from the identity of the target: a row
+is only an index, so selecting `(colonne existante, row + 1)` *before*
+the add command is applied (it is applied only after the frame is rendered,
+see `StokesForgeApp::ui`, `app.rs`) is safe — the row will exist in time.
+A new column, on the other hand, has no `NodeId` yet until `Command::
+AddColumn` has run: selecting it in advance makes no sense.
+`Action::AddColumnAndSelect { sheet, row }` therefore does both at once
+in its own handling (`AppState::add_column_and_select`): adds the
+column, *then* — once `self.snapshot` is refreshed by `execute` — selects
+`row` in the last visible column. Wired in the same two places as normal
+Tab: the direct keyboard shortcut of `grid_contents`, and the editing
+validation of `cell_widget` — `app::grid::is_last_visible_column` factors out the
+condition common to both.
 
-Câblé aussi **côté en-tête** (`Action::AddColumnAndSelectHeaderField`,
-`AppState::add_column_and_select_header_field`), pour **chacun** des quatre
-champs (Long Name, Units, Comments, Formule) de la dernière colonne, en
-édition comme hors édition (#52) : Tab y ajoute une colonne et sélectionne le
-même champ dans la colonne neuve. Jusqu'à #52, seul Formule le faisait — Tab
-circulait d'abord colonne par colonne pour un même champ ; l'utilisateur a levé
-cette décision, au prix du retour automatique au champ suivant de la première
-colonne quand on remplit l'en-tête champ par champ.
+Also wired **on the header side** (`Action::AddColumnAndSelectHeaderField`,
+`AppState::add_column_and_select_header_field`), for **each** of the four
+fields (Long Name, Units, Comments, Formula) of the last column, while
+editing as well as outside editing (#52): Tab adds a column there and selects the
+same field in the new column. Until #52, only Formula did so — Tab
+first went column by column for the same field; the user lifted
+that decision, at the price of the automatic return to the next field of the first
+column when filling in the header field by field.
 
-### Tab et flèches appartiennent à la grille (#38)
+### Tab and arrows belong to the grid (#38)
 
-egui traite Tab et les flèches **au début de l'image** (`Focus::begin_pass`)
-pour déplacer son propre focus de widget en widget, sauf si le widget
-focalisé les réclame par un `EventFilter`. La grille les lisait par
-`key_pressed`, qui ne retire rien : egui donnait le focus au premier widget
-focalisable venu (souvent hors de la grille), et dès qu'un widget avait le
-focus la garde des raccourcis (`egui_wants_keyboard_input`) coupait net la
-sélection de la grille.
-Même chose en édition : le `TextEdit` d'une cellule ou d'un champ d'en-tête
-perdait le focus sur Tab.
+egui handles Tab and the arrows **at the start of the frame** (`Focus::begin_pass`)
+to move its own focus from widget to widget, unless the focused widget
+claims them through an `EventFilter`. The grid read them with
+`key_pressed`, which removes nothing: egui gave the focus to the first
+focusable widget it found (often outside the grid), and as soon as a widget had
+the focus the shortcut guard (`egui_wants_keyboard_input`) cut the grid's
+selection short.
+Same while editing: the `TextEdit` of a cell or a header field
+lost focus on Tab.
 
-La règle, dans `grid_contents` (donc la même pour le classeur flottant et le
-classeur détaché, tous deux par `book_contents`) :
+The rule, in `grid_contents` (so the same for the floating workbook and the
+detached workbook, both through `book_contents`):
 
-- **Un ancrage de focus par grille** (`grid_focus_id`) : un widget posé sur le
-  rectangle de la grille, focalisable *seulement tant qu'il a le focus* (sinon
-  un Tab sans focus y entrerait de lui-même), qui porte le filtre
-  `GRID_KEYS` (Tab, flèches ; pas Échap, qui rend le focus). La grille le
-  réclame (`claim_grid_focus`) à un appui ou un relâchement dans son
-  rectangle, et à la fin d'une édition qui a rendu le focus à personne.
-  egui le retire seul à un clic ailleurs : Tab y reprend alors son rôle
-  habituel, sans toucher la sélection.
-- **En édition**, les champs de cellule et d'en-tête posent le même filtre
-  (`TextEdit::event_filter(GRID_KEYS)`) : Tab ne les fait plus perdre le
-  focus, ils le lisent eux-mêmes (`tab_pressed`), valident, rendent le focus
-  et laissent la grille le reprendre.
-- **Garde des raccourcis** : `focus_free` (aucun focus, ou celui de cette
-  grille). Le reste de l'application, qui testait `focused().is_some()` pour
-  savoir si l'on tape dans un champ (Entrée d'un dialogue, Suppr d'une
-  annotation), passe par `keyboard_focus_outside_grid`.
+- **One focus anchor per grid** (`grid_focus_id`): a widget placed on the
+  rectangle of the grid, focusable *only while it has the focus* (otherwise
+  a Tab with no focus would enter it by itself), which carries the filter
+  `GRID_KEYS` (Tab, arrows; not Esc, which gives the focus back). The grid
+  claims it (`claim_grid_focus`) on a press or a release in its
+  rectangle, and at the end of an edit that gave the focus to nobody.
+  egui removes it by itself on a click elsewhere: Tab then takes back its
+  usual role, without touching the selection.
+- **While editing**, the cell and header fields set the same filter
+  (`TextEdit::event_filter(GRID_KEYS)`): Tab no longer makes them lose
+  the focus, they read it themselves (`tab_pressed`), validate, give the focus back
+  and let the grid take it again.
+- **Shortcut guard**: `focus_free` (no focus, or that of this
+  grid). The rest of the application, which tested `focused().is_some()` to
+  know whether one is typing in a field (Enter in a dialog, Del on an
+  annotation), goes through `keyboard_focus_outside_grid`.
 
-F2 ouvre le même éditeur qu'un double-clic, avec le contenu initial conservé
-(#143), uniquement lorsque l'ancrage de la grille a le focus. Sur une plage
-de données ou de champs d'en-tête, il édite la case en haut à gauche, dans
-l'ordre visible des colonnes. Nom long, Unité, Commentaire et Formule utilisent
-leur éditeur existant ; les colonnes entières ne déclenchent pas cette édition.
-Le renommage par F2 reste propre aux gestionnaires focalisés.
+F2 opens the same editor as a double-click, with the initial content kept
+(#143), only when the grid's anchor has the focus. On a range
+of data or header fields, it edits the top-left cell, in the visible
+order of the columns. Long Name, Units, Comments and Formula use
+their existing editor; whole columns do not trigger this edit.
+Renaming with F2 stays specific to the focused managers.
 
-Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
-(`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
-dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par
-les tests de `app/grid.rs` (`app::grid::tests`). Le focus d'egui ne se voit pas dans une capture
-(`STOKESFORGE_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre
-(`run-stokesforge` en X11 aide, sans valoir Wayland natif).
+Limit: the filter applies only to the frame that follows the focus being taken
+(`set_focus_lock_filter` requires `had_focus_last_frame`) — a key falling
+in the very frame of the click is not a realistic keystroke. Locked by
+the tests of `app/grid.rs` (`app::grid::tests`). egui's focus does not show in a capture
+(`STOKESFORGE_APP_SCREENSHOT`): to be confirmed on a real window
+(`run-stokesforge` on X11 helps, without being worth native Wayland).
 
-### Alignement du corps : nombres à droite, texte à gauche
+### Body alignment: numbers right, text left
 
-`cell_widget` aligne chaque cellule du **corps** de la grille comme un
-tableur — jamais la gouttière ni l'en-tête, qui n'affichent pas de valeur de
-colonne. `AppState::cell_is_numeric` tranche par cellule, pas par colonne :
-sur une colonne `Mixed`, deux lignes voisines peuvent s'aligner
-différemment, l'une à droite (nombre saisi), l'autre à gauche (texte). Une
-valeur manquante (`NaN` ou texte vide/absent) compte comme non numérique et
-reste à gauche — un vide n'a pas de raison d'être poussé à droite, et ça
-évite qu'une colonne clairsemée ait l'air de sauter d'un bord à l'autre
-d'une ligne à l'autre.
+`cell_widget` aligns each cell of the **body** of the grid like a
+spreadsheet — never the gutter or the header, which do not display a column
+value. `AppState::cell_is_numeric` decides per cell, not per column:
+on a `Mixed` column, two neighboring rows can align
+differently, one to the right (typed number), the other to the left (text). A
+missing value (`NaN` or empty/absent text) counts as non-numeric and
+stays on the left — an empty cell has no reason to be pushed to the right, and that
+avoids a sparse column looking like it jumps from one edge to the other
+from one row to the next.
 
-`Label::halign` seul ne suffit **pas** ici, malgré ce que sa doc laisse
-penser : `ui.put` place le `Label` dans un `Layout::centered_and_justified`,
-qui justifie le texte (l'étire pour remplir la largeur) avant que `halign`
-n'ait voix au chapitre — le résultat restait visuellement centré, quel que
-soit `halign`. Un vrai `Layout` directionnel (`right_to_left`/
-`left_to_right`, `Align::Center` pour l'axe vertical), posé via
-`ui.scope_builder` sur un `max_rect` légèrement rétréci — le même mécanisme
-que celui déjà posé sur toute la table (`cell_layout` du `TableBuilder`) —
-aligne réellement le texte contre le bord voulu.
+`Label::halign` alone is **not** enough here, despite what its doc
+suggests: `ui.put` places the `Label` in a `Layout::centered_and_justified`,
+which justifies the text (stretches it to fill the width) before `halign`
+has a say — the result stayed visually centered, whatever
+`halign` was. A real directional `Layout` (`right_to_left`/
+`left_to_right`, `Align::Center` for the vertical axis), set via
+`ui.scope_builder` on a slightly shrunken `max_rect` — the same mechanism
+as the one already set on the whole table (`cell_layout` of the `TableBuilder`) —
+really aligns the text against the wanted edge.
 
-Un clic droit **hors** de la sélection la réduit d'abord à la case visée, un
-clic droit **dedans** la laisse intacte — pour que le menu agisse toujours sur
-ce qu'on vient de désigner — même garde (`response.secondary_clicked() &&
-!selected`) dans les quatre zones. `column_header_widget` ne l'avait pas :
-son clic droit réduisait **toujours** la plage à la lettre visée, ce qui
-rendait impossible de changer d'un coup le type ou le rôle de plusieurs
-colonnes sélectionnées, alors même que le commentaire de son `target_columns`
-supposait déjà l'inverse. Corrigé en même temps que l'arrivée de la
-gouttière, qui a rendu l'écart visible.
+A right-click **outside** the selection first reduces it to the targeted cell, a
+right-click **inside** it leaves it intact — so that the menu always acts on
+what was just designated — same guard (`response.secondary_clicked() &&
+!selected`) in the four zones. `column_header_widget` did not have it:
+its right-click **always** reduced the range to the targeted letter, which
+made it impossible to change the type or role of several selected
+columns at once, even though the comment of its `target_columns`
+already assumed the opposite. Fixed at the same time as the arrival of the
+gutter, which made the gap visible.
 
-Deux écarts délibérés entre le menu et le clavier :
+Two deliberate differences between the menu and the keyboard:
 
-- **« Supprimer et décaler » supprime tout de suite**, là où la touche Suppr
-  vide à la première pression et ne supprime qu'à la seconde. La double
-  pression n'existe que pour protéger d'une frappe réflexe sur une touche
-  facile d'accès ; un menu contextuel est un geste explicite et désigné.
-- **« Coller » n'est jamais grisé.** egui n'expose aucune API de *lecture* du
-  presse-papier (Ctrl+V ne marche que parce qu'`egui-winit` lit lui-même le
-  presse-papier avant de pousser l'`Event::Paste`), donc `app::grid::
-  system_clipboard_text` le lit directement via `arboard` — la bibliothèque
-  qu'`egui-winit` emploie déjà en interne. Savoir s'il y a quelque chose à
-  coller exigerait cette lecture à *chaque image* où le menu est ouvert : on
-  tente au clic, et on pose une notice si ça ne donne rien. « Coller à
-  l'identique », lui, est grisable sans coût — il rejoue le presse-papier
-  **interne**, dont on connaît l'état.
+- **"Delete and Shift Up" deletes right away**, whereas the Del key
+  clears on the first press and deletes only on the second. The double
+  press exists only to protect against a reflex keystroke on an
+  easy-to-reach key; a context menu is an explicit, designated gesture.
+- **"Paste" is never disabled.** egui exposes no API to *read* the
+  clipboard (Ctrl+V works only because `egui-winit` reads the
+  clipboard itself before pushing the `Event::Paste`), so `app::grid::
+  system_clipboard_text` reads it directly via `arboard` — the library
+  that `egui-winit` already uses internally. Knowing whether there is anything to
+  paste would require this read on *every frame* where the menu is open: we
+  try on click, and show a notice if it gives nothing. "Paste in Place", for its part, can be disabled at no cost — it replays the **internal**
+  clipboard, whose state is known.
 
-Enfin, les cinq constantes `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
-`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE` sont **purement
-décoratives** : elles n'existent que pour écrire le rappel de raccourci à
-droite d'une entrée de menu. Rien ne les consomme, et il ne faut pas essayer —
-`egui-winit` intercepte Ctrl+C/X/V à la traduction des événements de la
-fenêtre et n'en laisse jamais passer de `Event::Key` (un essai précédent,
-fondé sur l'hypothèse inverse, produisait des raccourcis qui ne se
-déclenchaient jamais).
+Finally, the five constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/
+`SHORTCUT_COPY_FULL_COLUMNS`/`SHORTCUT_PASTE_ABSOLUTE` are **purely
+decorative**: they exist only to write the shortcut reminder on the
+right of a menu entry. Nothing consumes them, and one must not try —
+`egui-winit` intercepts Ctrl+C/X/V when translating the window events
+and never lets an `Event::Key` through (an earlier attempt,
+based on the opposite assumption, produced shortcuts that never
+fired).
 
-### Limites assumées du banc
+### Accepted limits of the bench
 
-- **Les raccourcis sont consommés au niveau du contexte**, donc *avant* les
-  widgets. Ctrl+Z pendant la saisie d'une cellule annule la dernière **commande
-  du modèle**, pas la dernière frappe : c'est le comportement attendu d'un
-  tableur, et c'est aussi la limite — le banc ne sait pas distinguer les deux
-  intentions.
-- **Une seule cellule éditable à la fois**, toutes grilles **dockées**
-  confondues (`AppState::editing`). La grille est virtualisée
-  (`TableBuilder::body().rows()`) : une feuille peut avoir un million de
-  lignes, il n'est pas question de garder un tampon par cellule. Le même
-  principe vaut pour l'édition d'une note (`AppState::NoteEdit`), pour la même
-  raison de cohérence plutôt que de nécessité stricte. Un onglet **détaché**
-  a son propre tampon, indépendant de celui du dock et des autres onglets
-  détachés (voir « Détachement générique des onglets de contenu ») —
-  contrainte technique de la fermeture `'static` de `show_viewport_deferred`,
-  pas une extension délibérée de la limite.
-- **Les fenêtres ouvertes et leur mode ne sont pas restaurés** : le
-  démarrage ouvre le premier classeur et le premier graphe. Les positions
-  et tailles enregistrées sont réutilisées pour les contenus, mais la
-  maximisation et le détachement ne constituent pas un plan de disposition
-  persisté.
+- **Shortcuts are consumed at the context level**, so *before* the
+  widgets. Ctrl+Z while typing in a cell undoes the last **model
+  command**, not the last keystroke: this is the expected behavior of a
+  spreadsheet, and it is also the limit — the bench cannot tell the two
+  intentions apart.
+- **Only one editable cell at a time**, across all **docked** grids
+  (`AppState::editing`). The grid is virtualized
+  (`TableBuilder::body().rows()`): a sheet can have a million
+  rows, there is no question of keeping a buffer per cell. The same
+  principle holds for editing a note (`AppState::NoteEdit`), for the same
+  reason of consistency rather than strict necessity. A **detached** tab
+  has its own buffer, independent of that of the dock and of the other detached
+  tabs (see "Generic detaching of content tabs") —
+  a technical constraint of the `'static` closure of `show_viewport_deferred`,
+  not a deliberate extension of the limit.
+- **Open windows and their mode are not restored**: startup
+  opens the first workbook and the first graph. The saved positions
+  and sizes are reused for the contents, but maximization and
+  detachment are not a persisted layout plan.
 
-### Un détail qui a l'air d'un détail
+### A detail that looks like a detail
 
-`MISSING_TEXT_DISPLAY` vaut `\u{00A0}` — un espace insécable — pour afficher une
-valeur texte **absente**. Il occupe la cellule comme un blanc ordinaire (rien ne
-saute aux yeux) tout en restant, en mémoire, une chaîne différente de `""`, donc
-distincte d'une chaîne vide **présente**. Un caractère visible (`—`, `∅`, `?`)
-aurait été une réponse légitime à « qu'est-ce qu'un utilisateur pourrait vouloir
-taper ici ? » ; un espace insécable n'est accessible à la frappe sur aucun
-clavier usuel.
+`MISSING_TEXT_DISPLAY` is `\u{00A0}` — a non-breaking space — to display an
+**absent** text value. It fills the cell like an ordinary blank (nothing
+catches the eye) while remaining, in memory, a string different from `""`, so
+distinct from a **present** empty string. A visible character (`—`, `∅`, `?`)
+would have been a legitimate answer to "what might a user want to
+type here?"; a non-breaking space is not reachable by typing on any usual
+keyboard.
 
-Il ne vaut que pour les colonnes **texte**, où une chaîne vide présente existe
-et doit rester indiscernable à l'œil. Une colonne **mixte** porte
-l'information dans le type de sa cellule : `cell_text_in` la lit par
-`Column::cell` (et non `Column::get`, qui confondrait les deux cas) et affiche
-une cellule vide comme une cellule numérique vide, `""`.
+It holds only for **text** columns, where a present empty string exists
+and must stay indistinguishable to the eye. A **mixed** column carries
+the information in the type of its cell: `cell_text_in` reads it through
+`Column::cell` (and not `Column::get`, which would confuse the two cases) and displays
+an empty cell like an empty numeric cell, `""`.
 
-### Taper ce qui n'est pas un nombre
+### Typing what is not a number
 
-Une saisie non numérique dans une colonne numérique **élargit la colonne**
-plutôt que d'être refusée : `commit_cell` envoie `Command::SetCellsPromoting`,
-la colonne devient `ColumnType::Mixed`, la cellule porte le texte, les autres
-gardent leurs nombres ([`commandes-et-historique.md`](../commandes-et-historique.md)).
-Conversion et écriture tiennent dans une seule entrée d'historique : un
-`Ctrl+Z` ramène le type *et* la valeur d'avant.
+A non-numeric input in a numeric column **widens the column**
+rather than being refused: `commit_cell` sends `Command::SetCellsPromoting`,
+the column becomes `ColumnType::Mixed`, the cell holds the text, the others
+keep their numbers ([`commandes-et-historique.md`](../commandes-et-historique.md)).
+Conversion and write fit in a single history entry: one
+`Ctrl+Z` brings back the type *and* the previous value.
 
-Avant les colonnes à types mixtes, la saisie était refusée avec un message
-d'erreur, et noter un « n/a » sur une ligne obligeait à convertir toute la
-colonne en texte — donc à rendre tout le reste intraçable. Sur une colonne
-déjà mixte, plus rien n'est promu : chaque cellule décide pour elle-même, et
-un nombre tapé y reste un nombre.
-
+Before mixed-type columns, the input was refused with an error
+message, and noting an "n/a" on one row forced converting the whole
+column to text — thus making all the rest unplottable. On an already
+mixed column, nothing is promoted any more: each cell decides for itself, and
+a typed number stays a number there.

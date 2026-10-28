@@ -1,220 +1,214 @@
-# Application : projet neuf, dépôt de fichiers, assistant d'import
+# Application: new project, file drop, import wizard
 
-Suite du sommaire [`README.md`](README.md). Contenu : nouveau projet et graphique vide, glisser-déposer de fichiers et son backend, assistant d'import.
+Continuation of the index [`README.md`](README.md). Contents: new project and empty graph, file drag and drop and its backend, import wizard.
 
-### Nouveau projet et graphique vide (#73)
+### New project and empty graph (#73)
 
-**File › New › New Project** (« Fichier › Nouveau projet », Ctrl+N) remplace le
-projet courant dans la même fenêtre. La barre Fichier offre le même geste.
-Un projet contenant du travail non enregistré, y compris une saisie locale
-dans une fenêtre détachée ou un texte du graphique, demande « Discard Changes ·
-Cancel · Save » (#229 ; Entrée = Save, qui enregistre puis poursuit) ; Cancel,
-Échap ou la croix conservent le projet. File › Open…, File › Quit et la
-fermeture de la fenêtre posent la même question (`Action::OpenProject`,
-`Action::Quit`, `app/confirmations.rs`) ; un projet illisible ou un
-enregistrement raté s'annonce par un dialogue bloquant (S-M8, `AppState::alert`)
-et garde le projet et le chemin courants. Le repère est conservateur : toute
-révision depuis l'enregistrement, y compris une annulation, ou une géométrie
-modifiée demande confirmation. Une commande appliquée compte comme une
-modification **même pendant un recalcul long**, avant que l'instantané soit
-relu (`AppState::applied_revision`, #239) : fermer ou ouvrir pose la question.
-Il ne conserve aucun ancien arbre en mémoire.
-Un nouveau projet encore vide ne demande pas de confirmation.
+**File › New › New Project** ("File › New Project", Ctrl+N) replaces the
+current project in the same window. The File bar offers the same gesture.
+A project with unsaved work, including local input in a detached window or a
+graph text, asks "Discard Changes · Cancel · Save" (#229; Enter = Save, which
+saves then continues). Cancel, Esc or the close cross keep the project.
+File › Open…, File › Quit and closing the window ask the same question
+(`Action::OpenProject`, `Action::Quit`, `app/confirmations.rs`). An unreadable
+project or a failed save is announced by a blocking dialog (S-M8,
+`AppState::alert`) and keeps the current project and path. The marker is
+conservative: any revision since the save, including an undo, or a modified
+geometry asks for confirmation. A command that is applied counts as a
+modification **even during a long recalculation**, before the snapshot is read
+again (`AppState::applied_revision`, #239): closing or opening asks the
+question. It keeps no old tree in memory.
+A new project that is still empty asks for no confirmation.
 
-Si l'acteur de session meurt (panic, #310), `AppState::check_session` (appelé
-à chaque image par `poll_recalc` et par `refresh`) le détecte une seule fois :
-l'indicateur de recalcul est abandonné, une copie de secours du dernier
-instantané est écrite dans `recovery/` du dossier de données (jamais sur le
-`.stf` de l'utilisateur, et elle peut précéder sa dernière commande), et un
-dialogue bloquant (`AlertKind::SessionLost`) ne laisse que Close, qui ferme
-l'application. Quit ne demande alors rien.
+If the session actor dies (panic, #310), `AppState::check_session` (called at
+each frame by `poll_recalc` and by `refresh`) detects it only once: the
+recalculation indicator is dropped, a backup copy of the last snapshot is
+written in `recovery/` of the data folder (never over the user's `.stf`, and it
+may predate the user's last command), and a blocking dialog
+(`AlertKind::SessionLost`) leaves only Close, which closes the application.
+Quit then asks nothing.
 
-**Sauvegarde automatique et récupération (#317)** — `state/autosave.rs`,
-`recovery.rs`. Activée par défaut, toutes les 5 minutes (préférences
-`autosave`, `autosave_minutes`, bornes 1 à 60 ; File › Preferences › General,
-section Files). `AppState::poll_autosave(now)`, appelé par `logic()` de la
-fenêtre racine, écrit par `SessionHandle::save` le projet dans **un seul
-fichier par processus** de `recovery/` (`<nom|Untitled>-<pid>.stf`, écrasé,
-avec sa fiche `.json` et son verrou `.lock`), seulement si le projet a changé
-depuis la dernière copie, le dernier enregistrement ou le démarrage. Ni
-historique, ni `saved_revision`, ni chemin, ni titre « modifié » ne bougent, et
-le `.stf` de l'utilisateur n'est jamais écrit. L'échéance saute (et
-recommence 5 s plus tard) pendant une macro, un script, un import ou un
-recalcul ; un échec d'écriture dit un seul avertissement. La copie est
-supprimée à l'enregistrement, à la fermeture propre et pour New, Open d'un
-autre projet et Discard ; une session perdue la garde. Au démarrage (`main`,
-fenêtre racine), `scan_recovery` liste les copies sans verrou tenu et plus
-récentes que leur `.stf` (copies de #310 comprises) dans la fenêtre de
-récupération (Open, Ignore, Delete avec confirmation ; `docs/fenetres.md`) :
-Open charge dans la fenêtre courante (derrière « Enregistrer ? » s'il y a du
-travail), sous le chemin d'origine (vide pour Untitled), comme travail non
-enregistré, et la liste reste ouverte ; Ignore laisse la copie, reproposée au
-démarrage suivant.
+**Autosave and recovery (#317)** — `state/autosave.rs`, `recovery.rs`. On by
+default, every 5 minutes (preferences `autosave`, `autosave_minutes`, bounds 1
+to 60; File › Preferences › General, Files section).
+`AppState::poll_autosave(now)`, called by `logic()` of the root window, writes
+the project through `SessionHandle::save` into **a single file per process** of
+`recovery/` (`<nom|Untitled>-<pid>.stf`, overwritten, with its `.json` card
+and its `.lock` lock), only if the project has changed since the last copy, the
+last save or the start. Neither the history, nor `saved_revision`, nor the
+path, nor the "modified" title moves, and the user's `.stf` is never written.
+The deadline is skipped (and starts again 5 s later) during a macro, a script,
+an import or a recalculation; a write failure gives a single warning. The copy
+is deleted on save, on clean close, and for New, Open of another project and
+Discard; a lost session keeps it. At startup (`main`, root window),
+`scan_recovery` lists the copies with no held lock and newer than their `.stf`
+(including the copies from #310) in the recovery window (Open, Ignore, Delete
+with confirmation; `docs/fenetres.md`). Open loads into the current window
+(behind "Save?" if there is work), under the original path (empty for
+Untitled), as unsaved work, and the list stays open. Ignore leaves the copy,
+offered again at the next startup.
 
-Le remplacement passe par `SessionHandle::new_project`, vide l'historique et
-les géométries et change l'époque pour invalider les anciennes références
-Python. Les fenêtres de contenu, caches et sélections du projet précédent
-sont oubliés, et ses fenêtres détachées se ferment. La visibilité des barres
-et la langue sont conservées. Le geste est grisé pendant un script, un import
-en cours ou une macro ouverte. Le premier **Save** (« Enregistrer ») demande
-une destination, puis les suivants utilisent ce fichier.
+The replacement goes through `SessionHandle::new_project`, empties the history
+and the geometries and changes the epoch to invalidate the old Python
+references. The content windows, caches and selections of the previous project
+are forgotten, and its detached windows close. The visibility of the bars and
+the language are kept. The gesture is disabled during a script, an import in
+progress or an open macro. The first **Save** ("Save") asks for a
+destination, then the following ones use that file.
 
-**File › New › Add Graph** (« Fichier › Ajouter un graphique ») et la barre Fichier
-créent un graphique vide à la racine : une zone de tracé, aucune série ni titre.
-Sa fenêtre s'ouvre au premier plan. Il passe par la commande `AddGraph` existante :
-Annuler le retire, Rétablir retrouve la même identité, et le `.stf` le conserve.
-Ce geste n'a pas de raccourci supplémentaire ; il reste accessible au menu.
+**File › New › Add Graph** ("File › Add Graph") and the File bar
+create an empty graph at the root: one plot area, no series or title.
+Its window opens in the foreground. It goes through the existing `AddGraph`
+command: Undo removes it, Redo brings back the same identity, and the `.stf`
+keeps it. This gesture has no extra shortcut; it stays reachable from the menu.
 
-### Glisser-déposer de fichiers
+### File drag and drop
 
-Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le survol se voit par le trait de dépôt **unique** de l'application, `theme::drop_stroke` (vert de l'accent, S-X5), le même que celui du graphe survolé par des colonnes ou des lignes. Le
-classeur flottant sous le curseur réclame le dépôt en se peignant
-(`app::file_drop::claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
-classeur est créé. Les `.stf` ne sont jamais importés : `AppState` les met en
-file (`take_projects_to_open`) et `app.rs` lance un second processus
+Dropping files on the main window emits `Action::DropFiles`. The hover shows
+through the application's **single** drop stroke, `theme::drop_stroke` (accent
+green, S-X5), the same one as the graph hovered by columns or rows. The
+workbook floating under the cursor claims the drop by painting itself
+(`app::file_drop::claim_file_drop`): it receives one sheet per file, otherwise
+a new workbook is created. `.stf` files are never imported: `AppState` queues
+them (`take_projects_to_open`) and `app.rs` launches a second process
 (`file_drop::open_project_in_new_window`)
-`stokesforge-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
-sinon le dernier modèle utilisé dans cette session, sinon la recette permissive.
-Lecture, choix du modèle et analyse se font sur le fil de fond de l'import de
-menu (#266) : `drop_files` ne garde sur le fil de l'interface que les refus et
-la mise en file des `.stf`, puis passe par `start_import`, entrée unique de
-l'import (indicateur et Stop comme File › Import ; un dépôt pendant un import
-en cours est refusé). `poll_import` applique le résultat — une
-seule entrée « Importer » — et pose le message des modèles utilisés ; un fichier qui ne donne aucune valeur numérique
-ouvre à la place la fenêtre d'import pré-remplie, au retour du fil. Décision pure :
-`state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
-si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
-File › Import › Reopen Last
-Import… reprend ses fichiers dans l'assistant.
+`stokesforge-app <chemin>`. Each file uses the template that recognizes it,
+otherwise the last template used in this session, otherwise the permissive
+recipe. Reading, template choice and analysis happen on the background thread
+of the menu import (#266): `drop_files` keeps on the interface thread only the
+refusals and the queuing of `.stf` files, then goes through `start_import`, the
+single entry point of import (indicator and Stop as for File › Import; a drop
+during an import in progress is refused). `poll_import` applies the result — a
+single "Import" entry — and posts the message of the templates used; a file
+that gives no numeric value opens the pre-filled import window instead, when
+the thread returns. Pure decision: `state::file_drop_plan`. The drop always
+creates new sheets, even if the recipe of the last import replaced or merged a
+sheet. The File › Import › Reopen Last
+Import… link takes its files back into the wizard.
 
-Le même geste est câblé dans les fenêtres détachées : sur un classeur,
-la destination reste ce classeur ; sur un graphe, une note, une matrice ou le
-Project Manager, un nouveau classeur. Les dépôts sont isolés par viewport et
-leurs actions reviennent à la session principale. Un dépôt est refusé tant
-que les propriétés du graphe sont ouvertes, pour garder leur macro
-d'historique indépendante de l'import ; si elles s'ouvrent pendant que le fil
-lit, `poll_import` garde le résultat et l'applique après leur fermeture. Les événements de dépôt sont
-testés sans fenêtre. Le dépôt réel depuis Fichiers en Wayland natif est
-confirmé par l'utilisateur le 2026-10-02 ; les fenêtres OS détachées et
-les autres cas du protocole ci-dessous restent à valider manuellement.
+The same gesture is wired in the detached windows: on a workbook, the
+destination stays that workbook; on a graph, a note, a matrix or the
+Project Manager, a new workbook. Drops are isolated per viewport and their
+actions go back to the main session. A drop is refused as long as the graph
+properties are open, to keep their history macro independent of the import; if
+they open while the thread is reading, `poll_import` keeps the result and
+applies it after they close. The drop events are tested without a window. The
+real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
+the detached OS windows and the other cases of the protocol below remain to be
+validated manually.
 
-### Assistant d'import
+### Import wizard
 
-L'étape Format regroupe ses réglages sous cinq titres (#170) : séparateur,
-nombres et dates, lignes de commentaire, blocs et encodage, lignes ignorées.
-Ces titres utilisent la même brique de section que les autres formulaires ;
-ils ne changent ni la recette ni l'ordre des contrôles.
+The Format step groups its settings under five headings (#170): delimiter,
+numbers and dates, comment lines, blocks and encoding, ignored lines.
+These headings use the same section building block as the other forms; they
+change neither the recipe nor the order of the controls.
 
-« Importer… » ouvre un assistant en six étapes façon Origin (`import_window`,
-`ImportStep` ; module `src/app/import_wizard.rs`, #118, seul point d'entrée
-appelé par `app.rs`), **dialogue modal de la brique commune** (`modal_dialog_with` :
-même cadre, même barre de titre, même blocage du reste de l'interface que les
-propriétés du graphe ; *Finish* = bouton par défaut, *Back* et *Next* dans le
-pied de page) : fichiers et modèle, format, en-tête et fin des données,
-colonnes, métadonnées, destination. Tous ses textes passent par `tr!` (clés
-`import-*` du catalogue `en`, rédigées selon `docs/textes-interface.md` § 2.4 :
-*Delimiter*, *Template*, *Subheader*…) ; les noms de modèles et le contenu du
-fichier restent des données, jamais traduites. L'aperçu du fichier reste à droite à
-toutes les étapes ; un clic droit sur une ligne règle l'import à cet endroit
-(`AppState::import_line_action`). *Finish* importe dès l'étape 1 avec le
-modèle tel quel. Les octets des fichiers sont lus une fois (cache par chemin,
-`ImportState::bytes`) ; chaque fichier montre avant l'import ses lignes lues ou
-son erreur. L'en-tête est un seul réglage (`ImportRecipe::unify_header` ramène
-`HeaderSkip::Lines` au découpage structuré) ; les rôles de colonne choisis à
-l'étape 4 vivent dans la recette (`column_roles`). La section *Column names*
-est grisée et inactive quand *Names in first line* est coché : les noms
-viennent alors de cette ligne. Sinon, les choix *Filename* et *Header key*
-sont actifs ; leurs valeurs sont conservées pendant le grisage. Un dépôt de fichiers pendant
-que l'assistant est ouvert les ajoute à sa liste. *Finish* lance
-`Action::StartImport` : l'analyse des fichiers tourne sur un fil de fond (avec
-progression « Import en cours… k/n », `AppState::poll_import` appelé à chaque
-image) et les feuilles se créent à la fin, en une seule entrée « Importer ».
-Raccourci : **Ctrl+"** (`SHORTCUT_IMPORT` : touche du 3 sans Maj sur AZERTY,
-`SHORTCUT_IMPORT_QWERTY` : Ctrl+Maj+' sur QWERTY). Fichiers récents et dossier
-mémorisé : `stokesforge_import::RecentFiles` (`import_recent.json`, à côté des
-recettes). « File › Import › Reopen Last Import… » (`Action::ReopenLastImport`)
-rouvre l'assistant sur les fichiers et le modèle du dernier import — en
-l'annulant d'abord s'il est encore au sommet de l'historique, jamais un travail
-postérieur.
+"Import…" opens a six-step wizard in the Origin style (`import_window`,
+`ImportStep`; module `src/app/import_wizard.rs`, #118, the only entry point
+called by `app.rs`), a **modal dialog of the common building block**
+(`modal_dialog_with`: same frame, same title bar, same blocking of the rest of
+the interface as the graph properties; *Finish* = default button, *Back* and
+*Next* in the footer): files and template, format, header and end of data,
+columns, metadata, destination. All its texts go through `tr!` (`import-*` keys
+of the `en` catalog, written according to `docs/textes-interface.md` § 2.4:
+*Delimiter*, *Template*, *Subheader*…); template names and file content stay
+data, never translated. The file preview stays on the right at every step; a
+right-click on a line sets the import at that place
+(`AppState::import_line_action`). *Finish* imports from step 1 with the
+template as is. The file bytes are read once (cache by path,
+`ImportState::bytes`); each file shows before the import its lines read or its
+error. The header is a single setting (`ImportRecipe::unify_header` brings
+`HeaderSkip::Lines` back to the structured split); the column roles chosen at
+step 4 live in the recipe (`column_roles`). The *Column names* section is
+disabled and inactive when *Names in first line* is checked: the names then come
+from that line. Otherwise, the *Filename* and *Header key* choices are active;
+their values are kept while disabled. A file drop while the wizard is open adds
+them to its list. *Finish* launches `Action::StartImport`: the analysis of the
+files runs on a background thread (with progress "Importing… k of n",
+`AppState::poll_import` called at each frame) and the sheets are created at the
+end, in a single "Import" entry.
+Shortcut: **Ctrl+"** (`SHORTCUT_IMPORT`: the key of the 3 without Shift on
+AZERTY, `SHORTCUT_IMPORT_QWERTY`: Ctrl+Shift+' on QWERTY). Recent files and
+remembered folder: `stokesforge_import::RecentFiles` (`import_recent.json`, next
+to the recipes). "File › Import › Reopen Last Import…" (`Action::ReopenLastImport`)
+reopens the wizard on the files and template of the last import — undoing it
+first if it is still at the top of the history, never later work.
 
-Le témoin « modifié » du modèle compare les réglages au modèle chargé ou au
-dernier enregistrement réussi (`AppState::import_recipe_modified`). Enregistrer
-le modèle retire ce témoin ; un échec d'écriture conserve la référence
-précédente et signale l'erreur.
+The "modified" marker of the template compares the settings with the loaded
+template or the last successful save (`AppState::import_recipe_modified`).
+Saving the template removes this marker; a write failure keeps the previous
+reference and reports the error.
 
-**Où vont les colonnes.** Dans le classeur actif, le mode d'import
-(`ImportMode`) est : nouvelle feuille, remplacer la feuille active, ajouter des
-colonnes, ou ajouter des lignes (la colonne *j* du fichier prolonge la colonne
-*j* de la feuille). Plusieurs fichiers se répartissent selon `FilesLayout` : une
-feuille par fichier, une seule feuille côte à côte (X Y X Y…), ou une seule
-feuille avec le X du premier fichier partagé. Le plan (`plan_import`) est
-calculé puis exécuté dans la même macro « Importer ». Par défaut, la première
-colonne de chaque fichier reçoit le rôle X et les suivantes le rôle Y ; ces
-rôles sont conservés lors du rétablissement de l'import après annulation.
+**Where the columns go.** In the active workbook, the import mode
+(`ImportMode`) is: new sheet, replace the active sheet, add columns, or add rows
+(column *j* of the file extends column *j* of the sheet). Several files are
+spread according to `FilesLayout`: one sheet per file, a single sheet side by
+side (X Y X Y…), or a single sheet with the X of the first file shared. The plan
+(`plan_import`) is computed then executed in the same "Import" macro. By
+default, the first column of each file gets the X role and the following ones
+the Y role; these roles are kept when the import is redone after an undo.
 
-**Fin des données.** Par défaut aucune coupure (les données vont jusqu'à la fin
-du fichier) : la coupure automatique perdait sans avertissement les lignes qui
-suivaient une mesure manquante (« n/a ») en X. Elle reste un choix de l'assistant,
-et les modèles Jasco la demandent. Elle s'arme au premier X numérique,
-puis coupe au premier X non numérique (ligne vide comprise). Le texte et les
-lignes vides qui précèdent ce premier nombre sont conservés ; un texte dans Y
-ne coupe pas. Le préfixe `skip_chars` est retiré avant ce test ; avec le
-séparateur espaces, X est le premier jeton non vide. L'étape « En-tête et fin
-des données » propose aussi « Aucune coupure », première ligne vide, marqueur,
-N lignes après l'en-tête ou N lignes avant la fin. Le clic droit sur l'aperçu
-permet d'annuler la coupure automatique ; l'aperçu et l'import utilisent le
-même découpage (`stokesforge_import::layout`, `data_end`).
+**End of data.** By default there is no cut (the data go to the end of the
+file): the automatic cut silently lost the lines that followed a missing
+measurement ("n/a") in X. It remains a choice of the wizard, and the Jasco
+templates ask for it. It arms at the first numeric X, then cuts at the first
+non-numeric X (empty line included). The text and empty lines that precede that
+first number are kept; text in Y does not cut. The `skip_chars` prefix is
+removed before this test; with the Whitespace delimiter, X is the first non-empty
+token. The "Header and Data End" step also offers "No cut",
+first empty line, marker, N lines after the header or N lines before the end.
+The right-click on the preview allows cancelling the automatic cut; the preview
+and the import use the same split (`stokesforge_import::layout`, `data_end`).
 
-**Format des nombres, dates et encodage (#314).** Un séparateur « espaces »
-(choisi, ou résolu depuis Auto) avec l'espace pour milliers est refusé, à
-l'aperçu (message dans la fenêtre) comme à l'import : `1 234,5` serait coupé en
-deux colonnes ; `;` et tabulation acceptent ces milliers. Le réglage « Ordre des
-dates » (jour d'abord par défaut, ou mois d'abord) règle `03/04/2026` ; l'ISO ne
-change pas. En encodage Auto, un fichier presque UTF-8 est décodé en mixte : les
-séquences UTF-8 valides sont gardées, chaque octet invalide est lu en
-Windows-1252 ; un fichier Windows-1252 dont deux octets forment par hasard une
-séquence UTF-8 (`Ã©`) est lu `é` — forcer l'encodage dans ce cas.
+**Number format, dates and encoding (#314).** A "Whitespace" delimiter (chosen, or
+resolved from Auto) with the space as thousands separator is refused, in the
+preview (message in the window) as in the import: `1 234,5` would be split into
+two columns; `;` and tab accept these thousands. The "Date order" setting
+(day first by default, or month first) settles `03/04/2026`; ISO does not
+change. With Auto encoding, an almost-UTF-8 file is decoded in a mixed way:
+valid UTF-8 sequences are kept, each invalid byte is read as Windows-1252; a
+Windows-1252 file in which two bytes happen to form a UTF-8 sequence (`Ã©`) is
+read as `é` — force the encoding in this case.
 
-**Plusieurs blocs.** `BlockSplit` découpe un fichier qui enchaîne plusieurs
-spectres (à chaque ligne commençant par un texte comme `TITLE`, ou aux lignes
-vides) : `parse_blocks` rend un tableau par bloc, chacun avec son en-tête, et
-l'import crée une feuille par bloc (`fichier_1`, `fichier_2`…) ou les répartit
-selon `FilesLayout`. L'aperçu montre le premier bloc et le nombre de blocs.
+**Several blocks.** `BlockSplit` splits a file that chains several spectra (at
+each line starting with a text such as `TITLE`, or at empty lines):
+`parse_blocks` returns one table per block, each with its header, and the import
+creates one sheet per block (`fichier_1`, `fichier_2`…) or spreads them
+according to `FilesLayout`. The preview shows the first block and the number of
+blocks.
 
-**Actualiser.** Chaque colonne importée garde sa source
-(`ColumnMeta::import_source` : chemin, recette en JSON dans le modèle, index de colonne ;
-dans le fichier `.stf`, la recette a ses propres types, `docs/persistance.md`).
-« File › Import › Refresh from Source » (`Action::RefreshFromSource`)
-relit les fichiers et réécrit les valeurs **en place** : les colonnes gardent
-leur identité, les graphes restent valides. Les lignes de la feuille suivent le
-plus long des nouveaux contenus ; elles ne raccourcissent que si toutes les
-colonnes sont actualisées.
+**Refresh.** Each imported column keeps its source
+(`ColumnMeta::import_source`: path, recipe as JSON in the template, column
+index; in the `.stf` file, the recipe has its own types, `docs/persistance.md`).
+"File › Import › Refresh from Source" (`Action::RefreshFromSource`)
+rereads the files and rewrites the values **in place**: the columns keep their
+identity, the graphs stay valid. The rows of the sheet follow the longest of the
+new contents; they shrink only if all the columns are refreshed.
 
-### Glisser-déposer : le backend de fenêtre
+### Drag and drop: the window backend
 
-Sous Linux, winit choisit désormais **Wayland natif par défaut** lorsqu'il
-est disponible (#72). `STOKESFORGE_X11=1` force X11/XWayland en secours.
-`STOKESFORGE_WAYLAND=1` n'est plus nécessaire. eframe/egui-winit restent en
-0.36.2 ; les patches Cargo sélectionnent winit 0.30.13 et smithay-clipboard
-0.7.3 dans `vendor/` en attendant le support amont stable.
+On Linux, winit now chooses **native Wayland by default** when it is available
+(#72). `STOKESFORGE_X11=1` forces X11/XWayland as a fallback.
+`STOKESFORGE_WAYLAND=1` is no longer needed. eframe/egui-winit stay at
+0.36.2; the Cargo patches select winit 0.30.13 and smithay-clipboard
+0.7.3 in `vendor/` while waiting for stable upstream support.
 
-Le module transitoire reçoit `text/uri-list` sur **le même récepteur que le
-presse-papiers**. Ce worker est partagé par tous les viewports : créer un
-second récepteur vole le dépôt au premier sur Mutter, comme l'a montré le
-premier prototype. Un canal faible remet à winit les chemins et la position,
-sans objet Wayland ni nouveau fil. Il émet les événements habituels pour chaque
-fenêtre native, donc le chemin de dépôt de l'application et des fenêtres
-détachées reste commun. Le pipe est lu sans attente bloquante, avec une liste
-d'URI limitée à 1 Mio et un délai de 10 secondes. La position au lâcher reste
-celle utilisée pour choisir le classeur. Voir
-[`vendor/winit/STOKESFORGE.md`](../../vendor/winit/STOKESFORGE.md) pour le choix
-technique, les alternatives, le protocole manuel GNOME/KDE/wlroots et le
-retrait lors du passage à winit 0.31.
+The transitional module receives `text/uri-list` on **the same receiver as the
+clipboard**. This worker is shared by all viewports: creating a second receiver
+steals the drop from the first on Mutter, as the first prototype showed. A weak
+channel hands winit the paths and the position, with no Wayland object and no
+new thread. It emits the usual events for each native window, so the drop path
+of the application and of the detached windows stays common. The pipe is read
+without blocking wait, with a URI list limited to 1 MiB and a timeout of 10
+seconds. The position at release stays the one used to choose the workbook. See
+[`vendor/winit/STOKESFORGE.md`](../../vendor/winit/STOKESFORGE.md) for the
+technical choice, the alternatives, the manual GNOME/KDE/wlroots protocol and
+the removal on moving to winit 0.31.
 
-Le défaut du premier prototype a été reproduit avec un dépôt réel depuis
-Fichiers sur GNOME. Après correction, l'utilisateur confirme le fonctionnement
-du dépôt en Wayland natif le 2026-10-02.
-**Les fenêtres détachées et KDE/wlroots restent à valider manuellement** ;
-les tests automatiques couvrent le parseur, le canal, sa durée de vie et la
-décision d'import, pas le compositeur.
-
+The fault of the first prototype was reproduced with a real drop from
+Files on GNOME. After the fix, the user confirms that the drop works on native
+Wayland on 2026-10-02.
+**The detached windows and KDE/wlroots remain to be validated manually**;
+the automatic tests cover the parser, the channel, its lifetime and the import
+decision, not the compositor.

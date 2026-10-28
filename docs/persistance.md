@@ -1,80 +1,78 @@
-# Persistance — le format `.stf`
+# Persistence — the `.stf` format
 
-## Frontière figée
+## Frozen boundary
 
-Deux fonctions, un sens chacune, un `Project` complet en entrée/sortie et rien
-d'autre :
+Two functions, one direction each, a whole `Project` in and out and nothing
+else:
 
 ```rust
 save(project: &Project, path: &Path) -> PersistenceResult<()>;
 load(path: &Path)                    -> PersistenceResult<Project>;
 ```
 
-Aucun appelant ne connaît le format sur disque. S'il devait être remplacé un
-jour (Zarr avait été envisagé), rien au-dessus n'aurait à changer ; depuis la V1
-le format lui-même est figé (invariant 12, règle de version plus bas). Le chargement est
-**intégral** : tout le projet tient en mémoire, il n'y a pas de chargement
-partiel ni différé.
+No caller knows the on-disk format. If it ever had to be replaced (Zarr was
+considered), nothing above would have to change; since V1 the format itself is
+frozen (invariant 12, version rule below). Loading is **complete**: the whole
+project fits in memory, and there is no partial or deferred loading.
 
-La session utilise les variantes `save_with_geometries` et
-`load_with_geometries`, qui transportent aussi une table
-`NodeId -> WindowGeometry` (position et taille en points logiques). Ce bloc
-`window_geometries` appartient au même fichier `.stf`, mais reste
-séparé de l'arbre annulable. Un ancien fichier sans ce bloc se charge avec
-une table vide. L'application transmet les changements de géométrie à
-l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au
-démarrage avec un chemin de projet.
+The session uses the variants `save_with_geometries` and
+`load_with_geometries`, which also carry a `NodeId -> WindowGeometry` table
+(position and size in logical points). This `window_geometries` block belongs
+to the same `.stf` file, but stays separate from the undoable tree. An old file
+without this block loads with an empty table. The application passes geometry
+changes to the actor and reloads this table both from the File menu and at
+startup with a project path.
 
-Largeur des colonnes (#325) : la même fonction transporte une seconde table
-`NodeId -> f32` (points logiques), `FileBody::column_widths`, dans la struct
-`ViewTables { window_geometries, column_widths }` que rend `load_with_report` (et
-que prend `save_with_geometries`). Même statut que les géométries : hors de
-l'arbre annulable, `#[serde(default)]` (ancien fichier : table vide, les colonnes
-prennent la largeur par défaut), clés bornées par `MAX_NODE_ID`, placée avant
-`save_counter`. À la lecture, une clé sans nœud et une valeur qui n'est pas un
-réel fini strictement positif (NaN, ∞, ≤ 0) sont écartées **une à une**
-(invariant 10). L'acteur ne purge pas sa table à la mutation (Ctrl+Z doit
-retrouver la largeur) : c'est **l'écriture** qui n'émet pas la clé d'une colonne
-qui n'est plus dans l'arbre.
+Column width (#325): the same function carries a second table
+`NodeId -> f32` (logical points), `FileBody::column_widths`, in the struct
+`ViewTables { window_geometries, column_widths }` that `load_with_report` returns (and
+that `save_with_geometries` takes). Same status as the geometries: outside the
+undoable tree, `#[serde(default)]` (old file: empty table, the columns
+take the default width), keys bounded by `MAX_NODE_ID`, placed before
+`save_counter`. On reading, a key with no node and a value that is not
+a finite, strictly positive real number (NaN, ∞, ≤ 0) are dropped **one by one**
+(invariant 10). The actor does not purge its table on mutation (Ctrl+Z must
+get the width back): it is **writing** that does not emit the key of a column
+that is no longer in the tree.
 
-Chaque `WindowGeometry` porte aussi, en option, un `WindowView` (issue #16) :
-mode `Open`/`Maximized`/`Closed`, repli, rang d'empilement parmi les fenêtres
-ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie
-**flottante** ; le détachement n'est jamais enregistré (une fenêtre détachée
-est écrite `Open`) et la position d'une fenêtre OS détachée non plus. `view`
-absent = disposition initiale par défaut ; un mode inconnu se lit `Closed`.
+Each `WindowGeometry` also optionally carries a `WindowView` (issue #16):
+mode `Open`/`Maximized`/`Closed`, collapsed state, stacking rank among the open
+windows. `x`/`y`/`width`/`height` always stay the **floating** geometry there;
+detaching is never saved (a detached window is written `Open`), and neither is
+the position of a detached OS window. Absent `view` = default initial layout; an
+unknown mode reads as `Closed`.
 
-Les colonnes portent aussi `import_source` (issue #7, S2 de #323) : un
-`ImportSourceRecord` à champs nommés — chemin du fichier, recette, index de
-colonne, rang de bloc —, de quoi actualiser la colonne après réouverture. La
-recette a ses propres types miroirs (`recipe_record.rs`, un par type de
-`stokesforge_import::recipe`, `match` exhaustifs sans `_`) : le format ne
-dépend pas de la forme interne de la recette, et la dépendance
-`persistence → import` est déclarée dans la liste blanche. Le modèle garde la
-recette en JSON (`ImportSource::recipe_json`) : la conversion le relit à
-l'écriture et le réécrit à la lecture. Une recette illisible (colonne
-fabriquée à la main) s'écrit **sans source** : l'enregistrement ne s'arrête pas
-là-dessus. Absent pour une colonne saisie à la main.
+Columns also carry `import_source` (issue #7, S2 of #323): an
+`ImportSourceRecord` with named fields — file path, recipe, column index,
+block rank —, enough to refresh the column after reopening. The recipe has its
+own mirror types (`recipe_record.rs`, one per type of
+`stokesforge_import::recipe`, exhaustive `match` without `_`): the format does
+not depend on the internal shape of the recipe, and the dependency
+`persistence → import` is declared in the allow list. The model keeps the
+recipe as JSON (`ImportSource::recipe_json`): the conversion reads it back on
+writing and rewrites it on reading. An unreadable recipe (column built by
+hand) is written **without a source**: saving does not stop on it. Absent for
+a column typed in by hand.
 
-Les colonnes portent aussi `file_metadata` (issue #5) : les lignes clé / valeur
-de l'en-tête du fichier importé (et du pied de page si la recette le demande),
-dans l'ordre, sections comprises. Absent = liste vide.
+Columns also carry `file_metadata` (issue #5): the key / value lines of the
+header of the imported file (and of the footer if the recipe asks for it), in
+order, sections included. Absent = empty list.
 
-## Le format ne s'écrit pas dans le modèle
+## The format is not written into the model
 
-`stokesforge-core` ne dérive aucun `Serialize`/`Deserialize`. Ce crate définit ses
-**propres structures de transport** (`schema.rs`, privées au crate) et écrit à
-la main les conversions vers/depuis le modèle (`convert.rs`).
+`stokesforge-core` derives no `Serialize`/`Deserialize`. This crate defines its
+**own transport structs** (`schema.rs`, private to the crate) and writes by hand
+the conversions to/from the model (`convert.rs`).
 
-Le schéma sur disque est donc un objet explicite, versionné indépendamment des
-types du cœur : renommer un champ du modèle sans casser les fichiers déjà
-écrits ne coûtera qu'une fonction de conversion à ajuster.
+The on-disk schema is therefore an explicit object, versioned independently of
+the core types: renaming a model field without breaking the files already
+written will cost only one conversion function to adjust.
 
-Conséquence directe pour qui ajoute un champ au modèle : **il n'apparaîtra pas
-dans le fichier** tant que `schema.rs` et `convert.rs` n'auront pas été
-touchés. Ce n'est pas un oubli du format, c'est son point.
+Direct consequence for whoever adds a field to the model: **it will not appear
+in the file** until `schema.rs` and `convert.rs` have been touched. This is not
+an oversight of the format, it is its point.
 
-## Disposition du fichier
+## File layout
 
 ```text
 octets 0..4   signature "STKF"
@@ -82,520 +80,518 @@ octets 4..8   FORMAT_VERSION, u32 little-endian
 octets 8..    corps MessagePack (FileBody), rmp_serde::to_vec_named
 ```
 
-Le corps liste les nœuds en **parcours préfixe depuis la racine**
-(`Tree::walk_all`) : deux sauvegardes successives du même projet produisent des
-fichiers identiques **octet à octet**.
+The body lists the nodes in **pre-order from the root**
+(`Tree::walk_all`): two successive saves of the same project produce
+**byte-for-byte** identical files.
 
-Les buffers de colonnes numériques échappent à l'encodage MessagePack
-générique : ils sont écrits en octets bruts little-endian via `serde_bytes`
-(8 octets par `f64`), pas comme un tableau d'éléments. Un million de points
-pèse 8 Mo sur disque, pas un multiple gonflé par l'encodage par élément.
+The numeric column buffers escape the generic MessagePack encoding: they are
+written as raw little-endian bytes through `serde_bytes` (8 bytes per `f64`),
+not as an array of elements. A million points weigh 8 MB on disk, not an
+inflated multiple due to per-element encoding.
 
-## Cinq propriétés tenues dès la version 1
+## Five properties held from version 1
 
-Les rajouter après coup coûterait une migration.
+Adding them afterwards would cost a migration.
 
-1. **Écriture atomique.** `save` écrit dans un fichier temporaire du même
-   répertoire que la destination, puis le renomme sur la cible. Un lecteur ne
-   voit jamais un fichier à moitié écrit ; une écriture qui échoue ne laisse
-   aucune trace sur la destination. Une cible qui porte la signature `STKF`
-   mais ne se lit pas (copie interrompue, corps indécodable, ou corps que
-   `load` refuserait : modèle incohérent) n'est **pas** écrasée :
-   `UnreadableTarget`, l'utilisateur déplace le fichier ou choisit un autre
-   nom. La reconstruction complète n'est faite que pour une cible que le
-   processus n'a jamais chargée ni écrite. Une cible étrangère ou vide reste
-   remplaçable.
-2. **Numéro de version en premier**, lu et vérifié **avant** de toucher au
-   corps (`version.rs` : `read_header`, puis `decode_body(version, octets)`,
-   un `match` par version, partagé par `load` et par la lecture du compteur
-   de `save`). Fichier plus récent → `UnsupportedVersion` (S1 : pas de lecture
-   dégradée, le message dit de mettre StokesForge à jour, clé
-   `error-file-too-new`) ; fichier qui n'est pas un StokesForge →
-   `NotAStokesForgeFile`. Jamais de tentative de décoder un corps incompris.
-3. **Valeur manquante ≠ chaîne vide.** `None` contre `Some("")` pour le texte ;
-   les `NaN` numériques sont écrits et relus **bit à bit**
-   (`to_le_bytes`/`from_le_bytes` conservent le motif binaire exact).
-4. **Compteur de `NodeId` persisté.** `next_id_hint` est le **prochain**
-   identifiant à attribuer, pas le plus grand attribué. Au chargement, le
-   compteur repart à `max(valeur persistée, plus grand id lu + 1)` : un fichier
-   écrit par une version boguée ne peut pas le faire reculer.
-5. **Champs inconnus ignorés à la lecture.** `rmp_serde::to_vec_named`
-   sérialise chaque structure comme une **map nommée**, ce qui rend le fichier
-   auto-descriptif. Tout champ ajouté après la version 1 porte
-   `#[serde(default)]`, pour qu'un fichier plus ancien qui ne le porte pas
-   reste lisible.
+1. **Atomic write.** `save` writes to a temporary file in the same directory as
+   the destination, then renames it onto the target. A reader never sees a
+   half-written file; a write that fails leaves no trace on the destination. A
+   target that carries the `STKF` signature but cannot be read (interrupted
+   copy, undecodable body, or a body that `load` would refuse: inconsistent
+   model) is **not** overwritten: `UnreadableTarget`, and the user moves the
+   file or chooses another name. The full rebuild is done only for a target
+   that the process has never loaded or written. A foreign or empty target
+   stays replaceable.
+2. **Version number first**, read and checked **before** touching the body
+   (`version.rs`: `read_header`, then `decode_body(version, octets)`, one
+   `match` per version, shared by `load` and by the counter reading of `save`).
+   Newer file → `UnsupportedVersion` (S1: no degraded reading, the message says
+   to update StokesForge, key `error-file-too-new`); file that is not a
+   StokesForge file → `NotAStokesForgeFile`. Never an attempt to decode a body
+   that is not understood.
+3. **Missing value ≠ empty string.** `None` against `Some("")` for text;
+   numeric `NaN`s are written and read back **bit for bit**
+   (`to_le_bytes`/`from_le_bytes` keep the exact bit pattern).
+4. **Persisted `NodeId` counter.** `next_id_hint` is the **next** identifier to
+   allocate, not the largest one allocated. On loading, the counter restarts at
+   `max(valeur persistée, plus grand id lu + 1)`: a file written by a buggy
+   version cannot make it go backwards.
+5. **Unknown fields ignored on reading.** `rmp_serde::to_vec_named`
+   serializes each struct as a **named map**, which makes the file
+   self-describing. Every field added after version 1 carries
+   `#[serde(default)]`, so that an older file that does not carry it
+   stays readable.
 
-Le choix de MessagePack découle directement de la propriété 5 : `bincode`
-encode les structures en tuples **positionnels** — ajouter un champ y décale
-tout ce qui suit, en retirer un est tout aussi cassant.
+The choice of MessagePack follows directly from property 5: `bincode`
+encodes structs as **positional** tuples — adding a field shifts
+everything after it, and removing one is just as breaking.
 
-## L'historique n'est pas dans le fichier
+## The history is not in the file
 
-Le `.stf` ne porte **ni pile d'annulation ni libellés d'historique** :
-`stokesforge-persistence` ne dépend même pas de `stokesforge-commands`. Les champs
-`label` du schéma sont ceux des *fenêtres* (`WindowMeta::label`), sans rapport.
-Un projet rouvert repart d'un historique vide, donc aucune phrase d'historique
-ne survit à la langue de la session qui l'a écrite (issue #46 : le constat
-« le `.stf` enregistre des phrases françaises » était inexact).
+The `.stf` carries **neither an undo stack nor history labels**:
+`stokesforge-persistence` does not even depend on `stokesforge-commands`. The
+`label` fields of the schema are those of the *windows* (`WindowMeta::label`),
+unrelated. A reopened project starts from an empty history, so no history
+sentence survives the language of the session that wrote it (issue #46: the
+finding "the `.stf` saves French sentences" was inaccurate).
 
-Si l'historique est un jour écrit, le chemin est tracé : `HistoryLabel` est
-déjà une donnée structurée. Il faudra un type de transport dans `schema.rs`
-(sans `serde` dans `stokesforge-commands`, comme pour `stokesforge-plot`) et la même
-dégradation que `KindRecord` — un nom de variante inconnu capturé dans un
-`RawVariant`, rendu par un libellé générique, jamais un échec de lecture
+If the history is ever written, the path is laid out: `HistoryLabel` is
+already structured data. It will need a transport type in `schema.rs`
+(without `serde` in `stokesforge-commands`, as for `stokesforge-plot`) and the
+same degradation as `KindRecord` — an unknown variant name captured in a
+`RawVariant`, rendered by a generic label, never a read failure
 (invariant 10).
 
-## Variantes inconnues : la perte est bornée au nœud
+## Unknown variants: the loss is bounded to the node
 
-La propriété 5 ne couvrait que les **champs**, pas les **variantes**
-d'énumération. `serde` dérive un décodage d'enum externally-tagged qui ne sait
-pas se rattraper : un nom de variante inconnu faisait échouer l'enum, donc le
-nœud, donc **tout le fichier**.
+Property 5 covered only **fields**, not enum **variants**. `serde` derives an
+externally-tagged enum decoding that cannot recover: an unknown variant name
+made the enum fail, so the node, so the **whole file**.
 
-`KindRecord` et `PlotTypeRecord` écrivent maintenant leur
-`Serialize`/`Deserialize` à la main (`unknown.rs`). Le principe : décoder
-d'abord la valeur qui suit le nom de variante en un arbre générique
-(`rmpv::Value`), la réencoder, puis *essayer* de la redécoder comme une
-variante connue — via `rmp_serde`, jamais `rmpv::ext::from_value` (ce dernier
-représente les enums par **indice**, convention différente de celle que ce
-format écrit). Si l'essai échoue, le nom et le contenu bruts sont conservés
-dans un `stokesforge_plot::RawVariant`.
+`KindRecord` and `PlotTypeRecord` now write their
+`Serialize`/`Deserialize` by hand (`unknown.rs`). The principle: first decode
+the value that follows the variant name into a generic tree
+(`rmpv::Value`), re-encode it, then *try* to decode it again as a known
+variant — through `rmp_serde`, never `rmpv::ext::from_value` (the latter
+represents enums by **index**, a different convention from the one this format
+writes). If the attempt fails, the raw name and content are kept in a
+`stokesforge_plot::RawVariant`.
 
-C'est ce qui borne la perte à **ce seul nœud** (ou cette seule série) au lieu
-du fichier entier, et ce qui fait qu'une variante inconnue **survit à deux
-sauvegardes successives à l'identique** (batterie `b19`, qui s'appuie sur
-l'écriture déterministe vérifiée par `b20`). `RawVariant` ne
-connaît ni `serde` ni MessagePack : il ne porte que des octets opaques, déjà
-encodés tels que lus, et seul ce crate sait les réinterpréter.
+This is what bounds the loss to **that single node** (or that single series)
+instead of the whole file, and what makes an unknown variant **survive two
+successive saves unchanged** (battery `b19`, which relies on the deterministic
+writing checked by `b20`). `RawVariant` knows neither `serde` nor MessagePack:
+it carries only opaque bytes, already encoded as read, and only this crate
+knows how to reinterpret them.
 
-Un détail qui ne se voit pas d'ici mais sans lequel rien de tout cela ne
-tient : le nœud dégradé doit ensuite **passer la validation d'arbre**. Une
-nature non reconnue compte comme fenêtre, donc un dossier l'acceptait ; un
-classeur et une feuille, non — et une colonne dégradée sous sa feuille faisait
-donc échouer tout le fichier, exactement là où la dégradation devait servir.
-Les trois conteneurs l'acceptent depuis (`stokesforge_core::NodeKind::accepts_child`,
-batterie `b19`).
+One detail that cannot be seen from here but without which none of this
+holds: the degraded node must then **pass tree validation**. An unrecognized
+kind counts as a window, so a folder accepted it; a workbook and a sheet did
+not — and a degraded column under its sheet therefore made the whole file
+fail, exactly where the degradation was meant to help. The three containers
+accept it since then (`stokesforge_core::NodeKind::accepts_child`, battery
+`b19`).
 
-Le compromis est assumé et documenté : le détour par `rmpv::Value` copie les
-octets d'une colonne une ou deux fois de plus qu'un décodage direct. Rien ne
-mesure aujourd'hui le coût de `load`/`save` ; c'est un coût à surveiller si le
-format finit par porter des colonnes bien plus grandes.
+The trade-off is accepted and documented: the detour through `rmpv::Value`
+copies the bytes of a column once or twice more than a direct decoding.
+Nothing measures the cost of `load`/`save` today; it is a cost to watch if the
+format ends up carrying much larger columns.
 
-## Règle de version : tout fichier V1 se relit jusqu'en V3
+## Version rule: every V1 file can be read back up to V3
 
-Un logiciel de version N relit tout fichier de version ≤ N et le **migre en
-mémoire** vers le modèle courant ; il l'écrit dans sa version, jamais dans une
-plus ancienne. Un fichier plus récent est refusé (S1). Ce qui ne se rattrape pas
-après la V1 : **ce que la V1 écrit**, et ce qu'elle fait d'un fichier plus récent.
+Software of version N reads back any file of version ≤ N and **migrates it in
+memory** to the current model; it writes it in its own version, never in an
+older one. A newer file is refused (S1). What cannot be fixed after V1 is
+**what V1 writes**, and what it does with a newer file.
 
-| Changement du schéma | Numéro de version |
+| Schema change | Version number |
 |---|---|
-| ajout d'un champ `#[serde(default)]`, d'une variante lue avec repli | reste (additif) ; régénérer le témoin courant |
-| retrait ou renommage d'un champ ou d'une variante, changement de sens d'une valeur, de l'unité, de l'ordre d'une liste positionnelle | **monte** |
+| adding a `#[serde(default)]` field, a variant read with a fallback | stays (additive); regenerate the current witness |
+| removing or renaming a field or a variant, changing the meaning of a value, of the unit, of the order of a positional list | **goes up** |
 
-**Risque d'un champ additif.** Il peut sortir dans une version `Z` (1.0.1) ou `Y`,
-sans monter `FORMAT_VERSION`. Mais une version plus ancienne qui relit puis
-**réenregistre** le fichier ignore le champ et le perd, sans message. Chaque
-champ additif est donc annoncé au CHANGELOG. Un changement cassant du format
-monte `FORMAT_VERSION` et exige une version `X`.
+**Risk of an additive field.** It can ship in a `Z` version (1.0.1) or a `Y`
+version, without raising `FORMAT_VERSION`. But an older version that reads and
+then **re-saves** the file ignores the field and loses it, without a message.
+Each additive field is therefore announced in the CHANGELOG. A breaking change
+of the format raises `FORMAT_VERSION` and requires an `X` version.
 
-**Format N gelé.** Dès que le format N+1 existe sur une branche (`vN`), le format
-N est gelé sur toutes les autres : y toucher produirait des fichiers que la
-branche N+1 migre mal, ou une donnée perdue sans message. Seule la branche
-du format N+1 change le schéma.
+**Format N frozen.** As soon as format N+1 exists on a branch (`vN`), format N
+is frozen on all the other branches: touching it would produce files that the
+N+1 branch migrates badly, or data lost without a message. Only the branch of
+format N+1 changes the schema.
 
-Quand le numéro monte (V → V+1) : copier le schéma de V en `schema/vV.rs`, y
-ajouter la fonction `vV → courant`, ajouter son bras dans `version::decode_body`,
-figer le témoin (`tests/temoins/vV/`, jamais modifié) et créer le témoin
-`vV+1/`. `FORMAT_VERSION` ne se change jamais « pour essayer » : la CI (`scripts/versions-alignees.sh`, travail `fmt`) exige le fichier `tests/temoins/vN/projet.stf` dès que `FORMAT_VERSION` = N.
+When the number goes up (V → V+1): copy the schema of V to `schema/vV.rs`, add
+the function `vV → courant` there, add its arm in `version::decode_body`,
+freeze the witness (`tests/temoins/vV/`, never modified) and create the witness
+`vV+1/`. `FORMAT_VERSION` is never changed "just to try": the CI (`scripts/versions-alignees.sh`, `fmt` job) requires the file `tests/temoins/vN/projet.stf` as soon as `FORMAT_VERSION` = N.
 
-**Fichiers témoins** (`tests/fichiers_temoins.rs`, `tests/temoins/v1/projet.stf`) :
-le projet témoin exerce tous les types de nœuds, de colonnes et de séries, avec
-des valeurs hors défaut partout. Deux gardes : le fichier se relit en rendant
-exactement le projet (arbre, tables de vue, rapport propre) ; enregistrer ce
-projet redonne exactement les octets du fichier (la dérive du format écrit exige
-une décision). Régénération explicite : `STOKESFORGE_REGENERER_TEMOINS=1 cargo
+**Witness files** (`tests/fichiers_temoins.rs`, `tests/temoins/v1/projet.stf`):
+the witness project exercises all the node, column and series types, with
+non-default values everywhere. Two guards: the file reads back as exactly the
+project (tree, view tables, clean report); saving this project gives back
+exactly the bytes of the file (drift of the written format requires a
+decision). Explicit regeneration: `STOKESFORGE_REGENERER_TEMOINS=1 cargo
 test -p stokesforge-persistence --test fichiers_temoins regenerer -- --ignored`.
 
-**Ordre stable** : les tables de vue sont des `BTreeMap` dans le corps
-(`window_geometries`, `column_widths`) ; deux enregistrements du même projet
-donnent les mêmes octets (`tests/vues_deterministes.rs`).
+**Stable order**: the view tables are `BTreeMap`s in the body
+(`window_geometries`, `column_widths`); two saves of the same project
+give the same bytes (`tests/vues_deterministes.rs`).
 
-**Empreinte des entrées** (`inputs_digest`, S3) : partie du format. Son octet
-d'entrée et le FNV-1a sont figés par `the_digest_is_frozen_on_known_inputs`
-(valeurs littérales) ; la changer périmerait à la relecture tous les calculs des
-fichiers déjà écrits.
+**Input fingerprint** (`inputs_digest`, S3): part of the format. Its input byte
+and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
+(literal values); changing it would make every calculation of the files already
+written stale on reading.
 
-## Les colonnes à types mixtes : ajout additif, aucune migration
+## Mixed-type columns: additive change, no migration
 
-`ColumnType::Mixed` ([`modele-de-donnees.md`](modele-de-donnees.md)) a ajouté
-une variante à `TypeRecord` et une à `ValuesRecord`. **`FORMAT_VERSION` n'a pas
-bougé, et il n'y a aucune fonction de migration.** Les deux sens s'appuient sur
-des mécanismes déjà en place :
+`ColumnType::Mixed` ([`modele-de-donnees.md`](modele-de-donnees.md)) added
+one variant to `TypeRecord` and one to `ValuesRecord`. **`FORMAT_VERSION` did
+not move, and there is no migration function.** Both directions rely on
+mechanisms already in place:
 
-| Sens | Ce qui se passe |
+| Direction | What happens |
 |---|---|
-| ancien fichier, lecteur d'aujourd'hui | rien n'a changé pour lui — les trois variantes historiques et leurs encodages sont intacts, les colonnes homogènes s'écrivent octet pour octet comme avant |
-| fichier d'aujourd'hui, lecteur d'hier | le nom de variante `Mixed` lui est inconnu, son décodage strict de la colonne échoue, `unknown.rs` la range en `KindRecord::Unknown` : il perd **cette colonne**, pas le fichier, et une ré-écriture la restitue à l'identique |
+| old file, today's reader | nothing changed for it — the three historical variants and their encodings are intact, homogeneous columns are written byte for byte as before |
+| today's file, yesterday's reader | the variant name `Mixed` is unknown to it, its strict decoding of the column fails, `unknown.rs` puts it into `KindRecord::Unknown`: it loses **this column**, not the file, and a re-save gives it back unchanged |
 
-La seconde ligne est ce qui rend le choix de ne pas incrémenter
-`FORMAT_VERSION` défendable, et c'est pour cela qu'elle est **testée**
-(`b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`) plutôt que
-supposée. Incrémenter aurait eu un coût sans contrepartie : *tous* les
-fichiers écrits ensuite, colonne mixte ou pas, seraient devenus illisibles par
-les lecteurs antérieurs.
+The second row is what makes the choice not to increment `FORMAT_VERSION`
+defensible, and this is why it is **tested**
+(`b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`) rather than
+assumed. Incrementing would have had a cost with no counterpart: *all* the
+files written afterwards, mixed column or not, would have become unreadable by
+earlier readers.
 
-Même mécanisme, sans variante cette fois, pour les **textes libres** d'un
-panneau (issue #35) : `PanelSpecRecord::annotations`, un champ
-`#[serde(default)]` — un fichier plus ancien se relit sans texte, un lecteur
-plus ancien ignore le champ (il le perd à la ré-écriture). Aller-retour tenu
-par `a_non_trivial_plot_spec_round_trips_intact`.
+Same mechanism, without a variant this time, for the **free texts** of a
+panel (issue #35): `PanelSpecRecord::annotations`, a
+`#[serde(default)]` field — an older file reads back without text, an older
+reader ignores the field (it loses it on re-save). Round trip held
+by `a_non_trivial_plot_spec_round_trips_intact`.
 
-Largeur et alignement d'un texte libre (#244) : `AnnotationSpecRecord::width`
-(`Option<f64>`) et `align` (`TextAlignRecord`), `#[serde(default)]` — un fichier plus
-ancien se relit sans largeur, centré. Même aller-retour ; `TextFontRecord` (titres,
-axes, légende) reçoit les mêmes deux champs.
+Width and alignment of a free text (#244): `AnnotationSpecRecord::width`
+(`Option<f64>`) and `align` (`TextAlignRecord`), `#[serde(default)]` — an older
+file reads back without width, centered. Same round trip; `TextFontRecord` (titles,
+axes, legend) receives the same two fields.
 
-Idem pour les **objets graphiques** (issue #76) : `PanelSpecRecord::shapes`
-(`ShapeSpecRecord`, `ShapeKindRecord`), `#[serde(default)]` ; même aller-retour
-tenu par `a_non_trivial_plot_spec_round_trips_intact`.
+Likewise for the **graphic objects** (issue #76): `PanelSpecRecord::shapes`
+(`ShapeSpecRecord`, `ShapeKindRecord`), `#[serde(default)]`; same round trip
+held by `a_non_trivial_plot_spec_round_trips_intact`.
 
-Idem pour la **police et le corps des zones de texte** (issues #77, #78) :
-`TextFontRecord` (`family`, `size`) en champ `#[serde(default)]` de
-`PlotSpecRecord`, `PanelSpecRecord`, `AxisSpecRecord` (`title_font`) et
-`LegendSpecRecord` (`font`), et les couleurs `PanelSpecRecord::title_color` et
-`LegendSpecRecord::color` (#90, `#[serde(default)]` : absentes = automatique), et `font` sur `AnnotationSpecRecord` — absent d'un
-fichier plus ancien = la police du graphe. Aller-retour tenu par
+Likewise for the **font and size of text boxes** (issues #77, #78):
+`TextFontRecord` (`family`, `size`) as a `#[serde(default)]` field of
+`PlotSpecRecord`, `PanelSpecRecord`, `AxisSpecRecord` (`title_font`) and
+`LegendSpecRecord` (`font`), and the colors `PanelSpecRecord::title_color` and
+`LegendSpecRecord::color` (#90, `#[serde(default)]`: absent = automatic), and `font` on `AnnotationSpecRecord` — absent from
+an older file = the font of the graph. Round trip held by
 `a_non_trivial_plot_spec_round_trips_intact`.
 
-Idem pour les **textes déplacés** (issue #53) : `TextAnchorRecord` en champ
-`#[serde(default)]` sur `PlotSpecRecord` (titre), `PanelSpecRecord` (titre du
-panneau), `AxisSpecRecord` (titre d'axe) et `LegendSpecRecord` (légende) —
-absent d'un fichier plus ancien = le texte reste à sa place par défaut. Une
-ancre non finie lue du fichier est gardée telle quelle ; c'est le rendu qui
-l'ignore. Aller-retour tenu par `a_non_trivial_plot_spec_round_trips_intact`.
+Likewise for the **moved texts** (issue #53): `TextAnchorRecord` as a field
+`#[serde(default)]` on `PlotSpecRecord` (title), `PanelSpecRecord` (panel
+title), `AxisSpecRecord` (axis title) and `LegendSpecRecord` (legend) —
+absent from an older file = the text stays at its default place. A non-finite
+anchor read from the file is kept as is; it is the rendering that
+ignores it. Round trip held by `a_non_trivial_plot_spec_round_trips_intact`.
 
-### Pourquoi trois tableaux parallèles et pas un tableau d'énumérations
+### Why three parallel arrays and not an array of enums
 
-`ValuesRecord::Mixed` porte `{ tags, numbers, texts }` : un octet d'étiquette
-par ligne (`0` vide, `1` nombre, `2` texte), puis les seules valeurs qui
-existent — les nombres en little-endian brut comme `Float`, les textes à la
-suite.
+`ValuesRecord::Mixed` carries `{ tags, numbers, texts }`: one tag byte
+per row (`0` empty, `1` number, `2` text), then only the values that
+exist — the numbers in raw little-endian like `Float`, the texts one after
+the other.
 
-La raison est la même que celle qui fait écrire les colonnes numériques en
-octets bruts : `to_vec_named` sérialise une énumération par le **nom** de sa
-variante. Un `Vec<MixedCellRecord>` aurait écrit la chaîne `"Number"` — sept
-octets — devant chacun des huit octets d'une valeur. Avec les tableaux
-parallèles, une colonne d'un million de points majoritairement numérique pèse
-9 Mo au lieu de 16, et les `NaN` comme les `-0.0` traversent bit à bit.
+The reason is the same as the one that makes numeric columns written as raw
+bytes: `to_vec_named` serializes an enum by the **name** of its
+variant. A `Vec<MixedCellRecord>` would have written the string `"Number"` —
+seven bytes — in front of each eight-byte value. With the parallel arrays,
+a column of a million mostly numeric points weighs 9 MB instead of 16, and
+`NaN`s as well as `-0.0` go through bit for bit.
 
-Le prix est une cohérence à vérifier à la lecture : les étiquettes doivent
-annoncer exactement ce que les deux tableaux portent. Toute incohérence —
-étiquette inconnue comprise — est un `Corrupt`, jamais un décalage silencieux
-de toutes les lignes suivantes. Même politique que `BadFloatLength`.
+The price is a consistency to check on reading: the tags must announce exactly
+what the two arrays carry. Any inconsistency — unknown tag included — is a
+`Corrupt`, never a silent shift of all the following rows. Same policy as
+`BadFloatLength`.
 
-## Bornes de lecture
+## Read bounds
 
-`MAX_NODE_ID` = 10¹². Tout identifiant de nœud — ou `next_id_hint` — au-delà
-est refusé **dès la lecture**. Très loin de `u64::MAX`, où `IdAllocator::next`
-refuserait de toute façon, mais bien assez tôt pour qu'un fichier falsifié ne
-puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
+`MAX_NODE_ID` = 10¹². Any node identifier — or `next_id_hint` — above it is
+refused **as soon as it is read**. Very far from `u64::MAX`, where
+`IdAllocator::next` would refuse anyway, but early enough that a forged file
+cannot bring an unusable project into memory (battery `b4`).
 
-`MAX_COLUMN_ROWS` (`stokesforge_core::column`). Une colonne dont le fichier
-annonce plus de lignes (`tags.len()` pour `Mixed`, `octets / 8` pour `Float`,
-`values.len()` pour l'ancien `Text`) est refusée en `Corrupt`
-(`ConvertError::TooManyRows`, aide `check_rows`) **avant** toute allocation
+`MAX_COLUMN_ROWS` (`stokesforge_core::column`). A column for which the file
+announces more rows (`tags.len()` for `Mixed`, `octets / 8` for `Float`,
+`values.len()` for the old `Text`) is refused as `Corrupt`
+(`ConvertError::TooManyRows`, helper `check_rows`) **before** any allocation
 (#316). 
 
-**Budget global de cellules (B1, #316).** `load_with_limits(path,
-LoadLimits { max_bytes, max_cells })` somme les longueurs déclarées de toutes
-les colonnes (`check_cell_budget` : `tags.len()`, `octets / 8`, `values.len()`)
-une fois le corps décodé et **avant** `record_to_kind`, donc avant toute
-allocation de colonne du modèle ; au-delà, `PersistenceError::TooManyCells
-{ path, cells, limit }` (clé `error-file-too-many-cells`). Défaut
-`DEFAULT_MAX_CELLS` = 1 milliard ; réglable dans File › Preferences › General
-(millions de cellules, de 1 à 10 000, clé `max_cells_m`, `Action::SetMaxCellsM`).
-CLI, scripts et `load_with_limit` gardent la valeur par défaut
-(`LoadLimits::default()`). Témoins : `tests/budget_cellules.rs`, batterie `b3`.
+**Global cell budget (B1, #316).** `load_with_limits(path,
+LoadLimits { max_bytes, max_cells })` sums the declared lengths of all
+the columns (`check_cell_budget`: `tags.len()`, `octets / 8`, `values.len()`)
+once the body is decoded and **before** `record_to_kind`, therefore before any
+allocation of a model column; above the limit, `PersistenceError::TooManyCells
+{ path, cells, limit }` (key `error-file-too-many-cells`). Default
+`DEFAULT_MAX_CELLS` = 1 billion; adjustable in File › Preferences › General
+(millions of cells, from 1 to 10,000, key `max_cells_m`, `Action::SetMaxCellsM`).
+CLI, scripts and `load_with_limit` keep the default value
+(`LoadLimits::default()`). Witnesses: `tests/budget_cellules.rs`, battery `b3`.
 
-**Copies du décodage (#316).** `unknown::deserialize_with_fallback` libère le
-`rmpv::Value` capturé dès qu'il est réencodé, avant de bâtir l'enregistrement
-connu ; le chemin d'échec (variante inconnue) relit la valeur depuis les octets
-réencodés. Mesure (`VmHWM`, une colonne de 20 M de `f64`, fichier de 160 Mo,
-build de test) : pic 631 Mo avant, 475 Mo après (-25 %).
+**Decoding copies (#316).** `unknown::deserialize_with_fallback` frees the
+captured `rmpv::Value` as soon as it is re-encoded, before building the known
+record; the failure path (unknown variant) reads the value again from the
+re-encoded bytes. Measurement (`VmHWM`, one column of 20 M `f64`, 160 MB file,
+test build): peak 631 MB before, 475 MB after (-25 %).
 
-**Plafond de taille de fichier à l'ouverture (A2, #316).** `load_with_limit`
-(et `load_with_report`, qui prend `DEFAULT_MAX_FILE_BYTES` = 512 Mo) lit la
-taille par `metadata().len()` et refuse au-delà de la limite par
-`PersistenceError::TooLarge { path, size, limit }`, **avant** toute lecture ;
-exactement la limite passe. La lecture elle-même est bornée (`take(limite + 1)`)
-si le fichier grossit entre la mesure et la lecture. Le `.stf` **n'est pas
-compressé** : sa taille sur disque est sa taille décompressée, il n'y a donc pas
-de second contrôle à faire sur un « petit fichier qui se dilate » (la dilatation
-mémoire, elle, est bornée par `MAX_COLUMN_ROWS`). La limite est réglable dans les
-préférences (File › Preferences › General, 512 Mo par défaut, de 16 Mo à
-16 Go, pas de « sans limite ») ; l'application la lit **avant** de démarrer la
-session (`main.rs`, `session_for_startup`). Un refus à l'ouverture laisse projet
-et chemin courants (`open_project`). À l'enregistrement, un fichier qui dépasse
-la limite s'écrit quand même, mais un avertissement (`status-saved-over-limit`)
-remplace « Enregistré » et dit comment la relever.
+**File size cap on opening (A2, #316).** `load_with_limit`
+(and `load_with_report`, which takes `DEFAULT_MAX_FILE_BYTES` = 512 MB) reads
+the size through `metadata().len()` and refuses above the limit with
+`PersistenceError::TooLarge { path, size, limit }`, **before** any reading;
+exactly the limit passes. The reading itself is bounded (`take(limite + 1)`)
+in case the file grows between the measurement and the reading. The `.stf` is
+**not compressed**: its size on disk is its uncompressed size, so there is no
+second check to make against a "small file that inflates" (memory inflation,
+for its part, is bounded by `MAX_COLUMN_ROWS`). The limit is adjustable in the
+preferences (File › Preferences › General, 512 MB by default, from 16 MB to
+16 GB, no "unlimited"); the application reads it **before** starting the
+session (`main.rs`, `session_for_startup`). A refusal on opening leaves the
+current project and path unchanged (`open_project`). On saving, a file that
+exceeds the limit is still written, but a warning (`status-saved-over-limit`)
+replaces "Saved to" and says how to raise it.
 
-## Ce qu'il faut savoir avant de modifier
+## What to know before modifying
 
-- **Relire `docs/archive/rustrewrite/format-fichier-plx.md`** avant de toucher
-  au schéma : plusieurs options y sont déjà écartées avec leurs raisons.
-- Tout nouveau champ porte `#[serde(default)]`. Sans lui, le fichier de la
-  veille devient illisible.
-  Exemple : `AxisSpecRecord::mirror` / `tick_labels` (#176, ce dernier vrai par
-  défaut) ; `ticks` (#344, **vrai** par défaut, sinon un ancien fichier perdrait
-  ses tirets), `minor_ticks` (#344, faux si le champ manque : un ancien fichier n'a pas
-  de sous-graduations ; vrai pour un axe absent du fichier, comme un axe neuf),
-  `minor_tick_count` (`Option`, `None` = automatique) et `label_every` (1 par
-  défaut), `tick_length` / `minor_tick_length` / `tick_width` (`Option`,
-  `None` = automatique) et `tick_mark_color` (vide = couleur de l'échelle),
-  les réglages « Avancé » des tirets (#344 ; la valeur brute est gardée, le
-  rendu la borne), et `tick_direction` (`TickDirectionRecord`, valeur inconnue lue
-  `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`) ; les couleurs de texte (`PlotSpecRecord::title_color`,
-  `AxisSpecRecord::title_color`/`tick_color`) — un fichier plus ancien se
-  relit avec des chaînes vides, c'est-à-dire en couleur automatique (test
-  `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Ou
-  `FileBody::saved_colors` (couleurs enregistrées du projet), placé avant
-  `window_geometries` et `save_counter`, qui doit rester le dernier champ.
-- **Le sens d'un axe (#344) n'est pas normalisé par la persistance.**
-  `AxisSpecRecord::inverted` reste écrit tel quel, et `range_min` /
-  `range_max` aussi : le fichier rend ce qu'on lui a donné, octet pour octet
-  (témoin commun inchangé : `inverted` avec des bornes (-1, 10)). Le sens se
-  lit sur l'ordre des bornes (De > À = axe inversé) ; c'est `AxisSpec::orient`
-  qui ramène un axe à sa forme canonique, appelée **à l'ouverture** par la
-  session (`load_project`, projet pas encore installé : pas de commande, pas
-  d'historique) et par `pyst.set_graph` / `pyst.plot`. Le rendu d'un axe et
-  celui de son équivalent orienté sont identiques.
-- `tests/roundtrip.rs` vérifie l'aller-retour ; côté robustesse, `b2`
-  (persistance), `b3` (fichiers malformés puis sémantiquement hostiles), `b13`
-  (bornes d'un `PlotSpec` venu du disque), `b19` (fichier écrit par une version
-  plus récente), `b20` (deux écrivains sur un même fichier).
+- **Reread `docs/archive/rustrewrite/format-fichier-plx.md`** before touching
+  the schema: several options are already ruled out there with their reasons.
+- Every new field carries `#[serde(default)]`. Without it, yesterday's file
+  becomes unreadable.
+  Example: `AxisSpecRecord::mirror` / `tick_labels` (#176, the latter true by
+  default); `ticks` (#344, **true** by default, otherwise an old file would lose
+  its tick marks), `minor_ticks` (#344, false if the field is missing: an old file has
+  no minor ticks; true for an axis absent from the file, like a new axis),
+  `minor_tick_count` (`Option`, `None` = automatic) and `label_every` (1 by
+  default), `tick_length` / `minor_tick_length` / `tick_width` (`Option`,
+  `None` = automatic) and `tick_mark_color` (empty = scale color),
+  the "Advanced" settings of the tick marks (#344; the raw value is kept, the
+  rendering bounds it), and `tick_direction` (`TickDirectionRecord`, unknown value read
+  as `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`); the text colors (`PlotSpecRecord::title_color`,
+  `AxisSpecRecord::title_color`/`tick_color`) — an older file
+  reads back with empty strings, that is, in automatic color (test
+  `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Or
+  `FileBody::saved_colors` (saved colors of the project), placed before
+  `window_geometries` and `save_counter`, which must stay the last field.
+- **The direction of an axis (#344) is not normalized by persistence.**
+  `AxisSpecRecord::inverted` stays written as is, and `range_min` /
+  `range_max` too: the file gives back what it was given, byte for byte
+  (common witness unchanged: `inverted` with bounds (-1, 10)). The direction is
+  read from the order of the bounds (From > To = inverted axis); it is
+  `AxisSpec::orient` that brings an axis back to its canonical form, called **on
+  opening** by the session (`load_project`, project not yet installed: no
+  command, no history) and by `pyst.set_graph` / `pyst.plot`. The rendering of
+  an axis and that of its oriented equivalent are identical.
+- `tests/roundtrip.rs` checks the round trip; on the robustness side, `b2`
+  (persistence), `b3` (malformed then semantically hostile files), `b13`
+  (bounds of a `PlotSpec` coming from disk), `b19` (file written by a newer
+  version), `b20` (two writers on the same file).
 
-**À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
-`src/unknown.rs` (têtes).
+**To read**: `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
+`src/unknown.rs` (heads).
 
-## Calques superposés et rôles X2…Y4 (#167, #168)
+## Overlaid layers and roles X2…Y4 (#167, #168)
 
 `PanelSpecRecord::overlay` (`OverlaySpecRecord { x_top, y_right, layer }`,
-absent = calque ordinaire ; `layer` `#[serde(default)]` = 0, calque sans rôle)
-et `RoleRecord::X2`…`Y4` s'ajoutent au schéma ; les fichiers
-sans eux se relisent comme avant. Les adresses runtime (`AnnotationRef`,
-`ShapeRef`, `TextTarget`) portent l'indice du calque, rien n'en est écrit :
-seuls les textes ancrés restent rangés dans leur calque.
+absent = ordinary layer; `layer` `#[serde(default)]` = 0, layer with no role)
+and `RoleRecord::X2`…`Y4` are added to the schema; files
+without them read back as before. The runtime addresses (`AnnotationRef`,
+`ShapeRef`, `TextTarget`) carry the layer index, nothing of it is written:
+only the anchored texts stay stored in their layer.
 
-`KindRecord::Column::x_prime` (#164, `Option<f64>`) et
-`SeriesSpecRecord::row` (#166, `Option<u64>`) s'ajoutent au schéma, tous deux
-`#[serde(default)]` : les fichiers sans eux se relisent comme avant (`None`). Un
-x' non fini lu d'un fichier est ramené à `None`.
+`KindRecord::Column::x_prime` (#164, `Option<f64>`) and
+`SeriesSpecRecord::row` (#166, `Option<u64>`) are added to the schema, both
+`#[serde(default)]`: files without them read back as before (`None`). A
+non-finite x' read from a file is brought back to `None`.
 
-`SavedColorsRecord::gradients` (#178, liste de `{ name, stops }`, `#[serde(default)]`)
-transporte les nuanciers enregistrés du projet.
+`SavedColorsRecord::gradients` (#178, list of `{ name, stops }`, `#[serde(default)]`)
+carries the saved palettes of the project.
 
-`SeriesSpecRecord::group` (#177, `Option<u32>`) : `#[serde(default)]`, les
-fichiers sans lui se relisent sans groupe. `PanelSpecRecord::group_names` (#197,
-liste de `{ group, name }`, `#[serde(default)]`) : les noms de groupes ; absent,
-tous les groupes portent leur nom automatique, et un nom vide lu d'un fichier
-est écarté. `PanelSpecRecord::group_gradients` (#213, liste de
-`{ group, stops }`, `#[serde(default)]`) : les arrêts du nuancier retenu par un
-groupe ; absent, aucun groupe n'a de nuancier, et une entrée sans arrêt est
-écartée.
+`SeriesSpecRecord::group` (#177, `Option<u32>`): `#[serde(default)]`, files
+without it read back without a group. `PanelSpecRecord::group_names` (#197,
+list of `{ group, name }`, `#[serde(default)]`): the group names; absent,
+all groups carry their automatic name, and an empty name read from a file
+is dropped. `PanelSpecRecord::group_gradients` (#213, list of
+`{ group, stops }`, `#[serde(default)]`): the stops of the palette chosen by a
+group; absent, no group has a palette, and an entry without stops is
+dropped.
 
-## Visibilité des objets (#81, #85)
+## Object visibility (#81, #85)
 
-La visibilité des séries était déjà transportée par `SeriesSpecRecord`.
-`AnnotationSpecRecord::visible` et `ShapeSpecRecord::visible` la complètent ;
-les champs absents se relisent à `true`. Masquer ne supprime ni données,
-style, position ni rang. Le panneau Object Manager n'entre pas dans le `.stf` :
-son ouverture est une préférence de la personne.
+The visibility of series was already carried by `SeriesSpecRecord`.
+`AnnotationSpecRecord::visible` and `ShapeSpecRecord::visible` complete it;
+absent fields read back as `true`. Hiding deletes neither data,
+style, position nor rank. The Object Manager panel does not go into the `.stf`:
+its opening is a preference of the person.
 
-`PlotSpecRecord::title_visible`, `PanelSpecRecord::title_visible` et
-`AxisSpecRecord::title_visible` transportent aussi la visibilité des titres.
-Ces champs absents se relisent à `true` : les fichiers antérieurs gardent
-tous leurs titres visibles. Le numéro de format ne change pas pour l'ajout de
-ces champs avec valeur par défaut. Le libellé d'une commande `EditPlotSpec`
-appartient à l'historique en mémoire ; il n'est pas enregistré dans le fichier.
+`PlotSpecRecord::title_visible`, `PanelSpecRecord::title_visible` and
+`AxisSpecRecord::title_visible` also carry the visibility of titles.
+These absent fields read back as `true`: earlier files keep all
+their titles visible. The format number does not change for the addition of
+these fields with a default value. The label of an `EditPlotSpec` command
+belongs to the in-memory history; it is not saved in the file.
 
-## Presse-papiers d'objets (#105)
+## Object clipboard (#105)
 
-`clipboard::{encode_objects, decode_objects}` réutilise `NodeRecord` et les
-conversions du `.stf`, sans toucher au format des fichiers. Le transport est
-un texte commençant par `StokesForge Objects` puis un saut de ligne, suivi
-d'un corps MessagePack encodé en hexadécimal. Il ne porte pas de numéro de
-version : les instances doivent exécuter la même version du logiciel.
+`clipboard::{encode_objects, decode_objects}` reuses `NodeRecord` and the
+conversions of the `.stf`, without touching the file format. The transport is
+a text starting with `StokesForge Objects` then a line break, followed by
+a MessagePack body encoded in hexadecimal. It carries no version number:
+the instances must run the same version of the software.
 
-Le corps contient une origine opaque et une liste d'objets, chacun en parcours
-préfixe avec sa descendance. Chaque objet lu est validé comme un arbre autonome,
-avec les mêmes bornes d'identifiants et les mêmes règles de contenance que le
-fichier. Les valeurs et métadonnées sont conservées, notamment les NaN bit à bit,
-les cellules mixtes et la provenance d'import. Les identifiants source décrivent
-uniquement la structure du transport : ils sont remplacés à l'insertion.
-L'origine distingue le projet courant d'un autre : les graphes externes
-emportent leurs données et remplacent toutes leurs références (#107).
-Elle change après un chargement ou un nouveau projet ; elle n'est pas persistée.
+The body contains an opaque origin and a list of objects, each in pre-order
+with its descendants. Each object read is validated as a standalone tree,
+with the same identifier bounds and the same containment rules as the
+file. Values and metadata are kept, notably NaNs bit for bit,
+mixed cells and import provenance. The source identifiers describe
+only the structure of the transport: they are replaced on insertion.
+The origin tells the current project from another one: external graphs
+carry their data and replace all their references (#107).
+It changes after a load or a new project; it is not persisted.
 
-Les dépendances de chaque graphique sont transportées comme un sous-arbre
-classeur autonome dans `graph_data`, validé par le même lecteur que les
-objets. `WindowMeta.hidden` (défaut `false`, dans les records de fenêtres) enregistre
-le masquage des données
-embarquées dans le `.stf` et le presse-papiers. Les références rompues sont
-remplacées par des identifiants réservés sans nœud dans la destination,
-jamais réutilisés, y compris après sauvegarde/rechargement. Le transport
-textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
+The dependencies of each graph are carried as a standalone workbook
+subtree in `graph_data`, validated by the same reader as the
+objects. `WindowMeta.hidden` (default `false`, in the window records) saves
+the hiding of the data
+embedded in the `.stf` and the clipboard. Broken references are
+replaced by reserved identifiers with no node in the destination,
+never reused, including after save/reload. The text
+transport is limited to `MAX_OBJECT_CLIPBOARD_BYTES` (64 MiB).
 
-## Calculs d'analyse (#181)
+## Analysis calculations (#181)
 
-`FileBody::calculations` (`#[serde(default)]`, placé avant `window_geometries` et
-`save_counter`) porte les calculs de `Tree::calculations()` : un
-`CalculationRecord` par calcul, dans `crates/stokesforge-persistence/src/calculations.rs`.
+`FileBody::calculations` (`#[serde(default)]`, placed before `window_geometries` and
+`save_counter`) carries the calculations of `Tree::calculations()`: one
+`CalculationRecord` per calculation, in `crates/stokesforge-persistence/src/calculations.rs`.
 
-- L'**opération** traverse le fichier sous la forme d'un arbre générique
-  (`stokesforge_analysis::tree::Tree`, écrit en `rmpv::Value`) : un réglage ou une
-  opération nouvelle ne change pas le schéma ; champ facultatif absent (booléens, listes,
-  plages) = défaut, champ inconnu ignoré, champ essentiel (`op`, `under`,
-  `shift_initial`, `center`…) obligatoire : son absence écarte le calcul. Les nombres
-  non finis ne s'écrivent pas (`null`) : l'interface n'en accepte donc aucun.
-- Séries, annexe et sorties référencent des colonnes par `NodeId` brut ; les valeurs
-  de résultat (y compris `NaN`) et les avertissements sont écrits à plat.
-- Péremption : `manual` et `input_missing` sont gardées ; un `Failed(_)` s'écrit
-  `manual` (l'erreur n'est pas persistée : à l'ouverture un calcul automatique est
-  recalculé et retrouve son erreur, un calcul manuel reste périmé sans message).
-  **Depuis A1 (#316), l'ouverture ne recalcule plus aucun calcul** (voir
-  « Empreinte des entrées » ci-dessous) : il reste périmé (`manual`) avec les
-  valeurs du fichier jusqu'à « Recalculate ».
-- Formules (#321) : `formula_parts` — liste de fragments `Text(texte)` /
-  `Column(identifiant)`, l'identifiant borné à la lecture comme tout identifiant
-  (`MAX_NODE_ID`, invariant 7). Un identifiant qui ne désigne aucune colonne de la
-  feuille (fichier fabriqué, colonne disparue) se charge et s'affiche `#REF`
-  (invariant 10). L'ancienne clé `formula` (lettres) n'est plus lue (changement fait
-  avant la V1, quand le format n'avait pas à rester compatible) : la colonne se
-  charge avec ses valeurs et sans formule.
-- Empreinte des entrées (A1, #316) : chaque calcul écrit `inputs_digest`, une
-  empreinte **du contenu** de ses colonnes d'entrée (`Calculation::inputs_digest`,
-  `stokesforge-core/src/calc.rs` : type + valeurs, `f64::to_bits` petit-boutiste,
-  textes précédés de leur longueur, FNV-1a écrit à la main — l'algorithme est
-  gelé, il est dans des fichiers —, jamais de version de colonne ni de `NodeId`).
-  À la lecture, **sur les valeurs du fichier, avant tout recalcul de formule**,
-  `mark_changed_inputs` la confronte au contenu relu : différente, le calcul est
-  marqué `Manual` (périmé, bouton « Recalculate »), ses valeurs restent celles
-  du fichier. Champ absent (fichier ancien), ou entrée manquante à l'écriture :
-  rien n'est comparé, le calcul est cru tel quel (invariant 10 : dégrader en
-  « périmé », jamais en échec). Un fichier modifié à la main dans une colonne
-  qu'aucun calcul ne lit n'est, lui, pas revérifié.
-- Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible
-  (forme, ou `Operation::validate` en échec : un `NaN` écrit à la main, #291),
-  ou dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
-  colonnes restent des colonnes ordinaires. La forme est revérifiée à la lecture
-  par la règle unique de core (`validate_calculation_shape`, aussi appelée par
-  `CalculationDraft::validate`) : 1 à `MAX_CALCULATION_SERIES` séries, sorties
-  sur une série existante, résultats vides ou un par série (#309). Un
-  avertissement inconnu est ignoré.
-  L'écart n'est plus silencieux (#278) : `load_with_report` rend un `LoadReport`
-  (`discarded_calculations` : id du fichier, famille d'opération si elle se lit),
-  que la session transmet (`SessionHandle::load_with_report`) et qu'`AppState`
-  affiche en avertissement (`status-load-discarded`, voir plus bas : un seul
-  message compte calculs et traces). L'enregistrement
-  illisible n'est **pas conservé** (il ne se reconstruit pas) : il disparaîtrait
-  à la prochaine sauvegarde, d'où la confirmation décrite plus bas (#309). Deux
-  calculs de même identifiant dans un fichier : le **premier** est gardé, le
-  second est compté parmi les écartés (`records_to_calculations`, et la table
-  de noms de `records_to_corrections`). En amont, `Project::add_calculation`/`update_calculation`
-  refusent par `Operation::validate` toute opération qui ne se relirait pas (nombre
-  non fini), pour qu'un tel enregistrement ne soit pas écrit.
-- Les colonnes de sortie sont des colonnes normales du classeur : le fichier garde
-  leurs valeurs, aucun recalcul n'est fait à l'ouverture, pour un calcul manuel comme
-  automatique (A1, #316) ; seules les colonnes-formule sont recalculées.
-- Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées
-  deviennent ordinaires.
+- The **operation** goes through the file as a generic tree
+  (`stokesforge_analysis::tree::Tree`, written as `rmpv::Value`): a new setting or
+  operation does not change the schema; absent optional field (booleans, lists,
+  ranges) = default, unknown field ignored, essential field (`op`, `under`,
+  `shift_initial`, `center`…) mandatory: its absence drops the calculation. Non-finite
+  numbers are not written (`null`): the interface therefore accepts none.
+- Series, annex and outputs reference columns by raw `NodeId`; the result
+  values (`NaN` included) and the warnings are written flat.
+- Staleness: `manual` and `input_missing` are kept; a `Failed(_)` is written
+  `manual` (the error is not persisted: on opening an automatic calculation is
+  recomputed and finds its error again, a manual calculation stays stale without a message).
+  **Since A1 (#316), opening no longer recomputes any calculation** (see
+  "Input fingerprint" below): it stays stale (`manual`) with the
+  values of the file until "Recalculate".
+- Formulas (#321): `formula_parts` — list of fragments `Text(texte)` /
+  `Column(identifiant)`, the identifier bounded on reading like any identifier
+  (`MAX_NODE_ID`, invariant 7). An identifier that designates no column of the
+  sheet (forged file, vanished column) loads and displays as `#REF`
+  (invariant 10). The old key `formula` (letters) is no longer read (change made
+  before V1, when the format did not have to stay compatible): the column
+  loads with its values and without a formula.
+- Input fingerprint (A1, #316): each calculation writes `inputs_digest`, a
+  fingerprint **of the content** of its input columns (`Calculation::inputs_digest`,
+  `stokesforge-core/src/calc.rs`: type + values, little-endian `f64::to_bits`,
+  texts preceded by their length, FNV-1a written by hand — the algorithm is
+  frozen, it is in files —, never a column version or a `NodeId`).
+  On reading, **on the values of the file, before any formula recalculation**,
+  `mark_changed_inputs` compares it with the content read back: if different, the calculation is
+  marked `Manual` (stale, "Recalculate" button), its values stay those
+  of the file. Field absent (old file), or input missing at writing:
+  nothing is compared, the calculation is believed as is (invariant 10: degrade to
+  "stale", never to failure). A file edited by hand in a column
+  that no calculation reads is, for its part, not rechecked.
+- Tolerant reading (invariant 10): a calculation whose operation is unreadable
+  (shape, or `Operation::validate` failing: a hand-written `NaN`, #291),
+  or one of whose identifiers exceeds `MAX_NODE_ID`, is **dropped** without failure — its
+  columns stay ordinary columns. The shape is rechecked on reading
+  by the single rule of core (`validate_calculation_shape`, also called by
+  `CalculationDraft::validate`): 1 to `MAX_CALCULATION_SERIES` series, outputs
+  on an existing series, empty results or one per series (#309). An unknown
+  warning is ignored.
+  The gap is no longer silent (#278): `load_with_report` returns a `LoadReport`
+  (`discarded_calculations`: id from the file, operation family if it can be read),
+  which the session passes on (`SessionHandle::load_with_report`) and which `AppState`
+  shows as a warning (`status-load-discarded`, see below: a single
+  message counts calculations and traces). The unreadable
+  record is **not kept** (it cannot be rebuilt): it would disappear
+  on the next save, hence the confirmation described below (#309). Two
+  calculations with the same identifier in a file: the **first** is kept, the
+  second is counted among the dropped (`records_to_calculations`, and the name
+  table of `records_to_corrections`). Upstream, `Project::add_calculation`/`update_calculation`
+  refuse through `Operation::validate` any operation that would not read back (non-finite
+  number), so that such a record is not written.
+- The output columns are normal columns of the workbook: the file keeps
+  their values, no recalculation is done on opening, for a manual calculation as
+  for an automatic one (A1, #316); only formula columns are recomputed.
+- A copy of objects (#105) does not carry the calculations: the copied columns
+  become ordinary.
 
-## Ce que la lecture a écarté : dire, avertir, confirmer (#309)
+## What reading ruled out: say, warn, confirm (#309)
 
-- **Message unique** : `discarded_calculations_text` (`stokesforge-app-state`)
-  compte calculs **et** traces écartés dans une seule phrase de la barre d'état
-  (« 2 calculations and 1 correction record were discarded from the project
-  (#3, #4, #7) », clés `status-load-discarded*`) ; au plus cinq identifiants puis
-  « … », le compte reste exact. Même texte au démarrage (`mark_loaded`) et au
-  menu Fichier (`load`).
-- **CLI** : `stokesforge-cli run --project` lit par `load_with_report` ; un
-  fichier à écarts écrit `warning: … discarded` (anglais) sur stderr, puis le
-  script tourne (code de sortie 0). Ni erreur, ni question.
-- **Confirmation à l'enregistrement** : `AppState` retient le chemin source d'un
-  chargement qui a écarté quelque chose (`discarded_source`, posé par
-  `mark_loaded` et `load`). Enregistrer **sur ce chemin** passe par la fenêtre
-  « Écraser un fichier lu avec des écarts » (`Action::ConfirmDiscardedSave`,
-  `pending_discarded_save`, catalogue `docs/fenetres.md`) : l'attente n'est pas
-  un échec (aucune alerte, `after_save` conservé). Accepter écrit (et efface le
-  repère : la question ne revient pas) ; Cancel n'écrit rien, oublie le geste en
-  attente et rétablit le chemin d'un Enregistrer sous. Pas de question pour
-  Enregistrer sous un autre chemin, pour un fichier propre, pour le CLI et les
-  scripts, ni après un enregistrement réussi ; `new_project` et un autre
-  chargement effacent le repère. Un Enregistrer sous qui revient à la source
-  redemande tant que les écarts ne sont pas enregistrés.
+- **Single message**: `discarded_calculations_text` (`stokesforge-app-state`)
+  counts dropped calculations **and** traces in a single status bar sentence
+  ("2 calculations and 1 correction record were discarded from the project
+  (#3, #4, #7)", keys `status-load-discarded*`); at most five identifiers then
+  "…", the count stays exact. Same text at startup (`mark_loaded`) and in the
+  File menu (`load`).
+- **CLI**: `stokesforge-cli run --project` reads through `load_with_report`; a
+  file with gaps writes `warning: … discarded` (English) to stderr, then the
+  script runs (exit code 0). Neither an error nor a question.
+- **Confirmation on saving**: `AppState` keeps the source path of a
+  load that dropped something (`discarded_source`, set by
+  `mark_loaded` and `load`). Saving **to that path** goes through the window
+  "Replace File" (`Action::ConfirmDiscardedSave`,
+  `pending_discarded_save`, catalog `docs/fenetres.md`): waiting is not
+  a failure (no alert, `after_save` kept). Accepting writes (and clears the
+  marker: the question does not come back); Cancel writes nothing, forgets the pending
+  gesture and restores the path of a Save As. No question for
+  Save As to another path, for a clean file, for the CLI and
+  scripts, nor after a successful save; `new_project` and another
+  load clear the marker. A Save As that returns to the source
+  asks again as long as the gaps are not saved.
 
-## Corrections définitives des données (#212)
+## Final data corrections (#212)
 
-`FileBody::correction_traces` (`#[serde(default)]`) transporte séparément les
-`CorrectionRecord` de l'arbre : opération, séries sources, référence éventuelle
-et résultats. Le transport réutilise l'encodage des opérations/résultats des
-calculs, mais ne recrée aucun calcul actif ni colonne en lecture seule.
-Un ancien fichier se lit sans trace ; une opération inconnue ou un identifiant
-hors borne, une forme invalide ou une opération qui n'est pas une correction
-fait écarter uniquement sa trace, **comptée** dans `LoadReport::discarded_corrections`
-(#309). `main` transmet le rapport du démarrage à `AppState::mark_loaded`. Les valeurs corrigées restent
-dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
-traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
-pas ces traces, comme elles ne transportent pas les calculs. Les colonnes
-remplacées sont écrites dans `originals`, des paires nommées
-`OriginalRecord { column, copy }` du `CorrectionTraceRecord` (type dédié du
-champ, #323) ; la copie vit dans
-le classeur caché des copies d'analyse (#248), classeur ordinaire `hidden`
-marqué par son commentaire de fenêtre.
+`FileBody::correction_traces` (`#[serde(default)]`) carries separately the
+`CorrectionRecord`s of the tree: operation, source series, optional reference
+and results. The transport reuses the encoding of the operations/results of
+calculations, but recreates no active calculation or read-only column on reading.
+An old file reads without traces; an unknown operation or an out-of-bounds
+identifier, an invalid shape or an operation that is not a correction
+makes only its trace dropped, **counted** in `LoadReport::discarded_corrections`
+(#309). `main` passes the startup report to `AppState::mark_loaded`. The corrected values stay
+in the ordinary columns. The counter resumes beyond the identifiers of the
+traces, even if `next_id_hint` is too low. Column copies do not carry
+these traces, just as they do not carry the calculations. The replaced
+columns are written in `originals`, named pairs
+`OriginalRecord { column, copy }` of the `CorrectionTraceRecord` (dedicated type of the
+field, #323); the copy lives in
+the hidden workbook of analysis copies (#248), an ordinary `hidden` workbook
+marked by its window comment.
 
-## Chemin de travail et repère « enregistré » (#315)
+## Working path and "saved" marker (#315)
 
-Côté `AppState` (pas dans le format) : le repère « enregistré » (`saved_revision`,
-qui fait disparaître le « • » du titre et dispense de la question « enregistrer ? »)
-n'est posé que par un **vrai chargement** (`load`, `open_project`, ou
-`AppState::mark_loaded` appelé par le binaire après `stokesforge-app <chemin>`).
-Il n'est jamais déduit de l'existence d'un fichier au chemin : sinon un `demo.stf`
-du dossier courant passerait pour le projet et Ctrl+S l'écraserait sans le contrôle
-de l'enregistrement. Sans argument, la démonstration en mémoire (`STOKESFORGE_DEMO=1`) n'a pas de chemin ; celle de la première ouverture est ouverte depuis `demo.stf` du dossier de configuration (#333).
+On the `AppState` side (not in the format): the "saved" marker (`saved_revision`,
+which makes the "•" disappear from the title and dispenses with the "save?" question)
+is set only by a **real load** (`load`, `open_project`, or
+`AppState::mark_loaded` called by the binary after `stokesforge-app <chemin>`).
+It is never deduced from the existence of a file at the path: otherwise a `demo.stf`
+in the current folder would pass for the project and Ctrl+S would overwrite it without the check
+of saving. Without an argument, the in-memory demo (`STOKESFORGE_DEMO=1`) has no path; the first-opening one is opened from `demo.stf` in the configuration folder (#333).
 
-- `Action::SaveAs { path }` remplace le chemin puis enregistre ; en cas d'échec le
-  chemin précédent est **rétabli** (après `save`), pour que le Ctrl+S suivant
-  n'écrive pas sur le fichier qui vient d'échouer.
-- Aucun enregistrement pendant l'exécution d'un script : `save` refuse
-  (`error-save-script-running`) et abandonne le geste en attente ; le bouton et le
-  menu sont grisés.
-## Copies de secours (#317)
+- `Action::SaveAs { path }` replaces the path then saves; on failure the
+  previous path is **restored** (after `save`), so that the next Ctrl+S
+  does not write on the file that just failed.
+- No saving while a script is running: `save` refuses
+  (`error-save-script-running`) and abandons the pending gesture; the button and the
+  menu are disabled.
+## Backup copies (#317)
 
-Le format ne change pas : une copie de secours est un `.stf` ordinaire, écrit par
-`SessionHandle::save` (donc par temporaire et renommage) dans `recovery/` du dossier
-de données (ou `<STOKESFORGE_CONFIG_DIR>/recovery` quand la variable est posée,
-#332), à côté d'une fiche `.json` (chemin d'origine, heure) et d'un verrou
-`.lock` qui n'appartiennent pas au format. Elle ne passe jamais par le repère
-« enregistré » : ni `saved_revision`, ni chemin de travail. Proposée au démarrage
-suivant seulement si elle est plus récente que son `.stf`. Détail :
+The format does not change: a backup copy is an ordinary `.stf`, written by
+`SessionHandle::save` (so through temporary file and rename) in `recovery/` of the
+data folder (or `<STOKESFORGE_CONFIG_DIR>/recovery` when the variable is set,
+#332), next to a `.json` card (original path, time) and a `.lock` lock
+that do not belong to the format. It never goes through the "saved" marker:
+neither `saved_revision` nor working path. Offered at the next startup
+only if it is newer than its `.stf`. Details:
 `docs/application/projet-et-import.md`, `stokesforge-app-state/src/recovery.rs`.
 
-## Feuilles transposées liées (#253)
+## Linked transposed sheets (#253)
 
-`FileBody::transposes` (`#[serde(default)]`, placé après `correction_traces` et
-avant `window_geometries`) porte les liens de `Tree::transposes()` : un
-`TransposeRecord` par feuille transposée (`crates/stokesforge-persistence/src/transposes.rs`) —
-la feuille, sa source, la colonne x', son empreinte, les lignes demandées
-(ligne, colonne, empreinte) et les colonnes de la source telles que le lien les a
-lues (colonne, version, x' en bits). « Périmée » et « modifiée » ne sont **pas**
-écrites : elles se dérivent à la lecture, d'où l'importance des versions de colonnes
-(écrites par le fichier) et des empreintes de contenu (FNV-1a écrit en dur, stable
-d'une version de Rust à l'autre).
+`FileBody::transposes` (`#[serde(default)]`, placed after `correction_traces` and
+before `window_geometries`) carries the links of `Tree::transposes()`: one
+`TransposeRecord` per transposed sheet (`crates/stokesforge-persistence/src/transposes.rs`) —
+the sheet, its source, the x' column, its fingerprint, the requested rows
+(row, column, fingerprint) and the columns of the source as the link
+read them (column, version, x' in bits). "Stale" and "modified" are **not**
+written: they are derived on reading, hence the importance of the column versions
+(written by the file) and of the content fingerprints (FNV-1a written in hard code, stable
+from one Rust version to another).
 
-Lecture tolérante (invariant 10) : un lien dont la feuille ou la source n'est pas
-une feuille de l'arbre, ou dont un identifiant dépasse `MAX_NODE_ID`, est écarté seul ;
-la feuille reste, ordinaire. Un identifiant de colonne qui n'existe plus est accepté
-(la colonne a pu être supprimée) : le lien la recrée à la remise à jour. Le presse-papiers
-d'objets ne porte pas les liens (une copie est ordinaire). Champ additif : il
-ne change pas le numéro de version du format.
+Tolerant reading (invariant 10): a link whose sheet or source is not
+a sheet of the tree, or one of whose identifiers exceeds `MAX_NODE_ID`, is dropped alone;
+the sheet stays, ordinary. A column identifier that no longer exists is accepted
+(the column may have been deleted): the link recreates it on refresh. The object
+clipboard does not carry the links (a copy is ordinary). Additive field: it
+does not change the version number of the format.

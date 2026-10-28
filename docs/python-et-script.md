@@ -1,341 +1,332 @@
-# Python et scripts
+# Python and scripts
 
-`pyst` est l'interface d'extension publique de scripts. StokesForge est sous
-GPL-3.0-or-later pure : aucune permission supplémentaire ne couvre les scripts
-(l'exception de 1.0.0 a été retirée, #348). Licence et notices :
+`pyst` is the public scripting extension interface. StokesForge is under pure
+GPL-3.0-or-later: no additional permission covers scripts (the 1.0.0 exception
+was withdrawn, #348). License and notices:
 [`licence-et-extensions.md`](licence-et-extensions.md).
 
-Deux crates, derrière la feature `python` (absente de `default`) :
+Two crates, behind the `python` feature (absent from `default`):
 
-- **`stokesforge-python`** — l'interpréteur CPython **embarqué**. Il ne connaît pas
-  le modèle de StokesForge : il ne manipule que des scalaires et des tranches de
-  `f64`.
-- **`stokesforge-script`** — le fil de script, l'interruption, et la surface `pyst`
-  offerte aux scripts. Lui connaît le modèle, et parle à l'acteur.
+- **`stokesforge-python`** — the **embedded** CPython interpreter. It does not
+  know the StokesForge model: it handles only scalars and slices of `f64`.
+- **`stokesforge-script`** — the script thread, the interruption, and the
+  `pyst` surface offered to scripts. It knows the model, and talks to the actor.
 
-Sans la feature, les deux compilent vide : `cargo build` et `cargo test`
-fonctionnent sans interpréteur vendorisé. Le travail CI `test-python` prépare
-son runtime et exerce ce chemin automatiquement. Avec, la compilation
-exige `PYO3_CONFIG_FILE`, produite par `scripts/python-config.sh`.
+Without the feature, both compile empty: `cargo build` and `cargo test` work
+without a vendored interpreter. The `test-python` CI job prepares its runtime
+and exercises this path automatically. With the feature, the build requires
+`PYO3_CONFIG_FILE`, produced by `scripts/python-config.sh`.
 
-## Ce que ces crates rendent vrai
+## What these crates make true
 
-> Un script Python lit une colonne **sans copie**, en écrit une autre **via le
-> bus**, et `Ctrl+Z` annule ce que le script vient d'écrire.
+> A Python script reads a column **without copying**, writes another one **through
+> the bus**, and `Ctrl+Z` undoes what the script just wrote.
 
-C'est le critère de fin du socle, et `stokesforge-script::run_selftest` le rejoue en
-entier — depuis une distribution empaquetée pour le binaire `stokesforge-selftest`,
-sous `cargo test` pour `tests/selftest.rs`. Toute défaillance, y compris le
-démarrage de l'interpréteur, devient une étape en échec : jamais un panic.
+This is the completion criterion of the foundation, and
+`stokesforge-script::run_selftest` replays all of it — from a packaged
+distribution for the `stokesforge-selftest` binary, under `cargo test` for
+`tests/selftest.rs`. Every failure, including the interpreter start-up, becomes
+a failed step: never a panic.
 
-## L'interpréteur embarqué
+## The embedded interpreter
 
-`PYTHONHOME` seul **n'isole rien** : il laisse entrer `PYTHONPATH`, le
-`site-packages` utilisateur et les `.pth` du système. L'initialisation passe
-donc par `Py_InitializeFromConfig` avec une `PyConfig` issue de
-`PyConfig_InitIsolatedConfig`, en fixant `isolated`, `use_environment`,
-`user_site_directory`, `install_signal_handlers` et surtout
-`module_search_paths` **explicitement**. Aucune variable d'environnement, aucun
-setter déprécié.
+`PYTHONHOME` alone **isolates nothing**: it lets `PYTHONPATH`, the user
+`site-packages` and the system `.pth` files in. So initialization goes through
+`Py_InitializeFromConfig` with a `PyConfig` from `PyConfig_InitIsolatedConfig`,
+setting `isolated`, `use_environment`, `user_site_directory`,
+`install_signal_handlers` and above all `module_search_paths` **explicitly**. No
+environment variable, no deprecated setter.
 
-PyO3 n'offre **aucune** API sûre pour une configuration d'initialisation
-personnalisée — `Python::initialize()` appelle `Py_InitializeEx(0)`, qui lit
-l'environnement. Le passage par `pyo3::ffi` est donc obligatoire, et c'est le
-seul `unsafe` du crate.
+PyO3 offers **no** safe API for a custom initialization configuration —
+`Python::initialize()` calls `Py_InitializeEx(0)`, which reads the environment.
+Going through `pyo3::ffi` is therefore mandatory, and it is the only `unsafe` of
+the crate.
 
-L'initialisation est **explicite et paresseuse** (`auto-initialize` n'est pas
-activée). `Py_Finalize` n'est **jamais** appelé : source connue de plantages en
-sortie, sans bénéfice pour un processus qui se termine. Conséquence assumée :
-les `atexit` Python ne s'exécutent pas.
+Initialization is **explicit and lazy** (`auto-initialize` is not enabled).
+`Py_Finalize` is **never** called: it is a known source of crashes at exit, with
+no benefit for a process that is ending. Accepted consequence: Python `atexit`
+handlers do not run.
 
-`stokesforge-pyhello` existe pour prouver que cette isolation tient une fois
-empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
+`stokesforge-pyhello` exists to prove that this isolation holds once packaged
+(`scripts/pyhello-dist.sh`, clean environment).
 
-### `pyst.analysis` : lots et ajustement global (#201)
+### `pyst.analysis`: batches and global fit (#201)
 
-`y` peut être une liste de poignées : un seul calcul multi-séries, comme dans la
-fenêtre d'analyse (un Ctrl+Z, une ligne de Results). `x` et `sigma` valent pour
-toutes les séries (une poignée) ou une par série (liste de même longueur ;
-sinon `InvalidValueError`). Le résultat d'un lot est
-`{"series": [{columns, values, errors, warnings}, …]}`, dans l'ordre de `y` ;
-une poignée seule garde le dictionnaire à plat. `fit(shared=['tau'])` ajuste
-globalement. Témoins : `un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup`,
+`y` can be a list of handles: one multi-series calculation, as in the analysis
+window (one Ctrl+Z, one Results row). `x` and `sigma` apply to all series (one
+handle) or one per series (list of the same length; otherwise
+`InvalidValueError`). The result of a batch is
+`{"series": [{columns, values, errors, warnings}, …]}`, in the order of `y`;
+a single handle keeps the flat dictionary. `fit(shared=['tau'])` fits globally.
+Witnesses: `un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup`,
 `un_lot_mal_forme_est_refuse_avec_un_message`.
 
-### `pyst.analysis.fit` : modèles (#204)
+### `pyst.analysis.fit`: models (#204)
 
-`model=` accepte `linear`, `polynomial` (`degree`), `exponential`
-(`A·exp(−x/τ)`), `exponential_offset` (avec `y0`), `exponential2` (deux
-composantes et `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, ou une
-formule. `pyst.analysis.peaks(center_window=…)` borne chaque centre à ± cette
-distance de sa position de départ. Témoin :
+`model=` accepts `linear`, `polynomial` (`degree`), `exponential`
+(`A·exp(−x/τ)`), `exponential_offset` (with `y0`), `exponential2` (two
+components and `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, or a
+formula. `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
+distance from its starting position. Witness:
 `les_trois_exponentielles_et_la_fenetre_de_centre_ont_leur_nom`.
 
-### scipy dans le préfixe embarqué (#191)
+### scipy in the embedded prefix (#191)
 
-La pile embarquée porte numpy **et scipy** (`SCIPY_VERSION` de
-`vendor/python/lock.env`, roue cp312 : manylinux sous Linux, `win_amd64` sous
-Windows ; installée par `scripts/python-vendor.sh` avec
-`--no-deps --only-binary=:all:` comme numpy).
-Les deux sont solidaires de CPython et entre eux (la roue scipy exige
-`numpy>=2.0,<2.8`) : changer l'un se rejoue par `scripts/python-vendor.sh` puis
-`scripts/python-test.sh`. scipy sert aux **scripts** `pyst` (par exemple
-`scipy.optimize.curve_fit` pour un modèle que `pyst.analysis.fit` ne propose
-pas) ; l'interface et les menus n'en dépendent jamais, tout le traitement des
-menus est du Rust pur (`stokesforge-analysis`). Poids : ≈ 140 Mo installés
-(`scipy` 109 Mo + `scipy.libs` 30 Mo, OpenBLAS, libgfortran et libquadmath
-inclus), à compter dans le paquet. Les notices vont dans `licenses/scipy/`
-(`scripts/licenses-dist.sh`). Témoin : `stokesforge-script/tests/analysis.rs`,
-`scipy_ajuste_une_exponentielle_depuis_un_script` (travail CI `test-python`).
-Windows : le même script (sous Git Bash, #332) installe la roue `win_amd64`, et
-le travail CI `test-python-windows` lance les tests de scripts avec elle.
+The embedded stack carries numpy **and scipy** (`SCIPY_VERSION` of
+`vendor/python/lock.env`, cp312 wheel: manylinux on Linux, `win_amd64` on
+Windows; installed by `scripts/python-vendor.sh` with
+`--no-deps --only-binary=:all:` like numpy).
+Both are tied to CPython and to each other (the scipy wheel requires
+`numpy>=2.0,<2.8`): changing one is replayed by `scripts/python-vendor.sh` then
+`scripts/python-test.sh`. scipy serves `pyst` **scripts** (for example
+`scipy.optimize.curve_fit` for a model that `pyst.analysis.fit` does not
+offer); the interface and the menus never depend on it, all menu processing is
+pure Rust (`stokesforge-analysis`). Weight: ≈ 140 MB installed
+(`scipy` 109 MB + `scipy.libs` 30 MB, OpenBLAS, libgfortran and libquadmath
+included), to be counted in the package. The notices go in `licenses/scipy/`
+(`scripts/licenses-dist.sh`). Witness: `stokesforge-script/tests/analysis.rs`,
+`scipy_ajuste_une_exponentielle_depuis_un_script` (`test-python` CI job).
+Windows: the same script (under Git Bash, #332) installs the `win_amd64` wheel,
+and the `test-python-windows` CI job runs the script tests with it.
 
-## Tableaux : l'asymétrie est une décision
+## Arrays: the asymmetry is a decision
 
-| Sens | Mécanisme | Copie ? |
+| Direction | Mechanism | Copy? |
 |---|---|---|
-| Rust → Python (`column`) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
-| Rust → Python (`values`) | tuple de cellules `float` / `str` / `None` | **oui** |
-| Python → Rust (écriture) | copie du tableau numpy dans un `Vec<f64>` neuf | **oui** |
+| Rust → Python (`column`) | numpy array **borrowing** the `Arc<Vec<f64>>`, `writeable = False` | **no** |
+| Rust → Python (`values`) | tuple of `float` / `str` / `None` cells | **yes** |
+| Python → Rust (write) | copy of the numpy array into a new `Vec<f64>` | **yes** |
 
-L'écriture copie **par choix**, pour deux raisons indépendantes :
+Writing copies **by choice**, for two independent reasons:
 
-- le modèle doit posséder ses buffers — adopter de la mémoire allouée par
-  l'allocateur Python ferait dépendre la durée de vie d'une colonne de celle
-  d'un objet Python ;
-- un `Vec<f64>` copié est du Rust pur : il se détruit sur **n'importe quel
-  fil**, alors que détruire un objet Python exige le GIL — ce qui interdirait de
-  faire traverser la valeur au fil qui possède le modèle.
+- the model must own its buffers — adopting memory allocated by the Python
+  allocator would make the lifetime of a column depend on that of a Python
+  object;
+- a copied `Vec<f64>` is pure Rust: it is dropped on **any thread**, whereas
+  dropping a Python object requires the GIL — which would forbid passing the
+  value to the thread that owns the model.
 
-## Deux fils, pas un
+## Two threads, not one
 
-- le **fil de script** démarre CPython, en devient le fil principal, et exécute
-  les scripts l'un après l'autre ;
-- un **fil d'interruption** minuscule existe pour que `ScriptEngine::interrupt`
-  ne bloque **jamais**. Lever une exception asynchrone dans le fil de script
-  exige le GIL ; le prendre depuis le fil qui demande l'arrêt (l'interface)
-  pourrait l'y faire attendre. L'interface pose un drapeau et envoie un
-  message ; ce petit fil attend le GIL à sa place.
+- the **script thread** starts CPython, becomes its main thread, and runs the
+  scripts one after the other;
+- a tiny **interruption thread** exists so that `ScriptEngine::interrupt` **never**
+  blocks. Raising an asynchronous exception in the script thread requires the
+  GIL; taking it from the thread that asks for the stop (the interface) could
+  make it wait there. The interface sets a flag and sends a message; this small
+  thread waits for the GIL in its place.
 
-**Deux drapeaux, pas un**, également : `busy` est posé par `run` **avant**
-l'envoi du travail (il sert au refus `ScriptError::Busy`) ; `running` est posé
-par le fil de script une fois qu'il est **vraiment entré** dans le script. La
-distinction garantit qu'une interruption demandée pendant que `is_running()` est
-vrai ne peut plus être effacée par la remise à zéro de début d'exécution.
+**Two flags, not one**, too: `busy` is set by `run` **before** the work is
+sent (it serves the `ScriptError::Busy` refusal); `running` is set by the
+script thread once it has **really entered** the script. The distinction
+guarantees that an interruption requested while `is_running()` is true can no
+longer be erased by the start-of-run reset.
 
-## L'interruption, en deux moitiés
+## Interruption, in two halves
 
-L'interpréteur démarre **sans gestion des signaux** : aucun `KeyboardInterrupt`
-ne sera levé tout seul.
+The interpreter starts **without signal handling**: no `KeyboardInterrupt` will
+be raised by itself.
 
-1. un **drapeau atomique** vérifié par chaque appel de la surface `pyst` — il
-   attrape un script qui boucle en appelant l'API, sans surcoût ;
-2. **`PyThreadState_SetAsyncExc`** depuis le fil d'interruption, qui lève un
-   `KeyboardInterrupt` au prochain point de contrôle de l'interpréteur — il
-   attrape une boucle Python **pure**.
+1. an **atomic flag** checked by every call of the `pyst` surface — it catches a
+   script that loops while calling the API, at no extra cost;
+2. **`PyThreadState_SetAsyncExc`** from the interruption thread, which raises a
+   `KeyboardInterrupt` at the interpreter's next check point — it catches a
+   **pure** Python loop.
 
-*Écarté* : un hook `sys.settrace`, qui coûterait à chaque ligne exécutée, en
-permanence, pour une granularité dont on n'a pas besoin.
+*Rejected*: a `sys.settrace` hook, which would cost on every executed line,
+permanently, for a granularity that is not needed.
 
-**Limite dite honnêtement** : ni l'un ni l'autre n'interrompt un appel **natif**
-long. Une opération numpy sur dix millions de points ira à son terme ;
-l'exception ne sera levée qu'en revenant dans l'interpréteur. Un script qui
-avale les exceptions (`except: pass` en boucle pure) résiste à la seconde
-moitié — la première le rattrape dès qu'il touche à `pyst`.
+**Limit stated honestly**: neither of them interrupts a long **native** call. A
+numpy operation on ten million points runs to completion; the exception is
+raised only on returning to the interpreter. A script that swallows exceptions
+(`except: pass` in a pure loop) resists the second half — the first catches it
+as soon as it touches `pyst`.
 
-## La surface `pyst`
+## The `pyst` surface
 
-Le chantier Python (#65) reformule l'API à partir du code ; la spécification
-v1 de l'archive est historique. Les lots #66 à #68 ajoutent navigation,
-lecture des cellules, manipulation du projet et graphes natifs par commandes
-annulables. Aucun
-appel ne dépend d'une feuille active ni d'une fenêtre : la surface s'emploie
-avec toute session, y compris une session sans interface. La liste qui fait
-foi (noms, signatures, clés, valeurs) est « API figée V1 » plus bas ; le
-tableau ci-dessous en décrit les effets.
+The Python work package (#65) restates the API from the code; the v1
+specification in the archive is historical. Batches #66 to #68 add navigation,
+cell reading, project manipulation and native graphs through undoable commands.
+No call depends on an active sheet or a window: the surface works with any
+session, including a session without an interface. The authoritative list
+(names, signatures, keys, values) is "Frozen API V1" below; the table below
+describes its effects.
 
-| Appel | Résultat / effet |
+| Call | Result / effect |
 |---|---|
-| `root()` | poignée du dossier racine du projet courant |
-| `children(handle=None)` | liste des poignées des enfants directs, dans l'ordre du modèle ; sans poignée, enfants de la racine |
-| `info(handle)` | dictionnaire détaché : nom, nature, parent, nombre de lignes et métadonnées de colonne |
-| `values(handle)` | tuple copié des cellules stockées, en `float`, `str` ou `None` |
-| `resolve(path)` | poignée opaque résolue par la grammaire de chemins du modèle |
-| `column(handle)` | tableau numpy numérique/date-heure, sans copie et en lecture seule |
-| `set_column(handle, values)` | écriture numérique de même longueur par les commandes, annulable |
-| `create_workbook(name=None, parent=None)` | classeur vide dans le dossier demandé, racine par défaut ; poignée |
-| `create_worksheet(workbook, name=None)` | feuille vide en fin de classeur ; poignée |
-| `create_column(worksheet, name=None, column_type="numeric")` | colonne vide en fin de feuille ; poignée ; types `numeric`, `datetime`, `mixed` |
-| `rename(handle, name)` | renomme le nœud en conservant sa poignée |
-| `remove(handle)` | supprime le nœud et ses descendants, sauf la racine |
-| `set_values(handle, values)` | remplace les valeurs et la longueur de cette seule colonne |
-| `set_column_meta(handle, **metadata)` | modifie les seuls champs nommés, en préservant la provenance |
-| `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | crée un graphe natif ou ajoute une série à un graphe ; poignée ; sans `x`, la colonne X à gauche par rôle, sinon l'indice de ligne |
-| `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | ajoute un objet graphique en coordonnées de données ; rang dans le panneau |
-| `remove_shape(graph, index, *, panel=(0, 0))` | retire l'objet graphique de ce rang |
-| `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
-| `redo()` | symétrique d'`undo()` : rétablit la dernière entrée annulée ; `False` si rien à rétablir (et après des écritures du même script, qui vident la pile de rétablissement) |
-| `save()` | enregistre au chemin courant du projet ; `InvalidValueError` s'il n'en a pas (utiliser `save_as`) |
-| `save_as(path)` | enregistre sous ce chemin (texte ou `pathlib.Path`), qui devient le chemin courant |
-| `export_graph(graph, path, *, png_scale=4.0)` | exporte un graphe en `.svg`, `.pdf` ou `.png` (extension inconnue : `InvalidValueError`), même rendu que l'export de l'application |
-| `import_file(path, recipe=None)` | import dans un classeur neuf, une macro annulable ; poignées des feuilles créées |
-| `set_graph(graph, *, panel=(0, 0), axis="left", **options)` | règle un graphe existant par les clés de Graph Properties (tableau « `set_graph` » plus bas) ; **une seule entrée d'historique** ; clé inconnue ou valeur refusée : `InvalidValueError`, rien n'est écrit |
-| `insert_rows(worksheet, at, count=1)` | insère des lignes vides à la ligne `at` (0 = en tête) dans toutes les colonnes de la feuille ; `at` au-delà de la dernière ligne : `InvalidValueError` |
-| `delete_rows(worksheet, at, count=1)` | supprime `count` lignes à partir de `at` dans les colonnes de la feuille ; `undo()` rend les cellules |
-| `set_column_type(column, column_type)` | `numeric`, `datetime` ou `mixed` ; **conversion destructrice** des valeurs que le nouveau type ne représente pas (annulable) ; une colonne-formule refuse |
-| `move(handle, parent, index=None)` | déplace sous `parent` à `index` parmi les autres enfants (défaut : en dernier ; même parent = réordonner) ; la poignée reste valide ; parent inadapté, cycle, nom pris ou index hors limites : `InvalidValueError` |
-| `duplicate(handle, name=None)` | copie l'objet et ses descendants dans le même parent ; poignée de la copie ; une feuille juste après l'originale (`DuplicateWorksheet`), tout autre objet en fin de parent (`InsertCopy`) ; sans `name`, « `<nom> copy N` » (premier N libre, anglais : le script n'est pas traduit) ; la racine se refuse |
-| `set_note(note, text)` | remplace le texte entier d'une note |
+| `root()` | handle of the root folder of the current project |
+| `children(handle=None)` | list of handles of the direct children, in model order; without a handle, children of the root |
+| `info(handle)` | detached dictionary: name, kind, parent, row count and column metadata |
+| `values(handle)` | copied tuple of the stored cells, as `float`, `str` or `None` |
+| `resolve(path)` | opaque handle resolved by the model's path grammar |
+| `column(handle)` | numeric/datetime numpy array, without copy and read-only |
+| `set_column(handle, values)` | numeric write of the same length through the commands, undoable |
+| `create_workbook(name=None, parent=None)` | empty workbook in the requested folder, root by default; handle |
+| `create_worksheet(workbook, name=None)` | empty sheet at the end of the workbook; handle |
+| `create_column(worksheet, name=None, column_type="numeric")` | empty column at the end of the sheet; handle; types `numeric`, `datetime`, `mixed` |
+| `rename(handle, name)` | renames the node, keeping its handle |
+| `remove(handle)` | removes the node and its descendants, except the root |
+| `set_values(handle, values)` | replaces the values and the length of this column only |
+| `set_column_meta(handle, **metadata)` | changes only the named fields, preserving provenance |
+| `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | creates a native graph or adds a series to a graph; handle; without `x`, the X column to the left by role, otherwise the row index |
+| `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | adds a graphic object in data coordinates; returns the rank in the panel |
+| `remove_shape(graph, index, *, panel=(0, 0))` | removes the graphic object of this rank |
+| `undo()` | ends then undoes the current group, or undoes the last already ended group; `False` if the history is empty |
+| `redo()` | symmetric to `undo()`: redoes the last undone entry; `False` if there is nothing to redo (and after writes by the same script, which clear the redo stack) |
+| `save()` | saves at the project's current path; `InvalidValueError` if it has none (use `save_as`) |
+| `save_as(path)` | saves at this path (text or `pathlib.Path`), which becomes the current path |
+| `export_graph(graph, path, *, png_scale=4.0)` | exports a graph to `.svg`, `.pdf` or `.png` (unknown extension: `InvalidValueError`), same rendering as the application's export |
+| `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets |
+| `set_graph(graph, *, panel=(0, 0), axis="left", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below); **a single history entry**; unknown key or refused value: `InvalidValueError`, nothing is written |
+| `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
+| `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
+| `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column refuses |
+| `move(handle, parent, index=None)` | moves under `parent` at `index` among the other children (default: last; same parent = reorder); the handle stays valid; unsuitable parent, cycle, name taken or index out of range: `InvalidValueError` |
+| `duplicate(handle, name=None)` | copies the object and its descendants into the same parent; handle of the copy; a sheet right after the original (`DuplicateWorksheet`), any other object at the end of the parent (`InsertCopy`); without `name`, "`<nom> copy N`" (first free N, English: the script is not translated); the root is refused |
+| `set_note(note, text)` | replaces the whole text of a note |
 
-**Enregistrement (#331).** `save` et `save_as` passent par `SessionHandle::save`,
-comme l'application : l'enregistrement n'est pas une commande, ne touche ni à
-la révision ni à l'historique, et les poignées restent valides. Le groupe
-d'écritures du script est d'abord **validé** (point de validation, comme
-`undo`) : la session refuse d'écrire pendant une macro ouverte, et ce qui a été
-enregistré n'est plus défait par une erreur ultérieure du script. Le chemin
-courant n'est pas dans la session : le moteur le porte
-(`ScriptEngine::set_project_path`, posé par l'application avant chaque
-exécution avec le chemin du fichier ouvert ; `pyst.save_as` le change, et
-l'application l'adopte à la fin de l'exécution). Sans hôte qui le pose
-(CLI), le projet n'a pas de chemin avant le premier `save_as`.
-`export_graph` lit le spec du graphe dans un instantané et écrit avec
-`stokesforge-render-svg` (taille, polices et Typst de l'application, texte SVG
-laissé en texte) ; `stokesforge-script` dépend donc de `render-svg`, qui ne
-tire ni egui ni winit.
+**Saving (#331).** `save` and `save_as` go through `SessionHandle::save`, like
+the application: saving is not a command, touches neither the revision nor the
+history, and handles stay valid. The script's group of writes is first
+**committed** (commit point, like `undo`): the session refuses to write during
+an open macro, and what was saved is no longer undone by a later error of the
+script. The current path is not in the session: the engine carries it
+(`ScriptEngine::set_project_path`, set by the application before each run with
+the path of the open file; `pyst.save_as` changes it, and the application adopts
+it at the end of the run). Without a host that sets it (CLI), the project has no
+path before the first `save_as`.
+`export_graph` reads the graph spec in a snapshot and writes with
+`stokesforge-render-svg` (size, fonts and Typst of the application, SVG text
+left as text); `stokesforge-script` therefore depends on `render-svg`, which
+pulls in neither egui nor winit.
 
 ### `pyst.analysis` (#181)
 
-`readiness(kind, **options)` (#331) dit, sans lire de donnée ni rien écrire, ce
-qui manque avant un calcul (`Operation::readiness`) : dict `ready`, `reason`
-(`needs_points`, `needs_zone`, `bad_expression`, `no_parameter`, `invalid`) et
-`message` anglais ; `kind` est `baseline`, `integrate` ou `fit` avec les options
-de la fonction du même nom (un `nan` = pas encore posé), les autres calculs
-étant toujours prêts.
+`readiness(kind, **options)` (#331) says, without reading any data or writing
+anything, what is missing before a calculation (`Operation::readiness`): a dict
+`ready`, `reason` (`needs_points`, `needs_zone`, `bad_expression`,
+`no_parameter`, `invalid`) and an English `message`; `kind` is `baseline`,
+`integrate` or `fit` with the options of the function of the same name (a `nan`
+= not set yet), the other calculations always being ready.
 
-Sous-module des calculs du menu Analysis : `baseline`, `correct`, `smooth`,
+Submodule of the Analysis menu calculations: `baseline`, `correct`, `smooth`,
 `integrate`, `fit`, `peaks`, `reconvolve`, `deconvolve`. `smooth(y, x=None, *,
 method="adjacent"|"savitzky-golay"|"median", window=5, window_unit="points"|"x",
-order=2, replace_original=False)` (#324) : `window` est un nombre entier impair
-de points ou, avec `window_unit="x"`, une largeur en unités de X ; la colonne
-écrite est `columns["smoothed"]`. Chaque appel décrit une opération
-sur **une** colonne Y (poignée, X facultatif) et l'enregistre comme un calcul du
-projet par `Command::AddCalculation`, dans le groupe d'écritures du script : un
-seul `pyst.undo()` l'annule avec ses colonnes. Même `compute` que l'interface,
-même recalcul automatique (`auto_recalc`) et même option `keep_results`.
-Retour : un dictionnaire `{columns, values, errors, warnings}` aux clés stables
-du crate de calcul (`"area.total"`, `"param.tau"`, `"peak.height.1"`…) ;
-les avertissements sont en anglais. Nom long, unité et commentaire des
-colonnes de sortie sont **ceux de la fenêtre d'analyse** (#256) : une seule
-règle, `stokesforge_core::OutputName` (`Intensity (B-corr)`, `Baseline of B`,
-`Peak 2 of B`…), l'unité de la source, le titre de la famille en commentaire ;
-`pyst` les écrit par `english()`, donc toujours en anglais. Le nom reste figé à
-la création (le recalcul n'en réécrit que les données). `peaks` a, comme la
-fenêtre, `peak_columns=True` (une colonne par pic `peak.N` et le fond
-`background`) et `sum_column=True` (la somme `peaks_sum`) ; les autres
-colonnes d'aide suivent `keep_baseline`, `cumulative`, `normalize`,
-`residuals`. **Limites** : une série par appel (ni lot, ni ajustement global).
-Contrat : `stokesforge-script/tests/analysis.rs`. La dépendance de `script` à
-`stokesforge-analysis` est déclarée dans sa liste blanche (`no_ui_dependency.rs`).
+order=2, replace_original=False)` (#324): `window` is an odd integer number
+of points or, with `window_unit="x"`, a width in X units; the written column is
+`columns["smoothed"]`. Each call describes an operation
+on **one** Y column (handle, optional X) and records it as a project calculation
+through `Command::AddCalculation`, in the script's group of writes: a
+single `pyst.undo()` undoes it with its columns. Same `compute` as the
+interface, same automatic recalculation (`auto_recalc`) and same `keep_results`
+option.
+Return: a dictionary `{columns, values, errors, warnings}` with the stable keys
+of the calculation crate (`"area.total"`, `"param.tau"`, `"peak.height.1"`…);
+the warnings are in English. Long name, unit and comment of the output columns
+are **those of the analysis window** (#256): a single rule,
+`stokesforge_core::OutputName` (`Intensity (B-corr)`, `Baseline of B`,
+`Peak 2 of B`…), the unit of the source, the family title as the comment;
+`pyst` writes them through `english()`, so always in English. The name stays
+frozen at creation (recalculation rewrites only the data). `peaks` has, like the
+window, `peak_columns=True` (one column per peak `peak.N` and the background
+`background`) and `sum_column=True` (the sum `peaks_sum`); the other helper
+columns follow `keep_baseline`, `cumulative`, `normalize`, `residuals`.
+**Limits**: one series per call (no batch, no global fit).
+Contract: `stokesforge-script/tests/analysis.rs`. The dependency of `script` on
+`stokesforge-analysis` is declared in its allowlist (`no_ui_dependency.rs`).
 
-La ligne de base constante (#211) s’appelle avec
-`pyst.analysis.baseline(y, x, method="constant", points=[(x0, y0)])`, ou avec
-`zones=[(x_min, x_max)]` pour la moyenne des Y finis de cette zone inclusive.
-Un seul point **ou** une seule zone est requis, sans les combiner. Comme les
-autres lignes de base, `op="subtract"` soustrait le fond et `op="divide"`
-normalise par ce fond ; diviser par zéro produit des valeurs manquantes.
-Les deux méthodes sont enregistrées avec leurs réglages dans le `.stf`.
+The constant baseline (#211) is called with
+`pyst.analysis.baseline(y, x, method="constant", points=[(x0, y0)])`, or with
+`zones=[(x_min, x_max)]` for the mean of the finite Y values of this inclusive
+zone. Exactly one point **or** one zone is required, not combined. Like the
+other baselines, `op="subtract"` subtracts the background and `op="divide"`
+normalizes by this background; dividing by zero produces missing values.
+Both methods are recorded with their settings in the `.stf`.
 
-### Écritures et annulation d'un script (#67)
+### Writes and undo of a script (#67)
 
-Les écritures passent par les commandes déjà utilisées par l'application.
-La première mutation ouvre une macro exclusive `MacroKind::Script` ; les
-mutations suivantes, imports compris, rejoignent ce groupe. Au succès, un
-seul Ctrl+Z annule toute l'exécution (libellé « Exécuter le script »). Une
-exception non rattrapée ou une interruption demandée annule les mutations du
-groupe en cours et préserve l'historique précédent, y compris le rétablissement.
-Une erreur rattrapée permet au script de poursuivre et de valider ses autres
-écritures.
+Writes go through the commands the application already uses.
+The first mutation opens an exclusive `MacroKind::Script` macro; later
+mutations, imports included, join this group. On success, a single Ctrl+Z
+undoes the whole run (label "Run Script"). An uncaught exception or a
+requested interruption undoes the mutations of the current group and preserves
+the previous history, redo included. A caught error lets the script continue
+and commit its other writes.
 
-Un script de lecture n'ouvre aucune macro. Dès la première mutation, les
-autres clients ne peuvent plus écrire, sauvegarder ou charger pendant le
-groupe ; les lectures restent possibles. Le moteur possède toujours une
-identité de client distincte de son appelant, même si celui-ci lui transmet
-un clone de sa poignée. Les mutations revalident l'époque après acquisition
-de la macro ; les écritures de cellules portent encore `expected_version`
-(voir « Version de lecture » ci-dessous).
+A read-only script opens no macro. From the first mutation, other clients can
+no longer write, save or load during the group; reads remain possible. The
+engine always has a client identity distinct from its caller, even if the
+caller passes it a clone of its handle. Mutations revalidate the epoch after
+acquiring the macro; cell writes still carry `expected_version` (see "Read
+version" below).
 
-### Version de lecture (#312)
+### Read version (#312)
 
-Deux mécanismes, qui partagent la même comparaison de version :
+Two mechanisms, which share the same version comparison:
 
-- **Version lue, retenue par défaut.** `pyst.column` et `pyst.values` retiennent
-  la `version` de la colonne lue (même instantané que les valeurs), dans une
-  table `(nœud, époque) → version` du contexte de script, qui survit d'une
-  saisie de console à l'autre. `set_column` / `set_values` exigent cette
-  version : si la colonne a changé depuis (édition de l'interface, autre
-  client), l'écriture est refusée aussitôt par `ConcurrentWriteError`, sans
-  retentative et sans écraser l'édition. Après une écriture réussie, la version
-  retenue devient la version neuve : deux écritures successives réussissent.
-  `pyst.undo()` oublie toutes les versions retenues.
-- **`expected_version=` facultatif** (mot-clé) sur `set_column` et `set_values` :
-  il remplace la version retenue. `pyst.info(h)['column']['version']` fournit la
-  version courante ; `pyst.info` ne retient rien. Priorité : argument, puis
-  version retenue, puis version courante.
+- **Version read, kept by default.** `pyst.column` and `pyst.values` keep the
+  `version` of the column read (same snapshot as the values), in a
+  `(nœud, époque) → version` table of the script context, which survives from one
+  console input to the next. `set_column` / `set_values` require this
+  version: if the column has changed since (interface edit, other client), the
+  write is refused at once with `ConcurrentWriteError`, without retry and
+  without overwriting the edit. After a successful write, the kept version
+  becomes the new version: two successive writes succeed. `pyst.undo()` forgets
+  all the kept versions.
+- **Optional `expected_version=`** (keyword) on `set_column` and `set_values`:
+  it replaces the kept version. `pyst.info(h)['column']['version']` gives the
+  current version; `pyst.info` keeps nothing. Priority: argument, then kept
+  version, then current version.
 
-Limites connues : une colonne **écrite sans lecture préalable** n'est pas
-protégée (version courante) ; une colonne **B lue pour calculer A** ne protège
-que B, l'écriture de A reste non protégée si A n'a pas été lue. La version ne
-couvre que type et valeurs (invariants 8 et 11), ni nom ni métadonnées.
-Asymétrie assumée : aucune valeur n'est filtrée à l'écriture, un `inf` écrit
-par un script est stocké tel quel, alors que l'import le convertit en NaN ou
-en texte.
+Known limits: a column **written without a prior read** is not protected
+(current version); a column **B read to compute A** protects only B, the write
+of A stays unprotected if A was not read. The version covers only type and
+values (invariants 8 and 11), not name or metadata. Accepted asymmetry: no value
+is filtered on write, an `inf` written by a script is stored as is, whereas
+import converts it to NaN or to text.
 
-`pyst.undo()` reste utilisable pendant un script : il termine le groupe en
-cours puis l'annule entièrement. C'est un point de validation explicite ;
-une écriture ultérieure ouvre un nouveau groupe, et un échec ultérieur
-n'annule pas les opérations d'historique déjà demandées. Deux écritures
-successives avant `undo()` s'annulent donc ensemble.
+`pyst.undo()` remains usable during a script: it ends the current group then
+undoes it entirely. It is an explicit commit point; a later write opens a new
+group, and a later failure does not undo the history operations already
+requested. Two successive writes before `undo()` are therefore undone together.
 
-`set_column` conserve son contrat numpy strict : float64, une dimension,
-longueur inchangée, tableaux non contigus acceptés et masque non vide refusé.
-`set_values` remplace aussi la longueur, par composition de `SetCells` puis
-`DeleteCells` pour retirer la queue ; l'identité, le type, les métadonnées et
-les autres colonnes restent inchangés. Aucune suppression de queue ne
-précède la validation de l'écriture. L'écriture et la suppression de la queue
-sont enveloppées dans une macro imbriquée (`abort_macro` si la seconde échoue) :
-le tout réussit ou ne laisse rien. La version de lecture suit la même règle
-que `set_column`.
+`set_column` keeps its strict numpy contract: float64, one dimension,
+unchanged length, non-contiguous arrays accepted and non-empty mask refused.
+`set_values` also replaces the length, by composing `SetCells` then
+`DeleteCells` to remove the tail; identity, type, metadata and the other
+columns stay unchanged. No tail deletion precedes the validation of the write.
+The write and the tail deletion are wrapped in a nested macro (`abort_macro` if
+the second fails): everything succeeds or nothing is left. The read version
+follows the same rule as `set_column`.
 
-`set_values` accepte un tableau numpy float64 1D (mêmes contrôles) ou un
-itérable de `float`, `int`, `str`, `None`. Les entiers Python hors de
-[-2⁵³, 2⁵³] sont refusés : convertir explicitement si la perte de précision
-est voulue. `True` et `False` sont refusés (`InvalidValueError`, colonne
-inchangée) : convertir explicitement en `int` ou `float`. Une colonne numérique/date-heure refuse les textes et traduit
-`None` en NaN ; une colonne mixte conserve chaque cellule telle quelle
-(`None`, `""`, `"12"`, NaN et -0.0 sont distincts). Les entrées sont copiées.
-Les dates sont des timestamps POSIX en secondes.
+`set_values` accepts a 1D numpy float64 array (same checks) or an iterable of
+`float`, `int`, `str`, `None`. Python integers outside [-2⁵³, 2⁵³] are refused:
+convert explicitly if the loss of precision is intended. `True` and `False` are
+refused (`InvalidValueError`, column unchanged): convert explicitly to `int` or
+`float`. A numeric/datetime column refuses text and translates `None` to NaN; a
+mixed column keeps each cell as is (`None`, `""`, `"12"`, NaN and -0.0 are
+distinct). Inputs are copied. Dates are POSIX timestamps in seconds.
 
-Les noms automatiques viennent du modèle (`BookN`, `SheetN`, lettres de
-colonne). La longueur des noms (255 caractères), les caractères réservés,
-l'unicité et les types de parent gardent les règles du modèle. Le plafond
-de 100 000 000 lignes est partagé avec le modèle et vérifié avant la copie
-d'un tableau numpy ; un itérable est également borné pendant sa copie.
-Les créations rendent des objets vides ; pour des données texte, créer une
-colonne `mixed`, puis appeler `set_values`.
+Automatic names come from the model (`BookN`, `SheetN`, column letters). Name
+length (255 characters), reserved characters, uniqueness and parent kinds keep
+the model's rules. The cap of 100,000,000 rows is shared with the model and
+checked before copying a numpy array; an iterable is also bounded while it is
+copied. Creations return empty objects; for text data, create a `mixed` column,
+then call `set_values`.
 
-`set_column_meta` accepte `role`, `long_name`, `unit`, `comment`,
-`display_format` et `formula`. Les valeurs sont des chaînes, sauf
-`formula=None` qui retire la formule ; les rôles sont ceux de `info`.
-La formule s'écrit **en lettres de colonne** de la feuille de la colonne
-(`formula="A * 2"`, la casse est normalisée) et se lit de même ; une lettre qui
-ne désigne aucune colonne de la feuille, la colonne elle-même ou `#REF` lèvent
-`InvalidValueError` sans rien écrire (#321). Le script ne manipule jamais
-d'identifiants : le texte stocké de la formule n'est pas réécrit par un autre
-champ (changer `unit` d'une colonne dont la formule affiche `#REF` réussit).
-`type` et `version` restent en lecture seule. Une colonne-formule refuse
-les écritures directes. Poser une formule déclenche le recalcul existant,
-qui peut changer le type de la colonne pour porter les échecs de calcul ;
-retirer la formule ne reconvertit pas ce type automatiquement.
+`set_column_meta` accepts `role`, `long_name`, `unit`, `comment`,
+`display_format` and `formula`. Values are strings, except `formula=None`, which
+removes the formula; the roles are those of `info`.
+The formula is written **in column letters** of the column's sheet
+(`formula="A * 2"`, case is normalized) and is read the same way; a letter that
+designates no column of the sheet, the column itself or `#REF` raise
+`InvalidValueError` without writing anything (#321). The script never handles
+identifiers: the stored text of the formula is not rewritten by another field
+(changing `unit` of a column whose formula displays `#REF` succeeds).
+`type` and `version` stay read-only. A formula column refuses direct writes.
+Setting a formula triggers the existing recalculation, which can change the
+column type to carry calculation failures; removing the formula does not
+convert this type back automatically.
 
 ```python
 import numpy as np
@@ -349,45 +340,45 @@ pyst.set_column_meta(result, role="y", long_name="Signal doublé", unit="mV")
 # Un seul Ctrl+Z retire ce classeur et toutes ses données.
 ```
 
-Contrat : `crates/stokesforge-script/tests/mutations.rs` (création, longueurs,
-cellules exactes, undo/redo, refus, époques, interruption et imports).
+Contract: `crates/stokesforge-script/tests/mutations.rs` (creation, lengths,
+exact cells, undo/redo, refusals, epochs, interruption and imports).
 
-### Graphes natifs (#68)
+### Native graphs (#68)
 
-`pyst.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
-racine. Sans `x`, chaque `y` prend la colonne de rôle X la plus proche à sa
-gauche dans sa feuille (Xn pour un `y` de rôle Yn : X2 pour Y2, X3 pour Y3…), comme la fenêtre
-(`stokesforge_core::compose::x_for`, #257) ; l'abscisse n'est l'indice de ligne
-que si la feuille n'a pas de colonne X à gauche. **Changement de #257** : avant,
-`plot(y)` sans `x=` donnait toujours l'indice de ligne, même quand une colonne
-est de rôle X. Un `x=` explicite garde la main, rôle ou non. `parent` accepte un
-dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
-une série au premier panneau d'un graphe existant et conserve ses autres
-panneaux, séries et réglages ; `name` et `parent` sont alors refusés. Un appel
-ajoute une série, ou plusieurs si `y` est une liste de colonnes : ces séries forment un groupe (§ Groupes de séries, #196).
-Sans option `title`, un graphe neuf n'a pas de titre ; le nom du graphe
-sert à identifier sa fenêtre, pas à titrer la figure (#103).
+`pyst.plot(y, x)` references the model's columns and creates a graph at the
+root. Without `x`, each `y` takes the nearest X-role column to its left in its
+sheet (Xn for a `y` of role Yn: X2 for Y2, X3 for Y3…), like the window
+(`stokesforge_core::compose::x_for`, #257); the abscissa is the row index
+only if the sheet has no X column to the left. **Change from #257**: before,
+`plot(y)` without `x=` always gave the row index, even when a column
+has the X role. An explicit `x=` keeps priority, role or not. `parent` accepts a
+folder, `name` chooses the name (automatic `GraphN` otherwise). `graph=g` adds
+a series to the first panel of an existing graph and keeps its other
+panels, series and settings; `name` and `parent` are then refused. One call
+adds one series, or several if `y` is a list of columns: these series form a group (§ Series groups, #196).
+Without a `title` option, a new graph has no title; the graph name
+serves to identify its window, not to title the figure (#103).
 
-| Option | Valeurs |
+| Option | Values |
 |---|---|
 | `plot_type` | `line`, `scatter`, `line_scatter`, `bar`, `histogram`, `error_bar` |
-| `color` | `#RRGGBB` ou `#RRGGBBAA`, trait et symbole (liste : une couleur par série, chaîne : toutes) ; palette partagée sinon |
-| `line_style`, `line_width` | `none`, `solid`, `dash`, `dot`, `dash_dot` ; largeur finie positive |
-| `symbol`, `symbol_size` | `none`, `circle`, `square`, `triangle`, `diamond`, `plus`, `cross` ; taille finie positive |
-| `label`, `title`, `x_title`, `y_title` | chaînes avec markup Typst explicite |
-| `x_scale`, `y_scale` | `linear` ou `log` |
-| `x_from`/`x_to`, `y_from`/`y_to` | les deux bornes ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers ; plage automatique sinon sur un graphe neuf |
-| `axis` | `left` ou `right` pour la série et ses options Y ; rend l'axe droit visible |
-| `x_error`, `y_error` | poignées des colonnes d'erreurs |
-| `histogram_bins` | entier de 1 à 65 536 |
+| `color` | `#RRGGBB` or `#RRGGBBAA`, line and symbol (list: one color per series, string: all); shared palette otherwise |
+| `line_style`, `line_width` | `none`, `solid`, `dash`, `dot`, `dash_dot`; finite positive width |
+| `symbol`, `symbol_size` | `none`, `circle`, `square`, `triangle`, `diamond`, `plus`, `cross`; finite positive size |
+| `label`, `title`, `x_title`, `y_title` | strings with explicit Typst markup |
+| `x_scale`, `y_scale` | `linear` or `log` |
+| `x_from`/`x_to`, `y_from`/`y_to` | both bounds together, finite and different, positive on a log axis; `from > to` draws the axis reversed; automatic range otherwise on a new graph |
+| `axis` | `left` or `right` for the series and its Y options; makes the right axis visible |
+| `x_error`, `y_error` | handles of the error columns |
+| `histogram_bins` | integer from 1 to 65,536 |
 
-Le label automatique vient de la colonne et reste du texte littéral : une
-métadonnée contenant du markup n'est pas interprétée. Les titres et labels
-fournis explicitement utilisent Typst, comme les propriétés de l'application.
-Une option inconnue, une plage invalide ou une cible incorrecte est refusée.
-Les poignées et les paramètres sont validés avant la mutation ; les références
-cassées sont détectées avec leur époque. Les commandes `AddGraph` et
-`SetPlotSpec` rejoignent le même groupe `Script` que les écritures de colonnes.
+The automatic label comes from the column and stays literal text: metadata
+containing markup is not interpreted. Titles and labels given explicitly use
+Typst, like the application's properties.
+An unknown option, an invalid range or a wrong target is refused.
+Handles and parameters are validated before the mutation; broken references
+are detected with their epoch. The `AddGraph` and `SetPlotSpec` commands join
+the same `Script` group as the column writes.
 
 ```python
 x = pyst.resolve('[Book1]Sheet1!A')
@@ -397,137 +388,139 @@ g = pyst.plot(y, x, name='Graph1', title='$x^2$',
 pyst.plot(y, x, graph=g, line_style='dash', label='Deuxième série')
 ```
 
-Contrat : `tests/graphs.rs` compare le `PlotSpec` exact et le SVG partagé,
-avec un témoin différent et du Typst ; il couvre aussi ajout, rollback,
-persistance et références invalidées. Matplotlib est évalué séparément par
-le [spike #69](python-matplotlib-spike.md), sans changer le rendu natif.
+Contract: `tests/graphs.rs` compares the exact `PlotSpec` and the shared SVG,
+with a different witness and Typst; it also covers adding, rollback,
+persistence and invalidated references. Matplotlib is evaluated separately by
+the [spike #69](python-matplotlib-spike.md), without changing the native
+rendering.
 
-`pyst.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` pose un objet
-(`rectangle`, `ellipse`, `line` ou `arrow`, pointe en `(x2, y2)`) en coordonnées
-de données du calque de base de la case `panel=(ligne, colonne)` (le calque ordinaire, jamais un calque superposé, #167), au-dessus des autres, et rend
-son rang. `axis` vaut `left` ou `right`. La couleur du trait vide est
-automatique, celle du remplissage vide signifie aucun remplissage.
-`remove_shape` retire ce rang ; les objets suivants descendent d'un rang.
+`pyst.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311")` places an object
+(`rectangle`, `ellipse`, `line` or `arrow`, tip at `(x2, y2)`) in data
+coordinates of the base layer of the `panel=(ligne, colonne)` cell (the ordinary layer, never an overlaid layer, #167), above the others, and returns
+its rank. `axis` is `left` or `right`. An empty line color is
+automatic, an empty fill color means no fill.
+`remove_shape` removes this rank; the following objects move down one rank.
 
-Ces appels de #76 rejoignent la même macro `Script`, même s'ils sont la
-première mutation de l'exécution. Une erreur ou interruption annule donc aussi
-les ajouts et retraits d'objets. Nature, époque et panneau sont revalidés après
-réservation ; aucun client concurrent ne peut écraser le spec pendant cette
-écriture. Des coordonnées non finies, un type, axe, style ou rang invalide
-sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
+These #76 calls join the same `Script` macro, even if they are the
+first mutation of the run. An error or interruption therefore also undoes
+the additions and removals of objects. Kind, epoch and panel are revalidated
+after reservation; no concurrent client can overwrite the spec during this
+write. Non-finite coordinates, an invalid type, axis, style or rank
+are refused without mutation. Contract: `tests/script.rs` and `tests/graphs.rs`.
 
-### `set_graph` et édition de classeur (#331, lot 2)
+### `set_graph` and workbook editing (#331, batch 2)
 
-`set_graph` écrit le `PlotSpec` par un `SetPlotSpec` (comme `plot`, groupes de
-séries et `add_shape`) : **une seule entrée d'historique** quel que soit le
-nombre de clés, et un appel qui ne change rien n'écrit rien. Toutes les clés
-sont lues et validées avant l'écriture. La liste vit en un seul endroit,
-`SET_GRAPH_OPTIONS` (`stokesforge-script/src/set_graph.rs`), que le test de
-surface lira. Les clés Y visent l'axe `axis` (`left` par défaut, `right`).
+`set_graph` writes the `PlotSpec` through a `SetPlotSpec` (like `plot`, series
+groups and `add_shape`): **a single history entry** whatever the number of
+keys, and a call that changes nothing writes nothing. All keys
+are read and validated before writing. The list lives in one place,
+`SET_GRAPH_OPTIONS` (`stokesforge-script/src/set_graph.rs`), which the surface
+test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 
-| Clé | Valeur |
+| Key | Value |
 |---|---|
-| `title`, `panel_title`, `x_title`, `y_title`, `x_unit`, `y_unit` | chaînes (markup Typst pour les titres) |
-| `title_visible`, `stale_warning`, `decimal_comma` | booléens (graphe) |
-| `title_color`, `background` | `#RRGGBB` ou `#RRGGBBAA` ; `""` = automatique (titre) ou blanc (fond) |
-| `x_scale`, `y_scale` | `linear` ou `log` |
-| `x_from`/`x_to`, `y_from`/`y_to` | les deux ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers (et marque l'axe inversé, #344) ; passent le cadrage en manuel |
-| `x_auto_range`, `y_auto_range` | `True` rend le cadrage automatique (contradictoire avec des bornes données dans le même appel) |
-| `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booléens ; `x_inverted=True` sur des bornes croissantes les échange (le sens se lit sur leur ordre, `AxisSpec::orient`, #344) ; la surface elle-même ne change pas |
-| `legend_visible`, `legend_position` | booléen ; `top_left`, `top_right`, `bottom_left`, `bottom_right` (légende du panneau `panel`) |
+| `title`, `panel_title`, `x_title`, `y_title`, `x_unit`, `y_unit` | strings (Typst markup for the titles) |
+| `title_visible`, `stale_warning`, `decimal_comma` | booleans (graph) |
+| `title_color`, `background` | `#RRGGBB` or `#RRGGBBAA`; `""` = automatic (title) or white (background) |
+| `x_scale`, `y_scale` | `linear` or `log` |
+| `x_from`/`x_to`, `y_from`/`y_to` | both together, finite and different, positive on a log axis; `from > to` draws the axis reversed (and marks the axis as inverted, #344); switch the framing to manual |
+| `x_auto_range`, `y_auto_range` | `True` makes the framing automatic (contradictory with bounds given in the same call) |
+| `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
+| `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
 
-Hors de `set_graph` pour l'instant (rien ne les empêche techniquement, ils
-n'ont pas été jugés assez sûrs pour ce lot) : polices et ancrages des titres,
-couleurs des axes et de la légende, axe miroir et libellés de graduations,
-axe du haut, thèmes, et tout réglage de série (`plot`, `set_group_style`).
+Outside `set_graph` for now (nothing technically prevents them, they
+were not judged safe enough for this batch): fonts and anchors of the titles,
+colors of the axes and of the legend, mirror axis and tick labels,
+top axis, themes, and every series setting (`plot`, `set_group_style`).
 
-Le lot d'édition de classeur envoie les commandes que l'interface emploie
-(`InsertRows`, `DeleteRows`, `SetColumnType`, `Move`, `DuplicateWorksheet` ou
-`InsertCopy`, `SetNoteText`), dans le groupe annulable du script. Une écriture
-de colonne par le script (`insert_rows`, `delete_rows`, `set_column_type`)
-met à jour la version qu'il avait lue de ces colonnes (voir « Version de
-lecture ») : ses écritures suivantes ne se refusent pas elles-mêmes. Le calcul
-(`update_calculation`, `remove_calculation`) et la transposition ne sont pas
-exposés.
+The workbook editing batch sends the commands the interface uses
+(`InsertRows`, `DeleteRows`, `SetColumnType`, `Move`, `DuplicateWorksheet` or
+`InsertCopy`, `SetNoteText`), in the script's undoable group. A column write
+by the script (`insert_rows`, `delete_rows`, `set_column_type`)
+updates the version it had read of these columns (see "Read
+version"): its following writes do not refuse themselves. The calculation
+(`update_calculation`, `remove_calculation`) and the transposition are not
+exposed.
 
-### Groupes de séries (#196)
+### Series groups (#196)
 
-`pyst.plot([y1, y2, …], x)` crée **un groupe**, comme les séries ajoutées
-ensemble depuis l'interface (`PanelSpec::push_series_batch`) ; une liste d'une
-seule colonne n'en crée pas. `x` est `None` (la colonne X à gauche de chaque `y`
-par son rôle, sinon l'indice de ligne), une colonne partagée ou une liste de
-même longueur que `y`. `label` est une chaîne pour
-une série, une liste (un nom par série) pour un lot ; `group_name` nomme le
-groupe (refusé pour une série seule) ; `x_error`/`y_error` ne servent qu'à une
-série seule. Les couleurs automatiques suivent la palette, série après série (`SeriesSpec::from_palette`, au rang de la série dans le panneau).
-`color` suit la même règle que `label` (#207) : une liste donne une couleur par série (`InvalidValueError` si sa longueur n'est pas celle du lot) ; une chaîne seule vaut pour **toutes** les séries du lot ; pour un dégradé, voir `apply_gradient`.
+`pyst.plot([y1, y2, …], x)` creates **one group**, like series added
+together from the interface (`PanelSpec::push_series_batch`); a list of a
+single column creates none. `x` is `None` (the X column to the left of each `y`
+by its role, otherwise the row index), a shared column or a list of the
+same length as `y`. `label` is a string for
+one series, a list (one name per series) for a batch; `group_name` names the
+group (refused for a single series); `x_error`/`y_error` serve only a
+single series. Automatic colors follow the palette, series after series (`SeriesSpec::from_palette`, at the series' rank in the panel).
+`color` follows the same rule as `label` (#207): a list gives one color per series (`InvalidValueError` if its length is not that of the batch); a single string applies to **all** series of the batch; for a gradient, see `apply_gradient`.
 
-| Appel | Effet |
+| Call | Effect |
 |---|---|
-| `series(g, *, panel=(0, 0))` | liste de dictionnaires `index`, `name`, `group` (`None` si seule), `color`, `visible`, `y` (poignée) |
-| `series_groups(g, *, panel)` | liste de `id`, `name` (`None` = nom automatique), `members` (rangs) |
-| `group_series(g, indices, *, name=None, panel)` | groupe neuf à la place de la première série ; rend son numéro. Les séries quittent leur ancien groupe, qui disparaît avec son nom s'il est vide |
-| `set_series_group(g, index, group, *, panel)` | entre à la suite des membres, ou sort du groupe avec `None` ; rend le nouveau rang |
-| `rename_group(g, group, name, *, panel)` | `""` rend le nom automatique |
-| `ungroup(g, group, *, panel)` | dissout : les séries restent, style gardé |
-| `remove_group(g, group, *, panel)` | supprime le groupe **et ses séries** |
-| `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | pose chaque option donnée sur tous les membres |
-| `apply_gradient(g, group, gradient, *, panel)` | `gradient` : identifiant d'un nuancier fourni (`blue-red`…), nom d'un nuancier enregistré **dans le projet**, ou liste d'arrêts `#RRGGBB` |
+| `series(g, *, panel=(0, 0))` | list of dictionaries `index`, `name`, `group` (`None` if alone), `color`, `visible`, `y` (handle) |
+| `series_groups(g, *, panel)` | list of `id`, `name` (`None` = automatic name), `members` (ranks) |
+| `group_series(g, indices, *, name=None, panel)` | new group in place of the first series; returns its number. The series leave their former group, which disappears with its name if it is empty |
+| `set_series_group(g, index, group, *, panel)` | joins after the members, or leaves the group with `None`; returns the new rank |
+| `rename_group(g, group, name, *, panel)` | `""` restores the automatic name |
+| `ungroup(g, group, *, panel)` | dissolves: the series stay, style kept |
+| `remove_group(g, group, *, panel)` | removes the group **and its series** |
+| `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | sets each given option on all members |
+| `apply_gradient(g, group, gradient, *, panel)` | `gradient`: identifier of a provided palette (`blue-red`…), name of a palette saved **in the project**, or list of `#RRGGBB` stops |
 
-Un numéro de groupe est celui du spec : stable tant que le groupe existe. Les
-gestes rejouent ceux de l'interface (`PanelSpec::group_series`,
-`set_series_group`, `dissolve_group`, `remove_group`, `apply_group_gradient`) ;
-les groupes restent contigus. Les nuanciers enregistrés au niveau de
-l'utilisateur (hors projet) ne sont pas visibles d'un script, qui reste
-reproductible. Toutes ces écritures sont des `SetPlotSpec` du groupe `Script`
-(motif d'`add_shape` : validation avant et après réservation). Contrat :
-`tests/graphs.rs` (groupes en un appel, lecture, gestes et annulation d'un seul
-`undo`, refus sans mutation, poignées périmées).
+A group number is the spec's: stable as long as the group exists. The
+gestures replay those of the interface (`PanelSpec::group_series`,
+`set_series_group`, `dissolve_group`, `remove_group`, `apply_group_gradient`);
+groups stay contiguous. Palettes saved at user level (outside the project) are
+not visible to a script, which stays reproducible. All these writes are
+`SetPlotSpec` commands of the `Script` group (pattern of `add_shape`: validation
+before and after reservation). Contract:
+`tests/graphs.rs` (groups in one call, reading, gestures and undo with a single
+`undo`, refusal without mutation, stale handles).
 
-### CLI sans fenêtre (#71)
+### CLI without a window (#71)
 
 ```sh
 stokesforge-cli run --out resultat.stf calcul.pyst
 stokesforge-cli run --project resultat.stf --out suite.stf suite.pyst
 ```
 
-La feature `python` est requise ; sans elle, `run` explique comment l'activer.
-Sans `--project`, le script reçoit un projet vide ; sans `--out`, il n'y a
-pas de sauvegarde finale. Le fichier Python est lu en UTF-8. stdout et stderr
-sont préservées ; une exception affiche sa trace complète et rend un code
-non nul. `--out` n'est écrit qu'après succès. Les scripts passent par le
-même `ScriptEngine`, l'acteur et les commandes que la console.
+The `python` feature is required; without it, `run` explains how to enable it.
+Without `--project`, the script receives an empty project; without `--out`,
+there is no final save. The Python file is read as UTF-8. stdout and stderr
+are preserved; an exception prints its full trace and returns a non-zero
+code. `--out` is written only after success. Scripts go through the
+same `ScriptEngine`, actor and commands as the console.
 
-`scripts/cli-dist.sh` construit le paquet Linux `dist/stokesforge-cli/`, avec le
-runtime de base (sans Matplotlib), un rpath relatif et aucun pip. Il vérifie
-numpy, écritures, graphe, sauvegarde/rechargement et undo depuis ce paquet,
-sans écran ni `STOKESFORGE_PYTHON_HOME`, avec `PYTHONHOME`/`PYTHONPATH` piégés.
+`scripts/cli-dist.sh` builds the Linux package `dist/stokesforge-cli/`, with the
+base runtime (without Matplotlib), a relative rpath and no pip. It checks
+numpy, writes, graph, save/reload and undo from this package,
+without a display or `STOKESFORGE_PYTHON_HOME`, with `PYTHONHOME`/`PYTHONPATH`
+booby-trapped.
 
-### Navigation et métadonnées
+### Navigation and metadata
 
-`children` suit les dossiers, classeurs puis feuilles ; une colonne, un graphe,
-une note ou une matrice rend une liste vide. Une liste rendue ne se met pas à
-jour toute seule. Chaque appel lit un seul instantané du projet, et toute
-poignée rendue conserve l'époque de cet instantané.
+`children` follows folders, workbooks, then sheets; a column, a graph,
+a note or a matrix returns an empty list. A returned list does not update
+by itself. Each call reads a single snapshot of the project, and every
+returned handle keeps the epoch of that snapshot.
 
-`info` rend toujours les cinq clés suivantes :
+`info` always returns the following five keys:
 
-| Clé | Valeur |
+| Key | Value |
 |---|---|
-| `name` | nom court du nœud, ou nom du projet pour sa racine |
-| `kind` | `folder`, `workbook`, `worksheet`, `column`, `graph`, `matrix`, `note` ou `unknown` |
-| `parent` | poignée du parent ; `None` à la racine |
-| `row_count` | longueur d'une colonne ; maximum des longueurs pour une feuille (zéro si vide) ; `None` ailleurs |
-| `column` | dictionnaire ci-dessous pour une colonne ; `None` ailleurs |
+| `name` | short name of the node, or project name for its root |
+| `kind` | `folder`, `workbook`, `worksheet`, `column`, `graph`, `matrix`, `note` or `unknown` |
+| `parent` | handle of the parent; `None` at the root |
+| `row_count` | length of a column; maximum of the lengths for a sheet (zero if empty); `None` elsewhere |
+| `column` | dictionary below for a column; `None` elsewhere |
 
-`values` et `set_values` d'une colonne `datetime` restent des nombres (timestamps POSIX, secondes) : seule la grille affiche et lit les dates (#218).
+`values` and `set_values` of a `datetime` column stay numbers (POSIX timestamps, seconds): only the grid displays and reads dates (#218).
 
-Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
+The `column` metadata carry `type` (`numeric`, `datetime`, `mixed`),
 `role` (`x`, `y`, `x2`, `y2`, `x3`, `y3`, `x4`, `y4`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
-`unit`, `comment`, `x_prime` (nombre ou `None`, #164, lecture seule), `display_format`,
-`formula` (lettres de colonne, `#REF` pour une colonne lue qui a disparu, ou `None`) et `version`
-(compteur de modification). Modifier ce dictionnaire ne touche jamais au
-modèle. Relire `info` après une modification pour obtenir l'état courant.
+`unit`, `comment`, `x_prime` (number or `None`, #164, read-only), `display_format`,
+`formula` (column letters, `#REF` for a read column that has disappeared, or `None`) and `version`
+(modification counter). Modifying this dictionary never touches the
+model. Read `info` again after a modification to get the current state.
 
 ```python
 for objet in pyst.children():
@@ -540,13 +533,13 @@ for colonne in pyst.children(feuille):
           description["row_count"])
 ```
 
-### Cellules texte et mixtes
+### Text and mixed cells
 
-Le modèle actuel ne porte plus de type homogène `Text` : une colonne texte
-est une colonne `mixed` contenant des cellules texte. `values` préserve le
-type stocké de chaque cellule : un texte `"12.5"` reste une chaîne, une cellule
-vide devient `None`, une chaîne vide reste `""`, et un nombre NaN reste un
-`float` NaN. Les dates restent des timestamps POSIX en secondes.
+The current model no longer has a homogeneous `Text` type: a text column
+is a `mixed` column containing text cells. `values` preserves the
+stored type of each cell: a text `"12.5"` stays a string, an empty cell
+becomes `None`, an empty string stays `""`, and a NaN number stays a
+`float` NaN. Dates stay POSIX timestamps in seconds.
 
 ```python
 cellules = pyst.values(pyst.resolve("[Book1]Sheet1!Etiquette"))
@@ -557,81 +550,81 @@ numerique = pyst.column(pyst.resolve("[Book1]Sheet1!A"))  # sans copie
 mixte = np.array(cellules, dtype=object)                # copie explicite
 ```
 
-`values` copie en temps et mémoire proportionnels au nombre de cellules,
-y compris pour une colonne numérique ; son tuple est un instantané immuable.
-`column` conserve son contrat numérique sans copie et refuse une colonne
-mixte avec `InvalidValueError`. Les lectures ne changent ni la révision ni
-l'historique. Une cible autre qu'une colonne fait échouer `values` avec
-`InvalidValueError` ; toute poignée supprimée ou d'un projet rechargé est
-refusée avec `BrokenReferenceError`, avant de regarder sa nature.
+`values` copies in time and memory proportional to the number of cells,
+including for a numeric column; its tuple is an immutable snapshot.
+`column` keeps its numeric contract without copy and refuses a mixed
+column with `InvalidValueError`. Reads change neither the revision nor
+the history. A target other than a column makes `values` fail with
+`InvalidValueError`; any deleted handle, or one from a reloaded project, is
+refused with `BrokenReferenceError`, before looking at its kind.
 
-`pyst.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepte un
-chemin texte ou `pathlib.Path` et rend la liste des poignées des feuilles
-créées. Sans nom de modèle, il applique le choix automatique, sinon la recette
-permissive. Il respecte les réglages du modèle (colonnes ignorées, types,
-métadonnées, blocs et répartition en feuilles) et crée toujours un classeur
-neuf ; les modes de modification d'une feuille active concernent l'assistant.
-Un seul `pyst.undo()` ou Ctrl+Z retire tout l'import. Un modèle inconnu ou un
-fichier illisible lève `InvalidValueError` avant toute mutation ; une erreur
-pendant la création avorte la macro. L'analyse et les commandes se déroulent
-GIL relâché, comme les autres appels au modèle.
+`pyst.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepts a
+text path or `pathlib.Path` and returns the list of handles of the sheets
+created. Without a template name, it applies the automatic choice, otherwise the
+permissive recipe. It respects the template settings (ignored columns, types,
+metadata, blocks and split into sheets) and always creates a new
+workbook; the modes that modify an active sheet concern the wizard.
+A single `pyst.undo()` or Ctrl+Z removes the whole import. An unknown template or an
+unreadable file raises `InvalidValueError` before any mutation; an error
+during creation aborts the macro. Parsing and commands run with
+the GIL released, like the other calls to the model.
 
-Une poignée (`Handle`) est **opaque** : pas de constructeur Python, aucun entier
-exposé ; la résolution, la navigation, les créations et l'import en produisent. Elle reste
-valide après un renommage, un déplacement, et même après une suppression
-**suivie d'une annulation** — c'est
-le contrat de l'identité, assuré par le modèle (identifiants monotones, jamais
-réutilisés). Elle est invalidée par un `Load` ou un `NewProject`, détecté via l'`epoch` de
-l'instantané avant même de chercher le `NodeId` dans l'arbre courant
+A handle (`Handle`) is **opaque**: no Python constructor, no exposed integer;
+resolution, navigation, creations and import produce them. It stays
+valid after a rename, a move, and even after a deletion
+**followed by an undo** — this is
+the identity contract, ensured by the model (monotonic identifiers, never
+reused). It is invalidated by a `Load` or a `NewProject`, detected through the `epoch` of
+the snapshot even before looking up the `NodeId` in the current tree
 ([`session.md`](session.md)).
 
-Quatre exceptions, et seulement quatre : `UnknownPathError`,
-`BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`. Les trois
-premières viennent telles quelles de la spécification v1, pour ne pas avoir à
-les renommer ensuite ; la quatrième distingue le refus immédiat d'une écriture dont la colonne a
-changé depuis sa lecture (#312, sans retentative) des autres refus.
-Toute erreur de l'hôte — `SessionError`, `CommandError`, `CoreError` — est
-**traduite** en l'une d'elles, jamais transportée telle quelle à travers le
-canal.
+Four exceptions, and only four: `UnknownPathError`,
+`BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`. The first
+three come as is from the v1 specification, to avoid renaming
+them later; the fourth distinguishes the immediate refusal of a write whose column has
+changed since it was read (#312, without retry) from the other refusals.
+Every host error — `SessionError`, `CommandError`, `CoreError` — is
+**translated** into one of them, never carried as is through the
+channel.
 
-## API figée V1 (#331)
+## Frozen API V1 (#331)
 
-C'est la **liste de référence** de la surface `pyst` : les noms, les
-signatures, les exceptions, les clés d'options, les clés des dictionnaires
-rendus et leurs valeurs énumérées. Un script écrit contre elle doit continuer à
-marcher ; les tableaux des sections voisines la **commentent** (effets,
-exemples) mais ne la remplacent pas. Docstrings et messages d'erreur restent
-hors de la liste (S8 : les docstrings restent en français, les messages
-d'erreur en anglais).
+This is the **reference list** of the `pyst` surface: names,
+signatures, exceptions, option keys, keys of the returned dictionaries
+and their enumerated values. A script written against it must keep
+working; the tables of the neighboring sections **comment on** it (effects,
+examples) but do not replace it. Docstrings and error messages stay
+outside the list (S8: docstrings stay in French, error
+messages in English).
 
-**Règle de changement.** Toute modification de cette liste — appel, paramètre,
-défaut, exception, clé d'option, clé ou valeur d'un retour — est une **décision
-explicite** (issue ou demande de l'utilisateur), prise **dans le même commit**
-que le code : on met à jour le bloc concerné ici, et seulement ensuite le code.
-Un ajout est une évolution de l'API, pas un détail ; un retrait ou un renommage
-casse des scripts. Le test `crates/stokesforge-script/tests/surface_figee.rs`
-lit les blocs ci-dessous (il n'en garde aucune copie) et échoue sur toute
-différence avec le module réellement construit, en disant laquelle.
+**Change rule.** Any change to this list — call, parameter,
+default, exception, option key, key or value of a return — is an **explicit
+decision** (issue or user request), made **in the same commit**
+as the code: the relevant block is updated here, and only then the code.
+An addition is an evolution of the API, not a detail; a removal or a rename
+breaks scripts. The test `crates/stokesforge-script/tests/surface_figee.rs`
+reads the blocks below (it keeps no copy of them) and fails on any
+difference with the module actually built, saying which one.
 
-Format (lu par le test) : un bloc ```` ```pyst-api <genre> <nom> ```` par
-liste, une entrée par ligne.
+Format (read by the test): one ```` ```pyst-api <genre> <nom> ```` block per
+list, one entry per line.
 
-- `module <nom>` : `function nom(signature)` (la signature est celle que rend
-  `inspect.signature`, valeurs par défaut comprises ; deux défauts que PyO3 ne
-  sait pas écrire, `panel=(0, 0)` et `png_scale=4.0`, y figurent en clair et le
-  test les rapproche de l'`Ellipsis` que Python rend), `class nom`,
-  `exception nom` ou `module nom` (sous-module). Les noms qui commencent par `_`
-  ne sont pas publics et ne sont pas listés.
-- `options <appel>` : les clés acceptées par `**options` / `**metadata`. Pour
-  `set_graph`, la liste est la constante `SET_GRAPH_OPTIONS`
-  (`stokesforge-script/src/set_graph.rs`) ; pour `plot`, `PLOT_OPTIONS`
-  (`graph.rs`) ; pour `set_column_meta`, `COLUMN_META_FIELDS` (`surface.rs`).
-  Le message de « clé inconnue » de chacun les énumère, et le test compare ce
-  message à ce bloc.
-- `returns <nom>` : les clés du dictionnaire rendu (l'ordre n'est pas figé).
-- `enum <nom>` : les valeurs énumérées, en entrée (acceptées) et/ou en sortie
-  (rendues). Toute autre valeur est refusée par `InvalidValueError`, sauf le
-  `model` de `fit`, où un texte inconnu est lu comme une formule.
+- `module <nom>`: `function nom(signature)` (the signature is the one
+  `inspect.signature` returns, default values included; two defaults that PyO3
+  cannot write, `panel=(0, 0)` and `png_scale=4.0`, appear in plain form and the
+  test matches them to the `Ellipsis` that Python returns), `class nom`,
+  `exception nom` or `module nom` (submodule). Names that start with `_`
+  are not public and are not listed.
+- `options <appel>`: the keys accepted by `**options` / `**metadata`. For
+  `set_graph`, the list is the constant `SET_GRAPH_OPTIONS`
+  (`stokesforge-script/src/set_graph.rs`); for `plot`, `PLOT_OPTIONS`
+  (`graph.rs`); for `set_column_meta`, `COLUMN_META_FIELDS` (`surface.rs`).
+  The "unknown key" message of each one lists them, and the test compares this
+  message to this block.
+- `returns <nom>`: the keys of the returned dictionary (the order is not fixed).
+- `enum <nom>`: the enumerated values, as input (accepted) and/or as output
+  (returned). Any other value is refused with `InvalidValueError`, except the
+  `model` of `fit`, where an unknown text is read as a formula.
 
 ### Module `pyst`
 
@@ -683,9 +676,9 @@ function ungroup(graph, group, *, panel=(0, 0))
 function values(handle)
 ```
 
-Une `Handle` n'a aucun attribut ni méthode publics (pas de constructeur, aucun
-entier exposé) : `dir(pyst.Handle)` sans les noms en `_` est vide. Les quatre
-exceptions dérivent d'`Exception`.
+A `Handle` has no public attribute or method (no constructor, no exposed
+integer): `dir(pyst.Handle)` without the `_` names is empty. The four
+exceptions derive from `Exception`.
 
 ### Module `pyst.analysis`
 
@@ -701,7 +694,7 @@ function reconvolve(y, response, x=None, response_x=None, *, components=1, shift
 function smooth(y, x=None, *, method='adjacent', window=5.0, window_unit='points', order=2, keep_results=False, auto_recalc=True, replace_original=False)
 ```
 
-### Clés d'options
+### Option keys
 
 ```pyst-api options plot
 plot_type
@@ -766,7 +759,7 @@ display_format
 formula
 ```
 
-### Formes de retour
+### Return shapes
 
 ```pyst-api returns info
 name
@@ -803,11 +796,11 @@ name
 members
 ```
 
-Un calcul de `pyst.analysis` rend `{columns, values, errors, warnings}` ; pour
-une liste de `y`, `{series: [ce dictionnaire, …]}`. Les clés de `values`
-(`"area.total"`, `"param.tau"`…) sont celles du crate de calcul, hors de cette
-liste. Les clés de `columns` ci-dessous sont figées pour les trois opérations
-qui écrivent toujours les mêmes colonnes.
+A `pyst.analysis` calculation returns `{columns, values, errors, warnings}`; for
+a list of `y`, `{series: [ce dictionnaire, …]}`. The keys of `values`
+(`"area.total"`, `"param.tau"`…) are those of the calculation crate, outside this
+list. The keys of `columns` below are frozen for the three operations
+that always write the same columns.
 
 ```pyst-api returns analysis
 columns
@@ -839,7 +832,7 @@ reason
 message
 ```
 
-`readiness` ajoute `needed` et `have` quand `reason` vaut `needs_points`.
+`readiness` adds `needed` and `have` when `reason` is `needs_points`.
 
 ```pyst-api returns readiness.needs_points
 ready
@@ -849,7 +842,7 @@ needed
 have
 ```
 
-### Valeurs énumérées
+### Enumerated values
 
 ```pyst-api enum kind
 folder
@@ -1001,68 +994,68 @@ gaussian
 lorentzian
 ```
 
-## Le GIL — la partie que le compilateur tient
+## The GIL — the part the compiler holds
 
-Les trois règles et leur chemin caché sont dans [`invariants.md`](invariants.md)
-(invariant 9). Leur trace dans le code : tout `bridge.rs` s'exécute à
-l'intérieur d'un `Python::detach`, GIL relâché, et **rien n'y nomme un type
-PyO3** — c'est ce qui permet au marqueur `Ungil` de vérifier à la compilation
-qu'aucune valeur liée au GIL ne traverse l'attente de l'acteur.
+The three rules and their hidden path are in [`invariants.md`](invariants.md)
+(invariant 9). Their trace in the code: all of `bridge.rs` runs
+inside a `Python::detach`, GIL released, and **nothing there names a PyO3
+type** — this is what lets the `Ungil` marker check at compile time
+that no GIL-bound value crosses the wait on the actor.
 
-La résolution de chemin n'est plus réécrite dans le pont : `stokesforge-core` expose
-`Tree::resolve`, seule implémentation de la grammaire `[Book1]Sheet1!ColA` du
-dépôt, et le pont l'appelle sur l'arbre de son instantané.
+Path resolution is no longer rewritten in the bridge: `stokesforge-core` exposes
+`Tree::resolve`, the repository's only implementation of the `[Book1]Sheet1!ColA`
+grammar, and the bridge calls it on the tree of its snapshot.
 
-## Capture des sorties
+## Output capture
 
-`sys.stdout` est **global à l'interpréteur**. La recette habituelle — sauver,
-remplacer, restaurer — n'est correcte que si un seul acteur s'en sert à la
-fois ; deux moteurs de script dans le même processus se voleraient mutuellement
-leur restauration.
+`sys.stdout` is **global to the interpreter**. The usual recipe — save,
+replace, restore — is correct only if a single actor uses it at a
+time; two script engines in the same process would steal each other's
+restore.
 
-On pose donc **une seule fois** un objet-relais dans `sys.stdout`/`sys.stderr`,
-et c'est lui qui aiguille : vers le tampon du **fil courant** s'il y en a un,
-sinon vers la sortie réelle du processus. L'objet est partagé et sans état ; le
-seul état vit dans un `thread_local!`. Conséquence voulue : un `print` exécuté
-hors script continue d'aller sur la sortie du processus.
+So a single relay object is set **once** in `sys.stdout`/`sys.stderr`,
+and it does the routing: to the buffer of the **current thread** if there is one,
+otherwise to the real output of the process. The object is shared and stateless; the
+only state lives in a `thread_local!`. Intended consequence: a `print` run
+outside a script keeps going to the process output.
 
-## Ce qu'il faut savoir avant de modifier
+## What to know before modifying
 
-- Une erreur *du script* n'est pas une erreur du moteur : elle atterrit dans
-  `ScriptOutcome::error` avec sa trace Python. `ScriptError` est réservé aux
-  pannes de l'**hôte** (démarrage du fil, moteur occupé).
-- `stokesforge-script/tests/navigation.rs` vérifie le contrat du lot #66 : ordre,
-  métadonnées, longueurs, valeurs exactes, absence de mutation et identité des
-  poignées après renommage, déplacement, suppression/annulation et chargement.
-- Lancer les tests Python : `scripts/python-test.sh`, qui pose les trois
-  variables d'environnement nécessaires et teste pont, scripts, robustesse,
-  application et CLI. Le parcours `script_panel` (`stokesforge-app-state/tests/`) lit numpy, crée les résultats
-  et un graphe, puis annule/rétablit l'ensemble depuis `AppState`. Côté robustesse, `b7` (frontière
-  Rust ↔ Python dans les deux sens) et `b9` (script sous contrainte) sont
-  derrière la même feature.
+- An error *of the script* is not an engine error: it lands in
+  `ScriptOutcome::error` with its Python trace. `ScriptError` is reserved for
+  **host** failures (thread start-up, engine busy).
+- `stokesforge-script/tests/navigation.rs` checks the contract of batch #66: order,
+  metadata, lengths, exact values, absence of mutation and identity of
+  handles after rename, move, delete/undo and load.
+- Run the Python tests: `scripts/python-test.sh`, which sets the three
+  required environment variables and tests bridge, scripts, robustness,
+  application and CLI. The `script_panel` scenario (`stokesforge-app-state/tests/`) reads numpy, creates the results
+  and a graph, then undoes/redoes the whole from `AppState`. On the robustness side, `b7` (Rust ↔ Python
+  boundary in both directions) and `b9` (script under constraint) are
+  behind the same feature.
 
-**À lire** : `stokesforge-script/src/lib.rs`, `src/engine.rs`, `src/surface.rs`,
-`src/bridge.rs`, `stokesforge-python/src/interpreter.rs`, `src/array.rs` (têtes).
+**To read**: `stokesforge-script/src/lib.rs`, `src/engine.rs`, `src/surface.rs`,
+`src/bridge.rs`, `stokesforge-python/src/interpreter.rs`, `src/array.rs` (heads).
 
-### Remplacer une correction dans sa source (#212)
+### Replacing a correction in its source (#212)
 
-`pyst.analysis.baseline(..., replace_original=True)` et
-`pyst.analysis.correct(..., replace_original=True)` (et `smooth`, #324)
-écrivent dans les Y sources au lieu d'ajouter des colonnes.
-`columns['corrected']` (`columns['smoothed']` pour `smooth`) désigne alors la
-source originale. Exemple :
+`pyst.analysis.baseline(..., replace_original=True)` and
+`pyst.analysis.correct(..., replace_original=True)` (and `smooth`, #324)
+write into the source Y columns instead of adding columns.
+`columns['corrected']` (`columns['smoothed']` for `smooth`) then designates the
+original source. Example:
 
 ```python
 r = pyst.analysis.baseline(y, x, method="constant", points=[(0., 1.)],
                            replace_original=True)
 ```
 
-La correction n'est plus rééditable ni recalculée ; sa trace et ses réglages
-sont conservés dans Résultats et le `.stf`, même si `keep_results=False`.
-`auto_recalc` et les colonnes complémentaires ne s'appliquent pas au
-remplacement. Les colonnes à formule ou calculées sont refusées. Un lot qui
-produit des corrections contradictoires sur un même Y est refusé avant toute
-écriture. Les versions des sources sont revalidées dans la réservation du
-script. Le remplacement rejoint sa macro Script : Annuler défait toutes les
-corrections du script en une fois. Le script demande explicitement le
-remplacement ; la confirmation des sources partagées appartient à l'interface.
+The correction is no longer re-editable nor recalculated; its trace and settings
+are kept in Results and in the `.stf`, even if `keep_results=False`.
+`auto_recalc` and the additional columns do not apply to
+replacement. Formula or calculated columns are refused. A batch that
+produces contradictory corrections on the same Y is refused before any
+write. The versions of the sources are revalidated in the script's
+reservation. The replacement joins its Script macro: Undo reverts all the
+corrections of the script at once. The script explicitly asks for the
+replacement; the confirmation for shared sources belongs to the interface.

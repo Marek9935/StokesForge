@@ -68,7 +68,7 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
 /// Les options que `plot` accepte (`**options`), en un seul endroit : le message
 /// d'erreur d'une option inconnue et le test de surface (`tests/surface_figee.rs`,
 /// #331) partent de cette liste. Une option ajoutée au `match` de `plot` y entre
-/// aussi, et dans « API figée V1 » (`docs/python-et-script.md`).
+/// aussi, et dans « Frozen API V1 » (`docs/python-et-script.md`).
 pub(crate) const PLOT_OPTIONS: &[&str] = &[
     "plot_type",
     "color",

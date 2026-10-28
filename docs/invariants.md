@@ -1,297 +1,294 @@
 # Invariants
 
-Les règles qu'on ne casse pas. Chacune est ici parce qu'elle traverse
-plusieurs crates — donc parce qu'aucun commentaire de module ne peut à lui
-seul la faire respecter.
+The rules we do not break. Each one is here because it crosses several
+crates — so no module comment can enforce it alone.
 
-La colonne qui compte est la dernière : **ce qui la tient**. Une règle tenue
-par le compilateur ou par un test n'a pas besoin qu'on y pense ; une règle
-tenue par la relecture se perd.
+The column that matters is the last one: **what holds it**. A rule held by the
+compiler or by a test needs no one to think about it; a rule held by review
+gets lost.
 
-| # | Règle | Ce qui la tient |
+| # | Rule | What holds it |
 |---|---|---|
-| 1 | Aucune mutation du modèle hors d'une commande, pour les clients d'une session | la propriété : l'acteur détient le `&mut Project` de la session (la construction, les tests et le CLI passent par les primitives de `core`) ; la relecture pour une méthode `pub` mutante ajoutée à `core` (aucun test) |
-| 2 | Aucune dépendance UI sous `stokesforge-session`, ni dans l'état de l'application (`stokesforge-app-state`, #263) | `tests/no_ui_dependency.rs`, une liste blanche par crate |
-| 3 | `stokesforge-plot` ne connaît aucun moteur de rendu | sa seule dépendance est `stokesforge-id` |
-| 4 | Une seule source de mesure de texte | `stokesforge-render/tests/mesure.rs` + le test d'accord |
-| 5 | Une fonctionnalité de tracé n'entre pas dans un seul backend | `stokesforge-render` est générique sur `DrawingBackend` |
-| 6 | Le *feathering* n'entre pas dans la clé de cache | `stokesforge-render-egui/tests/feathering.rs` |
-| 7 | Identifiants jamais réutilisés | l'allocateur vit hors de l'arbre, dans `Project` |
-| 8 | LIFO strict sur la pile d'historique | la structure de `History`, vérifiée par `tests/history.rs` |
-| 9 | Aucun objet Python ne traverse le canal de l'acteur | le marqueur `Ungil` de PyO3, à la compilation |
-| 10 | Un défaut de donnée dégrade, il ne plante pas | des états de première classe, pas des erreurs |
-| 11 | Un recalcul ciblé rend exactement le recalcul complet | l'empreinte contient toute donnée du calcul ; `b22` (oracle jumeau) et `stokesforge-session/tests/recalc_cible.rs` |
-| 12 | Un fichier `.stf` écrit par la V1 se relit jusqu'en V3, et une version plus ancienne refuse un fichier d'un format (numéro) plus récent | `version::decode_body` (un bras par version), les fichiers témoins (`stokesforge-persistence/tests/fichiers_temoins.rs`), `UnsupportedVersion` |
+| 1 | No model mutation outside a command, for the clients of a session | ownership: the actor holds the `&mut Project` of the session (construction, tests and the CLI go through the primitives of `core`); review for a mutating `pub` method added to `core` (no test) |
+| 2 | No UI dependency under `stokesforge-session`, nor in the application state (`stokesforge-app-state`, #263) | `tests/no_ui_dependency.rs`, one allowlist per crate |
+| 3 | `stokesforge-plot` knows no renderer | its only dependency is `stokesforge-id` |
+| 4 | A single source of text measurement | `stokesforge-render/tests/mesure.rs` + the agreement test |
+| 5 | A plot feature does not enter a single backend | `stokesforge-render` is generic over `DrawingBackend` |
+| 6 | *Feathering* does not enter the cache key | `stokesforge-render-egui/tests/feathering.rs` |
+| 7 | Identifiers never reused | the allocator lives outside the tree, in `Project` |
+| 8 | Strict LIFO on the history stack | the structure of `History`, checked by `tests/history.rs` |
+| 9 | No Python object crosses the actor channel | PyO3's `Ungil` marker, at compile time |
+| 10 | A data defect degrades, it does not crash | first-class states, not errors |
+| 11 | A targeted recalculation gives exactly the full recalculation | the fingerprint contains every piece of data of the calculation; `b22` (twin oracle) and `stokesforge-session/tests/recalc_cible.rs` |
+| 12 | A `.stf` file written by V1 can be read back up to V3, and an older version refuses a file of a newer format (number) | `version::decode_body` (one arm per version), the witness files (`stokesforge-persistence/tests/fichiers_temoins.rs`), `UnsupportedVersion` |
 
 ---
 
-## 1. Aucune mutation du modèle hors d'une commande
+## 1. No model mutation outside a command
 
-`stokesforge-core::Project` est la seule façade publique de mutation du modèle, et
-toutes ses méthodes prennent `&mut self`. L'acteur de `stokesforge-session` détient
-le `&mut Project` **de la session** : un client n'a qu'un `Arc<Tree>` figé.
+`stokesforge-core::Project` is the only public facade for mutating the model,
+and all its methods take `&mut self`. The actor of `stokesforge-session` holds
+the `&mut Project` **of the session**: a client has only a frozen `Arc<Tree>`.
 
-La règle n'est donc pas une convention à surveiller mais une propriété de
-propriété. Pour muter, il faut passer par `SessionHandle::execute(Command)`,
-et donc par la pile d'historique — donc être annulable.
+So the rule is not a convention to watch but a property of ownership. To
+mutate, one must go through `SessionHandle::execute(Command)`, and therefore
+through the history stack — and so be undoable.
 
-Corollaire : ajouter une méthode `pub` mutante à `stokesforge-core` sans commande
-correspondante dans `stokesforge-commands` ouvre un chemin d'écriture non
-annulable. Aucun test ne le vérifie aujourd'hui (`b21` mesure le coût et
-l'identité sur le chemin d'écriture, pas ce corollaire) : c'est la relecture
-qui le tient.
+Corollary: adding a mutating `pub` method to `stokesforge-core` without a
+matching command in `stokesforge-commands` opens a non-undoable write path. No
+test checks this today (`b21` measures the cost and identity on the write path,
+not this corollary): review is what holds it.
 
-**À lire** : `stokesforge-core/src/project.rs` (tête), `stokesforge-session/src/lib.rs`
-(tête).
+**To read**: `stokesforge-core/src/project.rs` (head), `stokesforge-session/src/lib.rs`
+(head).
 
-## 2. Aucune dépendance UI sous `stokesforge-session`
+## 2. No UI dependency under `stokesforge-session`
 
-Plutôt que de deviner ce qu'est « une dépendance UI », chaque crate du socle
-porte un `tests/no_ui_dependency.rs` qui **liste les dépendances autorisées**
-et lit son propre `Cargo.toml`. Toute addition doit être ajoutée à la liste
-explicitement : la décision devient consciente au lieu de se glisser par un
+Rather than guess what "a UI dependency" is, each crate of the foundation
+carries a `tests/no_ui_dependency.rs` that **lists the allowed dependencies**
+and reads its own `Cargo.toml`. Every addition must be added to the list
+explicitly: the decision becomes conscious instead of slipping in through a
 `use`.
 
-Crates gardés ainsi : `stokesforge-core`, `stokesforge-plot`, `stokesforge-commands`,
+Crates guarded this way: `stokesforge-core`, `stokesforge-plot`, `stokesforge-commands`,
 `stokesforge-persistence`, `stokesforge-session`, `stokesforge-script`, `stokesforge-import`,
-`stokesforge-importer`, `stokesforge-clipboard`, `stokesforge-analysis` et
-`stokesforge-app-state` (#263 : l'état de l'application, ses textes et ses erreurs
-mises en phrase ; ni `egui`, ni `eframe`, ni `winit`, ni `stokesforge-clipboard`
-qui le tire — la liste blanche les refuse, et le compilateur remplace la garde
-de texte de #255). La
-lecture du manifeste est **commune** (`stokesforge-arch-guard`) : dépendances
-normales, de build, conditionnelles (`[target.…]`), optionnelles et renommées
-(`package = …`, jugées sur leur nom réel) ; les `dev-dependencies` sont hors
-périmètre (outillage de test). Ses témoins négatifs vivent dans ce crate.
+`stokesforge-importer`, `stokesforge-clipboard`, `stokesforge-analysis` and
+`stokesforge-app-state` (#263: the application state, its texts and its errors
+put into sentences; neither `egui`, nor `eframe`, nor `winit`, nor `stokesforge-clipboard`
+which pulls it in — the allowlist refuses them, and the compiler replaces the
+text guard of #255). The
+reading of the manifest is **shared** (`stokesforge-arch-guard`): normal,
+build, conditional (`[target.…]`), optional and renamed dependencies
+(`package = …`, judged on their real name); `dev-dependencies` are out of
+scope (test tooling). Its negative witnesses live in this crate.
 
-`stokesforge-render-svg` porte l'équivalent sous un autre nom
-(`tests/frontiere.rs`) : il ne doit voir ni `egui`, ni `eframe`, ni `winit` —
-c'est ce qui fait que **le rendu se teste sans serveur graphique**, donc en
-intégration continue.
+`stokesforge-render-svg` carries the equivalent under another name
+(`tests/frontiere.rs`): it must see neither `egui`, nor `eframe`, nor `winit` —
+this is what makes **rendering testable without a graphical server**, and so in
+continuous integration.
 
-## 3. `stokesforge-plot` ne connaît aucun moteur de rendu
+## 3. `stokesforge-plot` knows no renderer
 
-Un `PlotSpec` dit *ce qu'il faut tracer*, jamais *comment*. Sa seule
-dépendance est `stokesforge-id` : ni `plotters`, ni `egui`, ni `typst`, ni `serde`
-(la persistance a ses propres types de transport et fait elle-même la
-conversion).
+A `PlotSpec` says *what to plot*, never *how*. Its only dependency is
+`stokesforge-id`: no `plotters`, no `egui`, no `typst`, no `serde`
+(persistence has its own transport types and does the conversion itself).
 
-Conséquence concrète, et c'est la raison d'être de la règle : le vocabulaire
-du spec est le sien. Pas de `'o'`, pas de `linestyle='--'`, pas de
-`PenStyle` — des énumérations nommées, dont la table de traduction vit dans le
-renderer. La couche équivalente de la version Python a survécu à un changement
-complet de renderer sans qu'une ligne bouge.
+Concrete consequence, and this is the reason for the rule: the vocabulary of
+the spec is its own. No `'o'`, no `linestyle='--'`, no
+`PenStyle` — named enumerations, whose translation table lives in the
+renderer. The equivalent layer of the Python version survived a complete change
+of renderer without a line moving.
 
-**À lire** : `stokesforge-plot/src/lib.rs` et `src/style.rs` (têtes).
+**To read**: `stokesforge-plot/src/lib.rs` and `src/style.rs` (heads).
 
-## 4. Une seule source de mesure de texte
+## 4. A single source of text measurement
 
-C'est le **seul endroit du chantier où un bug est silencieux**, et c'est ce
-qui justifie le poids qu'on y met.
+This is the **only place in the work package where a bug is silent**, and this
+is what justifies the weight we put on it.
 
-Tout ce qui répond à « quelle place prend cette chaîne ? » passe par
-`stokesforge_render::text`, quel que soit le backend qui pose la question. Ce qui
-est partagé, ce sont les `epaint::FontDefinitions` — pas l'instance
-`epaint::Fonts`, qui n'est de toute façon ni `Clone` ni utilisable par `&self`.
-Le danger n'est pas « deux instances », c'est « deux jeux de polices ».
+Everything that answers "how much room does this string take?" goes through
+`stokesforge_render::text`, whichever backend asks the question. What is shared
+is the `epaint::FontDefinitions` — not the `epaint::Fonts` instance, which is
+neither `Clone` nor usable through `&self` anyway. The danger is not "two
+instances", it is "two sets of fonts".
 
-Le piège précis à connaître : `plotters` est pris **sans ses fonts**
-(`default-features = false`). Un `DrawingBackend` qui ne surcharge pas
-`draw_text` **panique** à la première graduation ; un qui ne surcharge pas
-`estimate_text_size` mesure le texte au **nombre d'octets UTF-8** — « λ »
-compte pour 2, « 111 » mesure comme « WWW » — et ne signale rien. Les marges
-réservées aux libellés seraient fausses, donc la zone de tracé différente de
-celle de l'écran : la figure exportée ne serait pas la figure vue.
+The precise trap to know: `plotters` is taken **without its fonts**
+(`default-features = false`). A `DrawingBackend` that does not override
+`draw_text` **panics** at the first tick; one that does not override
+`estimate_text_size` measures the text by its **number of UTF-8 bytes** — "λ"
+counts as 2, "111" measures like "WWW" — and signals nothing. The margins
+reserved for labels would be wrong, so the plot area would differ from the one
+on screen: the exported figure would not be the figure seen.
 
-Deux angles morts connus, tous deux traités : `configure_series_labels` et
-`MultiLineText` de Plotters mesurent le texte **eux-mêmes**, par
-`FontData::estimate_layout`, donc par l'heuristique naïve — jamais par
-`estimate_text_size`. C'est pour cette raison précise que la légende est
-écrite à la main dans `stokesforge_render::legend`.
+Two known blind spots, both handled: Plotters' `configure_series_labels` and
+`MultiLineText` measure the text **themselves**, through
+`FontData::estimate_layout`, hence through the naive heuristic — never through
+`estimate_text_size`. This is the precise reason why the legend is
+written by hand in `stokesforge_render::legend`.
 
-Deux moteurs mesurent, chacun pour un rôle, jamais pour le même texte :
-`epaint` (par `stokesforge_render::text`) pour les graduations, Typst
-(`stokesforge_render::formula`) pour les titres, titres d'axe et la légende (issue
-#32). Le rôle est décidé **une fois**, par le pipeline, dans le style du texte
-(`formula::rich_style`) ; les deux backends aiguillent sur `formula::is_rich`
-dans `estimate_text_size` **et** dans `draw_text` — une mesure par un moteur et
-un dessin par l'autre serait le même défaut silencieux. Le seul cas où un texte
-riche est mesuré par `epaint` est son repli quand il ne compile pas
-(invariant 10), et le repli vaut alors pour la mesure comme pour le dessin.
+Two engines measure, each for one role, never for the same text:
+`epaint` (through `stokesforge_render::text`) for the ticks, Typst
+(`stokesforge_render::formula`) for the titles, axis titles and the legend (issue
+#32). The role is decided **once**, by the pipeline, in the text style
+(`formula::rich_style`); both backends switch on `formula::is_rich`
+in `estimate_text_size` **and** in `draw_text` — a measurement by one engine and
+a drawing by the other would be the same silent defect. The only case where a
+rich text is measured by `epaint` is its fallback when it does not compile
+(invariant 10), and the fallback then applies to the measurement as well as to
+the drawing.
 
-Trois tests tiennent la règle, et le troisième est celui sans lequel les deux
-autres ne prouveraient rien :
+Three tests hold the rule, and the third is the one without which the other two
+would prove nothing:
 
-- `stokesforge-render/tests/mesure.rs` : deux mesureurs mesurent identiquement ; la
-  mesure ne dépend pas du `pixels_per_point` ; et elle est **différente** de
-  l'heuristique naïve — le témoin, sans lequel deux chemins également faux
-  passeraient ;
-- `stokesforge-render-egui/tests/accord.rs` : la même figure, écran contre SVG,
-  toutes les primitives comparées au pixel entier, plus deux familles de
-  témoins ;
-- `stokesforge-render-egui/tests/formes.rs` : les conventions d'ancrage propres à
-  chaque backend, que l'accord ne peut pas comparer directement.
+- `stokesforge-render/tests/mesure.rs`: two measurers measure identically; the
+  measurement does not depend on `pixels_per_point`; and it is **different**
+  from the naive heuristic — the witness, without which two equally wrong
+  paths would pass;
+- `stokesforge-render-egui/tests/accord.rs`: the same figure, screen against
+  SVG, all primitives compared to the whole pixel, plus two families of
+  witnesses;
+- `stokesforge-render-egui/tests/formes.rs`: the anchoring conventions specific
+  to each backend, which the agreement test cannot compare directly.
 
-**À lire** : `stokesforge-render/src/text.rs` (tête), puis
-`stokesforge-render-svg/src/backend.rs` (tête) pour le piège vu du côté export.
+**To read**: `stokesforge-render/src/text.rs` (head), then
+`stokesforge-render-svg/src/backend.rs` (head) for the trap seen from the
+export side.
 
-## 5. Une fonctionnalité de tracé n'entre pas dans un seul backend
+## 5. A plot feature does not enter a single backend
 
-Le pipeline Plotters est écrit **une fois**, générique sur
-`DB: DrawingBackend` (`stokesforge_render::pipeline`). Les deux backends ne
-diffèrent plus que par la façon de poser des pixels.
+The Plotters pipeline is written **once**, generic over
+`DB: DrawingBackend` (`stokesforge_render::pipeline`). The two backends now
+differ only in how they put pixels down.
 
-Un test peut constater un désaccord ; il ne peut pas empêcher qu'il naisse. Si
-chaque backend appelait son propre `ChartBuilder`, la moindre divergence de
-marge, de taille de police ou d'ordre d'appel deviendrait un désaccord à
-trouver après coup.
+A test can note a disagreement; it cannot prevent one from arising. If each
+backend called its own `ChartBuilder`, the slightest divergence in margin,
+font size or call order would become a disagreement to find afterwards.
 
-Une seule exception vit aujourd'hui : `stokesforge-render-egui::feathering`. Elle
-n'est pas une entorse — `TessellationOptions` est un réglage de la pile egui,
-en aval de la collecte des `Shape`, et un SVG ne triangule rien. Il n'y a
-littéralement rien à mettre de l'autre côté.
+A single exception lives today: `stokesforge-render-egui::feathering`. It
+is not a breach — `TessellationOptions` is a setting of the egui stack,
+downstream of the collection of `Shape`s, and an SVG triangulates nothing.
+There is literally nothing to put on the other side.
 
-## 6. Le *feathering* n'entre pas dans la clé de cache
+## 6. *Feathering* does not enter the cache key
 
-Couper la frange d'anticrénelage change la **tessellation**, pas les `Shape` —
-et la tessellation a lieu à chaque image de toute façon. Ajouter un terme à la
-clé `(revision, rect, pixels_per_point, view_generation)` ferait reconstruire
-toute la figure à chaque pression de bouton, c'est-à-dire payer cher
-exactement au moment qu'on voulait alléger (le levier vaut 78 % du coût de
-tessellation, mesuré).
+Cutting the anti-aliasing fringe changes the **tessellation**, not the `Shape`s —
+and tessellation happens at every frame anyway. Adding a term to the key
+`(revision, rect, pixels_per_point, view_generation)` would rebuild the whole
+figure at every button press, that is, pay dearly at exactly the moment we
+wanted to lighten (the lever is worth 78% of the tessellation cost, measured).
 
-À comparer avec `view_generation`, qui **doit** y être : un zoom change la
-géométrie tracée, pas seulement sa finition.
+Compare with `view_generation`, which **must** be in it: a zoom changes the
+plotted geometry, not only its finish.
 
-Verrouillé par `stokesforge-render-egui/tests/feathering.rs`.
+Locked by `stokesforge-render-egui/tests/feathering.rs`.
 
-## 7. Identifiants jamais réutilisés
+## 7. Identifiers never reused
 
-Un `NodeId` est un compteur monotone, jamais réattribué sur toute la vie d'un
-projet, **rechargement compris**. L'allocateur vit dans `Project`, **hors de
-l'arbre**, précisément pour qu'une annulation qui restaure un ancien arbre
-(`replace_tree`) ne le fasse pas reculer — sans quoi deux nœuds pourraient
-porter le même identifiant.
+A `NodeId` is a monotonic counter, never reassigned over the whole life of a
+project, **reload included**. The allocator lives in `Project`, **outside the
+tree**, precisely so that an undo that restores an old tree
+(`replace_tree`) does not move it back — otherwise two nodes could
+carry the same identifier.
 
-À la frontière `u64::MAX`, `IdAllocator::next` **refuse** (`checked_add`)
-plutôt que de déborder ou de reculer. Et `stokesforge_persistence::load` refuse dès
-la lecture tout identifiant au-delà de `MAX_NODE_ID` (10¹²) : très loin de
-`u64::MAX`, mais assez tôt pour qu'un fichier falsifié ne puisse pas amener un
-projet inutilisable en mémoire.
+At the `u64::MAX` boundary, `IdAllocator::next` **refuses** (`checked_add`)
+rather than overflowing or moving back. And `stokesforge_persistence::load` refuses from
+the read any identifier beyond `MAX_NODE_ID` (10¹²): very far from
+`u64::MAX`, but early enough that a forged file cannot lead to a project
+unusable in memory.
 
-## 8. LIFO strict sur la pile d'historique
+## 8. Strict LIFO on the history stack
 
-L'historique est hybride : la **structure** est retenue par instantanés
-d'arbre, les **données** par deltas ([`commandes-et-historique.md`](commandes-et-historique.md)).
-De cette asymétrie découle une contrainte non négociable : restaurer un arbre
-entier écrase tout ce qui a été écrit après lui, donc une entrée structurelle
-ne s'annule qu'une fois toutes les entrées postérieures annulées.
+The history is hybrid: **structure** is kept by tree snapshots, **data** by
+deltas ([`commandes-et-historique.md`](commandes-et-historique.md)).
+From this asymmetry follows a non-negotiable constraint: restoring a whole tree
+overwrites everything written after it, so a structural entry
+can be undone only once all later entries have been undone.
 
-La pile le garantit par construction, et **dans une macro les entrées
-s'annulent strictement en ordre inverse d'insertion**, quelles que soient leurs
-natures. C'est ce qui fait tenir l'hybride.
+The stack guarantees it by construction, and **inside a macro the entries are
+undone strictly in reverse order of insertion**, whatever their
+natures. This is what makes the hybrid hold.
 
-## 9. Aucun objet Python ne traverse le canal de l'acteur
+## 9. No Python object crosses the actor channel
 
-Trois règles, dont deux sont tenues par le compilateur :
+Three rules, two of which are held by the compiler:
 
-1. le fil de l'interface ne touche jamais à Python ;
-2. le fil de script relâche le GIL pendant qu'il attend l'acteur — chaque
-   appel de la surface `pyst` traverse `Python::detach`, et le marqueur `Ungil`
-   de PyO3 **interdit à la compilation** qu'une valeur liée au GIL entre dans
-   le bloc d'attente ou en ressorte ;
-3. l'acteur ne prend jamais le GIL — `stokesforge-session` ne dépend pas de
-   `stokesforge-python`, le type d'un objet Python n'y serait même pas nommable.
+1. the interface thread never touches Python;
+2. the script thread releases the GIL while it waits for the actor — each
+   call of the `pyst` surface goes through `Python::detach`, and PyO3's `Ungil`
+   marker **forbids at compile time** that a GIL-bound value enters the
+   waiting block or comes out of it;
+3. the actor never takes the GIL — `stokesforge-session` does not depend on
+   `stokesforge-python`, the type of a Python object could not even be named there.
 
-Le chemin caché que ces trois règles ferment : une requête ou une réponse qui
-transporterait un objet Python serait **détruite sur le fil de l'acteur** ; or
-détruire un objet Python décrémente son compteur de références, ce qui est une
-opération Python. D'où la formulation retenue — aucun objet Python ne traverse
-le canal, ni à l'aller, ni au retour, ni comme champ.
+The hidden path that these three rules close: a request or a response that
+carried a Python object would be **destroyed on the actor thread**; and
+destroying a Python object decrements its reference count, which is a
+Python operation. Hence the chosen wording — no Python object crosses
+the channel, neither on the way there, nor on the way back, nor as a field.
 
-Sans ces règles, le blocage mutuel est structurel : le script tiendrait le GIL
-en attendant l'acteur, pendant que l'acteur attendrait le GIL.
+Without these rules, the deadlock is structural: the script would hold the GIL
+while waiting for the actor, while the actor would wait for the GIL.
 
-## 10. Un défaut de donnée dégrade, il ne plante pas
+## 10. A data defect degrades, it does not crash
 
-La même politique, appliquée partout où une donnée peut être absente, inconnue
-ou invalide. Elle vaut d'être énoncée en une fois parce qu'elle revient sous
-quatre formes qui se ressemblent :
+The same policy, applied everywhere a piece of data can be missing, unknown
+or invalid. It is worth stating once because it comes back in
+four similar forms:
 
-| Situation | Ce qui se passe |
+| Situation | What happens |
 |---|---|
-| une série référence une colonne supprimée | `ResolvedSeries` existe toujours, `broken()` vrai, tracée en gris et annotée dans la légende |
-| une variante d'énumération inconnue dans un `.stf` | capturée telle quelle dans un `RawVariant` ; la perte est bornée à ce nœud (ou cette série), pas au fichier — **y compris sous une feuille ou un classeur**, que `accepts_child` accepte pour cette raison précise |
-| un titre, un titre d'axe ou une entrée de légende qui ne compile pas en Typst | le texte brut, `$…$` compris, s'affiche tel quel par `epaint` (seul cas où un texte riche n'est pas composé par Typst) ; le graphe ne disparaît pas |
-| une valeur manquante | `f64::NAN` (numérique, date-heure), `None` (texte, distinct de `Some("")`) ou `MixedCell::Empty` (mixte, distinct de `Number(NaN)` et de `Text("")`) |
-| une cellule texte dans une colonne tracée | une colonne mixte trace ses seules cellules numériques, les autres valant `NaN` — jamais un refus de tracer la colonne |
+| a series references a deleted column | `ResolvedSeries` still exists, `broken()` true, plotted in grey and annotated in the legend |
+| an unknown enumeration variant in a `.stf` | captured as is in a `RawVariant`; the loss is bounded to this node (or this series), not to the file — **including under a sheet or a workbook**, which `accepts_child` accepts for this precise reason |
+| a title, an axis title or a legend entry that does not compile in Typst | the raw text, `$…$` included, is displayed as is by `epaint` (the only case where a rich text is not composed by Typst); the graph does not disappear |
+| a missing value | `f64::NAN` (numeric, date-time), `None` (text, distinct from `Some("")`) or `MixedCell::Empty` (mixed, distinct from `Number(NaN)` and `Text("")`) |
+| a text cell in a plotted column | a mixed column plots only its numeric cells, the others being `NaN` — never a refusal to plot the column |
 
-Le fil commun : **un défaut visible et localisé, jamais un panic qui remonte**,
-et jamais une série silencieusement vide. Renommer ou déplacer une colonne
-référencée ne casse d'ailleurs rien du tout — une référence est un `NodeId`,
-pas un nom.
+The common thread: **a visible and localized defect, never a panic that comes
+up**, and never a silently empty series. Renaming or moving a referenced column
+breaks nothing at all, by the way — a reference is a `NodeId`,
+not a name.
 
-Si un panic échappe malgré tout au fil de l'acteur, on ne promet pas de
-l'éviter mais de le **rendre visible** (#310) : `SessionHandle::actor_alive`
-est faux, le recalcul « en cours » est abandonné, une copie de secours est
-écrite et un dialogue bloquant l'annonce — jamais un indicateur qui tourne sans
-fin.
+If a panic escapes the actor thread anyway, we do not promise to
+avoid it but to **make it visible** (#310): `SessionHandle::actor_alive`
+is false, the recalculation "in progress" is abandoned, a backup copy is
+written and a blocking dialog announces it — never an indicator that spins
+forever.
 
-Corollaire côté UI : `AppState::dispatch` (`stokesforge-app-state`) ne rend **jamais** d'erreur ; toute
-erreur devient un message de statut affiché.
+Corollary on the UI side: `AppState::dispatch` (`stokesforge-app-state`) **never** returns an error; every
+error becomes a displayed status message.
 
-## 11. Un recalcul ciblé rend exactement le recalcul complet
+## 11. A targeted recalculation gives exactly the full recalculation
 
-Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
-calcul a changé ; il le sait en comparant une **empreinte** (la formule
-stockée — fragments de texte et **identifiants** de colonnes, #321 —, la version
-de chaque colonne lue ou son absence de la feuille, longueur du résultat,
-version propre, issue) à celle de son dernier calcul. Ce que la règle protège est la seule
-défaillance possible d'une telle optimisation, et elle est silencieuse : une
-donnée lue par le calcul mais absente de l'empreinte laisse une valeur fausse
-affichée, sans erreur.
+Since #193, the actor rewrites a formula column only if a piece of data of its
+calculation has changed; it knows this by comparing a **fingerprint** (the
+stored formula — text fragments and column **identifiers**, #321 —, the version
+of each column read or its absence from the sheet, length of the result,
+own version, outcome) with that of its last calculation. What the rule protects is the only
+possible failure of such an optimization, and it is silent: a
+piece of data read by the calculation but absent from the fingerprint leaves a wrong value
+displayed, without any error.
 
-Deux conséquences qui traversent les crates :
+Two consequences that cross the crates:
 
-- **toute donnée que lit le calcul entre dans l'empreinte**
-  (`stokesforge-session/src/recalc.rs`) — une fonction de formule, une
-  référence entre feuilles ou une analyse qui lit une donnée nouvelle l'y
-  ajoute. La référence d'une correction est lue sur une **copie figée** du
-  classeur caché des copies (#248), jamais sur la colonne d'origine : la copie
-  est dédoublonnée par **contenu**, jamais par numéro de version, qui dépend de
-  l'historique et fausserait l'oracle `b22`. Une formule lit une colonne **de
-  sa feuille** : l'appartenance à la feuille (`None` dans l'empreinte : la
-  colonne a été supprimée ou déplacée ailleurs) est lue par le calcul, donc dans
-  l'empreinte ; les **lettres affichées**, que le calcul ne lit pas, n'y sont
-  pas (elles suivent les colonnes) ;
-- **toute écriture de données d'une colonne tire un numéro de version neuf**
-  (`Project::next_column_version`, `stokesforge-core`), **et toute insertion
-  d'une colonne qui porte déjà un numéro fait passer le compteur au-delà**
-  (`Project::insert_node`) : la comparaison repose sur « un numéro ne désigne
-  jamais deux contenus d'une même colonne ». Une primitive de `core` qui
-  écrirait sans cela, ou une insertion qui laisserait le compteur en deçà
-  (trouvé en relecture : `AddColumn` d'une colonne venue d'un fichier ou d'un
-  instantané d'avant un chargement), ferait passer une formule périmée pour
-  à jour.
+- **every piece of data the calculation reads enters the fingerprint**
+  (`stokesforge-session/src/recalc.rs`) — a formula function, a
+  cross-sheet reference or an analysis that reads a new piece of data adds it
+  there. The reference of a correction is read on a **frozen copy** of the
+  hidden workbook of copies (#248), never on the original column: the copy
+  is deduplicated by **content**, never by version number, which depends on the
+  history and would distort the `b22` oracle. A formula reads a column **of
+  its sheet**: membership in the sheet (`None` in the fingerprint: the
+  column was deleted or moved elsewhere) is read by the calculation, so it is in
+  the fingerprint; the **displayed letters**, which the calculation does not read, are not
+  in it (they follow the columns);
+- **every data write to a column draws a fresh version number**
+  (`Project::next_column_version`, `stokesforge-core`), **and every insertion
+  of a column that already carries a number moves the counter beyond it**
+  (`Project::insert_node`): the comparison relies on "a number never designates
+  two contents of the same column". A primitive of `core` that
+  wrote without this, or an insertion that left the counter below
+  (found in review: `AddColumn` of a column coming from a file or from a
+  snapshot from before a load), would make a stale formula pass for
+  up to date.
 
-Le recalcul complet n'a pas disparu : c'est l'oracle (`FormulaRecalc::Full`),
-contre lequel `b22` compare le ciblé après chaque pas d'une séquence tirée au
-sort. Ce qu'il faut tester quand on étend le mécanisme :
-[`tests.md`](tests.md), « Recalcul ciblé ».
+The full recalculation has not disappeared: it is the oracle (`FormulaRecalc::Full`),
+against which `b22` compares the targeted one after each step of a randomly
+drawn sequence. What to test when extending the mechanism:
+[`tests.md`](tests.md), "Targeted recalculation (#193) — and what to test when relying on it".
 
-**À lire** : `stokesforge-session/src/recalc.rs` (tête).
+**To read**: `stokesforge-session/src/recalc.rs` (head).
 
-## 12. Un fichier V1 se relit jusqu'en V3
+## 12. A V1 file can be read back up to V3
 
-Deux choses ne se rattrapent pas après la sortie d'une version : **ce qu'elle
-écrit** et **ce qu'elle fait d'un fichier plus récent**. Le second point est
-tenu par `UnsupportedVersion` (aucune lecture dégradée, message « mettez à
-jour StokesForge ») ; le premier par les fichiers témoins : le fichier de la
-version se relit en rendant le projet attendu, et l'enregistrement redonne ses
-octets. Retirer, renommer ou changer le sens d'un champ **monte le numéro de
-version** et ajoute un bras migrateur à `version::decode_body` ; ajouter un champ
-`#[serde(default)]` reste additif et régénère le témoin. Règle complète :
-[`persistance.md`](persistance.md), « Règle de version ».
+Two things cannot be fixed after a version is released: **what it writes** and
+**what it does with a newer file**. The second point is held by
+`UnsupportedVersion` (no degraded reading, message "update StokesForge"); the
+first by the witness files: the file of the version is read back giving the
+expected project, and saving gives back its bytes. Removing, renaming or
+changing the meaning of a field **raises the version number** and adds a
+migrating arm to `version::decode_body`; adding a `#[serde(default)]` field
+stays additive and regenerates the witness. Full rule:
+[`persistance.md`](persistance.md), "Version rule: every V1 file can be read back up to V3".
 
-**À lire** : `stokesforge-persistence/src/version.rs`,
+**To read**: `stokesforge-persistence/src/version.rs`,
 `stokesforge-persistence/tests/fichiers_temoins.rs`.

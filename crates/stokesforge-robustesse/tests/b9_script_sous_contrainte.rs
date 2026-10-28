@@ -188,7 +188,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     //
     // Une écriture dont la colonne a changé depuis la lecture est refusée
     // aussitôt par `ConcurrentWriteError` (`docs/python-et-script.md`,
-    // « version lue ») : c'est le contrat, pas une anomalie. Le script la
+    // « Read version ») : c'est le contrat, pas une anomalie. Le script la
     // compte comme un refus, comme `InvalidValueError`. Le nombre de refus
     // dépend de l'ordonnancement et n'est pas asserté.
     //

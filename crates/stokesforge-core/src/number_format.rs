@@ -1,5 +1,5 @@
 //! **Le** formateur de nombres affichés (#222, `docs/standard-interface.md`,
-//! § Affichage des nombres) : grille, champs, volet Results et graduations
+//! § Number display) : grille, champs, volet Results et graduations
 //! passent tous par ici, jamais par un `format!` local.
 //!
 //! Trois niveaux, une seule règle de forme :

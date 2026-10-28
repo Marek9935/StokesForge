@@ -1,621 +1,619 @@
-# Application : graphes
+# Application: graphs
 
-Suite du sommaire [`README.md`](README.md). Contenu : tracer depuis un classeur, glisser des colonnes ou des lignes vers un graphe, propriétés des graphiques, règles communes avec le rendu.
+Continuation of the table of contents [`README.md`](README.md). Contents: plotting from a workbook, dragging columns or rows to a graph, graph properties, rules shared with rendering.
 
-### Tracer depuis un classeur
+### Plotting from a workbook
 
-La rangée des lettres offre, en plus des types (Numeric, Mixed) et du
-sous-menu « Role », un sous-menu « Plot » (Line, Scatter, Line + Symbol, Bar) qui crée un graphe à
-partir de la sélection de colonnes courante — même cible que les deux autres
-sous-menus (`target_columns` : toute la plage sélectionnée si la colonne
-cliquée en fait partie, sinon cette colonne seule). Le graphe créé est
-ajouté sans titre dans le dossier qui contient le classeur (`Command::AddGraph`,
-pas d'entrée séparée pour la feuille) et s'ouvre aussitôt dans son propre onglet.
+In addition to the types (Numeric, Mixed) and the "Role" submenu, the row of
+letters offers a "Plot" submenu (Line, Scatter, Line + Symbol, Bar) that creates a graph from
+the current column selection. It has the same target as the other two
+submenus (`target_columns`: the whole selected range if the clicked column is
+part of it, otherwise that column alone). The new graph is added without a
+title in the folder that contains the workbook (`Command::AddGraph`, no
+separate entry for the sheet) and opens at once in its own tab.
 
-L'appariement des colonnes en séries suit la convention Origin plutôt qu'un
-choix arbitraire : parmi les colonnes visées, chacune de rôle Y
-(`ColumnRole::Y`, `ColumnMeta::role`) devient une série, appariée à la
-colonne X la plus proche à sa **gauche** dans la feuille — en comptant aussi
-les colonnes X non sélectionnées, puisque l'abscisse commune à plusieurs
-courbes n'a généralement pas de raison d'être re-cliquée à chaque tracé. Une
-colonne Y sans X à sa gauche garde une abscisse implicite (l'indice de
-ligne) ; une colonne de tout autre rôle (X, Z, barre d'erreur, étiquette,
-aucun) n'engendre jamais de série à elle seule. Une sélection sans aucune
-colonne Y ne crée donc aucun graphe — un clic droit sur une plage de
-colonnes purement X, par exemple, ne fait rien plutôt que d'ouvrir un graphe
-vide. Chaque série prend la couleur de palette de son rang
-(`SeriesSpec::from_palette`).
+The pairing of columns into series follows the Origin convention rather than an
+arbitrary choice: among the targeted columns, each column with the Y role
+(`ColumnRole::Y`, `ColumnMeta::role`) becomes a series, paired with the
+nearest X column to its **left** in the sheet. Unselected X columns count
+too, since the X shared by several curves usually has no reason to be
+clicked again at each plot. A Y column with no X to its left keeps an implicit
+X (the row index). A column of any other role (X, Z, error bar, label,
+none) never produces a series on its own. A selection with no Y column
+therefore creates no graph: a right-click on a range of purely X columns, for
+example, does nothing rather than opening an empty graph. Each series takes the
+palette color of its rank (`SeriesSpec::from_palette`).
 
-Cette règle vit dans `stokesforge_core::compose::series_from_columns` (#257 :
-`pyst.plot` et l'annexe d'une analyse l'appliquent aussi, `x_for`) ;
-`AppState::plot_columns` (`stokesforge-app-state/src/state.rs`) n'émet que la
-commande et les messages d'échec, et le menu contextuel ne fait que choisir le
-type de tracé et pousser `Action::PlotColumns`. Une seconde
-action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
-relit le `PlotSpec` courant d'un graphe existant pour y **ajouter** des
-séries (`Command::SetPlotSpec`) sans toucher à celles déjà présentes — elle
-sert le glisser-déposer d'un classeur vers un graphe ouvert, décrit
-ci-dessous.
+This rule lives in `stokesforge_core::compose::series_from_columns` (#257:
+`pyst.plot` and the appendix of an analysis apply it too, `x_for`);
+`AppState::plot_columns` (`stokesforge-app-state/src/state.rs`) only emits the
+command and the failure messages, and the context menu only chooses the plot
+type and pushes `Action::PlotColumns`. A second
+action, `Action::AddSeriesToGraph`, applies the same pairing rule but
+re-reads the current `PlotSpec` of an existing graph to **add** series to it
+(`Command::SetPlotSpec`) without touching those already there. It serves
+the drag and drop from a workbook to an open graph, described
+below.
 
-### Glisser une sélection de colonnes vers un graphe
+### Dragging a column selection to a graph
 
-Second chemin vers `Action::AddSeriesToGraph`, complémentaire du sous-menu
-« Plot » : on **attrape le bord** d'un bloc de colonnes sélectionnées, comme la
-sélection d'Excel, et on le lâche sur un graphe ouvert (#160).
+A second path to `Action::AddSeriesToGraph`, complementary to the "Plot"
+submenu: you **grab the edge** of a block of selected columns, like an Excel
+selection, and drop it on an open graph (#160).
 
-**Précondition.** Une sélection de **colonnes entières** (rangée des lettres,
-case du coin, Ctrl+A ; non contiguë comprise, #159) :
-`AppState::column_drag_payload` rend `None` pour des cellules, des lignes ou un
-champ d'en-tête. Le geste emporte **toutes** les colonnes sélectionnées, dans
-l'ordre de la feuille.
+**Precondition.** A selection of **whole columns** (row of letters,
+corner box, Ctrl+A; non-contiguous included, #159):
+`AppState::column_drag_payload` returns `None` for cells, rows or a
+header field. The gesture carries **all** the selected columns, in
+sheet order.
 
-**Prise.** `app::grid::column_grip_bands` (fonction pure, testée seule) pose
-une bande fine (`COLUMN_GRIP_HALF_WIDTH`, 3 pt de part et d'autre) sur chaque
-bord extérieur d'un bloc de colonnes sélectionnées qui se suivent — deux
-paires pour deux blocs séparés —, du premier champ d'en-tête au bas de la
-grille. La **rangée des lettres en est exclue** : ses bords de colonne servent
-au redimensionnement (`egui_extras`), qui garde la priorité. Les bandes sont
-posées après la table (donc au-dessus des cellules) mais n'existent que sur ces
-bords : le glisser d'extension de sélection de `cell_widget` garde toute la
-surface des cellules. Curseur `Grab` au survol, `Grabbing` pendant le glisser ;
-un repère (pictogramme du composant d'icônes + nombre de colonnes) suit le
-pointeur ; Échap annule (`egui::DragAndDrop::clear_payload`).
+**Grip.** `app::grid::column_grip_bands` (a pure function, tested alone) places
+a thin band (`COLUMN_GRIP_HALF_WIDTH`, 3 pt on each side) on each outer
+edge of a block of consecutive selected columns (two
+pairs for two separate blocks), from the first header field to the bottom of the
+grid. The **row of letters is excluded**: its column edges are used
+for resizing (`egui_extras`), which keeps priority. The bands are
+placed after the table (so above the cells) but exist only on these
+edges: the selection-extending drag of `cell_widget` keeps the whole
+surface of the cells. The cursor is `Grab` on hover and `Grabbing` during the drag;
+a marker (icon from the icon component + number of columns) follows the
+pointer; Esc cancels (`egui::DragAndDrop::clear_payload`).
 
-**Charge utile.** `state::ColumnDragPayload { sheet, columns }` typée — pas une
-chaîne —, portée par le mécanisme natif d'egui 0.36
+**Payload.** A typed `state::ColumnDragPayload { sheet, columns }` (not a
+string), carried by the native mechanism of egui 0.36
 (`egui::Response::dnd_set_drag_payload`, `egui::DragAndDrop`).
 
-**Cible.** Chaque `Tab::Graph` est enrobé par `app::graph_window::graph_drop_target`
-(appelée par `tab_contents`, seul point d'entrée commun au dock et aux
-onglets détachés) : un survol avec une `ColumnDragPayload` active dessine un
-contour sobre autour du graphe ; un relâchement au-dessus convertit la charge
-en `Action::AddSeriesToGraph` via `state::drop_payload_action`. Relâcher
-ailleurs ne fait rien. L'action porte le **calque** visé (`panel`) et
-**n'impose pas de type de tracé** (`plot_type: None`) : les séries prennent
-celui de la **dernière série** du calque, `Line` pour un calque vide
-(`compose::panel_plot_type`). Une seule commande annulable (`SetPlotSpec`).
-Le calque visé est le **calque actif** du graphe (#161, ci-dessous) :
-`graph_drop_target` et « Send to » lisent `published_active_panel`.
+**Target.** Each `Tab::Graph` is wrapped by `app::graph_window::graph_drop_target`
+(called by `tab_contents`, the only entry point shared by the dock and the
+detached tabs): a hover with an active `ColumnDragPayload` draws a
+discreet outline around the graph; a release above it converts the payload
+into `Action::AddSeriesToGraph` via `state::drop_payload_action`. Releasing
+elsewhere does nothing. The action carries the targeted **layer** (`panel`) and
+**does not impose a plot type** (`plot_type: None`): the series take
+the type of the **last series** of the layer, `Line` for an empty layer
+(`compose::panel_plot_type`). A single undoable command (`SetPlotSpec`).
+The targeted layer is the graph's **active layer** (#161, below):
+`graph_drop_target` and "Send to" read `published_active_panel`.
 
-### Ligne x' et glisser de lignes vers un graphe (#164, #166)
+### The x' row and dragging rows to a graph (#164, #166)
 
-**Ligne x'.** Cinquième champ de l'en-tête empilé, **au-dessus** du nom long
-(`HeaderField::XPrime`, rang -5 ; `HeaderField::COUNT` donne le nombre de
-champs, `rank`/`from_rank` la correspondance avec l'axe en-tête/données) : une
-valeur **numérique** par colonne (`ColumnMeta::x_prime`), saisie comme les
-autres champs — un texte vide l'efface, un texte qui n'est pas un nombre fini
-est refusé (barre d'état, rien n'est écrit). `Action::SetColumnXPrime`, copier,
-coller, vider et Tab suivent les autres champs ; la mutation reste
-`Command::SetColumnMeta` (un pas d'annulation). **Import** : rôle de
-sous-en-tête `x_prime` (`SubheaderRoles::x_prime`, ligne « x' » de l'assistant,
-code `X'` de l'aperçu), lu avec le format numérique de la recette.
-**Metadata** : la fenêtre des métadonnées d'une colonne propose, devant chaque
-valeur numérique du fichier, « Utiliser comme x' » (le mini sélecteur : la clé
-choisie alimente la ligne x' de cette colonne).
+**The x' row.** Fifth field of the stacked header, **above** the long name
+(`HeaderField::XPrime`, rank -5; `HeaderField::COUNT` gives the number of
+fields, `rank`/`from_rank` the mapping with the header/data axis): one
+**numeric** value per column (`ColumnMeta::x_prime`), entered like the
+other fields. An empty text clears it, and a text that is not a finite number
+is refused (status bar, nothing is written). `Action::SetColumnXPrime`, copy,
+paste, clear and Tab follow the other fields; the mutation remains
+`Command::SetColumnMeta` (one undo step). **Import**: subheader role
+`x_prime` (`SubheaderRoles::x_prime`, row "x'" of the wizard,
+code `X'` of the preview), read with the numeric format of the recipe.
+**Metadata**: the metadata window of a column offers, in front of each numeric
+value of the file, "Use as x'" (the mini selector: the chosen key
+feeds the x' row of this column).
 
-**Glisser de lignes.** Même geste que pour les colonnes, sur des **lignes
-entières** (gouttière des numéros) : `AppState::row_drag_payload` ne l'offre que
-si la feuille porte au moins une valeur x'. Prise par le bord haut ou bas d'un
-bloc (`app::grid::row_grip_bands`, pure, les bords se lisent sur la sélection
-et non sur les lignes peintes ; la gouttière reste libre), curseurs `Grab` /
-`Grabbing`, repère « n lignes », Échap. Charge `state::RowDragPayload`, cible
-`graph_drop_target` → `Action::AddRowsToGraph { axis: RowAxis::Ask }`. **Une
-ligne = une série** (`SeriesSpec::row`), nommée « Row n » à la création. Axe :
-un graphe **sans X** (aucune série à abscisse de colonne ni série ligne) reçoit
-les séries sur l'axe X principal du calque actif, sans question ; un graphe
-**avec X** pose le dialogue de choix de `app/confirmations.rs`
-(`modal_dialog_with`, appelé par `StokesForgeApp::blocking_confirmations`) — « Create Axis » (défaut) ajoute un calque superposé à
-axe X en haut (`OverlaySpec { x_top, y_right: false }`), « Use Present Axis »
-garde le calque visé, « Cancel » abandonne (`Action::ConfirmRowDrop`). Une
-seule `SetPlotSpec` : un seul pas d'annulation, calque compris. **Menus** : sur
-une sélection de lignes entières d'une feuille à x' (clic droit sur un numéro de
-ligne, menu Classeur), Plot crée un graphe de lignes (`Action::PlotRows`, mêmes
-types de tracé) et Send to envoie les lignes (même question d'axe qu'au dépôt) ;
-le menu des colonnes n'est plus proposé dans ce cas. Sans x', une sélection de
-lignes garde le menu des colonnes qu'elles traversent.
+**Dragging rows.** The same gesture as for columns, on **whole rows**
+(row-number gutter): `AppState::row_drag_payload` offers it only
+if the sheet has at least one x' value. The grip is on the top or bottom edge of a
+block (`app::grid::row_grip_bands`, pure, the edges are read from the selection
+and not from the painted rows; the gutter stays free), `Grab` /
+`Grabbing` cursors, "n rows" marker, Esc. The payload is `state::RowDragPayload`, the target is
+`graph_drop_target` → `Action::AddRowsToGraph { axis: RowAxis::Ask }`. **One
+row = one series** (`SeriesSpec::row`), named "Row n" on creation. Axis:
+a graph **without X** (no series with a column X and no row series) receives
+the series on the main X axis of the active layer, without a question; a graph
+**with X** opens the choice dialog of `app/confirmations.rs`
+(`modal_dialog_with`, called by `StokesForgeApp::blocking_confirmations`): "Create Axis" (default) adds a layer overlaid with
+an X axis at the top (`OverlaySpec { x_top, y_right: false }`), "Use Present Axis"
+keeps the targeted layer, "Cancel" abandons (`Action::ConfirmRowDrop`). A
+single `SetPlotSpec`: a single undo step, layer included. **Menus**: on a
+selection of whole rows of a sheet with x' (right-click on a row number,
+Workbook menu), Plot creates a graph of rows (`Action::PlotRows`, same plot
+types) and Send to sends the rows (same axis question as on drop);
+the column menu is no longer offered in this case. Without x', a selection of
+rows keeps the menu of the columns they cross.
 
-**Analyser une ligne (#253).** `Analysis ▸` est actif sur une courbe « ligne » (clic
-droit de la courbe, Object Manager, Graph › Selection, même menu partout) et sur des
-lignes entières de la gouttière (menu Analysis du classeur, clic droit des numéros). Le
-geste n’analyse pas la ligne : il crée ou complète la **feuille transposée liée**
-(« Sheet1ᵀ ») puis ouvre la fenêtre sur sa colonne « Row N » ; le résultat suit une colonne
-(classeur des résultats, « Replace original data » agit sur la colonne de la transposée,
-aucune série n'est ajoutée au graphe de lignes). Un groupe qui mêle courbes de colonnes et
-de lignes est grisé (`analysis-needs-same-curves`). Une colonne Y de la feuille sans x', ou
-de texte, fait refuser le geste en la nommant par sa lettre. La feuille transposée porte
-une bande en haut de la grille (`app/transpose_ui.rs`) : origine, « Out of date » quand la
-source a changé, « Values edited » quand une valeur d'une colonne liée a été éditée, et
-Recalculate (Relink avec confirmation dans ce dernier cas). Détail du modèle :
-[`../modele-de-donnees.md`](../modele-de-donnees.md), « Feuilles transposées liées ».
+**Analyzing a row (#253).** `Analysis ▸` is active on a "row" curve (right-click
+on the curve, Object Manager, Graph › Selection, same menu everywhere) and on
+whole rows of the gutter (Analysis menu of the workbook, right-click on the numbers). The
+gesture does not analyze the row: it creates or completes the **linked transposed sheet**
+("Sheet1ᵀ"), then opens the window on its "Row N" column. The result follows a column
+(results workbook, "Replace original data" acts on the column of the transposed sheet,
+no series is added to the graph of rows). A group that mixes column curves and
+row curves is disabled (`analysis-needs-same-curves`). A Y column of the sheet without x', or
+a text column, makes the gesture refuse, naming it by its letter. The transposed sheet carries
+a band at the top of the grid (`app/transpose_ui.rs`): origin, "Out of date" when the
+source has changed, "Values edited" when a value of a linked column has been edited, and
+Recalculate (Relink with confirmation in the latter case). Model details:
+[`../modele-de-donnees.md`](../modele-de-donnees.md), "Linked transposed sheets (#253)".
 
-**Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
-ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
-calque actif ; les colonnes de rôle **Y2, Y3, Y4** (appariées au **X2, X3, X4** le plus proche à
-sa gauche) partent, à la création du graphe (Plot) comme au dépôt ou à « Send
-to », chacune sur son calque numéroté (axe X en haut, axe Y à droite, échelles
-propres ; les axes s'empilent vers l'extérieur, le plus ancien contre la zone de
-tracé, #168), réutilisé s'il existe. « New Layer » est grisé à trois calques
-superposés par case ; un calque à deux axes prend le premier numéro libre. Le zoom, le déplacement et le rectangle de zoom portent sur les
-**échelles** : le geste, exprimé en pixels de la zone de tracé (commune aux
-calques d'une case), s'applique à toutes les échelles propres de tous les
-calques de la case (X, Y et y2 du calque ordinaire ; X en haut / Y à droite
-d'un calque superposé), si bien que les graduations restent alignées. Une
-échelle liée n'a pas de cadrage à elle (`Framing` par échelle, `Gesture`,
-`GraphView::commit_gesture`). **Un seul axe** : la molette (Ctrl) et le glisser
-au-dessus d'un axe (ligne et graduations, pas son titre) ne cadrent que cette
-échelle (`commit_axis_gesture`) ; la cible d'un glisser est figée à sa première
-image (`NavDrag`), le curseur peut donc quitter l'axe. Les autres échelles, liées
-ou non, ne bougent pas. Le rectangle de zoom reste un geste de zone de tracé. Rendu : `docs/rendu.md`.
+**Overlaid layers (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
+adds, through `Action::AddLayer`, a `PanelSpec::overlay_on` to the base layer of the
+active layer. The columns with role **Y2, Y3, Y4** (paired with the nearest **X2, X3, X4** to
+their left) go, when the graph is created (Plot) as well as on drop or "Send
+to", each to its own numbered layer (X axis at the top, Y axis on the right, own
+scales; the axes stack outward, the oldest against the plot
+area, #168), reused if it exists. "New Layer" is disabled at three
+overlaid layers per cell; a layer with two axes takes the first free number. Zoom, pan and the zoom rectangle act on the
+**scales**: the gesture, expressed in pixels of the plot area (shared by the
+layers of a cell), applies to all the own scales of all the
+layers of the cell (X, Y and y2 of the ordinary layer; top X / right Y of
+an overlaid layer), so the ticks stay aligned. A
+linked scale has no framing of its own (`Framing` per scale, `Gesture`,
+`GraphView::commit_gesture`). **A single axis**: the wheel (Ctrl) and the drag
+over an axis (line and ticks, not its title) frame only that scale
+(`commit_axis_gesture`); the target of a drag is frozen at its first
+frame (`NavDrag`), so the cursor can leave the axis. The other scales, linked
+or not, do not move. The zoom rectangle stays a plot-area gesture. Rendering: `docs/rendu.md`.
 
-**Calque actif (#161).** `GraphView::active_panel(spec)` : le dernier calque
-sélectionné, état d'interface hors `.stf` et hors historique, porté par la vue
-(donc identique en fenêtre détachée), revalidé à la lecture (calque disparu :
-le premier). Il change par un clic, un clic droit ou un début de glisser dans
-la zone de tracé d'un calque, par la sélection d'un objet du calque (figure ou
-Object Manager, `follow_selection`), par un clic sur le nœud du calque, de son
-groupe ou de ses axes dans l'Object Manager, et par le **repère numéroté** peint
-en haut à gauche de la fenêtre (`layer_badges`, jamais dans l'export ni la
-copie). La fenêtre publie le calque actif dans la mémoire d'egui
-(`published_active_panel`) pour les menus qui n'ont pas la vue. Suivent le
-calque actif : le dépôt de colonnes, « Send to » et Graph › Add Text ; les
-gestes qui désignent un point (clic droit, outils) visent leur calque.
+**Active layer (#161).** `GraphView::active_panel(spec)`: the last layer
+selected, an interface state outside the `.stf` and outside history, carried by the view
+(so identical in a detached window), revalidated on read (layer gone:
+the first one). It changes on a click, a right-click or the start of a drag in
+the plot area of a layer, on the selection of an object of the layer (figure or
+Object Manager, `follow_selection`), on a click on the node of the layer, of its
+group or of its axes in the Object Manager, and on the **numbered marker** painted
+at the top left of the window (`layer_badges`, never in the export or
+the copy). The window publishes the active layer in egui's memory
+(`published_active_panel`) for the menus that do not have the view. These follow the
+active layer: the drop of columns, "Send to" and Graph › Add Text; the
+gestures that designate a point (right-click, tools) target their own layer.
 
-**Entre deux fenêtres système : pas de glisser (#165).** Le dépôt marche au sein
-d'une même fenêtre OS (dock ou fenêtre détachée), pas de l'une à l'autre : sous
-Wayland la fenêtre source garde le pointeur tant que le bouton est pris, le
-graphique de l'autre fenêtre ne voit ni survol ni relâchement, et un vrai
-glisser-déposer `wl_data_device` coûterait plusieurs jours. Décision : aucun
-glisser inter-fenêtres, remplacé par **« Send to <graphique> »**
-(`app/graph_targets.rs`), la même `Action::AddSeriesToGraph` que le dépôt, vers
-**chaque graphique ouvert**, attaché ou détaché. Il se trouve à côté de « Plot »,
-dans le clic droit des lettres de colonnes, dans celui de toute case d'une
-sélection de **colonnes ou de lignes entières** (cellule, numéro de ligne,
-champ d'en-tête, coin : même menu que les lettres, appliqué aux colonnes de la
-sélection, `selection_context_menu`) et dans le menu Classeur. À partir de trois
-graphiques, un sous-menu « Send to Graph » ; sans graphique ouvert, l'entrée est
-absente.
+**Between two system windows: no drag (#165).** The drop works within one
+OS window (dock or detached window), not from one to the other: under
+Wayland the source window keeps the pointer while the button is held, the
+graph of the other window sees neither hover nor release, and a real
+`wl_data_device` drag and drop would cost several days. Decision: no
+cross-window drag, replaced by **"Send to <graph>"**
+(`app/graph_targets.rs`), the same `Action::AddSeriesToGraph` as the drop, to
+**every open graph**, attached or detached. It sits next to "Plot",
+in the right-click of the column letters, in that of any cell of a
+selection of **whole columns or rows** (cell, row number,
+header field, corner: same menu as the letters, applied to the columns of the
+selection, `selection_context_menu`) and in the Workbook menu. From three
+graphs on, a "Send to Graph" submenu; with no open graph, the entry is
+absent.
 
-### Propriétés des graphiques
+### Graph properties
 
-Les réglages d'un graphe vivent dans une **fenêtre flottante à onglets**
-(`app::plot_settings::plot_settings_window`), un **dialogue modal** (`modal_dialog`, `src/app/dialogs.rs`) :
-au premier plan, le reste de l'interface ne reçoit plus aucun clic, et un
-clic ailleurs fait clignoter son contour en rouge foncé
-(`theme::blocked_flash_color`). Deux boutons en bas : **OK** (par défaut,
-Entrée hors saisie de texte) et **Cancel** (aussi la croix et Échap) ; leurs
-textes viennent du catalogue (`dialog-ok`, `dialog-cancel`). Les
-gestes s'appliquent en direct au graphe (aperçu) mais dans une **macro
-d'historique** ouverte à l'ouverture de la fenêtre : OK la ferme — une
-seule entrée, un Ctrl+Z défait tout (`AppState::close_plot_settings`) ;
-Cancel l'avorte et restaure le graphe d'avant
-(`AppState::cancel_plot_settings`). Pendant la macro, annuler/rétablir et
-enregistrer sont refusés (`stokesforge-commands`), ainsi que les écritures d'une
-fenêtre détachée (autre identité d'émetteur : refusées par la session) et les
-actions qu'elle remonte à la racine (`reject_detached_actions`). Toute
-opération groupée se clôt par `AppState::end_grouped_macro`, qui rafraîchit
-l'instantané (sinon `can_undo`/libellé restent périmés, issue #22). Elle est construite
-par la même brique que les fenêtres de contenu (`show_window_in_layer`,
-`window_header`, `floating_resize_handles`) — même cadre, même barre de
-titre — et non par une `egui::Window` brute ; seuls l'ordre de calque et le
-calque plein écran qui capte les clics la distinguent. Ce calque est
-**invisible** : aucun voile sombre sur le reste de l'application, pour continuer
-à voir le rendu du graphe pendant le réglage (issue #20). Ses onglets sont la
-même bande que ceux des feuilles (`tab_strip`, issue #19) : c'est le standard
-du projet pour tout jeu d'onglets. Les fenêtres OS
-détachées, autres viewports, ne sont pas couvertes par ce blocage. Elle
-n'occupe aucune place tant qu'elle est fermée.
-Elle remplace l'ancien panneau fixe à droite de l'espace de travail, affiché
-en permanence dès qu'un graphe était actif. Son état (quel graphe, quel
-onglet, quel axe) est `state::PlotSettings`, dans `AppState` ; on l'ouvre
-par `Action::OpenPlotSettings { graph, tab, axis }`.
+The settings of a graph live in a **floating window with tabs**
+(`app::plot_settings::plot_settings_window`), a **modal dialog** (`modal_dialog`, `src/app/dialogs.rs`):
+in the foreground, the rest of the interface no longer receives any click, and a
+click elsewhere makes its outline flash dark red
+(`theme::blocked_flash_color`). Two buttons at the bottom: **OK** (default,
+Enter outside text input) and **Cancel** (also the cross and Esc); their
+texts come from the catalog (`dialog-ok`, `dialog-cancel`). The
+gestures apply live to the graph (preview) but inside a **history
+macro** opened when the window opens: OK closes it, giving a
+single entry, so one Ctrl+Z undoes everything (`AppState::close_plot_settings`);
+Cancel aborts it and restores the previous graph
+(`AppState::cancel_plot_settings`). During the macro, undo/redo and
+save are refused (`stokesforge-commands`), as are the writes of a
+detached window (another sender identity: refused by the session) and the
+actions it sends up to the root (`reject_detached_actions`). Every
+grouped operation ends with `AppState::end_grouped_macro`, which refreshes
+the snapshot (otherwise `can_undo`/the label stay stale, issue #22). The window is built
+from the same building block as the content windows (`show_window_in_layer`,
+`window_header`, `floating_resize_handles`), with the same frame and the same title
+bar, and not from a raw `egui::Window`; only the layer order and the
+full-screen layer that captures clicks set it apart. This layer is
+**invisible**: no dark veil over the rest of the application, so the
+graph rendering stays visible during the adjustment (issue #20). Its tabs are the
+same strip as those of the sheets (`tab_strip`, issue #19): this is the project
+standard for any set of tabs. The detached OS
+windows, other viewports, are not covered by this blocking. The window
+takes no space while it is closed.
+It replaces the former fixed panel on the right of the workspace, displayed
+permanently as soon as a graph was active. Its state (which graph, which
+tab, which axis) is `state::PlotSettings`, in `AppState`; it is opened
+by `Action::OpenPlotSettings { graph, tab, axis }`.
 
-**Double-clic sur la figure** (#113) : sur un axe, une courbe ou un objet
-graphique, il ouvre leurs paramètres (`GraphEvent::OpenAxisProperties`,
-`OpenSeriesProperties`, `OpenShapeProperties`, traduits par
-`graph_window::annotation_interactions`) ; sur un texte, il garde l'édition sur place ;
-dans la zone de tracé nue, il réinitialise le zoom. Dans l'Object Manager,
-toute ligne (graphe, calque, groupes, séries, axes, objets) ouvre ses
-paramètres au double-clic. Sur un graphe à plusieurs calques, le double-clic
-sur un axe et son menu contextuel ouvrent l'onglet Axes du calque visé,
-avec le même `Action::OpenObjectProperties` que l'Object Manager. L'adresse
-est celle du calque dans la grille, indépendante du rang des panneaux tracés.
+**Double-click on the figure** (#113): on an axis, a curve or a graphic
+object, it opens their settings (`GraphEvent::OpenAxisProperties`,
+`OpenSeriesProperties`, `OpenShapeProperties`, translated by
+`graph_window::annotation_interactions`); on a text, it keeps in-place editing;
+in the bare plot area, it resets the zoom. In the Object Manager,
+every row (graph, layer, groups, series, axes, objects) opens its
+settings on double-click. On a graph with several layers, a double-click
+on an axis and its context menu open the Axes tab of the targeted layer,
+with the same `Action::OpenObjectProperties` as the Object Manager. The address
+is that of the layer in the grid, independent of the rank of the plotted panels.
 
-**Titres, titres d'axe et légende** (issue #53) : se désignent comme un texte
-libre. Double-clic sur un titre ou un titre d'axe → éditeur sur place
-(`app::graph_text_edit::text_editor_ui`, un champ ; Entrée ou clic ailleurs valide, Échap
-annule) ; sur une entrée de légende → renomme la série (`SetLegendEntryName`,
-vide = nom dérivé de la colonne) ; sur le cadre de la légende, rien (elle n'a
-pas de texte à elle). Un glisser déplace le texte (ancré aux données : il suit
-le zoom) ; un clic droit propose « Edit Text » et « Reset Position » (grisé tant
-que le texte est à sa place), et « Graph » → « Text » → « Reset Text Positions » remet tout
-d'un coup. Chaque geste validé est **une** `Action` (`SetTextAnchor`,
-`ResetTextAnchors`, `SetTextContent`, `SetLegendEntryName`), donc un
-`SetPlotSpec`, une entrée d'historique ; la position est enregistrée dans le
-`.stf` et vaut à l'export.
+**Titles, axis titles and legend** (issue #53): they are targeted like a free
+text. Double-click on a title or an axis title → in-place editor
+(`app::graph_text_edit::text_editor_ui`, one field; Enter or a click elsewhere confirms, Esc
+cancels); on a legend entry → renames the series (`SetLegendEntryName`,
+empty = name derived from the column); on the legend frame, nothing (it has no
+text of its own). A drag moves the text (anchored to the data: it follows
+the zoom); a right-click offers "Edit Text" and "Reset Position" (disabled while
+the text is in place), and "Graph" → "Text" → "Reset Text Positions" resets everything
+at once. Each confirmed gesture is **one** `Action` (`SetTextAnchor`,
+`ResetTextAnchors`, `SetTextContent`, `SetLegendEntryName`), so one
+`SetPlotSpec`, one history entry; the position is saved in the
+`.stf` and applies on export.
 
-**Textes libres** (issue #35) : clic droit dans une zone de tracé →
-« Add Text » au point cliqué, ou « Graph » → « Text » → « Add Text »
-(au centre du premier panneau). Le texte s'édite **sur place** : un champ posé
-sur le texte, et au-dessus une barre couleur / taille / rotation
-(`app::graph_text_edit::annotation_editor_ui`) ; Entrée ou clic ailleurs valide, Échap annule.
-Le champ s'écrit **dans le cadre du rendu** (issue #37) : centré sur le centre
-du texte rendu, à la taille de police du texte (corps × échelle d'affichage de
-la figure), droit même si le texte est tourné — son placement est la fonction
-pure `stokesforge_render_egui::annotation_field`. Un texte vidé n'étant plus tracé,
-l'éditeur garde le dernier cadre connu. Tant qu'on tape, le champ a un léger
-fond ; dès qu'il perd le focus (on règle la rotation ou la taille), il devient
-transparent et l'aperçu **tourné** se voit (issue #36) ; un clic dans son cadre
-redonne la main à la saisie. La taille finale diffère un peu après
-recompilation par Typst (une formule `$…$` se compose autrement que sa source).
-Double-clic ou clic droit → « Modifier le texte » rouvrent l'éditeur ; un clic
-sélectionne (contour bleu), Suppr ou « Supprimer » le retire ; un glisser le
-déplace. L'aperçu vit dans la vue (`GraphView::set_annotation_preview`) et
-l'état de l'éditeur dans la mémoire d'egui, sous l'identifiant de la vue : même
-écriture pour la fenêtre flottante et la fenêtre détachée, rien dans
-`AppState`. Chaque geste validé est **une** `Action::SetAnnotation` ou
-`RemoveAnnotation`, donc un `SetPlotSpec` ou `EditPlotSpec`, une entrée d'historique. Les couleurs
-enregistrées sont publiées chaque image dans la mémoire d'egui
-(`color_picker::publish_saved_colors`, lue par `color_picker::saved_colors_id`) pour que le sélecteur de l'éditeur les propose aussi
-dans une fenêtre détachée.
+**Free texts** (issue #35): right-click in a plot area →
+"Add Text" at the clicked point, or "Graph" → "Text" → "Add Text"
+(at the center of the first panel). The text is edited **in place**: a field placed
+over the text, and above it a color / size / rotation bar
+(`app::graph_text_edit::annotation_editor_ui`); Enter or a click elsewhere confirms, Esc cancels.
+The field is written **in the rendering frame** (issue #37): centered on the center
+of the rendered text, at the font size of the text (body × display scale of
+the figure), upright even if the text is rotated. Its placement is the pure
+function `stokesforge_render_egui::annotation_field`. Since an emptied text is no longer plotted,
+the editor keeps the last known frame. While you type, the field has a light
+background; as soon as it loses focus (you adjust the rotation or the size), it becomes
+transparent and the **rotated** preview is visible (issue #36); a click in its frame
+gives control back to the input. The final size differs slightly after
+recompilation by Typst (a `$…$` formula is typeset differently from its source).
+Double-click or right-click → "Edit Text" reopen the editor; a click
+selects (blue outline), Del or "Delete" removes it; a drag
+moves it. The preview lives in the view (`GraphView::set_annotation_preview`) and
+the editor state in egui's memory, under the identifier of the view: the same
+code for the floating window and the detached window, nothing in
+`AppState`. Each confirmed gesture is **one** `Action::SetAnnotation` or
+`RemoveAnnotation`, so one `SetPlotSpec` or `EditPlotSpec`, one history entry. The saved
+colors are published every frame in egui's memory
+(`color_picker::publish_saved_colors`, read through `color_picker::saved_colors_id`) so that the editor's picker offers them too
+in a detached window.
 
-**Objets graphiques** (issue #76) : quatre outils de la barre « Outils »
-(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`) ; un clic insère une
-forme de taille par défaut (#153) : rectangle carré et ellipse circulaire de
-48 × 48 px, ligne ou flèche horizontale de 80 px, en pixels de figure à partir
-du point cliqué. Glisser trace librement l'objet (aperçu dans la vue) ; le
-clic ou relâchement rend la main à l'outil Pointeur et sélectionne l'objet.
-Avec le Pointeur : un clic sélectionne (contour et poignées),
-glisser le corps déplace (Ctrl + glisser ou clic milieu + glisser déplace la vue
-au lieu de l'objet, #318), glisser une poignée redimensionne, Suppr retire.
-Maintenir Maj pendant le redimensionnement conserve les proportions à l'écran
-au début du geste : le coin opposé reste fixe, une poignée de côté conserve
-le côté opposé et le centre de l'autre dimension. Une ligne ou flèche garde
-sa direction initiale. Sans Maj, les dimensions restent libres ; une forme
-initialement plate reste libre faute de rapport largeur/hauteur défini.
-Ces gestes sont communs aux graphes flottants et détachés. Menu
-« Graph » et clic droit sur l'objet : « Bring to Front », « Send to Back »,
-« Delete Object » (`graph_window::shape_order_buttons`). Chaque geste validé est **une**
-`Action::SetShape` / `RemoveShape` / `ReorderShape`, donc un `SetPlotSpec` ou `EditPlotSpec`. La
-partie « format d'objet » de la barre `Tools` (issue #64, fusionnée par #93 ;
-`object_format.rs`) règle l'objet sélectionné : couleur de trait, couleur de remplissage (grisée pour
-une ligne ou une flèche ; l'opacité est l'alpha du sélecteur, `#RRGGBBAA`),
-épaisseur. Chaque réglage est un champ du modèle posé par une `Action::SetShape`
-(`StokesForgeApp::format_object`, `app/format.rs`). Côté script : `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
+**Graphic objects** (issue #76): four tools of the "Tools" bar
+(`GraphTool::Rectangle`, `Ellipse`, `Line`, `Arrow`); a click inserts a
+shape of default size (#153): square rectangle and circular ellipse of
+48 × 48 px, horizontal line or arrow of 80 px, in figure pixels from
+the clicked point. A drag draws the object freely (preview in the view); the
+click or release gives control back to the Pointer tool and selects the object.
+With the Pointer: a click selects (outline and handles),
+dragging the body moves it (Ctrl + drag or middle click + drag moves the view
+instead of the object, #318), dragging a handle resizes, Del removes it.
+Holding Shift during the resize keeps the on-screen proportions
+at the start of the gesture: the opposite corner stays fixed, a side handle keeps
+the opposite side and the center of the other dimension. A line or arrow keeps
+its initial direction. Without Shift, the dimensions stay free; a shape
+that is initially flat stays free because it has no defined width/height ratio.
+These gestures are shared by floating and detached graphs. The
+"Graph" menu and the right-click on the object: "Bring to Front", "Send to Back",
+"Delete Object" (`graph_window::shape_order_buttons`). Each confirmed gesture is **one**
+`Action::SetShape` / `RemoveShape` / `ReorderShape`, so one `SetPlotSpec` or
+`EditPlotSpec`. The
+"object format" part of the `Tools` bar (issue #64, merged by #93;
+`object_format.rs`) sets the selected object: stroke color, fill color (disabled for
+a line or an arrow; opacity is the alpha of the picker, `#RRGGBBAA`),
+thickness. Each setting is a model field set by an `Action::SetShape`
+(`StokesForgeApp::format_object`, `app/format.rs`). On the script side: `pyst.add_shape` / `pyst.remove_shape` (`docs/python-et-script.md`).
 
-**Exporter le graphe** (issue #34) : menu « Graph » → « Export » → « Export
-Graph… », Ctrl+E (graphe actif seulement), ou clic droit sur la figure (y
-compris dans une fenêtre détachée). Un sélecteur `rfd` (SVG, PDF, PNG) propose
-le nom du graphe (`state::export_file_name`) ; le format suit l'extension,
-`.svg` si elle manque. `app::graph_window::request_graph_export` lit le zoom de la vue
-(`GraphView::framed_spec`) et pousse `Action::ExportGraph { path, spec }` ;
-`AppState` écrit le fichier (`stokesforge-render-svg`, texte Typst compris) et le dit
-dans la barre d'état. Aucune commande : le modèle n'est pas touché. La
-résolution PNG (×1, ×2, ×4 ; ×4 par défaut, soit 1920 × 1440 px) se règle dans
-« Graph » → « Export » → « PNG Resolution » (`Action::SetPngExportScale`,
-préférence de session). Le texte des SVG exportés (#162) se règle dans
-« Graph » → « Export » → « SVG Text » : **Texte** (défaut ; `<text>`
-sélectionnable, police nommée mais non embarquée) ou **Contours** ; le choix est
-retenu d'un lancement à l'autre (`preferences.json`, `Action::SetSvgTextMode`,
-ni commande ni historique ni `.stf`) et ne vaut que pour le SVG.
+**Exporting the graph** (issue #34): "Graph" → "Export" → "Export
+Graph…" menu, Ctrl+E (active graph only), or right-click on the figure (including
+in a detached window). An `rfd` picker (SVG, PDF, PNG) proposes
+the name of the graph (`state::export_file_name`); the format follows the extension,
+`.svg` if it is missing. `app::graph_window::request_graph_export` reads the zoom of the view
+(`GraphView::framed_spec`) and pushes `Action::ExportGraph { path, spec }`;
+`AppState` writes the file (`stokesforge-render-svg`, Typst text included) and says so
+in the status bar. No command: the model is not touched. The
+PNG resolution (×1, ×2, ×4; ×4 by default, i.e. 1920 × 1440 px) is set in
+"Graph" → "Export" → "PNG Resolution" (`Action::SetPngExportScale`,
+session preference). The text of exported SVGs (#162) is set in
+"Graph" → "Export" → "SVG Text": **Text** (default; selectable
+`<text>`, font named but not embedded) or **Outlines**; the choice is
+kept from one launch to the next (`preferences.json`, `Action::SetSvgTextMode`,
+no command, no history, no `.stf`) and applies to SVG only.
 
-**Copier le graphe vers une autre application** (issue #149) : menu « Graph »
-→ « Export » → « Copy Graph », ou **Ctrl+C** quand une fenêtre de graphique est active au
-premier plan (flottante ou détachée), qu'**aucun objet** n'y est sélectionné
-(série, texte libre, forme, titre ou légende : `selected_manager_target`, la
-sélection de l'Object Manager est celle de la vue) et qu'aucun champ de saisie
-n'a le focus (`keyboard_focus_outside_grid`). Le presse-papiers reçoit la
-**même figure en trois représentations**, offertes ensemble — SVG, PNG, PDF,
-dans cet ordre de préférence ; c'est l'application destinataire qui choisit, et
-beaucoup préfèrent le PNG. Le cadrage est celui de la vue affichée (zoom et
-déplacement, `GraphView::framed_spec`), la taille, les polices et le fond ceux de
-l'export vers un fichier, et le PNG suit « PNG Resolution ». Le Ctrl+C d'une
-cellule, d'une feuille ou du Project Manager est inchangé : le Project Manager
-retire lui-même son `Event::Copy` quand il a le focus, et `figure_copy` passe
-avant les panneaux et les contenus, de sorte qu'une grille visible derrière la
-fenêtre de graphique ne reçoit pas le même événement.
+**Copying the graph to another application** (issue #149): "Graph"
+→ "Export" → "Copy Graph" menu, or **Ctrl+C** when a graph window is active in the
+foreground (floating or detached), **no object** is selected in it
+(series, free text, shape, title or legend: `selected_manager_target`, the
+selection of the Object Manager is that of the view) and no input field
+has focus (`keyboard_focus_outside_grid`). The clipboard receives the
+**same figure in three representations**, offered together: SVG, PNG, PDF,
+in this order of preference; the receiving application chooses, and
+many prefer PNG. The framing is that of the displayed view (zoom and
+pan, `GraphView::framed_spec`); the size, the fonts and the background are those of
+the export to a file, and the PNG follows "PNG Resolution". Ctrl+C in a
+cell, a sheet or the Project Manager is unchanged: the Project Manager
+removes its own `Event::Copy` when it has focus, and `figure_copy` runs
+before the panels and the contents, so that a grid visible behind the
+graph window does not receive the same event.
 
-Chaîne : `app::figure_copy::request_figure_copy` (la racine, depuis `ui()`,
-ou le viewport d'un graphique détaché) pousse `Action::CopyGraphFigure { spec }` ;
-`AppState::copy_graph_figure` compose la figure **une fois**
-(`stokesforge_render_svg::export_bytes_many`) et prépare les représentations
-(`take_figure_clipboard`) ; la fenêtre racine les offre ensuite
-(`StokesForgeApp::offer_figure`, qui seule connaît son affichage par
-`eframe::Frame`) par `stokesforge-clipboard`. Un format qui échoue seul est omis
-et nommé dans le message ; si aucun n'est prêt, ou si le système refuse, la barre
-d'état donne la cause. Aucune commande : ni le modèle ni l'historique ne
-bougent.
+Chain: `app::figure_copy::request_figure_copy` (the root, from `ui()`,
+or the viewport of a detached graph) pushes `Action::CopyGraphFigure { spec }`;
+`AppState::copy_graph_figure` composes the figure **once**
+(`stokesforge_render_svg::export_bytes_many`) and prepares the representations
+(`take_figure_clipboard`); the root window then offers them
+(`StokesForgeApp::offer_figure`, which alone knows its display through
+`eframe::Frame`) through `stokesforge-clipboard`. A format that fails alone is omitted
+and named in the message; if none is ready, or if the system refuses, the status
+bar gives the cause. No command: neither the model nor the history
+changes.
 
-Pourquoi un crate à part : ni egui (`Context::copy_text`) ni `arboard` ne savent
-offrir `image/svg+xml` ni `application/pdf`, ni plusieurs types à la fois.
-`stokesforge-clipboard` porte un backend par affichage : **Wayland** par
-`Clipboard::store_formats` du patch `vendor/smithay-clipboard` (le worker déjà
-partagé avec egui-winit, voir `vendor/winit/STOKESFORGE.md`), **X11** par un
-propriétaire de la sélection `CLIPBOARD` (`TARGETS`, un type par
-représentation, pas d'`INCR` : une représentation plus grosse qu'une requête X
-n'est pas offerte), **Windows** (un format enregistré par représentation :
-`PNG`, `image/svg+xml`, `application/pdf`) et **macOS** (`NSPasteboard`, UTI
-`public.svg-image`, `public.png`, `com.adobe.pdf`). Sous Wayland le
-compositeur n'accepte la sélection que de la fenêtre focalisée qui vient de
-recevoir une entrée : l'offre part donc du geste, et sinon elle est perdue sans
-erreur, comme le texte d'egui-winit.
+Why a separate crate: neither egui (`Context::copy_text`) nor `arboard` can
+offer `image/svg+xml` or `application/pdf`, nor several types at once.
+`stokesforge-clipboard` carries one backend per display: **Wayland** through
+`Clipboard::store_formats` of the `vendor/smithay-clipboard` patch (the worker already
+shared with egui-winit, see `vendor/winit/STOKESFORGE.md`), **X11** through an
+owner of the `CLIPBOARD` selection (`TARGETS`, one type per
+representation, no `INCR`: a representation larger than an X request
+is not offered), **Windows** (one registered format per representation:
+`PNG`, `image/svg+xml`, `application/pdf`) and **macOS** (`NSPasteboard`, UTI
+`public.svg-image`, `public.png`, `com.adobe.pdf`). Under Wayland the
+compositor accepts the selection only from the focused window that has just
+received an input: the offer therefore starts from the gesture, and otherwise it is lost without
+an error, like the text of egui-winit.
 
-Vérifié : la composition et l'ordre des trois formats, le geste (sélection,
-focus, onglet actif, événement consommé) et l'entrée de menu par des tests ;
-X11 contre un vrai serveur (`cargo test -p stokesforge-clipboard --test x11 --
---ignored`, XWayland suffit). **Non exécutés par la CI ni ici** : Wayland réel,
-Windows et macOS (ces deux derniers compilent seulement,
-`cargo check -p stokesforge-clipboard --target x86_64-pc-windows-gnu` et
-`aarch64-apple-darwin`). Contrôle manuel Wayland : lancer l'application,
-sélectionner un graphique au premier plan sans rien y sélectionner, Ctrl+C, puis
-`wl-paste -l` doit lister `image/svg+xml`, `image/png` et `application/pdf`
-(`wl-paste -t image/png > figure.png` pour lire une représentation).
+Verified: the composition and order of the three formats, the gesture (selection,
+focus, active tab, event consumed) and the menu entry by tests;
+X11 against a real server (`cargo test -p stokesforge-clipboard --test x11 --
+--ignored`, XWayland is enough). **Not run by the CI or here**: real Wayland,
+Windows and macOS (the last two only compile,
+`cargo check -p stokesforge-clipboard --target x86_64-pc-windows-gnu` and
+`aarch64-apple-darwin`). Manual Wayland check: launch the application,
+select a graph in the foreground with nothing selected in it, Ctrl+C, then
+`wl-paste -l` must list `image/svg+xml`, `image/png` and `application/pdf`
+(`wl-paste -t image/png > figure.png` to read a representation).
 
-**Onglets** (`state::PlotSettingsTab`, clés `plot-tab-*`, en anglais) :
-« General » (titre et sa couleur, fond), « Plot Area » (titre du calque,
-quadrillage), « Axes » (un axe à la fois, choisi en tête de page : titre de
-l'axe — grandeur et unités —, échelle, affichage, couleur de l'axe),
-« Legend » et « Theme ». Les séries n'ont plus d'onglet (#179) : elles ont leur
-propre fenêtre, **Series Properties**, décrite plus bas. Les textes de toute la fenêtre sont des clés `plot-*`
-du catalogue `en` (infobulle en attribut `.hint`), selon le glossaire
-`docs/textes-interface.md` ; les noms saisis (titres, noms de série, thèmes)
-sont des données, jamais traduits.
+**Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
+"General" (title and its color, background), "Plot Area" (layer title,
+grid lines), "Axes" (one axis at a time, chosen at the top of the page: axis
+title (quantity and units), scale, display, axis color),
+"Legend" and "Theme". The series no longer have a tab (#179): they have their
+own window, **Series Properties**, described below. The texts of the whole window are `plot-*` keys
+of the `en` catalog (tooltip in a `.hint` attribute), following the glossary
+`docs/textes-interface.md`; the names that are typed in (titles, series names, themes)
+are data, never translated.
 
-**Textes du graphe** : titre, titre du panneau, libellé et unité d'axe, nom de
-série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
-§ Typst). Chacun de ces champs (`formula_field`) porte à sa droite une petite
-icône d'aide grisée (#197, `app/hover_help.rs`) dont la bulle, au survol, rappelle
-la syntaxe (`formula_help`, issue #33) : `$lambda$`, `$x_2$`, `$"cm"^(-1)$`,
-`*bold*`, `\$` pour un dollar, et nomme Typst avec l'adresse de sa référence.
-Elle remplace le mémo repliable « Math syntax » : le lien avec le champ se
-voit et l'aide ne prend plus de hauteur. Tout champ futur qui accepte du
-texte Typst (côté interface : « Math », #322) passe par `formula_field` ; une autre aide au survol, par `hover_help`.
-Le test `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un
-nom de série laissé vide reprend celui de la colonne, affiché tel quel.
+**Graph texts**: title, panel title, axis label and unit, series name
+are composed by Typst and read as **markup** (`docs/rendu.md`
+§ Typst (R8)). Each of these fields (`formula_field`) carries on its right a small
+greyed help icon (#197, `app/hover_help.rs`) whose bubble, on hover, recalls
+the syntax (`formula_help`, issue #33): `$lambda$`, `$x_2$`, `$"cm"^(-1)$`,
+`*bold*`, `\$` for a dollar, and names Typst with the address of its reference.
+It replaces the collapsible "Math syntax" memo: the link with the field is
+visible and the help no longer takes up height. Any future field that accepts
+Typst text (interface side: "Math", #322) goes through `formula_field`; any other hover help, through `hover_help`.
+The test `chaque_exemple_du_memo_compile` checks that each example compiles. A
+series name left empty takes that of the column, displayed as is.
 
-**Onglet « Thème »** : deux thèmes prédéfinis (`stokesforge_plot::THEMES` : Clair,
-Sombre) et trois couleurs globales — fond, texte, axes. Une
-couleur globale est **écrite dans tous les champs locaux** (titre du graphe,
-titre et échelle de chaque axe de chaque panneau ;
-`PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`) : le dernier
-réglage écrase ce qui avait été réglé une à une, et rien n'est mémorisé en
-plus (le format `.stf` ne change pas). Le tout reste dans le brouillon de la
-fenêtre : un seul pas d'historique à la validation. Les thèmes laissent le
-texte et les axes en automatique, donc ils suivent le fond.
+**"Theme" tab**: two predefined themes (`stokesforge_plot::THEMES`: Clair,
+Sombre) and three global colors: background, text, axes. A global
+color is **written into all the local fields** (graph title,
+title and scale of each axis of each panel;
+`PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`): the last
+setting overwrites what had been set one by one, and nothing more is remembered
+(the `.stf` format does not change). Everything stays in the draft of the
+window: a single history step on confirmation. The themes leave the
+text and the axes on automatic, so they follow the background.
 
-**Sélecteur de couleur** (`crate::color_picker`) : toute couleur de la
-fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
-qui ouvre une fenêtre surgissante **repliée** : palette, « Auto »
-quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
-(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). La case **« Custom color »**
-(une case à cocher depuis S-C5, #227) déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
-luminosité avec barre de teinte, ou **roue chromatique** avec barre de
-valeur ; le choix « Square | Wheel » est un jeu d'onglets soulignés, `tab_strip`
-— #170, point 7 — et se garde en mémoire d'egui, `stokesforge_picker_shape`), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
-replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
-par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
-exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
-se ferme sur Échap ou sur un clic hors d'elle et de ses listes. Une couleur transparente se montre sur un
-damier (dans l'échantillon du sélecteur). **Une palette par usage** (`stokesforge_plot::ColorUsage`) :
+**Color picker** (`crate::color_picker`): every color of the
+window is chosen with a swatch button (`color_field`/`color_button`)
+that opens a pop-up window, **collapsed**: palette, "Auto"
+when the color can be automatic, saved colors and hexadecimal input
+(`#RRGGBB`, or `#RRGGBBAA` with the opacity). The **"Custom color"** box
+(a checkbox since S-C5, #227) expands the rest: Save Color and its destination, swatch (saturation ×
+lightness square with a hue bar, or **color wheel** with a
+value bar; the "Square | Wheel" choice is a set of underlined tabs, `tab_strip`
+(#170, point 7) and is kept in egui's memory, `stokesforge_picker_shape`), **opacity**, RGB and HSL input. The picker always reopens
+collapsed (`color_picker::custom_id`). This window is an `egui::Area` managed
+by `color_button` (and not an `egui::Popup`, of which egui allows only one
+open instance: the list of a dropdown menu would close it); it
+closes on Esc or on a click outside it and its lists. A transparent color shows on a
+checkerboard (in the swatch of the picker). **One palette per use** (`stokesforge_plot::ColorUsage`):
 
-- **courbes** : un outil à part, avec un choix de palettes nommées
-  (`stokesforge_plot::CURVE_PALETTES` : StokesForge, Tableau 10, Okabe-Ito lisible par
-  les daltoniens, ColorBrewer Set1/Dark2/Paired, dégradés Viridis, Plasma,
-  gris), chacune avec ses nuances foncées et claires. Les palettes vivent
-  dans `stokesforge-plot`, pour qu'une évolution future colore plusieurs courbes
-  d'un coup (palette ou dégradé) ;
-- **texte** : encres lisibles ;
-- **fonds** : en premier **« No color »** (`#ffffff00`,
-  `stokesforge_plot::TRANSPARENT`), qui est aussi le **fond par défaut** d'un
-  graphe neuf (`PlotSpec::default`) : la figure exportée n'a pas de fond,
-  pour s'intégrer à une autre présentation ; à l'écran, elle se montre sur
-  un fond **blanc** peint par l'application sous la figure
-  (`app::graph_window::display_backdrop`), jamais exporté. Puis des fonds clairs, et des fonds
-  sombres (le texte automatique passe en blanc, voir `docs/rendu.md`). Un
-  fond vide (fichiers écrits avant ce défaut) reste blanc.
+- **curves**: a tool of its own, with a choice of named palettes
+  (`stokesforge_plot::CURVE_PALETTES`: StokesForge, Tableau 10, Okabe-Ito readable by
+  the colorblind, ColorBrewer Set1/Dark2/Paired, gradients Viridis, Plasma,
+  grays), each with its dark and light shades. The palettes live
+  in `stokesforge-plot`, so that a future change can color several curves
+  at once (palette or gradient);
+- **text**: readable inks;
+- **backgrounds**: first **"No color"** (`#ffffff00`,
+  `stokesforge_plot::TRANSPARENT`), which is also the **default background** of a new
+  graph (`PlotSpec::default`): the exported figure has no background,
+  to blend into another presentation; on screen, it shows on
+  a **white** background painted by the application under the figure
+  (`app::graph_window::display_backdrop`), never exported. Then light backgrounds, and dark
+  backgrounds (the automatic text turns white, see `docs/rendu.md`). An
+  empty background (files written before this default) stays white.
 
-**Couleurs enregistrées** : « Enregistrer » garde la couleur courante
-**dans le projet** (par défaut — commande annulable `SetSavedColors`,
-enregistrée dans le `.stf`) ou **pour l'utilisateur** (fichier
-`couleurs.json` du dossier de configuration de StokesForge (`STOKESFORGE_CONFIG_DIR`
-ou le dossier du système, `docs/application/theme-i18n-systeme.md`), à côté des
-recettes d'import, hors historique — `stokesforge_app_state::user_colors`), au choix
-(`state::SaveTarget`). Une couleur enregistrée ne réapparaît que dans la
-palette de son usage ; clic droit dessus pour la retirer
-(`Action::SaveColor`/`RemoveSavedColor`). Le sélecteur ne touche ni au
-modèle ni au disque : il dépose des demandes dans un `PickerEnv`, que
-`plot_settings_contents` traduit en actions.
+**Saved colors**: "Save Color" keeps the current color
+**in the project** (by default: undoable command `SetSavedColors`,
+saved in the `.stf`) or **for the user** (file
+`couleurs.json` in the StokesForge configuration folder (`STOKESFORGE_CONFIG_DIR`
+or the system folder, `docs/application/theme-i18n-systeme.md`), next to the
+import recipes, outside history: `stokesforge_app_state::user_colors`), as chosen
+(`state::SaveTarget`). A saved color reappears only in the
+palette of its use; right-click on it to remove it
+(`Action::SaveColor`/`RemoveSavedColor`). The picker touches neither the
+model nor the disk: it leaves requests in a `PickerEnv`, which
+`plot_settings_contents` translates into actions.
 
-La couleur est validée à la fin du geste (clic sur un échantillon, fin de
-glisser, champ validé, fermeture), jamais pixel par pixel. Tout nouveau
-réglage de couleur passe par ce sélecteur, avec l'usage qui lui correspond.
+The color is confirmed at the end of the gesture (click on a swatch, end of
+drag, field confirmed, closing), never pixel by pixel. Every new
+color setting goes through this picker, with the use that matches it.
 
-**Trois façons de l'ouvrir** :
+**Three ways to open it**:
 
-- **clic droit sur un composant du graphe** (`app::graph_window::graph_context_menu`) :
-  titre, zone de tracé, axe, titre d'axe, courbe, légende. Le menu est celui
-  de l'objet visé (`object_node_menu`), dont « Properties… » ouvre la page qui
-  règle ce composant (`state::PlotTarget::settings_page`) ; sur le fond et la
-  zone de tracé : Add Text, Insert Object, Export, Properties…. Le composant
-  sous le pointeur est trouvé par `stokesforge_render::hit::component_at`, sur la
-  géométrie réellement allouée par Plotters (zone de tracé, aires de
-  graduation, bande du titre), pas sur une reconstitution. Le clic droit
-  **sans** glisser ouvre le menu ; le glisser secondaire reste le zoom
-  élastique. Même chemin en fenêtre flottante et détachée
-  (`graph_view_contents`) ;
-- **menu « Graph »** de la barre de menus, présent seulement quand
-  l'onglet actif est un graphe (`state::active_graph`, testée sans fenêtre) :
-  un sous-menu « Properties » avec une entrée par onglet, et « Reset Zoom ». Aucun réglage n'est
-  donc atteignable **seulement** au clic droit ;
-- rouvrir la fenêtre sur un autre graphe valide d'abord le brouillon du
-  précédent.
+- **right-click on a component of the graph** (`app::graph_window::graph_context_menu`):
+  title, plot area, axis, axis title, curve, legend. The menu is that
+  of the targeted object (`object_node_menu`), whose "Properties…" opens the page that
+  sets this component (`state::PlotTarget::settings_page`); on the background and the
+  plot area: Add Text, Insert Object, Export, Properties…. The component
+  under the pointer is found by `stokesforge_render::hit::component_at`, on the
+  geometry actually allocated by Plotters (plot area, tick
+  areas, title band), not on a reconstruction. The right-click
+  **without** a drag opens the menu; the secondary drag stays the rubber-band
+  zoom. Same path in floating and detached windows
+  (`graph_view_contents`);
+- the **"Graph" menu** of the menu bar, present only when
+  the active tab is a graph (`state::active_graph`, tested without a window):
+  a "Properties" submenu with one entry per tab, and "Reset Zoom". So no setting
+  is reachable **only** by right-click;
+- reopening the window on another graph first confirms the draft of the
+  previous one.
 
-Fermer la fenêtre valide ce qui diverge encore du modèle
-(`AppState::close_plot_settings`), par exemple un champ texte qui n'a pas
-encore perdu le focus.
+Closing the window confirms whatever still differs from the model
+(`AppState::close_plot_settings`), for example a text field that has not
+yet lost focus.
 
-**Édite le `PlotSpec` au travers d'un brouillon, jamais directement.**
-`state::PlotEdit { graph, spec, selected_series }` est un `PlotSpec` entier
-tenu hors de l'historique jusqu'à validation — le même principe que
-`NoteEdit`/`HeaderEdit` (saisie différée, tampon local, commande envoyée
-seulement à la validation), généralisé à un objet entier plutôt qu'à un seul
-champ : le panneau mélange une douzaine de petits widgets (titre, axes,
-style de chaque série, légende) qui doivent tous voir et modifier le **même**
-brouillon. `AppState::begin_plot_edit(graph)`, appelée à chaque image par
-`app::plot_settings::plot_settings_window` avant de peindre quoi que ce soit, n'écrase le
-brouillon que s'il n'y en a pas encore ou qu'il portait sur un autre graphe
-— repeindre la même image sur le même graphe ne doit jamais effacer une
-saisie en cours, et changer de graphe ne doit jamais laisser fuiter le
-brouillon du précédent. Un brouillon **sans saisie en cours** (égal à
-`PlotEdit::base`, le spec du modèle dont il est parti) suit en revanche le
-modèle : après Annuler, Rétablir, un script ou un glisser-déposer de
-colonne, la fenêtre montre le spec à jour au lieu de valeurs périmées
-qu'une validation suivante réécrirait par-dessus l'annulation. `AppState::commit_plot_edit` envoie
-`Action::SetPlotSpec { graph, spec }` → `Command::SetPlotSpec` — mais
-seulement si le brouillon diverge du spec courant du modèle (comparaison
-`PartialEq` sur `PlotSpec`, qui dérive proprement jusqu'aux feuilles) :
-sans cette garde, relâcher un curseur qui n'a pas bougé ou perdre le focus
-d'un champ texte non modifié empilerait une entrée d'historique identique à
-la précédente.
+**It edits the `PlotSpec` through a draft, never directly.**
+`state::PlotEdit { graph, spec, selected_series }` is a whole `PlotSpec`
+held outside history until confirmation. It is the same principle as
+`NoteEdit`/`HeaderEdit` (deferred input, local buffer, command sent
+only on confirmation), generalized to a whole object rather than a single
+field: the panel mixes a dozen small widgets (title, axes,
+style of each series, legend) that must all see and modify the **same**
+draft. `AppState::begin_plot_edit(graph)`, called every frame by
+`app::plot_settings::plot_settings_window` before painting anything, overwrites the
+draft only if there is none yet or it was about another graph.
+Repainting the same frame on the same graph must never erase input
+in progress, and changing graph must never let the draft of the
+previous one leak. A draft **with no input in progress** (equal to
+`PlotEdit::base`, the model spec it started from) does, however, follow the
+model: after Undo, Redo, a script or a column drag and drop,
+the window shows the up-to-date spec instead of stale values
+that a later confirmation would write back over the undo. `AppState::commit_plot_edit` sends
+`Action::SetPlotSpec { graph, spec }` → `Command::SetPlotSpec`, but
+only if the draft differs from the current spec of the model (`PartialEq`
+comparison on `PlotSpec`, which derives cleanly down to the leaves):
+without this guard, releasing a slider that has not moved or losing the focus
+of an unmodified text field would stack a history entry identical to the
+previous one.
 
-**Stratégie anti-inflation d'historique**, trois familles de widgets liées
-chacune à un déclencheur de validation différent, plutôt qu'un commit à
-chaque frappe/pixel :
+**Anti-inflation strategy for history**, three families of widgets each tied
+to a different confirmation trigger, rather than a commit at every
+keystroke/pixel:
 
-- **texte** (titres, libellés d'axe, couleurs en `#RRGGBB`) : `lost_focus()`
-  — le champ est modifié en direct dans le brouillon à chaque frappe (retour
-  visuel immédiat), mais `commit_plot_edit` n'est appelé qu'à la perte de
-  focus, exactement comme `note_contents`/`cell_widget` ;
-- **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
-  d'axe manuelles, `egui::DragValue`) : `drag_stopped() || lost_focus()` —
-  la valeur change à chaque pixel de glisser dans le brouillon, mais ne
-  s'envoie qu'au relâchement de la souris ou à la validation clavier ;
-- **case à cocher / menu déroulant** (échelle, visibilité, grille, type de
-  tracé, position de légende...) : un seul événement discret par clic,
-  validé tout de suite — rien à débouncer, il n'y a par construction jamais
-  de rafale d'événements `changed()` pour ces widgets-là.
+- **text** (titles, axis labels, colors as `#RRGGBB`): `lost_focus()`.
+  The field is modified live in the draft at each keystroke (immediate
+  visual feedback), but `commit_plot_edit` is called only on loss of
+  focus, exactly like `note_contents`/`cell_widget`;
+- **numeric drag** (line thickness, marker size, manual axis
+  limits, `egui::DragValue`): `drag_stopped() || lost_focus()`.
+  The value changes at each pixel of the drag in the draft, but is
+  sent only on mouse release or keyboard confirmation;
+- **checkbox / dropdown menu** (scale, visibility, grid, plot
+  type, legend position...): a single discrete event per click,
+  confirmed at once. There is nothing to debounce, since by construction there is never
+  a burst of `changed()` events for these widgets.
 
-Chaque widget de `app::plot_settings::plot_settings_contents` (et de ses fonctions auxiliaires
-`axis_editor`/`series_editor`/`legend_editor`) accumule dans un simple
-booléen local `commit`, mis à `true` par n'importe quel widget qui vient de
-finir une interaction ; `commit_plot_edit` n'est appelé qu'une seule fois, à
-la toute fin de la fonction, jamais widget par widget.
+Each widget of `app::plot_settings::plot_settings_contents` (and of its helper functions
+`axis_editor`/`series_editor`/`legend_editor`) accumulates into a simple
+local boolean `commit`, set to `true` by any widget that has just
+finished an interaction; `commit_plot_edit` is called only once, at the
+very end of the function, never widget by widget.
 
-**Ce qu'édite la fenêtre**, en ne touchant que des champs qui existent
-réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
+**What the window edits**, touching only fields that really exist
+in `stokesforge-plot` (read before writing, as requested):
 
-- **Graphe** : `PlotSpec::title`, `background` ;
-- **Zone de tracé** — `PlotSpec::panels`[0] seulement, voir plus bas — :
-  `PanelSpec::title`, grille des axes du bas et de gauche ;
-- **Axes** : pour l'axe du bas, celui de gauche, et celui de droite si
-  `PanelSpec::uses_right_axis()` (l'axe du haut, masqué par défaut et sans
-  UI dans ce banc pour l'activer, n'a pas de section) : `AxisSpec::label`,
-  `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, les
-  bornes De / À (#344 : **ni case « Axe inversé » ni case « Plage auto »** ;
-  De et À sont toujours éditables, montrent les bornes calculées tant que
-  `auto_range` est vrai — dans l'ordre d'affichage, la borne haute d'abord
-  sur un axe inversé —, une saisie fige les deux bornes (`auto_range` faux,
-  `inverted = De > À`), le bouton « Auto » rend `auto_range` vrai en gardant
-  le sens), puis la section « Graduations » (tirets, sens, sous-graduations)
-  et son bloc repliable « Avancé » (`tick_length`, `minor_tick_length`,
-  `tick_width`, `tick_mark_color`, fermé par défaut, `Form::collapsible`) ;
-  `app/plot_settings.rs`, `axis_editor` et `mirror_axis_editor` (mêmes
-  sections, chacun pour soi) ;
-- **Séries** (#179 : fenêtre à part, `app/curve_settings.rs` ; `PlotSettingsTab::Series`
-  n'est plus dans `PlotSettingsTab::ALL` mais choisit cette page dans
-  `plot_settings_window` — même brouillon, autre titre `curve-window-title`, autre
-  identité egui et autre taille ; ouverte par le double-clic sur une courbe de la
-  figure ou sur sa ligne de l'Object Manager, `Properties…` et Graph › Properties ›
-  Series…). Liste à gauche rangée comme l'Object Manager (#197, `PanelSpec::slots`) :
-  une série seule est une ligne `list_row`, un groupe est un **nœud repliable**
-  (réduire ne masque aucune courbe) dont les membres sont en branche
-  `tree_lines` ; Move Up / Move Down changent le rang dans le groupe (ou sautent
-  un groupe entier), réglages à droite : le **groupe** de la série
-  (liste déroulante Aucun / nom du groupe / New group, et « Leave Group » qui la
-  détache ; groupe créé à l'ajout simultané, #177 ; entrer dans un groupe place
-  la série à la suite de ses membres), puis les gestes du groupe (`group_editor`) :
-  son **nom** (champ validé à la perte de focus, vide = « Group n »), Move Group
-  Up / Down, **Ungroup** (les séries restent, simples, avec leur style) et
-  **Delete Group** (le groupe et ses séries) ; et, pour une série
-  groupée, la **portée** (`EditScope`) en clair — « This series only » ou
-  « Whole group (n series) » (par défaut) — avec une phrase qui dit ce qui
-  s'applique. Portée groupe : style et épaisseur du trait, forme et taille du
-  symbole se recopient dans chaque membre (`propagate_style`) ; les réglages
-  propres à une série (nom, visibilité, légende) sont **grisés**
-  avec l'info-bulle `curve-scope-locked`, ses **couleurs sont masquées** (le
-  nuancier les donne, #213) et le **type de tracé** reste réglable, pour la
-  seule série choisie ; la phrase qui dit ce que la portée applique est sous un
-  « ? » à côté du choix, plus en note ; le **nuancier** (#178) est actif.
-  Portée série : seule la série bouge (c'est l'exception), ses couleurs
-  reviennent, le nuancier est grisé (info-bulle). Série sans groupe : tout est
-  actif, ses couleurs sont là et le **nuancier n'est pas affiché**. Nuanciers :
-  fournis (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe
-  « (Project) » / « (User) », bouton Delete grisé hors nuancier enregistré) ou
-  personnalisé à N couleurs (nom + cible + Save). Chaque entrée de la liste
-  montre ses couleurs (`gradient_swatch`) avant son nom, et la pastille se clique comme le nom ; la bande dessous
-  montre celui du groupe. Il est appliqué **dès qu'on le choisit** (ou qu'on
-  change un arrêt), sans bouton : il répartit les couleurs dans l'ordre de la
-  liste du brouillon, que OK valide et Cancel défait. Le **groupe retient** ses
-  arrêts (`PanelSpec::group_gradients`, dans le `.stf`) : la liste en relit le
-  choix (`identify_choice`), **vide** — et la bande grisée — tant qu'aucun n'a
-  été choisi ; une série qui rejoint le groupe (`set_series_group`) en reçoit la
-  couleur. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; un
-  groupe y est un **nœud parent comme les autres** (#197) : triangle de repli
-  (repli initial = celui de « Series », #139), case de visibilité mixte qui ne
-  commande que ses membres (`VisibilityTarget::SeriesGroup`), nom éditable sur
-  place (F2 ou Rename, Entrée valide, Échap annule), sélection (la `GraphView`
-  garde `selected_group`, valable tant que la série qui le désigne est
-  sélectionnée ; les poignées de toutes ses courbes sont peintes), double-clic
-  = fenêtre des séries ouverte sur sa première série, clic droit
-  (`object_node_menu` : Select Members, Rename, Move Up / Down, Ungroup, Hide,
-  Delete, Properties…). Dans la fenêtre des séries, l'en-tête du groupe suit la
-  même règle (#208) : surligné quand le groupe est réglé (portée « tout le
-  groupe »), un clic le choisit (première série, portée groupe). Suppr supprime le groupe **et ses séries** (le geste
-  distinct de la dissolution) ; Ctrl+↑/↓ le déplace en bloc. Actions :
+- **Graph**: `PlotSpec::title`, `background`;
+- **Plot area** (`PlotSpec::panels`[0] only, see below):
+  `PanelSpec::title`, grid of the bottom and left axes;
+- **Axes**: for the bottom axis, the left one, and the right one if
+  `PanelSpec::uses_right_axis()` (the top axis, hidden by default and with no
+  UI in this bench to enable it, has no section): `AxisSpec::label`,
+  `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, the
+  "From" / "to" limits (#344: **neither an "Inverted axis" box nor an "Auto range" box**;
+  "From" and "to" are always editable, show the computed limits as long as
+  `auto_range` is true (in display order, the upper limit first
+  on an inverted axis), an input freezes both limits (`auto_range` false,
+  `inverted = De > À`), the "Auto" button makes `auto_range` true again keeping
+  the direction), then the "Ticks" section (dashes, direction, minor ticks)
+  and its collapsible "Advanced" block (`tick_length`, `minor_tick_length`,
+  `tick_width`, `tick_mark_color`, closed by default, `Form::collapsible`);
+  `app/plot_settings.rs`, `axis_editor` and `mirror_axis_editor` (same
+  sections, each for itself);
+- **Series** (#179: separate window, `app/curve_settings.rs`; `PlotSettingsTab::Series`
+  is no longer in `PlotSettingsTab::ALL` but selects this page in
+  `plot_settings_window`: same draft, another title `curve-window-title`, another
+  egui identity and another size; opened by the double-click on a curve of the
+  figure or on its row of the Object Manager, `Properties…` and Graph › Properties ›
+  Series…). A list on the left arranged like the Object Manager (#197, `PanelSpec::slots`):
+  a single series is a `list_row` row, a group is a **collapsible node**
+  (collapsing hides no curve) whose members are in a `tree_lines` branch;
+  Move Up / Move Down change the rank in the group (or jump over a whole
+  group). Settings on the right: the series' **group**
+  (dropdown list None / group name / New group, and "Leave Group" which
+  detaches it; group created on simultaneous add, #177; entering a group places
+  the series after its members), then the group gestures (`group_editor`):
+  its **name** (field confirmed on loss of focus, empty = "Group n"), Move Group
+  Up / Down, **Ungroup** (the series stay, as single series, with their style) and
+  **Delete Group** (the group and its series); and, for a grouped
+  series, the **scope** (`EditScope`) in plain words: "This series only" or
+  "Whole group (n series)" (default), with a sentence that says what
+  applies. Group scope: line style and thickness, symbol shape and size
+  are copied into each member (`propagate_style`); the settings
+  specific to one series (name, visibility, legend) are **disabled**
+  with the tooltip `curve-scope-locked`, its **colors are hidden** (the
+  gradient gives them, #213) and the **plot type** stays settable, for the
+  chosen series only; the sentence that says what the scope applies is under a
+  "?" next to the choice, no longer in a note; the **gradient** (#178) is active.
+  Series scope: only the series moves (this is the exception), its colors
+  come back, the gradient is disabled (tooltip). Series without a group: everything is
+  active, its colors are there and the **gradient is not shown**. Gradients:
+  provided (`GRADIENT_PRESETS`), saved (project or user, suffix
+  "(Project)" / "(User)", Delete button disabled outside a saved gradient) or
+  custom with N colors (name + target + Save). Each entry of the list
+  shows its colors (`gradient_swatch`) before its name, and the dot can be clicked like the name; the band below
+  shows that of the group. It is applied **as soon as it is chosen** (or as soon as a
+  stop changes), without a button: it spreads the colors in the order of the
+  draft's list, which OK confirms and Cancel undoes. The **group remembers** its
+  stops (`PanelSpec::group_gradients`, in the `.stf`): the list re-reads the
+  choice from it (`identify_choice`), **empty** (and the band disabled) as long as none has
+  been chosen; a series that joins the group (`set_series_group`) receives its
+  color. In the Object Manager, the node under the layer is called "Series"; a
+  group there is a **parent node like the others** (#197): collapse triangle
+  (initial collapse = that of "Series", #139), mixed visibility box that
+  controls only its members (`VisibilityTarget::SeriesGroup`), name editable in
+  place (F2 or Rename, Enter confirms, Esc cancels), selection (the `GraphView`
+  keeps `selected_group`, valid as long as the series that designates it is
+  selected; the handles of all its curves are painted), double-click
+  = series window opened on its first series, right-click
+  (`object_node_menu`: Select Members, Rename, Move Up / Down, Ungroup, Hide,
+  Delete, Properties…). In the series window, the group header follows the
+  same rule (#208): highlighted when the group is being set (scope "whole
+  group"), a click chooses it (first series, group scope). Del deletes the group **and its series** (the
+  gesture distinct from dissolving it); Ctrl+↑/↓ moves it as a block. Actions:
   `RenameSeriesGroup`, `UngroupSeries`, `MoveSeriesGroup`, `MoveSeries`,
   `RemovePlotObject`.
-  Ancienne description de la liste : (`egui::ScrollArea` bornée en hauteur,
-  `selectable_label` par série, libellé `state::series_list_label` : le nom
-  de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon
-  son nom de nœud, sinon « (référence rompue) » — le même calcul que
-  `label_for` en privé dans `stokesforge-core/src/resolve.rs`, dupliqué plutôt
-  que rendu public parce que c'est une règle d'affichage, pas une règle de
-  résolution) — puis, pour la série choisie : `SeriesSpec::name`,
-  `plot_type` (`PlotType`, toutes les variantes sauf `Unknown`, voir plus
-  bas), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,
-  `width`) et `symbol` (`SymbolSpec::shape`, `size`, `color`) ;
-- **Légende** : `LegendSpec::visible`, `position`.
+  Former description of the list: (`egui::ScrollArea` bounded in height,
+  `selectable_label` per series, label `state::series_list_label`: the name
+  of the series if set, otherwise the long name of the Y column, otherwise
+  its node name, otherwise « (référence rompue) », the same computation as
+  `label_for` in private in `stokesforge-core/src/resolve.rs`, duplicated rather than
+  made public because it is a display rule, not a resolution rule), then, for the chosen
+  series: `SeriesSpec::name`,
+  `plot_type` (`PlotType`, all variants except `Unknown`, see
+  below), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,
+  `width`) and `symbol` (`SymbolSpec::shape`, `size`, `color`);
+- **Legend**: `LegendSpec::visible`, `position`.
 
-**`PlotType::Unknown` ne figure jamais dans le menu déroulant**, mais une
-série qui le porte s'affiche quand même — le champ type de tracé devient un
-texte en lecture seule (« type inconnu de cette version, non modifiable »),
-le reste (nom, visibilité, style...) reste éditable normalement. C'est
-l'invariant 10 (« un défaut de donnée dégrade, il ne plante pas ») appliqué
-à cette fenêtre : proposer `Unknown` dans la liste laisserait croire qu'on peut
-y revenir, alors que rien ne sait reconstruire une variante dont ce lecteur
-ne connaît que le nom et des octets bruts (C5, niveau 2,
+**`PlotType::Unknown` never appears in the dropdown menu**, but a
+series that carries it is still displayed: the plot type field becomes a
+read-only text ("type unknown to this version, not editable"),
+the rest (name, visibility, style...) stays editable as usual. This is
+invariant 10 ("a data defect degrades, it does not crash") applied
+to this window: offering `Unknown` in the list would suggest that one can go back to
+it, whereas nothing can rebuild a variant of which this reader
+knows only the name and raw bytes (C5, level 2,
 `guide-de-correction-robustesse.md` §F3).
 
-**Ce qui n'est pas fait**, explicitement hors périmètre de ce chantier :
+**What is not done**, explicitly out of scope for this work package:
 
-- **pas de largeur de barre ni de nombre de classes d'histogramme** —
-  `SeriesSpec::bar_width`/`histogram_bins` existent dans `stokesforge-plot` mais
-  n'ont pas de widget ici, laissé à une itération suivante ;
-- **pas d'ajout/suppression de série ou de panneau depuis la fenêtre** —
-  ça reste le rôle du sous-menu « Plot » et du glisser-déposer déjà
-  décrits plus haut ;
-- **zoom/pan n'y entrent pas, et ne doivent jamais y entrer** —
-  `stokesforge_render_egui::ViewState` vit sur `GraphView`, hors du `PlotSpec`
-  (`docs/invariants.md`, `.claude/rules.md`) : cette fenêtre n'a et n'aura
-  aucun champ de navigation, une confusion entre les deux romprait la
-  frontière rendu/modèle que tout le reste du chantier de rendu tient.
+- **no bar width and no number of histogram bins**:
+  `SeriesSpec::bar_width`/`histogram_bins` exist in `stokesforge-plot` but
+  have no widget here, left for a later iteration;
+- **no adding/removing of a series or panel from the window**:
+  that remains the role of the "Plot" submenu and of the drag and drop already
+  described above;
+- **zoom/pan are not part of it, and must never be**:
+  `stokesforge_render_egui::ViewState` lives on `GraphView`, outside the `PlotSpec`
+  (`docs/invariants.md`, `.claude/rules.md`): this window has and will have
+  no navigation field; confusing the two would break the rendering/model
+  boundary that the whole rendering work package upholds.
 
 
-## Règles communes avec le rendu
+## Rules shared with rendering
 
-Deux règles ne sont **pas** réécrites dans l'interface (issue #25) :
-la syntaxe des couleurs `#RRGGBB[AA]` (`stokesforge_plot::parse_hex`, dont
-`color_picker::parse_hex` n'est qu'un adaptateur) et le nom affiché d'une série
-(`stokesforge_core::series_label`, appelée par la légende **et** par la liste des
-séries des propriétés du graphe via `series_list_label`). Les transformations
-RGB/HSL restent propres au sélecteur.
-
+Two rules are **not** rewritten in the interface (issue #25):
+the syntax of the `#RRGGBB[AA]` colors (`stokesforge_plot::parse_hex`, of which
+`color_picker::parse_hex` is only an adapter) and the displayed name of a series
+(`stokesforge_core::series_label`, called by the legend **and** by the list of
+series of the graph properties through `series_list_label`). The RGB/HSL
+transformations remain specific to the picker.

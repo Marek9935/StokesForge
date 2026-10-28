@@ -1,134 +1,134 @@
-# Critères de la V1 (#333)
+# V1 criteria (#333)
 
-La V1 sort quand **chaque case ci-dessous est vraie**, constatée sur le commit
-qui porte le tag `v1.0.0`. Cette page dit ce qui est exigé et comment le
-constater ; le contenu de la version est dans [`CHANGELOG.md`](../CHANGELOG.md).
+V1 ships when **every box below is true**, as observed on the commit
+that carries the `v1.0.0` tag. This page says what is required and how to
+observe it; the content of the version is in [`CHANGELOG.md`](../CHANGELOG.md).
 
-## Ce que la V1 promet
+## What V1 promises
 
-| Promesse | Tenue par |
+| Promise | Held by |
 |---|---|
-| Un fichier `.stf` écrit par la V1 se relit et se migre jusqu'en V3 ; un fichier d'un **format** plus récent (numéro de format supérieur) est refusé avec un message clair | [`persistance.md`](persistance.md) § règle de version, [`invariants.md`](invariants.md) n° 12, fichier témoin `crates/stokesforge-persistence/tests/temoins/v1/` |
-| Un script `pyst` écrit contre la V1 continue de marcher | [`python-et-script.md`](python-et-script.md) § « API figée V1 », test `crates/stokesforge-script/tests/surface_figee.rs` |
-| L'application et son Python embarqué s'installent et démarrent sur Linux x86_64 et Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § « Où sont les binaires ») |
+| A `.stf` file written by V1 can be read back and migrated up to V3; a file of a newer **format** (higher format number) is refused with a clear message | [`persistance.md`](persistance.md) § Version rule: every V1 file can be read back up to V3, [`invariants.md`](invariants.md) no. 12, witness file `crates/stokesforge-persistence/tests/temoins/v1/` |
+| A `pyst` script written against V1 keeps working | [`python-et-script.md`](python-et-script.md) § Frozen API V1 (#331), test `crates/stokesforge-script/tests/surface_figee.rs` |
+| The application and its embedded Python install and start on Linux x86_64 and Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § Where the binaries are) |
 
-Le reste du code n'a **aucune** promesse de compatibilité d'une version
-majeure à l'autre (voir « Branches et versions » plus bas).
+The rest of the code has **no** compatibility promise from one major
+version to the next (see "Branches and versions" below).
 
-## Critères
+## Criteria
 
-Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
-« faite » sans l'avoir constatée.
+Each line is observed by a command or a page; none is declared
+"done" without having been observed.
 
-### Contenu
+### Content
 
-- [x] Toutes les issues du jalon V1 sont fermées (`glab issue list --milestone V1`
-  ne rend rien).
-- [x] Aucune issue ouverte étiquetée `bug` ne touche la perte de données, le
-  format `.stf` ou le pont Python (`glab issue list --label bug`).
+- [x] All issues of the V1 milestone are closed (`glab issue list --milestone V1`
+  returns nothing).
+- [x] No open issue labeled `bug` touches data loss, the
+  `.stf` format or the Python bridge (`glab issue list --label bug`).
 
-### Qualité
+### Quality
 
-- [x] Sur le commit du tag, les travaux bloquants sont verts : `fmt`, `licenses`,
+- [x] On the tag commit, the blocking jobs are green: `fmt`, `licenses`,
   `clippy`, `test`, `test-python` (`scripts/ci-statuts.sh <commit>`).
-- [x] `test-python-windows` et `dist-windows` (automatiques sur `main` et sur un tag) sont verts sur le même commit.
-- [x] `cargo test -p stokesforge-robustesse -- --ignored` ne rend aucun échec
-  (zéro rouge : plus aucun `#[ignore]` ne reste, voir `docs/tests.md`).
+- [x] `test-python-windows` and `dist-windows` (automatic on `main` and on a tag) are green on the same commit.
+- [x] `cargo test -p stokesforge-robustesse -- --ignored` returns no failure
+  (zero red: no `#[ignore]` is left, see `docs/tests.md`).
 
 ### Distribution
 
-- [x] `scripts/app-dist.sh` sort 0 sur Linux : la fenêtre s'ouvre et se ferme,
-  `stokesforge-selftest` passe, depuis le paquet. La CI le fait sous écran
-  virtuel (xvfb) au tag ; avant le tag, l'essayer aussi à la main sur un bureau
-  Wayland réel. Essai à la main fait le 2026-10-26 sur Ubuntu 26.04 (GNOME,
-  Wayland, VM, rendu logiciel) plutôt que sur Fedora, pour sortir de la
-  distribution de développement : paquet construit sur la machine de dev,
-  copié hors du dépôt, `stokesforge-selftest` code 0, application, console
-  `pyst`/numpy/scipy, import, `.stf`, exports et glisser-déposer
-  fonctionnent. Reste, pour cocher : la CI au tag, et refaire le même essai
-  avec l'archive du dernier `-rcN` (`v1.0.0-rc6` : construite sur Ubuntu par la
-  CI, dans le registre de paquets GitLab). Y constater aussi la première
-  ouverture : la démonstration s'ouvre au premier lancement, le suivant démarre
-  sur un projet vide (pour rejouer : supprimer `~/.config/StokesForge`).
-- [x] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
-  `StokesForge-<version>-windows-setup.exe` s'installe, démarre et se désinstalle
-  sur un poste neuf : au moins une fois à la main, sur un autre ordinateur
-  Windows, avec l'installeur du dernier `-rcN` (`v1.0.0-rc6`, même registre ; le runner
-  n'a pas de bureau), première ouverture comprise (démonstration, puis projet vide).
-- [x] Les notices de licences sont livrées dans les deux paquets, et celles de
-  Windows sont recoupées avec l'archive python-build-standalone Windows complète
+- [x] `scripts/app-dist.sh` exits 0 on Linux: the window opens and closes,
+  `stokesforge-selftest` passes, from the package. CI does this under a virtual
+  display (xvfb) at the tag; before the tag, also try it by hand on a real
+  Wayland desktop. Manual trial done on 2026-10-26 on Ubuntu 26.04 (GNOME,
+  Wayland, VM, software rendering) rather than on Fedora, to get away from the
+  development distribution: package built on the dev machine,
+  copied out of the repository, `stokesforge-selftest` code 0, application, `pyst`/numpy/scipy
+  console, import, `.stf`, exports and drag and drop
+  work. Left to tick the box: CI at the tag, and repeat the same trial
+  with the archive of the latest `-rcN` (`v1.0.0-rc6`: built on Ubuntu by
+  CI, in the GitLab package registry). Also observe the first
+  opening there: the demo opens on first launch, the next one starts
+  on an empty project (to replay: delete `~/.config/StokesForge`).
+- [x] `scripts/app-dist-windows.sh` exits 0 on the Windows runner and the installer
+  `StokesForge-<version>-windows-setup.exe` installs, starts and uninstalls
+  on a fresh machine: at least once by hand, on another Windows
+  computer, with the installer of the latest `-rcN` (`v1.0.0-rc6`, same registry; the runner
+  has no desktop), first opening included (demo, then empty project).
+- [x] The license notices are shipped in both packages, and those for
+  Windows are cross-checked against the complete python-build-standalone Windows archive
   (`vendor/python/licenses-windows/README.md`).
-- [x] Windows affiche « éditeur inconnu » (pas de signature de code) : assumé
-  (décision de la V1) et écrit dans les notes de version, section « Installation
-  sous Windows » de `CHANGELOG.md`.
+- [x] Windows shows "unknown publisher" (no code signing): accepted
+  (V1 decision) and written in the release notes, section « Installation sous Windows »
+  of `CHANGELOG.md`.
 
-### Version et documentation
+### Version and documentation
 
-- [x] Tous les crates sont en `1.0.0` (`scripts/versions-alignees.sh` le vérifie à chaque push, `scripts/release-notes.sh v1.0.0` au tag).
-- [x] `CHANGELOG.md` a une section `## [1.0.0]` datée, sans « à dater ».
-- [x] Les pages de `docs/` citées par les promesses ci-dessus décrivent le code
-  tel qu'il est (relecture, pas de renvoi à une issue encore ouverte).
+- [x] All crates are at `1.0.0` (`scripts/versions-alignees.sh` checks it on every push, `scripts/release-notes.sh v1.0.0` at the tag).
+- [x] `CHANGELOG.md` has a dated `## [1.0.0]` section, without « à dater ».
+- [x] The pages of `docs/` cited by the promises above describe the code
+  as it is (review, no reference to an issue that is still open).
 
-## Publier
+## Publishing
 
-1. Constater les critères ci-dessus ; dater la section `## [1.0.0]` du CHANGELOG ;
-   le jeton qui laisse GitHub téléverser les paquets dans GitLab et y créer la
-   release existe déjà (jeton de projet GitLab, rôle Developer, portée `api`,
-   secret GitHub `GITLAB_RELEASE_TOKEN`) ; il **expire** : vérifier son échéance
-   avant le tag (`docs/tests.md`, « Maintenance »).
-2. Fusionner sur `main` : il n'y a pas de branche de version à créer.
-3. Poser le tag `v1.0.0` sur ce commit de `main` et le pousser vers GitLab (le
-   miroir le transmet à GitHub).
-4. Le tag déclenche, sur GitHub seulement (le miroir le transmet) :
-   - les contrôles bloquants, Linux et Windows ;
-   - `release-linux` et `dist-windows` : archive
-     `StokesForge-1.0.0-linux-x86_64.tar.gz` et installeur
-     `StokesForge-1.0.0-windows-setup.exe`, téléversés dans le registre de
-     paquets GitLab (aucune release GitHub : GitHub n'est qu'un miroir) ;
-   - `publier`, quand tout cela est fait : release GitLab (notes tirées du
-     CHANGELOG, liens vers les deux paquets). Aucun runner GitLab n'y sert.
-5. Constater : la release GitLab existe, l'installeur et l'archive se
-   téléchargent depuis elle.
+1. Observe the criteria above; date the `## [1.0.0]` section of the CHANGELOG;
+   the token that lets GitHub upload the packages to GitLab and create the
+   release there already exists (GitLab project token, Developer role, `api` scope,
+   GitHub secret `GITLAB_RELEASE_TOKEN`); it **expires**: check its expiry date
+   before the tag (`docs/tests.md`, "Maintenance").
+2. Merge into `main`: there is no version branch to create.
+3. Put the `v1.0.0` tag on this commit of `main` and push it to GitLab (the
+   mirror passes it on to GitHub).
+4. The tag triggers, on GitHub only (the mirror passes it on):
+   - the blocking checks, Linux and Windows;
+   - `release-linux` and `dist-windows`: archive
+     `StokesForge-1.0.0-linux-x86_64.tar.gz` and installer
+     `StokesForge-1.0.0-windows-setup.exe`, uploaded to the GitLab package
+     registry (no GitHub release: GitHub is only a mirror);
+   - `publier`, when all of that is done: GitLab release (notes taken from the
+     CHANGELOG, links to the two packages). No GitLab runner is used for this.
+5. Observe: the GitLab release exists, the installer and the archive can be
+   downloaded from it.
 
-**Variante pour une version `X.Y.Z` suivante** (`1.0.1`, `1.1.0`, `2.0.0`) : les
-étapes sont les mêmes, avec ce qui change :
+**Variant for a following version `X.Y.Z`** (`1.0.1`, `1.1.0`, `2.0.0`): the
+steps are the same, with what changes:
 
-1. Un commit de version dédié : `version = "X.Y.Z"` dans tous les crates,
-   `cargo update --workspace`, section `## [X.Y.Z] - date` du CHANGELOG (la
-   section `[Non publié]` y est renommée et datée).
-2. CI verte sur ce commit (`scripts/ci-statuts.sh <commit>`), `test-python-windows`
-   et `dist-windows` compris.
-3. Tag `vX.Y.Z` sur ce commit de `main` (ou de `release/N.x` pour un correctif
-   d'une ancienne majeure), **sur ordre explicite de l'utilisateur**. Un
-   `-rcN` d'abord seulement dans les cas de « Branches et versions ».
+1. A dedicated version commit: `version = "X.Y.Z"` in all crates,
+   `cargo update --workspace`, section `## [X.Y.Z] - date` of the CHANGELOG (the
+   `[Non publié]` section is renamed and dated there).
+2. Green CI on this commit (`scripts/ci-statuts.sh <commit>`), `test-python-windows`
+   and `dist-windows` included.
+3. Tag `vX.Y.Z` on this commit of `main` (or of `release/N.x` for a fix
+   of an older major version), **on the explicit order of the user**. An
+   `-rcN` first only in the cases of "Branches and versions".
 
-Les travaux de publication refusent un tag incohérent avant tout téléversement :
-forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-notes.sh`).
-L'alignement des versions des crates est déjà contrôlé à chaque push par `fmt`
-(`scripts/versions-alignees.sh` : crates, dépendances internes, `Cargo.lock` —
-un `cargo update --workspace` oublié échoue —, témoin du format) : le tag
-ajoute la forme, le CHANGELOG, le refus d'un tag hors `main`/`release/*`
-(`scripts/release-tag-sur-main.sh`) et d'un tag qui ne dépasse pas les tags
-existants (`scripts/release-tag-croissant.sh`).
+The release jobs refuse an inconsistent tag before any upload:
+form `vX.Y.Z`, crate versions, CHANGELOG section (`scripts/release-notes.sh`).
+The alignment of crate versions is already checked on every push by `fmt`
+(`scripts/versions-alignees.sh`: crates, internal dependencies, `Cargo.lock` —
+a forgotten `cargo update --workspace` fails —, format witness): the tag
+adds the form, the CHANGELOG, the refusal of a tag outside `main`/`release/*`
+(`scripts/release-tag-sur-main.sh`) and of a tag that does not exceed the
+existing tags (`scripts/release-tag-croissant.sh`).
 
-**Ce qui a été éprouvé, et ce qui ne l'a pas été.** Les tags `v1.0.0-rc1` à
-`-rc6` ont servi d'essais et restent comme trace (`rc1` rouge, corrigé par
-`rc2` ; `rc3` à `rc5` ont réparé `release-linux` et le téléversement Windows).
-`rc6` est entièrement vert : contrôles Linux et Windows, `release-linux`,
-`dist-windows` (archive et installeur dans le registre de paquets GitLab) et
-`publier`. Un tag `vX.Y.Z-rcN` fait tout cela, mais `release-notes.sh` n'y
-vérifie que les versions des crates, et `publier` crée la release GitLab puis
-la supprime aussitôt (le tag reste, aucune release ne reste). Seul reste non
-éprouvé le contenu final des notes (section du CHANGELOG), lu au seul vrai tag ;
-`release-televerser.sh` et `release-publier.sh` s'essaient aussi à vide avec
+**What has been proven, and what has not.** The tags `v1.0.0-rc1` to
+`-rc6` served as trials and remain as a trace (`rc1` red, fixed by
+`rc2`; `rc3` to `rc5` repaired `release-linux` and the Windows upload).
+`rc6` is entirely green: Linux and Windows checks, `release-linux`,
+`dist-windows` (archive and installer in the GitLab package registry) and
+`publier`. A `vX.Y.Z-rcN` tag does all of this, but `release-notes.sh` checks
+only the crate versions there, and `publier` creates the GitLab release and then
+deletes it at once (the tag stays, no release stays). The only thing still
+unproven is the final content of the notes (CHANGELOG section), read at the one real tag;
+`release-televerser.sh` and `release-publier.sh` can also be tried empty with
 `STOKESFORGE_RELEASE_DRYRUN=1`.
 
-## Branches et versions
+## Branches and versions
 
-Principe : **une seule ligne tant que rien ne diverge**, une branche de plus le
-jour où un gros chantier empêcherait de livrer un correctif. Une branche
-n'est jamais ouverte d'avance : `vN` se crée depuis `main` le jour du besoin,
-`release/(N-1).x` depuis le dernier tag de l'ancienne majeure.
+Principle: **a single line as long as nothing diverges**, one more branch the
+day a big work package would prevent shipping a fix. A branch
+is never opened in advance: `vN` is created from `main` on the day of need,
+`release/(N-1).x` from the last tag of the old major version.
 
 ```
  Phase 1 : une seule ligne            Phase 2 : un chantier qui casse
@@ -137,56 +137,56 @@ n'est jamais ouverte d'avance : `vN` se crée depuis `main` le jour du besoin,
                                        v2 ───●──●──●──●──►  chantier cassant
 ```
 
-- **`main`** : la ligne livrable. Les corrections, les petits ajouts sans
-  risque et leurs tags (`v1.0.1`, `v1.1.0`…) y sont posés directement. Elle est
-  protégée (pas de force-push, voir `docs/tests.md` § CI).
-- **Numéros** : `Z` (`1.0.1`) = correction, ou champ additif du format `.stf`
-  (voir `persistance.md` : risque et annonce au CHANGELOG) ; `Y` (`1.1.0`) =
-  fonctionnalité ajoutée sans rien casser ; `X` (`2.0.0`) = rupture de
-  compatibilité, dont tout changement cassant du format (`FORMAT_VERSION`
-  monte).
-- **Branches de fonctionnalité** : `feature/<n>-<sujet>`, une par ticket, courtes
-  (quelques jours). Avant de fusionner, on fusionne `main` dedans. Elle entre
-  dans `main` par fusion `--no-ff`, commit « Fusion #N : … (Closes #N) ».
-  **Jamais** de squash ni de rebase d'une branche partagée.
-- **Ouvrir `vN`** (ex. `v2`) quand un chantier laisserait le code inutilisable
-  pendant des semaines (changement de bibliothèque d'interface, refonte du
-  modèle). Critère : *peut-on encore sortir un correctif de `main` pendant les
-  travaux ?* Sinon, branche. Un ajout de fonctionnalité n'en demande pas.
-  **Une seule branche `vN` à la fois.** Tant qu'elle est ouverte, `main` ne
-  reçoit que des correctifs et de petits ajouts ; les fonctionnalités vont dans
-  `vN`. Dans `vN`, les commits disent « Refs #N » : « Closes » ne ferme
-  l'issue qu'à la fusion dans `main`.
-- **Le bug se corrige là où il est né** : un bug présent sur `main` se corrige
-  sur `main`, dans un commit isolé, et arrive dans `vN` par **fusion** de `main`
-  (pas par copie à la main) ; un bug de `release/1.x` absent de `main` se
-  corrige directement sur `release/1.x`, sans cherry-pick. Fusionner `main`
-  dans `vN` souvent, chaque semaine environ : une branche longue sans fusion
-  donne des conflits énormes. `main` → `vN` se fait toujours par fusion.
-- **Chaque correctif porte son test de régression.** À la fusion `main` → `vN`
-  en conflit, on garde le test et on réécrit la correction dans le code de `vN`.
-- **Format `.stf` gelé** : dès que le format N+1 existe sur une branche, le
-  format N est gelé partout ailleurs (rien n'y change plus), sinon un fichier
-  réenregistré perdrait des données sans message.
-- **Fin du chantier** : `vN` est fusionnée dans `main`, tag `vN.0.0`. Si la
-  version précédente doit rester maintenue, créer alors `release/(N-1).x` depuis
-  son dernier tag ; les correctifs nés sur `main` y arrivent par cherry-pick
-  (la ligne du CHANGELOG avec).
-- **Tags `-rcN`** : après la V1, seulement avant une version `X` ou quand la CI
-  ou les scripts de distribution ont changé ; toujours sur ordre explicite de
-  l'utilisateur. Un tag n'est posé que sur `main` ou sur `release/N.x` : la CI
-  refuse sinon.
-- **Compatibilité** : le code interne n'a aucune promesse ; les deux surfaces
-  publiques suivent les numéros ci-dessus : fichiers `.stf` (invariant 12) et
-  API `pyst`, qui ne changent de façon cassante qu'à une version `X`.
-- **Qui décide `Z`, `Y` ou `X`** : l'utilisateur, au moment de demander le tag ;
-  le commit de version dédié le porte.
-- À partir de la V1, **la règle « pas de rétrocompatibilité du format en
-  développement » ne s'applique plus** : tout changement de ce qui est écrit
-  dans un `.stf` suit la règle de version de `persistance.md`.
+- **`main`**: the shippable line. Fixes, small risk-free additions
+  and their tags (`v1.0.1`, `v1.1.0`…) are put there directly. It is
+  protected (no force-push, see `docs/tests.md` § CI (GitHub Actions for Linux and Windows)).
+- **Numbers**: `Z` (`1.0.1`) = fix, or additive field of the `.stf` format
+  (see `persistance.md`: risk and announcement in the CHANGELOG); `Y` (`1.1.0`) =
+  feature added without breaking anything; `X` (`2.0.0`) = compatibility
+  break, including any breaking change of the format (`FORMAT_VERSION`
+  goes up).
+- **Feature branches**: `feature/<n>-<sujet>`, one per ticket, short
+  (a few days). Before merging, `main` is merged into it. It goes
+  into `main` by a `--no-ff` merge, commit "Fusion #N : … (Closes #N)".
+  **Never** squash or rebase a shared branch.
+- **Open `vN`** (e.g. `v2`) when a work package would leave the code unusable
+  for weeks (change of interface library, rework of the
+  model). Criterion: *can a fix still be shipped from `main` during the
+  work?* If not, branch. Adding a feature does not call for one.
+  **Only one `vN` branch at a time.** While it is open, `main` receives
+  only fixes and small additions; features go into
+  `vN`. In `vN`, commits say "Refs #N": "Closes" closes the
+  issue only at the merge into `main`.
+- **The bug is fixed where it was born**: a bug present on `main` is fixed
+  on `main`, in an isolated commit, and reaches `vN` by **merging** `main`
+  (not by hand copy); a bug of `release/1.x` absent from `main` is
+  fixed directly on `release/1.x`, without cherry-pick. Merge `main`
+  into `vN` often, about every week: a long branch without merges
+  gives huge conflicts. `main` → `vN` is always done by merge.
+- **Every fix carries its regression test.** On a conflicting `main` → `vN`
+  merge, keep the test and rewrite the fix in the code of `vN`.
+- **`.stf` format frozen**: as soon as format N+1 exists on a branch, format
+  N is frozen everywhere else (nothing changes in it any more), otherwise a re-saved
+  file would lose data without a message.
+- **End of the work package**: `vN` is merged into `main`, tag `vN.0.0`. If the
+  previous version must stay maintained, then create `release/(N-1).x` from
+  its last tag; the fixes born on `main` arrive there by cherry-pick
+  (with the CHANGELOG line).
+- **`-rcN` tags**: after V1, only before an `X` version or when CI
+  or the distribution scripts have changed; always on the explicit order of the
+  user. A tag is put only on `main` or on `release/N.x`: CI
+  refuses it otherwise.
+- **Compatibility**: internal code has no promise; the two public surfaces
+  follow the numbers above: `.stf` files (invariant 12) and the
+  `pyst` API, which change in a breaking way only at an `X` version.
+- **Who decides `Z`, `Y` or `X`**: the user, when asking for the tag;
+  the dedicated version commit carries it.
+- From V1 on, **the rule "no backward compatibility of the format during
+  development" no longer applies**: any change to what is written
+  in a `.stf` follows the version rule of `persistance.md`.
 
-## Hors V1
+## Out of V1
 
-Compression et somme de contrôle du `.stf`, repli `Unknown` sur les autres
-enums du format, signature de code Windows, distribution macOS : ils n'ont pas
-de critère ici. Voir #323 pour ce qui peut attendre la V2.
+Compression and checksum of the `.stf`, `Unknown` fallback on the other
+enums of the format, Windows code signing, macOS distribution: they have
+no criterion here. See #323 for what can wait for V2.

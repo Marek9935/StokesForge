@@ -3,11 +3,11 @@ name: stokesforge-commande
 description: Add or change an undoable StokesForge command, the only way to mutate the model. Use when a task creates, deletes, renames, moves or edits anything in the project (« ajoute une colonne », « renomme », « supprime »), or adds a pub mutating method to stokesforge-core.
 ---
 
-Invariant 1: no model mutation outside a command (`docs/invariants.md` § 1. Aucune mutation du modèle hors d'une commande). A `pub` mutating method added to `stokesforge-core` without its command opens a non-undoable write path. No test catches that today (`docs/invariants.md` names `b21`, which measures cost and identity instead): review is the only guard.
+Invariant 1: no model mutation outside a command (`docs/invariants.md` § 1. No model mutation outside a command). A `pub` mutating method added to `stokesforge-core` without its command opens a non-undoable write path. No test catches that today (`docs/invariants.md` names `b21`, which measures cost and identity instead): review is the only guard.
 
 ## Read first
 
-`docs/commandes-et-historique.md` § Ce qu'il faut savoir avant de modifier, then the header of `stokesforge-commands/src/command.rs` and `Command::is_structural` — the code is the list that counts. `.stf` touched: `docs/persistance.md` § Ce qu'il faut savoir avant de modifier, then `docs/archive/rustrewrite/format-fichier-plx.md` for options already ruled out.
+`docs/commandes-et-historique.md` § What to know before modifying, then the header of `stokesforge-commands/src/command.rs` and `Command::is_structural` — the code is the list that counts. `.stf` touched: `docs/persistance.md` § What to know before modifying, then `docs/archive/rustrewrite/format-fichier-plx.md` for options already ruled out.
 
 ## Walk the chain
 

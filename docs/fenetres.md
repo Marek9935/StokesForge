@@ -1,243 +1,242 @@
-# Catalogue des fenêtres et dialogues (#300)
+# Catalog of windows and dialogs (#300)
 
-Inventaire de **toutes** les fenêtres de `stokesforge-app` : ce qui existe, de
-quel type, avec quelle brique, quelle taille, quelles pages, d'où on l'ouvre.
-Sert de point de départ avant de créer une fenêtre neuve : on repère le
-jumeau, on l'ouvre, on l'imite. Le **comportement** (ordre des boutons,
-Échap, focus, grisé…) est dans [`standard-interface.md`](standard-interface.md),
-§ Fenêtres et dialogues et § Confirmations ; cette page ne le recopie pas.
+Inventory of **all** the windows of `stokesforge-app`: what exists, of
+which type, with which building block, which size, which pages, where it is opened from.
+It is a starting point before creating a new window: find the
+twin, open it, imitate it. The **behavior** (button order,
+Esc, focus, disabled state…) is in [`standard-interface.md`](standard-interface.md),
+§ Windows and dialogs and § Confirmations; this page does not copy it.
 
-Règles de tenue :
+Maintenance rules:
 
-- **E1 : ce catalogue se tient à jour à chaque fenêtre.** Toute fenêtre ou
-  dialogue ajouté, retiré, redimensionné ou dont les pages changent met sa
-  ligne à jour dans le même commit.
-- **E2 : maquette validée par l'utilisateur avant tout code de fenêtre
-  neuve.** Toujours, sans exception de taille. La maquette se présente comme
-  une décision (formulaire de décisions,
-  `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`) ;
-  le code ne commence qu'après accord.
+- **E1: this catalog is updated with every window.** Any window or
+  dialog added, removed, resized or whose pages change updates its
+  row in the same commit.
+- **E2: mockup approved by the user before any code for a new
+  window.** Always, with no exception for size. The mockup is presented as
+  a decision (decision form,
+  `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`);
+  code starts only after agreement.
 
-Le code fait foi : les tailles ci-dessous sont les tailles **par défaut**
-passées à la brique ; la taille et la position utilisées sont ensuite celles
-que l'utilisateur a laissées (S-F8, voir plus bas). Deux gardes tiennent cette
-page (S-F11) : `le_catalogue_des_fenetres_et_le_code_concordent` (tout
-identifiant `stokesforge_…` passé à un `modal_*` y figure, et chaque ligne a son
-appel ; **elle ne lit pas les tailles**) et `aucune_taille_libre_sans_justification`.
+The code is authoritative: the sizes below are the **default** sizes
+passed to the building block; the size and position used afterwards are those
+the user left (S-F8, see below). Two guards hold this
+page (S-F11): `le_catalogue_des_fenetres_et_le_code_concordent` (every
+`stokesforge_…` identifier passed to a `modal_*` appears here, and every row has its
+call; **it does not read the sizes**) and `aucune_taille_libre_sans_justification`.
 
-## Les natures et les classes de taille (S-F11)
+## Natures and size classes (S-F11)
 
-Une fenêtre modale a une **nature** (`DialogNature`, `app/dialogs.rs`) : elle
-fixe le pied, la taille par défaut, le focus initial et le bouton par défaut.
-Chaque `match` sur la nature est exhaustif, sans `_` : une nature nouvelle ne
-compile pas avant de les avoir dits. La taille est un **champ** de la variante,
-dont la valeur par défaut est une classe :
+A modal window has a **nature** (`DialogNature`, `app/dialogs.rs`): it
+fixes the footer, the default size, the initial focus and the default button.
+Every `match` on the nature is exhaustive, without `_`: a new nature does not
+compile until it has stated them. The size is a **field** of the variant,
+whose default value is a class:
 
-| Classe | Taille | Pour |
+| Class | Size | For |
 |---|---|---|
-| Petite | 480 x 170 | une question, un message, quelques boutons |
-| Moyenne | 480 x 420 | des réglages ou un formulaire à quelques pages |
-| Grande | 640 x 500 | une liste et son éditeur côte à côte |
+| Small | 480 x 170 | a question, a message, a few buttons |
+| Medium | 480 x 420 | settings or a form with a few pages |
+| Large | 640 x 500 | a list and its editor side by side |
 
-- **Fenêtre interactive** (réglages, réglages en direct, brouillon, assistant : `InteractiveSize`) :
-  la classe par défaut de la nature, une autre classe, ou une **taille libre**
-  (`InteractiveSize::Free`) qui exige `// TAILLE-LIBRE(#300): <justification>`
-  dans les douze lignes qui précèdent (15 caractères au moins). Tailles libres
-  aujourd'hui : l'analyse (1000 x 660), l'assistant d'import (1000 x 620) et le
-  banc `preferences_proto` (560 x 470, captures de référence).
-- **Fenêtre sans interaction riche** (choix, lecture seule, confirmation,
-  enregistrement, alerte : `PlainSize`) : peut prendre la **taille de son
-  contenu** (`PlainSize::Content`) **sans justification** — pas de formulaire à
-  ranger, une taille mal choisie y coûte peu. Le type ne l'offre pas aux
-  fenêtres interactives.
+- **Interactive window** (settings, live settings, draft, wizard: `InteractiveSize`):
+  the default class of the nature, another class, or a **free size**
+  (`InteractiveSize::Free`) that requires `// TAILLE-LIBRE(#300): <justification>`
+  in the twelve lines before it (15 characters at least). Free sizes
+  today: the analysis (1000 x 660), the import wizard (1000 x 620) and the
+  `preferences_proto` bench (560 x 470, reference screenshots).
+- **Window without rich interaction** (choice, read-only, confirmation,
+  save, alert: `PlainSize`): may take the **size of its
+  content** (`PlainSize::Content`) **without justification** — there is no form to
+  lay out, a badly chosen size costs little there. The type does not offer it to
+  interactive windows.
 
-| Nature | Brique | Classe par défaut | Focus initial |
+| Nature | Building block | Default class | Initial focus |
 |---|---|---|---|
-| `Settings` | `modal_dialog` | Moyenne | premier champ (S-F9) |
-| `Draft` | `modal_dialog_with` | Moyenne | premier champ |
-| `Choice` | `modal_dialog_with` | Petite | premier champ (s'il y en a) |
-| `Wizard` | `modal_wizard` | Grande | premier champ |
-| `LiveSettings` | `modal_live_settings` | Moyenne | premier champ (S-F9) |
-| `ReadOnly` | `modal_read_only` | Moyenne | aucun |
-| `Confirm` | `modal_confirm` | Petite | Cancel (S-F5) |
-| `SaveChanges` | `modal_save_changes` | Petite | Save |
-| `Alert` | `modal_alert` | Petite | Close |
+| `Settings` | `modal_dialog` | Medium | first field (S-F9) |
+| `Draft` | `modal_dialog_with` | Medium | first field |
+| `Choice` | `modal_dialog_with` | Small | first field (if there is one) |
+| `Wizard` | `modal_wizard` | Large | first field |
+| `LiveSettings` | `modal_live_settings` | Medium | first field (S-F9) |
+| `ReadOnly` | `modal_read_only` | Medium | none |
+| `Confirm` | `modal_confirm` | Small | Cancel (S-F5) |
+| `SaveChanges` | `modal_save_changes` | Small | Save |
+| `Alert` | `modal_alert` | Small | Close |
 
-`modal_dialog_with` prend la nature (réglages, brouillon ou choix) ; les autres
-briques ont une nature fixe et prennent le champ de taille de cette nature.
-Le bouton principal d'un pied est soit **toujours actif**
-(`DialogFooter::always(libellé, bulle)`), soit **peut être grisé**
-(`DialogFooter::gated(libellé, bulle, actif, raison)` : bulle et raison
-obligatoires, S-F10).
+`modal_dialog_with` takes the nature (settings, draft or choice); the other
+building blocks have a fixed nature and take the size field of that nature.
+The main button of a footer is either **always enabled**
+(`DialogFooter::always(libellé, bulle)`), or **can be disabled**
+(`DialogFooter::gated(libellé, bulle, actif, raison)`: tooltip and reason
+mandatory, S-F10).
 
-## Les types
+## The types
 
-| Type | Brique (`app/dialogs.rs`) | Nature | Pied | Quand |
+| Type | Building block (`app/dialogs.rs`) | Nature | Footer | When |
 |---|---|---|---|---|
-| **Réglages en direct** (S-F1) | `modal_dialog` | `Settings` | `[Cancel] [OK]` | un objet visible se règle, OK garde, Cancel restaure |
-| **Création sur brouillon** (S-F1) | `modal_dialog_with` | `Draft` | `[secondaires] [message] [Cancel] [verbe]` | une action qui crée ; le bouton porte son verbe (Create, Import) |
-| **Choix** | `modal_dialog_with` | `Choice` | idem, secondaires = autres réponses | une question sans réponse « oui » |
-| **Assistant** | `modal_wizard` | `Wizard` | `[Cancel] [message] [Back · Next] [Finish]` | plusieurs étapes ordonnées |
-| **Réglages appliqués en direct** (S-F2) | `modal_live_settings` | `LiveSettings` | `[message] [Close]` | régler sans rien à valider ni annuler : pied de lecture seule, mais des champs (focus, taille par classe) |
-| **Lecture seule** (S-F2) | `modal_read_only` | `ReadOnly` | `[secondaires] [message] [Close]` | consulter seulement |
-| **Confirmation** (S-F3 à S-F5) | `modal_confirm` | `Confirm` | `[message] [Cancel] [verbe]` | seulement ce que Ctrl+Z ne rattrape pas |
-| **Enregistrer ?** | `modal_save_changes` | `SaveChanges` | `[Discard Changes] [message] [Cancel] [Save]` | projet non enregistré |
-| **Échec grave** (S-M8) | `modal_alert` | `Alert` | `[action] [message] [Close]` | échec avec une action possible |
-| **Fenêtre de contenu** (non modale) | `window_chrome::show_floating_window` | aucune | aucun | classeur, graphe, matrice, note |
+| **Live settings** (S-F1) | `modal_dialog` | `Settings` | `[Cancel] [OK]` | a visible object is adjusted, OK keeps, Cancel restores |
+| **Creation on a draft** (S-F1) | `modal_dialog_with` | `Draft` | `[secondaires] [message] [Cancel] [verbe]` | an action that creates; the button carries its verb (Create, Import) |
+| **Choice** | `modal_dialog_with` | `Choice` | same, secondary = other answers | a question with no "yes" answer |
+| **Wizard** | `modal_wizard` | `Wizard` | `[Cancel] [message] [Back · Next] [Finish]` | several ordered steps |
+| **Settings applied live** (S-F2) | `modal_live_settings` | `LiveSettings` | `[message] [Close]` | adjust with nothing to confirm or cancel: read-only footer, but with fields (focus, size by class) |
+| **Read-only** (S-F2) | `modal_read_only` | `ReadOnly` | `[secondaires] [message] [Close]` | view only |
+| **Confirmation** (S-F3 to S-F5) | `modal_confirm` | `Confirm` | `[message] [Cancel] [verbe]` | only what Ctrl+Z cannot recover |
+| **Save?** | `modal_save_changes` | `SaveChanges` | `[Discard Changes] [message] [Cancel] [Save]` | unsaved project |
+| **Serious failure** (S-M8) | `modal_alert` | `Alert` | `[action] [message] [Close]` | failure with a possible action |
+| **Content window** (non-modal) | `window_chrome::show_floating_window` | none | none | workbook, graph, matrix, note |
 
-Les cinq premières lignes de brique passent toutes par le même corps
-`modal_frame` (même cadre, même barre de titre, même blocage du reste de
-l'interface) ; la fenêtre de contenu passe par `show_window_in_layer`, une
-`egui::Area` et non une `egui::Window`. `egui::Window` brute est interdite
-(garde `aucune_fenetre_n_est_une_egui_window_brute`).
+The first five building block rows all go through the same body
+`modal_frame` (same frame, same title bar, same blocking of the rest of
+the interface); the content window goes through `show_window_in_layer`, an
+`egui::Area` and not an `egui::Window`. A raw `egui::Window` is forbidden
+(guard `aucune_fenetre_n_est_une_egui_window_brute`).
 
-## Dialogues modaux
+## Modal dialogs
 
-Tous sont peints dans `StokesForgeApp::show_edit_dialogs` (`app.rs`), tant que
-leur état est ouvert dans `AppState`, sauf les blocants (dernière section).
+All are painted in `StokesForgeApp::show_edit_dialogs` (`app.rs`), as long as
+their state is open in `AppState`, except the blocking ones (last section).
 
-| Fenêtre | Nature | Taille | Pages ou contenu | Ouverture | Identifiant, fichier |
+| Window | Nature | Size | Pages or content | Opened from | Identifier, file |
 |---|---|---|---|---|---|
-| Propriétés du graphe | `Settings` | Moyenne | 5 onglets (`tab_strip`) : Graph, Plot Area, Axes, Legend, Theme | clic droit sur un composant du graphe, menu Graph, bouton Properties de la barre d'outils (`Action::OpenPlotSettings`) | `stokesforge_plot_settings` (construit), `plot_settings.rs` |
-| Propriétés des séries | `Settings` | Grande | liste des séries à gauche, éditeur à droite (`curve_settings_page`) | double-clic sur une courbe, Object Manager, menu Graph (`Action::OpenObjectProperties` sur une série ou un groupe) | `stokesforge_curve_settings` (construit), `plot_settings.rs` (fenêtre), `curve_settings.rs` (page) |
-| Propriétés d'un objet (rectangle, flèche…) | `Settings` | Moyenne | coordonnées X1 Y1 X2 Y2, couleurs de trait et de fond | double-clic sur l'objet, Object Manager (`open_shape_properties`) | dérivé de l'objet, `graph_window.rs` |
-| Analyse (nouvelle ou modification) | `Draft` | libre 1000 x 660 | deux colonnes : réglages (330 de large, défilants) et aperçu cliquable avec outils et valeurs | menu Analysis, clic droit, panneau des résultats (`Action::OpenAnalysis`) | `stokesforge_analysis` (construit), `analysis_dialog.rs`, `analysis_forms.rs`, `analysis_preview.rs` |
-| Assistant d'import | `Wizard` | libre 1000 x 620 | 6 étapes : Files, Format, Header, Columns, Metadata, Destination ; aperçu du fichier à droite à toutes les étapes | File > Import, Ctrl+3 (`open_import_dialog`) | `stokesforge_import_wizard`, `import_wizard.rs` |
-| Préférences | `LiveSettings` (réglages immédiats) | Moyenne | 3 onglets : General (langue, taille maximale d'un fichier à l'ouverture, sauvegarde automatique : case et période en minutes, grisée si la case est décochée, #317 ; analyse), Display (nouveaux classeurs), Export (formats de Copy Graph) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences`, `preferences_window.rs` |
-| Raccourcis clavier | `ReadOnly` | contenu 480 x 460 | liste défilante par zone, générée de `shortcuts::HELP` | Help > Keyboard Shortcuts (`Action::OpenKeyboardShortcuts`) | `stokesforge_keyboard_shortcuts`, `keyboard_shortcuts_window.rs` |
-| Historique de la barre d'état | `ReadOnly` | contenu 520 x 360 | les 50 derniers messages, état vide si aucun | clic sur la ligne d'état (`Action::OpenStatusHistory`) | `stokesforge_status_history`, `status_history.rs` |
-| Liste des R² faibles | `ReadOnly` | contenu 480 x 170 | compteurs par type, texte normal | pastille de la barre d'état (`Action::OpenLowR2List`) | `stokesforge_low_r2_list`, `status_history.rs` |
-| Métadonnées d'une colonne | `ReadOnly` | Moyenne | grille clé / valeur défilante, bouton « Use as x' » par ligne numérique | clic sur la cellule de métadonnées de l'en-tête d'une colonne, quand elle n'est pas vide (`Action::ViewColumnMetadata`) | `stokesforge_column_metadata`, `plot_settings.rs` |
-| Suppression d'un calcul | `Choice` | Petite | Delete, Delete with Columns, Cancel | suppression d'un calcul (`Action::RequestDeleteCalculation`, panneau des résultats ou menu d'analyse) | `stokesforge_delete_calculation`, `analysis_dialog.rs` |
-| Export de séries périmées | `Choice` | contenu 560 x 170 | Export Anyway, Export Without Warning, Recalculate and Export, Cancel (quatre libellés longs : plus large que Petite) | export ou copie d'un graphe qui montre un calcul pas à jour | `stokesforge_stale_export`, `stale_export.rs` |
-| Colonne utilisée par un calcul | `ReadOnly` | contenu 480 x 170 | Undo, Close ; la liste des colonnes à formule et des calculs qui lisaient ce qu'on vient de supprimer | suppression de colonnes, d'une feuille ou d'un classeur lus par un calcul (#306), après le geste | `stokesforge_column_use`, `column_use.rs` |
-| Copie avec en-tête de colonnes à formule | `Choice` | Petite | Values, Formulas (par défaut), Cancel | Ctrl+Maj+C ou Copy with Header quand une colonne copiée porte une formule (#306) | `stokesforge_full_copy`, `column_use.rs` |
-| Récupération de projets | `ReadOnly` | contenu 560 x 230 | une ligne par copie de secours (nom ou Untitled, date UTC) avec Open, Ignore, Delete ; message d'introduction ; liste défilante | au démarrage, s'il reste des copies de processus disparus plus récentes que leur `.stf` (`AppState::scan_recovery`, #317) ; se ferme d'elle-même quand la liste est vide | `stokesforge_recovery`, `recovery.rs` |
-| Remplacement d'une analyse partagée | `Confirm` | Petite | un message | appliquer une analyse dont la source nourrit d'autres courbes | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
-| Remise à jour d'une feuille transposée modifiée | `Confirm` | Petite | un message | Relink (bande de la feuille transposée liée) quand une valeur d'une colonne créée par le lien a été éditée (#253) | `stokesforge_transpose_relink`, `transpose_ui.rs` |
-| Suppression d'un modèle d'import | `Confirm` | Petite | un message | bouton de suppression d'un modèle, à l'étape Files ; peinte **dans** l'assistant | `stokesforge_import_template_delete`, `import_wizard.rs` |
+| Graph properties | `Settings` | Medium | 5 tabs (`tab_strip`): Graph, Plot Area, Axes, Legend, Theme | right-click on a graph component, Graph menu, Properties button of the toolbar (`Action::OpenPlotSettings`) | `stokesforge_plot_settings` (built), `plot_settings.rs` |
+| Series properties | `Settings` | Large | list of series on the left, editor on the right (`curve_settings_page`) | double-click on a curve, Object Manager, Graph menu (`Action::OpenObjectProperties` on a series or a group) | `stokesforge_curve_settings` (built), `plot_settings.rs` (window), `curve_settings.rs` (page) |
+| Properties of an object (rectangle, arrow…) | `Settings` | Medium | coordinates X1 Y1 X2 Y2, line and fill colors | double-click on the object, Object Manager (`open_shape_properties`) | derived from the object, `graph_window.rs` |
+| Analysis (new or edit) | `Draft` | free 1000 x 660 | two columns: settings (330 wide, scrolling) and clickable preview with tools and values | Analysis menu, right-click, results panel (`Action::OpenAnalysis`) | `stokesforge_analysis` (built), `analysis_dialog.rs`, `analysis_forms.rs`, `analysis_preview.rs` |
+| Import wizard | `Wizard` | free 1000 x 620 | 6 steps: Files, Format, Header, Columns, Metadata, Destination; file preview on the right at every step | File > Import, Ctrl+3 (`open_import_dialog`) | `stokesforge_import_wizard`, `import_wizard.rs` |
+| Preferences | `LiveSettings` (immediate settings) | Medium | 3 tabs: General (language, maximum file size at opening, autosave: checkbox and period in minutes, disabled if the checkbox is unchecked, #317; analysis), Display (new workbooks), Export (Copy Graph formats) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences`, `preferences_window.rs` |
+| Keyboard shortcuts | `ReadOnly` | content 480 x 460 | scrolling list by area, generated from `shortcuts::HELP` | Help > Keyboard Shortcuts (`Action::OpenKeyboardShortcuts`) | `stokesforge_keyboard_shortcuts`, `keyboard_shortcuts_window.rs` |
+| Status bar history | `ReadOnly` | content 520 x 360 | the last 50 messages, empty state if none | click on the status line (`Action::OpenStatusHistory`) | `stokesforge_status_history`, `status_history.rs` |
+| List of low R² | `ReadOnly` | content 480 x 170 | counters by type, normal text | status bar badge (`Action::OpenLowR2List`) | `stokesforge_low_r2_list`, `status_history.rs` |
+| Column metadata | `ReadOnly` | Medium | scrolling key / value grid, "Use as x'" button per numeric row | click on the metadata cell of a column header, when it is not empty (`Action::ViewColumnMetadata`) | `stokesforge_column_metadata`, `plot_settings.rs` |
+| Deleting a calculation | `Choice` | Small | Delete, Delete with Columns, Cancel | deleting a calculation (`Action::RequestDeleteCalculation`, results panel or analysis menu) | `stokesforge_delete_calculation`, `analysis_dialog.rs` |
+| Export of stale series | `Choice` | content 560 x 170 | Export Anyway, Export Without Warning, Recalculate and Export, Cancel (four long labels: wider than Small) | export or copy of a graph that shows an out-of-date calculation | `stokesforge_stale_export`, `stale_export.rs` |
+| Column used by a calculation | `ReadOnly` | content 480 x 170 | Undo, Close; the list of formula columns and calculations that read what was just deleted | deleting columns, a sheet or a workbook read by a calculation (#306), after the gesture | `stokesforge_column_use`, `column_use.rs` |
+| Copy with header of formula columns | `Choice` | Small | Values, Formulas (default), Cancel | Ctrl+Shift+C or Copy with Header when a copied column carries a formula (#306) | `stokesforge_full_copy`, `column_use.rs` |
+| Project recovery | `ReadOnly` | content 560 x 230 | one row per backup copy (name or Untitled, UTC date) with Open, Ignore, Delete; introduction message; scrolling list | at startup, if copies from vanished processes remain that are newer than their `.stf` (`AppState::scan_recovery`, #317); closes by itself when the list is empty | `stokesforge_recovery`, `recovery.rs` |
+| Replacing a shared analysis | `Confirm` | Small | a message | applying an analysis whose source feeds other curves | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
+| Refreshing a modified transposed sheet | `Confirm` | Small | a message | Relink (band of the linked transposed sheet) when a value of a column created by the link has been edited (#253) | `stokesforge_transpose_relink`, `transpose_ui.rs` |
+| Deleting an import template | `Confirm` | Small | a message | delete button of a template, at the Files step; painted **inside** the wizard | `stokesforge_import_template_delete`, `import_wizard.rs` |
 
-Les identifiants « construits » sont choisis avant l'appel (un `&str`, pas un
-littéral dans ses arguments) : la garde du catalogue les cherche comme
-littéraux (`IDENTIFIANTS_CONSTRUITS` dans `tests/gardes.rs`).
+The "built" identifiers are chosen before the call (a `&str`, not a
+literal in its arguments): the catalog guard looks for them as
+literals (`IDENTIFIANTS_CONSTRUITS` in `tests/gardes.rs`).
 
-## Dialogues bloquants
+## Blocking dialogs
 
-`confirmations::show` (`app/confirmations.rs`) les peint après tout le reste ;
-`AppState::blocking_dialog` (projet non enregistré, dépôt de lignes, alerte,
-écrasement, écrasement d'un fichier lu avec des écarts) fait vider les autres actions de l'image
-(`blocking_confirmations`). Tous de classe Petite (480 x 170).
+`confirmations::show` (`app/confirmations.rs`) paints them after everything else;
+`AppState::blocking_dialog` (unsaved project, row drop, alert,
+overwrite, overwrite of a file read with discrepancies) makes the other actions of the frame be
+emptied (`blocking_confirmations`). All of Small class (480 x 170).
 
-| Fenêtre | Nature | Identifiant | Ouverture |
+| Window | Nature | Identifier | Opened from |
 |---|---|---|---|
-| Projet non enregistré | `SaveChanges` | `stokesforge_unsaved` | New Project, Open…, Quit, fermeture de la fenêtre (`AppState::unsaved_pending`) |
-| Échec d'enregistrement / d'ouverture | `Alert` | `stokesforge_alert` | un enregistrement ou une ouverture qui échoue (`AlertKind::SaveFailed`, `OpenFailed`) |
-| R² faible (avertissement), session perdue | `ReadOnly` (Petite) | `stokesforge_alert` | fin d'un calcul dont le R² est faible, si la préférence l'autorise (`AlertKind::LowRSquared`) ; session morte (`AlertKind::SessionLost`) |
-| Écraser un fichier | `Confirm` | `stokesforge_overwrite` | export dont l'extension ajoutée vise un fichier existant (`pending_overwrite`) |
-| Écraser un fichier lu avec des écarts | `Confirm` | `stokesforge_discarded_save` | Enregistrer qui écraserait le fichier source d'un chargement ayant écarté des calculs ou des traces non encore enregistrés (`pending_discarded_save`, #309) ; pas pour Enregistrer sous ailleurs |
-| Supprimer une copie de secours | `Confirm` | `stokesforge_recovery_delete` | Delete d'une ligne de la fenêtre de récupération (`pending_recovery_delete`, #317) ; la fenêtre de récupération reste dessous |
-| Axe d'un dépôt de lignes | `Choice` | `stokesforge_row_drop` | glisser des lignes sur un graphe qui a déjà un axe X (`pending_row_drop`) |
+| Unsaved project | `SaveChanges` | `stokesforge_unsaved` | New Project, Open…, Quit, closing the window (`AppState::unsaved_pending`) |
+| Save / open failure | `Alert` | `stokesforge_alert` | a save or an open that fails (`AlertKind::SaveFailed`, `OpenFailed`) |
+| Low R² (warning), lost session | `ReadOnly` (Small) | `stokesforge_alert` | end of a calculation whose R² is low, if the preference allows it (`AlertKind::LowRSquared`); dead session (`AlertKind::SessionLost`) |
+| Overwrite a file | `Confirm` | `stokesforge_overwrite` | export whose added extension targets an existing file (`pending_overwrite`) |
+| Overwrite a file read with discrepancies | `Confirm` | `stokesforge_discarded_save` | Save that would overwrite the source file of a load that discarded calculations or traces not yet saved (`pending_discarded_save`, #309); not for Save As elsewhere |
+| Delete a backup copy | `Confirm` | `stokesforge_recovery_delete` | Delete on a row of the recovery window (`pending_recovery_delete`, #317); the recovery window stays underneath |
+| Axis of a row drop | `Choice` | `stokesforge_row_drop` | dragging rows onto a graph that already has an X axis (`pending_row_drop`) |
 
-Les alertes (échec, R² faible, session perdue) partagent l'identifiant
-`stokesforge_alert` : une seule à la fois.
+The alerts (failure, low R², lost session) share the identifier
+`stokesforge_alert`: only one at a time.
 
-## Fenêtres de contenu (non modales)
+## Content windows (non-modal)
 
-Classeur, graphe, matrice, note : des onglets de l'espace de travail, peints en
-fenêtres flottantes confinées (`show_floating_window`) ou détachées en fenêtre
-de l'OS (`window_detach.rs`), avec un en-tête à icônes (replier, détacher,
-maximiser, fermer ; `HeaderPlacement::Floating` / `Detached`). Pas de pied, pas
-de focus initial imposé. Tailles par défaut (`window_placement.rs`) : classeur
-373 x 420 (deux tiers de 560), graphe 560 x 460, matrice et note 560 x 420 ;
-minimum 220 x 140. Ouverture : `open_tab` (`window_stack.rs`), depuis le Project Manager ; une
-seconde ouverture sur la même entrée amène la fenêtre au premier plan sans la
-dupliquer. Chaque nouvelle fenêtre est décalée en cascade.
+Workbook, graph, matrix, note: tabs of the workspace, painted as
+confined floating windows (`show_floating_window`) or detached into an OS
+window (`window_detach.rs`), with an icon header (collapse, detach,
+maximize, close; `HeaderPlacement::Floating` / `Detached`). No footer, no
+imposed initial focus. Default sizes (`window_placement.rs`): workbook
+373 x 420 (two thirds of 560), graph 560 x 460, matrix and note 560 x 420;
+minimum 220 x 140. Opening: `open_tab` (`window_stack.rs`), from the Project Manager; a
+second opening on the same entry brings the window to the front without
+duplicating it. Each new window is offset in a cascade.
 
-## Hors catalogue
+## Outside the catalog
 
-- **Éditions sur place** (titre, légende, texte d'un graphe, cellule de la
-  grille, renommage) : pas de fenêtre, voir le standard (S-T4) et
+- **In-place edits** (title, legend, text of a graph, grid cell,
+  rename): no window, see the standard (S-T4) and
   `inplace_edit.rs`.
-- **Fenêtres natives de l'OS** : sélecteur de fichiers (`file_picker.rs`),
-  jamais une fenêtre egui.
-- **Sélecteur de couleur** : une fenêtre surgissante ancrée au bouton-échantillon
-  (`color_picker.rs`), pas un dialogue du catalogue.
-- **Prototype de test** : `preferences_proto.rs`, compilé en test seulement,
-  banc de la forme avancée de #148 (cinq pages dont Folders and Paths et
-  Analysis, pas encore livrées). Ses captures de référence sont dans
-  `crates/stokesforge-app/tests/snapshots/preferences_proto_*.png` ; ce n'est
-  pas une fenêtre de l'application.
+- **Native OS windows**: file picker (`file_picker.rs`),
+  never an egui window.
+- **Color picker**: a popup window anchored to the swatch button
+  (`color_picker.rs`), not a dialog of the catalog.
+- **Test prototype**: `preferences_proto.rs`, compiled in test only,
+  bench of the advanced form of #148 (five pages including Folders and Paths and
+  Analysis, not yet delivered). Its reference screenshots are in
+  `crates/stokesforge-app/tests/snapshots/preferences_proto_*.png`; it is
+  not a window of the application.
 
-## Taille, position, Échap, focus : ce que la brique fait seule
+## Size, position, Esc, focus: what the building block does by itself
 
-Rien de cela ne se réécrit dans une fenêtre neuve (S-F7 à S-F9, détail dans le
-standard) :
+None of this is rewritten in a new window (S-F7 to S-F9, details in the
+standard):
 
-- la taille et la position sont mémorisées **par identifiant** de dialogue
-  (clé du dialogue = `egui::Id`), dans les préférences, 32 sortes au plus ;
-  donner à une fenêtre neuve un identifiant `stokesforge_<nom>` stable et
-  unique ;
-- Échap : un champ texte puis le dialogue ; la croix vaut Cancel ;
-- focus initial : fixé par la nature (S-F11) : le premier champ texte, trouvé
-  par la brique, pour les réglages, brouillons, choix et assistants ; le
-  bouton par défaut (Cancel, Save, Close) pour une confirmation, un
-  enregistrement ou une alerte ; rien pour une lecture seule ;
-- zone de message du pied : l'erreur (`AppState::fail` tant qu'un dialogue de
-  contenu est ouvert) ou la raison du bouton principal grisé
+- the size and position are remembered **per identifier** of dialog
+  (dialog key = `egui::Id`), in the preferences, 32 kinds at most;
+  give a new window a stable and unique identifier `stokesforge_<nom>`;
+- Esc: a text field then the dialog; the cross is the same as Cancel;
+- initial focus: set by the nature (S-F11): the first text field, found
+  by the building block, for settings, drafts, choices and wizards; the
+  default button (Cancel, Save, Close) for a confirmation, a
+  save or an alert; nothing for a read-only window;
+- footer message area: the error (`AppState::fail` as long as a content
+  dialog is open) or the reason for the disabled main button
   (`DialogFooter::gated`, S-F10).
 
-## Anatomie d'une fenêtre neuve
+## Anatomy of a new window
 
-1. **Type et nature.** Choisir dans la table des types : la ligne donne la
-   nature (`DialogNature`), donc le pied, le focus et la classe de taille par
-   défaut. En cas de doute entre confirmation et choix : une confirmation
-   n'existe que pour ce que Ctrl+Z ne rattrape pas (standard S-F3).
-   **Taille** : la classe par défaut de la nature, sinon une autre classe ;
-   hors classes, une fenêtre interactive demande une taille libre justifiée
-   (`// TAILLE-LIBRE(#300):`), une fenêtre sans interaction riche prend la
-   taille de son contenu.
-2. **Maquette (E2).** La faire valider avant tout code : taille (classe), pages ou
-   sections, contenu de chaque page, pied, point d'ouverture. Joindre, quand
-   c'est utile, une capture du jumeau (voir ci-dessous).
-3. **Jumeau.** Ouvrir la fenêtre modèle du type (table suivante) et la copier,
-   sans en inventer l'ossature.
-4. **Textes.** Clés Fluent `en` d'abord, glossaire de
+1. **Type and nature.** Choose from the table of types: the row gives the
+   nature (`DialogNature`), hence the footer, the focus and the default size
+   class. When in doubt between confirmation and choice: a confirmation
+   exists only for what Ctrl+Z cannot recover (standard S-F3).
+   **Size**: the default class of the nature, otherwise another class;
+   outside the classes, an interactive window requires a justified free size
+   (`// TAILLE-LIBRE(#300):`), a window without rich interaction takes the
+   size of its content.
+2. **Mockup (E2).** Have it approved before any code: size (class), pages or
+   sections, content of each page, footer, opening point. Attach, when
+   useful, a screenshot of the twin (see below).
+3. **Twin.** Open the reference window of the type (next table) and copy it,
+   without inventing its structure.
+4. **Texts.** Fluent `en` keys first, glossary of
    [`textes-interface.md`](textes-interface.md) (skill
-   `stokesforge-textes-interface`) : titre, boutons, bulles `hint`, raison de
-   grisage `disabled-*`.
-5. **État.** Un drapeau ou un `Option` dans `AppState` et deux actions
-   `Open…` / `Close…` (le dialogue ne mute pas le modèle ; toute mutation passe
-   par une commande annulable, voir `stokesforge-commande`).
-6. **Peinture.** Une fonction `xxx_window(ctx, &state, actions)` qui rend
-   immédiatement si l'état est fermé, puis l'ajouter à `show_edit_dialogs`
-   (ou à `confirmations::show` si elle doit bloquer le reste).
-7. **Briques de contenu.** `form`/`choice` (`form.rs`), `number_field`,
-   `tab_strip`, `hover_help`, `empty_state`, `theme::SPACE_*`. Aucune bulle
-   nue, aucun `DragValue`, aucune couleur en dur : les gardes de
-   `tests/gardes.rs` le refusent.
-8. **Tests.** Peindre la fenêtre sans fenêtre réelle (`test_support.rs`) et
-   lire les textes peints ; la garde `aucune_fenetre_n_est_une_egui_window_brute`
-   et `tests/libelles.rs` couvrent déjà la brique et les libellés.
-9. **Catalogue (E1).** Ajouter la ligne de cette page dans le même commit,
-   avec l'identifiant `stokesforge_<nom>` en apostrophes inverses : la garde
-   `le_catalogue_des_fenetres_et_le_code_concordent` refuse un identifiant
-   absent de la page, ou une ligne sans appel.
+   `stokesforge-textes-interface`): title, buttons, `hint` tooltips, `disabled-*`
+   disable reason.
+5. **State.** A flag or an `Option` in `AppState` and two actions
+   `Open…` / `Close…` (the dialog does not mutate the model; every mutation goes through
+   an undoable command, see `stokesforge-commande`).
+6. **Painting.** A function `xxx_window(ctx, &state, actions)` that returns
+   immediately if the state is closed, then add it to `show_edit_dialogs`
+   (or to `confirmations::show` if it must block the rest).
+7. **Content building blocks.** `form`/`choice` (`form.rs`), `number_field`,
+   `tab_strip`, `hover_help`, `empty_state`, `theme::SPACE_*`. No bare
+   tooltip, no `DragValue`, no hard-coded color: the guards of
+   `tests/gardes.rs` refuse them.
+8. **Tests.** Paint the window without a real window (`test_support.rs`) and
+   read the painted texts; the guard `aucune_fenetre_n_est_une_egui_window_brute`
+   and `tests/libelles.rs` already cover the building block and the labels.
+9. **Catalog (E1).** Add the row of this page in the same commit,
+   with the identifier `stokesforge_<nom>` in backticks: the guard
+   `le_catalogue_des_fenetres_et_le_code_concordent` refuses an identifier
+   missing from the page, or a row without a call.
 
-### Fenêtre modèle par type
+### Reference window by type
 
-| Type | Fenêtre modèle | Pourquoi celle-là |
+| Type | Reference window | Why this one |
 |---|---|---|
-| Réglages en direct | `plot_settings_window` (`plot_settings.rs`) ; `shape_properties_ui` (`graph_window.rs`) pour le plus petit | brouillon, validation unique, onglets |
-| Création sur brouillon | `analysis_window` (`analysis_dialog.rs`) | verbe du bouton, raison du grisage, aperçu |
-| Choix | `stale_export_window` (`stale_export.rs`) | secondaires + principal, le plus court |
-| Assistant | `import_window` (`import_wizard.rs`) | le seul ; Back · Next · Finish |
-| Réglages en direct | `preferences_window.rs` (onglets, réglages immédiats) | Close seul, focus sur le premier champ |
-| Lecture seule | `keyboard_shortcuts_window.rs` (le plus simple) | Close seul |
-| Confirmation | `analysis_replace_window` (`analysis_dialog.rs`) ; `confirmations.rs` pour les blocantes | Cancel par défaut |
+| Live settings | `plot_settings_window` (`plot_settings.rs`); `shape_properties_ui` (`graph_window.rs`) for the smallest | draft, single confirmation, tabs |
+| Creation on a draft | `analysis_window` (`analysis_dialog.rs`) | button verb, disable reason, preview |
+| Choice | `stale_export_window` (`stale_export.rs`) | secondary + main, the shortest |
+| Wizard | `import_window` (`import_wizard.rs`) | the only one; Back · Next · Finish |
+| Live settings | `preferences_window.rs` (tabs, immediate settings) | Close only, focus on the first field |
+| Read-only | `keyboard_shortcuts_window.rs` (the simplest) | Close only |
+| Confirmation | `analysis_replace_window` (`analysis_dialog.rs`); `confirmations.rs` for the blocking ones | Cancel by default |
 
-## Produire une capture
+## Taking a screenshot
 
-Ne pas en fabriquer : les produire avec le skill `run-stokesforge`
+Do not make them by hand: produce them with the `run-stokesforge` skill
 (`.claude/skills/run-stokesforge/SKILL.md`).
 
 ```sh
@@ -249,11 +248,11 @@ python3 $D ss /tmp/fenetre.png     # capture, à lire avec Read
 python3 $D stop
 ```
 
-Gestes d'ouverture utiles : File > Preferences, File > Import (ou Ctrl+3),
-Help > Keyboard Shortcuts, clic sur la ligne d'état pour l'historique, clic
-droit sur un graphe ou menu Graph pour les propriétés. Les coordonnées de
-menu sont en pixels fixes (voir le skill) ; relire la capture avant de la
-comparer au jumeau. L'anglais est la langue de référence : repasser en English
-après un essai en français (la langue est enregistrée dans les préférences).
-Pour une mise en page seule, les bancs de tests (`egui_kittest`, voir
-`preferences_proto.rs`) rendent la fenêtre sans lancer l'application.
+Useful opening gestures: File > Preferences, File > Import (or Ctrl+3),
+Help > Keyboard Shortcuts, click on the status line for the history, right-click
+on a graph or the Graph menu for the properties. Menu coordinates
+are in fixed pixels (see the skill); reread the screenshot before
+comparing it to the twin. English is the reference language: switch back to English
+after a trial in French (the language is saved in the preferences).
+For a layout alone, the test benches (`egui_kittest`, see
+`preferences_proto.rs`) render the window without launching the application.

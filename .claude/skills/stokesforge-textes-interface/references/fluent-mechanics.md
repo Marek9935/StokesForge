@@ -1,6 +1,6 @@
 # Fluent mechanics: keys, `tr!`, pseudo-language, guards
 
-Read from `stokesforge-textes-interface` when writing a key. Overview and the *why*: `docs/application/theme-i18n-systeme.md` § Interface multilingue (Fluent), and the header of `crates/stokesforge-app-state/src/i18n.rs`.
+Read from `stokesforge-textes-interface` when writing a key. Overview and the *why*: `docs/application/theme-i18n-systeme.md` § Multilingual interface (Fluent), and the header of `crates/stokesforge-app-state/src/i18n.rs`.
 
 ## Writing a key
 

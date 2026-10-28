@@ -1,340 +1,341 @@
-# Commandes et historique
+# Commands and history
 
-`stokesforge-commands` est la **seule** couche qui mute un `Project` en dehors des
-tests. C'est la règle d'or du socle (invariant 1), et ce crate en est le point
-de passage obligé.
+`stokesforge-commands` is the **only** layer that mutates a `Project` outside
+tests. This is the golden rule of the foundation (invariant 1), and this crate
+is its mandatory point of passage.
 
-## Une commande est une valeur
+## A command is a value
 
-Pas un objet à état : elle ne retient ni `Project`, ni `Tree`, ni le moindre
-`Arc`. C'est ce qui lui permet de traverser un canal inter-threads telle
-quelle, de l'UI vers l'acteur qui détient l'unique `&mut Project`.
+Not a stateful object: it holds no `Project`, no `Tree`, not even an `Arc`.
+This is what lets it cross an inter-thread channel as is, from the UI to the
+actor that holds the one `&mut Project`.
 
-Tout ce qu'il faut pour annuler est calculé **à l'application**, par
-`History`, jamais porté par la commande.
+Everything needed to undo is computed **at application time**, by `History`,
+never carried by the command.
 
-Liste faisant foi : `stokesforge-commands/src/command.rs` (`Command`,
-`Command::is_structural`). Résumé :
+Authoritative list: `stokesforge-commands/src/command.rs` (`Command`,
+`Command::is_structural`). Summary:
 
-| Commande | Nature |
+| Command | Nature |
 |---|---|
-| `SetCells { column, start, values, expected_version }` | données |
-| `SetCellsPromoting { column, start, values, expected_version }` | données |
+| `SetCells { column, start, values, expected_version }` | data |
+| `SetCellsPromoting { column, start, values, expected_version }` | data |
 | `AddColumn { sheet, index, name, column }` | structure |
 | `DeleteColumn { column }` | structure |
 | `Rename { id, name }` | structure |
 | `Move { id, new_parent, index }` | structure |
-| `SetColumnType { column, column_type }` | données |
-| `InsertRows { sheet, … }` | données |
-| `DeleteRows { sheet, … }` | données |
+| `SetColumnType { column, column_type }` | data |
+| `InsertRows { sheet, … }` | data |
+| `DeleteRows { sheet, … }` | data |
 | `AddFolder { parent, name }` | structure |
 | `AddWorkbook { parent, name }` | structure |
 | `AddEmptyWorkbook { parent, name }` | structure |
 | `AddWorksheet { book, name }` | structure |
-| `DuplicateWorksheet { sheet, name }` | structure (le nom « copie N » est composé par l'application : phrase d'interface) |
+| `DuplicateWorksheet { sheet, name }` | structure (the name "copy N" is composed by the application: an interface text) |
 | `AddGraph { parent, name, spec }` | structure |
 | `AddMatrix { parent, name }` | structure |
 | `AddNote { parent, name, text }` | structure |
 | `RemoveNode { id }` | structure |
-| `SetWindowMeta { id, meta }` | données |
-| `SetNoteText { id, text }` | données |
-| `SetColumnMeta { column, meta }` | données |
-| `SetPlotSpec { graph, spec }` | données |
-| `EditPlotSpec { graph, spec, kind }` | données (même delta de spec, motif `PlotEditKind`) |
-| `SetSavedColors { colors }` | données |
+| `SetWindowMeta { id, meta }` | data |
+| `SetNoteText { id, text }` | data |
+| `SetColumnMeta { column, meta }` | data |
+| `SetPlotSpec { graph, spec }` | data |
+| `EditPlotSpec { graph, spec, kind }` | data (same spec delta, with a `PlotEditKind` reason) |
+| `SetSavedColors { colors }` | data |
 
-Le graphique vide de « File › Add Graph » (#73) réutilise `AddGraph` avec
-`PlotSpec::empty("")` : une zone de tracé, aucune série, même annulation et
-persistance qu’un graphique construit depuis des colonnes. « New Project »
-remplace l’identité du projet via la session, comme `load` ; il vide
-l’historique après confirmation et ne représente pas une commande annulable.
+The empty graph of "File › Add Graph" (#73) reuses `AddGraph` with
+`PlotSpec::empty("")`: one plot area, no series, the same undo and persistence
+as a graph built from columns. "New Project" replaces the identity of the
+project through the session, like `load`; it clears the history after
+confirmation and is not an undoable command.
 
-Une commande de création par nature de nœud plutôt qu'un `AddNode` générique
-(voir la doc de tête de `command.rs`) ; `RemoveNode` reste générique, comme
-`Project::remove`. Les quatre commandes d'édition de contenu
-(`SetWindowMeta`/`SetNoteText`/`SetColumnMeta`/`SetPlotSpec`) remplacent leur
-cible **en bloc**, à l'image de `SetCells` — pas d'édition par sous-champ.
+One creation command per node kind rather than a generic `AddNode` (see the
+head doc of `command.rs`); `RemoveNode` stays generic, like `Project::remove`.
+The four content-editing commands
+(`SetWindowMeta`/`SetNoteText`/`SetColumnMeta`/`SetPlotSpec`) replace their
+target **as a whole**, like `SetCells` — no per-subfield editing.
 
-### Deux écritures de cellules, stricte et tolérante
+### Two cell writes, strict and tolerant
 
-`SetCells` refuse un bloc qui ne correspond pas au type de la colonne
-(`CoreError::TypeMismatch`), et c'est ce que veut un appelant qui sait ce
-qu'il écrit — le pont Python, un script. `SetCellsPromoting` **élargit la
-colonne** en `ColumnType::Mixed` plutôt que de refuser : c'est la commande de
-la saisie en grille, où taper « n/a » dans une colonne de mesures doit
-produire une cellule texte, pas une erreur
+`SetCells` refuses a block that does not match the column type
+(`CoreError::TypeMismatch`), which is what a caller who knows what it writes
+wants — the Python bridge, a script. `SetCellsPromoting` **widens the column**
+to `ColumnType::Mixed` instead of refusing: it is the command of grid input,
+where typing "n/a" in a column of measurements must produce a text cell, not
+an error
 ([`modele-de-donnees.md`](modele-de-donnees.md)).
 
-Le choix du chemin se fait à l'**application**, jamais à l'appel :
+The choice of path is made at **application time**, never at the call:
 
-| Situation | Delta | Coût |
+| Situation | Delta | Cost |
 |---|---|---|
-| le bloc convient déjà au type | `Cells` | celui de `SetCells`, à l'identique |
-| la colonne est déjà mixte, le bloc non | `Cells` | idem : seul le bloc est converti |
-| la colonne n'est pas mixte et le bloc ne lui convient pas | `ColumnType` | un instantané de colonne, comme `SetColumnType` qu'elle contient |
+| the block already fits the type | `Cells` | that of `SetCells`, identical |
+| the column is already mixed, the block does not fit | `Cells` | same: only the block is converted |
+| the column is not mixed and the block does not fit it | `ColumnType` | one column snapshot, like `SetColumnType`, which it contains |
 
-Le troisième chemin n'a lieu qu'**une fois par colonne** : la saisie tolérante
-suivante trouve une colonne déjà mixte et retombe sur le deuxième. Et la
-conversion et l'écriture tiennent dans la **même** entrée d'historique, donc
-un seul `Ctrl+Z` ramène le type *et* la valeur d'avant.
+The third path happens only **once per column**: the next tolerant input finds
+a column that is already mixed and falls back on the second path. And the
+conversion and the write fit in the **same** history entry, so a single
+`Ctrl+Z` brings back the type *and* the previous value.
 
-`expected_version` est la condition optimiste : `None` ne vérifie rien (le
-comportement de l'UI, qui n'a pas cette discipline) ; `Some(v)` exige que
-`Column::version` vaille encore exactement `v` au **moment d'appliquer**,
-jamais avant — sans quoi la commande est refusée
-(`CoreError::ConcurrentModification`) sans toucher au modèle ni à
-l'historique. C'est ce que `stokesforge-script` remplit pour fermer le TOCTOU entre
-l'instantané qu'un script a lu et la commande qu'il envoie.
+`expected_version` is the optimistic condition: `None` checks nothing (the
+behavior of the UI, which has no such discipline); `Some(v)` requires that
+`Column::version` still equals exactly `v` **at the time of applying**, never
+before — otherwise the command is refused
+(`CoreError::ConcurrentModification`) without touching the model or the
+history. This is what `stokesforge-script` fills in to close the TOCTOU between
+the snapshot a script has read and the command it sends.
 
-Ce compteur sert aussi au recalcul ciblé des colonnes-formule (#193,
-[`session.md`](session.md)) : l'acteur ne recalcule une formule que si la
-version d'une de ses sources a changé. Toute écriture de données d'une
-colonne — commande, annulation, rétablissement — doit donc recevoir un
-numéro neuf du compteur unique du projet (`Project::next_column_version`),
-une colonne insérée avec un numéro (`AddColumn`, collage) fait passer ce
-compteur au-delà (`Project::insert_node`), et une restauration d'arbre ne
-doit ramener que des paires (version, contenu) qui ont réellement coexisté
-(`restamp_regressed_versions`). Une commande qui écrirait des cellules
-autrement ferait passer une formule périmée pour à jour (invariant 11).
+This counter also serves the targeted recalculation of formula columns (#193,
+[`session.md`](session.md)): the actor recalculates a formula only if the
+version of one of its sources has changed. So every data write to a column —
+command, undo, redo — must receive a fresh number from the single counter of
+the project (`Project::next_column_version`), a column inserted with a number
+(`AddColumn`, paste) moves this counter beyond it (`Project::insert_node`), and
+a tree restore must bring back only (version, content) pairs that really
+coexisted (`restamp_regressed_versions`). A command that wrote cells any other
+way would make a stale formula pass for up to date (invariant 11).
 
-## L'historique est hybride, et c'est une décision de coût
+## The history is hybrid, and that is a cost decision
 
-Structure et données n'ont pas le même prix.
+Structure and data do not have the same price.
 
-| Nature | Ce qui est retenu | Pourquoi |
+| Nature | What is kept | Why |
 |---|---|---|
-| **structure** (arbre, noms, ordre, ajout/suppression) | deux `Arc<Tree>`, `before` et `after` | l'arbre est persistant : les deux versions partagent tout ce qui n'a pas bougé, garder les deux coûte un pointeur |
-| **données** (contenu des colonnes) | un **delta** : anciennes *et* nouvelles valeurs des seules cellules écrites | un instantané retiendrait le buffer entier de la colonne — 8 Mo pour un million de points — à chaque frappe |
+| **structure** (tree, names, order, add/remove) | two `Arc<Tree>`, `before` and `after` | the tree is persistent: both versions share everything that did not move, keeping both costs one pointer |
+| **data** (column content) | a **delta**: old *and* new values of the written cells only | a snapshot would keep the whole column buffer — 8 MB for a million points — at every keystroke |
 
-Deux conséquences agréables du côté structure : l'arbre `before` retient les
-nœuds supprimés, il n'y a donc rien à libérer explicitement ; et un nœud
-restauré revient sous son **identifiant d'origine**, puisque `replace_tree` ne
-fait pas reculer l'allocateur.
+Two pleasant consequences on the structure side: the `before` tree keeps the
+removed nodes, so there is nothing to free explicitly; and a restored node
+comes back under its **original identifier**, since `replace_tree` does not
+move the allocator back.
 
-### Ce que l'hybride impose : LIFO strict
+### What the hybrid imposes: strict LIFO
 
-Restaurer un arbre entier écrase tout ce qui a été écrit après lui. Une entrée
-structurelle ne s'annule donc qu'une fois toutes les entrées postérieures
-annulées — garanti par construction, et **dans une macro les entrées
-s'annulent strictement en ordre inverse d'insertion**, quelles que soient leurs
-natures. C'est ce qui fait tenir l'hybride (invariant 8).
+Restoring a whole tree overwrites everything written after it. A structural
+entry can therefore be undone only once all later entries have been undone —
+guaranteed by construction, and **inside a macro the entries are undone
+strictly in reverse order of insertion**, whatever their natures. This is what
+makes the hybrid hold (invariant 8).
 
-## Deux limites, la plus contraignante gagne
+## Two limits, the most constraining wins
 
-Une limite comptée en **entrées** (`DEFAULT_LIMIT` = 100) ne voit pas le motif
-que mesure `tests/memory_pinning.rs` : en alternant une opération de structure
-et une écriture sur une même grosse colonne, chaque entrée structurelle épingle
-une version complète du buffer que l'écriture suivante remplace. Cent
-renommages ne pèsent rien ; une seule suppression de classeur pèse des
-centaines de méga-octets.
+A limit counted in **entries** (`DEFAULT_LIMIT` = 100) does not see the pattern
+that `tests/memory_pinning.rs` measures: by alternating a structure operation
+and a write on the same large column, each structural entry pins a full
+version of the buffer that the next write replaces. A hundred renames weigh
+nothing; a single workbook deletion weighs hundreds of megabytes.
 
-D'où `byte_limit` (`DEFAULT_BYTE_LIMIT` = 512 Mio), qui borne directement les
-octets de charge utile que l'historique est **seul** à maintenir vivants
-(`History::retained_bytes`, exact en permanence par suivi incrémental).
+Hence `byte_limit` (`DEFAULT_BYTE_LIMIT` = 512 MiB), which directly bounds the
+payload bytes that the history **alone** keeps alive
+(`History::retained_bytes`, always exact through incremental tracking).
 
-Trois règles d'éviction à connaître, toutes délibérées :
+Three eviction rules to know, all deliberate:
 
-- **la dernière entrée restante n'est jamais évincée**, même si elle dépasse
-  à elle seule la limite — sinon la limite produit exactement le désagrément
-  qu'elle cherche à éviter : plus rien à annuler juste après l'opération
-  lourde ;
-- l'éviction ne touche **jamais** la pile de rétablissement, qui n'est vidée
-  que par le prochain empilement. Une longue branche de `redo` peut donc
-  maintenir le total au-dessus du plafond jusqu'à la mutation suivante ;
-- `set_limit`/`set_byte_limit` refusent (`StackNotEmpty`) si une pile n'est
-  pas vide : décider quoi évincer au milieu d'un historique n'appartient pas à
-  la pile.
+- **the last remaining entry is never evicted**, even if it alone exceeds the
+  limit — otherwise the limit produces exactly the nuisance it tries to avoid:
+  nothing left to undo right after the heavy operation;
+- eviction **never** touches the redo stack, which is cleared only by the next
+  push. A long `redo` branch can therefore keep the total above the cap until
+  the next mutation;
+- `set_limit`/`set_byte_limit` refuse (`StackNotEmpty`) if a stack is not
+  empty: deciding what to evict in the middle of a history does not belong to
+  the stack.
 
-## Libellés d'historique : une donnée, pas une phrase
+## History labels: data, not a sentence
 
-Chaque entrée porte un `HistoryLabel` (`stokesforge-commands/src/label.rs`) : une
-énumération — l'action et ses paramètres (`InsertRows { count }`,
+Each entry carries a `HistoryLabel` (`stokesforge-commands/src/label.rs`): an
+enumeration — the action and its parameters (`InsertRows { count }`,
 `Rename { from, to }`, `SetCells { column: Option<ColumnRef> }`…), plus
-`Macro(MacroKind)` pour un groupe. `Command::label(&Tree)` le calcule sur
-l'arbre **d'avant** (le nom d'un nœud supprimé n'existe plus après) et ne peut
-pas échouer : un nœud introuvable donne `None`, que la phrase rend sous une
-forme générique. Une colonne se désigne par sa position (`ColumnRef`, lettre de
-la grille), jamais par son nom de nœud.
+`Macro(MacroKind)` for a group. `Command::label(&Tree)` computes it on the
+tree **from before** (the name of a removed node no longer exists afterwards)
+and cannot fail: a node not found gives `None`, which the sentence renders in
+a generic form. A column is designated by its position (`ColumnRef`, grid
+letter), never by its node name.
 
-Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
+The crate puts **nothing** into a sentence and does not depend on Fluent:
 
-| Où | Rôle |
+| Where | Role |
 |---|---|
-| `stokesforge-commands` | rend la donnée ; `Display` en **anglais** pour les journaux et le CLI |
-| `stokesforge-app-state/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
-| `stokesforge-app-state/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
+| `stokesforge-commands` | renders the data; `Display` in **English** for logs and the CLI |
+| `stokesforge-app-state/src/history_text.rs` | `history_text`: the variant as a sentence, through `tr!` and the `history-*` keys of the `en` catalog, Fluent plurals; exhaustive `match` |
+| `stokesforge-app-state/tests/history_text.rs` | the `en` catalog and `Display` say the same thing, variant by variant |
 
-`begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
-sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une
-feuille, exécuter un script, supprimer ou déplacer des colonnes) : un groupe est une valeur qui se compare (`undo_label ==
-Some(HistoryLabel::Macro(MacroKind::Import))`), pas un texte à relire. Un
-nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
-sa ligne de `Display`. L'historique n'est pas écrit dans le `.stf`
+`begin_macro` takes a `MacroKind`, a **closed** enumeration (paste, clear the
+selection, graph properties, refresh, import, create a workbook or a sheet, run
+a script, delete or move columns): a group is a value that can be compared
+(`undo_label ==
+Some(HistoryLabel::Macro(MacroKind::Import))`), not a text to reread. A new
+group adds a `MacroKind` variant, its `history-macro-*` key and its `Display`
+line. The history is not written to the `.stf`
 ([`persistance.md`](persistance.md)).
 
-### Une commande de données qui déplace des lignes réécrit les références de ligne (#307)
+### A data command that moves rows rewrites the row references (#307)
 
-`DataDelta::InsertRows` et `DeleteRows` portent `plots: Vec<(NodeId, PlotSpec,
-PlotSpec)>` (graphe, spec avant, spec après) : les séries « ligne »
-(`row = Some(r)`) dont l'ancre `y` est dans la feuille suivent le décalage. Les
-specs sont relevés avant la mutation des données, réécrits après par
-`Project::set_plot_spec` (invariant 1), et capturés à l'application
-(invariant 8) : `revert` remet l'avant, `reapply` l'après, sans inverse recalculé
-et sans `Entry::Macro` (le libellé « Delete N rows » reste). Une ancre rompue est
-ignorée ; la ligne dans la plage supprimée reste telle quelle (D1 ouverte).
+`DataDelta::InsertRows` and `DeleteRows` carry `plots: Vec<(NodeId, PlotSpec,
+PlotSpec)>` (graph, spec before, spec after): the "row" series
+(`row = Some(r)`) whose `y` anchor is in the sheet follow the shift. The
+specs are collected before the data mutation, rewritten afterwards by
+`Project::set_plot_spec` (invariant 1), and captured at application time
+(invariant 8): `revert` puts back the before, `reapply` the after, with no
+recomputed inverse and no `Entry::Macro` (the label "Delete N rows" stays). A
+broken anchor is ignored; a row inside the deleted range stays as it is (D1
+open).
 
 ## Macros
 
-`begin_macro` / `end_macro` / `abort_macro` groupent des commandes en une seule
-entrée annulable. L'imbrication est permise jusqu'à `MAX_MACRO_DEPTH` (1000) —
-une macro plus profonde est refusée plutôt que de faire déborder la pile
-d'appels.
+`begin_macro` / `end_macro` / `abort_macro` group commands into a single undoable
+entry. Nesting is allowed up to `MAX_MACRO_DEPTH` (1000) — a deeper macro is
+refused rather than overflowing the call stack.
 
-Attention : une macro n'empêche jamais le `Project` d'être muté ; elle **diffère
-seulement l'entrée d'historique**. C'est pourquoi `save` est refusé pendant une
-macro ouverte, et pourquoi une macro encore ouverte à l'arrêt de l'acteur est
-**annulée, pas commise** ([`session.md`](session.md)).
+Note: a macro never prevents the `Project` from being mutated; it **only defers
+the history entry**. This is why `save` is refused during an open macro, and
+why a macro still open when the actor stops is **aborted, not committed**
+([`session.md`](session.md)).
 
-Ce que l'identité du client change pendant une macro ouverte — qui peut
-exécuter, fermer, avorter — appartient à l'acteur et se lit dans la table de
+What the identity of the client changes during an open macro — who can run,
+close, abort — belongs to the actor and is read in the table of
 `stokesforge-session/src/lib.rs`.
 
-## Les erreurs
+## Errors
 
-Les erreurs du modèle remontent **telles quelles** (`CommandError::Core`,
-transparente) : une commande qui échoue échoue pour une raison du cœur, pas
-pour une raison inventée ici. Les autres variantes décrivent les seuls refus
-propres à la pile : macro ouverte, pas de macro, pile non vide, macro
-étrangère, macro trop profonde.
+Model errors come up **as they are** (`CommandError::Core`, transparent): a
+command that fails fails for a reason of the core, not for a reason invented
+here. The other variants describe only the refusals specific to the stack: open
+macro, no macro, non-empty stack, foreign macro, macro too deep.
 
-## Ce qu'il faut savoir avant de modifier
+## What to know before modifying
 
-- Ajouter une commande, c'est aussi décider sa **nature** (`is_structural`) :
-  s'en tromper casse l'invariant LIFO sans rien lever.
-- `tests/no_ui_dependency.rs` liste les dépendances autorisées du crate.
-- `tests/undo_random.rs` tire des séquences au sort ; `tests/history.rs` porte
-  les cas nommés ; `tests/memory_pinning.rs` mesure l'épinglage mémoire.
-  Côté robustesse : `b5` (macros), `b12` (commandes acceptées sans effet),
-  `b18` (ce qui reste possible pendant qu'une macro est ouverte), `b21`
-  (coût et identité sur le chemin d'écriture).
+- Adding a command also means deciding its **nature** (`is_structural`):
+  getting it wrong breaks the LIFO invariant without raising anything.
+- `tests/no_ui_dependency.rs` lists the allowed dependencies of the crate.
+- `tests/undo_random.rs` draws random sequences; `tests/history.rs` holds
+  the named cases; `tests/memory_pinning.rs` measures memory pinning.
+  On the robustness side: `b5` (macros), `b12` (commands accepted with no
+  effect), `b18` (what stays possible while a macro is open), `b21`
+  (cost and identity on the write path).
 
-`History::execute_recorded` est `execute` qui dit si une entrée a été rangée
-(`false` pour une commande acceptée mais sans effet, règle B5) : l'acteur s'en
-sert pour que Stop (#239) n'annule que la commande qu'il vient d'exécuter. On
-ne le déduit pas de `len()` avant/après (éviction, macro).
+`History::execute_recorded` is `execute` that tells whether an entry has been
+stored (`false` for a command accepted but with no effect, rule B5): the actor
+uses it so that Stop (#239) undoes only the command it has just executed. It
+is not deduced from `len()` before/after (eviction, macro).
 
-**À lire** : `stokesforge-commands/src/lib.rs` et `src/history.rs` (têtes).
+**To read**: `stokesforge-commands/src/lib.rs` and `src/history.rs` (heads).
 
-Object Manager (#81–85) réutilise le delta de `SetPlotSpec` par
-`Command::EditPlotSpec { graph, spec, kind }` : un remplacement en bloc,
-avec le motif `PlotEditKind` dans `HistoryLabel::EditPlotSpec`. Visibilité,
-renommage, ordre et suppression ont leurs clés `history-plot-*`, sans phrase
-transportée par l'acteur. Le menu et l'arbre émettent les mêmes `Action`.
-Une cible périmée, un rang inchangé ou une valeur identique n'envoie aucune
-commande. Ouvrir le panneau, choisir un contenu ou ouvrir ses propriétés
-relève de l'état de vue ; les modifications validées sont annulables.
+The Object Manager (#81–85) reuses the delta of `SetPlotSpec` through
+`Command::EditPlotSpec { graph, spec, kind }`: a replacement as a whole,
+with the `PlotEditKind` reason in `HistoryLabel::EditPlotSpec`. Visibility,
+renaming, ordering and removal have their `history-plot-*` keys, with no
+sentence carried by the actor. The menu and the tree emit the same `Action`.
+A stale target, an unchanged rank or an identical value sends no command.
+Opening the panel, choosing a content or opening its properties belongs to
+the view state; validated changes are undoable.
 
-## Copie d'objets (#105–106)
+## Copying objects (#105–106)
 
-`NodeCopy::capture` fige un sous-arbre sans conserver le projet ni son allocateur.
-`Command::InsertCopy` le recrée par `Project::insert_copy`, avec de nouveaux
-identifiants alloués dans la destination. Toute nature est copiable par défaut :
-la copie conserve son contenu et reconstruit ses enfants, sans liste blanche.
-Un échec restaure l'arbre ; le compteur d'identifiants ne recule jamais.
-`DuplicateWorksheet` réutilise cette primitive atomique et replace la feuille
-juste après l'originale, y compris si des natures inconnues y sont conservées.
+`NodeCopy::capture` freezes a subtree without keeping the project or its
+allocator. `Command::InsertCopy` recreates it through `Project::insert_copy`,
+with new identifiers allocated in the destination. Every kind is copyable by
+default: the copy keeps its content and rebuilds its children, with no
+allowlist. A failure restores the tree; the identifier counter never moves
+back. `DuplicateWorksheet` reuses this atomic primitive and puts the sheet
+right after the original, including when unknown kinds are kept in it.
 
-Les gestes multiples sont groupés par `MacroKind::{PasteObjects,
+Multiple gestures are grouped by `MacroKind::{PasteObjects,
 DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` (Project
-Manager) ; le déplacement de plusieurs colonnes d'une feuille a le sien,
-`MacroKind::MoveColumns` (#319 : une suite de `Command::Move` calculée par
-`stokesforge-app-state::column_move::plan`, index compté **après retrait**, un
-seul `execute` sans macro pour une colonne) ; un échec
-intermédiaire avorte le groupe entier. Ces libellés restent des données et ne
-sont pas enregistrés dans le `.stf`.
+Manager); moving several columns of a sheet has its own,
+`MacroKind::MoveColumns` (#319: a series of `Command::Move` computed by
+`stokesforge-app-state::column_move::plan`, index counted **after removal**, a
+single `execute` with no macro for one column); an intermediate failure aborts
+the whole group. These labels stay data and are not recorded in the `.stf`.
 
-Pour les graphes inter-projets (#107), la copie porte aussi les dépendances
-figées ; `NodeCopy::into_external` active leur insertion dans `InsertCopy`.
-Les classeurs cachés et les graphes sont créés atomiquement dans la même
-entrée structurelle, avec remplacement des références. Dans le même projet,
-les dépendances ne sont pas insérées. La révélation du classeur réutilise
-`SetWindowMeta`, donc son delta et son annulation.
+For cross-project graphs (#107), the copy also carries the frozen
+dependencies; `NodeCopy::into_external` enables their insertion in
+`InsertCopy`. Hidden workbooks and graphs are created atomically in the same
+structural entry, with the references replaced. Within the same project, the
+dependencies are not inserted. Revealing the workbook reuses
+`SetWindowMeta`, hence its delta and its undo.
 
-## Calculs d'analyse (#181)
+## Analysis calculations (#181)
 
-`AddCalculation`, `UpdateCalculation` et `RemoveCalculation` sont des commandes
-**structurelles** (instantané de l'arbre) : un calcul crée, réécrit ou supprime des
-colonnes de sortie en même temps que son enregistrement, et l'annulation doit tout
-rendre d'un bloc — une entrée d'historique par geste, comme une macro, sans en
-ouvrir une. Libellés : `HistoryLabel::AddCalculation(kind)`,
-`UpdateCalculation(kind)`, `RemoveCalculation { kind, with_columns }` (la famille
-d'opération est une donnée, `OperationKind`).
+`AddCalculation`, `UpdateCalculation` and `RemoveCalculation` are
+**structural** commands (tree snapshot): a calculation creates, rewrites or
+deletes output columns at the same time as its record, and the undo must give
+everything back in one block — one history entry per gesture, like a macro,
+without opening one. Labels: `HistoryLabel::AddCalculation(kind)`,
+`UpdateCalculation(kind)`, `RemoveCalculation { kind, with_columns }` (the
+operation family is data, `OperationKind`).
 
-- `RemoveCalculation { with_columns: false }` « détache » : les colonnes restent,
-  ordinaires et de nouveau éditables.
-- Une colonne produite par un calcul est **en lecture seule** pour les commandes de
-  cellules, de type et de suppression de cellules (`CoreError::CalculatedColumnReadOnly`,
-  `check_writable_cells` et `check_not_calculated`). Seuls restent permis le nom, l'unité
-  et les autres métadonnées (hors formule) ; un recalcul dont la sortie refuserait quand
-  même le résultat marque le calcul `Failed(OutputUnwritable)`.
-- Le recalcul automatique (`Project::refresh_calculation`, côté session) ne passe pas
-  par l'historique : c'est une mise à jour dérivée, comme le recalcul des formules.
+- `RemoveCalculation { with_columns: false }` "detaches": the columns stay,
+  ordinary and editable again.
+- A column produced by a calculation is **read-only** for the commands on cells,
+  on type and on cell deletion (`CoreError::CalculatedColumnReadOnly`,
+  `check_writable_cells` and `check_not_calculated`). Only the name, the unit
+  and the other metadata (apart from the formula) remain allowed; a
+  recalculation whose output would still refuse the result marks the
+  calculation `Failed(OutputUnwritable)`.
+- The automatic recalculation (`Project::refresh_calculation`, session side)
+  does not go through the history: it is a derived update, like the
+  recalculation of formulas.
 
-## Feuilles transposées liées (#253)
+## Linked transposed sheets (#253)
 
-`TransposeRows { source, rows }` crée ou complète la feuille transposée liée (feuille,
-colonne x', colonnes « Row N », lien) et `RecalculateTranspose { sheet }` réécrit ses
-colonnes liées depuis la source. Les deux sont **structurelles** (instantané de
-l'arbre : des nœuds apparaissent, le lien est porté par l'arbre) et atomiques — un refus
-(colonne sans x', colonne de texte) restaure l'arbre et n'empile rien. Libellés :
-`HistoryLabel::TransposeRows`, `RecalculateTranspose` ; groupe `MacroKind::AnalyzeRows`.
+`TransposeRows { source, rows }` creates or completes the linked transposed
+sheet (sheet, x' column, "Row N" columns, link) and
+`RecalculateTranspose { sheet }` rewrites its linked columns from the source.
+Both are **structural**
+(tree snapshot: nodes appear, the link is carried by the tree) and atomic — a
+refusal (column without x', text column) restores the tree and pushes nothing.
+Labels: `HistoryLabel::TransposeRows`, `RecalculateTranspose`; group
+`MacroKind::AnalyzeRows`.
 
-- **Un seul groupe annulable** : le geste d'analyse d'une ligne ouvre le groupe
-  `AnalyzeRows` (`state/transpose.rs`), exécute `TransposeRows` puis ouvre la fenêtre
-  d'analyse, qui est modale : Apply clôt le groupe avec le calcul, Cancel l'avorte et la
-  feuille n'a jamais existé. Un seul Ctrl+Z défait feuille, colonnes, lien et calcul.
-- Une feuille périmée et intacte est d'abord remise à jour quand on la complète ; une
-  feuille modifiée n'est jamais écrasée sauf par `RecalculateTranspose` (l'interface
-  demande confirmation avant).
-- Toute écriture de valeurs passe par `Project::restore_column` / `add_column` : version
-  neuve par colonne (« Pièges connus » de `CLAUDE.md`).
+- **A single undoable group**: the analysis gesture on a row opens the
+  `AnalyzeRows` group (`state/transpose.rs`), executes `TransposeRows`, then
+  opens the analysis window, which is modal: Apply closes the group with the
+  calculation, Cancel aborts it and the sheet never existed. A single Ctrl+Z
+  undoes sheet, columns, link and calculation.
+- A stale and untouched sheet is first brought up to date when it is completed;
+  a modified sheet is never overwritten except by `RecalculateTranspose` (the
+  interface asks for confirmation first).
+- Every write of values goes through `Project::restore_column` / `add_column`:
+  a fresh version per column (« Pièges connus » of `CLAUDE.md`).
 
-## Retirer une formule (#236)
+## Removing a formula (#236)
 
-Vider le champ Formule d'une colonne **supprime aussi ses valeurs** : une
-macro `MacroKind::RemoveFormula` (`SetColumnMeta` + `DeleteCells` de toute la
-colonne), une seule entrée d'historique, que Ctrl+Z rend d'un coup. Toutes les
-voies (saisie vidée, Retour arrière, coller, plusieurs colonnes) passent par
-`AppState::set_meta_dropping_formula_data`. Le clic droit offre « Remove
-Formula, Keep Data » (`Action::RemoveFormulaKeepData`), même macro sans
-suppression des valeurs.
+Clearing the Formula field of a column **also deletes its values**: a
+`MacroKind::RemoveFormula` macro (`SetColumnMeta` + `DeleteCells` of the whole
+column), a single history entry, which Ctrl+Z gives back at once. All paths
+(cleared input, Backspace, paste, several columns) go through
+`AppState::set_meta_dropping_formula_data`. The right-click offers "Remove
+Formula, Keep Data" (`Action::RemoveFormulaKeepData`), the same macro without
+the deletion of values.
 
-## Remplacement d'une correction (#212)
+## Replacing a correction (#212)
 
-`ReplaceAnalysisData { draft, expected_versions }` remplace en place les Y
-d'une ligne de base ou d'une correction par référence, et ajoute une trace
-immuable `CorrectionRecord`. Un instantané structurel garde valeurs et trace
-ensemble : un seul Annuler retire le geste, Rétablir le restaure. Aucun lien de
-calcul n'est conservé ; les colonnes restent éditables et leurs graphiques
-suivent leurs nouvelles valeurs. Les versions de toutes les entrées lues
-sont exigées avant écriture. Une colonne à formule ou calculée est refusée.
+`ReplaceAnalysisData { draft, expected_versions }` replaces in place the Y of a
+baseline or of a correction by reference, and adds an immutable
+`CorrectionRecord` trace. A structural snapshot keeps values and trace
+together: a single Undo removes the gesture, Redo restores it. No calculation
+link is kept; the columns stay editable and their graphs follow their new
+values. The versions of all the inputs read are required before writing. A
+column with a formula or a calculated column is refused.
 
-`RestoreOriginalData { trace }` (#248, structurelle) rend aux colonnes
-remplacées leur original, gardé dans le classeur caché des copies : il écrase
-les saisies faites depuis, et un Annuler le défait. **Toujours la donnée
-brute** (#308) : une colonne corrigée plusieurs fois garde la copie du tout
-premier remplacement (`first_original_of`), partagée par toutes ses traces ;
-restaurer l'une quelconque rend cette donnée brute et sort la colonne de
-**toutes** les traces (une trace sans colonne restante disparaît). Les copies (référence
-figée d'une correction, originaux) vivent dans **un seul classeur caché par
-projet** (`stokesforge-core/src/analysis_store.rs`) ; une copie est retirée avec
-la dernière analyse ou trace qui la cite. Toutes ces écritures sont dans la
-commande qui les provoque : annuler ramène l'arbre, copies comprises.
+`RestoreOriginalData { trace }` (#248, structural) gives back to the replaced
+columns their original, kept in the hidden workbook of copies: it overwrites
+the input made since, and an Undo reverts it. **Always the raw data** (#308): a
+column corrected several times keeps the copy of the very first replacement
+(`first_original_of`), shared by all its traces; restoring any one of them
+gives back this raw data and takes the column out of **all** the traces (a
+trace with no remaining column disappears). The copies (frozen reference of a
+correction, originals) live in **a single hidden workbook per project**
+(`stokesforge-core/src/analysis_store.rs`); a copy is removed with the last
+analysis or trace that cites it. All these writes are inside the command that
+causes them: undoing brings back the tree, copies included.
 
-La longueur de Y reste identique. Les lignes dont X ou Y est non fini gardent
-leur cellule originale ; un NaN produit sur une ligne valide (division par zéro,
-référence hors plage) reste visible. Plusieurs séries partageant Y doivent
-produire des valeurs identiques : sinon rien n'est écrit. Chaque remplacement
-garde sa propre trace (donc sa ligne de Results), y compris après une saisie
-ordinaire ; toutes partagent la donnée brute de la colonne. Supprimer toutes
-ses sources retire la trace ; annuler leur suppression la restaure.
+The length of Y stays identical. The rows whose X or Y is not finite keep their
+original cell; a NaN produced on a valid row (division by zero, reference out
+of range) stays visible. Several series sharing Y must produce identical
+values: otherwise nothing is written. Each replacement keeps its own trace
+(hence its Results row), including after an ordinary input; all share the raw
+data of the column. Deleting all its sources removes the trace; undoing their
+deletion restores it.
