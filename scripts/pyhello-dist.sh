@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Assemble et VALIDE la distribution autonome du hello-world Python.
+# Assembles and VALIDATES the standalone distribution of the Python hello-world.
 #
-# C'est le verrou de la phase 5 : si ce script sort 0, la pile Python embarquée
-# est empaquetable et isolée. Il construit, assemble, puis relance le binaire
-# dans un environnement vidé et piégé.
+# This is the lock of phase 5: if this script exits 0, the embedded Python
+# stack is packageable and isolated. It builds, assembles, then reruns the
+# binary in an emptied and trapped environment.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,71 +14,71 @@ PREFIX="$REPO_ROOT/vendor/python/extracted/python"
 DIST="$REPO_ROOT/dist/pyhello"
 SOFILE="libpython${PYTHON_XY}.so.1.0"
 
-# --- 1. Construction --------------------------------------------------------
-# PYO3_CONFIG_FILE : trouver libpython à la COMPILATION (piège n°1).
+# --- 1. Build ---------------------------------------------------------------
+# PYO3_CONFIG_FILE: find libpython at COMPILE time (pitfall no. 1).
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 
-# rpath RELATIF : le binaire trouvera sa libpython dans son propre dossier
-# (piège n°2). $ORIGIN doit arriver littéralement jusqu'à l'éditeur de liens,
-# d'où les guillemets SIMPLES. On passe par RUSTFLAGS plutôt que par
-# .cargo/config.toml : `[target.x86_64-unknown-linux-gnu]` y serait global au
-# workspace et imposerait ce rpath à tous les autres binaires.
+# RELATIVE rpath: the binary will find its libpython in its own folder
+# (pitfall no. 2). $ORIGIN must reach the linker literally, hence the SINGLE
+# quotes. We use RUSTFLAGS rather than .cargo/config.toml:
+# `[target.x86_64-unknown-linux-gnu]` there would be global to the workspace
+# and would impose this rpath on all the other binaries.
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
-echo "[dist] construction release de stokesforge-pyhello"
+echo "[dist] release build of stokesforge-pyhello"
 cd "$REPO_ROOT"
 cargo build --locked -p stokesforge-python --features python --release --bin stokesforge-pyhello
 
-# --- 2. Assemblage ----------------------------------------------------------
-echo "[dist] assemblage de $DIST"
+# --- 2. Assembly ------------------------------------------------------------
+echo "[dist] assembling $DIST"
 rm -rf "$DIST"
 mkdir -p "$DIST/lib/python/lib"
 
 cp "$REPO_ROOT/target/release/stokesforge-pyhello" "$DIST/pyhello"
 
-# libpython vit UNE SEULE FOIS, dans dist/pyhello/lib, là où pointe le rpath.
-# Elle pèse ~209 Mo (distribution non strippée) : la dupliquer sous
-# lib/python/lib doublerait la taille pour rien. Les modules d'extension de
-# lib-dynload la référencent par SONAME et la trouvent déjà chargée.
+# libpython lives ONLY ONCE, in dist/pyhello/lib, where the rpath points.
+# It weighs ~209 MB (unstripped distribution): duplicating it under
+# lib/python/lib would double the size for nothing. The extension modules of
+# lib-dynload reference it by SONAME and find it already loaded.
 cp "$PREFIX/lib/$SOFILE" "$DIST/lib/$SOFILE"
 ln -s "$SOFILE" "$DIST/lib/libpython${PYTHON_XY}.so"
 
-# Le préfixe embarqué, tel que EmbeddedPython::locate() l'attend :
-#   <dir de l'exécutable>/lib/python/lib/python3.12/{,lib-dynload,site-packages}
+# The embedded prefix, as EmbeddedPython::locate() expects it:
+#   <executable dir>/lib/python/lib/python3.12/{,lib-dynload,site-packages}
 cp -a "$PREFIX/lib/python${PYTHON_XY}" "$DIST/lib/python/lib/"
 
-# Bibliothèques annexes du préfixe (tcl/tk…), sauf libpython déjà placée.
+# Auxiliary libraries of the prefix (tcl/tk…), except libpython, already placed.
 find "$PREFIX/lib" -maxdepth 1 -name '*.so*' ! -name 'libpython*' \
     -exec cp -a {} "$DIST/lib/python/lib/" \;
 
-# `bin/` est exclu : l'initialisation par PyConfig n'a besoin que de `home` et
-# des chemins de modules, jamais d'un exécutable python3.
-# pip est retiré : décision d'architecture — pas de pip exposé à l'utilisateur.
+# `bin/` is excluded: initialization through PyConfig needs only `home` and the
+# module paths, never a python3 executable.
+# pip is removed: architecture decision, no pip exposed to the user.
 rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
        "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip-"*.dist-info
-# Les __pycache__ livrés par python-build-standalone sont CONSERVÉS : les
-# supprimer force CPython à recompiler la bibliothèque standard au premier
-# import (mesuré : ~250 ms d'init au lieu de ~85 ms), et une distribution
-# installée en lecture seule ne pourrait jamais reconstituer ce cache.
+# The __pycache__ shipped by python-build-standalone are KEPT: removing them
+# forces CPython to recompile the standard library at the first import
+# (measured: ~250 ms of init instead of ~85 ms), and a distribution installed
+# read-only could never rebuild this cache.
 
-# Licences du code, des ressources et du runtime effectivement livré (#129).
+# Licenses of the code, the resources and the runtime actually delivered (#129).
 "$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
 
 TAILLE="$(du -sm "$DIST" | cut -f1)"
-echo "[dist] taille de $DIST : ${TAILLE} Mo"
+echo "[dist] size of $DIST: ${TAILLE} MB"
 
-# --- 3. Preuve de liaison ---------------------------------------------------
-echo "[dist] ldd | grep python :"
+# --- 3. Linking proof -------------------------------------------------------
+echo "[dist] ldd | grep python:"
 ldd "$DIST/pyhello" | grep -i python
 if ! ldd "$DIST/pyhello" | grep -q "$DIST/lib/$SOFILE"; then
-    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib" >&2
+    echo "[dist] ERROR: $SOFILE is not resolved from $DIST/lib" >&2
     exit 1
 fi
 
-# --- 4. Preuve d'isolation --------------------------------------------------
-# Environnement VIDÉ puis piégé : si l'isolation fuit, sys.path les contiendra.
-echo "[dist] exécution en environnement nettoyé et piégé"
+# --- 4. Isolation proof -----------------------------------------------------
+# EMPTIED then trapped environment: if isolation leaks, sys.path will contain them.
+echo "[dist] running in a cleaned and trapped environment"
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        PYTHONPATH=/tmp/piege PYTHONHOME=/tmp/piege2 \
        "$DIST/pyhello" | tee "$DIST/../pyhello-run.log"
@@ -86,16 +86,16 @@ env -i PATH=/usr/bin:/bin HOME=/tmp \
 SORTIE="$(env -i PATH=/usr/bin:/bin HOME=/tmp PYTHONPATH=/tmp/piege \
               PYTHONHOME=/tmp/piege2 "$DIST/pyhello")"
 if grep -q "/tmp/piege" <<<"$SORTIE"; then
-    echo "[dist] ERREUR : l'environnement a fui dans sys.path" >&2
+    echo "[dist] ERROR: the environment leaked into sys.path" >&2
     exit 1
 fi
 if grep -qE "^sys\.path\[[0-9]\] *: */usr/lib/python3" <<<"$SORTIE"; then
-    echo "[dist] ERREUR : un chemin Python système est dans sys.path" >&2
+    echo "[dist] ERROR: a system Python path is in sys.path" >&2
     exit 1
 fi
 if ! grep -q "sys.flags.isolated    : true" <<<"$SORTIE"; then
-    echo "[dist] ERREUR : l'interpréteur n'est pas en mode isolé" >&2
+    echo "[dist] ERROR: the interpreter is not in isolated mode" >&2
     exit 1
 fi
 
-echo "[dist] OK — distribution autonome, isolée, ${TAILLE} Mo"
+echo "[dist] OK: standalone, isolated distribution, ${TAILLE} MB"

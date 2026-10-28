@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Livre les textes des licences dans un paquet déjà assemblé (#129).
-# La résolution Cargo inclut python, les dépendances transitives et toutes
-# les plateformes ; elle ne compile ni le workspace ni l'interpréteur.
+# Delivers the license texts into an already assembled package (#129).
+# The Cargo resolution includes python, transitive dependencies and all
+# platforms; it builds neither the workspace nor the interpreter.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ $# -eq 1 && -d "$1" ]] || {
-    echo "Usage : scripts/licenses-dist.sh <répertoire du paquet assemblé>" >&2
+    echo "Usage: scripts/licenses-dist.sh <assembled package directory>" >&2
     exit 1
 }
 PACKAGE_DIR="$(cd "$1" && pwd)"
 # shellcheck source=../vendor/python/lock.env
 source "$REPO_ROOT/vendor/python/lock.env"
-# Plateforme du paquet : celle de la machine, sauf STOKESFORGE_LICENSES_PLATFORM
-# (linux|windows), pour que licenses-test.sh éprouve aussi les refus de l'autre.
+# Package platform: the machine's own, unless STOKESFORGE_LICENSES_PLATFORM
+# (linux|windows) is set, so that licenses-test.sh also tests the refusals of
+# the other one.
 case "${STOKESFORGE_LICENSES_PLATFORM:-$(uname -s)}" in
     MINGW*|MSYS*|CYGWIN*|windows) PLATFORM=windows ;;
     *) PLATFORM=linux ;;
@@ -32,13 +33,13 @@ fi
 if [[ "$PYTHON_VERSION" != "$LICENSE_PYTHON_VERSION" ||
       "$PBS_RELEASE" != "$LICENSE_PBS_RELEASE" ||
       "$EXPECTED_TRIPLE" != "$LICENSE_PBS_TRIPLE" ]]; then
-    echo "[licences] ERREUR : actualiser vendor/python/licenses-$PLATFORM pour le verrou Python" >&2
+    echo "[licences] ERROR: update vendor/python/licenses-$PLATFORM to match the Python lock" >&2
     exit 1
 fi
 
 if [[ "$PLATFORM" == windows ]]; then
-    # Disposition lib/python/{Lib,DLLs} (scripts/app-dist-windows.sh) ; le
-    # LICENSE.txt de CPython est à la racine du préfixe, copié dans lib/python.
+    # Layout lib/python/{Lib,DLLs} (scripts/app-dist-windows.sh); CPython's
+    # LICENSE.txt is at the prefix root, copied into lib/python.
     PYTHON_LIB="$PACKAGE_DIR/lib/python/Lib"
     PYTHON_RUNTIME_LICENSE="$PACKAGE_DIR/lib/python/LICENSE.txt"
 else
@@ -49,19 +50,19 @@ NUMPY_LICENSES="$PYTHON_LIB/site-packages/numpy-${NUMPY_VERSION}.dist-info/licen
 SCIPY_LICENSE="$PYTHON_LIB/site-packages/scipy-${SCIPY_VERSION}.dist-info/LICENSE.txt"
 for notice in "$PYTHON_RUNTIME_LICENSE" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LICENSE"; do
     [[ -s "$notice" ]] || {
-        echo "[licences] ERREUR : notice absente du paquet : $notice" >&2
+        echo "[licences] ERROR: notice missing from the package: $notice" >&2
         exit 1
     }
 done
 for tool in cargo-deny cargo-about; do
     command -v "$tool" >/dev/null || {
-        echo "[licences] ERREUR : installer $tool (voir docs/licence-et-extensions.md)" >&2
+        echo "[licences] ERROR: install $tool (see docs/licence-et-extensions.md)" >&2
         exit 1
     }
 done
 [[ "$(cargo-deny --version)" == "cargo-deny ${CARGO_DENY_VERSION}" &&
    "$(cargo-about --version)" == "cargo-about ${CARGO_ABOUT_VERSION}" ]] || {
-    echo "[licences] ERREUR : utiliser les versions de scripts/licenses-tools.env" >&2
+    echo "[licences] ERROR: use the versions from scripts/licenses-tools.env" >&2
     exit 1
 }
 
@@ -90,4 +91,4 @@ cp "$PYTHON_RUNTIME_LICENSE" "$PACKAGE_DIR/licenses/python/LICENSE-runtime.txt"
 cp -a "$NUMPY_LICENSES/." "$PACKAGE_DIR/licenses/numpy/"
 cp "$SCIPY_LICENSE" "$PACKAGE_DIR/licenses/scipy/LICENSE.txt"
 mv "$TEMP_DIR/THIRD-PARTY-LICENSES.txt" "$PACKAGE_DIR/THIRD-PARTY-LICENSES.txt"
-echo "[licences] OK : licences et notices livrées dans $PACKAGE_DIR"
+echo "[licences] OK: licenses and notices delivered in $PACKAGE_DIR"

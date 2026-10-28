@@ -508,7 +508,7 @@ workspace exercise it, exports included (#34). `fmt` compiles nothing; it also c
 
 **Who does what.** GitLab is the reference repository; a mirror copies it to
 `github.com/Marek9935/StokesForge`, where `ci.yml` runs as soon as a `push` of `main`
-(or a tag `v*`) arrives. A second workflow, `Résultats GitLab`, then sends
+(or a tag `v*`) arrives. A second workflow, `GitLab results`, then sends
 the results back to the GitLab pipeline of the same commit. **So only GitLab is consulted**;
 the full logs stay on GitHub (link in each status).
 
@@ -599,13 +599,13 @@ Windows jobs of GitHub do not appear there; their failure is read on GitHub
 
 `.github/workflows/gitlab-status.yml` triggers when `CI` is finished,
 even on failure or after cancelation. `scripts/gitlab-status.py` publishes the six
-statuses `github-actions/<travail>` on the tested SHA, in the same GitLab
+statuses `github-actions/<job>` on the tested SHA, in the same GitLab
 pipeline, with a link to the GitHub logs of each job. The results
 arrive after the whole CI has ended; the logs and artifacts
 stay on GitHub. Old pipelines are not corrected retroactively.
 
 A failed `robustesse` reproduction is marked `skipped`, with the description
-« Échec non bloquant des reproductions »: the external statuses API offers
+"Non-blocking failure of the reproductions": the external statuses API offers
 no `allow_failure` parameter. The other failures are red, a cancelation
 stays canceled, and a missing job is never declared successful.
 
@@ -634,7 +634,7 @@ report: the statuses are already published.
 The reporter ignores pull requests and forks, and reads its script from
 `main`, never from the code of a PR. It also ignores an attempt for which a more recent
 rerun exists. A publication outage makes the workflow
-`Résultats GitLab` fail on GitHub, without turning the test results.
+`GitLab results` fail on GitHub, without turning the test results.
 
 The GitHub repository `Marek9935/StokesForge` and the GitLab project identifier
 (`86104040`) are written in `scripts/gitlab-status.py` (`REPOSITORY`, `GITLAB`),
@@ -646,7 +646,7 @@ in `gitlab-status.yml` (condition `github.repository`) and in
 release, #333) also **expires**: after the deadline, `release-linux`, `dist-windows`
 and `publier` fail. Recreate it in GitLab (`Paramètres > Jetons
 d'accès`) and replace the secret. The GitLab token `github-ci-status` **expires**: at its deadline,
-`Résultats GitLab` fails on GitHub (« Retour GitLab impossible ») and no
+`GitLab results` fails on GitHub ("Reporting to GitLab failed") and no
 status arrives anymore. Create a new token (step 1) and replace the secret
 `GITLAB_STATUS_TOKEN` (step 2). The GitHub token of the mirror (step 0) **also expires**
 (created on 17 October 2026, deadline 17 October 2027): after that time, the mirror
@@ -678,7 +678,7 @@ Initial configuration (once only):
    `GITLAB_STATUS_TOKEN`. Value: the GitLab token, typed directly here.
    No token is committed or asked for in the conversation.
 3. Push a GitLab commit and wait for its mirror, or rerun GitHub CI.
-   The workflow `Résultats GitLab` then publishes the states in
+   The workflow `GitLab results` then publishes the states in
    `GitLab > Build > Pipelines`, stage `external`.
 
 Reporter tests, without network or real token:

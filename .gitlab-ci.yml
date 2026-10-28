@@ -1,38 +1,38 @@
-# CI du dépôt : cœur Rust et intégration Python embarquée.
-# Ce fichier racine est le seul lu par GitLab.
+# Repository CI: Rust core and embedded Python integration.
+# This root file is the only one GitLab reads.
 #
-# ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :
+# WARNING — what `fmt`, `clippy` and `test` do NOT prove:
 #
-# Ces trois travaux n'activent jamais la feature Cargo `python`. Tout ce qui
-# touche à PyO3 (crates `stokesforge-python`, `stokesforge-script`, et l'intégration
-# côté `stokesforge-app`) est donc compilé **vide** ici : le pont Python — la
-# partie la plus risquée de toute l'architecture — n'est ni compilé, ni
-# vérifié par clippy, ni testé par ces trois travaux. Un pipeline vert sur ces
-# trois travaux dit seulement que le cœur Rust pur compile et passe ses
-# tests ; il ne dit rien du pont Python.
+# These three jobs never enable the Cargo feature `python`. Everything that
+# touches PyO3 (crates `stokesforge-python`, `stokesforge-script`, and the
+# integration in `stokesforge-app`) is therefore compiled **empty** here: the
+# Python bridge — the riskiest part of the whole architecture — is neither
+# compiled, nor checked by clippy, nor tested by these three jobs. A green
+# pipeline on these three jobs only says that the pure Rust core compiles and
+# passes its tests; it says nothing about the Python bridge.
 #
-# L'interpréteur n'est pas versionné ; `test-python` le vendorise, génère
-# PYO3_CONFIG_FILE et teste ce chemin automatiquement. Son échec bloque le
-# pipeline ; aucun Python système n'est requis.
+# The interpreter is not versioned; `test-python` vendors it, generates
+# PYO3_CONFIG_FILE and tests this path automatically. Its failure blocks the
+# pipeline; no system Python is required.
 
 stages:
   - check
 
-# Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
-# Les travaux Linux **et Windows** s'exécutent sur GitHub (`.github/workflows/ci.yml`,
-# runners hébergés), qui retourne leurs statuts externes ; la release GitLab y
-# est aussi créée (travail `publier`, #333). Poser STOKESFORGE_CI_LINUX=gitlab
-# pour réactiver les travaux Linux ici avec un runner Linux. Plus aucun runner
-# Windows GitLab n'est nécessaire.
+# Runners: only personal runners are used (shared ones are disabled in GitLab).
+# The Linux **and Windows** jobs run on GitHub (`.github/workflows/ci.yml`,
+# hosted runners), which sends back their external statuses; the GitLab release
+# is also created there (`publier` job, #333). Set STOKESFORGE_CI_LINUX=gitlab
+# to enable the Linux jobs here again with a Linux runner. No GitLab Windows
+# runner is needed any more.
 
 variables:
   STOKESFORGE_CI_LINUX: "github"
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
-  # #88 : le runner partagé saturait son disque (`No space left on device`)
-  # sur les travaux qui compilent Typst et egui. Pas de compilation
-  # incrémentale (inutile en CI) et pas d'informations de débogage : le profil
-  # `test` hérite de `main`. Réglage propre à la CI, `Cargo.toml` reste intact
-  # et le débogage local aussi.
+  # #88: the shared runner filled its disk (`No space left on device`)
+  # on the jobs that compile Typst and egui. No incremental compilation
+  # (useless in CI) and no debug info: the `test` profile inherits from
+  # `main`. A CI-only setting: `Cargo.toml` stays untouched, and so does local
+  # debugging.
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
 
@@ -41,8 +41,8 @@ variables:
   rules:
     - if: '$STOKESFORGE_CI_LINUX == "gitlab"'
 
-# Une clé par travail : ils ne partageaient qu'une clé par branche et se
-# réécrivaient mutuellement un `target/` volumineux (#88).
+# One key per job: they used to share one key per branch and overwrote each
+# other's large `target/` (#88).
 .rust-cache: &rust-cache
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
@@ -50,7 +50,7 @@ variables:
       - .cargo/
       - target/
 
-# `fmt` ne compile rien : seul le registre Cargo vaut d'être gardé.
+# `fmt` compiles nothing: only the Cargo registry is worth keeping.
 fmt:
   stage: check
   extends: .linux-job
@@ -66,8 +66,8 @@ fmt:
     - scripts/versions-alignees.sh
     - scripts/release-tag-test.sh
 
-# #129 : politique et notices, toutes plateformes et feature python comprise,
-# sans compilation du workspace. Versions partagées avec la distribution.
+# #129: policy and notices, all platforms and the python feature included,
+# without compiling the workspace. Versions shared with the distribution.
 licenses:
   stage: check
   extends: .linux-job
@@ -79,8 +79,8 @@ licenses:
   script:
     - source scripts/licenses-tools.env
     - cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
-    # Le binaire de cargo-about exige la feature `cli`, absente par défaut :
-    # sans elle, `cargo install` réussit sans rien installer (#332).
+    # The cargo-about binary needs the `cli` feature, off by default:
+    # without it, `cargo install` succeeds and installs nothing (#332).
     - cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cargo deny --locked check licenses
@@ -99,15 +99,14 @@ clippy:
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
-# `cargo test --workspace` couvre désormais aussi `stokesforge-robustesse` (banc de
-# robustesse, ajouté le 2026-09-11). Attention à ce que cela recouvre : ce
-# crate porte DEUX natures de test, et celle-ci n'en lance qu'une.
+# `cargo test --workspace` now also covers `stokesforge-robustesse` (robustness
+# bench, added on 2026-09-11). Mind what this covers: this crate holds TWO
+# kinds of test, and this job runs only one of them.
 #
-#   - les GARDE-FOUS passent et doivent continuer à passer — ils sont lancés
-#     ici, comme n'importe quel test du dépôt ;
-#   - les REPRODUCTIONS d'anomalies échouent délibérément. Elles sont
-#     `#[ignore]`, donc PAS lancées ici : c'est le travail `robustesse`
-#     ci-dessous qui s'en charge.
+#   - the GUARDS pass and must keep passing — they run here, like any test
+#     of the repository;
+#   - the REPRODUCTIONS of anomalies fail on purpose. They are `#[ignore]`,
+#     so they are NOT run here: the `robustesse` job below handles them.
 test:
   stage: check
   extends: .linux-job
@@ -116,20 +115,19 @@ test:
   script:
     - cargo test --workspace
 
-# Reproductions d'anomalies du banc de robustesse : les `#[ignore]` de
-# `stokesforge-robustesse`, une par anomalie, sous l'identifiant que porte leur
-# attribut. Il n'en reste aucune aujourd'hui (V1, #333 : critère « zéro
-# rouge ») ; le travail lance `--ignored` pour qu'une reproduction remise à
-# l'avenir soit vue à chaque pipeline.
+# Reproductions of anomalies of the robustness bench: the `#[ignore]` tests of
+# `stokesforge-robustesse`, one per anomaly, under the identifier their
+# attribute carries. None is left today (V1, #333: "zero red" criterion); the
+# job runs `--ignored` so that a reproduction added in the future is seen in
+# every pipeline.
 #
-# `allow_failure: true` : une reproduction échoue tant que son anomalie n'est
-# pas corrigée ; la rendre bloquante mettrait le pipeline au rouge en
-# permanence. Les batteries sans `#[ignore]` tournent, elles, dans `test` et
-# `test-python`, bloquants.
+# `allow_failure: true`: a reproduction fails until its anomaly is fixed;
+# making it blocking would keep the pipeline red all the time. The batteries
+# without `#[ignore]` run in `test` and `test-python`, which are blocking.
 #
-# **Quand une reproduction passe au vert**, retirer son `#[ignore]` pour que le
-# garde-fou prenne le relais dans le travail `test`. Anomalies d'origine et
-# ordre de correction : `docs/archive/rustrewrite/` (rapports de robustesse,
+# **When a reproduction turns green**, remove its `#[ignore]` so that the
+# guard takes over in the `test` job. Original anomalies and fixing order:
+# `docs/archive/rustrewrite/` (robustness reports,
 # `guide-de-correction-robustesse.md`).
 robustesse:
   stage: check
@@ -140,26 +138,26 @@ robustesse:
   script:
     - cargo test -p stokesforge-robustesse -- --ignored
 
-# Python #70 : automatique et bloquant, runtime et compilations en cache.
-# scripts/python-test.sh couvre pont, scripts, robustesse, application et CLI.
-# Les reproductions ignorées et le spike Matplotlib restent des essais explicites.
+# Python #70: automatic and blocking, runtime and compilations cached.
+# scripts/python-test.sh covers bridge, scripts, robustness, application and CLI.
+# The ignored reproductions and the Matplotlib spike stay explicit trials.
 test-python:
   stage: check
   extends: .linux-job
   image: rust:1
-  # Deux caches distincts (`.rust-cache` n'est pas réutilisable tel quel ici :
-  # son ancre porte déjà la clé `cache`, la fusionner dans un élément de liste
-  # imbriquerait `cache` sous `cache`). Le premier reprend la même forme que
-  # `.rust-cache` (dépendances et artefacts Cargo, clés par branche) ; le
-  # second est propre à ce travail — voir son commentaire.
+  # Two separate caches (`.rust-cache` cannot be reused as is here: its anchor
+  # already carries the `cache` key, and merging it into a list item would
+  # nest `cache` under `cache`). The first has the same shape as `.rust-cache`
+  # (Cargo dependencies and artifacts, keys per branch); the second belongs to
+  # this job — see its comment.
   cache:
     - key: cargo-python-${CI_COMMIT_REF_SLUG}
       paths:
         - .cargo/
         - target/
-    # Cache séparé, clé sur le verrou de versions : l'archive et le préfixe
-    # extrait ne changent que si vendor/python/lock.env change, donc restent
-    # en cache d'une exécution à l'autre sans retéléchargement.
+    # Separate cache, keyed on the version lock: the archive and the extracted
+    # prefix change only if vendor/python/lock.env changes, so they stay
+    # cached from one run to the next without downloading again.
     - key:
         files:
           - vendor/python/lock.env
@@ -167,12 +165,12 @@ test-python:
         - vendor/python/*.tar.gz
         - vendor/python/extracted/
   before_script:
-    # Minimum requis par scripts/python-vendor.sh, vérifié dans le script
-    # lui-même : `curl` (téléchargement de l'archive python-build-standalone),
-    # `tar` (extraction), `ca-certificates` (validation TLS par curl du
-    # certificat de GitHub). Rien de plus : aucun compilateur ni Python
-    # système n'est nécessaire, l'interpréteur vendorisé amorce lui-même son
-    # pip par `ensurepip` si besoin.
+    # Minimum required by scripts/python-vendor.sh, checked in the script
+    # itself: `curl` (downloads the python-build-standalone archive),
+    # `tar` (extraction), `ca-certificates` (TLS validation by curl of the
+    # GitHub certificate). Nothing more: no compiler and no system Python
+    # are needed, the vendored interpreter bootstraps its own pip with
+    # `ensurepip` if needed.
     - apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar
   script:
     - scripts/python-vendor.sh

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contrats du retour GitHub → GitLab, sans réseau ni jeton réel."""
+"""Contracts of the GitHub → GitLab report, with no network and no real token."""
 
 import contextlib
 import copy
@@ -85,10 +85,10 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(self.posts), 6)
         for post in self.posts:
             self.assertEqual(post["pipeline_id"], 99)
-            self.assertIn("Tentative 2", post["description"])
+            self.assertIn("Attempt 2", post["description"])
             self.assertRegex(post["target_url"], r"/actions/runs/42/job/\d+$")
         self.assertEqual([p["state"] for p in self.posts], ["success"] * 4 + ["skipped", "success"])
-        self.assertIn("Échec non bloquant", self.posts[4]["description"])
+        self.assertIn("Non-blocking failure", self.posts[4]["description"])
 
     def test_echec_timeout_et_annulation_ne_deviennent_pas_verts(self):
         for conclusion, expected in [("failure", "failed"), ("timed_out", "failed"), ("cancelled", "canceled")]:
@@ -119,7 +119,7 @@ class ReportTest(unittest.TestCase):
         self.report()
         description = self.posts[2]["description"]
         self.assertEqual(self.posts[2]["state"], "failed")
-        self.assertIn("étape « Run cargo clippy »", description)
+        self.assertIn('step "Run cargo clippy"', description)
         self.assertIn("the borrowed expression", description)
         self.assertIn("crates/x/src/app.rs:1295:69", description)
         self.assertNotIn("unused variable", description)
@@ -128,31 +128,31 @@ class ReportTest(unittest.TestCase):
     def test_echec_poste_un_commentaire_de_commit_de_cinquante_lignes(self):
         self.jobs[3]["conclusion"] = "failure"
         self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
-        before = [f"ligne avant {n}" for n in range(30)]
-        after = [f"ligne après {n}" for n in range(100)]
-        self.log = "\n".join(before + ["error: la cause"] + after)
+        before = [f"line before {n}" for n in range(30)]
+        after = [f"line after {n}" for n in range(100)]
+        self.log = "\n".join(before + ["error: the cause"] + after)
         self.report()
         self.assertEqual(len(self.comments), 1)
         note = self.comments[0]
         self.assertIn("github-actions/test", note)
         self.assertIn("/actions/runs/42/job/", note)
-        self.assertIn("error: la cause", note)
-        self.assertIn("ligne avant 29", note)
-        self.assertNotIn("ligne avant 5\n", note)  # au-delà du contexte avant
-        self.assertNotIn("ligne après 60", note)  # au-delà de 50 lignes
+        self.assertIn("error: the cause", note)
+        self.assertIn("line before 29", note)
+        self.assertNotIn("line before 5\n", note)  # beyond the context before
+        self.assertNotIn("line after 60", note)  # beyond 50 lines
         code = note.split("```text\n")[1].split("\n```")[0]
         self.assertEqual(len(code.splitlines()), status.CONTEXT_LINES)
 
     def test_fenetre_ancree_sur_le_marqueur_d_erreur_github(self):
-        # Vrai journal de `cargo fmt --check` : aucune ligne `error:`, la sortie
-        # utile est juste avant `##[error]`, le nettoyage du travail après.
+        # Real log of `cargo fmt --check`: no `error:` line, the useful output
+        # is just before `##[error]`, the job cleanup after.
         log = "\n".join(
-            ["bruit d'une étape précédente"] * 40
-            + ["Diff in crates/x/src/lib.rs:74:", "-ancien", "+nouveau", "##[error]Process completed with exit code 1.",
+            ["noise from a previous step"] * 40
+            + ["Diff in crates/x/src/lib.rs:74:", "-old", "+new", "##[error]Process completed with exit code 1.",
                "Post job cleanup.", "[command]/usr/bin/git version"]
         )
         context = status.failure_context(log)
-        self.assertIn("+nouveau", context)
+        self.assertIn("+new", context)
         self.assertIn("Diff in crates/x/src/lib.rs:74:", context)
         self.assertNotIn("Post job cleanup", context)
         self.assertLessEqual(len(context.splitlines()), status.CONTEXT_LINES)
@@ -164,7 +164,7 @@ class ReportTest(unittest.TestCase):
         self.report()  # journal absent
         self.assertEqual(len(self.comments), 1)
         self.assertNotIn("```", self.comments[0])
-        self.assertIn("Journal complet", self.comments[0])
+        self.assertIn("Full log", self.comments[0])
 
     def test_commentaire_refuse_ne_casse_pas_le_rapport(self):
         self.jobs[0]["conclusion"] = "failure"
@@ -189,7 +189,7 @@ class ReportTest(unittest.TestCase):
         self.licenses = None  # artefact introuvable
         self.report()
         self.assertEqual(self.uploads, [])
-        self.assertEqual(len(self.posts), 18)  # les statuts passent toujours
+        self.assertEqual(len(self.posts), 18)  # statuses always go through
 
     def test_depot_de_licences_refuse_ne_casse_pas_le_rapport(self):
         with patch.object(status, "request_json", side_effect=self.api):
@@ -228,8 +228,8 @@ class ReportTest(unittest.TestCase):
     def test_journal_indisponible_ou_enorme_ne_casse_pas_le_rapport(self):
         self.jobs[3]["conclusion"] = "failure"
         self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
-        self.report()  # journal absent : l'étape seule suffit
-        self.assertIn("étape « Run cargo test »", self.posts[3]["description"])
+        self.report()  # log missing: the step alone is enough
+        self.assertIn('step "Run cargo test"', self.posts[3]["description"])
         self.posts.clear()
         self.log = "error: " + "x" * 5000
         self.report()
@@ -258,7 +258,7 @@ class ReportTest(unittest.TestCase):
         self.jobs.pop(0)
         self.report()
         self.assertEqual(self.posts[0]["state"], "failed")
-        self.assertIn("absent", self.posts[0]["description"])
+        self.assertIn("missing", self.posts[0]["description"])
 
     def test_pr_fork_et_autre_workflow_ne_font_aucune_requete(self):
         for field, value in [("event", "pull_request"), ("head_repository", {"full_name": "fork/repo"}), ("path", ".github/workflows/autre.yml")]:

@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
-# Assemble et VALIDE la distribution autonome de la fenêtre `stokesforge-app`, pont
-# Python compris, **et** le binaire d'auto-vérification `stokesforge-selftest`.
+# Assembles and VALIDATES the standalone distribution of the `stokesforge-app`
+# window, Python bridge included, **and** the `stokesforge-selftest`
+# self-check binary.
 #
-# C'est le verrou de la tâche 5.6, côté empaquetage : si ce script sort 0,
-# TROIS choses sont vraies depuis un binaire empaqueté — pas depuis
-# `cargo run`, ni contre l'interpréteur vendorisé du dépôt :
-#   1. la fenêtre `stokesforge-app` s'ouvre et se ferme proprement ;
-#   2. `stokesforge-selftest` — construit et lié exactement comme `stokesforge-app`,
-#      même rpath relatif, même disposition `lib/python` — REJOUE le critère
-#      de fin du socle entier : édition/annulation/rétablissement,
-#      aller-retour disque, et un script Python qui lit une colonne sans
-#      copie, en écrit une autre par le bus, annulée depuis l'hôte comme
-#      depuis Python ;
-#   3. ce binaire d'auto-vérification sort en code 0.
+# This is the lock of task 5.6, on the packaging side: if this script exits 0,
+# THREE things are true from a packaged binary, not from `cargo run`, and not
+# against the repository's vendored interpreter:
+#   1. the `stokesforge-app` window opens and closes cleanly;
+#   2. `stokesforge-selftest`, built and linked exactly like `stokesforge-app`
+#      (same relative rpath, same `lib/python` layout), REPLAYS the end
+#      criterion of the whole foundation: edit/undo/redo, a disk round trip,
+#      and a Python script that reads a column without copying, writes another
+#      one through the bus, undone from the host as well as from Python;
+#   3. this self-check binary exits with code 0.
 #
-# Les deux binaires sont construits sur le même modèle que
-# `scripts/pyhello-dist.sh` (mêmes pièges n°1/n°2, même disposition
-# `lib/python`) et copiés CÔTE À CÔTE dans `dist/stokesforge-app/`, pour que les
-# deux trouvent `lib/python` par le même chemin relatif
-# (`<dossier de l'exécutable>/lib/python`, cf. `EmbeddedPython::locate`).
+# Both binaries are built on the same model as `scripts/pyhello-dist.sh` (same
+# pitfalls no. 1/no. 2, same `lib/python` layout) and copied SIDE BY SIDE into
+# `dist/stokesforge-app/`, so that both find `lib/python` by the same relative
+# path (`<executable directory>/lib/python`, see `EmbeddedPython::locate`).
 #
-# # Ce que ce script NE prouve PAS
+# # What this script does NOT prove
 #
-# `stokesforge-app` démarre l'interpréteur **paresseusement**, au premier script
-# (voir `stokesforge_app_state::state`) : son ouverture-fermeture par auto-fermeture ne
-# lance donc aucun script et ne touche jamais Python. C'est exactement le
-# trou que `stokesforge-selftest` comble : lui seul, dans ce script, exécute
-# réellement un script Python depuis le paquet.
+# `stokesforge-app` starts the interpreter **lazily**, at the first script
+# (see `stokesforge_app_state::state`): opening and closing it by auto-quit
+# therefore runs no script and never touches Python. This is exactly the gap
+# that `stokesforge-selftest` fills: it alone, in this script, really runs a
+# Python script from the package.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,37 +37,37 @@ DIST="$REPO_ROOT/dist/stokesforge-app"
 SOFILE="libpython${PYTHON_XY}.so.1.0"
 AUTOQUIT_MS="${STOKESFORGE_APP_DIST_AUTOQUIT_MS:-1500}"
 
-# --- 1. Construction --------------------------------------------------------
-# PYO3_CONFIG_FILE : trouver libpython à la COMPILATION (piège n°1).
+# --- 1. Build ---------------------------------------------------------------
+# PYO3_CONFIG_FILE: find libpython at COMPILE time (pitfall no. 1).
 PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 
-# rpath RELATIF, comme pour pyhello : les deux binaires trouveront leur
-# libpython dans le dossier où ils sont copiés (piège n°2), une fois déplacés
-# hors du dépôt — d'où le besoin de les copier au MÊME endroit (étape 2).
+# RELATIVE rpath, as for pyhello: both binaries will find their libpython in
+# the folder where they are copied (pitfall no. 2), once moved out of the
+# repository; hence the need to copy them to the SAME place (step 2).
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
-echo "[dist] construction release de stokesforge-app (feature python)"
+echo "[dist] release build of stokesforge-app (python feature)"
 cd "$REPO_ROOT"
 cargo build --locked -p stokesforge-app --features python --release --bin stokesforge-app
 
-echo "[dist] construction release de stokesforge-selftest (feature python)"
+echo "[dist] release build of stokesforge-selftest (python feature)"
 cargo build --locked -p stokesforge-script --features python --release --bin stokesforge-selftest
 
-# --- 2. Assemblage ----------------------------------------------------------
-echo "[dist] assemblage de $DIST"
+# --- 2. Assembly ------------------------------------------------------------
+echo "[dist] assembling $DIST"
 rm -rf "$DIST"
 mkdir -p "$DIST/lib/python/lib"
 
 cp "$REPO_ROOT/target/release/stokesforge-app" "$DIST/stokesforge-app"
-# À CÔTÉ de stokesforge-app, pas dans un sous-dossier : c'est ce qui lui fait
-# trouver lib/python par le même chemin relatif qu'EmbeddedPython::locate()
-# résout pour stokesforge-app (<dossier de l'exécutable>/lib/python).
+# NEXT TO stokesforge-app, not in a subfolder: this is what makes it find
+# lib/python by the same relative path that EmbeddedPython::locate() resolves
+# for stokesforge-app (<executable directory>/lib/python).
 cp "$REPO_ROOT/target/release/stokesforge-selftest" "$DIST/stokesforge-selftest"
 
-# Même disposition que dist/pyhello : libpython une seule fois dans lib/, là
-# où pointe le rpath ; le préfixe embarqué sous lib/python/lib, là où
-# EmbeddedPython::locate() l'attend (<dir de l'exécutable>/lib/python).
+# Same layout as dist/pyhello: libpython only once in lib/, where the rpath
+# points; the embedded prefix under lib/python/lib, where
+# EmbeddedPython::locate() expects it (<executable dir>/lib/python).
 cp "$PREFIX/lib/$SOFILE" "$DIST/lib/$SOFILE"
 ln -s "$SOFILE" "$DIST/lib/libpython${PYTHON_XY}.so"
 cp -a "$PREFIX/lib/python${PYTHON_XY}" "$DIST/lib/python/lib/"
@@ -76,61 +75,59 @@ find "$PREFIX/lib" -maxdepth 1 -name '*.so*' ! -name 'libpython*' \
     -exec cp -a {} "$DIST/lib/python/lib/" \;
 rm -rf "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip" \
        "$DIST/lib/python/lib/python${PYTHON_XY}/site-packages/pip-"*.dist-info
-# __pycache__ conservés : voir la doc de pyhello-dist.sh (même raison, même
-# gain de ~165 ms au premier script).
+# __pycache__ kept: see the doc of pyhello-dist.sh (same reason, same gain of
+# ~165 ms at the first script).
 
-# Licences du code, des ressources et du runtime effectivement livré (#129).
+# Licenses of the code, the resources and the runtime actually delivered (#129).
 "$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
 
 TAILLE="$(du -sm "$DIST" | cut -f1)"
-echo "[dist] taille de $DIST : ${TAILLE} Mo"
+echo "[dist] size of $DIST: ${TAILLE} MB"
 
-# --- 3. Preuve de liaison ---------------------------------------------------
-echo "[dist] ldd | grep python (stokesforge-app) :"
+# --- 3. Linking proof -------------------------------------------------------
+echo "[dist] ldd | grep python (stokesforge-app):"
 ldd "$DIST/stokesforge-app" | grep -i python
 if ! ldd "$DIST/stokesforge-app" | grep -q "$DIST/lib/$SOFILE"; then
-    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour stokesforge-app" >&2
+    echo "[dist] ERROR: $SOFILE is not resolved from $DIST/lib for stokesforge-app" >&2
     exit 1
 fi
 
-echo "[dist] ldd | grep python (stokesforge-selftest) :"
+echo "[dist] ldd | grep python (stokesforge-selftest):"
 ldd "$DIST/stokesforge-selftest" | grep -i python
 if ! ldd "$DIST/stokesforge-selftest" | grep -q "$DIST/lib/$SOFILE"; then
-    echo "[dist] ERREUR : $SOFILE n'est pas résolue depuis $DIST/lib pour stokesforge-selftest" >&2
+    echo "[dist] ERROR: $SOFILE is not resolved from $DIST/lib for stokesforge-selftest" >&2
     exit 1
 fi
 
-# --- 4. Preuve que la fenêtre empaquetée s'ouvre et se ferme ----------------
+# --- 4. Proof that the packaged window opens and closes --------------------
 #
-# Environnement nettoyé (`env -i`) : PATH et HOME minimaux, plus le strict
-# nécessaire pour qu'une vraie fenêtre puisse s'ouvrir sur CE poste — une
-# fenêtre a besoin d'un serveur d'affichage, ce que `pyhello` (purement
-# console) n'exigeait pas.
+# Cleaned environment (`env -i`): minimal PATH and HOME, plus the strict
+# minimum for a real window to open on THIS machine: a window needs a display
+# server, which `pyhello` (purely console) did not require.
 #
-# `WAYLAND_DISPLAY` et `XDG_RUNTIME_DIR` sont délibérément ABSENTS de cet
-# environnement : sur ce poste (session GNOME/Wayland), la fermeture
-# programmée par `STOKESFORGE_APP_AUTOQUIT_MS` ne réveille jamais la boucle
-# d'événements de `winit` sous son greffon Wayland — le processus reste
-# indéfiniment dans `ep_poll`, constaté par `cargo run` direct (`timeout 90`
-# sans sortie). Le même binaire, sous Xwayland (`DISPLAY` sans
-# `WAYLAND_DISPLAY`), s'ouvre et se ferme normalement (code 0, quelques
-# secondes) : c'est donc une limite du greffon Wayland de `winit`/`eframe`
-# sur CE compositeur, pas un défaut de `stokesforge-app`. Forcer Xwayland ici est
-# le contournement le plus honnête tant que ce n'est pas creusé côté
-# `eframe` ; voir le rapport de la tâche 5.6 pour le détail.
+# `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` are deliberately ABSENT from this
+# environment: on this machine (GNOME/Wayland session), the close scheduled by
+# `STOKESFORGE_APP_AUTOQUIT_MS` never wakes the `winit` event loop under its
+# Wayland plugin; the process stays indefinitely in `ep_poll`, observed with a
+# direct `cargo run` (`timeout 90` with no output). The same binary, under
+# Xwayland (`DISPLAY` without `WAYLAND_DISPLAY`), opens and closes normally
+# (code 0, a few seconds): so this is a limit of the `winit`/`eframe` Wayland
+# plugin on THIS compositor, not a defect of `stokesforge-app`. Forcing
+# Xwayland here is the most honest workaround until it is investigated on the
+# `eframe` side; see the report of task 5.6 for the detail.
 if [[ -z "${DISPLAY:-}" ]]; then
-    echo "[dist] ERREUR : DISPLAY n'est pas posée — il faut un serveur X11/Xwayland accessible" >&2
+    echo "[dist] ERROR: DISPLAY is not set; an accessible X11/Xwayland server is required" >&2
     exit 1
 fi
 
-# Dossier de configuration jetable (#333) : sans argument, la première
-# ouverture écrit la démonstration dans `demo.stf` de ce dossier et l'ouvre ;
-# c'est ce parcours de production que la fenêtre empaquetée éprouve, sans
-# toucher au vrai profil de la machine.
+# Throwaway configuration folder (#333): with no argument, the first opening
+# writes the demonstration into `demo.stf` of this folder and opens it; this
+# is the production path that the packaged window tests, without touching the
+# machine's real profile.
 CONFIG_DIR="$(mktemp -d)"
 trap 'rm -rf "$CONFIG_DIR"' EXIT
 
-echo "[dist] exécution en environnement nettoyé, STOKESFORGE_APP_AUTOQUIT_MS=$AUTOQUIT_MS"
+echo "[dist] running in a cleaned environment, STOKESFORGE_APP_AUTOQUIT_MS=$AUTOQUIT_MS"
 set +e
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" \
@@ -141,28 +138,28 @@ CODE="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$CODE" -ne 0 ]]; then
-    echo "[dist] ERREUR : la fenêtre empaquetée est sortie en code $CODE (attendu 0)" >&2
+    echo "[dist] ERROR: the packaged window exited with code $CODE (expected 0)" >&2
     exit 1
 fi
 
-# La première ouverture a offert la démonstration : le fichier existe et le
-# marqueur est posé (#333).
+# The first opening offered the demonstration: the file exists and the marker
+# is set (#333).
 if [[ ! -s "$CONFIG_DIR/demo.stf" ]] || ! grep -q '"first_run_done": true' "$CONFIG_DIR/preferences.json" 2>/dev/null; then
-    echo "[dist] ERREUR : la première ouverture n'a pas écrit demo.stf et le marqueur dans $CONFIG_DIR" >&2
+    echo "[dist] ERROR: the first opening did not write demo.stf and the marker in $CONFIG_DIR" >&2
     exit 1
 fi
 
-echo "[dist] OK — fenêtre empaquetée ouverte puis fermée proprement (code 0), ${TAILLE} Mo"
+echo "[dist] OK: packaged window opened then closed cleanly (code 0), ${TAILLE} MB"
 
-# --- 5. Preuve que le critère de fin du socle tient DEPUIS LE PAQUET -------
+# --- 5. Proof that the foundation's end criterion holds FROM THE PACKAGE ---
 #
-# C'est ici que ce script cesse d'être une preuve d'ouverture de fenêtre pour
-# devenir la preuve du critère de fin ENTIER. Environnement VIDÉ puis PIÉGÉ,
-# comme pour pyhello-dist.sh : si la résolution du préfixe embarqué ou son
-# isolation fuyaient vers un Python système, le faux PYTHONPATH/PYTHONHOME le
-# révélerait plutôt que de passer inaperçu. Aucun DISPLAY nécessaire :
-# stokesforge-selftest est un programme console, pas une fenêtre.
-echo "[dist] auto-vérification depuis le paquet, environnement nettoyé et piégé"
+# This is where this script stops being a proof that a window opens and becomes
+# the proof of the WHOLE end criterion. EMPTIED then TRAPPED environment, as
+# for pyhello-dist.sh: if the resolution of the embedded prefix or its
+# isolation leaked toward a system Python, the fake PYTHONPATH/PYTHONHOME would
+# reveal it rather than let it go unnoticed. No DISPLAY needed:
+# stokesforge-selftest is a console program, not a window.
+echo "[dist] self-check from the package, cleaned and trapped environment"
 set +e
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        PYTHONPATH=/tmp/piege PYTHONHOME=/tmp/piege2 \
@@ -171,8 +168,8 @@ CODE_SELFTEST="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$CODE_SELFTEST" -ne 0 ]]; then
-    echo "[dist] ERREUR : stokesforge-selftest est sorti en code $CODE_SELFTEST (attendu 0) — le critère de fin du socle n'est PAS vérifié depuis le paquet" >&2
+    echo "[dist] ERROR: stokesforge-selftest exited with code $CODE_SELFTEST (expected 0); the foundation's end criterion is NOT verified from the package" >&2
     exit 1
 fi
 
-echo "[dist] OK — fenêtre empaquetée ET critère de fin du socle vérifiés depuis le paquet (code 0), ${TAILLE} Mo"
+echo "[dist] OK: packaged window AND foundation end criterion verified from the package (code 0), ${TAILLE} MB"

@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Vérifie que tous les crates du workspace portent une même version X.Y.Z
-# (#349, #350). Ne lit ni tag ni CHANGELOG.
+# Checks that all workspace crates have the same version X.Y.Z
+# (#349, #350). Reads neither tag nor CHANGELOG.
 #
-# Usage : scripts/versions-alignees.sh [X.Y.Z]
-#   sans argument : les crates doivent être égaux entre eux ;
-#   avec argument : ils doivent tous être en X.Y.Z.
+# Usage: scripts/versions-alignees.sh [X.Y.Z]
+#   no argument: the crates must be equal to each other;
+#   with argument: they must all be at X.Y.Z.
 #
-# Refuse (code 1) si un crate dérive (liste de chaque crate et sa version), si
-# aucun crate n'est trouvé, ou si la section [package] d'un crate n'a pas
-# exactement une ligne `version = "…"` (`version.workspace = true` refusé :
-# non lu ici). Seule la section [package] est lue (#352).
-# Les dépendances internes `stokesforge-x = { version = "…" }` doivent porter
-# la même version (path seul permis ; table [dependencies.stokesforge-x] et
-# `package = "stokesforge-…"` refusés, non lus), et FORMAT_VERSION de
-# stokesforge-persistence exige le témoin tests/temoins/vN/projet.stf (#353).
-# Cargo.lock doit porter chaque crate du workspace à la même version (#351) :
-# refus (code 1) si le verrou est absent ou en retard (`cargo update --workspace`).
-# Appelé par le travail `fmt` (GitHub et GitLab) et par scripts/release-notes.sh.
-# STOKESFORGE_REPO_ROOT (essais) remplace la racine du dépôt.
+# Refuses (code 1) if a crate drifts (lists each crate and its version), if
+# no crate is found, or if the [package] section of a crate does not have
+# exactly one line `version = "…"` (`version.workspace = true` refused: not
+# read here). Only the [package] section is read (#352).
+# Internal dependencies `stokesforge-x = { version = "…" }` must have the
+# same version (path only is allowed; table [dependencies.stokesforge-x] and
+# `package = "stokesforge-…"` refused, not read), and FORMAT_VERSION of
+# stokesforge-persistence requires the witness tests/temoins/vN/projet.stf (#353).
+# Cargo.lock must hold each workspace crate at the same version (#351):
+# refused (code 1) if the lock file is missing or behind (`cargo update --workspace`).
+# Called by the `fmt` job (GitHub and GitLab) and by scripts/release-notes.sh.
+# STOKESFORGE_REPO_ROOT (tests) replaces the repository root.
 set -euo pipefail
 
 REPO_ROOT="${STOKESFORGE_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -29,7 +29,7 @@ bad=0
 for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
     [ -e "$manifest" ] || continue
     name="$(basename "$(dirname "$manifest")")"
-    # Section [package] seule : du [package] au prochain en-tête de section.
+    # [package] section only: from [package] to the next section header.
     found="$(awk '
         /^\[/ { in_pkg = ($0 ~ /^\[package\][[:space:]]*(#.*)?$/); next }
         in_pkg && /^version\.workspace[[:space:]]*=/ { ws = 1 }
@@ -45,17 +45,17 @@ for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
             if (n == 1) print val
         }' "$manifest")"
     if [ "$found" = WORKSPACE ]; then
-        echo "[versions] ERREUR : $name hérite de « version.workspace = true », non lu ici : écrire « version = \"X.Y.Z\" » dans [package]" >&2
+        echo "[versions] ERROR: $name inherits \"version.workspace = true\", not read here: write \"version = \\"X.Y.Z\\"\" in [package]" >&2
         bad=1
         continue
     fi
     if [ "$found" = DOUBLE ]; then
-        echo "[versions] ERREUR : $name a plusieurs lignes « version = » dans [package]" >&2
+        echo "[versions] ERROR: $name has several \"version =\" lines in [package]" >&2
         bad=1
         continue
     fi
     if [ -z "$found" ]; then
-        echo "[versions] ERREUR : $name n'a pas de ligne « version = \"X.Y.Z\" » dans [package]" >&2
+        echo "[versions] ERROR: $name has no line \"version = \\"X.Y.Z\\"\" in [package]" >&2
         bad=1
         continue
     fi
@@ -64,22 +64,22 @@ for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
 done
 
 if [ "${#names[@]}" = 0 ] && [ "$bad" = 0 ]; then
-    echo "[versions] ERREUR : aucun crate trouvé dans $REPO_ROOT/crates" >&2
+    echo "[versions] ERROR: no crate found in $REPO_ROOT/crates" >&2
     exit 1
 fi
 
 reference="${WANTED:-${versions[0]:-}}"
 for i in "${!names[@]}"; do
     if [ "${versions[$i]}" != "$reference" ]; then
-        echo "[versions] ERREUR : ${names[$i]} est en ${versions[$i]}, attendu $reference" >&2
+        echo "[versions] ERROR: ${names[$i]} is ${versions[$i]}, expected $reference" >&2
         bad=1
     fi
 done
 
-# Dépendances internes : `stokesforge-x = { version = "V", … }` dans toute
-# section *dependencies (dev-, build-, target.'cfg(…)'.*) doit porter la version
-# de référence. Une dépendance par chemin seul est permise. Les formes que ce
-# contrôle ne sait pas lire sont refusées plutôt que laissées passer (#353).
+# Internal dependencies: `stokesforge-x = { version = "V", … }` in any
+# *dependencies section (dev-, build-, target.'cfg(…)'.*) must have the
+# reference version. A path-only dependency is allowed. The forms this check
+# cannot read are refused rather than let through (#353).
 for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
     [ -e "$manifest" ] || continue
     name="$(basename "$(dirname "$manifest")")"
@@ -88,12 +88,12 @@ for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
             sect = $0
             dep_sect = (sect ~ /dependencies[[:space:]]*\][[:space:]]*(#.*)?$/)
             if (sect ~ /dependencies\.stokesforge-/) {
-                printf "%s : dépendance interne en table [..], forme non lue (écrire stokesforge-x = { version = \"%s\", path = \"…\" }) : %s\n", crate, ref, sect
+                printf "%s : internal dependency as a [..] table, unreadable form (write stokesforge-x = { version = \"%s\", path = \"…\" }) : %s\n", crate, ref, sect
             }
             next
         }
         /package[[:space:]]*=[[:space:]]*"stokesforge-/ {
-            printf "%s : dépendance interne renommée (package = \"stokesforge-…\"), forme non lue : %s\n", crate, $0
+            printf "%s : renamed internal dependency (package = \"stokesforge-…\"), unreadable form : %s\n", crate, $0
             next
         }
         dep_sect && /^[[:space:]]*stokesforge-[A-Za-z0-9_-]+[[:space:]]*=/ {
@@ -109,44 +109,44 @@ for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
                 sub(/^[^=]*=[[:space:]]*"/, "", v)
                 sub(/".*$/, "", v)
             } else {
-                next   # chemin seul
+                next   # path only
             }
             if (v != ref) {
-                printf "%s : dépendance %s en %s, attendu %s\n", crate, dep, v, ref
+                printf "%s: dependency %s is %s, expected %s\n", crate, dep, v, ref
             }
         }' "$manifest")"
     if [ -n "$dep_errors" ]; then
         while IFS= read -r line; do
-            echo "[versions] ERREUR : $line" >&2
+            echo "[versions] ERROR: $line" >&2
         done <<< "$dep_errors"
         bad=1
     fi
 done
 
-# Format .stf : FORMAT_VERSION = N exige le témoin tests/temoins/vN/projet.stf
-# (invariant 12 : un témoin ne se modifie jamais, une version de format neuve
-# en apporte un). Git ne versionne pas un dossier vide : on exige le fichier.
+# .stf format: FORMAT_VERSION = N requires the witness tests/temoins/vN/projet.stf
+# (invariant 12: a witness is never modified, a new format version brings
+# one). Git does not track an empty folder: the file is required.
 SCHEMA="$REPO_ROOT/crates/stokesforge-persistence/src/schema.rs"
 fv_lines=""
 [ ! -e "$SCHEMA" ] || fv_lines="$(grep -E '^[[:space:]]*(pub(\([a-z]+\))?[[:space:]]+)?const[[:space:]]+FORMAT_VERSION[[:space:]]*:[[:space:]]*[a-z0-9]+[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*;' "$SCHEMA" || true)"
 if [ "$(printf '%s' "$fv_lines" | grep -c .)" != 1 ]; then
-    echo "[versions] ERREUR : FORMAT_VERSION introuvable (ou en plusieurs exemplaires) dans $SCHEMA" >&2
+    echo "[versions] ERROR: FORMAT_VERSION not found (or found several times) in $SCHEMA" >&2
     bad=1
 else
     fv="$(printf '%s' "$fv_lines" | sed 's/^.*=[[:space:]]*\([0-9][0-9]*\)[[:space:]]*;.*$/\1/')"
     temoin="$REPO_ROOT/crates/stokesforge-persistence/tests/temoins/v$fv/projet.stf"
     if [ ! -f "$temoin" ]; then
-        echo "[versions] ERREUR : FORMAT_VERSION = $fv sans témoin $temoin (invariant 12, docs/persistance.md)" >&2
+        echo "[versions] ERROR: FORMAT_VERSION = $fv without witness $temoin (invariant 12, docs/persistance.md)" >&2
         bad=1
     fi
 fi
 
-# Cargo.lock : l'entrée de chaque crate du workspace porte la version de
-# référence. Un `cargo update --workspace` oublié après un changement de version
-# (règle #333) laisse l'ancienne version dans le verrou (#351), sans cargo.
+# Cargo.lock: the entry of each workspace crate has the reference version.
+# A forgotten `cargo update --workspace` after a version change (rule #333)
+# leaves the old version in the lock file (#351), without cargo.
 LOCK="$REPO_ROOT/Cargo.lock"
 if [ ! -f "$LOCK" ]; then
-    echo "[versions] ERREUR : Cargo.lock absent ($LOCK), versionné pour des constructions reproductibles" >&2
+    echo "[versions] ERROR: Cargo.lock missing ($LOCK), it is tracked for reproducible builds" >&2
     bad=1
 else
     for name in "${names[@]}"; do
@@ -155,14 +155,14 @@ else
             want && /^version = "/ { v = $0; sub(/^version = "/, "", v); sub(/".*$/, "", v); print v; exit }
             /^\[\[package\]\]/ { want = 0 }' "$LOCK")"
         if [ -z "$locked" ]; then
-            echo "[versions] ERREUR : $name absent de Cargo.lock : lancer « cargo update --workspace »" >&2
+            echo "[versions] ERROR: $name missing from Cargo.lock: run \"cargo update --workspace\"" >&2
             bad=1
         elif [ "$locked" != "$reference" ]; then
-            echo "[versions] ERREUR : Cargo.lock porte $name en $locked, attendu $reference : lancer « cargo update --workspace »" >&2
+            echo "[versions] ERROR: Cargo.lock has $name at $locked, expected $reference: run \"cargo update --workspace\"" >&2
             bad=1
         fi
     done
 fi
 
 [ "$bad" = 0 ] || exit 1
-echo "[versions] ${#names[@]} crates alignés en $reference"
+echo "[versions] ${#names[@]} crates in line at $reference"

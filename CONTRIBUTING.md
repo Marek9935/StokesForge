@@ -1,58 +1,59 @@
-# Contribuer à StokesForge
+# Contributing to StokesForge
 
-Le développement actif se fait sur `main`. Lire
-[`AGENTS.md`](AGENTS.md), [`.codex/README.md`](.codex/README.md) et la
-documentation du domaine avant de proposer une modification. Les bugs et
-évolutions se suivent dans les issues GitLab. Les commentaires, la
-documentation et les messages de commit sont en français.
+Active development happens on `main`. Read
+[`AGENTS.md`](AGENTS.md), [`.codex/README.md`](.codex/README.md) and the
+documentation of the domain before proposing a change. Bugs and
+changes are tracked in the GitLab issues. Commit messages, documentation
+(`docs/`, except `docs/archive/`, which stays in French) and new code and
+comments are in English. Existing French comments and identifiers are
+translated crate by crate (#372–#376).
 
-## Travailler à plusieurs
+## Working with others
 
-Une contribution passe par une merge request vers `main` : une relecture, la CI
-verte exigée. Ni force-push ni rebase sur une branche partagée ; la branche se
-nomme `feature/<n>-<sujet>`, reste courte et reçoit `main` avant la fusion
-(détail : [`docs/criteres-v1.md`](docs/criteres-v1.md), « Branches and versions »).
+A contribution goes through a merge request to `main`: one review, green CI
+required. No force-push and no rebase on a shared branch; the branch is
+named `feature/<n>-<topic>`, stays short and receives `main` before the merge
+(details: [`docs/criteres-v1.md`](docs/criteres-v1.md), "Branches and versions").
 
-## Licence des contributions
+## License of contributions
 
-Toute contribution originale à cette branche doit être proposée sous
-**GPL-3.0-or-later**. Ne proposer que des éléments dont
-vous détenez les droits nécessaires ; conserver les notices des composants
-tiers et indiquer leur provenance. Les contributions à une copie tierce
-vendorisée conservent sa licence, et leurs modifications doivent être
-identifiées.
+Every original contribution to this branch must be offered under
+**GPL-3.0-or-later**. Offer only material for which you hold the necessary
+rights; keep the notices of third-party components and state where they
+come from. Contributions to a vendored third-party copy keep its license,
+and their changes must be identified.
 
-Chaque commit extérieur doit porter un `Signed-off-by` attestant le
-[`Developer Certificate of Origin 1.1`](DCO), fourni sans modification.
-Après lecture du DCO, `git commit -s` ajoute cette ligne avec l'identité Git :
+Every external commit must carry a `Signed-off-by` line attesting the
+[`Developer Certificate of Origin 1.1`](DCO), provided without modification.
+After reading the DCO, `git commit -s` adds this line with your Git identity:
 
 ```text
-Signed-off-by: Prénom Nom <adresse@example.org>
+Signed-off-by: First Last <address@example.org>
 ```
 
-La signature confirme votre droit de proposer la contribution sous sa
-licence ; elle ne transfère pas votre copyright. Aucun CLA n'est encore en
-place. Le projet veut pouvoir accorder plus tard une permission supplémentaire
-(par exemple pour un connecteur propriétaire) : une contribution acceptée avant
-un CLA de licence (le contributeur garde son copyright et accorde le droit de
-redistribuer sous d'autres conditions) l'empêcherait sans l'accord de son
-auteur. Le CLA est suivi dans #348 et doit exister avant la première
-contribution extérieure fusionnée.
+The sign-off confirms your right to offer the contribution under its
+license; it does not transfer your copyright. No CLA is in place yet. The
+project wants to be able to grant an additional permission later (for example
+for a proprietary connector): a contribution accepted before a license CLA
+(the contributor keeps their copyright and grants the right to redistribute
+under other terms) would prevent this without the agreement of its author.
+The CLA is tracked in #348 and must exist before the first external
+contribution is merged.
 
-## Vérifications
+## Checks
 
-Suivre les contrôles du guide Codex : `fmt`, `clippy`, tests du workspace et
-tests Python quand le chemin Python est modifié. Une dépendance ou une
-ressource nouvelle doit aussi respecter [`deny.toml`](deny.toml) et figurer
-dans les notices de distribution. Les outils et commandes de licence sont
-dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+Follow the checks of the Codex guide: `fmt`, `clippy`, workspace tests and
+Python tests when the Python path is changed. A new dependency or
+resource must also respect [`deny.toml`](deny.toml) and appear
+in the distribution notices. The license tools and commands are
+in [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 
-La CI Linux et Windows tourne sur GitHub (miroir du dépôt) ; les
-résultats se lisent dans le pipeline GitLab du commit ou par
-`scripts/ci-statuts.sh`. Mode d'emploi, pièges du runner et maintenance :
-[`docs/tests.md`](docs/tests.md), « Using CI day to day ».
+The Linux and Windows CI runs on GitHub (mirror of the repository); the
+results are read in the GitLab pipeline of the commit or with
+`scripts/ci-statuts.sh`. Instructions, runner pitfalls and maintenance:
+[`docs/tests.md`](docs/tests.md), "Using CI day to day".
 
-Toute nouvelle interface d'extension couverte par l'exception nécessite un
-commit explicite dans la liste fermée de cette même page, avec son contrat
-public. Le présent accord de contribution concerne `main` ; il ne
-change pas la licence de l'ancienne implémentation conservée sous le tag `legacy-python`.
+Any new extension interface covered by the exception requires an explicit
+commit in the closed list of that same page, with its public contract. This
+contribution agreement applies to `main`; it does not
+change the license of the old implementation kept under the `legacy-python` tag.
