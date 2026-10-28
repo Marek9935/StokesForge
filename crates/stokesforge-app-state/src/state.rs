@@ -5645,17 +5645,12 @@ impl AppState {
     /// entry).
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
         let active_book = book.into();
-        // The built-in templates are offered, but we start on the
-        // first template **of the user**, otherwise on the permissive recipe.
-        let store = stokesforge_import::RecipeStore::load_with_builtins();
-        let recipe = store
-            .recipes()
-            .iter()
-            .find(|recipe| !stokesforge_import::RecipeStore::is_builtin(recipe))
-            .cloned()
-            .unwrap_or_else(|| {
-                stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
-            });
+        // Start on the first saved template, otherwise on the permissive
+        // recipe.
+        let store = stokesforge_import::RecipeStore::load();
+        let recipe = store.recipes().first().cloned().unwrap_or_else(|| {
+            stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
+        });
         let mut recipe = recipe;
         recipe.unify_header();
         let save_as_name = recipe.name.clone();
@@ -5760,9 +5755,7 @@ impl AppState {
                 // (extension, name, content signature), otherwise the last
                 // template actually used, otherwise the permissive recipe.
                 let store = match &source {
-                    ImportSource::Drop { .. } => {
-                        Some(stokesforge_import::RecipeStore::load_with_builtins())
-                    }
+                    ImportSource::Drop { .. } => Some(stokesforge_import::RecipeStore::load()),
                     ImportSource::Menu(_) => None,
                 };
                 for path in paths {

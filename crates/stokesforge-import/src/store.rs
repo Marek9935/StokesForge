@@ -21,27 +21,8 @@ impl RecipeStore {
             .unwrap_or_default()
     }
 
-    /// Like [`RecipeStore::load`], plus the templates provided out of the box
-    /// ([`crate::builtin_recipes`]) that the user has not replaced with a
-    /// template of the same name. The user's own come first.
-    pub fn load_with_builtins() -> Self {
-        let mut store = Self::load();
-        for builtin in crate::builtin_recipes() {
-            if !store.recipes.iter().any(|r| r.name == builtin.name) {
-                store.recipes.push(builtin);
-            }
-        }
-        store
-    }
-
-    /// Is this template a provided one, as is (not a modified version)?
-    pub fn is_builtin(recipe: &ImportRecipe) -> bool {
-        crate::builtin_recipes().iter().any(|b| b == recipe)
-    }
-
-    /// Writes to disk (creates the config folder if it does not exist). The
-    /// provided templates, unchanged, are not written: they come from the
-    /// program, not from the user's file.
+    /// Writes every recipe to disk (creates the config folder if it does not
+    /// exist).
     pub fn save(&self) -> std::io::Result<()> {
         let path = recipes_path().ok_or_else(|| {
             std::io::Error::new(
@@ -52,15 +33,7 @@ impl RecipeStore {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let user = Self {
-            recipes: self
-                .recipes
-                .iter()
-                .filter(|recipe| !Self::is_builtin(recipe))
-                .cloned()
-                .collect(),
-        };
-        let json = serde_json::to_string_pretty(&user)
+        let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json)
     }
@@ -187,5 +160,36 @@ mod tests {
             store.recipes(),
             "what is read back after `save` must be bit for bit what was written"
         );
+    }
+
+    /// No recipe exists in production code (#378): an empty config folder
+    /// gives an empty store, and a saved recipe is the only one reloaded.
+    #[test]
+    fn an_empty_config_folder_loads_empty_and_save_writes_every_recipe() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let names = [crate::config_dir::CONFIG_DIR_VARIABLE, "XDG_CONFIG_HOME"];
+        let previous = names.map(|name| (name, std::env::var_os(name)));
+        for name in names {
+            std::env::set_var(name, dir.path());
+        }
+
+        let empty = RecipeStore::load();
+        let mut store = RecipeStore::default();
+        store.upsert(ImportRecipe::new("Only one"));
+        let save_result = store.save();
+        let reloaded = RecipeStore::load();
+
+        for (name, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+
+        assert!(empty.recipes().is_empty());
+        save_result.expect("writing to the temporary directory must succeed");
+        assert_eq!(reloaded.recipes().len(), 1);
+        assert_eq!(reloaded.recipes()[0].name, "Only one");
     }
 }

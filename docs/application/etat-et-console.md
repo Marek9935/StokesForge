@@ -165,7 +165,7 @@ sources of both crates), `preferences_isolation.rs`, `wayland_{uri,bridge}.rs`.
 ## `stokesforge-cli`
 
 Windowless binary: `import` builds a new project from instrument
-files, `recipes` lists the templates and `run` (`python` feature) runs
+files, `recipes` lists the saved templates (nothing if none) and `run` (`python` feature) runs
 a Python file through a headless session. The same `pyst` calls, commands
 and undoable groups are available in the CLI and the console; see
 [`python-et-script.md`](../python-et-script.md). The standalone Linux package is

@@ -11,7 +11,7 @@ Read from `stokesforge-import` to find where a piece of the import lives. Each m
 | `layout` | **the** split of a file into zones (header, sub-header, names, data, footer, comments, skipped lines), shared by `parse` and `preview`; `split_lines` is the only line splitter |
 | `data_end` | the single rule for where data stops (`DataEnd`), shared by `parse` and `preview` |
 | `numbers`, `datetime` | numbers (decimal `Auto`, thousands, missing values; a non-finite result is `NaN`, token kept as text) and dates (`date_order`, `parse_datetime_with`) |
-| `builtin`, `choose` | built-in templates, and automatic choice (extension, name, content signature) |
+| `choose` | automatic choice of a saved template (extension, name, content signature) |
 | `preview` | classifies each shown line by role for the live preview, with the same split as `parse` |
 | `store` | saves and reloads user recipes (JSON), never panics on a corrupt file |
 | `decode` | bytes → text before any split (UTF-8, or the Windows code page of instrument software; mixed decoding in `Auto`) |

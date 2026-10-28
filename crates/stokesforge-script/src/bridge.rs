@@ -646,7 +646,7 @@ pub(crate) fn import_file(
     recipe_name: Option<&str>,
 ) -> Result<Vec<(NodeId, u64)>, HostError> {
     let session = context.session();
-    let store = stokesforge_import::RecipeStore::load_with_builtins();
+    let store = stokesforge_import::RecipeStore::load();
     let recipe = match recipe_name {
         Some(name) => store
             .recipes()
