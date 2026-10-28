@@ -2,7 +2,7 @@
 //! (orange frame), a single building block for all fields (#219, #217
 //! S-N6/S-N7/S-N11, S-T2, S-T3).
 //!
-//! Rules (`docs/standard-interface.md`, § Input refused or brought back):
+//! Rules (`docs/interface-standard.md`, § Input refused or brought back):
 //!
 //! - an **unreadable** input, or one that violates a constraint between two
 //!   fields, is *refused*: red frame, a bubble that states the rule, text

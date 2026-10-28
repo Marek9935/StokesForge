@@ -2,8 +2,8 @@
 #
 # L'anglais est la langue source : une clé absente d'ici n'existe pas, et `tr!`
 # (`src/i18n.rs`) refuse à la compilation une clé qui n'y figure pas. Règles de
-# rédaction : `docs/textes-interface.md` ; mécanique : skill
-# `stokesforge-textes-interface`.
+# rédaction : `docs/ui-texts.md` ; mécanique : skill
+# `stokesforge-ui-texts`.
 #
 # Nommage des clés : `zone-objet[-précision]`, en minuscules et tirets.
 

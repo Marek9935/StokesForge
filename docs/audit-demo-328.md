@@ -33,7 +33,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | legend in a corner | ✓ Legend tab (`legend_editor`) |
 | `Groups` (:302) | six curves in a group | ✓ plotting several columns together (state.rs:9400) |
 | | color gradient of the group | ✓ `curve_settings.rs` (`set_group_gradient`) |
-| `Rows` (:336) | "row" series | ✓ dragging rows from the gutter (gestes.md:96), `Action::PlotRows`, row menu (grid.rs:915) |
+| `Rows` (:336) | "row" series | ✓ dragging rows from the gutter (gestures.md:96), `Action::PlotRows`, row menu (grid.rs:915) |
 
 ## Elements without a gesture
 
@@ -43,12 +43,12 @@ missing feature.
 1. **Grid of several non-overlapping cells: B.** Nothing in the application
    adds a `PanelSpec::at(l, c)` to an existing graph. The only calls are
    `app.rs:2678` (new graph in 1×1), and `analysis_preview` / `object_drag` /
-   `state.rs:9413` for layers. `graphe.md:594` explicitly rules it out
+   `state.rs:9413` for layers. `graph.md:594` explicitly rules it out
    ("no adding/removing of a series or panel from the window").
    A work package in its own right. It is not a duplicate of #168, which covers
    only the X3/Y3 layers and following.
 2. **Number of bins of a histogram: B.** `SeriesSpec::histogram_bins` has
-   no widget. `graphe.md:592` acknowledges it as "left for a later iteration".
+   no widget. `graph.md:592` acknowledges it as "left for a later iteration".
    Small work package: one more field in Series.
 3. **Series on the right Y axis of the same panel: B.** `SeriesAxis::Right`
    is assigned only by the demo, `pyst` and persistence. The only neighboring
@@ -66,17 +66,17 @@ missing feature.
 
 ## Documentation (case A, to handle right away)
 
-- `gestes.md` cites neither New Layer, nor adding shapes, nor grouping by
+- `gestures.md` cites neither New Layer, nor adding shapes, nor grouping by
   multiple plotting, nor the color gradient. These gestures exist and are found in
-  `graphe.md:131` and `menus-et-barres.md:21`, but not in the gesture
+  `graph.md:131` and `menus-and-toolbars.md:21`, but not in the gesture
   catalog.
 - The Typst syntax of texts (`$lambda_1$`) is documented only on the rendering
-  side. Not verified: does an interface text or `graphe.md` explain it to the
+  side. Not verified: does an interface text or `graph.md` explain it to the
   user?
 
 ## Proposed split into sub-issues (not created)
 
-- **S1 (A, small)**: complete `gestes.md` and the tooltips: New Layer,
+- **S1 (A, small)**: complete `gestures.md` and the tooltips: New Layer,
   shapes, groups and color gradient, Typst in Add Text. Check: redo `Annotations`,
   `Groups` and `Rows` by following the documentation.
 - **S2 (B, small)**: "Bins" widget (`histogram_bins`) in Series. It
@@ -93,5 +93,5 @@ missing feature.
   `PlotTypes` demos as separate graphs and say so in the demo documentation.
   Issue #328 explicitly accepts a demo graph that cannot be reproduced.
 
-**Consistency**: `docs/application/etat-et-console.md` (description of the demo),
-`docs/gestes.md`, `docs/application/graphe.md`.
+**Consistency**: `docs/application/state-and-console.md` (description of the demo),
+`docs/gestures.md`, `docs/application/graph.md`.

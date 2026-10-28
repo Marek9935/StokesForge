@@ -56,7 +56,7 @@ for notice in "$PYTHON_RUNTIME_LICENSE" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LI
 done
 for tool in cargo-deny cargo-about; do
     command -v "$tool" >/dev/null || {
-        echo "[licences] ERROR: install $tool (see docs/licence-et-extensions.md)" >&2
+        echo "[licences] ERROR: install $tool (see docs/license-and-extensions.md)" >&2
         exit 1
     }
 done

@@ -1,4 +1,4 @@
-//! **The** formatter of displayed numbers (#222, `docs/standard-interface.md`,
+//! **The** formatter of displayed numbers (#222, `docs/interface-standard.md`,
 //! § Number display): grid, fields, Results pane and ticks
 //! all go through here, never through a local `format!`.
 //!

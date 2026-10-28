@@ -8,13 +8,13 @@
 #   - the tag does not have the form vX.Y.Z or vX.Y.Z-rcN;
 #   - a workspace crate is not at version X.Y.Z (the tag describes the code,
 #     not the other way round): the check is delegated to
-#     scripts/versions-alignees.sh, which also runs on every push (`fmt` job);
+#     scripts/versions-aligned.sh, which also runs on every push (`fmt` job);
 #   - for vX.Y.Z only, CHANGELOG.md has no non-empty `## [X.Y.Z]` section, or
 #     the section title still contains "undated" (tolerated on an -rcN, as the
 #     date is set only at the real tag).
 # An -rcN tag is a pre-release: only the crate versions are checked, and no
 # notes are printed. It tests the build and the upload of the packages:
-# `publier` (scripts/release-publier.sh, GitHub) then creates the GitLab
+# `publier` (scripts/release-publish.sh, GitHub) then creates the GitLab
 # release and deletes it at once (trial run, the tag stays).
 # Called by `release-linux` (GitHub, .github/workflows/ci.yml) and by
 # `publier`: a badly placed tag fails before any upload.
@@ -32,7 +32,7 @@ fi
 VERSION="${BASH_REMATCH[1]}"
 PRERELEASE="${BASH_REMATCH[2]}"
 
-"$(dirname "${BASH_SOURCE[0]}")/versions-alignees.sh" "$VERSION" >/dev/null
+"$(dirname "${BASH_SOURCE[0]}")/versions-aligned.sh" "$VERSION" >/dev/null
 [ -z "$PRERELEASE" ] || exit 0
 
 notes="$(awk -v header="## [$VERSION]" '

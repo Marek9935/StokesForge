@@ -22,7 +22,7 @@ import zipfile
 REPOSITORY = "Marek9935/StokesForge"
 GITHUB = f"https://api.github.com/repos/{REPOSITORY}"
 GITLAB = "https://gitlab.com/api/v4/projects/86104040"
-JOBS = ("fmt", "licenses", "clippy", "test", "robustesse", "test-python")
+JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python")
 # GitLab caps the description of an external status.
 DESCRIPTION_MAX = 255
 LOG_MAX = 20_000_000
@@ -249,7 +249,7 @@ def job_status(job, canceled=False):
     # A reproduction can fail without failing CI. The statuses API has no
     # allow_failure parameter: the result stays explicitly non-validating
     # (skipped), with its reason, rather than a false success.
-    reproduction_failed = job["name"] == "robustesse" and (
+    reproduction_failed = job["name"] == "robustness" and (
         conclusion == "failure"
         or any(step.get("conclusion") == "failure" for step in job.get("steps", []))
     )

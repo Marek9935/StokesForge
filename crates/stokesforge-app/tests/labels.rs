@@ -307,7 +307,7 @@ fn deviations(sources: &[SourceFile]) -> Vec<String> {
         for infraction in violations(file, CALLS, CONSTRUCTORS, TABLES) {
             deviations.push(format!(
                 "{}:{} in `{}`: {} {} — hardcoded text, go through `tr!` with a key \
-                 of `i18n/en/stokesforge_app.ftl` (skill `stokesforge-textes-interface`)",
+                 of `i18n/en/stokesforge_app.ftl` (skill `stokesforge-ui-texts`)",
                 infraction.file,
                 infraction.line,
                 infraction.function,

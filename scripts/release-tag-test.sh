@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test of scripts/release-tag-sur-main.sh (#354) and scripts/release-tag-croissant.sh (#355)
+# Test of scripts/release-tag-on-main.sh (#354) and scripts/release-tag-increasing.sh (#355)
 # on an isolated temporary git repository: no network, the real repository is not touched.
 # Usage: scripts/release-tag-test.sh
 set -euo pipefail
@@ -38,10 +38,10 @@ expect() {
 }
 
 # --- #354: the tagged commit is on main or on release/* ---
-expect 0 "commit on origin/main" "" release-tag-sur-main.sh v1.0.0 "$c_main"
-expect 0 "commit only on origin/release/1.x" "" release-tag-sur-main.sh v1.0.0 "$c_release"
-expect 1 "commit on a working branch" "::error title=tag not on main::" release-tag-sur-main.sh v1.0.0 "$c_feature"
-expect 1 "commit only on origin/v2" "tag not on main" release-tag-sur-main.sh v1.0.0 "$c_v2"
+expect 0 "commit on origin/main" "" release-tag-on-main.sh v1.0.0 "$c_main"
+expect 0 "commit only on origin/release/1.x" "" release-tag-on-main.sh v1.0.0 "$c_release"
+expect 1 "commit on a working branch" "::error title=tag not on main::" release-tag-on-main.sh v1.0.0 "$c_feature"
+expect 1 "commit only on origin/v2" "tag not on main" release-tag-on-main.sh v1.0.0 "$c_v2"
 
 # --- #355: increasing tag ---
 # croissant <code> <description> <pattern> <tag> <commit> <existing tags…>
@@ -50,7 +50,7 @@ croissant() {
     shift 5
     for t in $(g tag --list); do g tag -d "$t" >/dev/null; done
     for t in "$@"; do g tag "$t" "$c_main"; done
-    expect "$code" "$desc" "$motif" release-tag-croissant.sh "$tag" "$commit"
+    expect "$code" "$desc" "$motif" release-tag-increasing.sh "$tag" "$commit"
 }
 croissant 1 "rc8 while final release 1.0.0 exists" "final release" v1.0.0-rc8 "$c_main" v1.0.0-rc7 v1.0.0
 croissant 1 "0.9.0 after 1.0.0" "does not exceed" v0.9.0 "$c_main" v1.0.0

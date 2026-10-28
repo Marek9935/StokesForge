@@ -386,7 +386,7 @@ pub enum NameSource {
 /// on the `stokesforge-app` side) to ranges of sub-header lines.
 ///
 /// Has no equivalent for OriginLab's "System Parameters"/"User Parameters",
-/// deliberately: see `docs/chantier-import-previsualisation.md` (a decision
+/// deliberately: see `docs/import-preview-work-package.md` (a decision
 /// not to reopen without a new reason).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SubheaderRoles {

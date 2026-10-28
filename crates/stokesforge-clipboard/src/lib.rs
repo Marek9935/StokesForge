@@ -24,7 +24,7 @@
 //!
 //! | Display | Mechanism | Verified |
 //! |---|---|---|
-//! | Wayland | `Clipboard::store_formats` of the `vendor/smithay-clipboard` patch: the worker shared with egui-winit offers one `wl_data_source` per MIME type | by hand (see `docs/application/graphe.md`) |
+//! | Wayland | `Clipboard::store_formats` of the `vendor/smithay-clipboard` patch: the worker shared with egui-winit offers one `wl_data_source` per MIME type | by hand (see `docs/application/graph.md`) |
 //! | X11 | an owner of the `CLIPBOARD` selection ([`x11`]), `TARGETS` then one type per representation | real test, `--ignored` |
 //! | Windows | one registered format per representation (`PNG`, `image/svg+xml`, `application/pdf`) | compiles only |
 //! | macOS | `NSPasteboard`, one UTI type per representation | compiles only |

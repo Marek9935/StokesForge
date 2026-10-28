@@ -30,7 +30,7 @@ of StokesForge, the Rust, OFL and Phosphor notices, those of the patches, as
 well as CPython, its native libraries and numpy. It refuses a Python lock file
 that differs from the versioned notice set and a runtime without the CPython/numpy
 licenses. Policy and commands:
-[`licence-et-extensions.md`](licence-et-extensions.md).
+[`license-and-extensions.md`](license-and-extensions.md).
 
 ## Three families
 
@@ -38,7 +38,7 @@ licenses. Policy and commands:
 |---|---|---|
 | **unit tests** | `#[cfg(test)]` in `src/` | a local behavior, as close as possible to its code |
 | **integration tests** | `crates/*/tests/` | a crate property: public contract, boundary, agreement between paths |
-| **robustness bench** | `stokesforge-robustesse/tests/` | the foundation at its limits — 22 batteries `b1`…`b22` |
+| **robustness bench** | `stokesforge-robustness/tests/` | the foundation at its limits — 22 batteries `b1`…`b22` |
 
 ## Guards not to break
 
@@ -49,9 +49,9 @@ ones to understand before changing them.
 | Test | What it holds |
 |---|---|
 | `*/tests/no_ui_dependency.rs` (eleven crates, including `stokesforge-app-state` since #263: no `egui`, no `eframe`, no `winit`, no `stokesforge-clipboard`) | dependency allow-list: every addition to `Cargo.toml` must be added to it explicitly (invariant 2). Shared reading `stokesforge-arch-guard`: normal, build, `target.*` and renamed (`package`) dependencies; `dev-dependencies` excluded; negative witnesses in `stokesforge-arch-guard/src/lib.rs` |
-| `stokesforge-persistence/tests/witness_files.rs` (S4, #323) | the file `tests/witnesses/v1/project.stf` is read back to give exactly the witness project (all node, column and series types, non-default values), and saving the project gives back its bytes: the written format does not drift without a decision. Witness: renaming a field of `schema.rs` or `recipe_record.rs` fails both tests. Regeneration: see `persistance.md`, "Version rule: every V1 file can be read back up to V3" |
+| `stokesforge-persistence/tests/witness_files.rs` (S4, #323) | the file `tests/witnesses/v1/project.stf` is read back to give exactly the witness project (all node, column and series types, non-default values), and saving the project gives back its bytes: the written format does not drift without a decision. Witness: renaming a field of `schema.rs` or `recipe_record.rs` fails both tests. Regeneration: see `persistence.md`, "Version rule: every V1 file can be read back up to V3" |
 | `stokesforge-arch-guard/tests/skill_references.rs` (F1, #301) | in all project skills (`.claude/skills/stokesforge-*` and `run-stokesforge`, `SKILL.md` and `references/*.md`), every reference "`fichier.md` § Title" names a file and a heading that exist, a `§` without a path is refused; every link `](references/x)` of a `SKILL.md` points to an existing file and no file of `references/` is orphaned. Witnesses on fake trees (missing heading or file, `§` without a path, dead link, orphan, third-party skill ignored) |
-| `stokesforge-arch-guard/tests/standard_codes.rs` (#301) | every `S-XN` code cited (docs, skills, comments, tests) appears in the rule index of `docs/standard-interface.md`; witness on an unknown code |
+| `stokesforge-arch-guard/tests/standard_codes.rs` (#301) | every `S-XN` code cited (docs, skills, comments, tests) appears in the rule index of `docs/interface-standard.md`; witness on an unknown code |
 | `stokesforge-arch-guard/tests/config_dir.rs` (#332) | `ProjectDirs::from` is called only by `stokesforge-import/src/config_dir.rs` (comment lines ignored): every profile path goes through `config_dir()`, which tests redirect with `STOKESFORGE_CONFIG_DIR`. Witness: a fake source that calls it is refused, a comment is not; proven mutant: the call added to `recent.rs` fails the guard |
 | `stokesforge-render-svg/tests/no_ui_dependency.rs` | the export sees neither `egui`, nor `eframe`, nor `winit` — so it can be tested without a graphics server |
 | `stokesforge-render/tests/measurement.rs` | the single source of text measurement (invariant 4) |
@@ -62,7 +62,7 @@ ones to understand before changing them.
 | `stokesforge-render-egui/tests/feathering.rs` | feathering does not enter the cache key (invariant 6) |
 | `stokesforge-app-state/tests/script_bridge_lazy.rs` | the Python interpreter does not start when the window opens |
 | `stokesforge-app/tests/labels.rs` | no hard-coded interface text (`no_hardcoded_label`, absolute guard, no exemption, #48), including the `set_title` titles and visible `add_filter` names of file boxes (#127; technical extensions and format acronyms preserved) and the free functions `section_title`, `section_heading`, `table_header`, `secondary_text`, `bold`, `list_row`, `list_row_text` (#169, #170); the #43 zone (`ZONE_43`) with no literal at all, its functions looked up by name in all sources — a missing entry fails; the translation dependencies stay in `stokesforge-app` and `stokesforge-app-state`; `no_catalog_key_is_dead` (a key of `en` unused in the sources of both crates, witness `the_dead_keys_guard_reads_both_crates`); the `history-*` keys used; `notice`/`fail` of `app-state/state.rs` read (`the_guard_reads_the_state_messages_of_the_state_crate`); the witnesses that prove the guard sees a literal, including in a subfolder of `src/` |
-| `stokesforge-app/tests/guards.rs` | no bare `egui::Window` (`no_window_is_a_raw_egui_window`); the properties window goes through `modal_dialog` → `modal_dialog_with` → `modal_frame` → `show_window_in_layer` (like `modal_wizard`, the import wizard, `modal_live_settings` and `modal_read_only`, #228, then `modal_confirm`, `modal_save_changes` and `modal_alert`, #229); no global import (`use …::*`) outside test code (`no_global_import_outside_tests`, decision 2 of #115, absolute since #117); no `ui.separator()` in a menu outside the section building block (`no_raw_separator_in_a_menu`, #155, absolute); egui selectable button only in a menu, a drop-down list or the color picker (`no_selectable_button_outside_a_menu`, #169); no color `Color32::from_…` or named tint outside `theme.rs` and `color_picker.rs` (`no_hardcoded_color_outside_the_theme`, #169); no `ui.separator()` just before a section title or a text level (`section_heading`, `table_header`) (`no_separator_before_a_section_title`, #169, #170); no `bold(…).small()` outside `theme.rs` (`no_small_bold_outside_the_theme`, witness `the_small_bold_guard_sees_a_bold_small`, #170); neither `DragValue` nor `Slider` (`no_numeric_field_outside_the_building_block`, #220, absolute); no bare bubble (`on_hover_text`/`on_hover_ui`) on a box, a radio, a text or number field, a field label outside a menu (`no_bare_tooltip_on_a_form_field`, #225, absolute — the reminder goes through `help_beside`/`help_text`); every `add_enabled` carries `.on_disabled_hover_text` (`no_disabled_element_without_its_reason`, #226, absolute); no `add_space(<nombre>)` outside `theme.rs` (`no_literal_add_space_outside_the_theme`, #227, absolute — `theme::SPACE_ITEM` / `SPACE_SECTION`); a `rfd::` only in `file_picker.rs` of `stokesforge-app-state` (`no_rfd_picker_outside_the_module`, #192, witness `the_picker_guard_sees_an_rfd_outside_the_module`); no integration test (of the two `tests/` folders) calls `AppState::new` (`no_integration_test_uses_appstate_new`); the old guard "state modules do not name egui" (`MODULES_SANS_EGUI`, #255) is removed: since #263 the compiler and `stokesforge-app-state/tests/no_ui_dependency.rs` hold the boundary; no free size of an interactive window without `// FREE-SIZE(#300): <justification>` in the 12 preceding lines (`no_free_size_without_justification`, #300, S-F11, witness `the_sizes_guard_sees_a_bare_free_size`, proven mutation: marker removed); every `stokesforge_…` identifier passed to a `modal_*` appears in `docs/fenetres.md` and every line of the catalog has its call, without reading the sizes (`the_window_catalog_and_the_code_agree`, #300, witness `the_catalog_guard_sees_a_deviation`, proven mutation: catalog line removed); the witnesses of the source reader |
+| `stokesforge-app/tests/guards.rs` | no bare `egui::Window` (`no_window_is_a_raw_egui_window`); the properties window goes through `modal_dialog` → `modal_dialog_with` → `modal_frame` → `show_window_in_layer` (like `modal_wizard`, the import wizard, `modal_live_settings` and `modal_read_only`, #228, then `modal_confirm`, `modal_save_changes` and `modal_alert`, #229); no global import (`use …::*`) outside test code (`no_global_import_outside_tests`, decision 2 of #115, absolute since #117); no `ui.separator()` in a menu outside the section building block (`no_raw_separator_in_a_menu`, #155, absolute); egui selectable button only in a menu, a drop-down list or the color picker (`no_selectable_button_outside_a_menu`, #169); no color `Color32::from_…` or named tint outside `theme.rs` and `color_picker.rs` (`no_hardcoded_color_outside_the_theme`, #169); no `ui.separator()` just before a section title or a text level (`section_heading`, `table_header`) (`no_separator_before_a_section_title`, #169, #170); no `bold(…).small()` outside `theme.rs` (`no_small_bold_outside_the_theme`, witness `the_small_bold_guard_sees_a_bold_small`, #170); neither `DragValue` nor `Slider` (`no_numeric_field_outside_the_building_block`, #220, absolute); no bare bubble (`on_hover_text`/`on_hover_ui`) on a box, a radio, a text or number field, a field label outside a menu (`no_bare_tooltip_on_a_form_field`, #225, absolute — the reminder goes through `help_beside`/`help_text`); every `add_enabled` carries `.on_disabled_hover_text` (`no_disabled_element_without_its_reason`, #226, absolute); no `add_space(<nombre>)` outside `theme.rs` (`no_literal_add_space_outside_the_theme`, #227, absolute — `theme::SPACE_ITEM` / `SPACE_SECTION`); a `rfd::` only in `file_picker.rs` of `stokesforge-app-state` (`no_rfd_picker_outside_the_module`, #192, witness `the_picker_guard_sees_an_rfd_outside_the_module`); no integration test (of the two `tests/` folders) calls `AppState::new` (`no_integration_test_uses_appstate_new`); the old guard "state modules do not name egui" (`MODULES_SANS_EGUI`, #255) is removed: since #263 the compiler and `stokesforge-app-state/tests/no_ui_dependency.rs` hold the boundary; no free size of an interactive window without `// FREE-SIZE(#300): <justification>` in the 12 preceding lines (`no_free_size_without_justification`, #300, S-F11, witness `the_sizes_guard_sees_a_bare_free_size`, proven mutation: marker removed); every `stokesforge_…` identifier passed to a `modal_*` appears in `docs/windows.md` and every line of the catalog has its call, without reading the sizes (`the_window_catalog_and_the_code_agree`, #300, witness `the_catalog_guard_sees_a_deviation`, proven mutation: catalog line removed); the witnesses of the source reader |
 | `stokesforge-app/src/app/dialogs.rs` (module `tests`) | window natures (#300, S-F11): `each_nature_fixes_its_footer_size_and_focus` (table nature → footer, default class Small 480 x 170 / Medium 480 x 420 / Large 640 x 500, focus; the field of the variant wins), `the_initial_focus_follows_the_nature` (confirmation → Cancel, save and alert → primary, never the content field; read-only → nothing; witness: the draft goes to the field), `a_greyed_out_footer_shows_its_reason_and_not_its_tooltip` (`DialogFooter::gated` / `always`); S-F8 witness kept (`a_reopened_dialog_takes_back_its_size_and_position`); proven mutants (Small and Medium swapped, confirmation moved to the first field) |
 | `stokesforge-app/src/theme.rs` (module `tests`) | no `ScrollStyle` outside the theme (`no_scroll_style_outside_the_theme`); no egui `strong()`, all bold through `theme::bold` (`no_egui_strong_outside_the_theme`, #169); `bold` really widens the text with the embedded fonts; three text levels (#170): `each_text_level_sets_weight_and_size` (section title bold at normal size, table header bold at small size, secondary dimmed at small size) and `section_title_paints_the_section_heading_level`; proven mutants (`.small()` removed from the header or the secondary, bold removed from the title) |
 | `stokesforge-app/src/app/{list_row,object_manager_ui,project_manager,curve_settings,import_wizard}.rs` (tests) | single row height and step trail (#170, points 5 and 8): `every_list_row_has_the_single_height` (with or without an icon, selected or not = `LIST_ROW_HEIGHT`, a bare label is lower), `the_composed_row_takes_the_single_height_and_hands_it_back`, `the_reserved_background_imposes_the_minimum_height`, `group_series_and_object_have_the_same_row_height` (text centered in the row), `a_folder_has_the_height_of_a_window` (constant step folder/window), `the_series_row_has_the_single_height_with_its_checkbox`, `the_step_trail_has_no_text_chevron_any_more`; proven mutants (height not imposed on the row, on the folder header, on `list_row_sensed`, text chevron restored) |
@@ -75,7 +75,7 @@ ones to understand before changing them.
 | `stokesforge-app/src/field_state.rs` (tests) | field state (#219): pure decision of the cycle (`decide`), red/orange frame and bubble read in the painted shapes, old value given back on exit, orange cleared after 2 s, witness "valid input → no frame"; proven mutants (color, field kept open, deadline, exit without change, bubble) |
 | `app/busy.rs`, `app/empty_state.rs`, `stokesforge-app-state/tests/shell.rs` (#232) | indicator absent before 0.5 s then the word, Stop only after 3 s and only if the work can be interrupted; empty-state phrase dimmed and centered; import Stop: nothing created, no history entry, a later import runs to the end |
 | `stokesforge-app/tests/guards.rs`, `app/shortcuts.rs`, `app/keyboard_shortcuts_window.rs`, `project_manager.rs` (tests) | keyboard and mouse (#231): guards `no_consume_key_outside_the_registry` and `no_cursor_outside_the_cursors_module` (witnesses), every consumed constant appears in `HELP`, shortcuts window, Help menu, double-click in the Project Manager (activates, never closes, two Ctrl-clicks do not open) |
-| `stokesforge-script/tests/frozen_api.rs` (#331, feature `python`) | guard of the **frozen V1 API** of `pyst`: **reads** the `pyst-api` blocks of `docs/python-et-script.md` (no copy) and compares them with the built module — names and kind of `pyst` / `pyst.analysis`, `inspect.signature` of each function (clear refusal if one fails, otherwise the test would pass vacuously), `Handle` without a public attribute, docstrings, option keys (`plot`, `set_graph`, `set_column_meta`, read in the unknown-key message), keys of the returned dictionaries (`info`, `series`, `series_groups`, analysis results, `readiness`) and enumerated values. It replaces `la_surface_expose_vingt_huit_appels_et_quatre_erreurs`. Witnesses by mutation: call added, parameter renamed, default changed, dict key added, getter on `Handle`, option key added, line removed from the doc. Limit: an additional value *accepted as input* (not listed) is seen only if it is also returned; the defaults `panel=(0, 0)` and `png_scale=4.0` are matched to the PyO3 `Ellipsis`, so their value is not read back |
+| `stokesforge-script/tests/frozen_api.rs` (#331, feature `python`) | guard of the **frozen V1 API** of `pyst`: **reads** the `pyst-api` blocks of `docs/python-and-scripting.md` (no copy) and compares them with the built module — names and kind of `pyst` / `pyst.analysis`, `inspect.signature` of each function (clear refusal if one fails, otherwise the test would pass vacuously), `Handle` without a public attribute, docstrings, option keys (`plot`, `set_graph`, `set_column_meta`, read in the unknown-key message), keys of the returned dictionaries (`info`, `series`, `series_groups`, analysis results, `readiness`) and enumerated values. It replaces `la_surface_expose_vingt_huit_appels_et_quatre_erreurs`. Witnesses by mutation: call added, parameter renamed, default changed, dict key added, getter on `Handle`, option key added, line removed from the doc. Limit: an additional value *accepted as input* (not listed) is seen only if it is also returned; the defaults `panel=(0, 0)` and `png_scale=4.0` are matched to the PyO3 `Ellipsis`, so their value is not read back |
 | `stokesforge-app/src/number_field.rs` (tests) | "number" building block (#220): reading (refusal, bounds, integers), step and large steps, value list on the keyboard (Alt+↓, Enter, Esc), click = all selected, wheel on hover without a focus that follows the list (`step_preset`: off the list, extremities), field without a list = scrolling window, full arrow in the frame (`list_frame`: distinct theme backgrounds), consistency of the quantity table; in `plot_settings`: input validated on Enter, wheel notches = one history entry, Esc gives back the value then cancels the dialog |
 | `stokesforge-app/src/app/dialogs.rs` (tests) | dialog building block (#228): button order read in the shapes (dialog, wizard, read-only), pure decision of the footer (`footer_message`: the error comes before the reason) and its painting (the reason returns when the error disappears, active button witness), initial focus on the first text field and no focus without a field, Esc that leaves a field then cancels, geometry returned on close and taken back on open; proven mutants (initial focus, Esc); state side (`tests/shell.rs`): geometry written to the preferences outside the history, error in the footer of the open dialog only. Confirmations (#229): Enter and Esc = Cancel in `modal_confirm` (the click of the verb confirms), Enter = Save and Esc = Cancel in the trio, Discard Changes on the left, verb red on hover then on keyboard focus (Tab), pointer gone to rest; `modal_alert`: Enter = Close, action by its button; proven mutants (Enter of the confirmation, red on focus) |
 | `stokesforge-app`: confirmations on the state and window side (#229) | `stokesforge-app-state/tests/shell.rs`: New Project / Quit / Open… ask only if there is work to lose, Save saves then continues (and a failure or a closed picker abandons the gesture), unreadable project: path and project kept (S-M8), failed save (S-M8), export whose added extension would target an existing file; sheet and objects deleted without confirmation, message that names the graphs (`tests/project_objects.rs`); `app::tests::closing_the_window_asks_before_losing_work` (CancelClose, then Close after Discard); `import_wizard::tests::deleting_a_template_goes_through_a_modal_confirmation` (Enter cancels without validating the wizard) |
@@ -104,7 +104,7 @@ first.
 
 ## The robustness bench
 
-`stokesforge-robustesse` contains **no production code**. It depends on the
+`stokesforge-robustness` contains **no production code**. It depends on the
 whole workspace and carries two things:
 
 - **22 batteries** (`tests/b1…b22`) that test the foundation at its limits:
@@ -144,7 +144,7 @@ fix is good, and it is time to remove its `#[ignore]` so that the
 guard takes over.
 
 The correction campaign that came from the reports of 2026-09-11 is closed: no
-`#[ignore]` remains in `stokesforge-robustesse`. The last one, in `b9`
+`#[ignore]` remains in `stokesforge-robustness`. The last one, in `b9`
 (`b9_race_between_script_and_interface_on_the_length`), came from two defects of the
 test: the script did not catch `ConcurrentWriteError` (the contract refuses
 the write of a column changed since the read), and the "interface" ignored
@@ -175,13 +175,13 @@ new formula functions).
 
 | Test | What it holds |
 |---|---|
-| `stokesforge-robustesse/tests/b22_targeted_recalc.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps; same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
+| `stokesforge-robustness/tests/b22_targeted_recalc.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps; same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
 | `stokesforge-session/tests/recalc_targeted.rs` | one named case per component of the fingerprint (stored formula, sheet membership and version of the sources, length of the result, own version, outcome), the gestures that make them change (move within the sheet or to another, deletion then undo, cycle created elsewhere, deletion of cells in a formula column, aborted macro, duplicated sheet…), stability of a chain and of a cycle, forgetting of the memo by `Load` and `NewProject` on a coincidence of identifiers and versions that is **manufactured and checked**. Each "not rewritten" assertion has its witness in full mode |
 | `stokesforge-session/src/lib.rs` (`tests`), `src/recalc.rs` (`tests`) | interruptible recalculation (#239): Stop cancels the command and allows redo (stop set in advance on the next recalculation, hence deterministic), Stop after a command **without effect** undoes nothing (`History::execute_recorded`), the death of the actor (panic simulated by `Request::PanicForTest`, or in the middle of a recalculation) frees the gauge and makes `actor_alive` false (#310), late Stop without effect on the next one, stop between two columns then next pass that finishes without rewriting what is already written. `stokesforge-app-state/tests/shell.rs` (`heavy`): the same gesture seen from the interface on a heavy project, with its witness without Stop, and the question "save?" asked at close during the recalculation |
 | Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`an_oriented_axis_is_drawn_like_the_original_axis`, `stokesforge-render/tests/geometry.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_orients_the_axes_from_the_order_of_the_bounds`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more "Inverted axis" / "Auto range" / "Closed frame" boxes, "Advanced" block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of "Advanced" counted twice) |
 | `stokesforge-session/tests/analysis.rs` (`on_load_no_calculation_is_rerun_and_the_fingerprint_says_whether_it_is_stale`, `trust_on_load_applies_only_to_the_load`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
 | `stokesforge-session/tests/formula.rs` | the behavior of formulas itself (before #193, unchanged) |
-| `stokesforge-robustesse/tests/b14_sweep.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
+| `stokesforge-robustness/tests/b14_sweep.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
 | `stokesforge-core` (`project.rs`, `an_inserted_column_moves_the_counter_past_its_version`) | inserting a column moves the counter beyond its version |
 
 The oracle does not see an error **common** to both modes (calculation order,
@@ -431,9 +431,9 @@ its fingerprint is seen by the "unrelated" property of `b22` and by
 ```sh
 cargo test --workspace                        # tout, sauf #[ignore]
 cargo test -p <crate> --test <fichier>        # un fichier de tests
-cargo test -p stokesforge-robustesse -- --ignored  # reproductions et bancs coûteux
+cargo test -p stokesforge-robustness -- --ignored  # reproductions et bancs coûteux
 # (Typst est compilé et testé par `cargo test --workspace` ; `--all-features` n'active plus que Python : voir .codex/README.md)
-scripts/python-test.sh                        # pont Python, scripts, robustesse, application et CLI
+scripts/python-test.sh                        # pont Python, scripts, robustness, application et CLI
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
 
@@ -458,21 +458,21 @@ Linux runner is registered; Windows is not affected by this choice.
 
 | Job | Blocking | What it does |
 |---|---|---|
-| `fmt` | yes | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` and `scripts/versions-alignees.sh` (all crates in the same version `X.Y.Z`, #349/#350; only the `[package]` section is read, internal dependencies `stokesforge-x = { version = … }` equal to this version, `Cargo.lock` up to date, `FORMAT_VERSION` = N requires `tests/witnesses/vN/project.stf`, #351/#352/#353) |
+| `fmt` | yes | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` and `scripts/versions-aligned.sh` (all crates in the same version `X.Y.Z`, #349/#350; only the `[package]` section is read, internal dependencies `stokesforge-x = { version = … }` equal to this version, `Cargo.lock` up to date, `FORMAT_VERSION` = N requires `tests/witnesses/vN/project.stf`, #351/#352/#353) |
 | `licenses` | yes | policy and generation of third-party notices |
 | `clippy` | yes | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | yes | `cargo test --workspace` |
-| `robustesse` | no | `cargo test -p stokesforge-robustesse -- --ignored` |
+| `robustness` | no | `cargo test -p stokesforge-robustness -- --ignored` |
 | `test-python` | yes, automatic | vendors CPython + numpy, then `scripts/python-test.sh` |
-| `release-linux` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` (on an `-rcN`, `publier` creates the release then deletes it; no release remains) | checks the tag (`scripts/release-tag-sur-main.sh`, `scripts/release-tag-croissant.sh`, `scripts/release-notes.sh`), assembles and tests `scripts/app-dist.sh`, uploads the archive to the GitLab package registry, without a GitHub release (#333) |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-televerser.sh windows`) |
-| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the two package uploads | GitLab release with the notes of the CHANGELOG (#333); an `-rcN` creates then deletes the release (trial); procedure and criteria: [`criteres-v1.md`](criteres-v1.md) |
+| `release-linux` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` (on an `-rcN`, `publier` creates the release then deletes it; no release remains) | checks the tag (`scripts/release-tag-on-main.sh`, `scripts/release-tag-increasing.sh`, `scripts/release-notes.sh`), assembles and tests `scripts/app-dist.sh`, uploads the archive to the GitLab package registry, without a GitHub release (#333) |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
+| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the two package uploads | GitLab release with the notes of the CHANGELOG (#333); an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md) |
 
 The Linux jobs run on the pushed branches `main`, `feature/**`,
 `v[0-9]*`, `release/**` and on the tags `v*`. `release-linux` and `publier`
 refuse a tag whose commit is an ancestor neither of `origin/main` nor of a
-`release/*` branch (`scripts/release-tag-sur-main.sh`, #354), or that does not
-exceed the existing tags (`scripts/release-tag-croissant.sh`, #355):
+`release/*` branch (`scripts/release-tag-on-main.sh`, #354), or that does not
+exceed the existing tags (`scripts/release-tag-increasing.sh`, #355):
 a final tag must exceed every existing final; an `-rcN` must exceed the
 `-rc` tags of its version and not target a version that is already final; a commit that
 is only on `release/N.x` is compared only with the tags of major N. The distribution
@@ -502,7 +502,7 @@ required.
 
 Typst is no longer a feature (issue #29): Clippy compiles it, the tests of the
 workspace exercise it, exports included (#34). `fmt` compiles nothing; it also checks the alignment of crate versions
-(`scripts/versions-alignees.sh`, at every push, not only at the tag), including internal dependencies, `Cargo.lock` and the `.stf` format witness, without cargo.
+(`scripts/versions-aligned.sh`, at every push, not only at the tag), including internal dependencies, `Cargo.lock` and the `.stf` format witness, without cargo.
 
 ### Using CI day to day
 
@@ -520,7 +520,7 @@ GitHub CI but report nothing to GitLab (intended, see below).
 **Reading the result.**
 
 ```sh
-scripts/ci-statuts.sh [commit]      # HEAD par défaut ; exige glab connecté
+scripts/ci-status.sh [commit]      # HEAD par défaut ; exige glab connecté
 ```
 
 Or in the GitLab interface: `Build > Pipelines`, stage `external`. One line per
@@ -541,7 +541,7 @@ tests in parallel; only the captures (`egui_kittest` + wgpu) exclude each other
 (see below). The job sets `core.longpaths` before the checkout:
 without it, `git clean` fails on `.cargo/registry` ("Filename too long").
 These jobs, like `release-linux` and `publier`, not being in the list of
-`gitlab-status.py`, their result is read on GitHub, not in `ci-statuts.sh`.
+`gitlab-status.py`, their result is read on GitHub, not in `ci-status.sh`.
 The GitHub API **without login** is limited to 60 requests per hour and per
 address: do not poll it in a loop (a CI wait is done on GitLab,
 `glab`, or at a long interval); beyond that, it answers 403 until the next hour.
@@ -550,7 +550,7 @@ address: do not poll it in a loop (a CI wait is done on GitLab,
 (CI starts there only on its arrival). Force the push: mirror synchronization
 button, or `glab api -X POST projects/86104040/remote_mirrors/<id>/sync`.
 
-**Package upload.** `scripts/release-televerser.sh` passes the token to
+**Package upload.** `scripts/release-upload.sh` passes the token to
 `curl` through `-K -` (standard input), not through process substitution: under
 Git Bash (Windows) the latter fails (curl code 26). The token never appears
 in the arguments of the command.
@@ -604,7 +604,7 @@ pipeline, with a link to the GitHub logs of each job. The results
 arrive after the whole CI has ended; the logs and artifacts
 stay on GitHub. Old pipelines are not corrected retroactively.
 
-A failed `robustesse` reproduction is marked `skipped`, with the description
+A failed `robustness` reproduction is marked `skipped`, with the description
 "Non-blocking failure of the reproductions": the external statuses API offers
 no `allow_failure` parameter. The other failures are red, a cancelation
 stays canceled, and a missing job is never declared successful.
@@ -639,7 +639,7 @@ rerun exists. A publication outage makes the workflow
 The GitHub repository `Marek9935/StokesForge` and the GitLab project identifier
 (`86104040`) are written in `scripts/gitlab-status.py` (`REPOSITORY`, `GITLAB`),
 in `gitlab-status.yml` (condition `github.repository`) and in
-`scripts/ci-statuts.sh`. Renaming either repository requires changing them.
+`scripts/ci-status.sh`. Renaming either repository requires changing them.
 
 **Maintenance.** The GitLab project token of the GitHub secret `GITLAB_RELEASE_TOKEN`
 (Developer role, scope `api`; package upload and creation of the
@@ -682,7 +682,7 @@ Initial configuration (once only):
    `GitLab > Build > Pipelines`, stage `external`.
 
 Reporter tests, without network or real token:
-`python3 scripts/gitlab-status-test.py` (also run by the `fmt` job, with `scripts/release-notes-test.sh`, which tests `release-notes.sh` and `versions-alignees.sh` on a fake repository). They cover the results, the
+`python3 scripts/gitlab-status-test.py` (also run by the `fmt` job, with `scripts/release-notes-test.sh`, which tests `release-notes.sh` and `versions-aligned.sh` on a fake repository). They cover the results, the
 tolerated reproduction (including a failed step under a tolerated conclusion),
 cancelations, absent jobs, excluded PRs/forks, old
 attempts, pagination, pipeline selection and HTTP retries.
@@ -788,7 +788,7 @@ attempts, pagination, pipeline selection and HTTP retries.
 - `stokesforge-clipboard` (#149): the decision of X11 answers (`x11::answer`) and the Windows/macOS format names are tested without a server; the X11 offer is tested against a **real server** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` required, XWayland is enough: `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows is tested likewise against the **real clipboard** (`tests/windows.rs`, `#[ignore]`, interactive desktop required: `cargo test -p stokesforge-clipboard --test windows -- --ignored`; witness: a `windows_format_name` that returns the MIME for PNG fails the read-back of the "PNG" format). Wayland and macOS have no automatic test: Wayland requires a compositor and a real input (serial), macOS is only compiled (`cargo check --target …`). An X11 test of a recipient does not test `response_type` of a `SelectionNotify`: an event coming from `SendEvent` carries the bit 0x80.
 - Tests and their comments are in French, like the rest.
 
-**To read**: `stokesforge-robustesse/src/lib.rs` (the index of the batteries), then the
+**To read**: `stokesforge-robustness/src/lib.rs` (the index of the batteries), then the
 head of the targeted `b*` file.
 
 ## Re-split of interface functions (#124)
@@ -962,7 +962,7 @@ Limit: the red frame, the bubble and the field that stays open (grid) cannot be 
 | the width of a deleted column comes back with Ctrl+Z | `the_width_comes_back_with_the_column_after_undo` (purging widths at the mutation: red) |
 | `.stf` round trip; `NewProject` empties | `the_widths_make_the_file_round_trip` (not writing the field: red) |
 | writing does not emit the key of a vanished column | `saving_does_not_write_the_width_of_a_deleted_column`, `persistence` `save_drops_dead_keys_and_invalid_widths` (removing the filter: red) |
-| file without the field → empty table; orphan key, NaN, ∞, 0, negative discarded one by one; identifier > `MAX_NODE_ID` refused | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustesse/b3` `b3_hostile_column_widths` (reading without a filter, without `check_node_id`: red) |
+| file without the field → empty table; orphan key, NaN, ∞, 0, negative discarded one by one; identifier > `MAX_NODE_ID` refused | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustness/b3` `b3_hostile_column_widths` (reading without a filter, without `check_node_id`: red) |
 | the state sets the width through the actor without history, including a detached view | `app-state/tests/column_width.rs` |
 | the `.stf` gives its width to the startup snapshot | `main.rs` `startup_restores_the_column_widths_of_the_file` |
 | the dragged handle pushes the width only on release | `grid::tests::a_manual_resize_sends_the_width_at_the_end_only` |

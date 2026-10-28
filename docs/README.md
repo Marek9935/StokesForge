@@ -23,40 +23,40 @@ page that contradicts the code is wrong.
 |---|---|
 | understand the split into crates and why it is so | [`architecture.md`](architecture.md) |
 | know what I am not allowed to break | [`invariants.md`](invariants.md) |
-| touch the project tree, the columns, the `PlotSpec` | [`modele-de-donnees.md`](modele-de-donnees.md) |
-| touch undo/redo, macros | [`commandes-et-historique.md`](commandes-et-historique.md) |
-| touch the `.stf` format, `save`/`load` | [`persistance.md`](persistance.md) |
+| touch the project tree, the columns, the `PlotSpec` | [`data-model.md`](data-model.md) |
+| touch undo/redo, macros | [`commands-and-history.md`](commands-and-history.md) |
+| touch the `.stf` format, `save`/`load` | [`persistence.md`](persistence.md) |
 | touch the actor, concurrency, snapshots | [`session.md`](session.md) |
-| touch plotting, axes, SVG/PDF/PNG export, formulas | [`rendu.md`](rendu.md) |
-| touch the PyO3 bridge or the `pyst` surface of scripts | [`python-et-script.md`](python-et-script.md) |
+| touch plotting, axes, SVG/PDF/PNG export, formulas | [`rendering.md`](rendering.md) |
+| touch the PyO3 bridge or the `pyst` surface of scripts | [`python-and-scripting.md`](python-and-scripting.md) |
 | reproduce the off-screen measurements of the Matplotlib prototype | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
 | touch the window, shortcuts, the grid | [`application/`](application/README.md) |
-| add or display an icon (color roles, contact sheet) | [`icones.md`](icones.md) |
-| add or place a menu or right-click entry | [`menus.md`](menus.md) (grammar), then [`application/menus-et-barres.md`](application/menus-et-barres.md) § Themed menus (#114) |
-| write or change visible text (label, tooltip, message) | [`textes-interface.md`](textes-interface.md) |
-| add a field, a message, a dialog, a confirmation, a greyed-out state, a keyboard or mouse gesture | [`standard-interface.md`](standard-interface.md) (behavior, #217) |
-| create a new window or dialog, or add a gesture (wheel, double-click) | [`fenetres.md`](fenetres.md) (catalog of windows), [`principes-ui.md`](principes-ui.md) (interface principles), [`gestes.md`](gestes.md) (gesture matrix) |
+| add or display an icon (color roles, contact sheet) | [`icons.md`](icons.md) |
+| add or place a menu or right-click entry | [`menus.md`](menus.md) (grammar), then [`application/menus-and-toolbars.md`](application/menus-and-toolbars.md) § Themed menus (#114) |
+| write or change visible text (label, tooltip, message) | [`ui-texts.md`](ui-texts.md) |
+| add a field, a message, a dialog, a confirmation, a greyed-out state, a keyboard or mouse gesture | [`interface-standard.md`](interface-standard.md) (behavior, #217) |
+| create a new window or dialog, or add a gesture (wheel, double-click) | [`windows.md`](windows.md) (catalog of windows), [`ui-principles.md`](ui-principles.md) (interface principles), [`gestures.md`](gestures.md) (gesture matrix) |
 | write or run a test, understand the CI | [`tests.md`](tests.md) |
-| measure the smoothness of the interface (frame time, running in release) | [`mesure-performance.md`](mesure-performance.md) |
-| license, contributions, extension interfaces and third-party notices | [`licence-et-extensions.md`](licence-et-extensions.md) |
-| know what V1 requires, or release a version | [`criteres-v1.md`](criteres-v1.md) |
+| measure the smoothness of the interface (frame time, running in release) | [`performance-measurement.md`](performance-measurement.md) |
+| license, contributions, extension interfaces and third-party notices | [`license-and-extensions.md`](license-and-extensions.md) |
+| know what V1 requires, or release a version | [`v1-criteria.md`](v1-criteria.md) |
 
 `.claude/rules.md` completes this table on the **context loading** side: which
 crates to open, and above all which not to open, for each domain.
 
 An exception to the rule "these pages plan nothing":
-[`chantier-colonnes-mixtes.md`](chantier-colonnes-mixtes.md) is a
+[`mixed-columns-work-package.md`](mixed-columns-work-package.md) is a
 **handover note**, not a reference page — what a work package found along the
 way and what it leaves open, especially on the test side. It will join
 `docs/archive/` when its "remaining to do" column is empty.
 
-`docs/chantiers/` gathers the same notes for **pending** work:
+`docs/work-packages/` gathers the same notes for **pending** work:
 
 | Note | Contents |
 |---|---|
-| [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | nine features to develop, with the decisions already made |
-| [`prevision-import.md`](chantiers/prevision-import.md) | import preview |
-| [`analyse-maquettes.md`](chantiers/analyse-maquettes.md) | mathematical processing (#181): mockups M1–M15 and choices of 2026-10-09, carried over into #181–#190 |
+| [`feedback-2026-09-23-features.md`](work-packages/feedback-2026-09-23-features.md) | nine features to develop, with the decisions already made |
+| [`import-preview-plan.md`](work-packages/import-preview-plan.md) | import preview |
+| [`analysis-mockups.md`](work-packages/analysis-mockups.md) | mathematical processing (#181): mockups M1–M15 and choices of 2026-10-09, carried over into #181–#190 |
 
 **Bugs do not live there**: their state is tracked in the project's GitLab
 issues (`glab issue list --label bug`). The old `retours-*-bugs.md` reports
@@ -71,9 +71,9 @@ before being taken up.
 
 ```sh
 cargo build --workspace
-cargo test --workspace                        # inclut stokesforge-robustesse, sauf #[ignore]
+cargo test --workspace                        # inclut stokesforge-robustness, sauf #[ignore]
 cargo test -p <crate> <nom_test>              # un seul test
-cargo test -p stokesforge-robustesse -- --ignored  # reproductions et bancs coûteux
+cargo test -p stokesforge-robustness -- --ignored  # reproductions et bancs coûteux
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```

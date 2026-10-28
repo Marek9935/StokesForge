@@ -3,7 +3,7 @@
 //! The icons are Phosphor duotone, baked by `scripts/icons-build.sh`
 //! into **one variant per (icon, color role)** — `Image::tint` multiplies
 //! the pixels and cannot recolor stroke and fill separately. Usage rules
-//! and palette: `docs/icones.md`.
+//! and palette: `docs/icons.md`.
 //!
 //! Every icon display goes through [`icon_image`] or [`icon_button`]: uniform
 //! size ([`ICON_SIZE`]) and alignment, mandatory tooltip (text already

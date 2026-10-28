@@ -7,12 +7,12 @@ Read for every feature before coding (decide where the user finds it), and whene
 - Grammar (sections, submenus, absent / greyed, bare verbs, separators): `docs/menus.md` § Rules ; `docs/menus.md` § Canonical order of sections ; `docs/menus.md` § Adding an entry.
 - Content and envelope: `docs/menus.md` § The principle: content and envelope.
 - Shared painters, operational summary: `.claude/conventions.md` § Object Manager, fixed panels, menus.
-- Menu bar and thematic menus: `docs/application/menus-et-barres.md` § Themed menus (#114).
-- Grid context menu, deliberate menu / keyboard gaps: `docs/application/grille.md` § Grid context menus.
-- What Qt gave for free: `docs/application/etat-et-console.md` § What Qt gave for free, and must be written here.
-- Shortcut registry, `SHORTCUT_*`, cursors: `docs/standard-interface.md` § Keyboard and mouse ; `docs/gestes.md` § The model.
-- Tab, arrows and `GRID_KEYS`: `docs/application/grille.md` § Tab and arrows belong to the grid (#38).
-- Labels: `docs/textes-interface.md` § 1. Rules (skill `stokesforge-textes-interface`).
+- Menu bar and thematic menus: `docs/application/menus-and-toolbars.md` § Themed menus (#114).
+- Grid context menu, deliberate menu / keyboard gaps: `docs/application/grid.md` § Grid context menus.
+- What Qt gave for free: `docs/application/state-and-console.md` § What Qt gave for free, and must be written here.
+- Shortcut registry, `SHORTCUT_*`, cursors: `docs/interface-standard.md` § Keyboard and mouse ; `docs/gestures.md` § The model.
+- Tab, arrows and `GRID_KEYS`: `docs/application/grid.md` § Tab and arrows belong to the grid (#38).
+- Labels: `docs/ui-texts.md` § 1. Rules (skill `stokesforge-ui-texts`).
 
 ## Check
 

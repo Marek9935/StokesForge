@@ -28,7 +28,7 @@
 //! or the "Window" menu. Under Wayland, the compositor may ignore a window
 //! position
 //! requested by the application — the same caveat already documented in
-//! `docs/application/theme-i18n-systeme.md` for `rfd`; this task explicitly asks for
+//! `docs/application/theme-i18n-system.md` for `rfd`; this task explicitly asks for
 //! no position (it lets the compositor place the window), so it does not
 //! suffer from it directly, but the limit is worth knowing before one day
 //! adding a remembered position.

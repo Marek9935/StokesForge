@@ -23,7 +23,7 @@
 //! does not compile until it is handled here. Two treatments:
 //!
 //! - give it an `error-<family>-<cause>` key (text following the glossary and
-//!   `docs/textes-interface.md`: what happened, then what to do, without
+//!   `docs/ui-texts.md`: what happened, then what to do, without
 //!   internal jargon — no *node*, *session*, *macro*, *command*) and use it
 //!   through [`crate::tr!`] with its fields as named arguments;
 //! - or, failing that, let it fall back to its English `Display` through
@@ -1343,7 +1343,7 @@ pub mod tests_support {
     use std::fmt::Display;
 
     /// Internal jargon words that an error sentence does not use
-    /// (`docs/textes-interface.md`, R9). The `detail`s of the examples contain none:
+    /// (`docs/ui-texts.md`, R9). The `detail`s of the examples contain none:
     /// a forbidden word can only come from the catalog.
     const JARGON: &[&str] = &[
         "node", "session", "tree", "macro", "command", "handle", "snapshot", "please", "sorry",

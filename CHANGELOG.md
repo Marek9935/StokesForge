@@ -2,11 +2,11 @@
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow the numbering `MAJOR.MINOR.PATCH`; the V1 criteria are in
-[`docs/criteres-v1.md`](docs/criteres-v1.md).
+[`docs/v1-criteria.md`](docs/v1-criteria.md).
 
 What counts as compatibility from V1 on: the `.stf` file format (a V1 file can
 be read back and migrated up to V3, invariant 12) and the `pyst` API
-(["V1 frozen API"](docs/python-et-script.md)). The rest of the code has no
+(["V1 frozen API"](docs/python-and-scripting.md)). The rest of the code has no
 compatibility promise.
 
 One section per version, titled `## [X.Y.Z] - date`. The release job
@@ -19,7 +19,7 @@ there, in the commit that carries it. The version commit renames this section
 to `[X.Y.Z] - date` and opens a new empty one. A fix cherry-picked to
 `release/N.x` also carries its line there. An additive field of the `.stf`
 format is announced there (an older version that saves the file again loses it
-without a message, see `docs/persistance.md`).
+without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 

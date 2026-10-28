@@ -13,7 +13,7 @@ translated crate by crate (#372–#376).
 A contribution goes through a merge request to `main`: one review, green CI
 required. No force-push and no rebase on a shared branch; the branch is
 named `feature/<n>-<topic>`, stays short and receives `main` before the merge
-(details: [`docs/criteres-v1.md`](docs/criteres-v1.md), "Branches and versions").
+(details: [`docs/v1-criteria.md`](docs/v1-criteria.md), "Branches and versions").
 
 ## License of contributions
 
@@ -46,11 +46,11 @@ Follow the checks of the Codex guide: `fmt`, `clippy`, workspace tests and
 Python tests when the Python path is changed. A new dependency or
 resource must also respect [`deny.toml`](deny.toml) and appear
 in the distribution notices. The license tools and commands are
-in [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+in [`docs/license-and-extensions.md`](docs/license-and-extensions.md).
 
 The Linux and Windows CI runs on GitHub (mirror of the repository); the
 results are read in the GitLab pipeline of the commit or with
-`scripts/ci-statuts.sh`. Instructions, runner pitfalls and maintenance:
+`scripts/ci-status.sh`. Instructions, runner pitfalls and maintenance:
 [`docs/tests.md`](docs/tests.md), "Using CI day to day".
 
 Any new extension interface covered by the exception requires an explicit

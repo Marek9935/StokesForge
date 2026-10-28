@@ -5070,7 +5070,7 @@ fn cell_f64(state: &AppState, column: NodeId, row: usize) -> f64 {
 /// becomes `Mixed` and keeps the original token — this is the motivating
 /// use case of the "import preview" work package, which finally consumes on the import
 /// side the "mixed-type columns" work package
-/// (`ParsedColumn::texts`, see `docs/chantier-import-previsualisation.md`).
+/// (`ParsedColumn::texts`, see `docs/import-preview-work-package.md`).
 /// A fully numeric column, for its part, still produces a
 /// `Numeric` column identical to before that work package — checked
 /// elsewhere (all the other assertions of this file on numeric

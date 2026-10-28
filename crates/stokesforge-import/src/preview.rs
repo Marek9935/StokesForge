@@ -3,7 +3,7 @@
 //! role (main header, sub-header with its role, column header, data, footer)
 //! exactly as [`crate::parse::parse`] would treat it, so that the panel that
 //! shows this preview updates live at every settings change. See
-//! `docs/chantier-import-previsualisation.md` (the goal of the work package
+//! `docs/import-preview-work-package.md` (the goal of the work package
 //! that added this module).
 //!
 //! The point of vigilance that guided the whole writing of this module: stay

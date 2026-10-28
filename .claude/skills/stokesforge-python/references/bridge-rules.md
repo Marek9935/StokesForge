@@ -4,7 +4,7 @@ Read from `stokesforge-python` before touching the bridge or the interpreter.
 
 ## Invariant 9 — no Python object crosses the actor channel
 
-Source: `docs/invariants.md` § 9. No Python object crosses the actor channel ; `docs/python-et-script.md` § The GIL — the part the compiler holds.
+Source: `docs/invariants.md` § 9. No Python object crosses the actor channel ; `docs/python-and-scripting.md` § The GIL — the part the compiler holds.
 
 1. The UI thread never touches Python.
 2. The script thread **releases the GIL** while waiting for the actor: every `pyst` call goes through `Python::detach`, and PyO3's `Ungil` marker forbids at compile time a GIL-bound value entering or leaving the waiting block.
@@ -14,7 +14,7 @@ The hidden path these rules close: a request or response carrying a Python objec
 
 ## The read/write asymmetry is a decision
 
-Source: `docs/python-et-script.md` § Arrays: the asymmetry is a decision.
+Source: `docs/python-and-scripting.md` § Arrays: the asymmetry is a decision.
 
 | Direction | Mechanism | Copy? |
 |---|---|---|

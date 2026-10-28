@@ -4,14 +4,14 @@ Read when painting a scroll bar, tabs, a selectable list or tree, a section titl
 
 ## Where the rule lives
 
-- Scroll bars: `docs/application/theme-i18n-systeme.md` § Theme ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards (`theme::scroll_style`).
-- Four roles (tabs, list, exclusive choice, tool toggle): `docs/application/fenetres-et-panneaux.md` § Tabs, lists and selection: four aspects, four roles (#169).
-- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "common appearance (#169)" ; `docs/standard-interface.md` § Choices, layout.
-- Colour picker, usages, saved colours: `docs/application/graphe.md` § Graph properties ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point `color_picker::color_field`.
-- Empty colour = automatic, automatic ink: `docs/rendu.md` § Text and scale colors: automatic ink.
-- New colour field in the model (`#[serde(default)]`): `docs/persistance.md` § The format is not written into the model.
-- Icons: `docs/icones.md` § When to put an icon — and when not ; `docs/icones.md` § Every action has its logo (rule set with #110) ; `docs/icones.md` § Color: neutral by default, color is rare ; `docs/icones.md` § Adding an icon ; `docs/icones.md` § Color swatches (#89).
-- General principle: `docs/principes-ui.md` § 1. One building block, one gesture.
+- Scroll bars: `docs/application/theme-i18n-system.md` § Theme ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards (`theme::scroll_style`).
+- Four roles (tabs, list, exclusive choice, tool toggle): `docs/application/windows-and-panels.md` § Tabs, lists and selection: four aspects, four roles (#169).
+- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "common appearance (#169)" ; `docs/interface-standard.md` § Choices, layout.
+- Colour picker, usages, saved colours: `docs/application/graph.md` § Graph properties ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point `color_picker::color_field`.
+- Empty colour = automatic, automatic ink: `docs/rendering.md` § Text and scale colors: automatic ink.
+- New colour field in the model (`#[serde(default)]`): `docs/persistence.md` § The format is not written into the model.
+- Icons: `docs/icons.md` § When to put an icon — and when not ; `docs/icons.md` § Every action has its logo (rule set with #110) ; `docs/icons.md` § Color: neutral by default, color is rare ; `docs/icons.md` § Adding an icon ; `docs/icons.md` § Color swatches (#89).
+- General principle: `docs/ui-principles.md` § 1. One building block, one gesture.
 - Guards: `docs/tests.md` § Guards not to break.
 
 ## Check

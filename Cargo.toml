@@ -20,7 +20,7 @@ members = [
     "crates/stokesforge-cli",
     "crates/stokesforge-app-state",
     "crates/stokesforge-app",
-    "crates/stokesforge-robustesse",
+    "crates/stokesforge-robustness",
     "crates/stokesforge-arch-guard",
 ]
 

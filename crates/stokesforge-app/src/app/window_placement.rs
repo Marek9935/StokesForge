@@ -92,7 +92,7 @@ pub(super) fn floating_window_geometry_to_persist(
 /// window and crushed the floating windows against its edges. A "generous"
 /// bench rather than one fitted to a given screen; making it really
 /// adjustable by the user (persistence, settings UI) remains to be done —
-/// see `docs/chantiers`. Below this size, [`StokesForgeApp::ui`](eframe::App::ui) scrolls
+/// see `docs/work-packages`. Below this size, [`StokesForgeApp::ui`](eframe::App::ui) scrolls
 /// the workspace ([`StokesForgeApp::workspace_scroll`](crate::app::StokesForgeApp::workspace_scroll)) rather than
 /// shrinking or truncating the windows it contains.
 pub(super) const WORKSPACE_SIZE: egui::Vec2 = egui::vec2(1920.0, 1080.0);

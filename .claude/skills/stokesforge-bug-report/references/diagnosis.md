@@ -69,7 +69,7 @@ A reproduction fails on purpose and carries `#[ignore = "#<issue> : <reason>"]`.
 |---|---|
 | local behaviour of a function | `#[cfg(test)]` in the `src/` concerned |
 | public contract or crate boundary | `crates/<crate>/tests/` |
-| the core at its limits | the `bN` battery of `stokesforge-robustesse` |
+| the core at its limits | the `bN` battery of `stokesforge-robustness` |
 | interface logic | `crates/stokesforge-app-state/tests/shell.rs` |
 
 A purely visual symptom is not testable in CI: say so rather than write a test that proves nothing.

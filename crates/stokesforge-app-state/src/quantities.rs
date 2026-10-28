@@ -8,7 +8,7 @@
 //! for all the width fields at once.
 //!
 //! The **unit** is not in the table: it is stated in the field's label
-//! ("Line width (pt)"), a catalog key (S-N10, `docs/textes-interface.md`).
+//! ("Line width (pt)"), a catalog key (S-N10, `docs/ui-texts.md`).
 //! A `▼` appears only if the quantity has [`Quantity::presets`]; an axis bound
 //! or a fit parameter has none.
 //!

@@ -9899,7 +9899,7 @@ mod tests {
     //! value ↔ text boundary itself (A9 option 2 and C4,
     //! `guide-de-correction-robustesse.md` §F1/§F8). The rest of the file
     //! (dispatch, history, save...) is covered in integration by
-    //! `tests/shell.rs` and by the `stokesforge-robustesse` bench (battery 15),
+    //! `tests/shell.rs` and by the `stokesforge-robustness` bench (battery 15),
     //! which need a real session.
 
     use super::{

@@ -325,7 +325,7 @@ fn the_written_format_does_not_drift_without_a_version_change() {
         witness_project_bytes() == file,
         "the written format changed: if intended, bump the version number \
          (removal, rename, change of meaning) or regenerate the witness \
-         (addition), see docs/persistance.md, « Version rule »"
+         (addition), see docs/persistence.md, « Version rule »"
     );
 }
 

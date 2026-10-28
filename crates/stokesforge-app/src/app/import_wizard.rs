@@ -2050,7 +2050,7 @@ mod tests {
         );
     }
 
-    /// One notion, one word (`docs/textes-interface.md`): the comma, the dot,
+    /// One notion, one word (`docs/ui-texts.md`): the comma, the dot,
     /// "Auto" and "None" are written the same from one list of the wizard to
     /// another.
     #[test]

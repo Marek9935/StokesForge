@@ -7,24 +7,24 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 | [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implement a feature end to end | a change to make in the repo |
 | [`stokesforge-bug-report`](stokesforge-bug-report/SKILL.md) | triage feedback into GitLab issues | « ça plante », a batch of remarks, an issue |
 | [`stokesforge-bug-fix`](stokesforge-bug-fix/SKILL.md) | fix: reproduce first, repair at the cause | an explicit request to fix in the code |
-| [`stokesforge-commande`](stokesforge-commande/SKILL.md) | add an undoable command | any mutation of the project |
-| [`stokesforge-rendu`](stokesforge-rendu/SKILL.md) | plots, axes, export, Typst | `stokesforge-render*`, a visual symptom |
+| [`stokesforge-command`](stokesforge-command/SKILL.md) | add an undoable command | any mutation of the project |
+| [`stokesforge-rendering`](stokesforge-rendering/SKILL.md) | plots, axes, export, Typst | `stokesforge-render*`, a visual symptom |
 | [`stokesforge-import`](stokesforge-import/SKILL.md) | instrument files, recipes, preview | a badly read CSV/TXT/ASC |
 | [`stokesforge-python`](stokesforge-python/SKILL.md) | PyO3 bridge, `pyst`, console | a script, the `python` feature |
-| [`stokesforge-textes-interface`](stokesforge-textes-interface/SKILL.md) | visible texts by the glossary | any label, tooltip or message |
+| [`stokesforge-ui-texts`](stokesforge-ui-texts/SKILL.md) | visible texts by the glossary | any label, tooltip or message |
 | [`stokesforge-verification`](stokesforge-verification/SKILL.md) | test placement, checks, commit | « vérifie », « commit », end of a task |
 | [`run-stokesforge`](run-stokesforge/SKILL.md) | launch, drive and capture the real app | « lance l'app », « screenshot » |
-| [`stokesforge-expliquer`](stokesforge-expliquer/SKILL.md) | answer a chemist: features and architecture | « est-ce que je peux… », « comment ça marche » |
+| [`stokesforge-explain`](stokesforge-explain/SKILL.md) | answer a chemist: features and architecture | « est-ce que je peux… », « comment ça marche » |
 
 ## How they chain
 
 ```text
-question ──► stokesforge-expliquer
+question ──► stokesforge-explain
 symptom  ──► stokesforge-bug-report ──(explicit request)──► stokesforge-bug-fix ──┐
 request  ──► stokesforge-feature ──► commande / rendu / import / python / textes ──┴─► stokesforge-verification ──► commit (on request)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/formulaire-de-decisions.md`](stokesforge-bug-report/references/formulaire-de-decisions.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
+`run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 

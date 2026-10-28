@@ -179,7 +179,7 @@ unusable in memory.
 ## 8. Strict LIFO on the history stack
 
 The history is hybrid: **structure** is kept by tree snapshots, **data** by
-deltas ([`commandes-et-historique.md`](commandes-et-historique.md)).
+deltas ([`commands-and-history.md`](commands-and-history.md)).
 From this asymmetry follows a non-negotiable constraint: restoring a whole tree
 overwrites everything written after it, so a structural entry
 can be undone only once all later entries have been undone.
@@ -288,7 +288,7 @@ expected project, and saving gives back its bytes. Removing, renaming or
 changing the meaning of a field **raises the version number** and adds a
 migrating arm to `version::decode_body`; adding a `#[serde(default)]` field
 stays additive and regenerates the witness. Full rule:
-[`persistance.md`](persistance.md), "Version rule: every V1 file can be read back up to V3".
+[`persistence.md`](persistence.md), "Version rule: every V1 file can be read back up to V3".
 
 **To read**: `stokesforge-persistence/src/version.rs`,
 `stokesforge-persistence/tests/witness_files.rs`.

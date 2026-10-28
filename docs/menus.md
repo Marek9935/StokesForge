@@ -4,8 +4,8 @@ The **single** source of the rules that organize the menu-bar menus and the
 right-clicks. A new entry goes into a section of this grammar; a menu that
 violates it is reported against this page. The *how* (building block, shared
 paints) is in `crates/stokesforge-app/src/app/menu_sections.rs`
-and `docs/application/menus-et-barres.md` (§ Themed menus (#114)); the terms and capitalization
-are in `docs/textes-interface.md`.
+and `docs/application/menus-and-toolbars.md` (§ Themed menus (#114)); the terms and capitalization
+are in `docs/ui-texts.md`.
 
 ## The principle: content and envelope
 

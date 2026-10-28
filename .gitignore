@@ -48,7 +48,7 @@ htmlcov/
 /vendor/python/*.tar.gz
 /vendor/python/extracted/
 
-# Icônes Phosphor : seuls `SVGs/` (source des icônes embarquées, cf. docs/icones.md)
+# Icônes Phosphor : seuls `SVGs/` (source des icônes embarquées, cf. docs/icons.md)
 # et `LICENSE` sont versionnés ; le reste du paquet téléchargé est local.
 /vendor/phosphor-icons/Fonts/
 /vendor/phosphor-icons/PNGs/

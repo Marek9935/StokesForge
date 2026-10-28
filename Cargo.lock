@@ -5361,7 +5361,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "stokesforge-robustesse"
+name = "stokesforge-robustness"
 version = "1.0.0"
 dependencies = [
  "proptest",
