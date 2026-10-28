@@ -30,13 +30,13 @@ once on egui's global style; changing the `SCROLL_BAR_*` constants of
 `theme.rs` changes all the bars at once. Rule for future code: never
 build or modify a `ScrollStyle` outside `theme.rs`; an area
 that must reserve room for a bar reads it through
-`theme::scroll_bar_allocated_width`. The test `aucun_scroll_style_hors_du_theme`
+`theme::scroll_bar_allocated_width`. The test `no_scroll_style_outside_the_theme`
 fails the CI otherwise.
 
 **Icons.** Phosphor duotone, a single component (`icons.rs`: `icon_image`,
 `icon_button`, single size, mandatory tooltip), color "neutral by
 default, rare afterwards": rules and procedure in [`icones.md`](../icones.md).
-The test `aucune_icone_hors_du_composant` forbids loading any icon
+The test `no_icon_outside_the_component` forbids loading any icon
 elsewhere.
 
 ### Multilingual interface (Fluent)
@@ -58,7 +58,7 @@ at compile time) is at the top of `stokesforge-app-state/src/i18n.rs`.
 | `stokesforge-app-state/src/preferences.rs` | `preferences.json`, same configuration folder as `couleurs.json` |
 | `stokesforge-import/src/config_dir.rs` | the single rule for the configuration folder (`STOKESFORGE_CONFIG_DIR`, #332) |
 | `stokesforge-app-state/src/history_text.rs` | the history labels (`HistoryLabel`) as sentences, `history-*` keys (#46) |
-| `stokesforge-app/tests/libelles.rs` | the `aucun_libelle_en_dur` guard (absolute: no exemption), which reads the sources of both crates, and the dead keys |
+| `stokesforge-app/tests/labels.rs` | the `no_hardcoded_label` guard (absolute: no exemption), which reads the sources of both crates, and the dead keys |
 
 **`tr!` is the single entry point**: `tr!("menu-file")`, or with named
 arguments `tr!("history-insert-rows", count = n)`. It wraps `fl!`; a key or an
@@ -107,7 +107,7 @@ isolate themselves from the real profile (`docs/tests.md`, "Rule (#250)"). Rule 
 +30%), without a file. With `STOKESFORGE_LANG=en-XA`: a text without `[[ ]]` has not gone
 through the catalog, a missing `]]` signals a truncated text.
 
-**Guard `aucun_libelle_en_dur`** (`tests/libelles.rs`): no text literal
+**Guard `no_hardcoded_label`** (`tests/labels.rs`): no text literal
 in `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
 `selectable_value`, `selectable_label`, `on_hover_text`, `heading`, nor in the
 `Button::new(…)`/`RichText::new(…)`, nor in the `fn label()`/`fn title()` tables.
@@ -123,7 +123,7 @@ Zone #43 (graph properties, text editor, dialog footer,
 export) is guarded more strictly (`ZONE_43`: no text
 literal in its functions, whatever the form of the call). A key of the
 `en` catalog that no source in `src/` uses makes
-`aucune_cle_du_catalogue_n_est_morte` fail (`tests/libelles.rs`, which reads `src/` of both crates). Detailed mechanics: skill
+`no_catalog_key_is_dead` fail (`tests/labels.rs`, which reads `src/` of both crates). Detailed mechanics: skill
 `stokesforge-textes-interface`.
 
 **Displayed errors (#47).** The crates below return structured errors
@@ -162,7 +162,7 @@ without the portal answering (`wait_for_response` of `rfd` has no timeout);
 now, at worst, the request stays pending. Only one picker is tracked at a time: a new request replaces
 the old one, otherwise a picker closed without an answer from the portal would block
 Open afterwards (the abandoned thread stays blocked in `rfd`, with no effect).
-Guard: `aucun_selecteur_rfd_hors_du_module`. To be validated on a real GNOME/Wayland
+Guard: `no_rfd_picker_outside_the_module`. To be validated on a real GNOME/Wayland
 desktop (click on the application while the picker is open); on macOS, the
 pickers off the main thread remain to be checked. The picker is not yet
 attached to the window (`set_parent`), not needed for the unfreeze.

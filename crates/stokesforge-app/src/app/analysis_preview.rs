@@ -1,51 +1,51 @@
-//! L'aperçu de la fenêtre d'analyse (#181, maquettes M3 et M4) : la série
-//! montrée, le résultat du calcul en direct (ligne de base, ajustement, pics,
-//! résidus) et les repères posés (points, zones, positions de pics).
+//! The preview of the analysis window (#181, mockups M3 and M4): the series
+//! shown, the live result of the calculation (baseline, fit, peaks,
+//! residuals) and the markers placed (points, zones, peak positions).
 //!
-//! L'aperçu se peint lui-même — il ne passe pas par `GraphView` : il n'a ni
-//! calque, ni légende, ni historique, et ses clics **écrivent dans le
-//! formulaire** (`AnalysisForm::add_point`, `add_zone`, `remove_near`), pas
-//! dans le modèle. Sa **peinture** reste ici ; sa **géométrie** — pixel ↔
-//! données, zoom, graduations, aimantation, cadre initial — vient de
-//! `stokesforge_render` (`PanelTransform`, `axis_ticks`, `snap_to_curve`,
-//! `axis_frame`, #261) : l'application ne fait que convertir en `Pos2`.
+//! The preview paints itself; it does not go through `GraphView`: it has no
+//! layer, no legend, no history, and its clicks **write into the form**
+//! (`AnalysisForm::add_point`, `add_zone`, `remove_near`), not into the
+//! model. Its **painting** stays here; its **geometry** (pixel ↔ data,
+//! zoom, ticks, snapping, initial frame) comes from `stokesforge_render`
+//! (`PanelTransform`, `axis_ticks`, `snap_to_curve`, `axis_frame`, #261): the
+//! application only converts to `Pos2`.
 //!
-//! # Gestes
+//! # Gestures
 //!
-//! Comme sur le graphe (#270, D3 de #299 ; matrice : `docs/gestes.md`) :
+//! As on the graph (#270, D3 of #299; matrix: `docs/gestes.md`):
 //!
-//! - **Ctrl + molette** : zoom ancré sous le pointeur ; au-dessus d'un axe, ce
-//!   seul axe. La molette seule ne fait rien ;
-//! - **Ctrl + glisser** : déplace la vue (un glisser parti d'un axe ne déplace
-//!   que cet axe) ; le modificateur est lu au début du glisser ;
-//! - **double clic** : cadrage d'origine ;
-//! - **Maj + molette** : règle la moyenne N de l'aimant (M4 b) ;
-//! - outil *Points* : un clic pose un point ; **Maj** l'aimante sur la courbe
-//!   avec une moyenne locale de N points ; le rond d'aimantation grandit avec
-//!   la zone moyennée (largeur en X convertie en pixels, #334) ;
-//! - outil *Zone* : glisser trace une zone ou une plage ;
-//! - clic droit : retire le repère visé.
+//! - **Ctrl + wheel**: zoom anchored under the pointer; over an axis, that
+//!   axis alone. The wheel alone does nothing;
+//! - **Ctrl + drag**: moves the view (a drag that starts on an axis moves
+//!   only that axis); the modifier is read at the start of the drag;
+//! - **double click**: original framing;
+//! - **Shift + wheel**: sets the average N of the magnet (M4 b);
+//! - *Points* tool: a click places a point; **Shift** snaps it to the curve
+//!   with a local average of N points; the snap circle grows with the
+//!   averaged zone (width in X converted to pixels, #334);
+//! - *Zone* tool: dragging draws a zone or a range;
+//! - right click: removes the targeted marker.
 //!
-//! Le zoom et le déplacement sont calculés par `stokesforge_render`
-//! (`PanelTransform::zoom`, `pan`) ; l'aperçu n'a pas de `ViewState` (ni calque,
-//! ni panneaux dessinés) : il garde son cadre et ne fait que choisir la cible
-//! du geste, plein tracé ou un axe.
+//! Zoom and pan are computed by `stokesforge_render` (`PanelTransform::zoom`,
+//! `pan`); the preview has no `ViewState` (no layer, no drawn panels): it
+//! keeps its frame and only chooses the target of the gesture, the whole plot
+//! or one axis.
 //!
-//! # Le calcul n'est pas fait dans `ui()` (#201)
+//! # The calculation is not done in `ui()` (#201)
 //!
-//! L'aperçu se calcule sur **un fil de travail** (un seul à la fois, nommé
-//! `stokesforge-analysis-preview`) : un ajustement multi-pics sur des dizaines de
-//! milliers de points ne gèle plus la fenêtre. Chaque image compare le
-//! formulaire et la révision du modèle à ceux du dernier résultat ; s'ils
-//! diffèrent, la demande est posée **en remplaçant** celle qui attendait (le
-//! résultat obsolète est jeté, un calcul en cours n'est pas interrompu mais son
-//! résultat est ignoré s'il ne correspond plus). L'image attend le fil
-//! [`INLINE_WAIT`] au plus : un petit calcul rend son résultat dans la même
-//! image, sans clignotement ; un gros laisse l'ancien résultat (marqué « en
-//! cours ») et le fil réveille le viewport **une fois** à sa fin — aucun réveil
-//! périodique au repos.
+//! The preview is computed on **a worker thread** (only one at a time, named
+//! `stokesforge-analysis-preview`): a multi-peak fit on tens of thousands of
+//! points no longer freezes the window. Each frame compares the form and the
+//! model revision with those of the last result; if they differ, the request
+//! is posted **replacing** the one that was waiting (the obsolete result is
+//! dropped, a calculation in progress is not interrupted but its result is
+//! ignored if it no longer matches). The frame waits for the thread at most
+//! [`INLINE_WAIT`]: a small calculation returns its result in the same frame,
+//! without flicker; a big one leaves the old result (marked "in progress")
+//! and the thread wakes the viewport **once** when it ends. No periodic
+//! wake-up at rest.
 //!
-//! Une image où rien ne change ne refait rien.
+//! A frame where nothing changes redoes nothing.
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -64,14 +64,14 @@ use stokesforge_app_state::analysis::{
 };
 use stokesforge_app_state::tr;
 
-/// Le cadre de données visible : les bornes de X puis de Y, **dans l'ordre
-/// d'affichage** (un axe inversé a sa borne haute en premier), comme les prend
-/// [`PanelTransform::new`].
+/// The visible data frame: the bounds of X then of Y, **in display order**
+/// (a reversed axis has its high bound first), as [`PanelTransform::new`]
+/// takes them.
 type Frame = ((f64, f64), (f64, f64));
 
-/// Les axes (bas, ordonnée) de la courbe du graphe dont vient la série
-/// courante ; `None` sans graphe source — l'aperçu est alors linéaire et non
-/// inversé.
+/// The axes (bottom, ordinate) of the graph curve the current series comes
+/// from; `None` without a source graph: the preview is then linear and not
+/// reversed.
 fn source_axes(form: &AnalysisForm) -> Option<(&AxisSpec, &AxisSpec)> {
     let (spec, sources) = form.graph_source.as_ref()?;
     let source = sources.get(form.current)?;
@@ -80,9 +80,9 @@ fn source_axes(form: &AnalysisForm) -> Option<(&AxisSpec, &AxisSpec)> {
     Some((&panel.bottom, panel.axis(curve.axis.side())))
 }
 
-/// La transformation de `rect` pour ces bornes ; `None` pour un rectangle sans
-/// surface. Le rectangle d'egui est fractionnaire : origine et taille passent
-/// en `f64` sans arrondi.
+/// The transform of `rect` for these bounds; `None` for a rectangle with no
+/// area. The egui rectangle is fractional: origin and size pass to `f64`
+/// without rounding.
 fn transform_for(
     rect: egui::Rect,
     x: (f64, f64),
@@ -99,24 +99,24 @@ fn transform_for(
     )
 }
 
-/// Le pixel d'une donnée ; `None` si elle n'a pas d'image (hors d'une échelle
-/// logarithmique, non finie).
+/// The pixel of a data point; `None` if it has no image (outside a
+/// logarithmic scale, not finite).
 fn to_screen(transform: &PanelTransform, x: f64, y: f64) -> Option<egui::Pos2> {
     let (px, py) = transform.data_to_pixel(x, y)?;
     Some(egui::pos2(px as f32, py as f32))
 }
 
-/// Rayon minimal du rond d'aimantation : celui d'une moyenne d'un seul point.
+/// Minimal radius of the snap circle: that of an average of a single point.
 const SNAP_RADIUS_MIN: f32 = 6.0;
 
-/// Rayon en pixels du rond d'aimantation (#334) : le plus grand des deux
-/// demi-côtés de la zone moyennée, mesurés depuis le point aimanté `center` (en
-/// X, écran) jusqu'aux bords `edge_a` et `edge_b`. Il ne descend pas sous
-/// [`SNAP_RADIUS_MIN`] ni ne dépasse `max` ; un pixel non fini donne le
-/// minimum (invariant 10 : ni panique ni NaN). Les distances sont absolues :
-/// un axe X inversé donne le même rayon.
+/// Radius in pixels of the snap circle (#334): the larger of the two
+/// half-sides of the averaged zone, measured from the snapped point `center`
+/// (in X, screen) to the edges `edge_a` and `edge_b`. It does not go below
+/// [`SNAP_RADIUS_MIN`] nor above `max`; a non-finite pixel gives the
+/// minimum (invariant 10: no panic, no NaN). The distances are absolute: a
+/// reversed X axis gives the same radius.
 fn snap_radius(center: f32, edge_a: f32, edge_b: f32, max: f32) -> f32 {
-    // `f32::max` avale un NaN : on teste chaque pixel avant de comparer.
+    // `f32::max` swallows a NaN: we test each pixel before comparing.
     if ![center, edge_a, edge_b, max].iter().all(|v| v.is_finite()) {
         return SNAP_RADIUS_MIN;
     }
@@ -124,31 +124,31 @@ fn snap_radius(center: f32, edge_a: f32, edge_b: f32, max: f32) -> f32 {
     half.min(max).max(SNAP_RADIUS_MIN)
 }
 
-/// La donnée sous un pixel.
+/// The data under a pixel.
 fn to_data(transform: &PanelTransform, pos: egui::Pos2) -> Option<(f64, f64)> {
     transform.pixel_to_data(f64::from(pos.x), f64::from(pos.y))
 }
 
-/// Ce que l'aperçu rend à la fenêtre : les valeurs de la série montrée, ou ce
-/// qui empêche de calculer.
+/// What the preview returns to the window: the values of the series shown, or
+/// what prevents computing.
 #[derive(Debug, Clone, Default)]
 pub(super) struct PreviewOutcome {
     pub values: Vec<stokesforge_core::ResultValue>,
     pub warnings: Vec<stokesforge_analysis::ops::Warning>,
     pub skipped: usize,
     pub issue: Option<Issue>,
-    /// Le calcul est en cours : les valeurs montrées sont celles d'avant.
+    /// The calculation is in progress: the values shown are those from before.
     pub pending: bool,
 }
 
-/// Combien de temps une image attend le fil de calcul avant d'afficher
-/// l'ancien résultat. Les tests attendent le résultat pour être déterministes.
+/// How long a frame waits for the calculation thread before showing the old
+/// result. Tests wait for the result to be deterministic.
 #[cfg(not(test))]
 const INLINE_WAIT: Duration = Duration::from_millis(40);
 #[cfg(test)]
 const INLINE_WAIT: Duration = Duration::from_secs(30);
 
-/// Un résultat d'aperçu et ce pour quoi il a été calculé.
+/// A preview result and what it was computed for.
 struct PreviewCache {
     form: AnalysisForm,
     revision: u64,
@@ -161,7 +161,7 @@ impl PreviewCache {
     }
 }
 
-/// Ce que le fil de calcul doit calculer.
+/// What the calculation thread must compute.
 struct Request {
     form: AnalysisForm,
     revision: u64,
@@ -170,26 +170,26 @@ struct Request {
 
 #[derive(Default)]
 struct JobState {
-    /// Un fil de calcul tourne.
+    /// A calculation thread is running.
     running: bool,
-    /// La demande la plus récente, posée pendant qu'un calcul tournait.
+    /// The most recent request, posted while a calculation was running.
     next: Option<Request>,
-    /// Le dernier résultat terminé.
+    /// The last finished result.
     finished: Option<Arc<PreviewCache>>,
-    /// Ce qui a été demandé le plus récemment : on ne redemande pas la même
-    /// chose à chaque image.
+    /// What was requested most recently: the same thing is not requested
+    /// again on every frame.
     requested: Option<(AnalysisForm, u64)>,
 }
 
-/// Le calcul d'une demande ; une fonction pour que les tests y mettent un calcul
-/// lent et comptable.
+/// The calculation of a request; a function so that tests can put a slow,
+/// countable calculation in it.
 type Compute = fn(&Request) -> Result<Computed, Issue>;
 
 fn compute_preview(request: &Request) -> Result<Computed, Issue> {
     request.form.preview(&request.tree)
 }
 
-/// Le fil de calcul d'une fenêtre d'analyse, gardé dans la mémoire d'egui.
+/// The calculation thread of an analysis window, kept in egui memory.
 struct PreviewJobs {
     state: Mutex<JobState>,
     done: Condvar,
@@ -209,7 +209,7 @@ impl PreviewJobs {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Demande le calcul de `form` à `revision`, sauf s'il a déjà été demandé.
+    /// Requests the calculation of `form` at `revision`, unless already requested.
     fn request(
         self: &Arc<Self>,
         context: &egui::Context,
@@ -247,14 +247,14 @@ impl PreviewJobs {
             .name("stokesforge-analysis-preview".into())
             .spawn(move || jobs.work(&ctx, request));
         if spawned.is_err() {
-            // Aucun fil disponible : le calcul se fait sur l'appelant, comme
-            // avant #201, plutôt que de ne jamais rendre de résultat.
+            // No thread available: the calculation is done on the caller, as
+            // before #201, rather than never returning a result.
             self.work(context, fallback);
         }
     }
 
-    /// Le corps du fil : calcule la demande, publie, enchaîne sur la plus
-    /// récente s'il y en a une, puis s'arrête.
+    /// The thread body: computes the request, publishes, chains onto the most
+    /// recent one if there is one, then stops.
     fn work(&self, context: &egui::Context, mut request: Request) {
         loop {
             let result = (self.compute)(&request);
@@ -276,12 +276,12 @@ impl PreviewJobs {
         }
     }
 
-    /// Le dernier résultat terminé, quel qu'il soit.
+    /// The last finished result, whatever it is.
     fn latest(&self) -> Option<Arc<PreviewCache>> {
         self.lock().finished.clone()
     }
 
-    /// Attend au plus `timeout` le résultat de `form` à `revision`.
+    /// Waits at most `timeout` for the result of `form` at `revision`.
     fn wait_for(
         &self,
         form: &AnalysisForm,
@@ -321,8 +321,8 @@ struct StoredView {
     frame: Frame,
 }
 
-/// Ce que vise un geste de navigation : tout le tracé, ou une seule échelle
-/// (la bande des graduations de X sous le tracé, celle de Y à sa gauche).
+/// What a navigation gesture targets: the whole plot, or a single scale
+/// (the X tick band under the plot, the Y one on its left).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum NavTarget {
     Plot,
@@ -330,9 +330,9 @@ enum NavTarget {
     AxisY,
 }
 
-/// Ce que fait le glisser en cours, décidé à sa première image (comme
-/// `nav_drag` du graphe) : tracer une zone, ou déplacer la vue (Ctrl enfoncé au
-/// début), ou rien (parti hors du tracé et des axes).
+/// What the drag in progress does, decided on its first frame (like
+/// `nav_drag` of the graph): draw a zone, or move the view (Ctrl held at the
+/// start), or nothing (started outside the plot and the axes).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum DragMode {
     Draw,
@@ -341,8 +341,8 @@ enum DragMode {
     Ignore,
 }
 
-/// La cible d'un geste de navigation en `pos` : le tracé, l'axe X (sous le
-/// tracé, résidus compris), l'axe Y (à sa gauche), ou rien.
+/// The target of a navigation gesture at `pos`: the plot, the X axis (below
+/// the plot, residuals included), the Y axis (on its left), or nothing.
 fn nav_target(pos: egui::Pos2, plot_rect: egui::Rect, outer: egui::Rect) -> Option<NavTarget> {
     if plot_rect.contains(pos) {
         Some(NavTarget::Plot)
@@ -363,10 +363,10 @@ fn nav_target(pos: egui::Pos2, plot_rect: egui::Rect, outer: egui::Rect) -> Opti
     }
 }
 
-/// Le cadre après `gesture` sur `target`. Sur un axe, l'autre composante du
-/// geste est neutralisée au centre du tracé (comme
-/// `ViewState::commit_axis_gesture`) et l'autre borne du cadre ne bouge pas.
-/// Sans image (borne logarithmique ≤ 0), le cadre reste.
+/// The frame after `gesture` on `target`. On an axis, the other component of
+/// the gesture is neutralized at the center of the plot (like
+/// `ViewState::commit_axis_gesture`) and the other bound of the frame does
+/// not move. With no image (logarithmic bound ≤ 0), the frame stays.
 fn navigate(
     transform: &PanelTransform,
     plot_rect: egui::Rect,
@@ -399,21 +399,20 @@ fn navigate(
     }
 }
 
-/// La pause de frappe après laquelle un aperçu se recalcule (S-T1, #224), en
-/// secondes. Texte **et** nombres : chaque frappe d'un champ ne relance pas le
-/// calcul.
+/// The typing pause after which a preview is recomputed (S-T1, #224), in
+/// seconds. Text **and** numbers: each keystroke in a field does not restart
+/// the calculation.
 pub(super) const PREVIEW_PAUSE: f64 = 0.3;
 
-/// Au-delà de ce temps sans image peinte, la fenêtre a été fermée puis
-/// rouverte : le formulaire n'est pas en cours de frappe.
+/// Beyond this time without a painted frame, the window was closed then
+/// reopened: the form is not being typed in.
 const REOPEN_GAP: f64 = 1.0;
 
-/// Le formulaire est-il resté inchangé depuis [`PREVIEW_PAUSE`] ? Le formulaire
-/// de l'image précédente, l'instant de son dernier changement et celui de la
-/// dernière image sont gardés en mémoire d'egui ; tant qu'il bouge, une image
-/// est demandée à la fin de la pause (aucun réveil périodique au repos). À
-/// l'ouverture d'une fenêtre, l'aperçu se calcule tout de suite : il n'y a pas
-/// de frappe à attendre.
+/// Has the form stayed unchanged since [`PREVIEW_PAUSE`]? The form of the
+/// previous frame, the instant of its last change and that of the last frame
+/// are kept in egui memory; while it moves, a frame is requested at the end
+/// of the pause (no periodic wake-up at rest). When a window opens, the
+/// preview is computed at once: there is no typing to wait for.
 fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
     let key = id.with("preview_pause");
     let now = ui.input(|input| input.time);
@@ -442,8 +441,8 @@ fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
     true
 }
 
-/// Les crans de molette de cette image (positifs vers le haut), tous axes
-/// confondus : un événement brut par cran, quel que soit le lissage d'egui.
+/// The wheel notches of this frame (positive upward), all axes together: one
+/// raw event per notch, whatever the egui smoothing.
 fn wheel_notches(ui: &egui::Ui) -> i32 {
     let total: f32 = ui.input(|input| {
         input
@@ -468,8 +467,8 @@ fn wheel_notches(ui: &egui::Ui) -> i32 {
     total.abs().round().max(1.0) as i32 * total.signum() as i32
 }
 
-// Peint l'aperçu dans l'espace restant de `ui` et applique ses gestes au
-/// formulaire.
+// Paints the preview in the remaining space of `ui` and applies its gestures to the
+/// form.
 pub(super) fn preview(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -490,16 +489,16 @@ pub(super) fn preview(
     let up_to_date = jobs.latest().filter(|c| c.matches(form, revision));
     let cache = match (up_to_date, jobs.latest()) {
         (Some(cache), _) => cache,
-        // Un aperçu se recalcule après une pause de frappe (S-T1, #224) : tant
-        // que le formulaire bouge, on garde l'ancien résultat, marqué en cours.
+        // A preview is recomputed after a typing pause (S-T1, #224): while the
+        // form moves, the old result is kept, marked in progress.
         (None, Some(latest)) if !settled(ui, id, form) => latest,
         (None, _) => {
             jobs.request(ui.ctx(), form, tree, revision);
             jobs.wait_for(form, revision, INLINE_WAIT)
                 .or_else(|| jobs.latest())
                 .unwrap_or_else(|| {
-                    // Rien n'a encore été calculé (fil indisponible ou premier
-                    // calcul long) : un résultat vide, marqué en cours.
+                    // Nothing has been computed yet (thread unavailable or first
+                    // long calculation): an empty result, marked in progress.
                     Arc::new(PreviewCache {
                         form: form.clone(),
                         revision: u64::MAX,
@@ -547,9 +546,9 @@ pub(super) fn preview(
             .map(|c| &c.data)
     };
 
-    // Le cadre : mémorisé par série, recadré au double clic. Les échelles et le
-    // sens des axes viennent du graphe source ; le cadrage initial et la
-    // géométrie, de `stokesforge_render`.
+    // The frame: remembered per series, reframed on double click. The scales and the
+    // direction of the axes come from the source graph; the initial framing and the
+    // geometry, from `stokesforge_render`.
     let axes = source_axes(form);
     let scales = (
         axes.map_or(AxisScale::Linear, |(x, _)| x.scale),
@@ -598,15 +597,15 @@ pub(super) fn preview(
         ui.visuals().widgets.noninteractive.bg_stroke,
         egui::StrokeKind::Inside,
     );
-    // Un rectangle sans surface, ou des bornes sans image : rien à placer.
+    // A rectangle with no area, or bounds with no image: nothing to place.
     let Some(transform) = transform_for(plot_rect, frame.0, frame.1, scales) else {
         return outcome;
     };
     let text_color = ui.visuals().text_color();
     let font = egui::FontId::proportional(11.0);
 
-    // Graduations : le pas et le format du graphe (`axis_ticks`), le point
-    // décimal comme avant.
+    // Ticks: the step and the format of the graph (`axis_ticks`), the decimal
+    // point as before.
     for (x, label) in axis_ticks(scales.0, frame.0, false) {
         if let Some(p) = to_screen(&transform, x, frame.1 .0) {
             painter.text(
@@ -653,7 +652,7 @@ pub(super) fn preview(
         flush(&mut run);
     };
 
-    // Zones et plages.
+    // Zones and ranges.
     let base = frame.1 .0;
     let band = |plot: &egui::Painter, a: f64, b: f64| {
         let (Some(l), Some(r)) = (
@@ -672,7 +671,7 @@ pub(super) fn preview(
         band(&plot, a, b);
     }
 
-    // Données, puis résultats.
+    // Data, then results.
     let data_stroke = egui::Stroke::new(1.2, text_color);
     {
         let (_, all_y) = series_rows(tree, &series);
@@ -731,7 +730,7 @@ pub(super) fn preview(
         }
     }
 
-    // Repères posés.
+    // Markers placed.
     let marker = theme::preview_marker_color();
     for (px, py) in marks_of(form) {
         if let Some(p) = to_screen(&transform, px, py) {
@@ -747,7 +746,7 @@ pub(super) fn preview(
         }
     }
 
-    // Résidus sous la courbe.
+    // Residuals under the curve.
     if let Some(res) = residuals {
         let strip = egui::Rect::from_min_max(
             egui::pos2(plot_rect.left(), plot_rect.bottom() + 18.0),
@@ -759,7 +758,7 @@ pub(super) fn preview(
             .filter(|v| v.is_finite())
             .fold(0.0_f64, |m, v| m.max(v.abs()))
             .max(f64::MIN_POSITIVE);
-        // Même X que la courbe ; Y linéaire, non inversé, centré sur zéro.
+        // Same X as the curve; Y linear, not reversed, centered on zero.
         let sub = transform_for(
             strip,
             frame.0,
@@ -803,7 +802,7 @@ pub(super) fn preview(
         );
     }
 
-    // Ce qui empêche de calculer : dit au centre de l'aperçu.
+    // What prevents computing: said at the center of the preview.
     if let Some(issue) = &outcome.issue {
         plot.text(
             plot_rect.center_top() + egui::vec2(0.0, 8.0),
@@ -814,7 +813,7 @@ pub(super) fn preview(
         );
     }
 
-    // Gestes.
+    // Gestures.
     let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
     let hover = response.hover_pos().filter(|p| plot_rect.contains(*p));
     let hover_data = hover.and_then(|pos| to_data(&transform, pos));
@@ -824,8 +823,8 @@ pub(super) fn preview(
             if let Some(snap) = snap_to_curve_zone(&xs, &ys, hx, form.average) {
                 let (sx, sy) = (snap.x, snap.y);
                 if let Some(p) = to_screen(&transform, sx, sy) {
-                    // Le rond couvre la zone moyennée (#334) ; un bord sans
-                    // image (échelle log, valeur négative) : rayon minimal.
+                    // The circle covers the averaged zone (#334); an edge with no
+                    // image (log scale, negative value): minimal radius.
                     let edge = |x: f64| to_screen(&transform, x, sy).map_or(f32::NAN, |q| q.x);
                     let max = plot_rect.size().length();
                     let radius = snap_radius(p.x, edge(snap.x_min), edge(snap.x_max), max);
@@ -847,11 +846,11 @@ pub(super) fn preview(
             font.clone(),
             text_color,
         );
-        // Maj + molette règle la moyenne, d'un point par cran. On compte les
-        // événements bruts, un par cran : `smooth_scroll_delta` étale un cran
-        // sur plusieurs images et ajoutait des dizaines de points. Sous Maj,
-        // egui range le défilement dans l'axe horizontal, mais l'événement brut
-        // garde le sens de l'appareil : on additionne donc les deux axes.
+        // Shift + wheel sets the average, one point per notch. We count the
+        // raw events, one per notch: `smooth_scroll_delta` spreads a notch
+        // over several frames and added dozens of points. Under Shift,
+        // egui puts the scroll on the horizontal axis, but the raw event
+        // keeps the direction of the device: so we add both axes.
         if shift {
             let notches = wheel_notches(ui);
             if notches != 0 {
@@ -862,9 +861,9 @@ pub(super) fn preview(
         }
     }
 
-    // Ctrl + molette (ou pincement) : zoom ancré sous le pointeur, même facteur
-    // que le graphe ; au-dessus d'un axe, cette seule échelle. La molette seule
-    // ne zoome pas (#62).
+    // Ctrl + wheel (or pinch): zoom anchored under the pointer, same factor
+    // as the graph; over an axis, that scale alone. The wheel alone does not
+    // zoom (#62).
     let mut transform = transform;
     if let Some(pos) = response.hover_pos() {
         let zoom = ui.input(|i| i.zoom_delta());
@@ -880,8 +879,8 @@ pub(super) fn preview(
         }
     }
 
-    // L'origine du glisser est gardée en mémoire (#251) : egui efface
-    // `press_origin` à l'image du relâchement, celle où la zone se pose.
+    // The origin of the drag is kept in memory (#251): egui clears
+    // `press_origin` on the frame of the release, the one where the zone is placed.
     let origin_id = id.with("drag_origin");
     let origin = match ui.input(|i| i.pointer.press_origin()) {
         Some(pos) => {
@@ -890,9 +889,9 @@ pub(super) fn preview(
         }
         None => ui.data_mut(|d| d.remove_temp::<egui::Pos2>(origin_id)),
     };
-    // Ce que fait le glisser en cours, décidé à sa première image : Ctrl
-    // enfoncé alors → déplacer la vue, sinon tracer (outil Zone) ; l'utilisateur
-    // qui appuie ou relâche Ctrl en route ne change pas de geste en chemin.
+    // What the drag in progress does, decided on its first frame: Ctrl
+    // held then → move the view, otherwise draw (Zone tool); a user who
+    // presses or releases Ctrl along the way does not change gesture midway.
     let mode_id = id.with("drag_mode");
     let primary = egui::PointerButton::Primary;
     let mut mode = ui.data(|d| d.get_temp::<DragMode>(mode_id));
@@ -935,7 +934,7 @@ pub(super) fn preview(
     if !response.dragged_by(primary) {
         ui.data_mut(|d| d.remove_temp::<DragMode>(mode_id));
     }
-    // Ctrl + clic : rien (réservé à la navigation).
+    // Ctrl + click: nothing (reserved for navigation).
     if response.clicked_by(primary) && form.tool == PreviewTool::Points && !command {
         if let Some((cx, cy)) = hover_data {
             let (px, py) = if shift {
@@ -948,8 +947,8 @@ pub(super) fn preview(
     }
     if response.secondary_clicked() {
         if let Some((cx, _)) = hover_data {
-            // L'étendue de X est négative quand l'axe est inversé : la
-            // tolérance est une distance.
+            // The X extent is negative when the axis is reversed: the
+            // tolerance is a distance.
             let tolerance = (frame.0 .1 - frame.0 .0).abs() * 8.0 / f64::from(plot_rect.width());
             form.remove_near(cx, tolerance);
         }
@@ -971,7 +970,7 @@ pub(super) fn preview(
     outcome
 }
 
-/// Les zones, plages et fenêtres du formulaire à teinter.
+/// The zones, ranges and windows of the form to tint.
 fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     use stokesforge_analysis::ops::OperationKind as K;
     let s = &form.setup;
@@ -994,7 +993,7 @@ fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     }
 }
 
-/// Les points posés (droite, points d'ancrage).
+/// The points placed (line, anchor points).
 fn marks_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     use stokesforge_analysis::ops::OperationKind as K;
     use stokesforge_app_state::analysis::BaselineShape;
@@ -1014,7 +1013,7 @@ fn marks_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     }
 }
 
-/// Les positions de départ des pics.
+/// The starting positions of the peaks.
 fn seeds_of(form: &AnalysisForm) -> Vec<f64> {
     use stokesforge_analysis::ops::OperationKind as K;
     match form.kind {
@@ -1030,7 +1029,7 @@ mod tests {
     use stokesforge_app_state::analysis::Preset;
 
     fn form_and_tree() -> (AnalysisForm, Arc<Tree>) {
-        let project = stokesforge_core::Project::new("Aperçu").unwrap();
+        let project = stokesforge_core::Project::new("Preview").unwrap();
         let form = AnalysisForm::new(
             &Preset::Fit(stokesforge_analysis::model::Model::Linear),
             Vec::new(),
@@ -1049,11 +1048,11 @@ mod tests {
         Ok(Computed::default())
     }
 
-    /// Demander ne bloque pas l'image ; pendant un calcul, les demandes
-    /// intermédiaires sont remplacées par la plus récente, et le résultat d'une
-    /// demande périmée n'est jamais pris pour le bon (#201).
+    /// Requesting does not block the frame; during a calculation, the
+    /// intermediate requests are replaced by the most recent one, and the
+    /// result of a stale request is never taken for the right one (#201).
     #[test]
-    fn le_calcul_de_l_apercu_ne_bloque_pas_et_garde_la_demande_la_plus_recente() {
+    fn the_preview_calculation_does_not_block_and_keeps_the_most_recent_request() {
         let (form, tree) = form_and_tree();
         let context = egui::Context::default();
         let jobs = Arc::new(PreviewJobs::new(slow_and_recorded));
@@ -1062,39 +1061,39 @@ mod tests {
         jobs.request(&context, &form, &tree, 1);
         assert!(
             started.elapsed() < Duration::from_millis(100),
-            "demander ne calcule pas : {:?}",
+            "requesting does not compute: {:?}",
             started.elapsed()
         );
         assert!(
             jobs.wait_for(&form, 1, Duration::from_millis(10)).is_none(),
-            "l'image n'attend pas un calcul long"
+            "the frame does not wait for a long calculation"
         );
-        // Deux demandes pendant le calcul : seule la dernière sera calculée.
+        // Two requests during the calculation: only the last one will be computed.
         jobs.request(&context, &form, &tree, 2);
         jobs.request(&context, &form, &tree, 3);
         let done = jobs
             .wait_for(&form, 3, Duration::from_secs(10))
-            .expect("la demande la plus récente est calculée");
+            .expect("the most recent request is computed");
         assert_eq!(done.revision, 3);
-        assert_eq!(*ORDER.lock().unwrap(), vec![1, 3], "la demande 2 est jetée");
+        assert_eq!(*ORDER.lock().unwrap(), vec![1, 3], "request 2 is dropped");
         assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
-        // Témoin : le résultat de la demande 2 n'existe pas, il ne se confond pas
-        // avec celui de la 3.
+        // Witness: the result of request 2 does not exist, it is not confused
+        // with that of 3.
         assert!(!jobs.latest().unwrap().matches(&form, 2));
-        // Redemander la même chose ne relance rien.
+        // Requesting the same thing again restarts nothing.
         jobs.request(&context, &form, &tree, 3);
         std::thread::sleep(Duration::from_millis(250));
         assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
     }
 
-    /// L'aperçu se recalcule après une pause de 0,3 s sans changement (S-T1,
-    /// #224) : le premier calcul est immédiat, un changement relance le
-    /// compte à rebours, la pause écoulée l'autorise.
+    /// The preview is recomputed after a pause of 0.3 s without change (S-T1,
+    /// #224): the first calculation is immediate, a change restarts the
+    /// countdown, the elapsed pause allows it.
     #[test]
-    fn l_apercu_attend_une_pause_de_frappe_avant_de_se_recalculer() {
+    fn the_preview_waits_for_a_typing_pause_before_recalculating() {
         let (mut form, _) = form_and_tree();
         let context = egui::Context::default();
-        let id = egui::Id::new("apercu");
+        let id = egui::Id::new("preview");
         let at = |time: f64, form: &AnalysisForm| {
             let mut settled_now = false;
             let input = egui::RawInput {
@@ -1105,38 +1104,38 @@ mod tests {
             output.textures_delta.clear();
             settled_now
         };
-        assert!(at(1.0, &form), "le premier calcul n'attend pas");
-        assert!(at(1.05, &form), "rien n'a changé");
+        assert!(at(1.0, &form), "the first calculation does not wait");
+        assert!(at(1.05, &form), "nothing changed");
         form.current += 1;
-        assert!(!at(2.0, &form), "un changement relance le compte à rebours");
+        assert!(!at(2.0, &form), "a change restarts the countdown");
         assert!(
             !at(2.0 + PREVIEW_PAUSE - 0.05, &form),
-            "la pause n'est pas écoulée"
+            "the pause has not elapsed"
         );
-        assert!(at(2.0 + PREVIEW_PAUSE + 0.01, &form), "pause écoulée");
+        assert!(at(2.0 + PREVIEW_PAUSE + 0.01, &form), "pause elapsed");
         form.current += 1;
-        assert!(!at(3.0, &form), "chaque frappe repousse l'échéance");
+        assert!(!at(3.0, &form), "each keystroke pushes back the deadline");
         form.current += 1;
         assert!(
             at(10.0, &form),
-            "une fenêtre rouverte se calcule tout de suite, sans frappe à attendre"
+            "a reopened window computes at once, with no typing to wait for"
         );
     }
 }
 
-/// #251 : un glisser de l'outil Zone pose la zone au relâchement, alors
-/// qu'egui a déjà effacé `press_origin` à cette image.
+/// #251: a Zone-tool drag places the zone on release, even though
+/// egui has already cleared `press_origin` on that frame.
 #[cfg(test)]
 mod zone_tests {
-    use super::super::test_support::{colonnes_xy, contexte, image};
+    use super::super::test_support::{context, image, xy_columns};
     use super::*;
     use stokesforge_app_state::analysis::{BaselineShape, Preset};
     use stokesforge_core::SeriesRef;
 
-    /// Glisse sur l'aperçu de gauche à droite, au milieu de la hauteur.
-    fn glisser(shape: Option<BaselineShape>, preset: Preset) -> AnalysisForm {
+    /// Drags on the preview from left to right, at mid height.
+    fn drag(shape: Option<BaselineShape>, preset: Preset) -> AnalysisForm {
         let mut project = stokesforge_core::Project::new("Zone").unwrap();
-        let (x, y) = colonnes_xy(&mut project);
+        let (x, y) = xy_columns(&mut project);
         let tree = project.tree().clone();
         let series = vec![SeriesRef {
             x: Some(x),
@@ -1148,7 +1147,7 @@ mod zone_tests {
             form.setup.baseline.shape = shape;
             form.tool = form.natural_tool();
         }
-        let context = contexte();
+        let context = context();
         let id = egui::Id::new("zone");
         let ev = |pos: egui::Pos2, pressed: Option<bool>| {
             let mut v = vec![egui::Event::PointerMoved(pos)];
@@ -1180,8 +1179,8 @@ mod zone_tests {
     }
 
     #[test]
-    fn glisser_trace_la_zone_de_la_constante_par_moyenne() {
-        let form = glisser(Some(BaselineShape::ConstantZone), Preset::BaselineConstant);
+    fn dragging_draws_the_zone_of_the_average_constant() {
+        let form = drag(Some(BaselineShape::ConstantZone), Preset::BaselineConstant);
         assert_eq!(form.tool, PreviewTool::Zone);
         assert!(
             form.setup.baseline.constant_zone.is_some(),
@@ -1191,18 +1190,18 @@ mod zone_tests {
     }
 
     #[test]
-    fn glisser_trace_une_zone_du_polynome() {
-        let form = glisser(None, Preset::BaselinePolynomial);
+    fn dragging_draws_a_polynomial_zone() {
+        let form = drag(None, Preset::BaselinePolynomial);
         assert_eq!(form.setup.baseline.zones.len(), 1);
     }
 
-    /// Pose un point par un clic gauche puis le retire par un clic droit au
-    /// même pixel ; rend le point après chacun des deux clics. Avec `inverted`,
-    /// l'axe X du graphe source est inversé : l'étendue de X est alors négative
-    /// et la tolérance de `remove_near` doit rester une distance.
-    fn poser_puis_retirer(inverted: bool) -> [Option<(f64, f64)>; 2] {
-        let mut project = stokesforge_core::Project::new("Clic droit").unwrap();
-        let (x, y) = colonnes_xy(&mut project);
+    /// Places a point with a left click then removes it with a right click at
+    /// the same pixel; returns the point after each of the two clicks. With `inverted`,
+    /// the X axis of the source graph is reversed: the X extent is then negative
+    /// and the tolerance of `remove_near` must stay a distance.
+    fn place_then_remove(inverted: bool) -> [Option<(f64, f64)>; 2] {
+        let mut project = stokesforge_core::Project::new("Right click").unwrap();
+        let (x, y) = xy_columns(&mut project);
         let tree = project.tree().clone();
         let series = vec![SeriesRef {
             x: Some(x),
@@ -1218,8 +1217,8 @@ mod zone_tests {
         let spec = stokesforge_plot::PlotSpec::empty("Source").with_panels(panel);
         form.graph_source = Some((spec, vec![stokesforge_plot::SeriesRef::new(0, 0)]));
         assert_eq!(form.tool, PreviewTool::Points);
-        let context = contexte();
-        let id = egui::Id::new("clic_droit");
+        let context = context();
+        let id = egui::Id::new("right_click");
         let pos = egui::pos2(700.0, 400.0);
         let button = |button, pressed| egui::Event::PointerButton {
             pos,
@@ -1251,23 +1250,26 @@ mod zone_tests {
         [after_left, form.setup.baseline.constant_point]
     }
 
-    /// Le clic droit retire le repère visé, quel que soit le sens de l'axe X :
-    /// la tolérance `(x1 - x0) · 8 / largeur` serait négative sur un axe
-    /// inversé sans `abs`.
+    /// The right click removes the targeted marker, whatever the direction of the X axis:
+    /// the tolerance `(x1 - x0) · 8 / width` would be negative on a reversed
+    /// axis without `abs`.
     #[test]
-    fn clic_droit_retire_le_point_pose_meme_sur_un_axe_x_inverse() {
+    fn right_click_removes_the_placed_point_even_on_a_reversed_x_axis() {
         for inverted in [false, true] {
-            let [posed, removed] = poser_puis_retirer(inverted);
-            assert!(posed.is_some(), "le clic gauche pose le point ({inverted})");
+            let [posed, removed] = place_then_remove(inverted);
+            assert!(
+                posed.is_some(),
+                "the left click places the point ({inverted})"
+            );
             assert_eq!(
                 removed, None,
-                "le clic droit le retire (inversé : {inverted})"
+                "the right click removes it (reversed: {inverted})"
             );
         }
     }
 
-    /// Un aperçu piloté image par image : touches de modification, souris, molette.
-    struct Banc {
+    /// A preview driven frame by frame: modifier keys, mouse, wheel.
+    struct Bench {
         context: egui::Context,
         id: egui::Id,
         tree: Arc<Tree>,
@@ -1276,7 +1278,7 @@ mod zone_tests {
         pointer: egui::Pos2,
     }
 
-    /// Ctrl tel que l'envoie winit sous Linux : `command` suit `ctrl`.
+    /// Ctrl as winit sends it under Linux: `command` follows `ctrl`.
     const CTRL: egui::Modifiers = egui::Modifiers {
         alt: false,
         ctrl: true,
@@ -1284,23 +1286,23 @@ mod zone_tests {
         mac_cmd: false,
         command: true,
     };
-    /// Dans le tracé, vers le milieu.
-    const AU_MILIEU: egui::Pos2 = egui::pos2(700.0, 400.0);
-    /// Sur la bande des graduations de X (sous le tracé).
-    const SUR_X: egui::Pos2 = egui::pos2(700.0, 890.0);
-    /// Sur la bande des graduations de Y (à gauche du tracé).
-    const SUR_Y: egui::Pos2 = egui::pos2(20.0, 400.0);
+    /// In the plot, toward the middle.
+    const MIDDLE: egui::Pos2 = egui::pos2(700.0, 400.0);
+    /// On the X tick band (below the plot).
+    const ON_X: egui::Pos2 = egui::pos2(700.0, 890.0);
+    /// On the Y tick band (left of the plot).
+    const ON_Y: egui::Pos2 = egui::pos2(20.0, 400.0);
 
-    impl Banc {
+    impl Bench {
         fn new(preset: Preset, inverted: bool) -> Self {
-            Self::sur_serie(preset, inverted, None)
+            Self::on_series(preset, inverted, None)
         }
 
-        /// Comme `new`, sur une série de `points` points (x = 0, 1, 2…).
-        fn sur_serie(preset: Preset, inverted: bool, points: Option<usize>) -> Self {
+        /// Like `new`, on a series of `points` points (x = 0, 1, 2…).
+        fn on_series(preset: Preset, inverted: bool, points: Option<usize>) -> Self {
             let mut project = stokesforge_core::Project::new("Navigation").unwrap();
             let (x, y) = match points {
-                None => colonnes_xy(&mut project),
+                None => xy_columns(&mut project),
                 Some(n) => {
                     let root = project.root();
                     let book = project.add_empty_workbook(root, None).unwrap();
@@ -1331,20 +1333,20 @@ mod zone_tests {
                 let spec = stokesforge_plot::PlotSpec::empty("Source").with_panels(panel);
                 form.graph_source = Some((spec, vec![stokesforge_plot::SeriesRef::new(0, 0)]));
             }
-            let mut banc = Self {
-                context: contexte(),
+            let mut bench = Self {
+                context: context(),
                 id: egui::Id::new("navigation"),
                 tree: project.tree().clone(),
                 form,
                 modifiers: egui::Modifiers::NONE,
-                pointer: AU_MILIEU,
+                pointer: MIDDLE,
             };
-            banc.image(vec![]);
-            banc.image(vec![]);
-            banc
+            bench.image(vec![]);
+            bench.image(vec![]);
+            bench
         }
 
-        /// Une image où la souris est en `pointer` et les modificateurs ceux du banc.
+        /// A frame where the mouse is at `pointer` and the modifiers those of the bench.
         fn image(&mut self, mut events: Vec<egui::Event>) -> Vec<egui::epaint::ClippedShape> {
             let mut all = vec![
                 egui::Event::ModifiersChanged(self.modifiers),
@@ -1357,12 +1359,12 @@ mod zone_tests {
             })
         }
 
-        fn deplacer(&mut self, pointer: egui::Pos2) {
+        fn move_pointer(&mut self, pointer: egui::Pos2) {
             self.pointer = pointer;
             self.image(vec![]);
         }
 
-        fn bouton(&mut self, pressed: bool) {
+        fn set_button(&mut self, pressed: bool) {
             let event = egui::Event::PointerButton {
                 pos: self.pointer,
                 button: egui::PointerButton::Primary,
@@ -1372,24 +1374,24 @@ mod zone_tests {
             self.image(vec![event]);
         }
 
-        /// Appuie en `from`, glisse jusqu'en `to`, relâche.
-        fn glisser(&mut self, from: egui::Pos2, to: egui::Pos2) {
-            self.deplacer(from);
-            self.bouton(true);
-            self.deplacer(from + (to - from) * 0.5);
-            self.deplacer(to);
-            self.bouton(false);
+        /// Presses at `from`, drags to `to`, releases.
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            self.move_pointer(from);
+            self.set_button(true);
+            self.move_pointer(from + (to - from) * 0.5);
+            self.move_pointer(to);
+            self.set_button(false);
             self.image(vec![]);
         }
 
-        fn cadre(&self) -> Frame {
+        fn frame(&self) -> Frame {
             self.context
                 .data(|d| d.get_temp::<StoredView>(self.id.with("view")))
-                .expect("cadre mémorisé")
+                .expect("remembered frame")
                 .frame
         }
 
-        fn molette(&mut self, delta: egui::Vec2) {
+        fn wheel(&mut self, delta: egui::Vec2) {
             let event = egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
                 delta,
@@ -1399,67 +1401,73 @@ mod zone_tests {
             self.image(vec![event]);
         }
 
-        fn avec(&mut self, modifiers: egui::Modifiers) -> &mut Self {
+        fn with_modifiers(&mut self, modifiers: egui::Modifiers) -> &mut Self {
             self.modifiers = modifiers;
             self
         }
     }
 
-    fn largeur((a, b): (f64, f64)) -> f64 {
+    fn width_of((a, b): (f64, f64)) -> f64 {
         (b - a).abs()
     }
 
-    /// La molette seule ne fait plus rien dans l'aperçu (D3 de #299).
+    /// The wheel alone does nothing in the preview any more (D3 of #299).
     #[test]
-    fn la_molette_seule_ne_change_pas_le_cadre() {
-        let mut banc = Banc::new(Preset::Integrate, false);
-        let avant = banc.cadre();
-        banc.molette(egui::vec2(0.0, 120.0));
-        banc.molette(egui::vec2(0.0, -120.0));
-        assert_eq!(banc.cadre(), avant);
+    fn the_wheel_alone_does_not_change_the_frame() {
+        let mut bench = Bench::new(Preset::Integrate, false);
+        let before = bench.frame();
+        bench.wheel(egui::vec2(0.0, 120.0));
+        bench.wheel(egui::vec2(0.0, -120.0));
+        assert_eq!(bench.frame(), before);
     }
 
-    /// Ctrl + molette (ou pincement) resserre le cadre autour du pointeur : la
-    /// donnée sous le curseur y reste, et le cadre se resserre dans les deux axes.
+    /// Ctrl + wheel (or pinch) tightens the frame around the pointer: the
+    /// data under the cursor stays there, and the frame tightens on both axes.
     #[test]
-    fn ctrl_molette_resserre_le_cadre_autour_du_pointeur() {
-        for geste in ["pincement", "ctrl_molette"] {
-            let mut banc = Banc::new(Preset::Integrate, false);
-            let avant = banc.cadre();
+    fn ctrl_wheel_tightens_the_frame_around_the_pointer() {
+        for gesture in ["pinch", "ctrl_wheel"] {
+            let mut bench = Bench::new(Preset::Integrate, false);
+            let before = bench.frame();
             let pointeur = egui::pos2(400.0, 300.0);
-            banc.deplacer(pointeur);
-            // La donnée sous le pointeur, avant.
-            let plot_rect = rect_du_trace();
-            let sous_le_pointeur = |cadre: Frame| {
+            bench.move_pointer(pointeur);
+            // The data under the pointer, before.
+            let plot_rect = plot_area();
+            let under_the_pointer = |frame: Frame| {
                 let t = transform_for(
                     plot_rect,
-                    cadre.0,
-                    cadre.1,
+                    frame.0,
+                    frame.1,
                     (AxisScale::Linear, AxisScale::Linear),
                 )
                 .unwrap();
                 to_data(&t, pointeur).unwrap()
             };
-            let donnee = sous_le_pointeur(avant);
-            if geste == "pincement" {
-                banc.image(vec![egui::Event::Zoom(1.25)]);
+            let data_point = under_the_pointer(before);
+            if gesture == "pinch" {
+                bench.image(vec![egui::Event::Zoom(1.25)]);
             } else {
-                banc.avec(CTRL).molette(egui::vec2(0.0, 60.0));
+                bench.with_modifiers(CTRL).wheel(egui::vec2(0.0, 60.0));
             }
-            let apres = banc.cadre();
-            assert!(largeur(apres.0) < largeur(avant.0), "{geste} : X resserré");
-            assert!(largeur(apres.1) < largeur(avant.1), "{geste} : Y resserré");
-            let encore = sous_le_pointeur(apres);
+            let after = bench.frame();
             assert!(
-                (encore.0 - donnee.0).abs() < 1e-9 && (encore.1 - donnee.1).abs() < 1e-9,
-                "{geste} : la donnée sous le pointeur reste sous le pointeur"
+                width_of(after.0) < width_of(before.0),
+                "{gesture}: X tightened"
+            );
+            assert!(
+                width_of(after.1) < width_of(before.1),
+                "{gesture}: Y tightened"
+            );
+            let again = under_the_pointer(after);
+            assert!(
+                (again.0 - data_point.0).abs() < 1e-9 && (again.1 - data_point.1).abs() < 1e-9,
+                "{gesture}: the data under the pointer stays under the pointer"
             );
         }
     }
 
-    /// Le rectangle du tracé tel que `preview` le calcule pour une image de
-    /// 1400 × 900 sans résidus.
-    fn rect_du_trace() -> egui::Rect {
+    /// The plot rectangle as `preview` computes it for a frame of
+    /// 1400 × 900 without residuals.
+    fn plot_area() -> egui::Rect {
         let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
         let mut r = outer.shrink2(egui::vec2(8.0, 4.0));
         r.min.x += 44.0;
@@ -1467,55 +1475,61 @@ mod zone_tests {
         r
     }
 
-    /// Au-dessus d'un axe, Ctrl + molette ne cadre que cette échelle.
+    /// Over an axis, Ctrl + wheel frames only that scale.
     #[test]
-    fn ctrl_molette_sur_un_axe_ne_zoome_que_cette_echelle() {
-        let mut banc = Banc::new(Preset::Integrate, false);
-        let avant = banc.cadre();
-        banc.deplacer(SUR_X);
-        banc.image(vec![egui::Event::Zoom(1.25)]);
-        let apres_x = banc.cadre();
-        assert!(largeur(apres_x.0) < largeur(avant.0), "X resserré");
-        assert_eq!(apres_x.1, avant.1, "Y ne bouge pas");
-        banc.deplacer(SUR_Y);
-        banc.image(vec![egui::Event::Zoom(1.25)]);
-        let apres_y = banc.cadre();
-        assert_eq!(apres_y.0, apres_x.0, "X ne bouge plus");
-        assert!(largeur(apres_y.1) < largeur(avant.1), "Y resserré");
+    fn ctrl_wheel_on_an_axis_zooms_only_that_scale() {
+        let mut bench = Bench::new(Preset::Integrate, false);
+        let before = bench.frame();
+        bench.move_pointer(ON_X);
+        bench.image(vec![egui::Event::Zoom(1.25)]);
+        let after_x = bench.frame();
+        assert!(width_of(after_x.0) < width_of(before.0), "X tightened");
+        assert_eq!(after_x.1, before.1, "Y does not move");
+        bench.move_pointer(ON_Y);
+        bench.image(vec![egui::Event::Zoom(1.25)]);
+        let after_y = bench.frame();
+        assert_eq!(after_y.0, after_x.0, "X no longer moves");
+        assert!(width_of(after_y.1) < width_of(before.1), "Y tightened");
     }
 
-    /// Maj + molette règle la moyenne de l'aimant, de 1 par cran, sans toucher
-    /// au cadre.
+    /// Shift + wheel sets the magnet's average, by 1 per notch, without touching
+    /// the frame.
     #[test]
-    fn maj_molette_regle_la_moyenne_sans_zoomer() {
-        let mut banc = Banc::new(Preset::BaselineAnchors, false);
-        let (moyenne, cadre) = (banc.form.average, banc.cadre());
-        banc.avec(egui::Modifiers::SHIFT)
-            .molette(egui::vec2(0.0, 40.0));
-        assert_eq!(banc.form.average, moyenne + 1);
-        banc.molette(egui::vec2(0.0, -40.0));
-        assert_eq!(banc.form.average, moyenne);
-        assert_eq!(banc.cadre(), cadre, "le cadre ne bouge pas");
+    fn shift_wheel_sets_the_average_without_zooming() {
+        let mut bench = Bench::new(Preset::BaselineAnchors, false);
+        let (average, frame) = (bench.form.average, bench.frame());
+        bench
+            .with_modifiers(egui::Modifiers::SHIFT)
+            .wheel(egui::vec2(0.0, 40.0));
+        assert_eq!(bench.form.average, average + 1);
+        bench.wheel(egui::vec2(0.0, -40.0));
+        assert_eq!(bench.form.average, average);
+        assert_eq!(bench.frame(), frame, "the frame does not move");
     }
 
-    /// Un cran = un point, même si egui étale le défilement : les images
-    /// suivantes, sans événement de molette, ne changent plus rien.
+    /// One notch = one point, even if egui spreads the scroll: the following
+    /// frames, with no wheel event, change nothing any more.
     #[test]
-    fn un_cran_de_molette_vaut_un_point_meme_sur_plusieurs_images() {
-        let mut banc = Banc::new(Preset::BaselineAnchors, false);
-        let moyenne = banc.form.average;
-        banc.avec(egui::Modifiers::SHIFT)
-            .molette(egui::vec2(0.0, 50.0));
+    fn one_wheel_notch_is_worth_one_point_even_across_several_frames() {
+        let mut bench = Bench::new(Preset::BaselineAnchors, false);
+        let average = bench.form.average;
+        bench
+            .with_modifiers(egui::Modifiers::SHIFT)
+            .wheel(egui::vec2(0.0, 50.0));
         for _ in 0..5 {
-            banc.image(vec![]);
+            bench.image(vec![]);
         }
-        assert_eq!(banc.form.average, moyenne + 1);
-        banc.molette(egui::vec2(50.0, 0.0));
-        assert_eq!(banc.form.average, moyenne + 2, "axe horizontal sous Maj");
+        assert_eq!(bench.form.average, average + 1);
+        bench.wheel(egui::vec2(50.0, 0.0));
+        assert_eq!(
+            bench.form.average,
+            average + 2,
+            "horizontal axis under Shift"
+        );
     }
 
-    /// Les cercles de la couleur de l'aimant peints dans une image.
-    fn ronds_d_aimant(shapes: &[egui::epaint::ClippedShape]) -> Vec<f32> {
+    /// The circles of the magnet color painted in a frame.
+    fn snap_circles(shapes: &[egui::epaint::ClippedShape]) -> Vec<f32> {
         let marker = theme::preview_marker_color();
         shapes
             .iter()
@@ -1526,8 +1540,8 @@ mod zone_tests {
             .collect()
     }
 
-    /// Le texte peint, mis bout à bout.
-    fn textes(shapes: &[egui::epaint::ClippedShape]) -> String {
+    /// The painted text, put end to end.
+    fn texts(shapes: &[egui::epaint::ClippedShape]) -> String {
         shapes
             .iter()
             .filter_map(|clipped| match &clipped.shape {
@@ -1538,50 +1552,50 @@ mod zone_tests {
             .join("\n")
     }
 
-    /// Le rond d'aimantation grandit avec N (#334) : 6 px pour un point,
-    /// strictement plus pour 21 points d'une série de 101.
+    /// The snap circle grows with N (#334): 6 px for one point,
+    /// strictly more for 21 points of a series of 101.
     #[test]
-    fn le_rond_d_aimantation_grandit_avec_la_moyenne() {
-        let mut banc = Banc::sur_serie(Preset::BaselineAnchors, false, Some(101));
-        banc.avec(egui::Modifiers::SHIFT);
-        banc.form.average = 1;
-        let seul = ronds_d_aimant(&banc.image(vec![]));
-        banc.form.average = 21;
-        let large = ronds_d_aimant(&banc.image(vec![]));
-        assert_eq!(seul.len(), 1, "un rond d'aimant");
-        assert_eq!(large.len(), 1, "un rond d'aimant");
-        assert_eq!(seul[0], SNAP_RADIUS_MIN);
-        assert!(large[0] > seul[0], "{} > {}", large[0], seul[0]);
+    fn the_snap_circle_grows_with_the_average() {
+        let mut bench = Bench::on_series(Preset::BaselineAnchors, false, Some(101));
+        bench.with_modifiers(egui::Modifiers::SHIFT);
+        bench.form.average = 1;
+        let single = snap_circles(&bench.image(vec![]));
+        bench.form.average = 21;
+        let wide = snap_circles(&bench.image(vec![]));
+        assert_eq!(single.len(), 1, "one snap circle");
+        assert_eq!(wide.len(), 1, "one snap circle");
+        assert_eq!(single[0], SNAP_RADIUS_MIN);
+        assert!(wide[0] > single[0], "{} > {}", wide[0], single[0]);
     }
 
-    /// Au bord, le texte dit le nombre réel de points moyennés, pas N.
+    /// At the edge, the text gives the real number of points averaged, not N.
     #[test]
-    fn le_texte_de_la_moyenne_dit_le_nombre_reel_de_points_au_bord() {
-        let mut banc = Banc::sur_serie(Preset::BaselineAnchors, false, Some(101));
-        banc.avec(egui::Modifiers::SHIFT);
-        banc.pointer = egui::pos2(rect_du_trace().left() + 1.0, 400.0);
-        banc.form.average = 21;
-        let texte = textes(&banc.image(vec![]));
-        assert!(texte.contains("11 points"), "{texte}");
-        assert!(!texte.contains("21 points"), "{texte}");
+    fn the_average_text_gives_the_real_number_of_points_at_the_edge() {
+        let mut bench = Bench::on_series(Preset::BaselineAnchors, false, Some(101));
+        bench.with_modifiers(egui::Modifiers::SHIFT);
+        bench.pointer = egui::pos2(plot_area().left() + 1.0, 400.0);
+        bench.form.average = 21;
+        let text = texts(&bench.image(vec![]));
+        assert!(text.contains("11 points"), "{text}");
+        assert!(!text.contains("21 points"), "{text}");
     }
 
-    /// Le rayon du rond : demi-côté le plus grand, borné, jamais NaN.
+    /// The circle radius: largest half-side, clamped, never NaN.
     #[test]
-    fn le_rayon_du_rond_est_le_plus_grand_demi_cote_borne() {
+    fn the_circle_radius_is_the_largest_clamped_half_side() {
         let max = 1000.0;
-        // Un point : le minimum.
+        // One point: the minimum.
         assert_eq!(snap_radius(300.0, 300.0, 300.0, max), SNAP_RADIUS_MIN);
-        // Zone de 200 px centrée : 100 px.
+        // Centered zone of 200 px: 100 px.
         assert_eq!(snap_radius(300.0, 200.0, 400.0, max), 100.0);
-        // Asymétrique : 20 à gauche, 60 à droite, et l'inverse.
+        // Asymmetric: 20 on the left, 60 on the right, and the reverse.
         assert_eq!(snap_radius(300.0, 280.0, 360.0, max), 60.0);
         assert_eq!(snap_radius(300.0, 240.0, 320.0, max), 60.0);
-        // Axe X inversé : bords échangés, même rayon.
+        // Reversed X axis: edges swapped, same radius.
         assert_eq!(snap_radius(300.0, 400.0, 200.0, max), 100.0);
-        // Plafond.
+        // Cap.
         assert_eq!(snap_radius(300.0, -5000.0, 400.0, max), max);
-        // Non fini : le minimum, y compris si un seul pixel l'est.
+        // Not finite: the minimum, even if only one pixel is.
         assert_eq!(snap_radius(300.0, f32::NAN, 500.0, max), SNAP_RADIUS_MIN);
         assert_eq!(
             snap_radius(300.0, 100.0, f32::INFINITY, max),
@@ -1590,142 +1604,138 @@ mod zone_tests {
         assert_eq!(snap_radius(f32::NAN, 100.0, 500.0, max), SNAP_RADIUS_MIN);
     }
 
-    /// Ctrl + glisser déplace la vue : le cadre se translate (largeur gardée,
-    /// Y intact) et aucune zone n'est posée, malgré l'outil Zone de l'intégrale.
-    /// Sur un axe X inversé, les données suivent encore le curseur : les bornes
-    /// vont dans l'autre sens.
+    /// Ctrl + drag moves the view: the frame translates (width kept,
+    /// Y intact) and no zone is placed, despite the Integrate Zone tool.
+    /// On a reversed X axis, the data still follow the cursor: the bounds
+    /// go the other way.
     #[test]
-    fn ctrl_glisser_translate_le_cadre_sans_poser_de_zone() {
+    fn ctrl_drag_translates_the_frame_without_placing_a_zone() {
         for inverted in [false, true] {
-            let mut banc = Banc::new(Preset::Integrate, inverted);
-            assert_eq!(banc.form.tool, PreviewTool::Zone);
-            let avant = banc.cadre();
-            banc.avec(CTRL);
-            banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(700.0, 400.0));
-            let apres = banc.cadre();
+            let mut bench = Bench::new(Preset::Integrate, inverted);
+            assert_eq!(bench.form.tool, PreviewTool::Zone);
+            let before = bench.frame();
+            bench.with_modifiers(CTRL);
+            bench.drag(egui::pos2(500.0, 400.0), egui::pos2(700.0, 400.0));
+            let after = bench.frame();
             assert!(
-                banc.form.setup.integrate.ranges.is_empty(),
-                "Ctrl + glisser ne trace pas de zone ({inverted})"
+                bench.form.setup.integrate.ranges.is_empty(),
+                "Ctrl + drag draws no zone ({inverted})"
             );
             assert!(
-                (largeur(apres.0) - largeur(avant.0)).abs() < 1e-9,
+                (width_of(after.0) - width_of(before.0)).abs() < 1e-9,
                 "{inverted}"
             );
-            assert_eq!(apres.1, avant.1, "pas de déplacement vertical ({inverted})");
-            let decalage = apres.0 .0 - avant.0 .0;
-            assert!(decalage != 0.0, "le cadre a bougé ({inverted})");
-            // Le contenu suit le curseur vers la droite : le bord gauche voit
-            // des données plus à gauche dans le sens d'affichage, donc plus
-            // petites sans inversion et plus grandes avec.
+            assert_eq!(after.1, before.1, "no vertical movement ({inverted})");
+            let offset = after.0 .0 - before.0 .0;
+            assert!(offset != 0.0, "the frame moved ({inverted})");
+            // The content follows the cursor to the right: the left edge sees
+            // data further left in display direction, so smaller
+            // without reversal and larger with.
             assert_eq!(
-                decalage < 0.0,
+                offset < 0.0,
                 !inverted,
-                "sens du déplacement ({inverted})"
+                "direction of the movement ({inverted})"
             );
-            // La donnée sous le départ du glisser est sous son arrivée.
-            let plot_rect = rect_du_trace();
-            let t = |cadre: Frame| {
+            // The data under the start of the drag is under its arrival.
+            let plot_rect = plot_area();
+            let t = |frame: Frame| {
                 transform_for(
                     plot_rect,
-                    cadre.0,
-                    cadre.1,
+                    frame.0,
+                    frame.1,
                     (AxisScale::Linear, AxisScale::Linear),
                 )
                 .unwrap()
             };
             let (from, to) = (egui::pos2(500.0, 400.0), egui::pos2(700.0, 400.0));
-            let avant_x = to_data(&t(avant), from).unwrap().0;
-            let apres_x = to_data(&t(apres), to).unwrap().0;
-            // L'axe inversé est tracé par le graphe source, pas par ce `t`
-            // linéaire : on compare donc l'écart relatif à la largeur du cadre.
+            let before_x = to_data(&t(before), from).unwrap().0;
+            let after_x = to_data(&t(after), to).unwrap().0;
+            // The reversed axis is drawn by the source graph, not by this linear
+            // `t`: so we compare the gap relative to the width of the frame.
             if !inverted {
                 assert!(
-                    (avant_x - apres_x).abs() < 1e-9,
-                    "le contenu suit le curseur"
+                    (before_x - after_x).abs() < 1e-9,
+                    "the content follows the cursor"
                 );
             }
         }
     }
 
-    /// Ctrl + glisser parti d'un axe ne déplace que cet axe.
+    /// Ctrl + drag starting on an axis moves only that axis.
     #[test]
-    fn ctrl_glisser_sur_un_axe_ne_deplace_que_cet_axe() {
-        let mut banc = Banc::new(Preset::Integrate, false);
-        let avant = banc.cadre();
-        banc.avec(CTRL);
-        banc.glisser(SUR_X, SUR_X + egui::vec2(150.0, 60.0));
-        let apres = banc.cadre();
-        assert_ne!(apres.0, avant.0, "X déplacé");
-        assert_eq!(apres.1, avant.1, "Y intact");
-        let mut banc = Banc::new(Preset::Integrate, false);
-        banc.avec(CTRL);
-        banc.glisser(SUR_Y, SUR_Y + egui::vec2(10.0, 80.0));
-        assert_eq!(banc.cadre().0, avant.0, "X intact");
-        assert_ne!(banc.cadre().1, avant.1, "Y déplacé");
+    fn ctrl_drag_on_an_axis_moves_only_that_axis() {
+        let mut bench = Bench::new(Preset::Integrate, false);
+        let before = bench.frame();
+        bench.with_modifiers(CTRL);
+        bench.drag(ON_X, ON_X + egui::vec2(150.0, 60.0));
+        let after = bench.frame();
+        assert_ne!(after.0, before.0, "X moved");
+        assert_eq!(after.1, before.1, "Y intact");
+        let mut bench = Bench::new(Preset::Integrate, false);
+        bench.with_modifiers(CTRL);
+        bench.drag(ON_Y, ON_Y + egui::vec2(10.0, 80.0));
+        assert_eq!(bench.frame().0, before.0, "X intact");
+        assert_ne!(bench.frame().1, before.1, "Y moved");
     }
 
-    /// Le double clic recadre : le cadre d'origine, après un zoom comme après un
-    /// déplacement.
+    /// Double click reframes: the original frame, after a zoom as after a
+    /// movement.
     #[test]
-    fn le_double_clic_rend_le_cadre_d_origine() {
-        let mut banc = Banc::new(Preset::Integrate, false);
-        let origine = banc.cadre();
-        banc.image(vec![egui::Event::Zoom(1.5)]);
-        banc.avec(CTRL);
-        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(600.0, 450.0));
-        banc.avec(egui::Modifiers::NONE);
-        assert_ne!(banc.cadre(), origine);
-        banc.deplacer(AU_MILIEU);
+    fn double_click_restores_the_original_frame() {
+        let mut bench = Bench::new(Preset::Integrate, false);
+        let origine = bench.frame();
+        bench.image(vec![egui::Event::Zoom(1.5)]);
+        bench.with_modifiers(CTRL);
+        bench.drag(egui::pos2(500.0, 400.0), egui::pos2(600.0, 450.0));
+        bench.with_modifiers(egui::Modifiers::NONE);
+        assert_ne!(bench.frame(), origine);
+        bench.move_pointer(MIDDLE);
         for pressed in [true, false, true, false] {
-            banc.bouton(pressed);
+            bench.set_button(pressed);
         }
-        banc.image(vec![]);
-        assert_eq!(banc.cadre(), origine);
+        bench.image(vec![]);
+        assert_eq!(bench.frame(), origine);
     }
 
-    /// Un Ctrl + clic simple ne pose rien ; le clic seul pose le point.
+    /// A plain Ctrl + click places nothing; the click alone places the point.
     #[test]
-    fn ctrl_clic_ne_pose_pas_de_point() {
-        let mut banc = Banc::new(Preset::BaselineConstant, false);
-        assert_eq!(banc.form.tool, PreviewTool::Points);
-        banc.avec(CTRL);
+    fn ctrl_click_does_not_place_a_point() {
+        let mut bench = Bench::new(Preset::BaselineConstant, false);
+        assert_eq!(bench.form.tool, PreviewTool::Points);
+        bench.with_modifiers(CTRL);
         for pressed in [true, false] {
-            banc.bouton(pressed);
+            bench.set_button(pressed);
         }
-        banc.image(vec![]);
-        assert_eq!(banc.form.setup.baseline.constant_point, None);
-        banc.avec(egui::Modifiers::NONE);
-        banc.deplacer(AU_MILIEU + egui::vec2(30.0, 0.0));
+        bench.image(vec![]);
+        assert_eq!(bench.form.setup.baseline.constant_point, None);
+        bench.with_modifiers(egui::Modifiers::NONE);
+        bench.move_pointer(MIDDLE + egui::vec2(30.0, 0.0));
         for pressed in [true, false] {
-            banc.bouton(pressed);
+            bench.set_button(pressed);
         }
-        banc.image(vec![]);
-        assert!(banc.form.setup.baseline.constant_point.is_some());
+        bench.image(vec![]);
+        assert!(bench.form.setup.baseline.constant_point.is_some());
     }
 
-    /// Détection de pics : le glisser (outil Zone) donne la plage de recherche,
-    /// le clic (outil Points) la graine d'un pic ; le glisser en outil Points ne
-    /// pose rien.
+    /// Peak detection: the drag (Zone tool) gives the search range,
+    /// the click (Points tool) the seed of a peak; a drag with the Points tool
+    /// places nothing.
     #[test]
-    fn les_pics_se_posent_par_clic_et_par_glisser() {
-        let mut banc = Banc::new(Preset::Peaks, false);
-        assert_eq!(banc.form.tool, PreviewTool::Points);
-        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
-        assert_eq!(banc.form.setup.peaks.range, None, "outil Points : rien");
-        assert!(banc.form.setup.peaks.seeds.is_empty());
-        banc.form.tool = PreviewTool::Zone;
-        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
-        assert!(banc.form.setup.peaks.range.is_some(), "outil Zone : plage");
-        banc.form.tool = PreviewTool::Points;
-        banc.deplacer(AU_MILIEU);
+    fn peaks_are_placed_by_click_and_by_drag() {
+        let mut bench = Bench::new(Preset::Peaks, false);
+        assert_eq!(bench.form.tool, PreviewTool::Points);
+        bench.drag(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
+        assert_eq!(bench.form.setup.peaks.range, None, "Points tool: nothing");
+        assert!(bench.form.setup.peaks.seeds.is_empty());
+        bench.form.tool = PreviewTool::Zone;
+        bench.drag(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
+        assert!(bench.form.setup.peaks.range.is_some(), "Zone tool: range");
+        bench.form.tool = PreviewTool::Points;
+        bench.move_pointer(MIDDLE);
         for pressed in [true, false] {
-            banc.bouton(pressed);
+            bench.set_button(pressed);
         }
-        banc.image(vec![]);
-        assert_eq!(
-            banc.form.setup.peaks.seeds.len(),
-            1,
-            "outil Points : graine"
-        );
+        bench.image(vec![]);
+        assert_eq!(bench.form.setup.peaks.seeds.len(), 1, "Points tool: seed");
     }
 }

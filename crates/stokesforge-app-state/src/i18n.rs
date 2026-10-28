@@ -27,7 +27,7 @@
 //! global loader ([`loader`]), so a change of machinery does not touch the
 //! calls. A key missing from `i18n/en/stokesforge_app.ftl`, or an argument the
 //! message does not declare, **does not compile**. Never a literal in a label:
-//! `tests/libelles.rs` (`aucun_libelle_en_dur`) guards this.
+//! `tests/labels.rs` (`no_hardcoded_label`) guards this.
 //!
 //! # The language
 //!

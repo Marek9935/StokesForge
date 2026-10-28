@@ -1,151 +1,150 @@
-//! Détachement en fenêtres OS : les trois panneaux fixes et chaque fenêtre de
-//! contenu peuvent vivre dans un viewport dédié (`show_viewport_deferred`).
-//! La fermeture de ce callback est `'static` et `Send + Sync` : elle ne peut
-//! pas capturer `&mut AppState`, d'où les vues locales (`DetachedTabViewModel`,
-//! `ProjectManagerViewModel`) et les requêtes qu'elles renvoient à la racine.
+//! Detaching into OS windows: the three fixed panels and each content window
+//! can live in a dedicated viewport (`show_viewport_deferred`).
+//! The closure of this callback is `'static` and `Send + Sync`: it cannot
+//! capture `&mut AppState`, hence the local views (`DetachedTabViewModel`,
+//! `ProjectManagerViewModel`) and the requests they send back to the root.
 //!
-//! Déplacé d'`app.rs` (#101), puis découpé par phase (#124) : publication
-//! de l'instantané, peinture et collecte d'événements, commandes de fenêtre.
-//! Le payload du callback reste possédé et `'static` ; ses deux verrous
-//! gardent la même durée, et les actions métier attendent toujours la racine.
+//! Moved from `app.rs` (#101), then split by phase (#124): publishing
+//! the snapshot, painting and collecting events, window commands.
+//! The callback's payload stays owned and `'static`; its two locks
+//! keep the same duration, and business actions still wait for the root.
 //!
-//! # Repris de la doc de tête d'`app.rs`
+//! # Taken from the top doc of `app.rs`
 //!
-//! # Détachement du Project Manager
+//! # Detaching the Project Manager
 //!
-//! Le flottant `egui_dock` (`Surface::Window`) qu'un onglet pouvait obtenir
-//! en le glissant hors du dock n'existe plus pour le Project Manager,
-//! puisqu'il n'est plus un onglet — seul reste :
+//! The `egui_dock` floating (`Surface::Window`) that a tab could get
+//! by being dragged out of the dock no longer exists for the Project Manager,
+//! since it is no longer a tab — only this remains:
 //!
-//! **Vraie fenêtre OS séparée** ([`StokesForgeApp::pm_detached`],
-//! [`StokesForgeApp::show_detached_project_manager`]) : `egui::Context::
-//! show_viewport_deferred` ouvre un vrai viewport natif, déplaçable sur
-//! un autre écran. Quand ce mode est actif, [`StokesForgeApp::project_manager_panel`]
-//! n'est simplement pas peint cette image-là ; le fermer (bouton
-//! de la fenêtre OS, ou « Réattacher ») repose `pm_detached` à `false`, ce
-//! qui fait réapparaître le panneau au prochain rendu — toujours au même
-//! endroit, puisqu'il est figé à gauche. Déclenchable depuis son en-tête
-//! ou le menu « Fenêtre ». Sous Wayland, le compositeur peut ignorer une
-//! position de fenêtre
-//! demandée par l'application — la même réserve que documente déjà
-//! `docs/application/theme-i18n-systeme.md` pour `rfd` ; cette tâche ne demande explicitement
-//! aucune position (elle laisse le compositeur placer la fenêtre), donc n'en
-//! souffre pas directement, mais la limite vaut d'être connue avant d'y
-//! ajouter un jour une position mémorisée.
+//! **A real separate OS window** ([`StokesForgeApp::pm_detached`],
+//! [`StokesForgeApp::show_detached_project_manager`]): `egui::Context::
+//! show_viewport_deferred` opens a real native viewport, movable to
+//! another screen. When this mode is active, [`StokesForgeApp::project_manager_panel`]
+//! is simply not painted that frame; closing it (button
+//! of the OS window, or "Reattach") sets `pm_detached` back to `false`, which
+//! makes the panel reappear at the next render — always in the same
+//! place, since it is fixed on the left. Can be triggered from its header
+//! or the "Window" menu. Under Wayland, the compositor may ignore a window
+//! position
+//! requested by the application — the same caveat already documented in
+//! `docs/application/theme-i18n-systeme.md` for `rfd`; this task explicitly asks for
+//! no position (it lets the compositor place the window), so it does not
+//! suffer from it directly, but the limit is worth knowing before one day
+//! adding a remembered position.
 //!
-//! **`show_viewport_deferred`, pas `_immediate`** : constaté
-//! interactivement (Fedora/GNOME/Wayland, Mutter), la fenêtre détachée via
-//! `show_viewport_immediate` restait draggable mais visuellement confinée
-//! au rectangle de la fenêtre mère, même réduite — pas seulement
-//! l'absence de positionnement absolu ci-dessus, autre chose empêchait la
-//! fenêtre de sortir du cadre. `show_viewport_immediate` documente
-//! lui-même « pause the current viewport and render the child viewport in
-//! its own window » (rendu couplé des deux fenêtres), et `egui`
-//! recommande explicitement `show_viewport_deferred` pour une vraie
-//! fenêtre indépendante, repeinte indépendamment de la fenêtre parente —
-//! un candidat plausible pour ce symptôme, **pas une preuve**. Détail du
-//! choix, de l'incertitude assumée et du schéma de synchronisation
-//! (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) dans la
-//! doc de tête de [`StokesForgeApp::show_detached_project_manager`].
+//! **`show_viewport_deferred`, not `_immediate`**: observed
+//! interactively (Fedora/GNOME/Wayland, Mutter), the window detached through
+//! `show_viewport_immediate` stayed draggable but visually confined
+//! to the parent window's rectangle, even when reduced — not just
+//! the lack of absolute positioning above, something else kept the
+//! window from leaving the frame. `show_viewport_immediate` itself documents
+//! "pause the current viewport and render the child viewport in
+//! its own window" (coupled rendering of the two windows), and `egui`
+//! explicitly recommends `show_viewport_deferred` for a real
+//! independent window, repainted independently of the parent window —
+//! a plausible candidate for this symptom, **not proof**. Detail of the
+//! choice, of the acknowledged uncertainty and of the synchronization scheme
+//! (`ProjectManagerViewModel`, `DetachedProjectManagerRequests`) in the
+//! top doc of [`StokesForgeApp::show_detached_project_manager`].
 //!
-//! # Détachement générique des onglets de contenu
+//! # Generic detaching of content tabs
 //!
 //! [`StokesForgeApp::detach_tab`]/[`StokesForgeApp::reattach_tab`]/
-//! [`StokesForgeApp::show_detached_tabs`] généralisent le mécanisme ci-dessus à
-//! [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`] et [`Tab::Note`] — un
-//! bouton « Détacher dans une fenêtre » dans l'en-tête de chaque fenêtre
-//! flottante (voir § Fenêtres flottantes confinées), symétrique de
-//! « Réattacher à la fenêtre principale » côté fenêtre détachée. Plusieurs
-//! onglets peuvent être détachés en même temps :
-//! [`StokesForgeApp::detached_tabs`] est une table par [`Tab`] (chaque variante
-//! porte déjà un `NodeId`, donc un `ViewportId::from_hash_of(tab)` est
-//! unique par construction — pas de collision possible entre deux classeurs
-//! détachés simultanément, par exemple).
+//! [`StokesForgeApp::show_detached_tabs`] generalize the mechanism above to
+//! [`Tab::Book`], [`Tab::Graph`], [`Tab::Matrix`] and [`Tab::Note`] — a
+//! "Detach into a window" button in the header of each floating
+//! window (see § Confined floating windows), symmetric with
+//! "Reattach to the main window" on the detached window side. Several
+//! tabs can be detached at the same time:
+//! [`StokesForgeApp::detached_tabs`] is a table per [`Tab`] (each variant
+//! already carries a `NodeId`, so a `ViewportId::from_hash_of(tab)` is
+//! unique by construction — no collision possible between two workbooks
+//! detached simultaneously, for example).
 //!
-//! B8 (`retours-2026-09-23-bugs.md`) : comme pour une fenêtre
-//! flottante rétrécie (B4), un `Ui` dont les enfants dépassent son
-//! `max_rect` les peint quand même. [`StokesForgeApp::show_detached_tabs`] pose
-//! donc le contenu des quatre natures dans un même sous-`Ui` borné et rogné,
-//! juste avant le `match` qui aiguille vers chacune d'elles.
+//! B8 (`retours-2026-09-23-bugs.md`): as for a shrunken floating
+//! window (B4), a `Ui` whose children exceed its
+//! `max_rect` still paints them. [`StokesForgeApp::show_detached_tabs`] thus puts
+//! the content of the four kinds in a single bounded, clipped child `Ui`,
+//! right before the `match` that routes to each of them.
 //!
-//! # Pourquoi pas un `ViewModel` par nature de contenu comme pour le PM
+//! # Why no `ViewModel` per content kind as for the PM
 //!
-//! Le PM n'a qu'une seule forme de contenu (un arbre en lecture seule) ; les
-//! quatre natures de fenêtre ici sont franchement différentes (grille
-//! éditable virtualisée, graphe interactif avec cache de formes, texte
-//! éditable, espace réservé). Plutôt que quatre `ViewModel`/`Requests`
-//! disjoints à faire cohabiter dans [`StokesForgeApp::detached_tabs`],
-//! [`DetachedTabViewModel`] est une seule structure portant un champ par
-//! nature de contenu (`view_state` pour un classeur ou une note,
-//! `graph_view` pour un graphe) — les champs
-//! inutilisés pour la nature du `Tab` qu'elle sert restent simplement à leur
-//! valeur par défaut. Moins de types, un seul `Arc<Mutex<_>>` par onglet
-//! détaché à faire voyager dans la fermeture, au prix d'un typage un peu
-//! large ; le commentaire de tête de chaque champ dit à qui il appartient.
+//! The PM has only one form of content (a read-only tree); the
+//! four window kinds here are frankly different (virtualized editable
+//! grid, interactive graph with shape cache, editable text,
+//! placeholder). Rather than four disjoint `ViewModel`/`Requests`
+//! to make coexist in [`StokesForgeApp::detached_tabs`],
+//! [`DetachedTabViewModel`] is a single structure carrying one field per
+//! content kind (`view_state` for a workbook or a note,
+//! `graph_view` for a graph) — the fields
+//! unused for the kind of `Tab` it serves simply stay at their
+//! default value. Fewer types, a single `Arc<Mutex<_>>` per detached
+//! tab to carry in the closure, at the price of somewhat
+//! wide typing; the head comment of each field says whom it belongs to.
 //!
-//! # Le classeur partage son rendu entre les deux modes
+//! # The workbook shares its rendering between the two modes
 //!
-//! [`tab_contents`](crate::app::contents::tab_contents) (la fonction déjà partagée par les fenêtres flottantes et
-//! la zone de maximisation) prend `&mut AppState` — un onglet détaché ne peut
-//! pourtant pas capturer `&mut AppState` dans la fermeture `'static`,
-//! `Send + Sync`, exigée par `show_viewport_deferred`, exactement le
-//! problème déjà résolu pour le Project Manager (voir plus haut) : mettre
-//! `AppState` entière derrière un verrou déborderait le problème à
-//! résoudre, pour un onglet comme pour l'autre.
+//! [`tab_contents`](crate::app::contents::tab_contents) (the function already shared by the floating windows and
+//! the maximize area) takes `&mut AppState` — yet a detached tab cannot
+//! capture `&mut AppState` in the `'static`, `Send + Sync`
+//! closure required by `show_viewport_deferred`, exactly the
+//! problem already solved for the Project Manager (see above): putting
+//! the whole `AppState` behind a lock would move the problem to
+//! solve, for one tab as for the other.
 //!
-//! Le contournement retenu : [`DetachedTabViewModel::snapshot`], un clone de
-//! [`stokesforge_session::Snapshot`] (bon marché — deux `Arc`, voir sa doc), est
-//! resynchronisé depuis `self.state` à chaque image, **avant** l'appel à
-//! `show_viewport_deferred` — même schéma que `ProjectManagerViewModel::tree`.
-//! Une publication dont l'époque, la révision métier ou celle des géométries
-//! change réveille le viewport destinataire (#104) : publier l'instantané
-//! seul ne déclenche pas le callback différé. Au repos, aucun réveil périodique.
-//! Une mutation appliquée après la peinture programme aussi une nouvelle
-//! image racine pour publier cet état avant le redessin des lecteurs.
-//! Toute lecture pure (texte de cellule, colonnes visibles, feuilles d'un
-//! classeur, texte d'une note) passe par les fonctions libres de
-//! `stokesforge_app_state::state` factorisées sur un `&Tree` pour l'occasion
+//! The workaround chosen: [`DetachedTabViewModel::snapshot`], a clone of
+//! [`stokesforge_session::Snapshot`] (cheap — two `Arc`s, see its doc), is
+//! resynchronized from `self.state` on every frame, **before** the call to
+//! `show_viewport_deferred` — same scheme as `ProjectManagerViewModel::tree`.
+//! A publication whose epoch, business revision or geometries revision
+//! changes wakes the target viewport (#104): publishing the snapshot
+//! alone does not trigger the deferred callback. At rest, no periodic wake-up.
+//! A mutation applied after painting also schedules a new
+//! root frame to publish this state before the readers redraw.
+//! Every pure read (cell text, visible columns, sheets of a
+//! workbook, text of a note) goes through the free functions of
+//! `stokesforge_app_state::state` factored over a `&Tree` for the occasion
 //! (`cell_text_in`, `visible_columns_in`, `row_count_in`, `worksheets_of_in`,
-//! `note_text_in`, `node_title_in`) — le corps exact de la méthode
-//! `AppState` correspondante, pas une réécriture : une fenêtre flottante et
-//! une fenêtre détachée affichent donc littéralement la même règle, jamais
-//! deux versions à tenir en accord.
+//! `note_text_in`, `node_title_in`) — the exact body of the corresponding
+//! `AppState` method, not a rewrite: a floating window and
+//! a detached window thus literally display the same rule, never
+//! two versions to keep in agreement.
 //!
-//! Le classeur détaché possède une vue [`AppState`] locale construite par
-//! [`AppState::fork_for_detached_view`]. Elle conserve sélection, presse-papier
-//! et tampons de saisie, mais lit le même instantané de session que la racine.
-//! Ainsi [`book_contents`] et [`grid_contents`](crate::app::grid::grid_contents) sont appelées à l'identique
-//! dans les deux modes : onglets, en-têtes, largeurs et gestes ne peuvent
-//! plus dériver dans deux implémentations. Les actions mutantes rejoignent
-//! la boucle principale après [`AppState::adopt_detached_book_view`] ; elles
-//! gardent donc l'unique voie de commande annulable. La note suit le même
-//! motif : [`note_contents`] sur la vue locale, dont le tampon de saisie
-//! ([`AppState::note_editing`]) reste propre à la fenêtre.
+//! The detached workbook owns a local [`AppState`] view built by
+//! [`AppState::fork_for_detached_view`]. It keeps selection, clipboard
+//! and input buffers, but reads the same session snapshot as the root.
+//! Thus [`book_contents`] and [`grid_contents`](crate::app::grid::grid_contents) are called identically
+//! in both modes: tabs, headers, widths and gestures can no
+//! longer drift apart in two implementations. Mutating actions rejoin
+//! the main loop after [`AppState::adopt_detached_book_view`]; they
+//! thus keep the single undoable-command path. The note follows the same
+//! pattern: [`note_contents`] on the local view, whose input buffer
+//! ([`AppState::note_editing`]) stays specific to the window.
 //!
-//! [`Tab::Graph`] échappe à cette limite : [`stokesforge_render_egui::GraphView`]
-//! n'a pas de verrou global à `AppState` à respecter (son cache de formes et
-//! sa navigation zoom/pan sont déjà scopés par graphe, dans
-//! [`StokesForgeApp::graph_views`]) — [`graph_view_contents`] est donc
-//! **littéralement** la même fonction pour une fenêtre flottante et pour une
-//! fenêtre détachée, la vue elle-même migrant simplement hors de `graph_views` le
-//! temps du détachement ([`StokesForgeApp::detach_tab`]/[`StokesForgeApp::
-//! reattach_tab`]) pour rester un `Arc<Mutex<_>>` capturable par la
-//! fermeture sans dupliquer le cache.
+//! [`Tab::Graph`] escapes this limit: [`stokesforge_render_egui::GraphView`]
+//! has no global lock on `AppState` to respect (its shape cache and
+//! its zoom/pan navigation are already scoped per graph, in
+//! [`StokesForgeApp::graph_views`]) — [`graph_view_contents`] is thus
+//! **literally** the same function for a floating window and for a
+//! detached window, the view itself simply migrating out of `graph_views` for the
+//! duration of the detaching ([`StokesForgeApp::detach_tab`]/[`StokesForgeApp::
+//! reattach_tab`]) to stay an `Arc<Mutex<_>>` the closure can capture
+//! without duplicating the cache.
 //!
-//! [`Tab::Matrix`] n'a aucun état à faire voyager (espace réservé) :
-//! [`matrix_contents`] ne lit que l'arbre et sert tel quel aux deux
-//! fenêtres.
+//! [`Tab::Matrix`] has no state to carry (placeholder):
+//! [`matrix_contents`] reads only the tree and is used as is by both
+//! windows.
 //!
-//! # OM et console (#100)
+//! # OM and console (#100)
 //!
-//! Les panneaux détachés ont leur propre lecture et leurs requêtes, comme
-//! le PM, mais ne deviennent pas des onglets de contenu. L'OM publie aussi
-//! le graphe actif et sa sélection ; la console publie saisie/sortie et état
-//! du travail. Le moteur Python reste à la racine. Les requêtes de saisie
-//! sont drainées avant publication pour ne pas perdre les dernières frappes.
-//! Tous utilisent `detached_panel_contents` : cadre maison sans décoration
-//! native, Rattacher uniquement, fermeture OS convertie en rattachement.
-//!
+//! The detached panels have their own read and their requests, like
+//! the PM, but do not become content tabs. The OM also publishes
+//! the active graph and its selection; the console publishes input/output and the
+//! state of the job. The Python engine stays at the root. Input requests
+//! are drained before publication so as not to lose the last keystrokes.
+//! All use `detached_panel_contents`: home-made frame without native
+//! decoration, Reattach only, OS close converted into a reattach.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -182,8 +181,8 @@ use super::window_stack::toggle_collapse_to;
 use super::workbook::book_contents;
 use super::StokesForgeApp;
 
-/// Les deux compteurs ne suffisent pas après un remplacement de projet :
-/// l'époque appartient aussi à l'identité de l'instantané publié.
+/// The two counters are not enough after a project replacement:
+/// the epoch also belongs to the identity of the published snapshot.
 pub(super) fn snapshot_stamp(snapshot: &Snapshot) -> (u64, u64, u64) {
     (
         snapshot.epoch,
@@ -192,61 +191,61 @@ pub(super) fn snapshot_stamp(snapshot: &Snapshot) -> (u64, u64, u64) {
     )
 }
 
-/// Ce que la fenêtre OS détachée du Project Manager a besoin de peindre —
-/// strictement ça, et rien de plus. Voir la doc de tête de
-/// [`StokesForgeApp::show_detached_project_manager`] pour pourquoi ce détour
-/// plutôt que de mettre `AppState` entière derrière un verrou.
+/// What the detached OS window of the Project Manager needs to paint —
+/// strictly that, and nothing more. See the top doc of
+/// [`StokesForgeApp::show_detached_project_manager`] for why this detour
+/// rather than putting the whole `AppState` behind a lock.
 #[derive(Debug, Default, Clone)]
 pub(super) struct ProjectManagerViewModel {
-    /// Dernier instantané publié ; une publication modifiée réveille le viewport.
+    /// Last published snapshot; a changed publication wakes the viewport.
     pub(super) snapshot_stamp: Option<(u64, u64, u64)>,
-    /// Copie de [`AppState::project_tree`], resynchronisée à chaque image
-    /// par [`StokesForgeApp::show_detached_project_manager`] avant l'appel à
-    /// `show_viewport_deferred` — `AppState` reste la seule source de
-    /// vérité, ceci n'en est qu'un instantané pour le callback différé.
+    /// Copy of [`AppState::project_tree`], resynchronized on every frame
+    /// by [`StokesForgeApp::show_detached_project_manager`] before the call to
+    /// `show_viewport_deferred` — `AppState` stays the only source of
+    /// truth, this is only a snapshot for the deferred callback.
     pub(super) tree: Vec<ProjectTreeNode>,
     pub(super) root: Option<NodeId>,
-    /// Copie de [`StokesForgeApp::pm_selection`], même resynchronisation que
-    /// `tree` — nécessaire pour que la fenêtre détachée du Project Manager
-    /// affiche elle aussi la sélection courante et les fenêtres fermées atténuées à
-    /// jour (§6).
+    /// Copy of [`StokesForgeApp::pm_selection`], same resynchronization as
+    /// `tree` — needed so that the detached Project Manager window
+    /// also shows the current selection and the closed windows dimmed
+    /// up to date (§6).
     pub(super) selected: HashSet<PmEntry>,
-    /// Copie des onglets ouverts ([`StokesForgeApp::open_tabs`]), même
-    /// resynchronisation : les autres lignes sont atténuées.
+    /// Copy of the open tabs ([`StokesForgeApp::open_tabs`]), same
+    /// resynchronization: the other rows are dimmed.
     pub(super) open: HashSet<Tab>,
-    /// Copie de l'onglet au premier plan, même resynchronisation.
+    /// Copy of the foreground tab, same resynchronization.
     pub(super) active_tab: Option<Tab>,
 }
 
-/// Ce que la fenêtre OS détachée du Project Manager écrit, pour que la
-/// boucle principale (seule à porter `&mut AppState` et `&mut
-/// StokesForgeApp::floating_tabs`) les applique après le rendu — même schéma que
-/// les `open_requests`/
-/// `actions` locaux à [`StokesForgeApp::ui`](eframe::App::ui), juste posés par un callback différé
-/// (potentiellement rappelé à une image où la fenêtre mère ne peint pas)
-/// plutôt que collectés en direct pendant la peinture.
+/// What the detached OS window of the Project Manager writes, so that the
+/// main loop (the only one to carry `&mut AppState` and `&mut
+/// StokesForgeApp::floating_tabs`) applies them after rendering — same scheme as
+/// the `open_requests`/
+/// `actions` local to [`StokesForgeApp::ui`](eframe::App::ui), just set by a deferred callback
+/// (potentially called again on a frame where the parent window does not paint)
+/// rather than collected live during painting.
 #[derive(Debug, Default)]
 pub(super) struct DetachedProjectManagerRequests {
-    /// Dépôts de fichiers, traités par la même session que la fenêtre principale.
+    /// File drops, handled by the same session as the main window.
     pub(super) actions: Vec<Action>,
-    /// Onglets demandés par un clic dans l'arbre depuis la dernière
-    /// vidange ; [`StokesForgeApp::ui`](eframe::App::ui) les transfère dans son propre
-    /// `open_requests` puis les vide.
+    /// Tabs requested by a click in the tree since the last
+    /// drain; [`StokesForgeApp::ui`](eframe::App::ui) transfers them to its own
+    /// `open_requests` then empties them.
     pub(super) open: Vec<Tab>,
-    /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
-    /// été actionné depuis la dernière vidange.
+    /// True if the "Reattach" button or the closing of the OS window was
+    /// actuated since the last drain.
     pub(super) reattach: bool,
-    /// Sélection/masquage tels qu'ils étaient à la fin de la dernière image
-    /// peinte par la fenêtre détachée — `None` tant qu'aucune image n'a
-    /// encore tourné depuis la dernière vidange. Remplacés en bloc plutôt
-    /// qu'en delta, comme `DetachedTabRequests::geometry` (§6).
+    /// Selection/hiding as they were at the end of the last frame
+    /// painted by the detached window — `None` as long as no frame has
+    /// run since the last drain. Replaced as a whole rather
+    /// than as a delta, like `DetachedTabRequests::geometry` (§6).
     pub(super) selection: Option<HashSet<PmEntry>>,
-    /// Onglets que « Close » a demandé de fermer depuis la dernière vidange.
+    /// Tabs that "Close" asked to close since the last drain.
     pub(super) close: Vec<Tab>,
 }
 
-/// L'OM détaché reçoit la projection du graphe actif, même sans événement
-/// dans son viewport. Les gestes restent associés au graphe qui était peint.
+/// The detached OM receives the projection of the active graph, even with no event
+/// in its viewport. The gestures stay tied to the graph that was painted.
 #[derive(Clone)]
 pub(super) struct ObjectManagerModel {
     pub(super) stamp: (u64, u64, u64),
@@ -282,8 +281,8 @@ pub(super) struct DetachedScriptConsole {
     requests: Arc<Mutex<ScriptConsoleRequests>>,
 }
 
-/// Les panneaux détachés ont le cadre maison et une seule action de fenêtre.
-/// Une fermeture demandée par le compositeur devient un rattachement.
+/// The detached panels have the home-made frame and a single window action.
+/// A close requested by the compositor becomes a reattach.
 fn detached_panel_contents(
     ui: &mut egui::Ui,
     title: &str,
@@ -321,81 +320,81 @@ fn detached_panel_contents(
     reattach
 }
 
-/// Un onglet de contenu détaché en fenêtre OS séparée — voir la doc de tête
-/// du module, § détachement générique. Même patron que le Project Manager
-/// (`pm_view_model`/`pm_requests`), répété une fois par onglet plutôt qu'une
-/// fois pour toute l'appli : [`StokesForgeApp::detached_tabs`] en porte une par
-/// entrée.
+/// A content tab detached into a separate OS window — see the top doc
+/// of the module, § generic detaching. Same pattern as the Project Manager
+/// (`pm_view_model`/`pm_requests`), repeated once per tab rather than once
+/// for the whole app: [`StokesForgeApp::detached_tabs`] carries one per
+/// entry.
 pub(super) struct DetachedTab {
-    /// Ce que la fenêtre détachée peint, resynchronisé depuis `self.state`
-    /// (et `self.graph_views` pour un graphe) à chaque image par
+    /// What the detached window paints, resynchronized from `self.state`
+    /// (and `self.graph_views` for a graph) on every frame by
     /// [`StokesForgeApp::show_detached_tabs`].
     pub(super) view_model: Arc<Mutex<DetachedTabViewModel>>,
-    /// Ce que la fenêtre détachée écrit, drainé chaque image par
+    /// What the detached window writes, drained every frame by
     /// [`StokesForgeApp::ui`](eframe::App::ui).
     pub(super) requests: Arc<Mutex<DetachedTabRequests>>,
 }
 
-/// Ce qu'une fenêtre détachée a besoin de peindre. Une seule structure pour
-/// les quatre natures détachables plutôt que quatre `ViewModel` disjoints —
-/// voir la doc de tête du module pour le compromis. Chaque champ, hormis
-/// `snapshot`, n'a de sens que pour une nature de [`Tab`] particulière ; le
-/// commentaire le dit.
+/// What a detached window needs to paint. A single structure for
+/// the four detachable kinds rather than four disjoint `ViewModel`s —
+/// see the top doc of the module for the trade-off. Each field, except
+/// `snapshot`, makes sense only for one particular kind of [`Tab`]; the
+/// comment says which.
 pub(super) struct DetachedTabViewModel {
-    /// Instantané du modèle, resynchronisé à chaque image — voir la doc de
-    /// tête du module, § « la lecture du modèle est factorisée ». `None`
-    /// seulement avant la toute première synchronisation (jamais observable
-    /// depuis l'extérieur de [`StokesForgeApp::detach_tab`], qui le pose aussitôt).
+    /// Snapshot of the model, resynchronized on every frame — see the top doc of the
+    /// module, § "the model read is factored out". `None`
+    /// only before the very first synchronization (never observable
+    /// from outside [`StokesForgeApp::detach_tab`], which sets it at once).
     pub(super) snapshot: Option<Snapshot>,
-    /// `Tab::Book`/`Tab::Note` : vue [`AppState`] locale à la fenêtre, qui
-    /// rend le contenu commun avec la fenêtre flottante (mêmes
-    /// `book_contents`/`note_contents`) tout en gardant sa sélection et ses
-    /// saisies en cours.
+    /// `Tab::Book`/`Tab::Note`: [`AppState`] view local to the window, which
+    /// renders the content shared with the floating window (same
+    /// `book_contents`/`note_contents`) while keeping its selection and its
+    /// input in progress.
     pub(super) view_state: Option<AppState>,
-    /// `Tab::Graph` : la vue (cache de formes, zoom/pan), déplacée hors de
-    /// [`StokesForgeApp::graph_views`] le temps du détachement — voir
+    /// `Tab::Graph`: the view (shape cache, zoom/pan), moved out of
+    /// [`StokesForgeApp::graph_views`] for the duration of the detaching — see
     /// [`StokesForgeApp::detach_tab`]/[`StokesForgeApp::reattach_tab`].
     pub(super) graph_view: Option<GraphView>,
-    /// `Tab::Graph`/`Tab::Book` : repli du contenu, propre à cette fenêtre
-    /// détachée — initialisé depuis [`StokesForgeApp::collapsed_tabs`] par
-    /// `detach_tab`, basculé directement ici (pas de détour par
-    /// `DetachedTabRequests`, ce repli n'intéresse que cette fenêtre), et
-    /// reversé dans `collapsed_tabs` par `reattach_tab`.
+    /// `Tab::Graph`/`Tab::Book`: collapse of the content, specific to this detached
+    /// window — initialized from [`StokesForgeApp::collapsed_tabs`] by
+    /// `detach_tab`, toggled directly here (no detour through
+    /// `DetachedTabRequests`, this collapse concerns only this window), and
+    /// poured back into `collapsed_tabs` by `reattach_tab`.
     pub(super) collapsed: bool,
-    /// Le premier callback d'un viewport différé peut arriver avant que
-    /// Wayland/WGPU ait stabilisé sa taille. Une seule image supplémentaire
-    /// donne alors à la figure son rectangle réel, sans entretenir une boucle
-    /// de rendu quand la fenêtre reste inactive.
+    /// The first callback of a deferred viewport can arrive before
+    /// Wayland/WGPU has stabilized its size. One extra frame
+    /// then gives the figure its real rectangle, without sustaining a render
+    /// loop when the window stays inactive.
     pub(super) needs_initial_repaint: bool,
-    /// Dernière taille OS connue de la fenêtre **hors repli** (B9,
-    /// `retours-2026-09-23-bugs.md`) : mise à jour à chaque
-    /// image tant que `collapsed` est faux, gelée pendant un repli. Sert à
-    /// la fois de cible pour le `ViewportCommand::InnerSize` envoyé au
-    /// dépli et de taille à persister dans `window_geometries` pendant un
-    /// repli — même rôle que `current_size`/`window_sizes` côté fenêtre
-    /// flottante (B3), mais porté par le modèle plutôt que par une table de
-    /// l'app puisqu'une fenêtre détachée n'a pas d'équivalent. `None`
-    /// seulement avant la première image où le viewport rapporte une
-    /// taille (ou si la fenêtre a été détachée déjà repliée et jamais
-    /// dépliée depuis).
+    /// Last known OS size of the window **outside collapse** (B9,
+    /// `retours-2026-09-23-bugs.md`): updated on every
+    /// frame as long as `collapsed` is false, frozen during a collapse. Serves
+    /// both as the target for the `ViewportCommand::InnerSize` sent on
+    /// expanding and as the size to persist in `window_geometries` during a
+    /// collapse — same role as `current_size`/`window_sizes` on the floating
+    /// window side (B3), but carried by the model rather than by an app table
+    /// since a detached window has no equivalent. `None`
+    /// only before the first frame where the viewport reports a
+    /// size (or if the window was detached already collapsed and never
+    /// expanded since).
     pub(super) expanded_size: Option<egui::Vec2>,
     pub(super) focused: bool,
 }
 
-/// Ce qu'une fenêtre détachée écrit, pour que [`StokesForgeApp::ui`](eframe::App::ui) (seule à
-/// porter `&mut AppState`) les applique après le rendu — même rôle que
+/// What a detached window writes, so that [`StokesForgeApp::ui`](eframe::App::ui) (the only one to
+/// carry `&mut AppState`) applies them after rendering — same role as
 /// [`DetachedProjectManagerRequests`].
 #[derive(Debug, Default)]
 pub(super) struct DetachedTabRequests {
-    /// Actions produites par cette fenêtre depuis la dernière vidange
-    /// (validation de cellule/note, structure de la grille…) — le même
-    /// chemin de commande annulable qu'une fenêtre flottante, voir la doc de
-    /// tête du module.
+    /// Actions produced by this window since the last drain
+    /// (cell/note validation, grid structure…) — the same undoable-command
+    /// path as a floating window, see the top doc of the
+    /// module.
     pub(super) actions: Vec<Action>,
-    /// Vrai si « Réattacher à la fenêtre principale » a été actionné depuis
-    /// la dernière vidange.
+    /// True if "Reattach to the main window" was actuated since
+    /// the last drain.
     pub(super) reattach: bool,
-    /// La croix du système ferme la vue détachée sans la réattacher.
+    /// The system's cross closes the detached view without reattaching it.
     pub(super) close: bool,
 }
 
@@ -417,7 +416,7 @@ impl StokesForgeApp {
         }
         if reattach {
             self.om_detached = false;
-            // La lecture détachée ne doit plus retenir un ancien arbre entier.
+            // The detached read must no longer hold an old whole tree.
             self.om_view = None;
         }
     }
@@ -485,7 +484,7 @@ impl StokesForgeApp {
 
     pub(super) fn detach_script_console(&mut self) {
         self.script_detached = true;
-        // Le travail Python ne migre jamais ; ce lecteur ne possède que la saisie et la sortie.
+        // The Python job never migrates; this reader owns only the input and the output.
         self.script_view = Some(DetachedScriptConsole {
             model: Arc::new(Mutex::new(ScriptConsoleModel::from_state(&self.state))),
             requests: Arc::default(),
@@ -522,8 +521,8 @@ impl StokesForgeApp {
         let changed = {
             let mut model = view.model.lock().unwrap_or_else(|err| err.into_inner());
             let changed = *model != next;
-            // Une saisie arrivée après le drainage ne doit pas être écrasée
-            // par une publication de l'ancien tampon dans cette même image.
+            // An input that arrived after the drain must not be overwritten
+            // by a publication of the old buffer in this same frame.
             let requests = view.requests.lock().unwrap_or_else(|err| err.into_inner());
             if requests.source.is_none() {
                 model.source = next.source;
@@ -576,75 +575,75 @@ impl StokesForgeApp {
         }
     }
 
-    /// Bascule en mode détaché : le prochain rendu ouvre le Project Manager
-    /// dans sa propre fenêtre OS ([`StokesForgeApp::show_detached_project_manager`])
-    /// au lieu du panneau fixe ([`StokesForgeApp::project_manager_panel`]). Sans
-    /// effet s'il l'est déjà.
+    /// Switches to detached mode: the next render opens the Project Manager
+    /// in its own OS window ([`StokesForgeApp::show_detached_project_manager`])
+    /// instead of the fixed panel ([`StokesForgeApp::project_manager_panel`]). No
+    /// effect if it already is.
     pub(super) fn detach_project_manager(&mut self) {
         self.pm_detached = true;
     }
 
-    /// Bascule hors du mode détaché : le panneau fixe réapparaît au prochain
-    /// rendu, toujours à gauche puisqu'il est figé en position. Sans effet
-    /// s'il n'est pas détaché.
+    /// Switches out of detached mode: the fixed panel reappears at the next
+    /// render, always on the left since it is fixed in position. No effect
+    /// if it is not detached.
     pub(super) fn reattach_project_manager(&mut self) {
         self.pm_detached = false;
     }
 
-    /// Peint le Project Manager dans sa propre fenêtre OS native, via un
-    /// viewport `eframe`/`egui` **différé** — voir la doc de tête du module,
-    /// § détachement.
+    /// Paints the Project Manager in its own native OS window, through a
+    /// **deferred** `eframe`/`egui` viewport — see the top doc of the module,
+    /// § detaching.
     ///
-    /// # Pourquoi `show_viewport_deferred`, pas `_immediate`
+    /// # Why `show_viewport_deferred`, not `_immediate`
     ///
-    /// Ce module utilisait `show_viewport_immediate` jusqu'ici — le choix le
-    /// plus simple, jugé suffisant tant que ce panneau n'anime rien en
-    /// continu. Constat interactif de l'utilisateur (Fedora/GNOME/Wayland,
-    /// compositeur Mutter) : la fenêtre détachée était bien draggable, mais
-    /// restait **confinée visuellement au rectangle de la fenêtre mère**,
-    /// même celle-ci réduite (pas plein écran) — pas seulement l'absence de
-    /// positionnement absolu propre à Wayland (déjà documentée ci-dessus
-    /// pour `rfd`), autre chose empêchait la fenêtre de sortir du cadre.
-    /// `egui::Context::show_viewport_immediate` documente lui-même : « This
+    /// This module used `show_viewport_immediate` until now — the simplest
+    /// choice, judged sufficient as long as this panel animates nothing
+    /// continuously. The user's interactive finding (Fedora/GNOME/Wayland,
+    /// Mutter compositor): the detached window was indeed draggable, but
+    /// stayed **visually confined to the parent window's rectangle**,
+    /// even with the latter reduced (not full screen) — not just the lack of
+    /// absolute positioning specific to Wayland (already documented above
+    /// for `rfd`), something else kept the window from leaving the frame.
+    /// `egui::Context::show_viewport_immediate` itself documents: "This
     /// call will pause the current viewport and render the child viewport
-    /// in its own window » — ce couplage de rendu synchronisé entre les deux
-    /// fenêtres est un candidat plausible pour mal interagir avec le modèle
-    /// de frame de Wayland. `egui::Context::show_viewport_deferred` est la
-    /// forme que la doc `egui` recommande explicitement pour une vraie
-    /// fenêtre indépendante (« To avoid this, use show_viewport_deferred
-    /// instead »), repeinte indépendamment de la fenêtre parente.
+    /// in its own window" — this synchronized rendering coupling between the two
+    /// windows is a plausible candidate for interacting badly with Wayland's frame
+    /// model. `egui::Context::show_viewport_deferred` is the
+    /// form that the `egui` doc explicitly recommends for a real
+    /// independent window ("To avoid this, use show_viewport_deferred
+    /// instead"), repainted independently of the parent window.
     ///
-    /// **C'est un test, pas une garantie.** Rien ne prouve que le symptôme
-    /// observé côté Mutter vienne de ce couplage de rendu plutôt que d'autre
-    /// chose (un comportement du compositeur vis-à-vis des sous-fenêtres en
-    /// général, par exemple). Si l'utilisateur constate après coup que la
-    /// fenêtre détachée reste toujours confinée, ce sera à documenter comme
-    /// limite connue — à côté de la réserve Wayland déjà notée pour la
-    /// position — plutôt qu'à retenter une autre bascule sans piste
-    /// nouvelle.
+    /// **It is a test, not a guarantee.** Nothing proves that the symptom
+    /// observed on the Mutter side comes from this rendering coupling rather than from something
+    /// else (a compositor behavior toward subwindows in
+    /// general, for example). If the user finds afterwards that the
+    /// detached window is still confined, that will have to be documented as a
+    /// known limit — next to the Wayland caveat already noted for the
+    /// position — rather than trying another switch without a new
+    /// lead.
     ///
-    /// # Callback `Fn`, pas de `&mut self`
+    /// # `Fn` callback, no `&mut self`
     ///
-    /// `show_viewport_deferred` exige `impl Fn(&mut Ui, ViewportClass) +
-    /// Send + Sync + 'static` : pas de capture de `&mut self`, pas même
-    /// d'emprunt classique de `AppState` — le callback peut survivre à cette
-    /// image et être rappelé seul, à une image ultérieure de la fenêtre
-    /// détachée pendant que la fenêtre mère dort. Mettre `AppState` entière
-    /// derrière un verrou pour lui donner ce dont elle a besoin
-    /// déborderait largement du problème à résoudre (dispatch, boucle de
-    /// rendu principale) ; à la place, seul le strict nécessaire au panneau
-    /// voyage :
+    /// `show_viewport_deferred` requires `impl Fn(&mut Ui, ViewportClass) +
+    /// Send + Sync + 'static`: no capture of `&mut self`, not even a classic
+    /// borrow of `AppState` — the callback can outlive this
+    /// frame and be called again alone, on a later frame of the detached
+    /// window while the parent window sleeps. Putting the whole `AppState`
+    /// behind a lock to give it what it needs
+    /// would go far beyond the problem to solve (dispatch, main
+    /// render loop); instead, only what is strictly necessary to the panel
+    /// travels:
     ///
-    /// - [`ProjectManagerViewModel`] (l'arbre du projet) est resynchronisé
-    ///   ici depuis `self.state` — la vraie source de vérité — à chaque
-    ///   image, **avant** l'appel à `show_viewport_deferred` ;
-    /// - [`DetachedProjectManagerRequests`] recueille dans l'autre sens ce
-    ///   que le callback produit (clics d'ouverture, réattachement demandé) ;
-    ///   [`StokesForgeApp::ui`](eframe::App::ui) la draine avant la publication pour produire les
-    ///   mêmes `open_requests`/`Action` qu'avant, sans dupliquer la logique
-    ///   de [`StokesForgeApp::open_tab`] ni appeler
-    ///   [`StokesForgeApp::reattach_project_manager`] depuis l'intérieur d'un
-    ///   callback qui n'a pas accès à `&mut self`.
+    /// - [`ProjectManagerViewModel`] (the project tree) is resynchronized
+    ///   here from `self.state` — the real source of truth — on every
+    ///   frame, **before** the call to `show_viewport_deferred`;
+    /// - [`DetachedProjectManagerRequests`] collects in the other direction
+    ///   what the callback produces (open clicks, requested reattach);
+    ///   [`StokesForgeApp::ui`](eframe::App::ui) drains it before publication to produce the
+    ///   same `open_requests`/`Action` as before, without duplicating the logic
+    ///   of [`StokesForgeApp::open_tab`] nor calling
+    ///   [`StokesForgeApp::reattach_project_manager`] from inside a
+    ///   callback that has no access to `&mut self`.
     pub(super) fn show_detached_project_manager(
         &mut self,
         ctx: &egui::Context,
@@ -684,12 +683,12 @@ impl StokesForgeApp {
                 let mut opened = Vec::new();
                 let mut closed = Vec::new();
                 let mut actions = Vec::new();
-                // Lecture d'une copie plutôt que du verrou tenu pendant
-                // toute la peinture : `project_manager_contents_from_tree`
-                // ne doit pas retenir `view_model` verrouillé le temps
-                // d'un `ScrollArea` entier. La sélection/le masquage sont
-                // mutés sur ces copies puis renvoyés en bloc après coup
-                // (`selection`/`close` sur `DetachedProjectManagerRequests`).
+                // Read of a copy rather than of the lock held during
+                // the whole painting: `project_manager_contents_from_tree`
+                // must not keep `view_model` locked for the duration
+                // of a whole `ScrollArea`. The selection/hiding are
+                // mutated on these copies then sent back as a whole afterwards
+                // (`selection`/`close` on `DetachedProjectManagerRequests`).
                 let mut model = view_model
                     .lock()
                     .unwrap_or_else(|err| err.into_inner())
@@ -739,13 +738,13 @@ impl StokesForgeApp {
         }
     }
 
-    /// Retire `tab` des fenêtres flottantes et le détache en fenêtre OS
-    /// séparée — voir la doc de tête du module, § détachement générique. Sans
-    /// effet si `tab` est déjà détaché ou n'est pas une fenêtre flottante
-    /// actuellement ouverte. Ni le Project Manager ni la console de script
-    /// n'entrent dans ce chemin depuis leur passage en panneaux fixes — voir
-    /// [`StokesForgeApp::detach_project_manager`] et
-    /// [`StokesForgeApp::detach_script_console`] pour leurs chemins propres.
+    /// Removes `tab` from the floating windows and detaches it into a separate
+    /// OS window — see the top doc of the module, § generic detaching. No
+    /// effect if `tab` is already detached or is not a currently
+    /// open floating window. Neither the Project Manager nor the script console
+    /// goes through this path since they became fixed panels — see
+    /// [`StokesForgeApp::detach_project_manager`] and
+    /// [`StokesForgeApp::detach_script_console`] for their own paths.
     pub(super) fn detach_tab(&mut self, tab: Tab) {
         if self.detached_tabs.contains_key(&tab) {
             return;
@@ -757,9 +756,9 @@ impl StokesForgeApp {
             return;
         }
         if self.maximized_tab == Some(tab) {
-            // Un onglet maximisé qui ne serait plus une fenêtre flottante
-            // serait un état incohérent : redescendre proprement avant de le
-            // détacher.
+            // A maximized tab that was no longer a floating window
+            // would be an inconsistent state: step down cleanly before
+            // detaching it.
             self.maximized_tab = None;
         }
         let graph_view = match tab {
@@ -794,12 +793,12 @@ impl StokesForgeApp {
         );
     }
 
-    /// Retire `tab` de [`StokesForgeApp::detached_tabs`] et le repousse en fenêtre
-    /// flottante (nouveau rang de cascade). Sans effet s'il n'est pas
-    /// détaché. Une éventuelle [`GraphView`] déplacée par
-    /// [`StokesForgeApp::detach_tab`] revient dans [`StokesForgeApp::graph_views`] — le
-    /// cache de formes du graphe survit au détachement/réattachement, comme
-    /// il survit déjà à la fermeture d'une fenêtre flottante.
+    /// Removes `tab` from [`StokesForgeApp::detached_tabs`] and pushes it back as a
+    /// floating window (new cascade rank). No effect if it is not
+    /// detached. Any [`GraphView`] moved by
+    /// [`StokesForgeApp::detach_tab`] returns to [`StokesForgeApp::graph_views`] — the
+    /// graph's shape cache survives detaching/reattaching, as
+    /// it already survives the closing of a floating window.
     pub(super) fn reattach_tab(&mut self, tab: Tab) {
         let Some(detached) = self.detached_tabs.remove(&tab) else {
             return;
@@ -821,9 +820,9 @@ impl StokesForgeApp {
         }
     }
 
-    /// Ferme uniquement la vue détachée. Les données restent dans le projet
-    /// et le cache du graphe revient dans l'application, comme après la
-    /// fermeture d'une fenêtre flottante.
+    /// Closes only the detached view. The data stays in the project
+    /// and the graph's cache returns to the application, as after the
+    /// closing of a floating window.
     pub(super) fn close_detached_tab(&mut self, tab: Tab) {
         let Some(detached) = self.detached_tabs.remove(&tab) else {
             return;
@@ -839,18 +838,18 @@ impl StokesForgeApp {
         }
     }
 
-    /// Envoie la géométrie réellement retenue par egui après un déplacement
-    /// ou redimensionnement. Cette information de vue est persistante mais
-    /// reste hors de l'historique métier.
+    /// Sends the geometry actually kept by egui after a move
+    /// or resize. This view information is persistent but
+    /// stays outside the business history.
     pub(super) fn remember_window_geometry(&mut self, tab: Tab, rect: egui::Rect) {
         self.floating_rects.insert(tab_node(tab), rect);
     }
 
-    /// Envoie à la session la géométrie flottante de chaque fenêtre connue
-    /// avec son état du moment (ouverte/maximisée/fermée, repliée, rang
-    /// d'empilement) — uniquement ce qui a changé depuis le dernier envoi.
-    /// Une fenêtre détachée compte comme ouverte : le détachement ne se
-    /// retient pas, et la position de sa fenêtre OS n'est jamais écrite.
+    /// Sends the session the floating geometry of each known window
+    /// with its current state (open/maximized/closed, collapsed, stacking
+    /// rank) — only what changed since the last send.
+    /// A detached window counts as open: the detaching is not
+    /// remembered, and the position of its OS window is never written.
     pub(super) fn sync_window_views(&mut self) {
         let open_order: Vec<NodeId> = self
             .floating_tabs
@@ -899,14 +898,14 @@ impl StokesForgeApp {
         }
     }
 
-    /// Peint chaque onglet de [`StokesForgeApp::detached_tabs`] dans sa propre
-    /// fenêtre OS, via `show_viewport_deferred` — voir la doc de tête du
-    /// module, § détachement générique, et [`StokesForgeApp::
-    /// show_detached_project_manager`] pour la justification du choix
-    /// `_deferred`/`Fn` déjà faite pour le Project Manager (identique ici).
+    /// Paints each tab of [`StokesForgeApp::detached_tabs`] in its own
+    /// OS window, through `show_viewport_deferred` — see the top doc of the
+    /// module, § generic detaching, and [`StokesForgeApp::
+    /// show_detached_project_manager`] for the justification of the
+    /// `_deferred`/`Fn` choice already made for the Project Manager (identical here).
     ///
-    /// Ne draine **pas** les requêtes produites : [`StokesForgeApp::ui`](eframe::App::ui) le fait
-    /// juste après, une fois cette fonction revenue, exactement comme pour
+    /// Does **not** drain the requests produced: [`StokesForgeApp::ui`](eframe::App::ui) does it
+    /// right after, once this function has returned, exactly as for
     /// `pm_requests`.
     pub(super) fn show_detached_tabs(&mut self, ctx: &egui::Context) {
         let Self {
@@ -921,33 +920,33 @@ impl StokesForgeApp {
             let root_context = ctx.clone();
             let tab = *tab;
             let title = tr!("window-title-detached", name = tab_title(state, tab));
-            // `Tab::Graph` part à une taille qui contient sa figure de
-            // référence et son retour au cadrage initial.
-            // Le reste (`Book`/`Matrix`/`Note`) partage une taille uniforme.
-            // La grille du classeur emploie maintenant les mêmes largeurs
-            // et en-têtes que dans la fenêtre flottante.
-            // `Tab::Note` n'a pas de grille à proprement parler mais reçoit
-            // la même taille que « les autres » pour rester cohérente avec
-            // eux — c'est explicitement voulu, pas un oubli.
+            // `Tab::Graph` starts at a size that contains its reference
+            // figure and its return to the initial framing.
+            // The rest (`Book`/`Matrix`/`Note`) shares a uniform size.
+            // The workbook's grid now uses the same widths
+            // and headers as in the floating window.
+            // `Tab::Note` has no grid strictly speaking but gets
+            // the same size as "the others" to stay consistent with
+            // them — this is explicitly intended, not an oversight.
             let size = match tab {
                 Tab::Graph(_) => [GRAPH_WINDOW_SIZE.x, GRAPH_WINDOW_SIZE.y],
                 _ => [420.0, 360.0],
             };
-            // Sans décoration native : la barre maison (`window_header`,
-            // placement `Detached`) est tout ce que l'utilisateur a pour
-            // déplacer/redimensionner/fermer cette fenêtre — voir la doc de
-            // tête du module, § détachement générique, et
-            // [`detached_resize_handles`] pour le redimensionnement.
-            // Ni position ni taille mémorisées : la fenêtre OS détachée n'a
-            // pas de géométrie persistée (issue #16), seule la géométrie
-            // flottante l'est.
+            // Without native decoration: the home-made bar (`window_header`,
+            // placement `Detached`) is all the user has to
+            // move/resize/close this window — see the top doc of the
+            // module, § generic detaching, and
+            // [`detached_resize_handles`] for the resizing.
+            // Neither position nor size remembered: the detached OS window has
+            // no persisted geometry (issue #16), only the floating
+            // geometry is.
             let viewport = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_decorations(false)
                 .with_inner_size(size)
-                // Le repli B9 doit pouvoir réduire la hauteur sous le minimum
-                // habituel. Sous cette largeur, les onglets de feuille (taille
-                // naturelle) défilent au lieu de rétrécir — voir `sheet_tabs`.
+                // The B9 collapse must be able to reduce the height below the usual
+                // minimum. Below this width, the sheet tabs (natural
+                // size) scroll instead of shrinking — see `sheet_tabs`.
                 .with_min_inner_size([MIN_CONTENT_WINDOW_SIZE.x, WINDOW_HEADER_HEIGHT]);
             let id = egui::Id::new(tab);
             let payload = DetachedTabViewport {
@@ -970,8 +969,8 @@ impl StokesForgeApp {
     }
 }
 
-/// Données possédées du callback différé : aucun emprunt à l'application ne
-/// survit à la publication du viewport. Les phases ne créent aucun sous-Ui.
+/// Owned data of the deferred callback: no borrow from the application
+/// survives the publication of the viewport. The phases create no sub-Ui.
 struct DetachedTabViewport {
     tab: Tab,
     id: egui::Id,
@@ -981,7 +980,7 @@ struct DetachedTabViewport {
     root_context: egui::Context,
 }
 
-/// État de l'image lu avant les clics, puis actions de l'en-tête peint.
+/// Frame state read before the clicks, then actions of the painted header.
 struct DetachedTabFrame {
     was_collapsed: bool,
     is_active: bool,
@@ -990,8 +989,8 @@ struct DetachedTabFrame {
 }
 
 impl DetachedTab {
-    /// Publie d'abord l'instantané et la vue locale ; le réveil reste après
-    /// l'enregistrement du callback, dans `show_detached_tabs`.
+    /// Publishes first the snapshot and the local view; the wake-up stays after
+    /// the registration of the callback, in `show_detached_tabs`.
     fn publish_snapshot(&self, state: &AppState) -> bool {
         let snapshot = state.snapshot();
         let mut model = self
@@ -1013,8 +1012,8 @@ impl DetachedTab {
 }
 
 impl DetachedTabViewport {
-    /// Les deux verrous restent tenus pendant toute l'image, comme avant le
-    /// découpage : aucun drainage racine ne s'intercale entre ses phases.
+    /// The two locks stay held during the whole frame, as before the
+    /// split: no root drain comes in between its phases.
     fn show(&self, ui: &mut egui::Ui) {
         let root_context = &self.root_context;
         begin_file_drop(ui.ctx());
@@ -1024,28 +1023,28 @@ impl DetachedTabViewport {
             .unwrap_or_else(|err| err.into_inner());
         let mut requests = self.requests.lock().unwrap_or_else(|err| err.into_inner());
         let was_collapsed = model.collapsed;
-        // B9 (`retours-2026-09-23-bugs.md`) : la
-        // taille OS « logique » (hors repli) se mémorise nous-
-        // mêmes plutôt que de se déduire du rectangle rapporté
-        // cette image — pendant un repli ce rectangle est
-        // volontairement réduit (voir plus bas), et le geler ici
-        // est ce qui permet à la fois de retrouver l'exacte
-        // taille d'avant repli au dépli et de ne pas persister la
-        // taille repliée (même piège que
-        // `floating_window_geometry_to_persist`, B3). Lu avant
-        // tout traitement du clic de cette image : `was_collapsed`
-        // reflète l'état d'entrée, pas un éventuel bascule de
-        // cette image même.
+        // B9 (`retours-2026-09-23-bugs.md`): the
+        // "logical" OS size (outside collapse) is remembered by
+        // ourselves rather than deduced from the rectangle reported
+        // this frame — during a collapse that rectangle is
+        // deliberately reduced (see below), and freezing it here
+        // is what allows both to recover the exact
+        // size from before the collapse on expanding and not to persist the
+        // collapsed size (same trap as
+        // `floating_window_geometry_to_persist`, B3). Read before
+        // any handling of this frame's click: `was_collapsed`
+        // reflects the incoming state, not a possible toggle of
+        // this very frame.
         if !was_collapsed {
             if let Some(rect) = ui.ctx().input(|input| input.viewport().outer_rect) {
                 model.expanded_size = Some(rect.size());
             }
         }
-        // Surbrillance (B1/B3 suite) : une fenêtre détachée est
-        // un viewport OS séparé, donc « active » n'a de sens
-        // qu'au sens du focus OS — `active_tab`/`floating_tabs`
-        // ne le couvrent pas. `RawInput::focused` est déjà
-        // rapporté par le backend par viewport.
+        // Highlight (B1/B3 continued): a detached window is
+        // a separate OS viewport, so "active" only makes sense
+        // in the sense of the OS focus — `active_tab`/`floating_tabs`
+        // do not cover it. `RawInput::focused` is already
+        // reported by the backend per viewport.
         let is_active = ui.input(|input| input.focused);
         if model.focused != is_active {
             model.focused = is_active;
@@ -1066,11 +1065,11 @@ impl DetachedTabViewport {
             },
         );
         if std::mem::take(&mut model.needs_initial_repaint) {
-            // `show_viewport_deferred` crée la fenêtre après
-            // l'image racine. Sous Wayland, le premier callback
-            // peut donc voir une surface encore sans taille
-            // définitive ; redessiner une fois reconstruit la
-            // figure avec le rectangle configuré par WGPU.
+            // `show_viewport_deferred` creates the window after
+            // the root frame. Under Wayland, the first callback
+            // may thus see a surface still without a final
+            // size; redrawing once rebuilds the
+            // figure with the rectangle configured by WGPU.
             ui.ctx().request_repaint();
         }
         if ui.ctx().input(|input| input.viewport().close_requested()) {
@@ -1090,25 +1089,25 @@ impl DetachedTabViewport {
         let id = self.id;
         let root_context = &self.root_context;
         let mut header_actions = WindowHeaderActions::default();
-        // Trait par défaut (inactif) uniquement — le contour actif
-        // n'est plus recoloré ici (B7,
-        // `retours-2026-09-23-bugs.md`) : la
-        // géométrie de ce `Frame` suit `content_ui.min_rect()`
-        // (`containers/frame.rs`), et `CentralPanel::show_inside_dyn`
-        // rogne son affichage à `outer_rect` *avant* de le peindre
-        // — le débordement logique de contenu (bande d'outils qui
-        // ne s'enroule pas) faisait donc disparaître le contour
-        // sur les bords qui débordent, au lieu de le montrer.
-        // L'état actif est peint à part, après `.show()`, sur
-        // `input.content_rect()` — le rectangle du viewport OS
-        // réel, pas celui qu'egui recalcule.
+        // Default stroke (inactive) only — the active outline
+        // is no longer recolored here (B7,
+        // `retours-2026-09-23-bugs.md`): the
+        // geometry of this `Frame` follows `content_ui.min_rect()`
+        // (`containers/frame.rs`), and `CentralPanel::show_inside_dyn`
+        // clips its display to `outer_rect` *before* painting it
+        // — the logical overflow of content (tool band that
+        // does not wrap) thus made the outline disappear
+        // on the overflowing edges, instead of showing it.
+        // The active state is painted separately, after `.show()`, on
+        // `input.content_rect()` — the rectangle of the real OS
+        // viewport, not the one egui recomputes.
         let frame = egui::Frame::central_panel(ui.style())
             .inner_margin(WINDOW_CONTENT_MARGIN)
             .stroke(ui.style().visuals.window_stroke());
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let Some(snapshot) = model.snapshot.clone() else {
-                // Ne devrait jamais arriver : `detach_tab` pose le
-                // premier instantané avant toute image détachée.
+                // Should never happen: `detach_tab` sets the
+                // first snapshot before any detached frame.
                 return;
             };
             header_actions = window_header(
@@ -1122,9 +1121,9 @@ impl DetachedTabViewport {
             if was_collapsed ^ header_actions.toggle_collapse {
                 return;
             }
-            // Même borne logique pour les quatre natures : leur
-            // contenu peut déborder, mais il ne doit modifier ni
-            // le Frame ni le rectangle de découpe du viewport.
+            // Same logical bound for the four kinds: their
+            // content may overflow, but it must modify neither
+            // the Frame nor the viewport's clip rectangle.
             show_window_contents_bounded(ui, |ui| {
                 let tree = &snapshot.tree;
                 match tab {
@@ -1138,7 +1137,7 @@ impl DetachedTabViewport {
                     Tab::Graph(id) => {
                         let view = model.graph_view.get_or_insert_with(GraphView::default);
                         let before = selected_manager_target(view);
-                        // Ctrl+C dans ce viewport : la figure de **ce** graphique (#149).
+                        // Ctrl+C in this viewport: the figure of **this** graph (#149).
                         request_figure_copy(ui.ctx(), view, tree, id, &mut requests.actions);
                         graph_view_contents(ui, view, &snapshot, id, &mut requests.actions);
                         if before != selected_manager_target(view) {
@@ -1164,14 +1163,14 @@ impl DetachedTabViewport {
     fn collect_actions(&self, ui: &mut egui::Ui, requests: &mut DetachedTabRequests) {
         let tab = self.tab;
         let root_context = &self.root_context;
-        // Les raccourcis de l'édition sont lus dans le contexte
-        // du viewport qui a le focus, comme pour la racine.
+        // The edit shortcuts are read in the context
+        // of the viewport that has the focus, as for the root.
         if matches!(tab, Tab::Book(_)) {
             collect_undo_redo_shortcuts(ui.ctx(), &mut requests.actions);
         }
         if let Some(mut action) = finish_file_drop(ui.ctx()) {
-            // Même destination qu'un classeur flottant, y compris
-            // si sa grille est repliée et n'a pas réclamé le dépôt.
+            // Same destination as a floating workbook, even
+            // if its grid is collapsed and did not claim the drop.
             if let (Tab::Book(book), Action::DropFiles { target_book, .. }) = (tab, &mut action) {
                 *target_book = Some(book);
             }
@@ -1197,21 +1196,21 @@ impl DetachedTabViewport {
         } = frame;
         let size = self.size;
         let root_context = &self.root_context;
-        // État de repli qui s'applique à partir de cette image
-        // (avant même l'affectation à `model.collapsed`
-        // ci-dessous) — calculé une fois, servant à la fois à
-        // la cible du `ViewportCommand::InnerSize`, à la garde
-        // des poignées de redimensionnement et à la géométrie
-        // persistée en fin de fermeture.
+        // Collapse state that applies from this frame
+        // (even before the assignment to `model.collapsed`
+        // below) — computed once, serving at once
+        // the target of the `ViewportCommand::InnerSize`, the guard
+        // of the resize handles and the geometry
+        // persisted at the end of closing.
         let collapsed_now = was_collapsed ^ header_actions.toggle_collapse;
-        // Contour actif (B7) : peint sur le rectangle du
-        // viewport OS réel (`input.content_rect()`, déjà utilisé
-        // par `detached_resize_handles` juste en dessous), pas
-        // sur celui qu'egui recalcule depuis le contenu — voir la
-        // doc du `Frame` ci-dessus. `LayerId::background()` :
-        // même couche que `CentralPanel`, peint après elle donc
-        // par-dessus ; un seul viewport détaché ici, pas d'autre
-        // fenêtre dont l'ordre serait à disputer.
+        // Active outline (B7): painted on the rectangle of the
+        // real OS viewport (`input.content_rect()`, already used
+        // by `detached_resize_handles` just below), not
+        // on the one egui recomputes from the content — see the
+        // doc of the `Frame` above. `LayerId::background()`:
+        // same layer as `CentralPanel`, painted after it thus
+        // on top; a single detached viewport here, no other
+        // window whose order would be contested.
         if is_active {
             let content_rect = ui.ctx().input(|input| input.content_rect());
             paint_active_window_outline(
@@ -1224,32 +1223,32 @@ impl DetachedTabViewport {
         if header_actions.toggle_collapse {
             model.collapsed = collapsed_now;
         }
-        // B9 : contrairement aux poignées maison des fenêtres
-        // flottantes internes (sans conséquence pendant un repli,
-        // puisqu'elles ne mutent qu'une taille purement logique),
-        // celles-ci pilotent le viewport OS réel via
-        // `ViewportCommand::BeginResize` — les laisser actives
-        // pendant un repli permettrait à l'utilisateur
-        // d'agrandir la fenêtre repliée en direct, une taille
-        // qui ne serait ni affichée (le contenu reste sauté) ni
-        // mémorisée (`expanded_size` est gelée pendant un repli)
-        // et donc perdue au premier dépli.
+        // B9: unlike the home-made handles of the internal floating
+        // windows (harmless during a collapse,
+        // since they mutate only a purely logical size),
+        // these drive the real OS viewport through
+        // `ViewportCommand::BeginResize` — leaving them active
+        // during a collapse would let the user
+        // enlarge the collapsed window live, a size
+        // that would be neither displayed (the content stays skipped) nor
+        // remembered (`expanded_size` is frozen during a collapse)
+        // and thus lost at the first expand.
         if !collapsed_now {
             detached_resize_handles(ui);
         }
-        // B9 : une fenêtre détachée est un viewport OS réel — à
-        // la différence d'une fenêtre flottante interne, où
-        // `.fixed_size(display_size)` (B3) suffit à réduire ce
-        // qui est demandé à egui, rien ne réduit ici la taille
-        // du viewport tant qu'on ne le demande pas explicitement
-        // à l'OS. Réutilise le même calcul que
-        // `floating_window_display_size` (même hauteur de
-        // bande d'en-tête) : au repli, la largeur mémorisée et
-        // la hauteur de l'en-tête ; au dépli, la taille
-        // mémorisée telle quelle. Envoyé uniquement à l'image du
-        // bascule (pas à chaque image : un `InnerSize` répété
-        // pendant qu'un utilisateur redimensionne la fenêtre à
-        // la main la ferait sauter en arrière).
+        // B9: a detached window is a real OS viewport — unlike
+        // an internal floating window, where
+        // `.fixed_size(display_size)` (B3) is enough to reduce what
+        // is requested from egui, nothing here reduces the viewport's
+        // size as long as the OS is not explicitly asked
+        // to. Reuses the same computation as
+        // `floating_window_display_size` (same height of
+        // header band): on collapse, the remembered width and
+        // the header height; on expand, the remembered
+        // size as is. Sent only on the frame of the
+        // toggle (not on every frame: a repeated `InnerSize`
+        // while a user resizes the window by
+        // hand would make it jump back).
         if header_actions.toggle_collapse {
             let expanded_size = model
                 .expanded_size
@@ -1287,16 +1286,16 @@ impl DetachedTabViewport {
 
 #[cfg(test)]
 mod tests {
-    //! Le détachement en fenêtres OS, piloté par les callbacks de viewport
-    //! qu'egui publie : la publication de l'instantané qui réveille les
-    //! lecteurs (#104), l'état des fenêtres envoyé à la session (#16), les
-    //! dépôts de fichiers isolés de la racine, la figure reconstruite dans le
-    //! viewport, le rognage (B8), le repli du viewport OS (B9) et le contour
-    //! de focus (B7). Déplacés d'`app.rs` avec leur code (#123).
+    //! Detaching into OS windows, driven by the viewport callbacks
+    //! that egui publishes: the publication of the snapshot that wakes the
+    //! readers (#104), the window state sent to the session (#16), the
+    //! file drops isolated from the root, the figure rebuilt in the
+    //! viewport, the clipping (B8), the OS viewport collapse (B9) and the focus
+    //! outline (B7). Moved from `app.rs` with their code (#123).
     use std::time::Duration;
 
     use super::super::graph_window::graph_drop_target;
-    use super::super::graph_window::tests::graphe;
+    use super::super::graph_window::tests::plotted_graph;
     use super::super::grid::role_label;
     use super::super::project_manager::tests::find_text_center;
     use super::super::window_chrome::tests::find_icon_centers;
@@ -1306,67 +1305,64 @@ mod tests {
     use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
     use stokesforge_session::Session;
 
-    /// L'empreinte d'un instantané publié aux fenêtres détachées : chacun de
-    /// ses trois compteurs la change **à lui seul**. Révision et révision des
-    /// géométries ne suffisent pas : l'époque appartient aussi à l'identité
-    /// de l'instantané (un remplacement de projet), et une empreinte qui
-    /// l'oublierait laisserait un lecteur détaché sur l'ancien projet si les
-    /// deux autres compteurs coïncidaient.
+    /// The stamp of a snapshot published to the detached windows: each of
+    /// its three counters changes it **on its own**. Revision and geometries
+    /// revision are not enough: the epoch also belongs to the identity
+    /// of the snapshot (a project replacement), and a stamp that
+    /// forgot it would leave a detached reader on the old project if the
+    /// two other counters coincided.
     #[test]
-    fn chacun_des_trois_compteurs_change_l_empreinte_d_un_instantane() {
-        let session = Session::spawn(Project::new("Empreinte").unwrap(), None).unwrap();
+    fn each_of_the_three_counters_changes_the_stamp_of_a_snapshot() {
+        let session = Session::spawn(Project::new("Stamp").unwrap(), None).unwrap();
         let base = session.handle().snapshot().unwrap();
-        let empreinte = snapshot_stamp(&base);
+        let stamp = snapshot_stamp(&base);
         assert_eq!(
-            empreinte,
+            stamp,
             (base.epoch, base.revision, base.geometry_revision),
-            "l'empreinte lit les compteurs de l'instantané"
+            "the stamp reads the snapshot's counters"
         );
-        // Le témoin : le même instantané, recloné, garde son empreinte.
-        assert_eq!(snapshot_stamp(&base.clone()), empreinte);
+        // The witness: the same snapshot, recloned, keeps its stamp.
+        assert_eq!(snapshot_stamp(&base.clone()), stamp);
 
-        let mut epoque = base.clone();
-        epoque.epoch += 1;
+        let mut epoch = base.clone();
+        epoch.epoch += 1;
         let mut revision = base.clone();
         revision.revision += 1;
         let mut geometries = base.clone();
         geometries.geometry_revision += 1;
-        let changees = [
-            ("époque", snapshot_stamp(&epoque)),
-            ("révision", snapshot_stamp(&revision)),
-            ("révision des géométries", snapshot_stamp(&geometries)),
+        let changed = [
+            ("epoch", snapshot_stamp(&epoch)),
+            ("revision", snapshot_stamp(&revision)),
+            ("geometries revision", snapshot_stamp(&geometries)),
         ];
-        for (compteur, autre) in changees {
-            assert_ne!(
-                autre, empreinte,
-                "{compteur} seule doit changer l'empreinte"
-            );
+        for (counter, other) in changed {
+            assert_ne!(other, stamp, "{counter} alone must change the stamp");
         }
-        // Chacun change une composante différente : deux compteurs confondus
-        // donneraient deux empreintes égales.
-        let distinctes: std::collections::HashSet<(u64, u64, u64)> =
-            changees.iter().map(|(_, autre)| *autre).collect();
-        assert_eq!(distinctes.len(), changees.len(), "{changees:?}");
+        // Each changes a different component: two counters mixed up
+        // would give two equal stamps.
+        let distinct: std::collections::HashSet<(u64, u64, u64)> =
+            changed.iter().map(|(_, other)| *other).collect();
+        assert_eq!(distinct.len(), changed.len(), "{changed:?}");
     }
 
-    fn vue_persistee(session: &Session, node: NodeId) -> WindowGeometry {
+    fn persisted_view(session: &Session, node: NodeId) -> WindowGeometry {
         *session
             .handle()
             .snapshot()
             .unwrap()
             .window_geometries
             .get(&node)
-            .expect("géométrie envoyée à la session")
+            .expect("geometry sent to the session")
     }
 
-    /// #124 : le payload possédé d'une note conserve sa saisie locale ; la
-    /// perte de focus produit une requête, puis seule la racine l'applique.
-    /// La fermeture OS est elle aussi une requête, sans réattachement.
+    /// #124: the owned payload of a note keeps its local input; losing
+    /// focus produces a request, then only the root applies it.
+    /// The OS close is also a request, without reattaching.
     #[test]
-    fn une_note_detachee_differe_son_edition_et_sa_fermeture() {
-        let mut project = Project::new("Note détachée").unwrap();
+    fn a_detached_note_defers_its_editing_and_its_closing() {
+        let mut project = Project::new("Detached note").unwrap();
         let note = project
-            .add_note(project.root(), Some("Journal"), "Début")
+            .add_note(project.root(), Some("Journal"), "Start")
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -1419,7 +1415,7 @@ mod tests {
         };
         paint(Vec::new(), false);
         let first = paint(Vec::new(), false);
-        let dedans = find_text_center(&first.shapes, "Début") + egui::vec2(80.0, 0.0);
+        let inside = find_text_center(&first.shapes, "Start") + egui::vec2(80.0, 0.0);
         let pointer = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -1427,11 +1423,11 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         paint(
-            vec![egui::Event::PointerMoved(dedans), pointer(dedans, true)],
+            vec![egui::Event::PointerMoved(inside), pointer(inside, true)],
             false,
         );
-        paint(vec![pointer(dedans, false)], false);
-        paint(vec![egui::Event::Text(" suite".into())], false);
+        paint(vec![pointer(inside, false)], false);
+        paint(vec![egui::Event::Text(" more".into())], false);
         {
             let model = app.detached_tabs[&tab].view_model.lock().unwrap();
             assert_eq!(
@@ -1442,7 +1438,7 @@ mod tests {
                     .note_editing()
                     .unwrap()
                     .buffer,
-                "Début suite"
+                "Start more"
             );
         }
         assert!(app.detached_tabs[&tab]
@@ -1451,50 +1447,50 @@ mod tests {
             .unwrap()
             .actions
             .is_empty());
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Début"));
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));
 
-        let dehors = egui::pos2(200.0, 15.0);
+        let outside = egui::pos2(200.0, 15.0);
         paint(
-            vec![egui::Event::PointerMoved(dehors), pointer(dehors, true)],
+            vec![egui::Event::PointerMoved(outside), pointer(outside, true)],
             false,
         );
-        paint(vec![pointer(dehors, false)], false);
+        paint(vec![pointer(outside, false)], false);
         let actions = std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions);
         assert_eq!(
             actions,
             vec![Action::SetNoteText {
                 note,
-                text: "Début suite".into()
+                text: "Start more".into()
             }]
         );
         assert_eq!(
             app.state.note_text(note).as_deref(),
-            Some("Début"),
-            "la requête attend la racine"
+            Some("Start"),
+            "the request waits for the root"
         );
         for action in actions {
             app.state.dispatch(action);
         }
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Début suite"));
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Start more"));
         app.state.dispatch(Action::Undo);
-        assert_eq!(app.state.note_text(note).as_deref(), Some("Début"));
+        assert_eq!(app.state.note_text(note).as_deref(), Some("Start"));
 
         assert!(!app.detached_tabs[&tab].requests.lock().unwrap().close);
         paint(Vec::new(), true);
         let requests = app.detached_tabs[&tab].requests.lock().unwrap();
-        assert!(requests.close, "la croix OS doit revenir à la racine");
-        assert!(!requests.reattach, "la croix ferme la vue détachée");
+        assert!(requests.close, "the OS cross must go back to the root");
+        assert!(!requests.reattach, "the cross closes the detached view");
         assert!(
             app.detached_tabs.contains_key(&tab),
-            "la fermeture attend aussi son drainage"
+            "the closing also waits for its drain"
         );
     }
 
-    /// #104 : aucune entrée de souris dans les viewports lecteurs ; la
-    /// publication d'un nouvel instantané suffit à demander leur redessin.
+    /// #104: no mouse input in the reader viewports; the
+    /// publication of a new snapshot is enough to ask for their redraw.
     #[test]
-    fn une_mutation_reveille_les_fenetres_detachees_au_repos() {
-        let (session, graph) = graphe();
+    fn a_mutation_wakes_the_detached_windows_at_rest() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;
@@ -1551,7 +1547,7 @@ mod tests {
                 assert_eq!(
                     output.viewport_output[&id].repaint_delay,
                     Duration::MAX,
-                    "le viewport {id:?} doit dormir au repos"
+                    "the viewport {id:?} must sleep at rest"
                 );
             }
         };
@@ -1566,7 +1562,7 @@ mod tests {
             assert_eq!(
                 output.viewport_output[&id].repaint_delay,
                 Duration::ZERO,
-                "la mutation doit réveiller {id:?}"
+                "the mutation must wake {id:?}"
             );
         }
         settle(&mut app);
@@ -1586,7 +1582,7 @@ mod tests {
             assert_eq!(
                 output.viewport_output[&id].repaint_delay,
                 Duration::ZERO,
-                "la géométrie doit réveiller {id:?}"
+                "the geometry must wake {id:?}"
             );
         }
         settle(&mut app);
@@ -1598,7 +1594,7 @@ mod tests {
         assert_eq!(
             output.viewport_output[&ids[2]].repaint_delay,
             Duration::ZERO,
-            "une sélection de navigation réveille le Project Manager"
+            "a navigation selection wakes the Project Manager"
         );
         for id in &ids[..2] {
             assert_eq!(output.viewport_output[id].repaint_delay, Duration::MAX);
@@ -1607,14 +1603,14 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Issue #16 : l'état de chaque fenêtre (ouverte/maximisée/fermée, repliée,
-    /// rang d'empilement) part à la session avec sa géométrie flottante, et
-    /// cette dernière ne bouge ni à la maximisation, ni à la fermeture, ni au
-    /// détachement.
+    /// Issue #16: the state of each window (open/maximized/closed, collapsed,
+    /// stacking rank) goes to the session with its floating geometry, and
+    /// the latter moves neither on maximizing, nor on closing, nor on
+    /// detaching.
     #[test]
-    fn l_etat_des_fenetres_est_envoye_a_la_session_sans_toucher_a_la_geometrie_flottante() {
+    fn the_window_state_is_sent_to_the_session_without_touching_the_floating_geometry() {
         use stokesforge_session::WindowMode;
-        let (session, graph) = graphe();
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;
@@ -1623,7 +1619,7 @@ mod tests {
         app.remember_window_geometry(Tab::Book(book), rect.translate(egui::vec2(9.0, 9.0)));
         app.sync_window_views();
 
-        let open = vue_persistee(&session, graph);
+        let open = persisted_view(&session, graph);
         assert_eq!(
             (open.x, open.y, open.width, open.height),
             (40.0, 60.0, 500.0, 300.0)
@@ -1631,43 +1627,43 @@ mod tests {
         let view = open.view.unwrap();
         assert_eq!(view.mode, WindowMode::Open);
         assert!(!view.collapsed);
-        // Le graphe est ouvert après le classeur : il est au-dessus.
-        assert!(view.stack > vue_persistee(&session, book).view.unwrap().stack);
+        // The graph is opened after the workbook: it is on top.
+        assert!(view.stack > persisted_view(&session, book).view.unwrap().stack);
 
-        // Replié + maximisé : état retenu, rectangle inchangé.
+        // Collapsed + maximized: state kept, rectangle unchanged.
         app.collapsed_tabs.insert(Tab::Graph(graph));
         app.maximized_tab = Some(Tab::Graph(graph));
         app.sync_window_views();
-        let maximized = vue_persistee(&session, graph);
+        let maximized = persisted_view(&session, graph);
         assert_eq!(maximized.view.unwrap().mode, WindowMode::Maximized);
         assert!(maximized.view.unwrap().collapsed);
         assert_eq!((maximized.x, maximized.width), (open.x, open.width));
 
-        // Détachée : toujours « ouverte », rectangle flottant intact.
+        // Detached: still "open", floating rectangle intact.
         app.maximized_tab = None;
         app.detach_tab(Tab::Graph(graph));
         app.sync_window_views();
-        let detached = vue_persistee(&session, graph);
+        let detached = persisted_view(&session, graph);
         assert_eq!(detached.view.unwrap().mode, WindowMode::Open);
         assert_eq!((detached.x, detached.y), (open.x, open.y));
 
-        // Fermée : la géométrie flottante reste celle d'avant.
+        // Closed: the floating geometry stays the one from before.
         app.detached_tabs.clear();
         app.sync_window_views();
-        let closed = vue_persistee(&session, graph);
+        let closed = persisted_view(&session, graph);
         assert_eq!(closed.view.unwrap().mode, WindowMode::Closed);
         assert_eq!(
             (closed.x, closed.y, closed.width, closed.height),
             (40.0, 60.0, 500.0, 300.0)
         );
-        // Rouverte : c'est ce rectangle-là que la boucle de peinture relit.
+        // Reopened: it is that rectangle that the paint loop rereads.
         assert_eq!(app.floating_rects[&graph], rect);
     }
 
-    /// Les callbacks détachés émettent la même action et ne consomment pas
-    /// le dépôt en attente dans le viewport racine (mémoire egui partagée).
+    /// The detached callbacks emit the same action and do not consume
+    /// the pending drop in the root viewport (shared egui memory).
     #[test]
-    fn les_depots_detaches_gardent_leur_destination_et_sont_isoles_de_la_racine() {
+    fn detached_drops_keep_their_destination_and_are_isolated_from_the_root() {
         #[derive(Debug)]
         struct FakeFile(std::path::PathBuf);
         impl egui::DroppedFile for FakeFile {
@@ -1678,17 +1674,17 @@ mod tests {
                 Ok(Vec::new())
             }
         }
-        for kind in ["classeur", "graphe", "explorateur"] {
-            let (session, graph) = graphe();
+        for kind in ["workbook", "graph", "explorer"] {
+            let (session, graph) = plotted_graph();
             let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
             let mut app = StokesForgeApp::new(state);
             let book = app.state.books()[0].0;
-            let tab = if kind == "classeur" {
+            let tab = if kind == "workbook" {
                 Tab::Book(book)
             } else {
                 Tab::Graph(graph)
             };
-            let viewport = if kind == "explorateur" {
+            let viewport = if kind == "explorer" {
                 app.detach_project_manager();
                 egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
             } else {
@@ -1705,10 +1701,10 @@ mod tests {
                 )),
                 ..Default::default()
             };
-            root_input.dropped_files = vec![Arc::new(FakeFile("racine.csv".into()))];
+            root_input.dropped_files = vec![Arc::new(FakeFile("root.csv".into()))];
             let mut output = context.run_ui(root_input.clone(), |ui| {
                 begin_file_drop(ui.ctx());
-                if kind == "explorateur" {
+                if kind == "explorer" {
                     app.show_detached_project_manager(ui.ctx(), None);
                 } else {
                     app.show_detached_tabs(ui.ctx());
@@ -1728,10 +1724,10 @@ mod tests {
                     ..Default::default()
                 },
             );
-            detached_input.dropped_files = vec![Arc::new(FakeFile("detache.csv".into()))];
-            if kind == "classeur" {
-                // #124 : dans une même image, le raccourci rejoint la file
-                // avant le dépôt. L'ordre est observable au drainage racine.
+            detached_input.dropped_files = vec![Arc::new(FakeFile("detached.csv".into()))];
+            if kind == "workbook" {
+                // #124: within a single frame, the shortcut joins the queue
+                // before the drop. The order is observable at the root drain.
                 detached_input.events.push(egui::Event::Key {
                     key: egui::Key::Z,
                     physical_key: None,
@@ -1744,21 +1740,21 @@ mod tests {
                 .run_ui(detached_input, |ui| callback(ui))
                 .textures_delta
                 .clear();
-            let actions = if kind == "explorateur" {
+            let actions = if kind == "explorer" {
                 std::mem::take(&mut app.pm_requests.lock().unwrap().actions)
             } else {
                 std::mem::take(&mut app.detached_tabs[&tab].requests.lock().unwrap().actions)
             };
-            let target = (kind == "classeur").then_some(book);
-            let mut attendues = Vec::new();
-            if kind == "classeur" {
-                attendues.push(Action::Undo);
+            let target = (kind == "workbook").then_some(book);
+            let mut expected = Vec::new();
+            if kind == "workbook" {
+                expected.push(Action::Undo);
             }
-            attendues.push(Action::DropFiles {
-                paths: vec!["detache.csv".into()],
+            expected.push(Action::DropFiles {
+                paths: vec!["detached.csv".into()],
                 target_book: target,
             });
-            assert_eq!(actions, attendues);
+            assert_eq!(actions, expected);
             let mut root_action = None;
             root_input.dropped_files.clear();
             context
@@ -1770,7 +1766,7 @@ mod tests {
             assert_eq!(
                 root_action,
                 Some(Action::DropFiles {
-                    paths: vec!["racine.csv".into()],
+                    paths: vec!["root.csv".into()],
                     target_book: None
                 })
             );
@@ -1778,8 +1774,8 @@ mod tests {
     }
 
     #[test]
-    fn un_graphe_detache_reconstruit_ses_formes_dans_son_viewport() {
-        let (session, graph) = graphe();
+    fn a_detached_graph_rebuilds_its_shapes_in_its_viewport() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -1787,9 +1783,9 @@ mod tests {
         context.set_fonts(stokesforge_render_egui::font_definitions());
         assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
 
-        // Peindre d'abord la vue flottante : le détachement doit transférer
-        // une `GraphView` déjà remplie, puis la reconstruire dans les
-        // coordonnées du viewport OS distinct.
+        // Paint the floating view first: the detaching must transfer
+        // an already filled `GraphView`, then rebuild it in the
+        // coordinates of the distinct OS viewport.
         let mut root_input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -1805,7 +1801,7 @@ mod tests {
         output.textures_delta.clear();
         assert!(
             !app.graph_views[&graph].cache().shapes().is_empty(),
-            "la vue flottante de départ doit avoir construit sa figure"
+            "the starting floating view must have built its figure"
         );
 
         app.detach_tab(Tab::Graph(graph));
@@ -1818,7 +1814,7 @@ mod tests {
             .get(&viewport_id)
             .and_then(|viewport| viewport.viewport_ui_cb.clone());
         output.textures_delta.clear();
-        let callback = callback.expect("le détachement doit publier un callback de viewport");
+        let callback = callback.expect("the detaching must publish a viewport callback");
 
         root_input.viewport_id = viewport_id;
         root_input.viewports.insert(
@@ -1837,7 +1833,7 @@ mod tests {
         assert_eq!(
             output.viewport_output[&viewport_id].repaint_delay,
             Duration::ZERO,
-            "le premier callback doit programmer l'image de stabilisation du viewport"
+            "the first callback must schedule the viewport's stabilization frame"
         );
 
         let model = app.detached_tabs[&Tab::Graph(graph)]
@@ -1846,12 +1842,12 @@ mod tests {
             .unwrap_or_else(|err| err.into_inner());
         assert!(
             !model.needs_initial_repaint,
-            "le premier callback doit demander une unique image de stabilisation"
+            "the first callback must ask for a single stabilization frame"
         );
         let view = model.graph_view.as_ref().unwrap();
         assert!(
             !view.cache().shapes().is_empty(),
-            "le viewport détaché ne doit pas servir le cache vidé du viewport racine"
+            "the detached viewport must not serve the emptied cache of the root viewport"
         );
         let display = view.display_rect().unwrap();
         let transform = egui::emath::TSTransform::new(
@@ -1867,34 +1863,34 @@ mod tests {
                     expected.transform(transform);
                     painted.shape == expected
                 })),
-            "le viewport détaché doit réellement recevoir les formes du graphe"
+            "the detached viewport must really receive the graph's shapes"
         );
-        // Régression : le bouton « ↩ » de réattachement, non borné en
-        // hauteur, pouvait consommer toute la fenêtre détachée (voir la
-        // doc de tête de la ligne qui l'alloue) — la figure se retrouvait
-        // alors hors du rectangle visible, invisible bien que son cache
-        // fût rempli (ce que les deux assertions ci-dessus ne détectent
-        // pas : un `Shape` reste dans la liste même hors clip).
+        // Regression: the reattach "↩" button, unbounded in
+        // height, could consume the whole detached window (see the
+        // top doc of the line that allocates it) — the figure then ended up
+        // outside the visible rectangle, invisible though its cache
+        // was filled (which the two assertions above do not detect:
+        // a `Shape` stays in the list even outside the clip).
         let figure_rect = display;
         assert!(
             figure_rect.max.y <= GRAPH_WINDOW_SIZE.y,
-            "la figure doit rester dans la fenêtre détachée, pas {figure_rect:?} pour une fenêtre de {GRAPH_WINDOW_SIZE:?}"
+            "the figure must stay inside the detached window, not {figure_rect:?} for a window of {GRAPH_WINDOW_SIZE:?}"
         );
     }
 
-    // B8 (`retours-2026-09-23-bugs.md`) : même mécanisme que
+    // B8 (`retours-2026-09-23-bugs.md`): same mechanism as
     // B4 (`le_contenu_qui_deborde_est_rogne_au_rectangle_de_la_fenetre`),
-    // jamais porté à `show_detached_tabs` — un classeur détaché à plusieurs
-    // colonnes déborde du viewport OS sans rognage contrôlé, tronqué au pixel
-    // par la fenêtre OS elle-même plutôt que par le code applicatif.
-    // Scaffolding calqué sur `un_graphe_detache_reconstruit_ses_formes_dans_
-    // son_viewport` : détacher pour de vrai, peindre le callback de viewport
-    // publié par `show_detached_tabs` dans un `screen_rect` volontairement
-    // plus petit que le contenu, puis vérifier le `clip_rect` réellement
-    // envoyé à egui pour chaque en-tête de colonne peint.
+    // never carried over to `show_detached_tabs` — a detached workbook with several
+    // columns overflows the OS viewport without controlled clipping, truncated to the pixel
+    // by the OS window itself rather than by the application code.
+    // Scaffolding modeled on `a_detached_graph_rebuilds_its_shapes_in_its_
+    // viewport`: really detach, paint the viewport callback
+    // published by `show_detached_tabs` in a `screen_rect` deliberately
+    // smaller than the content, then check the `clip_rect` actually
+    // sent to egui for each painted column header.
     #[test]
-    fn le_classeur_detache_est_rogne_au_rectangle_du_viewport() {
-        let mut project = Project::new("Débordement").unwrap();
+    fn the_detached_workbook_is_clipped_to_the_viewport_rectangle() {
+        let mut project = Project::new("Overflow").unwrap();
         let root = project.root();
         let book = project.add_empty_workbook(root, None).unwrap();
         let sheet = project.add_worksheet(book, None).unwrap();
@@ -1903,7 +1899,7 @@ mod tests {
                 .add_column(
                     sheet,
                     None,
-                    Some(&format!("Colonne {i}")),
+                    Some(&format!("Column {i}")),
                     Column::from_f64(&[0.0, 1.0]),
                 )
                 .unwrap();
@@ -1918,7 +1914,7 @@ mod tests {
         let book_tab = Tab::Book(book);
         assert!(
             app.floating_tabs.contains(&book_tab),
-            "StokesForgeApp::new doit ouvrir le premier classeur en fenêtre flottante"
+            "StokesForgeApp::new must open the first workbook in a floating window"
         );
         app.detach_tab(book_tab);
 
@@ -1937,12 +1933,12 @@ mod tests {
             .viewport_output
             .get(&viewport_id)
             .and_then(|viewport| viewport.viewport_ui_cb.clone())
-            .expect("le détachement doit publier un callback de viewport");
+            .expect("the detaching must publish a viewport callback");
         output.textures_delta.clear();
 
-        // Fenêtre OS volontairement plus étroite que les dix colonnes
-        // nommées et leurs en-têtes — comme le rétrécissement natif de la
-        // reproduction du rapport de bug.
+        // OS window deliberately narrower than the ten named
+        // columns and their headers — like the native shrinking in the
+        // reproduction of the bug report.
         let window_size = egui::vec2(200.0, 150.0);
         let window_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, window_size);
         let mut viewport_input = root_input;
@@ -1958,29 +1954,29 @@ mod tests {
         let mut output = context.run_ui(viewport_input, |ui| callback(ui));
         output.textures_delta.clear();
 
-        // La partie sur laquelle egui n'offre aucune garantie propre, c'est
-        // le rectangle de rognage *logique* : le backend borne de toute façon
-        // le tampon au viewport OS, donc même sans le correctif, aucune forme
-        // n'a un `clip_rect` qui déborde `window_rect`. La régression que B8
-        // corrige est plus fine mais tout aussi réelle : sans
-        // `ui.set_clip_rect(...)` posé sur le `Ui` du `CentralPanel`, tout le
-        // contenu (en-têtes de colonne, grille, onglets) hérite du rognage
-        // *par défaut* du panneau — le rectangle plein du viewport, marge du
-        // `Frame` comprise — au lieu du rectangle de contenu réellement
-        // disponible une fois cette marge retirée. Un en-tête tout au bord
-        // droit se retrouve alors rogné pile au bord du viewport plutôt qu'au
-        // bord du panneau, ce qui le fait empiéter sur la bordure/marge du
-        // `Frame` — la même famille de symptôme que la capture du rapport de
-        // bug (troncature qui ignore la géométrie du contenu). Ce test
-        // verrouille donc : le rognage logique de tout contenu doit être
-        // strictement plus petit que `window_rect`, pas égal à lui.
+        // The part on which egui offers no guarantee of its own is
+        // the *logical* clipping rectangle: the backend clamps the
+        // buffer to the OS viewport anyway, so even without the fix, no shape
+        // has a `clip_rect` that overflows `window_rect`. The regression that B8
+        // fixes is subtler but just as real: without
+        // `ui.set_clip_rect(...)` set on the `CentralPanel`'s `Ui`, all the
+        // content (column headers, grid, tabs) inherits the panel's
+        // *default* clipping — the full rectangle of the viewport, `Frame`
+        // margin included — instead of the content rectangle really
+        // available once that margin is removed. A header right at the
+        // right edge then ends up clipped exactly at the viewport's edge rather than at the
+        // panel's edge, which makes it encroach on the `Frame`'s border/margin —
+        // the same symptom family as the bug report's screenshot
+        // (truncation that ignores the content's geometry). This test
+        // thus locks in: the logical clipping of any content must be
+        // strictly smaller than `window_rect`, not equal to it.
         //
-        // Ce qu'il ne prouve pas (relu par mutation, #123) : le classeur pose
-        // aujourd'hui son propre rognage (zone défilable de la grille, bande
-        // d'onglets), si bien que retirer celui de
-        // `show_window_contents_bounded` ne change rien ici. La borne commune
-        // a son témoin à part, sans contenu qui se rogne lui-même :
-        // `le_contenu_borne_est_rogne_sous_l_en_tete_et_ne_repousse_pas_le_cadre`
+        // What it does not prove (reread by mutation, #123): the workbook
+        // today sets its own clipping (the grid's scrollable area, the
+        // tab strip), so that removing the one from
+        // `show_window_contents_bounded` changes nothing here. The common bound
+        // has its own witness, with no content that clips itself:
+        // `the_bounded_content_is_clipped_under_the_header_and_does_not_push_the_frame`
         // (`window_chrome.rs`).
         let letter_label = format!("A({})", role_label(ColumnRole::Y));
         let content_labels = [
@@ -2001,17 +1997,17 @@ mod tests {
             checked += 1;
             assert!(
                 window_rect.contains_rect(painted.clip_rect),
-                "« {} » a un rectangle de découpe ({:?}) qui déborde du viewport \
-                 ({window_rect:?}) — B8 n'est pas corrigé",
+                "\"{}\" has a clip rectangle ({:?}) that overflows the viewport \
+                 ({window_rect:?}) — B8 is not fixed",
                 shape.galley.job.text,
                 painted.clip_rect,
             );
             assert!(
                 painted.clip_rect.width() < window_rect.width()
                     && painted.clip_rect.height() < window_rect.height(),
-                "« {} » a un rectangle de découpe ({:?}) égal au viewport complet \
-                 ({window_rect:?}) — rien ne distingue ce rognage de son absence : \
-                 B8 n'est pas corrigé",
+                "\"{}\" has a clip rectangle ({:?}) equal to the full viewport \
+                 ({window_rect:?}) — nothing distinguishes this clipping from its absence: \
+                 B8 is not fixed",
                 shape.galley.job.text,
                 painted.clip_rect,
             );
@@ -2019,8 +2015,8 @@ mod tests {
         assert_eq!(
             checked,
             content_labels.len(),
-            "le classeur détaché doit avoir peint tous les libellés attendus \
-             (en-tête empilé et onglet de feuille) : {:?}",
+            "the detached workbook must have painted all the expected labels \
+             (stacked header and sheet tab): {:?}",
             output
                 .shapes
                 .iter()
@@ -2043,30 +2039,30 @@ mod tests {
                 })
         };
         let tab_y = position_of("Sheet1")
-            .expect("l'onglet détaché doit être visible")
+            .expect("the detached tab must be visible")
             .y;
         let header_y = position_of(&letter_label)
-            .expect("l'en-tête détaché doit être visible")
+            .expect("the detached header must be visible")
             .y;
         assert!(
             tab_y > header_y,
-            "l'onglet doit rester sous la grille détachée"
+            "the tab must stay under the detached grid"
         );
     }
 
-    // B9 (`retours-2026-09-23-bugs.md`) : le correctif B3
-    // réduit la taille demandée à egui pour une fenêtre flottante interne
-    // pendant un repli, mais une fenêtre détachée est un viewport OS réel —
-    // rien n'envoyait de `ViewportCommand::InnerSize` quand son chevron de
-    // repli bascule, donc l'OS gardait la grande taille dépliée. Ce test
-    // pilote le callback du viewport détaché (même schéma que
-    // `un_graphe_detache_reconstruit_ses_formes_dans_son_viewport`), clique
-    // le chevron de repli, et vérifie la géométrie/l'état — pas
-    // l'apparence : les tests de rendu ne couvrent pas ce mécanisme (voir
-    // le rapport, § « Dans ton rapport final »).
+    // B9 (`retours-2026-09-23-bugs.md`): the B3 fix
+    // reduces the size requested from egui for an internal floating window
+    // during a collapse, but a detached window is a real OS viewport —
+    // nothing sent a `ViewportCommand::InnerSize` when its collapse
+    // chevron toggled, so the OS kept the big expanded size. This test
+    // drives the detached viewport's callback (same scheme as
+    // `a_detached_graph_rebuilds_its_shapes_in_its_viewport`), clicks
+    // the collapse chevron, and checks the geometry/state — not
+    // the appearance: the rendering tests do not cover this mechanism (see
+    // the report, § "In your final report").
     #[test]
-    fn une_fenetre_detachee_repliee_reduit_puis_restaure_son_viewport_os() {
-        let (session, graph) = graphe();
+    fn a_collapsed_detached_window_shrinks_then_restores_its_os_viewport() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -2099,12 +2095,12 @@ mod tests {
         let callback = output.viewport_output[&viewport_id]
             .viewport_ui_cb
             .clone()
-            .expect("le détachement doit publier un callback de viewport");
+            .expect("the detaching must publish a viewport callback");
         output.textures_delta.clear();
 
-        // Rectangle « OS » simulé : le test en a la main, comme le ferait
-        // le vrai backend en rapportant, image après image, la taille
-        // réellement appliquée par la fenêtre native.
+        // Simulated "OS" rectangle: the test controls it, as the real
+        // backend would by reporting, frame after frame, the size
+        // actually applied by the native window.
         let outer_rect = std::cell::Cell::new(egui::Rect::from_min_size(
             egui::pos2(100.0, 80.0),
             GRAPH_WINDOW_SIZE,
@@ -2131,19 +2127,19 @@ mod tests {
             output
         };
 
-        // Image de stabilisation (Wayland, voir `needs_initial_repaint`) :
-        // consomme le repaint initial et amorce `expanded_size` à la
-        // taille de départ.
+        // Stabilization frame (Wayland, see `needs_initial_repaint`):
+        // consumes the initial repaint and primes `expanded_size` with the
+        // starting size.
         paint(Vec::new());
-        // Seconde image : les textures SVG des icônes sont prêtes.
+        // Second frame: the icons' SVG textures are ready.
         let first = paint(Vec::new());
         let icon_pos = *find_icon_centers(&first.shapes)
             .first()
-            .expect("la flèche de repli doit être peinte, en haut à gauche");
+            .expect("the collapse arrow must be painted, at the top left");
 
-        // Un clic (glissé nul, pression puis relâchement) sur le chevron de
-        // repli, réparti sur deux images comme le veut la détection de clic
-        // d'egui — voir `click_at`.
+        // A click (null drag, press then release) on the collapse
+        // chevron, spread over two frames as egui's click detection
+        // requires — see `click_at`.
         paint(vec![egui::Event::PointerMoved(icon_pos)]);
         paint(vec![egui::Event::PointerButton {
             pos: icon_pos,
@@ -2167,30 +2163,30 @@ mod tests {
                     if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
                         && (size.y - expected_collapsed_height).abs() < f32::EPSILON
             )),
-            "le repli doit réduire le viewport OS à la hauteur de sa bande d'en-tête, \
-             commandes={commands:?}"
+            "the collapse must reduce the OS viewport to the height of its header band, \
+             commands={commands:?}"
         );
         {
             let model = app.detached_tabs[&tab]
                 .view_model
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
-            assert!(model.collapsed, "le repli doit être appliqué au modèle");
+            assert!(model.collapsed, "the collapse must be applied to the model");
         }
 
-        // L'OS applique la commande : l'image suivante rapporte le petit
-        // rectangle. Plus rien n'en est persisté depuis l'issue #16 : la
-        // fenêtre OS détachée n'a pas de géométrie retenue (seule la
-        // géométrie flottante l'est, voir `sync_window_views`).
+        // The OS applies the command: the next frame reports the small
+        // rectangle. Nothing of it is persisted since issue #16: the
+        // detached OS window has no remembered geometry (only the
+        // floating geometry is, see `sync_window_views`).
         outer_rect.set(egui::Rect::from_min_size(
             outer_rect.get().min,
             egui::vec2(GRAPH_WINDOW_SIZE.x, expected_collapsed_height),
         ));
         paint(Vec::new());
 
-        // Dépli : même chevron (glyphe différent, même rectangle), même
-        // schéma de clic — doit retrouver exactement la taille d'avant
-        // repli, pas une taille par défaut.
+        // Expand: same chevron (different glyph, same rectangle), same
+        // click scheme — must recover exactly the size from before
+        // the collapse, not a default size.
         paint(vec![egui::Event::PointerMoved(icon_pos)]);
         paint(vec![egui::Event::PointerButton {
             pos: icon_pos,
@@ -2212,31 +2208,31 @@ mod tests {
                     if (size.x - GRAPH_WINDOW_SIZE.x).abs() < f32::EPSILON
                         && (size.y - GRAPH_WINDOW_SIZE.y).abs() < f32::EPSILON
             )),
-            "le dépli doit restaurer exactement la taille d'avant repli, commandes={commands:?}"
+            "the expand must restore exactly the size from before the collapse, commands={commands:?}"
         );
         {
             let model = app.detached_tabs[&tab]
                 .view_model
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
-            assert!(!model.collapsed, "le dépli doit être appliqué au modèle");
+            assert!(!model.collapsed, "the expand must be applied to the model");
         }
     }
 
-    // B1/B3 suite, puis B7 (`retours-2026-09-23-bugs.md`) :
-    // les fenêtres détachées (viewports OS séparés) n'avaient aucun contour
-    // de surbrillance — `active_tab`/`floating_tabs` ne les couvrent pas,
-    // seul le focus OS du viewport a un sens pour elles. Même logique que
-    // les fenêtres flottantes (`active_window_stroke`), câblée sur
-    // `RawInput::focused` plutôt que sur `active_tab`. B7 a changé *où* ce
-    // contour actif est peint : plus sur le trait du `Frame` (dont la
-    // géométrie suit le contenu et se faisait rogner par
-    // `CentralPanel::show_inside_dyn` sur les bords qui débordent), mais à
-    // part, sur `input.content_rect()` — ce test vérifie maintenant la
-    // couleur *et* la géométrie de ce contour.
+    // B1/B3 continued, then B7 (`retours-2026-09-23-bugs.md`):
+    // the detached windows (separate OS viewports) had no highlight
+    // outline — `active_tab`/`floating_tabs` do not cover them,
+    // only the viewport's OS focus makes sense for them. Same logic as
+    // the floating windows (`active_window_stroke`), wired to
+    // `RawInput::focused` rather than to `active_tab`. B7 changed *where* this
+    // active outline is painted: no longer on the `Frame`'s stroke (whose
+    // geometry follows the content and got clipped by
+    // `CentralPanel::show_inside_dyn` on the overflowing edges), but
+    // separately, on `input.content_rect()` — this test now checks the
+    // color *and* the geometry of this outline.
     #[test]
-    fn la_fenetre_detachee_recolore_son_contour_selon_le_focus_os() {
-        let (session, graph) = graphe();
+    fn the_detached_window_recolors_its_outline_according_to_the_os_focus() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
@@ -2267,14 +2263,14 @@ mod tests {
         let callback = output.viewport_output[&viewport_id]
             .viewport_ui_cb
             .clone()
-            .expect("le détachement doit publier un callback de viewport");
+            .expect("the detaching must publish a viewport callback");
         output.textures_delta.clear();
 
-        // Toutes les formes rectangulaires dont le trait n'est pas de
-        // largeur nulle — depuis B7, il peut y en avoir deux : le trait par
-        // défaut du `Frame` du panneau central, et le contour actif peint à
-        // part par-dessus (`paint_active_window_outline`) quand la fenêtre a
-        // le focus OS.
+        // All the rectangular shapes whose stroke is not of zero
+        // width — since B7, there can be two: the default stroke of the
+        // central panel's `Frame`, and the active outline painted
+        // separately on top (`paint_active_window_outline`) when the window has
+        // the OS focus.
         fn stroke_shapes(
             shapes: &[egui::epaint::ClippedShape],
         ) -> Vec<(egui::Color32, egui::Rect)> {
@@ -2317,22 +2313,22 @@ mod tests {
         let style = egui::Style::default();
         let content_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, GRAPH_WINDOW_SIZE);
 
-        // D'autres formes de la fenêtre (bordure du graphe tracé, etc.) ont
-        // leur propre trait, sans rapport avec l'activité — on cherche donc
-        // la présence du bon contour plutôt que l'exclusivité de sa couleur.
+        // Other shapes of the window (border of the plotted graph, etc.) have
+        // their own stroke, unrelated to activity — so we look for
+        // the presence of the right outline rather than the exclusivity of its color.
         let inactive_strokes = paint_focused(false);
         assert!(
             inactive_strokes.iter().any(|(color, rect)| *color
                 == style.visuals.window_stroke().color
                 && *rect == content_rect),
-            "sans focus OS, le Frame du panneau central doit peindre le trait par défaut \
-             d'egui sur {content_rect:?} : {inactive_strokes:?}"
+            "without OS focus, the central panel's Frame must paint egui's default stroke \
+             on {content_rect:?}: {inactive_strokes:?}"
         );
         assert!(
             !inactive_strokes
                 .iter()
                 .any(|(color, _)| *color == style.visuals.selection.stroke.color),
-            "sans focus OS, aucun contour ne doit reprendre la couleur de sélection du thème : \
+            "without OS focus, no outline must take the theme's selection color: \
              {inactive_strokes:?}"
         );
 
@@ -2341,14 +2337,14 @@ mod tests {
             .iter()
             .find(|(color, _)| *color == style.visuals.selection.stroke.color)
             .expect(
-                "avec le focus OS, la fenêtre détachée doit peindre un contour reprenant la \
-                 couleur de sélection du thème",
+                "with the OS focus, the detached window must paint an outline taking the \
+                 theme's selection color",
             );
         assert_eq!(
             active_outline.1, content_rect,
-            "le contour actif doit longer exactement le rectangle du viewport OS \
-             (`input.content_rect()`, {content_rect:?}), pas un rectangle recalculé par egui \
-             depuis le contenu — B7 n'est pas corrigé (trouvé {:?})",
+            "the active outline must run exactly along the OS viewport's rectangle \
+             (`input.content_rect()`, {content_rect:?}), not a rectangle recomputed by egui \
+             from the content — B7 is not fixed (found {:?})",
             active_outline.1,
         );
     }

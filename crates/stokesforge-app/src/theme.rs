@@ -1,109 +1,109 @@
-//! Thème visuel propre à StokesForge.
+//! StokesForge's own visual theme.
 //!
-//! L'application ne suit **pas** le thème clair/sombre du système : elle
-//! impose sa propre palette, dérivée de [`egui::Visuals::light`] (jamais du
-//! sombre — cf. `docs/application/theme-i18n-systeme.md` § « Theme »). Deux raisons à ce choix :
+//! The application does **not** follow the system light/dark theme: it
+//! imposes its own palette, derived from [`egui::Visuals::light`] (never from
+//! the dark one — see `docs/application/theme-i18n-systeme.md` § "Theme"). Two reasons for this choice:
 //!
-//! - une appli scientifique se juge sur ses graphes, pas sur son chrome —
-//!   `stokesforge-render`/`stokesforge-render-egui` dessinent les tracés sur un fond
-//!   clair implicite (axes, grilles, texte noir) ; laisser l'utilisateur
-//!   basculer en sombre romprait ce contraste sans qu'aucun code de rendu
-//!   n'en soit informé ;
-//! - un thème qui change avec le système est un thème qu'on ne peut pas
-//!   garantir en capture d'écran ni en support (« chez moi c'est gris, chez
-//!   vous c'est bleu nuit »). Fixer la palette une fois pour toutes rend
-//!   l'appli identique sur toutes les machines.
+//! - a scientific application is judged on its graphs, not on its chrome —
+//!   `stokesforge-render`/`stokesforge-render-egui` draw the plots on an
+//!   implicit light background (axes, grids, black text); letting the user
+//!   switch to dark would break this contrast without any rendering code
+//!   being informed;
+//! - a theme that changes with the system is a theme that cannot be
+//!   guaranteed in a screenshot or in support ("on my machine it is gray, on
+//!   yours it is midnight blue"). Fixing the palette once and for all makes
+//!   the application identical on every machine.
 //!
-//! [`install`] pose cette palette une seule fois, à la construction de la
-//! fenêtre (`main.rs`, avant [`crate::app::StokesForgeApp::new`]) — jamais depuis
-//! [`crate::app::StokesForgeApp::ui`](eframe::App::ui), qui tournerait sinon à chaque image pour
-//! rien.
+//! [`install`] sets this palette once, when the window is built
+//! (`main.rs`, before [`crate::app::StokesForgeApp::new`]) — never from
+//! [`crate::app::StokesForgeApp::ui`](eframe::App::ui), which would otherwise run on every frame
+//! for nothing.
 //!
-//! # Barres de défilement : un seul standard
+//! # Scroll bars: a single standard
 //!
-//! Toutes les barres de défilement de l'application ont le même aspect
-//! (largeur, couleur, contraste), fixé par [`scroll_style`] et posé une fois
-//! pour toutes par [`install`] sur le style global d'egui — donc hérité par
-//! chaque `egui::ScrollArea`, `TableBuilder` compris, dans toutes les
-//! fenêtres (flottantes et détachées). Pour changer l'aspect de toutes les
-//! barres d'un coup, on modifie les constantes `SCROLL_BAR_*` ci-dessous,
-//! et nulle part ailleurs.
+//! All the scroll bars of the application look the same
+//! (width, color, contrast), fixed by [`scroll_style`] and set once
+//! and for all by [`install`] on egui's global style — hence inherited by
+//! every `egui::ScrollArea`, `TableBuilder` included, in all the
+//! windows (floating and detached). To change the look of all the
+//! bars at once, change the `SCROLL_BAR_*` constants below,
+//! and nowhere else.
 //!
-//! Règle pour le code futur : **ne jamais construire ni modifier un
-//! `ScrollStyle` hors de ce module** (`ScrollStyle::solid()`,
-//! `spacing_mut().scroll = …`). Une zone qui a besoin de connaître la place
-//! prise par une barre (bande réservée, barre déportée) la lit par
-//! [`scroll_bar_allocated_width`]. Le test
-//! `aucun_scroll_style_hors_du_theme` le verrouille.
+//! Rule for future code: **never build or modify a
+//! `ScrollStyle` outside this module** (`ScrollStyle::solid()`,
+//! `spacing_mut().scroll = …`). An area that needs to know the room
+//! taken by a bar (reserved band, offset bar) reads it through
+//! [`scroll_bar_allocated_width`]. The test
+//! `no_scroll_style_outside_the_theme` locks it.
 
 use eframe::egui::{self, Color32, Context, CornerRadius, Theme};
 
-/// Teinte d'accent de la marque StokesForge : un vert forêt plutôt que le bleu
-/// par défaut d'egui, utilisé pour la sélection, les liens et les éléments
-/// actifs — assez sombre pour rester lisible en texte sur fond clair.
+/// Accent tint of the StokesForge brand: a forest green rather than egui's
+/// default blue, used for selection, links and active elements — dark
+/// enough to stay readable as text on a light background.
 const ACCENT: Color32 = Color32::from_rgb(0x1E, 0x7A, 0x3C);
 
-/// Texte de la gouttière de la grille (lettres de colonne, « # », numéros de
-/// ligne, libellés de champ d'en-tête) — nettement plus sombre qu'[`ACCENT`]
-/// : la gouttière porte déjà un fond teinté ([`header_letter_row_fill`] et
-/// consorts), un texte à la même saturation que son propre fond s'y lit mal.
-/// Volontairement indépendant de `Visuals::strong_text_color()` (qui vaut
-/// `widgets.active.fg_stroke.color`, donc littéralement [`ACCENT`]) plutôt
-/// que de foncer cette teinte globale : elle sert aussi au texte « actif »
-/// d'éléments sans rapport avec la gouttière (boutons, onglets).
+/// Text of the grid gutter (column letters, "#", row numbers, header field
+/// labels) — clearly darker than [`ACCENT`]: the gutter already carries a
+/// tinted background ([`header_letter_row_fill`] and the like), and a text of
+/// the same saturation as its own background reads poorly there.
+/// Deliberately independent of `Visuals::strong_text_color()` (which equals
+/// `widgets.active.fg_stroke.color`, hence literally [`ACCENT`]) rather
+/// than darkening that global tint: it also serves for the "active" text
+/// of elements unrelated to the gutter (buttons, tabs).
 const GUTTER_TEXT: Color32 = Color32::from_rgb(0x0F, 0x4A, 0x24);
 
-/// Couleur de texte de la gouttière — voir [`GUTTER_TEXT`].
+/// Gutter text color — see [`GUTTER_TEXT`].
 pub fn gutter_text_color() -> Color32 {
     GUTTER_TEXT
 }
 
-/// Graisse du gras de l'interface (axe `wght` de Noto Sans Variable, qui va de
-/// 100 à 900) : le « semi-gras » 600 de la maquette des onglets (#169).
+/// Weight of the interface bold (`wght` axis of Noto Sans Variable, which goes
+/// from 100 to 900): the 600 "semi-bold" of the tabs mockup (#169).
 const BOLD_WEIGHT: f32 = 600.0;
 
-/// **Le** gras de l'interface : l'onglet actif, la ligne sélectionnée d'une
-/// liste, un titre de section de formulaire. `egui::RichText::strong` n'est
-/// pas un gras — il ne change que la couleur, en l'occurrence l'[`ACCENT`] —
-/// et n'est donc jamais employé (`aucun_strong_d_egui_hors_du_theme`). La
-/// graisse est une coordonnée de variation de la police embarquée par
-/// `stokesforge_render::font_definitions` : avec une police sans axe `wght`
-/// (une paire Fira ou Libertinus, une police système) le texte reste en
-/// graisse normale, sans erreur.
+/// **The** interface bold: the active tab, the selected row of a
+/// list, a form section title. `egui::RichText::strong` is
+/// not a bold — it only changes the color, here the [`ACCENT`] —
+/// and is therefore never used (`no_egui_strong_outside_the_theme`). The
+/// weight is a variation coordinate of the font embedded by
+/// `stokesforge_render::font_definitions`: with a font without a `wght` axis
+/// (a Fira or Libertinus pair, a system font) the text stays at
+/// normal weight, without error.
 pub fn bold(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).variation("wght", BOLD_WEIGHT)
 }
 
-/// Les **deux** espacements de l'interface (S-L4, #227) : aucun
-/// `ui.add_space(<nombre>)` ne s'écrit hors de ce module
-/// (`aucun_add_space_litteral_hors_du_theme`, `tests/gardes.rs`). Le petit
-/// écart sépare deux éléments d'un même bloc (une note de son champ, deux
-/// lignes d'un message) ; l'écart de section ouvre un bloc nouveau
-/// ([`section_title`], bandes d'onglets).
+/// The **two** spacings of the interface (S-L4, #227): no
+/// `ui.add_space(<number>)` is written outside this module
+/// (`no_literal_add_space_outside_the_theme`, `tests/guards.rs`). The small
+/// gap separates two elements of the same block (a note from its field, two
+/// lines of a message); the section gap opens a new block
+/// ([`section_title`], tab bands).
 pub const SPACE_ITEM: f32 = 4.0;
 
-/// L'écart de section : voir [`SPACE_ITEM`].
+/// The section gap: see [`SPACE_ITEM`].
 pub const SPACE_SECTION: f32 = 6.0;
 
-/// Largeur d'un champ **à quelques chiffres** (S-L2, #237) : un nombre entier
-/// dont la borne est connue et tient en trois chiffres (canal de couleur,
-/// pour cent, degré…), sans liste de valeurs (~38 px).
+/// Width of a field **of a few digits** (S-L2, #237): an integer whose bound
+/// is known and fits in three digits (color channel, percent, degree…),
+/// without a value list (~38 px).
 pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
 
-/// Largeur d'un champ réel signé à trois chiffres et une décimale, sans liste
-/// (rotation, « -180.5 », #246).
+/// Width of a signed real field with three digits and one decimal, without a
+/// list (rotation, "-180.5", #246).
 pub const FIELD_WIDTH_SIGNED_DIGITS: f32 = 54.0;
 
-/// Largeur d'un champ **court** (S-L2, #227) : un nombre, une borne, un
-/// caractère (~80 px). C'est la largeur de la brique « nombre ».
+/// Width of a **short** field (S-L2, #227): a number, a bound, a
+/// character (~80 px). This is the width of the "number" building block.
 pub const FIELD_WIDTH_SHORT: f32 = 80.0;
 
-/// Largeur d'un champ **moyen** (S-L2) : un nom, une liste de valeurs courte
+/// Width of a **medium** field (S-L2): a name, a short value list
 /// (~160 px).
 pub const FIELD_WIDTH_MEDIUM: f32 = 160.0;
 
-/// Les quatre largeurs nommées d'un champ de formulaire (S-L2) ; la pleine prend
-/// toute la place qui reste dans la colonne des champs.
+/// The four named widths of a form field (S-L2); the full one takes
+/// all the room left in the field column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldWidth {
     /// [`FIELD_WIDTH_DIGITS`].
@@ -112,12 +112,12 @@ pub enum FieldWidth {
     Short,
     /// [`FIELD_WIDTH_MEDIUM`].
     Medium,
-    /// Toute la largeur disponible.
+    /// All the available width.
     Full,
 }
 
 impl FieldWidth {
-    /// La largeur en points dans `ui` (la pleine lit la place qui reste).
+    /// The width in points in `ui` (the full one reads the room left).
     pub fn points(self, ui: &egui::Ui) -> f32 {
         match self {
             Self::Digits => FIELD_WIDTH_DIGITS,
@@ -128,82 +128,82 @@ impl FieldWidth {
     }
 }
 
-/// Les **trois niveaux de texte** de l'interface (#170, point 10) ; aucun autre
-/// ne s'écrit à la main. Le niveau 1 est le titre de section ([`section_heading`]),
-/// le niveau 2 l'en-tête de colonne d'un tableau ([`table_header`]), le niveau 3
-/// le texte secondaire ([`secondary_text`]). Combiner `bold(` et `.small()` hors
-/// de ce module est refusé (`aucun_gras_petit_hors_du_theme`, `tests/gardes.rs`).
+/// The **three text levels** of the interface (#170, point 10); no other
+/// is written by hand. Level 1 is the section title ([`section_heading`]),
+/// level 2 the column header of a table ([`table_header`]), level 3
+/// the secondary text ([`secondary_text`]). Combining `bold(` and `.small()` outside
+/// this module is refused (`no_small_bold_outside_the_theme`, `tests/guards.rs`).
 ///
-/// Niveau 1 : le texte d'un titre de section, en [`bold`] à la taille du corps.
+/// Level 1: the text of a section title, in [`bold`] at body size.
 pub fn section_heading(text: impl Into<String>) -> egui::RichText {
     bold(text)
 }
 
-/// Niveau 2 : l'en-tête de colonne d'un tableau (aperçu d'import, résultats,
-/// mémo des formules), en [`bold`] et en petit corps : il se distingue d'un titre
-/// de section sans le concurrencer.
+/// Level 2: the column header of a table (import preview, results,
+/// formula memo), in [`bold`] and small text: it stands out from a section
+/// title without competing with it.
 pub fn table_header(text: impl Into<String>) -> egui::RichText {
     bold(text).small()
 }
 
-/// Niveau 3 : le texte secondaire (détail, aide), atténué et en petit corps. Les
-/// règles d'emploi sont celles du texte atténué (`docs/standard-interface.md`).
+/// Level 3: the secondary text (detail, help), muted and in small text. The
+/// usage rules are those of muted text (`docs/standard-interface.md`).
 pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).small().weak()
 }
 
-/// **Le** titre de section d'un formulaire (propriétés du graphe, assistant
-/// d'import…) : un espace, puis le libellé au niveau [`section_heading`]. Le
-/// titre suffit à séparer les groupes : jamais de `ui.separator()` juste avant
-/// (`aucun_separateur_avant_un_titre_de_section`), jamais un trait seul entre
-/// deux blocs (S-L3), et jamais un libellé ordinaire qui ferait office de titre.
+/// **The** section title of a form (graph properties, import wizard…):
+/// a space, then the label at the [`section_heading`] level. The
+/// title is enough to separate the groups: never a `ui.separator()` right before
+/// (`no_separator_before_a_section_title`), never a lone rule between
+/// two blocks (S-L3), and never an ordinary label standing in as a title.
 pub fn section_title(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     ui.add_space(SPACE_SECTION);
     ui.label(section_heading(text))
 }
 
-/// Les variations qu'écrit [`bold`], pour mesurer ou reconnaître un gras
-/// (largeur réservée à un onglet, tests).
+/// The variations written by [`bold`], to measure or recognize a bold
+/// (width reserved for a tab, tests).
 pub fn bold_variations() -> egui::epaint::text::VariationCoords {
     egui::epaint::text::VariationCoords::new([("wght", BOLD_WEIGHT)])
 }
 
-/// L'[`ACCENT`] lui-même : texte et trait de l'onglet actif, filet de la
-/// ligne sélectionnée d'une liste (#169).
+/// The [`ACCENT`] itself: text and stroke of the active tab, rule of the
+/// selected row of a list (#169).
 pub fn accent() -> Color32 {
     ACCENT
 }
 
-/// Texte posé sur le fond plein d'[`ACCENT`] : celui d'un texte entouré actif
-/// (`form::toggle_texts`, #270).
+/// Text placed on the solid [`ACCENT`] background: that of an active outlined
+/// text (`form::toggle_texts`, #270).
 pub fn text_on_accent() -> Color32 {
     Color32::WHITE
 }
 
-/// Filet qui sépare une bande d'onglets de son contenu (#169).
+/// Rule that separates a tab band from its content (#169).
 pub fn tab_rule_color() -> Color32 {
     Color32::from_gray(0xD6)
 }
 
-/// Teinte de l'icône d'aide au survol d'un champ (#197) : l'icône neutre,
-/// estompée pour rester discrète à côté du champ qu'elle explique.
+/// Tint of the help icon shown on hovering a field (#197): the neutral icon,
+/// faded to stay discreet next to the field it explains.
 pub fn help_icon_tint() -> Color32 {
     Color32::from_white_alpha(150)
 }
 
-/// Trait d'un onglet survolé, à la place de celui de l'onglet actif (#169).
+/// Stroke of a hovered tab, in place of that of the active tab (#169).
 pub fn tab_hover_mark_color() -> Color32 {
     Color32::from_gray(0xC4)
 }
 
-/// Fond de la ligne sélectionnée d'une liste (Project Manager, #169) : plus
-/// pâle que `selection.bg_fill`, le filet d'[`ACCENT`] à gauche porte la
-/// sélection.
+/// Background of the selected row of a list (Project Manager, #169): paler
+/// than `selection.bg_fill`, the [`ACCENT`] rule on the left carries the
+/// selection.
 pub fn list_row_selected_fill() -> Color32 {
     ACCENT.gamma_multiply(0.14)
 }
 
-/// Fond du volet Results : un cran plus clair que le fond de panneau.
+/// Background of the Results pane: one step lighter than the panel background.
 pub fn results_pane_fill(ui: &egui::Ui) -> Color32 {
     ui.visuals()
         .panel_fill
@@ -211,33 +211,33 @@ pub fn results_pane_fill(ui: &egui::Ui) -> Color32 {
         .lerp_to_gamma(Color32::WHITE, 0.45)
 }
 
-/// Fond de la ligne survolée d'une liste (#169).
+/// Background of the hovered row of a list (#169).
 pub fn list_row_hover_fill() -> Color32 {
     Color32::from_gray(0xEC)
 }
 
-/// Trait « déposer ici », **unique** (#170, point 2) : le vert de l'accent,
-/// pour un fichier du système glissé au-dessus de la fenêtre
-/// (`app/file_drop.rs`) comme pour des colonnes ou des lignes glissées vers un
-/// graphe (`app/graph_window.rs`). Un seul aspect dit « le dépôt est possible
-/// ici » ; la nature du geste (externe ou interne) ne change pas sa couleur.
+/// **Single** "drop here" stroke (#170, point 2): the accent green,
+/// for a system file dragged over the window
+/// (`app/file_drop.rs`) as for columns or rows dragged to a
+/// graph (`app/graph_window.rs`). A single look says "the drop is possible
+/// here"; the nature of the gesture (external or internal) does not change its color.
 pub fn drop_stroke() -> egui::Stroke {
     egui::Stroke::new(2.5, ACCENT)
 }
 
-/// Aperçu de l'import : ligne d'en-tête reconnue (nom, sous-en-tête, unité),
-/// dans l'esprit du code couleur de l'assistant ASCII d'OriginLab.
+/// Import preview: recognized header line (name, sub-header, unit),
+/// in the spirit of the color code of OriginLab's ASCII wizard.
 pub fn import_header_line_color() -> Color32 {
     Color32::from_rgb(80, 140, 220)
 }
 
-/// Aperçu de l'import : sous-en-tête de commentaire ou de x'.
+/// Import preview: comment or x' sub-header.
 pub fn import_comment_line_color() -> Color32 {
     Color32::from_rgb(200, 80, 200)
 }
 
-/// Teinte d'une colonne calculée qui n'est plus à jour (lettre d'en-tête et
-/// cellules), #181.
+/// Tint of a computed column that is no longer up to date (header letter and
+/// cells), #181.
 pub fn stale_color(dark: bool) -> Color32 {
     if dark {
         Color32::from_rgb(230, 170, 70)
@@ -246,8 +246,8 @@ pub fn stale_color(dark: bool) -> Color32 {
     }
 }
 
-/// Courbe de résultat de l'aperçu d'analyse (ajustement, signal corrigé,
-/// somme des pics), #181.
+/// Result curve of the analysis preview (fit, corrected signal,
+/// sum of peaks), #181.
 pub fn preview_result_color(dark: bool) -> Color32 {
     if dark {
         Color32::from_rgb(255, 120, 90)
@@ -256,7 +256,7 @@ pub fn preview_result_color(dark: bool) -> Color32 {
     }
 }
 
-/// Courbe d'aide de l'aperçu d'analyse (ligne de base, fond), #181.
+/// Helper curve of the analysis preview (baseline, background), #181.
 pub fn preview_helper_color(dark: bool) -> Color32 {
     if dark {
         Color32::from_rgb(120, 200, 255)
@@ -265,17 +265,17 @@ pub fn preview_helper_color(dark: bool) -> Color32 {
     }
 }
 
-/// Repère posé sur l'aperçu d'analyse (point d'ancrage, pic de départ), #181.
+/// Marker placed on the analysis preview (anchor point, start peak), #181.
 pub fn preview_marker_color() -> Color32 {
     Color32::from_rgb(230, 150, 20)
 }
 
-/// Fond translucide d'une zone ou d'une plage de l'aperçu d'analyse, #181.
+/// Translucent background of a zone or a range of the analysis preview, #181.
 pub fn preview_zone_fill() -> Color32 {
     Color32::from_rgba_unmultiplied(230, 150, 20, 48)
 }
 
-/// Couleur du pic `index` (à partir de 1) dans l'aperçu d'analyse, #181.
+/// Color of peak `index` (starting at 1) in the analysis preview, #181.
 pub fn preview_peak_color(index: usize) -> Color32 {
     const LIGHT: [(u8, u8, u8); 6] = [
         (31, 119, 180),
@@ -289,18 +289,18 @@ pub fn preview_peak_color(index: usize) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-/// Cadre d'un champ dont la saisie est **refusée** (#219) : texte illisible,
-/// contrainte entre champs, erreur Typst. Le rouge est réservé à ce cas, à une
-/// exception **explicite** près : [`r_squared_color`] (`docs/standard-interface.md`).
+/// Frame of a field whose input is **refused** (#219): unreadable text,
+/// constraint between fields, Typst error. Red is reserved for this case, with one
+/// **explicit** exception: [`r_squared_color`] (`docs/standard-interface.md`).
 pub fn field_refused_color() -> Color32 {
     Color32::from_rgb(200, 30, 30)
 }
 
-/// Teinte d'un R² faible (#288), selon son palier : orange sous 0,95, rouge
-/// dès 0,8 (la boîte de dialogue, sous 0,6, garde ce rouge). Seul rouge permis
-/// hors du refus de champ : jeton **dédié**, qui ne sert à rien d'autre. La
-/// couleur n'est jamais le seul signal (gras et bulle, `exact_result_label`).
-/// Sans palier d'alerte : la couleur du texte ordinaire.
+/// Tint of a low R² (#288), according to its level: orange below 0.95, red
+/// from 0.8 (the dialog box, below 0.6, keeps this red). The only red allowed
+/// outside field refusal: a **dedicated** token, used for nothing else. Color
+/// is never the only signal (bold and tooltip, `exact_result_label`).
+/// Without an alert level: the ordinary text color.
 pub fn r_squared_color(
     level: stokesforge_app_state::r_squared::RSquaredLevel,
     dark: bool,
@@ -324,22 +324,22 @@ pub fn r_squared_color(
     }
 }
 
-/// Cadre d'un champ dont la valeur a été **ramenée** à une borne (#219) : teinte
-/// d'avertissement, distincte du rouge du refus.
+/// Frame of a field whose value was **clamped** to a bound (#219): warning
+/// tint, distinct from the refusal red.
 pub fn field_clamped_color() -> Color32 {
     Color32::from_rgb(220, 120, 0)
 }
 
-/// Rouge foncé et discret du contour d'un dialogue modal qui vient de
-/// refuser un clic ([`crate::app`], `modal_dialog`).
+/// Dark and discreet red of the outline of a modal dialog that has just
+/// refused a click ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {
     Color32::from_rgb(150, 28, 28)
 }
 
-/// Le bouton d'un geste destructeur (Delete, Discard Changes ; S-R5, #229) :
-/// style normal au repos, **rouge** au survol et au focus clavier (egui peint
-/// un widget focalisé avec le style `active`). À poser dans un `scope` qui ne
-/// contient que ce bouton.
+/// The button of a destructive gesture (Delete, Discard Changes; S-R5, #229):
+/// normal style at rest, **red** on hover and keyboard focus (egui paints
+/// a focused widget with the `active` style). To be placed in a `scope` that
+/// contains only this button.
 pub fn destructive_button_visuals(visuals: &mut egui::Visuals) {
     let red = visuals.error_fg_color;
     for state in [&mut visuals.widgets.hovered, &mut visuals.widgets.active] {
@@ -350,66 +350,66 @@ pub fn destructive_button_visuals(visuals: &mut egui::Visuals) {
     }
 }
 
-/// Fond de repos de la gouttière de la grille (lettres de colonnes, « # »,
-/// numéros de ligne, libellés de champ d'en-tête) — la distingue visuellement
-/// des données elles-mêmes. Dérivé de [`ACCENT`] comme le reste de la
-/// palette de sélection, mais très dilué : une teinte discrète plutôt qu'une
-/// vraie case pleine couleur, qui écraserait le reste de la grille.
+/// Resting background of the grid gutter (column letters, "#", row
+/// numbers, header field labels) — visually distinguishes it
+/// from the data itself. Derived from [`ACCENT`] like the rest of the
+/// selection palette, but very diluted: a discreet tint rather than a
+/// real full-color cell, which would overwhelm the rest of the grid.
 pub fn header_letter_row_fill() -> Color32 {
     ACCENT.gamma_multiply(0.10)
 }
 
-/// Fond de la gouttière quand elle est *concernée* par la sélection en cours
-/// sans être elle-même la cible du clic — la colonne ou la ligne d'une ou
-/// plusieurs cellules de données sélectionnées, par exemple. Un cran plus
-/// soutenu que [`header_letter_row_fill`] (le repos), sans atteindre
-/// l'intensité d'une sélection directe de la gouttière elle-même (voir
-/// [`header_letter_row_selected_fill`]) — trois paliers, comme un tableur :
-/// rien, « ta ligne/colonne est concernée », « c'est *toi* qui es
-/// sélectionné(e) ».
+/// Background of the gutter when it is *concerned* by the current selection
+/// without being itself the target of the click — the column or row of one or
+/// several selected data cells, for example. One step stronger than
+/// [`header_letter_row_fill`] (the resting one), without reaching the
+/// intensity of a direct selection of the gutter itself (see
+/// [`header_letter_row_selected_fill`]) — three levels, like a spreadsheet:
+/// nothing, "your row/column is concerned", "*you* are
+/// selected".
 pub fn header_letter_row_touched_fill() -> Color32 {
     ACCENT.gamma_multiply(0.24)
 }
 
-/// Fond de la gouttière quand elle est elle-même directement sélectionnée
-/// (clic sur une lettre de colonne, un numéro de ligne, un libellé de champ
-/// d'en-tête, ou sur « # » pour tout le tableau) — le palier le plus soutenu
-/// des trois, voir [`header_letter_row_touched_fill`].
+/// Background of the gutter when it is itself directly selected
+/// (click on a column letter, a row number, a header field label,
+/// or on "#" for the whole table) — the strongest level
+/// of the three, see [`header_letter_row_touched_fill`].
 pub fn header_letter_row_selected_fill() -> Color32 {
     ACCENT.gamma_multiply(0.42)
 }
 
-/// Épaisseur de toutes les barres de défilement, en points. Le défaut
-/// d'egui (6 pt en barre pleine, 2 pt en barre flottante au repos) se
-/// visait mal et se voyait peu.
+/// Thickness of all the scroll bars, in points. egui's default
+/// (6 pt in solid bar, 2 pt in floating bar at rest) was hard to
+/// hit and hard to see.
 const SCROLL_BAR_WIDTH: f32 = 10.0;
 
-/// Espace laissé entre le contenu et la barre, en points.
+/// Space left between the content and the bar, in points.
 const SCROLL_BAR_MARGIN: f32 = 2.0;
 
-/// Opacité de la poignée au repos : la poignée prend la couleur du texte
-/// des widgets (gris foncé, `widgets.inactive.fg_stroke`), atténuée — bien
-/// plus contrastée que le gris très clair (`widgets.inactive.bg_fill`) des
-/// barres pleines d'egui, sans être aussi lourde qu'un texte.
+/// Opacity of the handle at rest: the handle takes the color of the widgets'
+/// text (dark gray, `widgets.inactive.fg_stroke`), muted — far
+/// more contrasted than the very light gray (`widgets.inactive.bg_fill`) of
+/// egui's solid bars, without being as heavy as text.
 const SCROLL_BAR_HANDLE_OPACITY: f32 = 0.45;
 
-/// Opacité de la poignée survolée ou saisie (elle prend alors la couleur de
-/// survol, puis l'[`ACCENT`] pendant le glisser).
+/// Opacity of the hovered or grabbed handle (it then takes the hover
+/// color, then the [`ACCENT`] during the drag).
 const SCROLL_BAR_HANDLE_INTERACT_OPACITY: f32 = 0.8;
 
-/// Opacité du fond de la piste (`extreme_bg_color`).
+/// Opacity of the track background (`extreme_bg_color`).
 const SCROLL_BAR_TRACK_OPACITY: f32 = 1.0;
 
-/// Le style de **toutes** les barres de défilement de StokesForge — voir la
-/// section « Barres de défilement » en tête de module.
+/// The style of **all** StokesForge scroll bars — see the
+/// "Scroll bars" section at the top of the module.
 ///
-/// Construit en mode « flottant » d'egui, mais figé : largeur constante
-/// (pas d'élargissement au survol), place réservée égale à la barre plus sa
-/// marge (elle ne recouvre donc jamais le contenu), et opacités non nulles
-/// au repos (elle reste visible sans survol). C'est le seul mode d'egui qui
-/// laisse régler l'opacité de la poignée ; en mode « plein », elle est
-/// toujours opaque et de la couleur de fond des boutons, qu'on ne peut pas
-/// foncer sans foncer aussi tous les boutons.
+/// Built in egui's "floating" mode, but frozen: constant width
+/// (no widening on hover), reserved room equal to the bar plus its
+/// margin (so it never covers the content), and non-zero opacities
+/// at rest (it stays visible without hovering). This is the only egui mode that
+/// lets one set the handle opacity; in "solid" mode, it is
+/// always opaque and of the buttons' background color, which cannot be
+/// darkened without darkening all the buttons too.
 pub fn scroll_style() -> egui::style::ScrollStyle {
     egui::style::ScrollStyle {
         floating: true,
@@ -430,31 +430,31 @@ pub fn scroll_style() -> egui::style::ScrollStyle {
     }
 }
 
-/// Place qu'occupe une barre de défilement du standard [`scroll_style`],
-/// perpendiculairement à son sens (largeur d'une barre verticale, hauteur
-/// d'une barre horizontale), marge comprise.
+/// Room taken by a scroll bar of the [`scroll_style`] standard,
+/// perpendicular to its direction (width of a vertical bar, height
+/// of a horizontal bar), margin included.
 pub fn scroll_bar_allocated_width() -> f32 {
     scroll_style().allocated_width()
 }
 
-/// Pose le thème StokesForge sur `ctx` : verrouille la préférence sur
-/// [`Theme::Light`] (empêche egui de re-suivre le système à la moindre
-/// notification `winit`), applique la palette maison par-dessus
-/// [`egui::Visuals::light`], puis le standard des barres de défilement
+/// Sets the StokesForge theme on `ctx`: locks the preference on
+/// [`Theme::Light`] (prevents egui from following the system again at the
+/// slightest `winit` notification), applies the house palette on top of
+/// [`egui::Visuals::light`], then the scroll bar standard
 /// ([`scroll_style`]).
 pub fn install(ctx: &Context) {
     ctx.set_theme(Theme::Light);
     ctx.set_visuals(visuals());
     ctx.all_styles_mut(|style| style.spacing.scroll = scroll_style());
-    // Chargeurs d'images (SVG des icônes, `icons.rs`).
+    // Image loaders (SVG icons, `icons.rs`).
     egui_extras::install_image_loaders(ctx);
 }
 
-/// Construit la palette StokesForge : un `Visuals::light()` standard, avec juste
-/// les teintes qui portent l'identité de l'appli (sélection, liens, contour
-/// des widgets actifs) redéfinies — le reste (gris de fond, contrastes de
-/// texte, tailles) vient tel quel d'egui, pour ne pas réinventer ce que la
-/// bibliothèque a déjà calibré pour la lisibilité.
+/// Builds the StokesForge palette: a standard `Visuals::light()`, with just
+/// the tints that carry the identity of the application (selection, links, outline
+/// of active widgets) redefined — the rest (background grays, text
+/// contrasts, sizes) comes as is from egui, to avoid reinventing what the
+/// library has already calibrated for legibility.
 fn visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::light();
 
@@ -462,16 +462,16 @@ fn visuals() -> egui::Visuals {
     visuals.selection.bg_fill = ACCENT.gamma_multiply(0.35);
     visuals.selection.stroke.color = ACCENT;
 
-    // Contour des boutons/onglets actifs (dont la fenêtre flottante
-    // focalisée) : reprend l'accent plutôt que le bleu par défaut, pour que
-    // la disposition ressemble au reste de l'appli.
+    // Outline of active buttons/tabs (including the focused floating
+    // window): takes the accent rather than the default blue, so that
+    // the layout resembles the rest of the application.
     visuals.widgets.active.bg_stroke.color = ACCENT;
     visuals.widgets.active.fg_stroke.color = ACCENT;
     visuals.widgets.hovered.bg_stroke.color = ACCENT;
 
-    // Coins légèrement moins arrondis que le défaut egui (2px) : plus proche
-    // de l'esthétique dense et tabulaire d'un logiciel d'analyse de données
-    // que d'une appli mobile.
+    // Corners slightly less rounded than egui's default (2px): closer
+    // to the dense and tabular look of a data analysis tool
+    // than to a mobile app.
     let corner_radius = CornerRadius::same(3);
     visuals.window_corner_radius = corner_radius;
     visuals.menu_corner_radius = corner_radius;
@@ -488,33 +488,33 @@ fn visuals() -> egui::Visuals {
 mod tests {
     use super::*;
 
-    /// Garde-fou : si un jour quelqu'un fait dériver [`visuals`] de
-    /// `Visuals::dark()` par erreur (copier-coller, refactor...), ce test
-    /// échoue plutôt que de laisser le thème partir en sombre en silence.
+    /// Guard: if someone one day derives [`visuals`] from
+    /// `Visuals::dark()` by mistake (copy-paste, refactor...), this test
+    /// fails rather than letting the theme go dark silently.
     #[test]
     fn base_theme_is_light() {
         assert!(
             !visuals().dark_mode,
-            "le thème StokesForge doit rester clair"
+            "the StokesForge theme must stay light"
         );
     }
 
-    /// Le trait de dépôt (#170, point 2) est le vert de l'accent, pour un
-    /// fichier externe comme pour des colonnes : pas le bleu d'avant.
+    /// The drop stroke (#170, point 2) is the accent green, for an external
+    /// file as for columns: not the blue from before.
     #[test]
-    fn le_trait_de_depot_est_le_vert_de_l_accent() {
+    fn the_drop_stroke_is_the_accent_green() {
         let stroke = drop_stroke();
         assert_eq!(stroke.color, ACCENT);
         assert!(
             stroke.color.g() > stroke.color.b() && stroke.color.g() > stroke.color.r(),
-            "vert dominant"
+            "green dominant"
         );
     }
 
-    /// Le rouge de R² (#288) est un jeton à part : distinct de celui du refus de
-    /// champ, et chaque palier a sa teinte, en clair comme en sombre.
+    /// The R² red (#288) is a token apart: distinct from that of field
+    /// refusal, and each level has its tint, in light as in dark.
     #[test]
-    fn la_teinte_de_r_carre_a_un_jeton_propre_par_palier() {
+    fn the_r_squared_tint_has_its_own_token_per_level() {
         use stokesforge_app_state::r_squared::RSquaredLevel::{Dialog, Good, Orange, Red};
         for dark in [false, true] {
             let orange = r_squared_color(Orange, dark);
@@ -523,7 +523,7 @@ mod tests {
             assert_eq!(
                 red,
                 r_squared_color(Dialog, dark),
-                "la boîte garde le rouge"
+                "the dialog keeps the red"
             );
             assert_ne!(red, field_refused_color());
             assert_ne!(orange, r_squared_color(Good, dark));
@@ -531,26 +531,26 @@ mod tests {
         assert_ne!(r_squared_color(Red, true), r_squared_color(Red, false));
     }
 
-    /// Tous les paliers, toutes les teintes : `Good` garde la couleur du texte
-    /// ordinaire (ni orange ni rouge), et aucune teinte d'alerte ne vaut le
-    /// rouge de refus de champ.
+    /// All the levels, all the tints: `Good` keeps the ordinary text color
+    /// (neither orange nor red), and no alert tint equals the field refusal
+    /// red.
     #[test]
-    fn la_teinte_de_r_carre_distingue_tous_les_paliers() {
+    fn the_r_squared_tint_distinguishes_all_levels() {
         use stokesforge_app_state::r_squared::RSquaredLevel::{Dialog, Good, Orange, Red};
         for dark in [false, true] {
-            let teintes = [
+            let tints = [
                 r_squared_color(Good, dark),
                 r_squared_color(Orange, dark),
                 r_squared_color(Red, dark),
             ];
-            for (i, a) in teintes.iter().enumerate() {
-                for b in &teintes[i + 1..] {
+            for (i, a) in tints.iter().enumerate() {
+                for b in &tints[i + 1..] {
                     assert_ne!(a, b, "dark = {dark}");
                 }
                 assert_ne!(*a, field_refused_color(), "dark = {dark}");
                 assert_ne!(*a, field_clamped_color(), "dark = {dark}");
             }
-            assert_eq!(r_squared_color(Dialog, dark), teintes[2]);
+            assert_eq!(r_squared_color(Dialog, dark), tints[2]);
         }
         assert_ne!(
             r_squared_color(Orange, true),
@@ -559,26 +559,26 @@ mod tests {
         assert_ne!(r_squared_color(Good, true), r_squared_color(Good, false));
     }
 
-    /// Contraste WCAG minimal 3:1 (texte en gras) des teintes d'alerte sur les
-    /// fonds clair (blanc) et sombre (gris 27, fond sombre d'egui).
+    /// Minimal WCAG contrast 3:1 (bold text) of the alert tints on the light
+    /// (white) and dark (gray 27, egui's dark background) backgrounds.
     #[test]
-    fn la_teinte_de_r_carre_contraste_sur_fond_clair_et_sombre() {
+    fn the_r_squared_tint_contrasts_on_light_and_dark_backgrounds() {
         use stokesforge_app_state::r_squared::RSquaredLevel::{Good, Orange, Red};
         use stokesforge_render::color::contrast_ratio;
         let rgb = |c: Color32| (c.r(), c.g(), c.b());
-        for (dark, fond) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
-            for niveau in [Good, Orange, Red] {
-                let ratio = contrast_ratio(rgb(r_squared_color(niveau, dark)), fond);
+        for (dark, background) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
+            for level in [Good, Orange, Red] {
+                let ratio = contrast_ratio(rgb(r_squared_color(level, dark)), background);
                 assert!(
                     ratio >= 3.0,
-                    "{niveau:?} dark = {dark} : contraste {ratio:.2} < 3"
+                    "{level:?} dark = {dark}: contrast {ratio:.2} < 3"
                 );
             }
         }
     }
 
     #[test]
-    fn install_pose_le_standard_des_barres_de_defilement() {
+    fn install_sets_the_scrollbar_standard() {
         let ctx = Context::default();
         install(&ctx);
         assert_eq!(ctx.style_of(Theme::Light).spacing.scroll, scroll_style());
@@ -588,87 +588,84 @@ mod tests {
         );
     }
 
-    /// Garde-fou du standard : aucun fichier de `stokesforge-app` hors de ce
-    /// module ne construit ni ne modifie un `ScrollStyle`. Une barre au style
-    /// local échapperait au réglage unique des constantes `SCROLL_BAR_*`.
+    /// Guard of the standard: no file of `stokesforge-app` outside this
+    /// module builds or modifies a `ScrollStyle`. A bar with a local style
+    /// would escape the single setting of the `SCROLL_BAR_*` constants.
     #[test]
-    fn aucun_scroll_style_hors_du_theme() {
-        let fautifs = styles_de_defilement_hors_du_theme(&crate::sources::sources());
+    fn no_scroll_style_outside_the_theme() {
+        let offenders = scroll_styles_outside_the_theme(&crate::sources::sources());
         assert!(
-            fautifs.is_empty(),
-            "style de barre de défilement construit hors de theme.rs — passer par \
-             theme::scroll_style / theme::scroll_bar_allocated_width : {fautifs:?}"
+            offenders.is_empty(),
+            "scroll bar style built outside theme.rs — use \
+             theme::scroll_style / theme::scroll_bar_allocated_width: {offenders:?}"
         );
     }
 
-    /// Les lignes qui touchent un `ScrollStyle` hors de `theme.rs`,
-    /// `src/chemin:ligne` (commentaires exclus, tests compris). Toutes les
-    /// sources de `src/`, sous-dossiers compris (#116).
-    fn styles_de_defilement_hors_du_theme(sources: &[crate::sources::Fichier]) -> Vec<String> {
-        let mut fautifs = Vec::new();
-        for fichier in sources {
-            if fichier.chemin == "theme.rs" {
+    /// The lines that touch a `ScrollStyle` outside `theme.rs`,
+    /// `src/path:line` (comments excluded, tests included). All the
+    /// sources of `src/`, subdirectories included (#116).
+    fn scroll_styles_outside_the_theme(sources: &[crate::sources::SourceFile]) -> Vec<String> {
+        let mut offenders = Vec::new();
+        for file in sources {
+            if file.path == "theme.rs" {
                 continue;
             }
-            for (index, ligne) in fichier.code().lines().enumerate() {
-                if ligne.contains("ScrollStyle") || ligne.contains(".scroll =") {
-                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
+            for (index, line) in file.code().lines().enumerate() {
+                if line.contains("ScrollStyle") || line.contains(".scroll =") {
+                    offenders.push(format!("src/{}:{}", file.path, index + 1));
                 }
             }
         }
-        fautifs
+        offenders
     }
 
-    /// Garde-fou du gras : `RichText::strong` / `Ui::strong` d'egui ne
-    /// graissent rien (une autre couleur seulement) ; tout gras passe par
-    /// [`bold`]. Toutes les sources de `src/`, commentaires exclus.
+    /// Guard of the bold: egui's `RichText::strong` / `Ui::strong` embolden
+    /// nothing (another color only); every bold goes through
+    /// [`bold`]. All the sources of `src/`, comments excluded.
     #[test]
-    fn aucun_strong_d_egui_hors_du_theme() {
-        let fautifs = strong_d_egui(&crate::sources::sources());
+    fn no_egui_strong_outside_the_theme() {
+        let offenders = egui_strong(&crate::sources::sources());
         assert!(
-            fautifs.is_empty(),
-            "`strong()` d'egui ne met pas en gras — passer par theme::bold : {fautifs:?}"
+            offenders.is_empty(),
+            "egui's `strong()` does not embolden — use theme::bold: {offenders:?}"
         );
     }
 
-    /// Les lignes qui appellent `.strong()` hors de `theme.rs`.
-    fn strong_d_egui(sources: &[crate::sources::Fichier]) -> Vec<String> {
-        let mut fautifs = Vec::new();
-        for fichier in sources {
-            if fichier.chemin == "theme.rs" {
+    /// The lines that call `.strong()` outside `theme.rs`.
+    fn egui_strong(sources: &[crate::sources::SourceFile]) -> Vec<String> {
+        let mut offenders = Vec::new();
+        for file in sources {
+            if file.path == "theme.rs" {
                 continue;
             }
-            for (index, ligne) in fichier.code().lines().enumerate() {
-                if ligne.contains(".strong()") || ligne.contains("ui.strong(") {
-                    fautifs.push(format!("src/{}:{}", fichier.chemin, index + 1));
+            for (index, line) in file.code().lines().enumerate() {
+                if line.contains(".strong()") || line.contains("ui.strong(") {
+                    offenders.push(format!("src/{}:{}", file.path, index + 1));
                 }
             }
         }
-        fautifs
+        offenders
     }
 
-    /// Le témoin : un `.strong()` hors de `theme.rs` est vu, [`bold`] non.
+    /// The witness: a `.strong()` outside `theme.rs` is seen, [`bold`] is not.
     #[test]
-    fn la_garde_du_gras_voit_un_strong() {
-        let fichier = |code: &str| crate::sources::Fichier {
-            chemin: "app/x.rs".to_string(),
-            texte: code.to_string(),
-            de_test: false,
+    fn the_bold_guard_sees_a_strong() {
+        let file = |code: &str| crate::sources::SourceFile {
+            path: "app/x.rs".to_string(),
+            text: code.to_string(),
+            is_test: false,
         };
         assert_eq!(
-            strong_d_egui(&[fichier("let t = RichText::new(a).strong();")]),
+            egui_strong(&[file("let t = RichText::new(a).strong();")]),
             ["src/app/x.rs:1"]
         );
-        assert_eq!(
-            strong_d_egui(&[fichier("ui.strong(a);")]),
-            ["src/app/x.rs:1"]
-        );
-        assert!(strong_d_egui(&[fichier("ui.label(theme::bold(a));")]).is_empty());
+        assert_eq!(egui_strong(&[file("ui.strong(a);")]), ["src/app/x.rs:1"]);
+        assert!(egui_strong(&[file("ui.label(theme::bold(a));")]).is_empty());
     }
 
-    /// [`bold`] pose la graisse sur le texte, et rien d'autre ne la pose.
+    /// [`bold`] sets the weight on the text, and nothing else does.
     #[test]
-    fn bold_pose_la_graisse() {
+    fn bold_sets_the_weight() {
         let job = egui::WidgetText::from(bold("x")).into_layout_job(
             &egui::Style::default(),
             egui::FontSelection::Default,
@@ -683,55 +680,55 @@ mod tests {
         assert_ne!(job.sections[0].format.coords, bold_variations());
     }
 
-    /// Chaque niveau de texte pose sa graisse et sa taille : le titre de section
-    /// et l'en-tête de tableau sont en gras, le secondaire non ; seuls l'en-tête
-    /// et le secondaire sont en petit corps, et le secondaire est atténué.
+    /// Each text level sets its weight and size: the section title
+    /// and the table header are bold, the secondary is not; only the header
+    /// and the secondary are in small text, and the secondary is muted.
     #[test]
-    fn chaque_niveau_de_texte_pose_graisse_et_taille() {
-        let job = |texte: egui::RichText| {
-            egui::WidgetText::from(texte).into_layout_job(
+    fn each_text_level_sets_weight_and_size() {
+        let job = |text: egui::RichText| {
+            egui::WidgetText::from(text).into_layout_job(
                 &egui::Style::default(),
                 egui::FontSelection::Default,
                 egui::Align::LEFT,
             )
         };
-        let corps = job(egui::RichText::new("x")).sections[0]
+        let body = job(egui::RichText::new("x")).sections[0]
             .format
             .font_id
             .size;
         let section = job(section_heading("x"));
-        let entete = job(table_header("x"));
-        let secondaire = job(secondary_text("x"));
+        let header = job(table_header("x"));
+        let secondary = job(secondary_text("x"));
         assert_eq!(section.sections[0].format.coords, bold_variations());
-        assert_eq!(entete.sections[0].format.coords, bold_variations());
-        assert_ne!(secondaire.sections[0].format.coords, bold_variations());
-        assert_eq!(section.sections[0].format.font_id.size, corps);
-        assert!(entete.sections[0].format.font_id.size < corps);
-        assert!(secondaire.sections[0].format.font_id.size < corps);
-        // Seul le secondaire est atténué : les deux autres gardent la couleur
-        // de repli (`PLACEHOLDER`), résolue à la peinture.
+        assert_eq!(header.sections[0].format.coords, bold_variations());
+        assert_ne!(secondary.sections[0].format.coords, bold_variations());
+        assert_eq!(section.sections[0].format.font_id.size, body);
+        assert!(header.sections[0].format.font_id.size < body);
+        assert!(secondary.sections[0].format.font_id.size < body);
+        // Only the secondary is muted: the other two keep the fallback
+        // color (`PLACEHOLDER`), resolved at paint time.
         assert_eq!(section.sections[0].format.color, Color32::PLACEHOLDER);
-        assert_eq!(entete.sections[0].format.color, Color32::PLACEHOLDER);
-        assert_ne!(secondaire.sections[0].format.color, Color32::PLACEHOLDER);
+        assert_eq!(header.sections[0].format.color, Color32::PLACEHOLDER);
+        assert_ne!(secondary.sections[0].format.color, Color32::PLACEHOLDER);
     }
 
-    /// `section_title` s'appuie sur le niveau 1 : même graisse, même taille.
+    /// `section_title` relies on level 1: same weight, same size.
     #[test]
-    fn section_title_peint_le_niveau_titre_de_section() {
+    fn section_title_paints_the_section_heading_level() {
         let ctx = Context::default();
-        let mut sortie = ctx.run_ui(egui::RawInput::default(), |ui| {
-            section_title(ui, "Titre");
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            section_title(ui, "Title");
         });
-        sortie.textures_delta.clear();
-        let texte = sortie
+        out.textures_delta.clear();
+        let text = out
             .shapes
             .iter()
             .find_map(|s| match &s.shape {
                 egui::Shape::Text(t) => Some(t.clone()),
                 _ => None,
             })
-            .expect("un texte peint");
-        let coords: Vec<_> = texte
+            .expect("a painted text");
+        let coords: Vec<_> = text
             .galley
             .job
             .sections
@@ -741,51 +738,51 @@ mod tests {
         assert_eq!(coords, [bold_variations()]);
     }
 
-    /// Avec les polices embarquées, [`bold`] graisse vraiment les glyphes
-    /// (texte plus large qu'en graisse normale) — pas seulement une
-    /// coordonnée posée dans le vide : c'est ce qui prouve que la police du
-    /// projet a un axe `wght` que epaint sait suivre.
+    /// With the embedded fonts, [`bold`] really emboldens the glyphs
+    /// (text wider than at normal weight) — not just a
+    /// coordinate set in a void: this is what proves that the project's font
+    /// has a `wght` axis that epaint can follow.
     #[test]
-    fn bold_elargit_vraiment_le_texte_avec_les_polices_embarquees() {
+    fn bold_really_widens_text_with_the_embedded_fonts() {
         let ctx = Context::default();
         ctx.set_fonts(stokesforge_render_egui::font_definitions());
         install(&ctx);
-        let mut largeurs = (0.0, 0.0);
-        let mut sortie = ctx.run_ui(egui::RawInput::default(), |ui| {
-            largeurs = (
-                ui.label(egui::RichText::new("Zone de tracé")).rect.width(),
-                ui.label(bold("Zone de tracé")).rect.width(),
+        let mut widths = (0.0, 0.0);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            widths = (
+                ui.label(egui::RichText::new("Plot area")).rect.width(),
+                ui.label(bold("Plot area")).rect.width(),
             );
         });
-        sortie.textures_delta.clear();
+        out.textures_delta.clear();
         assert!(
-            largeurs.1 > largeurs.0 + 1.0,
-            "gras {} contre normal {}",
-            largeurs.1,
-            largeurs.0
+            widths.1 > widths.0 + 1.0,
+            "bold {} versus normal {}",
+            widths.1,
+            widths.0
         );
     }
 
-    /// Le témoin : un style de défilement posé dans un module de `src/app/` est
-    /// vu ; un commentaire et `theme.rs` lui-même passent.
+    /// The witness: a scroll style placed in a module of `src/app/` is
+    /// seen; a comment and `theme.rs` itself pass.
     #[test]
-    fn la_garde_du_defilement_voit_un_style_hors_d_app_rs() {
-        let fichier = |chemin: &str, texte: &str| crate::sources::Fichier {
-            chemin: chemin.to_string(),
-            texte: texte.to_string(),
-            de_test: false,
+    fn the_scroll_guard_sees_a_style_outside_app_rs() {
+        let file = |path: &str, text: &str| crate::sources::SourceFile {
+            path: path.to_string(),
+            text: text.to_string(),
+            is_test: false,
         };
         let sources = [
-            fichier(
-                "app/grille.rs",
+            file(
+                "app/grid.rs",
                 "// ScrollStyle\nfn f(s: &mut Style) {\n    s.spacing.scroll = ScrollStyle::thin();\n}",
             ),
-            fichier("app/notes.rs", "fn f(s: &mut Spacing) { s.scroll = x; }"),
-            fichier("theme.rs", "fn scroll_style() -> ScrollStyle { todo!() }"),
+            file("app/notes.rs", "fn f(s: &mut Spacing) { s.scroll = x; }"),
+            file("theme.rs", "fn scroll_style() -> ScrollStyle { todo!() }"),
         ];
         assert_eq!(
-            styles_de_defilement_hors_du_theme(&sources),
-            ["src/app/grille.rs:3", "src/app/notes.rs:1"]
+            scroll_styles_outside_the_theme(&sources),
+            ["src/app/grid.rs:3", "src/app/notes.rs:1"]
         );
     }
 }

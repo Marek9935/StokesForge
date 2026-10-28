@@ -370,7 +370,7 @@ the syntax (`formula_help`, issue #33): `$lambda$`, `$x_2$`, `$"cm"^(-1)$`,
 It replaces the collapsible "Math syntax" memo: the link with the field is
 visible and the help no longer takes up height. Any future field that accepts
 Typst text (interface side: "Math", #322) goes through `formula_field`; any other hover help, through `hover_help`.
-The test `chaque_exemple_du_memo_compile` checks that each example compiles. A
+The test `each_reminder_example_compiles` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
 **"Theme" tab**: two predefined themes (`stokesforge_plot::THEMES`, identified by `Theme::id`

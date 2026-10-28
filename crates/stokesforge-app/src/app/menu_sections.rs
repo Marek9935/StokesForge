@@ -1,29 +1,28 @@
-//! La brique commune des sections de menu (#155, grammaire de
-//! `docs/menus.md`) : tout menu, barre de menus ou clic droit, range ses
-//! entrées en **sections** (action principale, créer, presse-papiers,
-//! organiser, supprimer, sortie, `Properties…`) et ne pose un trait fin
-//! qu'**entre deux sections présentes** — jamais en tête, en fin ni en double.
+//! The shared building block for menu sections (#155, grammar of
+//! `docs/menus.md`): every menu, menu bar or right-click, arranges its
+//! entries in **sections** (main action, create, clipboard, organize, delete,
+//! exit, `Properties…`) and places a thin line only **between two present
+//! sections** — never at the start, at the end, or doubled.
 //!
-//! Pourquoi une brique plutôt que des `ui.separator()` à la main : un menu
-//! dont une section dépend de la cible (« Show Data » seulement sur une
-//! courbe) laissait un trait orphelin dès que la section disparaissait. Ici
-//! l'appelant dit seulement si la section **existe** pour cette cible ; le
-//! trait suit. Le seul `ui.separator()` d'un menu est celui de
-//! [`section_separator`] (garde `aucun_separateur_brut_dans_un_menu`,
-//! `tests/gardes.rs`, sans dérogation).
+//! Why a building block rather than hand-written `ui.separator()` calls: a
+//! menu whose section depends on the target ("Show Data" only on a curve) left
+//! an orphan line as soon as the section disappeared. Here the caller only
+//! says whether the section **exists** for this target; the line follows. The
+//! only `ui.separator()` of a menu is the one in [`section_separator`] (guard
+//! `no_raw_separator_in_a_menu`, `tests/guards.rs`, no exemption).
 //!
-//! « Absente » (sans objet pour la cible) n'est pas « grisée » (pertinente
-//! mais momentanément impossible, avec info-bulle `.disabled`) : une section
-//! absente ne s'appelle pas du tout, une section grisée se peint avec ses
-//! entrées grisées.
+//! "Absent" (not applicable to the target) is not "greyed out" (relevant but
+//! momentarily impossible, with a `.disabled` tooltip): an absent section is
+//! not called at all, a greyed-out section is painted with its entries greyed
+//! out.
 //!
-//! Un choix exclusif dans un menu (Type ▸, Role ▸, langue, texte du SVG) se
-//! peint par [`menu_choice`] : une **coche seule** devant l'option courante,
-//! sans radio ni fond de sélection (S-C3, #227).
+//! An exclusive choice in a menu (Type ▸, Role ▸, language, SVG text) is
+//! painted by [`menu_choice`]: a **lone check mark** in front of the current
+//! option, with no radio and no selection background (S-C3, #227).
 
 use eframe::egui;
 
-/// Compte les sections déjà peintes d'un menu pour séparer la suivante.
+/// Counts the sections already painted in a menu to separate the next one.
 #[derive(Debug, Default)]
 pub(super) struct MenuSections {
     painted: usize,
@@ -35,9 +34,9 @@ impl MenuSections {
         Self::default()
     }
 
-    /// Peint une section si elle `present` pour la cible, précédée d'un trait
-    /// fin quand une section l'a déjà été. `paint` n'est pas appelée pour une
-    /// section absente.
+    /// Paints a section if it is `present` for the target, preceded by a thin
+    /// line when a section has already been painted. `paint` is not called for
+    /// an absent section.
     pub(super) fn section(
         &mut self,
         ui: &mut egui::Ui,
@@ -56,17 +55,17 @@ impl MenuSections {
     }
 }
 
-/// Le trait fin entre deux sections : le seul séparateur d'un menu.
+/// The thin line between two sections: the only separator of a menu.
 fn section_separator(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().spacing(4.0));
 }
 
-/// Une option d'un choix exclusif dans un menu (S-C3, `docs/menus.md`) : une
-/// coche dans la marge devant l'option courante, rien devant les autres —
-/// jamais un radio ni le fond d'un bouton sélectionné. La marge est réservée
-/// pour toutes les options, qui restent alignées. Au survol, le fond d'une
-/// entrée de menu. L'accessibilité la décrit comme un bouton radio, coché ou
-/// non.
+/// An option of an exclusive choice in a menu (S-C3, `docs/menus.md`): a
+/// check mark in the margin in front of the current option, nothing in front
+/// of the others — never a radio nor the background of a selected button. The
+/// margin is reserved for all options, which stay aligned. On hover, the
+/// background of a menu entry. Accessibility describes it as a radio button,
+/// checked or not.
 pub(super) fn menu_choice(
     ui: &mut egui::Ui,
     selected: bool,
@@ -130,53 +129,53 @@ pub(super) fn menu_choice(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{contexte, image, image_de, textes};
+    use super::super::test_support::{context, frame_of, image, texts};
     use super::*;
 
-    /// S-C3 : une coche (un trait de trois points) devant la seule option
-    /// courante, aucun cercle de radio ni fond de sélection, et les libellés
-    /// des options alignés. Témoin : sans option courante, aucune coche.
+    /// S-C3: a check mark (a three-point line) in front of the current option
+    /// only, no radio circle or selection background, and the option labels
+    /// aligned. Witness: with no current option, no check mark.
     #[test]
-    fn un_choix_de_menu_coche_seulement_l_option_courante() {
-        let context = contexte();
-        let coches = |courante: Option<usize>| {
-            let formes = image(&context, Vec::new(), |ui| {
-                for (index, texte) in ["Un", "Deux"].into_iter().enumerate() {
-                    menu_choice(ui, courante == Some(index), texte);
+    fn a_menu_choice_checks_only_the_current_option() {
+        let context = context();
+        let checks = |current: Option<usize>| {
+            let shapes = image(&context, Vec::new(), |ui| {
+                for (index, text) in ["One", "Two"].into_iter().enumerate() {
+                    menu_choice(ui, current == Some(index), text);
                 }
             });
-            let traits = formes
+            let lines = shapes
                 .iter()
-                .filter(|forme| {
-                    matches!(&forme.shape, egui::Shape::Path(chemin) if chemin.points.len() == 3)
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Path(path) if path.points.len() == 3)
                 })
                 .count();
-            let ronds = formes
+            let circles = shapes
                 .iter()
-                .filter(|forme| matches!(forme.shape, egui::Shape::Circle(_)))
+                .filter(|shape| matches!(shape.shape, egui::Shape::Circle(_)))
                 .count();
-            (traits, ronds, textes(&formes))
+            (lines, circles, texts(&shapes))
         };
-        let (traits, ronds, peints) = coches(Some(1));
-        assert_eq!(traits, 1, "une coche, devant l'option courante");
-        assert_eq!(ronds, 0, "aucun radio");
-        let un = peints.iter().find(|t| t.texte == "Un").unwrap().centre;
-        let deux = peints.iter().find(|t| t.texte == "Deux").unwrap().centre;
-        assert!(deux.y > un.y);
+        let (lines, circles, painted) = checks(Some(1));
+        assert_eq!(lines, 1, "one check mark, in front of the current option");
+        assert_eq!(circles, 0, "no radio");
+        let one = painted.iter().find(|t| t.text == "One").unwrap().center;
+        let two = painted.iter().find(|t| t.text == "Two").unwrap().center;
+        assert!(two.y > one.y);
         assert_eq!(
-            coches(None).0,
+            checks(None).0,
             0,
-            "témoin : sans option courante, pas de coche"
+            "witness: with no current option, no check mark"
         );
     }
 
-    fn separateurs(presentes: &[bool]) -> (usize, usize) {
-        let context = contexte();
+    fn separators(present: &[bool]) -> (usize, usize) {
+        let context = context();
         let mut sections = MenuSections::new();
-        image_de(&context, egui::vec2(300.0, 300.0), Vec::new(), |ui| {
+        frame_of(&context, egui::vec2(300.0, 300.0), Vec::new(), |ui| {
             sections = MenuSections::new();
-            for &presente in presentes {
-                sections.section(ui, presente, |ui| {
+            for &is_present in present {
+                sections.section(ui, is_present, |ui| {
                     ui.label("x");
                 });
             }
@@ -185,29 +184,29 @@ mod tests {
     }
 
     #[test]
-    fn un_trait_seulement_entre_deux_sections_presentes() {
-        assert_eq!(separateurs(&[true, true, true]), (3, 2));
-        assert_eq!(separateurs(&[true]), (1, 0));
-        assert_eq!(separateurs(&[]), (0, 0));
+    fn a_line_only_between_two_present_sections() {
+        assert_eq!(separators(&[true, true, true]), (3, 2));
+        assert_eq!(separators(&[true]), (1, 0));
+        assert_eq!(separators(&[]), (0, 0));
     }
 
     #[test]
-    fn une_section_absente_ne_laisse_ni_trait_en_tete_ni_en_fin_ni_double() {
-        assert_eq!(separateurs(&[false, true, false]), (1, 0));
-        assert_eq!(separateurs(&[true, false, false, true]), (2, 1));
-        assert_eq!(separateurs(&[false, false]), (0, 0));
+    fn an_absent_section_leaves_no_line_at_the_start_the_end_or_doubled() {
+        assert_eq!(separators(&[false, true, false]), (1, 0));
+        assert_eq!(separators(&[true, false, false, true]), (2, 1));
+        assert_eq!(separators(&[false, false]), (0, 0));
     }
 
     #[test]
-    fn une_section_absente_n_appelle_pas_son_contenu() {
-        let context = contexte();
-        let mut appels = 0;
-        image_de(&context, egui::vec2(300.0, 300.0), Vec::new(), |ui| {
-            appels = 0;
+    fn an_absent_section_does_not_call_its_content() {
+        let context = context();
+        let mut calls = 0;
+        frame_of(&context, egui::vec2(300.0, 300.0), Vec::new(), |ui| {
+            calls = 0;
             let mut sections = MenuSections::new();
-            sections.section(ui, false, |_| appels += 1);
-            sections.section(ui, true, |_| appels += 1);
+            sections.section(ui, false, |_| calls += 1);
+            sections.section(ui, true, |_| calls += 1);
         });
-        assert_eq!(appels, 1);
+        assert_eq!(calls, 1);
     }
 }

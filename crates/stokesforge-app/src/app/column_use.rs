@@ -1,10 +1,10 @@
-//! La fenêtre « colonne utilisée par un calcul » (#306), ouverte **après** la
-//! suppression de colonnes (ou d'une feuille, d'un classeur) que lit une
-//! colonne à formule ou un calcul d'analyse.
+//! The "column used by a calculation" window (#306), opened **after** the
+//! deletion of columns (or of a sheet, a workbook) that a formula column or an
+//! analysis calculation reads.
 //!
-//! Lecture seule (`[Undo] [Close]`, S-F2) : `Close` ne fait rien, `Undo`
-//! annule le geste. Le geste n'est jamais bloqué d'avance. La liste vient de
-//! `AppState::column_use_lines`, calculée avant la suppression.
+//! Read-only (`[Undo] [Close]`, S-F2): `Close` does nothing, `Undo` undoes the
+//! gesture. The gesture is never blocked beforehand. The list comes from
+//! `AppState::column_use_lines`, computed before the deletion.
 
 use eframe::egui;
 
@@ -14,7 +14,7 @@ use super::dialogs::{
 use stokesforge_app_state::state::{Action, AppState, FullColumnsCopy};
 use stokesforge_app_state::tr;
 
-/// Peint la fenêtre tant qu'elle est ouverte, et pousse la réponse.
+/// Paints the window while it is open, and pushes the answer.
 pub(super) fn column_use_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     let Some(lines) = state.column_use_lines() else {
         return;
@@ -51,9 +51,9 @@ pub(super) fn column_use_window(ctx: &egui::Context, state: &AppState, actions: 
     }
 }
 
-/// Peint la question de Ctrl+Maj+C tant qu'elle attend (colonnes à formule),
-/// et pousse la réponse : `[Values] [Cancel] [Formulas]`, Formulas par défaut
-/// (le comportement d'avant la question).
+/// Paints the Ctrl+Shift+C question while it is pending (formula columns),
+/// and pushes the answer: `[Values] [Cancel] [Formulas]`, Formulas by default
+/// (the behavior before the question existed).
 pub(super) fn full_copy_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     if state.pending_full_copy().is_none() {
         return;

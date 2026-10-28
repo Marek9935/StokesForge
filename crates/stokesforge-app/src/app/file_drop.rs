@@ -1,29 +1,29 @@
-//! Dépôt de fichiers sur la fenêtre : l'emplacement du dépôt de l'image vit
-//! dans la mémoire temporaire d'egui (un par viewport). La racine ou une
-//! fenêtre détachée l'ouvre en début d'image ([`begin_file_drop`]), le
-//! classeur survolé le réclame en se peignant ([`claim_file_drop`]), et il
-//! devient une [`Action::DropFiles`] en fin d'image ([`finish_file_drop`]).
-//! Un projet déposé s'ouvre dans un second processus
-//! ([`open_project_in_new_window`]) ; les fichiers importés rejoignent la liste
-//! des récents ([`remember_recent_imports`]).
+//! File drop on the window: the slot for the frame's drop lives in egui's
+//! temporary memory (one per viewport). The root or a detached window opens it
+//! at the start of the frame ([`begin_file_drop`]), the hovered workbook claims
+//! it while painting ([`claim_file_drop`]), and it becomes an
+//! [`Action::DropFiles`] at the end of the frame ([`finish_file_drop`]).
+//! A dropped project opens in a second process
+//! ([`open_project_in_new_window`]); imported files join the recent list
+//! ([`remember_recent_imports`]).
 //!
-//! Sorti d'`app.rs` tel quel (#121).
+//! Moved out of `app.rs` as is (#121).
 
 use eframe::egui;
 use stokesforge_core::NodeId;
 
 use stokesforge_app_state::state::Action;
 
-/// Inscrit `paths` aux fichiers d'import récents (dossier de config). Un échec
-/// d'écriture est sans conséquence : la liste est un confort.
+/// Records `paths` in the recent import files (config folder). A write failure
+/// is harmless: the list is a convenience.
 pub(super) fn remember_recent_imports(paths: &[std::path::PathBuf]) {
     let mut recent = stokesforge_import::RecentFiles::load();
     recent.record(paths);
     let _ = recent.save();
 }
 
-/// Emplacement (mémoire temporaire d'egui) des fichiers déposés cette image :
-/// `book` est renseigné par le classeur sous le curseur, s'il y en a un.
+/// Slot (egui's temporary memory) for the files dropped this frame: `book` is
+/// filled in by the workbook under the cursor, if there is one.
 #[derive(Clone)]
 struct FileDropSlot {
     paths: Vec<std::path::PathBuf>,
@@ -31,15 +31,15 @@ struct FileDropSlot {
 }
 
 fn file_drop_slot_id(ctx: &egui::Context) -> egui::Id {
-    // La mémoire temporaire est commune aux viewports : un dépôt différé
-    // ne doit ni écraser ni consommer celui de la fenêtre principale.
+    // Temporary memory is shared by the viewports: a deferred drop must
+    // neither overwrite nor consume the one of the main window.
     egui::Id::new("stokesforge_file_drop").with(ctx.viewport_id())
 }
 
-/// Ouvre l'emplacement du dépôt de l'image et peint le retour visuel : un
-/// contour autour de l'application tant qu'un fichier survole la fenêtre
-/// (destination « nouveau classeur » ; un classeur survolé se surligne
-/// lui-même, voir [`claim_file_drop`]).
+/// Opens the frame's drop slot and paints the visual feedback: an outline
+/// around the application while a file hovers over the window (destination
+/// "new workbook"; a hovered workbook highlights itself, see
+/// [`claim_file_drop`]).
 pub(super) fn begin_file_drop(ctx: &egui::Context) {
     let slot_id = file_drop_slot_id(ctx);
     let (paths, hovering) = ctx.input(|input| {
@@ -75,10 +75,10 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
     });
 }
 
-/// Appelé par le classeur en train de se peindre : surligne sa zone quand un
-/// fichier la survole, et réclame le dépôt de l'image s'il a eu lieu sous le
-/// curseur (`rect_contains_pointer` tient compte de l'empilement des
-/// fenêtres : seule la fenêtre du dessus répond).
+/// Called by the workbook while it paints: highlights its area when a file
+/// hovers over it, and claims the frame's drop if it happened under the cursor
+/// (`rect_contains_pointer` accounts for window stacking: only the top window
+/// answers).
 pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
     let slot_id = file_drop_slot_id(ui.ctx());
     let rect = ui.max_rect();
@@ -108,7 +108,7 @@ pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
     });
 }
 
-/// Transforme le dépôt de l'image en [`Action::DropFiles`].
+/// Turns the frame's drop into an [`Action::DropFiles`].
 pub(super) fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
     let slot_id = file_drop_slot_id(ctx);
     let slot = ctx.data_mut(|data| {
@@ -122,17 +122,14 @@ pub(super) fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
     })
 }
 
-/// Ouvre `path` dans une nouvelle fenêtre StokesForge : un second processus de ce
-/// même binaire (`stokesforge-app <chemin>`). Un échec de lancement n'est que
-/// journalisé — un dépôt raté ne doit rien casser.
+/// Opens `path` in a new StokesForge window: a second process of this same
+/// binary (`stokesforge-app <path>`). A launch failure is only logged — a
+/// failed drop must break nothing.
 pub(super) fn open_project_in_new_window(path: &std::path::Path) {
     let spawned =
         std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg(path).spawn());
     if let Err(err) = spawned {
-        eprintln!(
-            "[stokesforge-app] ouverture de {} impossible : {err}",
-            path.display()
-        );
+        eprintln!("[stokesforge-app] cannot open {}: {err}", path.display());
     }
 }
 
@@ -152,12 +149,12 @@ mod tests {
         }
     }
 
-    fn fichier(name: &str) -> egui::DroppedFileHandle {
+    fn dropped_file(name: &str) -> egui::DroppedFileHandle {
         std::sync::Arc::new(FakeFile(name.into()))
     }
 
-    /// Ce qu'une image injecte : pointeur, fichiers lâchés, fichiers qui
-    /// survolent la fenêtre.
+    /// What a frame injects: pointer, dropped files, files hovering over the
+    /// window.
     struct Image {
         pointer: egui::Pos2,
         dropped: Vec<egui::DroppedFileHandle>,
@@ -180,9 +177,9 @@ mod tests {
         input
     }
 
-    /// Un faux classeur `book` posé en (`at`, 300 × 300), qui réclame le dépôt
-    /// en se peignant comme le fait le vrai.
-    fn classeur(ctx: &egui::Context, name: &str, at: egui::Pos2, book: NodeId) {
+    /// A fake workbook `book` placed at (`at`, 300 × 300), which claims the
+    /// drop while painting like the real one does.
+    fn workbook(ctx: &egui::Context, name: &str, at: egui::Pos2, book: NodeId) {
         egui::Area::new(egui::Id::new(name))
             .fixed_pos(at)
             .show(ctx, |ui| {
@@ -193,21 +190,21 @@ mod tests {
             });
     }
 
-    /// Issue #8 : un fichier lâché sur un classeur est réclamé par ce classeur
-    /// (et seulement lui), un fichier lâché ailleurs n'a pas de classeur, et un
-    /// survol sans dépôt n'émet aucune action. Sans fenêtre : les événements
-    /// `hovered_files`/`dropped_files` sont injectés dans l'entrée d'egui.
+    /// Issue #8: a file dropped on a workbook is claimed by that workbook (and
+    /// only it), a file dropped elsewhere has no workbook, and a hover without
+    /// a drop emits no action. Without a window: the `hovered_files` /
+    /// `dropped_files` events are injected into egui's input.
     #[test]
-    fn un_depot_est_reclame_par_le_classeur_sous_le_curseur() {
+    fn a_drop_is_claimed_by_the_workbook_under_the_cursor() {
         let book = NodeId::from_raw(42);
         let context = egui::Context::default();
-        // Un classeur occupe (100,100)-(400,400) ; le curseur est dedans ou dehors.
+        // A workbook occupies (100,100)-(400,400); the cursor is inside or outside.
         let frame = |image: Image| -> (Option<Action>, egui::FullOutput) {
             let mut result = None;
             let mut output = context.run_ui(input(&image), |ui| {
                 let ctx = ui.ctx().clone();
                 begin_file_drop(&ctx);
-                classeur(&ctx, "faux_classeur", egui::pos2(100.0, 100.0), book);
+                workbook(&ctx, "fake_workbook", egui::pos2(100.0, 100.0), book);
                 result = finish_file_drop(&ctx);
             });
             output.textures_delta.clear();
@@ -216,24 +213,24 @@ mod tests {
         let on_book = egui::pos2(200.0, 200.0);
         let image = |pointer, dropped: &[&str], hovered| Image {
             pointer,
-            dropped: dropped.iter().map(|name| fichier(name)).collect(),
+            dropped: dropped.iter().map(|name| dropped_file(name)).collect(),
             hovered,
         };
-        // Deux images de chauffe (l'Area n'est interactive qu'après la première).
+        // Two warm-up frames (the Area is interactive only after the first).
         frame(image(on_book, &[], false));
         frame(image(on_book, &[], false));
-        assert_eq!(frame(image(on_book, &[], false)).0, None, "pas de dépôt");
+        assert_eq!(frame(image(on_book, &[], false)).0, None, "no drop");
         assert_eq!(
             frame(image(on_book, &[], true)).0,
             None,
-            "un survol sans dépôt n'émet rien"
+            "a hover without a drop emits nothing"
         );
-        let on_book = frame(image(on_book, &["mesure.csv"], false)).0;
+        let on_book = frame(image(on_book, &["measurement.csv"], false)).0;
         assert!(
             matches!(&on_book, Some(Action::DropFiles { target_book: Some(b), paths }) if *b == book && paths.len() == 1),
             "{on_book:?}"
         );
-        let elsewhere = frame(image(egui::pos2(700.0, 500.0), &["mesure.csv"], false)).0;
+        let elsewhere = frame(image(egui::pos2(700.0, 500.0), &["measurement.csv"], false)).0;
         assert!(
             matches!(
                 &elsewhere,
@@ -246,12 +243,12 @@ mod tests {
         );
     }
 
-    /// Le survol d'un fichier se voit : un contour autour de la fenêtre
-    /// (destination « nouveau classeur »), un second autour du classeur
-    /// survolé, **du même trait** que le graphe survolé par des colonnes
-    /// (`theme::drop_stroke`, #170 point 2). Sans survol, aucun contour.
+    /// A file hover is visible: an outline around the window (destination
+    /// "new workbook"), a second one around the hovered workbook, **with the
+    /// same stroke** as the graph hovered by columns (`theme::drop_stroke`,
+    /// #170 point 2). Without a hover, no outline.
     #[test]
-    fn le_survol_d_un_fichier_entoure_la_fenetre_et_le_classeur_survole() {
+    fn a_file_hover_outlines_the_window_and_the_hovered_workbook() {
         let book = NodeId::from_raw(42);
         let context = egui::Context::default();
         let strokes = |pointer: egui::Pos2, hovered: bool| -> Vec<(f32, [u8; 3])> {
@@ -265,7 +262,7 @@ mod tests {
                 let mut output = context.run_ui(input(&image), |ui| {
                     let ctx = ui.ctx().clone();
                     begin_file_drop(&ctx);
-                    classeur(&ctx, "faux_classeur", egui::pos2(100.0, 100.0), book);
+                    workbook(&ctx, "fake_workbook", egui::pos2(100.0, 100.0), book);
                     finish_file_drop(&ctx);
                 });
                 output.textures_delta.clear();
@@ -274,7 +271,7 @@ mod tests {
                     .iter()
                     .filter_map(|painted| match &painted.shape {
                         egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
-                            // Sans l'alpha : la fenêtre du faux classeur s'ouvre en fondu.
+                            // Without the alpha: the fake workbook's window opens with a fade.
                             let [r, g, b, _] = rect.stroke.color.to_array();
                             Some((rect.stroke.width, [r, g, b]))
                         }
@@ -289,30 +286,30 @@ mod tests {
         let expected = (stroke.width, [r, g, b]);
         assert!(
             strokes(egui::pos2(200.0, 200.0), false).is_empty(),
-            "sans survol, rien"
+            "without a hover, nothing"
         );
         assert_eq!(
             strokes(egui::pos2(700.0, 500.0), true),
             vec![expected],
-            "la fenêtre seule, exactement le trait de dépôt"
+            "the window alone, exactly the drop stroke"
         );
-        // Le classeur survolé s'ouvre en fondu : sa teinte n'est pas encore
-        // pleine, on vérifie l'épaisseur et la dominante verte.
+        // The hovered workbook opens with a fade: its tint is not full yet, so
+        // the width and the green dominance are checked.
         let both = strokes(egui::pos2(200.0, 200.0), true);
-        assert_eq!(both.len(), 2, "la fenêtre et le classeur survolé");
+        assert_eq!(both.len(), 2, "the window and the hovered workbook");
         for (width, [r, g, b]) in both {
-            assert_eq!(width, stroke.width, "même épaisseur que le graphe");
-            assert!(g > r && g > b, "vert de l'accent, pas le bleu d'avant");
+            assert_eq!(width, stroke.width, "same width as the graph");
+            assert!(g > r && g > b, "accent green, not the earlier blue");
         }
     }
 
-    /// Deux classeurs superposés : le dépôt va à celui du dessus, seul à
-    /// répondre au pointeur (`rect_contains_pointer` tient compte de
-    /// l'empilement). Et si deux classeurs le réclament, le premier le garde.
+    /// Two stacked workbooks: the drop goes to the one on top, the only one to
+    /// answer the pointer (`rect_contains_pointer` accounts for stacking). And
+    /// if two workbooks claim it, the first keeps it.
     #[test]
-    fn le_depot_va_au_classeur_du_dessus_et_au_premier_qui_le_reclame() {
-        let dessous = NodeId::from_raw(1);
-        let dessus = NodeId::from_raw(2);
+    fn the_drop_goes_to_the_top_workbook_and_to_the_first_to_claim_it() {
+        let below = NodeId::from_raw(1);
+        let above = NodeId::from_raw(2);
         let context = egui::Context::default();
         let frame = |dropped: Vec<egui::DroppedFileHandle>| -> Option<Action> {
             let image = Image {
@@ -324,9 +321,9 @@ mod tests {
             let mut output = context.run_ui(input(&image), |ui| {
                 let ctx = ui.ctx().clone();
                 begin_file_drop(&ctx);
-                // Peint en second, le classeur « dessus » est au premier plan.
-                classeur(&ctx, "dessous", egui::pos2(100.0, 100.0), dessous);
-                classeur(&ctx, "dessus", egui::pos2(200.0, 200.0), dessus);
+                // Painted second, the "above" workbook is in the foreground.
+                workbook(&ctx, "below", egui::pos2(100.0, 100.0), below);
+                workbook(&ctx, "above", egui::pos2(200.0, 200.0), above);
                 result = finish_file_drop(&ctx);
             });
             output.textures_delta.clear();
@@ -335,42 +332,42 @@ mod tests {
         frame(Vec::new());
         frame(Vec::new());
         assert_eq!(
-            frame(vec![fichier("mesure.csv")]),
+            frame(vec![dropped_file("measurement.csv")]),
             Some(Action::DropFiles {
-                paths: vec!["mesure.csv".into()],
-                target_book: Some(dessus),
+                paths: vec!["measurement.csv".into()],
+                target_book: Some(above),
             })
         );
 
-        // Deux réclamations dans la même zone (aucun empilement entre elles,
-        // contexte neuf sans les fenêtres d'avant) : la première l'emporte.
+        // Two claims in the same area (no stacking between them, fresh context
+        // without the earlier windows): the first one wins.
         let context = egui::Context::default();
         let image = Image {
             pointer: egui::pos2(200.0, 200.0),
-            dropped: vec![fichier("mesure.csv")],
+            dropped: vec![dropped_file("measurement.csv")],
             hovered: false,
         };
         let mut result = None;
         let mut output = context.run_ui(input(&image), |ui| {
             begin_file_drop(ui.ctx());
-            claim_file_drop(ui, dessous);
-            claim_file_drop(ui, dessus);
+            claim_file_drop(ui, below);
+            claim_file_drop(ui, above);
             result = finish_file_drop(ui.ctx());
         });
         output.textures_delta.clear();
         assert_eq!(
             result,
             Some(Action::DropFiles {
-                paths: vec!["mesure.csv".into()],
-                target_book: Some(dessous),
+                paths: vec!["measurement.csv".into()],
+                target_book: Some(below),
             })
         );
     }
 
-    /// Un dépôt ne sert qu'une fois : `finish_file_drop` le consomme, et une
-    /// image sans fichier efface un dépôt qu'on n'aurait pas consommé.
+    /// A drop serves only once: `finish_file_drop` consumes it, and a frame
+    /// without a file erases a drop that was not consumed.
     #[test]
-    fn un_depot_ne_sert_qu_une_fois_et_ne_survit_pas_a_l_image_suivante() {
+    fn a_drop_serves_only_once_and_does_not_survive_the_next_frame() {
         let context = egui::Context::default();
         let run = |dropped: Vec<egui::DroppedFileHandle>, finish: bool| -> Option<Action> {
             let image = Image {
@@ -383,16 +380,16 @@ mod tests {
                 begin_file_drop(ui.ctx());
                 if finish {
                     result = finish_file_drop(ui.ctx());
-                    // Un second appel dans la même image ne rejoue rien.
+                    // A second call in the same frame replays nothing.
                     assert_eq!(finish_file_drop(ui.ctx()), None);
                 }
             });
             output.textures_delta.clear();
             result
         };
-        assert!(run(vec![fichier("a.csv")], true).is_some());
-        // Dépôt non consommé, puis une image sans fichier : il est oublié.
-        run(vec![fichier("b.csv")], false);
+        assert!(run(vec![dropped_file("a.csv")], true).is_some());
+        // Unconsumed drop, then a frame without a file: it is forgotten.
+        run(vec![dropped_file("b.csv")], false);
         let mut output = context.run_ui(
             input(&Image {
                 pointer: egui::pos2(10.0, 10.0),
@@ -404,7 +401,7 @@ mod tests {
                 assert_eq!(
                     finish_file_drop(ui.ctx()),
                     None,
-                    "le dépôt d'avant ne revient pas"
+                    "the earlier drop does not come back"
                 );
             },
         );

@@ -1,8 +1,8 @@
-//! Feuille transposée liée (#253) : la bande qui la signale en haut de la
-//! grille, avec son état (pas à jour, valeurs modifiées) et le bouton qui la
-//! remet à jour, et la confirmation qui précède l'écrasement de valeurs
-//! éditées. La création et le calcul sont dans `stokesforge-app-state`
-//! (`state/transpose.rs`) ; ici, seulement la peinture et les gestes.
+//! Linked transposed sheet (#253): the banner that flags it at the top of the
+//! grid, with its state (out of date, values modified) and the button that
+//! brings it up to date, and the confirmation that comes before overwriting
+//! edited values. Creation and computation live in `stokesforge-app-state`
+//! (`state/transpose.rs`); here, only painting and gestures.
 
 use eframe::egui;
 use stokesforge_core::NodeId;
@@ -13,12 +13,12 @@ use crate::theme;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// Hauteur de la bande, la même que celle des onglets de feuille.
+/// Height of the banner, the same as the sheet tabs.
 pub(super) const BANNER_HEIGHT: f32 = TAB_STRIP_HEIGHT;
 
-/// La bande de `sheet` si c'est une feuille transposée liée : d'où elle vient,
-/// ce qui a changé, et Recalculate (Relink quand des valeurs ont été éditées).
-/// L'appelant a réservé sa place quand `state.transpose_info(sheet)` existe.
+/// The banner of `sheet` if it is a linked transposed sheet: where it comes
+/// from, what changed, and Recalculate (Relink when values were edited).
+/// The caller has reserved its room when `state.transpose_info(sheet)` exists.
 pub(super) fn transpose_banner(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -60,8 +60,8 @@ pub(super) fn transpose_banner(
     });
 }
 
-/// Écraser des valeurs éditées dans les colonnes liées : confirmation avant
-/// (Ctrl+Z rattrape le geste, mais on prévient d'abord).
+/// Overwriting edited values in the linked columns: confirmation first
+/// (Ctrl+Z undoes the gesture, but the user is warned first).
 pub(super) fn transpose_relink_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -99,29 +99,27 @@ pub(super) fn transpose_relink_window(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{
-        cliquer, contexte, image, image_de, painted, texte_exact, textes,
-    };
+    use super::super::test_support::{click, context, frame_of, image, painted, text_exact, texts};
     use super::*;
     use stokesforge_core::{Column, ColumnMeta, Project, ValueBlock, TRANSPOSE_MARK};
     use stokesforge_session::Session;
 
-    /// Le nom « Sheet1ᵀ » s'écrit avec un caractère que la police embarquée
-    /// doit porter : sinon un carré vide au milieu de l'interface.
+    /// The name "Sheet1ᵀ" is written with a character the embedded font must
+    /// carry: otherwise an empty square appears in the middle of the interface.
     #[test]
-    fn la_police_embarquee_affiche_le_t_en_exposant() {
-        let ctx = contexte();
-        image_de(&ctx, egui::vec2(100.0, 100.0), Vec::new(), |_| {});
-        // La police proportionnelle porte les noms de feuille (onglets,
-        // gestionnaires, titres). La police à chasse fixe (console) ne le porte pas.
+    fn the_embedded_font_shows_the_superscript_t() {
+        let ctx = context();
+        frame_of(&ctx, egui::vec2(100.0, 100.0), Vec::new(), |_| {});
+        // The proportional font carries sheet names (tabs, managers, titles).
+        // The monospace font (console) does not carry it.
         let has = ctx
             .fonts_mut(|fonts| fonts.has_glyph(&egui::FontId::proportional(14.0), TRANSPOSE_MARK));
-        assert!(has, "pas de glyphe pour {TRANSPOSE_MARK}");
+        assert!(has, "no glyph for {TRANSPOSE_MARK}");
     }
 
-    /// Une feuille source à x' et sa transposée ; `source` est ensuite modifiée
-    /// pour la périmer.
-    fn banc() -> (Session, AppState, NodeId, NodeId, NodeId) {
+    /// A source sheet with x' and its transpose; `source` is then modified to
+    /// make it out of date.
+    fn bench() -> (Session, AppState, NodeId, NodeId, NodeId) {
         let mut project = Project::new("T").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
         let source = project.tree().children(book).unwrap()[0];
@@ -144,15 +142,15 @@ mod tests {
     }
 
     #[test]
-    fn la_bande_dit_l_origine_et_n_offre_recalculer_que_si_besoin() {
-        let (session, mut state, _source, sheet, first) = banc();
-        let ctx = contexte();
+    fn the_banner_states_the_origin_and_offers_recalculate_only_when_needed() {
+        let (session, mut state, _source, sheet, first) = bench();
+        let ctx = context();
         let mut actions = Vec::new();
-        let output = image_de(&ctx, egui::vec2(700.0, 60.0), Vec::new(), |ui| {
+        let output = frame_of(&ctx, egui::vec2(700.0, 60.0), Vec::new(), |ui| {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
         assert!(painted(&output, "Transposed from Sheet1"));
-        assert!(!painted(&output, "Recalculate"), "à jour : pas de bouton");
+        assert!(!painted(&output, "Recalculate"), "up to date: no button");
 
         session
             .handle()
@@ -167,18 +165,18 @@ mod tests {
         let shapes = image(&ctx, Vec::new(), |ui| {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
-        let found = textes(&shapes);
-        texte_exact(&found, &tr!("transpose-state-stale"));
-        let button = texte_exact(&found, &tr!("transpose-recalculate")).centre;
-        cliquer(&ctx, button, egui::PointerButton::Primary, |ui| {
+        let found = texts(&shapes);
+        text_exact(&found, &tr!("transpose-state-stale"));
+        let button = text_exact(&found, &tr!("transpose-recalculate")).center;
+        click(&ctx, button, egui::PointerButton::Primary, |ui| {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
         assert_eq!(actions, vec![Action::RecalculateTranspose { sheet }]);
     }
 
     #[test]
-    fn une_valeur_editee_offre_relier_de_nouveau() {
-        let (session, mut state, _source, sheet, _first) = banc();
+    fn an_edited_value_offers_to_relink() {
+        let (session, mut state, _source, sheet, _first) = bench();
         let row = state.tree().children(sheet).unwrap()[1];
         session
             .handle()
@@ -190,29 +188,27 @@ mod tests {
             })
             .unwrap();
         state.refresh();
-        let ctx = contexte();
+        let ctx = context();
         let mut actions = Vec::new();
         let shapes = image(&ctx, Vec::new(), |ui| {
             transpose_banner(ui, &state, sheet, &mut actions);
         });
-        let found = textes(&shapes);
-        texte_exact(&found, &tr!("transpose-state-modified"));
-        texte_exact(&found, &tr!("transpose-relink"));
-        assert!(found
-            .iter()
-            .all(|t| t.texte != tr!("transpose-recalculate")));
+        let found = texts(&shapes);
+        text_exact(&found, &tr!("transpose-state-modified"));
+        text_exact(&found, &tr!("transpose-relink"));
+        assert!(found.iter().all(|t| t.text != tr!("transpose-recalculate")));
     }
 
     #[test]
-    fn la_confirmation_ne_s_ouvre_que_sur_demande() {
-        let (_session, mut state, _source, sheet, _first) = banc();
-        let ctx = contexte();
+    fn the_confirmation_opens_only_on_request() {
+        let (_session, mut state, _source, sheet, _first) = bench();
+        let ctx = context();
         let mut actions = Vec::new();
-        let output = image_de(&ctx, egui::vec2(900.0, 600.0), Vec::new(), |ui| {
+        let output = frame_of(&ctx, egui::vec2(900.0, 600.0), Vec::new(), |ui| {
             transpose_relink_window(ui.ctx(), &state, &mut actions);
         });
         assert!(!painted(&output, &tr!("transpose-relink-title")));
-        // Édite une valeur liée puis demande la remise à jour.
+        // Edits a linked value, then asks for the update.
         let row = state.tree().children(sheet).unwrap()[1];
         _session
             .handle()
@@ -230,10 +226,10 @@ mod tests {
             let shapes = image(&ctx, Vec::new(), |ui| {
                 transpose_relink_window(ui.ctx(), &state, &mut actions);
             });
-            shown |= textes(&shapes)
+            shown |= texts(&shapes)
                 .iter()
-                .any(|t| t.texte == tr!("transpose-relink-title"));
+                .any(|t| t.text == tr!("transpose-relink-title"));
         }
-        assert!(shown, "la confirmation s'ouvre");
+        assert!(shown, "the confirmation opens");
     }
 }

@@ -1,5 +1,5 @@
-//! Garde-fous #100 : les panneaux gardent leur état de vue en changeant de
-//! présentation ; les callbacks différés lisent les publications de la racine.
+//! Guards #100: the panels keep their view state while changing
+//! presentation; the deferred callbacks read the root's publications.
 
 use crate::theme;
 use std::cell::RefCell;
@@ -110,9 +110,9 @@ impl Panel {
 }
 
 #[test]
-fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
+fn collapsed_strips_center_the_icons_and_the_title_in_their_thickness() {
     for panel in [Panel::Project, Panel::Object, Panel::Script] {
-        let session = Session::spawn(Project::new("Bandes").unwrap(), None).unwrap();
+        let session = Session::spawn(Project::new("Strips").unwrap(), None).unwrap();
         let mut app = StokesForgeApp::new(AppState::new(session.handle(), String::new()).unwrap());
         panel.set_collapsed(&mut app, true);
         app.state.set_object_manager_open_for_test(true);
@@ -129,7 +129,7 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
         for icon in icons {
             assert!(
                 (icon[axis] - strip.center()[axis]).abs() < 0.1,
-                "{panel:?} : {icon:?} / {strip:?}"
+                "{panel:?}: {icon:?} / {strip:?}"
             );
         }
         let title = output
@@ -152,16 +152,16 @@ fn les_bandes_repliees_centrent_les_icones_et_le_titre_dans_leur_epaisseur() {
         };
         assert!(
             center.distance(expected) < 0.1,
-            "titre centré : {center:?} / {expected:?}"
+            "title centered: {center:?} / {expected:?}"
         );
         session.shutdown().unwrap();
     }
 }
 
-/// #142 : les prises de console déployée restent voisines à gauche, et la
-/// bande repliée se sépare de l'espace de travail par le même trait que PM/OM.
+/// #142: the expanded console's handles stay neighbors on the left, and the
+/// collapsed strip separates from the workspace by the same stroke as PM/OM.
 #[test]
-fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
+fn the_console_groups_its_handles_on_the_left_and_delimits_the_top_of_its_strip() {
     for width in [320.0, 1200.0] {
         for collapsed in [true, false] {
             let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
@@ -193,11 +193,11 @@ fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
             } else {
                 super::window_chrome::HEADER_ACTION_WIDTH
             };
-            assert!(icons[0].x < rect.left() + cell, "chevron à gauche");
+            assert!(icons[0].x < rect.left() + cell, "chevron on the left");
             if !collapsed {
                 assert!(
                     (icons[1].x - icons[0].x - cell).abs() < 0.1,
-                    "Détacher immédiatement après le chevron : {icons:?}"
+                    "Detach right after the chevron: {icons:?}"
                 );
                 assert!((icons[0].y - icons[1].y).abs() < 0.1);
             }
@@ -208,7 +208,7 @@ fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
                     .widgets
                     .noninteractive
                     .bg_stroke;
-                assert!(stroke.width > 0.0, "séparation visible");
+                assert!(stroke.width > 0.0, "visible separation");
                 assert!(
                     output.shapes.iter().any(|shape| {
                         matches!(&shape.shape, egui::Shape::LineSegment { points, stroke: painted }
@@ -218,7 +218,7 @@ fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
                         && (points[0].y - rect.top() - stroke.width / 2.0).abs() < 0.1
                         && (points[1].y - points[0].y).abs() < 0.1)
                     }),
-                    "trait supérieur sur toute la largeur de la bande"
+                    "top stroke over the whole width of the strip"
                 );
             }
             session.shutdown().unwrap();
@@ -227,9 +227,9 @@ fn la_console_groupe_ses_prises_a_gauche_et_delimite_le_haut_de_sa_bande() {
 }
 
 #[test]
-fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
+fn collapsing_and_expanding_by_click_keeps_the_custom_dimension() {
     for panel in [Panel::Project, Panel::Object, Panel::Script] {
-        let session = Session::spawn(Project::new("Panneaux").unwrap(), None).unwrap();
+        let session = Session::spawn(Project::new("Panels").unwrap(), None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let app = RefCell::new(StokesForgeApp::new(state));
         panel.set_collapsed(&mut app.borrow_mut(), false);
@@ -237,8 +237,8 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
             .state
             .set_object_manager_open_for_test(true);
         let ctx = context();
-        // Une taille choisie par l'utilisateur, distincte du défaut, est le
-        // témoin : restaurer simplement la taille par défaut ne suffit pas.
+        // A size chosen by the user, distinct from the default, is the
+        // witness: simply restoring the default size is not enough.
         let size = match panel {
             Panel::Script => egui::vec2(1200.0, 310.0),
             _ => egui::vec2(370.0, 800.0),
@@ -262,8 +262,8 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
             .unwrap()
             .size();
         match panel {
-            Panel::Script => assert_eq!(before.y, 310.0, "témoin : hauteur personnalisée"),
-            _ => assert_eq!(before.x, 370.0, "témoin : largeur personnalisée"),
+            Panel::Script => assert_eq!(before.y, 310.0, "witness: custom height"),
+            _ => assert_eq!(before.x, 370.0, "witness: custom width"),
         }
         click_at(
             &ctx,
@@ -274,7 +274,7 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
         );
         assert!(
             panel.collapsed(&app.borrow()),
-            "{panel:?} se replie par son chevron"
+            "{panel:?} collapses by its chevron"
         );
         let collapsed = paint(&ctx, Vec::new());
         let strip = PanelState::load(&ctx, egui::Id::new(panel.collapsed_id()))
@@ -298,7 +298,7 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
         );
         assert!(
             !panel.collapsed(&app.borrow()),
-            "{panel:?} se déploie par son chevron"
+            "{panel:?} expands by its chevron"
         );
         paint(&ctx, Vec::new());
         assert_eq!(
@@ -312,7 +312,7 @@ fn replier_et_deployer_par_clic_conserve_la_dimension_personnalisee() {
 }
 
 #[test]
-fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
+fn panel_headers_have_only_collapse_and_detach_or_reattach() {
     for (placement, collapsed, count) in [
         (PanelPlacement::Left, false, 2),
         (PanelPlacement::Left, true, 1),
@@ -328,7 +328,7 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
             let mut output = ctx.run_ui(input(events), |ui| {
                 actions
                     .borrow_mut()
-                    .push(panel_header(ui, "Panneau", placement, collapsed));
+                    .push(panel_header(ui, "Panel", placement, collapsed));
             });
             output.textures_delta.clear();
             output
@@ -336,7 +336,7 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
         paint(&ctx, Vec::new());
         let output = paint(&ctx, Vec::new());
         let icons = find_icon_centers(&output.shapes);
-        assert_eq!(icons.len(), count, "aucune icône Fermer ou Maximiser");
+        assert_eq!(icons.len(), count, "no Close or Maximize icon");
         for (index, icon) in icons.into_iter().enumerate() {
             let before = actions.borrow().len();
             click_at(&ctx, icon, egui::Modifiers::NONE, paint);
@@ -346,7 +346,7 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
             assert_eq!(
                 actions[before..].iter().any(|action| action.detach),
                 detach,
-                "le côté et l'orientation déterminent l'ordre des boutons"
+                "the side and the orientation determine the order of the buttons"
             );
             assert_eq!(
                 actions[before..]
@@ -356,8 +356,8 @@ fn les_entetes_de_panneau_n_ont_que_replier_et_detacher_ou_rattacher() {
             );
         }
         if collapsed {
-            // L'ancienne cellule de Détacher est désormais du titre : un
-            // clic ici ne doit déclencher ni détachement ni déploiement.
+            // The former Detach cell is now title: a
+            // click here must trigger neither detaching nor expanding.
             let hidden = if placement == PanelPlacement::Bottom {
                 find_icon_centers(&output.shapes)[0] + egui::vec2(crate::icons::ICON_SIZE, 0.0)
             } else {
@@ -400,9 +400,9 @@ fn child_input(id: egui::ViewportId, events: Vec<egui::Event>, close: bool) -> e
 }
 
 #[test]
-fn detacher_par_l_icone_puis_rattacher_par_clic_ou_fermeture_os() {
+fn detaching_by_the_icon_then_reattaching_by_click_or_os_close() {
     for panel in [Panel::Project, Panel::Object, Panel::Script] {
-        let session = Session::spawn(Project::new("Panneaux").unwrap(), None).unwrap();
+        let session = Session::spawn(Project::new("Panels").unwrap(), None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let app = RefCell::new(StokesForgeApp::new(state));
         app.borrow_mut()
@@ -416,8 +416,8 @@ fn detacher_par_l_icone_puis_rattacher_par_clic_ou_fermeture_os() {
             output
         };
         paint_root(&ctx, Vec::new());
-        // Le bouton maison et la croix du compositeur suivent deux chemins
-        // d'entrée distincts, qui doivent finir dans le même panneau attaché.
+        // The home-made button and the compositor's cross follow two distinct
+        // input paths, which must end up in the same attached panel.
         for close_os in [false, true] {
             let attached = paint_root(&ctx, Vec::new());
             assert!(!panel.detached(&app.borrow()));
@@ -428,13 +428,16 @@ fn detacher_par_l_icone_puis_rattacher_par_clic_ou_fermeture_os() {
                 egui::Modifiers::NONE,
                 paint_root,
             );
-            assert!(panel.detached(&app.borrow()), "{panel:?} : l'icône détache");
+            assert!(
+                panel.detached(&app.borrow()),
+                "{panel:?}: the icon detaches"
+            );
             let registered = paint_root(&ctx, Vec::new());
             let id = panel.viewport();
             let callback = registered.viewport_output[&id]
                 .viewport_ui_cb
                 .clone()
-                .expect("callback différé du panneau");
+                .expect("deferred callback of the panel");
             assert_eq!(
                 registered.viewport_output[&id].builder.decorations,
                 Some(false)
@@ -456,27 +459,27 @@ fn detacher_par_l_icone_puis_rattacher_par_clic_ou_fermeture_os() {
                 let icons = find_icon_centers(&detached.shapes);
                 click_at(
                     &ctx,
-                    *icons.last().expect("icône Rattacher"),
+                    *icons.last().expect("Reattach icon"),
                     egui::Modifiers::NONE,
                     paint_child,
                 );
             }
             assert!(
                 panel.detached(&app.borrow()),
-                "la requête attend le drainage à la racine"
+                "the request waits for the drain at the root"
             );
             let attached_again = paint_root(&ctx, Vec::new());
             assert!(
                 !panel.detached(&app.borrow()),
-                "{panel:?} : le drainage rattache"
+                "{panel:?}: the drain reattaches"
             );
             assert!(
                 !attached_again.viewport_output.contains_key(&id),
-                "le panneau ne redéclare plus de viewport"
+                "the panel no longer redeclares a viewport"
             );
             assert!(
                 !panel.collapsed(&app.borrow()),
-                "le détachement ne replie pas le panneau"
+                "the detaching does not collapse the panel"
             );
         }
         session.shutdown().unwrap();
@@ -484,13 +487,13 @@ fn detacher_par_l_icone_puis_rattacher_par_clic_ou_fermeture_os() {
 }
 
 #[test]
-fn le_callback_object_manager_suit_le_graphe_actif_et_le_nouvel_instantane() {
-    let mut project = Project::new("Panneaux").unwrap();
+fn the_object_manager_callback_follows_the_active_graph_and_the_new_snapshot() {
+    let mut project = Project::new("Panels").unwrap();
     let first = project
         .add_graph(
             project.root(),
-            Some("Premier"),
-            stokesforge_plot::PlotSpec::empty("Premier"),
+            Some("First"),
+            stokesforge_plot::PlotSpec::empty("First"),
         )
         .unwrap();
     let second = project
@@ -518,7 +521,7 @@ fn le_callback_object_manager_suit_le_graphe_actif_et_le_nouvel_instantane() {
         output
     };
     paint_child(false);
-    assert!(painted(&paint_child(false), "Premier"));
+    assert!(painted(&paint_child(false), "First"));
     let settle = |app: &mut StokesForgeApp, graph| {
         for _ in 0..8 {
             ctx.run_ui(input(Vec::new()), |ui| {
@@ -534,7 +537,7 @@ fn le_callback_object_manager_suit_le_graphe_actif_et_le_nouvel_instantane() {
         assert_eq!(
             idle.viewport_output[&id].repaint_delay,
             std::time::Duration::MAX,
-            "témoin : le viewport dort tant que sa publication ne change pas"
+            "witness: the viewport sleeps as long as its publication does not change"
         );
         idle.textures_delta.clear();
     };
@@ -545,21 +548,21 @@ fn le_callback_object_manager_suit_le_graphe_actif_et_le_nouvel_instantane() {
     assert_eq!(
         output.viewport_output[&id].repaint_delay,
         std::time::Duration::ZERO,
-        "le changement réveille le viewport"
+        "the change wakes the viewport"
     );
     output.textures_delta.clear();
     let changed = paint_child(false);
     assert!(
         painted(&changed, "Second"),
-        "l'ancien callback lit le nouveau graphe"
+        "the old callback reads the new graph"
     );
-    assert!(!painted(&changed, "Premier"));
+    assert!(!painted(&changed, "First"));
     settle(&mut app, second);
     session
         .handle()
         .execute(stokesforge_commands::Command::Rename {
             id: second,
-            name: "Actualisé".into(),
+            name: "Updated".into(),
         })
         .unwrap();
     app.state.refresh();
@@ -572,24 +575,24 @@ fn le_callback_object_manager_suit_le_graphe_actif_et_le_nouvel_instantane() {
     );
     output.textures_delta.clear();
     assert!(
-        painted(&paint_child(false), "Actualisé"),
-        "l'instantané est republié"
+        painted(&paint_child(false), "Updated"),
+        "the snapshot is republished"
     );
     let closed = paint_child(true);
     assert!(closed.viewport_output[&id]
         .commands
         .contains(&egui::ViewportCommand::CancelClose));
     app.drain_object_manager(&ctx, &mut Vec::new());
-    assert!(!app.om_detached, "la fermeture OS rattache le panneau");
+    assert!(!app.om_detached, "the OS close reattaches the panel");
     session.shutdown().unwrap();
 }
 
 #[test]
-fn la_saisie_detachee_revient_a_la_console_attachee_apres_fermeture_os() {
+fn detached_input_returns_to_the_attached_console_after_an_os_close() {
     let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
     let state = AppState::new(session.handle(), String::new()).unwrap();
     let mut app = StokesForgeApp::new(state);
-    app.state.set_script_source("source_initiale".into());
+    app.state.set_script_source("initial_source".into());
     app.detach_script_console();
     let ctx = context();
     let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
@@ -605,11 +608,11 @@ fn la_saisie_detachee_revient_a_la_console_attachee_apres_fermeture_os() {
     };
     paint(&ctx, Vec::new());
     let output = paint(&ctx, Vec::new());
-    assert!(painted(&output, "source_initiale"));
+    assert!(painted(&output, "initial_source"));
     if app.state.script_available() {
         click_at(
             &ctx,
-            find_text_center(&output.shapes, "source_initiale"),
+            find_text_center(&output.shapes, "initial_source"),
             egui::Modifiers::NONE,
             paint,
         );
@@ -623,18 +626,18 @@ fn la_saisie_detachee_revient_a_la_console_attachee_apres_fermeture_os() {
                     repeat: false,
                     modifiers: egui::Modifiers::COMMAND,
                 },
-                egui::Event::Text("source_modifiee".into()),
+                egui::Event::Text("modified_source".into()),
             ],
         );
-        // Une publication peut tomber entre l'édition du viewport et son
-        // drainage à la racine : l'ancien tampon ne doit pas effacer la saisie.
+        // A publication can land between the viewport's edit and its
+        // drain at the root: the old buffer must not erase the input.
         let mut publication = ctx.run_ui(input(Vec::new()), |ui| {
             app.show_detached_script_console(ui.ctx())
         });
         publication.textures_delta.clear();
-        assert!(painted(&paint(&ctx, Vec::new()), "source_modifiee"));
+        assert!(painted(&paint(&ctx, Vec::new()), "modified_source"));
         app.drain_script_console(&ctx, &mut Vec::new());
-        assert_eq!(app.state.script_source(), "source_modifiee");
+        assert_eq!(app.state.script_source(), "modified_source");
     }
     let mut closed = ctx.run_ui(child_input(id, Vec::new(), true), |ui| callback(ui));
     assert!(closed.viewport_output[&id]
@@ -654,7 +657,7 @@ fn la_saisie_detachee_revient_a_la_console_attachee_apres_fermeture_os() {
 
 #[cfg(feature = "python")]
 #[test]
-fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
+fn detaching_and_reattaching_the_console_keeps_the_python_job_and_its_output() {
     use stokesforge_python::interpreter::{self, EmbeddedPython};
     let session = Session::spawn(Project::new("Console").unwrap(), None).unwrap();
     let mut state = AppState::new(session.handle(), String::new()).unwrap();
@@ -665,13 +668,13 @@ fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
                 .join("../../vendor/python/extracted/python")
         });
     state.set_python(EmbeddedPython::with_home(home));
-    let source = "import time\ntime.sleep(0.15)\nprint('sortie_conservee')";
+    let source = "import time\ntime.sleep(0.15)\nprint('kept_output')";
     state.set_script_source(source.into());
     state.dispatch(Action::RunScript);
     assert!(state.script_running());
     let mut app = StokesForgeApp::new(state);
     app.detach_script_console();
-    assert!(app.state.script_running(), "le moteur reste à la racine");
+    assert!(app.state.script_running(), "the engine stays at the root");
     let ctx = context();
     let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
     let mut output = ctx.run_ui(input(Vec::new()), |ui| {
@@ -685,21 +688,21 @@ fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
     assert!(!app.script_detached);
     assert!(
         app.state.script_running(),
-        "rattacher ne perd pas le canal du travail"
+        "reattaching does not lose the job's channel"
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while app.state.script_running() {
         assert!(
             std::time::Instant::now() < deadline,
-            "le script doit terminer"
+            "the script must finish"
         );
         app.script_open = false;
         app.script_collapsed = true;
         app.poll_background_jobs(&ctx);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    let output = app.state.script_output().expect("résultat du même travail");
-    assert_eq!(output.stdout, "sortie_conservee\n");
+    let output = app.state.script_output().expect("result of the same job");
+    assert_eq!(output.stdout, "kept_output\n");
     assert!(output.error.is_none(), "{:?}", output.error);
     assert_eq!(app.state.script_source(), source);
     app.detach_script_console();
@@ -710,26 +713,26 @@ fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
     output.textures_delta.clear();
     let mut output = ctx.run_ui(child_input(id, Vec::new(), false), |ui| callback(ui));
     assert!(
-        painted(&output, "sortie_conservee"),
-        "le panneau rouvert reçoit la sortie"
+        painted(&output, "kept_output"),
+        "the reopened panel receives the output"
     );
     output.textures_delta.clear();
     session.shutdown().unwrap();
 }
 
-/// L'ancien callback doit lire les nouveaux réglages même si ni graphe ni
-/// instantané ne changent. Le stockage injecté ne touche pas la machine.
+/// The old callback must read the new settings even if neither the graph nor the
+/// snapshot changes. The injected storage does not touch the machine.
 #[test]
-fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre() {
+fn settings_wake_and_change_the_detached_panel_like_the_anchored_panel() {
     use stokesforge_app_state::preferences::{ObjectManagerGroup, Preferences};
-    let mut project = Project::new("Réglages détachés").unwrap();
-    let mut spec = stokesforge_plot::PlotSpec::empty("Titre témoin");
+    let mut project = Project::new("Detached settings").unwrap();
+    let mut spec = stokesforge_plot::PlotSpec::empty("Witness title");
     spec.panels
         .get_mut(0)
         .unwrap()
         .annotations
         .push(stokesforge_plot::AnnotationSpec::new(
-            "Annotation témoin",
+            "Witness annotation",
             0.0,
             0.0,
         ));
@@ -768,7 +771,7 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     assert_eq!(
         idle.viewport_output[&id].repaint_delay,
         std::time::Duration::MAX,
-        "témoin : un panneau inchangé dort"
+        "witness: an unchanged panel sleeps"
     );
     app.state.dispatch(Action::SetObjectManagerGroupOpen {
         group: ObjectManagerGroup::Axes,
@@ -778,7 +781,7 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     assert_eq!(
         group_changed.viewport_output[&id].repaint_delay,
         std::time::Duration::ZERO,
-        "un réglage de repli seul réveille le panneau, même si les axes sont encore filtrés"
+        "a collapse setting alone wakes the panel, even if the axes are still filtered"
     );
     app.state.dispatch(Action::SetObjectManagerShowScales(true));
     let output = publish(&mut app);
@@ -790,8 +793,11 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     let output = child();
     assert!(painted(&output, &tr!("object-manager-axes")));
     assert!(painted(&output, &tr!("plot-axis-bottom")));
-    assert!(!painted(&output, "Titre témoin"), "titre lié jamais listé");
-    // Le panneau ancré lit les mêmes filtres et replis initiaux.
+    assert!(
+        !painted(&output, "Witness title"),
+        "linked title never listed"
+    );
+    // The anchored panel reads the same initial filters and collapses.
     app.om_detached = false;
     publish(&mut app);
     let anchored = publish(&mut app);
@@ -807,8 +813,8 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     child();
     assert!(!painted(&child(), &tr!("object-manager-axes")));
     assert!(painted(&child(), &tr!("object-manager-objects")));
-    // Le reset n'efface pas les axes déjà dépliés. Le filtre les révèle,
-    // malgré le nouveau défaut axes_open=false, dans les deux présentations.
+    // The reset does not erase the axes already expanded. The filter reveals them,
+    // despite the new default axes_open=false, in both presentations.
     app.state.dispatch(Action::SetObjectManagerShowScales(true));
     publish(&mut app);
     child();

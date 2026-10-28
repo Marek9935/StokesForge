@@ -148,26 +148,26 @@ two rules above:
 |---|---|---|
 | refused / brought-back field state (`field_state`) | red or orange frame, tooltip, cycle of a validated text field | **in place** (#219) |
 | "number" building block (`number_field`) + quantities table (`quantities`) | the only numeric field | **in place** (#220) |
-| guard: no `DragValue` nor `Slider` (`aucun_champ_numerique_hors_de_la_brique`) | | **in place** (#220) |
+| guard: no `DragValue` nor `Slider` (`no_numeric_field_outside_the_building_block`) | | **in place** (#220) |
 | number formatter (`stokesforge_core::number_format`) | the only displayed formatting | **in place** (#222) |
 | in-place editing building block (`app/inplace_edit.rs`) | a single S-T4 contract; previews with a 0.3 s pause | **in place** (#224) |
 | "?" icon (`app/hover_help.rs`: `hover_help`, `help_text`, `help_beside`) | reminder of a field, placed on the right (S-M1, S-T6) | **in place** (#225) |
-| guard: no bare tooltip on a form field (`aucune_bulle_nue_sur_un_champ_de_formulaire`) | checkbox, radio, text/number field, field label; menus and `…_contents` exempt | **in place** (#225) |
-| guard: no `add_enabled` without a reason (`aucun_element_grise_sans_sa_raison`) | call chain read up to `.on_disabled_hover_text`; `add_enabled_ui` (group) exempt | **in place** (#226) |
+| guard: no bare tooltip on a form field (`no_bare_tooltip_on_a_form_field`) | checkbox, radio, text/number field, field label; menus and `…_contents` exempt | **in place** (#225) |
+| guard: no `add_enabled` without a reason (`no_disabled_element_without_its_reason`) | call chain read up to `.on_disabled_hover_text`; `add_enabled_ui` (group) exempt | **in place** (#226) |
 | "form" building block (`app/form.rs`: `form`, `Form`, `choice`), widths and spacings of `theme.rs` | two-column grid, radio/list choice (S-C1, S-C2) | **in place** (#227) |
 | exclusive choice in a menu (`menu_sections::menu_choice`) | check mark alone (S-C3) | **in place** (#227) |
 | "framed texts" building block (`app/form.rs`: `toggle_texts`) | toggle exclusive choice, rounded frame around each label (active: solid accent fill; inactive: outline only); reserved for the gesture row of the analysis preview (exception S-K7) | **in place** (#270) |
-| guard: no literal `add_space` outside `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **in place** (#227) |
+| guard: no literal `add_space` outside `theme.rs` (`no_literal_add_space_outside_the_theme`) | | **in place** (#227) |
 | message area of the footer of `modal_dialog_with`, initial focus, remembered size, `modal_wizard`, `modal_live_settings`, `modal_read_only` | button order, error and reason in the footer, Esc, S-F8, S-F9 | **in place** (#228) |
 | window nature (`app/dialogs.rs`: `DialogNature`, `SizeClass`, `InteractiveSize`, `PlainSize`, `DialogFooter::always` / `gated`) | footer, size class, initial focus and default button imposed by exhaustive `match` (S-F11) | **in place** (#300) |
-| guard: no free size without justification (`aucune_taille_libre_sans_justification`, witness `la_garde_des_tailles_voit_une_taille_libre_nue`) | `InteractiveSize::Free` refused without the marker `// TAILLE-LIBRE(#300): <justification>` (S-F11) | **in place** (#300) |
-| guard: the window catalog and the code agree (`le_catalogue_des_fenetres_et_le_code_concordent`, witness `la_garde_du_catalogue_voit_un_ecart`) | every `stokesforge_…` identifier passed to a `modal_*` is in [`fenetres.md`](fenetres.md), and every catalog row has its call; does not read sizes (S-F11) | **in place** (#300) |
+| guard: no free size without justification (`no_free_size_without_justification`, witness `the_sizes_guard_sees_a_bare_free_size`) | `InteractiveSize::Free` refused without the marker `// FREE-SIZE(#300): <justification>` (S-F11) | **in place** (#300) |
+| guard: the window catalog and the code agree (`the_window_catalog_and_the_code_agree`, witness `the_catalog_guard_sees_a_deviation`) | every `stokesforge_…` identifier passed to a `modal_*` is in [`fenetres.md`](fenetres.md), and every catalog row has its call; does not read sizes (S-F11) | **in place** (#300) |
 | confirmations and serious failure (`modal_confirm`, `modal_save_changes`, `modal_alert`; `app/confirmations.rs`) | Cancel by default, trio Discard Changes · Cancel · Save, S-M8 | **in place** (#229) |
 | key registry of `app/shortcuts.rs`, `HELP`, Help › Keyboard Shortcuts | S-K1, S-K5 | **in place** (#231) |
-| guard: no `consume_key` outside `app/shortcuts.rs` (`aucun_consume_key_hors_du_registre`) | | **in place** (#231) |
-| cursors (`app/cursors.rs`) and guard `aucun_curseur_hors_du_module_des_curseurs` | S-X2 | **in place** (#231) |
-| guard: no tool selector outside the Tools bar (`aucun_selecteur_d_outil_hors_de_la_barre_tools`, witness `la_garde_des_outils_voit_un_selecteur_d_outil_nu`) | exclusive choice whose arguments name a tool, refused outside `toolbar.rs` without the marker `// OUTIL-EN-FENETRE(#299): <justification>` (S-K7) | **in place** (#299) |
-| guard: no gesture outside the matrix (`aucun_geste_hors_de_la_matrice`, witness `la_garde_des_gestes_voit_un_geste_hors_de_la_matrice`) | every file that reads a mouse wheel or a double-click is cited by [`gestes.md`](gestes.md) (S-K8) | **in place** (#299) |
+| guard: no `consume_key` outside `app/shortcuts.rs` (`no_consume_key_outside_the_registry`) | | **in place** (#231) |
+| cursors (`app/cursors.rs`) and guard `no_cursor_outside_the_cursors_module` | S-X2 | **in place** (#231) |
+| guard: no tool selector outside the Tools bar (`no_tool_picker_outside_the_tools_bar`, witness `the_tools_guard_sees_a_bare_tool_picker`) | exclusive choice whose arguments name a tool, refused outside `toolbar.rs` without the marker `// TOOL-IN-WINDOW(#299): <justification>` (S-K7) | **in place** (#299) |
+| guard: no gesture outside the matrix (`no_gesture_outside_the_matrix`, witness `the_gestures_guard_sees_a_gesture_outside_the_matrix`) | every file that reads a mouse wheel or a double-click is cited by [`gestes.md`](gestes.md) (S-K8) | **in place** (#299) |
 | "work in progress" building block (`app/busy.rs`: `work_in_progress`, `indicator`) | S-P1, S-P2 | **in place** (#232); wired to the background import and the script console |
 | "empty state" building block (`app/empty_state.rs`: `empty_state`) | S-P3 | **in place** (#232) |
 
@@ -496,7 +496,7 @@ History: #225, #230 (status bar), #228 (S-M7), #229 (S-M8).
   message), **Medium** 480 x 420 (settings, a form), **Large**
   640 x 500 (a list and its editor). An **interactive** window (settings,
   live settings, draft, wizard) takes a class; outside the classes, a **free size**
-  justified in the code (`// TAILLE-LIBRE(#300): <justification>`). A window
+  justified in the code (`// FREE-SIZE(#300): <justification>`). A window
   **without rich interaction** (choice, read-only, confirmation,
   save, alert) may take the size of its content **without
   justification**: it has no form to arrange, and a badly
@@ -554,22 +554,22 @@ enumeration with an exhaustive `match` without `_` (footer, default class, initi
 focus, default button); the `modal_*` building blocks take the size field
 of their nature (`InteractiveSize`: default, class, free;
 `PlainSize`: default, class, content), `modal_dialog_with` the nature
-(settings, draft or choice). Guards (`stokesforge-app/tests/gardes.rs`):
+(settings, draft or choice). Guards (`stokesforge-app/tests/guards.rs`):
 
-- **`aucune_taille_libre_sans_justification`**: `InteractiveSize::Free(` in production code
+- **`no_free_size_without_justification`**: `InteractiveSize::Free(` in production code
   requires, in the 12 lines that precede it, the exact marker
-  `// TAILLE-LIBRE(#300): <justification>` with a justification of at least 15 characters. Witness:
-  `la_garde_des_tailles_voit_une_taille_libre_nue` (bare, empty, too short,
+  `// FREE-SIZE(#300): <justification>` with a justification of at least 15 characters. Witness:
+  `the_sizes_guard_sees_a_bare_free_size` (bare, empty, too short,
   other number, no number, too far; justified, comment, string and test code
   pass). Free sizes today: the analysis, the import
   wizard, the `preferences_proto` bench.
-- **`le_catalogue_des_fenetres_et_le_code_concordent`**: every literal
+- **`the_window_catalog_and_the_code_agree`**: every literal
   `"stokesforge_…"` passed as an argument of a `modal_*` function (before its
   closures) appears in backticks in `docs/fenetres.md`, and every
   identifier of the catalog has its call. The identifiers **built** before
-  the call (`IDENTIFIANTS_CONSTRUITS`: graph properties, series properties,
+  the call (`BUILT_IDENTIFIERS`: graph properties, series properties,
   analysis) are searched as literals. Witness:
-  `la_garde_du_catalogue_voit_un_ecart`. **Limits**: it does not read
+  `the_catalog_guard_sees_a_deviation`. **Limits**: it does not read
   sizes, types or pages; a window whose identifier is derived
   (`id.with(…)`, the properties of an object) is not seen.
 
@@ -627,7 +627,7 @@ History: #229.
   series first") (S-G1).
 - **Form** (S-G2): `.disabled` tooltip of the element itself, never mixed with the
   normal tooltip, never put on a group.
-- **Mechanics**: the reasons are the `disabled-*` keys (or the `.disabled` of the action when it has one); `ToolbarButton` and the primary button of `modal_dialog_with` (`DialogFooter::accept_disabled`) set their own. Guard: `aucun_element_grise_sans_sa_raison`.
+- **Mechanics**: the reasons are the `disabled-*` keys (or the `.disabled` of the action when it has one); `ToolbarButton` and the primary button of `modal_dialog_with` (`DialogFooter::accept_disabled`) set their own. Guard: `no_disabled_element_without_its_reason`.
 - **Undo/Redo** (S-G3): disabled, "Nothing to undo"; enabled, "Undo Rename"
   (history label).
 - **Field that depends on a checkbox** (S-G4): disabled, value visible and kept;
@@ -663,7 +663,7 @@ History: #226.
 - **Three text levels** (S-L6, #170): `theme::section_heading` (section
   heading, bold), `theme::table_header` (column header of a table, bold
   in small size), `theme::secondary_text` (dimmed, small size). Guard
-  `aucun_gras_petit_hors_du_theme`.
+  `no_small_bold_outside_the_theme`.
 - **A single row height** (S-L7, #170): `list_row::LIST_ROW_HEIGHT`
   (24 pt) for `list_row` and for the composed rows of the Object Manager, the
   Project Manager (folder included) and the series list.
@@ -693,7 +693,7 @@ How it is held:
   exclusive choice: no check mark.
 - **`theme.rs`**: `SPACE_ITEM`, `SPACE_SECTION`, `FIELD_WIDTH_SHORT`
   (also `number_field::FIELD_WIDTH`), `FIELD_WIDTH_MEDIUM`, `FieldWidth`.
-  Guard `aucun_add_space_litteral_hors_du_theme` (`tests/gardes.rs`), without
+  Guard `no_literal_add_space_outside_the_theme` (`tests/guards.rs`), without
   exemption; a computed gap passes.
 - Migrated: graph properties (all pages, series editor shared
   with the series window), analysis form, import wizard
@@ -748,24 +748,24 @@ History: #227, #237 (width "a few digits"), #241 (Results panel).
 
 How it is held (S-K7, S-K8):
 
-- **`aucun_selecteur_d_outil_hors_de_la_barre_tools`**
-  (`stokesforge-app/tests/gardes.rs`): an exclusive choice (building block `choice` /
+- **`no_tool_picker_outside_the_tools_bar`**
+  (`stokesforge-app/tests/guards.rs`): an exclusive choice (building block `choice` /
   `choice_by`, `selectable_label`, `selectable_value`, `Button::selectable`,
   `RadioButton::new`, `radio`, `radio_value`, `toggle_value`) whose
   arguments name a tool ("tool", excluding "toolbar" and "tooltip") is
   refused in every file except `toolbar.rs`, unless one of the **12 lines
   that precede** (or the line itself) carries the exact marker
-  `// OUTIL-EN-FENETRE(#299): <justification>`, a justification of at least 15
-  characters. Witness: `la_garde_des_outils_voit_un_selecteur_d_outil_nu`
+  `// TOOL-IN-WINDOW(#299): <justification>`, a justification of at least 15
+  characters. Witness: `the_tools_guard_sees_a_bare_tool_picker`
   (each form of choice, empty exception, too short, from another marker or
   too far). Limit: it relies on the word "tool" in the arguments; a
   tool selector without that word escapes it.
-- **`aucun_geste_hors_de_la_matrice`**: every production file of
+- **`no_gesture_outside_the_matrix`**: every production file of
   `stokesforge-app` or `stokesforge-render-egui` that reads a mouse wheel
   (`scroll_delta`, `zoom_delta`, `MouseWheel`) or a double-click
   (`double_clicked`) must be cited (path `….rs` in backticks)
   in `gestes.md`; a cited file that no longer exists also fails the
-  guard. Witness: `la_garde_des_gestes_voit_un_geste_hors_de_la_matrice`.
+  guard. Witness: `the_gestures_guard_sees_a_gesture_outside_the_matrix`.
   **Real limits**: it works at the **file** level (a new
   wheel gesture in an already cited file passes, and it does not read what
   the gesture does); it sees only the **wheel and the double-click**, not
@@ -777,7 +777,7 @@ its preview, a gesture selector: **Point** (a click places an anchor point,
 a peak seed, a bound) and **Zone** (a drag draws a zone or a
 range), as two **framed texts** with toggle (`toggle_texts`, `app/form.rs`:
 rounded frame, active in solid accent fill, inactive in outline only),
-marker `OUTIL-EN-FENETRE(#299)` in `app/analysis_dialog.rs`. Justification:
+marker `TOOL-IN-WINDOW(#299)` in `app/analysis_dialog.rs`. Justification:
 these gestures need actions specific to the preview (adding a point, drawing
 a zone, snapping to the curve); putting them in the Tools bar of the graph
 would mix these gestures with those of the figure. The exception is as narrow

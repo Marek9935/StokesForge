@@ -43,7 +43,7 @@ without a prefix is in `stokesforge-app/src/` if it is under `app/` or named
 `app.rs` keeps only the **orchestration** of the frame; each interface surface
 is a real module of `src/app/` (work package #115, #116–#123): explicit
 imports, minimal visibility (`pub(super)` between `app` modules), no
-`use …::*` outside test code (guard `aucun_import_global_hors_des_tests`), a
+`use …::*` outside test code (guard `no_global_import_outside_tests`), a
 head doc per module. Direction of dependencies: `app.rs` → surface modules →
 shared building blocks (`dialogs`, `tab_strip`, `list_row`, `window_chrome`,
 `crate::icons`…). Internal tests follow the code they test: a test lives in
@@ -101,7 +101,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/window_chrome.rs` | common frame of windows and panels: `window_header`, `panel_header`, `floating_window_frame`, active outline, handles, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement: default sizes, cascade, fixed workspace (`WORKSPACE_SIZE`), `clamp_to_workspace`, logical → screen conversion |
 | `app/window_stack.rs` | stack of floating windows: `open_tab` (the only place that decides to open or focus), egui order and layers, hiding, collapsing, maximizing, `show_workspace` |
-| `app/test_support.rs` | (compiled in test only) test helpers shared by the surfaces: `contexte`, `image`/`image_de`, `touche`, `cliquer`, `painted`, `textes`/`texte_exact`, `distincts`, `colonnes_xy` (#128) |
+| `app/test_support.rs` | (compiled in test only) test helpers shared by the surfaces: `context`, `image`/`frame_of`, `touche`, `click`, `painted`, `textes`/`text_exact`, `distinct`, `xy_columns` (#128) |
 | `app/window_detach.rs` | detaching into OS windows: `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` and the publication of the snapshot that wakes the viewports (#104, `snapshot_stamp` is its fingerprint), `sync_window_views` (window state sent to the session, #16) |
 
 A new large surface is written in its own module, on this model; `app.rs`

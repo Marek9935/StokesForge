@@ -1,75 +1,76 @@
-//! Raccourcis clavier de l'application : les constantes `SHORTCUT_*` (celles
-//! que l'on consomme et celles, décoratives, qui ne servent qu'au rappel
-//! affiché dans un menu), leurs rappels écrits en toutes lettres, et la
-//! consommation d'annuler/rétablir dans le viewport actif.
+//! Keyboard shortcuts of the application: the `SHORTCUT_*` constants (those
+//! that are consumed and the decorative ones, which only serve for the reminder
+//! shown in a menu), their reminders spelled out in full, and the consumption
+//! of undo/redo in the active viewport.
 //!
-//! Sorti d'`app.rs` tel quel (#117). La consommation globale des raccourcis,
-//! `collect_shortcuts`, reste dans `app.rs` (#115).
+//! Moved out of `app.rs` as is (#117). The global consumption of shortcuts,
+//! `collect_shortcuts`, stays in `app.rs` (#115).
 //!
-//! **Registre unique des touches** (#231, S-K1) : toute touche que l'application
-//! consomme est une constante de ce module (`SHORTCUT_*` pour les raccourcis,
-//! `KEY_*` pour les touches nues d'un champ ou d'une liste), lue par
-//! `input.consume_shortcut(&…)`. Aucun `consume_key` ailleurs (garde
-//! `aucun_consume_key_hors_du_registre`, `tests/gardes.rs`). La fenêtre
-//! Help › Keyboard Shortcuts est générée de [`HELP`], en bas de ce fichier :
-//! un raccourci neuf s'y ajoute, sinon il reste invisible de l'utilisateur.
+//! **Single registry of keys** (#231, S-K1): every key the application
+//! consumes is a constant of this module (`SHORTCUT_*` for shortcuts, `KEY_*`
+//! for the bare keys of a field or a list), read by
+//! `input.consume_shortcut(&…)`. No `consume_key` elsewhere (guard
+//! `no_consume_key_outside_the_registry`, `tests/guards.rs`). The Help ›
+//! Keyboard Shortcuts window is generated from [`HELP`], at the bottom of
+//! this file: a new shortcut is added there, otherwise it stays invisible to
+//! the user.
 
 use eframe::egui;
 
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
 
-/// Échap — annule la saisie en cours, ferme la liste ou le dialogue.
+/// Escape — cancels the current input, closes the list or the dialog.
 pub(crate) const KEY_ESCAPE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape);
-/// Entrée — valide la saisie en cours ou le dialogue ; dans une liste (Project
-/// Manager, Object Manager), ouvre la ligne sélectionnée (S-K9).
+/// Enter — confirms the current input or the dialog; in a list (Project
+/// Manager, Object Manager), opens the selected row (S-K9).
 pub(crate) const KEY_ENTER: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter);
-/// Tab — valide la saisie et passe au champ suivant.
+/// Tab — confirms the input and moves to the next field.
 pub(crate) const KEY_TAB: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Tab);
-/// Suppr — supprime la sélection (la grille d'abord la vide, S-K2).
+/// Delete — deletes the selection (the grid first clears it, S-K2).
 pub(crate) const KEY_DELETE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Delete);
-/// Retour arrière — vide la sélection de la grille.
+/// Backspace — clears the grid selection.
 pub(crate) const KEY_BACKSPACE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Backspace);
-/// ↑ — valeur voisine d'un champ nombre ou d'une liste ; ligne précédente d'un
-/// gestionnaire (Project Manager, Object Manager, S-K9).
+/// ↑ — neighboring value of a number field or a list; previous row of a
+/// manager (Project Manager, Object Manager, S-K9).
 pub(crate) const KEY_ARROW_UP: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowUp);
-/// ↓ — valeur voisine d'un champ nombre ou d'une liste ; ligne suivante d'un
-/// gestionnaire (S-K9).
+/// ↓ — neighboring value of a number field or a list; next row of a manager
+/// (S-K9).
 pub(crate) const KEY_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowDown);
-/// Maj+↑ — dix crans vers le haut dans un champ nombre.
+/// Shift+↑ — ten steps up in a number field.
 pub(crate) const KEY_SHIFT_ARROW_UP: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowUp);
-/// Maj+↓ — dix crans vers le bas dans un champ nombre.
+/// Shift+↓ — ten steps down in a number field.
 pub(crate) const KEY_SHIFT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
-/// Alt+↓ — ouvre la liste de valeurs proposées d'un champ nombre.
+/// Alt+↓ — opens the list of suggested values of a number field.
 pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 
-/// Ctrl+Z — annuler.
+/// Ctrl+Z — undo.
 pub(super) const SHORTCUT_UNDO: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
-/// Ctrl+Y — rétablir (convention Windows).
+/// Ctrl+Y — redo (Windows convention).
 pub(super) const SHORTCUT_REDO_Y: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
-/// Ctrl+Maj+Z — rétablir (convention Unix / macOS). Les deux sont acceptées.
+/// Ctrl+Shift+Z — redo (Unix / macOS convention). Both are accepted.
 const SHORTCUT_REDO_Z: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::Z,
 );
 
-/// Annuler/rétablir dans le viewport actif, racine ou classeur détaché.
+/// Undo/redo in the active viewport, root or detached workbook.
 pub(super) fn collect_undo_redo_shortcuts(ctx: &egui::Context, actions: &mut Vec<Action>) {
     ctx.input_mut(|input| {
-        // Le rétablissement se teste avant l'annulation : Ctrl+Maj+Z
-        // matcherait également Ctrl+Z avec les modificateurs en surplus.
+        // Redo is tested before undo: Ctrl+Shift+Z would also match Ctrl+Z
+        // with the extra modifiers.
         if input.consume_shortcut(&SHORTCUT_REDO_Z) || input.consume_shortcut(&SHORTCUT_REDO_Y) {
             actions.push(Action::Redo);
         } else if input.consume_shortcut(&SHORTCUT_UNDO) {
@@ -78,123 +79,122 @@ pub(super) fn collect_undo_redo_shortcuts(ctx: &egui::Context, actions: &mut Vec
     });
 }
 
-/// Ctrl+S — enregistrer (dans le fichier déjà connu, sans dialogue).
+/// Ctrl+S — save (into the already known file, with no dialog).
 pub(super) const SHORTCUT_SAVE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
-/// Ctrl+Maj+S — choisir une destination et y enregistrer.
+/// Ctrl+Shift+S — choose a destination and save there.
 pub(super) const SHORTCUT_SAVE_AS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::S,
 );
-/// Ctrl+O — choisir un projet à ouvrir.
+/// Ctrl+O — choose a project to open.
 pub(super) const SHORTCUT_OPEN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
-/// Ctrl+N — nouveau projet (confirmation si des changements seraient perdus).
+/// Ctrl+N — new project (confirmation if changes would be lost).
 pub(super) const SHORTCUT_NEW_PROJECT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
-/// Ctrl+E — exporter le graphe actif en SVG, PDF ou PNG (issue #34). Sans
-/// effet quand l'onglet actif n'est pas un graphe.
+/// Ctrl+E — export the active graph as SVG, PDF or PNG (issue #34). No effect
+/// when the active tab is not a graph.
 pub(super) const SHORTCUT_EXPORT_GRAPH: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
-/// Ctrl+" — ouvrir l'assistant d'import. Sur un clavier AZERTY, `"` est la
-/// touche du chiffre 3 **sans** Maj : egui ne connaît pas de touche `"` et
-/// retombe sur la touche physique, donc le raccourci se consomme comme
-/// Ctrl+3. Sur un clavier QWERTY, `"` est Maj+apostrophe
-/// ([`SHORTCUT_IMPORT_QWERTY`]).
+/// Ctrl+" — open the import wizard. On an AZERTY keyboard, `"` is the digit 3
+/// key **without** Shift: egui has no `"` key and falls back to the physical
+/// key, so the shortcut is consumed as Ctrl+3. On a QWERTY keyboard, `"` is
+/// Shift+apostrophe ([`SHORTCUT_IMPORT_QWERTY`]).
 pub(super) const SHORTCUT_IMPORT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num3);
-/// Ctrl+Maj+' — le même raccourci d'import sur un clavier QWERTY, où `"`
-/// s'obtient avec Maj.
+/// Ctrl+Shift+' — the same import shortcut on a QWERTY keyboard, where `"` is
+/// typed with Shift.
 pub(super) const SHORTCUT_IMPORT_QWERTY: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::Quote,
 );
-/// Rappel affiché dans le menu : le caractère, pas le nom de la touche
-/// physique.
+/// Reminder shown in the menu: the character, not the name of the physical
+/// key.
 pub(super) const SHORTCUT_IMPORT_TEXT: &str = "Ctrl+\"";
-/// Ctrl+Entrée — exécuter le script de la console.
+/// Ctrl+Enter — run the console script.
 pub(super) const SHORTCUT_RUN_SCRIPT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
 
-/// F2 — renommer la sélection du Project Manager ou de l’Object Manager.
+/// F2 — rename the selection of the Project Manager or the Object Manager.
 pub(super) const SHORTCUT_RENAME_OBJECT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
-/// Ctrl+↑ — remonter la série sélectionnée d'un rang (Object Manager et
-/// figure ; consommée par `series_shortcuts`).
+/// Ctrl+↑ — move the selected series up one rank (Object Manager and
+/// figure; consumed by `series_shortcuts`).
 pub(super) const SHORTCUT_MOVE_SERIES_UP: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::ArrowUp);
-/// Ctrl+↓ — descendre la série sélectionnée d'un rang.
+/// Ctrl+↓ — move the selected series down one rank.
 pub(super) const SHORTCUT_MOVE_SERIES_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::ArrowDown);
-/// F2 — éditer une cellule ou un champ d’en-tête dans la grille focalisée (#143).
+/// F2 — edit a cell or a header field in the focused grid (#143).
 pub(super) const SHORTCUT_EDIT_CELL: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F2);
-/// Ctrl+D — dupliquer la feuille affichée du classeur actif. Pas de Suppr
-/// pour supprimer une feuille : trop de faux positifs, le menu seul suffit.
+/// Ctrl+D — duplicate the displayed sheet of the active workbook. No Delete
+/// to delete a sheet: too many false positives, the menu alone is enough.
 pub(super) const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
 
-/// Ctrl+D — dupliquer les objets sélectionnés du Project Manager.
+/// Ctrl+D — duplicate the selected objects of the Project Manager.
 pub(super) const SHORTCUT_DUPLICATE_OBJECT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
 
-/// Ctrl+C — copier la sélection de la grille.
+/// Ctrl+C — copy the grid selection.
 ///
-/// # Ces cinq raccourcis-ci ne sont **jamais** consommés
+/// # These five shortcuts are **never** consumed
 ///
-/// Contrairement à [`SHORTCUT_UNDO`] et compagnie, les cinq constantes qui
-/// suivent sont purement **décoratives** : elles n'existent que pour écrire
-/// le rappel de raccourci à droite d'une entrée de menu contextuel
-/// (`Context::format_shortcut`, qui rend « Ctrl+C » ou « ⌘C » selon la
-/// plateforme). Aucun appel à `consume_shortcut` ne les prend, et il ne faut
-/// pas essayer : `egui-winit` intercepte Ctrl+C/X/V à la traduction des
-/// événements de la fenêtre et n'en laisse jamais passer de `Event::Key`
-/// — un essai précédent, fondé sur l'hypothèse inverse, produisait des
-/// raccourcis qui ne se déclenchaient jamais. Le bloc clavier de
-/// [`grid_contents`](crate::app::grid::grid_contents) lit les `Event::Copy`/`Event::Cut`/`Event::Paste`
-/// correspondants, et c'est là que vit la vraie logique.
+/// Unlike [`SHORTCUT_UNDO`] and the like, the five constants that follow are
+/// purely **decorative**: they exist only to write the shortcut reminder to
+/// the right of a context menu entry (`Context::format_shortcut`, which
+/// renders "Ctrl+C" or "⌘C" depending on the platform). No call to
+/// `consume_shortcut` takes them, and one must not try: `egui-winit`
+/// intercepts Ctrl+C/X/V when translating the window events and never lets an
+/// `Event::Key` through — an earlier attempt, based on the opposite
+/// assumption, produced shortcuts that never fired. The keyboard block of
+/// [`grid_contents`](crate::app::grid::grid_contents) reads the matching
+/// `Event::Copy`/`Event::Cut`/`Event::Paste`, and that is where the real logic
+/// lives.
 pub(super) const SHORTCUT_COPY: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
-/// Ctrl+Maj+C — copier en entier les colonnes touchées (décoratif, voir
+/// Ctrl+Shift+C — copy the touched columns in full (decorative, see
 /// [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_COPY_FULL_COLUMNS: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::C,
 );
-/// Ctrl+A — tout sélectionner dans la grille et dans Edit (#159), même effet
-/// que la case du coin.
+/// Ctrl+A — select all in the grid and in Edit (#159), same effect as the
+/// corner box.
 pub(super) const SHORTCUT_SELECT_ALL: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::A);
-/// Ctrl+X — couper (décoratif, voir [`SHORTCUT_COPY`]).
+/// Ctrl+X — cut (decorative, see [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_CUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::X);
-/// Ctrl+V — coller à partir de l'ancre (décoratif, voir [`SHORTCUT_COPY`]).
+/// Ctrl+V — paste from the anchor (decorative, see [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_PASTE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
-/// Ctrl+Maj+V — coller à l'identique (décoratif, voir [`SHORTCUT_COPY`]).
+/// Ctrl+Shift+V — paste in place (decorative, see [`SHORTCUT_COPY`]).
 pub(super) const SHORTCUT_PASTE_ABSOLUTE: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::V,
 );
 
-/// Rappel de raccourci pour Retour arrière, écrit en toutes lettres plutôt
-/// que via `Context::format_shortcut`.
+/// Shortcut reminder for Backspace, spelled out in full rather than through
+/// `Context::format_shortcut`.
 ///
-/// egui nomme ses touches en anglais (« Backspace », « Delete ») : les
-/// passer par `format_shortcut` mettrait deux mots anglais au milieu d'un
-/// menu entièrement français. Les raccourcis à modificateur, eux, se rendent
-/// identiquement dans toutes les langues (« Ctrl+C ») et gagnent à passer
-/// par `format_shortcut`, qui sait les adapter à macOS.
+/// egui names its keys in English ("Backspace", "Delete"): passing them
+/// through `format_shortcut` would put two English words in the middle of a
+/// fully French menu. Shortcuts with a modifier, on the other hand, render
+/// identically in all languages ("Ctrl+C") and are better off going through
+/// `format_shortcut`, which knows how to adapt them to macOS.
 pub(super) fn shortcut_text_backspace() -> String {
     tr!("shortcut-backspace")
 }
 
-/// Pendant de [`shortcut_text_backspace`] pour Suppr.
+/// Counterpart of [`shortcut_text_backspace`] for Delete.
 pub(super) fn shortcut_text_delete() -> String {
     tr!("shortcut-delete")
 }
 
-/// Où un raccourci s'applique : les rubriques de Help › Keyboard Shortcuts.
+/// Where a shortcut applies: the sections of Help › Keyboard Shortcuts.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum HelpArea {
     General,
@@ -224,21 +224,21 @@ impl HelpArea {
     }
 }
 
-/// Ce qui s'affiche à droite d'une ligne de l'aide.
+/// What is shown to the right of a help row.
 pub(super) enum HelpKeys {
-    /// Un raccourci à modificateur, écrit par `Context::format_shortcut`.
+    /// A shortcut with a modifier, written by `Context::format_shortcut`.
     Shortcut(&'static egui::KeyboardShortcut),
-    /// Deux raccourcis équivalents.
+    /// Two equivalent shortcuts.
     Either(
         &'static egui::KeyboardShortcut,
         &'static egui::KeyboardShortcut,
     ),
-    /// Une touche ou un geste qui n'est pas un raccourci à modificateur
-    /// (Suppr, la molette) : texte traduit.
+    /// A key or gesture that is not a shortcut with a modifier (Delete, the
+    /// wheel): translated text.
     Text(fn() -> String),
 }
 
-/// Une ligne de Help › Keyboard Shortcuts.
+/// A row of Help › Keyboard Shortcuts.
 pub(super) struct HelpEntry {
     pub(super) area: HelpArea,
     pub(super) label: fn() -> String,
@@ -246,7 +246,7 @@ pub(super) struct HelpEntry {
 }
 
 impl HelpEntry {
-    /// Les touches de la ligne, telles qu'on les affiche.
+    /// The keys of the row, as they are displayed.
     pub(super) fn keys_text(&self, ctx: &egui::Context) -> String {
         match &self.keys {
             HelpKeys::Shortcut(shortcut) => ctx.format_shortcut(shortcut),
@@ -284,9 +284,9 @@ macro_rules! entry {
     };
 }
 
-/// Les raccourcis que l'aide montre, dans l'ordre d'affichage de chaque
-/// rubrique. Un raccourci neuf du registre s'ajoute ici, sinon l'utilisateur
-/// ne le découvre pas (S-K5).
+/// The shortcuts the help shows, in the display order of each section. A new
+/// shortcut of the registry is added here, otherwise the user does not
+/// discover it (S-K5).
 pub(super) const HELP: &[HelpEntry] = &[
     entry!(General, "help-undo", shortcut SHORTCUT_UNDO),
     entry!(General, "help-redo", either SHORTCUT_REDO_Y, SHORTCUT_REDO_Z),
@@ -340,13 +340,13 @@ pub(super) const HELP: &[HelpEntry] = &[
 mod tests {
     use super::*;
 
-    /// Ce que [`collect_undo_redo_shortcuts`] tire d'une image où `key` est
-    /// pressée avec `modifiers`, puis ce qu'il en reste pour un second
-    /// lecteur dans la même image.
-    fn actions_pour(key: egui::Key, modifiers: egui::Modifiers) -> (Vec<Action>, Vec<Action>) {
+    /// What [`collect_undo_redo_shortcuts`] draws from a frame where `key` is
+    /// pressed with `modifiers`, then what is left of it for a second reader
+    /// in the same frame.
+    fn actions_for(key: egui::Key, modifiers: egui::Modifiers) -> (Vec<Action>, Vec<Action>) {
         let context = egui::Context::default();
-        let mut premieres = Vec::new();
-        let mut restes = Vec::new();
+        let mut first = Vec::new();
+        let mut leftovers = Vec::new();
         let mut output = context.run_ui(
             egui::RawInput {
                 events: vec![egui::Event::Key {
@@ -359,32 +359,32 @@ mod tests {
                 ..Default::default()
             },
             |ui| {
-                collect_undo_redo_shortcuts(ui.ctx(), &mut premieres);
-                collect_undo_redo_shortcuts(ui.ctx(), &mut restes);
+                collect_undo_redo_shortcuts(ui.ctx(), &mut first);
+                collect_undo_redo_shortcuts(ui.ctx(), &mut leftovers);
             },
         );
         output.textures_delta.clear();
-        (premieres, restes)
+        (first, leftovers)
     }
 
-    /// Ctrl+Z annule ; Ctrl+Y et Ctrl+Maj+Z rétablissent. Ctrl+Maj+Z
-    /// contient Ctrl+Z : il doit rétablir **sans** annuler (le rétablissement
-    /// se teste d'abord). Le raccourci est consommé : un second lecteur de la
-    /// même image n'en voit rien, et Z sans Ctrl n'est pas un raccourci.
+    /// Ctrl+Z undoes; Ctrl+Y and Ctrl+Shift+Z redo. Ctrl+Shift+Z contains
+    /// Ctrl+Z: it must redo **without** undoing (redo is tested first). The
+    /// shortcut is consumed: a second reader of the same frame sees nothing of
+    /// it, and Z without Ctrl is not a shortcut.
     #[test]
-    fn annuler_et_retablir_se_lisent_au_clavier_une_seule_fois() {
+    fn undo_and_redo_are_read_from_the_keyboard_only_once() {
         let ctrl = egui::Modifiers::COMMAND.plus(egui::Modifiers::CTRL);
-        let ctrl_maj = ctrl.plus(egui::Modifiers::SHIFT);
-        for (key, modifiers, attendu) in [
+        let ctrl_shift = ctrl.plus(egui::Modifiers::SHIFT);
+        for (key, modifiers, expected) in [
             (egui::Key::Z, ctrl, vec![Action::Undo]),
             (egui::Key::Y, ctrl, vec![Action::Redo]),
-            (egui::Key::Z, ctrl_maj, vec![Action::Redo]),
+            (egui::Key::Z, ctrl_shift, vec![Action::Redo]),
             (egui::Key::Z, egui::Modifiers::NONE, vec![]),
             (egui::Key::A, ctrl, vec![]),
         ] {
-            let (premieres, restes) = actions_pour(key, modifiers);
-            assert_eq!(premieres, attendu, "{key:?} {modifiers:?}");
-            assert!(restes.is_empty(), "{key:?} {modifiers:?} lu deux fois");
+            let (first, leftovers) = actions_for(key, modifiers);
+            assert_eq!(first, expected, "{key:?} {modifiers:?}");
+            assert!(leftovers.is_empty(), "{key:?} {modifiers:?} read twice");
         }
     }
 }
@@ -393,15 +393,15 @@ mod tests {
 mod help_tests {
     use super::*;
 
-    /// Chaque rubrique de l'aide a des lignes, chaque ligne un texte de
-    /// touches non vide, dans les deux langues.
+    /// Each help section has rows, each row a non-empty key text, in both
+    /// languages.
     #[test]
-    fn l_aide_des_raccourcis_est_complete() {
+    fn the_shortcut_help_is_complete() {
         let ctx = egui::Context::default();
         for area in HelpArea::ALL {
             assert!(
                 HELP.iter().any(|entry| entry.area == area),
-                "rubrique vide : {area:?}"
+                "empty section: {area:?}"
             );
         }
         for entry in HELP {
@@ -410,10 +410,10 @@ mod help_tests {
         }
     }
 
-    /// L'aide est générée du registre : chaque constante `SHORTCUT_*`
-    /// consommée y figure. Un raccourci oublié ferait échouer ce test.
+    /// The help is generated from the registry: every consumed `SHORTCUT_*`
+    /// constant appears in it. A forgotten shortcut would fail this test.
     #[test]
-    fn chaque_raccourci_consomme_figure_dans_l_aide() {
+    fn every_consumed_shortcut_appears_in_the_help() {
         let ctx = egui::Context::default();
         let shown: Vec<String> = HELP.iter().map(|entry| entry.keys_text(&ctx)).collect();
         for shortcut in [
@@ -436,7 +436,7 @@ mod help_tests {
             let text = ctx.format_shortcut(shortcut);
             assert!(
                 shown.iter().any(|keys| keys.contains(&text)),
-                "{text} absent de l'aide"
+                "{text} missing from the help"
             );
         }
     }

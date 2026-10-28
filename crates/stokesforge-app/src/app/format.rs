@@ -1,17 +1,16 @@
-//! Barres de format de texte et d'objet, et barre d'outils contextuelle :
-//! ce qu'elles montrent ([`StokesForgeApp::format_target`],
-//! [`StokesForgeApp::text_format_state`], [`StokesForgeApp::object_format_state`],
-//! [`StokesForgeApp::tools_context`]) et ce qu'elles font
-//! ([`StokesForgeApp::run_toolbar_request`]).
+//! Text and object format bars, and the contextual toolbar: what they show
+//! ([`StokesForgeApp::format_target`], [`StokesForgeApp::text_format_state`],
+//! [`StokesForgeApp::object_format_state`], [`StokesForgeApp::tools_context`])
+//! and what they do ([`StokesForgeApp::run_toolbar_request`]).
 //!
-//! Les boutons eux-mêmes vivent dans `crate::toolbar` ; la mise en balises
-//! Typst d'un passage dans `stokesforge_app_state::text_format` ; ici, le lien entre les deux
-//! et la sélection de la vue de graphe (flottante ou détachée). La police, et
-//! pour un titre ou la légende le corps et la couleur, sont des champs de la
-//! zone ([`StokesForgeApp::format_zone`], #77/#78/#90), jamais une balise
-//! `#text(font: …)` dans le contenu.
+//! The buttons themselves live in `crate::toolbar`; the Typst markup of a
+//! passage in `stokesforge_app_state::text_format`; here, the link between the
+//! two and the selection of the graph view (floating or detached). The font,
+//! and for a title or the legend the size and the color, are fields of the
+//! zone ([`StokesForgeApp::format_zone`], #77/#78/#90), never a
+//! `#text(font: …)` tag in the content.
 //!
-//! Sorti d'`app.rs` tel quel (#122).
+//! Moved out of `app.rs` as is (#122).
 
 use eframe::egui;
 use stokesforge_core::NodeId;
@@ -29,7 +28,7 @@ use super::tab::Tab;
 use super::StokesForgeApp;
 
 impl StokesForgeApp {
-    /// Ce que la barre contextuelle montre pour la fenêtre au premier plan.
+    /// What the contextual bar shows for the foreground window.
     pub(super) fn tools_context(&self, active_tab: Option<Tab>) -> crate::toolbar::ToolsContext {
         use crate::toolbar::ToolsContext;
         match active_tab_kind(active_tab) {
@@ -58,8 +57,8 @@ impl StokesForgeApp {
         }
     }
 
-    /// Sur quoi la barre de format agit : un champ en édition sur place, sinon
-    /// un texte libre sélectionné, sinon rien (issue #63).
+    /// What the format bar acts on: a field being edited in place, otherwise a
+    /// selected free text, otherwise nothing (issue #63).
     pub(super) fn format_target(
         &self,
         ctx: &egui::Context,
@@ -89,8 +88,9 @@ impl StokesForgeApp {
         .unwrap_or(FormatTarget::None)
     }
 
-    /// Lit les réglages de la zone visée et les défauts du pipeline partagé.
-    /// Le brouillon en édition prime sur le modèle, aussi en fenêtre détachée.
+    /// Reads the settings of the targeted zone and the defaults of the shared
+    /// pipeline. The draft being edited takes precedence over the model, in a
+    /// detached window too.
     pub(super) fn text_format_state(
         &self,
         ctx: &egui::Context,
@@ -151,7 +151,7 @@ impl StokesForgeApp {
                         TextEditTarget::LegendEntry(address) => Some(TextTarget::Legend {
                             panel: address.panel,
                         }),
-                        // Un nom de groupe n'a pas de police propre.
+                        // A group name has no font of its own.
                         TextEditTarget::GroupName(_) => None,
                     })
                     .unwrap_or_else(|| view.selected_text())?;
@@ -194,8 +194,8 @@ impl StokesForgeApp {
         state.unwrap_or_default()
     }
 
-    /// L'objet graphique sélectionné du graphe au premier plan, avec son
-    /// adresse (issue #64).
+    /// The selected graphic object of the foreground graph, with its address
+    /// (issue #64).
     fn selected_object(
         &self,
         active_tab: Option<Tab>,
@@ -213,7 +213,7 @@ impl StokesForgeApp {
         Some((graph, target, shape))
     }
 
-    /// Ce que la barre de format d'objet montre.
+    /// What the object format bar shows.
     pub(super) fn object_format_state(
         &self,
         active_tab: Option<Tab>,
@@ -238,8 +238,8 @@ impl StokesForgeApp {
         })
     }
 
-    /// Règle l'objet sélectionné : une seule action annulable, comme un
-    /// déplacement (`ObjectFormat::apply` dit si quelque chose a changé).
+    /// Sets the selected object: a single undoable action, like a move
+    /// (`ObjectFormat::apply` says whether something changed).
     fn format_object(
         &mut self,
         format: &stokesforge_app_state::object_format::ObjectFormat,
@@ -273,20 +273,19 @@ impl StokesForgeApp {
         }
     }
 
-    /// Règle la police (ou le corps) de la **zone** de texte visée, sans
-    /// toucher à son contenu. Rend `true` si la demande a été prise en charge ;
-    /// `false` laisse [`StokesForgeApp::format_text`] poser des balises (le corps
-    /// d'un passage du champ en édition, la couleur, le gras…).
+    /// Sets the font (or size) of the targeted text **zone**, without touching
+    /// its content. Returns `true` if the request was handled; `false` lets
+    /// [`StokesForgeApp::format_text`] place tags (the size of a passage of the
+    /// field being edited, the color, bold…).
     ///
-    /// - un texte libre en édition : le brouillon de l'éditeur
-    ///   (`apply_pending_zone_font` (`graph_text_edit.rs`)) ;
-    /// - un titre ou un nom de légende en édition : le titre, ou la légende,
-    ///   directement ;
-    /// - un titre, un titre d'axe ou la légende sélectionné : idem, police et
-    ///   corps ;
-    /// - un texte libre sélectionné : sa police ;
-    /// - la couleur d'un titre, d'un titre d'axe ou de la légende sélectionné :
-    ///   celle de la zone entière (#90) ; en édition, un passage (balise).
+    /// - a free text being edited: the editor's draft
+    ///   (`apply_pending_zone_font` (`graph_text_edit.rs`));
+    /// - a title or a legend name being edited: the title, or the legend,
+    ///   directly;
+    /// - a selected title, axis title or legend: same, font and size;
+    /// - a selected free text: its font;
+    /// - the color of a selected title, axis title or legend: that of the
+    ///   whole zone (#90); while editing, a passage (tag).
     fn format_zone(
         &mut self,
         ctx: &egui::Context,
@@ -313,7 +312,7 @@ impl StokesForgeApp {
         else {
             return false;
         };
-        // Quelle zone de titre ? (`None` : pas de titre visé)
+        // Which title zone? (`None`: no title targeted)
         let zone = match (&title_editing, selected_text) {
             (Some(editor), _) => Some(match editor.target {
                 TextEditTarget::Title(target) => target,
@@ -344,9 +343,9 @@ impl StokesForgeApp {
                 return self.set_zone_font(graph, target, actions, |font| font.size = None);
             }
         }
-        // L'alignement (#244) est un champ de la boîte : le brouillon d'un
-        // texte libre en édition, sinon la zone d'un titre (édité ou
-        // sélectionné), sinon le texte libre sélectionné.
+        // Alignment (#244) is a field of the box: the draft of a free text
+        // being edited, otherwise the zone of a title (edited or selected),
+        // otherwise the selected free text.
         if let TextFormat::Align(align) = *format {
             if annotation_editing {
                 self.read_graph_view(graph, |view| {
@@ -406,10 +405,10 @@ impl StokesForgeApp {
             }
             return false;
         }
-        // Gras et italique d'un titre sélectionné hors édition (#243) : les
-        // balises enveloppent tout le texte, comme pour un texte libre ; un
-        // texte déjà entièrement enveloppé se déballe. La légende n'a pas de
-        // texte propre (`TextTarget::text` rend `None`) : rien à envelopper.
+        // Bold and italic of a selected title outside editing (#243): the tags
+        // wrap the whole text, as for a free text; a text already fully
+        // wrapped is unwrapped. The legend has no text of its own
+        // (`TextTarget::text` returns `None`): nothing to wrap.
         if let (TextFormat::Bold | TextFormat::Italic, Some(target), None, false) =
             (format, zone, &title_editing, annotation_editing)
         {
@@ -426,8 +425,8 @@ impl StokesForgeApp {
             }
             return true;
         }
-        // La couleur : celle de la zone d'un titre sélectionné ; dans un champ
-        // en édition elle reste une balise sur le passage surligné (#90).
+        // The color: that of the zone of a selected title; in a field being
+        // edited it stays a tag on the highlighted passage (#90).
         if let (TextFormat::Color(color), Some(target), None, false) =
             (format, zone, &title_editing, annotation_editing)
         {
@@ -438,8 +437,8 @@ impl StokesForgeApp {
             });
             return true;
         }
-        // Le corps : celui de la zone d'un titre sélectionné ; dans un champ
-        // en édition il reste une balise sur le passage surligné.
+        // The size: that of the zone of a selected title; in a field being
+        // edited it stays a tag on the highlighted passage.
         if let (TextFormat::Size(size), Some(target), None, false) =
             (format, zone, &title_editing, annotation_editing)
         {
@@ -451,10 +450,10 @@ impl StokesForgeApp {
         false
     }
 
-    /// Pose la police ou le corps de la zone de titre `target` : lit la
-    /// police actuelle dans le modèle, la change par `edit`, et pousse
-    /// **une** action annulable. `true` toujours (la demande est prise en
-    /// charge même si le graphe n'a plus ce texte).
+    /// Sets the font or size of the title zone `target`: reads the current
+    /// font from the model, changes it with `edit`, and pushes **one**
+    /// undoable action. Always `true` (the request is handled even if the
+    /// graph no longer has this text).
     fn set_zone_font(
         &self,
         graph: NodeId,
@@ -476,9 +475,10 @@ impl StokesForgeApp {
         true
     }
 
-    /// Met en forme le texte visé : dans le champ en édition (le champ pose
-    /// les balises à son prochain tracé, voir `apply_pending_format` (`graph_text_edit.rs`)), ou
-    /// sur tout le texte libre sélectionné — une seule action annulable.
+    /// Formats the targeted text: in the field being edited (the field places
+    /// the tags at its next paint, see `apply_pending_format`
+    /// (`graph_text_edit.rs`)), or on the whole selected free text — a single
+    /// undoable action.
     fn format_text(
         &mut self,
         ctx: &egui::Context,
@@ -487,8 +487,8 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
     ) {
         use stokesforge_app_state::text_format::{apply, TextFormat};
-        // La police est un attribut de la zone, jamais une balise (issue
-        // #78) ; le corps aussi pour un titre ou la légende (issue #77).
+        // The font is an attribute of the zone, never a tag (issue #78); the
+        // size too for a title or the legend (issue #77).
         if self.format_zone(ctx, &format, active_tab, actions) {
             return;
         }
@@ -513,7 +513,7 @@ impl StokesForgeApp {
                 else {
                     return;
                 };
-                // Couleur et corps d'un texte libre sont des champs du modèle.
+                // Color and size of a free text are model fields.
                 match &format {
                     TextFormat::Color(color) => annotation.color = color.clone(),
                     TextFormat::Size(size) => annotation.size = *size,
@@ -534,9 +534,8 @@ impl StokesForgeApp {
         }
     }
 
-    /// Exécute ce qu'un bouton de barre d'outils a demandé : les mêmes
-    /// chemins que les entrées de menu correspondantes, jamais une seconde
-    /// écriture.
+    /// Runs what a toolbar button asked for: the same paths as the matching
+    /// menu entries, never a second write.
     pub(super) fn run_toolbar_request(
         &mut self,
         ctx: &egui::Context,
@@ -578,7 +577,7 @@ impl StokesForgeApp {
 mod tests {
     use super::super::graph_text_edit::open_text_editor;
     use super::super::graph_window::graph_drop_target;
-    use super::super::graph_window::tests::graphe;
+    use super::super::graph_window::tests::plotted_graph;
     use super::super::object_manager_ui::{selected_manager_target, ObjectManagerRequest};
     use super::super::project_manager::tests::{click_at, find_text_center};
     use super::*;
@@ -595,11 +594,11 @@ mod tests {
     use stokesforge_render_egui::GraphTool;
     use stokesforge_session::Session;
 
-    /// Le texte libre du graphe de [`setup`].
-    const TEXTE: AnnotationRef = AnnotationRef { panel: 0, index: 0 };
+    /// The free text of the graph from [`setup`].
+    const FREE_TEXT: AnnotationRef = AnnotationRef { panel: 0, index: 0 };
 
-    /// Les actions d'une demande de format, sans les envoyer.
-    fn formate(
+    /// The actions of a format request, without sending them.
+    fn request_format(
         app: &mut StokesForgeApp,
         ctx: &egui::Context,
         graph: NodeId,
@@ -610,19 +609,19 @@ mod tests {
         actions
     }
 
-    fn format_en_attente(ctx: &egui::Context) -> Option<TextFormat> {
+    fn pending_format(ctx: &egui::Context) -> Option<TextFormat> {
         ctx.data(|data| data.get_temp::<Option<TextFormat>>(pending_format_id()))
             .flatten()
     }
 
-    fn police_en_attente(ctx: &egui::Context) -> Option<String> {
+    fn pending_font(ctx: &egui::Context) -> Option<String> {
         ctx.data(|data| data.get_temp::<Option<String>>(pending_zone_font_id()))
             .flatten()
     }
 
-    /// Ouvre l'éditeur sur place du titre, comme un double-clic : le graphe
-    /// est d'abord peint, pour que le titre ait une boîte à l'écran.
-    fn edite_le_titre(app: &mut StokesForgeApp, ctx: &egui::Context, graph: NodeId) {
+    /// Opens the title's in-place editor, like a double-click: the graph is
+    /// painted first, so the title has a box on screen.
+    fn edit_the_title(app: &mut StokesForgeApp, ctx: &egui::Context, graph: NodeId) {
         for _ in 0..2 {
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -653,15 +652,15 @@ mod tests {
         assert_eq!(
             app.format_target(ctx, Some(Tab::Graph(graph))),
             FormatTarget::Field,
-            "l'éditeur du titre doit être ouvert"
+            "the title editor must be open"
         );
     }
 
-    /// #97 : les champs de la barre affichent le format de la zone visée.
+    /// #97: the bar's fields show the format of the targeted zone.
     #[test]
-    fn la_barre_affiche_la_police_et_le_corps_du_titre_selectionne() {
+    fn the_bar_shows_the_font_and_size_of_the_selected_title() {
         use eframe::App as _;
-        let (session, graph) = graphe();
+        let (session, graph) = plotted_graph();
         let mut state = AppState::new(session.handle(), String::new()).unwrap();
         state.dispatch(Action::SetTextFont {
             graph,
@@ -703,10 +702,10 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// #99 : le même choix dans le sélecteur agit sur deux zones successives.
+    /// #99: the same choice in the picker acts on two successive zones.
     #[test]
-    fn la_meme_couleur_s_applique_a_deux_zones_successives_par_la_barre() {
-        let (session, graph) = graphe();
+    fn the_same_color_applies_to_two_successive_zones_through_the_bar() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let ctx = egui::Context::default();
@@ -762,7 +761,7 @@ mod tests {
                     }
                     _ => None,
                 })
-                .unwrap_or_else(|| panic!("échantillon peint (palette={palette})"))
+                .unwrap_or_else(|| panic!("swatch painted (palette={palette})"))
         };
         for target in [
             TextTarget::Title,
@@ -792,7 +791,7 @@ mod tests {
             assert_eq!(
                 target.color(&spec).as_deref(),
                 Some("#8b1a1a"),
-                "la zone {target:?} reçoit le rouge"
+                "the zone {target:?} gets the red"
             );
         }
         session.shutdown().unwrap();
@@ -800,12 +799,12 @@ mod tests {
 
     fn setup() -> (Session, StokesForgeApp, NodeId, egui::Context) {
         let mut project = Project::new("Formats").unwrap();
-        let mut spec = PlotSpec::empty("Titre");
+        let mut spec = PlotSpec::empty("Title");
         spec.panels
             .get_mut(0)
             .unwrap()
             .annotations
-            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+            .push(AnnotationSpec::new("Text", 0.0, 0.0));
         let graph = project.add_graph(project.root(), None, spec).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -818,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn les_corps_herites_et_auto_suivent_la_selection_flottante_et_detachee() {
+    fn inherited_and_auto_sizes_follow_the_floating_and_detached_selection() {
         for detached in [false, true] {
             let (session, mut app, graph, ctx) = setup();
             if detached {
@@ -879,7 +878,7 @@ mod tests {
                 assert!(reset.auto_size);
                 assert_eq!(
                     reset.family, explicit.family,
-                    "Auto ne change pas la police"
+                    "Auto does not change the font"
                 );
                 app.state.dispatch(Action::Undo);
                 assert_eq!(
@@ -893,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
+    fn the_bar_reads_the_draft_and_auto_restores_the_size_of_the_free_text() {
         let (session, mut app, graph, ctx) = setup();
         let target = AnnotationRef { panel: 0, index: 0 };
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
@@ -931,7 +930,7 @@ mod tests {
         );
         assert!(
             actions.is_empty(),
-            "seul le brouillon change avant validation"
+            "only the draft changes before validation"
         );
         assert_eq!(
             app.text_format_state(&ctx, Some(Tab::Graph(graph))).size,
@@ -945,35 +944,36 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Les boutons d'alignement de la barre (#244) posent `align` : sur le
-    /// texte libre sélectionné (champ de la boîte), sur un titre sélectionné
-    /// (champ de sa zone), chacun en une seule action.
+    /// The bar's alignment buttons (#244) set `align`: on the selected free
+    /// text (box field), on a selected title (field of its zone), each in a
+    /// single action.
     #[test]
-    fn l_alignement_se_pose_sur_la_boite_ou_la_zone() {
+    fn alignment_is_set_on_the_box_or_the_zone() {
         use stokesforge_plot::TextAlign;
         let (session, mut app, graph, ctx) = setup();
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
-        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
-        match formate(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Right)).as_slice() {
+        app.with_graph_view(graph, |view| view.select_annotation(Some(FREE_TEXT), &spec));
+        match request_format(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Right)).as_slice()
+        {
             [Action::SetAnnotation { annotation, .. }] => {
                 assert_eq!(annotation.align, TextAlign::Right);
-                assert_eq!(annotation.text, "Texte", "aucune balise");
+                assert_eq!(annotation.text, "Text", "no tag");
             }
-            other => panic!("une SetAnnotation attendue, pas {other:?}"),
+            other => panic!("one SetAnnotation expected, not {other:?}"),
         }
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });
-        match formate(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Left)).as_slice() {
+        match request_format(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Left)).as_slice() {
             [Action::SetTextFont { font, .. }] => assert_eq!(font.align, TextAlign::Left),
-            other => panic!("une SetTextFont attendue, pas {other:?}"),
+            other => panic!("one SetTextFont expected, not {other:?}"),
         }
-        // Le bouton de l'alignement courant reste enfoncé : l'état le lit.
+        // The button of the current alignment stays pressed: the state reads it.
         assert_eq!(
             app.text_format_state(&ctx, Some(Tab::Graph(graph))).align,
             Some(TextAlign::Center)
         );
-        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        app.with_graph_view(graph, |view| view.select_annotation(Some(FREE_TEXT), &spec));
         assert_eq!(
             app.text_format_state(&ctx, Some(Tab::Graph(graph))).align,
             Some(TextAlign::Center)
@@ -981,48 +981,48 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Un titre sélectionné hors édition (#243) : B / I enveloppent tout son
-    /// texte en une seule action ; une boîte à moitié enveloppée est
-    /// enveloppée en entier, une boîte entièrement enveloppée se déballe.
+    /// A selected title outside editing (#243): B / I wrap all its text in a
+    /// single action; a half-wrapped box is wrapped entirely, a fully wrapped
+    /// box is unwrapped.
     #[test]
-    fn gras_et_italique_enveloppent_tout_un_titre_selectionne() {
+    fn bold_and_italic_wrap_a_whole_selected_title() {
         let (session, mut app, graph, ctx) = setup();
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });
-        let texte = |actions: Vec<Action>| match actions.as_slice() {
+        let text_of = |actions: Vec<Action>| match actions.as_slice() {
             [Action::SetTextContent { text, .. }] => text.clone(),
-            other => panic!("une seule SetTextContent attendue, pas {other:?}"),
+            other => panic!("a single SetTextContent expected, not {other:?}"),
         };
         assert_eq!(
-            texte(formate(&mut app, &ctx, graph, TextFormat::Bold)),
-            "#strong[Titre]"
+            text_of(request_format(&mut app, &ctx, graph, TextFormat::Bold)),
+            "#strong[Title]"
         );
         assert_eq!(
-            texte(formate(&mut app, &ctx, graph, TextFormat::Italic)),
-            "#emph[Titre]"
+            text_of(request_format(&mut app, &ctx, graph, TextFormat::Italic)),
+            "#emph[Title]"
         );
-        let mut poser = |text: &str| {
+        let mut set_title_text = |text: &str| {
             app.state.dispatch(Action::SetTextContent {
                 graph,
                 target: TextTarget::Title,
                 text: text.into(),
             });
-            texte(formate(&mut app, &ctx, graph, TextFormat::Bold))
+            text_of(request_format(&mut app, &ctx, graph, TextFormat::Bold))
         };
-        assert_eq!(poser("#strong[a] b"), "#strong[#strong[a] b]");
-        assert_eq!(poser("#strong[Titre]"), "Titre");
+        assert_eq!(set_title_text("#strong[a] b"), "#strong[#strong[a] b]");
+        assert_eq!(set_title_text("#strong[Title]"), "Title");
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn les_formats_locaux_affichent_un_etat_neutre() {
+    fn local_formats_show_a_neutral_state() {
         let (session, mut app, graph, ctx) = setup();
         app.state.dispatch(Action::SetTextContent {
             graph,
             target: TextTarget::Title,
-            text: "Titre #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
+            text: "Title #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
         });
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
@@ -1036,12 +1036,12 @@ mod tests {
     }
 
     #[test]
-    fn la_selection_et_le_format_rejoignent_la_meme_vue_detachee() {
-        let mut project = Project::new("Objets").unwrap();
+    fn the_selection_and_the_format_reach_the_same_detached_view() {
+        let mut project = Project::new("Objects").unwrap();
         let root = project.root();
         let mut panel = PanelSpec::default();
         panel.series.push(SeriesSpec::new(NodeId::from_raw(100)));
-        let spec = PlotSpec::empty("Objets").with_panels(panel);
+        let spec = PlotSpec::empty("Objects").with_panels(panel);
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
         let session = Session::spawn(project, None).unwrap();
         let state = AppState::new(session.handle(), String::new()).unwrap();
@@ -1067,7 +1067,7 @@ mod tests {
             },
         );
         output.textures_delta.clear();
-        // Revenir dans le panneau conserve la cible native du graphe.
+        // Going back into the panel keeps the graph's native target.
         let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
             assert_eq!(app.active_content_tab(&ctx), Some(Tab::Graph(graph)));
         });
@@ -1095,20 +1095,21 @@ mod tests {
         assert_eq!(app.selected_series(graph), Some(target));
         assert_eq!(app.graph_views[&graph].selected_series(), Some(target));
     }
+
     #[test]
-    fn les_objets_masques_et_le_format_suivent_la_vue_detachee() {
+    fn hidden_objects_and_the_format_follow_the_detached_view() {
         use stokesforge_app_state::object_manager::VisibilityTarget as T;
         use stokesforge_plot::{
             AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextTarget,
         };
-        let mut project = Project::new("Objets").unwrap();
+        let mut project = Project::new("Objects").unwrap();
         let root = project.root();
-        let mut spec = PlotSpec::empty("Titre");
+        let mut spec = PlotSpec::empty("Title");
         spec.title_visible = false;
         let panel = spec.panels.get_mut(0).unwrap();
         panel
             .annotations
-            .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+            .push(AnnotationSpec::new("Text", 0.0, 0.0));
         panel.annotations[0].visible = false;
         panel
             .shapes
@@ -1141,7 +1142,7 @@ mod tests {
             );
             assert!(
                 !app.graph_views.contains_key(&graph),
-                "aucune seconde vue créée"
+                "no second view created"
             );
         }
         assert_eq!(
@@ -1183,18 +1184,17 @@ mod tests {
             selected_manager_target(&app.graph_views[&graph]),
             Some(T::Annotation(text))
         );
-        assert!(actions.is_empty(), "la sélection n'envoie aucune commande");
+        assert!(actions.is_empty(), "selection sends no command");
     }
 
-    /// Un texte libre sélectionné (sans éditeur ouvert) : gras et italique
-    /// sont des balises posées sur **tout** son texte par
-    /// `text_format::apply`, couleur et corps des champs du modèle ; chaque
-    /// demande est une seule action annulable.
+    /// A selected free text (no editor open): bold and italic are tags placed
+    /// on **all** its text by `text_format::apply`, color and size are model
+    /// fields; each request is a single undoable action.
     #[test]
-    fn gras_italique_couleur_et_corps_d_un_texte_libre_selectionne() {
+    fn bold_italic_color_and_size_of_a_selected_free_text() {
         let (session, mut app, graph, ctx) = setup();
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
-        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        app.with_graph_view(graph, |view| view.select_annotation(Some(FREE_TEXT), &spec));
         assert_eq!(
             app.format_target(&ctx, Some(Tab::Graph(graph))),
             FormatTarget::Block
@@ -1204,38 +1204,43 @@ mod tests {
                 graph: g,
                 target,
                 annotation,
-            }] if *g == graph && *target == TEXTE => (**annotation).clone(),
-            other => panic!("une seule SetAnnotation attendue, pas {other:?}"),
+            }] if *g == graph && *target == FREE_TEXT => (**annotation).clone(),
+            other => panic!("a single SetAnnotation expected, not {other:?}"),
         };
         for format in [TextFormat::Bold, TextFormat::Italic] {
-            let posee = annotation(formate(&mut app, &ctx, graph, format.clone()));
-            assert_eq!(posee.text, apply("Texte", 0..5, &format).text);
-            assert_ne!(posee.text, "Texte", "{format:?} pose une balise");
+            let placed = annotation(request_format(&mut app, &ctx, graph, format.clone()));
+            assert_eq!(placed.text, apply("Text", 0..4, &format).text);
+            assert_ne!(placed.text, "Text", "{format:?} places a tag");
         }
-        let colore = annotation(formate(
+        let colored = annotation(request_format(
             &mut app,
             &ctx,
             graph,
             TextFormat::Color("#8b1a1a".into()),
         ));
         assert_eq!(
-            (colore.color.as_str(), colore.text.as_str()),
-            ("#8b1a1a", "Texte")
+            (colored.color.as_str(), colored.text.as_str()),
+            ("#8b1a1a", "Text")
         );
-        let agrandi = annotation(formate(&mut app, &ctx, graph, TextFormat::Size(30.0)));
-        assert_eq!((agrandi.size, agrandi.text.as_str()), (30.0, "Texte"));
-        assert_eq!(format_en_attente(&ctx), None, "rien n'attend de champ");
+        let enlarged = annotation(request_format(
+            &mut app,
+            &ctx,
+            graph,
+            TextFormat::Size(30.0),
+        ));
+        assert_eq!((enlarged.size, enlarged.text.as_str()), (30.0, "Text"));
+        assert_eq!(pending_format(&ctx), None, "nothing is waiting for a field");
         session.shutdown().unwrap();
     }
 
-    /// Un champ en édition (#63) : la barre n'envoie rien, elle dépose le
-    /// format pour que le champ pose la balise sur le passage surligné à son
-    /// prochain tracé (`apply_pending_format`) — couleur et corps compris,
-    /// qui ne visent la zone entière que hors édition (#90).
+    /// A field being edited (#63): the bar sends nothing, it deposits the
+    /// format so the field places the tag on the highlighted passage at its
+    /// next paint (`apply_pending_format`) — color and size included, which
+    /// target the whole zone only outside editing (#90).
     #[test]
-    fn dans_un_champ_en_edition_le_format_attend_le_prochain_trace() {
+    fn in_a_field_being_edited_the_format_waits_for_the_next_paint() {
         let (session, mut app, graph, ctx) = setup();
-        edite_le_titre(&mut app, &ctx, graph);
+        edit_the_title(&mut app, &ctx, graph);
         for format in [
             TextFormat::Bold,
             TextFormat::Italic,
@@ -1243,18 +1248,18 @@ mod tests {
             TextFormat::Size(30.0),
         ] {
             assert!(
-                formate(&mut app, &ctx, graph, format.clone()).is_empty(),
-                "{format:?} n'envoie rien avant la validation du champ"
+                request_format(&mut app, &ctx, graph, format.clone()).is_empty(),
+                "{format:?} sends nothing before the field is validated"
             );
-            assert_eq!(format_en_attente(&ctx), Some(format));
+            assert_eq!(pending_format(&ctx), Some(format));
         }
         session.shutdown().unwrap();
     }
 
-    /// Hors édition, couleur et corps d'un titre sélectionné vont à la zone
-    /// entière (#77, #90) ; un corps invalide n'envoie rien.
+    /// Outside editing, color and size of a selected title go to the whole
+    /// zone (#77, #90); an invalid size sends nothing.
     #[test]
-    fn la_couleur_et_le_corps_d_un_titre_selectionne_vont_a_la_zone() {
+    fn the_color_and_size_of_a_selected_title_go_to_the_zone() {
         let (session, mut app, graph, ctx) = setup();
         let target = TextTarget::AxisTitle {
             panel: 0,
@@ -1263,72 +1268,71 @@ mod tests {
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
         assert_eq!(
-            formate(&mut app, &ctx, graph, TextFormat::Color("#8b1a1a".into())),
+            request_format(&mut app, &ctx, graph, TextFormat::Color("#8b1a1a".into())),
             vec![Action::SetTextColor {
                 graph,
                 target,
                 color: "#8b1a1a".into(),
             }]
         );
-        match formate(&mut app, &ctx, graph, TextFormat::Size(30.0)).as_slice() {
+        match request_format(&mut app, &ctx, graph, TextFormat::Size(30.0)).as_slice() {
             [Action::SetTextFont {
                 target: t, font, ..
             }] => {
                 assert_eq!(*t, target);
                 assert_eq!(font.size, Some(30.0));
             }
-            other => panic!("une seule SetTextFont attendue, pas {other:?}"),
+            other => panic!("a single SetTextFont expected, not {other:?}"),
         }
-        for invalide in [0.0, -4.0, f64::NAN] {
-            assert!(formate(&mut app, &ctx, graph, TextFormat::Size(invalide)).is_empty());
+        for invalid in [0.0, -4.0, f64::NAN] {
+            assert!(request_format(&mut app, &ctx, graph, TextFormat::Size(invalid)).is_empty());
         }
-        assert_eq!(format_en_attente(&ctx), None);
+        assert_eq!(pending_format(&ctx), None);
         session.shutdown().unwrap();
     }
 
-    /// La police est un champ de la zone (#78), jamais une balise
-    /// `#text(font: …)` dans le contenu : titre sélectionné ou en édition,
-    /// texte libre sélectionné ou en édition.
+    /// The font is a field of the zone (#78), never a `#text(font: …)` tag in
+    /// the content: selected or edited title, selected or edited free text.
     #[test]
-    fn la_police_est_un_champ_de_la_zone_jamais_une_balise() {
-        let police = || TextFormat::Font("  Fira Sans ".into());
-        let sans_balise = |actions: &[Action]| {
+    fn the_font_is_a_zone_field_never_a_tag() {
+        let font_format = || TextFormat::Font("  Fira Sans ".into());
+        let without_tag = |actions: &[Action]| {
             assert!(
                 !format!("{actions:?}").contains("#text(font"),
-                "aucune balise de police dans {actions:?}"
+                "no font tag in {actions:?}"
             );
         };
-        let titre = |actions: Vec<Action>| match actions.as_slice() {
+        let title_action = |actions: Vec<Action>| match actions.as_slice() {
             [Action::SetTextFont { target, font, .. }] => {
                 assert_eq!(*target, TextTarget::Title);
                 assert_eq!(font.family, "Fira Sans");
             }
-            other => panic!("une seule SetTextFont attendue, pas {other:?}"),
+            other => panic!("a single SetTextFont expected, not {other:?}"),
         };
 
-        // Titre sélectionné.
+        // Selected title.
         let (session, mut app, graph, ctx) = setup();
         let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });
-        let actions = formate(&mut app, &ctx, graph, police());
-        sans_balise(&actions);
-        titre(actions);
+        let actions = request_format(&mut app, &ctx, graph, font_format());
+        without_tag(&actions);
+        title_action(actions);
 
-        // Texte libre sélectionné : son champ `font`, texte inchangé.
-        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
-        let actions = formate(&mut app, &ctx, graph, police());
-        sans_balise(&actions);
+        // Selected free text: its `font` field, text unchanged.
+        app.with_graph_view(graph, |view| view.select_annotation(Some(FREE_TEXT), &spec));
+        let actions = request_format(&mut app, &ctx, graph, font_format());
+        without_tag(&actions);
         match actions.as_slice() {
             [Action::SetAnnotation { annotation, .. }] => {
                 assert_eq!(annotation.font, "Fira Sans");
-                assert_eq!(annotation.text, "Texte");
+                assert_eq!(annotation.text, "Text");
             }
-            other => panic!("une seule SetAnnotation attendue, pas {other:?}"),
+            other => panic!("a single SetAnnotation expected, not {other:?}"),
         }
 
-        // Texte libre en édition : le brouillon recevra la police.
+        // Free text being edited: the draft will receive the font.
         let id = app
             .with_graph_view(graph, |view| annotation_editor_id(view))
             .unwrap();
@@ -1336,35 +1340,34 @@ mod tests {
             data.insert_temp(
                 id,
                 AnnotationEditor {
-                    target: TEXTE,
-                    draft: TEXTE.get(&spec).unwrap().clone(),
-                    original: TEXTE.get(&spec).cloned(),
+                    target: FREE_TEXT,
+                    draft: FREE_TEXT.get(&spec).unwrap().clone(),
+                    original: FREE_TEXT.get(&spec).cloned(),
                     focus: false,
                     anchor: None,
                 },
             )
         });
-        assert!(formate(&mut app, &ctx, graph, police()).is_empty());
-        assert_eq!(police_en_attente(&ctx).as_deref(), Some("Fira Sans"));
-        assert_eq!(format_en_attente(&ctx), None, "pas de balise en attente");
+        assert!(request_format(&mut app, &ctx, graph, font_format()).is_empty());
+        assert_eq!(pending_font(&ctx).as_deref(), Some("Fira Sans"));
+        assert_eq!(pending_format(&ctx), None, "no tag pending");
         session.shutdown().unwrap();
 
-        // Titre en édition : la zone directement, rien en attente.
+        // Title being edited: the zone directly, nothing pending.
         let (session, mut app, graph, ctx) = setup();
-        edite_le_titre(&mut app, &ctx, graph);
-        let actions = formate(&mut app, &ctx, graph, police());
-        sans_balise(&actions);
-        titre(actions);
-        assert_eq!(format_en_attente(&ctx), None, "pas de balise en attente");
+        edit_the_title(&mut app, &ctx, graph);
+        let actions = request_format(&mut app, &ctx, graph, font_format());
+        without_tag(&actions);
+        title_action(actions);
+        assert_eq!(pending_format(&ctx), None, "no tag pending");
         session.shutdown().unwrap();
     }
 
-    /// La barre contextuelle suit la fenêtre au premier plan, et l'outil
-    /// choisi par un bouton est celui de la vue du graphe, flottante ou
-    /// détachée.
+    /// The contextual bar follows the foreground window, and the tool chosen
+    /// by a button is that of the graph view, floating or detached.
     #[test]
-    fn la_barre_d_outils_suit_la_fenetre_active_et_son_outil() {
-        let (session, graph) = graphe();
+    fn the_toolbar_follows_the_active_window_and_its_tool() {
+        let (session, graph) = plotted_graph();
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let ctx = egui::Context::default();
@@ -1398,23 +1401,20 @@ mod tests {
                     ..
                 }
             ));
-            assert!(
-                actions.is_empty(),
-                "choisir un outil n'est pas une commande"
-            );
+            assert!(actions.is_empty(), "choosing a tool is not a command");
             assert_eq!(
                 app.read_graph_view(graph, GraphView::tool),
                 Some(GraphTool::Text),
-                "détachée = {detached}"
+                "detached = {detached}"
             );
         }
 
-        // Classeur : la feuille affichée et ses colonnes sélectionnées.
+        // Workbook: the displayed sheet and its selected columns.
         let book = app.state.books()[0].0;
         let sheet = app.state.selected_sheet_in(book).unwrap();
         let column = app.state.visible_columns(sheet)[1].0;
         let ToolsContext::Book { columns, .. } = app.tools_context(Some(Tab::Book(book))) else {
-            panic!("contexte de classeur attendu");
+            panic!("workbook context expected");
         };
         assert!(columns.is_empty());
         app.state.select_column(sheet, column);
@@ -1424,10 +1424,10 @@ mod tests {
                 sheet: s,
                 columns,
             } => assert_eq!((b, s, columns), (book, Some(sheet), vec![column])),
-            other => panic!("contexte de classeur attendu, pas {other:?}"),
+            other => panic!("workbook context expected, not {other:?}"),
         }
 
-        // Un bouton qui porte une action la pousse telle quelle.
+        // A button that carries an action pushes it as is.
         let mut actions = Vec::new();
         app.run_toolbar_request(
             &ctx,
@@ -1439,12 +1439,12 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Le format d'objet vise l'objet graphique sélectionné : une seule
-    /// action, et rien sans sélection.
+    /// The object format targets the selected graphic object: a single action,
+    /// and nothing without a selection.
     #[test]
-    fn le_format_d_objet_vise_l_objet_selectionne() {
-        let mut project = Project::new("Objets").unwrap();
-        let mut spec = PlotSpec::empty("Objets");
+    fn the_object_format_targets_the_selected_object() {
+        let mut project = Project::new("Objects").unwrap();
+        let mut spec = PlotSpec::empty("Objects");
         spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
             ShapeKind::Rectangle,
             0.0,
@@ -1459,13 +1459,13 @@ mod tests {
         let tab = Some(Tab::Graph(graph));
         let mut actions = Vec::new();
         app.format_object(&ObjectFormat::LineWidth(3.0), tab, &mut actions);
-        assert!(actions.is_empty(), "sans sélection, rien");
+        assert!(actions.is_empty(), "without a selection, nothing");
         assert!(app.object_format_state(tab).is_none());
 
         let target = ShapeRef { panel: 0, index: 0 };
         app.with_graph_view(graph, |view| view.select_shape(Some(target)));
         let state = app.object_format_state(tab).unwrap();
-        assert!(state.closed, "un rectangle se remplit");
+        assert!(state.closed, "a rectangle can be filled");
         app.format_object(&ObjectFormat::LineWidth(3.0), tab, &mut actions);
         match actions.as_slice() {
             [Action::SetShape {
@@ -1476,7 +1476,7 @@ mod tests {
                 assert_eq!((*g, *t), (graph, target));
                 assert_eq!(shape.line_width, 3.0);
             }
-            other => panic!("une seule SetShape attendue, pas {other:?}"),
+            other => panic!("a single SetShape expected, not {other:?}"),
         }
         session.shutdown().unwrap();
     }

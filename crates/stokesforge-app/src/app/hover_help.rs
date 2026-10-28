@@ -1,24 +1,23 @@
-//! Aide au survol d'un champ (#197) : une petite icône grisée posée **tout à
-//! droite** du champ qu'elle explique, qui montre son rappel au survol.
+//! Hover help for a field (#197): a small greyed-out icon placed **at the far
+//! right** of the field it explains, which shows its reminder on hover.
 //!
-//! Elle remplace le mémo repliable « Formula syntax » qui s'ouvrait sous les
-//! champs : on ne voyait pas à quel champ il se rapportait, et il prenait de
-//! la hauteur dans des fenêtres déjà denses. L'aide est une brique commune —
-//! un champ qui a besoin d'un rappel appelle [`hover_help`] avec le contenu de
-//! la bulle, plutôt que de recopier icône, teinte et survol.
+//! It replaces the collapsible "Formula syntax" memo that opened under the
+//! fields: it was not clear which field it referred to, and it took up height
+//! in windows that are already dense. The help is a shared building block —
+//! a field that needs a reminder calls [`hover_help`] with the content of the
+//! bubble, instead of copying the icon, tint and hover.
 //!
-//! Une bulle de survol (`Response::on_hover_ui`), pas une fenêtre surgissante :
-//! la fenêtre des propriétés est un dialogue modal où egui ne retient qu'une
-//! fenêtre surgissante à la fois (#9), alors qu'une info-bulle vit dans sa
-//! propre couche.
+//! A hover bubble (`Response::on_hover_ui`), not a popup window: the
+//! properties window is a modal dialog where egui keeps only one popup window
+//! at a time (#9), whereas a tooltip lives in its own layer.
 
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole};
 use crate::theme;
 
-/// Pose l'icône d'aide au bout de la rangée en cours ; `contents` peint la
-/// bulle qui s'affiche au survol. Rend la réponse de l'icône.
+/// Places the help icon at the end of the current row; `contents` paints the
+/// bubble shown on hover. Returns the icon's response.
 pub(crate) fn hover_help(
     ui: &mut egui::Ui,
     contents: impl FnOnce(&mut egui::Ui),
@@ -31,8 +30,8 @@ pub(crate) fn hover_help(
     .on_hover_ui(contents)
 }
 
-/// Le rappel d'un champ en une phrase (#225, S-M1) : l'icône « ? » dont la bulle
-/// n'est que `text`.
+/// A field's reminder in one sentence (#225, S-M1): the "?" icon whose bubble
+/// is only `text`.
 pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     let text = text.into();
     hover_help(ui, |ui| {
@@ -40,9 +39,9 @@ pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Res
     })
 }
 
-/// Peint un champ (`add`) et pose l'icône « ? » de son rappel juste après, sur
-/// la même rangée (#225, S-M2 : jamais de bulle nue sur un champ). Rend ce que
-/// rend `add`, pour que `.changed()` reste lisible à l'appel.
+/// Paints a field (`add`) and places the "?" icon of its reminder right after,
+/// on the same row (#225, S-M2: never a bare bubble on a field). Returns what
+/// `add` returns, so that `.changed()` stays readable at the call site.
 pub(crate) fn help_beside<R>(
     ui: &mut egui::Ui,
     text: impl Into<String>,

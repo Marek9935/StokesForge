@@ -15,7 +15,7 @@ it is decided in `StokesForgeApp::ui`, and nowhere else: menu bar
 over the full width), Project Manager (`Panel::left`,
 `app/project_manager.rs`, unless detached), Object Manager (`Panel::right`,
 `app/object_manager_ui.rs`, unless detached), then the `CentralPanel`. The test
-`les_panneaux_fixes_se_posent_dans_l_ordre_de_ui` (`app.rs`) holds this order
+`fixed_panels_are_placed_in_the_order_of_ui` (`app.rs`) holds this order
 through the panel rectangles. The four other
 kinds of content window — `Tab::Book` (workbook), `Tab::Graph`,
 `Tab::Matrix`, `Tab::Note`, each carrying a `NodeId` — open by default
@@ -120,16 +120,16 @@ properties are also a set of tabs (`tab_strip`, `Top`).
 | exclusive choice in a menu, a drop-down list or the color picker (its "Square | Wheel" views are `tab_strip` tabs, not buttons) | egui's `selectable_label` / `selectable_value` | selected-button background |
 | toolbar tool toggle | `Button::selected` (`toolbar::tool_button`) | pressed button |
 
-Guard `aucun_bouton_selectionnable_hors_d_un_menu` (`tests/gardes.rs`): an
+Guard `no_selectable_button_outside_a_menu` (`tests/guards.rs`): an
 egui selectable button outside a menu, a `show_ui` or a
 `*picker*`/`*popup*` function makes the tests fail.
 
 Bold is **always** `theme::bold` (`wght` axis of Noto Sans Variable,
 weight 600): egui's `RichText::strong` makes nothing bold, it is forbidden
-(`aucun_strong_d_egui_hors_du_theme`). A form section title
+(`no_egui_strong_outside_the_theme`). A form section title
 (graph properties, import wizard) goes through `theme::section_title`
 (6 pt space then bold) and alone separates its groups, without a `ui.separator()`
-right before (`aucun_separateur_avant_un_titre_de_section`); the current step
+right before (`no_separator_before_a_section_title`); the current step
 of the import wizard and the selected item of a list are also in
 bold. A font without a `wght` axis (Fira or Libertinus pair, system font)
 stays at normal weight, without error.
@@ -139,7 +139,7 @@ title (`section_heading`, bold at normal size; `section_title` places it with
 its space), the column header of a table (`table_header`, bold at small
 size: import preview, results, formula memo) and the secondary text
 (`secondary_text`, muted at small size). A bold at small size written
-in place (`bold(…).small()`) is refused (`aucun_gras_petit_hors_du_theme`). A
+in place (`bold(…).small()`) is refused (`no_small_bold_outside_the_theme`). A
 list row (`list_row`) and any composed row (checkbox, swatch,
 label) have the same height, `list_row::LIST_ROW_HEIGHT` (S-L7): the
 `ui.horizontal` row receives it through `with_list_row_height` (interaction
@@ -150,7 +150,7 @@ comes from `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
 `list_row_selected_fill`, `list_row_hover_fill`, `drop_stroke`…)
 or from the `Visuals` it sets (`error_fg_color`, `warn_fg_color`,
 `selection`): no `Color32::from_…` and no named tint outside `theme.rs` and
-`color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`). Notes
+`color_picker.rs` (`no_hardcoded_color_outside_the_theme`). Notes
 and matrices stay bounded to the common rectangle. In a
 graph (`graph_view_contents`,
 `crates/stokesforge-app/src/app/graph_window.rs`), the figure keeps the ratio of

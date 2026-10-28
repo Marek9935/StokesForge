@@ -83,14 +83,14 @@ separately: **each variant (icon, role) is baked into the SVG** by
    (`target/icons/sheet-color.png` and `sheet-gray.png`, via Inkscape). Look at
    it: in grayscale, the shapes must stay distinct.
 5. In `icons.rs`: a variant of `Icon` and its lines of `VARIANTS`.
-   The test `le_tableau_des_variantes_suit_icons_tsv` fails if one is missing.
+   The test `the_variants_table_follows_icons_tsv` fails if one is missing.
 6. The baked variants and `src/` are versioned; commit both.
 
 ## Guards
 
-- `aucune_icone_hors_du_composant`: no module outside `icons.rs` cites
+- `no_icon_outside_the_component`: no module outside `icons.rs` cites
   `assets/icons` or an icon URI.
-- `chaque_icone_se_charge`: every variant rasterizes with the real loader.
+- `every_icon_loads`: every variant rasterizes with the real loader.
 - Width: `ICON_SIZE` (16 pt) is the only size; the strip of a window
   header icon is `HEADER_ACTION_WIDTH` (`app/window_chrome.rs`, #50).
 - In an interface test, a painted icon is a `Shape::Rect` with a texture;

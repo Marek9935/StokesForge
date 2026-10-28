@@ -1,23 +1,22 @@
-//! Les dialogues **bloquants** de l'application (#229,
-//! `docs/standard-interface.md`, § Confirmations) : tant que l'un attend sa
-//! réponse, il est seul à agir dans l'image (`StokesForgeApp::
-//! blocking_confirmations` vide les autres actions).
+//! The application's **blocking** dialogs (#229,
+//! `docs/standard-interface.md`, § Confirmations): while one waits for its
+//! answer, it is the only one acting in the frame (`StokesForgeApp::
+//! blocking_confirmations` empties the other actions).
 //!
-//! Classement des dialogues qui demandent quelque chose (S-F3) :
+//! Classification of the dialogs that ask something (S-F3):
 //!
-//! - **confirmations** — seulement ce que Ctrl+Z ne rattrape pas : projet non
-//!   enregistré (New Project, Open…, Quit, fermeture de la fenêtre :
-//!   « Discard Changes · Cancel · Save »), export qui écraserait un fichier
-//!   que le sélecteur natif n'a pas vu (ici), suppression d'un modèle d'import
-//!   (`import_wizard`). Une suppression annulable (feuille, objets du Project
-//!   Manager) ne demande rien ;
-//! - **choix** — une question dont aucune réponse n'est « oui » : l'axe X d'un
-//!   dépôt de lignes (ici), la suppression d'un calcul avec ou sans ses
-//!   colonnes (`analysis_dialog`), l'export de séries périmées
-//!   (`stale_export`). Ils gardent la forme des dialogues
-//!   (`modal_dialog_with`) ;
-//! - **échec grave** (S-M8) — enregistrement raté, projet illisible : message,
-//!   Close et une action possible.
+//! - **confirmations** — only what Ctrl+Z does not recover: unsaved project
+//!   (New Project, Open…, Quit, window close:
+//!   "Discard Changes · Cancel · Save"), export that would overwrite a file
+//!   the native picker did not see (here), deletion of an import template
+//!   (`import_wizard`). An undoable deletion (sheet, Project Manager objects)
+//!   asks nothing;
+//! - **choices** — a question where no answer is "yes": the X axis of a row
+//!   drop (here), deletion of a computation with or without its columns
+//!   (`analysis_dialog`), export of stale series (`stale_export`). They keep
+//!   the shape of dialogs (`modal_dialog_with`);
+//! - **serious failure** (S-M8) — failed save, unreadable project: message,
+//!   Close and one possible action.
 
 use eframe::egui;
 
@@ -32,17 +31,17 @@ use super::dialogs::{
     SaveChangesOutcome, SizeClass,
 };
 
-// Tous les dialogues bloquants sont de classe Petite (S-F11), la taille par
-// défaut de leur nature, sauf deux lectures seules qui la demandent.
+// All blocking dialogs are of class Small (S-F11), the default size of their
+// nature, except two read-only ones that ask for it.
 
-/// Peint le dialogue bloquant en attente, s'il y en a un, et pousse sa réponse.
+/// Paints the pending blocking dialog, if there is one, and pushes its answer.
 pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     if let Some(gesture) = state.unsaved_pending() {
         unsaved_dialog(ctx, gesture, actions);
     }
     if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::LowRSquared) {
-        // Un avertissement, pas un échec (#288) : rien à réessayer, Close seul
-        // (Entrée, Échap, croix) le referme.
+        // A warning, not a failure (#288): nothing to retry, Close alone
+        // (Enter, Escape, cross) closes it.
         let outcome = modal_read_only(
             ctx,
             egui::Id::new("stokesforge_alert"),
@@ -50,7 +49,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             PlainSize::Class(SizeClass::Small),
             |ui| {
                 ui.label(tr!("alert-low-r2"));
-                // Texte normal : les compteurs sont le contenu de la boîte.
+                // Normal text: the counters are the content of the box.
                 ui.label(&alert.message);
             },
         );
@@ -58,9 +57,9 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             actions.push(Action::DismissAlert);
         }
     } else if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::SessionLost) {
-        // La session est morte (#310) : le modèle est perdu, Close ferme
-        // l'application (`Action::DismissAlert`). Le message dit où est la copie
-        // de secours.
+        // The session is dead (#310): the model is lost, Close closes the
+        // application (`Action::DismissAlert`). The message says where the
+        // backup copy is.
         let outcome = modal_read_only(
             ctx,
             egui::Id::new("stokesforge_alert"),
@@ -86,8 +85,8 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
                     },
                 ),
             ),
-            // Traités plus haut : ni l'avertissement ni la session perdue
-            // n'ont d'action à relancer.
+            // Handled above: neither the warning nor the lost session has an
+            // action to retry.
             AlertKind::LowRSquared | AlertKind::SessionLost => return,
             AlertKind::OpenFailed => (
                 tr!("alert-open-failed-title"),
@@ -179,7 +178,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
     }
 }
 
-/// « Discard Changes · Cancel · Save » (S-F4) ; Entrée = Save.
+/// "Discard Changes · Cancel · Save" (S-F4); Enter = Save.
 fn unsaved_dialog(ctx: &egui::Context, gesture: &UnsavedGesture, actions: &mut Vec<Action>) {
     let question = match gesture {
         UnsavedGesture::NewProject => tr!("unsaved-new"),
@@ -203,9 +202,9 @@ fn unsaved_dialog(ctx: &egui::Context, gesture: &UnsavedGesture, actions: &mut V
     actions.push(Action::ConfirmUnsaved(choice));
 }
 
-/// Le choix d'axe d'un dépôt de lignes (#166) : un **choix**, pas une
-/// confirmation — « Create Axis » par défaut, « Use Present Axis » en second
-/// bouton, « Cancel » abandonne le dépôt.
+/// The axis choice of a row drop (#166): a **choice**, not a
+/// confirmation — "Create Axis" by default, "Use Present Axis" as the second
+/// button, "Cancel" abandons the drop.
 fn row_drop_dialog(ctx: &egui::Context, actions: &mut Vec<Action>) {
     let label = tr!("row-drop-new-axis");
     let hint = tr!("row-drop-new-axis", "hint");

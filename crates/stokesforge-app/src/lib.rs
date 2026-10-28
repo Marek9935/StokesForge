@@ -1,39 +1,38 @@
-//! Coquille UI minimale de StokesForge : le banc d'essai qui fait tourner **une
-//! fois** la boucle complète — modèle → commande → annulation → sauvegarde →
-//! rechargement — dans une vraie fenêtre.
+//! Minimal UI shell of StokesForge: the test bench that runs the complete
+//! loop — model → command → undo → save → reload — **once**, in a real
+//! window.
 //!
-//! # Ce que ce crate n'est pas
+//! # What this crate is not
 //!
-//! Ce n'est **pas** une ébauche de l'interface finale. La grille éditable à
-//! délégués, le panneau de propriétés et un système de graphes complet
-//! seront repris entièrement plus tard ; rien ici ne doit les préempter. Le
-//! banc est volontairement pauvre : son rôle est de prouver que
-//! l'intégration bout en bout tient, tant qu'une intégration ratée ne coûte
-//! qu'une réécriture de ce crate — et non celle de tout ce qu'on aurait bâti
-//! par-dessus. Deux fondations techniques y sont posées : la disposition est
-//! en **fenêtres flottantes confinées** (`egui::Window`, module [`app`]), et
-//! Save/Load passent par un sélecteur de fichiers natif (`rfd`) — voir
-//! `docs/application/README.md` pour le détail de ce qui est fait et de ce qui ne
-//! l'est pas encore.
+//! It is **not** a sketch of the final interface. The editable grid with
+//! delegates, the properties panel and a complete graph system will be taken
+//! up entirely later; nothing here must preempt them. The bench is
+//! deliberately poor: its role is to prove that the end-to-end integration
+//! holds, while a failed integration costs only a rewrite of this crate — and
+//! not that of everything that would have been built on top. Two technical
+//! foundations are laid here: the layout is **confined floating windows**
+//! (`egui::Window`, module [`app`]), and Save/Load go through a native file
+//! picker (`rfd`) — see `docs/application/README.md` for the detail of what is
+//! done and what is not yet.
 //!
-//! # Découpage
+//! # Breakdown
 //!
-//! - `stokesforge-app-state` (crate voisin, #263) : toute la logique, **sans
-//!   egui**, pilotée par un enum d'actions — donc testable en intégration
-//!   continue, sans serveur graphique (`stokesforge-app-state/tests/shell.rs`) ;
-//! - [`app`] : la glu `eframe`, qui traduit clavier et souris en actions et
-//!   peint l'état. Rien de ce qu'elle contient n'est une décision de produit ;
-//! - [`theme`] : la palette visuelle maison, posée une fois sur le
-//!   `Context` au démarrage (`main.rs`) — l'appli ne suit pas le thème
-//!   clair/sombre du système.
+//! - `stokesforge-app-state` (neighboring crate, #263): all the logic,
+//!   **without egui**, driven by an enum of actions — hence testable in
+//!   continuous integration, without a graphical server
+//!   (`stokesforge-app-state/tests/shell.rs`);
+//! - [`app`]: the `eframe` glue, which translates keyboard and mouse into
+//!   actions and paints the state. Nothing it contains is a product decision;
+//! - [`theme`]: the house visual palette, set once on the `Context` at startup
+//!   (`main.rs`) — the app does not follow the system light/dark theme.
 //!
-//! # Ce que Qt donnait et qu'il faut écrire ici
+//! # What Qt gave and has to be written here
 //!
-//! `QUndoStack` + `QAction::Undo` fournissaient presque gratuitement le
-//! raccourci clavier, l'entrée de menu, son grisage et son libellé
-//! (« Annuler *Renommer* »). Ici, chacun de ces quatre points est du code
-//! explicite : le raccourci dans [`app`], le grisage par `add_enabled`, le
-//! libellé par `AppState::undo_label` (de `stokesforge-app-state`).
+//! `QUndoStack` + `QAction::Undo` provided almost for free the keyboard
+//! shortcut, the menu entry, its graying and its label ("Undo *Rename*").
+//! Here, each of these four points is explicit code: the shortcut in
+//! [`app`], the graying by `add_enabled`, the label by `AppState::undo_label`
+//! (from `stokesforge-app-state`).
 
 #![cfg_attr(
     not(test),
@@ -50,9 +49,9 @@ pub mod theme;
 pub mod toolbar;
 pub mod tree_lines;
 
-/// Le lecteur des sources partagé par toutes les gardes qui lisent le code
-/// (#116) : celles d'`icons` et de `theme` ici, celles de `tests/` par le même
-/// fichier. Depuis #263 il lit aussi `stokesforge-app-state/src/`.
+/// The source reader shared by all the guards that read the code (#116): those
+/// of `icons` and `theme` here, those of `tests/` through the same file. Since
+/// #263 it also reads `stokesforge-app-state/src/`.
 #[cfg(test)]
 #[path = "../tests/support/sources.rs"]
 mod sources;

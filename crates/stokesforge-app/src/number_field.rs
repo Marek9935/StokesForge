@@ -1,48 +1,48 @@
-//! La brique « nombre » (#220, S-N1–S-N3, S-N8, S-F7) : **le seul** champ numérique de
-//! l'interface. Plus de `DragValue` ni de `Slider` (garde
-//! `aucun_champ_numerique_hors_de_la_brique`, `tests/gardes.rs`).
+//! The "number" building block (#220, S-N1–S-N3, S-N8, S-F7): **the only**
+//! numeric field of the interface. No more `DragValue` or `Slider` (guard
+//! `no_numeric_field_outside_the_building_block`, `tests/guards.rs`).
 //!
-//! # Ce que fait un champ
+//! # What a field does
 //!
-//! - un champ texte, large comme [`FIELD_WIDTH`] ; un `▼` seulement si la
-//!   [`Quantity`] propose des valeurs ([`Quantity::presets`]) ;
-//! - un clic dans le texte sélectionne tout, sans ouvrir la liste ;
-//! - la saisie s'applique à Entrée ou en quittant le champ, Échap rend
-//!   l'ancienne valeur ; une saisie illisible est **refusée**, une valeur hors
-//!   bornes **ramenée** (cadre rouge ou orange, bulle) : tout ce cycle est celui
-//!   de [`crate::field_state::edit_text`] ;
-//! - liste fermée : ↑/↓ d'un pas, Maj+↑/↓ d'un grand pas ; Alt+↓ ouvre la liste ;
-//! - liste ouverte : la molette la fait défiler, ↑/↓ surligne, Entrée choisit,
-//!   Échap la ferme (sans toucher à la valeur) ;
-//! - molette (#233, #235) : le **survol** suffit, sans focus, et **seulement**
-//!   sur un champ à liste : un cran = la valeur proposée voisine (`step_preset`),
-//!   une valeur hors liste saute à l'entrée voisine, aux extrémités elle reste.
-//!   Un champ sans liste ne réagit jamais : la fenêtre défile ;
-//! - aspect (#234) : cadre unique, flèche pleine à l'intérieur à droite, fond de
-//!   saisie du thème ; voir [`crate::list_frame`].
+//! - a text field, as wide as [`FIELD_WIDTH`]; a `▼` only if the [`Quantity`]
+//!   offers values ([`Quantity::presets`]);
+//! - a click in the text selects everything, without opening the list;
+//! - the entry applies on Enter or on leaving the field, Escape gives back the
+//!   old value; an unreadable entry is **refused**, an out-of-bounds value
+//!   **clamped** (red or orange frame, bubble): this whole cycle is that of
+//!   [`crate::field_state::edit_text`];
+//! - closed list: ↑/↓ by a step, Shift+↑/↓ by a big step; Alt+↓ opens the list;
+//! - open list: the wheel scrolls it, ↑/↓ highlights, Enter picks, Escape
+//!   closes it (without touching the value);
+//! - wheel (#233, #235): **hovering** is enough, without focus, and **only** on
+//!   a field with a list: one notch = the neighboring preset (`step_preset`),
+//!   an off-list value jumps to the neighboring entry, at the ends it stays.
+//!   A field without a list never reacts: the window scrolls;
+//! - look (#234): a single frame, a filled arrow inside on the right, the
+//!   theme's input background; see [`crate::list_frame`].
 //!
-//! La liste est une `egui::Area` à elle, pas `egui::Popup` : egui ne retient
-//! qu'une fenêtre surgissante ouverte par viewport, donc dans un dialogue modal
-//! la liste refermerait la fenêtre parente (issue #9, comme `color_button`).
+//! The list is an `egui::Area` of its own, not `egui::Popup`: egui keeps only
+//! one popup open per viewport, so in a modal dialog the list would close the
+//! parent window (issue #9, like `color_button`).
 //!
 //! # Auto (#221)
 //!
-//! Une grandeur a un Auto ([`AutoKind`]) : `Field` — champ vidé ou mot `auto`
-//! (casse libre, ou la seule lettre `a`/`A`)
-//! rend la valeur automatique ([`auto_number_field`], texte grisé « Auto (…) ») ;
-//! `Group` — le mot `auto` coche l'Auto du groupe ([`NumberResponse::auto`]),
-//! un champ vidé est refusé. Sans Auto, le mot et le champ vidé sont refusés.
+//! A quantity has an Auto ([`AutoKind`]): `Field` — an emptied field or the
+//! word `auto` (any case, or the single letter `a`/`A`) gives back the
+//! automatic value ([`auto_number_field`], grayed text "Auto (…)"); `Group` —
+//! the word `auto` ticks the group's Auto ([`NumberResponse::auto`]), an
+//! emptied field is refused. Without Auto, the word and the emptied field are
+//! refused.
 //!
-//! # Historique
+//! # History
 //!
-//! Chaque pas de flèche ou de molette est un changement rendu à l'appelant
-//! ([`NumberResponse::changed`]). Des crans d'affilée ne font qu'**une** entrée
-//! d'historique parce que l'appelant les écrit dans son brouillon ou dans la
-//! macro de son dialogue (propriétés du graphe) : la brique ne touche pas au
-//! modèle.
+//! Each arrow or wheel step is a change returned to the caller
+//! ([`NumberResponse::changed`]). Notches in a row make only **one** history
+//! entry because the caller writes them into its draft or into the macro of
+//! its dialog (graph properties): the building block does not touch the model.
 //!
-//! Le formateur des nombres affichés est provisoire (#222) : décimales de la
-//! grandeur, zéros de fin retirés. La virgule décimale arrive avec #223.
+//! The formatter of the displayed numbers is provisional (#222): decimals of
+//! the quantity, trailing zeros removed. The decimal comma arrives with #223.
 
 use eframe::egui;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -53,10 +53,10 @@ use crate::list_frame;
 use stokesforge_app_state::quantities::{AutoKind, Quantity};
 use stokesforge_app_state::tr;
 
-/// Largeur d'un champ numérique, en points (la « courte » de S-L2, #227).
+/// Width of a numeric field, in points (the "short" one of S-L2, #227).
 pub const FIELD_WIDTH: f32 = crate::theme::FIELD_WIDTH_SHORT;
 
-/// Une valeur que la brique sait lire et écrire. Les entiers arrondissent.
+/// A value the building block can read and write. Integers round.
 pub trait Number: Copy {
     fn to_f64(self) -> f64;
     fn from_f64(value: f64) -> Self;
@@ -94,35 +94,35 @@ macro_rules! integer_number {
 }
 integer_number!(i32, i64, u8, u32, usize);
 
-/// Ce que rend un champ numérique.
+/// What a numeric field returns.
 pub struct NumberResponse {
-    /// Le champ de saisie (survol, aide).
+    /// The input field (hover, help).
     pub response: egui::Response,
-    /// La valeur a changé cette image : saisie validée, pas de flèche, cran de
-    /// molette ou choix dans la liste.
+    /// The value changed this frame: entry confirmed, arrow step, wheel notch
+    /// or choice in the list.
     pub changed: bool,
-    /// L'utilisateur a demandé l'Auto cette image (champ vidé ou mot `auto`,
-    /// selon [`AutoKind`]) : l'appelant rend la valeur ou le groupe automatique.
+    /// The user asked for Auto this frame (emptied field or the word `auto`,
+    /// depending on [`AutoKind`]): the caller gives back the automatic value or group.
     pub auto: bool,
 }
 
-/// Ce qu'une saisie dit : un nombre, ou l'Auto (#221).
+/// What an entry says: a number, or Auto (#221).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Entry {
     Value(f64),
     Auto,
 }
 
-/// L'état de la liste de valeurs d'un champ.
+/// The state of a field's list of values.
 #[derive(Clone, Copy, Debug, Default)]
 struct Presets {
     open: bool,
     highlighted: usize,
 }
 
-/// Pose un champ numérique sur la grandeur `quantity`, dans la rangée en cours.
-/// `id_salt` identifie le champ (brouillon, liste) ; la valeur est écrite dans
-/// `value` dès qu'elle change.
+/// Places a numeric field on the quantity `quantity`, in the current row.
+/// `id_salt` identifies the field (draft, list); the value is written into
+/// `value` as soon as it changes.
 pub fn number_field<T: Number>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug + Copy,
@@ -132,10 +132,10 @@ pub fn number_field<T: Number>(
     number_field_core(ui, id_salt, value, quantity, None)
 }
 
-/// Un champ dont la valeur peut être automatique (#221) : `None` montre `hint`
-/// en gris (« Auto (0–4000) », la valeur calculée) ; vider le champ ou taper
-/// `auto` la remet à `None` (grandeur [`AutoKind::Field`]). Une saisie lisible
-/// la fixe à `Some`.
+/// A field whose value can be automatic (#221): `None` shows `hint` in gray
+/// ("Auto (0–4000)", the computed value); emptying the field or typing `auto`
+/// sets it back to `None` (quantity [`AutoKind::Field`]). A readable entry
+/// sets it to `Some`.
 pub fn auto_number_field<T: Number>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug + Copy,
@@ -172,22 +172,23 @@ fn number_field_core<T: Number>(
     let mut current = value.to_f64();
     let mut changed = false;
     let mut auto = false;
-    // Un Auto de la valeur elle-même (`AutoKind::Field`) ouvre la liste par une
-    // entrée « Auto » ; les valeurs proposées sont alors décalées d'un cran.
+    // An Auto of the value itself (`AutoKind::Field`) opens the list with an
+    // "Auto" entry; the presets are then shifted by one notch.
     let offset = usize::from(quantity.auto == AutoKind::Field);
     let focused = ctx.memory(|memory| memory.has_focus(id));
 
-    // — Clavier, avant le champ : le `TextEdit` prendrait ↑/↓ et Entrée. —
-    // Échap ferme la liste sans rendre la valeur (S-F7). egui retire lui-même le
-    // focus au début de l'image où Échap est pressée : la liste ouverte, pas le
-    // focus, dit que l'Échap est pour elle, et le champ le reprend.
+    // — Keyboard, before the field: the `TextEdit` would take ↑/↓ and Enter. —
+    // Escape closes the list without giving the value back (S-F7). egui itself
+    // removes the focus at the start of the frame where Escape is pressed: the
+    // open list, not the focus, says that the Escape is for it, and the field
+    // takes the focus back.
     let close_list = presets.open && key(ui, &shortcuts::KEY_ESCAPE);
     if close_list {
         presets.open = false;
     }
     if focused && !close_list {
-        // Alt+↓ est toujours pris : un pas ne doit pas le lire (egui fait
-        // correspondre « aucun modificateur » à n'importe quelle combinaison).
+        // Alt+↓ is always taken: a step must not read it (egui matches "no
+        // modifier" with any combination).
         let alt_down = key(ui, &shortcuts::KEY_ALT_ARROW_DOWN);
         if alt_down && has_presets && !presets.open {
             presets.open = true;
@@ -221,11 +222,11 @@ fn number_field_core<T: Number>(
         }
     }
 
-    // — Le champ. —
+    // — The field. —
     let shown = match auto_hint {
         Some(_) => String::new(),
-        // Hors saisie : 6 chiffres significatifs ; dans le champ : la valeur
-        // entière, pour qu'un Tab sans frappe n'en perde aucun (#222).
+        // Outside editing: 6 significant digits; in the field: the whole
+        // value, so that a Tab without typing loses none of it (#222).
         None if focused => format_exact(current),
         None => format_grid(current),
     };
@@ -266,9 +267,9 @@ fn number_field_core<T: Number>(
         select_all(&ctx, id, shown.chars().count());
     }
 
-    // — Molette (#233, #235) : le survol suffit, sans focus ; un cran = la
-    // valeur proposée voisine. Un champ sans liste n'y réagit jamais : la
-    // fenêtre défile. —
+    // — Wheel (#233, #235): hovering is enough, without focus; one notch = the
+    // neighboring preset. A field without a list never reacts: the window
+    // scrolls. —
     if has_presets && response.hovered() && !presets.open {
         let notches = wheel_notches(ui);
         if notches != 0 {
@@ -280,9 +281,9 @@ fn number_field_core<T: Number>(
         }
     }
 
-    // — La liste de valeurs. —
+    // — The list of values. —
     if has_presets {
-        // La flèche pleine est dans le cadre du champ (#234), cliquable.
+        // The filled arrow is in the field's frame (#234), clickable.
         let arrow = list_frame::arrow_rect(response.rect);
         let button = ui
             .interact(arrow, list_id.with("arrow"), egui::Sense::click())
@@ -339,8 +340,8 @@ fn number_field_core<T: Number>(
 
     if changed {
         *value = T::from_f64(current);
-        // Un pas, un cran ou un choix repart de la valeur : plus de brouillon,
-        // plus de cadre. Une saisie validée garde le sien (valeur ramenée).
+        // A step, a notch or a choice starts again from the value: no more
+        // draft, no more frame. A confirmed entry keeps its own (clamped value).
         if !typed {
             field_state::discard_draft(&ctx, id);
         }
@@ -352,12 +353,12 @@ fn number_field_core<T: Number>(
     }
 }
 
-/// Consomme la touche `shortcut` du registre.
+/// Consumes the key `shortcut` of the registry.
 fn key(ui: &egui::Ui, shortcut: &egui::KeyboardShortcut) -> bool {
     ui.input_mut(|input| input.consume_shortcut(shortcut))
 }
 
-/// Sélectionne tout le texte du champ `id` (`len` caractères).
+/// Selects all the text of the field `id` (`len` characters).
 fn select_all(ctx: &egui::Context, id: egui::Id, len: usize) {
     if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
         state
@@ -370,9 +371,9 @@ fn select_all(ctx: &egui::Context, id: egui::Id, len: usize) {
     }
 }
 
-/// Les crans de molette de cette image (positifs vers le haut), et la molette
-/// consommée : la fenêtre sous le champ ne défile pas. Ctrl+molette est le zoom
-/// (S-X1) et n'est pas pris.
+/// The wheel notches of this frame (positive upward), and the wheel consumed:
+/// the window under the field does not scroll. Ctrl+wheel is the zoom (S-X1)
+/// and is not taken.
 fn wheel_notches(ui: &mut egui::Ui) -> i32 {
     let total: f32 = ui.input(|input| {
         input
@@ -403,8 +404,8 @@ fn wheel_notches(ui: &mut egui::Ui) -> i32 {
     magnitude * total.signum() as i32
 }
 
-/// `value` déplacée de `steps` pas (un grand pas vaut dix crans), ramenée dans
-/// les bornes et arrondie aux décimales du pas pour que 0,1 + 0,2 reste 0,3.
+/// `value` moved by `steps` steps (a big step is worth ten notches), clamped
+/// to the bounds and rounded to the step's decimals so that 0.1 + 0.2 stays 0.3.
 fn step_value(quantity: &Quantity, value: f64, steps: i32) -> f64 {
     let unit = if steps.abs() >= 10 {
         quantity.big_step * f64::from(steps / 10)
@@ -415,9 +416,9 @@ fn step_value(quantity: &Quantity, value: f64, steps: i32) -> f64 {
     (moved * 1e9).round() / 1e9
 }
 
-/// `value` déplacée de `notches` entrées de la liste proposée (positif = vers
-/// le haut). Une valeur hors liste saute à l'entrée voisine dans le sens du
-/// cran ; aux extrémités, elle reste.
+/// `value` moved by `notches` entries of the preset list (positive = upward).
+/// An off-list value jumps to the neighboring entry in the direction of the
+/// notch; at the ends, it stays.
 fn step_preset(quantity: &Quantity, value: f64, notches: i32) -> f64 {
     const EPS: f64 = 1e-9;
     let mut current = value;
@@ -444,7 +445,7 @@ fn step_preset(quantity: &Quantity, value: f64, notches: i32) -> f64 {
     current
 }
 
-/// L'indice de la valeur proposée la plus proche de `value`.
+/// The index of the preset closest to `value`.
 fn nearest_preset(quantity: &Quantity, value: f64) -> usize {
     quantity
         .presets
@@ -454,9 +455,9 @@ fn nearest_preset(quantity: &Quantity, value: f64) -> usize {
         .map_or(0, |(index, _)| index)
 }
 
-/// Le contenu de la liste de valeurs (le nom contient « popup » : c'est un
-/// choix exclusif, `aucun_bouton_selectionnable_hors_d_un_menu`). Rend la
-/// valeur cliquée.
+/// The contents of the list of values (the name contains "popup": it is an
+/// exclusive choice, `no_selectable_button_outside_a_menu`). Returns the
+/// clicked value.
 fn preset_popup_contents(
     ui: &mut egui::Ui,
     quantity: &Quantity,
@@ -497,12 +498,12 @@ fn preset_popup_contents(
     picked
 }
 
-/// Lit une saisie : un nombre fini, entier si la grandeur l'est, ramené aux
-/// bornes.
+/// Reads an entry: a finite number, an integer if the quantity is one, clamped
+/// to the bounds.
 fn read(quantity: &Quantity, text: &str) -> Verdict<Entry> {
     let trimmed = text.trim();
-    // L'Auto : champ vidé (la valeur elle-même en a un) ou le mot `auto` (la
-    // valeur ou son groupe). Ailleurs, ni l'un ni l'autre n'est lisible.
+    // Auto: emptied field (the value itself has one) or the word `auto` (the
+    // value or its group). Elsewhere, neither is readable.
     if quantity.auto == AutoKind::Field && trimmed.is_empty() {
         return Verdict::Valid(Entry::Auto);
     }
@@ -545,8 +546,8 @@ fn refused(quantity: &Quantity) -> Verdict<Entry> {
     })
 }
 
-/// Un nombre tel qu'il s'affiche : au plus `decimals` décimales, sans zéros de
-/// fin, jamais « -0 ».
+/// A number as it is displayed: at most `decimals` decimals, no trailing
+/// zeros, never "-0".
 pub fn format_value(value: f64, decimals: usize) -> String {
     let mut text = format!("{value:.decimals$}");
     if text.contains('.') {
@@ -563,12 +564,12 @@ mod tests {
     use super::*;
     use stokesforge_app_state::quantities;
 
-    fn touche(key: egui::Key) -> egui::Event {
-        touche_avec(key, egui::Modifiers::NONE)
+    fn key_event(key: egui::Key) -> egui::Event {
+        key_event_with(key, egui::Modifiers::NONE)
     }
 
     #[test]
-    fn un_entier_de_trois_chiffres_sans_liste_prend_la_largeur_compacte() {
+    fn a_three_digit_integer_without_list_takes_the_compact_width() {
         for compact in [
             &quantities::COLOR_CHANNEL,
             &quantities::HUE_DEGREES,
@@ -577,7 +578,7 @@ mod tests {
         ] {
             assert!(compact.is_compact());
         }
-        // Plus de trois chiffres, réel ou signé : largeur courte.
+        // More than three digits, real or signed: short width.
         assert!(quantities::ROTATION.is_compact_signed());
         assert!(!quantities::ROTATION.is_compact());
         assert!(!quantities::FREE.is_compact_signed());
@@ -588,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn le_format_retire_les_zeros_de_fin_et_le_moins_zero() {
+    fn format_removes_trailing_zeros_and_minus_zero() {
         assert_eq!(format_value(2.5, 2), "2.5");
         assert_eq!(format_value(2.0, 2), "2");
         assert_eq!(format_value(-0.0, 2), "0");
@@ -598,8 +599,8 @@ mod tests {
     }
 
     #[test]
-    fn la_virgule_decimale_est_lue_comme_le_point() {
-        // #223 : « 2,5 » vaut 2.5 ; une virgule ambiguë reste refusée.
+    fn decimal_comma_is_read_as_the_point() {
+        // #223: "2,5" is 2.5; an ambiguous comma stays refused.
         assert_eq!(
             read(&quantities::AXIS_BOUND, "2,5"),
             Verdict::Valid(Entry::Value(2.5))
@@ -611,59 +612,55 @@ mod tests {
     }
 
     #[test]
-    fn une_saisie_illisible_est_refusee() {
-        for texte in ["abc", "1..2", "", "inf", "nan", "1e999"] {
+    fn an_unreadable_entry_is_refused() {
+        for text in ["abc", "1..2", "", "inf", "nan", "1e999"] {
             assert!(
-                matches!(read(&quantities::LINE_WIDTH, texte), Verdict::Refused(_)),
-                "{texte:?}"
+                matches!(read(&quantities::LINE_WIDTH, text), Verdict::Refused(_)),
+                "{text:?}"
             );
         }
     }
 
     #[test]
-    fn le_corps_de_la_barre_de_format_accepte_auto() {
-        // #245 : la barre de format doit pouvoir remettre le corps en Auto,
-        // par le mot, par le champ vidé ou par l'entrée de la liste.
-        let corps = quantities::TEXT_FORMAT_SIZE;
-        assert_eq!(corps.auto, AutoKind::Field);
-        for texte in ["auto", ""] {
-            assert_eq!(read(&corps, texte), Verdict::Valid(Entry::Auto));
+    fn the_format_bar_body_size_accepts_auto() {
+        // #245: the format bar must be able to put the body size back to Auto,
+        // by the word, by the emptied field or by the list entry.
+        let body = quantities::TEXT_FORMAT_SIZE;
+        assert_eq!(body.auto, AutoKind::Field);
+        for text in ["auto", ""] {
+            assert_eq!(read(&body, text), Verdict::Valid(Entry::Auto));
         }
-        // Le corps de l'éditeur sur place n'a pas d'Auto : ce n'est pas lui.
+        // The in-place editor's body size has no Auto: it is not this one.
         assert_eq!(quantities::TEXT_SIZE.auto, AutoKind::None);
     }
 
     #[test]
-    fn auto_est_accepte_selon_la_grandeur() {
-        let champ = quantities::FREE.with_auto(AutoKind::Field);
-        for texte in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
-            assert_eq!(
-                read(&champ, texte),
-                Verdict::Valid(Entry::Auto),
-                "{texte:?}"
-            );
+    fn auto_is_accepted_according_to_the_quantity() {
+        let field = quantities::FREE.with_auto(AutoKind::Field);
+        for text in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
+            assert_eq!(read(&field, text), Verdict::Valid(Entry::Auto), "{text:?}");
         }
-        assert_eq!(read(&champ, "5"), Verdict::Valid(Entry::Value(5.0)));
-        // Une borne de groupe accepte le mot, pas le champ vidé.
-        let groupe = &quantities::AXIS_BOUND;
-        assert_eq!(read(groupe, "auto"), Verdict::Valid(Entry::Auto));
-        assert!(matches!(read(groupe, ""), Verdict::Refused(_)));
-        assert!(matches!(read(groupe, "  "), Verdict::Refused(_)));
+        assert_eq!(read(&field, "5"), Verdict::Valid(Entry::Value(5.0)));
+        // A group bound accepts the word, not the emptied field.
+        let group = &quantities::AXIS_BOUND;
+        assert_eq!(read(group, "auto"), Verdict::Valid(Entry::Auto));
+        assert!(matches!(read(group, ""), Verdict::Refused(_)));
+        assert!(matches!(read(group, "  "), Verdict::Refused(_)));
     }
 
-    /// Témoin : une grandeur sans Auto refuse le mot comme le champ vidé.
+    /// Witness: a quantity without Auto refuses the word like the emptied field.
     #[test]
-    fn sans_auto_le_mot_et_le_champ_vide_sont_refuses() {
-        for texte in ["auto", "Auto", "a", "A", ""] {
+    fn without_auto_the_word_and_the_empty_field_are_refused() {
+        for text in ["auto", "Auto", "a", "A", ""] {
             assert!(
-                matches!(read(&quantities::LINE_WIDTH, texte), Verdict::Refused(_)),
-                "{texte:?}"
+                matches!(read(&quantities::LINE_WIDTH, text), Verdict::Refused(_)),
+                "{text:?}"
             );
         }
     }
 
     #[test]
-    fn un_entier_refuse_les_decimales_mais_pas_un_point_zero() {
+    fn an_integer_refuses_decimals_but_not_point_zero() {
         assert!(matches!(
             read(&quantities::MAX_PEAKS, "2.5"),
             Verdict::Refused(_)
@@ -675,14 +672,14 @@ mod tests {
     }
 
     #[test]
-    fn hors_bornes_la_valeur_est_ramenee_a_la_borne() {
+    fn out_of_bounds_the_value_is_clamped_to_the_bound() {
         let Verdict::Clamped {
             value,
             bound,
             limit,
         } = read(&quantities::LINE_WIDTH, "35")
         else {
-            panic!("35 dépasse 20");
+            panic!("35 exceeds 20");
         };
         assert_eq!(
             (value, bound, limit.as_str()),
@@ -697,17 +694,20 @@ mod tests {
         ));
     }
 
-    /// #260 : les plafonds des champs d'analyse sont ceux de
-    /// `stokesforge-analysis`, que `Operation::validate` applique aussi. Le
-    /// champ « Max peaks » monte de 50 à 100 pics.
+    /// #260: the caps of the analysis fields are those of
+    /// `stokesforge-analysis`, which `Operation::validate` also applies. The
+    /// "Max peaks" field goes up from 50 to 100 peaks.
     #[test]
-    fn les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse() {
+    fn analysis_fields_follow_the_caps_of_the_analysis_crate() {
         use stokesforge_analysis::ops::{MAX_COMPONENTS, MAX_DEGREE, MAX_ITERATIONS, MAX_PEAKS};
         assert_eq!(quantities::POLYNOMIAL_DEGREE.max, f64::from(MAX_DEGREE));
         assert_eq!(quantities::ITERATIONS.max, MAX_ITERATIONS as f64);
         assert_eq!(quantities::MAX_PEAKS.max, MAX_PEAKS as f64);
         assert_eq!(quantities::COMPONENTS.max, MAX_COMPONENTS as f64);
-        assert_eq!(MAX_PEAKS, 100, "décision du 2026-10-15 : 100 pics partout");
+        assert_eq!(
+            MAX_PEAKS, 100,
+            "decision of 2026-10-15: 100 peaks everywhere"
+        );
 
         assert_eq!(
             read(&quantities::MAX_PEAKS, "100"),
@@ -719,7 +719,7 @@ mod tests {
             limit,
         } = read(&quantities::MAX_PEAKS, "101")
         else {
-            panic!("101 dépasse 100");
+            panic!("101 exceeds 100");
         };
         assert_eq!(
             (value, bound, limit.as_str()),
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn des_decimales_au_clavier_sont_gardees() {
+    fn decimals_typed_on_the_keyboard_are_kept() {
         assert_eq!(
             read(&quantities::LINE_WIDTH, "2.75"),
             Verdict::Valid(Entry::Value(2.75))
@@ -736,24 +736,24 @@ mod tests {
     }
 
     #[test]
-    fn un_pas_est_arrondi_et_borne() {
-        let largeur = &quantities::LINE_WIDTH;
-        assert_eq!(step_value(largeur, 0.2, 1), 0.3);
-        assert_eq!(step_value(largeur, 19.95, 1), 20.0, "borne atteinte");
-        assert_eq!(step_value(largeur, 0.0, -1), 0.0);
-        assert_eq!(step_value(largeur, 1.0, 10), 2.0, "un grand pas");
-        assert_eq!(step_value(largeur, 5.0, -10), 4.0);
+    fn a_step_is_rounded_and_bounded() {
+        let width = &quantities::LINE_WIDTH;
+        assert_eq!(step_value(width, 0.2, 1), 0.3);
+        assert_eq!(step_value(width, 19.95, 1), 20.0, "bound reached");
+        assert_eq!(step_value(width, 0.0, -1), 0.0);
+        assert_eq!(step_value(width, 1.0, 10), 2.0, "a big step");
+        assert_eq!(step_value(width, 5.0, -10), 4.0);
     }
 
     #[test]
-    fn la_valeur_proposee_la_plus_proche_est_surlignee() {
+    fn the_nearest_preset_is_highlighted() {
         assert_eq!(nearest_preset(&quantities::LINE_WIDTH, 1.4), 2);
         assert_eq!(nearest_preset(&quantities::LINE_WIDTH, 99.0), 5);
     }
 
     #[test]
-    fn les_grandeurs_sont_coherentes() {
-        for quantite in [
+    fn quantities_are_consistent() {
+        for quantity in [
             quantities::FREE,
             quantities::LINE_WIDTH,
             quantities::SHAPE_LINE_WIDTH,
@@ -773,31 +773,31 @@ mod tests {
             quantities::COUNT,
             quantities::LINE_NUMBER,
         ] {
-            assert!(quantite.min < quantite.max, "{quantite:?}");
-            assert!(quantite.step > 0.0 && quantite.big_step >= quantite.step);
-            for preset in quantite.presets {
+            assert!(quantity.min < quantity.max, "{quantity:?}");
+            assert!(quantity.step > 0.0 && quantity.big_step >= quantity.step);
+            for preset in quantity.presets {
                 assert!(
-                    (quantite.min..=quantite.max).contains(preset),
-                    "{preset} hors de {quantite:?}"
+                    (quantity.min..=quantity.max).contains(preset),
+                    "{preset} outside {quantity:?}"
                 );
             }
         }
     }
 
-    /// La plage du corps de texte est celle du modèle : deux définitions
-    /// divergeraient en silence.
+    /// The text-body range is the model's: two definitions would diverge
+    /// silently.
     #[test]
-    fn le_corps_de_texte_suit_la_plage_du_modele() {
-        let (bas, haut) = stokesforge_render_egui::AnnotationSpec::SIZE_RANGE;
+    fn text_size_follows_the_model_range() {
+        let (low, high) = stokesforge_render_egui::AnnotationSpec::SIZE_RANGE;
         assert_eq!(
             (quantities::TEXT_SIZE.min, quantities::TEXT_SIZE.max),
-            (bas, haut)
+            (low, high)
         );
     }
 
-    // — Le champ peint : clavier, liste, molette. —
+    // — The painted field: keyboard, list, wheel. —
 
-    fn touche_avec(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    fn key_event_with(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -807,7 +807,7 @@ mod tests {
         }
     }
 
-    fn cran(delta: f32) -> egui::Event {
+    fn notch(delta: f32) -> egui::Event {
         egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, delta),
@@ -816,222 +816,222 @@ mod tests {
         }
     }
 
-    /// Un banc : un champ de l'épaisseur du trait (avec liste de valeurs) ou
-    /// de `quantite`, sa valeur, l'horloge.
-    struct Banc {
+    /// A bench: a field for the line thickness (with a list of values) or for
+    /// `quantity`, its value, the clock.
+    struct Bench {
         ctx: egui::Context,
-        valeur: f64,
-        quantite: Quantity,
-        temps: f64,
+        value: f64,
+        quantity: Quantity,
+        time: f64,
         id: Option<egui::Id>,
-        champ: Option<egui::Rect>,
+        field: Option<egui::Rect>,
     }
 
-    impl Banc {
-        fn new(valeur: f64, quantite: Quantity) -> Self {
+    impl Bench {
+        fn new(value: f64, quantity: Quantity) -> Self {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
             Self {
                 ctx,
-                valeur,
-                quantite,
-                temps: 0.0,
+                value,
+                quantity,
+                time: 0.0,
                 id: None,
-                champ: None,
+                field: None,
             }
         }
 
-        /// Une image avec `events` ; `focus` donne le focus au champ avant sa
-        /// pose. Rend ce qui a été peint et si la valeur a changé.
+        /// A frame with `events`; `focus` gives the focus to the field before
+        /// it is placed. Returns what was painted and whether the value changed.
         fn image(&mut self, events: Vec<egui::Event>, focus: bool) -> (egui::FullOutput, bool) {
-            self.temps += 0.1;
+            self.time += 0.1;
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(400.0, 300.0),
                 )),
                 events,
-                time: Some(self.temps),
+                time: Some(self.time),
                 focused: true,
                 ..Default::default()
             };
-            let (valeur, quantite, id_champ, rect_champ) = (
-                &mut self.valeur,
-                self.quantite,
+            let (value, quantity, field_id_slot, field_rect_slot) = (
+                &mut self.value,
+                self.quantity,
                 &mut self.id,
-                &mut self.champ,
+                &mut self.field,
             );
             let mut changed = false;
-            let mut sortie = self.ctx.run_ui(input, |ui| {
+            let mut output = self.ctx.run_ui(input, |ui| {
                 ui.horizontal(|ui| {
-                    let id = field_state::field_id(ui, "champ");
-                    *id_champ = Some(id);
+                    let id = field_state::field_id(ui, "field");
+                    *field_id_slot = Some(id);
                     if focus {
                         ui.memory_mut(|m| m.request_focus(id));
                     }
-                    let reponse = number_field(ui, "champ", valeur, &quantite);
-                    *rect_champ = Some(reponse.response.rect);
-                    changed = reponse.changed;
+                    let response = number_field(ui, "field", value, &quantity);
+                    *field_rect_slot = Some(response.response.rect);
+                    changed = response.changed;
                 });
             });
-            sortie.textures_delta.clear();
-            (sortie, changed)
+            output.textures_delta.clear();
+            (output, changed)
         }
 
-        /// Le champ prend le focus et se stabilise.
-        fn focaliser(&mut self) {
+        /// The field takes the focus and settles.
+        fn focus_field(&mut self) {
             self.image(Vec::new(), true);
             self.image(Vec::new(), false);
         }
 
-        fn peint(&mut self, texte: &str) -> bool {
-            let (sortie, _) = self.image(Vec::new(), false);
-            sortie.shapes.iter().any(|peint| {
-                matches!(&peint.shape,
-                    egui::Shape::Text(forme) if forme.galley.job.text == texte)
+        fn painted(&mut self, text: &str) -> bool {
+            let (output, _) = self.image(Vec::new(), false);
+            output.shapes.iter().any(|painted| {
+                matches!(&painted.shape,
+                    egui::Shape::Text(text_shape) if text_shape.galley.job.text == text)
             })
         }
 
-        fn cadres(sortie: &egui::FullOutput, couleur: egui::Color32) -> usize {
-            sortie
+        fn frames(output: &egui::FullOutput, color: egui::Color32) -> usize {
+            output
                 .shapes
                 .iter()
-                .filter(|peint| matches!(&peint.shape, egui::Shape::Rect(r) if r.stroke.color == couleur))
+                .filter(|painted| matches!(&painted.shape, egui::Shape::Rect(r) if r.stroke.color == color))
                 .count()
         }
     }
 
     #[test]
-    fn les_fleches_changent_d_un_pas_et_maj_d_un_grand_pas() {
-        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
-        banc.focaliser();
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+    fn arrows_change_by_a_step_and_shift_by_a_big_step() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.focus_field();
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowUp, egui::Modifiers::NONE)],
             false,
         );
-        assert!((banc.valeur - 2.1).abs() < 1e-9, "{}", banc.valeur);
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        assert!((bench.value - 2.1).abs() < 1e-9, "{}", bench.value);
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             false,
         );
-        assert!((banc.valeur - 2.0).abs() < 1e-9);
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::SHIFT)],
+        assert!((bench.value - 2.0).abs() < 1e-9);
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowUp, egui::Modifiers::SHIFT)],
             false,
         );
-        assert!((banc.valeur - 3.0).abs() < 1e-9, "{}", banc.valeur);
+        assert!((bench.value - 3.0).abs() < 1e-9, "{}", bench.value);
     }
 
     #[test]
-    fn sans_focus_les_fleches_ne_font_rien() {
-        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+    fn without_focus_arrows_do_nothing() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowUp, egui::Modifiers::NONE)],
             false,
         );
-        assert_eq!(banc.valeur, 2.0);
+        assert_eq!(bench.value, 2.0);
     }
 
     #[test]
-    fn alt_bas_ouvre_la_liste_entree_choisit_et_echap_la_ferme() {
-        let mut banc = Banc::new(1.4, quantities::LINE_WIDTH);
-        banc.focaliser();
-        assert!(!banc.peint("3"), "liste fermée : aucune valeur proposée");
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+    fn alt_down_opens_the_list_enter_picks_and_escape_closes_it() {
+        let mut bench = Bench::new(1.4, quantities::LINE_WIDTH);
+        bench.focus_field();
+        assert!(!bench.painted("3"), "list closed: no preset offered");
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::ALT)],
             false,
         );
-        assert!(banc.peint("3"), "liste ouverte");
-        assert_eq!(banc.valeur, 1.4, "ouvrir ne change rien");
-        // La valeur proposée la plus proche de 1,4 est 1,5 ; deux crans en bas.
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        assert!(bench.painted("3"), "list open");
+        assert_eq!(bench.value, 1.4, "opening changes nothing");
+        // The preset closest to 1.4 is 1.5; two notches down.
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             false,
         );
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::NONE)],
             false,
         );
-        assert_eq!(banc.valeur, 1.4, "surligner ne change rien");
-        let (_, changed) = banc.image(vec![touche(egui::Key::Enter)], false);
+        assert_eq!(bench.value, 1.4, "highlighting changes nothing");
+        let (_, changed) = bench.image(vec![key_event(egui::Key::Enter)], false);
         assert!(changed);
-        assert_eq!(banc.valeur, 3.0);
-        assert!(!banc.peint("4"), "la liste est fermée après le choix");
+        assert_eq!(bench.value, 3.0);
+        assert!(!bench.painted("4"), "the list is closed after the choice");
 
-        // Échap ferme la liste sans rendre ni changer la valeur.
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+        // Escape closes the list without giving back or changing the value.
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::ALT)],
             false,
         );
-        assert!(banc.peint("4"));
-        let (_, changed) = banc.image(vec![touche(egui::Key::Escape)], false);
+        assert!(bench.painted("4"));
+        let (_, changed) = bench.image(vec![key_event(egui::Key::Escape)], false);
         assert!(!changed);
-        assert!(!banc.peint("4"), "Échap ferme la liste");
-        assert_eq!(banc.valeur, 3.0);
+        assert!(!bench.painted("4"), "Escape closes the list");
+        assert_eq!(bench.value, 3.0);
     }
 
     #[test]
-    fn une_grandeur_sans_valeurs_proposees_n_ouvre_pas_de_liste() {
-        let mut banc = Banc::new(2.0, quantities::FREE);
-        banc.focaliser();
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+    fn a_quantity_without_presets_opens_no_list() {
+        let mut bench = Bench::new(2.0, quantities::FREE);
+        bench.focus_field();
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowDown, egui::Modifiers::ALT)],
             false,
         );
-        // Alt+↓ n'est pas un pas : la valeur ne bouge pas, rien ne s'ouvre.
-        assert_eq!(banc.valeur, 2.0);
+        // Alt+↓ is not a step: the value does not move, nothing opens.
+        assert_eq!(bench.value, 2.0);
     }
 
     #[test]
-    fn le_clic_selectionne_tout_le_texte() {
-        let mut banc = Banc::new(12.5, quantities::LINE_WIDTH);
-        banc.image(Vec::new(), false);
-        let centre = egui::pos2(20.0, 12.0);
+    fn click_selects_all_the_text() {
+        let mut bench = Bench::new(12.5, quantities::LINE_WIDTH);
+        bench.image(Vec::new(), false);
+        let center = egui::pos2(20.0, 12.0);
         for pressed in [None, Some(true), Some(false)] {
             let events = match pressed {
-                None => vec![egui::Event::PointerMoved(centre)],
+                None => vec![egui::Event::PointerMoved(center)],
                 Some(pressed) => vec![egui::Event::PointerButton {
-                    pos: centre,
+                    pos: center,
                     button: egui::PointerButton::Primary,
                     pressed,
                     modifiers: egui::Modifiers::NONE,
                 }],
             };
-            banc.image(events, false);
+            bench.image(events, false);
         }
-        banc.image(Vec::new(), false);
-        let etat =
-            egui::TextEdit::load_state(&banc.ctx, banc.id.expect("id")).expect("état du champ");
-        let plage = etat.cursor.char_range().expect("sélection");
-        let (bas, haut) = (
-            plage.primary.index.min(plage.secondary.index),
-            plage.primary.index.max(plage.secondary.index),
+        bench.image(Vec::new(), false);
+        let state =
+            egui::TextEdit::load_state(&bench.ctx, bench.id.expect("id")).expect("field state");
+        let range = state.cursor.char_range().expect("selection");
+        let (low, high) = (
+            range.primary.index.min(range.secondary.index),
+            range.primary.index.max(range.secondary.index),
         );
-        assert_eq!((bas.0, haut.0), (0, 4), "« 12.5 » entier");
+        assert_eq!((low.0, high.0), (0, 4), "\"12.5\" entirely");
     }
 
     #[test]
-    fn la_molette_suit_la_liste_au_survol_sans_focus() {
-        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
-        let centre = egui::pos2(20.0, 12.0);
-        // Curseur ailleurs : la molette reste à la fenêtre.
-        banc.image(
+    fn wheel_follows_the_list_on_hover_without_focus() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        let center = egui::pos2(20.0, 12.0);
+        // Cursor elsewhere: the wheel stays with the window.
+        bench.image(
             vec![egui::Event::PointerMoved(egui::pos2(300.0, 250.0))],
             false,
         );
-        banc.image(vec![cran(1.0)], false);
-        assert_eq!(banc.valeur, 2.0);
-        // Survol, sans focus : un cran = l'entrée voisine (2 → 3, puis 1,5).
-        banc.image(vec![egui::Event::PointerMoved(centre)], false);
-        banc.image(vec![cran(1.0)], false);
-        assert_eq!(banc.valeur, 3.0);
-        banc.image(vec![cran(-2.0)], false);
-        assert_eq!(banc.valeur, 1.5);
+        bench.image(vec![notch(1.0)], false);
+        assert_eq!(bench.value, 2.0);
+        // Hovering, without focus: one notch = the neighboring entry (2 → 3, then 1.5).
+        bench.image(vec![egui::Event::PointerMoved(center)], false);
+        bench.image(vec![notch(1.0)], false);
+        assert_eq!(bench.value, 3.0);
+        bench.image(vec![notch(-2.0)], false);
+        assert_eq!(bench.value, 1.5);
     }
 
     #[test]
-    fn step_preset_saute_hors_liste_et_s_arrete_aux_extremites() {
-        let q = quantities::LINE_WIDTH; // 0,5 · 1 · 1,5 · 2 · 3 · 4
+    fn step_preset_jumps_off_list_and_stops_at_the_ends() {
+        let q = quantities::LINE_WIDTH; // 0.5 · 1 · 1.5 · 2 · 3 · 4
         assert_eq!(step_preset(&q, 2.3, 1), 3.0);
         assert_eq!(step_preset(&q, 2.3, -1), 2.0);
         assert_eq!(step_preset(&q, 4.0, 1), 4.0);
@@ -1042,68 +1042,71 @@ mod tests {
     }
 
     #[test]
-    fn un_champ_sans_liste_ignore_la_molette() {
-        let mut banc = Banc::new(2.0, quantities::FREE);
-        banc.image(
+    fn a_field_without_list_ignores_the_wheel() {
+        let mut bench = Bench::new(2.0, quantities::FREE);
+        bench.image(
             vec![egui::Event::PointerMoved(egui::pos2(20.0, 12.0))],
             false,
         );
-        banc.image(vec![cran(1.0)], false);
-        assert_eq!(banc.valeur, 2.0);
-        banc.focaliser();
-        let (_, changed) = banc.image(vec![cran(1.0)], false);
+        bench.image(vec![notch(1.0)], false);
+        assert_eq!(bench.value, 2.0);
+        bench.focus_field();
+        let (_, changed) = bench.image(vec![notch(1.0)], false);
         assert!(!changed);
-        assert_eq!(banc.valeur, 2.0);
+        assert_eq!(bench.value, 2.0);
     }
 
     #[test]
-    fn la_fleche_pleine_est_dans_le_cadre_du_champ_a_liste() {
-        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
-        let (sortie, _) = banc.image(Vec::new(), false);
-        let champ = banc.champ.expect("rect du champ");
-        let fleche = sortie.shapes.iter().find_map(|peint| match &peint.shape {
-            egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT => {
-                Some(egui::Rect::from_points(&path.points))
-            }
-            _ => None,
-        });
-        let fleche = fleche.expect("triangle plein");
-        assert!(champ.contains_rect(fleche), "{fleche:?} hors de {champ:?}");
+    fn the_filled_arrow_is_inside_the_frame_of_a_list_field() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        let (output, _) = bench.image(Vec::new(), false);
+        let field = bench.field.expect("rect of the field");
+        let arrow = output
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT => {
+                    Some(egui::Rect::from_points(&path.points))
+                }
+                _ => None,
+            });
+        let arrow = arrow.expect("filled triangle");
+        assert!(field.contains_rect(arrow), "{arrow:?} outside {field:?}");
     }
 
     #[test]
-    fn une_saisie_hors_borne_est_ramenee_et_une_illisible_refusee() {
-        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
-        banc.focaliser();
-        banc.image(vec![egui::Event::Text("35".into())], false);
-        let (_, changed) = banc.image(vec![touche(egui::Key::Enter)], false);
+    fn an_out_of_bound_entry_is_clamped_and_an_unreadable_one_refused() {
+        let mut bench = Bench::new(2.0, quantities::LINE_WIDTH);
+        bench.focus_field();
+        bench.image(vec![egui::Event::Text("35".into())], false);
+        let (_, changed) = bench.image(vec![key_event(egui::Key::Enter)], false);
         assert!(changed);
-        assert_eq!(banc.valeur, 20.0);
-        let (sortie, _) = banc.image(Vec::new(), false);
+        assert_eq!(bench.value, 20.0);
+        let (output, _) = bench.image(Vec::new(), false);
         assert_eq!(
-            Banc::cadres(&sortie, crate::theme::field_clamped_color()),
+            Bench::frames(&output, crate::theme::field_clamped_color()),
             1
         );
 
-        banc.focaliser();
-        banc.image(vec![egui::Event::Text("abc".into())], false);
-        let (sortie, _) = banc.image(Vec::new(), false);
+        bench.focus_field();
+        bench.image(vec![egui::Event::Text("abc".into())], false);
+        let (output, _) = bench.image(Vec::new(), false);
         assert_eq!(
-            Banc::cadres(&sortie, crate::theme::field_refused_color()),
+            Bench::frames(&output, crate::theme::field_refused_color()),
             1
         );
-        assert_eq!(banc.valeur, 20.0);
+        assert_eq!(bench.value, 20.0);
     }
 
     #[test]
-    fn un_nombre_entier_ecrit_un_entier() {
-        let mut banc = Banc::new(3.0, quantities::POLYNOMIAL_DEGREE);
-        banc.focaliser();
-        banc.image(
-            vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+    fn an_integer_number_writes_an_integer() {
+        let mut bench = Bench::new(3.0, quantities::POLYNOMIAL_DEGREE);
+        bench.focus_field();
+        bench.image(
+            vec![key_event_with(egui::Key::ArrowUp, egui::Modifiers::NONE)],
             false,
         );
-        assert_eq!(banc.valeur, 4.0);
-        assert!(banc.peint("4"));
+        assert_eq!(bench.value, 4.0);
+        assert!(bench.painted("4"));
     }
 }

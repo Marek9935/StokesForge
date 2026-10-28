@@ -159,15 +159,15 @@ Sources: `app/window_chrome.rs`, `app/dialogs.rs`, `app/window_detach.rs`,
 
 ## The guard
 
-Two guards of `crates/stokesforge-app/tests/gardes.rs` hold this page.
+Two guards of `crates/stokesforge-app/tests/guards.rs` hold this page.
 
-- **`aucun_selecteur_d_outil_hors_de_la_barre_tools`** (#299, D1, D5): a
+- **`no_tool_picker_outside_the_tools_bar`** (#299, D1, D5): a
   choice (`choice`, selectable button, radio) whose arguments name a
   tool (`tool`) is refused outside `toolbar.rs`, unless it carries, in the
   twelve lines that precede it, the exemption marker
-  `// OUTIL-EN-FENETRE(#299): <justification>` with a non-empty
+  `// TOOL-IN-WINDOW(#299): <justification>` with a non-empty
   justification. A departure from the guideline is therefore justified in the code, and here.
-- **`aucun_geste_hors_de_la_matrice`** (#299, D4): every production file
+- **`no_gesture_outside_the_matrix`** (#299, D4): every production file
   that reads a wheel (`scroll_delta`, `zoom_delta`, `MouseWheel`) or a
   double-click (`double_clicked`) must be cited below; a cited file that
   no longer exists also fails the guard. It does not judge the gesture, it

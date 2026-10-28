@@ -1,32 +1,32 @@
-//! L'aspect commun d'un champ à liste (#234, S-N1/S-N9) : un cadre unique, une
-//! flèche **pleine à l'intérieur**, à droite — celle de la `ComboBox` d'egui.
+//! The common look of a list field (#234, S-N1/S-N9): a single frame, a
+//! **filled arrow inside**, on the right — the one of egui's `ComboBox`.
 //!
-//! Une seule différence entre les deux familles, voulue : le **fond**.
-//! [`editable_fill`] (fond d'un champ de saisie du thème, blanc en clair) pour
-//! ce qui se tape au clavier — le champ nombre à liste —, [`list_only_fill`]
-//! (fond des boutons, gris) pour un choix fermé. Les deux viennent des
-//! `Visuals` posés par `theme::install`, jamais d'une couleur en dur
-//! (`aucune_couleur_en_dur_hors_du_theme`).
+//! The two families differ in one deliberate way: the **fill**.
+//! [`editable_fill`] (the theme's input field fill, white in light mode) for
+//! what is typed on the keyboard — the number field with a list —,
+//! [`list_only_fill`] (the button fill, gray) for a closed choice. Both come
+//! from the `Visuals` set by `theme::install`, never from a hard-coded color
+//! (`no_hardcoded_color_outside_the_theme`).
 //!
-//! La `ComboBox` garde son propre dessin (egui) ; ce module en reprend la
-//! flèche et les fonds pour que `number_field` n'en diverge plus.
+//! The `ComboBox` keeps its own drawing (egui); this module takes over its
+//! arrow and fills so that `number_field` no longer diverges from it.
 
 use eframe::egui;
 
-/// Place réservée à droite du texte pour la flèche, en points.
+/// Room reserved to the right of the text for the arrow, in points.
 pub const ARROW_ROOM: f32 = 18.0;
 
-/// Fond d'un champ éditable au clavier.
+/// Fill of a field editable from the keyboard.
 pub fn editable_fill(visuals: &egui::Visuals) -> egui::Color32 {
     visuals.extreme_bg_color
 }
 
-/// Fond d'une liste qui seule choisit (celui d'un bouton ou d'une `ComboBox`).
+/// Fill of a list that only picks (the one of a button or a `ComboBox`).
 pub fn list_only_fill(visuals: &egui::Visuals) -> egui::Color32 {
     visuals.widgets.inactive.weak_bg_fill
 }
 
-/// Le rectangle de la flèche, à l'intérieur et à droite de `field`.
+/// The arrow's rectangle, inside `field` on the right.
 pub fn arrow_rect(field: egui::Rect) -> egui::Rect {
     egui::Rect::from_min_max(
         egui::pos2(field.right() - ARROW_ROOM, field.top()),
@@ -34,8 +34,8 @@ pub fn arrow_rect(field: egui::Rect) -> egui::Rect {
     )
 }
 
-/// Peint la flèche pleine (triangle vers le bas) dans `rect`, teinte du survol
-/// comprise.
+/// Paints the filled arrow (downward triangle) in `rect`, hover tint
+/// included.
 pub fn paint_arrow(ui: &egui::Ui, rect: egui::Rect, response: &egui::Response) {
     let color = ui.style().interact(response).fg_stroke.color;
     let triangle = egui::Rect::from_center_size(
@@ -58,7 +58,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn les_deux_fonds_different_et_viennent_du_theme() {
+    fn the_two_fills_differ_and_come_from_the_theme() {
         for visuals in [egui::Visuals::light(), egui::Visuals::dark()] {
             assert_ne!(editable_fill(&visuals), list_only_fill(&visuals));
             assert_eq!(editable_fill(&visuals), visuals.extreme_bg_color);
@@ -70,10 +70,10 @@ mod tests {
     }
 
     #[test]
-    fn la_fleche_est_dans_le_cadre_du_champ() {
-        let champ = egui::Rect::from_min_size(egui::pos2(10.0, 5.0), egui::vec2(80.0, 20.0));
-        let fleche = arrow_rect(champ);
-        assert!(champ.contains_rect(fleche));
-        assert_eq!(fleche.right(), champ.right());
+    fn the_arrow_is_inside_the_field_frame() {
+        let field = egui::Rect::from_min_size(egui::pos2(10.0, 5.0), egui::vec2(80.0, 20.0));
+        let arrow = arrow_rect(field);
+        assert!(field.contains_rect(arrow));
+        assert_eq!(arrow.right(), field.right());
     }
 }

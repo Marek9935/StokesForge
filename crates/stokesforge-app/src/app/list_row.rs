@@ -1,59 +1,59 @@
-//! **La** ligne de liste sélectionnable de l'application (#169, option A de
-//! la maquette des onglets) : une entrée d'arbre ou de liste — fenêtre du
-//! Project Manager, objet ou série de l'Object Manager, série de la page
-//! « Séries » des propriétés du graphe — se peint comme une ligne pleine
-//! largeur, jamais comme un bouton `selectable_label` / `Button::selectable`.
+//! **The** selectable list row of the application (#169, option A of the
+//! tabs mock-up): a tree or list entry — Project Manager window, Object
+//! Manager object or series, series of the graph properties "Series"
+//! page — is painted as a full-width row, never as a
+//! `selectable_label` / `Button::selectable` button.
 //!
-//! Aspect : sélectionnée, fond pâle d'accent sur toute la largeur restante
-//! depuis le retrait de la ligne, filet d'accent de [`LIST_ROW_MARK`] points à
-//! gauche, libellé en gras (`theme::bold`) ; survolée, fond gris clair ;
-//! focus clavier, contour de `selection.stroke`. Les couleurs viennent de
-//! `crate::theme`, nulle part ailleurs.
+//! Look: selected, a pale accent background over the whole width remaining
+//! since the row's indent, an accent strip of [`LIST_ROW_MARK`] points on
+//! the left, bold label (`theme::bold`); hovered, a light grey background;
+//! keyboard focus, an outline of `selection.stroke`. The colors come from
+//! `crate::theme`, nowhere else.
 //!
-//! Deux usages :
+//! Two uses:
 //!
-//! - [`list_row`] peint toute la ligne (icône facultative + libellé) et rend
-//!   sa réponse ;
-//! - une ligne composée de plusieurs widgets (case de visibilité, échantillon,
-//!   libellé de l'Object Manager) réserve son fond **avant** ses widgets par
-//!   [`ListRowBackground::reserve`], puis le pose une fois la ligne mesurée
-//!   ([`ListRowBackground::paint`]) : le fond passe sous les widgets, sans
-//!   ajouter de sous-`Ui` ni changer leurs identifiants egui.
+//! - [`list_row`] paints the whole row (optional icon + label) and returns
+//!   its response;
+//! - a row made of several widgets (visibility checkbox, swatch, Object
+//!   Manager label) reserves its background **before** its widgets with
+//!   [`ListRowBackground::reserve`], then lays it down once the row is
+//!   measured ([`ListRowBackground::paint`]): the background goes under the
+//!   widgets, without adding a sub-`Ui` or changing their egui ids.
 //!
-//! Un jeu d'**onglets** n'est pas une liste : il passe par `tab_strip`. Un
-//! **choix exclusif** dans une liste déroulante ou un menu garde le
-//! `selectable_label` d'egui (garde `aucun_bouton_selectionnable_hors_d_un_menu`).
+//! A set of **tabs** is not a list: it goes through `tab_strip`. An
+//! **exclusive choice** in a dropdown list or a menu keeps egui's
+//! `selectable_label` (guard `no_selectable_button_outside_a_menu`).
 
 use eframe::egui;
 
 use crate::icons::ICON_SIZE;
 use crate::theme;
 
-/// Largeur du filet d'accent à gauche d'une ligne sélectionnée.
+/// Width of the accent strip on the left of a selected row.
 pub(super) const LIST_ROW_MARK: f32 = 3.0;
 
-/// Hauteur **unique** d'une ligne de liste (#170, point 5) : la même pour une
-/// ligne de [`list_row`] avec ou sans icône, sélectionnée ou non, et pour une
-/// ligne composée (case de visibilité, échantillon, libellé : groupe, série,
-/// objet de l'Object Manager, en-tête de dossier du Project Manager, ligne
-/// série des propriétés). Valeur : la hauteur naturelle d'une ligne à icône
-/// (ligne de texte de 18 px plus 2 x 3 px de marge, soit 24 px), qui loge la case à cocher
-/// (`interact_size.y`) et l'échantillon de 18 px sans les rogner.
+/// **Single** height of a list row (#170, point 5): the same for a
+/// [`list_row`] row with or without an icon, selected or not, and for a
+/// composed row (visibility checkbox, swatch, label: group, series,
+/// Object Manager object, Project Manager folder header, properties series
+/// row). Value: the natural height of a row with an icon (an 18 px line of
+/// text plus 2 x 3 px of margin, i.e. 24 px), which fits the checkbox
+/// (`interact_size.y`) and the 18 px swatch without clipping them.
 pub(crate) const LIST_ROW_HEIGHT: f32 = 24.0;
 
-/// Marges intérieures d'une ligne peinte par [`list_row`].
+/// Inner margins of a row painted by [`list_row`].
 const LIST_ROW_PADDING: egui::Vec2 = egui::vec2(6.0, 3.0);
 
-/// Écart entre l'icône et le libellé.
+/// Gap between the icon and the label.
 const LIST_ROW_GAP: f32 = 5.0;
 
-/// Impose [`LIST_ROW_HEIGHT`] aux widgets d'une ligne composée : `add` s'écrit
-/// avec la hauteur d'interaction (`interact_size.y`) relevée à la hauteur de
-/// ligne, que lisent le `ui.horizontal` (hauteur de départ de la rangée), la
-/// case à cocher, le bouton et le champ de saisie ; chaque widget se centre
-/// donc dans une rangée de [`LIST_ROW_HEIGHT`], sans sous-`Ui` neuf (les
-/// identifiants egui et le glisser-déposer ne changent pas). Le réglage est
-/// rendu à l'appelant dès `add` terminée.
+/// Imposes [`LIST_ROW_HEIGHT`] on the widgets of a composed row: `add` is
+/// written with the interaction height (`interact_size.y`) raised to the
+/// row height, which `ui.horizontal` (starting height of the row), the
+/// checkbox, the button and the input field read; each widget thus centers
+/// in a row of [`LIST_ROW_HEIGHT`], without a new sub-`Ui` (egui ids and
+/// drag and drop do not change). The setting is handed back to the caller
+/// as soon as `add` is done.
 pub(super) fn with_list_row_height<R>(
     ui: &mut egui::Ui,
     add: impl FnOnce(&mut egui::Ui) -> R,
@@ -64,22 +64,22 @@ pub(super) fn with_list_row_height<R>(
     result
 }
 
-/// La moitié « poser » de [`with_list_row_height`], pour une en-tête repliable
-/// dont la réponse (`HeaderResponse`) emprunte l'`Ui` jusqu'à son `.body(…)` :
-/// pose [`LIST_ROW_HEIGHT`] et rend la hauteur d'avant, à rendre par
-/// [`restore_row_height`] une fois l'en-tête et son corps peints.
+/// The "set" half of [`with_list_row_height`], for a collapsing header
+/// whose response (`HeaderResponse`) borrows the `Ui` until its `.body(…)`:
+/// sets [`LIST_ROW_HEIGHT`] and returns the previous height, to be handed
+/// back by [`restore_row_height`] once the header and its body are painted.
 pub(super) fn raise_to_list_row_height(ui: &mut egui::Ui) -> f32 {
     let before = ui.spacing().interact_size.y;
     ui.spacing_mut().interact_size.y = LIST_ROW_HEIGHT;
     before
 }
 
-/// La moitié « rendre » : voir [`raise_to_list_row_height`].
+/// The "restore" half: see [`raise_to_list_row_height`].
 pub(super) fn restore_row_height(ui: &mut egui::Ui, before: f32) {
     ui.spacing_mut().interact_size.y = before;
 }
 
-/// Le libellé d'une ligne : gras si elle est sélectionnée.
+/// The label of a row: bold if it is selected.
 pub(super) fn list_row_text(text: &str, selected: bool) -> egui::RichText {
     if selected {
         theme::bold(text)
@@ -88,8 +88,8 @@ pub(super) fn list_row_text(text: &str, selected: bool) -> egui::RichText {
     }
 }
 
-/// Couleur du libellé : estompé pour une entrée masquée (`dimmed`), sinon
-/// le texte ordinaire, un cran plus foncé quand la ligne est sélectionnée.
+/// Label color: faded for a hidden entry (`dimmed`), otherwise
+/// ordinary text, a notch darker when the row is selected.
 pub(super) fn list_row_text_color(ui: &egui::Ui, selected: bool, dimmed: bool) -> egui::Color32 {
     if dimmed {
         ui.visuals().weak_text_color()
@@ -100,17 +100,17 @@ pub(super) fn list_row_text_color(ui: &egui::Ui, selected: bool, dimmed: bool) -
     }
 }
 
-/// Le libellé cliquable d'une ligne composée ([`ListRowBackground`]) : un
-/// bouton **sans cadre** — ni fond de sélection ni fond de survol, que porte
-/// la ligne entière —, marqué sélectionné pour l'arbre d'accessibilité.
+/// The clickable label of a composed row ([`ListRowBackground`]): a
+/// **frameless** button — neither selection background nor hover
+/// background, which the whole row carries —, marked selected for the accessibility tree.
 pub(super) fn list_row_label(text: egui::RichText, selected: bool) -> egui::Button<'static> {
     egui::Button::new(text).frame(false).selected(selected)
 }
 
-/// [`list_row_label`] suivi d'une zone qui prend tout le reste de la ligne,
-/// l'une et l'autre cliquables et glissables : le clic, le double-clic et le
-/// glisser-déposer valent sur toute la ligne, hors case de visibilité. Le
-/// libellé garde sa place à gauche (un bouton élargi le centrerait).
+/// [`list_row_label`] followed by an area that takes the rest of the row,
+/// both clickable and draggable: click, double-click and
+/// drag and drop apply to the whole row, outside the visibility checkbox. The
+/// label keeps its place on the left (a widened button would center it).
 pub(super) fn list_row_grip(
     ui: &mut egui::Ui,
     text: egui::RichText,
@@ -124,12 +124,12 @@ pub(super) fn list_row_grip(
     label.union(rest)
 }
 
-/// Le contour de focus clavier d'une ligne (#170, point 6) : celui de
-/// `selection.stroke`, posé en retrait d'un point. Une seule écriture pour
-/// toutes les lignes : une ligne de [`list_row`] qui a le focus d'egui, la ligne
-/// du curseur clavier du Project Manager (qui suit son propre focus, pas celui
-/// d'egui) et celle de l'Object Manager (une ancre de focus pour tout le
-/// panneau).
+/// The keyboard focus outline of a row (#170, point 6): that of
+/// `selection.stroke`, inset by one point. A single implementation for
+/// all rows: a [`list_row`] row that has egui focus, the row of the Project
+/// Manager keyboard cursor (which follows its own focus, not egui's)
+/// and that of the Object Manager (a focus anchor for the whole
+/// panel).
 pub(super) fn paint_focus_outline(ui: &egui::Ui, rect: egui::Rect) {
     ui.painter().rect_stroke(
         rect.shrink(1.0),
@@ -139,11 +139,11 @@ pub(super) fn paint_focus_outline(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
-/// Où va le curseur clavier depuis `cursor` quand on appuie sur ↑ (`step` = -1)
-/// ou ↓ (+1) dans `visible`, les lignes **visibles** dans l'ordre de lecture :
-/// la voisine, sans passer d'un bout à l'autre. Sans curseur (ou si le curseur
-/// n'est pas visible), ↓ va à la première ligne et ↑ à la dernière. `None` si
-/// rien n'est visible. Partagée par le Project Manager et l'Object Manager
+/// Where the keyboard cursor goes from `cursor` when ↑ (`step` = -1)
+/// or ↓ (+1) is pressed in `visible`, the **visible** rows in reading order:
+/// the neighbor, without wrapping from one end to the other. Without a cursor (or if the cursor
+/// is not visible), ↓ goes to the first row and ↑ to the last. `None` if
+/// nothing is visible. Shared by the Project Manager and the Object Manager
 /// (#170, point 6).
 pub(super) fn neighbour<T: Copy + PartialEq>(
     visible: &[T],
@@ -160,8 +160,8 @@ pub(super) fn neighbour<T: Copy + PartialEq>(
     visible.get(target).copied()
 }
 
-/// Les touches de navigation d'une liste, lues (et consommées) une fois par
-/// image.
+/// The navigation keys of a list, read (and consumed) once per
+/// frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NavKey {
     Up,
@@ -169,11 +169,11 @@ pub(super) enum NavKey {
     Enter,
 }
 
-/// Lit ↑, ↓ et Entrée dans le registre des touches. Les variantes Maj (↑ ↓) et
-/// Alt+↓ sont consommées **d'abord** et ne font rien : `consume_shortcut`
-/// ignore Maj et Alt en trop et les prendrait pour ↑ ou ↓ simples. Ctrl+↑ et
-/// Ctrl+↓ (déplacer une série) ne correspondent pas : le modificateur Ctrl, lui,
-/// doit être exact.
+/// Reads ↑, ↓ and Enter in the key registry. The Shift (↑ ↓) and
+/// Alt+↓ variants are consumed **first** and do nothing: `consume_shortcut`
+/// ignores extra Shift and Alt and would take them for plain ↑ or ↓. Ctrl+↑ and
+/// Ctrl+↓ (move a series) do not match: the Ctrl modifier, for its part,
+/// must be exact.
 pub(super) fn read_navigation(input: &mut egui::InputState) -> Option<NavKey> {
     use super::shortcuts::{
         KEY_ALT_ARROW_DOWN, KEY_ARROW_DOWN, KEY_ARROW_UP, KEY_ENTER, KEY_SHIFT_ARROW_DOWN,
@@ -199,10 +199,10 @@ pub(super) fn read_navigation(input: &mut egui::InputState) -> Option<NavKey> {
     }
 }
 
-/// Le fond d'une ligne : fond pâle et filet d'accent si elle est
-/// sélectionnée, gris clair si elle est seulement survolée, rien sinon. Deux
-/// formes à plat (fond, puis filet), jamais un `Shape::Vec` : les tests et
-/// la tessellation les lisent une à une.
+/// The background of a row: pale background and accent strip if it is
+/// selected, light grey if it is only hovered, nothing otherwise. Two
+/// flat shapes (background, then strip), never a `Shape::Vec`: the tests and
+/// the tessellation read them one by one.
 fn list_row_background(rect: egui::Rect, selected: bool, hovered: bool) -> [egui::Shape; 2] {
     if selected {
         let mark = egui::Rect::from_min_size(rect.min, egui::vec2(LIST_ROW_MARK, rect.height()));
@@ -220,12 +220,12 @@ fn list_row_background(rect: egui::Rect, selected: bool, hovered: bool) -> [egui
     }
 }
 
-/// Fond d'une ligne composée de plusieurs widgets : réservé avant eux, posé
-/// après (voir la doc de tête du module).
+/// Background of a row made of several widgets: reserved before them, laid
+/// down after (see the module head doc).
 pub(super) struct ListRowBackground([egui::layers::ShapeIdx; 2]);
 
 impl ListRowBackground {
-    /// Réserve la place du fond dans la liste des formes, sous ce qui suit.
+    /// Reserves the background's place in the shape list, under what follows.
     pub(super) fn reserve(ui: &egui::Ui) -> Self {
         let painter = ui.painter();
         Self([
@@ -234,9 +234,9 @@ impl ListRowBackground {
         ])
     }
 
-    /// Pose le fond sous la ligne `row`, prolongée jusqu'au bord droit de
-    /// l'`Ui` (la ligne court sur toute la largeur restante), et le contour de
-    /// focus clavier quand elle porte le curseur (`focused`, #170 point 6).
+    /// Lays the background under row `row`, extended to the right edge of
+    /// the `Ui` (the row runs across the whole remaining width), and the keyboard
+    /// focus outline when it carries the cursor (`focused`, #170 point 6).
     pub(super) fn paint(self, ui: &egui::Ui, row: egui::Rect, selected: bool, focused: bool) {
         let rect = egui::Rect::from_min_max(
             row.min,
@@ -259,10 +259,10 @@ impl ListRowBackground {
     }
 }
 
-/// Une ligne de liste : icône facultative et libellé, sur toute la largeur
-/// restante depuis son retrait. `dimmed` estompe le libellé (fenêtre
-/// masquée du Project Manager). La réponse est un clic ; l'arbre
-/// d'accessibilité la voit comme un bouton sélectionné ou non.
+/// A list row: optional icon and label, over the whole width
+/// remaining since its indent. `dimmed` fades the label (hidden
+/// window of the Project Manager). The response is a click; the accessibility
+/// tree sees it as a selected or unselected button.
 pub(super) fn list_row(
     ui: &mut egui::Ui,
     icon: Option<egui::Image<'static>>,
@@ -281,9 +281,9 @@ pub(super) fn list_row(
     )
 }
 
-/// [`list_row`] dont le contour de focus est peint aussi quand l'appelant sait
-/// que la ligne porte le curseur clavier sans avoir le focus d'egui (le Project
-/// Manager suit son focus lui-même, #170 point 6).
+/// [`list_row`] whose focus outline is also painted when the caller knows
+/// that the row carries the keyboard cursor without having egui focus (the Project
+/// Manager follows its focus itself, #170 point 6).
 pub(super) fn list_row_focused(
     ui: &mut egui::Ui,
     icon: Option<egui::Image<'static>>,
@@ -303,8 +303,8 @@ pub(super) fn list_row_focused(
     )
 }
 
-/// [`list_row`] qui se glisse aussi : toute la ligne saisit (glisser-déposer
-/// des séries, `object_dnd.rs`).
+/// [`list_row`] that can also be dragged: the whole row grabs (drag and drop
+/// of series, `object_dnd.rs`).
 pub(super) fn list_row_draggable(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
     list_row_sensed(
         ui,
@@ -356,9 +356,9 @@ fn list_row_sensed(
             icon.paint_at(ui, icon_rect);
             text_left = icon_rect.right() + LIST_ROW_GAP;
         }
-        let text_pos = egui::pos2(text_left, rect.center().y - galley.size().y / 2.0);
+        let text_index = egui::pos2(text_left, rect.center().y - galley.size().y / 2.0);
         let color = list_row_text_color(ui, selected, dimmed);
-        ui.painter().galley(text_pos, galley, color);
+        ui.painter().galley(text_index, galley, color);
         if focused || response.has_focus() {
             paint_focus_outline(ui, rect);
         }
@@ -370,7 +370,7 @@ fn list_row_sensed(
 mod tests {
     use super::*;
 
-    use super::super::test_support::{contexte, textes};
+    use super::super::test_support::{context, texts};
 
     fn rects(output: &egui::FullOutput, fill: egui::Color32) -> Vec<egui::Rect> {
         output
@@ -397,15 +397,15 @@ mod tests {
         output
     }
 
-    /// Une ligne sélectionnée : fond pâle pleine largeur, filet d'accent à
-    /// gauche, libellé gras, et jamais le fond `selection.bg_fill` d'un
-    /// bouton. Témoin : non sélectionnée, rien de tout cela.
+    /// A selected row: pale full-width background, accent strip on the
+    /// left, bold label, and never the `selection.bg_fill` background of a
+    /// button. Witness: unselected, none of this.
     #[test]
-    fn une_ligne_selectionnee_porte_fond_filet_et_gras() {
-        let context = contexte();
+    fn a_selected_row_carries_background_strip_and_bold() {
+        let context = context();
         let output = image(&context, |ui| {
-            list_row(ui, None, "Série A", true, false);
-            list_row(ui, None, "Série B", false, false);
+            list_row(ui, None, "Series A", true, false);
+            list_row(ui, None, "Series B", false, false);
         });
         let rows = rects(&output, theme::list_row_selected_fill());
         let marks = rects(&output, theme::accent());
@@ -414,83 +414,86 @@ mod tests {
         assert_eq!(marks[0].left(), rows[0].left());
         assert_eq!(marks[0].height(), rows[0].height());
         assert_eq!(marks[0].width(), LIST_ROW_MARK);
-        assert!(rows[0].width() > 300.0, "pleine largeur : {:?}", rows[0]);
+        assert!(rows[0].width() > 300.0, "full width: {:?}", rows[0]);
         let button_fill = context.global_style().visuals.selection.bg_fill;
         assert!(rects(&output, button_fill).is_empty());
-        let peints = textes(&output.shapes);
-        assert!(peints.iter().any(|t| t.texte == "Série A" && t.gras));
-        assert!(peints.iter().any(|t| t.texte == "Série B" && !t.gras));
+        let painted_texts = texts(&output.shapes);
+        assert!(painted_texts.iter().any(|t| t.text == "Series A" && t.bold));
+        assert!(painted_texts
+            .iter()
+            .any(|t| t.text == "Series B" && !t.bold));
     }
 
-    /// #170, point 5 : une ligne de liste a toujours `LIST_ROW_HEIGHT`, avec ou
-    /// sans icône, sélectionnée (gras) ou non. Témoin : la hauteur d'une ligne
-    /// n'est pas celle d'un simple libellé.
+    /// #170, point 5: a list row always has `LIST_ROW_HEIGHT`, with or
+    /// without an icon, selected (bold) or not. Witness: the height of a row
+    /// is not that of a plain label.
     #[test]
-    fn toute_ligne_de_liste_a_la_hauteur_unique() {
-        let context = contexte();
-        let mut hauteurs = Vec::new();
+    fn every_list_row_has_the_single_height() {
+        let context = context();
+        let mut heights = Vec::new();
         image(&context, |ui| {
-            for (icone, selected) in [(false, false), (false, true), (true, false), (true, true)] {
-                let icon = icone.then(|| {
+            for (has_icon, selected) in [(false, false), (false, true), (true, false), (true, true)]
+            {
+                let icon = has_icon.then(|| {
                     crate::icons::icon_image(
                         crate::icons::Icon::Folder,
                         crate::icons::IconRole::Folder,
                     )
                 });
-                hauteurs.push(list_row(ui, icon, "Série", selected, false).rect.height());
+                heights.push(list_row(ui, icon, "Series", selected, false).rect.height());
             }
-            hauteurs.push(list_row_draggable(ui, "Série", false).rect.height());
-            hauteurs.push(ui.label("Série").rect.height());
+            heights.push(list_row_draggable(ui, "Series", false).rect.height());
+            heights.push(ui.label("Series").rect.height());
         });
-        assert_eq!(hauteurs[..5], [LIST_ROW_HEIGHT; 5], "{hauteurs:?}");
+        assert_eq!(heights[..5], [LIST_ROW_HEIGHT; 5], "{heights:?}");
         assert!(
-            hauteurs[5] < LIST_ROW_HEIGHT,
-            "témoin : un libellé nu est plus bas : {hauteurs:?}"
+            heights[5] < LIST_ROW_HEIGHT,
+            "witness: a bare label is shorter: {heights:?}"
         );
     }
 
-    /// `with_list_row_height` loge case, bouton et champ dans une rangée de
-    /// `LIST_ROW_HEIGHT`, centrés sur son milieu, puis rend la hauteur
-    /// d'interaction d'avant. Témoin : sans lui, la rangée est plus basse.
+    /// `with_list_row_height` fits checkbox, button and field in a row of
+    /// `LIST_ROW_HEIGHT`, centered on its middle, then hands back the
+    /// interaction height from before. Witness: without it, the row is shorter.
     #[test]
-    fn la_rangee_composee_prend_la_hauteur_unique_et_la_rend() {
-        let context = contexte();
-        let mut mesures = Vec::new();
+    fn the_composed_row_takes_the_single_height_and_hands_it_back() {
+        let context = context();
+        let mut measured = Vec::new();
         image(&context, |ui| {
-            let avant = ui.spacing().interact_size.y;
-            for imposer in [true, false] {
-                let mut case = true;
-                let mut rangee = |ui: &mut egui::Ui| {
+            let before = ui.spacing().interact_size.y;
+            for impose in [true, false] {
+                let mut checkbox = true;
+                let mut row_fn = |ui: &mut egui::Ui| {
                     ui.horizontal(|ui| {
-                        let c = ui.checkbox(&mut case, "").rect.center().y;
-                        let b = ui.button("Nom").rect.center().y;
+                        let c = ui.checkbox(&mut checkbox, "").rect.center().y;
+                        let b = ui.button("Name").rect.center().y;
                         (c, b)
                     })
                 };
-                let sortie = if imposer {
-                    with_list_row_height(ui, rangee)
+                let outcome = if impose {
+                    with_list_row_height(ui, row_fn)
                 } else {
-                    rangee(ui)
+                    row_fn(ui)
                 };
-                let (c, b) = sortie.inner;
-                mesures.push((sortie.response.rect, c, b));
+                let (c, b) = outcome.inner;
+                measured.push((outcome.response.rect, c, b));
             }
-            assert_eq!(ui.spacing().interact_size.y, avant, "hauteur rendue");
+            assert_eq!(ui.spacing().interact_size.y, before, "height handed back");
         });
-        let (avec, c, b) = mesures[0];
-        assert_eq!(avec.height(), LIST_ROW_HEIGHT);
-        assert!((c - avec.center().y).abs() < 0.5 && (b - avec.center().y).abs() < 0.5);
+        let (with, c, b) = measured[0];
+        assert_eq!(with.height(), LIST_ROW_HEIGHT);
+        assert!((c - with.center().y).abs() < 0.5 && (b - with.center().y).abs() < 0.5);
         assert!(
-            mesures[1].0.height() < LIST_ROW_HEIGHT,
-            "témoin : {mesures:?}"
+            measured[1].0.height() < LIST_ROW_HEIGHT,
+            "witness: {measured:?}"
         );
     }
 
-    /// Le fond d'une ligne composée est au moins `LIST_ROW_HEIGHT` de haut,
-    /// même si la rangée mesurée est plus basse.
+    /// The background of a composed row is at least `LIST_ROW_HEIGHT` tall,
+    /// even if the measured row is shorter.
     #[test]
-    fn le_fond_reserve_impose_la_hauteur_minimale() {
-        let context = contexte();
+    fn the_reserved_background_imposes_the_minimum_height() {
+        let context = context();
         let output = image(&context, |ui| {
             let background = ListRowBackground::reserve(ui);
             let row = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 18.0));
@@ -506,22 +509,22 @@ mod tests {
         assert_eq!(
             rects(&output, theme::list_row_selected_fill())[0].height(),
             40.0,
-            "témoin : une rangée plus haute n'est pas rognée"
+            "witness: a taller row is not clipped"
         );
     }
 
-    /// Le fond réservé d'une ligne composée passe **sous** ses widgets et
-    /// court jusqu'au bord droit ; sans sélection ni survol, il ne peint rien.
+    /// The reserved background of a composed row goes **under** its widgets and
+    /// runs to the right edge; with no selection or hover, it paints nothing.
     #[test]
-    fn le_fond_reserve_passe_sous_les_widgets_de_la_ligne() {
-        let context = contexte();
+    fn the_reserved_background_goes_under_the_row_widgets() {
+        let context = context();
         for selected in [true, false] {
             let output = image(&context, |ui| {
                 let background = ListRowBackground::reserve(ui);
                 let row = ui
                     .horizontal(|ui| {
-                        ui.label("case");
-                        ui.label(list_row_text("Objet", selected));
+                        ui.label("box");
+                        ui.label(list_row_text("Object", selected));
                     })
                     .response
                     .rect;
@@ -530,18 +533,21 @@ mod tests {
             let fill = output.shapes.iter().position(|s| {
                 matches!(&s.shape, egui::Shape::Rect(r) if r.fill == theme::list_row_selected_fill())
             });
-            let texte = output
+            let text_index = output
                 .shapes
                 .iter()
                 .position(|s| matches!(&s.shape, egui::Shape::Text(_)));
             if selected {
-                let (fill, texte) = (fill.expect("fond"), texte.expect("texte"));
-                assert!(fill < texte, "le fond est peint avant les widgets");
+                let (fill, text_index) = (fill.expect("background"), text_index.expect("text"));
+                assert!(
+                    fill < text_index,
+                    "the background is painted before the widgets"
+                );
                 let rows = rects(&output, theme::list_row_selected_fill());
-                assert!(rows[0].right() >= 399.0, "jusqu'au bord : {:?}", rows[0]);
+                assert!(rows[0].right() >= 399.0, "up to the edge: {:?}", rows[0]);
                 assert_eq!(rects(&output, theme::accent()).len(), 1);
             } else {
-                assert!(fill.is_none(), "témoin : rien sans sélection");
+                assert!(fill.is_none(), "witness: nothing without selection");
                 assert!(rects(&output, theme::accent()).is_empty());
             }
         }

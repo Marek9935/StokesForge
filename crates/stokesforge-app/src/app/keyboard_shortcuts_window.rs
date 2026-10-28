@@ -1,6 +1,6 @@
-//! Help › Keyboard Shortcuts (#231, S-K5) : la liste des raccourcis, générée de
-//! [`HELP`](super::shortcuts::HELP) pour qu'elle ne puisse pas diverger du
-//! registre. Lecture seule, donc `modal_read_only` (Close seul, S-F2).
+//! Help › Keyboard Shortcuts (#231, S-K5): the list of shortcuts, generated
+//! from [`HELP`](super::shortcuts::HELP) so that it cannot diverge from the
+//! registry. Read-only, hence `modal_read_only` (Close only, S-F2).
 
 use eframe::egui;
 
@@ -10,7 +10,7 @@ use crate::theme;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// Peint la fenêtre tant qu'elle est ouverte.
+/// Paints the window while it is open.
 pub(super) fn keyboard_shortcuts_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -51,10 +51,10 @@ mod tests {
     use super::*;
     use crate::app::shortcuts::HELP;
 
-    /// Une image de la fenêtre ouverte ; rend les textes peints.
-    fn textes(open: bool) -> Vec<String> {
+    /// A frame of the open window; returns the painted texts.
+    fn texts(open: bool) -> Vec<String> {
         let session = stokesforge_session::Session::spawn(
-            stokesforge_core::Project::new("Aide").unwrap(),
+            stokesforge_core::Project::new("Help").unwrap(),
             None,
         )
         .unwrap();
@@ -65,9 +65,9 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut actions = Vec::new();
-        // Deux images : une fenêtre se peint à la seconde (la première la
-        // mesure) ; une lecture seule n'a plus de passe jetée du focus initial
-        // pour la lui donner (S-F11).
+        // Two frames: a window is painted on the second (the first one
+        // measures it); a read-only window no longer has a discarded initial
+        // focus pass to give it that (S-F11).
         let mut output = egui::FullOutput::default();
         for _ in 0..2 {
             output = ctx.run_ui(
@@ -93,18 +93,18 @@ mod tests {
             .collect()
     }
 
-    /// Fermée, la fenêtre ne peint rien ; ouverte, elle montre son titre, ses
-    /// rubriques et au moins une ligne du registre.
+    /// Closed, the window paints nothing; open, it shows its title, its
+    /// sections and at least one line of the registry.
     #[test]
-    fn la_fenetre_montre_le_registre_quand_elle_est_ouverte() {
-        assert!(textes(false).is_empty());
-        let texts = textes(true);
+    fn the_window_shows_the_registry_when_it_is_open() {
+        assert!(texts(false).is_empty());
+        let texts = texts(true);
         assert!(
             texts.contains(&tr!("keyboard-shortcuts-title")),
             "{texts:?}"
         );
         assert!(texts.contains(&tr!("help-area-general")), "{texts:?}");
         let first = (HELP[0].label)();
-        assert!(texts.contains(&first), "{first} absent : {texts:?}");
+        assert!(texts.contains(&first), "{first} missing: {texts:?}");
     }
 }

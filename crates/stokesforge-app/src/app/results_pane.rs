@@ -1,12 +1,13 @@
-//! Le volet Results d'un classeur (#181, maquette M7) : sous la grille, au
-//! dessus des onglets de feuille, les valeurs des calculs « Keep in Results ».
+//! The Results pane of a workbook (#181, mockup M7): below the grid, above
+//! the sheet tabs, the values of the "Keep in Results" calculations.
 //!
-//! Replié par défaut (un seul bandeau avec le compte), absent tant que le
-//! classeur n'a aucun résultat gardé. Déplié : la liste des calculs à gauche,
-//! le détail à droite — une rangée par série, une colonne par valeur — avec
-//! `Edit`, `Recalculate` et `Delete`. Le bouton `This sheet | Workbook` choisit
-//! ce que la liste montre. L'état d'ouverture et le calcul choisi sont de
-//! l'interface (mémoire egui) : ils ne vont ni dans le `.stf` ni dans l'historique.
+//! Collapsed by default (a single banner with the count), absent while the
+//! workbook has no kept result. Expanded: the list of calculations on the
+//! left, the detail on the right (one row per series, one column per value)
+//! with `Edit`, `Recalculate` and `Delete`. The `This sheet | Workbook`
+//! button chooses what the list shows. The open state and the chosen
+//! calculation belong to the interface (egui memory): they go neither into
+//! the `.stf` nor into the history.
 
 use eframe::egui;
 use stokesforge_core::NodeId;
@@ -25,11 +26,11 @@ use stokesforge_app_state::r_squared::level_of_value;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-/// Hauteur du bandeau replié.
+/// Height of the collapsed banner.
 pub(super) const COLLAPSED_HEIGHT: f32 = 22.0;
-/// Hauteur du volet déplié.
+/// Height of the expanded pane.
 const EXPANDED_HEIGHT: f32 = 210.0;
-/// Largeur de la liste des calculs.
+/// Width of the list of calculations.
 const LIST_WIDTH: f32 = 240.0;
 
 #[derive(Clone, Copy, Default)]
@@ -43,7 +44,7 @@ fn pane_id(book: NodeId) -> egui::Id {
     egui::Id::new(("stokesforge_results_pane", book.raw()))
 }
 
-/// La hauteur que le volet prend dans le classeur : rien sans résultat gardé.
+/// The height the pane takes in the workbook: nothing without a kept result.
 pub(super) fn pane_height(ui: &egui::Ui, state: &AppState, book: NodeId) -> f32 {
     if state.kept_calculations(book, None).is_empty()
         && state.correction_traces(book, None).is_empty()
@@ -61,7 +62,7 @@ pub(super) fn pane_height(ui: &egui::Ui, state: &AppState, book: NodeId) -> f32 
     }
 }
 
-/// Peint le volet dans `ui`, dont le rectangle a la hauteur de [`pane_height`].
+/// Paints the pane in `ui`, whose rectangle has the height of [`pane_height`].
 pub(super) fn results_pane(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -83,7 +84,7 @@ pub(super) fn results_pane(
         rect.top(),
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
-    // Bandeau de hauteur fixe, contenu centré verticalement (sinon le titre colle en haut).
+    // Banner of fixed height, content vertically centered (otherwise the title sticks to the top).
     let header = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), COLLAPSED_HEIGHT));
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -123,8 +124,8 @@ pub(super) fn results_pane(
         if !calculations.contains(&pane.selected.unwrap_or(NodeId::from_raw(0))) {
             pane.selected = calculations.first().copied();
         }
-        // Deux zones aux rectangles bornés : la liste ne dépasse jamais sa part et
-        // le détail revient à la ligne dans le reste, sans élargir la fenêtre.
+        // Two areas with bounded rectangles: the list never exceeds its share and
+        // the detail wraps in the rest, without widening the window.
         let area = ui.available_rect_before_wrap();
         let list_width = LIST_WIDTH.min(area.width() * 0.45);
         let list_rect = egui::Rect::from_min_size(area.min, egui::vec2(list_width, area.height()));
@@ -167,8 +168,8 @@ pub(super) fn results_pane(
     ui.data_mut(|d| d.insert_temp(id, pane));
 }
 
-/// La ligne de liste, courte pour tenir dans la liste : « Baseline · Spectre/B »
-/// (opération, feuille et colonne source), « (pas à jour) » si besoin.
+/// The list row, short enough to fit in the list: "Baseline · Spectrum/B"
+/// (operation, sheet and source column), "(out of date)" if needed.
 fn row_title(state: &AppState, calc: NodeId) -> String {
     let tree = state.tree();
     let (kind, first, stale) = match tree.correction_traces().get(&calc) {
@@ -200,7 +201,7 @@ fn row_title(state: &AppState, calc: NodeId) -> String {
     }
 }
 
-/// Le détail d'un calcul : ses gestes, puis le tableau série × valeur.
+/// The detail of a calculation: its gestures, then the series × value table.
 fn detail(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -244,7 +245,7 @@ fn detail(
     let Some(calc) = state.tree().calculation(calc_id) else {
         return;
     };
-    // La référence figée d'une correction n'apparaît que par cette ligne (#248).
+    // The frozen reference of a correction appears only through this line (#248).
     let reference = calc
         .aux
         .as_ref()
@@ -284,7 +285,7 @@ fn detail(
             reference = reference.as_str()
         ));
     }
-    // Les colonnes du tableau : chaque (clé, rang) vu, dans l'ordre d'apparition.
+    // The table columns: each (key, rank) seen, in order of appearance.
     let mut columns: Vec<(String, Option<usize>)> = Vec::new();
     for result in &calc.results {
         for value in &result.values {
@@ -341,7 +342,7 @@ fn detail(
         });
 }
 
-/// Les réglages gardés sont affichés comme des valeurs, sans édition possible.
+/// The kept settings are shown as values, with no possible edit.
 fn correction_settings(ui: &mut egui::Ui, operation: &stokesforge_analysis::ops::Operation) {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
     use stokesforge_analysis::correct::CorrectOp;
@@ -403,15 +404,15 @@ fn correction_settings(ui: &mut egui::Ui, operation: &stokesforge_analysis::ops:
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
+    use super::super::test_support::{click, context, frame_of, painted, text_exact, texts};
     use super::*;
     use stokesforge_app_state::analysis::Preset;
     use stokesforge_core::{Column, ColumnMeta, ColumnRole, Project};
     use stokesforge_session::Session;
 
-    /// Un classeur avec une intégrale gardée dans les résultats.
-    fn banc() -> (Session, AppState, NodeId, NodeId) {
-        let mut project = Project::new("Résultats").unwrap();
+    /// A workbook with an integral kept in the results.
+    fn bench() -> (Session, AppState, NodeId, NodeId) {
+        let mut project = Project::new("Results").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
         let sheet = project.tree().children(book).unwrap()[0];
         let xs: Vec<f64> = (0..11).map(f64::from).collect();
@@ -453,15 +454,15 @@ mod tests {
         sheet: NodeId,
         actions: &mut Vec<Action>,
     ) -> egui::FullOutput {
-        image_de(ctx, egui::vec2(900.0, 400.0), Vec::new(), |ui| {
+        frame_of(ctx, egui::vec2(900.0, 400.0), Vec::new(), |ui| {
             results_pane(ui, state, actions, book, sheet);
         })
     }
 
     #[test]
-    fn le_volet_est_replie_avec_son_compte_puis_se_deplie_en_tableau() {
-        let ctx = contexte();
-        let (session, state, book, sheet) = banc();
+    fn the_pane_is_collapsed_with_its_count_then_expands_into_a_table() {
+        let ctx = context();
+        let (session, state, book, sheet) = bench();
         assert_eq!(state.kept_calculations(book, None).len(), 1);
         assert_eq!(state.kept_calculations(book, Some(sheet)).len(), 1);
         assert_eq!(
@@ -474,21 +475,21 @@ mod tests {
         frame(&ctx, &state, book, sheet, &mut actions);
         let output = frame(&ctx, &state, book, sheet, &mut actions);
         assert!(painted(&output, &tr!("results-title", count = 1)));
-        assert!(!painted(&output, &tr!("results-scope-book")), "replié");
+        assert!(!painted(&output, &tr!("results-scope-book")), "collapsed");
 
-        // Le bouton de dépliage est à gauche du titre.
-        let title = texte_exact(&textes(&output.shapes), &tr!("results-title", count = 1)).centre;
-        cliquer(
+        // The expand button is left of the title.
+        let title = text_exact(&texts(&output.shapes), &tr!("results-title", count = 1)).center;
+        click(
             &ctx,
             egui::pos2(title.x - 40.0, title.y),
             egui::PointerButton::Primary,
             |ui| results_pane(ui, &state, &mut actions, book, sheet),
         );
         let output = frame(&ctx, &state, book, sheet, &mut actions);
-        assert!(painted(&output, &tr!("results-scope-book")), "déplié");
+        assert!(painted(&output, &tr!("results-scope-book")), "expanded");
         assert!(painted(&output, &value_label("area.total", None)));
-        let edit = texte_exact(&textes(&output.shapes), &tr!("action-calculation-edit")).centre;
-        cliquer(&ctx, edit, egui::PointerButton::Primary, |ui| {
+        let edit = text_exact(&texts(&output.shapes), &tr!("action-calculation-edit")).center;
+        click(&ctx, edit, egui::PointerButton::Primary, |ui| {
             results_pane(ui, &state, &mut actions, book, sheet)
         });
         let calc = *state.tree().calculations().keys().next().unwrap();
@@ -499,11 +500,11 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// #248 : la liste est unique ; chaque ligne porte sa catégorie en tête.
+    /// #248: the list is single; each row carries its category first.
     #[test]
-    fn chaque_ligne_porte_sa_categorie_en_tete() {
-        let ctx = contexte();
-        let (session, state, book, sheet) = banc();
+    fn each_row_carries_its_category_first() {
+        let ctx = context();
+        let (session, state, book, sheet) = bench();
         let mut actions = Vec::new();
         ctx.data_mut(|d| {
             d.insert_temp(
@@ -517,15 +518,15 @@ mod tests {
         frame(&ctx, &state, book, sheet, &mut actions);
         let output = frame(&ctx, &state, book, sheet, &mut actions);
         let calc = *state.tree().calculations().keys().next().unwrap();
-        let attendu = row_title(&state, calc);
-        assert!(painted(&output, &attendu), "{attendu}");
+        let expected = row_title(&state, calc);
+        assert!(painted(&output, &expected), "{expected}");
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn la_portee_se_choisit_par_deux_radios_cote_a_cote() {
-        let ctx = contexte();
-        let (session, state, book, sheet) = banc();
+    fn the_scope_is_chosen_with_two_radios_side_by_side() {
+        let ctx = context();
+        let (session, state, book, sheet) = bench();
         let mut actions = Vec::new();
         ctx.data_mut(|d| {
             d.insert_temp(
@@ -538,10 +539,10 @@ mod tests {
         });
         frame(&ctx, &state, book, sheet, &mut actions);
         let output = frame(&ctx, &state, book, sheet, &mut actions);
-        let sheet_label = texte_exact(&textes(&output.shapes), &tr!("results-scope-sheet")).centre;
-        let book_label = texte_exact(&textes(&output.shapes), &tr!("results-scope-book")).centre;
-        assert!((sheet_label.y - book_label.y).abs() < 1.0, "côte à côte");
-        cliquer(&ctx, book_label, egui::PointerButton::Primary, |ui| {
+        let sheet_label = text_exact(&texts(&output.shapes), &tr!("results-scope-sheet")).center;
+        let book_label = text_exact(&texts(&output.shapes), &tr!("results-scope-book")).center;
+        assert!((sheet_label.y - book_label.y).abs() < 1.0, "side by side");
+        click(&ctx, book_label, egui::PointerButton::Primary, |ui| {
             results_pane(ui, &state, &mut actions, book, sheet)
         });
         let pane = ctx

@@ -1,12 +1,12 @@
-//! La confirmation d'un export (ou d'une copie) de graphe qui montre des séries
-//! pas à jour (#198, maquette M9 a).
+//! The confirmation of a graph export (or copy) that shows out-of-date series
+//! (#198, mockup M9 a).
 //!
-//! `AppState::export_unless_stale` met l'action en attente quand la figure
-//! contient une série dont une colonne vient d'un calcul pas à jour ; cette
-//! fenêtre propose d'exporter quand même (la figure garde ses séries grisées et
-//! leur marqueur), sans l'avertissement, ou après avoir recalculé. Elle ne
-//! s'ouvre jamais pour un graphe qui a désactivé l'avertissement
-//! (`PlotSpec::stale_warning`, propriétés du graphe).
+//! `AppState::export_unless_stale` holds the action back when the figure
+//! contains a series with a column that comes from an out-of-date
+//! computation; this window offers to export anyway (the figure keeps its
+//! series greyed out and their marker), to export without the warning, or to
+//! export after recalculating. It never opens for a graph that turned the
+//! warning off (`PlotSpec::stale_warning`, graph properties).
 
 use eframe::egui;
 
@@ -14,7 +14,7 @@ use super::dialogs::{modal_dialog_with, DialogFooter, DialogNature, DialogOutcom
 use stokesforge_app_state::state::{Action, AppState, StaleExport};
 use stokesforge_app_state::tr;
 
-/// Peint la confirmation tant qu'un export attend, et pousse la réponse.
+/// Paints the confirmation while an export is waiting, and pushes the answer.
 pub(super) fn stale_export_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -30,7 +30,7 @@ pub(super) fn stale_export_window(
         ctx,
         egui::Id::new("stokesforge_stale_export"),
         &tr!("stale-export-title"),
-        // Quatre boutons aux libellés longs : plus large que la classe Small.
+        // Four buttons with long labels: wider than the Small class.
         DialogNature::Choice(PlainSize::Content(egui::vec2(560.0, 170.0))),
         DialogFooter::always(&accept, &accept_hint),
         |ui| {
@@ -68,7 +68,7 @@ pub(super) fn stale_export_window(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
+    use super::super::test_support::{click, context, frame_of, painted, text_exact, texts};
     use super::*;
     use stokesforge_analysis::model::Model;
     use stokesforge_app_state::analysis::Preset;
@@ -76,9 +76,9 @@ mod tests {
     use stokesforge_plot::PlotType;
     use stokesforge_session::Session;
 
-    /// Un graphe qui trace B et un ajustement manuel de B, rendu pas à jour par
-    /// la saisie d'une cellule de B.
-    fn banc(dir: &std::path::Path) -> (Session, AppState, NodeId) {
+    /// A graph that plots B and a manual fit of B, made out of date by typing
+    /// into a cell of B.
+    fn bench(dir: &std::path::Path) -> (Session, AppState, NodeId) {
         let mut project = Project::new("Export").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
         let sheet = project.tree().children(book).unwrap()[0];
@@ -138,23 +138,23 @@ mod tests {
     }
 
     #[test]
-    fn exporter_un_graphe_pas_a_jour_demande_d_abord_puis_exporte_selon_la_reponse() {
+    fn exporting_an_out_of_date_graph_asks_first_then_exports_according_to_the_answer() {
         let dir = tempfile::tempdir().unwrap();
-        let (_session, mut state, graph) = banc(dir.path());
+        let (_session, mut state, graph) = bench(dir.path());
         let spec = spec_of(&state, graph);
         let svg = dir.path().join("a.svg");
         state.dispatch(Action::ExportGraph {
             path: svg.clone(),
             spec: spec.clone(),
         });
-        assert!(!svg.exists(), "rien n'est écrit avant la réponse");
+        assert!(!svg.exists(), "nothing is written before the answer");
         assert_eq!(state.pending_stale_export(), Some(1));
 
-        // Annuler : rien n'est écrit, plus rien n'attend.
+        // Cancel: nothing is written, nothing is waiting any more.
         state.dispatch(Action::ConfirmStaleExport(StaleExport::Cancel));
         assert!(!svg.exists() && state.pending_stale_export().is_none());
 
-        // Exporter quand même : la série pas à jour est grisée (#9a9a9a).
+        // Export anyway: the out-of-date series is greyed out (#9a9a9a).
         state.dispatch(Action::ExportGraph {
             path: svg.clone(),
             spec: spec.clone(),
@@ -165,10 +165,10 @@ mod tests {
             with_warning.contains("#9A9A9A")
                 || with_warning.contains("#9a9a9a")
                 || with_warning.to_lowercase().contains("9a9a9a"),
-            "série grisée attendue"
+            "greyed-out series expected"
         );
 
-        // Sans avertissement : aucune série grisée.
+        // Without warning: no greyed-out series.
         let plain = dir.path().join("b.svg");
         state.dispatch(Action::ExportGraph {
             path: plain.clone(),
@@ -178,10 +178,10 @@ mod tests {
         let without = std::fs::read_to_string(&plain).unwrap();
         assert!(
             !without.to_lowercase().contains("9a9a9a"),
-            "témoin : pas de gris"
+            "witness: no grey"
         );
 
-        // Recalculer puis exporter : le calcul est à jour, la figure aussi.
+        // Recalculate then export: the computation is up to date, and so is the figure.
         let fresh = dir.path().join("c.svg");
         state.dispatch(Action::ExportGraph {
             path: fresh.clone(),
@@ -196,9 +196,9 @@ mod tests {
     }
 
     #[test]
-    fn un_graphe_qui_a_desactive_l_avertissement_s_exporte_sans_demander() {
+    fn a_graph_that_turned_the_warning_off_exports_without_asking() {
         let dir = tempfile::tempdir().unwrap();
-        let (_session, mut state, graph) = banc(dir.path());
+        let (_session, mut state, graph) = bench(dir.path());
         let mut spec = spec_of(&state, graph);
         spec.stale_warning = false;
         let svg = dir.path().join("a.svg");
@@ -215,17 +215,17 @@ mod tests {
     }
 
     #[test]
-    fn la_fenetre_propose_trois_issues_et_annuler() {
+    fn the_window_offers_three_ways_out_and_cancel() {
         let dir = tempfile::tempdir().unwrap();
-        let (_session, mut state, graph) = banc(dir.path());
+        let (_session, mut state, graph) = bench(dir.path());
         state.dispatch(Action::CopyGraphFigure {
             spec: spec_of(&state, graph),
         });
-        let ctx = contexte();
+        let ctx = context();
         let mut actions = Vec::new();
         let mut output = egui::FullOutput::default();
         for _ in 0..2 {
-            output = image_de(&ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
+            output = frame_of(&ctx, egui::vec2(1200.0, 800.0), Vec::new(), |ui| {
                 stale_export_window(ui.ctx(), &state, &mut actions);
             });
         }
@@ -235,10 +235,10 @@ mod tests {
             tr!("stale-export-recalculate"),
             tr!("dialog-cancel"),
         ] {
-            assert!(painted(&output, &label), "bouton {label:?}");
+            assert!(painted(&output, &label), "button {label:?}");
         }
-        let pos = texte_exact(&textes(&output.shapes), &tr!("stale-export-recalculate")).centre;
-        cliquer(&ctx, pos, egui::PointerButton::Primary, |ui| {
+        let pos = text_exact(&texts(&output.shapes), &tr!("stale-export-recalculate")).center;
+        click(&ctx, pos, egui::PointerButton::Primary, |ui| {
             stale_export_window(ui.ctx(), &state, &mut actions);
         });
         assert_eq!(
@@ -248,10 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn l_object_manager_marque_la_serie_pas_a_jour_sauf_si_le_graphe_y_renonce() {
+    fn the_object_manager_marks_the_out_of_date_series_unless_the_graph_opts_out() {
         let dir = tempfile::tempdir().unwrap();
-        let (_session, state, graph) = banc(dir.path());
-        let marques = |state: &AppState| -> Vec<bool> {
+        let (_session, state, graph) = bench(dir.path());
+        let marks = |state: &AppState| -> Vec<bool> {
             stokesforge_app_state::object_manager::object_tree(state.tree(), graph, None)
                 .unwrap()
                 .layers[0]
@@ -260,15 +260,15 @@ mod tests {
                 .map(|s| s.stale)
                 .collect()
         };
-        // Les deux premières séries sont les données, la dernière est l'ajustement.
-        let avec = marques(&state);
-        assert_eq!(avec.iter().filter(|s| **s).count(), 1);
-        assert!(*avec.last().unwrap());
-        // Témoin : sans avertissement, plus aucune marque.
+        // The first two series are the data, the last one is the fit.
+        let with = marks(&state);
+        assert_eq!(with.iter().filter(|s| **s).count(), 1);
+        assert!(*with.last().unwrap());
+        // Witness: without warning, no mark any more.
         let mut spec = spec_of(&state, graph);
         spec.stale_warning = false;
         let mut state = state;
         state.dispatch(Action::SetPlotSpec { graph, spec: *spec });
-        assert!(marques(&state).iter().all(|s| !s));
+        assert!(marks(&state).iter().all(|s| !s));
     }
 }

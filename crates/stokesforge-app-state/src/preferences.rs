@@ -717,7 +717,7 @@ fn read_recent_analyses(
 /// `Preferences::load_from`. `cfg(test)` holds only for the tests of THIS
 /// crate: those of `stokesforge-app`, which build an `AppState` through `new`
 /// (#263), turn on `test-support` through their dev-dependency — never a normal
-/// build (`tests/isolation_preferences.rs` of `stokesforge-app`).
+/// build (`tests/preferences_isolation.rs` of `stokesforge-app`).
 fn default_path() -> Option<PathBuf> {
     if cfg!(any(test, feature = "test-support")) {
         return None;

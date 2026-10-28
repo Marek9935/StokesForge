@@ -58,7 +58,7 @@ confirmation on the usual choices covered by the request.
 - Menus and right-clicks (#152): the grammar of `docs/menus.md` is the single
   source (sections in canonical order, separators only through
   `MenuSections::section` — guard
-  `aucun_separateur_brut_dans_un_menu` —, submenu for an exclusive choice or
+  `no_raw_separator_in_a_menu` —, submenu for an exclusive choice or
   ≥ 3 entries, entry absent or disabled with `.disabled`, bare verbs,
   `Properties…` last). The shared painting code draws the content; the
   top menu wraps it, the right-click shows it flat.

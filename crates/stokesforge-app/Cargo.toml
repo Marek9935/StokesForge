@@ -3,19 +3,19 @@ name = "stokesforge-app"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Coquille UI minimale (banc d'essai eframe) : fait tourner une fois la boucle modèle → commande → annulation → sauvegarde → rechargement."
+description = "Minimal UI shell (eframe test bench): runs the model → command → undo → save → reload loop once."
 
 [lints]
 workspace = true
 
 [features]
 default = []
-# Le pont Python (fil de script + interpréteur embarqué) est optionnel :
-# sans cette feature, stokesforge-app compile, teste et s'exécute exactement comme
-# avant cette tâche, sans tirer PyO3 ni exiger d'interpréteur vendorisé. La
-# console de script reste visible mais désactivée (cf. `state::AppState::
-# script_available`, dans stokesforge-app-state, dont la feature `python` porte
-# le fil de script).
+# The Python bridge (script thread + embedded interpreter) is optional:
+# without this feature, stokesforge-app compiles, tests and runs exactly as
+# before this task, without pulling in PyO3 or requiring a vendored
+# interpreter. The script console stays visible but disabled (see
+# `state::AppState::script_available`, in stokesforge-app-state, whose
+# `python` feature carries the script thread).
 python = ["stokesforge-app-state/python", "dep:stokesforge-python"]
 
 [dependencies]
@@ -28,60 +28,60 @@ stokesforge-session = { path = "../stokesforge-session" }
 stokesforge-plot = { path = "../stokesforge-plot" }
 stokesforge-render = { path = "../stokesforge-render" }
 stokesforge-render-egui = { path = "../stokesforge-render-egui" }
-# Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
-# l'écran, texte Typst compris. Aucune commande : l'export ne touche pas le
-# modèle.
+# Export of the graph as SVG, PDF or PNG (issue #34): the same pipeline as
+# the screen, Typst text included. No command: the export does not touch the
+# model.
 stokesforge-render-svg = { path = "../stokesforge-render-svg" }
-# Copie de la figure vers une application externe (issue #149) : offre
-# multi-format (SVG, PNG, PDF) au presse-papiers système, que ni egui ni
-# `arboard` ne savent faire.
+# Copy of the figure to an external application (issue #149): multi-format
+# offer (SVG, PNG, PDF) to the system clipboard, which neither egui nor
+# `arboard` can do.
 stokesforge-clipboard = { path = "../stokesforge-clipboard" }
-# Chemin optionnel, activé uniquement par la feature `python` de CE crate :
-# c'est elle qui active la feature `python` de chacun (dont dépend l'existence
-# même de leurs types publics, cf. la doc de tête de leurs `lib.rs`) ; le fil de
-# script, lui, est tiré par `stokesforge-app-state/python`.
+# Optional path, enabled only by the `python` feature of THIS crate: it is
+# what enables the `python` feature of each (on which the very existence of
+# their public types depends, see the top doc of their `lib.rs`); the script
+# thread is pulled in by `stokesforge-app-state/python`.
 stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
 eframe = "0.36.2"
-# Même version qu'eframe. Les patches winit/smithay-clipboard partagent le
-# récepteur Wayland (#72) ; main.rs permet STOKESFORGE_X11=1 en secours.
+# Same version as eframe. The winit/smithay-clipboard patches share the
+# Wayland receiver (#72); main.rs allows STOKESFORGE_X11=1 as a fallback.
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
-# `svg` : chargeur des icônes embarquées (`icons.rs`) ; resvg est déjà dans l'arbre
-# (stokesforge-render-svg), aucune dépendance nouvelle.
+# `svg`: loader of the embedded icons (`icons.rs`); resvg is already in the
+# tree (stokesforge-render-svg), no new dependency.
 egui_extras = { version = "0.36.2", features = ["svg"] }
-# Lecture du presse-papier système pour « Coller » pris dans un menu
-# contextuel : egui n'expose que l'écriture (`Context::copy_text`), et Ctrl+V
-# ne marche que parce qu'`egui-winit` lit le presse-papier lui-même avant de
-# pousser l'`Event::Paste`. `arboard` est précisément la bibliothèque qu'il
-# emploie en interne — elle était déjà dans l'arbre de dépendances, la citer
-# ici n'ajoute rien à compiler. Voir `app::system_clipboard_text`.
+# Reading the system clipboard for "Paste" taken from a context menu: egui
+# only exposes writing (`Context::copy_text`), and Ctrl+V only works because
+# `egui-winit` reads the clipboard itself before pushing the `Event::Paste`.
+# `arboard` is precisely the library it uses internally — it was already in
+# the dependency tree, citing it here adds nothing to compile. See
+# `app::system_clipboard_text`.
 arboard = "3.6.1"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Interface multilingue (issue #41, chantier #39) : le catalogue, le chargeur et
-# `tr!` vivent dans `stokesforge-app-state` ; `tr!` se déplie ici en
-# `i18n_embed_fl::fl!`, qui vérifie à la compilation qu'une clé et ses arguments
-# existent dans le catalogue `en` (lu par `i18n.toml`, qui pointe le catalogue de
-# `stokesforge-app-state`). Aucun crate du dessous ne dépend de ces
-# bibliothèques (les listes blanches de `no_ui_dependency` les refuseraient).
+# Multilingual interface (issue #41, work package #39): the catalog, the
+# loader and `tr!` live in `stokesforge-app-state`; `tr!` expands here to
+# `i18n_embed_fl::fl!`, which checks at compile time that a key and its
+# arguments exist in the `en` catalog (read through `i18n.toml`, which points
+# to the catalog of `stokesforge-app-state`). No crate below depends on these
+# libraries (the allow lists of `no_ui_dependency` would refuse them).
 i18n-embed-fl = "0.10.1"
 
 [dev-dependencies]
-# `test-support` : les isolations `cfg(test)` du chemin des préférences et de la
-# langue de départ ne valent que pour les tests de stokesforge-app-state ; les
-# nôtres bâtissent un `AppState` (#250, #263). Jamais en build normal.
+# `test-support`: the `cfg(test)` isolations of the preferences path and of
+# the starting language only hold for the tests of stokesforge-app-state; ours
+# build an `AppState` (#250, #263). Never in a normal build.
 stokesforge-app-state = { path = "../stokesforge-app-state", features = ["test-support"] }
 tempfile = "3"
-# Le dossier de configuration que `tests/isolation_preferences.rs` redirige.
+# The configuration folder that `tests/preferences_isolation.rs` redirects.
 directories = "5"
-# Prototype de la fenêtre Preferences (app/preferences_proto.rs) : pilote l'UI par
-# AccessKit et fige des captures. Aucune dépendance de production.
+# Prototype of the Preferences window (app/preferences_proto.rs): drives the UI
+# through AccessKit and freezes captures. No production dependency.
 egui_kittest = { version = "0.36.2", features = ["snapshot", "wgpu"] }
-# Exerce le parseur du patch Wayland dans les tests ordinaires du workspace.
+# Exercises the parser of the Wayland patch in the ordinary tests of the workspace.
 url = "2"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-# Exerce le canal exact du patch winit, sans connexion Wayland.
+# Exercises the exact channel of the winit patch, without a Wayland connection.
 calloop = "0.13"
 
 [[bin]]

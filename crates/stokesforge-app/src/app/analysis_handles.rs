@@ -1,17 +1,17 @@
-//! Les poignées d'un calcul sur le graphe réel (#199, maquette M10) : points
-//! d'ancrage d'une ligne de base, bornes des zones et des plages, positions de
-//! départ des pics.
+//! The handles of a calculation on the real graph (#199, mockup M10):
+//! anchor points of a baseline, bounds of zones and ranges, starting
+//! positions of peaks.
 //!
-//! Elles ne se voient que lorsque le calcul est **sélectionné** — une de ses
-//! courbes (source ou colonne produite) est la courbe sélectionnée du graphe,
-//! ou sa ligne du volet Results est choisie — jamais au repos ni à l'export :
-//! elles se peignent par-dessus la figure, pas dans `stokesforge-render`.
+//! They show only while the calculation is **selected** (one of its curves,
+//! source or produced column, is the graph's selected curve, or its row in
+//! the Results pane is chosen), never at rest nor in the export: they are
+//! painted over the figure, not in `stokesforge-render`.
 //!
-//! Glisser une poignée montre tout de suite le résultat (la ligne de base
-//! recalculée est peinte à la volée) ; le lâcher pousse **une**
-//! [`Action::MoveCalculationHandle`], donc un `UpdateCalculation` et une seule
-//! entrée d'historique par geste, pas par image. Le calcul des colonnes qui
-//! suit est le recalcul ordinaire.
+//! Dragging a handle shows the result at once (the recomputed baseline is
+//! painted on the fly). Releasing pushes **one**
+//! [`Action::MoveCalculationHandle`], so one `UpdateCalculation` and a single
+//! history entry per gesture, not per frame. The computation of the columns
+//! that follows is the ordinary recalculation.
 
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
@@ -22,17 +22,17 @@ use crate::theme;
 use stokesforge_app_state::analysis::{series_rows, AnalysisForm, Edge, Handle, HandleSlot};
 use stokesforge_app_state::state::Action;
 
-/// Rayon de saisie d'une poignée, en points egui.
+/// Grab radius of a handle, in egui points.
 const GRAB_RADIUS: f32 = 7.0;
-/// Nombre maximal de points de l'aperçu de ligne de base pendant le glisser.
+/// Maximum number of points of the baseline preview while dragging.
 const PREVIEW_POINTS: usize = 1500;
 
 fn selection_id() -> egui::Id {
     egui::Id::new("stokesforge_selected_calculation")
 }
 
-/// Le calcul choisi dans le volet Results (mémoire egui : état d'interface,
-/// ni `.stf` ni historique).
+/// The calculation chosen in the Results pane (egui memory: interface state,
+/// neither `.stf` nor history).
 pub(super) fn select_calculation(ctx: &egui::Context, calculation: Option<NodeId>) {
     ctx.data_mut(|d| match calculation {
         Some(id) => {
@@ -46,15 +46,15 @@ fn chosen_calculation(ctx: &egui::Context) -> Option<NodeId> {
     ctx.data(|d| d.get_temp::<NodeId>(selection_id()))
 }
 
-/// Un glisser en cours : l'endroit où la poignée est tenue, en données.
+/// A drag in progress: where the handle is held, in data coordinates.
 #[derive(Clone, Copy)]
 struct Drag {
     x: f64,
     y: f64,
 }
 
-/// Le calcul sélectionné sur ce graphe, et le calque où le peindre : celui de
-/// la première courbe qui lui appartient (source ou colonne produite).
+/// The calculation selected on this graph, and the layer to paint it on: that
+/// of the first curve that belongs to it (source or produced column).
 fn selected_on_graph(
     ctx: &egui::Context,
     view: &GraphView,
@@ -98,7 +98,7 @@ fn selected_on_graph(
     })
 }
 
-/// Peint les poignées du calcul sélectionné et traite leur glisser.
+/// Paints the handles of the selected calculation and handles their drag.
 pub(super) fn calculation_handles(
     ui: &mut egui::Ui,
     view: &GraphView,
@@ -127,7 +127,7 @@ pub(super) fn calculation_handles(
     let outline = egui::Stroke::new(1.0, ui.visuals().text_color());
     let line = egui::Stroke::new(1.0, marker);
 
-    // Où chaque poignée est tenue : sa place, ou le point où l'on la glisse.
+    // Where each handle is held: its place, or the point where it is dragged.
     let drags: Vec<Option<Drag>> = handles
         .iter()
         .map(|h| ui.data(|d| d.get_temp::<Drag>(handle_id(graph, h.slot))))
@@ -140,7 +140,7 @@ pub(super) fn calculation_handles(
     };
     let screen_x = |x: f64| view.data_to_screen(panel, x, 0.0).map(|p| p.x);
 
-    // Les zones : un voile entre les deux bornes.
+    // The zones: a veil between the two bounds.
     for (a, da) in handles.iter().zip(&drags) {
         let HandleSlot::Edge(set, i, Edge::Lo) = a.slot else {
             continue;
@@ -173,8 +173,8 @@ pub(super) fn calculation_handles(
             painter.vline(at.x, plot.y_range(), line);
         }
         let hit = egui::Rect::from_center_size(at, egui::Vec2::splat(GRAB_RADIUS * 2.0));
-        // Ctrl ou clic milieu : le geste est un pan du graphe (#318), la
-        // poignée le laisse passer. Une poignée déjà tenue garde son glisser.
+        // Ctrl or middle click: the gesture is a pan of the graph (#318), the
+        // handle lets it through. A handle already held keeps its drag.
         let passes_pan = drag.is_none()
             && ui.input(|i| {
                 i.modifiers.command || i.pointer.button_down(egui::PointerButton::Middle)
@@ -213,8 +213,8 @@ pub(super) fn calculation_handles(
         }
     }
 
-    // Aperçu immédiat : la ligne de base (ou le fond) recalculée avec la
-    // poignée tenue.
+    // Immediate preview: the baseline (or background) recomputed with the
+    // held handle.
     if let Some((handle, Some(drag))) = handles
         .iter()
         .zip(&drags)
@@ -241,8 +241,8 @@ fn handle_id(graph: NodeId, slot: HandleSlot) -> egui::Id {
     egui::Id::new(("stokesforge_calculation_handle", graph.raw(), slot))
 }
 
-/// La colonne d'aide (ligne de base, fond des pics) du formulaire déplacé,
-/// peinte sur la figure.
+/// The helper column (baseline, peak background) of the moved form, painted
+/// on the figure.
 fn paint_helper(
     ui: &egui::Ui,
     view: &GraphView,

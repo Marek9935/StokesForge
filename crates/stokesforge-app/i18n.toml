@@ -1,8 +1,8 @@
-# Configuration de i18n-embed pour `stokesforge-app` (issue #41, #263).
-# Le catalogue vit dans `stokesforge-app-state` (qui porte `tr!` et le
-# chargeur) ; l'application n'en a besoin que pour la vérification à la
-# compilation de `fl!` (clés et arguments), qui lit l'`i18n.toml` du crate
-# appelant. Même domaine que celui de `stokesforge-app-state/i18n.toml`.
+# i18n-embed configuration for `stokesforge-app` (issue #41, #263).
+# The catalog lives in `stokesforge-app-state` (which carries `tr!` and the
+# loader); the application only needs it for the compile-time check of `fl!`
+# (keys and arguments), which reads the `i18n.toml` of the calling crate. Same
+# domain as that of `stokesforge-app-state/i18n.toml`.
 fallback_language = "en"
 
 [fluent]
