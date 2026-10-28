@@ -1,0 +1,233 @@
+{
+  "recipes": [
+    {
+      "auto_match": {
+        "content_contains": "ORIGIN;JASCO",
+        "extensions": [
+          "csv"
+        ],
+        "name_contains": ""
+      },
+      "block_split": "None",
+      "column_kinds": [],
+      "column_roles": [],
+      "comment_prefix": "",
+      "data_end": "Auto",
+      "date_order": "DayFirst",
+      "decimal": "Auto",
+      "encoding": "Auto",
+      "excluded_metadata": [],
+      "files_layout": "SheetPerFile",
+      "footer_skip_lines": 0,
+      "has_column_header_row": false,
+      "header": {
+        "UntilMarker": "XYDATA"
+      },
+      "header_layout": {
+        "auto_detect": false,
+        "main_header_lines": 0,
+        "subheader_lines": 0
+      },
+      "import_mode": "NewSheet",
+      "keep_footer_metadata": false,
+      "keep_header_metadata": true,
+      "missing_tokens": [],
+      "name": "Jasco (semicolon)",
+      "name_source": {
+        "HeaderKey": "TITLE"
+      },
+      "preview_lines": 20,
+      "separator": "Semicolon",
+      "skip_chars": 0,
+      "skip_data_rows": 0,
+      "subheader_roles": {
+        "comment": null,
+        "long_name": null,
+        "same_line_name_unit": false,
+        "unit": null,
+        "x_prime": null
+      },
+      "thousands": null
+    },
+    {
+      "auto_match": {
+        "content_contains": "ORIGIN\tJASCO",
+        "extensions": [
+          "txt"
+        ],
+        "name_contains": ""
+      },
+      "block_split": "None",
+      "column_kinds": [],
+      "column_roles": [],
+      "comment_prefix": "",
+      "data_end": "Auto",
+      "date_order": "DayFirst",
+      "decimal": "Auto",
+      "encoding": "Auto",
+      "excluded_metadata": [],
+      "files_layout": "SheetPerFile",
+      "footer_skip_lines": 0,
+      "has_column_header_row": false,
+      "header": {
+        "UntilMarker": "XYDATA"
+      },
+      "header_layout": {
+        "auto_detect": false,
+        "main_header_lines": 0,
+        "subheader_lines": 0
+      },
+      "import_mode": "NewSheet",
+      "keep_footer_metadata": false,
+      "keep_header_metadata": true,
+      "missing_tokens": [],
+      "name": "Jasco (tab)",
+      "name_source": {
+        "HeaderKey": "TITLE"
+      },
+      "preview_lines": 20,
+      "separator": "Tab",
+      "skip_chars": 0,
+      "skip_data_rows": 0,
+      "subheader_roles": {
+        "comment": null,
+        "long_name": null,
+        "same_line_name_unit": false,
+        "unit": null,
+        "x_prime": null
+      },
+      "thousands": null
+    },
+    {
+      "auto_match": {
+        "content_contains": "",
+        "extensions": [],
+        "name_contains": ""
+      },
+      "block_split": "None",
+      "column_kinds": [],
+      "column_roles": [],
+      "comment_prefix": "",
+      "data_end": "None",
+      "date_order": "DayFirst",
+      "decimal": "Comma",
+      "encoding": "Auto",
+      "excluded_metadata": [],
+      "files_layout": "SheetPerFile",
+      "footer_skip_lines": 0,
+      "has_column_header_row": false,
+      "header": "None",
+      "header_layout": {
+        "auto_detect": false,
+        "main_header_lines": 0,
+        "subheader_lines": 0
+      },
+      "import_mode": "NewSheet",
+      "keep_footer_metadata": false,
+      "keep_header_metadata": true,
+      "missing_tokens": [],
+      "name": "AnalytikJena (no header)",
+      "name_source": "Filename",
+      "preview_lines": 20,
+      "separator": "Semicolon",
+      "skip_chars": 0,
+      "skip_data_rows": 0,
+      "subheader_roles": {
+        "comment": null,
+        "long_name": null,
+        "same_line_name_unit": false,
+        "unit": null,
+        "x_prime": null
+      },
+      "thousands": null
+    },
+    {
+      "auto_match": {
+        "content_contains": "",
+        "extensions": [
+          "asc"
+        ],
+        "name_contains": ""
+      },
+      "block_split": "None",
+      "column_kinds": [],
+      "column_roles": [],
+      "comment_prefix": "",
+      "data_end": "None",
+      "date_order": "DayFirst",
+      "decimal": "Dot",
+      "encoding": "Auto",
+      "excluded_metadata": [],
+      "files_layout": "SheetPerFile",
+      "footer_skip_lines": 0,
+      "has_column_header_row": false,
+      "header": "None",
+      "header_layout": {
+        "auto_detect": false,
+        "main_header_lines": 0,
+        "subheader_lines": 0
+      },
+      "import_mode": "NewSheet",
+      "keep_footer_metadata": false,
+      "keep_header_metadata": true,
+      "missing_tokens": [],
+      "name": "EPR (tab)",
+      "name_source": "Filename",
+      "preview_lines": 20,
+      "separator": "Tab",
+      "skip_chars": 0,
+      "skip_data_rows": 0,
+      "subheader_roles": {
+        "comment": null,
+        "long_name": null,
+        "same_line_name_unit": false,
+        "unit": null,
+        "x_prime": null
+      },
+      "thousands": null
+    },
+    {
+      "auto_match": {
+        "content_contains": "",
+        "extensions": [],
+        "name_contains": ""
+      },
+      "block_split": "None",
+      "column_kinds": [],
+      "column_roles": [],
+      "comment_prefix": "",
+      "data_end": "None",
+      "date_order": "DayFirst",
+      "decimal": "Auto",
+      "encoding": "Auto",
+      "excluded_metadata": [],
+      "files_layout": "SheetPerFile",
+      "footer_skip_lines": 0,
+      "has_column_header_row": true,
+      "header": "None",
+      "header_layout": {
+        "auto_detect": false,
+        "main_header_lines": 0,
+        "subheader_lines": 0
+      },
+      "import_mode": "NewSheet",
+      "keep_footer_metadata": false,
+      "keep_header_metadata": true,
+      "missing_tokens": [],
+      "name": "CSV with column names",
+      "name_source": "Filename",
+      "preview_lines": 20,
+      "separator": "Auto",
+      "skip_chars": 0,
+      "skip_data_rows": 0,
+      "subheader_roles": {
+        "comment": null,
+        "long_name": null,
+        "same_line_name_unit": false,
+        "unit": null,
+        "x_prime": null
+      },
+      "thousands": null
+    }
+  ]
+}

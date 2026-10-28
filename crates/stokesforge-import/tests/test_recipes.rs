@@ -1,10 +1,12 @@
-//! The templates provided out of the box read their fixtures, and the
-//! automatic choice proposes the right one (or none) for each real file in
-//! `test/import/`.
+//! The test templates (`test/import/test_recipes.json`, never shipped) read
+//! their fixtures, and the automatic choice proposes the right one (or none)
+//! for each real file in `test/import/`. No template exists in production
+//! code (#378): the fixture is copied into a redirected config folder and
+//! loaded through [`RecipeStore::load`].
 
 use std::path::{Path, PathBuf};
 
-use stokesforge_import::{builtin_recipes, choose_recipe, parse, ImportRecipe, RecipeStore};
+use stokesforge_import::{choose_recipe, parse, ImportRecipe, RecipeStore};
 
 fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -14,22 +16,39 @@ fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     (path, bytes)
 }
 
+/// Protects the tests in this binary that redirect the config folder
+/// (*process* state, shared by the `cargo test` threads).
+static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The recipes of `test/import/test_recipes.json`, loaded like a user's
+/// saved templates.
+fn test_recipes() -> Vec<ImportRecipe> {
+    let _lock = CONFIG_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let _restoration = RestoredConfig::redirect(dir.path());
+    let (_, bytes) = fixture("test_recipes.json");
+    std::fs::write(dir.path().join("import_recipes.json"), bytes).unwrap();
+    RecipeStore::load().recipes().to_vec()
+}
+
 fn recipe(name: &str) -> ImportRecipe {
-    builtin_recipes()
+    test_recipes()
         .into_iter()
         .find(|r| r.name == name)
-        .unwrap_or_else(|| panic!("provided template \"{name}\" missing"))
+        .unwrap_or_else(|| panic!("test template \"{name}\" missing"))
 }
 
 fn auto_name(file: &str) -> Option<String> {
     let (path, bytes) = fixture(file);
-    let recipes = builtin_recipes();
+    let recipes = test_recipes();
     choose_recipe(&recipes, &path, &bytes).map(|r| r.name.clone())
 }
 
 #[test]
 fn jasco_semicolon_reads_both_decimal_conventions() {
-    let jasco = recipe("Jasco (point-virgule)");
+    let jasco = recipe("Jasco (semicolon)");
     let (_, comma) = fixture("jasco_uvvis_semicolon.csv");
     let table = parse(&comma, &jasco).unwrap();
     assert_eq!(table.row_count(), 6);
@@ -45,23 +64,18 @@ fn jasco_semicolon_reads_both_decimal_conventions() {
 }
 
 #[test]
-fn the_other_builtins_read_their_fixtures() {
+fn the_other_test_templates_read_their_fixtures() {
     let (_, fluo) = fixture("jasco_fluo_tab.txt");
-    assert_eq!(
-        parse(&fluo, &recipe("Jasco (tabulation)"))
-            .unwrap()
-            .row_count(),
-        6
-    );
+    assert_eq!(parse(&fluo, &recipe("Jasco (tab)")).unwrap().row_count(), 6);
     let (_, analytik) = fixture("analytikjena_nohead_semicolon.csv");
-    let table = parse(&analytik, &recipe("AnalytikJena (sans en-tête)")).unwrap();
+    let table = parse(&analytik, &recipe("AnalytikJena (no header)")).unwrap();
     assert_eq!((table.columns.len(), table.row_count()), (2, 20));
     assert_eq!(table.columns[0].values[0], 250.0);
     let (_, rpe) = fixture("rpe_nohead_tab.asc");
-    let table = parse(&rpe, &recipe("RPE (tabulation)")).unwrap();
+    let table = parse(&rpe, &recipe("EPR (tab)")).unwrap();
     assert_eq!((table.columns.len(), table.row_count()), (2, 20));
     let (_, generic) = fixture("generic_named_header.csv");
-    let table = parse(&generic, &recipe("CSV avec noms de colonnes")).unwrap();
+    let table = parse(&generic, &recipe("CSV with column names")).unwrap();
     assert_eq!(table.columns[0].name.as_deref(), Some("Time"));
 }
 
@@ -69,23 +83,23 @@ fn the_other_builtins_read_their_fixtures() {
 fn automatic_choice_proposes_the_right_model_or_none() {
     assert_eq!(
         auto_name("jasco_uvvis_semicolon.csv").as_deref(),
-        Some("Jasco (point-virgule)")
+        Some("Jasco (semicolon)")
     );
     assert_eq!(
         auto_name("jasco_english_locale_dot.csv").as_deref(),
-        Some("Jasco (point-virgule)")
+        Some("Jasco (semicolon)")
     );
     assert_eq!(
         auto_name("JascoUV_vis.csv").as_deref(),
-        Some("Jasco (point-virgule)")
+        Some("Jasco (semicolon)")
     );
     assert_eq!(
         auto_name("jasco_fluo_tab.txt").as_deref(),
-        Some("Jasco (tabulation)")
+        Some("Jasco (tab)")
     );
     assert_eq!(
         auto_name("rpe_nohead_tab.asc").as_deref(),
-        Some("RPE (tabulation)")
+        Some("EPR (tab)")
     );
     // Without a signature of its own: never proposed automatically.
     assert_eq!(auto_name("analytikjena_nohead_semicolon.csv"), None);
@@ -93,39 +107,27 @@ fn automatic_choice_proposes_the_right_model_or_none() {
     assert_eq!(auto_name("proprietary_binary.dat"), None);
 }
 
-/// Protects the tests in this binary that redirect the config folder
-/// (*process* state, shared by the `cargo test` threads).
-static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[test]
-fn builtins_are_listed_but_never_written_to_the_user_file() {
-    let _lock = CONFIG_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
-    let dir = tempfile::tempdir().unwrap();
-    // A fresh folder, so no user recipe: `config_dir` reads
-    // `STOKESFORGE_CONFIG_DIR` (#332), `directories` ignores `XDG_CONFIG_HOME`
-    // outside Linux. The previous values are restored, even on panic.
-    let _restoration = RestoredConfig::redirect(dir.path());
-    let store = RecipeStore::load_with_builtins();
-    assert!(store.recipes().len() >= builtin_recipes().len());
-    assert!(RecipeStore::load().recipes().is_empty());
-    store.save().unwrap();
-    assert!(RecipeStore::load().recipes().is_empty(), "nothing written");
-
-    let mut mine = store.clone();
-    let mut edited = recipe("RPE (tabulation)");
-    edited.skip_chars = 3;
-    mine.upsert(edited);
-    mine.save().unwrap();
-    let reloaded = RecipeStore::load_with_builtins();
-    let rpe: Vec<_> = reloaded
-        .recipes()
-        .iter()
-        .filter(|r| r.name == "RPE (tabulation)")
-        .collect();
-    assert_eq!(rpe.len(), 1, "the modified version replaces the program's");
-    assert_eq!(rpe[0].skip_chars, 3);
+fn the_fixture_loads_exactly_five_named_templates() {
+    let names: Vec<String> = test_recipes().into_iter().map(|r| r.name).collect();
+    assert_eq!(
+        names,
+        [
+            "Jasco (semicolon)",
+            "Jasco (tab)",
+            "AnalytikJena (no header)",
+            "EPR (tab)",
+            "CSV with column names",
+        ]
+    );
+    let semicolon = recipe("Jasco (semicolon)");
+    assert_eq!(semicolon.data_end, stokesforge_import::DataEnd::Auto);
+    assert_eq!(semicolon.auto_match.content_contains, "ORIGIN;JASCO");
+    assert_eq!(
+        recipe("Jasco (tab)").auto_match.content_contains,
+        "ORIGIN\tJASCO"
+    );
+    assert_eq!(recipe("EPR (tab)").auto_match.extensions, ["asc"]);
 }
 
 /// Sets `STOKESFORGE_CONFIG_DIR` and `XDG_CONFIG_HOME`, restores both.
@@ -158,7 +160,7 @@ impl Drop for RestoredConfig {
 
 #[test]
 fn a_recipe_survives_export_to_a_file() {
-    let original = recipe("Jasco (tabulation)");
+    let original = recipe("Jasco (tab)");
     let text = original.to_json();
     assert_eq!(ImportRecipe::from_json(&text).unwrap(), original);
     assert!(ImportRecipe::from_json("not a recipe").is_err());

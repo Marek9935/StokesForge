@@ -6,7 +6,7 @@
 //! ```text
 //! stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x]
 //!                   [--out project.stf] FILE...
-//! stokesforge-cli recipes            # lists the known templates
+//! stokesforge-cli recipes            # lists the saved templates
 //! stokesforge-cli run [--project input.stf] [--out output.stf] script.pyst
 //! ```
 //!
@@ -58,7 +58,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         )
         .map_err(|err| err.to_string()),
         Some("recipes") => {
-            for recipe in RecipeStore::load_with_builtins().recipes() {
+            for recipe in RecipeStore::load().recipes() {
                 writeln!(out, "{}", recipe.name).map_err(|err| err.to_string())?;
             }
             Ok(())
@@ -125,7 +125,7 @@ fn parse_import_args(args: &[String]) -> Result<ImportArgs, String> {
 
 fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let args = parse_import_args(args)?;
-    let store = RecipeStore::load_with_builtins();
+    let store = RecipeStore::load();
     let named = match &args.recipe {
         Some(name) => Some(
             store
@@ -134,6 +134,9 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
                 .find(|recipe| &recipe.name == name)
                 .cloned()
                 .ok_or_else(|| {
+                    if store.recipes().is_empty() {
+                        return format!("unknown template \"{name}\" (no saved template)");
+                    }
                     let known: Vec<&str> =
                         store.recipes().iter().map(|r| r.name.as_str()).collect();
                     format!("unknown template \"{name}\" (known: {})", known.join(", "))

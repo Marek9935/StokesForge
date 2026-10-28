@@ -17,7 +17,8 @@ The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application
 4. **Respect the preview's cost budget** (header doc of `preview.rs`): a preview that rereads the whole file on each keystroke makes the window unusable.
 5. **The app imports in the background**: menu and drag-and-drop both go through `AppState::start_import`, applied by `poll_import` (#266); never read or parse on the UI thread. Writing into a live project goes through undoable commands (`stokesforge-commande`); only `stokesforge-cli import` builds a new `Project` directly.
 6. **Wizard texts** are `import-*` keys used by `tr!`, with the terms of `docs/textes-interface.md` § 2.4 Import (*Delimiter*, *Template* — never « recipe » on screen —, *Subheader*, *Footer*). Template names and file contents are data, never translated. Window: `app/import_wizard.rs`, a dialog of the shared building block (`stokesforge-feature`, sheet `windows-dialogs`); state in `stokesforge-app-state/src/state.rs`.
-7. **A mixed-type column is not an import failure** (invariant 10): keep it, never refuse the file.
+7. **No recipe in production code** (#378): the program carries no template; the user saves their own. Test templates live in `test/import/test_recipes.json` (a `RecipeStore` file), copied into a redirected config folder by the tests that need them.
+8. **A mixed-type column is not an import failure** (invariant 10): keep it, never refuse the file.
 
 Module map and symptom → field table: [references/modules-and-symptoms.md](references/modules-and-symptoms.md).
 

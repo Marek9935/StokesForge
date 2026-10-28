@@ -17,7 +17,8 @@ fn run(args: &[&str]) -> (Result<(), String>, String) {
     (result, String::from_utf8(out).unwrap())
 }
 
-/// Isolates the config folder: the machine's templates are not in it.
+/// Isolates the config folder: the machine's templates are not in it, the
+/// test templates are.
 ///
 /// The ten tests run in parallel in one process: the variable is a
 /// *process* state, set **only once**, to a folder kept
@@ -29,6 +30,14 @@ fn isolated() -> tempfile::TempDir {
     static CONFIG: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     CONFIG.get_or_init(|| {
         let config = tempfile::tempdir().unwrap();
+        // No template exists in the program (#378): the test templates are
+        // saved ones, copied from the fixture.
+        std::fs::create_dir_all(config.path().join("config")).unwrap();
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/import/test_recipes.json"),
+            config.path().join("config/import_recipes.json"),
+        )
+        .unwrap();
         std::env::set_var(
             stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
             config.path().join("config"),
@@ -54,7 +63,7 @@ fn imports_a_jasco_file_with_the_model_chosen_from_its_content() {
         &fixture("jasco_uvvis_semicolon.csv"),
     ]);
     result.unwrap();
-    assert!(output.contains("Jasco (point-virgule)"), "{output}");
+    assert!(output.contains("Jasco (semicolon)"), "{output}");
     let project = load(&out_path);
     let sheet = project
         .resolve_path("[Import]jasco_uvvis_semicolon")
@@ -79,7 +88,7 @@ fn layout_and_named_model_options() {
     let (result, output) = run(&[
         "import",
         "--recipe",
-        "RPE (tabulation)",
+        "EPR (tab)",
         "--layout",
         "side-by-side",
         "--out",
@@ -118,5 +127,5 @@ fn errors_are_reported_not_panicked() {
     result.unwrap();
     assert!(output.contains("skipped"), "{output}");
     let (_, listing) = run(&["recipes"]);
-    assert!(listing.contains("Jasco (tabulation)"));
+    assert!(listing.contains("Jasco (tab)"));
 }

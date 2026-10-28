@@ -558,7 +558,7 @@ the history. A target other than a column makes `values` fail with
 `InvalidValueError`; any deleted handle, or one from a reloaded project, is
 refused with `BrokenReferenceError`, before looking at its kind.
 
-`pyst.import_file("spectre.csv", recipe="Jasco (point-virgule)")` accepts a
+`pyst.import_file("spectre.csv", recipe="My Jasco")` (a template you saved) accepts a
 text path or `pathlib.Path` and returns the list of handles of the sheets
 created. Without a template name, it applies the automatic choice, otherwise the
 permissive recipe. It respects the template settings (ignored columns, types,

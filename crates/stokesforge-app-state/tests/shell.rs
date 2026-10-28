@@ -493,6 +493,21 @@ fn isolate_recipe_store() -> RecipeStoreIsolation {
     }
 }
 
+/// [`isolate_recipe_store`], then saves the test templates of
+/// `test/import/test_recipes.json` in the redirected folder, like templates
+/// the user saved (no template exists in the program, #378). Only the tests
+/// of automatic choice and of template selection need them.
+fn with_test_recipes() -> RecipeStoreIsolation {
+    let isolation = isolate_recipe_store();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test/import/test_recipes.json"),
+        isolation.dir.path().join("import_recipes.json"),
+    )
+    .expect("copy of the test templates");
+    isolation
+}
+
 /// What [`isolate_recipe_store`] returns: the lock, the temporary folder and
 /// the earlier values of the variables, restored on drop.
 struct RecipeStoreIsolation {
@@ -4749,8 +4764,7 @@ fn save_import_recipe_requires_a_non_empty_name() {
         state.dialog_error().is_some(),
         "a blank name must be refused"
     );
-    // The templates provided by default are listed, but nothing of the user's
-    // was added or written.
+    // Nothing was added or written.
     assert!(
         stokesforge_import::RecipeStore::load().recipes().is_empty(),
         "nothing was added to the store"
@@ -4824,7 +4838,7 @@ fn delete_import_recipe_removes_it_from_the_store_on_disk() {
 
     state.cancel_import();
     state.open_import(book);
-    // The user's templates (excluding the templates provided by default).
+    // The saved templates.
     let user_recipes = stokesforge_import::RecipeStore::load();
     let names: Vec<&str> = user_recipes
         .recipes()
@@ -9411,7 +9425,7 @@ fn reopening_the_last_import_leaves_later_work_alone() {
     assert!(state.import_state().is_some());
 }
 
-// -- Provided templates, automatic choice, sharing (issue #7) --
+// -- Test templates, automatic choice, sharing (issue #7) --
 
 fn fixture_path(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -9419,12 +9433,12 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
-/// A dropped Jasco file is read with the provided template that recognizes it
+/// A dropped Jasco file is read with the saved template that recognizes it
 /// (signature `ORIGIN;JASCO`), with no template ever saved — the
 /// numbers with a comma are read (decimal detected).
 #[test]
-fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
-    let _recipes = isolate_recipe_store();
+fn dropping_a_jasco_file_picks_the_saved_model_automatically() {
+    let _recipes = with_test_recipes();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
@@ -9450,11 +9464,7 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
     assert_eq!(state.worksheets_of(book).len(), before + 1);
     assert!(state.import_state().is_none(), "read without wizard");
     let status = state.status().expect("message");
-    assert!(
-        status.text.contains("Jasco (point-virgule)"),
-        "{}",
-        status.text
-    );
+    assert!(status.text.contains("Jasco (semicolon)"), "{}", status.text);
     let sheet = sheet_named(state.tree(), "jasco_uvvis_semicolon");
     let columns = state.visible_columns(sheet);
     assert_eq!(cell_f64(&state, columns[0].0, 0), 800.0);
@@ -9465,10 +9475,16 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
 /// content as long as the current template has not been modified.
 #[test]
 fn the_wizard_chooses_the_model_from_the_first_file() {
-    let _recipes = isolate_recipe_store();
+    let _recipes = with_test_recipes();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
+    // The window starts on the first saved template; start from a blank one.
+    assert_eq!(
+        state.import_state().unwrap().recipe.name,
+        "Jasco (semicolon)"
+    );
+    state.new_import_recipe();
     assert_eq!(
         state.import_state().unwrap().recipe.name,
         stokesforge_app_state::tr!("import-template-untitled")
@@ -9476,29 +9492,52 @@ fn the_wizard_chooses_the_model_from_the_first_file() {
 
     state.add_import_paths(vec![fixture_path("jasco_fluo_tab.txt")]);
 
-    assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        "Jasco (tabulation)"
-    );
+    assert_eq!(state.import_state().unwrap().recipe.name, "Jasco (tab)");
     assert!(!state.import_recipe_modified());
     // A template modified by hand is not overwritten by a second add.
     state.import_state_mut().unwrap().recipe.skip_chars = 1;
     state.add_import_paths(vec![fixture_path("rpe_nohead_tab.asc")]);
+    assert_eq!(state.import_state().unwrap().recipe.name, "Jasco (tab)");
+}
+
+/// No template exists in the program (#378): with an empty store the window
+/// lists none and starts on the permissive recipe, and a dropped Jasco file
+/// is read with it.
+#[test]
+fn without_saved_templates_the_import_starts_untitled_and_reads_a_drop() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.open_import(None::<NodeId>);
+    let import = state.import_state().unwrap();
+    assert!(import.store.recipes().is_empty());
     assert_eq!(
-        state.import_state().unwrap().recipe.name,
-        "Jasco (tabulation)"
+        import.recipe.name,
+        stokesforge_app_state::tr!("import-template-untitled")
     );
+    state.cancel_import();
+
+    let before = state.worksheets_of(book).len();
+    state.dispatch(Action::DropFiles {
+        paths: vec![fixture_path("jasco_uvvis_semicolon.csv")],
+        target_book: Some(book),
+    });
+    wait_import(&mut state);
+    assert_eq!(state.worksheets_of(book).len(), before + 1);
+    let status = state.status().expect("message");
+    assert!(!status.text.contains("Jasco"), "{}", status.text);
 }
 
 /// A template is exported to a file and re-imported (same name: it
 /// replaces), and it is then saved for the user.
 #[test]
 fn a_model_can_be_exported_and_imported_from_a_file() {
-    let _recipes = isolate_recipe_store();
+    let _recipes = with_test_recipes();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    state.select_import_recipe("RPE (tabulation)");
+    state.select_import_recipe("EPR (tab)");
     state.import_state_mut().unwrap().recipe.skip_chars = 4;
     let file = dir.path().join("rpe.json");
     state.export_import_recipe(&file);
@@ -9508,12 +9547,12 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
     state.import_import_recipe(&file);
 
     let recipe = &state.import_state().unwrap().recipe;
-    assert_eq!(recipe.name, "RPE (tabulation)");
+    assert_eq!(recipe.name, "EPR (tab)");
     assert_eq!(recipe.skip_chars, 4);
     assert!(stokesforge_import::RecipeStore::load()
         .recipes()
         .iter()
-        .any(|r| r.name == "RPE (tabulation)" && r.skip_chars == 4));
+        .any(|r| r.name == "EPR (tab)" && r.skip_chars == 4));
 
     // A file that is not a template: error message, nothing changes.
     let bad = dir.path().join("pas_un_modele.json");
@@ -9527,7 +9566,7 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
 /// a single history entry.
 #[test]
 fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
-    let _recipes = isolate_recipe_store();
+    let _recipes = with_test_recipes();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
@@ -9544,8 +9583,8 @@ fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
 
     assert_eq!(state.worksheets_of(book).len(), before + 2);
     let status = state.status().unwrap();
-    assert!(status.text.contains("Jasco (point-virgule)"));
-    assert!(status.text.contains("RPE (tabulation)"));
+    assert!(status.text.contains("Jasco (semicolon)"));
+    assert!(status.text.contains("EPR (tab)"));
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), before);
 }
