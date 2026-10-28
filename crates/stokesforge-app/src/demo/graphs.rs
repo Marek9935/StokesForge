@@ -4,12 +4,12 @@
 //! | Graph | What it shows |
 //! |---|---|
 //! | `Graph1` | one curve, two linear axes |
-//! | `Panneaux` | a 2×2 grid of panels |
+//! | `Panels` | a 2×2 grid of panels |
 //! | `Axes` | right Y axis, logarithmic scale, layer with secondary axes |
-//! | `TypesTrace` | scatter, line and points, bars, histogram, error bars |
+//! | `PlotTypes` | scatter, line and points, bars, histogram, error bars |
 //! | `Annotations` | Typst text, the four graphic objects, placed legend |
-//! | `Groupes` | a group of six curves and its color gradient |
-//! | `Lignes` | "row" series from the kinetics of `Book1` |
+//! | `Groups` | a group of six curves and its color gradient |
+//! | `Rows` | "row" series from the kinetics of `Book1` |
 //!
 //! No graph carries a title (#103): only panel, axis and series titles are
 //! set. A new graph is built **here** on the `Project` before `Session::spawn`
@@ -71,12 +71,12 @@ pub(super) fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
         ..AxisSpec::default()
     };
     panel.left = AxisSpec {
-        label: "Absorbance mesurée".into(),
-        unit: "u.a.".into(),
+        label: "Measured absorbance".into(),
+        unit: "".into(),
         ..AxisSpec::default()
     };
     let mut series_spec = SeriesSpec::new_xy(x, y);
-    series_spec.name = "Échantillon µ1".into();
+    series_spec.name = "Sample µ1".into();
     series_spec.line = LineSpec {
         color: "#4c78a8".into(),
         width: 2.0,
@@ -88,50 +88,33 @@ pub(super) fn demo_spec(x: NodeId, y: NodeId) -> PlotSpec {
 
 /// A 2×2 grid: spectrum, scatter, histogram, bars.
 fn panels(book1: &Book1, m: &Measures) -> PlotSpec {
-    let mut histogram = curve(None, m.noise, "Bruit", 2, PlotType::Histogram);
+    let mut histogram = curve(None, m.noise, "Noise", 2, PlotType::Histogram);
     histogram.histogram_bins = BinCount::new(20).unwrap_or(histogram.histogram_bins);
     PlotSpec::empty("").with_panels(vec![
         panel_with(
             (0, 0),
             ("λ", "nm"),
-            ("Absorbance", "u.a."),
+            ("Absorbance", ""),
             vec![curve(
                 Some(book1.spectrum_x),
                 book1.spectrum_y,
-                "Spectre",
+                "Spectrum",
                 0,
                 PlotType::Line,
             )],
         ),
         panel_with(
             (0, 1),
-            ("Temps", "s"),
+            ("Time", "s"),
             ("Signal", "mV"),
-            vec![curve(
-                Some(m.time),
-                m.decay,
-                "Décroissance",
-                1,
-                PlotType::Scatter,
-            )],
+            vec![curve(Some(m.time), m.decay, "Decay", 1, PlotType::Scatter)],
         ),
-        panel_with(
-            (1, 0),
-            ("Tension", "mV"),
-            ("Occurrences", ""),
-            vec![histogram],
-        ),
+        panel_with((1, 0), ("Voltage", "mV"), ("Count", ""), vec![histogram]),
         panel_with(
             (1, 1),
-            ("Échantillon", ""),
-            ("Rendement", "%"),
-            vec![curve(
-                Some(m.bars.0),
-                m.bars.1,
-                "Rendement",
-                3,
-                PlotType::Bar,
-            )],
+            ("Sample", ""),
+            ("Yield", "%"),
+            vec![curve(Some(m.bars.0), m.bars.1, "Yield", 3, PlotType::Bar)],
         ),
     ])
 }
@@ -143,45 +126,33 @@ fn panels(book1: &Book1, m: &Measures) -> PlotSpec {
 fn axes(m: &Measures) -> PlotSpec {
     let mut left_panel = panel_with(
         (0, 0),
-        ("Temps", "s"),
-        ("Décroissance", "mV"),
+        ("Time", "s"),
+        ("Decay", "mV"),
         vec![curve(
             Some(m.time),
             m.decay,
-            "Décroissance",
+            "Decay",
             0,
             PlotType::LineScatter,
         )],
     );
     left_panel.left.scale = AxisScale::Log;
     left_panel.left.grid = true;
-    let mut right_series = curve(
-        Some(m.time),
-        m.growth,
-        "Croissance",
-        1,
-        PlotType::LineScatter,
-    );
+    let mut right_series = curve(Some(m.time), m.growth, "Growth", 1, PlotType::LineScatter);
     right_series.axis = SeriesAxis::Right;
     left_panel.series.push(right_series);
-    left_panel.right = axis("Croissance", "mV");
+    left_panel.right = axis("Growth", "mV");
 
     let base = panel_with(
         (0, 1),
-        ("Temps", "s"),
-        ("Croissance", "mV"),
-        vec![curve(
-            Some(m.time),
-            m.growth,
-            "Croissance",
-            1,
-            PlotType::Line,
-        )],
+        ("Time", "s"),
+        ("Growth", "mV"),
+        vec![curve(Some(m.time), m.growth, "Growth", 1, PlotType::Line)],
     );
     let mut layer = PanelSpec::overlay_on(&base, OverlaySpec::SECOND_AXES);
-    layer.bottom.label = "Temps relatif".into();
+    layer.bottom.label = "Relative time".into();
     layer.bottom.unit = "min".into();
-    layer.left.label = "Température".into();
+    layer.left.label = "Temperature".into();
     layer.left.unit = "°C".into();
     layer.series.push(curve(
         Some(m.time),
@@ -195,48 +166,43 @@ fn axes(m: &Measures) -> PlotSpec {
 
 /// One panel per plot type.
 fn plot_types(m: &Measures) -> PlotSpec {
-    let mut errors = curve(
-        Some(m.time),
-        m.decay,
-        "Décroissance ± σ",
-        4,
-        PlotType::ErrorBar,
-    );
+    let mut errors = curve(Some(m.time), m.decay, "Decay ± σ", 4, PlotType::ErrorBar);
     errors.y_error = Some(m.error);
-    let mut histogram = curve(None, m.noise, "Bruit", 2, PlotType::Histogram);
+    let mut histogram = curve(None, m.noise, "Noise", 2, PlotType::Histogram);
     histogram.histogram_bins = BinCount::new(30).unwrap_or(histogram.histogram_bins);
     let mut cells = vec![
         panel_with(
             (0, 0),
-            ("Temps", "s"),
+            ("Time", "s"),
             ("Signal", "mV"),
-            vec![curve(Some(m.time), m.decay, "Nuage", 0, PlotType::Scatter)],
+            vec![curve(
+                Some(m.time),
+                m.decay,
+                "Scatter",
+                0,
+                PlotType::Scatter,
+            )],
         ),
         panel_with(
             (0, 1),
-            ("Temps", "s"),
-            ("Température", "°C"),
+            ("Time", "s"),
+            ("Temperature", "°C"),
             vec![curve(
                 Some(m.time),
                 m.oscillation,
-                "Courbe et points",
+                "Line + Symbol",
                 1,
                 PlotType::LineScatter,
             )],
         ),
         panel_with(
             (0, 2),
-            ("Échantillon", ""),
-            ("Rendement", "%"),
-            vec![curve(Some(m.bars.0), m.bars.1, "Barres", 3, PlotType::Bar)],
+            ("Sample", ""),
+            ("Yield", "%"),
+            vec![curve(Some(m.bars.0), m.bars.1, "Bars", 3, PlotType::Bar)],
         ),
-        panel_with(
-            (1, 0),
-            ("Tension", "mV"),
-            ("Occurrences", ""),
-            vec![histogram],
-        ),
-        panel_with((1, 1), ("Temps", "s"), ("Signal", "mV"), vec![errors]),
+        panel_with((1, 0), ("Voltage", "mV"), ("Count", ""), vec![histogram]),
+        panel_with((1, 1), ("Time", "s"), ("Signal", "mV"), vec![errors]),
     ];
     for (cell, name) in
         cells
@@ -254,11 +220,11 @@ fn annotations(book1: &Book1) -> PlotSpec {
     let mut panel = panel_with(
         (0, 0),
         ("λ", "nm"),
-        ("Absorbance", "u.a."),
+        ("Absorbance", ""),
         vec![curve(
             Some(book1.spectrum_x),
             book1.spectrum_y,
-            "Spectre",
+            "Spectrum",
             0,
             PlotType::Line,
         )],
@@ -269,7 +235,7 @@ fn annotations(book1: &Book1) -> PlotSpec {
         .push(AnnotationSpec::new("Maximum $lambda_1$", 580.0, 0.8));
     panel
         .annotations
-        .push(AnnotationSpec::new("Épaulement $lambda_2$", 668.0, 0.74));
+        .push(AnnotationSpec::new("Shoulder $lambda_2$", 668.0, 0.74));
 
     let mut zone = ShapeSpec::new(ShapeKind::Rectangle, 500.0, 0.0, 540.0, 0.9);
     zone.line_color = "#4c78a8".into();
@@ -290,7 +256,7 @@ fn annotations(book1: &Book1) -> PlotSpec {
 fn groups(m: &Measures) -> anyhow::Result<PlotSpec> {
     let mut panel = panel_with(
         (0, 0),
-        ("Temps de réaction", "h"),
+        ("Reaction time", "h"),
         ("Conversion", "mol/L"),
         Vec::new(),
     );
@@ -302,7 +268,7 @@ fn groups(m: &Measures) -> anyhow::Result<PlotSpec> {
             curve(
                 Some(m.families_x),
                 *y,
-                &format!("Courbe {}", rank + 1),
+                &format!("Curve {}", rank + 1),
                 rank,
                 PlotType::Line,
             )
@@ -330,7 +296,7 @@ fn rows(book1: &Book1) -> PlotSpec {
             ..curve(
                 None,
                 book1.kinetics,
-                &format!("Ligne {}", row + 1),
+                &format!("Row {}", row + 1),
                 rank,
                 PlotType::LineScatter,
             )
@@ -338,8 +304,8 @@ fn rows(book1: &Book1) -> PlotSpec {
         .collect();
     PlotSpec::empty("").with_panels(panel_with(
         (0, 0),
-        ("Temps", "s"),
-        ("Absorbance", "u.a."),
+        ("Time", "s"),
+        ("Absorbance", ""),
         series,
     ))
 }
@@ -361,12 +327,12 @@ pub(super) fn graph1(project: &mut Project, book1: &Book1) -> anyhow::Result<()>
 pub(super) fn others(project: &mut Project, book1: &Book1, m: &Measures) -> anyhow::Result<()> {
     let root = project.root();
     for (name, spec) in [
-        ("Panneaux", panels(book1, m)),
+        ("Panels", panels(book1, m)),
         ("Axes", axes(m)),
-        ("TypesTrace", plot_types(m)),
+        ("PlotTypes", plot_types(m)),
         ("Annotations", annotations(book1)),
-        ("Groupes", groups(m)?),
-        ("Lignes", rows(book1)),
+        ("Groups", groups(m)?),
+        ("Rows", rows(book1)),
     ] {
         project
             .add_graph(root, Some(name), spec)

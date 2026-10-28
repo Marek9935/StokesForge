@@ -52,7 +52,7 @@ fn demo_columns_and_script_follow_the_grid_letters() {
     for (sheet, names) in [
         ("Sheet1", &["A", "B", "C"][..]),
         ("Sheet2", &["A"][..]),
-        ("Spectre", &["A", "B"][..]),
+        ("Spectrum", &["A", "B"][..]),
     ] {
         let id = project.resolve_path(&format!("[Book1]{sheet}")).unwrap();
         let actual: Vec<_> = project
@@ -156,7 +156,7 @@ fn every_graph_resolves_without_broken_reference_and_draws() {
     let mut edited = demo_project().unwrap();
     let (_, spec) = graphs(&edited)
         .into_iter()
-        .find(|(name, _)| name == "Panneaux")
+        .find(|(name, _)| name == "Panels")
         .unwrap();
     let victim: NodeId = spec.referenced_columns()[0];
     edited.remove(victim).unwrap();
@@ -219,7 +219,7 @@ fn log_axes_carry_only_strictly_positive_data() {
 
     // Witness: the first column of the kinetics (t = 0) contains zeros, and
     // the check finds them.
-    let kinetics = project.resolve_path("[Book1]Cinetique").unwrap();
+    let kinetics = project.resolve_path("[Book1]Kinetics").unwrap();
     let column = project.tree().children(kinetics).unwrap()[0];
     let mut spec = PlotSpec::empty("");
     let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
@@ -291,7 +291,7 @@ fn every_analysis_dataset_recovers_its_parameters() {
     // longer recovers its parameters (or its fit fails).
     let mut constant = analysis::datasets()
         .into_iter()
-        .find(|j| j.name == "FitGaussienne")
+        .find(|j| j.name == "FitGaussian")
         .unwrap();
     constant.y = vec![1.0; constant.x.len()];
     assert!(!deviations(&constant).is_empty());
@@ -347,8 +347,8 @@ fn noise_and_demo_are_deterministic() {
     for (got, expected) in pinned.iter().zip(PINNED_NOISE) {
         assert!((got - expected).abs() < 1e-9, "{got} ≠ {expected}");
     }
-    let first = column_by_path(&demo_project().unwrap(), "[Mesures]Sheet1!B");
-    let second = column_by_path(&demo_project().unwrap(), "[Mesures]Sheet1!B");
+    let first = column_by_path(&demo_project().unwrap(), "[Measurements]Sheet1!B");
+    let second = column_by_path(&demo_project().unwrap(), "[Measurements]Sheet1!B");
     assert_eq!(numbers(&first), numbers(&second));
     assert!((numbers(&first)[0] - PINNED_MEASURE).abs() < 1e-9);
 
@@ -543,4 +543,56 @@ fn demo_has_every_column_type() {
             .formula
             .is_some());
     }
+}
+
+/// Every visible text of the demo that is not a French letter or a French
+/// abbreviation: the demo is hard-coded English (#379).
+///
+/// The limit: the check looks for accented letters and `u.a.`. An unaccented
+/// French word ("Temps", "Mesures") is **not** caught; the names are reviewed
+/// by hand. Legitimate non-ASCII (λ µ ° · − σ ± ⁻¹) passes.
+#[test]
+fn demo_visible_texts_are_english() {
+    const FRENCH_LETTERS: &str = "àâäçéèêëîïôöùûüÿœæÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸŒÆ";
+    let project = demo_project().unwrap();
+    let mut texts: Vec<String> = Vec::new();
+    for (_, node) in project.tree().iter() {
+        texts.push(node.name().to_string());
+        match node.kind() {
+            NodeKind::Column(column) => {
+                let meta = column.meta();
+                texts.extend([
+                    meta.long_name.clone(),
+                    meta.unit.clone(),
+                    meta.comment.clone(),
+                ]);
+                for row in 0..column.len() {
+                    if let stokesforge_core::MixedCell::Text(text) = column.values().cell(row) {
+                        texts.push(text);
+                    }
+                }
+            }
+            NodeKind::Note { text, .. } => texts.push(text.clone()),
+            _ => {}
+        }
+    }
+    for (_, spec) in graphs(&project) {
+        for panel in spec.panels.iter() {
+            texts.push(panel.title.clone());
+            for axis in [&panel.bottom, &panel.left, &panel.right, &panel.top] {
+                texts.extend([axis.label.clone(), axis.unit.clone()]);
+            }
+            texts.extend(panel.series.iter().map(|series| series.name.clone()));
+            texts.extend(panel.annotations.iter().map(|a| a.text.clone()));
+        }
+    }
+    assert!(texts.len() > 100, "the collection no longer sees the demo");
+    let offenders: Vec<&String> = texts
+        .iter()
+        .filter(|text| text.contains("u.a.") || text.chars().any(|c| FRENCH_LETTERS.contains(c)))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "French texts in the demo: {offenders:?}"
+    );
 }

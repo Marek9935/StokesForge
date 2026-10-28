@@ -53,6 +53,11 @@ without a message, see `docs/persistance.md`).
 
 ### Changed
 
+- The demo project is now in English (#379): folders, workbooks, sheets,
+  column titles, units, graph names, axis labels, series names and the
+  note (`Workbooks`, `Analysis`, `Spectrum`, `Kinetics`, `Panels`,
+  `PlotTypes`, `Groups`, `Rows`, `FitGaussian`…), whatever the interface
+  language. Absorbance carries no unit; arbitrary units read `a.u.`.
 - Axes page of the properties (#344): the "Reverse axis" and "Auto range"
   boxes disappear. The direction of the axis is read from the order of the
   bounds (From > To inverts the axis); From and To are always editable, follow
