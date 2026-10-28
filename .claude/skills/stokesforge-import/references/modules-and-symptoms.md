@@ -17,7 +17,7 @@ Read from `stokesforge-import` to find where a piece of the import lives. Each m
 | `decode` | bytes → text before any split (UTF-8, or the Windows code page of instrument software; mixed decoding in `Auto`) |
 | `metadata` | header (and footer if asked) as key / value lines |
 | `recent` | recently imported files and remembered folder (`import_recent.json`) |
-| `config_dir` | the single rule for the configuration folder (`.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point « Dossier de configuration ») |
+| `config_dir` | the single rule for the configuration folder (`.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards, point "Configuration folder (#332)") |
 
 `crates/stokesforge-importer/src/lib.rs`: from parsed tables to model columns (`plan_import`, `make_import_column`, `MetaLine`). `crates/stokesforge-persistence/src/recipe_record.rs`: the recipe as written in the `.stf`.
 

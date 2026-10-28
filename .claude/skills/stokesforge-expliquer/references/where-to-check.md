@@ -21,7 +21,7 @@ Read from `stokesforge-expliquer` before answering. Pages route; the code decide
 | what must never break | `docs/invariants.md` | the « Ce qui la tient » column of its table |
 | licence (plain GPL-3.0-or-later; extra permission only on written request, #348) | `docs/licence-et-extensions.md` § Additional permission: withdrawn, can be requested | — |
 | the *why* of a precise decision | the module's `//!` header | — |
-| an option ruled out and its reason | `docs/archive/` (not maintained, written before the PlotYx → StokesForge renaming: `CLAUDE.md` § Contexte) | — |
+| an option ruled out and its reason | `docs/archive/` (not maintained, written before the PlotYx → StokesForge renaming: `CLAUDE.md` § Context) | — |
 
 A « oui » is checked by an `rg` in the crate or by the test that exercises it; a « non » too.
 

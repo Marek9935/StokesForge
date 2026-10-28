@@ -6,7 +6,7 @@ Read for every feature before coding (decide where the user finds it), and whene
 
 - Grammar (sections, submenus, absent / greyed, bare verbs, separators): `docs/menus.md` § Rules ; `docs/menus.md` § Canonical order of sections ; `docs/menus.md` § Adding an entry.
 - Content and envelope: `docs/menus.md` § The principle: content and envelope.
-- Shared painters, operational summary: `.claude/conventions.md` § Object Manager, panneaux fixes, menus.
+- Shared painters, operational summary: `.claude/conventions.md` § Object Manager, fixed panels, menus.
 - Menu bar and thematic menus: `docs/application/menus-et-barres.md` § Themed menus (#114).
 - Grid context menu, deliberate menu / keyboard gaps: `docs/application/grille.md` § Grid context menus.
 - What Qt gave for free: `docs/application/etat-et-console.md` § What Qt gave for free, and must be written here.

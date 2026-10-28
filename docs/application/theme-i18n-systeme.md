@@ -143,7 +143,7 @@ The `detail` fields (cause described by the originating crate) and the system
 messages stay in English in the sentence. `stokesforge-importer` returns a structured
 `ImportFailure` (file + cause) for the same reason.
 
-Rule of conduct (full chain, turned into a sentence): `.claude/conventions.md`, section « Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application ».
+Rule of conduct (full chain, turned into a sentence): `.claude/conventions.md`, section "Errors: raw English below, catalog sentence in the application".
 
 ### Native file picker
 

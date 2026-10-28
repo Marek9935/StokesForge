@@ -27,11 +27,11 @@ The two diagnoses send you to opposite places.
 
 ## Docked / detached duplicate
 
-A content once had two writings, floating and detached. Workbook, graph, note and matrix are unified; a report that cites only one path of a reintroduced duplicate gets half a fix. Rules: `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
+A content once had two writings, floating and detached. Workbook, graph, note and matrix are unified; a report that cites only one path of a reintroduced duplicate gets half a fix. Rules: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog).
 
 ## Wrong or ambiguous error message
 
-The displayed text comes from the catalogue (`crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl`, `error-*` key) and the variant → key mapping in `crates/stokesforge-app-state/src/errors.rs`. Locate the message **by its key**, and say whether the catalogue sentence, the mapping, or the raw `detail` of the source crate is at fault. Chain: `.claude/conventions.md` § Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application.
+The displayed text comes from the catalogue (`crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl`, `error-*` key) and the variant → key mapping in `crates/stokesforge-app-state/src/errors.rs`. Locate the message **by its key**, and say whether the catalogue sentence, the mapping, or the raw `detail` of the source crate is at fault. Chain: `.claude/conventions.md` § Errors: raw English below, catalog sentence in the application.
 
 ## Report template (non-obvious bugs only)
 

@@ -24,10 +24,10 @@ symptom  ──► stokesforge-bug-report ──(explicit request)──► stok
 request  ──► stokesforge-feature ──► commande / rendu / import / python / textes ──┴─► stokesforge-verification ──► commit (on request)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/formulaire-de-decisions.md`](stokesforge-bug-report/references/formulaire-de-decisions.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, « Délégation et choix du modèle ».
+`run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/formulaire-de-decisions.md`](stokesforge-bug-report/references/formulaire-de-decisions.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 
 - A change that installs a new rule updates the skills concerned in the same commit (`CLAUDE.md`, « Conventions »); a skill that notes a deviation says it must be fixed, never that it exists.
-- A skill cites a path where the code lives now. Renvois « `x.md` § Titre » are checked by `crates/stokesforge-arch-guard/tests/renvois_fiches.rs`, which also refuses an unlinked `references/` file.
+- A skill cites a path where the code lives now. References such as "`x.md` § Title" are checked by `crates/stokesforge-arch-guard/tests/renvois_fiches.rs`, which also refuses an unlinked `references/` file.
 - A new skill earns its place when a domain has traps that raise no error; otherwise `.claude/rules.md` is enough. Format and description rules: `skill-manager`.

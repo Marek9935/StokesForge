@@ -15,9 +15,9 @@ Read at step 1 of `stokesforge-verification`. Families and guards: `docs/tests.m
 
 A decision that must live near the UI is extracted as a **pure function** and tested (`app::grid::column_grip_bands`, `state::active_graph`, `state::drop_payload_action`). Tests follow their code: moving a function moves its tests. A test helper shared between `app` modules is `pub(in crate::app)` in the test module that owns it. A target painted by hand also checks its name, role and state in the published AccessKit tree.
 
-## The témoin
+## The witness
 
-A test comparing two paths can pass because both are right — or because **both are wrong the same way**. It needs a case that must stay **different**: `docs/tests.md` § The witness, without which an equality test proves nothing. Under `CLAUDE.md` § Délégation et choix du modèle, each témoin is checked by mutation (break the code, see the test fail, restore).
+A test comparing two paths can pass because both are right — or because **both are wrong the same way**. It needs a case that must stay **different**: `docs/tests.md` § The witness, without which an equality test proves nothing. Under `CLAUDE.md` § Delegation and model choice, each witness is checked by mutation (break the code, see the test fail, restore).
 
 ## Reproduction vs guard
 

@@ -83,7 +83,7 @@ fail at the first deviation.
 
 ## Conventions
 
-- Code, comments and commits **in French**; documentation in `docs/` **in English**, `docs/archive/` stays in French (#368).
+- Code, comments and commits: commits are **in English** since #368. Code and comments are **still in French** for now and are translated crate by crate (#372–#376). Documentation in `docs/` is **in English**; `docs/archive/` stays in French (#368).
 - A module head comment explains **why**, not *what*: the
   *what* can be read in the signature just below.
 - Every mutation of the model goes through an undoable command of
