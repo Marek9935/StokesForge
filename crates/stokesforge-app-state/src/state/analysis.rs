@@ -1,12 +1,12 @@
-//! L'état de la fenêtre d'analyse (#181) : le formulaire ouvert, la
-//! confirmation de suppression d'un calcul, et les gestes qui lancent,
-//! modifient, recalculent ou retirent un calcul.
+//! The state of the analysis window (#181): the open form, the confirmation
+//! of the deletion of a calculation, and the gestures that launch, modify,
+//! recalculate or remove a calculation.
 //!
-//! Tout passe par des commandes annulables (`AddCalculation`,
-//! `UpdateCalculation`, `RemoveCalculation`, invariant 1) ou, pour le
-//! recalcul, par `SessionHandle::recalculate` — hors historique, comme le
-//! recalcul des formules. Le formulaire lui-même est un état d'interface :
-//! jamais dans l'historique tant que l'utilisateur n'a pas validé.
+//! Everything goes through undoable commands (`AddCalculation`,
+//! `UpdateCalculation`, `RemoveCalculation`, invariant 1) or, for
+//! recalculation, through `SessionHandle::recalculate`, outside the history,
+//! like formula recalculation. The form itself is an interface state: never
+//! in the history until the user has validated.
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_commands::HistoryLabel;
@@ -23,48 +23,48 @@ use crate::errors;
 use crate::r_squared;
 use crate::tr;
 
-/// La réponse à la confirmation de suppression d'un calcul (M8).
+/// The answer to the confirmation of the deletion of a calculation (M8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalculationDelete {
-    /// Retire le calcul ; ses colonnes deviennent des colonnes ordinaires.
+    /// Removes the calculation; its columns become ordinary columns.
     Calculation,
-    /// Retire le calcul et ses colonnes de sortie.
+    /// Removes the calculation and its output columns.
     WithColumns,
-    /// Ne fait rien.
+    /// Does nothing.
     Cancel,
 }
 
-/// La réponse à la confirmation d'un export qui montre des séries pas à jour
+/// The answer to the confirmation of an export that shows out-of-date series
 /// (#198, M9 a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaleExport {
-    /// Exporte la figure telle qu'elle s'affiche : séries grisées et marqueur.
+    /// Exports the figure as it is displayed: greyed series and marker.
     Anyway,
-    /// Exporte la figure sans l'avertissement (couleurs normales, pas de marqueur).
+    /// Exports the figure without the warning (normal colors, no marker).
     WithoutWarning,
-    /// Recalcule d'abord les calculs pas à jour, puis exporte.
+    /// First recalculates the out-of-date calculations, then exports.
     Recalculate,
     /// N'exporte rien.
     Cancel,
 }
 
 impl AppState {
-    /// Le formulaire de la fenêtre d'analyse, s'il est ouvert.
+    /// The form of the analysis window, if it is open.
     pub fn analysis_form(&self) -> Option<&AnalysisForm> {
         self.analysis.as_ref()
     }
 
-    /// Le même, modifiable : la fenêtre y écrit ses réglages en direct.
+    /// The same, mutable: the window writes its settings into it live.
     pub fn analysis_form_mut(&mut self) -> Option<&mut AnalysisForm> {
         self.analysis.as_mut()
     }
 
-    /// Le calcul dont la suppression attend confirmation.
+    /// The calculation whose deletion is waiting for confirmation.
     pub fn pending_calculation_delete(&self) -> Option<NodeId> {
         self.pending_calculation_delete
     }
 
-    /// Les calculs périmés du projet (menu Analysis › Recalculate Out of Date).
+    /// The out-of-date calculations of the project (Analysis › Recalculate Out of Date menu).
     pub fn stale_calculations(&self) -> Vec<NodeId> {
         self.snapshot
             .tree
@@ -75,8 +75,8 @@ impl AppState {
             .collect()
     }
 
-    /// Ouvre la fenêtre sur les séries des colonnes sélectionnées de `sheet`
-    /// (chaque Y avec le X le plus proche à sa gauche, comme un graphe).
+    /// Opens the window on the series of the selected columns of `sheet`
+    /// (each Y with the nearest X on its left, like a graph).
     pub(super) fn open_analysis(&mut self, preset: &Preset, sheet: NodeId, columns: &[NodeId]) {
         let planned = series_from_columns(
             &self.snapshot.tree,
@@ -107,7 +107,7 @@ impl AppState {
         ));
     }
 
-    /// Le graphe désigne ses propres X/Y : aucun appariement de feuille ici.
+    /// The graph designates its own X/Y: no sheet pairing here.
     pub(super) fn open_graph_analysis(
         &mut self,
         preset: &Preset,
@@ -115,8 +115,8 @@ impl AppState {
         sources: &[stokesforge_plot::SeriesRef],
         spec: stokesforge_plot::PlotSpec,
     ) {
-        // Des courbes « ligne » (#253) : on analyse les colonnes de la feuille
-        // transposée liée, jamais la ligne elle-même.
+        // "Row" curves (#253): the columns of the linked transposed sheet are
+        // analyzed, never the row itself.
         let curves: Vec<_> = sources
             .iter()
             .filter_map(|source| spec.panels.get(source.panel)?.series.get(source.index))
@@ -139,8 +139,8 @@ impl AppState {
             .iter()
             .map(|source| {
                 let curve = spec.panels.get(source.panel)?.series.get(source.index)?;
-                // Une série de ligne a une autre sémantique que les colonnes ;
-                // elle ne doit jamais analyser silencieusement toute sa colonne.
+                // A row series has other semantics than columns; it must never
+                // silently analyze its whole column.
                 if curve.row.is_some() || self.snapshot.tree.node(curve.y).is_none() {
                     return None;
                 }
@@ -162,17 +162,17 @@ impl AppState {
         self.analysis = Some(form);
     }
 
-    /// Les dernières analyses lancées, la plus récente en tête (#249).
+    /// The latest analyses launched, the most recent first (#249).
     pub fn analysis_recent(&self) -> &[RecentAnalysis] {
         &self.analysis_recent
     }
 
-    /// Rouvre une des dernières analyses (#249) sur la sélection `target`,
-    /// avec ses réglages. Avec `run` (Ctrl+clic), la lance tout de suite quand
-    /// rien ne manque — points, zones et colonne de référence ne sont pas
-    /// retenus : alors la fenêtre reste ouverte, réglages en place, pour les
-    /// poser. « Replace original data » n'est repris que si la sélection le
-    /// permet (colonnes ordinaires).
+    /// Reopens one of the latest analyses (#249) on the selection `target`,
+    /// with its settings. With `run` (Ctrl+click), launches it right away when
+    /// nothing is missing; points, zones and reference column are not
+    /// remembered: then the window stays open, settings in place, to set
+    /// them. "Replace original data" is taken back only if the selection
+    /// allows it (ordinary columns).
     pub(super) fn open_recent_analysis(&mut self, index: usize, run: bool, target: RecentTarget) {
         let Some(recent) = self.analysis_recent.get(index).cloned() else {
             return;
@@ -206,8 +206,8 @@ impl AppState {
         }
     }
 
-    /// Retient l'analyse que le formulaire vient de lancer (#249). Un fichier
-    /// de préférences illisible ne doit pas défaire un calcul réussi.
+    /// Remembers the analysis that the form has just launched (#249). An
+    /// unreadable preferences file must not undo a successful calculation.
     fn remember_analysis(&mut self, form: &AnalysisForm) {
         let Some(recent) = RecentAnalysis::from_form(form) else {
             return;
@@ -218,7 +218,7 @@ impl AppState {
             .save_analysis_recent(&self.analysis_recent);
     }
 
-    /// Rouvre un calcul existant (« Edit Calculation… »).
+    /// Reopens an existing calculation ("Edit Calculation…").
     pub(super) fn edit_calculation(&mut self, id: NodeId) {
         match self.snapshot.tree.calculation(id) {
             Some(calc) => self.analysis = Some(AnalysisForm::from_calculation(id, calc)),
@@ -226,10 +226,10 @@ impl AppState {
         }
     }
 
-    /// Un glisser de poignée (#199) : les réglages du calcul changent comme
-    /// dans la fenêtre d'analyse, et c'est la même commande, donc un pas
-    /// d'historique par geste. Rien ne change (et rien n'entre dans
-    /// l'historique) si la poignée n'a pas bougé.
+    /// A handle drag (#199): the settings of the calculation change as in the
+    /// analysis window, and it is the same command, hence one history step
+    /// per gesture. Nothing changes (and nothing enters the history) if the
+    /// handle did not move.
     pub(super) fn move_calculation_handle(
         &mut self,
         id: NodeId,
@@ -251,9 +251,9 @@ impl AppState {
         }
     }
 
-    /// Valide la fenêtre : un calcul neuf ou la modification de l'existant,
-    /// en une entrée d'historique. La fenêtre reste ouverte si le calcul
-    /// échoue.
+    /// Validates the window: a new calculation or the modification of the
+    /// existing one, in a single history entry. The window stays open if the
+    /// calculation fails.
     pub fn pending_analysis_replacement(&self) -> bool {
         self.pending_analysis_replacement
     }
@@ -357,21 +357,21 @@ impl AppState {
             Some(graph) => self.add_calculation_to_graph(command, graph, &form),
             None => self.execute(command),
         }
-        // L'échec va dans le pied de la fenêtre (S-M7, #228) : elle reste
-        // ouverte.
+        // The failure goes into the footer of the window (S-M7, #228): it
+        // stays open.
         if !self.last_action_failed() {
             self.analysis_keep_results = form.keep_results;
             self.remember_analysis(&form);
-            // Le dernier choix devient le défaut des prochaines sessions (#200).
-            // Un fichier de préférences illisible ne doit pas défaire un calcul réussi.
+            // The last choice becomes the default of the next sessions (#200).
+            // An unreadable preferences file must not undo a successful calculation.
             let _ = self
                 .object_manager_preferences
                 .save_analysis_keep_results(form.keep_results);
             self.analysis = None;
             self.end_row_macro();
-            // Un calcul « Show » ne garde pas ses valeurs : le recalcul ne les
-            // verra jamais, c'est donc ici qu'un R² très faible se dit (#288).
-            // Un calcul qui garde ses valeurs est vu par `watch_low_r2`.
+            // A "Show" calculation does not keep its values: recalculation will
+            // never see them, so this is where a very low R² is reported (#288).
+            // A calculation that keeps its values is seen by `watch_low_r2`.
             if !form.keep_results && !form.replace_original && form.low_r2_dialog {
                 let kind = form.kind;
                 let count = all_values
@@ -383,13 +383,13 @@ impl AppState {
         }
     }
 
-    /// Ouvre la boîte « R² très faible » (#288) pour `found` (par calcul, son
-    /// type et son nombre de séries en défaut), sauf si la préférence de
-    /// l'application la coupe, s'il n'y a rien à dire, ou si une alerte attend
-    /// déjà d'être lue (une seule case : une alerte d'enregistrement ou
-    /// d'ouverture ne s'écrase pas). Le texte est un compteur par type (#290).
-    /// Ce qui n'a pas pu s'ouvrir n'est pas perdu : la pastille de la barre
-    /// d'état (`low_r2_groups`) le dit tant que les R² restent faibles.
+    /// Opens the "Low R²" box (#288) for `found` (per calculation, its type
+    /// and its number of series at fault), unless the application preference
+    /// turns it off, there is nothing to say, or an alert is already waiting
+    /// to be read (a single slot: a save or open alert is not overwritten).
+    /// The text is a counter per type (#290). What could not open is not
+    /// lost: the badge of the status bar (`low_r2_groups`) says it as long as
+    /// the R² stay low.
     fn raise_low_r2(&mut self, found: &[(OperationKind, usize)]) {
         let groups = r_squared::group_by_kind(found.iter().copied());
         if groups.is_empty()
@@ -404,9 +404,9 @@ impl AppState {
         });
     }
 
-    /// Recalcule les R² faibles du projet (#290) à partir de l'instantané
-    /// courant : un **état**, pas un évènement. Appelée à chaque instantané
-    /// neuf, avant `watch_low_r2` ; le groupe disparaît dès que les R² remontent.
+    /// Recomputes the low R² of the project (#290) from the current
+    /// snapshot: a **state**, not an event. Called at every new snapshot,
+    /// before `watch_low_r2`; the group disappears as soon as the R² go back up.
     pub(super) fn refresh_low_r2_groups(&mut self) {
         self.low_r2_groups = r_squared::project_groups(&self.snapshot.tree);
         if self.low_r2_groups.is_empty() {
@@ -414,31 +414,32 @@ impl AppState {
         }
     }
 
-    /// Les séries à R² < 0,6 de tout le projet, par type de calcul, dans
-    /// l'ordre fixe des types (#290). Compte aussi les calculs dont la boîte
-    /// est coupée ; pas les calculs « Show », qui ne gardent pas leurs valeurs.
+    /// The series with R² < 0.6 of the whole project, per type of calculation,
+    /// in the fixed order of the types (#290). Also counts the calculations
+    /// whose box is turned off; not the "Show" calculations, which do not keep
+    /// their values.
     pub fn low_r2_groups(&self) -> &[r_squared::LowRSquaredGroup] {
         &self.low_r2_groups
     }
 
-    /// Le nombre de séries à R² < 0,6 du projet : la pastille de la barre
-    /// d'état n'existe que s'il est positif.
+    /// The number of series with R² < 0.6 in the project: the badge of the
+    /// status bar exists only if it is positive.
     pub fn low_r2_total(&self) -> usize {
         r_squared::total(&self.low_r2_groups)
     }
 
-    /// La liste de la pastille est-elle ouverte ?
+    /// Is the badge list open?
     pub fn low_r2_list_open(&self) -> bool {
         self.low_r2_list_open
     }
 
-    /// Le texte de la liste de la pastille : les mêmes compteurs que la boîte.
+    /// The text of the badge list: the same counters as the box.
     pub fn low_r2_list_text(&self) -> String {
         r_squared::summary_text(&self.low_r2_groups)
     }
 
-    /// Prend l'empreinte des R² très faibles des calculs de `tree`, sans rien
-    /// dire : l'ouverture d'un projet n'est pas un recalcul.
+    /// Takes the fingerprint of the very low R² of the calculations of `tree`,
+    /// saying nothing: opening a project is not a recalculation.
     pub(super) fn seed_low_r2(&mut self) {
         self.low_r2_seen = self
             .snapshot
@@ -452,10 +453,10 @@ impl AppState {
             .collect();
     }
 
-    /// Appelée à chaque instantané neuf : un calcul qui garde ses valeurs et
-    /// dont un R² très faible **vient de changer** (recalcul manuel ou
-    /// automatique, application, annulation) ouvre la boîte (#288). Un calcul
-    /// dont le résultat n'a pas bougé ne la rouvre pas à chaque image.
+    /// Called at every new snapshot: a calculation that keeps its values and
+    /// whose very low R² **has just changed** (manual or automatic
+    /// recalculation, apply, undo) opens the box (#288). A calculation whose
+    /// result has not moved does not reopen it at every frame.
     pub(super) fn watch_low_r2(&mut self) {
         let tree = self.snapshot.tree.clone();
         let mut found = Vec::new();
@@ -476,8 +477,8 @@ impl AppState {
         self.raise_low_r2(&found);
     }
 
-    /// Les graphiques qui tracent au moins une des colonnes `ys` : ceux où
-    /// « Add to graph » a un sens (#200).
+    /// The graphs that plot at least one of the columns `ys`: those where
+    /// "Add to graph" makes sense (#200).
     pub fn graphs_plotting(&self, ys: &[NodeId]) -> Vec<(NodeId, String)> {
         self.graphs()
             .into_iter()
@@ -493,9 +494,9 @@ impl AppState {
             .collect()
     }
 
-    /// Crée le calcul **et** trace ses colonnes sur `graph`, en une seule
-    /// entrée d'historique (#200). Les résidus ne sont pas tracés : leur échelle
-    /// écraserait la courbe. Un échec à n'importe quelle étape avorte tout.
+    /// Creates the calculation **and** plots its columns on `graph`, in a
+    /// single history entry (#200). The residuals are not plotted: their scale
+    /// would crush the curve. A failure at any step aborts everything.
     fn add_calculation_to_graph(&mut self, command: Command, graph: NodeId, form: &AnalysisForm) {
         if self.handle.begin_macro(MacroKind::AnalysisToGraph).is_err() {
             return;
@@ -546,8 +547,8 @@ impl AppState {
         self.refresh();
     }
 
-    /// Le résultat rejoint exactement le calque et le groupe de sa source,
-    /// avec son X explicite (l'ordre de la feuille ne sert pas d'appariement).
+    /// The result joins exactly the layer and the group of its source,
+    /// with its explicit X (the order of the sheet is not used for pairing).
     fn add_graph_analysis_outputs(
         &mut self,
         graph: NodeId,
@@ -592,13 +593,13 @@ impl AppState {
             result.y_error = None;
             result.name.clear();
             result.visible = true;
-            // Aucun nouveau groupe : le numéro appartient au calque source.
+            // No new group: the number belongs to the source layer.
             panel.series.push(result);
         }
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
-    /// Recalcule `ids` ; vide : tous les calculs périmés.
+    /// Recalculates `ids`; empty: all the out-of-date calculations.
     pub(super) fn recalculate_calculations(&mut self, ids: &[NodeId]) {
         match self.handle.recalculate(ids) {
             Ok(_) => {
@@ -609,8 +610,8 @@ impl AppState {
         }
     }
 
-    /// « Detach from Calculation » : le calcul est retiré, les colonnes
-    /// restent et deviennent ordinaires.
+    /// "Detach from Calculation": the calculation is removed, the columns
+    /// stay and become ordinary.
     pub(super) fn detach_calculation(&mut self, id: NodeId) {
         self.execute(Command::RemoveCalculation {
             id,
@@ -618,14 +619,14 @@ impl AppState {
         });
     }
 
-    /// Demande la suppression d'un calcul : ouvre la confirmation (M8).
+    /// Asks for the deletion of a calculation: opens the confirmation (M8).
     pub(super) fn request_delete_calculation(&mut self, id: NodeId) {
         if self.snapshot.tree.calculation(id).is_some() {
             self.pending_calculation_delete = Some(id);
         }
     }
 
-    /// Réponse à la confirmation de suppression.
+    /// Answer to the deletion confirmation.
     pub(super) fn confirm_delete_calculation(&mut self, choice: CalculationDelete) {
         let Some(id) = self.pending_calculation_delete.take() else {
             return;
@@ -643,8 +644,8 @@ impl AppState {
         }
     }
 
-    /// Le nom d'un calcul pour les menus et les confirmations : l'opération et
-    /// la première colonne source.
+    /// The name of a calculation for menus and confirmations: the operation
+    /// and the first source column.
     pub fn calculation_title(&self, id: NodeId) -> String {
         let Some(calc) = self.snapshot.tree.calculation(id) else {
             return String::new();
@@ -661,7 +662,7 @@ impl AppState {
 }
 
 impl AppState {
-    /// Les traces de correction du classeur, dans leur ordre de création.
+    /// The correction traces of the workbook, in their creation order.
     pub fn correction_traces(&self, book: NodeId, sheet: Option<NodeId>) -> Vec<NodeId> {
         let tree = &self.snapshot.tree;
         tree.correction_traces()
@@ -679,9 +680,9 @@ impl AppState {
             .collect()
     }
 
-    /// Les calculs qui gardent leurs résultats (« Keep in Results ») pour le
-    /// classeur `book` — ceux dont la première série vit dans une de ses
-    /// feuilles —, restreints à `sheet` quand elle est donnée (volet Results,
+    /// The calculations that keep their results ("Keep in Results") for the
+    /// workbook `book`: those whose first series lives in one of its
+    /// sheets, restricted to `sheet` when it is given (Results pane,
     /// M7).
     pub fn kept_calculations(&self, book: NodeId, sheet: Option<NodeId>) -> Vec<NodeId> {
         let tree = &self.snapshot.tree;
@@ -704,15 +705,15 @@ impl AppState {
 }
 
 impl AppState {
-    /// Pourquoi une colonne de sortie n'est pas à jour, si elle appartient à
-    /// un calcul périmé (M9 a).
+    /// Why an output column is not up to date, if it belongs to an
+    /// out-of-date calculation (M9 a).
     pub fn column_staleness(&self, column: NodeId) -> Option<&stokesforge_core::Staleness> {
         let (id, _) = self.snapshot.tree.calculation_of_column(column)?;
         self.snapshot.tree.calculation(id)?.stale.as_ref()
     }
 
-    /// La phrase qui dit pourquoi `column` est périmée, pour l'info-bulle de
-    /// son en-tête ; `None` si la colonne est à jour.
+    /// The sentence that says why `column` is out of date, for the tooltip of
+    /// its header; `None` if the column is up to date.
     pub fn column_stale_text(&self, column: NodeId) -> Option<String> {
         use stokesforge_core::Staleness;
         Some(match self.column_staleness(column)? {
@@ -727,8 +728,8 @@ impl AppState {
 }
 
 impl AppState {
-    /// Les calculs pas à jour dont une colonne est tracée par les séries
-    /// visibles de `spec` ; vide quand le graphe a désactivé l'avertissement.
+    /// The out-of-date calculations one of whose columns is plotted by the
+    /// visible series of `spec`; empty when the graph turned the warning off.
     pub fn stale_calculations_in(&self, spec: &stokesforge_plot::PlotSpec) -> Vec<NodeId> {
         if !spec.stale_warning {
             return Vec::new();
@@ -759,8 +760,8 @@ impl AppState {
         calculations
     }
 
-    /// L'export (ou la copie) en attente de confirmation, avec le nombre de
-    /// calculs pas à jour qu'il montre.
+    /// The export (or copy) waiting for confirmation, with the number of
+    /// out-of-date calculations it shows.
     pub fn pending_stale_export(&self) -> Option<usize> {
         let spec = match self.pending_stale_export.as_ref()? {
             Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } => spec,
@@ -769,8 +770,8 @@ impl AppState {
         Some(self.stale_calculations_in(spec).len())
     }
 
-    /// Exporte ou copie tout de suite si la figure est à jour ; sinon met
-    /// l'action en attente et laisse la fenêtre demander (#198).
+    /// Exports or copies right away if the figure is up to date; otherwise
+    /// puts the action on hold and lets the window ask (#198).
     pub(super) fn export_unless_stale(&mut self, action: Action) {
         let stale = match &action {
             Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } => {
@@ -793,7 +794,7 @@ impl AppState {
         }
     }
 
-    /// Réponse à la confirmation d'export.
+    /// Answer to the export confirmation.
     pub(super) fn confirm_stale_export(&mut self, choice: StaleExport) {
         let Some(mut action) = self.pending_stale_export.take() else {
             return;
@@ -825,8 +826,8 @@ impl AppState {
     }
 }
 
-/// Le R² d'une série qui franchit le palier de la boîte, s'il y en a un (le plus
-/// bas si plusieurs : un ajustement global n'en a qu'un par série).
+/// The R² of a series that crosses the threshold of the box, if there is one
+/// (the lowest if several: a global fit has only one per series).
 fn low_r2_of(values: &[stokesforge_core::ResultValue]) -> Option<f64> {
     values
         .iter()
@@ -840,7 +841,7 @@ mod tests {
     use super::low_r2_of;
     use stokesforge_core::ResultValue;
 
-    fn valeur(key: &str, value: f64) -> ResultValue {
+    fn value_of(key: &str, value: f64) -> ResultValue {
         ResultValue {
             key: key.to_string(),
             index: None,
@@ -850,24 +851,24 @@ mod tests {
     }
 
     #[test]
-    fn low_r2_of_rend_le_plus_bas_sous_le_palier_de_la_boite() {
+    fn low_r2_of_returns_the_lowest_below_the_box_threshold() {
         let values = [
-            valeur("stat.r_squared", 0.4),
-            valeur("stat.r_squared", -2.0),
-            valeur("stat.r_squared", 0.5),
-            valeur("param.tau", -9.0),
+            value_of("stat.r_squared", 0.4),
+            value_of("stat.r_squared", -2.0),
+            value_of("stat.r_squared", 0.5),
+            value_of("param.tau", -9.0),
         ];
         assert_eq!(low_r2_of(&values), Some(-2.0));
     }
 
     #[test]
-    fn low_r2_of_ne_rend_rien_hors_du_palier_ou_hors_de_la_cle() {
+    fn low_r2_of_returns_nothing_outside_the_threshold_or_the_key() {
         assert_eq!(low_r2_of(&[]), None);
-        assert_eq!(low_r2_of(&[valeur("stat.r_squared", 0.6)]), None);
-        assert_eq!(low_r2_of(&[valeur("stat.r_squared", f64::NAN)]), None);
-        assert_eq!(low_r2_of(&[valeur("param.tau", 0.1)]), None);
+        assert_eq!(low_r2_of(&[value_of("stat.r_squared", 0.6)]), None);
+        assert_eq!(low_r2_of(&[value_of("stat.r_squared", f64::NAN)]), None);
+        assert_eq!(low_r2_of(&[value_of("param.tau", 0.1)]), None);
         assert_eq!(
-            low_r2_of(&[valeur("stat.r_squared", f64::NEG_INFINITY)]),
+            low_r2_of(&[value_of("stat.r_squared", f64::NEG_INFINITY)]),
             Some(f64::NEG_INFINITY)
         );
     }

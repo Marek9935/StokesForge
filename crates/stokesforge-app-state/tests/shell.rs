@@ -1,27 +1,27 @@
-//! Critères d'acceptation de la coquille UI, pilotés **sans fenêtre**.
+//! Acceptance criteria of the UI shell, driven **without a window**.
 //!
-//! Tout ce qui compte dans cette phase est vérifié ici : `AppState` ne dépend
-//! pas d'egui, donc la boucle complète (modèle → commande → annulation →
-//! sauvegarde → rechargement) tourne en CI sans serveur graphique. La couche
-//! `eframe` n'est qu'une traduction clavier/souris → [`Action`] et un
-//! peintre ; ce qu'elle ajoute n'est pas testable automatiquement et n'est
-//! donc pas testé ici (voir le critère 13, qui est un script).
+//! Everything that matters in this phase is checked here: `AppState` does not
+//! depend on egui, so the whole loop (model → command → undo →
+//! save → reload) runs in CI without a graphics server. The `eframe` layer
+//! is only a keyboard/mouse → [`Action`] translation and a
+//! painter; what it adds cannot be tested automatically and is
+//! therefore not tested here (see criterion 13, which is a script).
 //!
-//! Chaque test démarre **sa propre** `Session` sur un projet de démonstration
-//! construit par le helper local [`demo_project`] : les tests ne partagent
-//! aucun état et ne dépendent pas du projet de démonstration du binaire, qui
-//! peut changer sans invalider ces assertions.
+//! Each test starts **its own** `Session` on a demo project
+//! built by the local helper [`demo_project`]: the tests share
+//! no state and do not depend on the binary's demo project, which
+//! can change without invalidating these assertions.
 //!
-//! # Grille scopée par classeur
+//! # Grid scoped by workbook
 //!
-//! Depuis que la grille est un onglet par classeur (`Tab::Book`, plutôt que
-//! le `Tab::Grid` unique et global d'avant cette tâche), `AppState` n'a plus
-//! de « la » feuille sélectionnée : [`AppState::visible_columns`] et
-//! [`AppState::row_count`] prennent un `NodeId` de feuille explicite, et
-//! [`AppState::selected_sheet_in`] rend la feuille choisie *dans un classeur
-//! donné*. Les tests ci-dessous résolvent donc le classeur ou la feuille
-//! visée par son nom ([`book_named`], [`sheet_named`]) plutôt que de
-//! compter sur une sélection implicite.
+//! Since the grid is one tab per workbook (`Tab::Book`, rather than
+//! the single global `Tab::Grid` from before this task), `AppState` no longer has
+//! "the" selected sheet: [`AppState::visible_columns`] and
+//! [`AppState::row_count`] take an explicit sheet `NodeId`, and
+//! [`AppState::selected_sheet_in`] returns the sheet chosen *in a given
+//! workbook*. The tests below therefore resolve the target workbook or sheet
+//! by its name ([`book_named`], [`sheet_named`]) rather than
+//! relying on an implicit selection.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -45,30 +45,30 @@ use stokesforge_import::{
 use stokesforge_plot::{AxisScale, PlotType, RawVariant};
 use stokesforge_session::{Session, SessionHandle};
 
-/// Projet de démonstration des tests : un classeur `Book1` avec `Sheet1`
-/// (colonnes `Temps`, `Signal`, `Note`, cette dernière **plus courte**) et
-/// une seconde feuille `Sheet2` avec une colonne courte. L'hétérogénéité des
-/// longueurs est délibérée : c'est le cas que le modèle autorise et que la
-/// grille doit savoir peindre.
+/// Demo project of the tests: a workbook `Book1` with `Sheet1`
+/// (columns `Time`, `Signal`, `Note`, the latter **shorter**) and
+/// a second sheet `Sheet2` with a short column. The uneven
+/// lengths are deliberate: it is the case the model allows and that the
+/// grid must be able to paint.
 fn demo_project() -> Project {
-    let mut project = Project::new("Demo").expect("projet de démonstration");
+    let mut project = Project::new("Demo").expect("demo project");
     let root = project.root();
     let book = project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
+        .expect("workbook Book1");
     let sheet1 = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("Book1 lisible")
-        .expect("Sheet1 créée avec le classeur");
+        .expect("Book1 readable")
+        .expect("Sheet1 created with the workbook");
     project
         .add_column(
             sheet1,
             None,
-            Some("Temps"),
+            Some("Time"),
             Column::from_f64(&[0.0, 0.5, 1.0, 1.5, 2.0]),
         )
-        .expect("colonne Temps");
+        .expect("column Time");
     project
         .add_column(
             sheet1,
@@ -76,7 +76,7 @@ fn demo_project() -> Project {
             Some("Signal"),
             Column::from_f64(&[10.0, f64::NAN, 30.0, 40.0, 50.0]),
         )
-        .expect("colonne Signal");
+        .expect("column Signal");
     project
         .add_column(
             sheet1,
@@ -84,56 +84,56 @@ fn demo_project() -> Project {
             Some("Note"),
             Column::from_text(&[Some("a".to_string()), None, Some(String::new())]),
         )
-        .expect("colonne Note");
+        .expect("column Note");
     let sheet2 = project
         .add_worksheet(book, Some("Sheet2"))
-        .expect("feuille Sheet2");
+        .expect("worksheet Sheet2");
     project
-        .add_column(sheet2, None, Some("Court"), Column::from_f64(&[7.0, 8.0]))
-        .expect("colonne Court");
+        .add_column(sheet2, None, Some("Short"), Column::from_f64(&[7.0, 8.0]))
+        .expect("column Court");
     project
 }
 
-/// Projet minimal ne contenant qu'**une** feuille : sert à produire un
-/// fichier dont les identifiants de nœud ne recouvrent pas ceux de
-/// [`demo_project`] (critère 8).
+/// Minimal project holding only **one** sheet: used to produce a
+/// file whose node identifiers do not overlap those of
+/// [`demo_project`] (criterion 8).
 fn single_sheet_project() -> Project {
-    let mut project = Project::new("Autre").expect("projet Autre");
+    let mut project = Project::new("Other").expect("project Other");
     let root = project.root();
     let book = project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
+        .expect("workbook Book1");
     let sheet = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("Book1 lisible")
-        .expect("Sheet1 créée avec le classeur");
+        .expect("Book1 readable")
+        .expect("Sheet1 created with the workbook");
     project
         .add_column(sheet, None, Some("Unique"), Column::from_f64(&[1.0, 2.0]))
-        .expect("colonne Unique");
+        .expect("column Unique");
     project
 }
 
-/// Démarre une session sur `project` et rend l'état applicatif associé, ainsi
-/// que la session (à garder vivante : la lâcher termine l'acteur).
+/// Starts a session on `project` and returns the associated application state, as well
+/// as the session (keep it alive: dropping it ends the actor).
 fn start(project: Project, path: &Path) -> (Session, AppState) {
-    let session = Session::spawn(project, None).expect("thread de session");
+    let session = Session::spawn(project, None).expect("session thread");
     let state = AppState::new_with_preferences(
         session.handle(),
         path.display().to_string(),
         stokesforge_app_state::preferences::Preferences::load_from(None),
     )
-    .expect("état applicatif initial");
+    .expect("initial application state");
     (session, state)
 }
 
-/// Session sur le projet de démonstration, fichier de travail dans `dir`.
+/// Session on the demo project, working file in `dir`.
 fn start_demo(dir: &Path) -> (Session, AppState) {
     start(demo_project(), &dir.join("projet.stf"))
 }
 
 #[test]
-fn graphique_vide_annulable_retabli_et_enregistre() {
+fn an_empty_graph_is_undoable_redoable_and_saved() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
     let before = state.tree().len();
@@ -146,10 +146,7 @@ fn graphique_vide_annulable_retabli_et_enregistre() {
         .last()
         .unwrap();
     let spec = state.plot_spec(graph).unwrap();
-    assert!(
-        spec.title.is_empty(),
-        "#103 : un graphique vide n'a pas de titre"
-    );
+    assert!(spec.title.is_empty(), "#103: an empty graph has no title");
     assert_eq!(spec.panels.len(), 1);
     assert!(spec.panels.iter().all(|panel| panel.series.is_empty()));
     state.dispatch(Action::Undo);
@@ -164,7 +161,7 @@ fn graphique_vide_annulable_retabli_et_enregistre() {
 }
 
 #[test]
-fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
+fn a_new_project_waits_for_confirmation_and_cancelling_preserves_the_work() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
     let before = state.tree().len();
@@ -184,7 +181,7 @@ fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
     assert_eq!(state.tree().len(), 1);
     assert!(state.path().is_empty());
     assert!(!state.can_undo());
-    // Pas de confirmation pour un second projet encore vide.
+    // No confirmation for a second, still empty project.
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
@@ -198,7 +195,7 @@ fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
 }
 
 #[test]
-fn nouveau_projet_apres_enregistrement_et_apres_echec() {
+fn a_new_project_after_saving_and_after_a_failure() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
@@ -213,11 +210,11 @@ fn nouveau_projet_apres_enregistrement_et_apres_echec() {
     assert!(state.unsaved_pending().is_none());
     assert_eq!(state.tree().len(), 1);
     state.dispatch(Action::AddGraph);
-    state.set_path(dir.path().display().to_string()); // une destination qui est un dossier
+    state.set_path(dir.path().display().to_string()); // a destination that is a folder
     state.dispatch(Action::Save);
-    // S-M8 (#229) : un enregistrement raté est un échec grave, dit par un
-    // dialogue bloquant qui propose Save As….
-    let alert = state.alert().expect("échec grave");
+    // S-M8 (#229): a failed save is a serious failure, reported by a
+    // blocking dialog that offers Save As….
+    let alert = state.alert().expect("serious failure");
     assert_eq!(alert.kind, AlertKind::SaveFailed);
     assert!(!alert.message.is_empty());
     assert!(state.blocking_dialog());
@@ -230,24 +227,24 @@ fn nouveau_projet_apres_enregistrement_et_apres_echec() {
     session.shutdown().unwrap();
 }
 
-/// S-F4 (#229) : la réponse Save enregistre, **puis** poursuit le geste ; un
-/// enregistrement raté l'abandonne (le travail reste) et le dit (S-M8).
+/// S-F4 (#229): the Save answer saves, **then** continues the gesture; a
+/// failed save abandons it (the work stays) and reports it (S-M8).
 #[test]
-fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
+fn the_save_answer_saves_then_continues_the_gesture() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
-    let file = dir.path().join("travail.stf");
+    let file = dir.path().join("work.stf");
     state.set_path(file.display().to_string());
     state.dispatch(Action::AddGraph);
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
-    assert!(file.is_file(), "enregistré");
-    assert_eq!(state.tree().len(), 1, "puis le nouveau projet");
+    assert!(file.is_file(), "saved");
+    assert_eq!(state.tree().len(), 1, "then the new project");
     assert!(state.unsaved_pending().is_none());
 
-    // Échec : le geste en attente est abandonné, le travail reste.
+    // Failure: the pending gesture is abandoned, the work stays.
     state.dispatch(Action::AddWorkbook);
     let len = state.tree().len();
     state.set_path(dir.path().display().to_string());
@@ -255,32 +252,32 @@ fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
         pending_edits: false,
     });
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
-    assert_eq!(state.tree().len(), len, "le travail reste");
+    assert_eq!(state.tree().len(), len, "the work stays");
     assert_eq!(
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::SaveFailed)
     );
     assert!(state.unsaved_pending().is_none());
-    // Un enregistrement réussi plus tard ne rejoue pas le geste abandonné.
+    // A later successful save does not replay the abandoned gesture.
     state.dispatch(Action::DismissAlert);
     state.set_path(file.display().to_string());
     state.dispatch(Action::Save);
     assert_eq!(state.tree().len(), len);
 
-    // Sans fichier : Save note le geste, que l'enregistrement poursuivra
-    // (la fenêtre demande où écrire puis pousse Action::Save) ; Cancel
-    // (sélecteur fermé sans choix) l'oublie.
+    // Without a file: Save records the gesture, which the save will continue
+    // (the window asks where to write, then pushes Action::Save); Cancel
+    // (picker closed without a choice) forgets it.
     state.dispatch(Action::AddGraph);
     state.set_path(String::new());
     state.dispatch(Action::Quit {
         pending_edits: false,
     });
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
-    assert!(!state.take_quit_ready(), "rien d'enregistré encore");
+    assert!(!state.take_quit_ready(), "nothing saved yet");
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
     state.set_path(file.display().to_string());
     state.dispatch(Action::Save);
-    assert!(!state.take_quit_ready(), "geste oublié");
+    assert!(!state.take_quit_ready(), "gesture forgotten");
     state.dispatch(Action::AddGraph);
     state.set_path(String::new());
     state.dispatch(Action::Quit {
@@ -289,15 +286,15 @@ fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
     state.set_path(file.display().to_string());
     state.dispatch(Action::Save);
-    assert!(state.take_quit_ready(), "enregistré, puis Quit");
+    assert!(state.take_quit_ready(), "saved, then Quit");
     session.shutdown().unwrap();
 }
 
-/// `STOKESFORGE_DEMO=1` : la démonstration forcée se ferme sans question, même
-/// modifiée ; New et Open… continuent de demander. Témoin : sans le réglage,
-/// la même fermeture pose la question.
+/// `STOKESFORGE_DEMO=1`: the forced demo closes without a question, even
+/// when modified; New and Open… still ask. Witness: without the setting,
+/// the same close asks the question.
 #[test]
-fn la_demo_forcee_se_ferme_sans_demander_d_enregistrer() {
+fn the_forced_demo_closes_without_asking_to_save() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
     state.dispatch(Action::AddGraph);
@@ -307,7 +304,7 @@ fn la_demo_forcee_se_ferme_sans_demander_d_enregistrer() {
     assert_eq!(
         state.unsaved_pending(),
         Some(&UnsavedGesture::Quit),
-        "témoin : sans le réglage, la question est posée"
+        "witness: without the setting, the question is asked"
     );
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
 
@@ -316,7 +313,7 @@ fn la_demo_forcee_se_ferme_sans_demander_d_enregistrer() {
         pending_edits: true,
     });
     assert!(state.unsaved_pending().is_none());
-    assert!(state.take_quit_ready(), "fermeture directe");
+    assert!(state.take_quit_ready(), "direct close");
 
     state.dispatch(Action::NewProject {
         pending_edits: false,
@@ -324,16 +321,16 @@ fn la_demo_forcee_se_ferme_sans_demander_d_enregistrer() {
     assert_eq!(
         state.unsaved_pending(),
         Some(&UnsavedGesture::NewProject),
-        "New project demande encore"
+        "New project still asks"
     );
     session.shutdown().unwrap();
 }
 
-/// S-F3 (#229) : Quit et Open… demandent seulement s'il y a du travail à
-/// perdre ; Discard poursuit. Un projet illisible garde le projet **et** le
-/// chemin courants (S-M8).
+/// S-F3 (#229): Quit and Open… ask only if there is work to
+/// lose; Discard continues. An unreadable project keeps the current project **and**
+/// path (S-M8).
 #[test]
-fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
+fn quit_and_open_ask_only_if_work_would_be_lost() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state) = start_demo(dir.path());
     let file = dir.path().join("a.stf");
@@ -343,8 +340,8 @@ fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
         pending_edits: false,
     });
     assert!(state.unsaved_pending().is_none());
-    assert!(state.take_quit_ready(), "rien à perdre : Quit direct");
-    assert!(!state.take_quit_ready(), "une seule fois");
+    assert!(state.take_quit_ready(), "nothing to lose: direct Quit");
+    assert!(!state.take_quit_ready(), "only once");
 
     state.dispatch(Action::Quit {
         pending_edits: true,
@@ -354,10 +351,10 @@ fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
     assert!(state.take_quit_ready());
 
-    // Open… d'un fichier illisible, sans travail à perdre.
+    // Open… of an unreadable file, with no work to lose.
     let len = state.tree().len();
-    let bad = dir.path().join("illisible.stf");
-    std::fs::write(&bad, "pas un projet").unwrap();
+    let bad = dir.path().join("unreadable.stf");
+    std::fs::write(&bad, "not a project").unwrap();
     state.dispatch(Action::OpenProject {
         path: bad.display().to_string(),
         pending_edits: false,
@@ -366,11 +363,11 @@ fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::OpenFailed)
     );
-    assert_eq!(state.path(), file.display().to_string(), "chemin gardé");
+    assert_eq!(state.path(), file.display().to_string(), "path kept");
     assert_eq!(state.tree().len(), len);
     state.dispatch(Action::DismissAlert);
 
-    // Open… avec du travail : question, puis Discard ouvre.
+    // Open… with work: a question, then Discard opens.
     let other = dir.path().join("b.stf");
     state.set_path(other.display().to_string());
     state.dispatch(Action::Save);
@@ -384,50 +381,46 @@ fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
         state.unsaved_pending(),
         Some(UnsavedGesture::Open(path)) if *path == other.display().to_string()
     ));
-    assert_eq!(
-        state.path(),
-        file.display().to_string(),
-        "pas encore ouvert"
-    );
+    assert_eq!(state.path(), file.display().to_string(), "not opened yet");
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
     assert_eq!(state.path(), other.display().to_string());
     assert_eq!(state.tree().len(), len);
     session.shutdown().unwrap();
 }
 
-/// Identifiant de la colonne `name` dans `sheet`.
+/// Identifier of the column `name` in `sheet`.
 fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
     state
         .visible_columns(sheet)
         .into_iter()
         .find(|(_, column_name, _)| column_name == name)
         .map(|(id, _, _)| id)
-        .unwrap_or_else(|| panic!("colonne {name} visible dans {sheet}"))
+        .unwrap_or_else(|| panic!("column {name} visible in {sheet}"))
 }
 
-/// Cellule brute du modèle (au-delà de ce que `cell_text` laisse voir).
+/// Raw model cell (beyond what `cell_text` lets you see).
 fn cell(state: &AppState, column: NodeId, row: usize) -> Cell {
     state
         .tree()
         .get(column)
-        .expect("colonne présente")
+        .expect("column present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .get(row)
 }
 
-/// Type d'une colonne dans l'arbre courant.
+/// Type of a column in the current tree.
 fn column_type(state: &AppState, column: NodeId) -> ColumnType {
     state
         .tree()
         .get(column)
-        .expect("colonne présente")
+        .expect("column present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .column_type()
 }
 
-/// Feuille nommée `name` dans l'arbre courant.
+/// Sheet named `name` in the current tree.
 fn sheet_named(tree: &Tree, name: &str) -> NodeId {
     tree.walk_all()
         .into_iter()
@@ -435,11 +428,11 @@ fn sheet_named(tree: &Tree, name: &str) -> NodeId {
             tree.node(*id)
                 .is_some_and(|node| node.kind().is_worksheet() && node.name() == name)
         })
-        .unwrap_or_else(|| panic!("feuille {name} présente"))
+        .unwrap_or_else(|| panic!("sheet {name} present"))
 }
 
-/// Classeur nommé `name` dans l'arbre courant. Pendant de [`sheet_named`],
-/// nécessaire depuis que la sélection de feuille est scopée par classeur
+/// Workbook named `name` in the current tree. Counterpart of [`sheet_named`],
+/// needed since the sheet selection is scoped by workbook
 /// ([`AppState::selected_sheet_in`]).
 fn book_named(tree: &Tree, name: &str) -> NodeId {
     tree.walk_all()
@@ -452,39 +445,39 @@ fn book_named(tree: &Tree, name: &str) -> NodeId {
                 ) && node.name() == name
             })
         })
-        .unwrap_or_else(|| panic!("classeur {name} présent"))
+        .unwrap_or_else(|| panic!("workbook {name} present"))
 }
 
-/// Poignée de session inutilisée hors construction : silence le lint sur les
-/// tests qui n'en ont pas besoin.
+/// Session handle unused outside construction: silences the lint on the
+/// tests that do not need it.
 #[allow(dead_code)]
 fn unused(_: &SessionHandle) {}
 
-/// Protège les tests qui isolent le dossier de config des recettes d'import
-/// (voir [`isolate_recipe_store`]) contre d'autres tests de ce même binaire
-/// qui feraient la même chose en parallèle : `std::env::set_var` est un état
-/// global du *processus*, jamais scopé à un thread — `cargo test` fait
-/// tourner les tests de ce fichier sur plusieurs threads par défaut.
+/// Protects the tests that isolate the import-recipe config folder
+/// (see [`isolate_recipe_store`]) from other tests of this same binary
+/// that would do the same in parallel: `std::env::set_var` is global
+/// *process* state, never scoped to a thread — `cargo test` runs
+/// the tests of this file on several threads by default.
 static IMPORT_RECIPES_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Redirige le dossier de config vers un répertoire temporaire propre à
-/// l'appel, pour la durée de vie de la valeur rendue : `stokesforge_import::
-/// RecipeStore::load`/`save` (donc `AppState::open_import`/`save_import_recipe`/
-/// `delete_import_recipe`) passent par `stokesforge_import::config_dir::
-/// config_dir`, qui lit `STOKESFORGE_CONFIG_DIR` (#332). `XDG_CONFIG_HOME`
-/// est posée aussi : c'est la seule que `directories` respecte, et sur
-/// Linux seulement. Sans `STOKESFORGE_CONFIG_DIR`, ces méthodes lisaient et
-/// écrivaient le vrai profil de la machine sous Windows — non hermétique,
-/// et en course entre tests (« Access is denied »).
+/// Redirects the config folder to a temporary directory specific to the
+/// call, for the lifetime of the returned value: `stokesforge_import::
+/// RecipeStore::load`/`save` (hence `AppState::open_import`/`save_import_recipe`/
+/// `delete_import_recipe`) go through `stokesforge_import::config_dir::
+/// config_dir`, which reads `STOKESFORGE_CONFIG_DIR` (#332). `XDG_CONFIG_HOME`
+/// is set too: it is the only one `directories` honors, and on
+/// Linux only. Without `STOKESFORGE_CONFIG_DIR`, these methods read and
+/// wrote the machine's real profile on Windows — not hermetic,
+/// and racing between tests ("Access is denied").
 ///
-/// Garde le verrou et le répertoire temporaire vivants jusqu'à ce que la
-/// valeur rendue soit abandonnée (fin du test, y compris en cas de panique :
-/// `Drop` restaure les deux variables à leur valeur d'avant).
+/// Keeps the lock and the temporary directory alive until the
+/// returned value is dropped (end of the test, panic included:
+/// `Drop` restores both variables to their earlier value).
 fn isolate_recipe_store() -> RecipeStoreIsolation {
     let lock = IMPORT_RECIPES_ENV_LOCK
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let dir = tempfile::tempdir().expect("répertoire temporaire pour les recettes d'import");
+    let dir = tempfile::tempdir().expect("temporary directory for the import recipes");
     let names = [
         stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
         "XDG_CONFIG_HOME",
@@ -500,8 +493,8 @@ fn isolate_recipe_store() -> RecipeStoreIsolation {
     }
 }
 
-/// Ce que [`isolate_recipe_store`] rend : le verrou, le dossier temporaire et
-/// les valeurs d'avant des variables, restaurées à la chute.
+/// What [`isolate_recipe_store`] returns: the lock, the temporary folder and
+/// the earlier values of the variables, restored on drop.
 struct RecipeStoreIsolation {
     previous: [(&'static str, Option<std::ffi::OsString>); 2],
     _lock: std::sync::MutexGuard<'static, ()>,
@@ -509,7 +502,7 @@ struct RecipeStoreIsolation {
 }
 
 impl RecipeStoreIsolation {
-    /// Le dossier de config temporaire.
+    /// The temporary config folder.
     fn path(&self) -> &std::path::Path {
         self.dir.path()
     }
@@ -526,40 +519,38 @@ impl Drop for RecipeStoreIsolation {
     }
 }
 
-/// #332 : sous l'isolation, le dossier de config est le dossier temporaire
-/// (`Path` égal, pas une chaîne), et un enregistrement de modèle d'import y
-/// écrit son fichier. Sous Windows, `XDG_CONFIG_HOME` seule ne suffit pas :
-/// `directories` l'ignore, et le modèle partait dans le vrai profil.
+/// #332: under the isolation, the config folder is the temporary folder
+/// (equal `Path`, not a string), and saving an import template there
+/// writes its file. On Windows, `XDG_CONFIG_HOME` alone is not enough:
+/// `directories` ignores it, and the template went to the real profile.
 #[test]
-fn l_isolation_redirige_le_dossier_de_config_et_l_enregistrement_y_ecrit() {
+fn the_isolation_redirects_the_config_folder_and_saving_writes_there() {
     let isolation = isolate_recipe_store();
     assert_eq!(
         stokesforge_import::config_dir::config_dir().as_deref(),
         Some(isolation.path()),
-        "le dossier de config est le dossier temporaire"
+        "the config folder is the temporary folder"
     );
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
-    state.import_state_mut().unwrap().save_as_name = "Témoin".to_string();
+    state.import_state_mut().unwrap().save_as_name = "Witness".to_string();
     state.save_import_recipe();
     assert!(!state.status().unwrap().is_error());
     let file = isolation.path().join("import_recipes.json");
-    assert!(file.is_file(), "le modèle est écrit dans {file:?}");
-    assert!(std::fs::read_to_string(&file).unwrap().contains("Témoin"));
+    assert!(file.is_file(), "the template is written to {file:?}");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("Witness"));
 }
 
-// -- 1. État initial --
+// -- 1. Initial state --
 
 #[test]
 fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
 
     let book1 = book_named(state.tree(), "Book1");
-    let sheet = state
-        .selected_sheet_in(book1)
-        .expect("une feuille par défaut");
+    let sheet = state.selected_sheet_in(book1).expect("a default sheet");
     assert_eq!(sheet, sheet_named(state.tree(), "Sheet1"));
 
     let columns = state.visible_columns(sheet);
@@ -570,13 +561,13 @@ fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
     assert_eq!(
         described,
         vec![
-            ("Temps", ColumnType::Numeric),
+            ("Time", ColumnType::Numeric),
             ("Signal", ColumnType::Numeric),
             ("Note", ColumnType::Mixed),
         ]
     );
 
-    // Maximum des longueurs (5, 5, 3), pas la longueur de la première colonne.
+    // Maximum of the lengths (5, 5, 3), not the length of the first column.
     assert_eq!(state.row_count(sheet), 5);
 
     assert!(!state.can_undo());
@@ -585,144 +576,144 @@ fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
     assert_eq!(state.redo_label(), None);
 }
 
-// -- 2. Saisie d'une cellule --
+// -- 2. Entering a cell --
 
-/// #222 : la grille peint 6 chiffres significatifs, mais l'édition, le copier
-/// et la comparaison de saisie gardent la valeur entière.
+/// #222: the grid paints 6 significant digits, but editing, copying
+/// and the input comparison keep the full value.
 #[test]
 fn the_grid_paints_six_digits_but_edits_and_copies_the_exact_value() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "12.345678901".to_string(),
     });
 
-    assert_eq!(state.cell_display(temps, 1), "12.3457");
-    assert_eq!(state.cell_text(temps, 1), "12.345678901");
-    state.begin_edit(temps, 1);
+    assert_eq!(state.cell_display(time_col, 1), "12.3457");
+    assert_eq!(state.cell_text(time_col, 1), "12.345678901");
+    state.begin_edit(time_col, 1);
     assert_eq!(
         state.editing().map(|edit| edit.buffer.clone()),
         Some("12.345678901".to_string()),
-        "le tampon d'édition porte la valeur entière"
+        "the edit buffer holds the full value"
     );
 }
 
-/// #218 : une colonne Date/Time s'affiche, s'édite et se copie en ISO 8601 ;
-/// `10/10/2026 14:30` (jour d'abord) est lu en timestamp ; un nombre nu reste
-/// un timestamp ; un texte qui n'est pas une date promeut la colonne en Mixed.
+/// #218: a Date/Time column is displayed, edited and copied in ISO 8601;
+/// `10/10/2026 14:30` (day first) is read as a timestamp; a bare number stays
+/// a timestamp; a text that is not a date promotes the column to Mixed.
 #[test]
 fn a_datetime_cell_shows_iso_and_reads_day_first_dates() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::SetColumnType {
-        column: temps,
+        column: time_col,
         column_type: ColumnType::DateTime,
     });
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 0,
         text: "10/10/2026 14:30".to_string(),
     });
-    assert_eq!(state.cell_display(temps, 0), "2026-10-10 14:30");
-    assert_eq!(state.cell_text(temps, 0), "2026-10-10 14:30");
-    let iso = match cell(&state, temps, 0) {
+    assert_eq!(state.cell_display(time_col, 0), "2026-10-10 14:30");
+    assert_eq!(state.cell_text(time_col, 0), "2026-10-10 14:30");
+    let iso = match cell(&state, time_col, 0) {
         Cell::Float(value) => value,
-        other => panic!("timestamp attendu, reçu {other:?}"),
+        other => panic!("timestamp expected, got {other:?}"),
     };
 
-    // Jour d'abord : 10/11/2026 est le 10 novembre.
+    // Day first: 10/11/2026 is 10 November.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "10/11/2026".to_string(),
     });
-    assert_eq!(state.cell_text(temps, 1), "2026-11-10 00:00");
-    // La forme ISO se relit à l'identique.
+    assert_eq!(state.cell_text(time_col, 1), "2026-11-10 00:00");
+    // The ISO form reads back identically.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "2026-10-10 14:30".to_string(),
     });
-    assert_eq!(cell(&state, temps, 2), Cell::Float(iso));
-    // Un nombre nu reste un timestamp POSIX.
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(iso));
+    // A bare number stays a POSIX timestamp.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 3,
         text: "86400".to_string(),
     });
-    assert_eq!(state.cell_text(temps, 3), "1970-01-02 00:00");
-    // Mois d'abord (13e mois) : pas une date, la colonne devient Mixed.
+    assert_eq!(state.cell_text(time_col, 3), "1970-01-02 00:00");
+    // Month first (13th month): not a date, the column becomes Mixed.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 3,
         text: "10/13/2026".to_string(),
     });
-    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+    assert_eq!(column_type(&state, time_col), ColumnType::Mixed);
 }
 
-/// #223 : la virgule est lue comme un point décimal dans une cellule Numeric ;
-/// l'interface réécrit toujours avec le point. « 1,000 » est lu 1 (S-R6).
+/// #223: the comma is read as a decimal point in a Numeric cell;
+/// the interface always writes back with the point. "1,000" is read as 1 (S-R6).
 #[test]
 fn a_decimal_comma_is_read_in_a_numeric_cell_and_shown_with_a_point() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "42,5".to_string(),
     });
-    assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
-    assert_eq!(state.cell_text(temps, 1), "42.5");
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(42.5));
+    assert_eq!(state.cell_text(time_col, 1), "42.5");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "1,000".to_string(),
     });
-    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1.0));
 
-    // Témoin : une virgule ambiguë n'est pas un nombre, la colonne devient mixte
-    // plutôt que de perdre le texte.
+    // Witness: an ambiguous comma is not a number, the column becomes mixed
+    // rather than losing the text.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 3,
         text: "1,2,3".to_string(),
     });
-    assert_eq!(state.cell_text(temps, 3), "1,2,3");
+    assert_eq!(state.cell_text(time_col, 3), "1,2,3");
 }
 
 #[test]
 fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let before = state.snapshot().revision;
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "42.5".to_string(),
     });
 
-    assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
-    assert_eq!(state.cell_text(temps, 1), "42.5");
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(42.5));
+    assert_eq!(state.cell_text(time_col, 1), "42.5");
     assert!(state.can_undo());
-    // La colonne A, pas « Temps » : le libellé désigne la colonne comme la
-    // grille l'affiche (sa lettre de position, `ColumnRef`), jamais par son
-    // nom de nœud, qui n'apparaît nulle part à l'écran. `Temps` reste le nom
-    // de nœud de cette colonne (c'est par lui que `column_id` la retrouve
-    // ici), il n'a simplement plus sa place dans un libellé destiné à
-    // l'utilisateur.
+    // Column A, not "Time": the label designates the column as the
+    // grid displays it (its position letter, `ColumnRef`), never by its
+    // node name, which appears nowhere on screen. `Time` remains the node name
+    // of this column (it is how `column_id` finds it
+    // here), it simply no longer belongs in a label meant for the
+    // user.
     assert_eq!(
         state.undo_label(),
         Some(undo_entry(&HistoryLabel::SetCells {
@@ -732,96 +723,96 @@ fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     assert!(state.snapshot().revision > before);
 }
 
-// -- 3. Saisie non numérique dans une colonne numérique --
+// -- 3. Non-numeric input in a numeric column --
 
-/// Taper un texte dans une colonne numérique **n'est plus une erreur** : la
-/// colonne passe à [`ColumnType::Mixed`] et la cellule porte le texte, les
-/// autres gardant leurs nombres (`Command::SetCellsPromoting`). Avant les
-/// colonnes à types mixtes, la saisie était refusée et il fallait convertir
-/// toute la colonne en texte — donc rendre tout le reste intraçable — pour
-/// noter un « n/a » sur une seule ligne.
+/// Typing text into a numeric column **is no longer an error**: the
+/// column becomes [`ColumnType::Mixed`] and the cell holds the text, the
+/// others keeping their numbers (`Command::SetCellsPromoting`). Before
+/// mixed-type columns, the input was refused and the whole column had to be
+/// converted to text — making everything else unplottable — to
+/// note an "n/a" on a single row.
 #[test]
 fn non_numeric_input_promotes_the_column_to_mixed() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let before = state.snapshot().revision;
-    let voisin = cell(&state, temps, 0);
+    let voisin = cell(&state, time_col, 0);
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "n/a".to_string(),
     });
 
     assert!(
         state.status().is_none_or(|status| !status.is_error()),
-        "une saisie non numérique n'est plus une erreur"
+        "a non-numeric input is no longer an error"
     );
-    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
-    assert_eq!(state.cell_text(temps, 1), "n/a");
+    assert_eq!(column_type(&state, time_col), ColumnType::Mixed);
+    assert_eq!(state.cell_text(time_col, 1), "n/a");
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         voisin,
-        "les autres lignes gardent leur nombre"
+        "the other rows keep their number"
     );
     assert!(state.snapshot().revision > before);
 
-    // Une seule entrée d'historique pour la conversion **et** l'écriture :
-    // annuler ramène à la fois le type et la valeur d'avant.
+    // A single history entry for the conversion **and** the write:
+    // undoing brings back both the earlier type and value.
     state.dispatch(Action::Undo);
-    assert_eq!(column_type(&state, temps), ColumnType::Numeric);
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5), "valeur intacte");
+    assert_eq!(column_type(&state, time_col), ColumnType::Numeric);
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(0.5), "value intact");
 
-    // Et la deuxième saisie tolérante, sur une colonne déjà mixte, ne change
-    // plus le type : elle écrit simplement une cellule texte.
+    // And the second tolerant input, on an already mixed column, no longer
+    // changes the type: it simply writes a text cell.
     state.dispatch(Action::Redo);
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "hs".to_string(),
     });
-    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
-    assert_eq!(state.cell_text(temps, 2), "hs");
-    // Et un nombre tapé dans une colonne devenue mixte reste un nombre.
+    assert_eq!(column_type(&state, time_col), ColumnType::Mixed);
+    assert_eq!(state.cell_text(time_col, 2), "hs");
+    // And a number typed into a column that became mixed stays a number.
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 3,
         text: "7.25".to_string(),
     });
-    assert_eq!(cell(&state, temps, 3), Cell::Float(7.25));
+    assert_eq!(cell(&state, time_col, 3), Cell::Float(7.25));
 }
 
-// -- 4. Valeur manquante --
+// -- 4. Missing value --
 
 #[test]
 fn blank_text_writes_a_missing_numeric_value() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "   ".to_string(),
     });
 
-    match cell(&state, temps, 2) {
-        Cell::Float(value) => assert!(value.is_nan(), "valeur manquante = NaN"),
-        other => panic!("cellule numérique attendue, reçu {other:?}"),
+    match cell(&state, time_col, 2) {
+        Cell::Float(value) => assert!(value.is_nan(), "missing value = NaN"),
+        other => panic!("numeric cell expected, got {other:?}"),
     }
-    assert_eq!(state.cell_text(temps, 2), "");
+    assert_eq!(state.cell_text(time_col, 2), "");
     assert!(
         state.status().is_none_or(|status| !status.is_error()),
-        "écrire une valeur manquante n'est pas une erreur"
+        "writing a missing value is not an error"
     );
 }
 
 #[test]
 fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -838,20 +829,16 @@ fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
         row: 0,
         text: String::new(),
     });
-    assert_eq!(
-        cell(&state, note, 0),
-        Cell::Text(None),
-        "manquante, pas \"\""
-    );
-    // A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8) : une valeur
-    // absente ne s'affiche plus comme une chaîne vide (qui représenterait une
-    // chaîne vide *présente*) mais selon la convention de `cell_text` — un
-    // espace insécable, ici comparé par la propriété plutôt que par sa valeur
-    // littérale pour ne pas dupliquer la constante hors de `stokesforge-app`.
+    assert_eq!(cell(&state, note, 0), Cell::Text(None), "missing, not \"\"");
+    // A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8): an absent
+    // value is no longer displayed as an empty string (which would represent a
+    // *present* empty string) but per the convention of `cell_text` — a
+    // non-breaking space, compared here by property rather than by its literal
+    // value so as not to duplicate the constant outside `stokesforge-app`.
     assert_ne!(
         state.cell_text(note, 0),
         "",
-        "une valeur absente ne s'affiche plus comme une chaîne vide présente"
+        "an absent value is no longer displayed as a present empty string"
     );
 
     state.dispatch(Action::Undo);
@@ -859,23 +846,27 @@ fn empty_text_writes_a_missing_text_value_and_undo_restores_it() {
     assert_eq!(state.cell_text(note, 0), "a");
 }
 
-// -- 5. Annulation / rétablissement --
+// -- 5. Undo / redo --
 
 #[test]
 fn undo_and_redo_walk_the_history_both_ways() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "42.5".to_string(),
     });
 
     state.dispatch(Action::Undo);
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5), "valeur d'origine");
+    assert_eq!(
+        cell(&state, time_col, 1),
+        Cell::Float(0.5),
+        "original value"
+    );
     assert!(state.can_redo());
     assert_eq!(
         state.redo_label(),
@@ -885,44 +876,44 @@ fn undo_and_redo_walk_the_history_both_ways() {
     );
 
     state.dispatch(Action::Redo);
-    assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(42.5));
 }
 
-// -- 6. Annuler à vide --
+// -- 6. Undo on empty --
 
 #[test]
 fn undo_on_an_empty_history_is_a_notice_not_an_error() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let before = state.snapshot().revision;
 
     state.dispatch(Action::Undo);
 
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert_eq!(
         status.level,
         StatusLevel::Warning,
-        "« rien à annuler » est le pendant du bouton grisé : un avertissement, pas une erreur"
+        "\"nothing to undo\" is the counterpart of the greyed-out button: a warning, not an error"
     );
     assert_eq!(state.snapshot().revision, before);
 
     state.dispatch(Action::Redo);
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert!(!status.is_error());
     assert_eq!(state.snapshot().revision, before);
 }
 
-// -- 7. La boucle complète — critère de sortie de phase --
+// -- 7. The full loop — phase exit criterion --
 
 #[test]
 fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "42.5".to_string(),
     });
@@ -931,51 +922,51 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
     state.dispatch(Action::Save);
     assert!(
         state.status().is_some_and(|status| !status.is_error()),
-        "sauvegarde réussie : {:?}",
+        "save succeeded: {:?}",
         state.status()
     );
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "99.0".to_string(),
     });
-    assert_eq!(cell(&state, temps, 1), Cell::Float(99.0));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(99.0));
 
     state.dispatch(Action::Load);
     assert!(
         state.status().is_some_and(|status| !status.is_error()),
-        "chargement réussi : {:?}",
+        "load succeeded: {:?}",
         state.status()
     );
 
     assert_eq!(
         **state.tree(),
         *saved_tree,
-        "l'arbre rechargé est identique à celui d'après la première saisie"
+        "the reloaded tree is identical to the one after the first input"
     );
-    assert!(!state.can_undo(), "le chargement vide l'historique");
+    assert!(!state.can_undo(), "loading clears the history");
     assert!(!state.can_redo());
 
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    assert_eq!(state.cell_text(temps, 1), "42.5");
+    let time_col = column_id(&state, sheet1, "Time");
+    assert_eq!(state.cell_text(time_col, 1), "42.5");
 }
 
-// -- 8. Rechargement et sélection périmée --
+// -- 8. Reload and stale selection --
 
 #[test]
 fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let mine = dir.path().join("mien.stf");
-    let other = dir.path().join("autre.stf");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mine = dir.path().join("mine.stf");
+    let other = dir.path().join("other.stf");
 
-    // Le fichier étranger est écrit par une session distincte.
+    // The foreign file is written by a separate session.
     {
         let (other_session, mut other_state) = start(single_sheet_project(), &other);
         other_state.dispatch(Action::Save);
         assert!(other_state.status().is_some_and(|s| !s.is_error()));
-        other_session.shutdown().expect("arrêt de la session");
+        other_session.shutdown().expect("session shutdown");
     }
 
     let (_session, mut state) = start_demo(&mine);
@@ -990,19 +981,19 @@ fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
 
     assert!(
         !state.tree().contains(sheet2),
-        "le fichier étranger ne porte pas l'identifiant de Sheet2 \
-         (sinon le critère ne teste rien) — `book1`, créé plus tôt dans les \
-         deux projets, peut en revanche coïncider : ce n'est pas ce que ce \
-         critère vérifie"
+        "the foreign file does not carry the identifier of Sheet2 \
+         (otherwise the criterion tests nothing) — `book1`, created earlier in the \
+         two projects, may on the other hand coincide: that is not what this \
+         criterion checks"
     );
 
-    // Auto-cicatrisant : un classeur du nouvel arbre, jamais explicitement
-    // sélectionné, retombe de lui-même sur sa première feuille — voir la doc
-    // de `AppState::selected_sheet_in`.
+    // Self-healing: a workbook of the new tree, never explicitly
+    // selected, falls back on its own to its first sheet — see the doc
+    // of `AppState::selected_sheet_in`.
     let book = book_named(state.tree(), "Book1");
     let sheet = state
         .selected_sheet_in(book)
-        .expect("une feuille par défaut dans le classeur du nouveau fichier");
+        .expect("a default sheet in the new file's workbook");
     assert!(state
         .tree()
         .node(sheet)
@@ -1015,37 +1006,37 @@ fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
     assert_eq!(names, vec!["Unique".to_string()]);
 }
 
-// -- 9. Chemin invalide --
+// -- 9. Invalid path --
 
 #[test]
 fn a_failing_load_leaves_the_model_and_history_untouched() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 0,
         text: "3.0".to_string(),
     });
     let revision = state.snapshot().revision;
     let tree = std::sync::Arc::clone(state.tree());
 
-    state.set_path(dir.path().join("inexistant.stf").display().to_string());
+    state.set_path(dir.path().join("missing.stf").display().to_string());
     state.dispatch(Action::Load);
 
-    // S-M8 (#229) : un projet illisible est un échec grave, dit par un dialogue.
+    // S-M8 (#229): an unreadable project is a serious failure, reported by a dialog.
     assert_eq!(
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::OpenFailed)
     );
     assert_eq!(state.snapshot().revision, revision);
     assert_eq!(**state.tree(), *tree);
-    assert!(state.can_undo(), "l'historique est préservé");
+    assert!(state.can_undo(), "the history is preserved");
 }
 
-/// Un état dont le plafond d'ouverture est réglé par le fichier de préférences
-/// de `dir` (`max_file_mb` en Mo, A2 #316).
+/// A state whose opening cap is set by the preferences file
+/// of `dir` (`max_file_mb` in MB, A2 #316).
 fn start_with_max_file_mb(
     project: Project,
     path: &Path,
@@ -1054,56 +1045,56 @@ fn start_with_max_file_mb(
 ) -> (Session, AppState) {
     let preferences_file = dir.join("preferences.json");
     std::fs::write(&preferences_file, format!(r#"{{"max_file_mb":{mb}}}"#)).unwrap();
-    let session = Session::spawn(project, None).expect("thread de session");
+    let session = Session::spawn(project, None).expect("session thread");
     let state = AppState::new_with_preferences(
         session.handle(),
         path.display().to_string(),
         stokesforge_app_state::preferences::Preferences::load_from(Some(preferences_file)),
     )
-    .expect("état applicatif initial");
+    .expect("initial application state");
     (session, state)
 }
 
-/// A2 (#316) : un fichier au-dessus du plafond d'ouverture est refusé par un
-/// dialogue, le projet et le chemin courants sont gardés.
+/// A2 (#316): a file above the opening cap is refused by a
+/// dialog, the current project and path are kept.
 #[test]
 fn opening_a_file_over_the_limit_is_refused_and_keeps_the_project_and_path() {
     stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let current = dir.path().join("projet.stf");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let current = dir.path().join("project.stf");
     let (_session, mut state) = start_with_max_file_mb(demo_project(), &current, dir.path(), 16);
     state.dispatch(Action::Save);
     let len = state.tree().len();
-    // 16 Mo + 1 octet : le contenu n'a pas à être un projet, la taille suffit.
-    let big = dir.path().join("gros.stf");
+    // 16 MB + 1 byte: the content need not be a project, the size is enough.
+    let big = dir.path().join("big.stf");
     std::fs::write(&big, vec![0u8; (16 << 20) + 1]).unwrap();
     state.dispatch(Action::OpenProject {
         path: big.display().to_string(),
         pending_edits: false,
     });
-    let alert = state.alert().expect("un dialogue d'échec");
+    let alert = state.alert().expect("a failure dialog");
     assert_eq!(alert.kind, AlertKind::OpenFailed);
     assert!(
         alert.message.contains("too large") && alert.message.contains("Preferences"),
-        "message inattendu : {}",
+        "unexpected message: {}",
         alert.message
     );
-    assert_eq!(state.path(), current.display().to_string(), "chemin gardé");
-    assert_eq!(state.tree().len(), len, "projet gardé");
+    assert_eq!(state.path(), current.display().to_string(), "path kept");
+    assert_eq!(state.tree().len(), len, "project kept");
 }
 
-/// A2 (#316) : un enregistrement au-dessus du plafond réussit, mais l'avertit
-/// (à la place de « Enregistré »), en disant comment relever la limite.
+/// A2 (#316): a save above the cap succeeds, but warns about it
+/// (instead of "Saved"), saying how to raise the limit.
 #[test]
 fn saving_over_the_opening_limit_succeeds_with_a_warning() {
     stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let file = dir.path().join("gros.stf");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let file = dir.path().join("big.stf");
     let mut project = demo_project();
     let root = project.root();
-    let book = project.add_workbook(root, Some("Gros")).unwrap();
+    let book = project.add_workbook(root, Some("Big")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
-    // 2,3 millions de réels : plus de 16 Mo une fois écrits.
+    // 2.3 million reals: more than 16 MB once written.
     project
         .add_column(
             sheet,
@@ -1114,31 +1105,31 @@ fn saving_over_the_opening_limit_succeeds_with_a_warning() {
         .unwrap();
     let (_session, mut state) = start_with_max_file_mb(project, &file, dir.path(), 16);
     state.dispatch(Action::Save);
-    assert!(file.exists(), "l'enregistrement a réussi");
+    assert!(file.exists(), "the save succeeded");
     assert!(state.alert().is_none());
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert_eq!(status.level, StatusLevel::Warning);
     assert!(
         status.text.contains("Preferences") && status.text.contains("16 MB"),
-        "avertissement inattendu : {}",
+        "unexpected warning: {}",
         status.text
     );
 
-    // Sous le plafond : le message habituel, sans avertissement.
+    // Under the cap: the usual message, without a warning.
     let (_session, mut small) = start_with_max_file_mb(
         demo_project(),
-        &dir.path().join("petit.stf"),
+        &dir.path().join("small.stf"),
         dir.path(),
         16,
     );
     small.dispatch(Action::Save);
-    let status = small.status().expect("un message");
+    let status = small.status().expect("a message");
     assert_ne!(status.level, StatusLevel::Warning);
     assert!(status.text.starts_with("Saved to"), "{}", status.text);
 }
 
-/// Un calcul illisible dans le fichier est écarté (le projet se charge) mais
-/// dit par un avertissement de la barre d'état, plus en silence (#278).
+/// An unreadable calculation in the file is discarded (the project loads) but
+/// reported by a status bar warning, no longer silently (#278).
 #[test]
 fn loading_a_file_with_an_unreadable_calculation_warns() {
     use stokesforge_analysis::correct::CorrectOp;
@@ -1147,8 +1138,8 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
         CalculationDraft, Column, ColumnMeta, OutputDraft, SeriesRef, SeriesResult,
     };
     stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let path = dir.path().join("calcul.stf");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let path = dir.path().join("calculation.stf");
 
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -1180,13 +1171,13 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
             low_r2_dialog: true,
         })
         .unwrap();
-    stokesforge_persistence::save(&project, &path).expect("écriture");
-    // Même longueur : l'opération devient illisible sans décaler un octet.
+    stokesforge_persistence::save(&project, &path).expect("write");
+    // Same length: the operation becomes unreadable without shifting a byte.
     let mut bytes = std::fs::read(&path).unwrap();
     let at = bytes
         .windows(8)
         .position(|w| w == b"subtract")
-        .expect("l'opération est dans le fichier");
+        .expect("the operation is in the file");
     bytes[at..at + 8].copy_from_slice(b"subtraXX");
     std::fs::write(&path, &bytes).unwrap();
 
@@ -1194,8 +1185,8 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
     state.set_path(path.display().to_string());
     state.dispatch(Action::Load);
 
-    assert!(state.alert().is_none(), "le projet se charge");
-    let status = state.status().expect("un message");
+    assert!(state.alert().is_none(), "the project loads");
+    let status = state.status().expect("a message");
     assert_eq!(status.level, StatusLevel::Warning);
     assert!(
         status.text.contains("was discarded") && status.text.contains('#'),
@@ -1204,22 +1195,22 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
     );
 }
 
-/// Une erreur de lecture `.stf` s'affiche par la phrase du catalogue de
-/// l'application (#47), pas par le texte brut du crate du dessous : « is damaged »
-/// ici, « corrupt file » dans le `Display` que lit le CLI.
+/// A `.stf` read error is shown through the sentence of the application
+/// catalog (#47), not through the raw text of the crate below: "is damaged"
+/// here, "corrupt file" in the `Display` that the CLI reads.
 #[test]
 fn a_stf_read_error_is_shown_through_the_catalogue() {
     // Compared in English: the test must not depend on `STOKESFORGE_LANG` or on the
     // saved preference of whoever runs it.
     stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
 
-    let truncated = dir.path().join("tronque.stf");
-    std::fs::write(&truncated, b"STKF\x01").expect("écriture du fichier de test");
+    let truncated = dir.path().join("truncated.stf");
+    std::fs::write(&truncated, b"STKF\x01").expect("writing the test file");
     state.set_path(truncated.display().to_string());
     state.dispatch(Action::Load);
-    let alert = state.alert().expect("un échec grave (S-M8)");
+    let alert = state.alert().expect("a serious failure (S-M8)");
     assert_eq!(
         alert.message,
         format!(
@@ -1228,12 +1219,12 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
         )
     );
 
-    let foreign = dir.path().join("etranger.stf");
-    std::fs::write(&foreign, b"hello").expect("écriture du fichier de test");
+    let foreign = dir.path().join("foreign.stf");
+    std::fs::write(&foreign, b"hello").expect("writing the test file");
     state.set_path(foreign.display().to_string());
     state.dispatch(Action::DismissAlert);
     state.dispatch(Action::Load);
-    let alert = state.alert().expect("un échec grave (S-M8)");
+    let alert = state.alert().expect("a serious failure (S-M8)");
     assert_eq!(
         alert.message,
         format!("{} is not a StokesForge file", foreign.display())
@@ -1242,9 +1233,9 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
 
 #[test]
 fn a_failing_save_reports_an_error_and_writes_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
-    let target = dir.path().join("absent").join("projet.stf");
+    let target = dir.path().join("absent").join("project.stf");
 
     state.set_path(target.display().to_string());
     state.dispatch(Action::Save);
@@ -1252,32 +1243,32 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
     assert_eq!(
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::SaveFailed),
-        "S-M8 : dialogue bloquant"
+        "S-M8: blocking dialog"
     );
-    assert!(!target.exists(), "rien n'a été écrit");
+    assert!(!target.exists(), "nothing was written");
     assert!(!target.parent().is_some_and(Path::exists));
 }
 
-/// #315 : un fichier qui existe au chemin de départ ne fait pas du projet un
-/// projet « enregistré » — seul un vrai chargement ([`AppState::mark_loaded`])
-/// pose le repère. Sinon Ctrl+S écraserait ce fichier sans contrôle.
+/// #315: a file that exists at the starting path does not make the project a
+/// "saved" project — only a real load ([`AppState::mark_loaded`])
+/// sets the marker. Otherwise Ctrl+S would overwrite that file unchecked.
 #[test]
-fn un_fichier_existant_ne_rend_pas_le_projet_enregistre_sans_chargement() {
+fn an_existing_file_does_not_make_the_project_saved_without_a_load() {
     let dir = tempfile::tempdir().unwrap();
-    let existing = dir.path().join("existant.stf");
+    let existing = dir.path().join("existing.stf");
     let (writer, _) = start_demo(dir.path());
     writer.handle().save(&existing).unwrap();
     assert!(existing.is_file());
 
     let (_session, mut state) = start(demo_project(), &existing);
     let title = state.window_title();
-    assert!(title.contains("existant.stf •"), "{title}");
+    assert!(title.contains("existing.stf •"), "{title}");
     state.dispatch(Action::Quit {
         pending_edits: false,
     });
     assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::Quit));
 
-    // Témoin : le chargement explicite pose le repère.
+    // Witness: the explicit load sets the marker.
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
     state.mark_loaded(&stokesforge_session::LoadReport::default());
     let title = state.window_title();
@@ -1288,10 +1279,10 @@ fn un_fichier_existant_ne_rend_pas_le_projet_enregistre_sans_chargement() {
     assert!(state.unsaved_pending().is_none());
 }
 
-/// #315 : « Enregistrer sous » raté rétablit l'ancien chemin ; le Ctrl+S
-/// suivant n'écrit pas sur le fichier qui vient d'échouer.
+/// #315: a failed "Save As" restores the old path; the next Ctrl+S
+/// does not write to the file that just failed.
 #[test]
-fn un_enregistrer_sous_rate_retablit_l_ancien_chemin() {
+fn a_failed_save_as_restores_the_old_path() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let old = dir.path().join("projet.stf");
@@ -1308,16 +1299,16 @@ fn un_enregistrer_sous_rate_retablit_l_ancien_chemin() {
 
     state.dispatch(Action::DismissAlert);
     state.dispatch(Action::Save);
-    assert!(old.is_file(), "Save écrit l'ancien fichier");
+    assert!(old.is_file(), "Save writes the old file");
     assert!(!target.exists());
     assert!(!target.parent().is_some_and(Path::exists));
 }
 
 #[test]
-fn un_enregistrer_sous_reussi_change_de_chemin_et_marque_enregistre() {
+fn a_successful_save_as_changes_the_path_and_marks_saved() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
-    let target = dir.path().join("nouveau.stf");
+    let target = dir.path().join("new.stf");
     state.dispatch(Action::AddGraph);
     state.dispatch(Action::SaveAs {
         path: target.display().to_string(),
@@ -1325,13 +1316,13 @@ fn un_enregistrer_sous_reussi_change_de_chemin_et_marque_enregistre() {
     assert!(target.is_file());
     assert_eq!(state.path(), target.display().to_string());
     let title = state.window_title();
-    assert!(title.contains("nouveau.stf"), "{title}");
+    assert!(title.contains("new.stf"), "{title}");
     assert!(!title.contains('•'), "{title}");
 }
 
-/// #315 : sans chemin, le titre ne reste pas vide.
+/// #315: without a path, the title does not stay empty.
 #[test]
-fn sans_chemin_le_titre_porte_un_nom_de_repli() {
+fn without_a_path_the_title_carries_a_fallback_name() {
     let (_session, state) = start(demo_project(), Path::new(""));
     let title = state.window_title();
     assert!(
@@ -1340,47 +1331,51 @@ fn sans_chemin_le_titre_porte_un_nom_de_repli() {
     );
 }
 
-// -- 10. Colonnes de longueurs différentes --
+// -- 10. Columns of different lengths --
 
 #[test]
 fn reading_past_the_end_of_a_short_column_yields_a_missing_value() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
 
     assert_eq!(state.row_count(sheet1), 5);
-    // `Note` = [Some("a"), None, Some("")] : la ligne 2 est une chaîne vide
-    // *présente*, les lignes 3 et au-delà sont hors bornes — `Column::get`
-    // y rend `Cell::Text(None)`, la même valeur *absente* qu'une ligne 1
-    // écrite explicitement à `None`. A9 (option 2) : ces deux natures ne
-    // s'affichent plus de la même façon (avant ce correctif, les quatre
-    // assertions ci-dessous rendaient toutes `""`).
-    assert_eq!(state.cell_text(note, 2), "", "Some(\"\") s'affiche vide");
+    // `Note` = [Some("a"), None, Some("")]: row 2 is a *present* empty
+    // string, rows 3 and beyond are out of bounds — `Column::get`
+    // returns `Cell::Text(None)` there, the same *absent* value as a row 1
+    // explicitly written as `None`. A9 (option 2): these two natures are no
+    // longer displayed the same way (before this fix, the four
+    // assertions below all returned `""`).
+    assert_eq!(
+        state.cell_text(note, 2),
+        "",
+        "Some(\"\") is displayed empty"
+    );
     let absente = state.cell_text(note, 3);
     assert_ne!(
         absente,
         state.cell_text(note, 2),
-        "hors bornes (valeur absente) doit s'afficher différemment de \
-         Some(\"\") (chaîne vide présente)"
+        "out of bounds (absent value) must display differently from \
+         Some(\"\") (present empty string)"
     );
     assert_eq!(
         state.cell_text(note, 4),
         absente,
-        "toute position hors bornes affiche la même chose"
+        "every out-of-bounds position displays the same thing"
     );
     assert_eq!(
         state.cell_text(note, 10_000),
         absente,
-        "toute position hors bornes affiche la même chose"
+        "every out-of-bounds position displays the same thing"
     );
 }
 
-// -- 11. Lignes et colonnes --
+// -- 11. Rows and columns --
 
 #[test]
 fn inserting_then_undoing_rows_restores_the_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
@@ -1399,7 +1394,7 @@ fn inserting_then_undoing_rows_restores_the_tree_bit_for_bit() {
 
 #[test]
 fn deleting_then_undoing_rows_restores_the_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
@@ -1418,7 +1413,7 @@ fn deleting_then_undoing_rows_restores_the_tree_bit_for_bit() {
 
 #[test]
 fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let before = std::sync::Arc::clone(state.tree());
@@ -1432,9 +1427,9 @@ fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
 
     let columns = state.visible_columns(sheet1);
     assert_eq!(columns.len(), names_before.len() + 1);
-    let (_, new_name, new_type) = columns.last().cloned().expect("la colonne ajoutée");
-    assert!(!new_name.is_empty(), "un nom a été généré");
-    assert!(!names_before.contains(&new_name), "nom libre");
+    let (_, new_name, new_type) = columns.last().cloned().expect("the added column");
+    assert!(!new_name.is_empty(), "a name was generated");
+    assert!(!names_before.contains(&new_name), "free name");
     assert_eq!(new_type, ColumnType::Numeric);
 
     state.dispatch(Action::Undo);
@@ -1444,7 +1439,7 @@ fn adding_then_undoing_a_column_restores_the_tree_bit_for_bit() {
 
 #[test]
 fn adding_then_undoing_a_worksheet_restores_the_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book1 = book_named(state.tree(), "Book1");
     let before = std::sync::Arc::clone(state.tree());
@@ -1454,11 +1449,11 @@ fn adding_then_undoing_a_worksheet_restores_the_tree_bit_for_bit() {
 
     let sheets_after = state.worksheets_of(book1);
     assert_eq!(sheets_after.len(), sheets_before.len() + 1);
-    let (new_sheet, new_name) = sheets_after.last().cloned().expect("la feuille ajoutée");
-    assert!(!new_name.is_empty(), "un nom a été généré");
+    let (new_sheet, new_name) = sheets_after.last().cloned().expect("the added sheet");
+    assert!(!new_name.is_empty(), "a name was generated");
     assert!(
         sheets_before.iter().all(|(id, _)| *id != new_sheet),
-        "nouvelle feuille"
+        "new sheet"
     );
 
     state.dispatch(Action::Undo);
@@ -1468,7 +1463,7 @@ fn adding_then_undoing_a_worksheet_restores_the_tree_bit_for_bit() {
 
 #[test]
 fn creating_a_workbook_is_undoable_and_redoable() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let before = std::sync::Arc::clone(state.tree());
     let books_before = state.books();
@@ -1478,11 +1473,11 @@ fn creating_a_workbook_is_undoable_and_redoable() {
     let after = std::sync::Arc::clone(state.tree());
     let books_after = state.books();
     assert_eq!(books_after.len(), books_before.len() + 1);
-    let (book, name) = books_after.last().expect("classeur créé");
-    assert!(!name.is_empty(), "un nom est généré");
+    let (book, name) = books_after.last().expect("workbook created");
+    assert!(!name.is_empty(), "a name is generated");
     assert!(
         state.selected_sheet_in(*book).is_some(),
-        "un nouveau classeur contient sa feuille initiale"
+        "a new workbook contains its initial sheet"
     );
     assert_eq!(
         state.undo_label(),
@@ -1496,7 +1491,7 @@ fn creating_a_workbook_is_undoable_and_redoable() {
     assert_eq!(**state.tree(), *after);
 }
 
-/// Les enfants directs de `parent`, avec leur nom.
+/// The direct children of `parent`, with their name.
 fn child_names(
     state: &AppState,
     parent: stokesforge_core::NodeId,
@@ -1510,16 +1505,16 @@ fn child_names(
         .map(|id| {
             (
                 *id,
-                state.tree().node(*id).expect("enfant").name().to_string(),
+                state.tree().node(*id).expect("child").name().to_string(),
             )
         })
         .collect()
 }
 
-/// #326 : Add Folder crée un dossier nommé, annulable et rétablissable.
+/// #326: Add Folder creates a named folder, undoable and redoable.
 #[test]
 fn creating_a_folder_is_undoable_and_redoable() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     let before = std::sync::Arc::clone(state.tree());
@@ -1528,7 +1523,7 @@ fn creating_a_folder_is_undoable_and_redoable() {
 
     let after = std::sync::Arc::clone(state.tree());
     assert_eq!(after.len(), before.len() + 1);
-    let (folder, name) = child_names(&state, root).pop().expect("dossier créé");
+    let (folder, name) = child_names(&state, root).pop().expect("folder created");
     assert_eq!(name, "Folder1");
     assert!(matches!(
         state.tree().node(folder).unwrap().kind(),
@@ -1546,10 +1541,10 @@ fn creating_a_folder_is_undoable_and_redoable() {
     assert_eq!(**state.tree(), *after);
 }
 
-/// #326 : deux créations de suite ne se heurtent pas (unicité fraternelle).
+/// #326: two creations in a row do not collide (sibling uniqueness).
 #[test]
 fn two_folders_get_distinct_names() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
 
@@ -1565,10 +1560,10 @@ fn two_folders_get_distinct_names() {
     assert_eq!(names, ["Folder1", "Folder2"]);
 }
 
-/// #326 : le nom se cherche parmi les enfants du dossier visé, pas de la racine.
+/// #326: the name is searched among the children of the target folder, not of the root.
 #[test]
 fn a_folder_is_created_inside_the_chosen_parent() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     state.dispatch(Action::AddFolder { parent: root });
@@ -1582,21 +1577,21 @@ fn a_folder_is_created_inside_the_chosen_parent() {
     assert_eq!(
         inner.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>(),
         ["Folder1"],
-        "libre dans le sous-dossier, même si la racine porte déjà Folder1"
+        "free in the subfolder, even if the root already carries Folder1"
     );
     assert_eq!(child_names(&state, root).len(), root_children);
 }
 
-/// #326 : un parent disparu échoue en barre d'état, sans entrée d'historique.
+/// #326: a vanished parent fails in the status bar, without a history entry.
 #[test]
 fn a_folder_in_a_removed_parent_fails_without_history() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     state.dispatch(Action::AddFolder { parent: root });
-    let (gone, _) = child_names(&state, root).pop().expect("dossier");
+    let (gone, _) = child_names(&state, root).pop().expect("folder");
     state.dispatch(Action::DeleteObjects(vec![gone]));
-    assert!(state.tree().node(gone).is_none(), "le dossier est supprimé");
+    assert!(state.tree().node(gone).is_none(), "the folder is removed");
     let label = state.undo_label();
     let revision = state.snapshot().revision;
 
@@ -1609,14 +1604,14 @@ fn a_folder_in_a_removed_parent_fails_without_history() {
 
 #[test]
 fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    // Un nœud qui n'est pas une feuille : un graphe, par exemple.
-    let mut project = Project::new("Vide").expect("projet vide");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    // A node that is not a sheet: a graph, for example.
+    let mut project = Project::new("Empty").expect("empty project");
     let root = project.root();
     let graph = project
         .add_graph(root, Some("Graph1"), Default::default())
-        .expect("un graphe");
-    let (_session, mut state) = start(project, &dir.path().join("vide.stf"));
+        .expect("a graph");
+    let (_session, mut state) = start(project, &dir.path().join("empty.stf"));
 
     assert!(state.visible_columns(graph).is_empty());
     assert_eq!(state.row_count(graph), 0);
@@ -1637,7 +1632,7 @@ fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
 
 #[test]
 fn selecting_something_that_is_not_a_sheet_is_refused() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book1 = book_named(state.tree(), "Book1");
     let selected = state.selected_sheet_in(book1);
@@ -1648,7 +1643,7 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     assert_eq!(
         state.selected_sheet_in(book1),
         selected,
-        "sélection inchangée"
+        "selection unchanged"
     );
 
     state.dispatch(Action::SelectSheet(NodeId::from_raw(9_999)));
@@ -1656,23 +1651,23 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     assert_eq!(state.selected_sheet_in(book1), selected);
 }
 
-/// Le texte du menu Annuler pour `label`, dans la langue courante : le test
-/// compare la **structure** (quelle entrée, quels paramètres), pas une langue ;
-/// les phrases anglaises sont tenues par `tests/history_text.rs`.
+/// The text of the Undo menu for `label`, in the current language: the test
+/// compares the **structure** (which entry, which parameters), not a language;
+/// the English sentences are held by `tests/history_text.rs`.
 fn undo_entry(label: &HistoryLabel) -> String {
     stokesforge_app_state::tr!("history-undo-entry", label = history_text(label))
 }
 
-/// Le texte du menu Rétablir pour `label`, comme [`undo_entry`].
+/// The text of the Redo menu for `label`, like [`undo_entry`].
 fn redo_entry(label: &HistoryLabel) -> String {
     stokesforge_app_state::tr!("history-redo-entry", label = history_text(label))
 }
 
-// -- 12. Libellés --
+// -- 12. Labels --
 
 #[test]
 fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
@@ -1680,21 +1675,21 @@ fn labels_prefix_the_history_entry_and_vanish_when_the_action_is_impossible() {
     assert_eq!(state.redo_label(), None);
 
     state.dispatch(Action::AddColumn { sheet: sheet1 });
-    let undo = state.undo_label().expect("un libellé d'annulation");
+    let undo = state.undo_label().expect("an undo label");
     assert_eq!(undo, undo_entry(&HistoryLabel::AddColumn));
-    assert_eq!(state.redo_label(), None, "rien à rétablir");
+    assert_eq!(state.redo_label(), None, "nothing to redo");
 
     state.dispatch(Action::Undo);
-    let redo = state.redo_label().expect("un libellé de rétablissement");
+    let redo = state.redo_label().expect("a redo label");
     assert_eq!(redo, redo_entry(&HistoryLabel::AddColumn));
     assert_eq!(state.undo_label(), None);
 }
 
-// -- Divers : l'explorateur latéral --
+// -- Miscellaneous: the side explorer --
 
 #[test]
 fn sheets_lists_every_worksheet_with_a_readable_path() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
 
     let sheets = state.sheets();
@@ -1706,7 +1701,7 @@ fn sheets_lists_every_worksheet_with_a_readable_path() {
 
 #[test]
 fn selecting_a_sheet_updates_its_books_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book1 = book_named(state.tree(), "Book1");
     let sheet2 = sheet_named(state.tree(), "Sheet2");
@@ -1719,27 +1714,27 @@ fn selecting_a_sheet_updates_its_books_selection() {
         .into_iter()
         .map(|(_, name, _)| name)
         .collect();
-    assert_eq!(names, vec!["Court".to_string()]);
+    assert_eq!(names, vec!["Short".to_string()]);
     assert_eq!(state.row_count(sheet2), 2);
 }
 
-/// Deux classeurs ouverts simultanément (deux `Tab::Book`) ne partagent pas
-/// leur feuille sélectionnée : sélectionner une feuille dans l'un ne doit
-/// jamais affecter l'autre — la raison d'être de [`AppState::
-/// selected_sheet_in`] scopé par classeur plutôt qu'une sélection globale.
+/// Two workbooks open at the same time (two `Tab::Book`) do not share
+/// their selected sheet: selecting a sheet in one must
+/// never affect the other — the reason for [`AppState::
+/// selected_sheet_in`] being scoped by workbook rather than a global selection.
 #[test]
 fn selecting_a_sheet_in_one_book_does_not_affect_another_book() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let mut project = demo_project();
     let root = project.root();
     let book2 = project
         .add_workbook(root, Some("Book2"))
-        .expect("classeur Book2");
+        .expect("workbook Book2");
     let book2_sheet2 = project
-        .add_worksheet(book2, Some("Autre"))
-        .expect("feuille Autre");
+        .add_worksheet(book2, Some("Other"))
+        .expect("worksheet Other");
 
-    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    let (_session, mut state) = start(project, &dir.path().join("project.stf"));
     let book1 = book_named(state.tree(), "Book1");
     let book1_sheet2 = sheet_named(state.tree(), "Sheet2");
 
@@ -1750,21 +1745,21 @@ fn selecting_a_sheet_in_one_book_does_not_affect_another_book() {
     assert_eq!(state.selected_sheet_in(book2), Some(book2_sheet2));
 }
 
-// -- Divers : le tampon de saisie d'une cellule --
+// -- Miscellaneous: the cell input buffer --
 
 #[test]
 fn the_cell_buffer_only_reaches_the_model_on_commit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let revision = state.snapshot().revision;
 
-    state.begin_edit(temps, 0);
+    state.begin_edit(time_col, 0);
     assert_eq!(
         state.editing().map(|edit| edit.buffer.as_str()),
         Some("0"),
-        "le tampon part du texte affiché"
+        "the buffer starts from the displayed text"
     );
     if let Some(edit) = state.editing_mut() {
         edit.buffer = "7.25".to_string();
@@ -1772,231 +1767,234 @@ fn the_cell_buffer_only_reaches_the_model_on_commit() {
     assert_eq!(
         state.snapshot().revision,
         revision,
-        "taper ne touche pas le modèle : sinon une entrée d'historique par caractère"
+        "typing does not touch the model: otherwise one history entry per character"
     );
 
     state.commit_edit();
-    assert_eq!(cell(&state, temps, 0), Cell::Float(7.25));
-    assert!(state.editing().is_none(), "la saisie est refermée");
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(7.25));
+    assert!(state.editing().is_none(), "the edit is closed");
     assert!(state.snapshot().revision > revision);
 }
 
 #[test]
 fn cancelling_an_edit_discards_the_buffer() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let revision = state.snapshot().revision;
 
-    state.begin_edit(temps, 0);
+    state.begin_edit(time_col, 0);
     if let Some(edit) = state.editing_mut() {
         edit.buffer = "7.25".to_string();
     }
     state.cancel_edit();
 
     assert!(state.editing().is_none());
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
     assert_eq!(state.snapshot().revision, revision);
 }
 
-// -- Divers : la sélection de la grille (souris + Ctrl+C/X/V) --
+// -- Miscellaneous: the grid selection (mouse + Ctrl+C/X/V) --
 //
-// `stokesforge_app::app` (egui) traduit clic/glisser en `AppState::select_cell`/
-// `extend_selection`, puis Ctrl+C/Ctrl+Maj+C/X/V/Ctrl+Maj+V en
+// `stokesforge_app::app` (egui) translates click/drag into `AppState::select_cell`/
+// `extend_selection`, then Ctrl+C/Ctrl+Shift+C/X/V/Ctrl+Shift+V into
 // `AppState::copy_selection`/`AppState::copy_full_columns`/
 // `Action::ClearSelectedCells`/`Action::Paste`/`Action::PasteAbsolute` —
-// tout ce qui suit ce point de traduction est testable ici, sans fenêtre.
-// Bug « le copier/couper/coller ne marche pas avec une sélection d'une
-// seule cellule » : une sélection posée par un simple clic
-// ([`AppState::select_cell`]) est un rectangle 1×1 comme un autre pour
-// `Selection` (voir `crate::selection::Selection::single_cell` et ses tests
-// unitaires) — les trois tests qui suivent le vérifient au niveau où
-// `stokesforge_app::app` s'arrête.
+// everything after this translation point is testable here, without a window.
+// Bug "copy/cut/paste does not work with a single-cell
+// selection": a selection set by a plain click
+// ([`AppState::select_cell`]) is a 1×1 rectangle like any other for
+// `Selection` (see `crate::selection::Selection::single_cell` and its unit
+// tests) — the three tests that follow check it at the level where
+// `stokesforge_app::app` stops.
 
 #[test]
 fn a_single_cell_selection_copies_exactly_that_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 2);
-    assert!(state.is_selected(sheet1, temps, 2));
+    state.select_cell(sheet1, time_col, 2);
+    assert!(state.is_selected(sheet1, time_col, 2));
 
     let signal = column_id(&state, sheet1, "Signal");
     assert!(
         !state.is_selected(sheet1, signal, 2),
-        "une seule cellule est sélectionnée, pas toute la ligne"
+        "a single cell is selected, not the whole row"
     );
 
     assert_eq!(
         state.copy_selection(sheet1),
         Some("1".to_string()),
-        "Ctrl+C sur une sélection d'une seule cellule copie exactement son texte, rien d'autre"
+        "Ctrl+C on a single-cell selection copies exactly its text, nothing else"
     );
 }
 
 #[test]
 fn clearing_a_single_cell_selection_empties_only_that_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 2);
+    state.select_cell(sheet1, time_col, 2);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
 
-    assert_eq!(cell(&state, temps, 2), Cell::Float(f64::NAN));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(f64::NAN));
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         Cell::Float(0.0),
-        "Ctrl+X/Retour arrière sur une seule cellule ne touche pas les autres"
+        "Ctrl+X/Backspace on a single cell does not touch the others"
     );
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(0.5));
 }
 
 #[test]
 fn pasting_onto_a_single_cell_selection_writes_from_its_anchor() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    // Sélection d'une seule cellule sur `Temps`, ligne 1 — le collage doit
-    // s'étirer depuis cette ancre, sur autant de colonnes que le TSV collé
-    // en porte (ici deux : `Temps` et `Signal`), pas seulement la cellule
-    // sélectionnée.
-    state.select_cell(sheet1, temps, 1);
+    // Single-cell selection on `Time`, row 1 — the paste must
+    // stretch from this anchor, over as many columns as the pasted TSV
+    // carries (here two: `Time` and `Signal`), not only the selected
+    // cell.
+    state.select_cell(sheet1, time_col, 1);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "9\t99\n".to_string(),
     });
 
-    assert_eq!(cell(&state, temps, 1), Cell::Float(9.0));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(9.0));
     assert_eq!(cell(&state, signal, 1), Cell::Float(99.0));
-    // Le reste de la colonne n'a pas bougé.
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    // The rest of the column did not move.
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
 }
 
-/// Régression : coller un texte non numérique dans une colonne `Numeric`
-/// écrivait silencieusement `NaN` (la case paraissait vidée) sans jamais
-/// élargir la colonne en `Mixed` — contrairement à la même saisie tapée au
-/// clavier (`non_numeric_input_promotes_the_column_to_mixed`). Le collage
-/// doit se comporter exactement pareil : c'est la même tolérance,
-/// `Command::SetCellsPromoting` plutôt qu'un `NaN` qui avale le texte collé.
+/// Regression: pasting a non-numeric text into a `Numeric` column
+/// silently wrote `NaN` (the cell looked cleared) without ever
+/// widening the column to `Mixed` — unlike the same input typed on
+/// the keyboard (`non_numeric_input_promotes_the_column_to_mixed`). The paste
+/// must behave exactly the same: it is the same tolerance,
+/// `Command::SetCellsPromoting` rather than a `NaN` that swallows the pasted text.
 #[test]
 fn pasting_non_numeric_text_onto_a_numeric_cell_promotes_the_column_to_mixed() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    let voisin = cell(&state, temps, 0);
+    let time_col = column_id(&state, sheet1, "Time");
+    let voisin = cell(&state, time_col, 0);
 
-    state.select_cell(sheet1, temps, 1);
+    state.select_cell(sheet1, time_col, 1);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "n/a".to_string(),
     });
 
     assert_eq!(
-        column_type(&state, temps),
+        column_type(&state, time_col),
         ColumnType::Mixed,
-        "le collage doit promouvoir la colonne comme le ferait une saisie clavier"
+        "the paste must promote the column as a keyboard input would"
     );
-    assert_eq!(state.cell_text(temps, 1), "n/a");
+    assert_eq!(state.cell_text(time_col, 1), "n/a");
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         voisin,
-        "les autres lignes gardent leur nombre"
+        "the other rows keep their number"
     );
 
-    // Une seule entrée d'historique pour la promotion **et** l'écriture.
+    // A single history entry for the promotion **and** the write.
     state.dispatch(Action::Undo);
-    assert_eq!(column_type(&state, temps), ColumnType::Numeric);
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+    assert_eq!(column_type(&state, time_col), ColumnType::Numeric);
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(0.5));
 }
 
-/// Même régression, pour un rectangle collé sur plusieurs lignes : une
-/// seule valeur non numérique parmi les lignes collées suffit à promouvoir
-/// toute l'écriture en `Mixed`, les valeurs numériques du même collage
-/// restant des nombres traçables.
+/// Same regression, for a rectangle pasted over several rows: a single
+/// non-numeric value among the pasted rows is enough to promote
+/// the whole write to `Mixed`, the numeric values of the same paste
+/// remaining plottable numbers.
 #[test]
 fn pasting_a_mixed_numeric_and_text_block_promotes_the_column_once() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "7\nn/a\n9\n".to_string(),
     });
 
-    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
-    assert_eq!(cell(&state, temps, 0), Cell::Float(7.0));
-    assert_eq!(state.cell_text(temps, 1), "n/a");
-    assert_eq!(cell(&state, temps, 2), Cell::Float(9.0));
+    assert_eq!(column_type(&state, time_col), ColumnType::Mixed);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(7.0));
+    assert_eq!(state.cell_text(time_col, 1), "n/a");
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(9.0));
 }
 
-// -- Saisie et collage : une seule règle de lecture (#258) --
+// -- Input and paste: a single reading rule (#258) --
 
-/// #258, reproduction : une date collée garde sa valeur de date, comme une date
-/// tapée. Deux lignes `2026-10-15` puis `n/a` collées dans une colonne
-/// DateTime l'élargissent en Mixed ; la première case reste un timestamp, la
-/// seconde est du texte, et un seul Annuler rend la colonne DateTime.
+/// #258, reproduction: a pasted date keeps its date value, like a typed
+/// date. Two lines `2026-10-15` then `n/a` pasted into a DateTime
+/// column widen it to Mixed; the first cell stays a timestamp, the
+/// second is text, and a single Undo gives the DateTime column back.
 #[test]
 fn a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::SetColumnType {
-        column: temps,
+        column: time_col,
         column_type: ColumnType::DateTime,
     });
-    let attendu = stokesforge_core::datetime::parse_datetime("2026-10-15").expect("date");
+    let expected = stokesforge_core::datetime::parse_datetime("2026-10-15").expect("date");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "2026-10-15\nn/a".to_string(),
     });
 
-    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
-    assert_eq!(cell(&state, temps, 0), Cell::Float(attendu));
-    assert_eq!(cell(&state, temps, 1), Cell::Text(Some("n/a".to_string())));
+    assert_eq!(column_type(&state, time_col), ColumnType::Mixed);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(expected));
+    assert_eq!(
+        cell(&state, time_col, 1),
+        Cell::Text(Some("n/a".to_string()))
+    );
 
-    // Témoin : la même suite tapée case par case donne les mêmes cellules.
-    let (_autre, mut tape) = start_demo(dir.path());
-    let temps_tape = column_id(&tape, sheet_named(tape.tree(), "Sheet1"), "Temps");
-    tape.dispatch(Action::SetColumnType {
-        column: temps_tape,
+    // Witness: the same sequence typed cell by cell gives the same cells.
+    let (_other, mut typed) = start_demo(dir.path());
+    let typed_time = column_id(&typed, sheet_named(typed.tree(), "Sheet1"), "Time");
+    typed.dispatch(Action::SetColumnType {
+        column: typed_time,
         column_type: ColumnType::DateTime,
     });
     for (row, text) in ["2026-10-15", "n/a"].into_iter().enumerate() {
-        tape.dispatch(Action::CommitCell {
-            column: temps_tape,
+        typed.dispatch(Action::CommitCell {
+            column: typed_time,
             row,
             text: text.to_string(),
         });
     }
-    assert_eq!(cell(&tape, temps_tape, 0), cell(&state, temps, 0));
-    assert_eq!(cell(&tape, temps_tape, 1), cell(&state, temps, 1));
+    assert_eq!(cell(&typed, typed_time, 0), cell(&state, time_col, 0));
+    assert_eq!(cell(&typed, typed_time, 1), cell(&state, time_col, 1));
 
     state.dispatch(Action::Undo);
-    assert_eq!(column_type(&state, temps), ColumnType::DateTime);
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    assert_eq!(column_type(&state, time_col), ColumnType::DateTime);
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
 }
 
-/// #258 : `inf` et `nan` tapés restent du texte, même dans une colonne déjà
-/// Mixed (avant, `MixedCell::from_text` les lisait en nombre) ; la colonne reste
-/// Mixed et un infini n'entre jamais dans les données par la grille.
+/// #258: typed `inf` and `nan` stay text, even in an already
+/// Mixed column (before, `MixedCell::from_text` read them as numbers); the column stays
+/// Mixed and an infinity never enters the data through the grid.
 #[test]
 fn typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -2024,14 +2022,14 @@ fn typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text() {
     assert_eq!(column_type(&state, note), ColumnType::Mixed);
 }
 
-/// #258 : après un collage, une colonne Mixed dont toutes les cases présentes
-/// sont des nombres repasse en Numeric, comme après une saisie. La `Note` de la
-/// démo vaut `[Some("a"), None, Some("")]` : le collage écrase les trois
-/// cases (le `Some("")` bloquerait la repromotion). Un seul Annuler défait le
-/// collage **et** la repromotion.
+/// #258: after a paste, a Mixed column whose present cells
+/// are all numbers goes back to Numeric, as after a typed input. The demo's `Note`
+/// is `[Some("a"), None, Some("")]`: the paste overwrites the three
+/// cells (the `Some("")` would block the repromotion). A single Undo reverts the
+/// paste **and** the repromotion.
 #[test]
 fn pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -2049,7 +2047,7 @@ fn pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo() {
     assert_eq!(
         state.undo_label(),
         Some(undo_entry(&HistoryLabel::Macro(MacroKind::PasteCells))),
-        "collage et repromotion forment une entrée"
+        "paste and repromotion form one entry"
     );
 
     state.dispatch(Action::Undo);
@@ -2058,11 +2056,11 @@ fn pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo() {
     assert_eq!(cell(&state, note, 2), Cell::Text(Some(String::new())));
 }
 
-/// #258 : un collage de plusieurs colonnes qui repromeut `Note` reste **une**
-/// entrée d'historique (la repromotion se fait avant la fermeture du groupe).
+/// #258: a paste of several columns that repromotes `Note` stays **one**
+/// history entry (the repromotion happens before the group closes).
 #[test]
 fn a_multi_column_paste_with_a_repromotion_is_one_undo() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -2084,21 +2082,21 @@ fn a_multi_column_paste_with_a_repromotion_is_one_undo() {
     assert_eq!(column_type(&state, note), ColumnType::Mixed);
     assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
     assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
-    assert!(!state.can_undo(), "un seul Annuler a tout défait");
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #258, les deux autres points de collage : une case copiée collée
-/// (`GridClipboard::Text`) et une colonne entière collée
-/// (`GridClipboard::FullColumns`) repromeuvent aussi, en une entrée.
+/// #258, the two other paste points: a copied cell pasted
+/// (`GridClipboard::Text`) and a whole column pasted
+/// (`GridClipboard::FullColumns`) also repromote, in one entry.
 #[test]
 fn single_value_and_full_column_pastes_also_repromote_a_mixed_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    // Une case : `Signal` passe en Mixed, reçoit un « n/a » puis un nombre.
+    // One cell: `Signal` becomes Mixed, receives an "n/a" then a number.
     state.dispatch(Action::SetColumnType {
         column: signal,
         column_type: ColumnType::Mixed,
@@ -2109,12 +2107,12 @@ fn single_value_and_full_column_pastes_also_repromote_a_mixed_column() {
         text: "n/a".to_string(),
     });
     assert_eq!(column_type(&state, signal), ColumnType::Mixed);
-    state.select_cell(sheet1, temps, 2);
-    let copie = state.copy_selection(sheet1).expect("sélection non vide");
+    state.select_cell(sheet1, time_col, 2);
+    let copied = state.copy_selection(sheet1).expect("non-empty selection");
     state.select_cell(sheet1, signal, 1);
     state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: copie,
+        text: copied,
     });
     assert_eq!(column_type(&state, signal), ColumnType::Numeric);
     assert_eq!(cell(&state, signal, 1), Cell::Float(1.0));
@@ -2122,14 +2120,16 @@ fn single_value_and_full_column_pastes_also_repromote_a_mixed_column() {
     assert_eq!(column_type(&state, signal), ColumnType::Mixed);
     assert_eq!(cell(&state, signal, 1), Cell::Text(Some("n/a".to_string())));
 
-    // Une colonne entière : `Temps` collée sur la `Note` mixte.
+    // A whole column: `Time` pasted onto the mixed `Note`.
     let note = column_id(&state, sheet1, "Note");
-    state.select_cell(sheet1, temps, 0);
-    let colonnes = state.copy_full_columns(sheet1).expect("sélection non vide");
+    state.select_cell(sheet1, time_col, 0);
+    let full_columns = state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
     state.select_cell(sheet1, note, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: colonnes,
+        text: full_columns,
     });
     assert_eq!(column_type(&state, note), ColumnType::Numeric);
     assert_eq!(cell(&state, note, 4), Cell::Float(2.0));
@@ -2138,11 +2138,11 @@ fn single_value_and_full_column_pastes_also_repromote_a_mixed_column() {
     assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
 }
 
-/// #258 : un collage sur une colonne Mixed qui reste Mixed n'ouvre pas de
-/// groupe pour rien — c'est la même entrée simple qu'avant.
+/// #258: a paste onto a Mixed column that stays Mixed does not open a
+/// group for nothing — it is the same simple entry as before.
 #[test]
 fn a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -2161,9 +2161,9 @@ fn a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry() {
     );
 }
 
-/// Valide un champ d'en-tête via le même chemin que la saisie utilisateur
-/// (`begin_header_edit`/`commit_header_edit`), pour préparer une sélection
-/// de champ dans les tests de copier/coller mixte ci-dessous.
+/// Validates a header field through the same path as user input
+/// (`begin_header_edit`/`commit_header_edit`), to prepare a field
+/// selection in the mixed copy/paste tests below.
 fn set_header_field(state: &mut AppState, column: NodeId, field: HeaderField, text: &str) {
     state.begin_header_edit(column, field);
     if let Some(edit) = state.header_editing_mut() {
@@ -2172,47 +2172,47 @@ fn set_header_field(state: &mut AppState, column: NodeId, field: HeaderField, te
     state.commit_header_edit();
 }
 
-/// Bug historique (trois correctifs successifs) : une sélection copiée à
-/// cheval sur l'en-tête et les données (« rectangle mixte »,
-/// `paste_tsv` d'alors) dumpait les lignes de champ d'en-tête dans des
-/// lignes de données, décalant tout ce qui suit. Le nouveau modèle rend ce
-/// scénario **structurellement impossible** plutôt que de le corriger au
-/// coup par coup : un glisser parti d'un champ d'en-tête qui atteint une
-/// cellule de donnée s'arrête au champ Formule (voir `crate::selection`),
-/// donc ne peut plus jamais produire une copie mixte. Ce test le vérifie au
-/// niveau où `stokesforge_app::app` s'arrête : la sélection clampée ne copie que des
-/// champs, et coller ce résultat sur une cellule de donnée (sortes
-/// différentes) ne colle rien plutôt que de mal se répartir.
+/// Historical bug (three successive fixes): a selection copied across
+/// the header and the data ("mixed rectangle",
+/// `paste_tsv` back then) dumped the header field rows into data
+/// rows, shifting everything after. The new model makes this
+/// scenario **structurally impossible** rather than fixing it
+/// case by case: a drag starting from a header field that reaches a
+/// data cell stops at the Formula field (see `crate::selection`),
+/// so it can never again produce a mixed copy. This test checks it at the
+/// level where `stokesforge_app::app` stops: the clamped selection copies only
+/// fields, and pasting that result onto a data cell (different
+/// kinds) pastes nothing rather than spreading badly.
 #[test]
 fn extending_a_header_selection_into_data_clamps_instead_of_mixing_a_copy() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::Unit, "nm");
-    set_header_field(&mut state, temps, HeaderField::Comment, "a");
-    // Formule volontairement laissée vide, pour vérifier qu'un champ vide se
-    // copie bien (et ne casse pas le format).
+    set_header_field(&mut state, time_col, HeaderField::Unit, "nm");
+    set_header_field(&mut state, time_col, HeaderField::Comment, "a");
+    // Formula deliberately left empty, to check that an empty field is
+    // copied properly (and does not break the format).
 
-    // Glisser parti du champ Unité vers une cellule de donnée : la
-    // sélection s'arrête à Formule, elle ne touche jamais la ligne 2.
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
-    state.extend_selection(sheet1, temps, 2);
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Unit));
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Comment));
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Formula));
+    // Drag starting from the Unit field toward a data cell: the
+    // selection stops at Formula, it never touches row 2.
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
+    state.extend_selection(sheet1, time_col, 2);
+    assert!(state.is_header_field_selected(sheet1, time_col, HeaderField::Unit));
+    assert!(state.is_header_field_selected(sheet1, time_col, HeaderField::Comment));
+    assert!(state.is_header_field_selected(sheet1, time_col, HeaderField::Formula));
     assert!(
-        !state.is_selected(sheet1, temps, 2),
-        "le glisser ne traverse plus la frontière en-tête/données"
+        !state.is_selected(sheet1, time_col, 2),
+        "the drag no longer crosses the header/data boundary"
     );
 
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(
         text, "nm\na\n\n",
-        "3 lignes de champ en clair, rien de plus : la copie ne porte plus \
-         de ligne de donnée"
+        "3 plain field rows, nothing more: the copy no longer carries \
+         a data row"
     );
 
     let signal_data_before = [
@@ -2221,9 +2221,9 @@ fn extending_a_header_selection_into_data_clamps_instead_of_mixing_a_copy() {
         cell(&state, signal, 2),
     ];
 
-    // Collée sur une cellule de donnée de `Signal` : sortes différentes
-    // (champs copiés, ancre sur une donnée), rien ne se colle (règle 2 de
-    // la matrice de comportement, voir `stokesforge_app_state::state`).
+    // Pasted onto a data cell of `Signal`: different kinds
+    // (copied fields, anchor on a data cell), nothing is pasted (rule 2 of
+    // the behavior matrix, see `stokesforge_app_state::state`).
     state.select_cell(sheet1, signal, 1);
     state.dispatch(Action::Paste {
         sheet: sheet1,
@@ -2238,85 +2238,85 @@ fn extending_a_header_selection_into_data_clamps_instead_of_mixing_a_copy() {
     assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
 }
 
-/// Un copier/coller purement données (aucun champ d'en-tête dans la
-/// sélection) colle exactement comme un tableur de référence : décalé sur
-/// l'ancre, rien d'autre touché.
+/// A pure data copy/paste (no header field in the
+/// selection) pastes exactly like a reference spreadsheet: shifted onto the
+/// anchor, nothing else touched.
 #[test]
 fn pure_data_copy_paste_keeps_working_without_header_markers() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.extend_selection(sheet1, signal, 1);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(text, "0\t10\n0.5\t\n");
 
-    state.select_cell(sheet1, temps, 3);
+    state.select_cell(sheet1, time_col, 3);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
 
-    assert_eq!(cell(&state, temps, 3), Cell::Float(0.0));
+    assert_eq!(cell(&state, time_col, 3), Cell::Float(0.0));
     assert_eq!(cell(&state, signal, 3), Cell::Float(10.0));
-    assert_eq!(cell(&state, temps, 4), Cell::Float(0.5));
+    assert_eq!(cell(&state, time_col, 4), Cell::Float(0.5));
     assert!(matches!(cell(&state, signal, 4), Cell::Float(v) if v.is_nan()));
 }
 
-/// #311 : une case ABSENTE (ligne plus courte que la colonne visée) garde la
-/// valeur existante ; seule la case présente est écrite.
+/// #311: an ABSENT cell (row shorter than the target column) keeps the
+/// existing value; only the present cell is written.
 #[test]
 fn a_pasted_row_shorter_than_the_others_keeps_the_existing_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 2);
+    state.select_cell(sheet1, time_col, 2);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1\t2\n3\n4\t5".to_string(),
     });
-    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1.0));
     assert_eq!(cell(&state, signal, 2), Cell::Float(2.0));
-    assert_eq!(cell(&state, temps, 3), Cell::Float(3.0));
+    assert_eq!(cell(&state, time_col, 3), Cell::Float(3.0));
     assert_eq!(
         cell(&state, signal, 3),
         Cell::Float(40.0),
-        "case absente entre deux cases présentes : la valeur existante reste"
+        "absent cell between two present cells: the existing value stays"
     );
     assert_eq!(cell(&state, signal, 4), Cell::Float(5.0));
 }
 
-/// #311 : une case PRÉSENTE et vide (`"3\t"`) reste une valeur manquante.
+/// #311: a PRESENT and empty cell (`"3\t"`) stays a missing value.
 #[test]
 fn a_present_but_empty_pasted_cell_is_still_a_missing_value() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 2);
+    state.select_cell(sheet1, time_col, 2);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1\t2\n3\t".to_string(),
     });
-    assert_eq!(cell(&state, temps, 3), Cell::Float(3.0));
+    assert_eq!(cell(&state, time_col, 3), Cell::Float(3.0));
     assert!(matches!(cell(&state, signal, 3), Cell::Float(v) if v.is_nan()));
 }
 
-/// #311 : la dernière ligne courte n'allonge pas la colonne la plus courte.
+/// #311: the last short row does not lengthen the shortest column.
 #[test]
 fn a_short_last_row_does_not_lengthen_the_shorter_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let len = |state: &AppState, id| {
         state
@@ -2326,35 +2326,35 @@ fn a_short_last_row_does_not_lengthen_the_shorter_column() {
             .map(|c| c.len())
     };
 
-    state.select_cell(sheet1, temps, 4);
+    state.select_cell(sheet1, time_col, 4);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1\t2\n3".to_string(),
     });
-    assert_eq!(len(&state, temps), Some(6), "Temps reçoit ses deux cases");
     assert_eq!(
-        len(&state, signal),
-        Some(5),
-        "Signal ne reçoit que la sienne"
+        len(&state, time_col),
+        Some(6),
+        "Time receives its two cells"
     );
+    assert_eq!(len(&state, signal), Some(5), "Signal receives only its own");
     assert_eq!(cell(&state, signal, 4), Cell::Float(2.0));
 }
 
-/// #311 : même collage sur une colonne `Mixed` — la case absente garde sa
-/// cellule telle quelle, et le tout reste une seule entrée d'historique.
+/// #311: same paste onto a `Mixed` column — the absent cell keeps its
+/// cell as is, and the whole stays a single history entry.
 #[test]
 fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
     while state.can_undo() {
         state.dispatch(Action::Undo);
     }
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1\t2\tx\n3\t4\n5\t6\ty".to_string(),
@@ -2363,7 +2363,7 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     assert_eq!(
         cell(&state, note, 1),
         Cell::Text(None),
-        "case absente : la cellule Mixed existante reste"
+        "absent cell: the existing Mixed cell stays"
     );
     assert_eq!(cell(&state, note, 2), Cell::Text(Some("y".to_string())));
     assert_eq!(cell(&state, signal, 1), Cell::Float(4.0));
@@ -2371,19 +2371,19 @@ fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
     state.dispatch(Action::Undo);
     assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
     assert_eq!(cell(&state, note, 2), Cell::Text(Some(String::new())));
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
     assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
-    assert!(!state.can_undo(), "un seul Annuler a tout défait");
+    assert!(!state.can_undo(), "a single Undo reverted everything");
 }
 
-/// #311 : plus de colonnes copiées que la feuille n'en a à partir de l'ancre :
-/// celles qui tiennent s'écrivent, le statut compte les autres.
+/// #311: more columns copied than the sheet has from the anchor:
+/// those that fit are written, the status counts the others.
 #[test]
 fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
@@ -2394,25 +2394,25 @@ fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
     });
     assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
-    let status = state.status().expect("un message");
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
+    let status = state.status().expect("a message");
     assert!(!status.is_error());
     assert!(
         status.text.contains("One column"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status.text
     );
 }
 
-/// #311 : un collage qui tient en largeur ne pose aucun statut de débordement.
+/// #311: a paste that fits the width sets no overflow status.
 #[test]
 fn a_paste_that_fits_the_sheet_width_reports_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1\t2\t3\n4\t5\t6".to_string(),
@@ -2421,84 +2421,84 @@ fn a_paste_that_fits_the_sheet_width_reports_nothing() {
         state
             .status()
             .is_none_or(|status| !status.text.contains("did not fit")),
-        "aucun statut de débordement"
+        "no overflow status"
     );
 }
 
-// -- #311 (E2, E4) : avis de virgule décimale, champs d'en-tête débordants --
+// -- #311 (E2, E4): decimal comma notice, overflowing header fields --
 
 fn status_text(state: &AppState) -> String {
     state.status().map(|s| s.text.clone()).unwrap_or_default()
 }
 
-/// #311 (E2) : « 1,234 » saisi dans une cellule Numeric reste lu 1.234 (R6),
-/// et la barre d'état le dit ; « 1,5 » n'a rien d'ambigu : aucun avis.
+/// #311 (E2): "1,234" typed into a Numeric cell is still read as 1.234 (R6),
+/// and the status bar says so; "1,5" is unambiguous: no notice.
 #[test]
 fn typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "1,234".to_string(),
     });
-    assert_eq!(cell(&state, temps, 1), Cell::Float(1.234));
-    let status = state.status().expect("un avis");
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(1.234));
+    let status = state.status().expect("a notice");
     assert!(!status.is_error());
     assert!(
         status.text.contains("1,234") && status.text.contains("1.234"),
-        "avis inattendu : {}",
+        "unexpected notice: {}",
         status.text
     );
 
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "1,5".to_string(),
     });
-    assert_eq!(cell(&state, temps, 2), Cell::Float(1.5));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1.5));
     assert!(
         !status_text(&state).contains("decimal comma"),
-        "pas d'avis pour 1,5 : {}",
+        "no notice for 1,5: {}",
         status_text(&state)
     );
 }
 
-/// #311 (E2) : l'avis vaut aussi pour une cellule d'une colonne Mixed.
+/// #311 (E2): the notice also applies to a cell of a Mixed column.
 #[test]
 fn the_decimal_comma_notice_also_applies_to_a_mixed_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 0,
         text: "n/a".to_string(),
     });
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 1,
         text: "12,345".to_string(),
     });
     assert!(
         status_text(&state).contains("decimal comma"),
-        "avis attendu : {}",
+        "notice expected: {}",
         status_text(&state)
     );
 }
 
-/// #311 (E2) : le collage ne pose pas l'avis (saisie de cellule seulement).
+/// #311 (E2): the paste does not set the notice (cell input only).
 #[test]
 fn pasting_a_thousands_looking_number_does_not_notice() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    state.select_cell(sheet1, temps, 0);
+    let time_col = column_id(&state, sheet1, "Time");
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "1,234".to_string(),
@@ -2506,34 +2506,34 @@ fn pasting_a_thousands_looking_number_does_not_notice() {
     assert!(!status_text(&state).contains("decimal comma"));
 }
 
-/// Lettres affichées de la formule d'une colonne (#321 : la formule est
-/// stockée par identifiants, les lettres ne sont qu'un affichage).
+/// Letters displayed for a column's formula (#321: the formula is
+/// stored by identifiers, the letters are only a display).
 fn formula_letters(state: &AppState, column: NodeId) -> Option<String> {
     state.tree().formula_letters(column)
 }
 
-/// Copie de trois rangées d'en-tête (Nom long, Unité, Commentaire) d'une
-/// colonne, prête à coller ; renvoie le texte copié.
+/// Copy of three header rows (Long Name, Unit, Comment) of a
+/// column, ready to paste; returns the copied text.
 fn copy_three_header_rows(state: &mut AppState, sheet: NodeId, column: NodeId) -> String {
     set_header_field(state, column, HeaderField::LongName, "A");
     set_header_field(state, column, HeaderField::Unit, "u");
     set_header_field(state, column, HeaderField::Comment, "c");
     state.select_header_field(sheet, column, HeaderField::LongName);
     state.extend_header_field_selection(sheet, column, HeaderField::Comment);
-    state.copy_selection(sheet).expect("sélection non vide")
+    state.copy_selection(sheet).expect("non-empty selection")
 }
 
-/// #311 (E4) : trois rangées collées avec la première sur Formule : Formule
-/// est écrite, les deux autres rangées sont comptées dans le statut, le tout
-/// en une seule entrée d'historique.
+/// #311 (E4): three rows pasted with the first on Formula: Formula
+/// is written, the other two rows are counted in the status, the whole
+/// in a single history entry.
 #[test]
 fn a_header_field_paste_anchored_low_counts_the_rows_beyond_formula() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let note = column_id(&state, sheet1, "Note");
-    let text = copy_three_header_rows(&mut state, sheet1, temps);
+    let text = copy_three_header_rows(&mut state, sheet1, time_col);
 
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
@@ -2541,27 +2541,27 @@ fn a_header_field_paste_anchored_low_counts_the_rows_beyond_formula() {
         text,
     });
     assert_eq!(formula_letters(&state, note).as_deref(), Some("A"));
-    assert_eq!(state.column_meta(note).unit, "", "rangée jetée");
-    let status = state.status().expect("un statut");
+    assert_eq!(state.column_meta(note).unit, "", "row dropped");
+    let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
         status.text.contains("2 header fields did not fit"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status.text
     );
     state.dispatch(Action::Undo);
-    assert_eq!(formula_letters(&state, note), None, "un Annuler suffit");
+    assert_eq!(formula_letters(&state, note), None, "one Undo is enough");
 }
 
-/// #311 (E4) : ancré sur Nom long, les trois rangées tiennent : aucun statut.
+/// #311 (E4): anchored on Long Name, the three rows fit: no status.
 #[test]
 fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let note = column_id(&state, sheet1, "Note");
-    let text = copy_three_header_rows(&mut state, sheet1, temps);
+    let text = copy_three_header_rows(&mut state, sheet1, time_col);
 
     state.select_header_field(sheet1, note, HeaderField::LongName);
     state.dispatch(Action::Paste {
@@ -2571,56 +2571,56 @@ fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
     assert_eq!(state.column_meta(note).comment, "c");
     assert!(
         !status_text(&state).contains("did not fit"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status_text(&state)
     );
 }
 
-/// #311 (E4) : colonnes et champs qui débordent ensemble : un seul message.
+/// #311 (E4): columns and fields that overflow together: a single message.
 #[test]
 fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
-    for column in [temps, signal] {
+    for column in [time_col, signal] {
         set_header_field(&mut state, column, HeaderField::LongName, "A");
         set_header_field(&mut state, column, HeaderField::Unit, "u");
     }
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
     state.extend_header_field_selection(sheet1, signal, HeaderField::Unit);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
-    let status = state.status().expect("un statut");
+    let status = state.status().expect("a status");
     assert!(!status.is_error(), "{}", status.text);
     assert!(
         status
             .text
             .contains("1 column(s) and 1 header field(s) did not fit"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status.text
     );
 }
 
-/// #259 : une case texte qui porte une tabulation ou un retour à la ligne se
-/// colle d'un seul tenant dans une autre session (donc par le seul texte du
-/// presse-papiers, comme depuis un tableur) — rien ne glisse sur les cases
-/// suivantes. Le texte copié est au format Excel/LibreOffice.
+/// #259: a text cell that carries a tab or a line break is
+/// pasted in one piece into another session (hence through the clipboard
+/// text alone, as from a spreadsheet) — nothing slides onto the
+/// following cells. The copied text is in Excel/LibreOffice format.
 #[test]
 fn a_multiline_text_cell_pastes_into_another_session_without_shifting_anything() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut source) = start_demo(dir.path());
     let sheet1 = sheet_named(source.tree(), "Sheet1");
     let signal = column_id(&source, sheet1, "Signal");
     let note = column_id(&source, sheet1, "Note");
-    let multiline = "ligne 1\nligne 2\r\nTab\tici \"cité\"".to_string();
+    let multiline = "line 1\nline 2\r\nTab\there \"quoted\"".to_string();
     source.dispatch(Action::CommitCell {
         column: note,
         row: 0,
@@ -2630,13 +2630,13 @@ fn a_multiline_text_cell_pastes_into_another_session_without_shifting_anything()
 
     source.select_cell(sheet1, signal, 0);
     source.extend_selection(sheet1, note, 1);
-    let text = source.copy_selection(sheet1).expect("sélection non vide");
+    let text = source.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(
-        text, "10\t\"ligne 1\nligne 2\r\nTab\tici \"\"cité\"\"\"\n\t\n",
-        "la case texte est entre guillemets, la case manquante reste vide"
+        text, "10\t\"line 1\nline 2\r\nTab\there \"\"quoted\"\"\"\n\t\n",
+        "the text cell is quoted, the missing cell stays empty"
     );
 
-    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let dir2 = tempfile::tempdir().expect("temporary directory");
     let (_session2, mut target) = start_demo(dir2.path());
     let sheet1 = sheet_named(target.tree(), "Sheet1");
     let signal = column_id(&target, sheet1, "Signal");
@@ -2652,7 +2652,7 @@ fn a_multiline_text_cell_pastes_into_another_session_without_shifting_anything()
     assert_eq!(
         cell(&target, note, 3),
         Cell::Text(None),
-        "la ligne suivante n'a reçu que ses propres cases"
+        "the next row received only its own cells"
     );
     assert_eq!(
         target
@@ -2661,16 +2661,16 @@ fn a_multiline_text_cell_pastes_into_another_session_without_shifting_anything()
             .and_then(|n| n.as_column())
             .map(|c| c.len()),
         Some(4),
-        "deux lignes collées (2 et 3), pas une de plus : le retour à la ligne \
-         de la case n'a rien coupé"
+        "two rows pasted (2 and 3), not one more: the line break \
+         of the cell cut nothing"
     );
 }
 
-/// #259 : une seule case texte multiligne copiée puis collée ailleurs reste
-/// une seule case (et non une rangée de cases).
+/// #259: a single multiline text cell copied then pasted elsewhere stays
+/// a single cell (and not a row of cells).
 #[test]
 fn a_single_multiline_text_cell_pastes_as_one_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut source) = start_demo(dir.path());
     let sheet1 = sheet_named(source.tree(), "Sheet1");
     let note = column_id(&source, sheet1, "Note");
@@ -2680,9 +2680,9 @@ fn a_single_multiline_text_cell_pastes_as_one_cell() {
         text: "a\nb\tc".to_string(),
     });
     source.select_cell(sheet1, note, 0);
-    let text = source.copy_selection(sheet1).expect("une case");
+    let text = source.copy_selection(sheet1).expect("one cell");
 
-    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let dir2 = tempfile::tempdir().expect("temporary directory");
     let (_session2, mut target) = start_demo(dir2.path());
     let sheet1 = sheet_named(target.tree(), "Sheet1");
     let note = column_id(&target, sheet1, "Note");
@@ -2698,12 +2698,12 @@ fn a_single_multiline_text_cell_pastes_as_one_cell() {
     assert_eq!(cell(&target, note, 0), Cell::Text(Some("a".to_string())));
 }
 
-/// #259 : un espace insécable tapé dans un texte n'est pas pris pour une case
-/// manquante au copier — il se copie et se recolle tel quel, alors que la case
-/// vraiment manquante reste une case vide.
+/// #259: a non-breaking space typed in a text is not mistaken for a missing
+/// cell on copy — it is copied and pasted back as is, whereas the cell
+/// really missing stays an empty cell.
 #[test]
 fn a_typed_non_breaking_space_survives_copy_and_paste() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut source) = start_demo(dir.path());
     let sheet1 = sheet_named(source.tree(), "Sheet1");
     let note = column_id(&source, sheet1, "Note");
@@ -2721,18 +2721,18 @@ fn a_typed_non_breaking_space_survives_copy_and_paste() {
     assert_eq!(
         cell(&source, note, 1),
         Cell::Text(Some("m\u{00A0}s".to_string())),
-        "la saisie d'un espace insécable est gardée par le modèle"
+        "typing a non-breaking space is kept by the model"
     );
 
     source.select_cell(sheet1, signal, 0);
     source.extend_selection(sheet1, note, 2);
-    let text = source.copy_selection(sheet1).expect("sélection non vide");
+    let text = source.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(
         text, "10\t5\u{00A0}mm\n\tm\u{00A0}s\n30\t\n",
-        "les espaces insécables tapés sont copiés ; la case manquante reste vide"
+        "typed non-breaking spaces are copied; the missing cell stays empty"
     );
 
-    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let dir2 = tempfile::tempdir().expect("temporary directory");
     let (_session2, mut target) = start_demo(dir2.path());
     let sheet1 = sheet_named(target.tree(), "Sheet1");
     let note = column_id(&target, sheet1, "Note");
@@ -2753,28 +2753,28 @@ fn a_typed_non_breaking_space_survives_copy_and_paste() {
     assert_eq!(
         cell(&target, note, 2),
         Cell::Text(None),
-        "la case vraiment manquante n'est pas devenue un espace insécable"
+        "the cell that is really missing did not become a non-breaking space"
     );
 }
 
-/// Un copier/coller purement champs d'en-tête (sélection entièrement dans
-/// l'en-tête, sans toucher la moindre ligne de donnée) va bien sur les
-/// champs de la colonne cible — jamais sur ses données.
+/// A pure header-field copy/paste (selection entirely in the
+/// header, touching no data row at all) goes onto the
+/// fields of the target column — never onto its data.
 #[test]
 fn pure_header_field_copy_paste_writes_header_fields_not_data() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
 
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Unit);
 
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(text, "T\ns\n");
 
     let signal_data_before = [
@@ -2783,8 +2783,8 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
         cell(&state, signal, 2),
     ];
 
-    // Ancré sur un champ d'en-tête de `Signal` (même sorte que la copie) :
-    // les champs s'appliquent, les données ne bougent pas.
+    // Anchored on a header field of `Signal` (same kind as the copy):
+    // the fields apply, the data do not move.
     state.select_header_field(sheet1, signal, HeaderField::LongName);
     state.dispatch(Action::Paste {
         sheet: sheet1,
@@ -2799,24 +2799,24 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
     assert_eq!(cell(&state, signal, 2), signal_data_before[2]);
 }
 
-/// Un copier de champs d'en-tête collé sur une cellule de donnée ne colle
-/// rien : les deux sortes ne se mélangent jamais (règle 2 de la matrice de
-/// comportement, voir `stokesforge_app_state::state`) — le pendant de
-/// [`pure_header_field_copy_paste_writes_header_fields_not_data`] côté
-/// ancre de l'autre sorte.
+/// A header-field copy pasted onto a data cell pastes
+/// nothing: the two kinds never mix (rule 2 of the behavior matrix,
+/// see `stokesforge_app_state::state`) — the counterpart of
+/// [`pure_header_field_copy_paste_writes_header_fields_not_data`] on the
+/// anchor of the other kind.
 #[test]
 fn header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Unit);
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
     let signal_data_before = [cell(&state, signal, 0), cell(&state, signal, 1)];
 
@@ -2827,37 +2827,37 @@ fn header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing() {
     });
 
     let meta = state.column_meta(signal);
-    assert_eq!(meta.long_name, "", "rien ne se colle : sortes différentes");
+    assert_eq!(meta.long_name, "", "nothing is pasted: different kinds");
     assert_eq!(meta.unit, "");
     assert_eq!(cell(&state, signal, 0), signal_data_before[0]);
     assert_eq!(cell(&state, signal, 1), signal_data_before[1]);
 }
 
-/// Bug signalé : coller un rectangle de plusieurs champs d'en-tête sur un
-/// seul champ sélectionné doit étirer le rectangle depuis cette ancre —
-/// comme un tableur de référence — pas retomber sur les champs d'origine
-/// (ce qui laissait tous les champs sauf le premier vides).
+/// Reported bug: pasting a rectangle of several header fields onto a
+/// single selected field must stretch the rectangle from that anchor —
+/// like a reference spreadsheet — not fall back on the original fields
+/// (which left all fields but the first empty).
 #[test]
 fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fields() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "a");
-    set_header_field(&mut state, temps, HeaderField::Unit, "b");
-    // « A » : une lettre de colonne valable, car ce texte atterrit sur le
-    // champ Formule de `Note` (les formules se saisissent en lettres, #321).
-    set_header_field(&mut state, temps, HeaderField::Comment, "A");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "a");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "b");
+    // "A": a valid column letter, because this text lands on the
+    // Formula field of `Note` (formulas are entered as letters, #321).
+    set_header_field(&mut state, time_col, HeaderField::Comment, "A");
 
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Comment);
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(text, "a\nb\nA\n");
 
-    // Ancré sur le champ Nom long de `Signal` (le même rang que le premier
-    // champ copié) : les trois champs s'appliquent, décalage nul.
+    // Anchored on the Long Name field of `Signal` (the same rank as the first
+    // copied field): the three fields apply, zero offset.
     state.select_header_field(sheet1, signal, HeaderField::LongName);
     state.dispatch(Action::Paste {
         sheet: sheet1,
@@ -2868,10 +2868,10 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     assert_eq!(meta.unit, "b");
     assert_eq!(meta.comment, "A");
 
-    // Ancré sur Unité cette fois (un rang plus bas) : le rectangle se
-    // décale d'autant — Unité reçoit la première ligne copiée, Commentaire
-    // la deuxième, et la troisième (qui débordait sur Formule) s'y écrit
-    // aussi puisqu'elle reste dans les 4 champs.
+    // Anchored on Unit this time (one rank lower): the rectangle
+    // shifts by as much — Unit receives the first copied row, Comment
+    // the second, and the third (which overflowed onto Formula) is written there
+    // too since it stays within the 4 fields.
     let note = column_id(&state, sheet1, "Note");
     state.select_header_field(sheet1, note, HeaderField::Unit);
     state.dispatch(Action::Paste {
@@ -2884,181 +2884,177 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     assert_eq!(formula_letters(&state, note).as_deref(), Some("A"));
 }
 
-// -- Formules par identifiant (#321) --
+// -- Formulas by identifier (#321) --
 
-/// Une lettre qui ne désigne aucune colonne de la feuille est refusée : rien
-/// n'est écrit, la barre d'état dit laquelle (en saisie comme au collage).
+/// A letter that designates no column of the sheet is refused: nothing
+/// is written, the status bar says which (on input as on paste).
 #[test]
 fn a_formula_naming_a_missing_column_is_refused_with_a_message() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     set_header_field(&mut state, signal, HeaderField::Formula, "Z*2");
-    assert_eq!(formula_letters(&state, signal), None, "rien n'est écrit");
-    let status = state.status().expect("un statut");
+    assert_eq!(formula_letters(&state, signal), None, "nothing is written");
+    let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
         status.text.contains("Column Z does not exist"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status.text
     );
 
-    // Au collage, le même refus (et son message à lui) : rien n'est écrit.
+    // On paste, the same refusal (and its own message): nothing is written.
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "Y*2".to_string(),
     });
-    assert_eq!(formula_letters(&state, note), None, "collage refusé");
-    let status = state.status().expect("un statut");
+    assert_eq!(formula_letters(&state, note), None, "paste refused");
+    let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
         status.text.contains("Column Y does not exist"),
-        "statut inattendu : {}",
+        "unexpected status: {}",
         status.text
     );
 }
 
-/// Une colonne lue qui disparaît laisse `#REF` dans le texte affiché ; quitter
-/// la case sans rien changer ne réécrit pas la formule (le texte affiché n'est
-/// jamais relu : `#REF` serait refusé), et Annuler rend la colonne et sa
-/// lettre.
+/// A read column that disappears leaves `#REF` in the displayed text; leaving
+/// the cell without changing anything does not rewrite the formula (the displayed text is
+/// never read back: `#REF` would be refused), and Undo gives back the column and its
+/// letter.
 #[test]
 fn a_formula_reading_a_deleted_column_shows_ref_and_survives_an_unchanged_edit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
     let stored = state.column_meta(signal).formula;
     assert!(stored.is_some());
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
     assert_eq!(formula_letters(&state, signal).as_deref(), Some("#REF*2"));
 
-    // Ouvrir la case puis la quitter telle quelle : la formule reste, sans
-    // message d'erreur.
+    // Open the cell then leave it as is: the formula stays, with no
+    // error message.
     state.begin_header_edit(signal, HeaderField::Formula);
     assert_eq!(
         state.header_editing_mut().map(|edit| edit.buffer.clone()),
         Some("#REF*2".to_string())
     );
     state.commit_header_edit();
-    assert_eq!(state.column_meta(signal).formula, stored, "formule intacte");
+    assert_eq!(state.column_meta(signal).formula, stored, "formula intact");
     assert!(
         !state.status().is_some_and(|status| status.is_error()),
-        "aucune erreur : {}",
+        "no error: {}",
         status_text(&state)
     );
 }
 
-/// Le refus de la case Formule se décide dans `app-state`
-/// (`header_edit_refusal`), que la grille peint : la colonne qui se lit
-/// elle-même est refusée dès la frappe, et valider un texte refusé n'écrit rien.
+/// The refusal of the Formula cell is decided in `app-state`
+/// (`header_edit_refusal`), which the grid paints: a column that reads
+/// itself is refused as soon as it is typed, and committing a refused text writes nothing.
 #[test]
 fn a_formula_reading_its_own_column_is_refused_while_typing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let note = column_id(&state, sheet1, "Note"); // la colonne C
+    let note = column_id(&state, sheet1, "Note"); // column C
 
     state.begin_header_edit(note, HeaderField::Formula);
-    assert_eq!(state.header_edit_refusal(), None, "rien de tapé");
-    state.header_editing_mut().expect("saisie").buffer = "C*2".to_string();
-    let refusal = state.header_edit_refusal().expect("auto-lecture refusée");
+    assert_eq!(state.header_edit_refusal(), None, "nothing typed");
+    state.header_editing_mut().expect("input").buffer = "C*2".to_string();
+    let refusal = state.header_edit_refusal().expect("self-reading refused");
     assert!(
         refusal.contains("own column") && refusal.contains('C'),
-        "phrase inattendue : {refusal}"
+        "unexpected sentence: {refusal}"
     );
     state.commit_header_edit();
-    assert_eq!(formula_letters(&state, note), None, "rien n'est écrit");
+    assert_eq!(formula_letters(&state, note), None, "nothing is written");
 
-    // La minuscule est normalisée : `a*2` s'affiche `A*2`.
+    // Lowercase is normalized: `a*2` is displayed as `A*2`.
     set_header_field(&mut state, note, HeaderField::Formula, "a*2");
     assert_eq!(formula_letters(&state, note).as_deref(), Some("A*2"));
 }
 
-/// `#REF` : valider le texte affiché sans le toucher n'écrit rien et n'est pas
-/// refusé ; le modifier (`#REF*3`) est refusé ; vider efface ; une erreur de
-/// **syntaxe** n'est jamais un refus (elle s'enregistre). Et la case Formule
-/// porte son problème (`formula_issue`) tant qu'elle lit une colonne supprimée.
+/// `#REF`: committing the displayed text without touching it writes nothing and is not
+/// refused; modifying it (`#REF*3`) is refused; clearing erases; a
+/// **syntax** error is never a refusal (it is saved). And the Formula cell
+/// carries its problem (`formula_issue`) as long as it reads a deleted column.
 #[test]
 fn a_ref_formula_is_refused_only_when_its_text_is_changed() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
-    assert_eq!(state.formula_issue(signal), None, "aucune colonne perdue");
-    state.select_column(sheet1, temps);
+    assert_eq!(state.formula_issue(signal), None, "no lost column");
+    state.select_column(sheet1, time_col);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
     state.dispatch(Action::CloseColumnUse);
-    let issue = state.formula_issue(signal).expect("une colonne est perdue");
+    let issue = state.formula_issue(signal).expect("a column is lost");
     assert!(issue.contains("Column deleted"), "{issue}");
     let stored = state.column_meta(signal).formula;
 
     state.begin_header_edit(signal, HeaderField::Formula);
-    assert_eq!(state.header_edit_refusal(), None, "texte affiché : valide");
-    state.header_editing_mut().expect("saisie").buffer = "#REF*3".to_string();
-    let refusal = state.header_edit_refusal().expect("#REF modifié refusé");
+    assert_eq!(state.header_edit_refusal(), None, "displayed text: valid");
+    state.header_editing_mut().expect("input").buffer = "#REF*3".to_string();
+    let refusal = state.header_edit_refusal().expect("modified #REF refused");
     assert!(refusal.contains("Column deleted"), "{refusal}");
     state.commit_header_edit();
     assert_eq!(
         state.column_meta(signal).formula,
         stored,
-        "rien n'est écrit"
+        "nothing is written"
     );
 
     state.begin_header_edit(signal, HeaderField::Formula);
-    state.header_editing_mut().expect("saisie").buffer = "B*".to_string();
-    assert_eq!(
-        state.header_edit_refusal(),
-        None,
-        "une erreur de syntaxe s'enregistre"
-    );
-    state.header_editing_mut().expect("saisie").buffer = String::new();
-    assert_eq!(state.header_edit_refusal(), None, "vider efface");
+    state.header_editing_mut().expect("input").buffer = "B*".to_string();
+    assert_eq!(state.header_edit_refusal(), None, "a syntax error is saved");
+    state.header_editing_mut().expect("input").buffer = String::new();
+    assert_eq!(state.header_edit_refusal(), None, "clearing erases");
     state.cancel_header_edit();
 }
 
-/// Collage d'un rectangle dont la formule est refusée dans la feuille
-/// d'arrivée : les autres champs sont collés, et la barre d'état dit le refus
-/// **en dernier** (la même phrase qu'à la saisie).
+/// Paste of a rectangle whose formula is refused in the destination
+/// sheet: the other fields are pasted, and the status bar states the refusal
+/// **last** (the same sentence as on input).
 #[test]
 fn a_refused_formula_in_a_paste_leaves_the_other_fields_pasted() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let sheet2 = sheet_named(state.tree(), "Sheet2");
     let signal = column_id(&state, sheet1, "Signal");
-    let court = column_id(&state, sheet2, "Court"); // la colonne A de Sheet2
+    let short = column_id(&state, sheet2, "Short"); // column A of Sheet2
 
     set_header_field(&mut state, signal, HeaderField::LongName, "ln");
     set_header_field(&mut state, signal, HeaderField::Unit, "u");
     set_header_field(&mut state, signal, HeaderField::Comment, "c");
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
-    // Deux colonnes copiées (Signal et Note) pour une seule d'arrivée : l'avis
-    // de débordement part aussi, et le refus de la formule doit passer après.
+    // Two columns copied (Signal and Note) for a single destination: the overflow
+    // notice is also issued, and the formula refusal must come after it.
     let note = column_id(&state, sheet1, "Note");
     state.select_header_field(sheet1, signal, HeaderField::LongName);
     state.extend_header_field_selection(sheet1, note, HeaderField::Formula);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
-    // Dans Sheet2, « A » est la colonne qui reçoit : elle se lirait elle-même.
-    state.select_header_field(sheet2, court, HeaderField::LongName);
+    // In Sheet2, "A" is the receiving column: it would read itself.
+    state.select_header_field(sheet2, short, HeaderField::LongName);
     state.dispatch(Action::Paste {
         sheet: sheet2,
         text,
     });
-    let meta = state.column_meta(court);
+    let meta = state.column_meta(short);
     assert_eq!(
         (
             meta.long_name.as_str(),
@@ -3066,66 +3062,66 @@ fn a_refused_formula_in_a_paste_leaves_the_other_fields_pasted() {
             meta.comment.as_str()
         ),
         ("ln", "u", "c"),
-        "les autres champs sont collés"
+        "the other fields are pasted"
     );
-    assert_eq!(formula_letters(&state, court), None, "formule refusée");
-    let status = state.status().expect("un statut");
+    assert_eq!(formula_letters(&state, short), None, "formula refused");
+    let status = state.status().expect("a status");
     assert!(status.is_error(), "{}", status.text);
     assert!(
         status.text.contains("own column"),
-        "statut inattendu (le refus passe après l'avis de débordement) : {}",
+        "unexpected status (the refusal comes after the overflow notice): {}",
         status.text
     );
 }
 
-/// Ctrl+Maj+C (formules) copie des **lettres** : collées dans une autre
-/// feuille, elles sont relues dans la feuille d'arrivée (là, `A` est la
-/// colonne de cette feuille, pas celle d'où vient la copie).
+/// Ctrl+Shift+C (formulas) copies **letters**: pasted into another
+/// sheet, they are re-read in the destination sheet (there, `A` is the
+/// column of that sheet, not the one the copy comes from).
 #[test]
 fn copied_formulas_travel_as_letters_and_are_read_in_the_destination_sheet() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let sheet2 = sheet_named(state.tree(), "Sheet2");
     let signal = column_id(&state, sheet1, "Signal");
-    let court = column_id(&state, sheet2, "Court");
+    let short = column_id(&state, sheet2, "Short");
 
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
     state.select_column(sheet1, signal);
     assert_eq!(
         state.copy_full_columns(sheet1),
         None,
-        "la question est posée"
+        "the question is asked"
     );
     state.dispatch(Action::ConfirmFullColumnsCopy(
         stokesforge_app_state::state::FullColumnsCopy::Formulas,
     ));
-    let text = state.take_object_clipboard_text().expect("texte copié");
-    assert!(text.contains("A*2"), "des lettres : {text}");
+    let text = state.take_object_clipboard_text().expect("copied text");
+    assert!(text.contains("A*2"), "letters: {text}");
 
     state.dispatch(Action::AddColumn { sheet: sheet2 });
-    let columns = state.tree().children(sheet2).expect("feuille").to_vec();
-    let arrivee = *columns.last().expect("colonne ajoutée");
-    assert_ne!(arrivee, court);
-    state.select_header_field(sheet2, arrivee, HeaderField::XPrime);
+    let columns = state.tree().children(sheet2).expect("sheet").to_vec();
+    let arrival = *columns.last().expect("added column");
+    assert_ne!(arrival, short);
+    state.select_header_field(sheet2, arrival, HeaderField::XPrime);
     state.dispatch(Action::Paste {
         sheet: sheet2,
         text,
     });
-    assert_eq!(formula_letters(&state, arrivee).as_deref(), Some("A*2"));
+    assert_eq!(formula_letters(&state, arrival).as_deref(), Some("A*2"));
     let lue = state
-        .column_meta(arrivee)
+        .column_meta(arrival)
         .formula
-        .expect("formule collée")
+        .expect("pasted formula")
         .columns();
     assert_eq!(
         lue,
-        std::collections::BTreeSet::from([court]),
-        "lit la colonne A de Sheet2"
+        std::collections::BTreeSet::from([short]),
+        "reads column A of Sheet2"
     );
 }
 
-// -- Retirer une formule (#236) --
+// -- Removing a formula (#236) --
 
 fn column_len(state: &AppState, column: NodeId) -> usize {
     state
@@ -3135,14 +3131,14 @@ fn column_len(state: &AppState, column: NodeId) -> usize {
         .map_or(0, |c| c.len())
 }
 
-/// Vider la case Formule supprime aussi les valeurs de la colonne, et
-/// Ctrl+Z rend formule et données d'un seul coup (#236).
+/// Clearing the Formula cell also deletes the column's values, and
+/// Ctrl+Z gives back formula and data in one go (#236).
 #[test]
 fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let len = column_len(&state, signal);
     assert!(len > 0);
@@ -3156,9 +3152,9 @@ fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
     assert_eq!(
         column_len(&state, signal),
         0,
-        "les valeurs partent avec la formule"
+        "the values go with the formula"
     );
-    assert!(column_len(&state, temps) > 0, "les autres colonnes restent");
+    assert!(column_len(&state, time_col) > 0, "the other columns stay");
 
     state.dispatch(Action::Undo);
     assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
@@ -3166,10 +3162,10 @@ fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
     assert_eq!(cell(&state, signal, 0), value);
 }
 
-/// Vider le champ au clavier (Retour arrière) suit le même chemin.
+/// Clearing the field with the keyboard (Backspace) follows the same path.
 #[test]
 fn clearing_the_formula_field_with_backspace_also_deletes_the_values() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -3182,10 +3178,10 @@ fn clearing_the_formula_field_with_backspace_also_deletes_the_values() {
     assert_eq!(column_len(&state, signal), 0);
 }
 
-/// « Remove Formula, Keep Data » garde les valeurs ; une seule annulation.
+/// "Remove Formula, Keep Data" keeps the values; a single undo.
 #[test]
 fn remove_formula_keep_data_keeps_the_values_in_one_undo_step() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -3206,21 +3202,21 @@ fn remove_formula_keep_data_keeps_the_values_in_one_undo_step() {
     assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
 }
 
-/// Workbook › Columns : la même entrée, sur des colonnes entières.
+/// Workbook › Columns: the same entry, on whole columns.
 #[test]
 fn remove_columns_formula_keep_data_works_from_the_columns_menu() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
     let len = column_len(&state, signal);
 
-    assert!(!state.any_formula(&[temps]));
-    assert!(state.any_formula(&[temps, signal]));
+    assert!(!state.any_formula(&[time_col]));
+    assert!(state.any_formula(&[time_col, signal]));
     state.dispatch(Action::RemoveColumnsFormulaKeepData {
-        columns: vec![temps, signal],
+        columns: vec![time_col, signal],
     });
     assert_eq!(formula_letters(&state, signal), None);
     assert_eq!(column_len(&state, signal), len);
@@ -3228,10 +3224,10 @@ fn remove_columns_formula_keep_data_works_from_the_columns_menu() {
     assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
 }
 
-/// L'entrée n'est offerte que sur une formule existante.
+/// The entry is offered only on an existing formula.
 #[test]
 fn keep_formula_data_is_only_offered_on_a_formula_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -3242,37 +3238,34 @@ fn keep_formula_data_is_only_offered_on_a_formula_field() {
     assert!(!state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
 }
 
-// -- Matrice de comportement copier/coller (§3, voir la doc de tête de
+// -- Copy/paste behavior matrix (§3, see the head doc of
 // `stokesforge_app_state::state`) --
 //
-// Les tests plus haut couvrent déjà plusieurs lignes de la matrice (case
-// unique → `Text`, rectangle relatif de données ou de champs, débordement
-// en colonnes, croisement en-tête/données qui ne colle rien). Ceux qui
-// suivent couvrent le reste : `Text` externe sur n'importe quelle ancre,
-// `Ctrl+Maj+C` (`AppState::copy_full_columns`), l'autre sens du croisement
-// en-tête/données, et `Ctrl+Maj+V` (`Action::PasteAbsolute`) pour un
-// rectangle relatif comme pour des colonnes entières.
+// The tests above already cover several rows of the matrix (single
+// cell → `Text`, relative rectangle of data or fields, overflow
+// in columns, header/data crossing that pastes nothing). Those that
+// follow cover the rest: external `Text` on any anchor,
+// `Ctrl+Shift+C` (`AppState::copy_full_columns`), the other direction of the
+// header/data crossing, and `Ctrl+Shift+V` (`Action::PasteAbsolute`) for a
+// relative rectangle as for whole columns.
 
-/// Une seule case copiée — ici un champ d'en-tête — devient `Text` : son
-/// texte seul. C'est ce qui permet de copier la formule d'une colonne dans
-/// le champ Formule d'une autre, l'exemple qui motive la règle (voir la doc
-/// de tête de `stokesforge_app_state::state`).
+/// A single copied cell — here a header field — becomes `Text`: its
+/// text alone. This is what makes it possible to copy a column's formula into
+/// another's Formula field, the example that motivates the rule (see the head
+/// doc of `stokesforge_app_state::state`).
 #[test]
 fn copying_a_single_formula_field_can_paste_it_into_another_columns_formula_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
 
-    // `Temps` est la colonne A : sa formule ne peut pas se lire elle-même,
-    // la source de la copie est donc `Signal`.
+    // `Time` is column A: its formula cannot read itself,
+    // so the copy source is `Signal`.
     set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
     state.select_header_field(sheet1, signal, HeaderField::Formula);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
-    assert_eq!(
-        text, "A*2",
-        "une seule case copiée : son texte, rien d'autre"
-    );
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
+    assert_eq!(text, "A*2", "a single copied cell: its text, nothing else");
 
     let note = column_id(&state, sheet1, "Note");
     state.select_header_field(sheet1, note, HeaderField::Formula);
@@ -3284,235 +3277,239 @@ fn copying_a_single_formula_field_can_paste_it_into_another_columns_formula_fiel
     assert_eq!(formula_letters(&state, note).as_deref(), Some("A*2"));
 }
 
-/// Règle 1 : un texte externe sans tabulation ni retour à la ligne (jamais
-/// passé par `copy_selection`, donc jamais reconnu comme notre presse-
-/// papier) s'écrit dans la case ancrée, quelle qu'elle soit — champ
-/// d'en-tête comme cellule de donnée.
+/// Rule 1: an external text with no tab or line break (never
+/// passed through `copy_selection`, hence never recognized as our
+/// clipboard) is written into the anchored cell, whatever it is — header
+/// field as well as data cell.
 #[test]
 fn external_plain_text_writes_into_whichever_anchor_is_selected() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
     state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: "Capteur 1".to_string(),
+        text: "Sensor 1".to_string(),
     });
-    assert_eq!(state.column_meta(temps).long_name, "Capteur 1");
+    assert_eq!(state.column_meta(time_col).long_name, "Sensor 1");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "42".to_string(),
     });
-    assert_eq!(cell(&state, temps, 0), Cell::Float(42.0));
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(42.0));
 }
 
-/// #164 : la ligne x' s'édite comme les autres champs d'en-tête, accepte un
-/// nombre (virgule décimale comprise), s'annule en un pas, et un texte vide
-/// l'efface.
+/// #164: the x' row is edited like the other header fields, accepts a
+/// number (decimal comma included), is undone in one step, and an empty text
+/// clears it.
 #[test]
 fn x_prime_is_edited_cleared_and_undone_like_a_header_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    assert_eq!(state.column_meta(temps).x_prime, None);
+    let time_col = column_id(&state, sheet1, "Time");
+    assert_eq!(state.column_meta(time_col).x_prime, None);
 
-    set_header_field(&mut state, temps, HeaderField::XPrime, " 12.5 ");
-    assert_eq!(state.column_meta(temps).x_prime, Some(12.5));
+    set_header_field(&mut state, time_col, HeaderField::XPrime, " 12.5 ");
+    assert_eq!(state.column_meta(time_col).x_prime, Some(12.5));
 
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(temps).x_prime, None);
+    assert_eq!(state.column_meta(time_col).x_prime, None);
     state.dispatch(Action::Redo);
-    assert_eq!(state.column_meta(temps).x_prime, Some(12.5));
+    assert_eq!(state.column_meta(time_col).x_prime, Some(12.5));
 
-    set_header_field(&mut state, temps, HeaderField::XPrime, "");
-    assert_eq!(state.column_meta(temps).x_prime, None);
+    set_header_field(&mut state, time_col, HeaderField::XPrime, "");
+    assert_eq!(state.column_meta(time_col).x_prime, None);
 }
 
-/// #164 : un texte qui n'est pas un nombre fini est refusé avec un message,
-/// sans rien écrire ni empiler d'historique.
+/// #164: a text that is not a finite number is refused with a message,
+/// without writing anything or stacking any history.
 #[test]
 fn x_prime_refuses_text_nan_and_infinity() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    set_header_field(&mut state, temps, HeaderField::XPrime, "3");
-    for invalide in ["abc", "NaN", "inf", "-Infinity", "1e400"] {
-        set_header_field(&mut state, temps, HeaderField::XPrime, invalide);
+    let time_col = column_id(&state, sheet1, "Time");
+    set_header_field(&mut state, time_col, HeaderField::XPrime, "3");
+    for invalid in ["abc", "NaN", "inf", "-Infinity", "1e400"] {
+        set_header_field(&mut state, time_col, HeaderField::XPrime, invalid);
         assert_eq!(
-            state.column_meta(temps).x_prime,
+            state.column_meta(time_col).x_prime,
             Some(3.0),
-            "{invalide:?} ne remplace pas la valeur"
+            "{invalid:?} does not replace the value"
         );
-        let status = state.status().expect("message d'état");
-        assert!(status.is_error(), "{invalide:?} signalé comme erreur");
+        let status = state.status().expect("status message");
+        assert!(status.is_error(), "{invalid:?} reported as an error");
     }
-    // Les refus n'ont rien empilé : un seul Undo retire le « 3 ».
+    // The refusals stacked nothing: a single Undo removes the "3".
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(temps).x_prime, None);
+    assert_eq!(state.column_meta(time_col).x_prime, None);
 }
 
-/// #164 : x' se vide avec la sélection (Suppr) et se colle d'un champ à
-/// l'autre ; coller du texte sur x' est refusé.
+/// #164: x' is cleared with the selection (Delete) and pasted from one field to
+/// another; pasting text onto x' is refused.
 #[test]
 fn x_prime_is_cleared_and_pasted_as_a_header_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    set_header_field(&mut state, temps, HeaderField::XPrime, "7");
-    state.select_header_field(sheet1, temps, HeaderField::XPrime);
+    let time_col = column_id(&state, sheet1, "Time");
+    set_header_field(&mut state, time_col, HeaderField::XPrime, "7");
+    state.select_header_field(sheet1, time_col, HeaderField::XPrime);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
-    assert_eq!(state.column_meta(temps).x_prime, None);
+    assert_eq!(state.column_meta(time_col).x_prime, None);
 
-    state.select_header_field(sheet1, temps, HeaderField::XPrime);
+    state.select_header_field(sheet1, time_col, HeaderField::XPrime);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "42".to_string(),
     });
-    assert_eq!(state.column_meta(temps).x_prime, Some(42.0));
+    assert_eq!(state.column_meta(time_col).x_prime, Some(42.0));
     state.dispatch(Action::Paste {
         sheet: sheet1,
-        text: "pas un nombre".to_string(),
+        text: "not a number".to_string(),
     });
-    assert_eq!(state.column_meta(temps).x_prime, Some(42.0));
+    assert_eq!(state.column_meta(time_col).x_prime, Some(42.0));
 }
 
-/// Ctrl+Maj+C promeut en colonne entière (en-tête + corps) la colonne
-/// touchée par une sélection d'une seule cellule.
+/// Ctrl+Shift+C promotes to a whole column (header + body) the column
+/// touched by a single-cell selection.
 #[test]
 fn copy_full_columns_promotes_the_touched_columns_from_a_single_cell_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
-    state.select_cell(sheet1, temps, 2);
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
+    state.select_cell(sheet1, time_col, 2);
 
-    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
-    // 5 lignes d'en-tête (x', Nom long, Unité, Commentaire, Formule) puis tout
-    // le corps de `Temps`, indépendamment de la cellule sélectionnée.
+    let text = state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
+    // 5 header rows (x', Long Name, Unit, Comment, Formula) then the whole
+    // body of `Time`, regardless of the selected cell.
     assert_eq!(text, "\n\ns\n\n\n0\n0.5\n1\n1.5\n2\n");
 }
 
-/// Symétrique de [`header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing`] :
-/// des lignes de données copiées, collées sur un champ d'en-tête (sortes
-/// différentes), ne collent rien non plus.
+/// Symmetric to [`header_field_copy_pasted_onto_a_data_cell_anchor_pastes_nothing`]:
+/// copied data rows, pasted onto a header field (different
+/// kinds), paste nothing either.
 #[test]
 fn relative_data_rows_pasted_onto_a_header_field_anchor_pastes_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.extend_selection(sheet1, signal, 1);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
-    let unit_before = state.column_meta(temps).unit;
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    let unit_before = state.column_meta(time_col).unit;
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
 
-    assert_eq!(state.column_meta(temps).unit, unit_before);
+    assert_eq!(state.column_meta(time_col).unit, unit_before);
 }
 
-/// Ctrl+Maj+V sur un rectangle relatif de champs d'en-tête ignore l'ancre :
-/// chaque champ retombe sur son rang d'origine plutôt que de se décaler.
+/// Ctrl+Shift+V on a relative rectangle of header fields ignores the anchor:
+/// each field falls back on its original rank rather than shifting.
 #[test]
 fn paste_absolute_replays_relative_header_fields_on_their_original_rank() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
-    set_header_field(&mut state, temps, HeaderField::Comment, "x");
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
-    state.copy_selection(sheet1).expect("sélection non vide");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::Comment, "x");
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Comment);
+    state.copy_selection(sheet1).expect("non-empty selection");
 
-    // Ancré sur Nom long (au-dessus du rang d'origine) : en relatif ça
-    // décalerait tout vers le haut ; Ctrl+Maj+V ignore l'ancre.
+    // Anchored on Long Name (above the original rank): in relative mode this
+    // would shift everything up; Ctrl+Shift+V ignores the anchor.
     state.select_header_field(sheet1, signal, HeaderField::LongName);
     state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
 
     let meta = state.column_meta(signal);
-    assert_eq!(meta.long_name, "", "Nom long n'était pas dans la copie");
+    assert_eq!(meta.long_name, "", "Long Name was not in the copy");
     assert_eq!(meta.unit, "s");
     assert_eq!(meta.comment, "x");
 }
 
-/// Ctrl+Maj+V sur un rectangle relatif de données ignore l'ancre : chaque
-/// ligne retombe sur sa ligne d'origine plutôt que de se décaler — même
-/// avec une ancre choisie ailleurs.
+/// Ctrl+Shift+V on a relative rectangle of data ignores the anchor: each
+/// row falls back on its original row rather than shifting — even
+/// with an anchor chosen elsewhere.
 #[test]
 fn paste_absolute_replays_relative_data_rows_on_their_original_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    // Copie les lignes 2 et 3, puis les modifie : Ctrl+Maj+V doit les
-    // restaurer à leur rang d'origine, pas à partir de l'ancre choisie plus
-    // bas (la ligne 0).
-    state.select_cell(sheet1, temps, 2);
-    state.extend_selection(sheet1, temps, 3);
-    state.copy_selection(sheet1).expect("sélection non vide");
+    // Copy rows 2 and 3, then modify them: Ctrl+Shift+V must
+    // restore them to their original rank, not from the chosen anchor
+    // further down (row 0).
+    state.select_cell(sheet1, time_col, 2);
+    state.extend_selection(sheet1, time_col, 3);
+    state.copy_selection(sheet1).expect("non-empty selection");
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "99".to_string(),
     });
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 3,
         text: "98".to_string(),
     });
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
 
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         Cell::Float(0.0),
-        "l'ancre (ligne 0) n'a pas reçu la première ligne copiée"
+        "the anchor (row 0) did not receive the first copied row"
     );
     assert_eq!(
-        cell(&state, temps, 2),
+        cell(&state, time_col, 2),
         Cell::Float(1.0),
-        "restaurée à son rang d'origine"
+        "restored to its original rank"
     );
-    assert_eq!(cell(&state, temps, 3), Cell::Float(1.5));
+    assert_eq!(cell(&state, time_col, 3), Cell::Float(1.5));
 }
 
-/// Ctrl+V d'une copie de colonnes entières, ancrée sur un champ d'en-tête :
-/// les champs à partir de l'ancre (incluse) s'appliquent identité, ceux
-/// au-dessus sont jetés ; le corps se colle sans décalage.
+/// Ctrl+V of a whole-columns copy, anchored on a header field:
+/// the fields from the anchor (included) apply as is, those
+/// above are dropped; the body is pasted without offset.
 #[test]
 fn full_columns_pasted_onto_a_header_field_anchor_applies_from_that_field_down_with_an_unshifted_body(
 ) {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
-    set_header_field(&mut state, temps, HeaderField::Comment, "x");
-    state.select_cell(sheet1, temps, 0);
-    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::Comment, "x");
+    state.select_cell(sheet1, time_col, 0);
+    let text = state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
 
     state.select_header_field(sheet1, signal, HeaderField::Unit);
     state.dispatch(Action::Paste {
@@ -3521,30 +3518,32 @@ fn full_columns_pasted_onto_a_header_field_anchor_applies_from_that_field_down_w
     });
 
     let meta = state.column_meta(signal);
-    assert_eq!(meta.long_name, "", "au-dessus de l'ancre (Unité) : jeté");
+    assert_eq!(meta.long_name, "", "above the anchor (Unit): dropped");
     assert_eq!(meta.unit, "s");
     assert_eq!(meta.comment, "x");
     assert_eq!(
         cell(&state, signal, 0),
         Cell::Float(0.0),
-        "corps collé sans décalage"
+        "body pasted without offset"
     );
     assert_eq!(cell(&state, signal, 1), Cell::Float(0.5));
 }
 
-/// Ctrl+V d'une copie de colonnes entières, ancrée sur une cellule de
-/// donnée : l'en-tête est entièrement jeté, le corps se décale sur l'ancre.
+/// Ctrl+V of a whole-columns copy, anchored on a data
+/// cell: the header is entirely dropped, the body shifts onto the anchor.
 #[test]
 fn full_columns_pasted_onto_a_data_cell_anchor_discards_header_and_shifts_the_body() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    state.select_cell(sheet1, temps, 0);
-    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    state.select_cell(sheet1, time_col, 0);
+    let text = state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
 
     let signal_long_name_before = state.column_meta(signal).long_name;
     state.select_cell(sheet1, signal, 2);
@@ -3556,36 +3555,38 @@ fn full_columns_pasted_onto_a_data_cell_anchor_discards_header_and_shifts_the_bo
     assert_eq!(
         state.column_meta(signal).long_name,
         signal_long_name_before,
-        "l'en-tête est entièrement jeté quand l'ancre est une cellule de donnée"
+        "the header is entirely dropped when the anchor is a data cell"
     );
     assert_eq!(
         cell(&state, signal, 2),
         Cell::Float(0.0),
-        "1re ligne copiée -> ligne d'ancrage"
+        "1st copied row -> anchor row"
     );
     assert_eq!(cell(&state, signal, 3), Cell::Float(0.5));
     assert_eq!(
         cell(&state, signal, 0),
         Cell::Float(10.0),
-        "avant l'ancre : inchangé"
+        "before the anchor: unchanged"
     );
 }
 
-/// Ctrl+Maj+V d'une copie de colonnes entières ignore l'ancre dans les deux
-/// dimensions à la fois : l'en-tête s'applique quand même (contrairement à
-/// Ctrl+V sur une ancre de donnée) et le corps ne se décale pas
-/// (contrairement à Ctrl+V sur une ancre de donnée non plus).
+/// Ctrl+Shift+V of a whole-columns copy ignores the anchor in both
+/// dimensions at once: the header applies all the same (unlike
+/// Ctrl+V on a data anchor) and the body does not shift
+/// (unlike Ctrl+V on a data anchor either).
 #[test]
 fn paste_absolute_of_full_columns_applies_everything_at_its_origin_regardless_of_anchor() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    state.select_cell(sheet1, temps, 0);
-    state.copy_full_columns(sheet1).expect("sélection non vide");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    state.select_cell(sheet1, time_col, 0);
+    state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
 
     state.select_cell(sheet1, signal, 2);
     state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
@@ -3593,46 +3594,46 @@ fn paste_absolute_of_full_columns_applies_everything_at_its_origin_regardless_of
     assert_eq!(
         state.column_meta(signal).long_name,
         "T",
-        "l'en-tête s'applique même avec une ancre de donnée"
+        "the header applies even with a data anchor"
     );
     assert_eq!(
         cell(&state, signal, 0),
         Cell::Float(0.0),
-        "corps à son rang d'origine"
+        "body at its original rank"
     );
     assert_eq!(
         cell(&state, signal, 2),
         Cell::Float(1.0),
-        "pas décalé sur l'ancre (ligne 2) : reçoit Temps[2], pas Temps[0]"
+        "not shifted onto the anchor (row 2): receives Time[2], not Time[0]"
     );
 }
 
-/// Un rectangle de champs décalé sur l'ancre peut déborder après Formule,
-/// le dernier des 4 champs : ce qui dépasse est **jeté** silencieusement,
-/// jamais replié sur les données ni écrasé sur Formule. Chemin de perte de
-/// données discrète, donc verrouillé ici.
+/// A rectangle of fields shifted onto the anchor can overflow past Formula,
+/// the last of the 4 fields: what overflows is **dropped** silently,
+/// never wrapped onto the data nor overwritten onto Formula. A discreet
+/// data-loss path, hence locked here.
 #[test]
 fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "a");
-    // « A » : atterrit sur le champ Formule de `Signal`, où seule une lettre
-    // de colonne de la feuille est valable (#321).
-    set_header_field(&mut state, temps, HeaderField::Unit, "A");
-    set_header_field(&mut state, temps, HeaderField::Comment, "c");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "a");
+    // "A": lands on the Formula field of `Signal`, where only a letter
+    // of a column of the sheet is valid (#321).
+    set_header_field(&mut state, time_col, HeaderField::Unit, "A");
+    set_header_field(&mut state, time_col, HeaderField::Comment, "c");
     set_header_field(&mut state, signal, HeaderField::LongName, "intact");
-    set_header_field(&mut state, signal, HeaderField::Unit, "intact aussi");
+    set_header_field(&mut state, signal, HeaderField::Unit, "intact too");
 
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Comment);
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
-    // Ancré sur Commentaire : « a » y tombe, « b » sur Formule, « c »
-    // déborderait après Formule.
+    // Anchored on Comment: "a" lands there, "b" on Formula, "c"
+    // would overflow past Formula.
     state.select_header_field(sheet1, signal, HeaderField::Comment);
     state.dispatch(Action::Paste {
         sheet: sheet1,
@@ -3644,61 +3645,63 @@ fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() 
     assert_eq!(formula_letters(&state, signal).as_deref(), Some("A"));
     assert_eq!(
         meta.long_name, "intact",
-        "les champs au-dessus de l'ancre ne sont pas touchés"
+        "the fields above the anchor are not touched"
     );
-    assert_eq!(meta.unit, "intact aussi");
-    // « c » n'a atterri nulle part : ni dans un champ, ni dans la colonne
-    // voisine (le rectangle copié ne fait qu'une colonne de large).
+    assert_eq!(meta.unit, "intact too");
+    // "c" landed nowhere: neither in a field, nor in the neighboring
+    // column (the copied rectangle is only one column wide).
     assert!(
         [&meta.long_name, &meta.unit, &meta.comment]
             .iter()
             .all(|value| *value != "c")
             && formula_letters(&state, signal).as_deref() != Some("c"),
-        "« c » débordait après Formule : il est jeté, pas replié ailleurs"
+        "\"c\" overflowed past Formula: it is dropped, not wrapped elsewhere"
     );
     let note = column_id(&state, sheet1, "Note");
     assert_eq!(
         state.column_meta(note).long_name,
         "",
-        "la colonne voisine n'est pas touchée non plus"
+        "the neighboring column is not touched either"
     );
 }
 
-/// Un collage qui touche plusieurs colonnes et plusieurs champs ne compte
-/// que pour **une** entrée d'historique : une seule annulation doit tout
-/// remettre en place, pas une par champ écrit.
+/// A paste that touches several columns and several fields counts
+/// for only **one** history entry: a single undo must put everything
+/// back, not one per written field.
 #[test]
 fn pasting_full_columns_counts_as_a_single_history_entry() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
 
-    // Deux colonnes copiées en entier (en-tête + corps).
-    state.select_cell(sheet1, temps, 0);
+    // Two whole columns copied (header + body).
+    state.select_cell(sheet1, time_col, 0);
     state.extend_selection(sheet1, signal, 0);
-    let text = state.copy_full_columns(sheet1).expect("sélection non vide");
+    let text = state
+        .copy_full_columns(sheet1)
+        .expect("non-empty selection");
 
     let signal_before = state.column_meta(signal).clone();
     let note_before = state.column_meta(note).clone();
     let signal_data_before = cell(&state, signal, 0);
     let note_data_before = cell(&state, note, 0);
 
-    // Collé à partir de `Signal` : déborde sur `Note`, et écrit les 4
-    // champs de chacune — largement plus d'une opération.
+    // Pasted from `Signal`: overflows onto `Note`, and writes the 4
+    // fields of each — far more than one operation.
     state.select_header_field(sheet1, signal, HeaderField::LongName);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
-    // `Signal` reçoit les champs de `Temps`, et le débordement donne à
-    // `Note` ceux de `Signal` : plusieurs colonnes, plusieurs champs, plus
-    // les deux corps — bien plus d'une opération.
+    // `Signal` receives the fields of `Time`, and the overflow gives
+    // `Note` those of `Signal`: several columns, several fields, plus
+    // the two bodies — far more than one operation.
     assert_eq!(state.column_meta(signal).long_name, "T");
     assert_eq!(state.column_meta(signal).unit, "s");
     assert_eq!(cell(&state, signal, 0), Cell::Float(0.0));
@@ -3708,7 +3711,7 @@ fn pasting_full_columns_counts_as_a_single_history_entry() {
     assert_eq!(
         state.column_meta(signal).long_name,
         signal_before.long_name,
-        "une seule annulation doit défaire tout le collage"
+        "a single undo must undo the whole paste"
     );
     assert_eq!(state.column_meta(signal).unit, signal_before.unit);
     assert_eq!(state.column_meta(note).long_name, note_before.long_name);
@@ -3716,363 +3719,360 @@ fn pasting_full_columns_counts_as_a_single_history_entry() {
     assert_eq!(cell(&state, note, 0), note_data_before);
 }
 
-/// Ctrl+Maj+V rejoue le presse-papier **interne** : sans copie préalable
-/// dans cette session, il n'a aucun rang d'origine à rejouer. C'est un
-/// avertissement, pas une erreur ni une panique.
+/// Ctrl+Shift+V replays the **internal** clipboard: without a prior copy
+/// in this session, it has no original rank to replay. It is a
+/// warning, not an error nor a panic.
 #[test]
 fn paste_absolute_without_a_prior_copy_is_a_notice_not_an_error() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let before = state.snapshot().revision;
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::PasteAbsolute { sheet: sheet1 });
 
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert!(
         !status.is_error(),
-        "« rien à coller » est un état normal, pas une erreur"
+        "\"nothing to paste\" is a normal state, not an error"
     );
-    assert_eq!(state.snapshot().revision, before, "le modèle n'a pas bougé");
+    assert_eq!(state.snapshot().revision, before, "the model did not move");
 }
 
-/// Régression : Suppr vide un champ d'en-tête, comme Retour arrière. Un
-/// champ n'est pas répété par ligne, donc « vider et faire remonter » n'y a
-/// pas d'autre sens que « vider » — et la touche ne doit pas rester sans
-/// effet dans l'en-tête.
+/// Regression: Delete clears a header field, like Backspace. A
+/// field is not repeated per row, so "clear and shift up" has
+/// no other meaning than "clear" — and the key must not remain without
+/// effect in the header.
 #[test]
 fn delete_on_a_header_field_selection_clears_it_like_backspace() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
 
-    // Un seul champ sélectionné.
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    // A single field selected.
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
-    assert_eq!(state.column_meta(temps).long_name, "");
+    assert_eq!(state.column_meta(time_col).long_name, "");
     assert_eq!(
-        state.column_meta(temps).unit,
+        state.column_meta(time_col).unit,
         "s",
-        "seul le champ sélectionné est vidé"
+        "only the selected field is cleared"
     );
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         Cell::Float(0.0),
-        "aucune donnée n'a remonté"
+        "no data moved up"
     );
 
-    // Plage de champs : même règle.
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    // Range of fields: same rule.
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Unit);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
-    assert_eq!(state.column_meta(temps).long_name, "");
-    assert_eq!(state.column_meta(temps).unit, "");
-    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    assert_eq!(state.column_meta(time_col).long_name, "");
+    assert_eq!(state.column_meta(time_col).unit, "");
+    assert_eq!(cell(&state, time_col, 0), Cell::Float(0.0));
 }
 
-/// Suppr en deux temps (`AppState::consume_delete_key`) : la première
-/// pression sur une sélection vide la case sans rien décaler, exactement
-/// comme Retour arrière ; la deuxième pression sur *cette même sélection*
-/// supprime pour de bon et décale ce qui suit.
+/// Two-stage Delete (`AppState::consume_delete_key`): the first
+/// press on a selection clears the cell without shifting anything, exactly
+/// like Backspace; the second press on *that same selection*
+/// deletes for good and shifts what follows.
 #[test]
 fn pressing_delete_twice_on_the_same_selection_clears_then_shifts() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0].
-    state.select_cell(sheet1, temps, 2);
+    // "Time" = [0.0, 0.5, 1.0, 1.5, 2.0].
+    state.select_cell(sheet1, time_col, 2);
 
-    // Première pression : vide, ne décale rien.
+    // First press: clears, shifts nothing.
     let action = state
         .consume_delete_key(sheet1)
-        .expect("une sélection est active");
+        .expect("a selection is active");
     assert_eq!(action, Action::ClearSelectedCells { sheet: sheet1 });
     state.dispatch(action);
     assert!(
-        matches!(cell(&state, temps, 2), Cell::Float(v) if v.is_nan()),
-        "la case est vide après la première pression"
+        matches!(cell(&state, time_col, 2), Cell::Float(v) if v.is_nan()),
+        "the cell is empty after the first press"
     );
-    let temps_len = state
+    let time_len = state
         .tree()
-        .get(temps)
-        .expect("colonne Temps présente")
+        .get(time_col)
+        .expect("column Time present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .len();
-    assert_eq!(temps_len, 5, "rien n'a été décalé à la première pression");
+    assert_eq!(time_len, 5, "nothing was shifted on the first press");
 
-    // Deuxième pression, même sélection : supprime et décale.
+    // Second press, same selection: deletes and shifts.
     let action = state
         .consume_delete_key(sheet1)
-        .expect("la sélection n'a pas changé");
+        .expect("the selection did not change");
     assert_eq!(action, Action::DeleteSelectedCells { sheet: sheet1 });
     state.dispatch(action);
-    let temps_len = state
+    let time_len = state
         .tree()
-        .get(temps)
-        .expect("colonne Temps présente")
+        .get(time_col)
+        .expect("column Time present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .len();
-    assert_eq!(temps_len, 4, "la deuxième pression décale bien ce qui suit");
-    assert_eq!(cell(&state, temps, 2), Cell::Float(1.5));
+    assert_eq!(time_len, 4, "the second press does shift what follows");
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1.5));
 }
 
-/// Changer la sélection entre les deux pressions repart au premier temps
-/// (vider) : la deuxième pression ne supprime que si elle vise *exactement*
-/// la même sélection que la précédente.
+/// Changing the selection between the two presses restarts at the first stage
+/// (clear): the second press deletes only if it targets *exactly*
+/// the same selection as the previous one.
 #[test]
 fn changing_selection_between_two_delete_presses_restarts_at_clearing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 1);
-    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    state.select_cell(sheet1, time_col, 1);
+    let action = state.consume_delete_key(sheet1).expect("active selection");
     assert_eq!(action, Action::ClearSelectedCells { sheet: sheet1 });
     state.dispatch(action);
 
-    // La sélection bouge avant la deuxième pression.
-    state.select_cell(sheet1, temps, 3);
-    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    // The selection moves before the second press.
+    state.select_cell(sheet1, time_col, 3);
+    let action = state.consume_delete_key(sheet1).expect("active selection");
     assert_eq!(
         action,
         Action::ClearSelectedCells { sheet: sheet1 },
-        "sélection différente : on repart au premier temps, pas une suppression"
+        "different selection: restart at the first stage, not a deletion"
     );
 }
 
-/// Une autre mutation de la grille (ici Retour arrière) entre les deux
-/// pressions oublie la première, même si la sélection n'a pas bougé : une
-/// pression sur Suppr qui suit ne doit pas supprimer par surprise.
+/// Another grid mutation (here Backspace) between the two
+/// presses forgets the first, even if the selection did not move: a
+/// following Delete press must not delete by surprise.
 #[test]
 fn another_grid_mutation_between_two_delete_presses_forgets_the_first() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 1);
-    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    state.select_cell(sheet1, time_col, 1);
+    let action = state.consume_delete_key(sheet1).expect("active selection");
     state.dispatch(action);
 
-    // Une autre mutation de la grille se glisse entre les deux pressions,
-    // sur la même sélection — comme le ferait l'appelant (`app/grid.rs`) avant
-    // de dispatcher `Action::ClearSelectedCells` pour Retour arrière.
+    // Another grid mutation slips in between the two presses,
+    // on the same selection — as the caller (`app/grid.rs`) would before
+    // dispatching `Action::ClearSelectedCells` for Backspace.
     state.forget_delete_repeat(sheet1);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
 
-    let action = state.consume_delete_key(sheet1).expect("sélection active");
+    let action = state.consume_delete_key(sheet1).expect("active selection");
     assert_eq!(
         action,
         Action::ClearSelectedCells { sheet: sheet1 },
-        "la mutation intercalée a fait oublier la première pression"
+        "the interleaved mutation made it forget the first press"
     );
 }
 
-/// [`AppState::grid_menu`] — ce que le menu contextuel propose est décidé
-/// ici, sans egui : la zone touchée, l'accord en nombre des libellés, et le
-/// fait que « Supprimer et décaler » n'existe pas dans l'en-tête, où Suppr
-/// n'a rien à faire remonter (voir [`AppState::grid_menu`] et la doc de
+/// [`AppState::grid_menu`] — what the context menu offers is decided
+/// here, without egui: the touched zone, the number agreement of the labels, and the
+/// fact that "Delete and Shift Up" does not exist in the header, where Delete
+/// has nothing to shift up (see [`AppState::grid_menu`] and the doc of
 /// `GridMenu`).
 #[test]
 fn the_grid_menu_names_what_the_selection_actually_touches() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 1);
-    let menu = state.grid_menu(sheet1).expect("une cellule sélectionnée");
+    state.select_cell(sheet1, time_col, 1);
+    let menu = state.grid_menu(sheet1).expect("a selected cell");
     assert_eq!(menu.zone, GridZone::Data);
-    assert!(!menu.plural, "une seule cellule");
+    assert!(!menu.plural, "a single cell");
     assert!(!menu.multi_column);
-    assert_eq!(menu.target_label(), "la cellule");
-    assert_eq!(menu.copy_full_columns_label(), "Copier la colonne entière");
+    assert_eq!(menu.target_label(), "the cell");
+    assert_eq!(menu.copy_full_columns_label(), "Copy entire column");
     assert!(
         menu.offers_delete_shift,
-        "Suppr fait remonter ce qui suit dans les données"
+        "Delete shifts what follows up in the data"
     );
 
-    // Plusieurs lignes d'une seule colonne : pluriel en cases, mais toujours
-    // une seule colonne entière à promouvoir.
-    state.extend_selection(sheet1, temps, 3);
-    let menu = state.grid_menu(sheet1).expect("un rectangle sélectionné");
+    // Several rows of a single column: plural in cells, but still
+    // a single whole column to promote.
+    state.extend_selection(sheet1, time_col, 3);
+    let menu = state.grid_menu(sheet1).expect("a selected rectangle");
     assert!(menu.plural);
     assert!(
         !menu.multi_column,
-        "trois cases empilées ne touchent qu'une colonne"
+        "three stacked cells touch only one column"
     );
-    assert_eq!(menu.target_label(), "les cellules");
-    assert_eq!(menu.copy_full_columns_label(), "Copier la colonne entière");
+    assert_eq!(menu.target_label(), "the cells");
+    assert_eq!(menu.copy_full_columns_label(), "Copy entire column");
 
     state.extend_selection(sheet1, signal, 3);
-    let menu = state.grid_menu(sheet1).expect("un rectangle sélectionné");
+    let menu = state.grid_menu(sheet1).expect("a selected rectangle");
     assert!(menu.multi_column);
-    assert_eq!(
-        menu.copy_full_columns_label(),
-        "Copier les colonnes entières"
-    );
+    assert_eq!(menu.copy_full_columns_label(), "Copy entire columns");
 
-    // En-tête : un champ n'est pas répété par ligne, rien à faire remonter.
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
-    let menu = state.grid_menu(sheet1).expect("un champ sélectionné");
+    // Header: a field is not repeated per row, nothing to shift up.
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
+    let menu = state.grid_menu(sheet1).expect("a selected field");
     assert_eq!(menu.zone, GridZone::Header);
-    assert_eq!(menu.target_label(), "le champ");
+    assert_eq!(menu.target_label(), "the field");
     assert!(
         !menu.offers_delete_shift,
-        "dans l'en-tête, Suppr ne fait que vider : deux entrées pour un même effet n'auraient pas de sens"
+        "in the header, Delete only clears: two entries for the same effect would make no sense"
     );
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Unit);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Unit);
     assert_eq!(
         state
             .grid_menu(sheet1)
-            .expect("une plage de champs")
+            .expect("a range of fields")
             .target_label(),
-        "les champs"
+        "the fields"
     );
 
-    // Colonnes entières : une seule colonne reste au singulier.
-    state.select_column(sheet1, temps);
-    let menu = state.grid_menu(sheet1).expect("une colonne sélectionnée");
+    // Whole columns: a single column stays singular.
+    state.select_column(sheet1, time_col);
+    let menu = state.grid_menu(sheet1).expect("a selected column");
     assert_eq!(menu.zone, GridZone::Columns);
-    assert_eq!(menu.target_label(), "la colonne");
+    assert_eq!(menu.target_label(), "the column");
     assert!(menu.offers_delete_shift);
     state.extend_column_selection(sheet1, signal);
     assert_eq!(
         state
             .grid_menu(sheet1)
-            .expect("une plage de colonnes")
+            .expect("a range of columns")
             .target_label(),
-        "les colonnes"
+        "the columns"
     );
 }
 
-/// « Coller à l'identique » (Ctrl+Maj+V) rejoue le presse-papier **interne** :
-/// le menu doit le griser tant que rien n'a été copié depuis la grille dans
-/// cette session, plutôt que d'offrir une entrée qui ne ferait que poser une
-/// notice (verrou du pendant menu de
+/// "Paste Absolute" (Ctrl+Shift+V) replays the **internal** clipboard:
+/// the menu must grey it out as long as nothing was copied from the grid in
+/// this session, rather than offering an entry that would only set a
+/// notice (lock for the menu counterpart of
 /// [`paste_absolute_without_a_prior_copy_is_a_notice_not_an_error`]).
 #[test]
 fn the_grid_menu_greys_out_paste_absolute_until_something_was_copied() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     assert!(
         !state
             .grid_menu(sheet1)
-            .expect("une cellule sélectionnée")
+            .expect("a selected cell")
             .paste_absolute_enabled,
-        "rien n'a encore été copié depuis la grille"
+        "nothing has been copied from the grid yet"
     );
 
-    state.copy_selection(sheet1).expect("copie d'une cellule");
+    state.copy_selection(sheet1).expect("copy of a cell");
     assert!(
         state
             .grid_menu(sheet1)
-            .expect("une cellule sélectionnée")
+            .expect("a selected cell")
             .paste_absolute_enabled,
-        "une copie depuis la grille donne de quoi rejouer"
+        "a copy from the grid gives something to replay"
     );
 }
 
-/// Sans sélection, pas de menu à ouvrir — l'appelant doit s'abstenir plutôt
-/// que de poser un menu dont chaque entrée serait sans effet.
+/// Without a selection, no menu to open — the caller must abstain rather
+/// than show a menu where every entry would have no effect.
 #[test]
 fn the_grid_menu_is_absent_without_a_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     assert!(state.grid_menu(sheet1).is_none());
 }
 
-// -- 13. Le script Python — ce qui doit tenir SANS la feature `python` --
+// -- 13. The Python script — what must hold WITHOUT the `python` feature --
 //
-// Ce qui exige un interpréteur (exécution, sortie, annulation d'une écriture
-// de script, démarrage paresseux prouvé à l'exécution) vit dans
-// `tests/script_panel.rs`, qui ne compile qu'avec la feature. Ici, la preuve
-// que l'interpréteur ne démarre **jamais** dans cette configuration n'est pas
-// un test à part : elle est **structurelle**. `Cargo.toml` déclare
-// `stokesforge-script` et `stokesforge-python` comme dépendances optionnelles activées
-// par la seule feature `python` de ce crate ; sans elle, ni l'un ni l'autre
-// n'est compilé dans le binaire — il n'existe donc littéralement aucun code
-// capable de démarrer CPython, quelle que soit la façon dont `AppState` est
-// construite ou utilisée. `cargo tree -p stokesforge-app-state` (sans `--features
-// python`) le confirme : ni `stokesforge-python` ni `stokesforge-script` n'y
-// apparaissent.
+// What requires an interpreter (execution, output, undoing a script
+// write, lazy startup proven at runtime) lives in
+// `tests/script_panel.rs`, which compiles only with the feature. Here, the proof
+// that the interpreter **never** starts in this configuration is not
+// a separate test: it is **structural**. `Cargo.toml` declares
+// `stokesforge-script` and `stokesforge-python` as optional dependencies enabled
+// only by the `python` feature of this crate; without it, neither
+// is compiled into the binary — so there is literally no code
+// able to start CPython, however `AppState` is
+// built or used. `cargo tree -p stokesforge-app-state` (without `--features
+// python`) confirms it: neither `stokesforge-python` nor `stokesforge-script`
+// appears there.
 //
-// Les deux tests qui suivent supposent la feature ABSENTE (« sans le pont
-// Python, RunScript est refusé ») ; ils sont donc `#[cfg(not(feature =
-// "python"))]` — sans quoi, compilés avec la feature (`cargo test --features
-// python`), `script_available()` serait vrai et ils échoueraient à juste
-// titre. Le pendant « avec la feature » de ces critères vit dans
+// The two tests that follow assume the feature is ABSENT ("without the Python
+// bridge, RunScript is refused"); they are therefore `#[cfg(not(feature =
+// "python"))]` — otherwise, compiled with the feature (`cargo test --features
+// python`), `script_available()` would be true and they would rightly
+// fail. The "with the feature" counterpart of these criteria lives in
 // `tests/script_panel.rs`.
 
 #[cfg(not(feature = "python"))]
 #[test]
 fn script_available_is_false_and_run_script_explains_why_without_the_feature() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let before = state.snapshot().revision;
 
     assert!(
         !state.script_available(),
-        "le pont Python n'est pas compilé dans cette configuration"
+        "the Python bridge is not compiled in this configuration"
     );
-    assert!(state.script_output().is_none(), "rien n'a encore tourné");
+    assert!(state.script_output().is_none(), "nothing has run yet");
 
     state.dispatch(Action::RunScript);
 
-    let status = state.status().expect("un message explicite");
+    let status = state.status().expect("an explicit message");
     assert!(
         status.is_error(),
-        "impossible d'exécuter un script n'est pas un succès silencieux"
+        "being unable to run a script is not a silent success"
     );
     assert_eq!(
         status.text,
         stokesforge_app_state::tr!("error-script-unavailable"),
-        "le message explique pourquoi : {}",
+        "the message explains why: {}",
         status.text
     );
     assert_eq!(
         state.snapshot().revision,
         before,
-        "aucune commande n'a été envoyée à l'acteur"
+        "no command was sent to the actor"
     );
     assert!(
         !state.can_undo(),
-        "rien à annuler : rien n'a été exécuté par le script"
+        "nothing to undo: nothing was run by the script"
     );
     assert!(
         state.script_output().is_none(),
-        "aucune sortie : le script refusé n'a jamais tourné"
+        "no output: the refused script never ran"
     );
 }
 
 #[cfg(not(feature = "python"))]
 #[test]
 fn interrupt_script_is_also_explained_without_the_feature() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
 
     state.dispatch(Action::InterruptScript);
 
-    let status = state.status().expect("un message explicite");
+    let status = state.status().expect("an explicit message");
     assert!(status.is_error());
     assert_eq!(
         status.text,
@@ -4082,94 +4082,90 @@ fn interrupt_script_is_also_explained_without_the_feature() {
 
 #[test]
 fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
-    assert_eq!(state.script_source(), "", "vide par défaut");
+    assert_eq!(state.script_source(), "", "empty by default");
 
-    state.set_script_source("print('bonjour')".to_string());
-    assert_eq!(state.script_source(), "print('bonjour')");
+    state.set_script_source("print('hello')".to_string());
+    assert_eq!(state.script_source(), "print('hello')");
 
-    // Des actions qui n'ont rien à voir avec le script ne doivent pas y
-    // toucher : le tampon de script est indépendant du reste de l'état.
+    // Actions unrelated to the script must not
+    // touch it: the script buffer is independent of the rest of the state.
     state.dispatch(Action::AddColumn { sheet: sheet1 });
-    assert_eq!(state.script_source(), "print('bonjour')");
+    assert_eq!(state.script_source(), "print('hello')");
     state.dispatch(Action::Undo);
-    assert_eq!(state.script_source(), "print('bonjour')");
+    assert_eq!(state.script_source(), "print('hello')");
 
     state.set_script_source("v = 2".to_string());
-    assert_eq!(
-        state.script_source(),
-        "v = 2",
-        "relecture après remplacement"
-    );
+    assert_eq!(state.script_source(), "v = 2", "re-read after replacement");
 }
 
-/// Phase R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
-/// un. Le pendant de `sheets()`, et la seule partie du panneau de rendu qui
-/// se teste sans fenêtre — le reste, c'est `stokesforge-render-egui` qui le
-/// couvre (`tests/cache_session.rs`).
+/// Phase R4: the bench must know where the graphs are, since it displays
+/// one. The counterpart of `sheets()`, and the only part of the rendering panel that
+/// can be tested without a window — the rest is covered by
+/// `stokesforge-render-egui` (`tests/cache_session.rs`).
 #[test]
-fn les_graphes_du_projet_sont_enumeres_avec_leur_chemin() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn the_project_graphs_are_listed_with_their_path() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let mut project = demo_project();
     let root = project.root();
     let sheet = sheet_named(project.tree(), "Sheet1");
-    let colonne = project
+    let column = project
         .tree()
-        .child_by_name(sheet, "Temps")
-        .expect("Sheet1 lisible")
-        .expect("colonne Temps");
+        .child_by_name(sheet, "Time")
+        .expect("Sheet1 readable")
+        .expect("column Time");
     let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
-    panel
-        .series
-        .push(stokesforge_plot::SeriesSpec::new(colonne));
-    let spec = stokesforge_plot::PlotSpec::empty("Essai").with_panels(panel);
+    panel.series.push(stokesforge_plot::SeriesSpec::new(column));
+    let spec = stokesforge_plot::PlotSpec::empty("Test").with_panels(panel);
     project
         .add_graph(root, Some("Graph1"), spec)
-        .expect("graphe");
+        .expect("graph");
 
-    let (session, state) = start(project, &dir.path().join("projet.stf"));
-    let graphes = state.graphs();
-    assert_eq!(graphes.len(), 1, "un seul graphe : {graphes:?}");
-    assert_eq!(graphes[0].1, "Graph1");
-    // Une feuille n'est pas un graphe, et réciproquement.
-    assert!(state.sheets().iter().all(|(id, _)| *id != graphes[0].0));
+    let (session, state) = start(project, &dir.path().join("project.stf"));
+    let graphs = state.graphs();
+    assert_eq!(graphs.len(), 1, "a single graph: {graphs:?}");
+    assert_eq!(graphs[0].1, "Graph1");
+    // A sheet is not a graph, and conversely.
+    assert!(state.sheets().iter().all(|(id, _)| *id != graphs[0].0));
     unused(&session.handle());
 }
 
-// -- Divers : le panneau Project Manager --
+// -- Miscellaneous: the Project Manager panel --
 
-/// Le Project Manager s'arrête à `Workbook`/`Graph`/`Matrix`/`Note` : jamais
-/// de descente dans les feuilles d'un classeur ni dans le contenu d'un
-/// graphe (§1 de la tâche). `books()` reste le pendant à plat de `graphs()`,
-/// utilisé par la disposition initiale de `stokesforge_app::app::StokesForgeApp::new`.
+/// The Project Manager stops at `Workbook`/`Graph`/`Matrix`/`Note`: never
+/// descending into the sheets of a workbook nor into the content of a
+/// graph (§1 of the task). `books()` remains the flat counterpart of `graphs()`,
+/// used by the initial layout of `stokesforge_app::app::StokesForgeApp::new`.
 #[test]
 fn books_are_enumerated_like_graphs_with_their_readable_path() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, state) = start_demo(dir.path());
 
     let books = state.books();
-    assert_eq!(books.len(), 1, "un seul classeur : {books:?}");
+    assert_eq!(books.len(), 1, "a single workbook: {books:?}");
     assert_eq!(books[0].1, "Book1");
 }
 
-/// [`AppState::project_tree`] montre les dossiers et les quatre natures de
-/// fenêtre, jamais les feuilles d'un classeur.
+/// [`AppState::project_tree`] shows the folders and the four kinds of
+/// window, never the sheets of a workbook.
 #[test]
 fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
     use stokesforge_app_state::state::{ProjectTreeNode, WindowKind};
 
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let mut project = demo_project();
     let root = project.root();
-    let folder = project.add_folder(root, "Manips").expect("dossier Manips");
+    let folder = project
+        .add_folder(root, "Experiments")
+        .expect("folder Experiments");
     project
-        .add_note(folder, Some("Note1"), "un texte")
+        .add_note(folder, Some("Note1"), "some text")
         .expect("note");
 
-    let (_session, state) = start(project, &dir.path().join("projet.stf"));
+    let (_session, state) = start(project, &dir.path().join("project.stf"));
     let tree = state.project_tree();
 
     let book = tree
@@ -4181,18 +4177,20 @@ fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
                     if name == "Book1" && *kind == WindowKind::Book
             )
         })
-        .expect("Book1 est une fenêtre du Project Manager");
-    // Une fenêtre du Project Manager n'a jamais d'enfants dans cette vue,
-    // même si `Workbook` a bien des `Worksheet` dans le modèle.
+        .expect("Book1 is a window of the Project Manager");
+    // A window of the Project Manager never has children in this view,
+    // even if `Workbook` does have `Worksheet`s in the model.
     assert!(matches!(book, ProjectTreeNode::Window { .. }));
 
     let folder_node = tree
         .iter()
         .find_map(|node| match node {
-            ProjectTreeNode::Folder { name, children, .. } if name == "Manips" => Some(children),
+            ProjectTreeNode::Folder { name, children, .. } if name == "Experiments" => {
+                Some(children)
+            }
             _ => None,
         })
-        .expect("Manips est un dossier déplié dans le Project Manager");
+        .expect("Experiments is an unfolded folder in the Project Manager");
     assert!(
         folder_node.iter().any(|child| matches!(
             child,
@@ -4201,103 +4199,103 @@ fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
                 ..
             }
         )),
-        "la note apparaît dans son dossier"
+        "the note appears in its folder"
     );
 }
 
-// -- Divers : l'édition de note --
+// -- Miscellaneous: note editing --
 
-/// La note détachée édite sur une vue locale : sa saisie n'atteint pas l'état
-/// de la racine, et sa validation rejoint la voie de commande annulable.
+/// The detached note edits on a local view: its input does not reach the state
+/// of the root, and its validation joins the undoable command path.
 #[test]
 fn detached_note_view_keeps_its_buffer_local_and_commits_through_the_root() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let mut project = demo_project();
     let root = project.root();
     let note = project
-        .add_note(root, Some("Note1"), "avant")
+        .add_note(root, Some("Note1"), "before")
         .expect("note");
-    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    let (_session, mut state) = start(project, &dir.path().join("project.stf"));
 
     let mut detached = state.fork_for_detached_view().unwrap();
     detached.begin_note_edit(note);
     if let Some(edit) = detached.note_editing_mut() {
-        edit.buffer = "après".to_string();
+        edit.buffer = "after".to_string();
     }
     assert!(state.note_editing().is_none());
-    assert_eq!(state.note_text(note), Some("avant".to_string()));
+    assert_eq!(state.note_text(note), Some("before".to_string()));
 
     state.dispatch(Action::SetNoteText {
         note,
-        text: "après".to_string(),
+        text: "after".to_string(),
     });
     detached.sync_detached_snapshot(state.snapshot().clone());
-    assert_eq!(detached.note_text(note), Some("après".to_string()));
+    assert_eq!(detached.note_text(note), Some("after".to_string()));
     assert!(state.can_undo());
     state.dispatch(Action::Undo);
-    assert_eq!(state.note_text(note), Some("avant".to_string()));
+    assert_eq!(state.note_text(note), Some("before".to_string()));
 }
 
 #[test]
 fn editing_a_note_commits_on_dispatch_and_is_undoable() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let mut project = demo_project();
     let root = project.root();
     let note = project
-        .add_note(root, Some("Note1"), "avant")
+        .add_note(root, Some("Note1"), "before")
         .expect("note");
 
-    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
-    assert_eq!(state.note_text(note), Some("avant".to_string()));
+    let (_session, mut state) = start(project, &dir.path().join("project.stf"));
+    assert_eq!(state.note_text(note), Some("before".to_string()));
 
     state.begin_note_edit(note);
     if let Some(edit) = state.note_editing_mut() {
-        edit.buffer = "après".to_string();
+        edit.buffer = "after".to_string();
     }
     state.commit_note_edit();
 
-    assert_eq!(state.note_text(note), Some("après".to_string()));
+    assert_eq!(state.note_text(note), Some("after".to_string()));
     assert!(state.editing().is_none());
     assert!(state.can_undo());
 
     state.dispatch(Action::Undo);
-    assert_eq!(state.note_text(note), Some("avant".to_string()));
+    assert_eq!(state.note_text(note), Some("before".to_string()));
 }
 
-// -- 15. Suppr sur une sélection de cellules --
+// -- 15. Delete on a cell selection --
 
 #[test]
 fn deleting_a_single_selected_row_shifts_the_rest_up_instead_of_truncating() {
-    // Régression : sélectionner la 3e ligne (index 2, 0-indexée) d'une
-    // colonne et appuyer sur Suppr doit retirer *cette seule ligne* et faire
-    // remonter les suivantes d'une position — pas tronquer tout ce qui suit
-    // la ligne sélectionnée.
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    // Regression: selecting the 3rd row (index 2, 0-indexed) of a
+    // column and pressing Delete must remove *that single row* and shift
+    // the following ones up by one position — not truncate everything after
+    // the selected row.
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0] avant suppression.
+    // "Time" = [0.0, 0.5, 1.0, 1.5, 2.0] before the deletion.
     assert_eq!(state.row_count(sheet1), 5);
 
-    state.select_cell(sheet1, temps, 2);
+    state.select_cell(sheet1, time_col, 2);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
-    // Seule la ligne d'index 2 (valeur 1.0) a disparu de la colonne
-    // sélectionnée ; les lignes 3 et 4 (1.5, 2.0) sont remontées aux index 2
-    // et 3 — la colonne perd exactement une valeur, elle n'est pas tronquée
-    // à sa fin. `state.row_count` ne convient pas ici : c'est le maximum des
-    // longueurs de colonnes de la feuille, et "Signal" (non sélectionnée)
-    // garde ses 5 lignes.
-    let temps_len = state
+    // Only the row at index 2 (value 1.0) disappeared from the selected
+    // column; rows 3 and 4 (1.5, 2.0) moved up to indexes 2
+    // and 3 — the column loses exactly one value, it is not truncated
+    // at its end. `state.row_count` does not fit here: it is the maximum of the
+    // column lengths of the sheet, and "Signal" (not selected)
+    // keeps its 5 rows.
+    let time_len = state
         .tree()
-        .get(temps)
-        .expect("colonne Temps présente")
+        .get(time_col)
+        .expect("column Time present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .len();
-    assert_eq!(temps_len, 4);
-    let values: Vec<Cell> = (0..4).map(|row| cell(&state, temps, row)).collect();
+    assert_eq!(time_len, 4);
+    let values: Vec<Cell> = (0..4).map(|row| cell(&state, time_col, row)).collect();
     assert_eq!(
         values,
         vec![
@@ -4312,22 +4310,22 @@ fn deleting_a_single_selected_row_shifts_the_rest_up_instead_of_truncating() {
     state.dispatch(Action::Undo);
     let temps_len_after_undo = state
         .tree()
-        .get(temps)
-        .expect("colonne Temps présente")
+        .get(time_col)
+        .expect("column Time present")
         .as_column()
-        .expect("nœud colonne")
+        .expect("column node")
         .len();
     assert_eq!(temps_len_after_undo, 5);
-    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+    assert_eq!(cell(&state, time_col, 2), Cell::Float(1.0));
 }
 
 #[test]
 fn committing_a_note_without_typing_writes_nothing() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let mut project = demo_project();
     let root = project.root();
     let note = project
-        .add_note(root, Some("Note1"), "inchangé")
+        .add_note(root, Some("Note1"), "unchanged")
         .expect("note");
 
     let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
@@ -4336,31 +4334,31 @@ fn committing_a_note_without_typing_writes_nothing() {
     state.begin_note_edit(note);
     state.commit_note_edit();
 
-    assert_eq!(state.snapshot().revision, revision, "rien n'a été écrit");
+    assert_eq!(state.snapshot().revision, revision, "nothing was written");
     assert!(!state.can_undo());
 }
 
-/// Importer plusieurs fichiers crée une feuille par fichier, chacune nommée
-/// d'après son fichier (`file_stem`) et porteuse des colonnes du fichier —
-/// et tout le lot tient dans **une seule** entrée d'historique : un unique
-/// Ctrl+Z (`AppState::dispatch(Action::Undo)`) retire les deux feuilles
-/// d'un coup, pas une à la fois.
+/// Importing several files creates one sheet per file, each named
+/// after its file (`file_stem`) and carrying the file's columns —
+/// and the whole batch fits in **one** history entry: a single
+/// Ctrl+Z (`AppState::dispatch(Action::Undo)`) removes both sheets
+/// at once, not one at a time.
 #[test]
 fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
 
-    let file_a = dir.path().join("mesure_a.csv");
-    std::fs::write(&file_a, "X,Y\n1,10\n2,20\n").expect("écrit mesure_a.csv");
-    let file_b = dir.path().join("mesure_b.csv");
-    std::fs::write(&file_b, "X,Y\n3,30\n4,40\n").expect("écrit mesure_b.csv");
+    let file_a = dir.path().join("measure_a.csv");
+    std::fs::write(&file_a, "X,Y\n1,10\n2,20\n").expect("wrote measure_a.csv");
+    let file_b = dir.path().join("measure_b.csv");
+    std::fs::write(&file_b, "X,Y\n3,30\n4,40\n").expect("wrote measure_b.csv");
 
-    let mut recipe = stokesforge_import::ImportRecipe::new("Sans titre");
-    // Les deux fichiers ont une ligne d'en-tête "X,Y" : sans ceci, elle est
-    // lue comme une ligne de données (deux valeurs manquantes) et les noms
-    // de colonnes retombent sur le nom de fichier plutôt que "X"/"Y".
+    let mut recipe = stokesforge_import::ImportRecipe::new("Untitled");
+    // Both files have a header row "X,Y": without this, it is
+    // read as a data row (two missing values) and the column names
+    // fall back on the file name rather than "X"/"Y".
     recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
@@ -4368,14 +4366,14 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
         paths: vec![file_a.clone(), file_b.clone()],
     });
 
-    let status = state.status().expect("un message de statut");
+    let status = state.status().expect("a status message");
     assert!(
         !status.is_error(),
-        "l'import ne doit pas être signalé en échec"
+        "the import must not be reported as a failure"
     );
     assert!(
         status.text.contains("2"),
-        "le message récapitule le nombre de fichiers importés : {}",
+        "the message sums up the number of imported files: {}",
         status.text
     );
 
@@ -4383,12 +4381,12 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before + 2,
-        "une feuille par fichier importé"
+        "one sheet per imported file"
     );
-    let sheet_a = sheet_named(tree, "mesure_a");
-    let sheet_b = sheet_named(tree, "mesure_b");
+    let sheet_a = sheet_named(tree, "measure_a");
+    let sheet_b = sheet_named(tree, "measure_b");
     let columns_a = state.visible_columns(sheet_a);
-    assert_eq!(columns_a.len(), 2, "deux colonnes lues dans mesure_a.csv");
+    assert_eq!(columns_a.len(), 2, "two columns read in measure_a.csv");
     assert_eq!(state.column_meta(columns_a[0].0).long_name, "X");
     assert_eq!(state.column_meta(columns_a[1].0).long_name, "Y");
     assert_eq!(state.column_meta(columns_a[0].0).role, ColumnRole::X);
@@ -4400,22 +4398,22 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     assert_eq!(state.column_meta(columns_b[1].0).role, ColumnRole::Y);
     assert_eq!(cell_f64(&state, columns_b[0].0, 0), 3.0);
 
-    // Une seule entrée d'historique pour tout le lot : un unique `Undo`
-    // retire les deux feuilles d'un coup.
+    // A single history entry for the whole batch: a single `Undo`
+    // removes both sheets at once.
     assert!(state.can_undo());
     state.dispatch(Action::Undo);
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before,
-        "un seul Ctrl+Z retire tout l'import, feuilles des deux fichiers comprises"
+        "a single Ctrl+Z removes the whole import, sheets of both files included"
     );
     assert!(
         !state.can_undo(),
-        "l'import entier n'a compté que pour une seule entrée d'historique"
+        "the whole import counted for only one history entry"
     );
 
-    // Le rétablissement restaure aussi les rôles, pour chaque fichier du lot
-    // (issue #3), avec les mêmes identifiants de colonnes et leurs données.
+    // Redo also restores the roles, for each file of the batch
+    // (issue #3), with the same column identifiers and their data.
     state.dispatch(Action::Redo);
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
     for (sheet, columns, first_x) in [(sheet_a, columns_a, 1.0), (sheet_b, columns_b, 3.0)] {
@@ -4426,36 +4424,36 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
     }
 }
 
-/// Les deux destinations qui créent des classeurs conservent la règle
-/// « une feuille par fichier » et le lot entier reste annulable d'un coup.
+/// The two destinations that create workbooks keep the rule
+/// "one sheet per file" and the whole batch stays undoable at once.
 #[test]
 fn importing_into_new_books_groups_files_as_requested() {
     for destination in [
         ImportDestination::NewBookPerFile,
         ImportDestination::NewBookForAll,
     ] {
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let (_session, mut state) = start_demo(dir.path());
         let root = state.tree().root();
-        let before = state.tree().node(root).expect("racine").children().len();
-        let a = dir.path().join("mesure_a.csv");
-        let b = dir.path().join("mesure_b.csv");
+        let before = state.tree().node(root).expect("root").children().len();
+        let a = dir.path().join("measure_a.csv");
+        let b = dir.path().join("measure_b.csv");
         std::fs::write(&a, "1,10\n2,20\n").unwrap();
         std::fs::write(&b, "3,30\n4,40\n").unwrap();
         state.dispatch(Action::ImportFiles {
             destination,
-            recipe: ImportRecipe::new("Sans titre"),
+            recipe: ImportRecipe::new("Untitled"),
             paths: vec![a, b],
         });
-        let added = state.tree().node(root).expect("racine").children().len() - before;
+        let added = state.tree().node(root).expect("root").children().len() - before;
         let expected = if destination == ImportDestination::NewBookPerFile {
             2
         } else {
             1
         };
         assert_eq!(added, expected);
-        let sheet_a = sheet_named(state.tree(), "mesure_a");
-        let sheet_b = sheet_named(state.tree(), "mesure_b");
+        let sheet_a = sheet_named(state.tree(), "measure_a");
+        let sheet_b = sheet_named(state.tree(), "measure_b");
         let book_a = state.tree().node(sheet_a).unwrap().parent().unwrap();
         let book_b = state.tree().node(sheet_b).unwrap().parent().unwrap();
         assert_eq!(
@@ -4476,14 +4474,14 @@ fn importing_into_new_books_groups_files_as_requested() {
         );
         state.dispatch(Action::Undo);
         assert_eq!(
-            state.tree().node(root).expect("racine").children().len(),
+            state.tree().node(root).expect("root").children().len(),
             before
         );
     }
 }
 
-/// La vue détachée garde ses sélections et ses copies, puis fournit ce
-/// contexte à la voie de commande principale avant un collage différé.
+/// The detached view keeps its selections and its copies, then provides this
+/// context to the main command path before a deferred paste.
 #[test]
 fn detached_book_view_reuses_the_grid_selection_and_clipboard() {
     let dir = tempfile::tempdir().unwrap();
@@ -4506,19 +4504,19 @@ fn detached_book_view_reuses_the_grid_selection_and_clipboard() {
     assert_eq!(cell_f64(&state, target, 1), cell_f64(&state, source, 0));
 }
 
-/// Un fichier illisible ne produit pas de classeur vide ; un fichier valide
-/// ultérieur du même lot est quand même importé.
+/// An unreadable file produces no empty workbook; a later valid file
+/// of the same batch is still imported.
 #[test]
 fn new_book_import_creates_nothing_for_an_unreadable_file() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     let before = state.tree().node(root).unwrap().children().len();
-    let valid = dir.path().join("valide.csv");
+    let valid = dir.path().join("valid.csv");
     std::fs::write(&valid, "1,2\n").unwrap();
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::NewBookPerFile,
-        recipe: ImportRecipe::new("Sans titre"),
+        recipe: ImportRecipe::new("Untitled"),
         paths: vec![dir.path().join("absent.csv"), valid],
     });
     assert_eq!(
@@ -4539,21 +4537,21 @@ fn import_without_an_active_book_defaults_to_one_new_book_for_the_batch() {
     assert_eq!(import.destination, ImportDestination::NewBookForAll);
 }
 
-/// Un fichier illisible n'interrompt pas le lot : les fichiers suivants sont
-/// importés quand même, et le message final récapitule combien ont
-/// réellement réussi.
+/// An unreadable file does not interrupt the batch: the following files are
+/// imported all the same, and the final message sums up how many
+/// actually succeeded.
 #[test]
 fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
 
     let missing = dir.path().join("absent.csv");
-    let file_ok = dir.path().join("mesure.csv");
-    std::fs::write(&file_ok, "X,Y\n1,10\n").expect("écrit mesure.csv");
+    let file_ok = dir.path().join("measure.csv");
+    std::fs::write(&file_ok, "X,Y\n1,10\n").expect("wrote measure.csv");
 
-    let recipe = stokesforge_import::ImportRecipe::new("Sans titre");
+    let recipe = stokesforge_import::ImportRecipe::new("Untitled");
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
         recipe,
@@ -4563,12 +4561,12 @@ fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before + 1,
-        "seul le fichier lisible a produit une feuille"
+        "only the readable file produced a sheet"
     );
-    let status = state.status().expect("un message de statut récapitulatif");
+    let status = state.status().expect("a summary status message");
     assert!(
         status.text.contains('1'),
-        "le récapitulatif final compte 1 fichier réellement importé : {}",
+        "the final summary counts 1 file actually imported: {}",
         status.text
     );
     assert!(state.can_undo());
@@ -4576,19 +4574,19 @@ fn a_file_read_failure_does_not_abort_the_rest_of_the_batch() {
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
 }
 
-/// `AppState::open_import` démarre sur le premier modèle enregistré s'il y
-/// en a, sinon sur une recette permissive — les deux branches de sa doc.
+/// `AppState::open_import` starts on the first saved template if there is
+/// one, otherwise on a permissive recipe — the two branches of its doc.
 #[test]
 fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
-    // Rien d'enregistré : recette permissive par défaut.
+    // Nothing saved: permissive recipe by default.
     state.open_import(book);
     {
-        let import = state.import_state().expect("fenêtre d'import ouverte");
+        let import = state.import_state().expect("import window open");
         assert_eq!(import.recipe.separator, Separator::Auto);
         assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
         assert_eq!(import.recipe.header, HeaderSkip::None);
@@ -4598,84 +4596,81 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     }
     state.cancel_import();
 
-    // Un modèle déjà enregistré sur disque (écrit directement, sans passer
-    // par la fenêtre) : `open_import` doit le proposer d'entrée.
+    // A template already saved on disk (written directly, without going
+    // through the window): `open_import` must offer it right away.
     let mut store = RecipeStore::default();
     let mut jasco = ImportRecipe::new("Jasco UV-Vis");
     jasco.separator = Separator::Semicolon;
     jasco.decimal = DecimalStyle::Comma;
     store.upsert(jasco);
-    store.save().expect("écrit le modèle isolé sur disque");
+    store.save().expect("writes the isolated template to disk");
 
     state.open_import(book);
-    let import = state.import_state().expect("fenêtre d'import ouverte");
+    let import = state.import_state().expect("import window open");
     assert_eq!(import.recipe.name, "Jasco UV-Vis");
     assert_eq!(import.recipe.separator, Separator::Semicolon);
     assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
 }
 
-/// S-T1 (#224) : pendant une frappe, les aperçus de l'import gardent la recette
-/// d'avant jusqu'à 0,3 s sans changement ; hors frappe, un changement est
-/// immédiat.
+/// S-T1 (#224): during typing, the import previews keep the previous
+/// recipe until 0.3 s without change; outside typing, a change is
+/// immediate.
 #[test]
 fn the_import_preview_waits_for_a_typing_pause_but_not_for_other_controls() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     state.open_import(book);
-    let import = state.import_state_mut().expect("fenêtre d'import ouverte");
+    let import = state.import_state_mut().expect("import window open");
     let before = import.recipe.comment_prefix.clone();
-    assert_eq!(import.debounce_preview(true, 10.0), None, "rien n'a changé");
+    assert_eq!(import.debounce_preview(true, 10.0), None, "nothing changed");
 
-    // Une frappe : l'aperçu reste sur l'ancienne recette.
+    // A keystroke: the preview stays on the old recipe.
     import.recipe.comment_prefix = "#".to_string();
     let wait = import
         .debounce_preview(true, 10.0)
-        .expect("une pause court");
+        .expect("a pause is running");
     assert!((wait - 0.3).abs() < 1e-9);
     assert_eq!(import.preview_recipe().comment_prefix, before);
 
-    // Une autre frappe repousse l'échéance.
+    // Another keystroke pushes back the deadline.
     import.recipe.comment_prefix = "##".to_string();
     assert!(import.debounce_preview(true, 10.2).is_some());
     assert_eq!(import.preview_recipe().comment_prefix, before);
-    assert!(
-        import.debounce_preview(true, 10.4).is_some(),
-        "0,2 s seulement"
-    );
+    assert!(import.debounce_preview(true, 10.4).is_some(), "0.2 s only");
 
-    // La pause écoulée, l'aperçu suit la recette.
+    // Once the pause has elapsed, the preview follows the recipe.
     assert_eq!(import.debounce_preview(true, 10.55), None);
     assert_eq!(import.preview_recipe().comment_prefix, "##");
 
-    // Hors frappe (liste, case) : immédiat.
+    // Outside typing (list, checkbox): immediate.
     import.recipe.comment_prefix = ";".to_string();
     assert_eq!(import.debounce_preview(false, 11.0), None);
     assert_eq!(import.preview_recipe().comment_prefix, ";");
 }
 
-/// « Nouveau modèle » repart d'une recette permissive, même après avoir
-/// chargé/modifié un modèle existant.
+/// "New Template" starts from a permissive recipe again, even after
+/// loading/modifying an existing template.
 #[test]
 fn new_import_recipe_resets_to_a_permissive_default() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
     state.open_import(book);
     {
-        let import = state.import_state_mut().expect("fenêtre d'import ouverte");
+        let import = state.import_state_mut().expect("import window open");
         import.recipe.separator = Separator::Tab;
         import.recipe.decimal = DecimalStyle::Comma;
         import.recipe.footer_skip_lines = 5;
         import.recipe.has_column_header_row = true;
-        import.recipe.name = "Autre chose".to_string();
+        import.recipe.name = "Something else".to_string();
     }
 
     state.new_import_recipe();
-    let import = state.import_state().expect("fenêtre d'import ouverte");
+    let import = state.import_state().expect("import window open");
     assert_eq!(
         import.recipe.name,
         stokesforge_app_state::tr!("import-template-untitled")
@@ -4688,23 +4683,23 @@ fn new_import_recipe_resets_to_a_permissive_default() {
     assert_eq!(import.recipe.name_source, NameSource::Filename);
 }
 
-/// La liste déroulante des modèles charge le modèle choisi dans la recette
-/// en cours d'édition ; un nom inconnu est sans effet (pas de panique, pas de
-/// recette à moitié remplacée).
+/// The template dropdown loads the chosen template into the recipe
+/// being edited; an unknown name has no effect (no panic, no
+/// half-replaced recipe).
 #[test]
 fn select_import_recipe_loads_a_saved_model_and_ignores_unknown_names() {
-    // `select_import_recipe` lui-même ne fait que chercher dans le `Vec` en
-    // mémoire, mais `open_import` juste en dessous appelle bien
-    // `RecipeStore::load()` pour de vrai : sans isolation, il lirait
-    // `XDG_CONFIG_HOME` tel qu'un *autre* test de ce fichier, tournant en
-    // parallèle et isolé dans son propre répertoire temporaire, l'aurait
-    // laissé à cet instant précis — et chargerait son modèle au lieu de
-    // rien, avant que la ligne suivante n'écrase `store` de toute façon.
-    // Théorie confirmée à la dure : un run sur ~7 a bien fait échouer un
-    // autre test de ce fichier de cette façon avant que cette isolation ne
-    // soit ajoutée ici.
+    // `select_import_recipe` itself only searches the in-memory `Vec`,
+    // but `open_import` just below does call
+    // `RecipeStore::load()` for real: without isolation, it would read
+    // `XDG_CONFIG_HOME` as an *other* test of this file, running in
+    // parallel and isolated in its own temporary directory, would
+    // have left it at that precise moment — and would load its template instead of
+    // nothing, before the next line overwrites `store` anyway.
+    // Theory confirmed the hard way: about 1 run in 7 did make another
+    // test of this file fail this way before this isolation was
+    // added here.
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
@@ -4714,34 +4709,34 @@ fn select_import_recipe_loads_a_saved_model_and_ignores_unknown_names() {
     let mut fluo = ImportRecipe::new("Fluo");
     fluo.separator = Separator::Tab;
     store.upsert(fluo);
-    state.import_state_mut().expect("fenêtre ouverte").store = store;
+    state.import_state_mut().expect("window open").store = store;
 
     state.select_import_recipe("Fluo");
     assert_eq!(
         state.import_state().unwrap().recipe.name,
         "Fluo",
-        "le modèle choisi remplace la recette en cours"
+        "the chosen template replaces the current recipe"
     );
     assert_eq!(
         state.import_state().unwrap().recipe.separator,
         Separator::Tab
     );
 
-    state.select_import_recipe("N'existe pas");
+    state.select_import_recipe("Does not exist");
     assert_eq!(
         state.import_state().unwrap().recipe.name,
         "Fluo",
-        "un nom inconnu ne remplace rien"
+        "an unknown name replaces nothing"
     );
 }
 
-/// Enregistrer un modèle sans nom (ou un nom blanc) est refusé, sans
-/// modifier le store — condition explicitement documentée par
+/// Saving a template without a name (or a blank name) is refused, without
+/// modifying the store — condition explicitly documented by
 /// `AppState::save_import_recipe`.
 #[test]
 fn save_import_recipe_requires_a_non_empty_name() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
@@ -4749,28 +4744,28 @@ fn save_import_recipe_requires_a_non_empty_name() {
     state.import_state_mut().unwrap().save_as_name = "   ".to_string();
     state.save_import_recipe();
 
-    // S-M7 (#228) : l'erreur d'un geste de l'assistant va dans son pied.
+    // S-M7 (#228): the error of a wizard gesture goes in its footer.
     assert!(
         state.dialog_error().is_some(),
-        "un nom blanc doit être refusé"
+        "a blank name must be refused"
     );
-    // Les modèles fournis d'office sont listés, mais rien de l'utilisateur
-    // n'a été ajouté ni écrit.
+    // The templates provided by default are listed, but nothing of the user's
+    // was added or written.
     assert!(
         stokesforge_import::RecipeStore::load().recipes().is_empty(),
-        "rien n'a été ajouté au store"
+        "nothing was added to the store"
     );
 }
 
-/// Un modèle enregistré survit à la fermeture de la fenêtre : le rouvrir
-/// (nouvelle session de fenêtre, mais même disque) le retrouve tel quel —
-/// l'aller-retour complet à travers `RecipeStore::save`/`load`, jamais
-/// exercé avant que ce test n'existe (les tests de `stokesforge-import` ne
-/// couvraient que la désérialisation, jamais l'écriture réelle).
+/// A saved template survives closing the window: reopening it
+/// (new window session, but same disk) finds it as is —
+/// the full round trip through `RecipeStore::save`/`load`, never
+/// exercised before this test existed (the tests of `stokesforge-import` only
+/// covered deserialization, never the real write).
 #[test]
 fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
@@ -4781,20 +4776,16 @@ fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
         import.recipe.decimal = DecimalStyle::Comma;
         import.recipe.footer_skip_lines = 2;
         import.recipe.has_column_header_row = true;
-        import.recipe.name_source = NameSource::HeaderKey("TITRE".to_string());
+        import.recipe.name_source = NameSource::HeaderKey("TITLE".to_string());
         import.save_as_name = "Jasco UV".to_string();
     }
     state.save_import_recipe();
-    let status = state.status().expect("un message de statut");
-    assert!(
-        !status.is_error(),
-        "l'enregistrement a réussi : {}",
-        status.text
-    );
+    let status = state.status().expect("a status message");
+    assert!(!status.is_error(), "the save succeeded: {}", status.text);
 
     state.cancel_import();
     state.open_import(book);
-    let import = state.import_state().expect("fenêtre d'import ouverte");
+    let import = state.import_state().expect("import window open");
     assert_eq!(import.recipe.name, "Jasco UV");
     assert_eq!(import.recipe.separator, Separator::Semicolon);
     assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
@@ -4802,16 +4793,16 @@ fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
     assert!(import.recipe.has_column_header_row);
     assert_eq!(
         import.recipe.name_source,
-        NameSource::HeaderKey("TITRE".to_string())
+        NameSource::HeaderKey("TITLE".to_string())
     );
 }
 
-/// Supprimer un modèle le retire du disque, pas seulement de la liste en
-/// mémoire de la fenêtre courante.
+/// Deleting a template removes it from disk, not only from the in-memory
+/// list of the current window.
 #[test]
 fn delete_import_recipe_removes_it_from_the_store_on_disk() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
 
@@ -4820,20 +4811,20 @@ fn delete_import_recipe_removes_it_from_the_store_on_disk() {
     store.upsert(ImportRecipe::new("Fluo"));
     store
         .save()
-        .expect("écrit les deux modèles isolés sur disque");
+        .expect("writes the two isolated templates to disk");
 
     state.open_import(book);
     state.delete_import_recipe("Jasco");
-    let status = state.status().expect("un message de statut");
+    let status = state.status().expect("a status message");
     assert!(
         !status.is_error(),
-        "la suppression a réussi : {}",
+        "the deletion succeeded: {}",
         status.text
     );
 
     state.cancel_import();
     state.open_import(book);
-    // Les modèles de l'utilisateur (hors modèles fournis d'office).
+    // The user's templates (excluding the templates provided by default).
     let user_recipes = stokesforge_import::RecipeStore::load();
     let names: Vec<&str> = user_recipes
         .recipes()
@@ -4843,42 +4834,42 @@ fn delete_import_recipe_removes_it_from_the_store_on_disk() {
     assert_eq!(
         names,
         vec!["Fluo"],
-        "« Jasco » a bien disparu du fichier sur disque, « Fluo » reste"
+        "\"Jasco\" did disappear from the file on disk, \"Fluo\" stays"
     );
 }
 
-/// L'aperçu suit les réglages courants image par image (pas de mise en
-/// cache) : sans « la première ligne donne les noms de colonnes », la ligne
-/// d'en-tête est lue comme une donnée illisible (valeurs manquantes) ; en
-/// l'activant, elle nomme les colonnes et la première vraie donnée apparaît.
-/// Couvre aussi les deux cas où l'aperçu ne porte pas de table : aucun
-/// fichier choisi, et un chemin qui n'existe pas.
+/// The preview follows the current settings frame by frame (no
+/// caching): without "the first row gives the column names", the header
+/// row is read as unreadable data (missing values); enabling
+/// it names the columns and the first real data row appears.
+/// Also covers the two cases where the preview carries no table: no
+/// file chosen, and a path that does not exist.
 #[test]
 fn import_preview_reflects_current_recipe_settings_and_reports_parse_errors() {
-    // `open_import` appelle `RecipeStore::load()` pour de vrai — isolé pour
-    // la même raison que `select_import_recipe_loads_a_saved_model_and_
-    // ignores_unknown_names`, ci-dessus.
+    // `open_import` calls `RecipeStore::load()` for real — isolated for
+    // the same reason as `select_import_recipe_loads_a_saved_model_and_
+    // ignores_unknown_names`, above.
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let file = dir.path().join("mesure.csv");
-    std::fs::write(&file, "Time,Signal\n1,10\n2,20\n").expect("écrit mesure.csv");
+    let file = dir.path().join("measure.csv");
+    std::fs::write(&file, "Time,Signal\n1,10\n2,20\n").expect("wrote measure.csv");
 
     state.open_import(book);
     assert!(
         state.import_preview().is_none(),
-        "aucun fichier choisi : pas d'aperçu"
+        "no file chosen: no preview"
     );
 
     state.set_import_paths(vec![file.clone()]);
     let table = state
         .import_preview()
-        .expect("un aperçu, un fichier est choisi")
-        .expect("le fichier se parse");
+        .expect("a preview, a file is chosen")
+        .expect("the file parses");
     assert!(
         table.columns[0].values[0].is_nan(),
-        "sans has_column_header_row, « Time » est lu comme une donnée illisible"
+        "without has_column_header_row, \"Time\" is read as unreadable data"
     );
 
     state
@@ -4891,27 +4882,27 @@ fn import_preview_reflects_current_recipe_settings_and_reports_parse_errors() {
     assert_eq!(table.columns[1].name.as_deref(), Some("Signal"));
     assert_eq!(table.columns[0].values[0], 1.0);
 
-    state.import_state_mut().unwrap().paths = vec![dir.path().join("n_existe_pas.csv")];
+    state.import_state_mut().unwrap().paths = vec![dir.path().join("does_not_exist.csv")];
     assert!(
         state.import_preview().unwrap().is_err(),
-        "un chemin introuvable est signalé, pas paniqué"
+        "a path that cannot be found is reported, not a panic"
     );
 }
 
-/// `NameSource::HeaderKey` retrouve le nom de la série dans les lignes
-/// d'en-tête ignorées (motif « CLÉ<séparateur>VALEUR »), pour une colonne
-/// qui n'a par ailleurs aucun nom propre (pas de ligne d'en-tête de
-/// colonnes) — le cas d'usage central de la fonctionnalité, un fichier
-/// Jasco-like à une seule série.
+/// `NameSource::HeaderKey` finds the series name in the skipped header
+/// lines ("KEY<separator>VALUE" pattern), for a column
+/// that otherwise has no name of its own (no column
+/// header row) — the central use case of the feature, a
+/// Jasco-like file with a single series.
 #[test]
 fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_of_its_own() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let file = dir.path().join("spectre.csv");
-    std::fs::write(&file, "TITLE;MonEchantillon\nXYDATA\n1;10\n2;20\n").expect("écrit spectre.csv");
+    let file = dir.path().join("spectrum.csv");
+    std::fs::write(&file, "TITLE;MySample\nXYDATA\n1;10\n2;20\n").expect("wrote spectrum.csv");
 
-    let mut recipe = ImportRecipe::new("Sans titre");
+    let mut recipe = ImportRecipe::new("Untitled");
     recipe.separator = Separator::Semicolon;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
     recipe.name_source = NameSource::HeaderKey("TITLE".to_string());
@@ -4922,28 +4913,28 @@ fn importing_resolves_series_name_from_a_header_key_when_the_column_has_no_name_
     });
 
     let tree = state.tree();
-    let sheet = sheet_named(tree, "spectre");
+    let sheet = sheet_named(tree, "spectrum");
     let columns = state.visible_columns(sheet);
     assert_eq!(state.column_meta(columns[0].0).long_name, "X");
     assert_eq!(
         state.column_meta(columns[1].0).long_name,
-        "MonEchantillon",
-        "la deuxième colonne prend le nom lu sur la ligne TITLE, pas le nom de fichier"
+        "MySample",
+        "the second column takes the name read on the TITLE line, not the file name"
     );
 }
 
-/// `has_column_header_row` nomme **chaque** colonne d'après la ligne
-/// d'en-tête restante, pas seulement la première — le cas d'un fichier «
-/// matrice » avec plusieurs séries Y, chacune sous son propre nom.
+/// `has_column_header_row` names **each** column after the remaining
+/// header row, not only the first — the case of a "matrix"
+/// file with several Y series, each under its own name.
 #[test]
 fn importing_a_file_with_a_column_header_row_names_every_series_from_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let file = dir.path().join("matrice.txt");
-    std::fs::write(&file, "wavelength\tA\tB\n1\t10\t100\n2\t20\t200\n").expect("écrit matrice.txt");
+    let file = dir.path().join("matrix.txt");
+    std::fs::write(&file, "wavelength\tA\tB\n1\t10\t100\n2\t20\t200\n").expect("wrote matrix.txt");
 
-    let mut recipe = ImportRecipe::new("Sans titre");
+    let mut recipe = ImportRecipe::new("Untitled");
     recipe.separator = Separator::Tab;
     recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
@@ -4953,7 +4944,7 @@ fn importing_a_file_with_a_column_header_row_names_every_series_from_it() {
     });
 
     let tree = state.tree();
-    let sheet = sheet_named(tree, "matrice");
+    let sheet = sheet_named(tree, "matrix");
     let columns = state.visible_columns(sheet);
     assert_eq!(columns.len(), 3);
     assert_eq!(state.column_meta(columns[0].0).long_name, "wavelength");
@@ -4963,20 +4954,20 @@ fn importing_a_file_with_a_column_header_row_names_every_series_from_it() {
     assert_eq!(cell_f64(&state, columns[2].0, 0), 100.0);
 }
 
-/// Importer un seul fichier ne compte lui aussi que pour une seule entrée
-/// d'annulation — le lot à un seul élément n'est pas un cas particulier.
+/// Importing a single file also counts for only one undo
+/// entry — the single-element batch is not a special case.
 #[test]
 fn undoing_a_single_file_import_removes_exactly_that_sheet() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
-    let file = dir.path().join("seul.csv");
-    std::fs::write(&file, "1,10\n2,20\n").expect("écrit seul.csv");
+    let file = dir.path().join("single.csv");
+    std::fs::write(&file, "1,10\n2,20\n").expect("wrote single.csv");
 
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
-        recipe: ImportRecipe::new("Sans titre"),
+        recipe: ImportRecipe::new("Untitled"),
         paths: vec![file],
     });
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
@@ -4986,25 +4977,25 @@ fn undoing_a_single_file_import_removes_exactly_that_sheet() {
     assert!(!state.can_undo());
 }
 
-/// Un fichier qui se lit mais ne s'analyse pas (marqueur d'en-tête jamais
-/// trouvé) n'interrompt pas non plus le lot, et le message final signale un
-/// échec — pas un simple décompte muet, voir la doc d'`AppState::
-/// import_files` (§ correctif) : `self.fail`/`self.notice` remplacent
-/// `self.status`, un `self.fail` par fichier en échec se serait sinon fait
-/// écraser par le message récapitulatif final.
+/// A file that reads but does not parse (header marker never
+/// found) does not interrupt the batch either, and the final message reports a
+/// failure — not a mute count, see the doc of `AppState::
+/// import_files` (§ fix): `self.fail`/`self.notice` replace
+/// `self.status`, a `self.fail` per failed file would otherwise have been
+/// overwritten by the final summary message.
 #[test]
 fn a_parse_failure_amid_a_batch_is_surfaced_as_an_error_not_silently_swallowed() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
 
-    let bad = dir.path().join("incomplet.csv");
-    std::fs::write(&bad, "TITLE;Incomplet\n").expect("écrit incomplet.csv (jamais XYDATA)");
-    let good = dir.path().join("complet.csv");
-    std::fs::write(&good, "TITLE;Complet\nXYDATA\n1;10\n").expect("écrit complet.csv");
+    let bad = dir.path().join("incomplete.csv");
+    std::fs::write(&bad, "TITLE;Incomplete\n").expect("wrote incomplete.csv (never XYDATA)");
+    let good = dir.path().join("complete.csv");
+    std::fs::write(&good, "TITLE;Complete\nXYDATA\n1;10\n").expect("wrote complete.csv");
 
-    let mut recipe = ImportRecipe::new("Sans titre");
+    let mut recipe = ImportRecipe::new("Untitled");
     recipe.separator = Separator::Semicolon;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".to_string());
     state.dispatch(Action::ImportFiles {
@@ -5016,73 +5007,70 @@ fn a_parse_failure_amid_a_batch_is_surfaced_as_an_error_not_silently_swallowed()
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before + 1,
-        "seul le fichier qui s'analyse a produit une feuille"
+        "only the file that parses produced a sheet"
     );
-    let status = state.status().expect("un message de statut");
+    let status = state.status().expect("a status message");
     assert!(
         status.is_error(),
-        "un fichier en échec doit se voir, pas disparaître derrière un décompte : {}",
+        "a failed file must be visible, not vanish behind a count: {}",
         status.text
     );
     assert!(
-        status.text.contains("incomplet.csv"),
-        "le message nomme le fichier fautif : {}",
+        status.text.contains("incomplete.csv"),
+        "the message names the faulty file: {}",
         status.text
     );
 }
 
-/// Importer dans un classeur qui n'existe pas (identifiant invalide) échoue
-/// proprement — signalé, jamais de panique, aucune feuille fantôme.
+/// Importing into a workbook that does not exist (invalid identifier) fails
+/// cleanly — reported, never a panic, no phantom sheet.
 #[test]
 fn importing_into_a_nonexistent_book_fails_gracefully() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
-    let file = dir.path().join("mesure.csv");
-    std::fs::write(&file, "1,10\n").expect("écrit mesure.csv");
+    let file = dir.path().join("measure.csv");
+    std::fs::write(&file, "1,10\n").expect("wrote measure.csv");
 
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(NodeId::from_raw(999_999)),
-        recipe: ImportRecipe::new("Sans titre"),
+        recipe: ImportRecipe::new("Untitled"),
         paths: vec![file],
     });
 
-    let status = state.status().expect("un message de statut");
-    assert!(
-        status.is_error(),
-        "un classeur inexistant doit être signalé"
-    );
-    assert!(!state.can_undo(), "rien n'a été créé, rien à annuler");
+    let status = state.status().expect("a status message");
+    assert!(status.is_error(), "a nonexistent workbook must be reported");
+    assert!(!state.can_undo(), "nothing was created, nothing to undo");
 }
 
-/// Lit une cellule numérique brute, pour les assertions sur le contenu
-/// importé (au-delà de ce que `cell_text` laisse voir — voir [`cell`]).
+/// Reads a raw numeric cell, for assertions on the imported
+/// content (beyond what `cell_text` lets you see — see [`cell`]).
 fn cell_f64(state: &AppState, column: NodeId, row: usize) -> f64 {
     match cell(state, column, row) {
         Cell::Float(value) => value,
-        Cell::Text(_) => panic!("{column} n'est pas une colonne numérique"),
+        Cell::Text(_) => panic!("{column} is not a numeric column"),
     }
 }
 
-/// Une cellule qui ne s'analyse pas en nombre, au milieu d'une colonne par
-/// ailleurs numérique, ne devient plus un `NaN` muet : la colonne importée
-/// devient `Mixed` et garde le jeton d'origine — c'est le cas d'usage
-/// motivant du chantier « prévisualisation d'import », qui consomme enfin
-/// côté import le chantier « colonnes à types mixtes »
-/// (`ParsedColumn::texts`, voir `docs/chantier-import-previsualisation.md`).
-/// Une colonne entièrement numérique, elle, continue de produire une
-/// colonne `Numeric` à l'identique d'avant ce chantier — vérifié par
-/// ailleurs (toutes les autres assertions de ce fichier sur des imports
-/// numériques n'ont pas changé de résultat).
+/// A cell that does not parse as a number, in the middle of an otherwise
+/// numeric column, no longer becomes a mute `NaN`: the imported column
+/// becomes `Mixed` and keeps the original token — this is the motivating
+/// use case of the "import preview" work package, which finally consumes on the import
+/// side the "mixed-type columns" work package
+/// (`ParsedColumn::texts`, see `docs/chantier-import-previsualisation.md`).
+/// A fully numeric column, for its part, still produces a
+/// `Numeric` column identical to before that work package — checked
+/// elsewhere (all the other assertions of this file on numeric
+/// imports did not change result).
 #[test]
 fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let file = dir.path().join("mesure.csv");
-    std::fs::write(&file, "1,2\nn/a,4\n5,6\n").expect("écrit mesure.csv");
-    // Le texte est dans la première colonne (le X) : la coupure automatique
-    // (issue #4) s'y arrêterait, d'où l'option « Aucune coupure ».
-    let mut recipe = ImportRecipe::new("Sans titre");
+    let file = dir.path().join("measure.csv");
+    std::fs::write(&file, "1,2\nn/a,4\n5,6\n").expect("wrote measure.csv");
+    // The text is in the first column (the X): the automatic cut-off
+    // (issue #4) would stop there, hence `DataEnd::None` (no cut-off).
+    let mut recipe = ImportRecipe::new("Untitled");
     recipe.data_end = stokesforge_import::DataEnd::None;
 
     state.dispatch(Action::ImportFiles {
@@ -5092,14 +5080,14 @@ fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text()
     });
 
     let tree = state.tree();
-    let sheet = sheet_named(tree, "mesure");
+    let sheet = sheet_named(tree, "measure");
     let columns = state.visible_columns(sheet);
     let first = columns[0].0;
     assert_eq!(column_type(&state, first), ColumnType::Mixed);
     assert_eq!(cell_f64(&state, first, 0), 1.0);
     match cell(&state, first, 1) {
         Cell::Text(Some(text)) => assert_eq!(text, "n/a"),
-        other => panic!("cellule 1 devrait être un texte conservé, trouvé {other:?}"),
+        other => panic!("cell 1 should be a kept text, found {other:?}"),
     }
     assert_eq!(cell_f64(&state, first, 2), 5.0);
 
@@ -5107,27 +5095,27 @@ fn importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text()
     assert_eq!(
         column_type(&state, second),
         ColumnType::Numeric,
-        "une colonne entièrement numérique n'est pas promue en Mixed"
+        "a fully numeric column is not promoted to Mixed"
     );
 }
 
-/// Les rôles de sous-en-tête (`long_name`/`unit`/`comment`) assignés dans la
-/// recette peuplent `ColumnMeta` — la fonctionnalité centrale du chantier
-/// « prévisualisation d'import » côté modèle, au-delà de l'aperçu lui-même
-/// (testé côté `stokesforge-import`, voir `preview::tests`).
+/// The subheader roles (`long_name`/`unit`/`comment`) assigned in the
+/// recipe populate `ColumnMeta` — the central feature of the
+/// "import preview" work package on the model side, beyond the preview itself
+/// (tested in `stokesforge-import`, see `preview::tests`).
 #[test]
 fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let file = dir.path().join("instrument.csv");
     std::fs::write(
         &file,
-        "Temperature,Pressure\ndegC,bar\nmesure lente,mesure rapide\n0.5,12\n1,2\n3,4\n",
+        "Temperature,Pressure\ndegC,bar\nslow measurement,fast measurement\n0.5,12\n1,2\n3,4\n",
     )
-    .expect("écrit instrument.csv");
+    .expect("wrote instrument.csv");
 
-    let mut recipe = ImportRecipe::new("Sans titre");
+    let mut recipe = ImportRecipe::new("Untitled");
     recipe.header_layout = stokesforge_import::HeaderLayout {
         main_header_lines: 0,
         subheader_lines: 4,
@@ -5152,85 +5140,81 @@ fn subheader_roles_populate_column_meta_long_name_unit_and_comment() {
     let meta0 = state.column_meta(columns[0].0);
     assert_eq!(meta0.long_name, "Temperature");
     assert_eq!(meta0.unit, "degC");
-    assert_eq!(meta0.comment, "mesure lente");
-    assert_eq!(meta0.x_prime, Some(0.5), "ligne x' (#164)");
+    assert_eq!(meta0.comment, "slow measurement");
+    assert_eq!(meta0.x_prime, Some(0.5), "x' row (#164)");
     let meta1 = state.column_meta(columns[1].0);
     assert_eq!(meta1.long_name, "Pressure");
     assert_eq!(meta1.unit, "bar");
-    assert_eq!(meta1.comment, "mesure rapide");
+    assert_eq!(meta1.comment, "fast measurement");
     assert_eq!(meta1.x_prime, Some(12.0));
 }
 
-// -- 14. Entrée sur la dernière ligne : ajout de ligne borné à la feuille --
+// -- 14. Enter on the last row: row addition bounded to the sheet --
 
-/// Reproduit le bug rapporté : dans `demo_project`, `Note` (colonne texte,
-/// 3 valeurs stockées) est plus courte que `Temps`/`Signal` (5 valeurs) sur
-/// la même feuille — un cas que le modèle autorise explicitement (voir la
-/// doc de [`demo_project`]). Valider par Entrée la ligne 2 de `Note`
-/// (`Some("")`, la dernière valeur *stockée* de la colonne, mais pas la
-/// dernière ligne *affichée* de la feuille) ne doit pas ajouter de ligne :
-/// avant le correctif, `commit_cell_and_advance` comparait `row + 1` à la
-/// longueur du buffer de la seule colonne éditée plutôt qu'à la hauteur
-/// réelle de la feuille, et ajoutait une ligne fantôme en bas de toute la
-/// feuille.
+/// Reproduces the reported bug: in `demo_project`, `Note` (text column,
+/// 3 stored values) is shorter than `Time`/`Signal` (5 values) on
+/// the same sheet — a case the model explicitly allows (see the
+/// doc of [`demo_project`]). Committing row 2 of `Note` with Enter
+/// (`Some("")`, the last *stored* value of the column, but not the
+/// last *displayed* row of the sheet) must not add a row:
+/// before the fix, `commit_cell_and_advance` compared `row + 1` to the
+/// buffer length of the edited column alone rather than to the real
+/// height of the sheet, and added a phantom row at the bottom of the whole
+/// sheet.
 #[test]
 fn committing_the_last_stored_value_of_a_short_column_mid_sheet_does_not_add_a_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
-    assert_eq!(state.row_count(sheet1), 5, "Temps/Signal font 5 lignes");
+    assert_eq!(state.row_count(sheet1), 5, "Time/Signal make 5 rows");
 
     state.dispatch(Action::CommitCellAndAdvance {
         column: note,
         row: 2,
-        text: "milieu".to_string(),
+        text: "middle".to_string(),
         sheet: sheet1,
     });
 
     assert_eq!(
         state.row_count(sheet1),
         5,
-        "éditer une ligne au milieu de la feuille n'ajoute pas de ligne, \
-         même si c'était la dernière valeur stockée de cette colonne"
+        "editing a row in the middle of the sheet adds no row, \
+         even if it was the last stored value of this column"
     );
-    assert_eq!(state.cell_text(note, 2), "milieu");
+    assert_eq!(state.cell_text(note, 2), "middle");
 }
 
-/// À l'inverse, valider par Entrée la vraie dernière ligne de la feuille
-/// ajoute bien une ligne — comportement voulu, inchangé par le correctif.
+/// Conversely, committing the real last row of the sheet with Enter
+/// adds a row indeed — intended behavior, unchanged by the fix.
 #[test]
 fn committing_the_last_row_of_the_sheet_adds_a_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     assert_eq!(state.row_count(sheet1), 5);
 
     state.dispatch(Action::CommitCellAndAdvance {
-        column: temps,
+        column: time_col,
         row: 4,
         text: "2.5".to_string(),
         sheet: sheet1,
     });
 
-    assert_eq!(
-        state.row_count(sheet1),
-        6,
-        "dernière ligne : une ligne ajoutée"
-    );
-    assert_eq!(cell(&state, temps, 4), Cell::Float(2.5));
+    assert_eq!(state.row_count(sheet1), 6, "last row: a row is added");
+    assert_eq!(cell(&state, time_col, 4), Cell::Float(2.5));
 }
 
-// -- 15. Conversion de type de colonne --
+// -- 15. Column type conversion --
 
-/// Choix manuel du type d'une colonne (`Action::SetColumnType`) : une
-/// colonne texte contenant du texte non numérique perd ce texte en passant
-/// en numérique (`NaN`), conversion destructrice assumée — même politique
-/// que `Column::set_column_type` côté `stokesforge-core`.
+/// Manual choice of a column's type (`Action::SetColumnType`): a
+/// text column containing non-numeric text loses that text when becoming
+/// numeric (`NaN`), a destructive conversion that is assumed — same policy
+/// as `Column::set_column_type` on the `stokesforge-core` side.
 #[test]
 fn set_column_type_action_converts_and_can_lose_non_numeric_text() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -5243,29 +5227,29 @@ fn set_column_type_action_converts_and_can_lose_non_numeric_text() {
 
     assert_eq!(column_type(&state, note), ColumnType::Numeric);
     match cell(&state, note, 0) {
-        Cell::Float(value) => assert!(value.is_nan(), "« a » n'est pas un nombre : disparaît"),
-        other => panic!("cellule numérique attendue, reçu {other:?}"),
+        Cell::Float(value) => assert!(value.is_nan(), "\"a\" is not a number: it disappears"),
+        other => panic!("numeric cell expected, got {other:?}"),
     }
 }
 
-/// Une colonne texte dont toutes les valeurs présentes s'analysent comme
-/// des nombres se convertit seule en numérique dès qu'on valide une cellule
-/// — pendant du sens inverse déjà couvert par
-/// `non_numeric_input_promotes_the_column_to_mixed` (colonne numérique qui
-/// reçoit du texte).
+/// A text column whose present values all parse as
+/// numbers converts itself to numeric as soon as a cell is committed
+/// — counterpart of the reverse direction already covered by
+/// `non_numeric_input_promotes_the_column_to_mixed` (a numeric column that
+/// receives text).
 #[test]
 fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
     assert_eq!(column_type(&state, note), ColumnType::Mixed);
 
-    // `Note` = [Some("a"), None, Some("")] : remplacer « a » par un nombre
-    // laisse la ligne 2 (`Some("")`, présente mais non numérique) en
-    // travers — la colonne ne bascule pas tant qu'une valeur *présente*
-    // reste non numérique (`None`, lui, est ignoré : c'est une valeur
-    // absente, pas un texte qui refuse de s'analyser).
+    // `Note` = [Some("a"), None, Some("")]: replacing "a" with a number
+    // leaves row 2 (`Some("")`, present but non-numeric) in the
+    // way — the column does not switch as long as a *present* value
+    // stays non-numeric (`None`, for its part, is ignored: it is an
+    // absent value, not a text that refuses to parse).
     state.dispatch(Action::CommitCell {
         column: note,
         row: 0,
@@ -5274,7 +5258,7 @@ fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
     assert_eq!(
         column_type(&state, note),
         ColumnType::Mixed,
-        "la ligne 2 (chaîne vide présente) n'est pas un nombre : pas de conversion"
+        "row 2 (present empty string) is not a number: no conversion"
     );
 
     state.dispatch(Action::CommitCell {
@@ -5286,67 +5270,67 @@ fn a_text_column_left_with_only_numeric_values_auto_promotes_to_numeric() {
     assert_eq!(
         column_type(&state, note),
         ColumnType::Numeric,
-        "toutes les valeurs présentes sont des nombres : conversion automatique"
+        "all present values are numbers: automatic conversion"
     );
     assert_eq!(cell(&state, note, 0), Cell::Float(1.0));
     assert_eq!(cell(&state, note, 2), Cell::Float(2.5));
 }
 
-/// `Action::SetColumnRole` (sous-menu « Rôle » du menu contextuel d'en-tête,
-/// à côté du type) écrit `ColumnMeta::role` — rôle par défaut `Y` pour toute
-/// colonne, voir `Column::new` côté `stokesforge-core`.
+/// `Action::SetColumnRole` (the "Role" submenu of the header context menu,
+/// next to the type) writes `ColumnMeta::role` — default role `Y` for any
+/// column, see `Column::new` on the `stokesforge-core` side.
 #[test]
 fn set_column_role_action_writes_the_column_meta_role() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
-    assert_eq!(state.column_meta(temps).role, ColumnRole::Y);
+    let time_col = column_id(&state, sheet1, "Time");
+    assert_eq!(state.column_meta(time_col).role, ColumnRole::Y);
 
     state.dispatch(Action::SetColumnRole {
-        column: temps,
+        column: time_col,
         role: ColumnRole::X,
     });
 
-    assert_eq!(state.column_meta(temps).role, ColumnRole::X);
+    assert_eq!(state.column_meta(time_col).role, ColumnRole::X);
 }
 
-// -- 16. Multi-sélection de colonnes et de champs d'en-tête --
+// -- 16. Multi-selection of columns and header fields --
 
-/// Glisser/Maj-clic sur la rangée des lettres (`extend_column_selection`)
-/// sélectionne une plage de colonnes entières, pas une seule.
+/// Drag/Shift-click on the letters row (`extend_column_selection`)
+/// selects a range of whole columns, not just one.
 #[test]
 fn extending_a_column_selection_covers_the_whole_range() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.extend_column_selection(sheet1, note);
 
-    assert!(state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, time_col));
     assert!(
         state.is_column_selected(sheet1, signal),
-        "colonne intermédiaire incluse"
+        "intermediate column included"
     );
     assert!(state.is_column_selected(sheet1, note));
 }
 
-/// Glisser/Maj-clic sur les rangées de champs d'en-tête
-/// (`extend_header_field_selection`) sélectionne un rectangle de champs sur
-/// plusieurs colonnes et plusieurs champs, pas un seul.
+/// Drag/Shift-click on the header field rows
+/// (`extend_header_field_selection`) selects a rectangle of fields across
+/// several columns and several fields, not just one.
 #[test]
 fn extending_a_header_field_selection_covers_the_whole_rectangle() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
     state.extend_header_field_selection(sheet1, signal, HeaderField::Formula);
 
     for field in [
@@ -5355,253 +5339,256 @@ fn extending_a_header_field_selection_covers_the_whole_rectangle() {
         HeaderField::Formula,
     ] {
         assert!(
-            state.is_header_field_selected(sheet1, temps, field),
-            "{field:?} de Temps dans le rectangle"
+            state.is_header_field_selected(sheet1, time_col, field),
+            "{field:?} of Time in the rectangle"
         );
         assert!(
             state.is_header_field_selected(sheet1, signal, field),
-            "{field:?} de Signal dans le rectangle"
+            "{field:?} of Signal in the rectangle"
         );
     }
     assert!(
-        !state.is_header_field_selected(sheet1, temps, HeaderField::LongName),
-        "Nom long est au-dessus de l'ancre (Unité) : hors du rectangle"
+        !state.is_header_field_selected(sheet1, time_col, HeaderField::LongName),
+        "Long Name is above the anchor (Unit): outside the rectangle"
     );
     assert_eq!(
         state.selected_header_field(sheet1),
         None,
-        "un rectangle de plusieurs champs n'est jamais un champ unique"
+        "a rectangle of several fields is never a single field"
     );
 }
 
-/// Glisser depuis un champ d'en-tête vers une cellule de données
-/// (`extend_selection`, la méthode *cellule de données*, appelée alors que
-/// la sélection en cours est déjà une plage de champs) s'arrête à la
-/// frontière plutôt que de la traverser : le rectangle couvre les champs
-/// entre l'ancre et Formule (le dernier champ d'en-tête), sur la colonne
-/// visée comme sur celle de l'ancre, mais ne touche jamais une donnée.
-/// Trois correctifs successifs avaient fait vivre un rectangle mixte qui
-/// traversait cette frontière ; voir la doc de tête de `crate::selection`
-/// pour pourquoi il a été retiré.
+/// Dragging from a header field to a data cell
+/// (`extend_selection`, the *data cell* method, called while
+/// the current selection is already a range of fields) stops at the
+/// boundary rather than crossing it: the rectangle covers the fields
+/// between the anchor and Formula (the last header field), on the target
+/// column as on the anchor's, but never touches a data row.
+/// Three successive fixes had kept alive a mixed rectangle that
+/// crossed this boundary; see the head doc of `crate::selection`
+/// for why it was removed.
 #[test]
 fn dragging_a_cell_extension_across_the_header_boundary_stops_at_the_formula_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
     state.extend_selection(sheet1, signal, 2);
 
     assert!(
         !state.is_selected(sheet1, signal, 2),
-        "la cellule visée n'est plus jamais incluse : le glisser s'arrête à la frontière"
+        "the target cell is never included anymore: the drag stops at the boundary"
     );
     assert!(
-        state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
-        "le champ d'ancrage reste sélectionné"
+        state.is_header_field_selected(sheet1, time_col, HeaderField::Unit),
+        "the anchor field stays selected"
     );
     assert!(
-        state.is_header_field_selected(sheet1, temps, HeaderField::Comment),
-        "champ intermédiaire entre l'ancre et Formule inclus"
+        state.is_header_field_selected(sheet1, time_col, HeaderField::Comment),
+        "intermediate field between the anchor and Formula included"
     );
     assert!(
         state.is_header_field_selected(sheet1, signal, HeaderField::Formula),
-        "le rectangle s'étend jusqu'à Formule sur la colonne visée"
+        "the rectangle extends to Formula on the target column"
     );
     assert!(
-        !state.is_selected(sheet1, temps, 0),
-        "aucune donnée de la colonne d'ancrage n'est incluse"
+        !state.is_selected(sheet1, time_col, 0),
+        "no data of the anchor column is included"
     );
     assert_eq!(
         state.selected_header_field(sheet1),
         None,
-        "un rectangle de plusieurs cases n'est jamais réduit à un seul champ"
+        "a multi-cell rectangle is never reduced to a single field"
     );
 }
 
-/// Symétrique : glisser depuis une cellule de donnée vers un champ d'en-tête
-/// s'arrête à la ligne 0, ne remonte jamais dans l'en-tête.
+/// Symmetric: dragging from a data cell to a header field
+/// stops at row 0, never climbs into the header.
 #[test]
 fn dragging_a_header_field_extension_across_the_data_boundary_stops_at_row_zero() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 3);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+    state.select_cell(sheet1, time_col, 3);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Comment);
 
     assert!(
-        !state.is_header_field_selected(sheet1, temps, HeaderField::Comment),
-        "le champ visé n'est jamais inclus : le glisser s'arrête à la frontière"
+        !state.is_header_field_selected(sheet1, time_col, HeaderField::Comment),
+        "the target field is never included: the drag stops at the boundary"
     );
     for row in 0..=3 {
-        assert!(state.is_selected(sheet1, temps, row), "ligne {row} incluse");
+        assert!(
+            state.is_selected(sheet1, time_col, row),
+            "row {row} included"
+        );
     }
 }
 
-/// Une sélection démarrée sur le champ Commentaire et étendue jusqu'à une
-/// ligne de données de la même colonne s'arrête à Formule (le dernier
-/// champ d'en-tête) : elle ne touche jamais la moindre ligne de données.
-/// Régression du bug historique (trois correctifs successifs) du
-/// « rectangle mixte », voir la doc de tête de `crate::selection`.
+/// A selection started on the Comment field and extended to a
+/// data row of the same column stops at Formula (the last
+/// header field): it never touches a single data row.
+/// Regression of the historical bug (three successive fixes) of the
+/// "mixed rectangle", see the head doc of `crate::selection`.
 #[test]
 fn extending_from_a_header_field_into_data_stops_before_any_data_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_header_field(sheet1, temps, HeaderField::Comment);
-    state.extend_selection(sheet1, temps, 4);
+    state.select_header_field(sheet1, time_col, HeaderField::Comment);
+    state.extend_selection(sheet1, time_col, 4);
 
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Comment));
+    assert!(state.is_header_field_selected(sheet1, time_col, HeaderField::Comment));
     assert!(
-        state.is_header_field_selected(sheet1, temps, HeaderField::Formula),
-        "Formule, dernier champ d'en-tête, atteinte"
+        state.is_header_field_selected(sheet1, time_col, HeaderField::Formula),
+        "Formula, last header field, reached"
     );
     assert!(
-        !state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
-        "Unité est au-dessus de l'ancre : hors du rectangle"
+        !state.is_header_field_selected(sheet1, time_col, HeaderField::Unit),
+        "Unit is above the anchor: outside the rectangle"
     );
     for row in 0..=4 {
         assert!(
-            !state.is_selected(sheet1, temps, row),
-            "ligne {row} jamais incluse : le glisser s'est arrêté à Formule"
+            !state.is_selected(sheet1, time_col, row),
+            "row {row} never included: the drag stopped at Formula"
         );
     }
 
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
     assert_eq!(
         text.lines().count(),
         2,
-        "2 champs d'en-tête (Commentaire, Formule), aucune ligne de donnée"
+        "2 header fields (Comment, Formula), no data row"
     );
 }
 
-/// Glisser depuis une cellule de données vers la rangée des lettres
-/// (`extend_column_selection` appelée alors que la sélection en cours est un
-/// rectangle de cellules) repose une sélection d'une seule colonne à la
-/// cible plutôt que d'être ignorée.
+/// Dragging from a data cell to the letters row
+/// (`extend_column_selection` called while the current selection is a
+/// rectangle of cells) sets a single-column selection at the
+/// target rather than being ignored.
 #[test]
 fn dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.extend_column_selection(sheet1, signal);
 
     assert!(
         state.is_column_selected(sheet1, signal),
-        "la colonne visée devient la nouvelle sélection"
+        "the target column becomes the new selection"
     );
     assert!(
-        !state.is_selected(sheet1, temps, 0),
-        "l'ancienne sélection de cellule n'a plus cours"
+        !state.is_selected(sheet1, time_col, 0),
+        "the old cell selection no longer applies"
     );
 }
 
-/// Glisser depuis la rangée des lettres vers une rangée de champs d'en-tête
-/// (`extend_header_field_selection` appelée alors que la sélection en cours
-/// est une plage de colonnes) repose une sélection d'un seul champ à la
-/// cible plutôt que d'être ignorée.
+/// Dragging from the letters row to a header field row
+/// (`extend_header_field_selection` called while the current selection
+/// is a range of columns) sets a single-field selection at the
+/// target rather than being ignored.
 #[test]
 fn dragging_a_header_field_extension_across_the_column_boundary_reselects_a_single_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.extend_header_field_selection(sheet1, signal, HeaderField::Comment);
 
     assert_eq!(
         state.selected_header_field(sheet1),
         Some((signal, HeaderField::Comment)),
-        "le champ visé devient la nouvelle sélection"
+        "the target field becomes the new selection"
     );
     assert!(
-        !state.is_column_selected(sheet1, temps),
-        "l'ancienne plage de colonnes n'a plus cours"
+        !state.is_column_selected(sheet1, time_col),
+        "the old range of columns no longer applies"
     );
 }
 
-/// Flèche Haut depuis la première ligne de données rejoint le champ Formule
-/// (le plus bas des 4 champs d'en-tête) ; Bas depuis Formule revient à la
-/// première ligne de données — la frontière entre l'en-tête et les données
-/// se traverse maintenant au clavier.
+/// Up arrow from the first data row reaches the Formula field
+/// (the lowest of the 4 header fields); Down from Formula goes back to the
+/// first data row — the boundary between the header and the data
+/// is now crossed with the keyboard.
 #[test]
 fn arrow_up_from_the_first_data_row_enters_the_header_fields() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.move_selection(sheet1, MoveDirection::Up, false);
     assert_eq!(
         state.selected_header_field(sheet1),
-        Some((temps, HeaderField::Formula))
+        Some((time_col, HeaderField::Formula))
     );
 
     state.move_selection(sheet1, MoveDirection::Up, false);
     assert_eq!(
         state.selected_header_field(sheet1),
-        Some((temps, HeaderField::Comment))
+        Some((time_col, HeaderField::Comment))
     );
 
     state.move_selection(sheet1, MoveDirection::Down, false);
     assert_eq!(
         state.selected_header_field(sheet1),
-        Some((temps, HeaderField::Formula))
+        Some((time_col, HeaderField::Formula))
     );
 
     state.move_selection(sheet1, MoveDirection::Down, false);
     assert!(
-        state.is_selected(sheet1, temps, 0),
-        "Bas depuis Formule redescend en première ligne de données"
+        state.is_selected(sheet1, time_col, 0),
+        "Down from Formula goes back down to the first data row"
     );
 }
 
-/// Tab depuis le champ Formule de la **dernière** colonne visible entre
-/// dans les données, à `Data(0)` de la **première** colonne — le pendant de
-/// Tab pour la frontière en-tête/données, symétrique de Maj+Tab depuis
-/// `Data(0)` de la première colonne (voir le test suivant).
+/// Tab from the Formula field of the **last** visible column enters
+/// the data, at `Data(0)` of the **first** column — the counterpart of
+/// Tab for the header/data boundary, symmetric to Shift+Tab from
+/// `Data(0)` of the first column (see the next test).
 #[test]
 fn tab_from_the_last_column_formula_field_enters_the_data() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_header_field(sheet1, note, HeaderField::Formula);
     state.move_selection_tab(sheet1, false);
 
     assert!(
-        state.is_selected(sheet1, temps, 0),
-        "Tab depuis Formule de la dernière colonne rejoint Data(0) de la première"
+        state.is_selected(sheet1, time_col, 0),
+        "Tab from Formula of the last column reaches Data(0) of the first"
     );
 }
 
-/// Maj+Tab depuis `Data(0)` de la première colonne visible rejoint le champ
-/// Formule de la **dernière** colonne — le point d'entrée symétrique dans
-/// l'en-tête.
+/// Shift+Tab from `Data(0)` of the first visible column reaches the
+/// Formula field of the **last** column — the symmetric entry point in
+/// the header.
 #[test]
 fn shift_tab_from_the_first_cell_reaches_the_last_column_formula_field() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let note = column_id(&state, sheet1, "Note");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.move_selection_tab(sheet1, true);
 
     assert_eq!(
@@ -5610,82 +5597,82 @@ fn shift_tab_from_the_first_cell_reaches_the_last_column_formula_field() {
     );
 }
 
-/// Tab circule normalement au sein de l'en-tête, colonne par colonne, puis
-/// champ par champ une fois toutes les colonnes parcourues pour un champ
-/// donné — sans jamais entrer dans les données tant que ce n'est pas la
-/// dernière colonne au dernier champ.
+/// Tab moves normally within the header, column by column, then
+/// field by field once all columns have been traversed for a given
+/// field — without ever entering the data until it is the
+/// last column at the last field.
 #[test]
 fn tab_cycles_through_header_fields_before_reaching_data() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.select_header_field(sheet1, time_col, HeaderField::LongName);
     state.move_selection_tab(sheet1, false);
     assert_eq!(
         state.selected_header_field(sheet1),
         Some((signal, HeaderField::LongName)),
-        "Tab avance d'abord de colonne en colonne pour un même champ"
+        "Tab first advances column by column for the same field"
     );
 }
 
-// -- 17. Sélection de lignes entières (gouttière des numéros de ligne) --
+// -- 17. Selecting whole rows (row number gutter) --
 
-/// Un clic sur la gouttière (`select_row`) sélectionne toute la ligne :
-/// toutes les colonnes visibles de la feuille, à cette ligne — miroir de
-/// [`extending_a_column_selection_covers_the_whole_range`] mais pour une
-/// seule ligne.
+/// A click on the gutter (`select_row`) selects the whole row:
+/// all the visible columns of the sheet, at that row — mirror of
+/// [`extending_a_column_selection_covers_the_whole_range`] but for a
+/// single row.
 #[test]
 fn clicking_the_row_gutter_selects_the_whole_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_row(sheet1, 1);
 
     assert!(state.is_row_selected(sheet1, 1));
-    assert!(!state.is_row_selected(sheet1, 0), "ligne 0 non touchée");
-    assert!(state.is_selected(sheet1, temps, 1));
+    assert!(!state.is_row_selected(sheet1, 0), "row 0 not touched");
+    assert!(state.is_selected(sheet1, time_col, 1));
     assert!(state.is_selected(sheet1, signal, 1));
     assert!(
         state.is_selected(sheet1, note, 1),
-        "Note est plus courte que les deux autres colonnes, mais reste \
-         touchée par la sélection de ligne : une ligne entière couvre \
-         toutes les colonnes visibles, pas seulement celles assez longues"
+        "Note is shorter than the two other columns, but is still \
+         touched by the row selection: a whole row covers \
+         all the visible columns, not only the long enough ones"
     );
     assert!(
-        !state.is_selected(sheet1, temps, 0),
-        "seule la ligne 1 est sélectionnée"
+        !state.is_selected(sheet1, time_col, 0),
+        "only row 1 is selected"
     );
 }
 
-/// Maj-clic ou glisser sur la gouttière (`extend_row_selection`) étend la
-/// plage à plusieurs lignes — miroir de
+/// Shift-click or drag on the gutter (`extend_row_selection`) extends the
+/// range to several rows — mirror of
 /// [`extending_a_column_selection_covers_the_whole_range`].
 #[test]
 fn extending_a_row_selection_covers_the_whole_range() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.select_row(sheet1, 1);
     state.extend_row_selection(sheet1, 3);
 
     for row in 1..=3 {
-        assert!(state.is_row_selected(sheet1, row), "ligne {row} incluse");
-        assert!(state.is_selected(sheet1, temps, row));
+        assert!(state.is_row_selected(sheet1, row), "row {row} included");
+        assert!(state.is_selected(sheet1, time_col, row));
     }
     assert!(!state.is_row_selected(sheet1, 0));
     assert!(!state.is_row_selected(sheet1, 4));
 
-    // Le sens du glisser ne compte pas : reglisser vers le haut couvre la
-    // même plage.
+    // The drag direction does not matter: dragging back up covers the
+    // same range.
     state.select_row(sheet1, 3);
     state.extend_row_selection(sheet1, 1);
     for row in 1..=3 {
@@ -5693,46 +5680,46 @@ fn extending_a_row_selection_covers_the_whole_range() {
     }
 }
 
-/// Retour arrière (`Action::ClearSelectedCells`) sur une plage de lignes
-/// vide toutes les colonnes touchées à cette ligne, sans rien décaler —
-/// même règle que pour un rectangle de cellules.
+/// Backspace (`Action::ClearSelectedCells`) on a range of rows
+/// clears all the columns touched at that row, without shifting anything —
+/// same rule as for a rectangle of cells.
 #[test]
 fn backspace_on_a_full_row_selection_clears_it_without_shifting() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0].
+    // "Time" = [0.0, 0.5, 1.0, 1.5, 2.0].
     state.select_row(sheet1, 1);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
 
     assert!(
-        matches!(cell(&state, temps, 1), Cell::Float(v) if v.is_nan()),
-        "la ligne 1 est vide"
+        matches!(cell(&state, time_col, 1), Cell::Float(v) if v.is_nan()),
+        "row 1 is empty"
     );
     assert_eq!(
-        cell(&state, temps, 2),
+        cell(&state, time_col, 2),
         Cell::Float(1.0),
-        "rien n'a été décalé"
+        "nothing was shifted"
     );
-    assert_eq!(state.row_count(sheet1), 5, "aucune ligne retirée");
+    assert_eq!(state.row_count(sheet1), 5, "no row removed");
 }
 
-/// Supprimer une sélection de colonnes entières retire les colonnes de la
-/// feuille (et pas seulement leurs cellules) ; Annuler les rend d'un coup,
-/// avec leurs valeurs. Régression : aucune voie de l'interface n'appelait
-/// `Command::DeleteColumn`, « Delete and Shift Up » ne vidait que les cellules.
+/// Deleting a selection of whole columns removes the columns from the
+/// sheet (and not only their cells); Undo gives them back at once,
+/// with their values. Regression: no interface path called
+/// `Command::DeleteColumn`, "Delete and Shift Up" only cleared the cells.
 #[test]
 fn deleting_selected_columns_removes_them_and_undo_restores_them() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let before = state.visible_columns(sheet1).len();
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.extend_column_selection(sheet1, signal);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
@@ -5741,66 +5728,66 @@ fn deleting_selected_columns_removes_them_and_undo_restores_them() {
         .into_iter()
         .map(|(id, ..)| id)
         .collect();
-    assert_eq!(after.len(), before - 2, "les deux colonnes ont disparu");
-    assert!(!after.contains(&temps) && !after.contains(&signal));
+    assert_eq!(after.len(), before - 2, "the two columns are gone");
+    assert!(!after.contains(&time_col) && !after.contains(&signal));
 
     state.dispatch(Action::Undo);
     assert_eq!(
         state.visible_columns(sheet1).len(),
         before,
-        "un seul Annuler rend les deux colonnes"
+        "a single Undo gives back both columns"
     );
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(0.5));
 }
 
-/// Suppr (`Action::DeleteSelectedCells`) sur une plage de lignes supprime la
-/// ligne et fait remonter ce qui suit, dans **toutes** les colonnes
-/// touchées, indépendamment de leur longueur propre.
+/// Delete (`Action::DeleteSelectedCells`) on a range of rows deletes the
+/// row and shifts what follows up, in **all** the touched
+/// columns, regardless of their own length.
 #[test]
 fn delete_on_a_full_row_selection_shifts_every_column_up() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
-    // "Temps" = [0.0, 0.5, 1.0, 1.5, 2.0], "Signal" = [10, NaN, 30, 40, 50],
-    // "Note" = [Some("a"), None, Some("")] (plus courte que les deux
-    // autres : ligne 1 est dans ses bornes).
+    // "Time" = [0.0, 0.5, 1.0, 1.5, 2.0], "Signal" = [10, NaN, 30, 40, 50],
+    // "Note" = [Some("a"), None, Some("")] (shorter than the two
+    // others: row 1 is within its bounds).
     state.select_row(sheet1, 1);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
     assert_eq!(state.row_count(sheet1), 4);
     assert_eq!(
-        cell(&state, temps, 1),
+        cell(&state, time_col, 1),
         Cell::Float(1.0),
-        "la ligne 2 d'origine (1.0) a pris la place de la ligne 1 supprimée"
+        "the original row 2 (1.0) took the place of the deleted row 1"
     );
     assert_eq!(
-        cell(&state, temps, 3),
+        cell(&state, time_col, 3),
         Cell::Float(2.0),
-        "dernière ligne inchangée, juste décalée"
+        "last row unchanged, just shifted"
     );
     assert!(matches!(cell(&state, signal, 1), Cell::Float(v) if (v - 30.0).abs() < f64::EPSILON));
     assert_eq!(
         state.cell_text(note, 1),
         "",
-        "Note[2] (chaîne vide présente) a remonté en position 1"
+        "Note[2] (present empty string) moved up to position 1"
     );
 }
 
-/// Le cas limite explicitement visé par la tâche : supprimer une ligne
-/// *au-delà* de la fin d'une colonne plus courte que les autres (`Note`, 3
-/// valeurs sur une feuille de 5 lignes) ne doit ni paniquer ni toucher cette
-/// colonne — `Command::DeleteCells` applique `at`/`count` indépendamment par
-/// colonne, une colonne plus courte que `at` n'a rien à retirer.
+/// The edge case explicitly targeted by the task: deleting a row
+/// *beyond* the end of a column shorter than the others (`Note`, 3
+/// values on a sheet of 5 rows) must neither panic nor touch that
+/// column — `Command::DeleteCells` applies `at`/`count` independently per
+/// column, a column shorter than `at` has nothing to remove.
 #[test]
 fn deleting_the_last_row_leaves_a_shorter_column_untouched() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
@@ -5810,20 +5797,16 @@ fn deleting_the_last_row_leaves_a_shorter_column_untouched() {
         state.cell_text(note, 2),
     ];
 
-    // Ligne 4 (la dernière, 0-indexée) : hors des bornes de `Note` (longueur
-    // 3), mais bien dans celles de `Temps`/`Signal` (longueur 5).
+    // Row 4 (the last, 0-indexed): outside the bounds of `Note` (length
+    // 3), but well within those of `Time`/`Signal` (length 5).
     state.select_row(sheet1, 4);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
+    assert_eq!(state.row_count(sheet1), 4, "Time/Signal lost a row");
     assert_eq!(
-        state.row_count(sheet1),
-        4,
-        "Temps/Signal ont perdu une ligne"
-    );
-    assert_eq!(
-        cell(&state, temps, 3),
+        cell(&state, time_col, 3),
         Cell::Float(1.5),
-        "la dernière ligne restante est l'avant-dernière d'origine"
+        "the last remaining row is the original second to last"
     );
     assert!(matches!(cell(&state, signal, 3), Cell::Float(v) if (v - 40.0).abs() < f64::EPSILON));
     assert_eq!(
@@ -5833,56 +5816,56 @@ fn deleting_the_last_row_leaves_a_shorter_column_untouched() {
             state.cell_text(note, 2),
         ],
         note_before,
-        "Note, plus courte que la ligne supprimée, n'a pas bougé"
+        "Note, shorter than the deleted row, did not move"
     );
 }
 
-/// [`AppState::grid_menu`] sur une plage de lignes rend la zone `Rows` et
-/// les bons libellés, singulier et pluriel — le pluriel n'y suit que le
-/// nombre de *lignes*, jamais le nombre de colonnes (voir la doc de
-/// [`GridMenu::plural`]) : une seule ligne sur une feuille à 3 colonnes
-/// reste « la ligne ».
+/// [`AppState::grid_menu`] on a range of rows returns the `Rows` zone and
+/// the right labels, singular and plural — the plural there follows only the
+/// number of *rows*, never the number of columns (see the doc of
+/// [`GridMenu::plural`]): a single row on a 3-column sheet
+/// stays "the row".
 #[test]
 fn the_grid_menu_on_a_full_row_selection_names_rows() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     state.select_row(sheet1, 1);
-    let menu = state.grid_menu(sheet1).expect("une ligne sélectionnée");
+    let menu = state.grid_menu(sheet1).expect("a selected row");
     assert_eq!(menu.zone, GridZone::Rows);
     assert!(
         !menu.plural,
-        "une seule ligne reste singulière même si elle touche 3 colonnes"
+        "a single row stays singular even if it touches 3 columns"
     );
-    assert_eq!(menu.target_label(), "la ligne");
+    assert_eq!(menu.target_label(), "the row");
     assert!(
         menu.offers_delete_shift,
-        "Suppr fait remonter ce qui suit dans toutes les colonnes"
+        "Delete shifts up what follows in all the columns"
     );
 
     state.extend_row_selection(sheet1, 3);
-    let menu = state.grid_menu(sheet1).expect("une plage de lignes");
-    assert!(menu.plural, "plusieurs lignes couvertes");
-    assert_eq!(menu.target_label(), "les lignes");
+    let menu = state.grid_menu(sheet1).expect("a range of rows");
+    assert!(menu.plural, "several rows covered");
+    assert_eq!(menu.target_label(), "the rows");
 }
 
-/// Copier une ligne entière (Ctrl+C sur la gouttière) puis la coller
-/// ailleurs colle chaque colonne à sa place, comme un rectangle de cellules
-/// — c'est la matrice `full_rank_range`/`DataRows` de [`AppState::
-/// copy_selection`]/[`AppState::paste`] qui s'applique, pas la branche
-/// « plage de colonnes entières » (qui n'a pas de sens pour une ligne).
+/// Copying a whole row (Ctrl+C on the gutter) then pasting it
+/// elsewhere pastes each column in its place, like a rectangle of cells
+/// — it is the `full_rank_range`/`DataRows` matrix of [`AppState::
+/// copy_selection`]/[`AppState::paste`] that applies, not the
+/// "range of whole columns" branch (which makes no sense for a row).
 #[test]
 fn copying_a_full_row_and_pasting_elsewhere_pastes_the_whole_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_row(sheet1, 0);
-    let text = state.copy_selection(sheet1).expect("ligne non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty row");
     assert_eq!(text, "0\t10\ta\n");
 
     state.select_row(sheet1, 1);
@@ -5891,135 +5874,135 @@ fn copying_a_full_row_and_pasting_elsewhere_pastes_the_whole_row() {
         text,
     });
 
-    assert_eq!(cell(&state, temps, 1), Cell::Float(0.0));
+    assert_eq!(cell(&state, time_col, 1), Cell::Float(0.0));
     assert!(matches!(cell(&state, signal, 1), Cell::Float(v) if (v - 10.0).abs() < f64::EPSILON));
     assert_eq!(state.cell_text(note, 1), "a");
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         Cell::Float(0.0),
-        "la ligne copiée elle-même n'a pas bougé"
+        "the copied row itself did not move"
     );
     assert_eq!(
-        cell(&state, temps, 2),
+        cell(&state, time_col, 2),
         Cell::Float(1.0),
-        "les lignes qui n'ont pas reçu le collage n'ont pas bougé"
+        "the rows that did not receive the paste did not move"
     );
 }
 
-/// Glisser depuis une cellule de données vers la gouttière repose une
-/// sélection d'une seule ligne à la cible plutôt que d'être ignorée — pendant
-/// de [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`].
+/// Dragging from a data cell to the gutter sets a
+/// single-row selection at the target rather than being ignored — counterpart
+/// of [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`].
 #[test]
 fn dragging_a_row_extension_across_the_data_boundary_reselects_a_single_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.extend_row_selection(sheet1, 3);
 
     assert!(
         state.is_row_selected(sheet1, 3),
-        "la ligne visée devient la nouvelle sélection"
+        "the target row becomes the new selection"
     );
     assert!(
-        !state.is_selected(sheet1, temps, 0),
-        "l'ancienne sélection de cellule n'a plus cours"
+        !state.is_selected(sheet1, time_col, 0),
+        "the old cell selection no longer applies"
     );
 }
 
-/// Glisser depuis la gouttière vers une cellule de données repose une
-/// sélection d'une seule cellule à la cible plutôt que d'étendre
-/// silencieusement la plage de lignes sans effet — pendant de
+/// Dragging from the gutter to a data cell sets a
+/// single-cell selection at the target rather than silently extending
+/// the range of rows to no effect — counterpart of
 /// [`dragging_a_column_extension_across_the_data_boundary_reselects_a_single_column`]
-/// côté colonnes.
+/// on the column side.
 #[test]
 fn dragging_a_cell_extension_across_the_row_gutter_boundary_reselects_a_single_cell() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.select_row(sheet1, 1);
-    state.extend_selection(sheet1, temps, 3);
+    state.extend_selection(sheet1, time_col, 3);
 
     assert_eq!(
         state.selection(sheet1).and_then(Selection::single_cell),
-        Some((temps, 3)),
-        "la cellule visée devient la nouvelle sélection"
+        Some((time_col, 3)),
+        "the target cell becomes the new selection"
     );
     assert!(
         !state.is_row_selected(sheet1, 1),
-        "l'ancienne plage de lignes n'a plus cours"
+        "the old range of rows no longer applies"
     );
 }
 
-/// Glisser depuis la rangée des lettres vers la gouttière repose une
-/// sélection d'une seule ligne, et réciproquement — les deux plages
-/// entières ne se traversent jamais l'une l'autre non plus.
+/// Dragging from the letters row to the gutter sets a
+/// single-row selection, and conversely — the two whole
+/// ranges never cross each other either.
 #[test]
 fn dragging_between_the_letter_row_and_the_row_gutter_never_mixes_the_two_ranges() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.extend_row_selection(sheet1, 2);
     assert!(state.is_row_selected(sheet1, 2));
-    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, time_col));
 
     state.select_row(sheet1, 2);
-    state.extend_column_selection(sheet1, temps);
-    assert!(state.is_column_selected(sheet1, temps));
+    state.extend_column_selection(sheet1, time_col);
+    assert!(state.is_column_selected(sheet1, time_col));
     assert!(!state.is_row_selected(sheet1, 2));
 }
 
-// -- 18. Sélection de champ d'en-tête entier (libellés de la gouttière) --
+// -- 18. Selecting a whole header field (gutter labels) --
 
-/// Un clic sur un libellé de champ dans la gouttière (`select_header_row`)
-/// sélectionne ce champ pour **toutes** les colonnes visibles de la feuille
-/// — miroir de [`clicking_the_row_gutter_selects_the_whole_row`], côté
-/// en-tête.
+/// A click on a field label in the gutter (`select_header_row`)
+/// selects that field for **all** the visible columns of the sheet
+/// — mirror of [`clicking_the_row_gutter_selects_the_whole_row`], on the
+/// header side.
 #[test]
 fn clicking_a_header_row_label_selects_the_field_in_every_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
     set_header_field(&mut state, signal, HeaderField::LongName, "S");
 
     state.select_header_row(sheet1, HeaderField::LongName);
 
     assert!(state.is_header_row_selected(sheet1, HeaderField::LongName));
     assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::LongName));
+    assert!(state.is_header_field_selected(sheet1, time_col, HeaderField::LongName));
     assert!(state.is_header_field_selected(sheet1, signal, HeaderField::LongName));
     assert!(
         state.is_header_field_selected(sheet1, note, HeaderField::LongName),
-        "Note est une colonne visible comme les autres, même sans nom long \
-         défini : un champ entier couvre toutes les colonnes visibles"
+        "Note is a visible column like the others, even without a long name \
+         defined: a whole field covers all the visible columns"
     );
     assert!(
-        !state.is_header_field_selected(sheet1, temps, HeaderField::Unit),
-        "seul Long Name est sélectionné"
+        !state.is_header_field_selected(sheet1, time_col, HeaderField::Unit),
+        "only Long Name is selected"
     );
 }
 
-/// Maj-clic ou glisser sur les libellés (`extend_header_row_selection`)
-/// étend la plage à plusieurs champs — miroir de
+/// Shift-click or drag on the labels (`extend_header_row_selection`)
+/// extends the range to several fields — mirror of
 /// [`extending_a_row_selection_covers_the_whole_range`].
 #[test]
 fn extending_a_header_row_selection_covers_the_whole_field_range() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.select_header_row(sheet1, HeaderField::Unit);
     state.extend_header_row_selection(sheet1, HeaderField::Formula);
@@ -6030,11 +6013,11 @@ fn extending_a_header_row_selection_covers_the_whole_field_range() {
         HeaderField::Formula,
     ] {
         assert!(state.is_header_row_selected(sheet1, field));
-        assert!(state.is_header_field_selected(sheet1, temps, field));
+        assert!(state.is_header_field_selected(sheet1, time_col, field));
     }
     assert!(!state.is_header_row_selected(sheet1, HeaderField::LongName));
 
-    // Le sens du glisser ne compte pas.
+    // The drag direction does not matter.
     state.select_header_row(sheet1, HeaderField::Formula);
     state.extend_header_row_selection(sheet1, HeaderField::Unit);
     for field in [
@@ -6046,203 +6029,201 @@ fn extending_a_header_row_selection_covers_the_whole_field_range() {
     }
 }
 
-/// Retour arrière sur une plage de champ d'en-tête entier vide ce champ dans
-/// **toutes** les colonnes — même mécanisme que
-/// [`delete_on_a_header_field_selection_clears_it_like_backspace`], mais sur
-/// toutes les colonnes d'un même geste plutôt qu'une seule.
+/// Backspace on a range of a whole header field clears that field in
+/// **all** the columns — same mechanism as
+/// [`delete_on_a_header_field_selection_clears_it_like_backspace`], but on
+/// all the columns in a single gesture rather than just one.
 #[test]
 fn clearing_a_header_row_selection_empties_the_field_in_every_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::Unit, "s");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "s");
     set_header_field(&mut state, signal, HeaderField::Unit, "V");
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
 
     state.select_header_row(sheet1, HeaderField::Unit);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
 
-    assert_eq!(state.column_meta(temps).unit, "");
+    assert_eq!(state.column_meta(time_col).unit, "");
     assert_eq!(state.column_meta(signal).unit, "");
     assert_eq!(
-        state.column_meta(temps).long_name,
+        state.column_meta(time_col).long_name,
         "T",
-        "seul le champ Unit était sélectionné"
+        "only the Unit field was selected"
     );
 }
 
-/// Suppr sur une plage de champ d'en-tête entier se contente de vider,
-/// exactement comme sur un champ d'une seule colonne : un champ n'est pas
-/// répété par ligne, il n'y a rien à faire remonter (voir
+/// Delete on a range of a whole header field just clears,
+/// exactly as on a field of a single column: a field is not
+/// repeated per row, there is nothing to shift up (see
 /// [`Selection::delete_at_count`]).
 #[test]
 fn delete_on_a_header_row_selection_only_clears_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::Comment, "c1");
+    set_header_field(&mut state, time_col, HeaderField::Comment, "c1");
     set_header_field(&mut state, signal, HeaderField::Comment, "c2");
 
     state.select_header_row(sheet1, HeaderField::Comment);
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
-    assert_eq!(state.column_meta(temps).comment, "");
+    assert_eq!(state.column_meta(time_col).comment, "");
     assert_eq!(state.column_meta(signal).comment, "");
     assert_eq!(
-        cell(&state, temps, 0),
+        cell(&state, time_col, 0),
         Cell::Float(0.0),
-        "aucune donnée n'a remonté"
+        "no data moved up"
     );
 }
 
-/// [`AppState::grid_menu`] sur une plage de champ d'en-tête entier reste
-/// dans la zone `Header` (même terminologie qu'un rectangle de champs d'une
-/// seule colonne) et n'offre pas « Supprimer et décaler ».
+/// [`AppState::grid_menu`] on a range of a whole header field stays
+/// in the `Header` zone (same terminology as a rectangle of fields of a
+/// single column) and does not offer "Delete and Shift Up".
 #[test]
 fn the_grid_menu_on_a_header_row_selection_stays_in_the_header_zone() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     state.select_header_row(sheet1, HeaderField::LongName);
-    let menu = state
-        .grid_menu(sheet1)
-        .expect("un champ entier sélectionné");
+    let menu = state.grid_menu(sheet1).expect("a whole field selected");
     assert_eq!(menu.zone, GridZone::Header);
     assert!(
         menu.plural,
-        "un champ entier touche plusieurs colonnes sur Sheet1"
+        "a whole field touches several columns on Sheet1"
     );
-    assert_eq!(menu.target_label(), "les champs");
+    assert_eq!(menu.target_label(), "the fields");
     assert!(
         !menu.offers_delete_shift,
-        "un champ n'est pas répété par ligne, Suppr n'a rien à décaler"
+        "a field is not repeated per row, Delete has nothing to shift"
     );
 }
 
-/// Copier une plage de champ d'en-tête entier (Ctrl+C sur un libellé) puis
-/// la coller ailleurs écrit chaque colonne à sa place, comme un rectangle de
-/// champs — c'est la matrice `full_rank_range`/`HeaderFields` de
-/// [`AppState::copy_selection`]/[`AppState::paste`] qui s'applique.
+/// Copying a range of a whole header field (Ctrl+C on a label) then
+/// pasting it elsewhere writes each column in its place, like a rectangle of
+/// fields — it is the `full_rank_range`/`HeaderFields` matrix of
+/// [`AppState::copy_selection`]/[`AppState::paste`] that applies.
 #[test]
 fn copying_a_header_row_and_pasting_elsewhere_pastes_every_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::LongName, "T");
+    set_header_field(&mut state, time_col, HeaderField::LongName, "T");
     set_header_field(&mut state, signal, HeaderField::LongName, "S");
 
     state.select_header_row(sheet1, HeaderField::LongName);
-    let text = state.copy_selection(sheet1).expect("champ non vide");
+    let text = state.copy_selection(sheet1).expect("non-empty field");
     assert_eq!(
         text, "T\tS\t\n",
-        "Sheet1 a une troisième colonne (Note), sans nom long défini"
+        "Sheet1 has a third column (Note), with no long name defined"
     );
 
-    set_header_field(&mut state, temps, HeaderField::Unit, "existant");
+    set_header_field(&mut state, time_col, HeaderField::Unit, "existant");
     state.select_header_row(sheet1, HeaderField::Unit);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
 
-    assert_eq!(state.column_meta(temps).unit, "T");
+    assert_eq!(state.column_meta(time_col).unit, "T");
     assert_eq!(state.column_meta(signal).unit, "S");
     assert_eq!(
-        state.column_meta(temps).long_name,
+        state.column_meta(time_col).long_name,
         "T",
-        "le champ copié lui-même n'a pas bougé"
+        "the copied field itself did not move"
     );
 }
 
-/// Étendre une sélection de cellule de données réinitialise une plage de
-/// champ d'en-tête entier en cours plutôt que d'étendre silencieusement sans
-/// effet — verrou du garde-fou ajouté à [`AppState::extend_selection`].
+/// Extending a data cell selection resets an ongoing range of a
+/// whole header field rather than silently extending to no
+/// effect — lock for the guard added to [`AppState::extend_selection`].
 #[test]
 fn extending_a_data_selection_resets_a_header_rows_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.select_header_row(sheet1, HeaderField::LongName);
-    state.extend_selection(sheet1, temps, 2);
+    state.extend_selection(sheet1, time_col, 2);
 
     assert_eq!(
         state.selection(sheet1).and_then(Selection::single_cell),
-        Some((temps, 2)),
-        "la cellule visée devient la nouvelle sélection"
+        Some((time_col, 2)),
+        "the target cell becomes the new selection"
     );
     assert!(!state.is_header_row_selected(sheet1, HeaderField::LongName));
 }
 
-/// Étendre un champ d'une seule colonne réinitialise une plage de champ
-/// entier en cours plutôt que de rester bloquée sur l'ancienne plage sans la
-/// changer — verrou du garde-fou ajouté à [`AppState::
-/// extend_header_field_selection`]. Sans ce garde-fou, l'appel n'aurait rien
-/// fait du tout : `extend_row_to` ne mute que `SelectionKind::Rows`, jamais
-/// `HeaderRows`, la sélection serait restée figée sur l'ancien champ entier.
+/// Extending a single-column field resets an ongoing range of a
+/// whole field rather than staying stuck on the old range without
+/// changing it — lock for the guard added to [`AppState::
+/// extend_header_field_selection`]. Without this guard, the call would have done
+/// nothing at all: `extend_row_to` only mutates `SelectionKind::Rows`, never
+/// `HeaderRows`, the selection would have stayed frozen on the old whole field.
 #[test]
 fn extending_a_single_column_header_field_resets_a_header_rows_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
     state.select_header_row(sheet1, HeaderField::Unit);
-    state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
+    state.extend_header_field_selection(sheet1, time_col, HeaderField::Comment);
 
     assert_eq!(
         state.selected_header_field(sheet1),
-        Some((temps, HeaderField::Comment)),
-        "la sélection repart d'un seul champ, celui visé"
+        Some((time_col, HeaderField::Comment)),
+        "the selection restarts from a single field, the targeted one"
     );
     assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
 }
 
-/// Glisser entre la rangée des lettres et un libellé de champ entier repose
-/// une sélection simple dans les deux sens — les deux plages « entières » ne
-/// se traversent jamais l'une l'autre, comme la rangée des lettres et la
-/// gouttière des numéros de ligne.
+/// Dragging between the letters row and a whole-field label sets
+/// a simple selection in both directions — the two "whole" ranges never
+/// cross each other, like the letters row and the row number
+/// gutter.
 #[test]
 fn dragging_between_the_letter_row_and_a_header_row_label_never_mixes_the_two_ranges() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
     state.extend_header_row_selection(sheet1, HeaderField::Unit);
     assert!(state.is_header_row_selected(sheet1, HeaderField::Unit));
-    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, time_col));
 
     state.select_header_row(sheet1, HeaderField::Unit);
-    state.extend_column_selection(sheet1, temps);
-    assert!(state.is_column_selected(sheet1, temps));
+    state.extend_column_selection(sheet1, time_col);
+    assert!(state.is_column_selected(sheet1, time_col));
     assert!(!state.is_header_row_selected(sheet1, HeaderField::Unit));
 }
 
-// -- 19. Sélectionner tout le tableau (« # »), et gouttière « touchée » --
+// -- 19. Selecting the whole table ("#"), and "touched" gutter --
 
-/// Un clic sur le « # » (`select_all`) sélectionne tout le tableau : toutes
-/// les lignes, donc toutes les colonnes visibles — `is_all_selected` le
-/// confirme, et le menu contextuel de la grille reste bien dans la zone
-/// données/lignes (pas d'en-tête) puisque le tableau entier en fait partie.
+/// A click on the "#" (`select_all`) selects the whole table: all
+/// the rows, hence all the visible columns — `is_all_selected` confirms
+/// it, and the grid context menu does stay in the data/rows
+/// zone (no header) since the whole table is part of it.
 #[test]
 fn clicking_the_hash_gutter_selects_the_whole_table() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
@@ -6250,26 +6231,26 @@ fn clicking_the_hash_gutter_selects_the_whole_table() {
 
     assert!(state.is_all_selected(sheet1));
     for row in 0..state.row_count(sheet1) {
-        assert!(state.is_selected(sheet1, temps, row));
+        assert!(state.is_selected(sheet1, time_col, row));
         assert!(state.is_selected(sheet1, signal, row));
         assert!(
             state.is_selected(sheet1, note, row),
-            "Note est plus courte, mais une sélection de tout le tableau \
-             couvre toutes les colonnes visibles, pas seulement celles \
-             assez longues"
+            "Note is shorter, but a selection of the whole table \
+             covers all the visible columns, not only the \
+             long enough ones"
         );
     }
 }
 
-/// Une feuille sans ligne se sélectionne quand même en entier (#159) : la
-/// case du coin et Ctrl+A prennent toutes les colonnes visibles, en-tête
-/// compris, ce qui laisse par exemple changer leur type ou leur rôle.
+/// A sheet with no rows can still be selected entirely (#159): the
+/// corner cell and Ctrl+A take all the visible columns, header
+/// included, which allows for example changing their type or role.
 #[test]
 fn select_all_on_a_sheet_without_rows_selects_every_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     state.dispatch(Action::DeleteRows {
         sheet: sheet1,
@@ -6278,81 +6259,81 @@ fn select_all_on_a_sheet_without_rows_selects_every_column() {
     });
     assert_eq!(state.row_count(sheet1), 0);
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time_col, 0);
     state.dispatch(Action::SelectAll { sheet: sheet1 });
 
     assert!(state.is_all_selected(sheet1));
-    assert!(state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, time_col));
     assert!(state.is_column_selected(sheet1, signal));
 }
 
-/// Une sélection partielle n'est pas « tout sélectionné ».
+/// A partial selection is not "all selected".
 #[test]
 fn a_partial_column_selection_is_not_all_selected() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time_col);
 
     assert!(!state.is_all_selected(sheet1));
 }
 
-/// Sélectionner une seule cellule de données « touche » sa colonne et sa
-/// ligne — le repère qui teinte la rangée des lettres et la gouttière des
-/// numéros de ligne d'une intensité intermédiaire, sans les sélectionner
-/// pour autant (`is_column_selected`/`is_row_selected` restent faux : ce
-/// n'est pas la rangée des lettres ni la gouttière qui ont été cliquées).
+/// Selecting a single data cell "touches" its column and
+/// row — the marker that tints the letters row and the row number
+/// gutter with an intermediate intensity, without selecting them
+/// all the same (`is_column_selected`/`is_row_selected` stay false: it is
+/// not the letters row nor the gutter that was clicked).
 #[test]
 fn selecting_a_data_cell_touches_its_column_and_row_but_does_not_select_them() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 2);
+    state.select_cell(sheet1, time_col, 2);
 
-    assert!(state.column_touched_by_selection(sheet1, temps));
+    assert!(state.column_touched_by_selection(sheet1, time_col));
     assert!(state.row_touched_by_selection(sheet1, 2));
     assert!(!state.column_touched_by_selection(sheet1, signal));
     assert!(!state.row_touched_by_selection(sheet1, 0));
-    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, time_col));
     assert!(!state.is_row_selected(sheet1, 2));
 }
 
-/// Une sélection de champ d'en-tête (colonne seule ou champ entier) ne
-/// touche jamais une ligne de données : `row_touched_by_selection` doit
-/// rester faux, la gouttière des numéros de ligne n'a pas à réagir à une
-/// sélection qui ne descend jamais dans les données.
+/// A header field selection (single column or whole field) never
+/// touches a data row: `row_touched_by_selection` must
+/// stay false, the row number gutter must not react to a
+/// selection that never goes down into the data.
 #[test]
 fn a_header_selection_never_touches_a_data_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    state.select_header_field(sheet1, temps, HeaderField::Unit);
+    state.select_header_field(sheet1, time_col, HeaderField::Unit);
     assert!(!state.row_touched_by_selection(sheet1, 0));
 
     state.select_header_row(sheet1, HeaderField::Unit);
     assert!(!state.row_touched_by_selection(sheet1, 0));
     assert!(
-        state.column_touched_by_selection(sheet1, temps),
-        "un champ d'en-tête entier touche bien toutes les colonnes"
+        state.column_touched_by_selection(sheet1, time_col),
+        "a whole header field does touch all the columns"
     );
 }
 
-// -- 20. Tab en dernière colonne d'une ligne de données : ajout de colonne --
+// -- 20. Tab on the last column of a data row: column addition --
 
-/// `Action::AddColumnAndSelect` ajoute une colonne en fin de feuille puis y
-/// sélectionne la ligne demandée — le pendant de
-/// [`committing_the_last_row_of_the_sheet_adds_a_row`] mais pour l'axe des
-/// colonnes (Tab plutôt qu'Entrée).
+/// `Action::AddColumnAndSelect` adds a column at the end of the sheet then
+/// selects the requested row in it — the counterpart of
+/// [`committing_the_last_row_of_the_sheet_adds_a_row`] but for the
+/// column axis (Tab rather than Enter).
 #[test]
 fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let columns_before = state.visible_columns(sheet1).len();
@@ -6364,20 +6345,20 @@ fn add_column_and_select_adds_a_column_and_selects_it_on_the_given_row() {
 
     let columns_after = state.visible_columns(sheet1);
     assert_eq!(columns_after.len(), columns_before + 1);
-    let new_column = columns_after.last().expect("colonne ajoutée").0;
+    let new_column = columns_after.last().expect("added column").0;
     assert!(
         state.is_selected(sheet1, new_column, 2),
-        "la ligne demandée est sélectionnée dans la colonne neuve"
+        "the requested row is selected in the new column"
     );
 }
 
-/// `Action::AddColumnAndSelectHeaderField` — le pendant de
+/// `Action::AddColumnAndSelectHeaderField` — the counterpart of
 /// [`add_column_and_select_adds_a_column_and_selects_it_on_the_given_row`]
-/// côté en-tête : Tab valide sur un champ d'en-tête de la dernière colonne
-/// ajoute une colonne plutôt que d'entrer dans les données.
+/// on the header side: Tab committed on a header field of the last column
+/// adds a column rather than entering the data.
 #[test]
 fn add_column_and_select_header_field_adds_a_column_and_selects_the_field_in_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let columns_before = state.visible_columns(sheet1).len();
@@ -6389,62 +6370,62 @@ fn add_column_and_select_header_field_adds_a_column_and_selects_the_field_in_it(
 
     let columns_after = state.visible_columns(sheet1);
     assert_eq!(columns_after.len(), columns_before + 1);
-    let new_column = columns_after.last().expect("colonne ajoutée").0;
+    let new_column = columns_after.last().expect("added column").0;
     assert_eq!(
         state.selected_header_field(sheet1),
         Some((new_column, HeaderField::Formula)),
-        "le champ demandé est sélectionné dans la colonne neuve"
+        "the requested field is selected in the new column"
     );
 }
 
-// -- 21. Alignement du corps de la grille : nombres à droite, texte à gauche --
+// -- 21. Grid body alignment: numbers right, text left --
 
-/// Une cellule numérique renseignée est numérique — `cell_is_numeric` pilote
-/// `app::grid::cell_widget` pour l'aligner à droite, comme dans tout tableur.
+/// A populated numeric cell is numeric — `cell_is_numeric` drives
+/// `app::grid::cell_widget` to align it to the right, as in any spreadsheet.
 #[test]
 fn a_populated_numeric_cell_is_numeric() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
 
-    assert!(state.cell_is_numeric(temps, 1));
+    assert!(state.cell_is_numeric(time_col, 1));
 }
 
-/// Une cellule numérique manquante (`NaN`) n'est pas numérique au sens de
-/// l'alignement : un vide n'a pas de raison d'être poussé à droite plutôt
-/// qu'à gauche.
+/// A missing numeric cell (`NaN`) is not numeric in the sense of
+/// alignment: a blank has no reason to be pushed right rather than
+/// left.
 #[test]
 fn a_missing_numeric_cell_is_not_numeric() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time_col = column_id(&state, sheet1, "Time");
     state.dispatch(Action::CommitCell {
-        column: temps,
+        column: time_col,
         row: 2,
         text: "   ".to_string(),
     });
 
-    assert!(!state.cell_is_numeric(temps, 2));
+    assert!(!state.cell_is_numeric(time_col, 2));
 }
 
-/// Une cellule texte n'est jamais numérique.
+/// A text cell is never numeric.
 #[test]
 fn a_text_cell_is_not_numeric() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
 
-    assert!(!state.cell_is_numeric(note, 0), "Note, ligne 0 = \"a\"");
+    assert!(!state.cell_is_numeric(note, 0), "Note, row 0 = \"a\"");
 }
 
-/// Sur une colonne `Mixed`, le type se lit par cellule, pas par colonne :
-/// deux lignes voisines de la même colonne peuvent s'aligner différemment.
+/// On a `Mixed` column, the type is read per cell, not per column:
+/// two neighboring rows of the same column can align differently.
 #[test]
 fn cell_is_numeric_reads_per_cell_on_a_mixed_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let note = column_id(&state, sheet1, "Note");
@@ -6458,36 +6439,36 @@ fn cell_is_numeric_reads_per_cell_on_a_mixed_column() {
 
     assert!(
         state.cell_is_numeric(note, 1),
-        "\"3\" saisi dans une colonne Mixed reste une valeur numérique"
+        "\"3\" typed into a Mixed column stays a numeric value"
     );
     assert!(
         !state.cell_is_numeric(note, 0),
-        "la ligne voisine, restée texte (\"a\"), ne l'est pas"
+        "the neighboring row, which stayed text (\"a\"), is not"
     );
 }
 
-// -- 22. Tracer depuis un classeur (menu contextuel de l'en-tête) --
+// -- 22. Plot from a workbook (header context menu) --
 
-/// `Action::PlotColumns` apparie chaque Y sélectionné à la colonne X la plus
-/// proche à sa **gauche** dans la feuille, façon OriginLab — `Temps` est
-/// mise en rôle `X`, `Signal` reste `Y` (rôle par défaut), la série créée
-/// doit donc tracer `Signal` contre `Temps`.
+/// `Action::PlotColumns` pairs each selected Y with the nearest X column to its
+/// **left** in the sheet, OriginLab style: `Time` is given the `X` role,
+/// `Signal` stays `Y` (default role), so the created series must plot
+/// `Signal` against `Time`.
 #[test]
 fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let root = state.tree().root();
     state.dispatch(Action::SetColumnRole {
-        column: temps,
+        column: time,
         role: ColumnRole::X,
     });
 
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
-        columns: vec![temps, signal],
+        columns: vec![time, signal],
         plot_type: PlotType::Line,
     });
 
@@ -6495,42 +6476,38 @@ fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé dans le dossier du classeur");
-    let spec = state.plot_spec(graph).expect("spec du graphe créé");
+        .expect("the graph was created in the workbook folder");
+    let spec = state.plot_spec(graph).expect("spec of the created graph");
     assert!(
         spec.title.is_empty(),
-        "#103 : tracer des colonnes n'ajoute pas de titre"
+        "#103: plotting columns adds no title"
     );
     assert_eq!(spec.panels.len(), 1);
     let series = &spec.panels[0].series;
-    assert_eq!(
-        series.len(),
-        1,
-        "Temps est X, pas une série ; Signal en est une"
-    );
+    assert_eq!(series.len(), 1, "Time is X, not a series; Signal is one");
     assert_eq!(series[0].y, signal);
-    assert_eq!(series[0].x, Some(temps));
+    assert_eq!(series[0].x, Some(time));
     assert_eq!(series[0].plot_type, PlotType::Line);
 }
 
-/// #167 : un Y2 s'apparie au X2 le plus proche à sa gauche et part sur un
-/// **second calque** superposé (axe X en haut, axe Y à droite) ; le Y reste
-/// sur le premier. Ajouter ensuite des colonnes au graphe réutilise ce calque.
+/// #167: a Y2 is paired with the nearest X2 to its left and goes on a
+/// **second layer** overlaid (X axis on top, Y axis on the right); the Y stays
+/// on the first. Adding columns to the graph afterwards reuses this layer.
 #[test]
 fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let mut project = Project::new("X2Y2").expect("projet");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mut project = Project::new("X2Y2").expect("project");
     let root = project.root();
-    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
     let sheet = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("lecture")
-        .expect("feuille");
+        .expect("read")
+        .expect("sheet");
     let mut add = |name: &str| {
         project
             .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
-            .expect("colonne")
+            .expect("column")
     };
     let (x, y, x2, y2) = (add("X"), add("Y"), add("X2"), add("Y2"));
     let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
@@ -6553,9 +6530,9 @@ fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé");
+        .expect("graph created");
     let spec = state.plot_spec(graph).expect("spec");
-    assert_eq!(spec.panels.len(), 2, "un calque de plus pour Y2");
+    assert_eq!(spec.panels.len(), 2, "one more layer for Y2");
     assert_eq!(spec.panels[0].overlay, None);
     assert_eq!(
         (spec.panels[0].series[0].x, spec.panels[0].series[0].y),
@@ -6563,10 +6540,10 @@ fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
     );
     let second = &spec.panels[1];
     assert!(second.overlay.is_some_and(|o| o.x_top && o.y_right));
-    assert_eq!((second.row, second.column), (0, 0), "même case");
+    assert_eq!((second.row, second.column), (0, 0), "same cell");
     assert_eq!((second.series[0].x, second.series[0].y), (Some(x2), y2));
 
-    // Un second dépôt de Y2 reprend le même calque, sans en créer un autre.
+    // A second drop of Y2 reuses the same layer, without creating another.
     state.dispatch(Action::AddSeriesToGraph {
         graph,
         panel: 0,
@@ -6585,24 +6562,24 @@ fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
     );
 }
 
-/// #168 : Y3 et Y4 s'apparient à X3 et X4, chacun sur son calque numéroté ;
-/// un Y3 déposé plus tard retrouve le sien ; un Y3 sans Y2 ne crée pas de
-/// calque 2 vide.
+/// #168: Y3 and Y4 are paired with X3 and X4, each on its own numbered layer;
+/// a Y3 dropped later finds its own; a Y3 without Y2 does not create an empty
+/// layer 2.
 #[test]
 fn plot_columns_sends_y3_and_y4_to_their_own_numbered_layers() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let mut project = Project::new("X3Y4").expect("projet");
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mut project = Project::new("X3Y4").expect("project");
     let root = project.root();
-    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
     let sheet = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("lecture")
-        .expect("feuille");
+        .expect("read")
+        .expect("sheet");
     let mut add = |name: &str| {
         project
             .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
-            .expect("colonne")
+            .expect("column")
     };
     let c: Vec<NodeId> = ["X", "Y", "X3", "Y3", "X4", "Y4"].map(&mut add).to_vec();
     let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
@@ -6625,27 +6602,27 @@ fn plot_columns_sends_y3_and_y4_to_their_own_numbered_layers() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé");
+        .expect("graph created");
     let spec = state.plot_spec(graph).expect("spec");
-    let calques: Vec<(u8, NodeId, Option<NodeId>)> = spec
+    let layers: Vec<(u8, NodeId, Option<NodeId>)> = spec
         .panels
         .iter()
         .skip(1)
         .map(|p| {
             (
-                p.overlay.expect("superposé").layer,
+                p.overlay.expect("overlaid").layer,
                 p.series[0].y,
                 p.series[0].x,
             )
         })
         .collect();
     assert_eq!(
-        calques,
+        layers,
         [(3, c[3], Some(c[2])), (4, c[5], Some(c[4]))],
-        "pas de calque 2 vide, X3/X4 et non X"
+        "no empty layer 2, X3/X4 and not X"
     );
 
-    // Un Y3 redéposé rejoint le calque 3, sans en créer un autre.
+    // A re-dropped Y3 joins layer 3, without creating another.
     state.dispatch(Action::AddSeriesToGraph {
         graph,
         panel: 0,
@@ -6658,11 +6635,11 @@ fn plot_columns_sends_y3_and_y4_to_their_own_numbered_layers() {
     assert_eq!(after.panels[2].series.len(), 1);
 }
 
-/// #168 : « New Layer » refuse un quatrième calque superposé ; un calque à
-/// deux axes prend le premier numéro de rôle libre.
+/// #168: "New Layer" refuses a fourth overlaid layer; a two-axes layer takes
+/// the first free role number.
 #[test]
 fn add_layer_numbers_two_axes_layers_and_stops_at_three_overlays() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -6676,7 +6653,7 @@ fn add_layer_numbers_two_axes_layers_and_stops_at_three_overlays() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé");
+        .expect("graph created");
     for _ in 0..4 {
         state.dispatch(Action::AddLayer {
             graph,
@@ -6686,20 +6663,20 @@ fn add_layer_numbers_two_axes_layers_and_stops_at_three_overlays() {
         });
     }
     let spec = state.plot_spec(graph).expect("spec");
-    let numeros: Vec<u8> = spec
+    let numbers: Vec<u8> = spec
         .panels
         .iter()
         .skip(1)
         .map(|p| p.overlay.unwrap().layer)
         .collect();
-    assert_eq!(numeros, [2, 3, 4], "le quatrième est refusé");
+    assert_eq!(numbers, [2, 3, 4], "the fourth is refused");
 }
 
-/// #167 : `AddLayer` pose un calque superposé sur le calque de base du calque
-/// visé, en un pas d'annulation ; un calque inexistant ne change rien.
+/// #167: `AddLayer` puts an overlaid layer on the base layer of the targeted
+/// layer, in one undo step; a nonexistent layer changes nothing.
 #[test]
 fn add_layer_overlays_the_base_of_the_target_layer() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -6713,7 +6690,7 @@ fn add_layer_overlays_the_base_of_the_target_layer() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé");
+        .expect("graph created");
 
     state.dispatch(Action::AddLayer {
         graph,
@@ -6721,7 +6698,7 @@ fn add_layer_overlays_the_base_of_the_target_layer() {
         x_top: true,
         y_right: false,
     });
-    // Depuis le calque superposé, le nouveau recouvre le même calque de base.
+    // From the overlaid layer, the new one covers the same base layer.
     state.dispatch(Action::AddLayer {
         graph,
         panel: 1,
@@ -6752,11 +6729,11 @@ fn add_layer_overlays_the_base_of_the_target_layer() {
     assert_eq!(state.plot_spec(graph).expect("spec").panels.len(), 2);
 }
 
-/// Sans colonne X à sa gauche (aucune colonne de rôle `X` dans la feuille),
-/// l'abscisse reste implicite — comportement d'Origin sans X désigné.
+/// Without an X column to its left (no column with the `X` role in the sheet),
+/// the abscissa stays implicit: Origin's behavior with no X designated.
 #[test]
 fn plot_columns_without_an_x_to_the_left_uses_an_implicit_abscissa() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -6772,54 +6749,54 @@ fn plot_columns_without_an_x_to_the_left_uses_an_implicit_abscissa() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
-    let spec = state.plot_spec(graph).expect("spec du graphe créé");
+        .expect("the graph was created");
+    let spec = state.plot_spec(graph).expect("spec of the created graph");
     let series = &spec.panels[0].series;
     assert_eq!(series.len(), 1);
     assert_eq!(series[0].y, signal);
-    assert_eq!(series[0].x, None, "aucune colonne X dans la feuille");
+    assert_eq!(series[0].x, None, "no X column in the sheet");
 }
 
-/// Une sélection sans aucune colonne de rôle Y ne crée aucun graphe — pas de
-/// commande envoyée, donc rien à annuler.
+/// A selection with no column of role Y creates no graph: no command
+/// sent, so nothing to undo.
 #[test]
 fn plot_columns_without_any_y_column_is_a_no_op() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let root = state.tree().root();
     state.dispatch(Action::SetColumnRole {
-        column: temps,
+        column: time,
         role: ColumnRole::X,
     });
-    let children_before = state.tree().node(root).expect("racine").children().len();
+    let children_before = state.tree().node(root).expect("root").children().len();
     let undo_label_before = state.undo_label();
 
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
-        columns: vec![temps],
+        columns: vec![time],
         plot_type: PlotType::Line,
     });
 
-    let children_after = state.tree().node(root).expect("racine").children().len();
+    let children_after = state.tree().node(root).expect("root").children().len();
     assert_eq!(
         children_before, children_after,
-        "aucune colonne Y sélectionnée : pas de graphe créé"
+        "no Y column selected: no graph created"
     );
     assert_eq!(
         state.undo_label(),
         undo_label_before,
-        "aucune commande n'a été envoyée : l'entrée d'historique à annuler ne change pas"
+        "no command was sent: the history entry to undo does not change"
     );
     assert!(state.status().is_some_and(|status| status.is_error()));
 }
 
-/// Annuler après `Action::PlotColumns` restaure l'arbre bit pour bit — le
-/// graphe créé disparaît, comme toute autre création.
+/// Undoing after `Action::PlotColumns` restores the tree bit for bit: the
+/// created graph disappears, like any other creation.
 #[test]
 fn undo_after_plot_columns_restores_the_tree_bit_for_bit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -6837,12 +6814,12 @@ fn undo_after_plot_columns_restores_the_tree_bit_for_bit() {
     assert_eq!(**state.tree(), *before);
 }
 
-/// `Action::AddSeriesToGraph` ajoute des séries à un `PlotSpec` existant sans
-/// écraser celles déjà présentes — c'est ce que le glisser-déposer du
-/// chantier 2 exigera, testé ici en pilotant `AppState` directement.
+/// `Action::AddSeriesToGraph` adds series to an existing `PlotSpec` without
+/// overwriting those already present: this is what the drag and drop of
+/// work package 2 will require, tested here by driving `AppState` directly.
 #[test]
 fn add_series_to_graph_appends_without_overwriting_existing_series() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -6858,8 +6835,8 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
-    let before = state.plot_spec(graph).expect("spec initiale");
+        .expect("the graph was created");
+    let before = state.plot_spec(graph).expect("initial spec");
     assert_eq!(before.panels[0].series.len(), 1);
 
     state.dispatch(Action::AddSeriesToGraph {
@@ -6869,25 +6846,25 @@ fn add_series_to_graph_appends_without_overwriting_existing_series() {
         plot_type: Some(PlotType::Scatter),
     });
 
-    let after = state.plot_spec(graph).expect("spec après ajout");
+    let after = state.plot_spec(graph).expect("spec after add");
     assert_eq!(after.panels[0].series.len(), 2);
     assert_eq!(
         after.panels[0].series[0].y, signal,
-        "la série déjà présente n'est pas écrasée"
+        "the series already present is not overwritten"
     );
     assert_eq!(after.panels[0].series[1].y, note);
     assert_eq!(after.panels[0].series[1].plot_type, PlotType::Scatter);
 }
 
-/// #177 : des séries ajoutées **en même temps** forment un groupe ; une série
-/// ajoutée seule n'en a pas. Un nouvel ajout multiple ouvre un autre groupe
-/// sans toucher au premier.
+/// #177: series added **at the same time** form a group; a series
+/// added alone has none. A new multiple add opens another group
+/// without touching the first.
 #[test]
-fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+fn series_added_together_form_a_group_a_single_one_does_not() {
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
     let root = state.tree().root();
@@ -6896,7 +6873,7 @@ fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
             .tree()
             .node(root)
             .and_then(|node| node.children().last().copied())
-            .expect("graphe")
+            .expect("graph")
     };
 
     state.dispatch(Action::PlotColumns {
@@ -6904,15 +6881,15 @@ fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
         columns: vec![signal],
         plot_type: PlotType::Line,
     });
-    let seul = last_graph(&state);
+    let only = last_graph(&state);
     assert_eq!(
-        state.plot_spec(seul).unwrap().panels[0].series[0].group,
+        state.plot_spec(only).unwrap().panels[0].series[0].group,
         None
     );
 
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
-        columns: vec![temps, signal, note],
+        columns: vec![time, signal, note],
         plot_type: PlotType::Line,
     });
     let graph = last_graph(&state);
@@ -6920,15 +6897,15 @@ fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
     assert!(panel.series.len() >= 2);
     assert!(panel.series.iter().all(|s| s.group == Some(1)), "{panel:?}");
 
-    // Une seule colonne ajoutée : pas de groupe ; deux ensemble : un second.
+    // A single column added: no group; two together: a second one.
     state.dispatch(Action::AddSeriesToGraph {
-        graph: seul,
+        graph: only,
         panel: 0,
         columns: vec![note],
         plot_type: None,
     });
-    let seul_apres = state.plot_spec(seul).unwrap();
-    assert!(seul_apres.panels[0]
+    let only_after = state.plot_spec(only).unwrap();
+    assert!(only_after.panels[0]
         .series
         .iter()
         .all(|s| s.group.is_none()));
@@ -6938,30 +6915,30 @@ fn des_series_ajoutees_ensemble_forment_un_groupe_une_seule_non() {
         columns: vec![signal, note],
         plot_type: None,
     });
-    let apres = state.plot_spec(graph).unwrap().panels[0].clone();
+    let after = state.plot_spec(graph).unwrap().panels[0].clone();
     let n = panel.series.len();
-    assert!(apres.series[..n].iter().all(|s| s.group == Some(1)));
-    assert!(apres.series[n..].iter().all(|s| s.group == Some(2)));
-    assert_eq!(apres.series.len(), n + 2);
+    assert!(after.series[..n].iter().all(|s| s.group == Some(1)));
+    assert!(after.series[n..].iter().all(|s| s.group == Some(2)));
+    assert_eq!(after.series.len(), n + 2);
 }
 
-// -- 22 ter. Glisser des lignes vers un graphe (#166) --
+// -- 22 ter. Drag rows to a graph (#166) --
 
-/// Feuille « cinétique » : trois colonnes mesurées à t = 0, 10 et 20 s (x'),
-/// plus une colonne sans x'. Rend (état, feuille, colonnes avec x').
+/// "Kinetics" sheet: three columns measured at t = 0, 10 and 20 s (x'),
+/// plus a column without x'. Returns (state, sheet, columns with x').
 fn kinetics(dir: &Path) -> (Session, AppState, NodeId, Vec<NodeId>) {
-    let mut project = Project::new("Cinétique").expect("projet");
+    let mut project = Project::new("Kinetics").expect("project");
     let root = project.root();
-    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
     let sheet = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("lecture")
-        .expect("feuille");
+        .expect("read")
+        .expect("sheet");
     let mut add = |name: &str, values: &[f64]| {
         project
             .add_column(sheet, None, Some(name), Column::from_f64(values))
-            .expect("colonne")
+            .expect("column")
     };
     let a = add("A", &[1.0, 2.0, 3.0]);
     let b = add("B", &[4.0, 5.0, 6.0]);
@@ -6974,13 +6951,13 @@ fn kinetics(dir: &Path) -> (Session, AppState, NodeId, Vec<NodeId>) {
     (session, state, sheet, vec![a, b, c])
 }
 
-/// Écrit la valeur x' de la colonne nommée `name` de `sheet`.
+/// Writes the x' value of the column named `name` of `sheet`.
 fn set_x_prime(state: &mut AppState, sheet: NodeId, name: &str, text: &str) {
     let column = column_id(state, sheet, name);
     set_header_field(state, column, HeaderField::XPrime, text);
 }
 
-/// Un graphe créé depuis une colonne Y apparié à une colonne X (donc « avec X »).
+/// A graph created from a Y column paired with an X column (hence "with X").
 fn graph_with_x(state: &mut AppState, sheet: NodeId) -> NodeId {
     let root = state.tree().root();
     let x = column_id(state, sheet, "A");
@@ -6998,76 +6975,68 @@ fn graph_with_x(state: &mut AppState, sheet: NodeId) -> NodeId {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé")
+        .expect("graph created")
 }
 
-/// Le geste n'est offert que pour des **lignes entières** ET une feuille qui a
-/// une ligne x' : ni sans sélection, ni pour des colonnes, ni sans x'.
+/// The gesture is only offered for **whole rows** AND a sheet that has
+/// an x' row: not without a selection, nor for columns, nor without x'.
 #[test]
 fn row_drag_payload_needs_full_rows_and_an_x_prime_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, sheet, _) = kinetics(dir.path());
-    assert_eq!(state.row_drag_payload(sheet), None, "aucune sélection");
+    assert_eq!(state.row_drag_payload(sheet), None, "no selection");
 
     state.select_column(sheet, column_id(&state, sheet, "A"));
-    assert_eq!(
-        state.row_drag_payload(sheet),
-        None,
-        "des colonnes, pas des lignes"
-    );
+    assert_eq!(state.row_drag_payload(sheet), None, "columns, not rows");
 
     state.select_row(sheet, 1);
     state.extend_row_selection(sheet, 2);
-    let payload = state.row_drag_payload(sheet).expect("lignes + x'");
+    let payload = state.row_drag_payload(sheet).expect("rows + x'");
     assert_eq!((payload.sheet, payload.rows.clone()), (sheet, vec![1, 2]));
 
-    // Sans aucune valeur x', plus de geste.
+    // Without any x' value, no more gesture.
     for column in ["A", "B", "C"] {
         set_x_prime(&mut state, sheet, column, "");
     }
     state.select_row(sheet, 1);
-    assert_eq!(state.row_drag_payload(sheet), None, "sans x'");
+    assert_eq!(state.row_drag_payload(sheet), None, "without x'");
 
-    // Une sélection de cellules (pas de lignes entières) ne se glisse pas non plus.
+    // A cell selection (not whole rows) cannot be dragged either.
     set_x_prime(&mut state, sheet, "A", "1");
     state.select_cell(sheet, column_id(&state, sheet, "A"), 1);
     assert_eq!(state.row_drag_payload(sheet), None);
 }
 
-/// Graphe sans X déterminé : pas de dialogue, l'axe X principal ; une ligne =
-/// une série, dont les points sont les valeurs de la ligne placées à x'. Un
-/// seul pas d'annulation.
+/// Graph with no determined X: no dialog, the main X axis; a row =
+/// a series, whose points are the row values placed at x'. A single
+/// undo step.
 #[test]
 fn dropping_rows_on_a_graph_without_x_uses_the_main_axis_with_no_dialog() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, sheet, columns) = kinetics(dir.path());
     state.dispatch(Action::AddGraph);
     let root = state.tree().root();
     let graph = *state.tree().node(root).unwrap().children().last().unwrap();
     state.select_row(sheet, 0);
     state.extend_row_selection(sheet, 1);
-    let payload = state.row_drag_payload(sheet).expect("charge");
+    let payload = state.row_drag_payload(sheet).expect("loads");
 
     state.dispatch(drop_rows_action(&payload, graph, 0));
 
-    assert_eq!(state.pending_row_drop(), None, "pas de question sans X");
+    assert_eq!(state.pending_row_drop(), None, "no question without X");
     let spec = state.plot_spec(graph).expect("spec");
-    assert_eq!(
-        spec.panels.len(),
-        1,
-        "axe principal : pas de nouveau calque"
-    );
+    assert_eq!(spec.panels.len(), 1, "main axis: no new layer");
     let series = &spec.panels[0].series;
-    assert_eq!(series.len(), 2, "une série par ligne sélectionnée");
+    assert_eq!(series.len(), 2, "one series per selected row");
     assert_eq!(
         series.iter().map(|s| s.row).collect::<Vec<_>>(),
         [Some(0), Some(1)]
     );
-    assert_eq!(series[0].y, columns[0], "ancrée sur la première colonne x'");
+    assert_eq!(series[0].y, columns[0], "anchored on the first x' column");
 
     let resolved = stokesforge_core::resolve_spec(state.tree(), &spec);
     let first = &resolved.panels[0].series[0];
-    // Ligne 0 : A=1, B=4, C=7 aux instants 0, 10, 20 — la colonne D, sans x', n'en est pas.
+    // Row 0: A=1, B=4, C=7 at times 0, 10, 20 — column D, without x', is not one.
     assert_eq!(first.x.as_ref().unwrap().as_slice(), [0.0, 10.0, 20.0]);
     assert_eq!(first.y.as_ref().unwrap().as_slice(), [1.0, 4.0, 7.0]);
     let second = &resolved.panels[0].series[1];
@@ -7077,37 +7046,37 @@ fn dropping_rows_on_a_graph_without_x_uses_the_main_axis_with_no_dialog() {
     assert!(state.plot_spec(graph).unwrap().panels[0].series.is_empty());
 }
 
-/// Graphe qui a déjà un X : le dépôt ne change rien avant la réponse ; « Créer
-/// un axe » (défaut) ajoute un calque à axe X propre, **dans le même pas
-/// d'annulation** ; « Axe présent » reste dans le calque visé ; « Annuler »
-/// abandonne.
+/// Graph that already has an X: the drop changes nothing before the answer;
+/// "Create Axis" (default) adds a layer with its own X axis, **in the same
+/// undo step**; "Use Present Axis" stays in the targeted layer; "Cancel"
+/// abandons.
 #[test]
 fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, sheet, _) = kinetics(dir.path());
     let graph = graph_with_x(&mut state, sheet);
     let before = state.plot_spec(graph).expect("spec");
     state.select_row(sheet, 2);
-    let payload = state.row_drag_payload(sheet).expect("charge");
+    let payload = state.row_drag_payload(sheet).expect("loads");
 
     state.dispatch(drop_rows_action(&payload, graph, 0));
-    assert_eq!(state.pending_row_drop(), Some((graph, 1)), "question posée");
-    assert_eq!(state.plot_spec(graph).unwrap(), before, "rien n'a changé");
+    assert_eq!(state.pending_row_drop(), Some((graph, 1)), "question asked");
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "nothing changed");
 
-    // Annuler : plus de question, rien de changé.
+    // Cancel: no more question, nothing changed.
     state.dispatch(Action::ConfirmRowDrop(None));
     assert_eq!(state.pending_row_drop(), None);
     assert_eq!(state.plot_spec(graph).unwrap(), before);
 
-    // Nouvel axe : un calque superposé, axe X en haut, un seul Undo.
+    // New axis: an overlaid layer, X axis on top, a single Undo.
     state.dispatch(drop_rows_action(&payload, graph, 0));
     state.dispatch(Action::ConfirmRowDrop(Some(RowAxis::New)));
     assert_eq!(state.pending_row_drop(), None);
     let spec = state.plot_spec(graph).unwrap();
-    assert_eq!(spec.panels.len(), 2, "un calque de plus");
+    assert_eq!(spec.panels.len(), 2, "one more layer");
     assert_eq!(
         spec.panels[0], before.panels[0],
-        "le calque d'origine est intact"
+        "the original layer is intact"
     );
     assert!(spec.panels[1]
         .overlay
@@ -7118,10 +7087,10 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(
         state.plot_spec(graph).unwrap(),
         before,
-        "un seul pas, calque compris"
+        "a single step, layer included"
     );
 
-    // Axe présent : les séries rejoignent le calque visé, sans nouveau calque.
+    // Present axis: the series join the targeted layer, without a new layer.
     state.dispatch(drop_rows_action(&payload, graph, 0));
     state.dispatch(Action::ConfirmRowDrop(Some(RowAxis::Present)));
     let spec = state.plot_spec(graph).unwrap();
@@ -7130,11 +7099,11 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(spec.panels[0].series[1].row, Some(2));
 }
 
-/// Une ligne hors de la feuille est ignorée ; une feuille sans x' refuse avec
-/// un message, sans rien écrire.
+/// A row outside the sheet is ignored; a sheet without x' refuses with
+/// a message, writing nothing.
 #[test]
 fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, sheet, _) = kinetics(dir.path());
     state.dispatch(Action::AddGraph);
     let root = state.tree().root();
@@ -7166,11 +7135,11 @@ fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
     assert!(state.status().expect("message").is_error());
 }
 
-/// Plot d'une sélection de lignes (#166) : un graphe neuf dont chaque ligne est
-/// une série, pas toutes les colonnes traversées ; un seul pas d'annulation.
+/// Plot of a row selection (#166): a fresh graph where each row is
+/// a series, not all the columns crossed; a single undo step.
 #[test]
 fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, sheet, columns) = kinetics(dir.path());
     let root = state.tree().root();
     let before = state.tree().len();
@@ -7185,7 +7154,7 @@ fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe créé");
+        .expect("graph created");
     let spec = state.plot_spec(graph).expect("spec");
     let series = &spec.panels[0].series;
     assert_eq!(
@@ -7197,7 +7166,7 @@ fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
     state.dispatch(Action::Undo);
     assert_eq!(state.tree().len(), before);
 
-    // Sans x', rien n'est créé.
+    // Without x', nothing is created.
     for name in ["A", "B", "C"] {
         set_x_prime(&mut state, sheet, name, "");
     }
@@ -7210,88 +7179,84 @@ fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
     assert!(state.status().expect("message").is_error());
 }
 
-// -- 23. Glisser une sélection de colonnes vers un graphe --
+// -- 23. Drag a column selection to a graph --
 
-/// [`AppState::column_drag_payload`] rend `None` tant que `sheet` n'a pas de
-/// sélection couvrant une colonne — pas de glisser possible sans colonne,
-/// même depuis la zone de prise.
+/// [`AppState::column_drag_payload`] returns `None` as long as `sheet` has no
+/// selection covering a column: no drag possible without a column,
+/// even from the grab zone.
 #[test]
 fn column_drag_payload_is_none_without_a_column_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
 
     assert_eq!(state.column_drag_payload(sheet1), None);
 }
 
-/// Seule une sélection de **colonnes entières** se glisse (#160) : des
-/// cellules ou des lignes, même couvrant des colonnes, n'offrent pas le
-/// geste.
+/// Only a selection of **whole columns** can be dragged (#160): cells
+/// or rows, even covering columns, do not offer the
+/// gesture.
 #[test]
 fn column_drag_payload_needs_whole_columns() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time, 0);
     state.extend_selection(sheet1, signal, 1);
-    assert_eq!(state.column_drag_payload(sheet1), None, "des cellules");
+    assert_eq!(state.column_drag_payload(sheet1), None, "cells");
 
     state.select_row(sheet1, 1);
-    assert_eq!(state.column_drag_payload(sheet1), None, "une ligne");
+    assert_eq!(state.column_drag_payload(sheet1), None, "a row");
 
     state.select_header_row(sheet1, HeaderField::Unit);
-    assert_eq!(
-        state.column_drag_payload(sheet1),
-        None,
-        "un champ d'en-tête"
-    );
+    assert_eq!(state.column_drag_payload(sheet1), None, "a header field");
 }
 
-/// Avec une sélection de colonnes entières, la charge utile porte la feuille
-/// et **toutes** les colonnes sélectionnées dans l'ordre de la feuille —
-/// aussi non contiguës —, que `stokesforge_app::app::grid::grid_contents` glisse depuis
-/// le bord du bloc et que [`drop_payload_action`] relit au dépôt.
+/// With a selection of whole columns, the payload carries the sheet
+/// and **all** the selected columns in sheet order, even
+/// non-contiguous ones, which `stokesforge_app::app::grid::grid_contents` drags from
+/// the block edge and which [`drop_payload_action`] reads back at the drop.
 #[test]
 fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_column(sheet1, signal);
-    state.extend_column_selection(sheet1, temps);
+    state.extend_column_selection(sheet1, time);
     let payload = state
         .column_drag_payload(sheet1)
-        .expect("sélection couvrant Temps et Signal");
+        .expect("selection covering Time and Signal");
     assert_eq!(payload.sheet, sheet1);
-    assert_eq!(payload.columns, vec![temps, signal]);
+    assert_eq!(payload.columns, vec![time, signal]);
 
     state.select_column(sheet1, note);
-    state.toggle_column_selection(sheet1, temps);
+    state.toggle_column_selection(sheet1, time);
     assert_eq!(
         state.column_drag_payload(sheet1).unwrap().columns,
-        vec![temps, note],
-        "non contiguës, dans l'ordre de la feuille"
+        vec![time, note],
+        "non-contiguous, in sheet order"
     );
 
     state.select_all(sheet1);
     assert_eq!(
         state.column_drag_payload(sheet1).unwrap().columns,
-        vec![temps, signal, note],
-        "la case du coin les emporte toutes"
+        vec![time, signal, note],
+        "the corner cell takes them all"
     );
 }
 
-/// [`drop_payload_action`] vise le calque donné et **n'impose pas** de type
-/// de tracé (`None`) : les séries prennent celui du calque (#160).
+/// [`drop_payload_action`] targets the given layer and **does not impose** a
+/// plot type (`None`): the series take that of the layer (#160).
 #[test]
 fn drop_payload_action_targets_the_panel_without_forcing_a_plot_type() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7312,11 +7277,11 @@ fn drop_payload_action_targets_the_panel_without_forcing_a_plot_type() {
     );
 }
 
-/// Trace `Signal` en nuage de points, y dépose `Note` : la nouvelle série
-/// prend le type du calque (nuage), pas `Line`. Un seul pas d'annulation.
+/// Plots `Signal` as a scatter, drops `Note` into it: the new series
+/// takes the type of the layer (scatter), not `Line`. A single undo step.
 #[test]
 fn a_dropped_series_takes_the_plot_type_of_the_target_panel() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7332,29 +7297,27 @@ fn a_dropped_series_takes_the_plot_type_of_the_target_panel() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
     let before = state.plot_spec(graph).unwrap();
 
     state.select_column(sheet1, note);
-    let payload = state
-        .column_drag_payload(sheet1)
-        .expect("Note sélectionnée");
+    let payload = state.column_drag_payload(sheet1).expect("Note selected");
     state.dispatch(drop_payload_action(&payload, graph, 0));
 
-    let spec = state.plot_spec(graph).expect("spec après dépôt");
+    let spec = state.plot_spec(graph).expect("spec after drop");
     assert_eq!(spec.panels[0].series.len(), 2);
     assert_eq!(spec.panels[0].series[1].y, note);
     assert_eq!(spec.panels[0].series[1].plot_type, PlotType::Scatter);
 
     state.dispatch(Action::Undo);
-    assert_eq!(state.plot_spec(graph).unwrap(), before, "un seul pas");
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "a single step");
 }
 
-/// Un calque qui mélange plusieurs types donne celui de sa dernière série ;
-/// un calque vide, `Line` ; un calque inexistant n'ajoute rien.
+/// A layer that mixes several types takes that of its last series;
+/// an empty layer, `Line`; a nonexistent layer adds nothing.
 #[test]
 fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7366,7 +7329,7 @@ fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("graphe vide");
+        .expect("empty graph");
     state.dispatch(Action::AddSeriesToGraph {
         graph,
         panel: 0,
@@ -7376,7 +7339,7 @@ fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
     assert_eq!(
         state.plot_spec(graph).unwrap().panels[0].series[0].plot_type,
         PlotType::Line,
-        "calque vide : Line"
+        "empty layer: Line"
     );
 
     state.dispatch(Action::AddSeriesToGraph {
@@ -7393,7 +7356,7 @@ fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
     });
     let series = &state.plot_spec(graph).unwrap().panels[0].series;
     assert_eq!(series.len(), 3);
-    assert_eq!(series[2].plot_type, PlotType::Bar, "dernière série : Bar");
+    assert_eq!(series[2].plot_type, PlotType::Bar, "last series: Bar");
 
     let before = state.plot_spec(graph).unwrap();
     state.dispatch(Action::AddSeriesToGraph {
@@ -7402,14 +7365,14 @@ fn the_drop_plot_type_is_the_last_series_type_or_line_for_an_empty_panel() {
         columns: vec![signal],
         plot_type: None,
     });
-    assert_eq!(state.plot_spec(graph).unwrap(), before, "calque inconnu");
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "unknown layer");
 }
 
-// -- 24. Propriétés des graphiques --
+// -- 24. Graph properties --
 
-/// [`active_graph`] décide la présence du menu « Graphique » : seul
-/// `ActiveTabKind::Graph` rend `Some`, toutes les autres natures d'onglet
-/// (ou aucun onglet actif) rendent `None`.
+/// [`active_graph`] decides the presence of the "Graph" menu: only
+/// `ActiveTabKind::Graph` returns `Some`, all the other kinds of tab
+/// (or no active tab) return `None`.
 #[test]
 fn active_graph_is_some_only_for_a_graph_tab() {
     let graph = NodeId::from_raw(7);
@@ -7420,7 +7383,7 @@ fn active_graph_is_some_only_for_a_graph_tab() {
     assert_eq!(active_graph(ActiveTabKind::None), None);
 }
 
-/// Trace `Signal` de `Sheet1` dans un nouveau graphe et le rend.
+/// Plots `Signal` of `Sheet1` into a new graph and returns it.
 fn plotted_graph(state: &mut AppState) -> NodeId {
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(state, sheet1, "Signal");
@@ -7434,12 +7397,12 @@ fn plotted_graph(state: &mut AppState) -> NodeId {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé")
+        .expect("the graph was created")
 }
 
-/// Le clic droit sur un composant ouvre l'onglet qui le règle : titre →
-/// « General », zone de tracé → « Plot Area », axe ou titre d'axe →
-/// « Axes » sur cet axe.
+/// A right-click on a component opens the tab that sets it: title ->
+/// "General", plot area -> "Plot Area", axis or axis title ->
+/// "Axes" on that axis.
 #[test]
 fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
     // Compared in English: the test must not depend on `STOKESFORGE_LANG` or on the
@@ -7471,37 +7434,37 @@ fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
     );
 }
 
-/// `Action::OpenPlotSettings` ouvre la fenêtre sur l'onglet et l'axe
-/// demandés et un brouillon du graphe ; sans axe précisé (menu
-/// « Graphique »), l'axe déjà choisi est gardé.
+/// `Action::OpenPlotSettings` opens the window on the requested tab and axis
+/// and a draft of the graph; with no axis given ("Graph" menu), the
+/// axis already chosen is kept.
 #[test]
 fn open_plot_settings_opens_the_requested_tab_and_keeps_the_chosen_axis() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     assert!(state.plot_settings().is_none());
 
     state.dispatch(PlotTarget::Axis(PlotAxis::Left).open_settings(graph));
-    let settings = state.plot_settings().expect("fenêtre ouverte");
+    let settings = state.plot_settings().expect("window open");
     assert_eq!(settings.graph, graph);
     assert_eq!(settings.tab, PlotSettingsTab::Axes);
     assert_eq!(settings.axis, PlotAxis::Left);
-    assert_eq!(state.plot_edit().expect("brouillon").graph, graph);
+    assert_eq!(state.plot_edit().expect("draft").graph, graph);
 
     state.dispatch(Action::OpenPlotSettings {
         graph,
         tab: PlotSettingsTab::Legend,
         axis: None,
     });
-    let settings = state.plot_settings().expect("fenêtre ouverte");
+    let settings = state.plot_settings().expect("window open");
     assert_eq!(settings.tab, PlotSettingsTab::Legend);
-    assert_eq!(settings.axis, PlotAxis::Left, "l'axe choisi est gardé");
+    assert_eq!(settings.axis, PlotAxis::Left, "the chosen axis is kept");
 }
 
-/// Un nœud qui n'est pas un graphe n'ouvre rien.
+/// A node that is not a graph opens nothing.
 #[test]
 fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     state.dispatch(Action::OpenPlotSettings {
@@ -7513,41 +7476,41 @@ fn open_plot_settings_ignores_a_node_that_is_not_a_graph() {
     assert!(state.plot_edit().is_none());
 }
 
-/// Fermer la fenêtre valide une saisie encore en cours (champ qui n'a pas
-/// perdu le focus), puis abandonne le brouillon.
+/// Closing the window validates an input still in progress (field that has not
+/// lost focus), then abandons the draft.
 #[test]
 fn closing_plot_settings_commits_a_pending_edit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     state.dispatch(PlotTarget::Title.open_settings(graph));
-    state.plot_edit_mut().expect("brouillon").spec.title = "Spectre".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Spectrum".to_string();
 
     state.close_plot_settings();
 
     assert!(state.plot_settings().is_none());
     assert!(state.plot_edit().is_none());
-    assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectre");
+    assert_eq!(state.plot_spec(graph).expect("spec").title, "Spectrum");
 }
 
-/// #15 : « Annuler » (aussi la croix et Échap) remet le graphe dans l'état où
-/// il était à l'ouverture de la fenêtre, après un aperçu en direct, et ne
-/// laisse aucune entrée d'historique.
+/// #15: "Cancel" (also the cross and Esc) puts the graph back in the state it
+/// was in when the window opened, after a live preview, and leaves
+/// no history entry.
 #[test]
 fn cancelling_plot_settings_restores_the_graph_and_leaves_no_history() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let original = state.plot_spec(graph).expect("spec");
     let label_before = state.undo_label();
     state.dispatch(PlotTarget::Title.open_settings(graph));
 
-    state.plot_edit_mut().expect("brouillon").spec.title = "Aperçu".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Preview".to_string();
     state.commit_plot_edit();
     assert_eq!(
         state.plot_spec(graph).expect("spec").title,
-        "Aperçu",
-        "aperçu en direct dans le modèle"
+        "Preview",
+        "live preview in the model"
     );
 
     state.cancel_plot_settings();
@@ -7555,27 +7518,27 @@ fn cancelling_plot_settings_restores_the_graph_and_leaves_no_history() {
     assert!(state.plot_settings().is_none());
     assert!(state.plot_edit().is_none());
     assert_eq!(state.plot_spec(graph).expect("spec"), original);
-    assert_eq!(state.undo_label(), label_before, "aucune entrée ajoutée");
+    assert_eq!(state.undo_label(), label_before, "no entry added");
 }
 
-/// #15 : « Valider » garde tout, en **une seule** entrée d'historique — un
-/// Ctrl+Z défait tous les gestes de la fenêtre d'un coup.
+/// #15: "OK" keeps everything, in **a single** history entry: one
+/// Ctrl+Z undoes all the window's gestures at once.
 #[test]
 fn accepting_plot_settings_is_a_single_history_entry() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let original = state.plot_spec(graph).expect("spec");
     state.dispatch(PlotTarget::Title.open_settings(graph));
 
-    state.plot_edit_mut().expect("brouillon").spec.title = "Premier".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "First".to_string();
     state.commit_plot_edit();
-    state.plot_edit_mut().expect("brouillon").spec.background = "#102030".to_string();
+    state.plot_edit_mut().expect("draft").spec.background = "#102030".to_string();
     state.commit_plot_edit();
     state.close_plot_settings();
 
     let kept = state.plot_spec(graph).expect("spec");
-    assert_eq!(kept.title, "Premier");
+    assert_eq!(kept.title, "First");
     assert_eq!(kept.background, "#102030");
 
     state.dispatch(Action::Undo);
@@ -7583,41 +7546,41 @@ fn accepting_plot_settings_is_a_single_history_entry() {
     assert_eq!(
         state.plot_spec(graph).expect("spec"),
         original,
-        "un seul Ctrl+Z défait les deux gestes"
+        "a single Ctrl+Z undoes both gestures"
     );
 }
 
-/// Ouvrir les propriétés d'un autre graphe valide d'abord le brouillon du
-/// premier : rien n'est perdu en passant de l'un à l'autre.
+/// Opening the properties of another graph first validates the draft of the
+/// first: nothing is lost going from one to the other.
 #[test]
 fn switching_plot_settings_to_another_graph_commits_the_first_draft() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let first = plotted_graph(&mut state);
     let second = plotted_graph(&mut state);
     assert_ne!(first, second);
     state.dispatch(PlotTarget::Title.open_settings(first));
-    state.plot_edit_mut().expect("brouillon").spec.title = "Premier".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "First".to_string();
 
     state.dispatch(PlotTarget::Title.open_settings(second));
 
-    assert_eq!(state.plot_spec(first).expect("spec").title, "Premier");
-    assert_eq!(state.plot_edit().expect("brouillon").graph, second);
+    assert_eq!(state.plot_spec(first).expect("spec").title, "First");
+    assert_eq!(state.plot_edit().expect("draft").graph, second);
 }
 
-/// Un brouillon sans saisie en cours suit le modèle : après Annuler, la
-/// fenêtre montre le spec rétabli, pas l'ancien — sinon la validation
-/// suivante réécrirait par-dessus l'annulation.
+/// A draft with no input in progress follows the model: after Cancel, the
+/// window shows the restored spec, not the old one, otherwise the next
+/// validation would rewrite over the undo.
 #[test]
 fn an_idle_plot_draft_follows_undo() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     let original = state.plot_spec(graph).expect("spec").title;
-    // Brouillon ouvert sans la fenêtre (pas de macro d'historique : Annuler
-    // reste possible, contrairement à la fenêtre modale qui le refuse).
+    // Draft opened without the window (no history macro: Cancel
+    // stays possible, unlike the modal window which refuses it).
     state.begin_plot_edit(graph);
-    state.plot_edit_mut().expect("brouillon").spec.title = "Modifié".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Modified".to_string();
     state.commit_plot_edit();
 
     state.dispatch(Action::Undo);
@@ -7625,19 +7588,19 @@ fn an_idle_plot_draft_follows_undo() {
 
     assert_eq!(state.plot_spec(graph).expect("spec").title, original);
     assert_eq!(
-        state.plot_edit().expect("brouillon").spec.title,
+        state.plot_edit().expect("draft").spec.title,
         original,
-        "le brouillon a suivi l'annulation"
+        "the draft followed the undo"
     );
 }
 
-/// `AppState::begin_plot_edit` ouvre un brouillon initialisé sur le spec
-/// courant du graphe, et `AppState::commit_plot_edit` l'envoie au modèle
-/// (`Action::SetPlotSpec`) — un aller-retour complet, comme le ferait le
-/// panneau en éditant le titre du graphe.
+/// `AppState::begin_plot_edit` opens a draft initialized on the current spec
+/// of the graph, and `AppState::commit_plot_edit` sends it to the model
+/// (`Action::SetPlotSpec`): a full round trip, as the panel would do
+/// when editing the graph title.
 #[test]
 fn begin_and_commit_plot_edit_round_trip_through_set_plot_spec() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7651,26 +7614,26 @@ fn begin_and_commit_plot_edit_round_trip_through_set_plot_spec() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
 
     state.begin_plot_edit(graph);
-    let edit = state.plot_edit().expect("brouillon ouvert").clone();
+    let edit = state.plot_edit().expect("draft open").clone();
     assert_eq!(edit.graph, graph);
-    assert_eq!(edit.spec, state.plot_spec(graph).expect("spec initiale"));
+    assert_eq!(edit.spec, state.plot_spec(graph).expect("initial spec"));
 
-    state.plot_edit_mut().expect("brouillon").spec.title = "Ma figure".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "My figure".to_string();
     state.commit_plot_edit();
 
-    let after = state.plot_spec(graph).expect("spec après commit");
-    assert_eq!(after.title, "Ma figure");
+    let after = state.plot_spec(graph).expect("spec after commit");
+    assert_eq!(after.title, "My figure");
 }
 
-/// Valider un brouillon qui n'a **pas** changé n'envoie aucune commande —
-/// sans quoi perdre le focus d'un champ texte non modifié, ou relâcher un
-/// curseur qui n'a pas bougé, empilerait une entrée d'historique inutile.
+/// Validating a draft that has **not** changed sends no command, since
+/// otherwise losing focus on an unmodified text field, or releasing a
+/// cursor that did not move, would stack a useless history entry.
 #[test]
 fn committing_an_unchanged_plot_edit_sends_no_command() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7684,7 +7647,7 @@ fn committing_an_unchanged_plot_edit_sends_no_command() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
 
     state.begin_plot_edit(graph);
     let undo_label_before = state.undo_label();
@@ -7694,16 +7657,16 @@ fn committing_an_unchanged_plot_edit_sends_no_command() {
     assert_eq!(
         state.undo_label(),
         undo_label_before,
-        "brouillon identique au spec courant : rien à valider"
+        "draft identical to the current spec: nothing to validate"
     );
 }
 
-/// Ctrl+Z après une validation du panneau restaure le spec d'avant, comme
-/// n'importe quelle autre commande annulable — le panneau n'a pas de chemin
-/// de mutation à lui, il passe par `Command::SetPlotSpec` comme les autres.
+/// Ctrl+Z after a panel validation restores the previous spec, like
+/// any other undoable command: the panel has no mutation path of its
+/// own, it goes through `Command::SetPlotSpec` like the others.
 #[test]
 fn undo_after_committing_a_plot_edit_restores_the_previous_spec() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7717,28 +7680,25 @@ fn undo_after_committing_a_plot_edit_restores_the_previous_spec() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
-    let before = state.plot_spec(graph).expect("spec initial");
+        .expect("the graph was created");
+    let before = state.plot_spec(graph).expect("initial spec");
 
     state.begin_plot_edit(graph);
-    state.plot_edit_mut().expect("brouillon").spec.title = "Titre modifié".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Modified title".to_string();
     state.commit_plot_edit();
-    assert_ne!(state.plot_spec(graph).expect("spec après commit"), before);
+    assert_ne!(state.plot_spec(graph).expect("spec after commit"), before);
 
     state.dispatch(Action::Undo);
 
-    assert_eq!(
-        state.plot_spec(graph).expect("spec après annulation"),
-        before
-    );
+    assert_eq!(state.plot_spec(graph).expect("spec after undo"), before);
 }
 
-/// Repeindre la même image sur le même graphe ne doit jamais effacer une
-/// saisie en cours : `begin_plot_edit` est un no-op tant que le graphe visé
-/// n'a pas changé, même appelé plusieurs fois de suite.
+/// Repainting the same frame on the same graph must never erase an input
+/// in progress: `begin_plot_edit` is a no-op as long as the targeted graph
+/// has not changed, even called several times in a row.
 #[test]
 fn begin_plot_edit_does_not_clobber_an_in_progress_draft() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7752,32 +7712,28 @@ fn begin_plot_edit_does_not_clobber_an_in_progress_draft() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
 
     state.begin_plot_edit(graph);
-    state.plot_edit_mut().expect("brouillon").spec.title = "En cours de saisie".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Being typed".to_string();
 
-    // Répète l'appel, comme le ferait `plot_settings_window` à chaque image.
+    // Repeats the call, as `plot_settings_window` would on every frame.
     state.begin_plot_edit(graph);
     state.begin_plot_edit(graph);
 
     assert_eq!(
-        state
-            .plot_edit()
-            .expect("brouillon toujours ouvert")
-            .spec
-            .title,
-        "En cours de saisie",
-        "le brouillon en cours de saisie n'a pas été effacé"
+        state.plot_edit().expect("draft still open").spec.title,
+        "Being typed",
+        "the draft being typed was not erased"
     );
 }
 
-/// Changer de graphe réinitialise le brouillon sur le spec de l'autre
-/// graphe — pas de résidu de l'édition précédente affiché sur le mauvais
-/// graphe.
+/// Changing graph resets the draft on the spec of the other graph, with no
+/// residue of the previous edit displayed on the wrong
+/// graph.
 #[test]
 fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7793,7 +7749,7 @@ fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("premier graphe créé");
+        .expect("first graph created");
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
         columns: vec![note],
@@ -7803,30 +7759,30 @@ fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("second graphe créé");
+        .expect("second graph created");
     assert_ne!(first_graph, second_graph);
 
     state.begin_plot_edit(first_graph);
-    state.plot_edit_mut().expect("brouillon").spec.title = "Résidu".to_string();
+    state.plot_edit_mut().expect("draft").spec.title = "Residue".to_string();
 
     state.begin_plot_edit(second_graph);
 
-    let edit = state.plot_edit().expect("brouillon du second graphe");
+    let edit = state.plot_edit().expect("draft of the second graph");
     assert_eq!(edit.graph, second_graph);
     assert_ne!(
-        edit.spec.title, "Résidu",
-        "le brouillon du premier graphe ne doit pas fuiter sur le second"
+        edit.spec.title, "Residue",
+        "the draft of the first graph must not leak onto the second"
     );
 }
 
-/// Une série dont le type de tracé est [`PlotType::Unknown`] (C5, variante
-/// d'une version plus récente de StokesForge que ce lecteur ne connaît pas) doit
-/// pouvoir être ouverte dans le brouillon d'édition et affichée dans la
-/// liste des séries sans jamais paniquer — invariant 10 (« un défaut de
-/// donnée dégrade, il ne plante pas »), qui vaut aussi pour ce panneau.
+/// A series whose plot type is [`PlotType::Unknown`] (C5, variant
+/// of a more recent StokesForge version than this reader knows) must be
+/// openable in the edit draft and shown in the
+/// series list without ever panicking: invariant 10 ("a data defect
+/// degrades, it does not crash"), which also holds for this panel.
 #[test]
 fn a_series_with_an_unknown_plot_type_can_be_opened_without_panicking() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7840,12 +7796,12 @@ fn a_series_with_an_unknown_plot_type_can_be_opened_without_panicking() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
 
     state.begin_plot_edit(graph);
     {
-        let edit = state.plot_edit_mut().expect("brouillon");
-        edit.spec.panels.get_mut(0).expect("panneau").series[0].plot_type =
+        let edit = state.plot_edit_mut().expect("draft");
+        edit.spec.panels.get_mut(0).expect("panel").series[0].plot_type =
             PlotType::Unknown(RawVariant {
                 name: "FutureType".to_string(),
                 payload: vec![1, 2, 3],
@@ -7853,20 +7809,20 @@ fn a_series_with_an_unknown_plot_type_can_be_opened_without_panicking() {
     }
     state.commit_plot_edit();
 
-    let spec = state.plot_spec(graph).expect("spec après commit");
+    let spec = state.plot_spec(graph).expect("spec after commit");
     assert!(matches!(
         spec.panels[0].series[0].plot_type,
         PlotType::Unknown(_)
     ));
 }
 
-/// L'échelle d'un axe se modifie bien à travers le brouillon : ce test tient
-/// lieu de garde-fou pour tout champ d'`AxisSpec` édité par le panneau — si
-/// un futur renommage de champ casse le binding direct des widgets, un test
-/// qui ne passe plus par `PlotEdit` du tout ne le verrait pas.
+/// The scale of an axis is edited properly through the draft: this test serves
+/// as a guard for any `AxisSpec` field edited by the panel: if
+/// a future field rename breaks the direct binding of the widgets, a test
+/// that no longer goes through `PlotEdit` at all would not see it.
 #[test]
 fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let signal = column_id(&state, sheet1, "Signal");
@@ -7880,12 +7836,12 @@ fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
         .tree()
         .node(root)
         .and_then(|node| node.children().last().copied())
-        .expect("le graphe a été créé");
+        .expect("the graph was created");
 
     state.begin_plot_edit(graph);
     {
-        let edit: &mut PlotEdit = state.plot_edit_mut().expect("brouillon");
-        let panel = edit.spec.panels.get_mut(0).expect("panneau");
+        let edit: &mut PlotEdit = state.plot_edit_mut().expect("draft");
+        let panel = edit.spec.panels.get_mut(0).expect("panel");
         panel.left.scale = AxisScale::Log;
         panel.left.auto_range = false;
         panel.left.range_min = Some(0.1);
@@ -7893,22 +7849,22 @@ fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
     }
     state.commit_plot_edit();
 
-    let spec = state.plot_spec(graph).expect("spec après commit");
+    let spec = state.plot_spec(graph).expect("spec after commit");
     assert_eq!(spec.panels[0].left.scale, AxisScale::Log);
     assert!(spec.panels[0].left.has_explicit_range());
     assert_eq!(spec.panels[0].left.range_min, Some(0.1));
     assert_eq!(spec.panels[0].left.range_max, Some(100.0));
 }
 
-// -- 25. Couleurs enregistrées --
+// -- 25. Saved colors --
 
-/// Enregistrer une couleur « dans le projet » passe par une commande
-/// annulable : elle apparaît dans l'arbre, Annuler la retire.
+/// Saving a color "in the project" goes through an undoable
+/// command: it appears in the tree, Cancel removes it.
 #[test]
 fn saving_a_color_in_the_project_is_undoable() {
     use stokesforge_app_state::state::SaveTarget;
     use stokesforge_plot::ColorUsage;
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.use_user_colors_file(dir.path().join("couleurs.json"));
 
@@ -7928,24 +7884,24 @@ fn saving_a_color_in_the_project_is_undoable() {
             .saved_colors(SaveTarget::Project)
             .get(ColorUsage::Text)
             .is_empty(),
-        "rangée par usage"
+        "filed by use"
     );
     assert!(
         state.saved_colors(SaveTarget::User).is_empty(),
-        "pas chez l'utilisateur"
+        "not with the user"
     );
 
     state.dispatch(Action::Undo);
     assert!(state.saved_colors(SaveTarget::Project).is_empty());
 }
 
-/// Enregistrer une couleur « utilisateur » l'écrit dans le fichier de
-/// l'utilisateur, hors projet et hors historique ; la retirer aussi.
+/// Saving a "user" color writes it to the user's file,
+/// outside the project and outside the history; removing it too.
 #[test]
 fn saving_a_color_for_the_user_writes_the_user_file() {
     use stokesforge_app_state::state::SaveTarget;
     use stokesforge_plot::ColorUsage;
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let path = dir.path().join("config").join("couleurs.json");
     state.use_user_colors_file(path.clone());
@@ -7962,8 +7918,8 @@ fn saving_a_color_for_the_user_writes_the_user_file() {
         ["#ffffff00"]
     );
     assert!(state.saved_colors(SaveTarget::Project).is_empty());
-    assert!(!state.can_undo(), "hors historique");
-    let written = std::fs::read_to_string(&path).expect("fichier écrit");
+    assert!(!state.can_undo(), "outside the history");
+    let written = std::fs::read_to_string(&path).expect("file written");
     assert!(written.contains("#ffffff00"));
 
     state.dispatch(Action::RemoveSavedColor {
@@ -7974,26 +7930,26 @@ fn saving_a_color_for_the_user_writes_the_user_file() {
     assert!(state.saved_colors(SaveTarget::User).is_empty());
 }
 
-/// #178 : un nuancier se range dans le projet (annulable) ou chez l'utilisateur
-/// (fichier, hors historique), se remplace par son nom et se supprime.
+/// #178: a color gradient is stored in the project (undoable) or with the user
+/// (file, outside the history), replaced by its name and deleted.
 #[test]
-fn les_nuanciers_s_enregistrent_dans_le_projet_ou_chez_l_utilisateur_et_se_suppriment() {
+fn gradients_are_saved_in_the_project_or_with_the_user_and_deleted() {
     use stokesforge_app_state::state::SaveTarget;
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let path = dir.path().join("config").join("couleurs.json");
     state.use_user_colors_file(path.clone());
     let stops = vec!["#112233".to_string(), "#aabbcc".to_string()];
 
     state.dispatch(Action::SaveGradient {
-        name: "Mon nuancier".to_string(),
+        name: "My gradient".to_string(),
         stops: stops.clone(),
         target: SaveTarget::Project,
     });
-    let projet = state.saved_colors(SaveTarget::Project).gradients;
-    assert_eq!(projet.len(), 1);
-    assert_eq!(projet[0].name, "Mon nuancier");
-    assert_eq!(projet[0].stops, stops);
+    let project = state.saved_colors(SaveTarget::Project).gradients;
+    assert_eq!(project.len(), 1);
+    assert_eq!(project[0].name, "My gradient");
+    assert_eq!(project[0].stops, stops);
     assert!(state.saved_colors(SaveTarget::User).gradients.is_empty());
     state.dispatch(Action::Undo);
     assert!(state.saved_colors(SaveTarget::Project).gradients.is_empty());
@@ -8004,11 +7960,11 @@ fn les_nuanciers_s_enregistrent_dans_le_projet_ou_chez_l_utilisateur_et_se_suppr
         target: SaveTarget::User,
     });
     assert_eq!(state.saved_colors(SaveTarget::User).gradients.len(), 1);
-    assert!(!state.can_undo(), "hors historique");
+    assert!(!state.can_undo(), "outside the history");
     assert!(std::fs::read_to_string(&path)
-        .expect("fichier écrit")
+        .expect("file written")
         .contains("Perso"));
-    // Un nuancier du même nom (casse indifférente) est remplacé, pas doublé.
+    // A gradient with the same name (case-insensitive) is replaced, not duplicated.
     state.dispatch(Action::SaveGradient {
         name: "perso".to_string(),
         stops: vec!["#000000".to_string(), "#ffffff".to_string()],
@@ -8023,11 +7979,11 @@ fn les_nuanciers_s_enregistrent_dans_le_projet_ou_chez_l_utilisateur_et_se_suppr
     assert!(state.saved_colors(SaveTarget::User).gradients.is_empty());
 }
 
-/// Un graphe créé depuis le classeur n'a pas de fond : « aucune couleur »
-/// (transparent) est le fond par défaut.
+/// A graph created from the workbook has no background: "no color"
+/// (transparent) is the default background.
 #[test]
 fn a_new_graph_has_no_background_color() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let graph = plotted_graph(&mut state);
     assert_eq!(
@@ -8036,10 +7992,10 @@ fn a_new_graph_has_no_background_color() {
     );
 }
 
-// -- Glisser-déposer de fichiers (issue #8) --
+// -- File drag and drop (issue #8) --
 
-/// Un dépôt OS peut arriver depuis un viewport détaché malgré le dialogue
-/// modal de la racine : il ne doit pas entrer dans la macro du graphe.
+/// An OS drop can arrive from a detached viewport despite the root's modal
+/// dialog: it must not enter the graph's macro.
 #[test]
 fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
     let _recipes = isolate_recipe_store();
@@ -8052,7 +8008,7 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
         axis: None,
     });
     let before = session.handle().snapshot().unwrap();
-    assert!(before.history.in_macro, "le dialogue ouvre sa macro");
+    assert!(before.history.in_macro, "the dialog opens its macro");
     let file = dir.path().join("mesure.csv");
     std::fs::write(&file, "1,10\n2,20\n").unwrap();
     state.dispatch(Action::DropFiles {
@@ -8062,8 +8018,8 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
     let after = session.handle().snapshot().unwrap();
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.revision, before.revision);
-    assert!(after.history.in_macro, "le dialogue conserve sa macro");
-    // S-M7 (#228) : le refus s'écrit dans le pied du dialogue ouvert.
+    assert!(after.history.in_macro, "the dialog keeps its macro");
+    // S-M7 (#228): the refusal is written in the footer of the open dialog.
     assert!(state.dialog_error().is_some());
     assert!(!state.can_reopen_last_import());
     state.cancel_plot_settings();
@@ -8074,26 +8030,26 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
     wait_import(&mut state);
     assert!(
         !state.status().unwrap().is_error(),
-        "le dépôt passe après fermeture du dialogue"
+        "the drop goes through after the dialog closes"
     );
     assert!(state.can_reopen_last_import());
 }
 
-/// Le dernier modèle réellement utilisé prime sur l'ordre du catalogue.
-/// Un dépôt crée toujours de nouvelles feuilles, même après un remplacement.
+/// The last model really used takes precedence over the catalog order.
+/// A drop always creates new sheets, even after a replacement.
 #[test]
 fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let mut recipe = stokesforge_import::ImportRecipe::new("Dernier modèle utilisé");
+    let mut recipe = stokesforge_import::ImportRecipe::new("Last template used");
     recipe.separator = stokesforge_import::Separator::Semicolon;
     recipe.has_column_header_row = true;
     recipe.import_mode = stokesforge_import::ImportMode::ReplaceSheet;
     recipe.files_layout = stokesforge_import::FilesLayout::SideBySide;
     let initial = dir.path().join("initial.csv");
-    std::fs::write(&initial, "Temps;Signal\n1;10\n").unwrap();
+    std::fs::write(&initial, "Time;Signal\n1;10\n").unwrap();
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
         recipe,
@@ -8102,11 +8058,11 @@ fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
     assert!(!state.status().unwrap().is_error());
     let before = state.snapshot().tree.clone();
     let sheets_before = state.worksheets_of(book).len();
-    let files: Vec<_> = ["depot1.csv", "depot2.csv"]
+    let files: Vec<_> = ["drop1.csv", "drop2.csv"]
         .into_iter()
         .map(|name| {
             let path = dir.path().join(name);
-            std::fs::write(&path, "Temps;Signal\n2;20\n3;30\n").unwrap();
+            std::fs::write(&path, "Time;Signal\n2;20\n3;30\n").unwrap();
             path
         })
         .collect();
@@ -8116,26 +8072,22 @@ fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
     });
     wait_import(&mut state);
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
-    let sheet = sheet_named(state.tree(), "depot1");
+    let sheet = sheet_named(state.tree(), "drop1");
     let columns = state.visible_columns(sheet);
-    assert_eq!(state.column_meta(columns[0].0).long_name, "Temps");
+    assert_eq!(state.column_meta(columns[0].0).long_name, "Time");
     assert_eq!(cell_f64(&state, columns[0].0, 0), 2.);
-    assert!(state
-        .status()
-        .unwrap()
-        .text
-        .contains("Dernier modèle utilisé"));
+    assert!(state.status().unwrap().text.contains("Last template used"));
     state.dispatch(Action::Undo);
     assert_eq!(*state.snapshot().tree, *before);
 }
 
-/// Sans dernier import ni modèle reconnu, on utilise la recette permissive,
-/// jamais le premier modèle du catalogue qui pourrait avaler les données.
+/// With no last import or recognized template, the permissive recipe is used,
+/// never the first template of the catalog, which could swallow the data.
 #[test]
 fn dropping_an_unknown_file_without_history_uses_the_default_recipe() {
     let _recipes = isolate_recipe_store();
     let mut store = stokesforge_import::RecipeStore::default();
-    let mut unsuitable = stokesforge_import::ImportRecipe::new("Mauvais modèle");
+    let mut unsuitable = stokesforge_import::ImportRecipe::new("Bad template");
     unsuitable.header = stokesforge_import::HeaderSkip::Lines(1);
     store.upsert(unsuitable);
     store.save().unwrap();
@@ -8151,15 +8103,15 @@ fn dropping_an_unknown_file_without_history_uses_the_default_recipe() {
     wait_import(&mut state);
     let sheet = sheet_named(state.tree(), "inconnu");
     let x = state.visible_columns(sheet)[0].0;
-    assert_eq!(cell_f64(&state, x, 0), 1., "première ligne conservée");
+    assert_eq!(cell_f64(&state, x, 0), 1., "first line kept");
     assert_eq!(cell_f64(&state, x, 1), 2.);
 }
 
-/// Le lieu du dépôt fixe la destination ; l'extension `.stf` fait d'un fichier
-/// un projet à ouvrir, pas une donnée à importer.
+/// The place of the drop sets the destination; the `.stf` extension makes a file
+/// a project to open, not data to import.
 #[test]
 fn file_drop_plan_picks_destination_from_the_drop_target_and_splits_projects() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let paths = vec![
@@ -8180,12 +8132,12 @@ fn file_drop_plan_picks_destination_from_the_drop_target_and_splits_projects() {
     assert_eq!(elsewhere.destination, ImportDestination::NewBookForAll);
 }
 
-/// Dépôt sur un classeur : une feuille par fichier, une seule entrée
-/// d'historique, et le message nomme le modèle utilisé.
+/// Drop on a workbook: one sheet per file, a single history entry,
+/// and the message names the template used.
 #[test]
 fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
@@ -8201,8 +8153,8 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
-    assert!(state.import_state().is_none(), "aucune fenêtre d'import");
-    let status = state.status().expect("message de statut");
+    assert!(state.import_state().is_none(), "no import window");
+    let status = state.status().expect("status message");
     assert!(!status.is_error());
     assert_eq!(
         status.text,
@@ -8212,14 +8164,14 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     );
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
-    assert!(!state.can_undo(), "un seul Ctrl+Z pour tout le dépôt");
+    assert!(!state.can_undo(), "a single Ctrl+Z for the whole drop");
 }
 
-/// Dépôt hors classeur : un nouveau classeur partagé par le lot.
+/// Drop outside a workbook: a new workbook shared by the batch.
 #[test]
 fn dropping_files_elsewhere_creates_a_new_book() {
     let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     let books_before = state.tree().node(root).unwrap().children().len();
@@ -8238,33 +8190,33 @@ fn dropping_files_elsewhere_creates_a_new_book() {
     );
 }
 
-/// Un `.stf` n'est jamais importé : il est mis en file pour ouverture dans
-/// une nouvelle fenêtre, sans toucher au projet courant.
+/// A `.stf` is never imported: it is queued to be opened in
+/// a new window, without touching the current project.
 #[test]
 fn dropping_a_project_file_queues_it_instead_of_importing() {
     let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let revision = state.revision();
     let project = dir.path().join("autre.stf");
-    std::fs::write(&project, b"pas lu ici").unwrap();
+    std::fs::write(&project, b"not read here").unwrap();
 
     state.dispatch(Action::DropFiles {
         paths: vec![project.clone()],
         target_book: None,
     });
 
-    assert_eq!(state.revision(), revision, "le projet courant est intact");
+    assert_eq!(state.revision(), revision, "the current project is intact");
     assert_eq!(state.take_projects_to_open(), vec![project]);
-    assert!(state.take_projects_to_open().is_empty(), "file vidée");
+    assert!(state.take_projects_to_open().is_empty(), "queue emptied");
 }
 
-/// Un fichier que la recette lit mal n'est pas importé : la fenêtre d'import
-/// s'ouvre, pré-remplie ; un fichier correct du même lot est importé.
+/// A file that the recipe reads badly is not imported: the import window
+/// opens, prefilled; a correct file of the same batch is imported.
 #[test]
 fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
     let _recipes = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheets_before = state.worksheets_of(book).len();
@@ -8280,18 +8232,18 @@ fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
     wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
-    let import = state.import_state().expect("fenêtre d'import ouverte");
+    let import = state.import_state().expect("import window open");
     assert_eq!(import.paths, vec![bad]);
     assert_eq!(import.destination, ImportDestination::ActiveBook(book));
 }
 
-// -- Création d'un classeur ou d'une feuille : colonnes X et Y d'office --
+// -- Creating a workbook or a sheet: X and Y columns by default --
 
-/// Un nouveau classeur naît avec une colonne X et une colonne Y, et un seul
-/// Ctrl+Z retire le tout.
+/// A new workbook is born with an X column and a Y column, and a single
+/// Ctrl+Z removes everything.
 #[test]
 fn a_new_book_starts_with_an_x_and_a_y_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let root = state.tree().root();
     let before = state.tree().node(root).unwrap().children().len();
@@ -8313,10 +8265,10 @@ fn a_new_book_starts_with_an_x_and_a_y_column() {
     assert_eq!(state.tree().node(root).unwrap().children().len(), before);
 }
 
-/// Une feuille ajoutée à un classeur reçoit elle aussi X et Y.
+/// A sheet added to a workbook also gets X and Y.
 #[test]
 fn a_new_sheet_starts_with_an_x_and_a_y_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let before = state.worksheets_of(book).len();
@@ -8334,14 +8286,14 @@ fn a_new_sheet_starts_with_an_x_and_a_y_column() {
     assert_eq!(state.worksheets_of(book).len(), before);
 }
 
-// -- Métadonnées de fichier par colonne (issue #5) --
+// -- File metadata per column (issue #5) --
 
-/// L'import garde l'en-tête du fichier, clé / valeur, sur chaque colonne ; la
-/// fenêtre de consultation s'ouvre et se ferme sans toucher à l'historique ;
-/// un seul Ctrl+Z retire l'import et ses métadonnées.
+/// The import keeps the file header, key / value, on each column; the
+/// viewing window opens and closes without touching the history;
+/// a single Ctrl+Z removes the import and its metadata.
 #[test]
 fn import_keeps_file_metadata_on_every_column() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let file = dir.path().join("jasco.csv");
@@ -8370,10 +8322,7 @@ fn import_keeps_file_metadata_on_every_column() {
             keys,
             vec!["TITLE", "[Measurement Information]", "XUNITS", ""]
         );
-        assert_eq!(
-            lines[3].value, "XYDATA",
-            "ligne sans clé gardée telle quelle"
-        );
+        assert_eq!(lines[3].value, "XYDATA", "line without a key kept as is");
         assert_eq!(lines[2].value, "NANOMETERS");
         assert!(lines[1].is_section());
     }
@@ -8392,7 +8341,7 @@ fn import_keeps_file_metadata_on_every_column() {
     assert_eq!(
         state.revision(),
         revision,
-        "consulter ne change pas le modèle"
+        "viewing does not change the model"
     );
 
     state.dispatch(Action::Undo);
@@ -8402,10 +8351,10 @@ fn import_keeps_file_metadata_on_every_column() {
         .all(|(id, _)| state.tree().node(*id).unwrap().name() != "jasco"));
 }
 
-/// Une colonne saisie à la main n'a pas de métadonnées : case vide.
+/// A column typed by hand has no metadata: empty cell.
 #[test]
 fn a_hand_made_column_has_no_file_metadata() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::AddWorkbook);
     let root = state.tree().root();
@@ -8416,12 +8365,12 @@ fn a_hand_made_column_has_no_file_metadata() {
     assert_eq!(state.file_metadata_summary(column), "");
 }
 
-// -- Assistant d'import en étapes (issue #6) --
+// -- Step-by-step import wizard (issue #6) --
 
-/// Enregistrer le modèle fixe la référence du témoin « modifié », y compris
-/// après un changement de nom. Une nouvelle retouche le rallume.
+/// Saving the template sets the reference of the "modified" witness, even
+/// after a rename. A new edit lights it up again.
 #[test]
-fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
+fn saving_an_import_template_updates_the_modified_witness() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
@@ -8429,7 +8378,7 @@ fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
     {
         let import = state.import_state_mut().unwrap();
         import.recipe.skip_chars = 2;
-        import.save_as_name = "Mon appareil".into();
+        import.save_as_name = "My instrument".into();
     }
     assert!(state.import_recipe_modified());
 
@@ -8438,7 +8387,7 @@ fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
     assert!(!state.status().unwrap().is_error());
     assert!(
         !state.import_recipe_modified(),
-        "le modèle vient d'être enregistré"
+        "the template was just saved"
     );
     let saved = state.import_state().unwrap().recipe.clone();
     assert!(RecipeStore::load().recipes().contains(&saved));
@@ -8448,13 +8397,13 @@ fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
     assert!(
         !state.import_recipe_modified(),
-        "retour au modèle enregistré"
+        "back to the saved template"
     );
 }
 
-/// Un échec d'écriture ne doit pas faire croire que les réglages sont sauvés.
+/// A write failure must not make one believe the settings are saved.
 #[test]
-fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
+fn a_save_failure_keeps_the_import_template_modified() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
@@ -8471,27 +8420,24 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
     std::fs::create_dir(&file).unwrap();
     state.save_import_recipe();
 
-    assert!(
-        state.dialog_error().is_some(),
-        "S-M7 : dans le pied de l'assistant"
-    );
+    assert!(state.dialog_error().is_some(), "S-M7: in the wizard footer");
     assert!(state.import_recipe_modified());
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
     assert!(
         !state.import_recipe_modified(),
-        "la référence reste le dernier succès"
+        "the reference stays the last success"
     );
 }
 
-/// #267 : un modèle importé dont l'enregistrement échoue reste « modifié ».
+/// #267: an imported template whose saving fails stays "modified".
 #[test]
-fn un_echec_d_enregistrement_d_un_modele_importe_le_garde_modifie() {
+fn a_save_failure_of_an_imported_template_keeps_it_modified() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
     let mut recipe = state.import_state_mut().unwrap().recipe.clone();
-    recipe.name = "importé".to_string();
+    recipe.name = "imported".to_string();
     recipe.skip_chars = 7;
     let json = dir.path().join("modele.json");
     std::fs::write(&json, recipe.to_json()).unwrap();
@@ -8506,7 +8452,7 @@ fn un_echec_d_enregistrement_d_un_modele_importe_le_garde_modifie() {
     assert!(state.dialog_error().is_some());
     assert!(
         state.import_recipe_modified(),
-        "non écrit sur disque : la référence reste l'ancienne"
+        "not written to disk: the reference stays the old one"
     );
 }
 
@@ -8520,7 +8466,7 @@ fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
     file
 }
 
-/// Les étapes s'enchaînent dans l'ordre, bornées aux deux bouts.
+/// The steps follow one another in order, bounded at both ends.
 #[test]
 fn import_wizard_steps_go_forward_and_back_within_bounds() {
     use stokesforge_app_state::state::ImportStep;
@@ -8539,8 +8485,8 @@ fn import_wizard_steps_go_forward_and_back_within_bounds() {
     assert_eq!(state.import_state().unwrap().step, ImportStep::Metadata);
 }
 
-/// Le fichier n'est lu qu'une fois : après sa suppression du disque, l'aperçu
-/// reste servi par le cache (plus de relecture à chaque image).
+/// The file is read only once: after its deletion from disk, the preview
+/// is still served from the cache (no re-read on every frame).
 #[test]
 fn import_preview_reads_the_file_only_once() {
     let _recipes = isolate_recipe_store();
@@ -8553,13 +8499,13 @@ fn import_preview_reads_the_file_only_once() {
     std::fs::remove_file(&file).unwrap();
     assert!(
         matches!(state.import_line_preview(), Some(Ok(_))),
-        "l'aperçu vient du cache, pas du disque"
+        "the preview comes from the cache, not from the disk"
     );
     assert_eq!(state.import_encoding(), Some("UTF-8"));
 }
 
-/// Plusieurs fichiers : on en retire un, on choisit celui qu'on prévisualise,
-/// et chacun porte son propre état (lignes lues ou erreur) avant l'import.
+/// Several files: one is removed, the one to preview is chosen,
+/// and each carries its own state (lines read or error) before the import.
 #[test]
 fn import_wizard_lists_files_with_their_status_and_previews_the_chosen_one() {
     let _recipes = isolate_recipe_store();
@@ -8574,7 +8520,7 @@ fn import_wizard_lists_files_with_their_status_and_previews_the_chosen_one() {
     assert!(statuses[0].1.is_ok());
     assert!(
         statuses[1].1.is_err(),
-        "l'erreur est connue avant d'importer"
+        "the error is known before importing"
     );
 
     state.set_import_preview_index(1);
@@ -8584,8 +8530,8 @@ fn import_wizard_lists_files_with_their_status_and_previews_the_chosen_one() {
     assert!(matches!(state.import_line_preview(), Some(Ok(_))));
 }
 
-/// Les deux réglages d'en-tête sont ramenés à un seul à l'ouverture d'un
-/// modèle ; la suppression d'un modèle demande une confirmation.
+/// The two header settings are brought down to one when a template is
+/// opened; deleting a template asks for a confirmation.
 #[test]
 fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
     let _recipes = isolate_recipe_store();
@@ -8595,11 +8541,11 @@ fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
     {
         let import = state.import_state_mut().unwrap();
         import.recipe.header = HeaderSkip::Lines(3);
-        import.save_as_name = "Trois lignes".into();
+        import.save_as_name = "Three lines".into();
     }
     state.save_import_recipe();
     state.open_import(None::<NodeId>);
-    state.select_import_recipe("Trois lignes");
+    state.select_import_recipe("Three lines");
     let recipe = &state.import_state().unwrap().recipe;
     assert_eq!(recipe.header, HeaderSkip::None);
     assert_eq!(recipe.header_layout.main_header_lines, 3);
@@ -8608,10 +8554,10 @@ fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
     assert!(
         state.import_recipe_modified(),
-        "modifié sans être enregistré"
+        "modified without being saved"
     );
 
-    state.request_delete_import_recipe("Trois lignes");
+    state.request_delete_import_recipe("Three lines");
     state.cancel_delete_import_recipe();
     assert!(state
         .import_state()
@@ -8619,8 +8565,8 @@ fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
         .store
         .recipes()
         .iter()
-        .any(|r| r.name == "Trois lignes"));
-    state.request_delete_import_recipe("Trois lignes");
+        .any(|r| r.name == "Three lines"));
+    state.request_delete_import_recipe("Three lines");
     state.confirm_delete_import_recipe();
     assert!(state
         .import_state()
@@ -8628,11 +8574,11 @@ fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
         .store
         .recipes()
         .iter()
-        .all(|r| r.name != "Trois lignes"));
+        .all(|r| r.name != "Three lines"));
 }
 
-/// Le clic droit sur l'aperçu règle l'en-tête, la ligne des unités et la fin
-/// des données.
+/// The right-click on the preview sets the header, the units row and the end
+/// of the data.
 #[test]
 fn import_preview_line_actions_adjust_the_recipe() {
     use stokesforge_app_state::state::ImportLineAction;
@@ -8647,11 +8593,11 @@ fn import_preview_line_actions_adjust_the_recipe() {
         recipe.separator = Separator::Semicolon;
         recipe.header = HeaderSkip::None;
         recipe.header_layout = Default::default();
-        // La coupure automatique n'est plus le défaut : ce test l'éprouve.
+        // Automatic cut is no longer the default: this test exercises it.
         recipe.data_end = stokesforge_import::DataEnd::Auto;
     }
 
-    // Les données commencent à la ligne 4 : trois lignes d'en-tête.
+    // The data starts at line 4: three header lines.
     state.import_line_action(ImportLineAction::DataStartsHere, 4);
     assert_eq!(
         state
@@ -8664,7 +8610,7 @@ fn import_preview_line_actions_adjust_the_recipe() {
     );
     assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 3);
 
-    // Fin des données à la ligne 6 (la dernière donnée est la ligne 6).
+    // End of the data at line 6 (the last data is line 6).
     state.import_line_action(ImportLineAction::DataEndsHere, 6);
     assert_eq!(state.import_preview().unwrap().unwrap().row_count(), 2);
 
@@ -8674,7 +8620,7 @@ fn import_preview_line_actions_adjust_the_recipe() {
         stokesforge_import::DataEnd::None
     );
 
-    // La ligne 2 donne les unités : elle ouvre le sous-en-tête.
+    // Line 2 gives the units: it opens the subheader.
     state.import_line_action(ImportLineAction::UnitsLine, 2);
     let recipe = &state.import_state().unwrap().recipe;
     assert_eq!(recipe.header_layout.main_header_lines, 1);
@@ -8685,8 +8631,8 @@ fn import_preview_line_actions_adjust_the_recipe() {
     );
 }
 
-/// L'étape « Colonnes » : un rôle Ignorer retire la colonne, erreur Y est
-/// posée sur la colonne choisie.
+/// The "Columns" step: an Ignore role removes the column, Y error is
+/// set on the chosen column.
 #[test]
 fn import_column_roles_from_the_wizard_are_applied() {
     let _recipes = isolate_recipe_store();
@@ -8711,13 +8657,13 @@ fn import_column_roles_from_the_wizard_are_applied() {
 
     let sheet = sheet_named(state.tree(), "trois");
     let columns = state.visible_columns(sheet);
-    assert_eq!(columns.len(), 3, "la quatrième colonne est ignorée");
+    assert_eq!(columns.len(), 3, "the fourth column is ignored");
     assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
     assert_eq!(state.column_meta(columns[1].0).role, ColumnRole::Y);
     assert_eq!(state.column_meta(columns[2].0).role, ColumnRole::YError);
 }
 
-/// Un dépôt pendant que l'assistant est ouvert ajoute les fichiers à sa liste.
+/// A drop while the wizard is open adds the files to its list.
 #[test]
 fn dropping_files_while_the_wizard_is_open_adds_them_to_its_list() {
     let _recipes = isolate_recipe_store();
@@ -8734,34 +8680,38 @@ fn dropping_files_while_the_wizard_is_open_adds_them_to_its_list() {
         paths: vec![file],
         target_book: None,
     });
-    assert_eq!(state.import_state().unwrap().paths.len(), 1, "sans doublon");
+    assert_eq!(
+        state.import_state().unwrap().paths.len(),
+        1,
+        "without duplicates"
+    );
 }
 
-// -- État Annuler après clôture d'une opération groupée (issue #22) --
+// -- Undo state after closing a grouped operation (issue #22) --
 
-/// L'instantané de l'UI reflète la macro close dès la fin de l'action : même
-/// `can_undo` et même libellé que l'acteur.
+/// The UI snapshot reflects the closed macro as soon as the action ends: same
+/// `can_undo` and same label as the actor.
 fn assert_undo_state_matches_actor(session: &Session, state: &AppState, label: HistoryLabel) {
     let actual = session.handle().snapshot().unwrap();
     assert_eq!(state.can_undo(), actual.history.can_undo);
-    assert!(state.can_undo(), "{label:?} doit être annulable");
+    assert!(state.can_undo(), "{label:?} must be undoable");
     assert_eq!(actual.history.undo_label.as_ref(), Some(&label));
     assert_eq!(
         state.undo_label(),
         Some(undo_entry(&label)),
-        "le libellé du menu vient de l'entrée close"
+        "the menu label comes from the closed entry"
     );
 }
 
 #[test]
 fn undo_state_is_fresh_right_after_a_grouped_paste() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheet = state.selected_sheet_in(book).unwrap();
     let columns = state.visible_columns(sheet);
     state.select_cell(sheet, columns[0].0, 0);
-    // Séance neuve : rien d'annulable avant le collage.
+    // Fresh session: nothing undoable before the paste.
     while state.can_undo() {
         state.dispatch(Action::Undo);
     }
@@ -8774,7 +8724,7 @@ fn undo_state_is_fresh_right_after_a_grouped_paste() {
 
 #[test]
 fn undo_state_is_fresh_right_after_a_grouped_clear() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheet = state.selected_sheet_in(book).unwrap();
@@ -8792,14 +8742,14 @@ fn undo_state_is_fresh_right_after_a_grouped_clear() {
     );
 }
 
-// -- Annuler les propriétés d'un graphe n'annule pas une saisie détachée (#21) --
+// -- Undoing a graph's properties does not undo a detached input (#21) --
 
-/// Pendant que la fenêtre des propriétés d'un graphe tient une macro, une vue
-/// détachée (autre identité d'émetteur) ne peut pas y glisser une écriture :
-/// elle est refusée, et annuler les propriétés ne touche pas au classeur.
+/// While the graph properties window holds a macro, a detached view
+/// (other sender identity) cannot slip a write into it:
+/// it is refused, and undoing the properties does not touch the workbook.
 #[test]
 fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut main) = start_demo(dir.path());
     let graph = plotted_graph(&mut main);
     let book = book_named(main.tree(), "Book1");
@@ -8807,7 +8757,7 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     let column = main.visible_columns(sheet)[0].0;
     let before = cell_f64(&main, column, 0);
 
-    let mut detached = main.fork_for_detached_view().expect("vue détachée");
+    let mut detached = main.fork_for_detached_view().expect("detached view");
     main.dispatch(Action::OpenPlotSettings {
         graph,
         tab: PlotSettingsTab::Graph,
@@ -8820,13 +8770,13 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     });
     assert!(
         detached.status().is_some_and(|status| status.is_error()),
-        "la saisie étrangère est refusée pendant le dialogue"
+        "the foreign input is refused during the dialog"
     );
     main.cancel_plot_settings();
     detached.refresh();
     assert_eq!(cell_f64(&detached, column, 0), before);
 
-    // Le dialogue fermé, la même saisie passe et reste.
+    // The dialog closed, the same input goes through and stays.
     detached.dispatch(Action::CommitCell {
         column,
         row: 0,
@@ -8836,25 +8786,25 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     assert_eq!(cell_f64(&main, column, 0), 99.0);
 }
 
-// -- Recalcul lourd : indicateur et Stop (issue #239) --
+// -- Heavy recalculation: indicator and Stop (issue #239) --
 
-/// Un projet dont le premier recalcul complet dure assez pour dépasser
-/// l'attente de la commande : une grosse colonne source et beaucoup de
-/// colonnes-formule qui la lisent.
+/// A project whose first full recalculation lasts long enough to exceed
+/// the command wait: a big source column and many formula columns
+/// that read it.
 fn heavy_formula_project() -> Project {
-    let mut project = Project::new("Lourd").expect("projet");
+    let mut project = Project::new("Lourd").expect("project");
     let root = project.root();
-    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
     let sheet = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("lecture")
+        .expect("read")
         .expect("Sheet1");
     let values: Vec<f64> = (0..200_000).map(f64::from).collect();
     project
         .add_column(sheet, None, Some("A"), Column::from_f64(&values))
         .expect("A");
-    let colonne_a = project.tree().children(sheet).expect("feuille")[0];
+    let column_a = project.tree().children(sheet).expect("sheet")[0];
     for index in 0..150 {
         let column = project
             .add_column(
@@ -8863,12 +8813,12 @@ fn heavy_formula_project() -> Project {
                 Some(&format!("F{index}")),
                 Column::new(ColumnType::Numeric),
             )
-            .expect("colonne");
-        // Formule par identifiant (#321) : elle lit la colonne A.
+            .expect("column");
+        // Formula by identifier (#321): it reads column A.
         let formula = ColumnFormula::from_parts(vec![
-            FormulaPart::Column(colonne_a),
+            FormulaPart::Column(column_a),
             FormulaPart::Text("*2+".into()),
-            FormulaPart::Column(colonne_a),
+            FormulaPart::Column(column_a),
             FormulaPart::Text("*3".into()),
         ]);
         project
@@ -8879,14 +8829,14 @@ fn heavy_formula_project() -> Project {
                     ..Default::default()
                 },
             )
-            .expect("formule");
+            .expect("formula");
     }
     project
 }
 
-/// Une commande qui lance un recalcul long rend la main : l'indicateur se lit,
-/// et Stop défait la commande comme Ctrl+Z (rétablissable), avec son message.
-/// Sans Stop (témoin), la même commande reste appliquée.
+/// A command that starts a long recalculation hands control back: the indicator
+/// can be read, and Stop undoes the command like Ctrl+Z (redoable), with its message.
+/// Without Stop (witness), the same command stays applied.
 #[test]
 fn stop_during_a_heavy_recalculation_undoes_the_command() {
     let dir = tempfile::tempdir().unwrap();
@@ -8895,19 +8845,22 @@ fn stop_during_a_heavy_recalculation_undoes_the_command() {
     state.dispatch(Action::AddGraph);
     let elapsed = state
         .recalc_work()
-        .expect("le recalcul complet dépasse l'attente de la commande");
+        .expect("the full recalculation outlasts the command wait");
     assert!(elapsed >= std::time::Duration::from_millis(200));
-    assert_eq!(state.tree().len(), folders, "instantané non rafraîchi");
+    assert_eq!(state.tree().len(), folders, "snapshot not refreshed");
 
     state.dispatch(Action::StopRecalc);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while state.recalc_work().is_some() {
-        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "recalculation too long"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     state.poll_recalc();
-    assert_eq!(state.tree().len(), folders, "le graphique a disparu");
-    assert!(state.snapshot().history.can_redo, "comme après Ctrl+Z");
+    assert_eq!(state.tree().len(), folders, "the graph disappeared");
+    assert!(state.snapshot().history.can_redo, "as after Ctrl+Z");
     assert!(!state.snapshot().history.can_undo);
     let status = state.status().expect("message");
     assert!(!status.is_error());
@@ -8926,18 +8879,21 @@ fn without_stop_the_heavy_recalculation_keeps_the_command() {
     assert!(state.recalc_work().is_some());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while state.recalc_work().is_some() {
-        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "recalculation too long"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     state.poll_recalc();
-    assert_eq!(state.tree().len(), folders + 1, "le graphique reste");
+    assert_eq!(state.tree().len(), folders + 1, "the graph stays");
     assert!(state.snapshot().history.can_undo);
 }
 
-/// Les messages de la barre d'état, du plus ancien au plus récent. Le projet
-/// lourd pèse environ 240 Mo une fois écrit : si le dossier temporaire est plein
-/// (`Disk quota exceeded`), l'écriture échoue et seul ce message dit pourquoi
-/// (#342). À joindre aux assertions qui dépendent d'une écriture.
+/// The status bar messages, from the oldest to the most recent. The heavy
+/// project weighs about 240 MB once written: if the temporary folder is full
+/// (`Disk quota exceeded`), the write fails and only this message says why
+/// (#342). To be attached to the assertions that depend on a write.
 fn status_messages(state: &AppState) -> String {
     state
         .status_history()
@@ -8946,20 +8902,23 @@ fn status_messages(state: &AppState) -> String {
         .join(" | ")
 }
 
-/// Attend la fin du recalcul en cours, puis laisse l'état le relever.
+/// Waits for the current recalculation to end, then lets the state pick it up.
 fn finish_recalculation(state: &mut AppState) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while state.recalc_work().is_some() {
-        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "recalculation too long"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     state.poll_recalc();
 }
 
-/// Projet enregistré, puis une commande dont le recalcul dépasse l'attente :
-/// l'instantané garde l'ancienne révision, mais la commande est dans
-/// l'acteur. Fermer, créer un projet ou en ouvrir un autre doit poser la
-/// question « enregistrer ? » — sinon la modification est perdue sans un mot.
+/// Saved project, then a command whose recalculation exceeds the wait:
+/// the snapshot keeps the old revision, but the command is in
+/// the actor. Closing, creating a project or opening another one must raise
+/// the "save?" question, otherwise the change is lost without a word.
 #[test]
 fn closing_during_a_heavy_recalculation_still_asks_to_save() {
     let dir = tempfile::tempdir().unwrap();
@@ -8970,28 +8929,28 @@ fn closing_during_a_heavy_recalculation_still_asks_to_save() {
     state.dispatch(Action::Quit {
         pending_edits: false,
     });
-    assert!(state.take_quit_ready(), "enregistré : Quit direct");
+    assert!(state.take_quit_ready(), "saved: direct Quit");
 
     state.dispatch(Action::AddGraph);
-    assert!(state.recalc_work().is_some(), "recalcul encore en cours");
-    assert_ne!(state.window_title(), clean_title, "titre : modifié");
+    assert!(state.recalc_work().is_some(), "recalculation still running");
+    assert_ne!(state.window_title(), clean_title, "title: modified");
     state.dispatch(Action::Quit {
         pending_edits: false,
     });
-    assert!(state.unsaved_pending().is_some(), "la question est posée");
+    assert!(state.unsaved_pending().is_some(), "the question is asked");
     assert!(!state.take_quit_ready());
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
 
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(state.unsaved_pending().is_some(), "Nouveau demande aussi");
+    assert!(state.unsaved_pending().is_some(), "New asks too");
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
     finish_recalculation(&mut state);
 }
 
-/// Témoin inverse : enregistrer pendant le recalcul remet le projet « propre »
-/// — la révision appliquée ne doit pas rester au-dessus du repère enregistré.
+/// Inverse witness: saving during the recalculation makes the project "clean" again
+/// — the applied revision must not stay above the saved mark.
 #[test]
 fn saving_during_a_heavy_recalculation_clears_the_unsaved_mark() {
     let dir = tempfile::tempdir().unwrap();
@@ -9007,16 +8966,16 @@ fn saving_during_a_heavy_recalculation_clears_the_unsaved_mark() {
     });
     assert!(
         state.unsaved_pending().is_none(),
-        "plus rien à perdre ; messages : {}",
+        "nothing left to lose; messages: {}",
         status_messages(&state)
     );
     assert!(state.take_quit_ready());
 }
 
-// -- Mort de l'acteur de session (#310) --
+// -- Death of the session actor (#310) --
 
-/// L'acteur meurt : une seule alerte bloquante, une copie de secours relisible
-/// du dernier état affiché, jamais écrite sur le fichier de l'utilisateur.
+/// The actor dies: a single blocking alert, a readable rescue copy
+/// of the last displayed state, never written to the user's file.
 #[test]
 fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
     let dir = tempfile::tempdir().unwrap();
@@ -9034,12 +8993,12 @@ fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
     state.poll_recalc();
 
     assert!(state.session_lost());
-    let alert = state.alert().expect("alerte bloquante");
+    let alert = state.alert().expect("blocking alert");
     assert_eq!(
         alert.kind,
         stokesforge_app_state::state::AlertKind::SessionLost
     );
-    // Seuls les `.stf` comptent : la copie a aussi sa fiche (#317).
+    // Only the `.stf` count: the copy also has its record (#317).
     let stf_files = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
         std::fs::read_dir(dir)
             .unwrap()
@@ -9051,29 +9010,26 @@ fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
     assert_eq!(
         copies.len(),
         1,
-        "une copie de secours ; alerte : {} ; messages : {}",
+        "a rescue copy; alert: {}; messages: {}",
         alert.message,
         status_messages(&state)
     );
     assert!(alert.message.contains(&copies[0].display().to_string()));
-    let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
-    assert_eq!(back.tree(), &tree, "le dernier état affiché");
-    assert!(
-        !file.exists(),
-        "le fichier de l'utilisateur n'est pas touché"
-    );
+    let back = stokesforge_persistence::load(&copies[0]).expect("the copy reads back");
+    assert_eq!(back.tree(), &tree, "the last displayed state");
+    assert!(!file.exists(), "the user's file is not touched");
 
-    // Une seule fois : ni deuxième copie, ni deuxième alerte.
+    // Only once: neither a second copy nor a second alert.
     state.dispatch(Action::DismissAlert);
-    assert!(state.take_quit_ready(), "Close ferme l'application");
+    assert!(state.take_quit_ready(), "Close closes the application");
     state.poll_recalc();
     state.refresh();
     assert!(state.alert().is_none());
     assert_eq!(stf_files(&recovery).len(), 1);
 }
 
-/// Session morte : fermer la fenêtre n'ouvre pas « enregistrer ? » (il n'y a
-/// plus rien à enregistrer) et sans dossier de secours le message reste vide.
+/// Dead session: closing the window does not open "save?" (there is
+/// nothing left to save) and with no rescue folder the message stays empty.
 #[test]
 fn quitting_a_dead_session_asks_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -9093,12 +9049,12 @@ fn quitting_a_dead_session_asks_nothing() {
     assert!(state.take_quit_ready());
 }
 
-// -- Import en fond, reprise du dernier import, fichiers récents (issue #6) --
+// -- Background import, reopening the last import, recent files (issue #6) --
 
-/// L'analyse tourne sur un fil de fond : `start_import` rend la main, la
-/// progression se lit, et `poll_import` crée les feuilles une fois prêt —
-/// toujours en une seule entrée d'historique. Un second lancement est refusé
-/// pendant qu'un import est en cours.
+/// The analysis runs on a background thread: `start_import` hands control back,
+/// progress can be read, and `poll_import` creates the sheets once ready —
+/// always in a single history entry. A second launch is refused
+/// while an import is running.
 #[test]
 fn a_background_import_reports_progress_then_applies_in_one_entry() {
     let _recipes = isolate_recipe_store();
@@ -9119,7 +9075,7 @@ fn a_background_import_reports_progress_then_applies_in_one_entry() {
         recipe: ImportRecipe::new("Fond"),
         paths: files.clone(),
     });
-    let (_, total) = state.import_progress().expect("un import est en cours");
+    let (_, total) = state.import_progress().expect("an import is running");
     assert_eq!(total, 3);
     state.dispatch(Action::StartImport {
         destination: ImportDestination::ActiveBook(book),
@@ -9128,36 +9084,36 @@ fn a_background_import_reports_progress_then_applies_in_one_entry() {
     });
     assert!(
         state.status().is_some_and(|status| status.is_error()),
-        "un second import est refusé"
+        "a second import is refused"
     );
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !state.poll_import() {
-        assert!(std::time::Instant::now() < deadline, "import trop long");
+        assert!(std::time::Instant::now() < deadline, "import too long");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert!(state.import_progress().is_none());
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 3);
     assert_eq!(state.take_imported_paths().len(), 3);
-    assert!(state.take_imported_paths().is_empty(), "file vidée");
+    assert!(state.take_imported_paths().is_empty(), "queue emptied");
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
-    assert!(!state.can_undo(), "une seule entrée pour tout le lot");
+    assert!(!state.can_undo(), "a single entry for the whole batch");
 }
 
-/// Attend la fin de l'import en fond (lecture, analyse, puis application par
-/// `poll_import`), sans jamais attendre indéfiniment.
+/// Waits for the background import to end (read, analysis, then application by
+/// `poll_import`), without ever waiting indefinitely.
 fn wait_import(state: &mut AppState) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while state.import_progress().is_some() {
         state.poll_import();
-        assert!(std::time::Instant::now() < deadline, "import trop long");
+        assert!(std::time::Instant::now() < deadline, "import too long");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 
-/// Un dépôt de gros fichier rend la main aussitôt (#266) : la lecture et
-/// l'analyse se font sur le fil de fond, rien n'est encore créé.
+/// A drop of a big file hands control back right away (#266): reading and
+/// analysis happen on the background thread, nothing is created yet.
 #[test]
 fn dropping_a_big_csv_returns_immediately_and_applies_later() {
     let _recipes = isolate_recipe_store();
@@ -9179,19 +9135,19 @@ fn dropping_a_big_csv_returns_immediately_and_applies_later() {
 
     assert!(
         state.import_work().is_some(),
-        "travail en cours (S-P1/S-P2)"
+        "work in progress (S-P1/S-P2)"
     );
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before,
-        "rien encore"
+        "nothing yet"
     );
     wait_import(&mut state);
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
 }
 
-/// Un fichier illisible n'empêche pas le bon : l'assistant ne s'ouvre qu'au
-/// retour du fil, avec le seul fichier illisible.
+/// An unreadable file does not block the good one: the wizard only opens when
+/// the thread returns, with the unreadable file alone.
 #[test]
 fn a_background_drop_opens_the_wizard_only_when_the_thread_answers() {
     let _recipes = isolate_recipe_store();
@@ -9206,12 +9162,12 @@ fn a_background_drop_opens_the_wizard_only_when_the_thread_answers() {
         paths: vec![bad.clone(), good],
         target_book: Some(book),
     });
-    assert!(state.import_state().is_none(), "assistant fermé pendant");
+    assert!(state.import_state().is_none(), "wizard closed meanwhile");
     wait_import(&mut state);
-    assert_eq!(state.import_state().expect("assistant").paths, vec![bad]);
+    assert_eq!(state.import_state().expect("wizard").paths, vec![bad]);
 }
 
-/// Tous illisibles : l'assistant s'ouvre, aucune macro vide dans l'historique.
+/// All unreadable: the wizard opens, no empty macro in the history.
 #[test]
 fn a_drop_of_only_unreadable_files_opens_the_wizard_without_history() {
     let _recipes = isolate_recipe_store();
@@ -9224,8 +9180,8 @@ fn a_drop_of_only_unreadable_files_opens_the_wizard_without_history() {
         target_book: None,
     });
     wait_import(&mut state);
-    assert_eq!(state.import_state().expect("assistant").paths, vec![bad]);
-    assert!(!state.can_undo(), "aucune entrée d'historique");
+    assert_eq!(state.import_state().expect("wizard").paths, vec![bad]);
+    assert!(!state.can_undo(), "no history entry");
     assert_ne!(
         state.status().map(|status| status.text.clone()),
         Some(stokesforge_app_state::tr!(
@@ -9233,11 +9189,11 @@ fn a_drop_of_only_unreadable_files_opens_the_wizard_without_history() {
             count = 0,
             models = ""
         )),
-        "aucun import appliqué, aucun message de dépôt"
+        "no import applied, no drop message"
     );
 }
 
-/// Stop pendant un dépôt : rien n'est appliqué, l'assistant ne s'ouvre pas.
+/// Stop during a drop: nothing is applied, the wizard does not open.
 #[test]
 fn stopping_a_background_drop_applies_nothing() {
     let _recipes = isolate_recipe_store();
@@ -9261,8 +9217,8 @@ fn stopping_a_background_drop_applies_nothing() {
     assert!(!state.can_undo());
 }
 
-/// Le message « modèles utilisés » est propre au dépôt : un import de menu
-/// ne l'affiche pas.
+/// The "models used" message belongs to the drop: a menu import
+/// does not show it.
 #[test]
 fn a_menu_import_does_not_report_a_drop() {
     let _recipes = isolate_recipe_store();
@@ -9282,11 +9238,11 @@ fn a_menu_import_does_not_report_a_drop() {
     assert_ne!(
         status.text,
         stokesforge_app_state::tr!("status-import-dropped", count = 1, models = ""),
-        "pas de message de dépôt"
+        "no drop message"
     );
 }
 
-/// Un dépôt pendant un import en cours est refusé.
+/// A drop during a running import is refused.
 #[test]
 fn dropping_files_during_a_running_import_is_refused() {
     let _recipes = isolate_recipe_store();
@@ -9313,9 +9269,9 @@ fn dropping_files_during_a_running_import_is_refused() {
     wait_import(&mut state);
 }
 
-/// Propriétés du graphe ouvertes quand le fil répond : l'application est
-/// différée, la macro du graphe reste intacte, puis l'import s'applique en
-/// entrée séparée.
+/// Graph properties open when the thread answers: the application is
+/// deferred, the graph's macro stays intact, then the import is applied as a
+/// separate entry.
 #[test]
 fn a_background_drop_waits_for_the_plot_settings_to_close() {
     let _recipes = isolate_recipe_store();
@@ -9336,20 +9292,20 @@ fn a_background_drop_waits_for_the_plot_settings_to_close() {
         axis: None,
     });
     let before = session.handle().snapshot().unwrap();
-    assert!(before.history.in_macro, "le dialogue ouvre sa macro");
+    assert!(before.history.in_macro, "the dialog opens its macro");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    assert!(!state.poll_import(), "différé");
+    assert!(!state.poll_import(), "deferred");
     let during = session.handle().snapshot().unwrap();
     assert_eq!(*during.tree, *before.tree);
     assert!(during.history.in_macro);
-    assert!(state.import_progress().is_some(), "travail gardé");
+    assert!(state.import_progress().is_some(), "work kept");
     state.cancel_plot_settings();
     wait_import(&mut state);
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
 }
 
-/// Stop (#232, S-P2) : l'import en fond s'arrête, rien n'est créé, ni
-/// historique, et un nouvel import peut repartir aussitôt.
+/// Stop (#232, S-P2): the background import stops, nothing is created, nor
+/// history, and a new import can start right away.
 #[test]
 fn stopping_a_background_import_creates_nothing() {
     let _recipes = isolate_recipe_store();
@@ -9376,27 +9332,27 @@ fn stopping_a_background_import_creates_nothing() {
     assert!(state.import_work().is_some(), "un import est en cours");
     state.dispatch(Action::StopImport);
     assert!(state.import_work().is_none() && state.import_progress().is_none());
-    assert!(!state.poll_import(), "rien à appliquer");
+    assert!(!state.poll_import(), "nothing to apply");
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
     assert!(state.take_imported_paths().is_empty());
-    assert!(!state.can_undo(), "aucune entrée d'historique");
+    assert!(!state.can_undo(), "no history entry");
     assert!(
         state.status().is_some_and(|status| !status.is_error()),
-        "un arrêt voulu n'est pas une erreur"
+        "an intended stop is not an error"
     );
 
-    // Témoin : un import lancé après Stop va jusqu'au bout.
+    // Witness: an import started after Stop goes all the way.
     start(&mut state);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !state.poll_import() {
-        assert!(std::time::Instant::now() < deadline, "import trop long");
+        assert!(std::time::Instant::now() < deadline, "import too long");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 3);
 }
 
-/// « Régler le dernier import » annule l'import s'il est encore au sommet de
-/// l'historique, puis rouvre l'assistant sur ses fichiers et sa recette.
+/// "Adjust last import" undoes the import if it is still at the top of the
+/// history, then reopens the wizard on its files and its recipe.
 #[test]
 fn reopening_the_last_import_undoes_it_and_prefills_the_wizard() {
     let _recipes = isolate_recipe_store();
@@ -9419,15 +9375,15 @@ fn reopening_the_last_import_undoes_it_and_prefills_the_wizard() {
 
     state.dispatch(Action::ReopenLastImport);
 
-    assert_eq!(state.worksheets_of(book).len(), sheets_before, "annulé");
-    let import = state.import_state().expect("assistant rouvert");
+    assert_eq!(state.worksheets_of(book).len(), sheets_before, "undone");
+    let import = state.import_state().expect("wizard reopened");
     assert_eq!(import.paths, vec![file]);
     assert_eq!(import.recipe.separator, Separator::Semicolon);
     assert_eq!(import.destination, ImportDestination::ActiveBook(book));
 }
 
-/// Si autre chose a été fait depuis, l'ancien import n'est pas annulé : on ne
-/// défait jamais un travail étranger.
+/// If something else was done since, the old import is not undone: one never
+/// undoes foreign work.
 #[test]
 fn reopening_the_last_import_leaves_later_work_alone() {
     let _recipes = isolate_recipe_store();
@@ -9438,7 +9394,7 @@ fn reopening_the_last_import_leaves_later_work_alone() {
     std::fs::write(&file, "1,10\n2,20\n").unwrap();
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
-        recipe: ImportRecipe::new("Sans titre"),
+        recipe: ImportRecipe::new("Untitled"),
         paths: vec![file],
     });
     state.dispatch(Action::AddWorkbook);
@@ -9450,12 +9406,12 @@ fn reopening_the_last_import_leaves_later_work_alone() {
     assert_eq!(state.tree().node(root).unwrap().children().len(), books);
     assert!(
         state.worksheets_of(book).len() >= 2,
-        "l'import reste en place"
+        "the import stays in place"
     );
     assert!(state.import_state().is_some());
 }
 
-// -- Modèles fournis, choix automatique, partage (issue #7) --
+// -- Provided templates, automatic choice, sharing (issue #7) --
 
 fn fixture_path(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -9463,20 +9419,20 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
-/// Un fichier Jasco déposé est lu avec le modèle fourni qui le reconnaît
-/// (signature `ORIGIN;JASCO`), sans qu'aucun modèle n'ait été enregistré — les
-/// nombres à virgule sont lus (décimale détectée).
+/// A dropped Jasco file is read with the provided template that recognizes it
+/// (signature `ORIGIN;JASCO`), with no template ever saved — the
+/// numbers with a comma are read (decimal detected).
 #[test]
 fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    // Le modèle reconnu prime même sur le dernier modèle utilisé, dont
-    // les réglages ne conviennent pas du tout à la structure Jasco.
+    // The recognized template takes precedence even over the last template used, whose
+    // settings do not suit the Jasco structure at all.
     let initial = dir.path().join("initial.csv");
-    std::fs::write(&initial, "Temps,Signal\n1,10\n").unwrap();
-    let mut previous_recipe = stokesforge_import::ImportRecipe::new("Dernier CSV");
+    std::fs::write(&initial, "Time,Signal\n1,10\n").unwrap();
+    let mut previous_recipe = stokesforge_import::ImportRecipe::new("Last CSV");
     previous_recipe.has_column_header_row = true;
     state.dispatch(Action::ImportFiles {
         destination: ImportDestination::ActiveBook(book),
@@ -9492,7 +9448,7 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
     wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), before + 1);
-    assert!(state.import_state().is_none(), "lu sans assistant");
+    assert!(state.import_state().is_none(), "read without wizard");
     let status = state.status().expect("message");
     assert!(
         status.text.contains("Jasco (point-virgule)"),
@@ -9505,8 +9461,8 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
     assert_eq!(column_type(&state, columns[0].0), ColumnType::Numeric);
 }
 
-/// Dans l'assistant, le premier fichier ajouté choisit le modèle d'après son
-/// contenu tant que le modèle courant n'a pas été modifié.
+/// In the wizard, the first file added chooses the template from its
+/// content as long as the current template has not been modified.
 #[test]
 fn the_wizard_chooses_the_model_from_the_first_file() {
     let _recipes = isolate_recipe_store();
@@ -9525,7 +9481,7 @@ fn the_wizard_chooses_the_model_from_the_first_file() {
         "Jasco (tabulation)"
     );
     assert!(!state.import_recipe_modified());
-    // Un modèle modifié à la main n'est pas écrasé par un second ajout.
+    // A template modified by hand is not overwritten by a second add.
     state.import_state_mut().unwrap().recipe.skip_chars = 1;
     state.add_import_paths(vec![fixture_path("rpe_nohead_tab.asc")]);
     assert_eq!(
@@ -9534,8 +9490,8 @@ fn the_wizard_chooses_the_model_from_the_first_file() {
     );
 }
 
-/// Un modèle s'exporte dans un fichier et se réimporte (même nom : il
-/// remplace), et il est alors enregistré pour l'utilisateur.
+/// A template is exported to a file and re-imported (same name: it
+/// replaces), and it is then saved for the user.
 #[test]
 fn a_model_can_be_exported_and_imported_from_a_file() {
     let _recipes = isolate_recipe_store();
@@ -9559,19 +9515,16 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
         .iter()
         .any(|r| r.name == "RPE (tabulation)" && r.skip_chars == 4));
 
-    // Un fichier qui n'est pas un modèle : message d'erreur, rien ne change.
+    // A file that is not a template: error message, nothing changes.
     let bad = dir.path().join("pas_un_modele.json");
-    std::fs::write(&bad, "{ pas du json").unwrap();
+    std::fs::write(&bad, "{ not json").unwrap();
     state.import_import_recipe(&bad);
-    assert!(
-        state.dialog_error().is_some(),
-        "S-M7 : dans le pied de l'assistant"
-    );
+    assert!(state.dialog_error().is_some(), "S-M7: in the wizard footer");
     assert_eq!(state.import_state().unwrap().recipe.skip_chars, 4);
 }
 
-/// Plusieurs modèles dans un même dépôt : chaque fichier a le sien, le tout en
-/// une seule entrée d'historique.
+/// Several templates in one drop: each file has its own, all in
+/// a single history entry.
 #[test]
 fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
     let _recipes = isolate_recipe_store();
@@ -9597,14 +9550,14 @@ fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
     assert_eq!(state.worksheets_of(book).len(), before);
 }
 
-/// Colonne date-heure et colonne forcée en texte à l'import (issue #7).
+/// Date-time column and column forced to text at import (issue #7).
 #[test]
 fn import_builds_datetime_and_forced_text_columns() {
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
-    let file = dir.path().join("natures.csv");
+    let file = dir.path().join("kinds.csv");
     std::fs::write(
         &file,
         "007;2000-01-01 00:00:00;1\n008;2000-01-02 00:00:00;2\n",
@@ -9623,19 +9576,19 @@ fn import_builds_datetime_and_forced_text_columns() {
         paths: vec![file],
     });
 
-    let sheet = sheet_named(state.tree(), "natures");
+    let sheet = sheet_named(state.tree(), "kinds");
     let columns = state.visible_columns(sheet);
     assert_eq!(column_type(&state, columns[0].0), ColumnType::Mixed);
     match cell(&state, columns[0].0, 0) {
         Cell::Text(Some(text)) => assert_eq!(text, "007"),
-        other => panic!("attendu le texte 007, obtenu {other:?}"),
+        other => panic!("expected the text 007, got {other:?}"),
     }
     assert_eq!(column_type(&state, columns[1].0), ColumnType::DateTime);
     assert_eq!(cell_f64(&state, columns[1].0, 0), 946_684_800.0);
     assert_eq!(column_type(&state, columns[2].0), ColumnType::Numeric);
 }
 
-// -- Modes d'import et répartition de plusieurs fichiers (issue #7) --
+// -- Import modes and distribution of several files (issue #7) --
 
 fn write_csv(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
     let file = dir.join(name);
@@ -9667,8 +9620,8 @@ fn import_with(
     });
 }
 
-/// Remplacer la feuille active vide ses colonnes d'avant et garde la feuille ;
-/// un seul Ctrl+Z rend l'ancien contenu.
+/// Replacing the active sheet empties its previous columns and keeps the sheet;
+/// a single Ctrl+Z gives back the old content.
 #[test]
 fn import_mode_replace_sheet_swaps_the_content_in_one_entry() {
     use stokesforge_import::{FilesLayout, ImportMode};
@@ -9690,22 +9643,18 @@ fn import_mode_replace_sheet_swaps_the_content_in_one_entry() {
         vec![file],
     );
 
-    assert_eq!(
-        state.worksheets_of(book).len(),
-        sheets,
-        "pas de nouvelle feuille"
-    );
+    assert_eq!(state.worksheets_of(book).len(), sheets, "no new sheet");
     assert_eq!(state.visible_columns(sheet).len(), 2);
     assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0, 3.0]);
     state.dispatch(Action::Undo);
     assert_eq!(
         state.visible_columns(sheet).len(),
         before,
-        "l'ancien contenu revient"
+        "the old content comes back"
     );
 }
 
-/// Ajouter des colonnes : à la suite de celles de la feuille active.
+/// Add columns: after those of the active sheet.
 #[test]
 fn import_mode_add_columns_appends_to_the_active_sheet() {
     use stokesforge_import::{FilesLayout, ImportMode};
@@ -9729,8 +9678,8 @@ fn import_mode_add_columns_appends_to_the_active_sheet() {
     assert_eq!(column_values(&state, sheet, before)[..2], [7.0, 8.0]);
 }
 
-/// Ajouter des lignes : la colonne j du fichier prolonge la colonne j de la
-/// feuille.
+/// Add rows: column j of the file extends column j of the
+/// sheet.
 #[test]
 fn import_mode_add_rows_extends_the_existing_columns() {
     use stokesforge_import::{FilesLayout, ImportMode};
@@ -9756,7 +9705,7 @@ fn import_mode_add_rows_extends_the_existing_columns() {
     assert_eq!(
         state.visible_columns(sheet).len(),
         columns_before,
-        "mêmes colonnes"
+        "same columns"
     );
     let first = column_values(&state, sheet, 0);
     assert_eq!(first[..rows_before], first_before[..]);
@@ -9765,8 +9714,8 @@ fn import_mode_add_rows_extends_the_existing_columns() {
     assert_eq!(state.row_count(sheet), rows_before);
 }
 
-/// Plusieurs fichiers, une seule feuille : côte à côte (X Y X Y), ou avec le X
-/// du premier fichier partagé.
+/// Several files, a single sheet: side by side (X Y X Y), or with the X
+/// of the first file shared.
 #[test]
 fn several_files_can_share_one_sheet_side_by_side_or_with_a_common_x() {
     use stokesforge_import::{FilesLayout, ImportMode};
@@ -9788,7 +9737,7 @@ fn several_files_can_share_one_sheet_side_by_side_or_with_a_common_x() {
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets + 1,
-        "une seule feuille"
+        "a single sheet"
     );
     let sheet = sheet_named(state.tree(), "spec_a");
     assert_eq!(state.visible_columns(sheet).len(), 4, "X Y X Y");
@@ -9805,20 +9754,20 @@ fn several_files_can_share_one_sheet_side_by_side_or_with_a_common_x() {
     );
     let sheet = sheet_named(state.tree(), "spec_a");
     let columns = state.visible_columns(sheet);
-    assert_eq!(columns.len(), 3, "un X, puis un Y par fichier");
+    assert_eq!(columns.len(), 3, "one X, then one Y per file");
     assert_eq!(state.column_meta(columns[0].0).role, ColumnRole::X);
     assert_eq!(state.column_meta(columns[2].0).role, ColumnRole::Y);
     assert_eq!(column_values(&state, sheet, 1), vec![10.0, 20.0]);
     assert_eq!(column_values(&state, sheet, 2), vec![11.0, 21.0]);
-    // Les Y portent le nom de leur fichier pour la légende.
+    // The Ys carry the name of their file for the legend.
     assert_eq!(state.column_meta(columns[1].0).long_name, "spec_a");
     assert_eq!(state.column_meta(columns[2].0).long_name, "spec_b");
 }
 
-/// Réimport (issue #7) : les colonnes importées se relisent depuis leur fichier
-/// avec la recette mémorisée, **en place** — mêmes colonnes (donc les graphes
-/// qui les tracent restent valides), valeurs neuves, nombre de lignes suivi —,
-/// en une seule entrée annulable.
+/// Re-import (issue #7): the imported columns are re-read from their file
+/// with the memorized recipe, **in place** — same columns (so the graphs
+/// that plot them stay valid), new values, row count followed —,
+/// in a single undoable entry.
 #[test]
 fn refreshing_from_the_source_file_updates_the_columns_in_place() {
     let _recipes = isolate_recipe_store();
@@ -9837,33 +9786,33 @@ fn refreshing_from_the_source_file_updates_the_columns_in_place() {
     assert!(state.can_refresh_from_source(sheet));
     let ids_before: Vec<NodeId> = state.visible_columns(sheet).iter().map(|c| c.0).collect();
 
-    // Le fichier change : plus de lignes, autres valeurs.
+    // The file changes: more lines, other values.
     write_csv(dir.path(), "mesure.csv", "5;50\n6;60\n7;70\n");
     state.dispatch(Action::RefreshFromSource { sheet });
 
     let ids_after: Vec<NodeId> = state.visible_columns(sheet).iter().map(|c| c.0).collect();
-    assert_eq!(ids_before, ids_after, "les colonnes gardent leur identité");
+    assert_eq!(ids_before, ids_after, "the columns keep their identity");
     assert_eq!(column_values(&state, sheet, 0), vec![5.0, 6.0, 7.0]);
     assert_eq!(column_values(&state, sheet, 1), vec![50.0, 60.0, 70.0]);
     assert!(state.status().is_some_and(|s| !s.is_error()));
 
-    // Un seul Ctrl+Z revient aux valeurs d'avant l'actualisation.
+    // A single Ctrl+Z goes back to the values from before the refresh.
     state.dispatch(Action::Undo);
     assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0]);
 
-    // Un fichier disparu est signalé sans rien casser.
+    // A vanished file is reported without breaking anything.
     std::fs::remove_file(&file).unwrap();
     state.dispatch(Action::RefreshFromSource { sheet });
     assert!(state.status().is_some_and(|s| s.is_error()));
     assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0]);
-    // La feuille de démonstration, saisie à la main, n'a rien à actualiser.
+    // The demo sheet, typed by hand, has nothing to refresh.
     let demo_sheet = state.selected_sheet_in(book).unwrap();
     assert!(!state.can_refresh_from_source(demo_sheet));
 }
 
-/// Un fichier à plusieurs blocs donne une feuille par bloc (nommées d'après le
-/// fichier et le rang), ou une feuille commune selon la répartition choisie ;
-/// l'actualisation retrouve le bon bloc de chaque colonne (issue #7).
+/// A file with several blocks gives one sheet per block (named after the
+/// file and the rank), or a common sheet depending on the chosen distribution;
+/// the refresh finds the right block of each column (issue #7).
 #[test]
 fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
     use stokesforge_import::{BlockSplit, HeaderSkip};
@@ -9898,7 +9847,7 @@ fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
         stokesforge_app_state::tr!("status-import-done", imported = 1, total = 1)
     );
 
-    // Le fichier change : chaque bloc se met à jour dans sa propre feuille.
+    // The file changes: each block updates in its own sheet.
     write_csv(
         dir.path(),
         "spectres.csv",
@@ -9909,202 +9858,195 @@ fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
     assert_eq!(column_values(&state, first, 1), vec![11.0, 22.0]);
     assert_eq!(column_values(&state, second, 1), vec![33.0, 44.0, 55.0]);
 
-    // Un seul Ctrl+Z pour l'import entier.
+    // A single Ctrl+Z for the whole import.
     while state.can_undo() {
         state.dispatch(Action::Undo);
     }
     assert_eq!(state.worksheets_of(book).len(), before);
 }
 
-// -- Issue #34 : exporter un graphe --
+// -- Issue #34: export a graph --
 
-/// Un projet de démonstration avec un graphe titré en Typst.
+/// A demo project with a graph titled in Typst.
 fn demo_with_graph(dir: &Path) -> (Session, AppState, NodeId) {
     let mut project = demo_project();
     let root = project.root();
     let sheet = sheet_named(project.tree(), "Sheet1");
-    let colonne = |name: &str| {
+    let column = |name: &str| {
         project
             .tree()
             .child_by_name(sheet, name)
-            .expect("Sheet1 lisible")
-            .expect("colonne")
+            .expect("Sheet1 readable")
+            .expect("column")
     };
-    let (x, y) = (colonne("Temps"), colonne("Signal"));
+    let (x, y) = (column("Time"), column("Signal"));
     let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
     panel
         .series
         .push(stokesforge_plot::SeriesSpec::new_xy(x, y));
-    let spec = stokesforge_plot::PlotSpec::empty("Spectre $Delta H$").with_panels(panel);
+    let spec = stokesforge_plot::PlotSpec::empty("Spectrum $Delta H$").with_panels(panel);
     let graph = project
         .add_graph(root, Some("Graph1"), spec)
-        .expect("graphe");
+        .expect("graph");
     let (session, state) = start(project, &dir.join("projet.stf"));
     (session, state, graph)
 }
 
 fn graph_spec(state: &AppState, graph: NodeId) -> stokesforge_plot::PlotSpec {
-    match state.tree().get(graph).expect("graphe").kind() {
+    match state.tree().get(graph).expect("graph").kind() {
         stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
-        _ => panic!("pas un graphe"),
+        _ => panic!("not a graph"),
     }
 }
 
-/// L'export écrit ce qu'on lui donne — le spec cadré par la vue, donc le
-/// zoom courant — sans toucher au modèle : ni le `PlotSpec` du graphe ni la
-/// révision ne bougent. Le témoin est l'export du spec non cadré, qui
-/// diffère.
+/// The export writes what it is given — the spec framed by the view, so the
+/// current zoom — without touching the model: neither the graph's `PlotSpec` nor the
+/// revision moves. The witness is the export of the unframed spec, which
+/// differs.
 #[test]
-fn exporter_un_graphe_zoome_ne_touche_pas_le_modele() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn exporting_a_zoomed_graph_does_not_touch_the_model() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let avant = (graph_spec(&state, graph), state.snapshot().revision);
+    let before = (graph_spec(&state, graph), state.snapshot().revision);
 
-    // Ce que `GraphView::framed_spec` rend après un zoom : un clone cadré.
-    let mut zoome = avant.0.clone();
-    if let Some(panel) = zoome.panels.get_mut(0) {
+    // What `GraphView::framed_spec` returns after a zoom: a framed clone.
+    let mut zoomed = before.0.clone();
+    if let Some(panel) = zoomed.panels.get_mut(0) {
         panel.bottom.auto_range = false;
         panel.bottom.range_min = Some(0.5);
         panel.bottom.range_max = Some(1.0);
     }
-    let exporte = |state: &mut AppState, nom: &str, spec: &stokesforge_plot::PlotSpec| {
-        let path = dir.path().join(nom);
+    let exported = |state: &mut AppState, name: &str, spec: &stokesforge_plot::PlotSpec| {
+        let path = dir.path().join(name);
         state.dispatch(Action::ExportGraph {
             path: path.clone(),
             spec: Box::new(spec.clone()),
         });
-        let status = state.status().expect("un message");
+        let status = state.status().expect("a message");
         assert!(!status.is_error(), "{}", status.text);
-        std::fs::read(path).expect("fichier exporté")
+        std::fs::read(path).expect("exported file")
     };
-    let svg_zoome = exporte(&mut state, "zoome.svg", &zoome);
-    let svg_entier = exporte(&mut state, "entier.svg", &avant.0);
-    assert_ne!(
-        svg_zoome, svg_entier,
-        "le cadrage zoomé n'a pas été exporté"
-    );
-    assert!(String::from_utf8_lossy(&svg_zoome).contains("<svg"));
+    let zoomed_svg = exported(&mut state, "zoome.svg", &zoomed);
+    let whole_svg = exported(&mut state, "entier.svg", &before.0);
+    assert_ne!(zoomed_svg, whole_svg, "the zoomed framing was not exported");
+    assert!(String::from_utf8_lossy(&zoomed_svg).contains("<svg"));
 
-    assert_eq!(graph_spec(&state, graph), avant.0, "le modèle a changé");
-    assert_eq!(
-        state.snapshot().revision,
-        avant.1,
-        "une commande a été émise"
-    );
+    assert_eq!(graph_spec(&state, graph), before.0, "the model changed");
+    assert_eq!(state.snapshot().revision, before.1, "a command was emitted");
 }
 
-/// S-F3 (#229) : le sélecteur natif demande avant d'écraser le nom saisi ;
-/// l'extension `.svg` ajoutée ensuite vise un autre fichier, qu'il n'a pas
-/// vu. S'il existe, l'export attend la confirmation : Cancel le laisse
-/// intact, Replace l'écrase. Témoin : un nom avec extension n'attend rien.
+/// S-F3 (#229): the native picker asks before overwriting the typed name;
+/// the `.svg` extension added afterwards targets another file, which it has not
+/// seen. If it exists, the export waits for confirmation: Cancel leaves it
+/// intact, Replace overwrites it. Witness: a name with an extension waits for nothing.
 #[test]
-fn un_export_qui_ecraserait_un_fichier_non_vu_demande_confirmation() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn an_export_that_would_overwrite_an_unseen_file_asks_for_confirmation() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let spec = Box::new(graph_spec(&state, graph));
-    let existant = dir.path().join("figure.svg");
-    std::fs::write(&existant, "ancien").unwrap();
-    let exporte = |state: &mut AppState, nom: &str| {
+    let existing = dir.path().join("figure.svg");
+    std::fs::write(&existing, "ancien").unwrap();
+    let exported = |state: &mut AppState, name: &str| {
         state.dispatch(Action::ExportGraph {
-            path: dir.path().join(nom),
+            path: dir.path().join(name),
             spec: spec.clone(),
         });
     };
 
-    exporte(&mut state, "figure");
-    assert_eq!(state.pending_overwrite(), Some(existant.as_path()));
+    exported(&mut state, "figure");
+    assert_eq!(state.pending_overwrite(), Some(existing.as_path()));
     assert!(state.blocking_dialog());
     state.dispatch(Action::ConfirmOverwrite(false));
     assert!(state.pending_overwrite().is_none());
-    assert_eq!(std::fs::read_to_string(&existant).unwrap(), "ancien");
+    assert_eq!(std::fs::read_to_string(&existing).unwrap(), "ancien");
 
-    exporte(&mut state, "figure");
+    exported(&mut state, "figure");
     state.dispatch(Action::ConfirmOverwrite(true));
-    assert!(std::fs::read_to_string(&existant).unwrap().contains("<svg"));
+    assert!(std::fs::read_to_string(&existing).unwrap().contains("<svg"));
 
-    std::fs::write(&existant, "ancien").unwrap();
-    exporte(&mut state, "figure.svg");
-    assert!(state.pending_overwrite().is_none(), "vu par le sélecteur");
-    assert!(std::fs::read_to_string(&existant).unwrap().contains("<svg"));
+    std::fs::write(&existing, "ancien").unwrap();
+    exported(&mut state, "figure.svg");
+    assert!(state.pending_overwrite().is_none(), "seen by the picker");
+    assert!(std::fs::read_to_string(&existing).unwrap().contains("<svg"));
 }
 
-/// Le format suit l'extension : PDF et PNG (à l'agrandissement réglé), `.svg`
-/// ajouté à un nom sans extension, et une extension inconnue est refusée
-/// avec un message, sans fichier écrit.
+/// The format follows the extension: PDF and PNG (at the set magnification), `.svg`
+/// added to a name without an extension, and an unknown extension is refused
+/// with a message, no file written.
 #[test]
-fn le_format_dexport_suit_lextension() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn the_export_format_follows_the_extension() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let spec = Box::new(graph_spec(&state, graph));
-    let exporte = |state: &mut AppState, nom: &str| {
+    let exported = |state: &mut AppState, name: &str| {
         state.dispatch(Action::ExportGraph {
-            path: dir.path().join(nom),
+            path: dir.path().join(name),
             spec: spec.clone(),
         });
-        state.status().expect("un message").clone()
+        state.status().expect("a message").clone()
     };
 
-    assert!(!exporte(&mut state, "figure.pdf").is_error());
+    assert!(!exported(&mut state, "figure.pdf").is_error());
     let pdf = std::fs::read(dir.path().join("figure.pdf")).expect("PDF");
     assert!(pdf.starts_with(b"%PDF"));
 
     state.dispatch(Action::SetPngExportScale(2.0));
     assert_eq!(state.png_export_scale(), 2.0);
-    assert!(!exporte(&mut state, "figure.png").is_error());
+    assert!(!exported(&mut state, "figure.png").is_error());
     let png = std::fs::read(dir.path().join("figure.png")).expect("PNG");
     assert_eq!(
         u32::from_be_bytes([png[16], png[17], png[18], png[19]]),
         960
     );
-    // Un agrandissement hors de la liste proposée est ignoré.
+    // A magnification outside the proposed list is ignored.
     state.dispatch(Action::SetPngExportScale(3.0));
     assert_eq!(state.png_export_scale(), 2.0);
 
-    assert!(!exporte(&mut state, "sans_extension").is_error());
+    assert!(!exported(&mut state, "sans_extension").is_error());
     assert!(dir.path().join("sans_extension.svg").exists());
 
-    assert!(exporte(&mut state, "figure.jpg").is_error());
+    assert!(exported(&mut state, "figure.jpg").is_error());
     assert!(!dir.path().join("figure.jpg").exists());
 }
 
-/// #162 : l'export SVG garde le texte en `<text>` par défaut, passe en
-/// contours (aucun `<text>`) quand l'utilisateur le choisit ; le PDF et le PNG
-/// ne dépendent pas de ce réglage, qui n'entre ni au modèle ni à l'historique.
+/// #162: the SVG export keeps text as `<text>` by default, switches to
+/// outlines (no `<text>`) when the user chooses so; the PDF and the PNG
+/// do not depend on this setting, which enters neither the model nor the history.
 #[test]
-fn le_mode_du_texte_svg_suit_la_preference_et_ne_touche_ni_modele_ni_historique() {
+fn the_svg_text_mode_follows_the_preference_and_touches_neither_model_nor_history() {
     use stokesforge_render_svg::SvgTextMode;
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let mut spec = graph_spec(&state, graph);
-    spec.title = "Spectre".to_owned();
+    spec.title = "Spectrum".to_owned();
     let spec = Box::new(spec);
     let revision = state.revision();
-    let exporte = |state: &mut AppState, nom: &str| {
+    let exported = |state: &mut AppState, name: &str| {
         state.dispatch(Action::ExportGraph {
-            path: dir.path().join(nom),
+            path: dir.path().join(name),
             spec: spec.clone(),
         });
-        let status = state.status().expect("un message");
+        let status = state.status().expect("a message");
         assert!(!status.is_error(), "{}", status.text);
-        std::fs::read_to_string(dir.path().join(nom)).expect("SVG")
+        std::fs::read_to_string(dir.path().join(name)).expect("SVG")
     };
 
     assert_eq!(state.svg_text_mode(), SvgTextMode::Text);
-    let texte = exporte(&mut state, "texte.svg");
-    assert!(texte.contains("<text"), "texte SVG attendu par défaut");
-    assert!(texte.contains("Spectre"));
+    let text = exported(&mut state, "texte.svg");
+    assert!(text.contains("<text"), "SVG text expected by default");
+    assert!(text.contains("Spectrum"));
 
     state.dispatch(Action::SetSvgTextMode(SvgTextMode::Outlines));
     assert_eq!(state.svg_text_mode(), SvgTextMode::Outlines);
-    let contours = exporte(&mut state, "contours.svg");
-    assert!(!contours.contains("<text"), "aucun <text> en contours");
+    let contours = exported(&mut state, "contours.svg");
+    assert!(!contours.contains("<text"), "no <text> in outlines");
 
-    assert_eq!(state.revision(), revision, "une commande a été émise");
+    assert_eq!(state.revision(), revision, "a command was emitted");
 }
 
 #[test]
-fn le_nom_propose_est_celui_du_graphe() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn the_proposed_name_is_the_graph_name() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, state, graph) = demo_with_graph(dir.path());
     assert_eq!(
         stokesforge_app_state::state::export_file_name(state.tree(), graph),
@@ -10112,64 +10054,64 @@ fn le_nom_propose_est_celui_du_graphe() {
     );
 }
 
-// -- Issue #35 : textes libres --
+// -- Issue #35: free texts --
 
-/// Ajouter, déplacer, retirer un texte libre : chaque geste est **une**
-/// modification du modèle, donc un seul Ctrl+Z — quel que soit le nombre
-/// d'images qu'a duré l'édition ou le glisser, dont l'aperçu vit dans la
-/// vue. Et un geste qui ne change rien n'empile rien.
+/// Add, move, remove a free text: each gesture is **one**
+/// change of the model, so a single Ctrl+Z — whatever the number
+/// of frames the edit or the drag lasted, whose preview lives in the
+/// view. And a gesture that changes nothing stacks nothing.
 #[test]
-fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
+fn a_free_text_is_added_moved_and_removed_in_one_step_each() {
     use stokesforge_plot::{AnnotationRef, AnnotationSpec};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let target = AnnotationRef { panel: 0, index: 0 };
-    let texte = |state: &AppState| target.get(&graph_spec(state, graph)).cloned();
+    let text = |state: &AppState| target.get(&graph_spec(state, graph)).cloned();
     let revision = |state: &AppState| state.snapshot().revision;
 
-    let depart = revision(&state);
+    let start = revision(&state);
     state.dispatch(Action::SetAnnotation {
         graph,
         target,
-        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.0, 30.0)),
+        annotation: Box::new(AnnotationSpec::new("Peak $lambda$", 1.0, 30.0)),
     });
     assert_eq!(
-        texte(&state).map(|a| a.text),
-        Some("Pic $lambda$".to_owned())
+        text(&state).map(|a| a.text),
+        Some("Peak $lambda$".to_owned())
     );
-    let apres_ajout = revision(&state);
-    assert_ne!(apres_ajout, depart);
+    let after_add = revision(&state);
+    assert_ne!(after_add, start);
 
-    // Le même texte : rien ne change, rien n'est empilé.
+    // The same text: nothing changes, nothing is stacked.
     state.dispatch(Action::SetAnnotation {
         graph,
         target,
-        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.0, 30.0)),
+        annotation: Box::new(AnnotationSpec::new("Peak $lambda$", 1.0, 30.0)),
     });
     assert_eq!(
         revision(&state),
-        apres_ajout,
-        "un geste sans effet a été empilé"
+        after_add,
+        "a no-effect gesture was stacked"
     );
 
-    // Déplacé : une seule entrée, qu'un Ctrl+Z défait entièrement.
+    // Moved: a single entry, which a Ctrl+Z undoes entirely.
     state.dispatch(Action::SetAnnotation {
         graph,
         target,
-        annotation: Box::new(AnnotationSpec::new("Pic $lambda$", 1.5, 40.0)),
+        annotation: Box::new(AnnotationSpec::new("Peak $lambda$", 1.5, 40.0)),
     });
-    assert_eq!(texte(&state).map(|a| (a.x, a.y)), Some((1.5, 40.0)));
+    assert_eq!(text(&state).map(|a| (a.x, a.y)), Some((1.5, 40.0)));
     state.dispatch(Action::Undo);
-    assert_eq!(texte(&state).map(|a| (a.x, a.y)), Some((1.0, 30.0)));
+    assert_eq!(text(&state).map(|a| (a.x, a.y)), Some((1.0, 30.0)));
 
     state.dispatch(Action::RemoveAnnotation { graph, target });
-    assert!(texte(&state).is_none());
+    assert!(text(&state).is_none());
     state.dispatch(Action::Undo);
-    assert!(texte(&state).is_some(), "Ctrl+Z rend le texte retiré");
+    assert!(text(&state).is_some(), "Ctrl+Z restores the removed text");
     state.dispatch(Action::Undo);
-    assert!(texte(&state).is_none(), "Ctrl+Z défait l'ajout");
+    assert!(text(&state).is_none(), "Ctrl+Z undoes the add");
 
-    // Une adresse au-delà du dernier rang est ignorée.
+    // An address beyond the last rank is ignored.
     state.dispatch(Action::SetAnnotation {
         graph,
         target: AnnotationRef { index: 4, ..target },
@@ -10178,19 +10120,19 @@ fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
     assert!(graph_spec(&state, graph).panels[0].annotations.is_empty());
 }
 
-// -- Issue #76 : objets graphiques --
+// -- Issue #76: graphic objects --
 
-/// Ajouter, déplacer, empiler et retirer un objet : chaque geste est **une**
-/// modification du modèle (un seul Ctrl+Z), un geste sans effet n'empile rien,
-/// et passer au premier plan un objet déjà dessus non plus.
+/// Add, move, stack and remove an object: each gesture is **one**
+/// change of the model (a single Ctrl+Z), a gesture with no effect stacks nothing,
+/// and bringing to front an object already on top does not either.
 #[test]
-fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
+fn a_graphic_object_is_added_stacked_and_removed_in_one_step_each() {
     use stokesforge_app_state::state::ShapeOrder;
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let at = |index| ShapeRef { panel: 0, index };
-    let formes = |state: &AppState| graph_spec(state, graph).panels[0].shapes.clone();
+    let shapes = |state: &AppState| graph_spec(state, graph).panels[0].shapes.clone();
     let revision = |state: &AppState| state.snapshot().revision;
     let rect = |x: f64| ShapeSpec::new(ShapeKind::Rectangle, x, 0.0, x + 1.0, 1.0);
 
@@ -10201,38 +10143,38 @@ fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
             shape: Box::new(rect(x)),
         });
     }
-    assert_eq!(formes(&state).len(), 2);
+    assert_eq!(shapes(&state).len(), 2);
 
-    // Le même objet : rien n'est empilé.
-    let apres_ajout = revision(&state);
+    // The same object: nothing is stacked.
+    let after_add = revision(&state);
     state.dispatch(Action::SetShape {
         graph,
         target: at(1),
         shape: Box::new(rect(5.0)),
     });
-    assert_eq!(revision(&state), apres_ajout);
+    assert_eq!(revision(&state), after_add);
 
-    // Déjà au premier plan : rien n'est empilé.
+    // Already in front: nothing is stacked.
     state.dispatch(Action::ReorderShape {
         graph,
         target: at(1),
         order: ShapeOrder::ToFront,
     });
-    assert_eq!(revision(&state), apres_ajout);
+    assert_eq!(revision(&state), after_add);
 
-    // Au premier plan : l'ordre change, un Ctrl+Z le défait.
+    // To the front: the order changes, a Ctrl+Z undoes it.
     state.dispatch(Action::ReorderShape {
         graph,
         target: at(0),
         order: ShapeOrder::ToFront,
     });
     assert_eq!(
-        formes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
+        shapes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
         [5.0, 1.0]
     );
     state.dispatch(Action::Undo);
     assert_eq!(
-        formes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
+        shapes(&state).iter().map(|s| s.x1).collect::<Vec<_>>(),
         [1.0, 5.0]
     );
 
@@ -10240,32 +10182,36 @@ fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
         graph,
         target: at(0),
     });
-    assert_eq!(formes(&state).len(), 1);
+    assert_eq!(shapes(&state).len(), 1);
     state.dispatch(Action::Undo);
-    assert_eq!(formes(&state).len(), 2, "Ctrl+Z rend l'objet retiré");
+    assert_eq!(
+        shapes(&state).len(),
+        2,
+        "Ctrl+Z restores the removed object"
+    );
 
-    // Une adresse au-delà du dernier rang est ignorée.
+    // An address beyond the last rank is ignored.
     state.dispatch(Action::SetShape {
         graph,
         target: at(9),
         shape: Box::new(rect(0.0)),
     });
-    assert_eq!(formes(&state).len(), 2);
+    assert_eq!(shapes(&state).len(), 2);
 }
 
-// -- Issue #53 : titres, titres d'axe et légende déplaçables --
+// -- Issue #53: movable titles, axis titles and legend --
 
-/// Déplacer un titre, un titre d'axe ou la légende, puis les remettre : chaque
-/// geste est **une** modification du modèle (un seul Ctrl+Z), et un geste sans
-/// effet n'empile rien.
-/// Issues #77 et #78 : la police et le corps d'un titre, d'un titre d'axe ou
-/// de la légende sont un attribut de la zone, posé en une entrée annulable.
+/// Move a title, an axis title or the legend, then put them back: each
+/// gesture is **one** change of the model (a single Ctrl+Z), and a gesture with no
+/// effect stacks nothing.
+/// Issues #77 and #78: the font and the size of a title, an axis title or
+/// the legend are an attribute of the area, set in one undoable entry.
 #[test]
-fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
+fn the_font_of_a_text_area_is_set_in_one_undoable_step() {
     use stokesforge_plot::{AxisSide, TextFont, TextTarget};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let cibles = [
+    let targets = [
         TextTarget::Title,
         TextTarget::AxisTitle {
             panel: 0,
@@ -10273,42 +10219,42 @@ fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
         },
         TextTarget::Legend { panel: 0 },
     ];
-    let police = |state: &AppState, cible: TextTarget| cible.font(&graph_spec(state, graph));
-    let voulue = TextFont {
+    let font = |state: &AppState, target: TextTarget| target.font(&graph_spec(state, graph));
+    let wanted = TextFont {
         family: "Fira Sans".to_string(),
         size: Some(20.0),
         ..Default::default()
     };
-    for cible in cibles {
-        assert_eq!(police(&state, cible), Some(TextFont::default()));
+    for target in targets {
+        assert_eq!(font(&state, target), Some(TextFont::default()));
         state.dispatch(Action::SetTextFont {
             graph,
-            target: cible,
-            font: voulue.clone(),
+            target,
+            font: wanted.clone(),
         });
-        assert_eq!(police(&state, cible), Some(voulue.clone()));
-        let apres = state.snapshot().revision;
+        assert_eq!(font(&state, target), Some(wanted.clone()));
+        let after = state.snapshot().revision;
         state.dispatch(Action::SetTextFont {
             graph,
-            target: cible,
-            font: voulue.clone(),
+            target,
+            font: wanted.clone(),
         });
         assert_eq!(
             state.snapshot().revision,
-            apres,
-            "un réglage identique a été empilé"
+            after,
+            "an identical setting was stacked"
         );
         state.dispatch(Action::Undo);
-        assert_eq!(police(&state, cible), Some(TextFont::default()));
+        assert_eq!(font(&state, target), Some(TextFont::default()));
     }
 }
 
 #[test]
-fn la_couleur_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
+fn the_color_of_a_text_area_is_set_in_one_undoable_step() {
     use stokesforge_plot::{AxisSide, TextTarget};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let cibles = [
+    let targets = [
         TextTarget::Title,
         TextTarget::PanelTitle { panel: 0 },
         TextTarget::AxisTitle {
@@ -10317,26 +10263,26 @@ fn la_couleur_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
         },
         TextTarget::Legend { panel: 0 },
     ];
-    let couleur = |state: &AppState, cible: TextTarget| cible.color(&graph_spec(state, graph));
-    for cible in cibles {
-        let avant = couleur(&state, cible);
+    let color = |state: &AppState, target: TextTarget| target.color(&graph_spec(state, graph));
+    for target in targets {
+        let before = color(&state, target);
         state.dispatch(Action::SetTextColor {
             graph,
-            target: cible,
+            target,
             color: "#ff0000".to_string(),
         });
-        assert_eq!(couleur(&state, cible), Some("#ff0000".to_string()));
+        assert_eq!(color(&state, target), Some("#ff0000".to_string()));
         state.dispatch(Action::Undo);
-        assert_eq!(couleur(&state, cible), avant, "{cible:?}");
+        assert_eq!(color(&state, target), before, "{target:?}");
     }
 }
 
 #[test]
-fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
+fn a_title_is_moved_and_reset_in_one_step_each() {
     use stokesforge_plot::{AxisSide, TextAnchor, TextTarget};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let cibles = [
+    let targets = [
         TextTarget::Title,
         TextTarget::AxisTitle {
             panel: 0,
@@ -10344,128 +10290,128 @@ fn un_titre_se_deplace_et_se_reinitialise_en_un_pas_chacun() {
         },
         TextTarget::Legend { panel: 0 },
     ];
-    let ancre = |state: &AppState, cible: TextTarget| cible.anchor(&graph_spec(state, graph));
+    let anchor = |state: &AppState, target: TextTarget| target.anchor(&graph_spec(state, graph));
     let revision = |state: &AppState| state.snapshot().revision;
 
-    for cible in cibles {
-        let avant = revision(&state);
+    for target in targets {
+        let before = revision(&state);
         state.dispatch(Action::SetTextAnchor {
             graph,
-            target: cible,
+            target,
             anchor: Some(TextAnchor::new(1.0, 2.0)),
         });
-        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
-        let apres = revision(&state);
-        assert_ne!(apres, avant);
+        assert_eq!(anchor(&state, target), Some(TextAnchor::new(1.0, 2.0)));
+        let after = revision(&state);
+        assert_ne!(after, before);
 
-        // La même ancre : rien n'est empilé.
+        // The same anchor: nothing is stacked.
         state.dispatch(Action::SetTextAnchor {
             graph,
-            target: cible,
+            target,
             anchor: Some(TextAnchor::new(1.0, 2.0)),
         });
-        assert_eq!(revision(&state), apres, "un geste sans effet a été empilé");
+        assert_eq!(revision(&state), after, "a no-effect gesture was stacked");
 
-        // Un seul Ctrl+Z défait le déplacement.
+        // A single Ctrl+Z undoes the move.
         state.dispatch(Action::Undo);
-        assert_eq!(ancre(&state, cible), None);
+        assert_eq!(anchor(&state, target), None);
         state.dispatch(Action::Redo);
-        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
+        assert_eq!(anchor(&state, target), Some(TextAnchor::new(1.0, 2.0)));
 
-        // « Reset Position » d'un seul texte : une entrée.
+        // "Reset Position" of a single text: one entry.
         state.dispatch(Action::SetTextAnchor {
             graph,
-            target: cible,
+            target,
             anchor: None,
         });
-        assert_eq!(ancre(&state, cible), None);
+        assert_eq!(anchor(&state, target), None);
         state.dispatch(Action::Undo);
-        assert_eq!(ancre(&state, cible), Some(TextAnchor::new(1.0, 2.0)));
+        assert_eq!(anchor(&state, target), Some(TextAnchor::new(1.0, 2.0)));
     }
 
-    // Tout remettre d'un coup : une entrée pour l'ensemble.
+    // Reset everything at once: one entry for the whole.
     assert!(graph_spec(&state, graph).has_text_anchors());
     state.dispatch(Action::ResetTextAnchors { graph });
     assert!(!graph_spec(&state, graph).has_text_anchors());
-    let apres_reset = revision(&state);
+    let after_reset = revision(&state);
     state.dispatch(Action::ResetTextAnchors { graph });
     assert_eq!(
         revision(&state),
-        apres_reset,
-        "tout remettre quand rien n'est déplacé n'empile rien"
+        after_reset,
+        "resetting everything when nothing is moved stacks nothing"
     );
     state.dispatch(Action::Undo);
-    for cible in cibles {
-        assert!(ancre(&state, cible).is_some(), "{cible:?} rendu par Ctrl+Z");
+    for target in targets {
+        assert!(
+            anchor(&state, target).is_some(),
+            "{target:?} restored by Ctrl+Z"
+        );
     }
 }
 
-/// Éditer un titre au double-clic, renommer une entrée de légende : une
-/// modification chacun, et un texte inchangé ne fige rien.
+/// Edit a title by double-click, rename a legend entry: one
+/// change each, and an unchanged text freezes nothing.
 #[test]
-fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
+fn a_title_and_a_legend_name_are_edited_in_one_step() {
     use stokesforge_plot::{SeriesRef, TextTarget};
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let titre = TextTarget::AxisTitle {
+    let title = TextTarget::AxisTitle {
         panel: 0,
         side: stokesforge_plot::AxisSide::Bottom,
     };
     state.dispatch(Action::SetTextContent {
         graph,
-        target: titre,
-        text: "Temps $t$".to_owned(),
+        target: title,
+        text: "Time $t$".to_owned(),
     });
-    assert_eq!(
-        graph_spec(&state, graph).panels[0].bottom.label,
-        "Temps $t$"
-    );
+    assert_eq!(graph_spec(&state, graph).panels[0].bottom.label, "Time $t$");
     state.dispatch(Action::SetTextContent {
         graph,
         target: TextTarget::Title,
         text: "Courbe".to_owned(),
     });
     assert_eq!(graph_spec(&state, graph).title, "Courbe");
-    // La légende n'a pas de texte à elle : sans effet.
-    let avant = state.snapshot().revision;
+    // The legend has no text of its own: no effect.
+    let before = state.snapshot().revision;
     state.dispatch(Action::SetTextContent {
         graph,
         target: TextTarget::Legend { panel: 0 },
         text: "x".to_owned(),
     });
-    assert_eq!(state.snapshot().revision, avant);
+    assert_eq!(state.snapshot().revision, before);
 
-    let serie = SeriesRef::new(0, 0);
+    let series = SeriesRef::new(0, 0);
     state.dispatch(Action::SetLegendEntryName {
         graph,
-        series: serie,
+        series,
         name: "Échantillon".to_owned(),
     });
     assert_eq!(
         graph_spec(&state, graph)
-            .series_at(serie)
+            .series_at(series)
             .map(|s| s.name.clone()),
         Some("Échantillon".to_owned())
     );
     state.dispatch(Action::Undo);
     assert_eq!(
         graph_spec(&state, graph)
-            .series_at(serie)
+            .series_at(series)
             .map(|s| s.name.clone()),
         Some(String::new())
     );
-    // Une série qui n'existe pas : ignorée.
-    let avant = state.snapshot().revision;
+    // A series that does not exist: ignored.
+    let before = state.snapshot().revision;
     state.dispatch(Action::SetLegendEntryName {
         graph,
         series: SeriesRef::new(0, 99),
         name: "x".to_owned(),
     });
-    assert_eq!(state.snapshot().revision, avant);
+    assert_eq!(state.snapshot().revision, before);
 }
 
 #[test]
-fn object_manager_visibilite_groupe_annulable_et_persistante() {
+fn object_manager_group_visibility_is_undoable_and_persistent() {
     use stokesforge_app_state::object_manager::{object_tree, VisibilityTarget};
     use stokesforge_plot::{
         AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeSpec,
@@ -10490,7 +10436,7 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
         .unwrap();
     let mut first = PanelSpec::at(0, 0);
     first.series = vec![SeriesSpec::new(column), SeriesSpec::new(column)];
-    first.series[1].name = "Référence".into();
+    first.series[1].name = "Reference".into();
     first
         .annotations
         .push(AnnotationSpec::new("Pic", 0.5, 10.0));
@@ -10505,7 +10451,7 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
     let target = SeriesRef::new(0, 1);
     let tree = object_tree(state.tree(), graph, Some(target)).unwrap();
     assert_eq!(tree.layers.len(), 2);
-    assert_eq!(tree.layers[0].series[1].label, "Référence");
+    assert_eq!(tree.layers[0].series[1].label, "Reference");
     assert!(tree.layers[0].series[1].selected);
     assert!(!tree.layers[1].series[0].selected);
 
@@ -10516,7 +10462,7 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
     });
     let hidden = graph_spec(&state, graph);
     assert!(!hidden.series_at(target).unwrap().visible);
-    assert_eq!(hidden.series_at(target).unwrap().name, "Référence");
+    assert_eq!(hidden.series_at(target).unwrap().name, "Reference");
     assert!(VisibilityTarget::Group(0).visibility(&hidden).mixed);
     let revision = state.revision();
     state.dispatch(Action::SetPlotVisibility {
@@ -10532,7 +10478,7 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
     assert_eq!(
         state.revision(),
         revision,
-        "ni commande identique, ni cible périmée"
+        "neither an identical command, nor a stale target"
     );
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), spec);
@@ -10549,13 +10495,13 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
     assert!(!panel_hidden.panels[0].shapes[0].visible);
     assert!(
         panel_hidden.panels[1].series[0].visible,
-        "l'autre calque reste visible"
+        "the other layer stays visible"
     );
     state.dispatch(Action::Undo);
     assert_eq!(
         graph_spec(&state, graph),
         hidden,
-        "le calque entier s'annule en une entrée"
+        "the whole layer undoes in one entry"
     );
     state.dispatch(Action::Redo);
     state.dispatch(Action::Save);
@@ -10568,14 +10514,14 @@ fn object_manager_visibilite_groupe_annulable_et_persistante() {
     assert_eq!(graph_spec(&state, graph), panel_hidden);
 }
 
-// -- Object Manager : gestes et contenus non-série (#84–85) --
+// -- Object Manager: gestures and non-series contents (#84–85) --
 
 fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
     use stokesforge_plot::{AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeSpec};
     let mut project = Project::new("Objets").unwrap();
     let mut first = PanelSpec::at(0, 0);
-    first.title = "Calque A".into();
-    first.bottom.label = "Temps".into();
+    first.title = "Layer A".into();
+    first.bottom.label = "Time".into();
     first.bottom.unit = "s".into();
     first.left.label = "Signal".into();
     for name in ["A", "B", "C"] {
@@ -10601,10 +10547,10 @@ fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
     (project, graph, spec)
 }
 
-/// #151 : supprimer une courbe ne touche ni les données partagées ni les
-/// autres courbes ; Annuler/Rétablir restaure le graphique et sa projection.
+/// #151: deleting a curve touches neither the shared data nor the
+/// other curves; Cancel/Redo restores the graph and its projection.
 #[test]
-fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
+fn object_manager_deletes_a_curve_without_touching_the_data() {
     use stokesforge_app_state::object_manager::{object_tree, VisibilityTarget as T};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
     let dir = tempfile::tempdir().unwrap();
@@ -10616,7 +10562,7 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
         .unwrap();
     let columns: Vec<_> = project.tree().children(sheet).unwrap().to_vec();
     let mut panel = PanelSpec::default();
-    for name in ["Première", "Deuxième"] {
+    for name in ["First series", "Second series"] {
         let mut series = SeriesSpec::new(columns[1]);
         series.x = Some(columns[0]);
         series.name = name.into();
@@ -10642,7 +10588,7 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
     assert_eq!(graph_spec(&state, graph), after);
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert_eq!(model.layers[0].series.len(), 1);
-    assert_eq!(model.layers[0].series[0].label, "Deuxième");
+    assert_eq!(model.layers[0].series[0].label, "Second series");
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
     assert_eq!(
@@ -10662,11 +10608,11 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
     assert_eq!(remaining_nodes, original_nodes);
 }
 
-/// #344 : le cadre fermé est une bascule en **une seule** entrée d'historique
-/// (motif `ClosedFrame`) que l'Annuler défait d'un bloc ; les tirets du bas et
-/// de gauche sont copiés une fois ; avec une série à droite, seul le haut ferme.
+/// #344: the closed frame is a toggle in **a single** history entry
+/// (`ClosedFrame` reason) that Undo undoes as a block; the bottom and
+/// left tick marks are copied once; with a series on the right, only the top closes.
 #[test]
-fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee() {
+fn the_closed_frame_is_a_single_history_entry_and_spares_the_busy_right_side() {
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::{SeriesAxis, TickDirection};
     let dir = tempfile::tempdir().unwrap();
@@ -10675,7 +10621,7 @@ fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee
         let panel = spec.panels.get_mut(0).unwrap();
         panel.bottom.tick_direction = TickDirection::In;
         panel.left.ticks = false;
-        // Le second calque a une série sur l'axe de droite : vrai axe.
+        // The second layer has a series on the right axis: a real axis.
         let second = spec.panels.get_mut(1).unwrap();
         second.series[0].axis = SeriesAxis::Right;
     }
@@ -10696,7 +10642,7 @@ fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee
     assert_eq!(panel.top.tick_direction, TickDirection::In);
     assert!(
         panel.top.ticks && !panel.right.ticks,
-        "tirets copiés du bas et de gauche"
+        "tick marks copied from the bottom and left"
     );
     assert_eq!(
         labels(&state),
@@ -10704,11 +10650,15 @@ fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee
     );
 
     state.dispatch(Action::Undo);
-    assert_eq!(graph_spec(&state, graph), spec, "un Annuler rétablit tout");
+    assert_eq!(
+        graph_spec(&state, graph),
+        spec,
+        "one Undo restores everything"
+    );
     state.dispatch(Action::Redo);
     assert_eq!(graph_spec(&state, graph), closed);
 
-    // Bascule : le second geste rouvre le cadre, en une entrée aussi.
+    // Toggle: the second gesture reopens the frame, in one entry too.
     state.dispatch(Action::SetClosedFrame {
         graph,
         panel: 0,
@@ -10721,11 +10671,11 @@ fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee
     assert_eq!(
         graph_spec(&state, graph),
         closed,
-        "un seul Annuler rouvre le cadre fermé"
+        "a single Undo reopens the closed frame"
     );
     state.dispatch(Action::Redo);
 
-    // Droite occupée par une série : seul le haut ferme, la droite reste intacte.
+    // Right occupied by a series: only the top closes, the right stays intact.
     state.dispatch(Action::SetClosedFrame {
         graph,
         panel: 1,
@@ -10737,16 +10687,16 @@ fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee
     assert!(second.frame_closed());
 }
 
-/// #197 : les gestes d'un groupe de séries sont des commandes annulables,
-/// chacune avec son motif d'historique ; une cible périmée n'en crée aucune.
+/// #197: the gestures of a series group are undoable commands,
+/// each with its history reason; a stale target creates none.
 #[test]
-fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
+fn the_gestures_of_a_series_group_are_undoable_and_persistent() {
     use stokesforge_app_state::object_manager::{object_tree, LayerSlot, VisibilityTarget as T};
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::{SeriesGroupRef, SeriesRef};
     let dir = tempfile::tempdir().unwrap();
     let (mut project, graph, mut spec) = object_manager_project();
-    // Premier calque : A, [B C] — le groupe 1 de « B » et « C ».
+    // First layer: A, [B C] — group 1 of "B" and "C".
     {
         let panel = spec.panels.get_mut(0).unwrap();
         panel.series[1].group = Some(1);
@@ -10760,10 +10710,10 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     state.dispatch(Action::RenameSeriesGroup {
         graph,
         group,
-        name: "  Lots  ".into(),
+        name: "  Batches  ".into(),
     });
     let named = graph_spec(&state, graph);
-    assert_eq!(named.panels[0].group_label(1), Some("Lots"));
+    assert_eq!(named.panels[0].group_label(1), Some("Batches"));
     assert_eq!(
         labels(&state),
         Some(HistoryLabel::EditPlotSpec(K::RenameGroup))
@@ -10771,19 +10721,19 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert!(matches!(
         &model.layers[0].slots[1],
-        LayerSlot::Group(row) if row.name == "Lots" && row.members == [1, 2]
+        LayerSlot::Group(row) if row.name == "Batches" && row.members == [1, 2]
     ));
 
     let revision = state.revision();
     state.dispatch(Action::RenameSeriesGroup {
         graph,
         group,
-        name: "Lots".into(),
+        name: "Batches".into(),
     });
     state.dispatch(Action::RenameSeriesGroup {
         graph,
         group: SeriesGroupRef::new(0, 9),
-        name: "Fantôme".into(),
+        name: "Ghost".into(),
     });
     state.dispatch(Action::UngroupSeries {
         graph,
@@ -10797,10 +10747,10 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     assert_eq!(
         state.revision(),
         revision,
-        "nom identique, groupe absent, butée : rien"
+        "identical name, missing group, limit: nothing"
     );
 
-    // Monter le groupe l'amène avant « A » ; une série seule saute le groupe.
+    // Moving the group up brings it before "A"; a lone series jumps over the group.
     state.dispatch(Action::MoveSeriesGroup {
         graph,
         group,
@@ -10837,10 +10787,10 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     assert_eq!(
         names(&graph_spec(&state, graph)),
         ["A", "B", "C"],
-        "premier membre d'un groupe : il y reste"
+        "first member of a group: it stays there"
     );
 
-    // Dissoudre garde les séries et leur style ; Annuler rend le groupe et son nom.
+    // Dissolving keeps the series and their style; Undo gives back the group and its name.
     let before = graph_spec(&state, graph);
     state.dispatch(Action::UngroupSeries { graph, group });
     let ungrouped = graph_spec(&state, graph);
@@ -10854,7 +10804,7 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
 
-    // Supprimer le groupe retire ses séries ; les données ne sont pas touchées.
+    // Deleting the group removes its series; the data are not touched.
     state.dispatch(Action::RemovePlotObject {
         graph,
         target: T::SeriesGroup(group),
@@ -10870,7 +10820,7 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
     assert_eq!(names(&graph_spec(&state, graph)), ["A"]);
     state.dispatch(Action::Undo);
 
-    // La case du groupe ne commande que ses membres.
+    // The group's box only controls its members.
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::SeriesGroup(group),
@@ -10888,21 +10838,21 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
 }
 
 #[test]
-fn object_manager_series_renommage_ordre_suppression_undo_redo() {
+fn object_manager_series_rename_order_delete_undo_redo() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::SeriesRef;
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
     let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
-    let source = SeriesRef::new(1, 1); // Série masquée, second calque.
+    let source = SeriesRef::new(1, 1); // Hidden series, second layer.
     state.dispatch(Action::SetLegendEntryName {
         graph,
         series: source,
-        name: "Référence".into(),
+        name: "Reference".into(),
     });
     let renamed = graph_spec(&state, graph);
-    assert_eq!(renamed.series_at(source).unwrap().name, "Référence");
+    assert_eq!(renamed.series_at(source).unwrap().name, "Reference");
     assert!(!renamed.series_at(source).unwrap().visible);
     assert_eq!(
         state.snapshot().history.undo_label,
@@ -10926,7 +10876,7 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
             .iter()
             .map(|s| s.name.as_str())
             .collect::<Vec<_>>(),
-        ["A", "C", "Référence"]
+        ["A", "C", "Reference"]
     );
     assert_eq!(moved.panels[0], before.panels[0]);
     assert_eq!(
@@ -10939,7 +10889,7 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     assert_eq!(graph_spec(&state, graph), moved);
 
     let revision = state.revision();
-    // Déjà à sa place, ou cible périmée : aucune commande.
+    // Already in place, or stale target: no command.
     state.dispatch(Action::PlaceSeries {
         graph,
         source: SeriesRef::new(1, 2),
@@ -10964,7 +10914,7 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     assert_eq!(
         state.revision(),
         revision,
-        "aucune commande pour une cible périmée ou un geste sans effet"
+        "no command for a stale target or a no-effect gesture"
     );
 
     state.dispatch(Action::RemovePlotObject {
@@ -10989,16 +10939,16 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     assert_eq!(
         graph_spec(&state, graph).panels.len(),
         2,
-        "la dernière série ne supprime pas le calque"
+        "the last series does not delete the layer"
     );
 }
 
-/// Le glisser-déposer de l'Object Manager et de la fenêtre des séries : une
-/// commande par geste, annulable, qu'il réordonne, fasse entrer dans un groupe
-/// ou en fasse sortir ; un groupe se pose en bloc ; un objet libre se pose dans
-/// sa catégorie.
+/// Drag and drop of the Object Manager and the series window: a
+/// command per gesture, undoable, whether it reorders, moves into a group
+/// or out of one; a group is placed as a block; a free object is placed in
+/// its category.
 #[test]
-fn object_manager_placement_des_series_groupes_et_objets_annulable() {
+fn object_manager_placement_of_series_groups_and_objects_is_undoable() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::{
@@ -11034,7 +10984,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
     };
     let label = |state: &AppState| state.snapshot().history.undo_label.clone();
 
-    // Entrer dans un groupe au rang voulu : A rejoint [B C] entre les deux.
+    // Enter a group at the wanted rank: A joins [B C] between the two.
     state.dispatch(Action::PlaceSeries {
         graph,
         source: SeriesRef::new(0, 0),
@@ -11049,9 +10999,13 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
         Some(HistoryLabel::EditPlotSpec(K::ReorderSeries))
     );
     state.dispatch(Action::Undo);
-    assert_eq!(graph_spec(&state, graph), spec, "un seul Annuler rend tout");
+    assert_eq!(
+        graph_spec(&state, graph),
+        spec,
+        "a single Undo gives everything back"
+    );
 
-    // Sortir d'un groupe pour la tête de liste.
+    // Leave a group for the head of the list.
     state.dispatch(Action::PlaceSeries {
         graph,
         source: SeriesRef::new(0, 2),
@@ -11063,7 +11017,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
     assert_eq!(left.panels[0].series[0].group, None);
     state.dispatch(Action::Undo);
 
-    // Un groupe se pose en bloc après la dernière série seule.
+    // A group is placed as a block after the last lone series.
     state.dispatch(Action::PlaceSeriesGroup {
         graph,
         group: SeriesGroupRef::new(0, 1),
@@ -11076,7 +11030,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
     );
     state.dispatch(Action::Undo);
 
-    // Un texte se pose parmi les textes, une forme parmi les formes.
+    // A text is placed among the texts, a shape among the shapes.
     state.dispatch(Action::ReorderObject {
         graph,
         target: T::Annotation(AnnotationRef { panel: 0, index: 1 }),
@@ -11099,7 +11053,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
         ShapeKind::Arrow
     );
 
-    // Rien à faire : aucune commande.
+    // Nothing to do: no command.
     let revision = state.revision();
     state.dispatch(Action::PlaceSeries {
         graph,
@@ -11121,7 +11075,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
 }
 
 #[test]
-fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
+fn object_manager_properties_open_the_series_of_the_right_layer_and_undo() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_plot::SeriesRef;
     let dir = tempfile::tempdir().unwrap();
@@ -11152,7 +11106,7 @@ fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
 }
 
 #[test]
-fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
+fn object_manager_persistent_settings_and_reset_stay_outside_the_history() {
     use stokesforge_app_state::preferences::{
         ObjectManagerGroup, ObjectManagerSettings, Preferences,
     };
@@ -11183,7 +11137,7 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
     let changed = state.object_manager_settings();
     assert_ne!(
         changed, defaults,
-        "témoin : les actions changent les réglages"
+        "witness: the actions change the settings"
     );
     assert_eq!(
         Preferences::load_from(Some(path.clone())).object_manager_settings(),
@@ -11196,7 +11150,7 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
     assert_eq!(loaded.object_manager_settings(), defaults);
     assert!(
         !state.object_manager_open() && !loaded.object_manager_open(),
-        "le reset ne rouvre pas le panneau"
+        "the reset does not reopen the panel"
     );
     assert_eq!(state.revision(), revision);
     assert!(!state.can_undo() && !state.can_redo());
@@ -11206,11 +11160,11 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
 }
 
 #[test]
-fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
+fn object_manager_setting_stays_active_if_storage_fails() {
     use stokesforge_app_state::preferences::{ObjectManagerGroup, Preferences};
     let dir = tempfile::tempdir().unwrap();
-    // Un dossier à la place du fichier provoque une erreur portable,
-    // sans dépendre des permissions ou de l'identité de l'utilisateur CI.
+    // A folder in place of the file causes a portable error,
+    // without depending on the permissions or the identity of the CI user.
     let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
     let mut state = AppState::new_with_preferences(
         session.handle(),
@@ -11231,7 +11185,7 @@ fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
 }
 
 #[test]
-fn object_manager_textes_lies_jamais_listes_sans_revelation() {
+fn object_manager_linked_texts_are_never_listed_without_a_reveal() {
     use stokesforge_app_state::object_manager::{
         object_tree_with_selection, VisibilityTarget as T,
     };
@@ -11241,8 +11195,8 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
     let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
-    // #214 : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
-    // le texte libre et les quatre formes restent.
+    // #214: neither graph title, nor layer title, nor axes, nor legend;
+    // the free text and the four shapes stay.
     let tree = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     assert_eq!(tree.layers[0].objects.len(), 5);
     assert!(tree.layers[0]
@@ -11257,8 +11211,8 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
         .objects
         .iter()
         .any(|o| o.target == T::Shape(arrow)));
-    assert!(!tree.layers[0].series.is_empty(), "séries toujours listées");
-    // Pas de révélation à la sélection : un texte lié sélectionné n'apparaît pas.
+    assert!(!tree.layers[0].series.is_empty(), "series always listed");
+    // No reveal on selection: a selected linked text does not appear.
     let selected = object_tree_with_selection(
         state.tree(),
         graph,
@@ -11268,8 +11222,8 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
     )
     .unwrap();
     assert!(selected.layers[0].objects.iter().all(|o| !o.selected));
-    // #173 : la case du graphique ne commande que ce que l'arbre affiche ; les
-    // textes liés gardent leur état, et ne rendent pas la case indéterminée.
+    // #173: the graph's box only controls what the tree shows; the
+    // linked texts keep their state, and do not make the box indeterminate.
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::Graph,
@@ -11286,7 +11240,7 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
 }
 
 #[test]
-fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
+fn object_manager_show_objects_lists_or_hides_the_free_objects() {
     use stokesforge_app_state::object_manager::{
         object_tree_with_selection, VisibilityTarget as T,
     };
@@ -11298,7 +11252,7 @@ fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
     let hidden = object_tree_with_selection(state.tree(), graph, None, false, false).unwrap();
     assert!(hidden.layers[0].objects.is_empty());
     assert!(!hidden.layers[0].series.is_empty());
-    // Les objets non listés ne comptent pas dans la case du graphique (#173).
+    // Unlisted objects do not count in the graph's box (#173).
     state.dispatch(Action::SetObjectManagerShowObjects(false));
     state.dispatch(Action::SetPlotVisibility {
         graph,
@@ -11313,7 +11267,7 @@ fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
 }
 
 #[test]
-fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
+fn object_manager_scales_hidden_by_default_one_box_per_axis() {
     use stokesforge_app_state::object_manager::{
         object_tree_with_selection, AxisRef, ObjectKind, VisibilityTarget as T,
     };
@@ -11329,12 +11283,12 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
             .map(|o| o.target)
             .collect()
     };
-    // Cachées par défaut, même textes affichés.
+    // Hidden by default, even with the texts displayed.
     let hidden = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     assert!(axes(&hidden).is_empty());
-    // Bascule active : le groupe « Axes » et ses quatre lignes, dont le haut et
-    // la droite, axes miroirs (#176) ; les autres objets du calque n'en
-    // contiennent aucun.
+    // Active toggle: the "Axes" group and its four rows, including the top and
+    // the right, mirror axes (#176); the other objects of the layer contain
+    // none.
     let shown = object_tree_with_selection(state.tree(), graph, None, true, true).unwrap();
     let axis = |side| T::Axis(AxisRef { panel: 0, side });
     assert_eq!(
@@ -11351,11 +11305,11 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
         .objects
         .iter()
         .all(|o| !matches!(o.kind, ObjectKind::Axis)));
-    // Une case par axe : `AxisSpec::visible`, une seule entrée d'historique.
+    // One box per axis: `AxisSpec::visible`, a single history entry.
     let left = axis(AxisSide::Left);
     assert!(left.visibility(&before).checked);
-    // Les miroirs du haut et de la droite sont décochés d'office (#176) : le
-    // groupe est mixte dès l'ouverture.
+    // The top and right mirrors are unchecked by default (#176): the
+    // group is mixed from the start.
     assert!(T::Axes(0).visibility(&before).mixed);
     state.dispatch(Action::SetPlotVisibility {
         graph,
@@ -11365,8 +11319,8 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     let spec = graph_spec(&state, graph);
     assert!(!spec.panels[0].left.visible);
     assert!(!left.visibility(&spec).checked);
-    // La case du groupe est mixte dès qu'un de ses axes est masqué, et les
-    // commande tous en une écriture.
+    // The group's box is mixed as soon as one of its axes is hidden, and it
+    // controls them all in one write.
     assert!(T::Axes(0).visibility(&spec).mixed);
     state.dispatch(Action::SetPlotVisibility {
         graph,
@@ -11377,7 +11331,7 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
     state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
-    // Les cases du graphique et du calque ne touchent pas aux axes.
+    // The graph's and the layer's boxes do not touch the axes.
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::Graph,
@@ -11393,7 +11347,7 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
 }
 
 #[test]
-fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
+fn object_manager_free_objects_tree_visibility_and_file() {
     use stokesforge_app_state::object_manager::{
         object_tree_with_selection, VisibilityTarget as T,
     };
@@ -11408,7 +11362,7 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     assert_eq!(
         model.layers[0].objects.len(),
         5,
-        "texte libre et quatre formes, aucun texte lié (#214)"
+        "free text and four shapes, no linked text (#214)"
     );
     assert_eq!(
         model.layers[0]
@@ -11432,11 +11386,11 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
         visible: false,
     });
     let hidden_title = graph_spec(&state, graph);
-    assert_eq!(target.text(&hidden_title).as_deref(), Some("Temps (s)"));
+    assert_eq!(target.text(&hidden_title).as_deref(), Some("Time (s)"));
     assert_eq!(target.visible(&hidden_title), Some(false));
     assert!(
         !T::Panel(0).visibility(&hidden_title).mixed,
-        "un titre lié n'est pas listé : il ne compte pas dans la case du calque"
+        "a linked title is not listed: it does not count in the layer's box"
     );
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
@@ -11449,7 +11403,7 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     let hidden = graph_spec(&state, graph);
     assert!(
         hidden.title_visible && hidden.panels[0].bottom.title_visible,
-        "les textes liés non listés gardent leur état (#214)"
+        "unlisted linked texts keep their state (#214)"
     );
     assert!(hidden.panels[0].bottom.visible);
     assert!(!text.get(&hidden).unwrap().visible);
@@ -11488,14 +11442,14 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     }
 }
 
-// -- Feuilles : renommer, dupliquer, supprimer (#106) --
+// -- Sheets: rename, duplicate, delete (#106) --
 
-/// Renommer une feuille : une seule entrée d'historique, annulable ; nom vide
-/// ou déjà pris dans le classeur → l'ancien nom reste, message d'erreur, rien
-/// dans l'historique.
+/// Rename a sheet: a single history entry, undoable; an empty name
+/// or one already taken in the workbook → the old name stays, error message, nothing
+/// in the history.
 #[test]
 fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     state.dispatch(Action::AddWorksheet { book });
@@ -11522,7 +11476,7 @@ fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
         });
         assert_eq!(state.tree().node(sheet1).unwrap().name(), "Sheet1");
         assert!(state.status().is_some_and(|status| status.is_error()));
-        assert_eq!(state.revision(), revision, "aucune entrée d'historique");
+        assert_eq!(state.revision(), revision, "no history entry");
     }
 
     state.dispatch(Action::BeginRenameSheet(sheet1));
@@ -11530,20 +11484,20 @@ fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
     assert_eq!(state.renaming_sheet(), None);
 }
 
-/// Dupliquer : « … copie 1 », « … copie 2 » (premier numéro libre), colonnes
-/// aux identifiants neufs et mêmes valeurs, copie affichée ; les graphes de la
-/// mère la tracent toujours ; un Ctrl+Z retire la copie.
+/// Duplicate: "… copy 1", "… copy 2" (first free number), columns
+/// with new identifiers and the same values, copy displayed; the mother's
+/// graphs still plot it; a Ctrl+Z removes the copy.
 #[test]
 fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
-        columns: vec![temps, signal],
+        columns: vec![time, signal],
         plot_type: PlotType::Line,
     });
     let before = std::sync::Arc::clone(state.tree());
@@ -11564,7 +11518,7 @@ fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
     let copied: Vec<_> = state.tree().node(copy1).unwrap().children().to_vec();
     assert_eq!(original.len(), copied.len());
     for (a, b) in original.iter().zip(&copied) {
-        assert_ne!(a, b, "identifiants neufs");
+        assert_ne!(a, b, "new identifiers");
         assert_eq!(
             state.tree().node(*a).unwrap().name(),
             state.tree().node(*b).unwrap().name()
@@ -11582,20 +11536,20 @@ fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
     assert_eq!(**state.tree(), *before);
 }
 
-/// Supprimer une feuille ne demande rien (S-F3, #229) : le message nomme les
-/// graphes qui la traçaient, Undo la rend ; la dernière feuille d'un classeur
-/// est refusée.
+/// Deleting a sheet asks nothing (S-F3, #229): the message names the
+/// graphs that plotted it, Undo gives it back; the last sheet of a workbook
+/// is refused.
 #[test]
 fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     state.dispatch(Action::PlotColumns {
         sheet: sheet1,
-        columns: vec![temps, signal],
+        columns: vec![time, signal],
         plot_type: PlotType::Line,
     });
     let only = state.worksheets_of(book);
@@ -11621,30 +11575,30 @@ fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
     assert_eq!(**state.tree(), *before);
 }
 
-// -- Issue #149 : copier la figure vers une application externe --
+// -- Issue #149: copy the figure to an external application --
 
-/// La copie prépare SVG, PNG puis PDF de la figure — dans cet ordre, celui de
-/// la préférence — sans toucher au modèle : ni le `PlotSpec` ni la révision ne
-/// bougent, donc rien à annuler. Le PNG suit l'agrandissement réglé pour les
-/// exports, et la représentation n'est relevée qu'une fois.
+/// The copy prepares SVG, PNG then PDF of the figure — in that order, that of
+/// the preference — without touching the model: neither the `PlotSpec` nor the revision
+/// moves, so nothing to undo. The PNG follows the magnification set for
+/// the exports, and the representation is picked up only once.
 #[test]
-fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
+fn copying_the_figure_prepares_svg_png_pdf_without_touching_the_model() {
     use stokesforge_render_svg::ExportFormat;
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let avant = (graph_spec(&state, graph), state.snapshot().revision);
+    let before = (graph_spec(&state, graph), state.snapshot().revision);
     state.dispatch(Action::SetPngExportScale(2.0));
 
     state.dispatch(Action::CopyGraphFigure {
-        spec: Box::new(avant.0.clone()),
+        spec: Box::new(before.0.clone()),
     });
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert!(!status.is_error(), "{}", status.text);
     assert_eq!(
         status.text,
         stokesforge_app_state::tr!("status-graph-copied", formats = "SVG, PNG, PDF")
     );
-    let reps = state.take_figure_clipboard().expect("la figure est prête");
+    let reps = state.take_figure_clipboard().expect("the figure is ready");
     assert!(matches!(
         reps.iter().map(|r| r.format).collect::<Vec<_>>()[..],
         [
@@ -11655,7 +11609,7 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
     ));
     assert!(String::from_utf8_lossy(&reps[0].bytes).contains("<svg"));
     assert!(reps[1].bytes.starts_with(b"\x89PNG"));
-    // Témoin du réglage : le PNG est à l'échelle 2 (480 × 2).
+    // Witness of the setting: the PNG is at scale 2 (480 × 2).
     assert_eq!(
         u32::from_be_bytes([
             reps[1].bytes[16],
@@ -11666,25 +11620,21 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
         960
     );
     assert!(reps[2].bytes.starts_with(b"%PDF"));
-    assert!(state.take_figure_clipboard().is_none(), "relevée une fois");
+    assert!(state.take_figure_clipboard().is_none(), "picked up once");
 
-    assert_eq!(graph_spec(&state, graph), avant.0, "le modèle a changé");
-    assert_eq!(
-        state.snapshot().revision,
-        avant.1,
-        "une commande a été émise"
-    );
-    assert!(!state.can_undo(), "aucune entrée d'historique");
+    assert_eq!(graph_spec(&state, graph), before.0, "the model changed");
+    assert_eq!(state.snapshot().revision, before.1, "a command was emitted");
+    assert!(!state.can_undo(), "no history entry");
 }
 
-/// Preferences › Export règle la copie : l'ordre des représentations est celui
-/// de la liste, un format décoché n'est pas offert, et le message ne nomme que
-/// ceux qui le sont.
+/// Preferences › Export sets the copy: the order of the representations is that
+/// of the list, an unchecked format is not offered, and the message only names
+/// those that are.
 #[test]
-fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
+fn copying_the_figure_follows_the_order_and_the_choice_of_the_preferences() {
     use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry};
     use stokesforge_render_svg::ExportFormat;
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     state.dispatch(Action::SetCopyFormats(vec![
         CopyFormatEntry {
@@ -11703,28 +11653,28 @@ fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
     state.dispatch(Action::CopyGraphFigure {
         spec: Box::new(graph_spec(&state, graph)),
     });
-    let status = state.status().expect("un message");
+    let status = state.status().expect("a message");
     assert!(!status.is_error(), "{}", status.text);
     assert_eq!(
         status.text,
         stokesforge_app_state::tr!("status-graph-copied", formats = "PDF, PNG")
     );
-    let reps = state.take_figure_clipboard().expect("la figure est prête");
+    let reps = state.take_figure_clipboard().expect("the figure is ready");
     assert!(matches!(
         reps.iter().map(|r| r.format).collect::<Vec<_>>()[..],
         [ExportFormat::Pdf, ExportFormat::Png { .. }]
     ));
 }
 
-/// La figure copiée est celle du spec cadré qu'on donne : un zoom change les
-/// octets (même témoin que l'export vers un fichier).
+/// The copied figure is that of the framed spec given: a zoom changes the
+/// bytes (same witness as the export to a file).
 #[test]
-fn copier_la_figure_zoomee_copie_ce_qu_on_voit() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn copying_a_zoomed_figure_copies_what_is_seen() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
-    let entier = graph_spec(&state, graph);
-    let mut zoome = entier.clone();
-    if let Some(panel) = zoome.panels.get_mut(0) {
+    let whole = graph_spec(&state, graph);
+    let mut zoomed = whole.clone();
+    if let Some(panel) = zoomed.panels.get_mut(0) {
         panel.bottom.auto_range = false;
         panel.bottom.range_min = Some(0.5);
         panel.bottom.range_max = Some(1.0);
@@ -11733,36 +11683,36 @@ fn copier_la_figure_zoomee_copie_ce_qu_on_voit() {
         state.dispatch(Action::CopyGraphFigure {
             spec: Box::new(spec.clone()),
         });
-        state.take_figure_clipboard().expect("prête")[0]
+        state.take_figure_clipboard().expect("ready")[0]
             .bytes
             .clone()
     };
-    assert_ne!(svg(&mut state, &zoome), svg(&mut state, &entier));
+    assert_ne!(svg(&mut state, &zoomed), svg(&mut state, &whole));
 }
 
-/// Un refus du système remplace le message « copié » par sa cause. La phrase
-/// est mise par la fenêtre (`clipboard_error_message`, testée dans
-/// `app/figure_copy.rs`) ; l'état la montre telle quelle, en erreur.
+/// A system refusal replaces the "copied" message with its cause. The sentence
+/// is put by the window (`clipboard_error_message`, tested in
+/// `app/figure_copy.rs`); the state shows it as is, as an error.
 #[test]
-fn un_refus_du_presse_papiers_remplace_le_message_copie() {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+fn a_clipboard_refusal_replaces_the_copied_message() {
+    let dir = tempfile::tempdir().expect("temporary folder");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     state.dispatch(Action::CopyGraphFigure {
         spec: Box::new(graph_spec(&state, graph)),
     });
     assert!(!state.status().expect("message").is_error());
-    // La phrase vient de la fenêtre (`clipboard_error_message`, testée dans
-    // `app/figure_copy.rs`) : l'état ne fait que l'afficher en erreur.
+    // The sentence comes from the window (`clipboard_error_message`, tested in
+    // `app/figure_copy.rs`): the state only shows it as an error.
     state.figure_clipboard_failed("Could not copy the graph: selection refused".into());
     let status = state.status().expect("message");
     assert!(status.is_error());
     assert_eq!(status.text, "Could not copy the graph: selection refused");
 }
 
-/// #153 : un redimensionnement passe par la même action que l'insertion ;
-/// un seul annuler/rétablir restaure les dimensions et tout le style.
+/// #153: a resize goes through the same action as the insertion;
+/// a single undo/redo restores the dimensions and the whole style.
 #[test]
-fn le_redimensionnement_d_une_forme_est_annulable_en_un_pas() {
+fn resizing_a_shape_is_undoable_in_one_step() {
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state, graph) = demo_with_graph(dir.path());
@@ -11797,23 +11747,23 @@ fn le_redimensionnement_d_une_forme_est_annulable_en_un_pas() {
     }
 }
 
-// -- 20. Sélection multiple de colonnes : Ctrl+clic, Maj+clic (#159) --
+// -- 20. Multiple column selection: Ctrl+click, Shift+click (#159) --
 
-/// Le Ctrl+clic ajoute puis retire une colonne, une par une, sans exiger
-/// qu'elle touche les autres ; l'ordre des actions est celui de la feuille.
+/// Ctrl+click adds then removes a column, one at a time, without requiring
+/// that it touch the others; the order of the actions is that of the sheet.
 #[test]
 fn ctrl_click_toggles_non_contiguous_columns() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_column(sheet1, note);
-    state.toggle_column_selection(sheet1, temps);
+    state.toggle_column_selection(sheet1, time);
 
-    assert!(state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, time));
     assert!(!state.is_column_selected(sheet1, signal));
     assert!(state.is_column_selected(sheet1, note));
     assert_eq!(
@@ -11821,20 +11771,20 @@ fn ctrl_click_toggles_non_contiguous_columns() {
             .selection(sheet1)
             .unwrap()
             .columns(state.tree(), sheet1),
-        vec![temps, note],
-        "l'ordre de la feuille, pas celui des clics"
+        vec![time, note],
+        "the sheet order, not the click order"
     );
 
     state.toggle_column_selection(sheet1, note);
     assert!(!state.is_column_selected(sheet1, note));
-    assert!(state.is_column_selected(sheet1, temps));
+    assert!(state.is_column_selected(sheet1, time));
 }
 
-/// Maj+clic remplace tout par la plage ancre → cible ; Ctrl+Maj+clic
-/// (`extend_column_selection`) l'ajoute aux colonnes déjà posées.
+/// Shift+click replaces everything with the anchor → target range; Ctrl+Shift+click
+/// (`extend_column_selection`) adds it to the columns already set.
 #[test]
 fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
     let columns: Vec<NodeId> = state
@@ -11847,7 +11797,7 @@ fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
 
     state.select_column(sheet1, first);
     state.toggle_column_selection(sheet1, last);
-    // Maj+clic : la plage ancre (`last`) → `first` remplace les deux.
+    // Shift+click: the anchor (`last`) → `first` range replaces both.
     state.extend_column_selection_replacing(sheet1, first);
     for column in &columns {
         assert!(state.is_column_selected(sheet1, *column));
@@ -11855,184 +11805,174 @@ fn shift_click_replaces_and_ctrl_shift_click_adds_a_range() {
 
     state.select_column(sheet1, first);
     state.toggle_column_selection(sheet1, last);
-    // Ctrl+Maj+clic : ancre `last` → colonne suivante, les anciennes restent.
+    // Ctrl+Shift+click: anchor `last` → next column, the old ones stay.
     state.extend_column_selection(sheet1, columns[columns.len() - 2]);
     assert!(state.is_column_selected(sheet1, first));
     assert!(state.is_column_selected(sheet1, columns[columns.len() - 2]));
     assert!(state.is_column_selected(sheet1, last));
 }
 
-/// Une sélection non contiguë grise Paste et Paste in Place (cible
-/// ambiguë) et le collage au clavier est refusé avec un message ; une
-/// sélection contiguë garde les deux.
+/// A non-contiguous selection disables Paste and Paste in Place (ambiguous
+/// target) and keyboard paste is refused with a message; a
+/// contiguous selection keeps both.
 #[test]
 fn a_non_contiguous_selection_cannot_be_pasted_into() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time);
     state.toggle_column_selection(sheet1, signal);
     assert!(state.grid_menu(sheet1).unwrap().paste_enabled);
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time);
     state.toggle_column_selection(sheet1, note);
     assert!(!state.grid_menu(sheet1).unwrap().paste_enabled);
 
-    let before = cell(&state, temps, 0);
+    let before = cell(&state, time, 0);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text: "999".to_string(),
     });
-    assert_eq!(cell(&state, temps, 0), before, "rien n'est collé");
+    assert_eq!(cell(&state, time, 0), before, "nothing is pasted");
 }
 
-/// Copier une sélection non contiguë met les colonnes côte à côte, dans
-/// l'ordre de la feuille.
+/// Copying a non-contiguous selection puts the columns side by side, in
+/// sheet order.
 #[test]
 fn copying_non_contiguous_columns_joins_them_in_sheet_order() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
 
     state.select_column(sheet1, note);
-    state.toggle_column_selection(sheet1, temps);
-    let text = state.copy_selection(sheet1).expect("sélection non vide");
+    state.toggle_column_selection(sheet1, time);
+    let text = state.copy_selection(sheet1).expect("non-empty selection");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time);
     state.toggle_column_selection(sheet1, signal);
     state.toggle_column_selection(sheet1, note);
-    let all = state.copy_selection(sheet1).expect("sélection non vide");
+    let all = state.copy_selection(sheet1).expect("non-empty selection");
 
     let first_line = text.lines().next().unwrap();
-    assert_eq!(
-        first_line.split('\t').count(),
-        2,
-        "deux colonnes : {text:?}"
-    );
+    assert_eq!(first_line.split('\t').count(), 2, "two columns: {text:?}");
     assert_eq!(all.lines().next().unwrap().split('\t').count(), 3);
     assert_eq!(
         first_line.split('\t').next(),
         all.lines().next().unwrap().split('\t').next(),
-        "Temps d'abord dans les deux copies"
+        "Time first in both copies"
     );
 }
 
-/// Une colonne retirée du modèle sort de la sélection multiple.
+/// A column removed from the model leaves the multiple selection.
 #[test]
 fn toggling_a_column_off_keeps_the_others() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_column(sheet1, temps);
+    state.select_column(sheet1, time);
     state.toggle_column_selection(sheet1, signal);
-    state.toggle_column_selection(sheet1, temps);
+    state.toggle_column_selection(sheet1, time);
 
-    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, time));
     assert!(state.is_column_selected(sheet1, signal));
-    // Ctrl+clic sur une cellule d'une autre sorte : une sélection simple.
-    state.select_cell(sheet1, temps, 0);
+    // Ctrl+click on a cell of another kind: a simple selection.
+    state.select_cell(sheet1, time, 0);
     state.toggle_column_selection(sheet1, signal);
     assert!(state.is_column_selected(sheet1, signal));
-    assert!(!state.is_column_selected(sheet1, temps));
+    assert!(!state.is_column_selected(sheet1, time));
 }
 
-// -- 21. Sélection multiple de lignes et de cellules (#159) --
+// -- 21. Multiple selection of rows and cells (#159) --
 
-/// Retirer une cellule du milieu d'un rectangle le découpe autour d'elle ;
-/// la remettre la rajoute. Les cases voisines restent sélectionnées.
+/// Removing a cell from the middle of a rectangle cuts it around it;
+/// putting it back adds it again. The neighboring cells stay selected.
 #[test]
 fn toggling_a_cell_out_of_a_rectangle_splits_it() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time, 0);
     state.extend_selection(sheet1, signal, 2);
-    state.toggle_cell_selection(sheet1, temps, 1);
+    state.toggle_cell_selection(sheet1, time, 1);
 
-    assert!(!state.is_selected(sheet1, temps, 1));
-    for (column, row) in [
-        (temps, 0),
-        (temps, 2),
-        (signal, 0),
-        (signal, 1),
-        (signal, 2),
-    ] {
+    assert!(!state.is_selected(sheet1, time, 1));
+    for (column, row) in [(time, 0), (time, 2), (signal, 0), (signal, 1), (signal, 2)] {
         assert!(state.is_selected(sheet1, column, row), "{row}");
     }
-    state.toggle_cell_selection(sheet1, temps, 1);
-    assert!(state.is_selected(sheet1, temps, 1));
+    state.toggle_cell_selection(sheet1, time, 1);
+    assert!(state.is_selected(sheet1, time, 1));
 }
 
-/// Une seule sorte à la fois : un Ctrl+clic sur un champ d'en-tête quand des
-/// cellules de données sont sélectionnées repose une sélection simple.
+/// Only one kind at a time: a Ctrl+click on a header field when data
+/// cells are selected sets a simple selection again.
 #[test]
 fn ctrl_click_never_mixes_header_and_data() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
 
-    state.select_cell(sheet1, temps, 0);
-    state.toggle_header_field_selection(sheet1, temps, HeaderField::Unit);
+    state.select_cell(sheet1, time, 0);
+    state.toggle_header_field_selection(sheet1, time, HeaderField::Unit);
 
-    assert!(!state.is_selected(sheet1, temps, 0));
-    assert!(state.is_header_field_selected(sheet1, temps, HeaderField::Unit));
+    assert!(!state.is_selected(sheet1, time, 0));
+    assert!(state.is_header_field_selected(sheet1, time, HeaderField::Unit));
 }
 
-/// Deux cellules qui partagent leur ligne se copient côte à côte ; deux
-/// cellules qui ne partagent ni ligne ni colonne ne se copient pas (Copy et
-/// Cut grisés).
+/// Two cells that share their row are copied side by side; two
+/// cells that share neither row nor column are not copied (Copy and
+/// Cut disabled).
 #[test]
 fn copying_multiple_cells_needs_shared_rows_or_columns() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
 
-    state.select_cell(sheet1, temps, 1);
+    state.select_cell(sheet1, time, 1);
     state.toggle_cell_selection(sheet1, signal, 1);
     assert!(state.grid_menu(sheet1).unwrap().copy_enabled);
-    let side_by_side = state.copy_selection(sheet1).expect("même ligne");
+    let side_by_side = state.copy_selection(sheet1).expect("same row");
     assert_eq!(side_by_side.lines().count(), 1);
     assert_eq!(side_by_side.lines().next().unwrap().split('\t').count(), 2);
 
-    // Même colonne, lignes 0 et 2 : empilées, sans la ligne 1.
-    state.select_cell(sheet1, temps, 0);
-    state.toggle_cell_selection(sheet1, temps, 2);
-    let stacked = state.copy_selection(sheet1).expect("même colonne");
+    // Same column, rows 0 and 2: stacked, without row 1.
+    state.select_cell(sheet1, time, 0);
+    state.toggle_cell_selection(sheet1, time, 2);
+    let stacked = state.copy_selection(sheet1).expect("same column");
     assert_eq!(stacked.lines().count(), 2);
 
-    state.select_cell(sheet1, temps, 0);
+    state.select_cell(sheet1, time, 0);
     state.toggle_cell_selection(sheet1, signal, 2);
     assert!(!state.grid_menu(sheet1).unwrap().copy_enabled);
     assert_eq!(state.copy_selection(sheet1), None);
 }
 
-/// Effacer des lignes non contiguës vide chacune ; Suppr ne décale pas (des
-/// trous rendraient la remontée ambiguë) et se contente de vider.
+/// Clearing non-contiguous rows empties each; Delete does not shift (holes
+/// would make the shift-up ambiguous) and just empties.
 #[test]
 fn clearing_non_contiguous_rows_empties_each_without_shifting() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let rows = state.row_count(sheet1);
     assert!(rows >= 4);
-    let kept = cell(&state, temps, 1);
+    let kept = cell(&state, time, 1);
 
     state.select_row(sheet1, 0);
     state.toggle_row_selection(sheet1, 2);
@@ -12043,23 +11983,23 @@ fn clearing_non_contiguous_rows_empties_each_without_shifting() {
 
     state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
 
-    assert_eq!(state.row_count(sheet1), rows, "rien n'a remonté");
-    assert_eq!(cell(&state, temps, 1), kept, "la ligne 1 est intacte");
-    assert_ne!(cell(&state, temps, 0), kept);
+    assert_eq!(state.row_count(sheet1), rows, "nothing moved up");
+    assert_eq!(cell(&state, time, 1), kept, "row 1 is intact");
+    assert_ne!(cell(&state, time, 0), kept);
     state.dispatch(Action::Undo);
 }
 
-/// Ctrl+clic qui retire la dernière ligne ou colonne ne laisse pas de
-/// sélection vide.
+/// A Ctrl+click that removes the last row or column does not leave an
+/// empty selection.
 #[test]
 fn toggling_off_the_last_item_clears_the_selection() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
 
-    state.select_column(sheet1, temps);
-    state.toggle_column_selection(sheet1, temps);
+    state.select_column(sheet1, time);
+    state.toggle_column_selection(sheet1, time);
     assert!(state.selection(sheet1).is_none());
 
     state.select_row(sheet1, 1);
@@ -12067,23 +12007,20 @@ fn toggling_off_the_last_item_clears_the_selection() {
     assert!(state.selection(sheet1).is_none());
 }
 
-/// Type et rôle de plusieurs colonnes forment **un seul** pas d'annulation
-/// (#159) ; sur une seule colonne, pas de groupe.
+/// Type and role of several columns form **a single** undo step
+/// (#159); on a single column, no group.
 #[test]
 fn changing_type_and_role_of_several_columns_is_one_undo_step() {
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
+    let time = column_id(&state, sheet1, "Time");
     let signal = column_id(&state, sheet1, "Signal");
-    let role_before = (
-        state.column_meta(temps).role,
-        state.column_meta(signal).role,
-    );
+    let role_before = (state.column_meta(time).role, state.column_meta(signal).role);
     let type_before = (
         state
             .tree()
-            .node(temps)
+            .node(time)
             .unwrap()
             .as_column()
             .unwrap()
@@ -12098,31 +12035,28 @@ fn changing_type_and_role_of_several_columns_is_one_undo_step() {
     );
 
     state.dispatch(Action::SetColumnsRole {
-        columns: vec![temps, signal],
+        columns: vec![time, signal],
         role: ColumnRole::Z,
     });
-    assert_eq!(state.column_meta(temps).role, ColumnRole::Z);
+    assert_eq!(state.column_meta(time).role, ColumnRole::Z);
     assert_eq!(state.column_meta(signal).role, ColumnRole::Z);
 
     state.dispatch(Action::Undo);
     assert_eq!(
-        (
-            state.column_meta(temps).role,
-            state.column_meta(signal).role
-        ),
+        (state.column_meta(time).role, state.column_meta(signal).role),
         role_before,
-        "un seul Annuler rend les deux rôles"
+        "a single Undo gives back both roles"
     );
 
     state.dispatch(Action::SetColumnsType {
-        columns: vec![temps, signal],
+        columns: vec![time, signal],
         column_type: ColumnType::Mixed,
     });
     state.dispatch(Action::Undo);
     let type_after = (
         state
             .tree()
-            .node(temps)
+            .node(time)
             .unwrap()
             .as_column()
             .unwrap()
@@ -12137,14 +12071,14 @@ fn changing_type_and_role_of_several_columns_is_one_undo_step() {
     );
     assert_eq!(
         type_after, type_before,
-        "un seul Annuler rend les deux types"
+        "a single Undo gives back both types"
     );
 }
 
-/// S-F8 (#228) : la géométrie d'un dialogue fermé s'écrit dans les préférences,
-/// hors historique et hors projet, et se relit à la session suivante.
+/// S-F8 (#228): the geometry of a closed dialog is written to the preferences,
+/// outside the history and outside the project, and read back at the next session.
 #[test]
-fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
+fn the_geometry_of_a_closed_dialog_goes_to_the_preferences() {
     use stokesforge_app_state::preferences::{DialogGeometry, Preferences};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("preferences.json");
@@ -12173,17 +12107,17 @@ fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
             .get("import"),
         Some(&geometry)
     );
-    assert_eq!(state.revision(), revision, "ni commande ni historique");
+    assert_eq!(state.revision(), revision, "neither command nor history");
     assert!(!state.can_undo());
     session.shutdown().unwrap();
 }
 
-/// S-M7 (#228) : hors de tout dialogue, une erreur reste dans la barre d'état ;
-/// un dialogue ouvert la prend dans son pied, et elle ne lui survit pas.
+/// S-M7 (#228): outside any dialog, an error stays in the status bar;
+/// an open dialog takes it in its footer, and it does not outlive it.
 #[test]
-fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
+fn an_error_goes_to_the_footer_of_the_open_dialog_only() {
     let _isolation = isolate_recipe_store();
-    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
     state.import_state_mut().unwrap().save_as_name = String::new();
@@ -12191,10 +12125,13 @@ fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
     assert!(state.dialog_error().is_some());
     assert!(!state.status().is_some_and(|status| status.is_error()));
     state.cancel_import();
-    assert!(state.dialog_error().is_none(), "l'erreur ne survit pas");
+    assert!(
+        state.dialog_error().is_none(),
+        "the error does not outlive it"
+    );
 
-    // Témoin : sans dialogue, une erreur (préférences impossibles à écrire :
-    // un dossier à la place du fichier) va dans la barre d'état.
+    // Witness: without a dialog, an error (preferences impossible to write:
+    // a folder in place of the file) goes to the status bar.
     use stokesforge_app_state::preferences::Preferences;
     let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
     let mut state = AppState::new_with_preferences(
@@ -12209,42 +12146,42 @@ fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
     assert!(state.dialog_error().is_none());
     assert!(
         state.status().is_some_and(|status| status.is_error()),
-        "hors dialogue, la barre d'état"
+        "outside a dialog, the status bar"
     );
     session.shutdown().unwrap();
 }
 
-// -- Barre d'état : durée, historique, titre (#230) --
+// -- Status bar: duration, history, title (#230) --
 
 #[test]
-fn une_information_s_efface_apres_huit_secondes_pas_un_avertissement() {
+fn an_information_clears_after_eight_seconds_a_warning_does_not() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
-    let at = state.status().expect("enregistré").at;
+    let at = state.status().expect("saved").at;
     assert_eq!(state.status().unwrap().level, StatusLevel::Info);
 
     let before = at + INFO_LIFETIME - std::time::Duration::from_secs(3);
     assert_eq!(
         state.expire_status(before),
         Some(std::time::Duration::from_secs(3)),
-        "la prochaine échéance, pour ne programmer que ce redessin"
+        "the next deadline, to schedule only this repaint"
     );
     assert!(state.status().is_some());
     assert_eq!(state.expire_status(at + INFO_LIFETIME), None);
-    assert!(state.status().is_none(), "l'information s'est effacée");
+    assert!(state.status().is_none(), "the information was cleared");
 
-    // Un avertissement reste, quel que soit l'âge, et ne programme rien.
+    // A warning stays, whatever its age, and schedules nothing.
     state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
-    let at = state.status().expect("avertissement").at;
+    let at = state.status().expect("warning").at;
     assert_eq!(state.status().unwrap().level, StatusLevel::Warning);
     assert_eq!(state.expire_status(at + INFO_LIFETIME * 10), None);
     assert!(state.status().is_some());
 }
 
 #[test]
-fn l_historique_garde_les_cinquante_derniers_messages_dans_l_ordre() {
+fn the_history_keeps_the_last_fifty_messages_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     assert_eq!(state.status_history().count(), 0);
@@ -12262,7 +12199,7 @@ fn l_historique_garde_les_cinquante_derniers_messages_dans_l_ordre() {
 }
 
 #[test]
-fn le_titre_porte_le_nom_du_projet_et_un_point_tant_qu_il_n_est_pas_enregistre() {
+fn the_title_carries_the_project_name_and_a_dot_while_it_is_not_saved() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
@@ -12276,10 +12213,10 @@ fn le_titre_porte_le_nom_du_projet_et_un_point_tant_qu_il_n_est_pas_enregistre()
     assert_eq!(state.window_title(), saved);
 }
 
-/// #309 : le rapport de la lecture du démarrage est dit comme celui du menu
-/// Fichier ; un rapport vide ne dit rien de plus.
+/// #309: the report of the startup read is said like that of the File
+/// menu; an empty report says nothing more.
 #[test]
-fn mark_loaded_avertit_des_calculs_ecartes_du_rapport() {
+fn mark_loaded_warns_about_the_calculations_discarded_by_the_report() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start(demo_project(), &dir.path().join("p.stf"));
     state.mark_loaded(&stokesforge_session::LoadReport::default());
@@ -12287,7 +12224,7 @@ fn mark_loaded_avertit_des_calculs_ecartes_du_rapport() {
         state
             .status()
             .is_none_or(|s| s.level != stokesforge_app_state::state::StatusLevel::Warning),
-        "rapport vide : pas d'avertissement"
+        "empty report: no warning"
     );
     let report = stokesforge_session::LoadReport {
         discarded_calculations: vec![stokesforge_session::DiscardedCalculation {
@@ -12297,7 +12234,7 @@ fn mark_loaded_avertit_des_calculs_ecartes_du_rapport() {
         ..Default::default()
     };
     state.mark_loaded(&report);
-    let status = state.status().expect("un avertissement");
+    let status = state.status().expect("a warning");
     assert_eq!(
         status.level,
         stokesforge_app_state::state::StatusLevel::Warning
@@ -12311,17 +12248,17 @@ fn discarded(ids: &[u64]) -> Vec<stokesforge_session::DiscardedCalculation> {
         .collect()
 }
 
-/// #309 (F1) : des traces de correction seules sont dites (message compté) ;
-/// calculs et traces forment **un seul** message qui compte les deux.
+/// #309 (F1): correction records alone are said (counted message);
+/// calculations and records form **a single** message that counts both.
 #[test]
-fn le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message() {
+fn the_report_counts_the_records_and_the_calculations_in_a_single_message() {
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start(demo_project(), &dir.path().join("p.stf"));
     state.mark_loaded(&stokesforge_session::LoadReport {
         discarded_corrections: discarded(&[7]),
         ..Default::default()
     });
-    let status = state.status().expect("un avertissement");
+    let status = state.status().expect("a warning");
     assert_eq!(
         status.level,
         stokesforge_app_state::state::StatusLevel::Warning
@@ -12340,8 +12277,8 @@ fn le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message() {
     );
 }
 
-/// Un `.stf` à un calcul de correction que la lecture écartera (octets
-/// abîmés), à `path`.
+/// A `.stf` with a correction calculation that the read will discard (corrupted
+/// bytes), at `path`.
 fn write_file_with_a_discarded_calculation(path: &Path) {
     use stokesforge_analysis::correct::CorrectOp;
     use stokesforge_analysis::ops::Operation;
@@ -12381,55 +12318,55 @@ fn write_file_with_a_discarded_calculation(path: &Path) {
     let at = bytes
         .windows(8)
         .position(|w| w == b"subtract")
-        .expect("l'opération est dans le fichier");
+        .expect("the operation is in the file");
     bytes[at..at + 8].copy_from_slice(b"subtraXX");
     std::fs::write(path, bytes).unwrap();
 }
 
-/// Une session sur un fichier abîmé, chargé par `Action::Load`.
+/// A session on a corrupted file, loaded by `Action::Load`.
 fn start_on_a_discarding_file(dir: &Path) -> (Session, AppState, std::path::PathBuf) {
     let file = dir.join("abime.stf");
     write_file_with_a_discarded_calculation(&file);
     let (session, mut state) = start(Project::new("Vide").unwrap(), &file);
     state.dispatch(Action::Load);
-    assert!(state.alert().is_none(), "le projet se charge");
+    assert!(state.alert().is_none(), "the project loads");
     (session, state, file)
 }
 
-/// #309 (F3) : enregistrer sur le fichier source d'une lecture qui a écarté
-/// des données demande d'abord ; accepter écrit, et l'enregistrement suivant
-/// ne demande plus rien.
+/// #309 (F3): saving to the source file of a read that discarded
+/// data asks first; accepting writes, and the next save
+/// asks nothing more.
 #[test]
-fn enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit() {
+fn saving_to_the_source_with_discards_asks_then_writes() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, file) = start_on_a_discarding_file(dir.path());
     let before = std::fs::read(&file).unwrap();
 
     state.dispatch(Action::Save);
-    let (name, what) = state.pending_discarded_save().expect("une question");
+    let (name, what) = state.pending_discarded_save().expect("a question");
     assert_eq!(name, "abime.stf");
     assert_eq!(what, "1 calculation");
     assert!(state.blocking_dialog());
-    assert!(state.alert().is_none(), "l'attente n'est pas un échec");
-    assert_eq!(std::fs::read(&file).unwrap(), before, "rien d'écrit");
+    assert!(state.alert().is_none(), "waiting is not a failure");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "nothing written");
 
     state.dispatch(Action::ConfirmDiscardedSave(true));
     assert!(state.pending_discarded_save().is_none());
-    assert_ne!(std::fs::read(&file).unwrap(), before, "écrit");
+    assert_ne!(std::fs::read(&file).unwrap(), before, "written");
     let (_, _, report) = stokesforge_persistence::load_with_report(&file).unwrap();
-    assert!(report.is_clean(), "le fichier réécrit est propre");
+    assert!(report.is_clean(), "the rewritten file is clean");
 
     let written = std::fs::read(&file).unwrap();
     state.dispatch(Action::AddGraph);
     state.dispatch(Action::Save);
-    assert!(state.pending_discarded_save().is_none(), "plus de question");
+    assert!(state.pending_discarded_save().is_none(), "no more question");
     assert_ne!(std::fs::read(&file).unwrap(), written);
     session.shutdown().unwrap();
 }
 
-/// Cancel n'écrit rien et oublie le geste qui attendait l'enregistrement.
+/// Cancel writes nothing and forgets the gesture that was waiting for the save.
 #[test]
-fn refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste() {
+fn refusing_the_overwrite_writes_nothing_and_forgets_the_gesture() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, file) = start_on_a_discarding_file(dir.path());
     let before = std::fs::read(&file).unwrap();
@@ -12443,23 +12380,23 @@ fn refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste() {
 
     state.dispatch(Action::ConfirmDiscardedSave(false));
     assert!(state.pending_discarded_save().is_none());
-    assert_eq!(std::fs::read(&file).unwrap(), before, "rien d'écrit");
-    assert!(!state.take_quit_ready(), "le geste est oublié");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "nothing written");
+    assert!(!state.take_quit_ready(), "the gesture is forgotten");
 
-    // La question revient, et accepter n'exécute pas le Quit oublié.
+    // The question comes back, and accepting does not run the forgotten Quit.
     state.dispatch(Action::Save);
     assert!(
         state.pending_discarded_save().is_some(),
-        "écarts toujours là"
+        "discards still there"
     );
     state.dispatch(Action::ConfirmDiscardedSave(true));
-    assert!(!state.take_quit_ready(), "Quit oublié");
+    assert!(!state.take_quit_ready(), "Quit forgotten");
     session.shutdown().unwrap();
 }
 
-/// Quit, Save, puis accepter : le projet est enregistré, puis l'application quitte.
+/// Quit, Save, then accept: the project is saved, then the application quits.
 #[test]
-fn quitter_enregistrer_accepter_enregistre_puis_quitte() {
+fn quit_save_accept_saves_then_quits() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, file) = start_on_a_discarding_file(dir.path());
     let before = std::fs::read(&file).unwrap();
@@ -12468,18 +12405,18 @@ fn quitter_enregistrer_accepter_enregistre_puis_quitte() {
         pending_edits: false,
     });
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
-    assert!(!state.take_quit_ready(), "attend la réponse");
+    assert!(!state.take_quit_ready(), "waits for the answer");
     state.dispatch(Action::ConfirmDiscardedSave(true));
     assert_ne!(std::fs::read(&file).unwrap(), before);
-    assert!(state.take_quit_ready(), "enregistré, puis Quit");
+    assert!(state.take_quit_ready(), "saved, then Quit");
     session.shutdown().unwrap();
 }
 
-/// Enregistrer sous un AUTRE chemin ne demande rien et laisse la source
-/// intacte ; y revenir demande tant que les écarts ne sont pas enregistrés, et
-/// Cancel rétablit le chemin précédent.
+/// Save As to ANOTHER path asks nothing and leaves the source
+/// intact; going back to it asks as long as the discards are not saved, and
+/// Cancel restores the previous path.
 #[test]
-fn enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui() {
+fn save_as_elsewhere_asks_nothing_but_going_back_to_the_source_does() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, file) = start_on_a_discarding_file(dir.path());
     let before = std::fs::read(&file).unwrap();
@@ -12490,10 +12427,10 @@ fn enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui() {
     });
     assert!(
         state.pending_discarded_save().is_none(),
-        "ailleurs : sans question"
+        "elsewhere: no question"
     );
     assert!(other.exists());
-    assert_eq!(std::fs::read(&file).unwrap(), before, "source intacte");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "source intact");
     assert_eq!(state.path(), other.display().to_string());
 
     state.dispatch(Action::SaveAs {
@@ -12501,10 +12438,10 @@ fn enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui() {
     });
     assert!(
         state.pending_discarded_save().is_some(),
-        "retour à la source"
+        "back to the source"
     );
     state.dispatch(Action::ConfirmDiscardedSave(false));
-    assert_eq!(state.path(), other.display().to_string(), "chemin rétabli");
+    assert_eq!(state.path(), other.display().to_string(), "path restored");
     assert_eq!(std::fs::read(&file).unwrap(), before);
 
     state.dispatch(Action::SaveAs {
@@ -12516,9 +12453,9 @@ fn enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui() {
     session.shutdown().unwrap();
 }
 
-/// Un fichier propre, ou un nouveau projet, n'ouvre aucune question.
+/// A clean file, or a new project, opens no question.
 #[test]
-fn un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question() {
+fn a_clean_file_or_a_new_project_opens_no_question() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("propre.stf");
     stokesforge_persistence::save(&demo_project(), &file).unwrap();
@@ -12527,7 +12464,7 @@ fn un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question() {
     state.dispatch(Action::Save);
     assert!(state.pending_discarded_save().is_none());
 
-    // Un nouveau projet efface le repère de la source abîmée.
+    // A new project clears the mark of the corrupted source.
     let (session2, mut state2, bad) = start_on_a_discarding_file(dir.path());
     state2.dispatch(Action::NewProject {
         pending_edits: false,
@@ -12539,16 +12476,16 @@ fn un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question() {
     session2.shutdown().unwrap();
 }
 
-/// Le chargement du démarrage (`mark_loaded`) pose le même repère que le menu
-/// Fichier : le premier Enregistrer sur la source demande.
+/// The startup load (`mark_loaded`) sets the same mark as the File menu:
+/// the first Save on the source asks.
 #[test]
-fn le_chargement_du_demarrage_pose_le_repere_de_la_source() {
+fn the_startup_load_sets_the_source_mark() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("p.stf");
     let (session, mut state) = start(demo_project(), &file);
     state.mark_loaded(&stokesforge_session::LoadReport::default());
     state.dispatch(Action::Save);
-    assert!(state.pending_discarded_save().is_none(), "rapport propre");
+    assert!(state.pending_discarded_save().is_none(), "clean report");
 
     state.mark_loaded(&stokesforge_session::LoadReport {
         discarded_corrections: discarded(&[7]),
@@ -12556,13 +12493,13 @@ fn le_chargement_du_demarrage_pose_le_repere_de_la_source() {
     });
     let before = std::fs::read(&file).unwrap();
     state.dispatch(Action::Save);
-    let (_, what) = state.pending_discarded_save().expect("une question");
+    let (_, what) = state.pending_discarded_save().expect("a question");
     assert_eq!(what, "1 correction record");
     assert_eq!(std::fs::read(&file).unwrap(), before);
     session.shutdown().unwrap();
 }
 
-// -- Sauvegarde automatique et récupération (#317) --
+// -- Autosave and recovery (#317) --
 
 mod autosave {
     use super::*;
@@ -12571,7 +12508,7 @@ mod autosave {
 
     const PERIOD: Duration = Duration::from_secs(300);
 
-    /// Session sur la démonstration, dossier de secours dans `dir/recovery`.
+    /// Session on the demo, rescue folder in `dir/recovery`.
     fn start_recovery(dir: &Path, project_file: &str) -> (Session, AppState, PathBuf) {
         let path = if project_file.is_empty() {
             Path::new("").to_path_buf()
@@ -12584,8 +12521,8 @@ mod autosave {
         (session, state, recovery)
     }
 
-    /// Les fichiers `.stf` du dossier de secours (la fiche et le verrou ne
-    /// comptent pas).
+    /// The `.stf` files of the rescue folder (the record and the lock do not
+    /// count).
     fn copies(recovery: &Path) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(recovery) else {
             return Vec::new();
@@ -12603,10 +12540,10 @@ mod autosave {
         state.dispatch(Action::AddGraph);
     }
 
-    // -- Préférences, via les actions --
+    // -- Preferences, via the actions --
 
     #[test]
-    fn la_sauvegarde_est_active_par_defaut_avec_cinq_minutes() {
+    fn autosave_is_on_by_default_with_five_minutes() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
         assert!(state.autosave_enabled());
@@ -12619,13 +12556,13 @@ mod autosave {
         assert!(!state.autosave_enabled());
     }
 
-    // -- L'écriture --
+    // -- The write --
 
-    /// Une modification puis l'échéance : une copie relue égale au modèle, sans
-    /// aucune trace dans l'historique, le titre, le chemin, ni la question de
-    /// Quit ; le `.stf` de l'utilisateur n'est pas écrit.
+    /// A change then the deadline: a copy that reads back equal to the model, with
+    /// no trace in the history, the title, the path, nor the Quit
+    /// question; the user's `.stf` is not written.
     #[test]
-    fn la_copie_relit_le_modele_sans_toucher_historique_titre_ni_quit() {
+    fn the_copy_reads_back_the_model_without_touching_history_title_or_quit() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
@@ -12645,16 +12582,16 @@ mod autosave {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        assert!(name.starts_with("a-"), "nom du projet : {name}");
-        let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
+        assert!(name.starts_with("a-"), "project name: {name}");
+        let back = stokesforge_persistence::load(&copies[0]).expect("the copy reads back");
         assert_eq!(back.tree(), state.tree());
         assert!(
             !dir.path().join("a.stf").exists(),
-            "le .stf n'est pas écrit"
+            "the .stf is not written"
         );
         assert_eq!(state.snapshot().history.undo_label, undo_label);
         assert_eq!(state.snapshot().revision, revision);
-        assert_eq!(state.window_title(), title, "titre « modifié » inchangé");
+        assert_eq!(state.window_title(), title, "'modified' title unchanged");
         assert_eq!(state.path(), dir.path().join("a.stf").display().to_string());
 
         state.dispatch(Action::Quit {
@@ -12663,19 +12600,19 @@ mod autosave {
         assert_eq!(
             state.unsaved_pending(),
             Some(&UnsavedGesture::Quit),
-            "la copie n'a pas enregistré le projet"
+            "the copy did not save the project"
         );
         state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
-        // Témoin : un vrai enregistrement, lui, lève la question.
+        // Witness: a real save does raise the question.
         state.dispatch(Action::Save);
         state.dispatch(Action::Quit {
             pending_edits: false,
         });
-        assert!(state.take_quit_ready(), "enregistré : Quit direct");
+        assert!(state.take_quit_ready(), "saved: direct Quit");
     }
 
     #[test]
-    fn avant_l_echeance_rien_n_est_ecrit() {
+    fn before_the_deadline_nothing_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
@@ -12688,31 +12625,28 @@ mod autosave {
         assert_eq!(copies(&recovery).len(), 1);
     }
 
-    /// Rien n'a changé depuis le démarrage, puis depuis la dernière copie :
-    /// aucune écriture (la copie effacée à la main ne revient pas).
+    /// Nothing changed since startup, then since the last copy:
+    /// no write (the copy deleted by hand does not come back).
     #[test]
-    fn sans_changement_aucune_ecriture() {
+    fn without_a_change_no_write() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
         state.poll_autosave(t0);
         state.poll_autosave(t0 + PERIOD);
-        assert!(copies(&recovery).is_empty(), "rien depuis le démarrage");
+        assert!(copies(&recovery).is_empty(), "nothing since startup");
 
         change(&mut state);
         state.poll_autosave(t0 + 2 * PERIOD);
-        let copy = copies(&recovery).pop().expect("copie écrite");
+        let copy = copies(&recovery).pop().expect("copy written");
         std::fs::remove_file(&copy).unwrap();
         state.poll_autosave(t0 + 3 * PERIOD);
-        assert!(
-            copies(&recovery).is_empty(),
-            "rien depuis la dernière copie"
-        );
+        assert!(copies(&recovery).is_empty(), "nothing since the last copy");
     }
 
-    /// Un enregistrement remet le repère : aucune copie tant que rien ne change.
+    /// A save resets the mark: no copy as long as nothing changes.
     #[test]
-    fn apres_un_enregistrement_rien_a_copier() {
+    fn after_a_save_nothing_to_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
@@ -12723,9 +12657,9 @@ mod autosave {
         assert!(copies(&recovery).is_empty());
     }
 
-    /// Deux échéances avec des changements : un seul fichier, écrasé.
+    /// Two deadlines with changes: a single file, overwritten.
     #[test]
-    fn deux_echeances_ecrasent_la_meme_copie() {
+    fn two_deadlines_overwrite_the_same_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
@@ -12737,11 +12671,11 @@ mod autosave {
         let copies = copies(&recovery);
         assert_eq!(copies.len(), 1, "{copies:?}");
         let back = stokesforge_persistence::load(&copies[0]).unwrap();
-        assert_eq!(back.tree(), state.tree(), "la seconde écriture l'emporte");
+        assert_eq!(back.tree(), state.tree(), "the second write wins");
     }
 
     #[test]
-    fn preference_coupee_rien_n_est_ecrit() {
+    fn preference_off_nothing_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         state.dispatch(Action::SetAutosave(false));
@@ -12752,15 +12686,15 @@ mod autosave {
         assert!(copies(&recovery).is_empty());
     }
 
-    /// La période réglée s'applique, à partir du réglage.
+    /// The set period applies, from the setting.
     #[test]
-    fn la_periode_reglee_est_celle_du_minuteur() {
+    fn the_set_period_is_the_timer_period() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
         state.poll_autosave(t0);
-        // Réglée en cours de route : la nouvelle période compte dès l'image
-        // suivante, pas à l'ancienne échéance (5 minutes).
+        // Set along the way: the new period counts from the next frame,
+        // not at the old deadline (5 minutes).
         state.dispatch(Action::SetAutosaveMinutes(1));
         change(&mut state);
         let t1 = t0 + Duration::from_secs(10);
@@ -12772,7 +12706,7 @@ mod autosave {
     }
 
     #[test]
-    fn un_projet_sans_chemin_est_copie_sous_untitled() {
+    fn a_project_without_a_path_is_copied_as_untitled() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, recovery) = start_recovery(dir.path(), "");
         let t0 = Instant::now();
@@ -12789,10 +12723,10 @@ mod autosave {
         assert!(name.starts_with("Untitled-"), "{name}");
     }
 
-    /// Macro ouverte : l'échéance est repoussée sans erreur ; fermée, la copie
-    /// part au nouvel essai.
+    /// Open macro: the deadline is pushed back without error; closed, the copy
+    /// goes out at the new attempt.
     #[test]
-    fn pendant_une_macro_l_echeance_saute_sans_erreur() {
+    fn during_a_macro_the_deadline_is_skipped_without_error() {
         let dir = tempfile::tempdir().unwrap();
         let (session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
         let t0 = Instant::now();
@@ -12804,13 +12738,13 @@ mod autosave {
         assert!(state.snapshot().history.in_macro);
         let due = t0 + PERIOD;
         let messages = state.status_history().count();
-        let retry = state.poll_autosave(due).expect("réarmé");
-        assert!(retry < PERIOD, "nouvel essai rapproché : {retry:?}");
+        let retry = state.poll_autosave(due).expect("re-armed");
+        assert!(retry < PERIOD, "closer new attempt: {retry:?}");
         assert!(copies(&recovery).is_empty());
         assert_eq!(
             state.status_history().count(),
             messages,
-            "aucun message : sans avertissement ni erreur"
+            "no message: no warning or error"
         );
         handle.end_macro().unwrap();
         state.refresh();
@@ -12818,9 +12752,9 @@ mod autosave {
         assert_eq!(copies(&recovery).len(), 1);
     }
 
-    /// Un recalcul en cours : même saut.
+    /// A recalculation running: same skip.
     #[test]
-    fn pendant_un_recalcul_l_echeance_saute() {
+    fn during_a_recalculation_the_deadline_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("l.stf"));
         let recovery = dir.path().join("recovery");
@@ -12828,8 +12762,8 @@ mod autosave {
         let t0 = Instant::now();
         state.poll_autosave(t0);
         state.dispatch(Action::AddGraph);
-        assert!(state.recalc_work().is_some(), "recalcul en cours");
-        let retry = state.poll_autosave(t0 + PERIOD).expect("réarmé");
+        assert!(state.recalc_work().is_some(), "recalculation running");
+        let retry = state.poll_autosave(t0 + PERIOD).expect("re-armed");
         assert!(retry < PERIOD);
         assert!(copies(&recovery).is_empty());
         finish_recalculation(&mut state);
@@ -12837,14 +12771,14 @@ mod autosave {
         assert_eq!(
             copies(&recovery).len(),
             1,
-            "messages : {}",
+            "messages: {}",
             status_messages(&state)
         );
     }
 
-    /// Dossier impossible : un seul avertissement tant que ça dure.
+    /// Impossible folder: a single warning as long as it lasts.
     #[test]
-    fn un_dossier_impossible_ne_dit_qu_un_avertissement() {
+    fn an_impossible_folder_says_only_a_warning() {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
         let obstacle = dir.path().join("fichier");
@@ -12863,7 +12797,7 @@ mod autosave {
         state.poll_autosave(t0 + PERIOD);
         state.poll_autosave(t0 + 2 * PERIOD);
         state.poll_autosave(t0 + 3 * PERIOD);
-        assert_eq!(warnings(&state), before + 1, "un seul avertissement");
+        assert_eq!(warnings(&state), before + 1, "a single warning");
         assert!(state.status().is_some_and(|s| s.text
             == stokesforge_app_state::tr!(
                 "status-autosave-failed",
@@ -12873,7 +12807,7 @@ mod autosave {
             )));
     }
 
-    // -- La suppression de la copie --
+    // -- Deleting the copy --
 
     fn with_copy(dir: &Path, file: &str) -> (Session, AppState, PathBuf, Instant) {
         let (session, mut state, recovery) = start_recovery(dir, file);
@@ -12881,12 +12815,12 @@ mod autosave {
         state.poll_autosave(t0);
         change(&mut state);
         state.poll_autosave(t0 + PERIOD);
-        assert_eq!(copies(&recovery).len(), 1, "copie écrite");
+        assert_eq!(copies(&recovery).len(), 1, "copy written");
         (session, state, recovery, t0)
     }
 
     #[test]
-    fn enregistrer_supprime_la_copie() {
+    fn saving_deletes_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
         state.dispatch(Action::Save);
@@ -12894,12 +12828,12 @@ mod autosave {
         assert_eq!(
             std::fs::read_dir(&recovery).unwrap().count(),
             0,
-            "fiche et verrou aussi"
+            "record and lock too"
         );
     }
 
     #[test]
-    fn enregistrer_sous_supprime_la_copie() {
+    fn save_as_deletes_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state, recovery, _) = with_copy(dir.path(), "");
         state.dispatch(Action::SaveAs {
@@ -12909,7 +12843,7 @@ mod autosave {
     }
 
     #[test]
-    fn fermer_en_abandonnant_supprime_la_copie() {
+    fn closing_by_discarding_deletes_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
         state.dispatch(Action::Quit {
@@ -12918,7 +12852,7 @@ mod autosave {
         assert_eq!(
             copies(&recovery).len(),
             1,
-            "la question est posée, rien n'est perdu"
+            "the question is asked, nothing is lost"
         );
         state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
         assert!(state.take_quit_ready());
@@ -12926,7 +12860,7 @@ mod autosave {
     }
 
     #[test]
-    fn nouveau_projet_supprime_la_copie() {
+    fn new_project_deletes_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
         state.dispatch(Action::NewProject {
@@ -12937,7 +12871,7 @@ mod autosave {
     }
 
     #[test]
-    fn ouvrir_un_autre_projet_supprime_la_copie() {
+    fn opening_another_project_deletes_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let other = dir.path().join("autre.stf");
         {
@@ -12955,9 +12889,9 @@ mod autosave {
         assert!(copies(&recovery).is_empty());
     }
 
-    /// Annuler la question garde la copie.
+    /// Canceling the question keeps the copy.
     #[test]
-    fn annuler_la_question_garde_la_copie() {
+    fn canceling_the_question_keeps_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
         state.dispatch(Action::Quit {
@@ -12967,9 +12901,9 @@ mod autosave {
         assert_eq!(copies(&recovery).len(), 1);
     }
 
-    /// Session perdue puis Close : la copie automatique est gardée.
+    /// Lost session then Close: the automatic copy is kept.
     #[test]
-    fn session_perdue_puis_close_garde_la_copie() {
+    fn lost_session_then_close_keeps_the_copy() {
         let dir = tempfile::tempdir().unwrap();
         let (session, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
         let automatic = copies(&recovery);
@@ -12977,15 +12911,15 @@ mod autosave {
         state.poll_recalc();
         assert!(state.session_lost());
         state.dispatch(Action::DismissAlert);
-        assert!(state.take_quit_ready(), "Close ferme l'application");
+        assert!(state.take_quit_ready(), "Close closes the application");
         for copy in automatic {
-            assert!(copy.exists(), "la copie automatique reste : {copy:?}");
+            assert!(copy.exists(), "the automatic copy stays: {copy:?}");
         }
     }
 
-    // -- La récupération au démarrage --
+    // -- Recovery at startup --
 
-    /// Une copie d'un processus disparu : écrite sans verrou, comme #310.
+    /// A copy from a vanished process: written without a lock, like #310.
     fn dead_copy(recovery: &Path, project_path: &str, graphs: usize) -> (PathBuf, Tree) {
         let dir = tempfile::tempdir().unwrap();
         let (_session, mut source) = start_demo(dir.path());
@@ -12999,16 +12933,16 @@ mod autosave {
     }
 
     #[test]
-    fn open_reprend_le_chemin_d_origine_et_un_historique_vide() {
+    fn open_takes_the_original_path_and_an_empty_history() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let origin = dir.path().join("travail.stf");
         let (copy, tree) = dead_copy(&recovery, &origin.display().to_string(), 2);
-        // Un projet vide : rien à perdre, Open charge sans poser de question.
-        let (_s, mut state) = start(Project::new("Vide").unwrap(), Path::new(""));
+        // An empty project: nothing to lose, Open loads without asking a question.
+        let (_s, mut state) = start(Project::new("Empty").unwrap(), Path::new(""));
         state.set_recovery_dir(Some(recovery.clone()));
         state.scan_recovery();
-        let rows = state.recovery_rows().expect("une copie proposée");
+        let rows = state.recovery_rows().expect("a proposed copy");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].path, copy);
 
@@ -13016,14 +12950,11 @@ mod autosave {
 
         assert_eq!(state.tree().as_ref(), &tree);
         assert_eq!(state.path(), origin.display().to_string());
-        assert!(!state.snapshot().history.can_undo, "historique vide");
-        assert!(
-            state.recovery_rows().is_none(),
-            "liste vide : fenêtre fermée"
-        );
-        assert!(!copy.exists(), "la copie ouverte est effacée");
-        assert_eq!(copies(&recovery).len(), 1, "recopiée dans l'emplacement");
-        // Travail non enregistré : fermer pose la question.
+        assert!(!state.snapshot().history.can_undo, "empty history");
+        assert!(state.recovery_rows().is_none(), "empty list: window closed");
+        assert!(!copy.exists(), "the opened copy is deleted");
+        assert_eq!(copies(&recovery).len(), 1, "copied again into the location");
+        // Unsaved work: closing asks the question.
         state.dispatch(Action::Quit {
             pending_edits: false,
         });
@@ -13031,7 +12962,7 @@ mod autosave {
     }
 
     #[test]
-    fn open_d_une_copie_sans_chemin_laisse_le_chemin_vide() {
+    fn open_of_a_copy_without_a_path_leaves_the_path_empty() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let (copy, _) = dead_copy(&recovery, "", 1);
@@ -13042,10 +12973,10 @@ mod autosave {
         assert_eq!(state.path(), "");
     }
 
-    /// Du travail en cours : la question « Enregistrer ? » d'abord ; la liste
-    /// reste ouverte pour les autres copies.
+    /// Work in progress: the "Save?" question first; the list
+    /// stays open for the other copies.
     #[test]
-    fn open_demande_enregistrer_et_la_liste_reste_ouverte() {
+    fn open_asks_to_save_and_the_list_stays_open() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let (first, _) = dead_copy(&recovery, "", 1);
@@ -13061,17 +12992,17 @@ mod autosave {
             state.unsaved_pending(),
             Some(&UnsavedGesture::OpenRecovery(first.clone()))
         );
-        assert!(first.exists(), "rien n'est chargé avant la réponse");
+        assert!(first.exists(), "nothing is loaded before the answer");
         state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
 
         assert!(!first.exists());
-        let rows = state.recovery_rows().expect("la liste reste ouverte");
+        let rows = state.recovery_rows().expect("the list stays open");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].path, second);
     }
 
     #[test]
-    fn ignore_garde_le_fichier_et_il_revient_au_demarrage_suivant() {
+    fn ignore_keeps_the_file_and_it_comes_back_at_the_next_startup() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let (copy, _) = dead_copy(&recovery, "", 1);
@@ -13080,15 +13011,15 @@ mod autosave {
         state.scan_recovery();
         state.dispatch(Action::RecoveryIgnore(copy.clone()));
         assert!(state.recovery_rows().is_none());
-        assert!(copy.exists(), "Ignore garde le fichier");
+        assert!(copy.exists(), "Ignore keeps the file");
         let (_s2, mut next) = start_demo(dir.path());
         next.set_recovery_dir(Some(recovery));
         next.scan_recovery();
-        assert_eq!(next.recovery_rows().unwrap().len(), 1, "reproposée");
+        assert_eq!(next.recovery_rows().unwrap().len(), 1, "offered again");
     }
 
     #[test]
-    fn delete_demande_confirmation_puis_efface_copie_fiche_et_verrou() {
+    fn delete_asks_confirmation_then_deletes_copy_record_and_lock() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let (copy, _) = dead_copy(&recovery, "/x/b.stf", 1);
@@ -13098,11 +13029,11 @@ mod autosave {
         state.scan_recovery();
 
         state.dispatch(Action::RecoveryDelete(copy.clone()));
-        assert!(copy.exists(), "rien n'est effacé avant la confirmation");
+        assert!(copy.exists(), "nothing is deleted before the confirmation");
         assert_eq!(state.pending_recovery_delete().as_deref(), Some("b.stf"));
         assert!(state.blocking_dialog());
         state.dispatch(Action::ConfirmRecoveryDelete(false));
-        assert!(copy.exists(), "Cancel garde la copie");
+        assert!(copy.exists(), "Cancel keeps the copy");
         assert!(state.recovery_rows().is_some());
 
         state.dispatch(Action::RecoveryDelete(copy.clone()));
@@ -13111,9 +13042,9 @@ mod autosave {
         assert!(state.recovery_rows().is_none());
     }
 
-    /// Close ignore tout : les fichiers restent.
+    /// Close ignores everything: the files stay.
     #[test]
-    fn close_ignore_les_copies_restantes() {
+    fn close_ignores_the_remaining_copies() {
         let dir = tempfile::tempdir().unwrap();
         let recovery = dir.path().join("recovery");
         let (copy, _) = dead_copy(&recovery, "", 1);
@@ -13125,10 +13056,10 @@ mod autosave {
         assert!(copy.exists());
     }
 
-    /// Sans dossier de secours (tests, système sans dossier de données) : rien
-    /// n'est proposé, rien n'est écrit.
+    /// Without a rescue folder (tests, system with no data folder): nothing
+    /// is offered, nothing is written.
     #[test]
-    fn sans_dossier_de_secours_rien_ne_se_passe() {
+    fn without_a_rescue_folder_nothing_happens() {
         let dir = tempfile::tempdir().unwrap();
         let (_s, mut state) = start_demo(dir.path());
         state.set_recovery_dir(None);

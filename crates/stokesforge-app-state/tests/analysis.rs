@@ -1,7 +1,7 @@
-//! Le modèle de la fenêtre d'analyse (#181), sans interface : défauts par
-//! opération, ce qui manque pour valider, l'opération décrite, l'aperçu et le
-//! lot enregistré (noms longs M6, colonnes demandées, métadonnées conservées en
-//! modification).
+//! The analysis window model (#181), without interface: defaults per
+//! operation, what is missing to validate, the described operation, the preview
+//! and the saved batch (long names M6, requested columns, metadata kept on
+//! edit).
 
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::model::Model;
@@ -20,7 +20,7 @@ struct Fixture {
     y: NodeId,
 }
 
-/// Une droite `y = 2x + 1` posée sur 21 points, colonne Y « Intensity ».
+/// A line `y = 2x + 1` laid on 21 points, Y column "Intensity".
 fn fixture() -> Fixture {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
@@ -126,8 +126,8 @@ fn what_is_missing_is_named_before_any_computation() {
     assert!(matches!(form.issues().as_slice(), [Issue::BadModel(_)]));
 }
 
-/// #260 : le brouillon se décrit en `Operation` et `Operation::readiness` dit
-/// ce qui manque, y compris pour le point ou la zone uniques.
+/// #260: the draft is described as an `Operation` and `Operation::readiness`
+/// says what is missing, including for the single point or zone.
 #[test]
 fn a_constant_baseline_names_its_missing_point_or_zone() {
     let f = fixture();
@@ -144,8 +144,8 @@ fn a_constant_baseline_names_its_missing_point_or_zone() {
     assert!(form.issues().is_empty());
 }
 
-/// #260 : un degré hors plafond (lu d'un fichier) est un prérequis refusé, pas
-/// une allocation de milliards de paramètres.
+/// #260: a degree above the cap (read from a file) is a refused prerequisite,
+/// not an allocation of billions of parameters.
 #[test]
 fn a_huge_polynomial_degree_is_an_issue_not_an_allocation() {
     let f = fixture();
@@ -161,7 +161,7 @@ fn a_huge_polynomial_degree_is_an_issue_not_an_allocation() {
     assert_eq!(form.operation(), None);
 }
 
-/// Le bouton « Auto » ne regarde que la plage ajustée.
+/// The "Auto" button only looks at the fitted range.
 #[test]
 fn auto_reads_only_the_fitted_range() {
     let f = fixture();
@@ -184,7 +184,7 @@ fn auto_reads_only_the_fitted_range() {
         .fit
         .params
         .iter()
-        .map(|p| p.initial.expect("une valeur de départ"))
+        .map(|p| p.initial.expect("a starting value"))
         .collect();
     assert!((initial[0] - 1.0).abs() < 1e-6 && (initial[1] - 3.0).abs() < 1e-6);
     form.setup.fit.range = None;
@@ -210,7 +210,7 @@ fn the_operation_reads_only_the_active_family() {
             keep_baseline: true,
         })
     );
-    // Changer de famille ne perd rien de la ligne de base.
+    // Changing family loses nothing of the baseline.
     form.set_kind(OperationKind::Integrate);
     assert!(matches!(
         form.operation(),
@@ -260,7 +260,7 @@ fn the_saved_batch_names_columns_after_their_source() {
     );
     assert!(draft.outputs.iter().all(|o| o.meta.unit == "counts"));
     assert!(draft.outputs.iter().all(|o| o.meta.comment == "Correction"));
-    // La droite posée est exactement la courbe : la correction est nulle.
+    // The laid line is exactly the curve: the correction is zero.
     assert!(draft.outputs[0].data.iter().all(|v| v.abs() < 1e-9));
     assert!(draft.keep_results);
     assert_eq!(draft.results.len(), 1);
@@ -323,35 +323,35 @@ fn editing_keeps_the_metadata_the_user_gave_to_an_output() {
 #[test]
 fn preview_gestures_write_into_the_active_family() {
     let f = fixture();
-    // Droite par deux points : le troisième remplace le plus ancien.
+    // Line through two points: the third replaces the oldest.
     let mut form = AnalysisForm::new(&Preset::BaselineLine, series(&f), false);
     for p in [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)] {
         form.add_point(p.0, p.1);
     }
     assert_eq!(form.setup.baseline.points, vec![(2.0, 2.0), (3.0, 3.0)]);
-    // Ancrages : triés par X.
+    // Anchors: sorted by X.
     let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
     form.add_point(5.0, 1.0);
     form.add_point(1.0, 2.0);
     assert_eq!(form.setup.baseline.points, vec![(1.0, 2.0), (5.0, 1.0)]);
     assert!(form.remove_near(5.2, 0.5));
-    assert!(!form.remove_near(9.0, 0.5), "trop loin");
+    assert!(!form.remove_near(9.0, 0.5), "too far");
     assert_eq!(form.setup.baseline.points, vec![(1.0, 2.0)]);
-    // Zones : bornes remises dans l'ordre, une zone vide est ignorée.
+    // Zones: bounds put back in order, an empty zone is ignored.
     let mut form = AnalysisForm::new(&Preset::BaselinePolynomial, series(&f), false);
     form.add_zone(8.0, 2.0);
     form.add_zone(4.0, 4.0);
     assert_eq!(form.setup.baseline.zones, vec![(2.0, 8.0)]);
     assert!(
         form.remove_near(5.0, 0.0),
-        "une zone se retire par un point dedans"
+        "a zone is removed by a point inside it"
     );
-    // Plage d'ajustement : une seule.
+    // Fit range: only one.
     let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
     form.add_zone(1.0, 3.0);
     form.add_zone(5.0, 9.0);
     assert_eq!(form.setup.fit.range, Some((5.0, 9.0)));
-    // Pics : positions triées.
+    // Peaks: sorted positions.
     let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
     form.add_point(7.0, 1.0);
     form.add_point(3.0, 1.0);
@@ -370,9 +370,9 @@ fn the_natural_tool_follows_the_family() {
     assert_eq!(tool(Preset::Peaks), PreviewTool::Points);
 }
 
-/// #270, #299 : seule la détection de pics offre le choix entre un clic (la
-/// position d'un pic) et un glisser (sa plage) ; les autres analyses n'ont
-/// aucun geste à choisir, le leur est `natural_tool`.
+/// #270, #299: only peak detection offers the choice between a click (the
+/// position of a peak) and a drag (its range); the other analyses have no
+/// gesture to choose, theirs is `natural_tool`.
 #[test]
 fn only_peaks_offer_a_choice_of_gesture() {
     use stokesforge_app_state::analysis::PreviewTool;
@@ -394,7 +394,10 @@ fn only_peaks_offer_a_choice_of_gesture() {
     let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
     assert!(form.tool_choices().contains(&form.natural_tool()));
     form.set_kind(stokesforge_analysis::ops::OperationKind::Integrate);
-    assert!(form.tool_choices().is_empty(), "le choix suit la famille");
+    assert!(
+        form.tool_choices().is_empty(),
+        "the choice follows the family"
+    );
 }
 
 #[test]
@@ -456,7 +459,7 @@ fn editing_a_weighted_fit_keeps_its_weighting() {
         .unwrap();
     let calc = f.project.tree().calculation(id).unwrap().clone();
     let again = AnalysisForm::from_calculation(id, &calc);
-    assert!(again.setup.fit.weighted, "la pondération survit à Edit");
+    assert!(again.setup.fit.weighted, "weighting survives Edit");
     assert_eq!(again.effective_series(), form.effective_series());
 }
 
@@ -473,7 +476,7 @@ fn changing_the_components_keeps_the_shift_settings_at_the_end() {
         form.setup.reconv.resize_params();
         let params = &form.setup.reconv.spec.params;
         assert_eq!(params.len(), 2 + 2 * components);
-        assert_eq!(params.last().unwrap(), &marked, "{components} composantes");
+        assert_eq!(params.last().unwrap(), &marked, "{components} components");
         assert_ne!(params[params.len() - 2], marked);
     }
 }
@@ -489,10 +492,10 @@ fn the_preview_is_not_recomputed_for_the_tool_or_the_average() {
     other.keep_results = !form.keep_results;
     assert!(
         form.same_preview(&other),
-        "outil et moyenne ne changent pas l'aperçu"
+        "tool and average do not change the preview"
     );
     other.setup.baseline.points.push((1.0, 1.0));
-    assert!(!form.same_preview(&other), "un point posé le change");
+    assert!(!form.same_preview(&other), "a placed point changes it");
 }
 
 #[test]
@@ -503,10 +506,13 @@ fn the_three_exponentials_are_three_distinct_fit_models() {
         Model::ExponentialOffset,
         Model::Exponential2,
     ] {
-        assert!(models.contains(&wanted), "{wanted:?} absent du menu Fit");
+        assert!(
+            models.contains(&wanted),
+            "{wanted:?} missing from the Fit menu"
+        );
     }
-    // Chaque variante a son propre nombre de paramètres : choisir l'une dans la
-    // fenêtre n'en lance pas une autre (#204).
+    // Each variant has its own number of parameters: choosing one in the
+    // window does not run another one (#204).
     let counts: Vec<usize> = [
         Model::Exponential,
         Model::ExponentialOffset,
@@ -529,17 +535,17 @@ fn the_center_window_of_the_peaks_reaches_the_operation_and_comes_back() {
     let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
     form.setup.peaks.center_window = Some(0.75);
     let Some(Operation::Peaks { spec, .. }) = form.operation() else {
-        panic!("une opération de pics est attendue");
+        panic!("a peaks operation is expected");
     };
     assert_eq!(spec.center_window, Some(0.75));
     let op = form.operation().unwrap();
     let mut reopened = AnalysisForm::new(&preset_of(&op), series(&f), false);
     reopened.setup.load(&op);
     assert_eq!(reopened.setup.peaks.center_window, Some(0.75));
-    // Témoin : sans fenêtre, les positions restent libres.
+    // Witness: without a window, the positions stay free.
     form.setup.peaks.center_window = None;
     let Some(Operation::Peaks { spec, .. }) = form.operation() else {
-        panic!("une opération de pics est attendue");
+        panic!("a peaks operation is expected");
     };
     assert_eq!(spec.center_window, None);
 }
@@ -555,7 +561,11 @@ fn the_area_unit_is_the_product_of_the_units_and_only_when_both_exist() {
         project.set_column_meta(x, meta).unwrap();
     };
     let s = series(&f).remove(0);
-    assert_eq!(value_unit(f.project.tree(), &s, "area"), "", "X sans unité");
+    assert_eq!(
+        value_unit(f.project.tree(), &s, "area"),
+        "",
+        "X without a unit"
+    );
     x_unit(&mut f.project, f.x, "nm");
     assert_eq!(value_unit(f.project.tree(), &s, "area"), "nm·counts");
     assert_eq!(value_unit(f.project.tree(), &s, "area.total"), "nm·counts");
@@ -563,7 +573,7 @@ fn the_area_unit_is_the_product_of_the_units_and_only_when_both_exist() {
     assert_eq!(
         value_unit(f.project.tree(), &s, "param.tau"),
         "",
-        "pas une aire"
+        "not an area"
     );
     assert_eq!(with_unit("12".into(), "nm·counts"), "12 nm·counts");
     assert_eq!(with_unit("12".into(), ""), "12");
@@ -588,15 +598,15 @@ fn auto_fills_the_starting_values_of_a_free_model_from_the_data() {
         .fit
         .params
         .iter()
-        .map(|p| p.initial.expect("une valeur de départ"))
+        .map(|p| p.initial.expect("a starting value"))
         .collect();
     assert_eq!(initial.len(), 2);
     assert!(initial.iter().all(|v| v.is_finite()));
     assert!(
         initial.iter().any(|v| v.abs() > 10.0),
-        "le départ suit l'échelle des données, pas « tout à 1 » : {initial:?}"
+        "the start follows the data scale, not 'all at 1': {initial:?}"
     );
-    // Un paramètre fixé garde sa valeur.
+    // A fixed parameter keeps its value.
     form.setup.fit.params[0].fixed = true;
     form.setup.fit.params[0].initial = Some(7.0);
     form.setup.fit.auto_initial(&xs, &ys);
@@ -606,18 +616,17 @@ fn auto_fills_the_starting_values_of_a_free_model_from_the_data() {
 #[test]
 fn every_builtin_model_formula_compiles_in_typst() {
     use stokesforge_render::formula;
-    let fonts =
-        formula::resolve_fonts(&stokesforge_render::FontChoice::default()).expect("polices");
+    let fonts = formula::resolve_fonts(&stokesforge_render::FontChoice::default()).expect("fonts");
     for model in Preset::fit_models() {
         match model_formula_source(&model) {
             Some(source) => {
                 let (sans, math) = fonts.clone();
                 formula::compile(source, 14.0, [0, 0, 0, 255], sans, math)
-                    .unwrap_or_else(|error| panic!("{model:?} : {source:?} : {error}"));
+                    .unwrap_or_else(|error| panic!("{model:?}: {source:?}: {error}"));
             }
             None => assert!(
                 matches!(model, Model::Custom { .. }),
-                "seul le modèle libre n'a pas de formule fixe : {model:?}"
+                "only the free model has no fixed formula: {model:?}"
             ),
         }
     }
@@ -626,7 +635,7 @@ fn every_builtin_model_formula_compiles_in_typst() {
 #[test]
 fn handles_expose_points_edges_and_seeds_and_move_them() {
     let f = fixture();
-    // Ancrages : X et Y se déplacent, les points restent triés.
+    // Anchors: X and Y move, the points stay sorted.
     let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
     form.add_point(1.0, 2.0);
     form.add_point(5.0, 1.0);
@@ -635,13 +644,10 @@ fn handles_expose_points_edges_and_seeds_and_move_them() {
     assert_eq!(handles[1].y, Some(1.0));
     assert!(form.move_handle(HandleSlot::Point(0), 7.0, 3.0));
     assert_eq!(form.setup.baseline.points, vec![(5.0, 1.0), (7.0, 3.0)]);
-    assert!(
-        !form.move_handle(HandleSlot::Point(9), 1.0, 1.0),
-        "disparue"
-    );
+    assert!(!form.move_handle(HandleSlot::Point(9), 1.0, 1.0), "gone");
     assert!(!form.move_handle(HandleSlot::Point(0), f64::NAN, 1.0));
 
-    // Zones : deux bornes par zone, jamais croisées ni réduites à un point.
+    // Zones: two bounds per zone, never crossed nor reduced to a point.
     let mut form = AnalysisForm::new(&Preset::BaselinePolynomial, series(&f), false);
     form.add_zone(2.0, 8.0);
     let edge = |e| HandleSlot::Edge(RangeSet::BaselineZones, 0, e);
@@ -652,17 +658,20 @@ fn handles_expose_points_edges_and_seeds_and_move_them() {
     assert_eq!(
         form.setup.baseline.zones,
         vec![(8.0, 10.0)],
-        "ordre rétabli"
+        "order restored"
     );
-    assert!(!form.move_handle(edge(Edge::Hi), 8.0, 0.0), "plage nulle");
+    assert!(
+        !form.move_handle(edge(Edge::Hi), 8.0, 0.0),
+        "zero-width range"
+    );
 
-    // Intégrale, ajustement, pics : plages et positions.
+    // Integral, fit, peaks: ranges and positions.
     let mut form = AnalysisForm::new(&Preset::Integrate, series(&f), false);
     form.add_zone(1.0, 3.0);
     assert!(form.move_handle(HandleSlot::Edge(RangeSet::Integrate, 0, Edge::Hi), 6.0, 0.0));
     assert_eq!(form.setup.integrate.ranges, vec![(1.0, 6.0)]);
     let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
-    assert!(form.handles().is_empty(), "pas de plage, pas de poignée");
+    assert!(form.handles().is_empty(), "no range, no handle");
     form.add_zone(1.0, 3.0);
     assert!(form.move_handle(HandleSlot::Edge(RangeSet::Fit, 0, Edge::Lo), 0.5, 0.0));
     assert_eq!(form.setup.fit.range, Some((0.5, 3.0)));
@@ -675,7 +684,7 @@ fn handles_expose_points_edges_and_seeds_and_move_them() {
 }
 
 #[test]
-fn constante_un_seul_point_ou_une_zone_et_reouverture_exacte() {
+fn constant_single_point_or_zone_and_exact_reopening() {
     let f = fixture();
     let mut form = AnalysisForm::new(&Preset::BaselineConstant, series(&f), false);
     assert!(form.operation_for(false).is_none());
@@ -709,7 +718,7 @@ fn constante_un_seul_point_ou_une_zone_et_reouverture_exacte() {
 }
 
 #[test]
-fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
+fn changing_the_constant_shape_keeps_the_anchors_and_the_zones() {
     let f = fixture();
     let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
     for (x, y) in [(1.0, 3.0), (2.0, 5.0), (3.0, 7.0)] {
@@ -719,7 +728,7 @@ fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
     form.setup.baseline.shape = BaselineShape::Constant;
     assert!(
         form.operation_for(false).is_none(),
-        "la constante a son propre point"
+        "the constant has its own point"
     );
     form.add_point(4.0, 9.0);
     assert!(form.move_handle(HandleSlot::Point(0), 5.0, 11.0));
@@ -733,7 +742,7 @@ fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
     form.setup.baseline.shape = BaselineShape::ConstantZone;
     assert!(
         form.operation_for(false).is_none(),
-        "la constante a sa propre zone"
+        "the constant has its own zone"
     );
     form.add_zone(4.0, 6.0);
     assert!(form.move_handle(
@@ -752,7 +761,7 @@ fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
     assert!(form.remove_near(5.0, 0.01));
     form.setup.baseline.shape = BaselineShape::Zones;
     assert_eq!(form.operation_for(false), Some(zones));
-    // La droite utilise toujours les deux premiers ancrages conservés.
+    // The line still uses the first two kept anchors.
     form.setup.baseline.shape = BaselineShape::TwoPoints;
     assert!(matches!(
         form.operation_for(false),
@@ -766,9 +775,9 @@ fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
     ));
 }
 
-/// #324 : le lissage est de la catégorie « Data Manipulation », sa fenêtre en
-/// points est toujours impaire, son brouillon décrit l'opération des réglages
-/// et se rouvre sur la même méthode.
+/// #324: smoothing is in the "Data Manipulation" category, its window in
+/// points is always odd, its draft describes the operation of the settings
+/// and reopens on the same method.
 #[test]
 fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     use stokesforge_analysis::smooth::{SmoothMethod, SmoothWindow};
@@ -785,14 +794,11 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     let mut form = AnalysisForm::new(&Preset::SmoothSavitzkyGolay, series(&f), true);
     assert_eq!(form.kind, OperationKind::Smooth);
     form.setup.smooth.set_points(10);
-    assert_eq!(
-        form.setup.smooth.points, 11,
-        "une fenêtre paire est relevée"
-    );
+    assert_eq!(form.setup.smooth.points, 11, "an even window is raised");
     form.setup.smooth.set_points(2);
-    assert_eq!(form.setup.smooth.points, 3, "bornée au minimum");
+    assert_eq!(form.setup.smooth.points, 3, "clamped to the minimum");
     form.setup.smooth.set_points(10_000);
-    assert_eq!(form.setup.smooth.points, 1001, "bornée au plafond");
+    assert_eq!(form.setup.smooth.points, 1001, "clamped to the cap");
     form.setup.smooth.set_points(9);
 
     let op = form.operation().unwrap();
@@ -803,7 +809,7 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     assert_eq!(spec.window, SmoothWindow::Points(9));
     assert_eq!(preset_of(&op), Preset::SmoothSavitzkyGolay);
 
-    // En unités de X, la fenêtre est celle du champ de largeur.
+    // In X units, the window is the one of the width field.
     form.setup.smooth.unit = SmoothUnit::XUnits;
     form.setup.smooth.x_width = 4.0;
     let Some(Operation::Smooth { spec }) = form.operation() else {
@@ -812,8 +818,8 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     assert_eq!(spec.window, SmoothWindow::XUnits(4.0));
     form.setup.smooth.unit = SmoothUnit::Points;
 
-    // Le lot écrit la colonne lissée, nommée d'après sa source, de l'unité de
-    // celle-ci ; une droite lissée par SG reste la droite.
+    // The batch writes the smoothed column, named after its source, with the
+    // unit of the latter; a line smoothed by SG stays the line.
     let draft = form.draft(f.project.tree()).unwrap();
     assert_eq!(draft.outputs.len(), 1);
     assert_eq!(draft.outputs[0].key, "smoothed");
@@ -822,7 +828,7 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     assert_eq!(draft.outputs[0].meta.comment, "Smoothing");
     let ys: Vec<f64> = (0..21).map(|x| 2.0 * f64::from(x) + 1.0).collect();
     for (row, y) in ys.iter().enumerate().take(17).skip(4) {
-        assert!((draft.outputs[0].data[row] - y).abs() < 1e-9, "ligne {row}");
+        assert!((draft.outputs[0].data[row] - y).abs() < 1e-9, "row {row}");
     }
 
     let id = f.project.add_calculation(draft).unwrap();
@@ -831,7 +837,7 @@ fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
     assert_eq!(again.operation(), Some(op));
     assert_eq!(again.setup.smooth.points, 9);
 
-    // Un lissage peut remplacer les données, comme une correction.
+    // Smoothing can replace the data, like a correction.
     let fresh = AnalysisForm::new(&Preset::SmoothMedian, series(&f), false);
     assert_eq!(fresh.replacement_disabled(f.project.tree()), None);
 }

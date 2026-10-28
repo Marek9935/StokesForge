@@ -1,32 +1,32 @@
-//! Les dernières analyses lancées (#249), listées en bas du menu Analysis,
-//! façon OriginLab : une méthode **et ses réglages**, sans les colonnes ni les
-//! plages. **Sans egui.**
+//! The latest analyses run (#249), listed at the bottom of the Analysis menu,
+//! OriginLab-style: a method **and its settings**, without the columns or the
+//! ranges. **No egui.**
 //!
-//! # Ce qui est retenu, ce qui ne l'est pas
+//! # What is kept, what is not
 //!
-//! Une entrée garde l'[`Operation`] du calcul lancé, **sans les plages et les
-//! valeurs de départ** : plages d'intégration, d'ajustement et de pics,
-//! positions de départ des pics, réglages par paramètre d'un ajustement ou d'une
-//! reconvolution (valeurs initiales, bornes, paramètres fixés ou partagés),
-//! fenêtre d'une reconvolution — la règle est `Operation::forget_positions`
-//! (`stokesforge-analysis`). Il reste la méthode, le degré, le
-//! modèle, Subtract ou Divide, les cases de sortie, « Replace original data » —
-//! et la **définition d'une ligne de base** (ses points, ses zones, ses
-//! ancrages), faute de quoi Ctrl+clic ne pourrait jamais relancer une ligne de
-//! base sur le spectre suivant, qui est le geste visé. La colonne de référence
-//! ou de réponse (`aux`) et les séries ne sont pas des réglages : la relance les
-//! reprend de la sélection courante (donc une correction par une référence
-//! ouvre toujours la fenêtre, qui attend sa colonne).
+//! An entry keeps the [`Operation`] of the calculation run, **without the
+//! ranges and the starting values**: integration, fit and peak ranges, peak
+//! starting positions, per-parameter settings of a fit or a reconvolution
+//! (initial values, bounds, fixed or shared parameters), window of a
+//! reconvolution — the rule is `Operation::forget_positions`
+//! (`stokesforge-analysis`). What remains is the method, the degree, the
+//! model, Subtract or Divide, the output boxes, "Replace original data" —
+//! and the **definition of a baseline** (its points, its zones, its
+//! anchors), without which Ctrl+click could never rerun a baseline on the
+//! next spectrum, which is the intended gesture. The reference or response
+//! column (`aux`) and the series are not settings: the rerun takes them from
+//! the current selection (so a correction by a reference always opens the
+//! window, which waits for its column).
 //!
-//! # Persistance
+//! # Persistence
 //!
-//! Les entrées vivent dans les préférences de l'application (#148), jamais dans
-//! le `.stf` : elles suivent l'utilisateur d'un projet à l'autre. L'opération
-//! traverse le fichier sous la forme de l'arbre générique de
-//! `stokesforge_analysis::tree` converti en JSON (le `.stf`, lui, l'écrit en
-//! MessagePack par `tree_to_value`, `stokesforge-persistence`) : un réglage
-//! nouveau ne change pas le format. Une entrée illisible est ignorée,
-//! jamais une erreur (invariant 10).
+//! The entries live in the application preferences (#148), never in the
+//! `.stf`: they follow the user from one project to another. The operation
+//! goes through the file as the generic tree of `stokesforge_analysis::tree`
+//! converted to JSON (the `.stf`, for its part, writes it as MessagePack
+//! through `tree_to_value`, `stokesforge-persistence`): a new setting does not
+//! change the format. An unreadable entry is ignored, never an error
+//! (invariant 10).
 
 use stokesforge_analysis::baseline::BaselineMethod;
 use stokesforge_analysis::model::Model;
@@ -36,21 +36,21 @@ use stokesforge_analysis::tree::Tree as OpTree;
 use crate::analysis::{preset_of, AnalysisForm, Preset};
 use crate::tr;
 
-/// Le nombre d'analyses retenues (Origin en garde autant).
+/// The number of analyses kept (Origin keeps as many).
 pub const MAX_RECENT: usize = 3;
 
-/// Une analyse retenue : la méthode et ses réglages.
+/// A kept analysis: the method and its settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecentAnalysis {
-    /// L'opération, sans point, plage ni valeur de départ.
+    /// The operation, without points, ranges or starting values.
     pub operation: Operation,
-    /// « Replace original data » était choisi.
+    /// "Replace original data" was chosen.
     pub replace_original: bool,
 }
 
 impl RecentAnalysis {
-    /// Ce que le formulaire lance, ou `None` quand il ne lance rien de neuf
-    /// (modification d'un calcul) ou n'a pas d'opération complète.
+    /// What the form launches, or `None` when it launches nothing new
+    /// (editing a calculation) or has no complete operation.
     pub fn from_form(form: &AnalysisForm) -> Option<Self> {
         if form.editing.is_some() {
             return None;
@@ -61,22 +61,22 @@ impl RecentAnalysis {
         })
     }
 
-    /// La méthode préchoisie de la fenêtre.
+    /// The window's preselected method.
     pub fn preset(&self) -> Preset {
         preset_of(&self.operation)
     }
 
-    /// Reprend les réglages dans un formulaire neuf ouvert sur [`Self::preset`].
-    /// « Replace original data » n'est pas appliqué ici : la fenêtre ne
-    /// l'accorde que si la sélection le permet (`replacement_disabled`).
+    /// Takes the settings into a new form opened on [`Self::preset`].
+    /// "Replace original data" is not applied here: the window grants it only
+    /// if the selection allows it (`replacement_disabled`).
     pub fn apply(&self, form: &mut AnalysisForm) {
-        // Une entrée venue des préférences peut garder des positions (fichier
-        // édité à la main, ancienne version) : on les oublie à la lecture aussi.
+        // An entry coming from the preferences may keep positions (hand-edited
+        // file, old version): they are forgotten on reading too.
         form.setup.load(&forgotten(self.operation.clone()));
         form.tool = form.natural_tool();
     }
 
-    /// Le libellé du menu : `Polynomial Baseline (degree 3)`.
+    /// The menu label: `Polynomial Baseline (degree 3)`.
     pub fn label(&self) -> String {
         let name = self.name();
         match self.detail() {
@@ -85,7 +85,7 @@ impl RecentAnalysis {
         }
     }
 
-    /// L'info-bulle : ce que le clic et le Ctrl+clic font.
+    /// The tooltip: what the click and the Ctrl+click do.
     pub fn hint(&self) -> String {
         if self.replace_original {
             tr!("analysis-recent-hint-replace")
@@ -112,7 +112,7 @@ impl RecentAnalysis {
         }
     }
 
-    /// Le réglage qui distingue deux entrées de la même méthode.
+    /// The setting that tells two entries of the same method apart.
     fn detail(&self) -> Option<String> {
         use stokesforge_analysis::baseline::BaselineOp;
         use stokesforge_analysis::correct::CorrectOp;
@@ -156,7 +156,7 @@ impl RecentAnalysis {
 
     // ── JSON ───────────────────────────────────────────────────────────
 
-    /// L'entrée sous forme JSON, pour le fichier de préférences.
+    /// The entry as JSON, for the preferences file.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "operation": tree_to_json(&self.operation.to_tree()),
@@ -164,7 +164,7 @@ impl RecentAnalysis {
         })
     }
 
-    /// Relit une entrée ; `None` si elle est illisible.
+    /// Reads an entry back; `None` if it is unreadable.
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         let operation = Operation::from_tree(&json_to_tree(value.get("operation")?)).ok()?;
         Some(Self {
@@ -177,7 +177,7 @@ impl RecentAnalysis {
     }
 }
 
-/// Le nom d'un modèle d'ajustement dans une entrée récente.
+/// The name of a fit model in a recent entry.
 fn model_name(model: &Model) -> String {
     match model {
         Model::Linear => tr!("analysis-fit-linear"),
@@ -195,15 +195,16 @@ fn model_name(model: &Model) -> String {
     .to_string()
 }
 
-/// Retire de l'opération tout ce qui désigne des données (voir la doc de tête) :
-/// la règle est `Operation::forget_positions`, dans `stokesforge-analysis`.
+/// Removes from the operation everything that designates data (see the
+/// top-level doc): the rule is `Operation::forget_positions`, in
+/// `stokesforge-analysis`.
 fn forgotten(mut op: Operation) -> Operation {
     op.forget_positions();
     op
 }
 
-/// Range `new` en tête de `list`, sans doublon, `MAX_RECENT` au plus (#249) :
-/// une même analyse n'occupe qu'une place, remontée en tête.
+/// Puts `new` at the head of `list`, without duplicates, `MAX_RECENT` at most
+/// (#249): the same analysis takes only one place, moved to the head.
 pub fn remember(list: &mut Vec<RecentAnalysis>, new: RecentAnalysis) {
     list.retain(|entry| entry != &new);
     list.insert(0, new);
@@ -275,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn le_libelle_nomme_la_methode_et_son_reglage() {
+    fn the_label_names_the_method_and_its_setting() {
         english();
         let polynomial = recent(Operation::Baseline {
             method: BaselineMethod::Zones {
@@ -319,16 +320,16 @@ mod tests {
     }
 
     #[test]
-    fn les_plages_et_les_valeurs_de_depart_ne_sont_pas_retenues() {
+    fn ranges_and_starting_values_are_not_kept() {
         let mut f = form(&Preset::Integrate);
         f.setup.integrate.ranges = vec![(1.0, 2.0)];
         f.setup.integrate.cumulative = true;
         let kept = RecentAnalysis::from_form(&f).unwrap();
         let Operation::Integrate { spec } = &kept.operation else {
-            panic!("une intégrale");
+            panic!("an integral");
         };
-        assert!(spec.ranges.is_empty(), "plages oubliées");
-        assert!(spec.cumulative, "témoin : le réglage reste");
+        assert!(spec.ranges.is_empty(), "ranges forgotten");
+        assert!(spec.cumulative, "witness: the setting stays");
 
         let mut f = form(&Preset::Fit(Model::Gaussian));
         f.setup.fit.range = Some((1.0, 2.0));
@@ -336,17 +337,17 @@ mod tests {
         f.setup.fit.params[2].fixed = true;
         let kept = RecentAnalysis::from_form(&f).unwrap();
         let Operation::Fit { spec, range, .. } = &kept.operation else {
-            panic!("un ajustement");
+            panic!("a fit");
         };
         assert_eq!(*range, None);
         assert!(spec.params.iter().all(|p| p.initial.is_none() && !p.fixed));
     }
 
-    /// #260 : une entrée lue des préférences peut garder des positions (fichier
-    /// édité à la main) : la réouverture les oublie, `fixed` et `shared`
-    /// compris, par la règle unique `Operation::forget_positions`.
+    /// #260: an entry read from the preferences may keep positions (hand-edited
+    /// file): reopening forgets them, `fixed` and `shared` included, through
+    /// the single rule `Operation::forget_positions`.
     #[test]
-    fn rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages() {
+    fn reopening_an_entry_also_forgets_fixed_and_shared_settings() {
         let setting = ParamSetting {
             initial: Some(3.0),
             fixed: true,
@@ -366,14 +367,14 @@ mod tests {
         entry.apply(&mut reopened);
         assert_eq!(reopened.setup.fit.range, None);
         assert_eq!(reopened.setup.fit.params, vec![ParamSetting::default(); 2]);
-        assert!(!reopened.setup.fit.is_global(), "plus de paramètre partagé");
-        assert!(reopened.setup.fit.residuals, "témoin : le réglage reste");
+        assert!(!reopened.setup.fit.is_global(), "no shared parameter left");
+        assert!(reopened.setup.fit.residuals, "witness: the setting stays");
     }
 
-    /// #260 : un degré énorme lu des préférences ne fabrique aucun paramètre —
-    /// ni à la réouverture, ni dans les prérequis du formulaire.
+    /// #260: a huge degree read from the preferences builds no parameter —
+    /// neither on reopening, nor in the form's prerequisites.
     #[test]
-    fn un_degre_enorme_des_preferences_est_refuse_sans_allocation() {
+    fn a_huge_degree_from_the_preferences_is_rejected_without_allocation() {
         let entry = recent(Operation::Fit {
             spec: FitSpec {
                 model: Model::Polynomial { degree: u32::MAX },
@@ -392,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn la_definition_d_une_ligne_de_base_est_retenue() {
+    fn the_definition_of_a_baseline_is_kept() {
         let mut f = form(&Preset::BaselineAnchors);
         f.setup.baseline.points = vec![(0.0, 1.0), (10.0, 2.0)];
         f.setup.baseline.op = BaselineOp::Divide;
@@ -403,18 +404,18 @@ mod tests {
         assert_eq!(reopened.setup.baseline.shape, BaselineShape::Anchors);
         assert_eq!(reopened.setup.baseline.op, BaselineOp::Divide);
         assert_eq!(reopened.setup.baseline.points.len(), 2);
-        assert!(reopened.issues().is_empty(), "prête à être relancée");
+        assert!(reopened.issues().is_empty(), "ready to be rerun");
     }
 
     #[test]
-    fn modifier_un_calcul_ne_retient_rien() {
+    fn editing_a_calculation_keeps_nothing() {
         let mut f = form(&Preset::Integrate);
         f.editing = Some(stokesforge_core::NodeId::from_raw(7));
         assert!(RecentAnalysis::from_form(&f).is_none());
     }
 
     #[test]
-    fn une_meme_analyse_n_occupe_qu_une_place_remontee_en_tete_et_trois_au_plus() {
+    fn the_same_analysis_takes_one_place_moved_to_the_head_and_three_at_most() {
         let integrate = |cumulative| {
             recent(Operation::Integrate {
                 spec: IntegrateSpec {
@@ -435,7 +436,7 @@ mod tests {
         assert_eq!(
             list,
             vec![integrate(false), line.clone()],
-            "doublon remonté"
+            "duplicate moved up"
         );
         let subtract = recent(Operation::Correct {
             op: stokesforge_analysis::correct::CorrectOp::Subtract,
@@ -445,12 +446,12 @@ mod tests {
         assert_eq!(
             list,
             vec![subtract, integrate(true), integrate(false)],
-            "trois au plus : la plus ancienne (la correction) part"
+            "three at most: the oldest (the correction) goes"
         );
     }
 
     #[test]
-    fn le_json_fait_l_aller_retour_et_une_entree_illisible_est_ecartee() {
+    fn json_round_trips_and_an_unreadable_entry_is_discarded() {
         let mut f = form(&Preset::Fit(Model::Polynomial { degree: 3 }));
         f.replace_original = false;
         f.setup.fit.residuals = true;
@@ -458,18 +459,18 @@ mod tests {
         let json = kept.to_json();
         assert_eq!(RecentAnalysis::from_json(&json), Some(kept));
         assert_eq!(
-            RecentAnalysis::from_json(&serde_json::json!({ "operation": { "kind": "inconnu" } })),
+            RecentAnalysis::from_json(&serde_json::json!({ "operation": { "kind": "unknown" } })),
             None
         );
         assert_eq!(RecentAnalysis::from_json(&serde_json::json!(42)), None);
     }
 
-    /// Une entrée dont l'opération porte un nombre non fini (#278) : écrite en
-    /// JSON (`null`), elle ne se relit jamais en opération non finie — soit
-    /// illisible (`None`, la paire perdue), soit relue valide (le champ
-    /// facultatif devient absent). Les valeurs finies, elles, font l'aller-retour.
+    /// An entry whose operation carries a non-finite number (#278): written
+    /// as JSON (`null`), it is never read back as a non-finite operation —
+    /// either unreadable (`None`, the pair lost), or read back valid (the
+    /// optional field becomes absent). Finite values do round-trip.
     #[test]
-    fn une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie() {
+    fn an_entry_with_a_non_finite_number_is_never_read_back_non_finite() {
         use stokesforge_analysis::baseline::BaselineMethod;
         use stokesforge_analysis::deconv::DirectMethod;
         use stokesforge_analysis::model::Model;
@@ -509,7 +510,7 @@ mod tests {
             keep_baseline: false,
         };
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            // Paires : la lecture échoue, l'entrée est écartée.
+            // Pairs: reading fails, the entry is discarded.
             for operation in [
                 baseline(BaselineMethod::Constant { point: (bad, 1.0) }),
                 baseline(BaselineMethod::Line {
@@ -526,7 +527,7 @@ mod tests {
                     "{operation:?} → {json}"
                 );
             }
-            // Réglages facultatifs : relus absents, mais jamais non finis.
+            // Optional settings: read back absent, but never non-finite.
             for operation in [
                 peaks(vec![seed(1.0, Some(bad))], 0.1),
                 peaks(Vec::new(), bad),
@@ -541,7 +542,7 @@ mod tests {
                 }
             }
         }
-        // Le fini fait l'aller-retour exact.
+        // Finite values round-trip exactly.
         for operation in [
             baseline(BaselineMethod::Constant { point: (0.5, -1.0) }),
             fit(Some((0.0, 2.0))),

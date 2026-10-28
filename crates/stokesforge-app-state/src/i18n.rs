@@ -1,21 +1,21 @@
-//! Mécanique de traduction de l'interface : Fluent, catalogues embarqués,
-//! langue courante, macro [`tr!`](crate::tr!) (issue #41, chantier #39).
+//! Interface translation machinery: Fluent, embedded catalogs, current
+//! language, the [`tr!`](crate::tr!) macro (issue #41, work package #39).
 //!
-//! # Pourquoi Fluent, et pourquoi ici seulement
+//! # Why Fluent, and why only here
 //!
-//! L'anglais est la **langue source** ; le français est une traduction. Fluent
-//! (via `i18n-embed` et `i18n-embed-fl`) a été retenu parce que sa macro `fl!`
-//! vérifie **à la compilation** qu'une clé et ses arguments existent dans le
-//! catalogue `en` — `rust-i18n` laisse passer une clé manquante et l'affiche
-//! telle quelle à l'écran. Les pluriels et les accords sont gérés par le format
-//! (règles CLDR), et un traducteur édite des `.ftl` sans toucher au Rust.
+//! English is the **source language**; French is a translation. Fluent (via
+//! `i18n-embed` and `i18n-embed-fl`) was chosen because its `fl!` macro checks
+//! **at compile time** that a key and its arguments exist in the `en` catalog
+//! — `rust-i18n` lets a missing key through and displays it as is on screen.
+//! Plurals and agreement are handled by the format (CLDR rules), and a
+//! translator edits `.ftl` files without touching Rust.
 //!
-//! Seule l'application traduit : `fl!` lit l'`i18n.toml` du crate qui l'appelle,
-//! et aucun crate du dessous ne dépend de Fluent (les listes blanches de
-//! `no_ui_dependency` le refuseraient). Les crates du dessous rendent des
-//! données structurées ; l'application les met en phrase (#46, #47).
+//! Only the application translates: `fl!` reads the `i18n.toml` of the crate
+//! that calls it, and no crate below depends on Fluent (the allowlists of
+//! `no_ui_dependency` would refuse it). The crates below return structured
+//! data; the application puts it into sentences (#46, #47).
 //!
-//! # Utiliser
+//! # Using it
 //!
 //! ```ignore
 //! use crate::tr;
@@ -23,39 +23,40 @@
 //! ui.label(tr!("history-insert-rows", count = n));
 //! ```
 //!
-//! [`tr!`](crate::tr!) est **l'unique point d'entrée** : il enveloppe `fl!` sur le
-//! chargeur global ([`loader`]), pour qu'un changement de mécanique ne touche
-//! pas les appels. Une clé absente de `i18n/en/stokesforge_app.ftl`, ou un argument
-//! que le message ne déclare pas, **ne compile pas**. Jamais de littéral dans
-//! un libellé : `tests/libelles.rs` (`aucun_libelle_en_dur`) le garde.
+//! [`tr!`](crate::tr!) is **the single entry point**: it wraps `fl!` on the
+//! global loader ([`loader`]), so a change of machinery does not touch the
+//! calls. A key missing from `i18n/en/stokesforge_app.ftl`, or an argument the
+//! message does not declare, **does not compile**. Never a literal in a label:
+//! `tests/libelles.rs` (`aucun_libelle_en_dur`) guards this.
 //!
-//! # La langue
+//! # The language
 //!
-//! Par ordre de priorité ([`choose_language`]) : la variable d'environnement
-//! `STOKESFORGE_LANG` (`en`, `fr`, `en-XA`), puis la préférence `language` de
-//! `preferences.json` ([`crate::preferences`]), sinon l'anglais. On ne suit
-//! **pas** la langue du système : l'interface sort en anglais tant que le
-//! catalogue français n'est pas complet (#49). Une valeur inconnue ou un
-//! fichier corrompu passe au niveau suivant, jamais de panique (invariant 10).
+//! In order of priority ([`choose_language`]): the `STOKESFORGE_LANG`
+//! environment variable (`en`, `fr`, `en-XA`), then the `language` preference
+//! of `preferences.json` ([`crate::preferences`]), otherwise English. The
+//! system language is **not** followed: the interface comes out in English
+//! until the French catalog is complete (#49). An unknown value or a corrupted
+//! file falls to the next level, never a panic (invariant 10).
 //!
-//! La langue est choisie **une fois**, à la première lecture du chargeur global.
-//! Les tests ne la changent pas : ils bâtissent leur propre chargeur
-//! ([`build_loader`]) pour ne pas se marcher dessus.
+//! The language is chosen **once**, on the first read of the global loader.
+//! Tests do not change it: they build their own loader ([`build_loader`]) so
+//! as not to step on each other.
 //!
-//! # La pseudo-langue `en-XA`
+//! # The `en-XA` pseudo-locale
 //!
-//! Produite à la volée depuis `en` ([`pseudo`]) : accents, `[[ ]]`, +30 %. Lancer
-//! l'application avec `STOKESFORGE_LANG=en-XA` montre d'un coup d'œil ce qui n'est
-//! pas passé par le catalogue (pas de `[[ ]]`) ou qui est tronqué (`]]` absent).
+//! Produced on the fly from `en` ([`pseudo`]): accents, `[[ ]]`, +30%.
+//! Launching the application with `STOKESFORGE_LANG=en-XA` shows at a glance
+//! what did not go through the catalog (no `[[ ]]`) or is truncated (`]]`
+//! missing).
 //!
-//! # Ce que `fl!` ne peut pas garantir
+//! # What `fl!` cannot guarantee
 //!
-//! Le français peut manquer d'une clé : le chargeur retombe alors sur l'anglais
-//! (`fallback_language` de `i18n.toml`) — c'est voulu tant que #49 n'est pas
-//! fait, et le test de complétude *rapporte* ce qui manque sans échouer. En
-//! revanche une clé **présente en `fr` et absente de `en`** est une erreur, et
-//! des arguments différents d'une langue à l'autre aussi : ce sont les tests de
-//! ce module qui les attrapent, pas le compilateur.
+//! French may lack a key: the loader then falls back to English
+//! (`fallback_language` of `i18n.toml`) — this is intended until #49 is done,
+//! and the completeness test *reports* what is missing without failing. In
+//! contrast a key **present in `fr` and absent from `en`** is an error, and so
+//! are arguments that differ from one language to the other: the tests of this
+//! module catch them, not the compiler.
 
 pub mod pseudo;
 
@@ -67,22 +68,22 @@ use i18n_embed::unic_langid::LanguageIdentifier;
 use i18n_embed::{I18nAssets, LanguageLoader};
 use rust_embed::RustEmbed;
 
-/// Variable d'environnement qui impose la langue (`en`, `fr`, `en-XA`).
+/// Environment variable that forces the language (`en`, `fr`, `en-XA`).
 pub const LANGUAGE_VARIABLE: &str = "STOKESFORGE_LANG";
 
-/// Les catalogues, embarqués dans le binaire (relus sur disque en profil debug).
+/// The catalogs, embedded in the binary (re-read from disk in the debug profile).
 #[derive(RustEmbed)]
 #[folder = "i18n/"]
 struct Embedded;
 
-/// Les catalogues vus par `i18n-embed` : ceux du dossier `i18n/`, plus la
-/// pseudo-langue `en-XA` qui n'a **pas de fichier** et se fabrique depuis `en`.
-struct Catalogues;
+/// The catalogs as seen by `i18n-embed`: those of the `i18n/` folder, plus the
+/// `en-XA` pseudo-locale, which has **no file** and is built from `en`.
+struct Catalogs;
 
-/// Le dossier de la pseudo-langue dans la vue des catalogues.
+/// The pseudo-locale folder in the catalog view.
 const PSEUDO_DIRECTORY: &str = "en-XA";
 
-impl I18nAssets for Catalogues {
+impl I18nAssets for Catalogs {
     fn get_files(&self, file_path: &str) -> Vec<Cow<'_, [u8]>> {
         let Some(name) = file_path
             .strip_prefix(PSEUDO_DIRECTORY)
@@ -109,23 +110,23 @@ impl I18nAssets for Catalogues {
     }
 }
 
-/// Une langue de l'interface.
+/// An interface language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Language {
-    /// L'anglais : la langue source, et la valeur par défaut.
+    /// English: the source language, and the default value.
     #[default]
     English,
-    /// Le français (catalogue complet, #49).
+    /// French (complete catalog, #49).
     French,
-    /// La pseudo-langue de test : l'anglais accentué, allongé, encadré de `[[ ]]`.
+    /// The test pseudo-locale: English accented, lengthened, framed in `[[ ]]`.
     PseudoEnglish,
 }
 
 impl Language {
-    /// Toutes les langues proposées.
+    /// All the languages offered.
     pub const ALL: [Language; 3] = [Language::English, Language::French, Language::PseudoEnglish];
 
-    /// L'étiquette de la langue : `en`, `fr`, `en-XA`.
+    /// The language tag: `en`, `fr`, `en-XA`.
     pub fn tag(self) -> &'static str {
         match self {
             Language::English => "en",
@@ -134,9 +135,9 @@ impl Language {
         }
     }
 
-    /// Lit une étiquette écrite par l'utilisateur (`STOKESFORGE_LANG`, préférence),
-    /// sans tenir compte de la casse ni de `_` contre `-` : `fr`, `FR`, `fr_FR`,
-    /// `en-xa`. `None` pour tout ce qui n'est pas une langue proposée.
+    /// Reads a tag written by the user (`STOKESFORGE_LANG`, preference),
+    /// ignoring case and `_` versus `-`: `fr`, `FR`, `fr_FR`, `en-xa`. `None`
+    /// for anything that is not an offered language.
     pub fn parse(text: &str) -> Option<Self> {
         let normalized = text.trim().replace('_', "-").to_ascii_lowercase();
         match normalized.as_str() {
@@ -149,9 +150,8 @@ impl Language {
         }
     }
 
-    /// Le nom de la langue **dans cette langue**, tel qu'on le propose dans le
-    /// menu : jamais traduit, pour qu'on la retrouve quelle que soit la langue
-    /// courante.
+    /// The name of the language **in that language**, as offered in the menu:
+    /// never translated, so that it can be found whatever the current language.
     pub fn native_name(self) -> &'static str {
         match self {
             Language::English => "English",
@@ -165,10 +165,10 @@ impl Language {
     }
 }
 
-/// La langue qui s'applique : `environment` (valeur de `STOKESFORGE_LANG`) d'abord,
-/// puis `preference` (préférence enregistrée), sinon l'anglais. Une valeur qui
-/// n'est pas une langue proposée est **sautée**, pas une erreur : une faute de
-/// frappe dans la variable laisse la préférence jouer.
+/// The language that applies: `environment` (value of `STOKESFORGE_LANG`)
+/// first, then `preference` (saved preference), otherwise English. A value
+/// that is not an offered language is **skipped**, not an error: a typo in the
+/// variable lets the preference apply.
 pub fn choose_language(environment: Option<&str>, preference: Option<&str>) -> Language {
     environment
         .and_then(Language::parse)
@@ -176,16 +176,16 @@ pub fn choose_language(environment: Option<&str>, preference: Option<&str>) -> L
         .unwrap_or_default()
 }
 
-/// La langue du démarrage : la variable d'environnement, puis `preferences.json`.
+/// The startup language: the environment variable, then `preferences.json`.
 fn startup_language() -> Language {
     let environment = std::env::var(LANGUAGE_VARIABLE).ok();
-    // Les tests du crate partagent ce chargeur global et certains (`errors`) le
-    // passent en anglais : les `preferences.json` de celui qui teste ne doivent
-    // pas décider de la langue de départ, sinon ils se marchent dessus. Seule la
-    // variable d'environnement reste (les sous-processus de test s'en servent).
+    // The tests of the crate share this global loader and some (`errors`)
+    // switch it to English: the `preferences.json` of whoever runs the tests
+    // must not decide the startup language, otherwise they step on each other.
+    // Only the environment variable remains (test subprocesses use it).
     //
-    // `cfg(test)` ne vaut que pour les tests de ce crate : ceux de
-    // `stokesforge-app` activent la feature `test-support` (#263).
+    // `cfg(test)` holds only for the tests of this crate: those of
+    // `stokesforge-app` turn on the `test-support` feature (#263).
     #[cfg(any(test, feature = "test-support"))]
     return choose_language(environment.as_deref(), None);
     #[cfg(not(any(test, feature = "test-support")))]
@@ -195,21 +195,21 @@ fn startup_language() -> Language {
     )
 }
 
-/// Bâtit un chargeur pour `language`. L'anglais est toujours chargé derrière
-/// (`fallback_language`), donc une clé absente d'une langue reprend l'anglais.
-/// Ne panique jamais : si le chargement échoue, le chargeur reste sur le repli.
+/// Builds a loader for `language`. English is always loaded behind it
+/// (`fallback_language`), so a key missing from a language falls back to
+/// English. Never panics: if loading fails, the loader stays on the fallback.
 pub fn build_loader(language: Language) -> FluentLanguageLoader {
     let loader = fluent_language_loader!();
     if loader
-        .load_languages(&Catalogues, &[language.identifier()])
+        .load_languages(&Catalogs, &[language.identifier()])
         .is_err()
     {
-        // Ne peut pas arriver avec des catalogues embarqués ; l'erreur est
-        // avalée plutôt que de planter l'interface (invariant 10).
-        let _ = loader.load_fallback_language(&Catalogues);
+        // Cannot happen with embedded catalogs; the error is swallowed rather
+        // than crash the interface (invariant 10).
+        let _ = loader.load_fallback_language(&Catalogs);
     }
-    // Pas de marques d'isolation bidirectionnelle autour des arguments : les
-    // polices de l'interface les dessineraient comme des carrés.
+    // No bidirectional isolation marks around arguments: the interface fonts
+    // would draw them as squares.
     loader.set_use_isolating(false);
     loader
 }
@@ -219,11 +219,10 @@ struct Current {
     loader: FluentLanguageLoader,
 }
 
-/// La langue courante. `egui` redessine tous les textes à chaque image : un
-/// changement de langue s'applique donc dès l'image suivante, sans redémarrer.
-/// Chaque changement fait fuir un petit chargeur (quelques Ko) pour que
-/// [`loader`] garde son `&'static` ; un utilisateur ne change pas de langue des
-/// milliers de fois.
+/// The current language. `egui` redraws all the texts on every frame: a
+/// language change therefore applies from the next frame, with no restart.
+/// Each change leaks a small loader (a few KB) so that [`loader`] keeps its
+/// `&'static`; a user does not change language thousands of times.
 static CURRENT: LazyLock<RwLock<&'static Current>> = LazyLock::new(|| {
     let language = startup_language();
     RwLock::new(Box::leak(Box::new(Current {
@@ -233,25 +232,26 @@ static CURRENT: LazyLock<RwLock<&'static Current>> = LazyLock::new(|| {
 });
 
 fn current() -> &'static Current {
-    // Un verrou empoisonné ne peut venir que d'un panic ailleurs ; la valeur
-    // lue reste valide.
+    // A poisoned lock can only come from a panic elsewhere; the value read
+    // stays valid.
     CURRENT
         .read()
         .map_or_else(|poisoned| *poisoned.into_inner(), |guard| *guard)
 }
 
-/// Le chargeur global, celui de [`tr!`](crate::tr!).
+/// The global loader, the one used by [`tr!`](crate::tr!).
 pub fn loader() -> &'static FluentLanguageLoader {
     &current().loader
 }
 
-/// La langue du chargeur global.
+/// The language of the global loader.
 pub fn language() -> Language {
     current().language
 }
 
-/// Change la langue du chargeur global : les [`tr!`](crate::tr!) suivants parlent
-/// `language`. Ne touche pas aux préférences ([`Preferences::save_language`]).
+/// Changes the language of the global loader: the following
+/// [`tr!`](crate::tr!) calls speak `language`. Does not touch the preferences
+/// ([`Preferences::save_language`]).
 pub fn set_language(language: Language) {
     if self::language() == language {
         return;
@@ -266,17 +266,17 @@ pub fn set_language(language: Language) {
     }
 }
 
-/// Traduit une clé du catalogue `en` dans la langue courante.
+/// Translates a key of the `en` catalog into the current language.
 ///
-/// - sans argument : `tr!("menu-file")` ;
-/// - avec arguments nommés : `tr!("history-insert-rows", count = n)` ;
-/// - dans un autre chargeur que le global : `tr!(in loader; "menu-file")`, pour
-///   un test qui compare une langue précise ([`build_loader`]) sans dépendre de
-///   celle de l'environnement. Les mêmes vérifications à la compilation.
+/// - without an argument: `tr!("menu-file")`;
+/// - with named arguments: `tr!("history-insert-rows", count = n)`;
+/// - in a loader other than the global one: `tr!(in loader; "menu-file")`, for
+///   a test that compares a specific language ([`build_loader`]) without
+///   depending on the environment's. The same compile-time checks.
 ///
-/// Enveloppe `i18n_embed_fl::fl!` : une clé inconnue ou un argument inconnu
-/// **ne compile pas**. C'est le seul point d'entrée à employer dans
-/// l'interface (voir la doc du module).
+/// Wraps `i18n_embed_fl::fl!`: an unknown key or an unknown argument **does
+/// not compile**. It is the only entry point to use in the interface (see the
+/// module doc).
 #[macro_export]
 macro_rules! tr {
     (in $loader:expr; $message_id:literal) => {
@@ -306,9 +306,9 @@ mod tests {
     const EN: &str = include_str!("../i18n/en/stokesforge_app.ftl");
     const FR: &str = include_str!("../i18n/fr/stokesforge_app.ftl");
 
-    // --- Lecture d'un catalogue : clés et arguments --------------------------
+    // --- Reading a catalog: keys and arguments --------------------------------
 
-    /// Les variables `$nom` qu'un motif emploie, sélecteurs et variantes compris.
+    /// The `$name` variables a pattern uses, selectors and variants included.
     fn pattern_variables(pattern: &Pattern<&str>, into: &mut BTreeSet<String>) {
         for element in &pattern.elements {
             if let PatternElement::Placeable { expression } = element {
@@ -355,14 +355,14 @@ mod tests {
         }
     }
 
-    /// Les entrées d'un catalogue : clé (`message`, ou `message.attribut`) vers
-    /// l'ensemble de ses arguments, et les morceaux que Fluent n'a pas pu lire.
-    struct Catalogue {
+    /// The entries of a catalog: key (`message`, or `message.attribute`) to
+    /// its set of arguments, and the pieces Fluent could not read.
+    struct Catalog {
         messages: BTreeMap<String, BTreeSet<String>>,
         junk: Vec<String>,
     }
 
-    fn read(source: &str) -> Catalogue {
+    fn read(source: &str) -> Catalog {
         let resource = match parser::parse(source) {
             Ok(resource) => resource,
             Err((resource, _)) => resource,
@@ -388,27 +388,27 @@ mod tests {
                 _ => {}
             }
         }
-        Catalogue { messages, junk }
+        Catalog { messages, junk }
     }
 
-    /// Ce qu'un catalogue de traduction doit à la référence.
+    /// What a translation catalog owes to the reference.
     struct Comparison {
-        /// Clés écrites dans la traduction mais absentes de `en` : erreur.
+        /// Keys written in the translation but absent from `en`: error.
         unknown_in_reference: Vec<String>,
-        /// Clés dont les arguments diffèrent de ceux de `en` : erreur.
+        /// Keys whose arguments differ from those of `en`: error.
         arguments_differ: Vec<String>,
-        /// Clés de `en` pas encore traduites : un rapport, pas une erreur.
+        /// Keys of `en` not yet translated: a report, not an error.
         untranslated: Vec<String>,
     }
 
-    fn compare(reference: &Catalogue, translation: &Catalogue) -> Comparison {
+    fn compare(reference: &Catalog, translation: &Catalog) -> Comparison {
         let mut unknown_in_reference = Vec::new();
         let mut arguments_differ = Vec::new();
         for (key, variables) in &translation.messages {
             match reference.messages.get(key) {
                 None => unknown_in_reference.push(key.clone()),
                 Some(expected) if expected != variables => arguments_differ
-                    .push(format!("{key} : en {expected:?}, traduction {variables:?}")),
+                    .push(format!("{key}: en {expected:?}, translation {variables:?}")),
                 Some(_) => {}
             }
         }
@@ -425,56 +425,56 @@ mod tests {
         }
     }
 
-    // --- Les catalogues ------------------------------------------------------
+    // --- The catalogs --------------------------------------------------------
 
     #[test]
-    fn le_catalogue_anglais_s_analyse_sans_erreur() {
+    fn the_english_catalog_parses_without_error() {
         let en = read(EN);
-        assert!(en.junk.is_empty(), "morceaux illisibles : {:?}", en.junk);
+        assert!(en.junk.is_empty(), "unreadable pieces: {:?}", en.junk);
         assert!(!en.messages.is_empty());
         let fr = read(FR);
-        assert!(fr.junk.is_empty(), "morceaux illisibles : {:?}", fr.junk);
+        assert!(fr.junk.is_empty(), "unreadable pieces: {:?}", fr.junk);
     }
 
-    /// Complétude **bloquante** (#49) : toute clé de `fr` existe dans `en` avec
-    /// les mêmes arguments, et toute clé de `en` existe dans `fr`. Une clé
-    /// ajoutée à `en` s'ajoute à `fr` dans le même commit.
+    /// **Blocking** completeness (#49): every key of `fr` exists in `en` with
+    /// the same arguments, and every key of `en` exists in `fr`. A key added to
+    /// `en` is added to `fr` in the same commit.
     #[test]
-    fn toute_cle_francaise_existe_en_anglais_avec_les_memes_arguments() {
+    fn every_french_key_exists_in_english_with_the_same_arguments() {
         let comparison = compare(&read(EN), &read(FR));
         assert!(
             comparison.unknown_in_reference.is_empty(),
-            "clés du catalogue fr absentes de en (l'anglais est la source) : {:?}",
+            "keys of the fr catalog missing from en (English is the source): {:?}",
             comparison.unknown_in_reference
         );
         assert!(
             comparison.arguments_differ.is_empty(),
-            "arguments différents de l'anglais : {:?}",
+            "arguments different from English: {:?}",
             comparison.arguments_differ
         );
         assert!(
             comparison.untranslated.is_empty(),
-            "{} clé(s) de `en` absente(s) de `fr` : {:?}",
+            "{} key(s) of `en` missing from `fr`: {:?}",
             comparison.untranslated.len(),
             comparison.untranslated
         );
     }
 
-    /// Le témoin du test de complétude : sans lui, un comparateur qui ne
-    /// détecte rien passerait pour un catalogue conforme.
+    /// The witness of the completeness test: without it, a comparator that
+    /// detects nothing would pass for a conforming catalog.
     #[test]
-    fn la_completude_detecte_une_cle_inconnue_et_un_argument_different() {
+    fn completeness_detects_an_unknown_key_and_a_different_argument() {
         let en = read("a = A\nb = B { $count }\nc = C\n");
         let fr = read("a = A\nb = B { $nombre }\nz = Z\n");
         let comparison = compare(&en, &fr);
         assert_eq!(comparison.unknown_in_reference, ["z"]);
         assert_eq!(comparison.arguments_differ.len(), 1);
-        assert!(comparison.arguments_differ[0].starts_with("b :"));
+        assert!(comparison.arguments_differ[0].starts_with("b:"));
         assert_eq!(comparison.untranslated, ["c"]);
     }
 
     #[test]
-    fn la_completude_lit_les_arguments_des_pluriels_et_des_attributs() {
+    fn completeness_reads_the_arguments_of_plurals_and_attributes() {
         let catalogue = read(
             "n =\n    { $count ->\n        [one] { $count } item\n       *[other] { $count } items\n    }\n\
              t = Title\n    .hint = Open { $name }\n",
@@ -490,27 +490,27 @@ mod tests {
         assert!(catalogue.messages["t"].is_empty());
     }
 
-    // --- Le chargeur ---------------------------------------------------------
+    // --- The loader ----------------------------------------------------------
 
     #[test]
-    fn l_anglais_est_la_langue_source() {
+    fn english_is_the_source_language() {
         let loader = build_loader(Language::English);
         assert_eq!(loader.get("menu-file"), "File");
         assert_eq!(loader.current_language().to_string(), "en");
     }
 
     #[test]
-    fn le_francais_traduit_le_catalogue() {
+    fn french_translates_the_catalog() {
         let loader = build_loader(Language::French);
         assert_eq!(loader.current_language().to_string(), "fr");
         assert_eq!(loader.get("menu-file"), "Fichier");
     }
 
-    /// Règle CLDR française : le singulier vaut pour 0 **et** 1.
-    /// Une préférence `fr` ouvre l'interface en français au démarrage (sans
-    /// `STOKESFORGE_LANG`), et la variable l'emporte sur elle.
+    /// French CLDR rule: the singular holds for 0 **and** 1.
+    /// An `fr` preference opens the interface in French at startup (without
+    /// `STOKESFORGE_LANG`), and the variable overrides it.
     #[test]
-    fn une_preference_francaise_ouvre_l_interface_en_francais() {
+    fn a_french_preference_opens_the_interface_in_french() {
         let language = choose_language(None, Some("fr"));
         assert_eq!(language, Language::French);
         assert_eq!(build_loader(language).get("menu-file"), "Fichier");
@@ -518,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn les_pluriels_francais_suivent_la_regle_cldr() {
+    fn french_plurals_follow_the_cldr_rule() {
         let loader = build_loader(Language::French);
         let message = |count: i32| {
             loader.get_args(
@@ -531,10 +531,10 @@ mod tests {
         assert_eq!(message(2), "Insérer 2 lignes");
     }
 
-    /// Typographie française : une espace insécable avant « : » et « ? », et
-    /// dans les guillemets — jamais une espace ordinaire.
+    /// French typography: a non-breaking space before ":" and "?", and inside
+    /// the guillemets — never an ordinary space.
     #[test]
-    fn la_typographie_francaise_utilise_l_espace_insecable() {
+    fn french_typography_uses_the_non_breaking_space() {
         for (number, line) in FR.lines().enumerate() {
             if line.starts_with('#') {
                 continue;
@@ -542,7 +542,7 @@ mod tests {
             for bad in [" :", " ?", " !", "« ", " »"] {
                 assert!(
                     !line.contains(bad),
-                    "fr:{} : espace ordinaire avant ou dans « {bad} » : {line}",
+                    "fr:{}: ordinary space before or in « {bad} »: {line}",
                     number + 1
                 );
             }
@@ -550,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn un_argument_et_un_pluriel_passent_par_le_chargeur() {
+    fn an_argument_and_a_plural_go_through_the_loader() {
         let loader = build_loader(Language::English);
         let message = |count: i32| {
             loader.get_args(
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn la_pseudo_langue_entoure_et_allonge_chaque_message() {
+    fn the_pseudo_locale_frames_and_lengthens_every_message() {
         let english = build_loader(Language::English);
         let pseudo = build_loader(Language::PseudoEnglish);
         assert_eq!(pseudo.current_language().to_string(), "en-XA");
@@ -579,7 +579,7 @@ mod tests {
             let text = pseudo.get(&key);
             assert!(
                 text.starts_with(pseudo::OPEN) && text.ends_with(pseudo::CLOSE),
-                "{key} : {text:?} n'est pas encadré"
+                "{key}: {text:?} is not framed"
             );
             let inner: String = text
                 .trim_start_matches(pseudo::OPEN)
@@ -587,14 +587,14 @@ mod tests {
                 .to_string();
             assert!(
                 inner.chars().count() * 10 >= plain.chars().count() * 13,
-                "{key} : {text:?} n'est pas allongé de 30 % par rapport à {plain:?}"
+                "{key}: {text:?} is not lengthened by 30% compared with {plain:?}"
             );
-            assert_ne!(inner, plain, "{key} : pas accentué");
+            assert_ne!(inner, plain, "{key}: not accented");
         }
     }
 
     #[test]
-    fn la_pseudo_langue_garde_les_arguments_de_l_anglais() {
+    fn the_pseudo_locale_keeps_the_arguments_of_english() {
         let pseudo = build_loader(Language::PseudoEnglish);
         let message = pseudo.get_args(
             "history-insert-rows",
@@ -606,22 +606,22 @@ mod tests {
     }
 
     #[test]
-    fn la_pseudo_langue_couvre_toutes_les_cles_de_l_anglais() {
+    fn the_pseudo_locale_covers_every_key_of_english() {
         let pseudo = build_loader(Language::PseudoEnglish);
         for key in read(EN).messages.keys().filter(|key| !key.contains('.')) {
-            assert!(pseudo.has(key), "{key} manque en en-XA");
+            assert!(pseudo.has(key), "{key} missing from en-XA");
         }
-        // Et le français vide reprend l'anglais, clé par clé.
+        // And empty French falls back to English, key by key.
         let french = build_loader(Language::French);
         for key in read(EN).messages.keys().filter(|key| !key.contains('.')) {
-            assert!(french.has(key), "{key} ne se résout pas en fr");
+            assert!(french.has(key), "{key} does not resolve in fr");
         }
     }
 
-    // --- Le choix de la langue ----------------------------------------------
+    // --- Choosing the language ----------------------------------------------
 
     #[test]
-    fn l_etiquette_d_une_langue_se_relit() {
+    fn a_language_tag_reads_back() {
         for language in Language::ALL {
             assert_eq!(Language::parse(language.tag()), Some(language));
         }
@@ -635,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn la_variable_l_emporte_sur_la_preference_puis_l_anglais() {
+    fn the_variable_overrides_the_preference_then_english() {
         use Language::{English, French, PseudoEnglish};
         assert_eq!(choose_language(Some("en-XA"), Some("fr")), PseudoEnglish);
         assert_eq!(choose_language(Some("en"), Some("fr")), English);
@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn une_valeur_inconnue_passe_au_niveau_suivant() {
+    fn an_unknown_value_falls_to_the_next_level() {
         use Language::{English, French};
         assert_eq!(choose_language(Some("klingon"), Some("fr")), French);
         assert_eq!(choose_language(Some("klingon"), None), English);
@@ -652,21 +652,21 @@ mod tests {
         assert_eq!(choose_language(Some(""), Some("")), English);
     }
 
-    /// La préférence est lue dans `preferences.json` : corrompue, l'application
-    /// démarre en anglais.
+    /// The preference is read from `preferences.json`: corrupted, the
+    /// application starts in English.
     #[test]
-    fn une_preference_corrompue_demarre_en_anglais() {
-        let dir = tempfile::tempdir().expect("dossier temporaire");
+    fn a_corrupted_preference_starts_in_english() {
+        let dir = tempfile::tempdir().expect("temporary folder");
         let path = dir.path().join("preferences.json");
-        std::fs::write(&path, "{ \"language\": ").expect("écriture");
+        std::fs::write(&path, "{ \"language\": ").expect("write");
         let preferences = Preferences::load_from(Some(path));
         assert_eq!(
             choose_language(None, preferences.language()),
             Language::English
         );
 
-        let path = dir.path().join("valide.json");
-        std::fs::write(&path, r#"{ "language": "fr" }"#).expect("écriture");
+        let path = dir.path().join("valid.json");
+        std::fs::write(&path, r#"{ "language": "fr" }"#).expect("write");
         let preferences = Preferences::load_from(Some(path));
         assert_eq!(
             choose_language(None, preferences.language()),
@@ -674,13 +674,13 @@ mod tests {
         );
     }
 
-    // --- La macro ------------------------------------------------------------
+    // --- The macro -----------------------------------------------------------
 
-    /// `tr!` passe par le chargeur global, dont la langue dépend de
-    /// l'environnement du test : on ne compare donc qu'à ce que la même langue
-    /// donne par un chargeur construit à part.
+    /// `tr!` goes through the global loader, whose language depends on the
+    /// test environment: so we compare only with what the same language gives
+    /// through a separately built loader.
     #[test]
-    fn la_macro_traduit_avec_et_sans_argument() {
+    fn the_macro_translates_with_and_without_an_argument() {
         let reference = build_loader(language());
         assert_eq!(tr!("menu-file"), reference.get("menu-file"));
         assert_eq!(

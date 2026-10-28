@@ -1,6 +1,6 @@
-//! Largeur des colonnes (#325) côté état de l'application : un réglage de vue
-//! qui passe par l'acteur, sans commande ni historique, y compris depuis une
-//! vue détachée (son propre `AppState`, la même session).
+//! Column width (#325) on the application state side: a view setting that goes
+//! through the actor, with no command and no history, including from a detached
+//! window (its own `AppState`, the same session).
 
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_core::{Column, NodeId, Project};
@@ -23,10 +23,10 @@ fn setup(dir: &std::path::Path) -> (Session, AppState, NodeId) {
     (session, state, column)
 }
 
-/// L'action pose la largeur auprès de l'acteur et la relit sans attendre un
-/// rafraîchissement ; ni révision ni historique ne bougent.
+/// The action sets the width on the actor and reads it back without waiting for
+/// a refresh; neither the revision nor the history moves.
 #[test]
-fn l_action_pose_la_largeur_sans_historique() {
+fn the_action_sets_the_width_without_history() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, column) = setup(dir.path());
     let revision = state.revision();
@@ -39,11 +39,11 @@ fn l_action_pose_la_largeur_sans_historique() {
 
     assert_eq!(state.column_width(column), Some(88.0));
     assert_eq!(state.revision(), revision);
-    assert!(!state.can_undo(), "pas d'entrée d'historique");
-    let acteur = session.handle().snapshot().unwrap();
-    assert_eq!(acteur.column_widths.get(&column), Some(&88.0));
-    assert_eq!(acteur.revision, revision);
-    // Une largeur invalide n'entre ni dans l'acteur ni dans la copie locale.
+    assert!(!state.can_undo(), "no history entry");
+    let actor = session.handle().snapshot().unwrap();
+    assert_eq!(actor.column_widths.get(&column), Some(&88.0));
+    assert_eq!(actor.revision, revision);
+    // An invalid width enters neither the actor nor the local copy.
     state.dispatch(Action::SetColumnWidth {
         column,
         width: f32::NAN,
@@ -51,10 +51,10 @@ fn l_action_pose_la_largeur_sans_historique() {
     assert_eq!(state.column_width(column), Some(88.0));
 }
 
-/// La vue détachée a son propre `AppState` : sa largeur passe aussi par
-/// l'acteur, et l'état principal la relit à son prochain rafraîchissement.
+/// The detached window has its own `AppState`: its width also goes through
+/// the actor, and the main state reads it back at its next refresh.
 #[test]
-fn la_vue_detachee_envoie_sa_largeur_a_l_acteur() {
+fn the_detached_window_sends_its_width_to_the_actor() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut main, column) = setup(dir.path());
     let mut detached = main.fork_for_detached_view().unwrap();
@@ -74,16 +74,16 @@ fn la_vue_detachee_envoie_sa_largeur_a_l_acteur() {
             .get(&column),
         Some(&120.0)
     );
-    assert_eq!(main.column_width(column), None, "pas encore rafraîchi");
+    assert_eq!(main.column_width(column), None, "not refreshed yet");
     main.refresh();
     assert_eq!(main.column_width(column), Some(120.0));
 }
 
-/// L'action de remise (#330) retire la largeur de l'acteur et de la copie
-/// locale sans attendre un rafraîchissement ; ni révision ni historique ne bougent. Témoin éprouvé : ne pas retirer
-/// la clé de la copie locale.
+/// The reset action (#330) removes the width from the actor and from the local
+/// copy without waiting for a refresh; neither the revision nor the history
+/// moves. Tested witness: do not remove the key from the local copy.
 #[test]
-fn l_action_de_remise_retire_la_largeur_sans_historique() {
+fn the_reset_action_removes_the_width_without_history() {
     let dir = tempfile::tempdir().unwrap();
     let (session, mut state, column) = setup(dir.path());
     let revision = state.revision();
@@ -99,6 +99,6 @@ fn l_action_de_remise_retire_la_largeur_sans_historique() {
 
     assert_eq!(state.column_width(column), None);
     assert_eq!(state.revision(), revision);
-    let acteur = session.handle().snapshot().unwrap();
-    assert!(!acteur.column_widths.contains_key(&column));
+    let actor = session.handle().snapshot().unwrap();
+    assert!(!actor.column_widths.contains_key(&column));
 }

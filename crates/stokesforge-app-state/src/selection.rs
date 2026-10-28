@@ -1,66 +1,62 @@
-//! Sélection de cellules dans la grille d'une feuille.
+//! Cell selection in a worksheet's grid.
 //!
-//! État UI **pur** : jamais envoyé à l'acteur, jamais dans l'historique
-//! (voir la règle 2 en tête de [`crate::state`]). [`crate::state::AppState`]
-//! en porte une par feuille affichée, dans une table qu'elle purge comme le
-//! reste au fil de [`crate::state::AppState::revalidate_selection`].
+//! **Pure** UI state: never sent to the actor, never in the history (see rule 2
+//! at the top of [`crate::state`]). [`crate::state::AppState`] carries one per
+//! displayed worksheet, in a table it purges like the rest as
+//! [`crate::state::AppState::revalidate_selection`] runs.
 //!
-//! # Vocabulaire de l'en-tête
+//! # Header vocabulary
 //!
-//! L'en-tête empilée d'une colonne a 5 rangées : la **rangée des lettres**
-//! (A, B, C…, celle qui sélectionne la colonne entière) puis 4 **champs
-//! d'en-tête** — Nom long, Unité, Commentaire, Formule
-//! ([`crate::state::HeaderField`]) — chacun une rangée de sa propre valeur,
-//! répétée par colonne.
+//! The stacked header of a column has 5 rows: the **letter row** (A, B, C...,
+//! the one that selects the whole column) then 4 **header fields** — Long Name,
+//! Units, Comments, F(x)= ([`crate::state::HeaderField`]) — each one a row of its
+//! own value, repeated per column.
 //!
-//! # Un seul axe, jamais traversé par une sélection
+//! # A single axis, never crossed by a selection
 //!
-//! Les 5 champs d'en-tête et les lignes de données d'une même colonne
-//! forment un seul axe ordonné (voir [`GridCursor::rank`]) : x' < Nom long <
-//! Unité < Commentaire < Formule < ligne 0 < ligne 1 < … mais un rectangle de
-//! sélection ([`SelectionKind::Rows`]) reste toujours entièrement d'un seul
-//! côté de la frontière (rang -1/0) : soit entièrement dans l'en-tête, soit
-//! entièrement dans les données — **jamais à cheval sur les deux**. Un
-//! glisser ou un Maj-clic qui commence d'un côté et vise l'autre s'arrête à
-//! la frontière plutôt que de la traverser ([`Selection::extend_row_to`]) :
-//! la case visée est ramenée à la dernière case du côté de l'ancre (le champ
-//! Formule si l'ancre est dans l'en-tête, la ligne 0 si elle est dans les
-//! données). Trois correctifs successifs ont fait vivre puis grossir un
-//! « rectangle mixte » qui traversait cette frontière ; il rendait le
-//! copier/coller incompréhensible et a été retiré au profit de cette règle
-//! plus simple, décidée avec l'utilisateur. La plage de colonnes entières
-//! ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
-//! la plage de lignes entières ([`SelectionKind::FullRows`], glisser/
-//! Maj-clic sur la gouttière des numéros de ligne) et la plage d'un champ
-//! d'en-tête entier ([`SelectionKind::HeaderRows`], glisser/Maj-clic sur le
-//! libellé du champ dans la gouttière, en face de « Long Name »/« Units »/
-//! « Comments »/« F(x)= ») restent chacune un geste distinct, jamais mélangé
-//! au reste ni l'une à l'autre : un glisser qui croise l'une d'elles repose
-//! toujours une sélection simple plutôt que d'étendre silencieusement sans
-//! effet (voir [`crate::state::AppState::extend_selection`]/[`crate::state::
-//! AppState::extend_header_field_selection`]/[`crate::state::AppState::
-//! extend_column_selection`]/[`crate::state::AppState::
-//! extend_row_selection`]/[`crate::state::AppState::
-//! extend_header_row_selection`]). Une plage de lignes entières ne touche par
-//! ailleurs jamais l'en-tête, et une plage de champ d'en-tête entier ne
-//! touche jamais les données : chacune est le pendant de l'autre zone, comme
-//! `Columns` l'est de `FullRows`.
+//! The 5 header fields and the data rows of the same column form a single
+//! ordered axis (see [`GridCursor::rank`]): x' < Long Name < Units < Comments <
+//! F(x)= < row 0 < row 1 < ... but a selection rectangle
+//! ([`SelectionKind::Rows`]) always stays entirely on one side of the boundary
+//! (rank -1/0): either entirely in the header, or entirely in the data —
+//! **never straddling both**. A drag or a Shift-click that starts on one side
+//! and aims at the other stops at the boundary instead of crossing it
+//! ([`Selection::extend_row_to`]): the targeted cell is brought back to the last
+//! cell on the anchor's side (the F(x)= field if the anchor is in the header,
+//! row 0 if it is in the data). Three successive fixes kept alive, then grew, a
+//! "mixed rectangle" that crossed this boundary; it made copy/paste
+//! incomprehensible and was removed in favor of this simpler rule, decided with
+//! the user. The range of whole columns ([`SelectionKind::Columns`],
+//! drag/Shift-click on the letter row), the range of whole rows
+//! ([`SelectionKind::FullRows`], drag/Shift-click on the row-number gutter) and
+//! the range of a whole header field ([`SelectionKind::HeaderRows`],
+//! drag/Shift-click on the field label in the gutter, facing "Long Name"/
+//! "Units"/"Comments"/"F(x)=") each remain a distinct gesture, never mixed with
+//! the rest or with one another: a drag that crosses one of them always sets a
+//! plain selection instead of silently extending to no effect (see
+//! [`crate::state::AppState::extend_selection`]/
+//! [`crate::state::AppState::extend_header_field_selection`]/
+//! [`crate::state::AppState::extend_column_selection`]/
+//! [`crate::state::AppState::extend_row_selection`]/
+//! [`crate::state::AppState::extend_header_row_selection`]). A range of whole rows
+//! also never touches the header, and a range of a whole header field never
+//! touches the data: each is the counterpart of the other zone, as `Columns` is
+//! of `FullRows`.
 
 use stokesforge_core::{NodeId, Tree};
 
 use crate::state::{visible_columns_in, HeaderField};
 
-/// Sélection courante dans la grille d'une feuille : un rectangle borné à
-/// l'en-tête ou aux données ([`SelectionKind::Rows`], jamais les deux à la
-/// fois — voir la doc de tête du module), une plage de colonnes entières
-/// ([`SelectionKind::Columns`], glisser/Maj-clic sur la rangée des lettres)
-/// une plage de lignes entières ([`SelectionKind::FullRows`], glisser/
-/// Maj-clic sur la gouttière des numéros de ligne), ou une plage d'un champ
-/// d'en-tête entier ([`SelectionKind::HeaderRows`], glisser/Maj-clic sur son
-/// libellé dans la gouttière) — même comportement clic-sélectionne/
-/// glisser-étende/double-clic-édite pour toutes, voir
+/// Current selection in a worksheet's grid: a rectangle bounded to the header or
+/// to the data ([`SelectionKind::Rows`], never both at once — see the module's
+/// top doc), a range of whole columns ([`SelectionKind::Columns`],
+/// drag/Shift-click on the letter row), a range of whole rows
+/// ([`SelectionKind::FullRows`], drag/Shift-click on the row-number gutter), or
+/// a range of a whole header field ([`SelectionKind::HeaderRows`],
+/// drag/Shift-click on its label in the gutter) — same click-selects/
+/// drag-extends/double-click-edits behavior for all, see
 /// `app::grid::header_field_widget`, `app::grid::cell_widget`,
-/// `app::grid::column_header_widget`, `app::grid::row_number_widget` et
+/// `app::grid::column_header_widget`, `app::grid::row_number_widget` and
 /// `app::grid::header_row_label_widget`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selection {
@@ -69,74 +65,68 @@ pub struct Selection {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SelectionKind {
-    /// Rectangle de champs d'en-tête ou de cellules de données (jamais les
-    /// deux), entre `anchor` (posée au premier clic, jamais déplacée par la
-    /// suite) et `cursor` (la dernière case visée — un simple clic pose
-    /// `cursor == anchor`, un glisser ou un Maj-clic ne déplace que
-    /// `cursor`). `anchor` et `cursor` sont toujours de la même sorte
-    /// (toutes deux un champ, ou toutes deux une cellule) :
-    /// [`Selection::extend_row_to`] ramène systématiquement `cursor` à la
-    /// frontière plutôt que de la laisser changer de sorte, voir la doc de
-    /// tête du module.
+    /// Rectangle of header fields or data cells (never both), between `anchor` (set
+    /// at the first click, never moved afterwards) and `cursor` (the last cell
+    /// aimed at — a plain click sets `cursor == anchor`, a drag or a Shift-click
+    /// moves only `cursor`). `anchor` and `cursor` are always of the same kind
+    /// (both a field, or both a cell): [`Selection::extend_row_to`] systematically
+    /// brings `cursor` back to the boundary rather than let it change kind, see the
+    /// module's top doc.
     ///
-    /// `extra` porte les rectangles déjà posés par Ctrl+clic ou Ctrl+glisser
-    /// (#159), tous de la même zone (en-tête ou données) ; le rectangle
-    /// `anchor`–`cursor` est le **dernier**, celui que Maj+clic étend. Il ne
-    /// compte dans la sélection que si `active` : un Ctrl+clic qui retire une
-    /// cellule laisse l'ancre sur elle sans la sélectionner.
+    /// `extra` carries the rectangles already set by Ctrl+click or Ctrl+drag
+    /// (#159), all in the same zone (header or data); the `anchor`–`cursor`
+    /// rectangle is the **last** one, the one Shift+click extends. It counts in the
+    /// selection only if `active`: a Ctrl+click that removes a cell leaves the
+    /// anchor on it without selecting it.
     Rows {
         extra: Vec<(GridCursor, GridCursor)>,
         anchor: GridCursor,
         cursor: GridCursor,
         active: bool,
     },
-    /// Ensemble de colonnes entières (#159) : les colonnes de `base`
-    /// (posées une à une par Ctrl+clic, ou gelées par un autre geste), plus,
-    /// si `ranged`, la plage `anchor..=cursor` (mêmes règles que
-    /// `Rows::anchor`/`cursor`, mais en colonnes plutôt qu'en cases) —
-    /// glisser ou Maj-clic sur la rangée des lettres. `anchor` est la
-    /// dernière colonne cliquée. L'ordre de `base` n'a aucun sens :
-    /// [`Selection::columns`] rend toujours l'ordre de la feuille.
+    /// Set of whole columns (#159): the columns of `base` (set one by one by
+    /// Ctrl+click, or frozen by another gesture), plus, if `ranged`, the
+    /// `anchor..=cursor` range (same rules as `Rows::anchor`/`cursor`, but in
+    /// columns rather than cells) — drag or Shift-click on the letter row. `anchor`
+    /// is the last column clicked. The order of `base` has no meaning:
+    /// [`Selection::columns`] always returns the worksheet's order.
     Columns {
         base: Vec<NodeId>,
         anchor: NodeId,
         cursor: NodeId,
         ranged: bool,
     },
-    /// Plage de lignes entières, entre `anchor` et `cursor` (mêmes règles que
-    /// `Columns::anchor`/`cursor`, mais en indices de ligne plutôt qu'en
-    /// identifiants de colonne) — glisser ou Maj-clic sur la gouttière des
-    /// numéros de ligne (`app::grid::row_number_widget`). Symétrique de
-    /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
-    /// comme elle, ne touche jamais l'en-tête (une ligne entière est une
-    /// sélection de données pures, voir la doc de tête du module).
+    /// Range of whole rows, between `anchor` and `cursor` (same rules as
+    /// `Columns::anchor`/`cursor`, but in row indices rather than column
+    /// identifiers) — drag or Shift-click on the row-number gutter
+    /// (`app::grid::row_number_widget`). Symmetric to `Columns`: it touches all the
+    /// visible columns of the worksheet and, like it, never touches the header (a
+    /// whole row is a pure data selection, see the module's top doc).
     ///
-    /// Comme `Columns`, c'est un **ensemble** (#159) : les intervalles de
-    /// `base` (posés par Ctrl+clic), plus, si `ranged`, la plage
-    /// `anchor..=cursor`.
+    /// Like `Columns`, it is a **set** (#159): the intervals of `base` (set by
+    /// Ctrl+click), plus, if `ranged`, the `anchor..=cursor` range.
     FullRows {
         base: Vec<(usize, usize)>,
         anchor: usize,
         cursor: usize,
         ranged: bool,
     },
-    /// Plage d'un champ d'en-tête entier, entre `anchor` et `cursor` (mêmes
-    /// règles que `FullRows::anchor`/`cursor`, mais en champs plutôt qu'en
-    /// indices de ligne) — glisser ou Maj-clic sur le libellé du champ dans
-    /// la gouttière (`app::grid::header_row_label_widget`). Pendant de
-    /// `FullRows` pour la zone d'en-tête, comme `FullRows` l'est de
-    /// `Columns` : elle touche toutes les colonnes visibles de la feuille et,
-    /// symétriquement, ne touche jamais les données — c'est une sélection
-    /// d'en-tête pur.
+    /// Range of a whole header field, between `anchor` and `cursor` (same rules as
+    /// `FullRows::anchor`/`cursor`, but in fields rather than row indices) — drag
+    /// or Shift-click on the field label in the gutter
+    /// (`app::grid::header_row_label_widget`). Counterpart of `FullRows` for the
+    /// header zone, as `FullRows` is of `Columns`: it touches all the visible
+    /// columns of the worksheet and, symmetrically, never touches the data — it is
+    /// a pure header selection.
     HeaderRows {
         anchor: HeaderField,
         cursor: HeaderField,
     },
 }
 
-/// Colonnes visibles de `sheet`, sans plage à résoudre — partagé par
-/// [`SelectionKind::FullRows`] et [`SelectionKind::HeaderRows`], qui portent
-/// chacune toutes les colonnes de la feuille plutôt qu'une sous-plage.
+/// Visible columns of `sheet`, with no range to resolve — shared by
+/// [`SelectionKind::FullRows`] and [`SelectionKind::HeaderRows`], which each
+/// carry all the columns of the worksheet rather than a sub-range.
 fn all_visible_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
     visible_columns_in(tree, sheet)
         .into_iter()
@@ -144,33 +134,32 @@ fn all_visible_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
         .collect()
 }
 
-/// Point de départ unifié de la navigation clavier (flèches, Tab) et de la
-/// sélection à la souris — une case de la grille, cellule de données ou
-/// champ d'en-tête, sur l'axe unique décrit en tête du module. `None` pour
-/// une plage de colonnes ([`Selection::grid_cursor`]) : la rangée des
-/// lettres n'a pas de « case suivante » qui ait un sens évident, il faut
-/// re-cliquer une cellule ou un champ pour reprendre la navigation.
+/// Unified starting point of keyboard navigation (arrows, Tab) and of mouse
+/// selection — a grid cell, data cell or header field, on the single axis
+/// described at the top of the module. `None` for a range of columns
+/// ([`Selection::grid_cursor`]): the letter row has no "next cell" with an
+/// obvious meaning, a cell or a field must be clicked again to resume
+/// navigation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridCursor {
-    /// Cellule de données `(colonne, ligne)`.
+    /// Data cell `(column, row)`.
     Data(NodeId, usize),
-    /// Champ d'en-tête `(colonne, champ)`.
+    /// Header field `(column, field)`.
     Header(NodeId, HeaderField),
 }
 
 impl GridCursor {
-    /// Colonne visée, quelle que soit la sorte de case.
+    /// Targeted column, whatever the kind of cell.
     fn column(self) -> NodeId {
         match self {
             GridCursor::Data(column, _) | GridCursor::Header(column, _) => column,
         }
     }
 
-    /// Rang sur l'axe unique en-tête puis données (voir la doc de tête du
-    /// module) : les 5 champs d'en-tête occupent `-5..=-1` (via
-    /// [`HeaderField::rank`]), les lignes de données `0..` — comparable
-    /// entre deux [`GridCursor`] de la même colonne ou de colonnes
-    /// différentes, la colonne se résolvant séparément par position (voir
+    /// Rank on the single header-then-data axis (see the module's top doc): the 5
+    /// header fields take `-5..=-1` (via [`HeaderField::rank`]), the data rows
+    /// `0..` — comparable between two [`GridCursor`]s of the same column or of
+    /// different columns, the column being resolved separately by position (see
     /// [`order_range`]).
     fn rank(self) -> isize {
         match self {
@@ -180,9 +169,8 @@ impl GridCursor {
     }
 }
 
-/// Plage `[lo, hi]` inclusive de rangs (voir [`GridCursor::rank`]) couverte
-/// par `a` et `b`, quel que soit leur ordre (un glisser peut viser vers le
-/// haut comme vers le bas).
+/// Inclusive range `[lo, hi]` of ranks (see [`GridCursor::rank`]) covered by
+/// `a` and `b`, whatever their order (a drag can aim upward as well as downward).
 fn rank_range(a: GridCursor, b: GridCursor) -> (isize, isize) {
     let (ra, rb) = (a.rank(), b.rank());
     if ra <= rb {
@@ -192,10 +180,10 @@ fn rank_range(a: GridCursor, b: GridCursor) -> (isize, isize) {
     }
 }
 
-/// Ramène `target` à la frontière de la zone de `anchor` s'il n'est pas de
-/// la même sorte qu'elle — voir la doc de tête du module. La colonne visée
-/// par `target` n'est, elle, jamais bornée : un glisser peut couvrir
-/// plusieurs colonnes même en butant sur la frontière de rang.
+/// Brings `target` back to the boundary of `anchor`'s zone if it is not of the
+/// same kind — see the module's top doc. The column aimed at by `target` is
+/// never bounded: a drag can cover several columns even when hitting the rank
+/// boundary.
 fn clamp_to_anchor_zone(anchor: GridCursor, target: GridCursor) -> GridCursor {
     match (anchor, target) {
         (GridCursor::Header(..), GridCursor::Data(column, _)) => {
@@ -206,11 +194,11 @@ fn clamp_to_anchor_zone(anchor: GridCursor, target: GridCursor) -> GridCursor {
     }
 }
 
-/// Colonnes couvertes par `[a, b]` dans l'ordre de `sheet` — partagé entre
-/// [`SelectionKind::Rows`] et [`SelectionKind::Columns`], qui résolvent tous
-/// deux une plage de colonnes de la même façon, par position dans
-/// [`visible_columns_in`] plutôt que par comparaison directe d'identifiants
-/// (une colonne peut être glissée dans l'ordre inverse, `a` après `b`).
+/// Columns covered by `[a, b]` in the order of `sheet` — shared between
+/// [`SelectionKind::Rows`] and [`SelectionKind::Columns`], which both resolve a
+/// range of columns the same way, by position in [`visible_columns_in`] rather
+/// than by direct comparison of identifiers (a column can be dragged in reverse
+/// order, `a` after `b`).
 fn order_range(tree: &Tree, sheet: NodeId, a: NodeId, b: NodeId) -> Vec<NodeId> {
     let order: Vec<NodeId> = visible_columns_in(tree, sheet)
         .into_iter()
@@ -227,10 +215,9 @@ fn order_range(tree: &Tree, sheet: NodeId, a: NodeId, b: NodeId) -> Vec<NodeId> 
     }
 }
 
-/// Un bloc rectangulaire de la sélection : des colonnes (dans l'ordre de la
-/// feuille) et une plage de rangs `lo..=hi` (voir [`GridCursor::rank`]). Une
-/// sélection multiple (#159) en porte plusieurs ; copier, effacer et
-/// supprimer raisonnent bloc par bloc.
+/// A rectangular block of the selection: columns (in the worksheet's order) and
+/// a range of ranks `lo..=hi` (see [`GridCursor::rank`]). A multiple selection
+/// (#159) carries several; copy, clear and delete reason block by block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectionBlock {
     pub(crate) columns: Vec<NodeId>,
@@ -238,7 +225,7 @@ pub(crate) struct SelectionBlock {
     pub(crate) hi: isize,
 }
 
-/// Colonnes et plages de rangs d'une copie ([`Selection::copy_layout`]).
+/// Columns and rank ranges of a copy ([`Selection::copy_layout`]).
 pub(crate) type CopyLayout = (Vec<NodeId>, Vec<(isize, isize)>);
 
 fn ordered(a: usize, b: usize) -> (usize, usize) {
@@ -249,8 +236,8 @@ fn ordered(a: usize, b: usize) -> (usize, usize) {
     }
 }
 
-/// Intervalles triés et fusionnés (les intervalles qui se touchent n'en font
-/// qu'un : `(1,2)` et `(3,4)` donnent `(1,4)`).
+/// Sorted and merged intervals (intervals that touch make only one: `(1,2)` and
+/// `(3,4)` give `(1,4)`).
 fn merge_intervals(mut intervals: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     intervals.sort_unstable();
     let mut merged: Vec<(usize, usize)> = Vec::new();
@@ -263,7 +250,7 @@ fn merge_intervals(mut intervals: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     merged
 }
 
-/// `intervals` privés de `point`, un intervalle coupé en deux au besoin.
+/// `intervals` minus `point`, an interval split in two when needed.
 fn remove_point(intervals: Vec<(usize, usize)>, point: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     for (lo, hi) in intervals {
@@ -281,7 +268,7 @@ fn remove_point(intervals: Vec<(usize, usize)>, point: usize) -> Vec<(usize, usi
     out
 }
 
-/// Case de la colonne d'indice `column` (dans `order`) au rang `rank`.
+/// Cell of the column of index `column` (in `order`) at rank `rank`.
 fn cursor_at(order: &[NodeId], column: usize, rank: isize) -> GridCursor {
     if rank < 0 {
         GridCursor::Header(order[column], HeaderField::from_rank(rank))
@@ -290,9 +277,8 @@ fn cursor_at(order: &[NodeId], column: usize, rank: isize) -> GridCursor {
     }
 }
 
-/// Bornes `((colonne min, colonne max), (rang min, rang max))` du rectangle
-/// `a`–`b`, les colonnes en indices de `order` ; `None` si une colonne a
-/// disparu.
+/// Bounds `((min column, max column), (min rank, max rank))` of the rectangle
+/// `a`–`b`, columns as indices of `order`; `None` if a column has disappeared.
 fn rect_bounds(
     order: &[NodeId],
     a: GridCursor,
@@ -303,8 +289,8 @@ fn rect_bounds(
     Some((ordered(ca, cb), rank_range(a, b)))
 }
 
-/// Le rectangle `a`–`b` privé de la case `(column, rank)`, en rectangles qui
-/// la contournent (au plus quatre) ; `a`–`b` tel quel s'il ne la contient pas.
+/// The rectangle `a`–`b` minus the cell `(column, rank)`, as rectangles that go
+/// around it (at most four); `a`–`b` as is if it does not contain it.
 fn rect_minus_cell(
     order: &[NodeId],
     a: GridCursor,
@@ -338,7 +324,7 @@ fn rect_minus_cell(
 }
 
 impl Selection {
-    /// Sélection d'une seule cellule — l'ancre d'un futur rectangle.
+    /// Selection of a single cell — the anchor of a future rectangle.
     pub fn cell(column: NodeId, row: usize) -> Self {
         let cursor = GridCursor::Data(column, row);
         Self {
@@ -351,7 +337,7 @@ impl Selection {
         }
     }
 
-    /// Sélection d'une seule colonne entière — l'ancre d'une future plage.
+    /// Selection of a single whole column — the anchor of a future range.
     pub fn column(column: NodeId) -> Self {
         Self {
             kind: SelectionKind::Columns {
@@ -363,9 +349,9 @@ impl Selection {
         }
     }
 
-    /// Sélection de **toutes** les colonnes données (dans l'ordre de la
-    /// feuille), en-tête compris — la case du coin et Ctrl+A (#159). `None`
-    /// pour une feuille sans colonne.
+    /// Selection of **all** the given columns (in the worksheet's order), header
+    /// included — the corner cell and Ctrl+A (#159). `None` for a worksheet with no
+    /// column.
     pub fn all_columns(columns: &[NodeId]) -> Option<Self> {
         let first = *columns.first()?;
         Some(Self {
@@ -378,7 +364,7 @@ impl Selection {
         })
     }
 
-    /// Sélection d'une seule ligne entière — l'ancre d'une future plage.
+    /// Selection of a single whole row — the anchor of a future range.
     pub fn row(row: usize) -> Self {
         Self {
             kind: SelectionKind::FullRows {
@@ -390,9 +376,9 @@ impl Selection {
         }
     }
 
-    /// Sélection d'un champ d'en-tête entier (toutes les colonnes visibles
-    /// de la feuille) — l'ancre d'une future plage, pendant de
-    /// [`Selection::row`] pour la zone d'en-tête.
+    /// Selection of a whole header field (all the visible columns of the worksheet)
+    /// — the anchor of a future range, counterpart of [`Selection::row`] for the
+    /// header zone.
     pub fn header_row(field: HeaderField) -> Self {
         Self {
             kind: SelectionKind::HeaderRows {
@@ -402,15 +388,13 @@ impl Selection {
         }
     }
 
-    /// Sélection d'un seul champ d'en-tête **d'une colonne précise** —
-    /// l'ancre d'une future plage. Distinct de [`Selection::header_row`],
-    /// qui touche d'emblée toutes les colonnes : celui-ci n'en touche qu'une,
-    /// et un glisser peut ensuite l'étendre à d'autres colonnes (voir
-    /// [`Selection::extend_row_to`]) sans jamais couvrir *toutes* les
-    /// colonnes d'un même geste — les deux widgets qui posent l'une ou
-    /// l'autre sont distincts (`app::grid::header_field_widget` pour
-    /// celle-ci, `app::grid::header_row_label_widget` pour
-    /// [`Selection::header_row`]).
+    /// Selection of a single header field **of a specific column** — the anchor of
+    /// a future range. Distinct from [`Selection::header_row`], which touches all
+    /// the columns at once: this one touches only one, and a drag can then extend
+    /// it to other columns (see [`Selection::extend_row_to`]) without ever covering
+    /// *all* the columns in one gesture — the two widgets that set one or the other
+    /// are distinct (`app::grid::header_field_widget` for this one,
+    /// `app::grid::header_row_label_widget` for [`Selection::header_row`]).
     pub fn header_field(column: NodeId, field: HeaderField) -> Self {
         let cursor = GridCursor::Header(column, field);
         Self {
@@ -464,11 +448,11 @@ impl Selection {
         }
     }
 
-    /// Ctrl+clic sur une cellule ou un champ d'en-tête (#159) : ajoute la
-    /// case à la sélection, ou la retire (le rectangle qui la contient est
-    /// découpé autour d'elle), et y pose l'ancre. `false` si la sélection
-    /// n'est pas un ensemble de cases de la même zone (en-tête ou données) :
-    /// l'appelant pose alors une sélection simple.
+    /// Ctrl+click on a cell or a header field (#159): adds the cell to the
+    /// selection, or removes it (the rectangle that contains it is split around
+    /// it), and puts the anchor there. `false` if the selection is not a set of
+    /// cells of the same zone (header or data): the caller then sets a plain
+    /// selection.
     pub fn toggle_cell(&mut self, tree: &Tree, sheet: NodeId, target: GridCursor) -> bool {
         let SelectionKind::Rows {
             extra,
@@ -511,9 +495,9 @@ impl Selection {
         true
     }
 
-    /// Ctrl+glisser (#159) : ouvre un nouveau rectangle en `target`, sans
-    /// toucher aux précédents ; Maj+clic et le glisser l'étendent ensuite.
-    /// `false` dans les mêmes cas que [`Selection::toggle_cell`].
+    /// Ctrl+drag (#159): opens a new rectangle at `target`, without touching the
+    /// previous ones; Shift+click and the drag then extend it. `false` in the same
+    /// cases as [`Selection::toggle_cell`].
     pub fn add_cell(&mut self, target: GridCursor) -> bool {
         let SelectionKind::Rows {
             extra,
@@ -536,15 +520,13 @@ impl Selection {
         true
     }
 
-    /// Étend une plage de colonnes jusqu'à `column`, en gardant l'ancre
-    /// posée par [`Selection::column`] — glisser ou Maj-clic sur la rangée
-    /// des lettres. Sans effet si la sélection courante n'est pas déjà une
-    /// plage de colonnes.
+    /// Extends a range of columns up to `column`, keeping the anchor set by
+    /// [`Selection::column`] — drag or Shift-click on the letter row. No effect if
+    /// the current selection is not already a range of columns.
     ///
-    /// Les colonnes déjà posées par Ctrl+clic restent : c'est le geste
-    /// additif (glisser, Ctrl+Maj+clic). Pour un Maj+clic simple, qui
-    /// remplace tout par la plage ancre → `column`, voir
-    /// [`Selection::extend_columns_replacing`].
+    /// The columns already set by Ctrl+click remain: this is the additive gesture
+    /// (drag, Ctrl+Shift+click). For a plain Shift+click, which replaces everything
+    /// with the anchor → `column` range, see [`Selection::extend_columns_replacing`].
     pub fn extend_columns_to(&mut self, column: NodeId) {
         if let SelectionKind::Columns { cursor, ranged, .. } = &mut self.kind {
             *cursor = column;
@@ -552,8 +534,8 @@ impl Selection {
         }
     }
 
-    /// Maj+clic : la sélection devient exactement la plage ancre →
-    /// `column`, les colonnes posées une à une disparaissent.
+    /// Shift+click: the selection becomes exactly the anchor → `column` range, the
+    /// columns set one by one disappear.
     pub fn extend_columns_replacing(&mut self, column: NodeId) {
         if let SelectionKind::Columns { base, .. } = &mut self.kind {
             base.clear();
@@ -561,9 +543,9 @@ impl Selection {
         self.extend_columns_to(column);
     }
 
-    /// Ctrl+clic : bascule l'appartenance de `column` et déplace l'ancre
-    /// sur elle. Sans effet si la sélection n'est pas un ensemble de
-    /// colonnes (l'appelant pose alors [`Selection::column`]).
+    /// Ctrl+click: toggles the membership of `column` and moves the anchor onto it.
+    /// No effect if the selection is not a set of columns (the caller then sets
+    /// [`Selection::column`]).
     pub fn toggle_column(&mut self, tree: &Tree, sheet: NodeId, column: NodeId) {
         let selected = self.columns(tree, sheet);
         if let SelectionKind::Columns {
@@ -585,13 +567,12 @@ impl Selection {
         }
     }
 
-    /// Disposition de la copie (#159) : les colonnes (ordre de la feuille) et
-    /// les plages de rangs à copier, bout à bout, dans l'ordre de la feuille.
-    /// Des blocs qui partagent les **mêmes lignes** se mettent côte à côte,
-    /// ceux qui partagent les **mêmes colonnes** s'empilent ; sinon `None` :
-    /// la copie serait ambiguë (Copy et Cut grisés). Un bloc unique, comme un
-    /// ensemble de colonnes entières, est toujours copiable (`None` aussi
-    /// pour ce dernier : il se copie par colonne, sans rangs).
+    /// Copy layout (#159): the columns (worksheet order) and the rank ranges to
+    /// copy, end to end, in the worksheet's order. Blocks that share the **same
+    /// rows** go side by side, those that share the **same columns** are stacked;
+    /// otherwise `None`: the copy would be ambiguous (Copy and Cut grayed out). A
+    /// single block, like a set of whole columns, is always copyable (`None` too
+    /// for the latter: it is copied by column, without ranks).
     pub(crate) fn copy_layout(&self, tree: &Tree, sheet: NodeId) -> Option<CopyLayout> {
         let blocks = self.blocks(tree, sheet);
         let first = blocks.first()?;
@@ -599,8 +580,8 @@ impl Selection {
             return Some((self.columns(tree, sheet), vec![(first.lo, first.hi)]));
         }
         if blocks.iter().all(|b| b.columns == first.columns) {
-            // Rangs décalés de `HeaderField::COUNT` pour fusionner en non
-            // signés (les champs d'en-tête occupent `-COUNT..=-1`).
+            // Ranks shifted by `HeaderField::COUNT` to merge as unsigned (header fields
+            // take `-COUNT..=-1`).
             let merged = merge_intervals(
                 blocks
                     .iter()
@@ -648,8 +629,8 @@ impl Selection {
         }
     }
 
-    /// Maj+clic sur un numéro de ligne : la sélection devient exactement la
-    /// plage ancre → `row`, les lignes posées au Ctrl+clic disparaissent.
+    /// Shift+click on a row number: the selection becomes exactly the anchor →
+    /// `row` range, the rows set with Ctrl+click disappear.
     pub fn extend_full_rows_replacing(&mut self, row: usize) {
         if let SelectionKind::FullRows { base, .. } = &mut self.kind {
             base.clear();
@@ -657,9 +638,8 @@ impl Selection {
         self.extend_full_rows_to(row);
     }
 
-    /// Ctrl+clic sur un numéro de ligne (#159) : bascule l'appartenance de
-    /// `row` et y pose l'ancre. Sans effet si la sélection n'est pas un
-    /// ensemble de lignes.
+    /// Ctrl+click on a row number (#159): toggles the membership of `row` and puts
+    /// the anchor there. No effect if the selection is not a set of rows.
     pub fn toggle_row(&mut self, row: usize) {
         let selected = self.full_row_intervals();
         if let SelectionKind::FullRows {
@@ -681,8 +661,8 @@ impl Selection {
         }
     }
 
-    /// Intervalles de lignes d'un ensemble de lignes entières, triés et
-    /// fusionnés ; vide pour toute autre sorte de sélection.
+    /// Row intervals of a set of whole rows, sorted and merged; empty for any other
+    /// kind of selection.
     fn full_row_intervals(&self) -> Vec<(usize, usize)> {
         match &self.kind {
             SelectionKind::FullRows {
@@ -701,8 +681,8 @@ impl Selection {
         }
     }
 
-    /// Rectangles de cases d'un ensemble de cases, le dernier compris s'il
-    /// est actif ; vide pour toute autre sorte de sélection.
+    /// Cell rectangles of a set of cells, the last one included if it is active;
+    /// empty for any other kind of selection.
     fn rects(&self) -> Vec<(GridCursor, GridCursor)> {
         match &self.kind {
             SelectionKind::Rows {
@@ -721,9 +701,8 @@ impl Selection {
         }
     }
 
-    /// Les blocs rectangulaires de la sélection (voir [`SelectionBlock`]) ;
-    /// vide pour un ensemble de colonnes entières, qui se lit par
-    /// [`Selection::columns`].
+    /// The rectangular blocks of the selection (see [`SelectionBlock`]); empty for a
+    /// set of whole columns, which is read through [`Selection::columns`].
     pub(crate) fn blocks(&self, tree: &Tree, sheet: NodeId) -> Vec<SelectionBlock> {
         match &self.kind {
             SelectionKind::Rows { .. } => self
@@ -765,9 +744,8 @@ impl Selection {
         }
     }
 
-    /// Intervalles de lignes de **données** touchés, triés et fusionnés —
-    /// sans l'arbre : une ligne n'a pas besoin des colonnes pour savoir si
-    /// elle est touchée.
+    /// Intervals of **data** rows touched, sorted and merged — without the tree: a
+    /// row does not need the columns to know whether it is touched.
     fn data_intervals(&self) -> Vec<(usize, usize)> {
         match &self.kind {
             SelectionKind::Rows { .. } => merge_intervals(
@@ -784,48 +762,44 @@ impl Selection {
         }
     }
 
-    /// Étend une plage de champ d'en-tête entier jusqu'à `field`, en gardant
-    /// l'ancre posée par [`Selection::header_row`] — glisser ou Maj-clic sur
-    /// un libellé de champ dans la gouttière. Sans effet si la sélection
-    /// courante n'est pas déjà une plage de ce genre.
+    /// Extends a range of a whole header field up to `field`, keeping the anchor
+    /// set by [`Selection::header_row`] — drag or Shift-click on a field label in
+    /// the gutter. No effect if the current selection is not already a range of
+    /// this kind.
     pub fn extend_header_rows_to(&mut self, field: HeaderField) {
         if let SelectionKind::HeaderRows { cursor, .. } = &mut self.kind {
             *cursor = field;
         }
     }
 
-    /// Vrai si la sélection est une plage de colonnes entières (rangée des
-    /// lettres) — permet à [`crate::state::AppState::extend_selection`]/
-    /// [`crate::state::AppState::extend_header_field_selection`] de
-    /// distinguer une extension normale (au sein du rectangle en cours,
-    /// borné à l'en-tête ou aux données) d'un franchissement de frontière
-    /// depuis la rangée des lettres, qui doit reposer une sélection simple
-    /// plutôt que d'étendre silencieusement sans effet ; et à
-    /// [`crate::state::AppState::extend_column_selection`] de faire
-    /// l'inverse.
+    /// True if the selection is a range of whole columns (letter row) — lets
+    /// [`crate::state::AppState::extend_selection`]/
+    /// [`crate::state::AppState::extend_header_field_selection`] tell a normal
+    /// extension (within the current rectangle, bounded to the header or to the
+    /// data) from a boundary crossing from the letter row, which must set a plain
+    /// selection instead of silently extending to no effect; and lets
+    /// [`crate::state::AppState::extend_column_selection`] do the opposite.
     pub fn is_columns(&self) -> bool {
         matches!(self.kind, SelectionKind::Columns { .. })
     }
 
-    /// Vrai si la sélection est une plage de lignes entières (gouttière des
-    /// numéros de ligne) — même rôle que [`Selection::is_columns`], mais
-    /// pour la frontière symétrique : permet à [`crate::state::AppState::
-    /// extend_selection`]/[`crate::state::AppState::
-    /// extend_header_field_selection`] de reposer une sélection simple
-    /// plutôt que d'étendre silencieusement sans effet quand un glisser part
-    /// de la gouttière, et à [`crate::state::AppState::
-    /// extend_row_selection`] de faire l'inverse.
+    /// True if the selection is a range of whole rows (row-number gutter) — same
+    /// role as [`Selection::is_columns`], but for the symmetric boundary: lets
+    /// [`crate::state::AppState::extend_selection`]/
+    /// [`crate::state::AppState::extend_header_field_selection`] set a plain
+    /// selection instead of silently extending to no effect when a drag starts from
+    /// the gutter, and lets [`crate::state::AppState::extend_row_selection`] do the
+    /// opposite.
     pub fn is_full_rows(&self) -> bool {
         matches!(self.kind, SelectionKind::FullRows { .. })
     }
 
-    /// Vrai si la sélection est une plage de champ d'en-tête entier
-    /// (libellé de champ dans la gouttière) — même rôle que
-    /// [`Selection::is_full_rows`], côté en-tête : permet à
-    /// [`crate::state::AppState::extend_header_field_selection`] de reposer
-    /// une sélection simple plutôt que d'étendre silencieusement sans effet
-    /// quand un glisser part de la gouttière, et à [`crate::state::
-    /// AppState::extend_header_row_selection`] de faire l'inverse.
+    /// True if the selection is a range of a whole header field (field label in the
+    /// gutter) — same role as [`Selection::is_full_rows`], on the header side: lets
+    /// [`crate::state::AppState::extend_header_field_selection`] set a plain
+    /// selection instead of silently extending to no effect when a drag starts from
+    /// the gutter, and lets [`crate::state::AppState::extend_header_row_selection`]
+    /// do the opposite.
     pub fn is_header_rows(&self) -> bool {
         matches!(self.kind, SelectionKind::HeaderRows { .. })
     }
@@ -845,16 +819,14 @@ impl Selection {
         }
     }
 
-    /// Point de départ unifié de la navigation clavier — la dernière case
-    /// visée, cellule de données ou champ d'en-tête. `None` pour une plage
-    /// de colonnes : la rangée des lettres n'a pas de « case suivante » qui
-    /// ait un sens évident, il faut re-cliquer une cellule ou un champ pour
-    /// reprendre la navigation. Même chose pour une plage de lignes entières
-    /// ou de champ d'en-tête entier : ni l'une ni l'autre n'a de colonne à
-    /// proposer comme case suivante. Utilisé aussi bien par [`crate::state::
-    /// AppState::move_selection`] (flèches) que par [`crate::state::
-    /// AppState::move_selection_tab`] (Tab/Maj+Tab), qui traversent tous
-    /// deux la frontière en-tête/données.
+    /// Unified starting point of keyboard navigation — the last cell aimed at, data
+    /// cell or header field. `None` for a range of columns: the letter row has no
+    /// "next cell" with an obvious meaning, a cell or a field must be clicked again
+    /// to resume navigation. Same for a range of whole rows or of a whole header
+    /// field: neither has a column to offer as the next cell. Used both by
+    /// [`crate::state::AppState::move_selection`] (arrows) and by
+    /// [`crate::state::AppState::move_selection_tab`] (Tab/Shift+Tab), which both
+    /// cross the header/data boundary.
     pub fn grid_cursor(&self) -> Option<GridCursor> {
         match &self.kind {
             SelectionKind::Rows { cursor, .. } => Some(*cursor),
@@ -892,9 +864,9 @@ impl Selection {
         }
     }
 
-    /// Les lignes d'une sélection de **lignes entières**, croissantes et sans
-    /// doublon — vide pour toute autre sélection (#166) : seul le geste de la
-    /// gouttière des numéros de ligne désigne des lignes.
+    /// The rows of a selection of **whole rows**, ascending and without duplicates
+    /// — empty for any other selection (#166): only the row-number gutter gesture
+    /// designates rows.
     pub fn full_row_indices(&self) -> Vec<usize> {
         self.full_row_intervals()
             .into_iter()
@@ -964,13 +936,12 @@ impl Selection {
         }
     }
 
-    /// Vrai si `column` fait partie de la plage de colonnes sélectionnée
-    /// (clic, glisser ou Maj-clic sur la rangée des lettres) — distinct de
-    /// [`Selection::contains`], qui teste une cellule précise. Faux pour une
-    /// plage de lignes entières ou de champ d'en-tête entier : ce n'est pas
-    /// la même sélection, même si elle finit par toucher les mêmes colonnes
-    /// (voir [`Selection::is_row_selected`]/[`Selection::
-    /// is_header_row_selected`] pour leurs pendants respectifs).
+    /// True if `column` is part of the selected range of columns (click, drag or
+    /// Shift-click on the letter row) — distinct from [`Selection::contains`],
+    /// which tests a specific cell. False for a range of whole rows or of a whole
+    /// header field: it is not the same selection, even if it ends up touching the
+    /// same columns (see [`Selection::is_row_selected`]/
+    /// [`Selection::is_header_row_selected`] for their respective counterparts).
     pub fn is_column_selected(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
         match &self.kind {
             SelectionKind::Columns { .. } => self.columns(tree, sheet).contains(&column),
@@ -984,12 +955,11 @@ impl Selection {
             .any(|&(lo, hi)| (lo..=hi).contains(&row))
     }
 
-    /// Vrai si `field` fait partie de la plage de champ d'en-tête entier
-    /// sélectionnée (clic, glisser ou Maj-clic sur le libellé du champ dans
-    /// la gouttière) — pendant de [`Selection::is_row_selected`], côté
-    /// en-tête, pour la surbrillance de `app::grid::header_row_label_widget`.
-    /// Ne prend ni `tree` ni `sheet`, pour la même
-    /// raison que [`Selection::is_row_selected`].
+    /// True if `field` is part of the selected range of a whole header field (click,
+    /// drag or Shift-click on the field label in the gutter) — counterpart of
+    /// [`Selection::is_row_selected`], on the header side, for the highlight of
+    /// `app::grid::header_row_label_widget`. Takes neither `tree` nor `sheet`, for
+    /// the same reason as [`Selection::is_row_selected`].
     pub fn is_header_row_selected(&self, field: HeaderField) -> bool {
         match &self.kind {
             SelectionKind::HeaderRows { .. } => self.full_rank_range().is_some_and(|(lo, hi)| {
@@ -1000,15 +970,13 @@ impl Selection {
         }
     }
 
-    /// Vrai si `column` est touchée par la sélection courante, **quelle que
-    /// soit sa sorte** — contrairement à [`Selection::is_column_selected`],
-    /// qui ne vaut que pour un clic direct sur la rangée des lettres, ceci
-    /// vaut aussi pour un simple rectangle de cellules de données dont
-    /// `column` fait partie. Sert à teinter la rangée des lettres d'une
-    /// intensité intermédiaire (`stokesforge_app::theme::
-    /// header_letter_row_touched_fill`) quand une cellule de sa colonne est
-    /// sélectionnée sans que la colonne elle-même le soit — le repère « ta
-    /// colonne est concernée » d'un tableur.
+    /// True if `column` is touched by the current selection, **whatever its kind**
+    /// — unlike [`Selection::is_column_selected`], which holds only for a direct
+    /// click on the letter row, this also holds for a plain rectangle of data cells
+    /// that `column` is part of. Used to tint the letter row with an intermediate
+    /// intensity (`stokesforge_app::theme::header_letter_row_touched_fill`) when a
+    /// cell of its column is selected without the column itself being so — the
+    /// "your column is concerned" marker of a spreadsheet.
     pub fn touches_column(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {
         self.columns(tree, sheet).contains(&column)
     }
@@ -1068,9 +1036,9 @@ impl Selection {
                 .unwrap_or(0);
             (0, count)
         } else {
-            // Un seul bloc de données : on retire exactement ses lignes. Une
-            // sélection multiple (#159) laisserait des trous : remonter
-            // n'aurait pas de sens univoque, Suppr se contente de vider.
+            // A single data block: exactly its rows are removed. A multiple selection
+            // (#159) would leave holes: moving up would have no unambiguous meaning,
+            // Delete just clears.
             match self.blocks(tree, sheet).as_slice() {
                 [block] if block.hi >= 0 => (
                     block.lo.max(0) as usize,
@@ -1106,15 +1074,13 @@ impl Selection {
 mod tests {
     use super::*;
 
-    /// [`Selection::single_cell`] — verrou du bug 1 (taper sur une cellule
-    /// sélectionnée démarre l'édition) : un simple clic reste réduit à une
-    /// seule cellule, mais l'étendre — même jusqu'à elle-même via un
-    /// Maj-clic ou un glisser sans mouvement réel — ne doit plus jamais être
-    /// traité comme une cellule unique une fois `extend_row_to` appelé,
-    /// puisque le geste qui a produit la sélection n'est alors plus « un
-    /// simple clic sur une cellule ». Un champ d'en-tête unique n'est non
-    /// plus jamais `single_cell` (voir [`Selection::selected_header_field`]
-    /// pour son pendant).
+    /// [`Selection::single_cell`] — lock of bug 1 (typing on a selected cell starts
+    /// editing): a plain click stays reduced to a single cell, but extending it —
+    /// even up to itself via a Shift-click or a drag with no real movement — must
+    /// never again be treated as a single cell once `extend_row_to` has been called,
+    /// since the gesture that produced the selection is then no longer "a plain
+    /// click on a cell". A single header field is likewise never `single_cell` (see
+    /// [`Selection::selected_header_field`] for its counterpart).
     #[test]
     fn single_cell_is_some_only_for_a_plain_click() {
         let column = NodeId::from_raw(1);
@@ -1128,7 +1094,7 @@ mod tests {
         assert_eq!(
             extended.single_cell(),
             None,
-            "un rectangle de plusieurs lignes n'est pas une cellule unique"
+            "a rectangle of several rows is not a single cell"
         );
 
         let mut extended_columns = Selection::cell(column, 3);
@@ -1136,26 +1102,25 @@ mod tests {
         assert_eq!(
             extended_columns.single_cell(),
             None,
-            "un rectangle de plusieurs colonnes n'est pas une cellule unique"
+            "a rectangle of several columns is not a single cell"
         );
 
         assert_eq!(
             Selection::column(column).single_cell(),
             None,
-            "une plage de colonnes n'est jamais une cellule unique"
+            "a range of columns is never a single cell"
         );
 
         assert_eq!(
             Selection::header_field(column, HeaderField::Comment).single_cell(),
             None,
-            "un champ d'en-tête unique n'est pas une cellule unique"
+            "a single header field is not a single cell"
         );
     }
 
-    /// [`Selection::extend_row_to`] — un glisser parti d'un champ d'en-tête
-    /// qui vise une cellule de données s'arrête au champ Formule de la
-    /// colonne visée, jamais dans les données elles-mêmes : voir la doc de
-    /// tête du module.
+    /// [`Selection::extend_row_to`] — a drag that starts from a header field and
+    /// aims at a data cell stops at the F(x)= field of the targeted column, never in
+    /// the data itself: see the module's top doc.
     #[test]
     fn extending_from_a_header_field_into_data_stops_at_the_formula_field() {
         let column = NodeId::from_raw(1);
@@ -1167,13 +1132,12 @@ mod tests {
         assert_eq!(
             selection.grid_cursor(),
             Some(GridCursor::Header(other_column, HeaderField::Formula)),
-            "le glisser s'arrête au dernier champ d'en-tête de la colonne visée"
+            "the drag stops at the last header field of the targeted column"
         );
     }
 
-    /// Symétrique : un glisser parti d'une cellule de données qui vise un
-    /// champ d'en-tête s'arrête à la ligne 0 de la colonne visée, jamais
-    /// dans l'en-tête lui-même.
+    /// Symmetric: a drag that starts from a data cell and aims at a header field
+    /// stops at row 0 of the targeted column, never in the header itself.
     #[test]
     fn extending_from_data_into_a_header_field_stops_at_row_zero() {
         let column = NodeId::from_raw(1);
@@ -1185,17 +1149,16 @@ mod tests {
         assert_eq!(
             selection.grid_cursor(),
             Some(GridCursor::Data(other_column, 0)),
-            "le glisser s'arrête à la ligne 0 de la colonne visée"
+            "the drag stops at row 0 of the targeted column"
         );
     }
 
-    /// [`Selection::extend_row_to`] ne fait rien sur une plage de lignes
-    /// entières : elle n'est pas un rectangle de ce genre. Verrou du
-    /// non-franchissement de frontière symétrique à [`Selection::
-    /// extend_columns_to`] (déjà verrouillé côté colonnes par les tests de
-    /// `AppState` dans `tests/shell.rs`) — un glisser qui, parti de la
-    /// gouttière, croiserait une cellule ne doit jamais faire glisser un
-    /// `FullRows` vers un rectangle de cases.
+    /// [`Selection::extend_row_to`] does nothing on a range of whole rows: it is not
+    /// a rectangle of this kind. Lock of the boundary non-crossing, symmetric to
+    /// [`Selection::extend_columns_to`] (already locked on the column side by the
+    /// `AppState` tests in `tests/shell.rs`) — a drag that, starting from the
+    /// gutter, would cross a cell must never turn a `FullRows` into a rectangle of
+    /// cells.
     #[test]
     fn extend_row_to_has_no_effect_on_a_full_rows_selection() {
         let column = NodeId::from_raw(1);
@@ -1205,18 +1168,18 @@ mod tests {
 
         assert!(
             selection.is_full_rows(),
-            "la sélection reste une plage de lignes entières"
+            "the selection stays a range of whole rows"
         );
         assert_eq!(
             selection.row_range(),
             Some((2, 2)),
-            "le curseur n'a pas bougé"
+            "the cursor did not move"
         );
     }
 
-    /// Symétrique : [`Selection::extend_full_rows_to`] ne fait rien sur un
-    /// rectangle de cases ou une plage de colonnes — il faut re-cliquer la
-    /// gouttière pour repartir en plage de lignes.
+    /// Symmetric: [`Selection::extend_full_rows_to`] does nothing on a rectangle of
+    /// cells or a range of columns — the gutter must be clicked again to start over
+    /// as a range of rows.
     #[test]
     fn extend_full_rows_to_has_no_effect_outside_a_full_rows_selection() {
         let column = NodeId::from_raw(1);
@@ -1226,20 +1189,19 @@ mod tests {
         assert_eq!(
             cell_selection.single_cell(),
             Some((column, 3)),
-            "la sélection de cellule n'a pas bougé"
+            "the cell selection did not move"
         );
 
         let mut column_selection = Selection::column(column);
         column_selection.extend_full_rows_to(7);
         assert!(
             column_selection.is_columns(),
-            "la plage de colonnes n'a pas basculé en plage de lignes"
+            "the column range did not switch to a row range"
         );
     }
 
-    /// Une plage de lignes entières n'est jamais une cellule unique ni un
-    /// champ d'en-tête sélectionné — c'est une sélection de données pures,
-    /// distincte des deux (voir la doc de tête du module).
+    /// A range of whole rows is never a single cell nor a selected header field —
+    /// it is a pure data selection, distinct from both (see the module's top doc).
     #[test]
     fn a_full_rows_selection_is_neither_a_single_cell_nor_a_header_field() {
         let selection = Selection::row(4);
@@ -1249,12 +1211,12 @@ mod tests {
         assert_eq!(
             selection.grid_cursor(),
             None,
-            "pas de « case suivante » pour une plage de lignes, comme pour une plage de colonnes"
+            "no \"next cell\" for a range of rows, as for a range of columns"
         );
     }
 
-    /// [`Selection::row_range`]/[`Selection::is_row_selected`] couvrent la
-    /// plage quel que soit le sens du glisser (ancre après le curseur).
+    /// [`Selection::row_range`]/[`Selection::is_row_selected`] cover the range
+    /// whatever the direction of the drag (anchor after the cursor).
     #[test]
     fn full_rows_range_is_order_independent() {
         let mut selection = Selection::row(5);
@@ -1269,13 +1231,12 @@ mod tests {
     }
 
     /// [`Selection::extend_row_to`]/[`Selection::extend_columns_to`]/
-    /// [`Selection::extend_full_rows_to`] ne font rien sur une plage de champ
-    /// d'en-tête entier — verrou du non-franchissement de frontière
-    /// symétrique à [`extend_row_to_has_no_effect_on_a_full_rows_selection`]
-    /// : un glisser qui, parti d'un libellé de champ dans la gouttière,
-    /// croiserait une cellule, une colonne ou la gouttière des numéros de
-    /// ligne ne doit jamais faire glisser un `HeaderRows` vers une autre
-    /// sorte de sélection.
+    /// [`Selection::extend_full_rows_to`] do nothing on a range of a whole header
+    /// field — lock of the boundary non-crossing, symmetric to
+    /// [`extend_row_to_has_no_effect_on_a_full_rows_selection`]: a drag that,
+    /// starting from a field label in the gutter, would cross a cell, a column or
+    /// the row-number gutter must never turn a `HeaderRows` into another kind of
+    /// selection.
     #[test]
     fn no_other_extend_method_touches_a_header_rows_selection() {
         let column = NodeId::from_raw(1);
@@ -1287,18 +1248,18 @@ mod tests {
 
         assert!(
             selection.is_header_rows(),
-            "la sélection reste une plage de champ d'en-tête entier"
+            "the selection stays a range of a whole header field"
         );
         assert_eq!(
             selection.full_rank_range(),
             Some((-3, -3)),
-            "le curseur n'a pas bougé (Unit = rang -3, voir HeaderField::index)"
+            "the cursor did not move (Unit = rank -3, see HeaderField::index)"
         );
     }
 
-    /// Symétrique : [`Selection::extend_header_rows_to`] ne fait rien en
-    /// dehors d'une plage de champ d'en-tête entier — il faut re-cliquer un
-    /// libellé de la gouttière pour repartir en plage de ce genre.
+    /// Symmetric: [`Selection::extend_header_rows_to`] does nothing outside a range
+    /// of a whole header field — a gutter label must be clicked again to start over
+    /// as a range of this kind.
     #[test]
     fn extend_header_rows_to_has_no_effect_outside_a_header_rows_selection() {
         let column = NodeId::from_raw(1);
@@ -1308,7 +1269,7 @@ mod tests {
         assert_eq!(
             cell_selection.single_cell(),
             Some((column, 3)),
-            "la sélection de cellule n'a pas bougé"
+            "the cell selection did not move"
         );
 
         let mut field_selection = Selection::header_field(column, HeaderField::LongName);
@@ -1316,15 +1277,14 @@ mod tests {
         assert_eq!(
             field_selection.selected_header_field(),
             Some((column, HeaderField::LongName)),
-            "le champ d'une seule colonne n'a pas basculé en champ entier"
+            "the single-column field did not switch to a whole field"
         );
     }
 
-    /// Une plage de champ d'en-tête entier n'est jamais une cellule unique
-    /// ni un champ d'en-tête d'une seule colonne — c'est une sélection
-    /// d'en-tête pur, mais qui touche par construction toutes les colonnes,
-    /// distincte des deux (voir [`Selection::header_field`] pour son
-    /// pendant à une colonne).
+    /// A range of a whole header field is never a single cell nor a header field of
+    /// a single column — it is a pure header selection, but one that touches all
+    /// the columns by construction, distinct from both (see
+    /// [`Selection::header_field`] for its single-column counterpart).
     #[test]
     fn a_header_rows_selection_is_neither_a_single_cell_nor_a_single_column_header_field() {
         let selection = Selection::header_row(HeaderField::Comment);
@@ -1334,24 +1294,25 @@ mod tests {
         assert_eq!(
             selection.grid_cursor(),
             None,
-            "pas de « case suivante » pour un champ entier, comme pour une plage de lignes"
+            "no \"next cell\" for a whole field, as for a range of rows"
         );
         assert_eq!(
             selection.row_range(),
             None,
-            "un champ d'en-tête entier ne touche jamais les données"
+            "a whole header field never touches the data"
         );
     }
 
-    /// [`Selection::full_rank_range`]/[`Selection::is_header_row_selected`]
-    /// couvrent la plage quel que soit le sens du glisser, et restent
-    /// strictement dans l'en-tête (rangs négatifs).
+    /// [`Selection::full_rank_range`]/[`Selection::is_header_row_selected`] cover
+    /// the range whatever the direction of the drag, and stay strictly in the
+    /// header (negative ranks).
     #[test]
     fn header_rows_range_is_order_independent_and_stays_in_the_header() {
         let mut selection = Selection::header_row(HeaderField::Formula);
         selection.extend_header_rows_to(HeaderField::Unit);
 
-        // Unit = rang -3, Formula = rang -1 (voir HeaderField::index).
+        // Unit = rank -3, Formula = rank -1 (see HeaderField::index).
+        //
         assert_eq!(selection.full_rank_range(), Some((-3, -1)));
         assert!(selection.is_header_row_selected(HeaderField::Unit));
         assert!(selection.is_header_row_selected(HeaderField::Comment));

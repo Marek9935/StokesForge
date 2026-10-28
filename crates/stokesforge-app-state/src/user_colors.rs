@@ -1,21 +1,20 @@
-//! Couleurs enregistrées « pour l'utilisateur » : gardées sur cette machine,
-//! proposées dans tous les projets.
+//! Colors saved "for the user": kept on this machine, offered in all
+//! projects.
 //!
-//! Le pendant hors projet des couleurs enregistrées dans le projet
-//! ([`stokesforge_plot::SavedColors`], portées par l'arbre et le fichier `.stf`,
-//! modifiées par une commande annulable). Celles-ci ne sont pas dans le
-//! modèle — elles n'appartiennent à aucun projet —, ne passent donc par
-//! aucune commande et ne s'annulent pas : c'est une préférence de
-//! l'utilisateur, comme les recettes d'import
-//! (`stokesforge_import::RecipeStore`), dont ce module reprend le stockage — un
-//! fichier JSON dans le dossier de configuration de StokesForge, jamais de
-//! panique s'il est absent, illisible ou corrompu (invariant 10).
+//! The out-of-project counterpart of the colors saved in the project
+//! ([`stokesforge_plot::SavedColors`], carried by the tree and the `.stf`
+//! file, changed by an undoable command). These are not in the model — they
+//! belong to no project —, so they go through no command and cannot be undone:
+//! they are a user preference, like the import recipes
+//! (`stokesforge_import::RecipeStore`), whose storage this module reuses — a
+//! JSON file in StokesForge's configuration folder, never a panic if it is
+//! missing, unreadable or corrupt (invariant 10).
 
 use std::path::{Path, PathBuf};
 
 use stokesforge_plot::SavedColors;
 
-/// Forme du fichier sur disque.
+/// Shape of the file on disk.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct UserColorsFile {
     #[serde(default)]
@@ -24,12 +23,12 @@ struct UserColorsFile {
     text: Vec<String>,
     #[serde(default)]
     backgrounds: Vec<String>,
-    /// Nuanciers (#178) : `(nom, arrêts)`.
+    /// Color gradients (#178): `(name, stops)`.
     #[serde(default)]
     gradients: Vec<(String, Vec<String>)>,
 }
 
-/// Les couleurs de l'utilisateur, et le fichier où elles vivent.
+/// The user's colors, and the file where they live.
 #[derive(Debug, Clone, Default)]
 pub struct UserColors {
     colors: SavedColors,
@@ -37,13 +36,13 @@ pub struct UserColors {
 }
 
 impl UserColors {
-    /// Charge depuis le fichier de configuration de l'utilisateur. Fichier
-    /// absent, illisible ou corrompu : liste vide, pas d'erreur.
+    /// Loads from the user's configuration file. Missing, unreadable or
+    /// corrupt file: empty list, no error.
     pub fn load() -> Self {
         Self::load_from(default_path())
     }
 
-    /// Charge depuis `path` (`None` : rien à charger, rien ne sera écrit).
+    /// Loads from `path` (`None`: nothing to load, nothing will be written).
     pub fn load_from(path: Option<PathBuf>) -> Self {
         let colors = path
             .as_deref()
@@ -66,19 +65,19 @@ impl UserColors {
         Self { colors, path }
     }
 
-    /// Les couleurs enregistrées.
+    /// The saved colors.
     pub fn colors(&self) -> &SavedColors {
         &self.colors
     }
 
-    /// Le fichier où elles sont écrites, s'il y en a un.
+    /// The file where they are written, if there is one.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
-    /// Remplace les couleurs et les écrit sur disque (crée le dossier de
-    /// configuration au besoin). En cas d'échec d'écriture, les couleurs
-    /// restent remplacées pour cette session et l'erreur est rendue.
+    /// Replaces the colors and writes them to disk (creates the configuration
+    /// folder if needed). If the write fails, the colors stay replaced for
+    /// this session and the error is returned.
     pub fn replace(&mut self, colors: SavedColors) -> std::io::Result<()> {
         self.colors = colors.bounded();
         let Some(path) = &self.path else {
@@ -104,8 +103,8 @@ impl UserColors {
     }
 }
 
-/// Fichier `couleurs.json` du dossier de configuration
-/// (`stokesforge_import::config_dir::config_dir`, #332) — le même dossier que
+/// The `couleurs.json` file of the configuration folder
+/// (`stokesforge_import::config_dir::config_dir`, #332) — the same folder as
 /// `import_recipes.json`.
 fn default_path() -> Option<PathBuf> {
     stokesforge_import::config_dir::config_dir().map(|dir| dir.join("couleurs.json"))
@@ -117,23 +116,23 @@ mod tests {
     use stokesforge_plot::ColorUsage;
 
     #[test]
-    fn les_couleurs_de_l_utilisateur_survivent_a_un_redemarrage() {
-        let dir = tempfile::tempdir().expect("dossier temporaire");
+    fn the_users_colors_survive_a_restart() {
+        let dir = tempfile::tempdir().expect("temporary folder");
         let path = dir.path().join("config").join("couleurs.json");
         let mut store = UserColors::load_from(Some(path.clone()));
         assert!(store.colors().is_empty());
         store
             .replace(SavedColors::default().with_added(ColorUsage::Text, "#123456"))
-            .expect("écriture");
+            .expect("write");
         let reloaded = UserColors::load_from(Some(path));
         assert_eq!(reloaded.colors().get(ColorUsage::Text), ["#123456"]);
     }
 
     #[test]
-    fn un_fichier_corrompu_donne_une_liste_vide() {
-        let dir = tempfile::tempdir().expect("dossier temporaire");
+    fn a_corrupt_file_gives_an_empty_list() {
+        let dir = tempfile::tempdir().expect("temporary folder");
         let path = dir.path().join("couleurs.json");
-        std::fs::write(&path, "{ pas du json").expect("écriture");
+        std::fs::write(&path, "{ not json").expect("write");
         assert!(UserColors::load_from(Some(path)).colors().is_empty());
     }
 }

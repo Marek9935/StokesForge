@@ -1,29 +1,29 @@
-//! L'état de l'application StokesForge, **sans interface graphique** (#263,
-//! chantier #254).
+//! The StokesForge application state, **without a graphical interface** (#263,
+//! work package #254).
 //!
-//! Ce crate reçoit tout ce que `stokesforge-app` décide sans le dessiner :
-//! [`state::AppState`] (les actions de l'utilisateur, leur effet sur la
-//! session, les messages d'état), la sélection, les préférences, les formulaires
-//! d'analyse, les textes d'interface (`tr!`, [`i18n`]) et les erreurs mises en
-//! phrase ([`errors`]). Il ne dépend d'**aucun** crate d'interface — ni
-//! `egui`, ni `eframe`, ni `winit`, ni `wgpu`, pas plus que
-//! `stokesforge-clipboard` qui tire winit : c'est le compilateur qui tient la
-//! frontière que gardait, avant #263, une garde de texte (#255). Les tests de
-//! l'état (`tests/shell.rs`…) compilent donc sans fenêtre.
+//! This crate receives everything `stokesforge-app` decides without drawing
+//! it: [`state::AppState`] (the user's actions, their effect on the session,
+//! the status messages), the selection, the preferences, the analysis forms,
+//! the interface texts (`tr!`, [`i18n`]) and the errors put into sentences
+//! ([`errors`]). It depends on **no** interface crate: not `egui`, not
+//! `eframe`, not `winit`, not `wgpu`, nor `stokesforge-clipboard`, which pulls
+//! in winit. The compiler holds the boundary that a text guard kept before
+//! #263 (#255). The state tests (`tests/shell.rs`...) therefore compile
+//! without a window.
 //!
-//! # Ce qui reste dans `stokesforge-app`
+//! # What stays in `stokesforge-app`
 //!
-//! La coquille `eframe` (`app`, `main.rs`), le thème, les icônes et les briques
-//! de champ qui nomment un type d'egui. Elle lit cet état et le peint ; elle
-//! n'y ajoute aucune décision de produit. L'offre de la figure au
-//! presse-papiers système (`stokesforge-clipboard`) y reste aussi : l'état ne
-//! garde que des octets neutres ([`state::FigureBytes`]).
+//! The `eframe` shell (`app`, `main.rs`), the theme, the icons and the field
+//! building blocks that name an egui type. It reads this state and paints it;
+//! it adds no product decision to it. The offer of the figure to the system
+//! clipboard (`stokesforge-clipboard`) also stays there: the state keeps only
+//! neutral bytes ([`state::FigureBytes`]).
 //!
-//! # Une frontière lisible
+//! # A readable boundary
 //!
-//! Les modules sont publics un à un, sans `pub use` géant : le chemin d'un
-//! import (`stokesforge_app_state::selection::…`) dit d'où vient l'élément.
-//! Seul [`tr!`] se trouve à la racine (`#[macro_export]`).
+//! The modules are public one by one, with no giant `pub use`: the path of an
+//! import (`stokesforge_app_state::selection::...`) says where the item comes
+//! from. Only [`tr!`] sits at the root (`#[macro_export]`).
 
 #![cfg_attr(
     not(test),

@@ -1,6 +1,6 @@
-//! Le texte de la boîte « R² faible » et de la pastille (#290), en anglais et
-//! en français, singulier et pluriel. Un seul test : la langue est globale au
-//! processus, et ce fichier est le sien.
+//! The text of the "low R²" dialog and of the badge (#290), in English and
+//! French, singular and plural. A single test: the language is global to the
+//! process, and this file is its own.
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_app_state::i18n::{self, Language};
@@ -9,7 +9,7 @@ use stokesforge_app_state::r_squared::{
 };
 
 fn groups() -> Vec<LowRSquaredGroup> {
-    // Désordre volontaire, et un type en deux morceaux : 7 + 5 reconvolutions.
+    // Deliberately unordered, and one type in two pieces: 7 + 5 reconvolutions.
     group_by_kind([
         (OperationKind::Fit, 1),
         (OperationKind::Reconvolution, 7),
@@ -33,7 +33,7 @@ fn the_counts_group_by_type_in_a_fixed_order() {
                 count: 12
             },
         ],
-        "types dans l'ordre de OperationKind::ALL, zéro écarté, totaux fusionnés"
+        "types in the order of OperationKind::ALL, zero dropped, totals merged"
     );
     assert_eq!(total(&found), 13);
     assert!(group_by_kind([]).is_empty());
@@ -41,7 +41,7 @@ fn the_counts_group_by_type_in_a_fixed_order() {
 
 #[test]
 fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
-    let _garde = LANGUE.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     i18n::set_language(Language::English);
     let text = summary_text(&groups());
     assert_eq!(
@@ -58,7 +58,7 @@ fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
     );
     assert_eq!(badge_text(1), "1 R² faible");
     assert_eq!(badge_text(13), "13 R² faibles");
-    // Chaque type a son nom au glossaire, au singulier comme au pluriel.
+    // Each type has its name in the glossary, in the singular as in the plural.
     for kind in OperationKind::ALL {
         for count in [1, 2] {
             let line =
@@ -72,25 +72,25 @@ fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
     i18n::set_language(Language::English);
 }
 
-// ---- Blindage (#290) : noms par type, pluriels, regroupement de la boîte ----
+// ---- Hardening (#290): names by type, plurals, grouping of the dialog ----
 
 use std::sync::Mutex;
 use stokesforge_app_state::r_squared::group_line;
 
-/// La langue est globale au processus : les tests de ce fichier se la passent.
-static LANGUE: Mutex<()> = Mutex::new(());
+/// The language is global to the process: the tests of this file take turns.
+static LANGUAGE_LOCK: Mutex<()> = Mutex::new(());
 
-fn avec_langue<T>(language: Language, f: impl FnOnce() -> T) -> T {
-    let _garde = LANGUE.lock().unwrap_or_else(|e| e.into_inner());
+fn with_language<T>(language: Language, f: impl FnOnce() -> T) -> T {
+    let _guard = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     i18n::set_language(language);
     let out = f();
     i18n::set_language(Language::English);
     out
 }
 
-/// Match exhaustif sans `_` : un type ajouté à `OperationKind` casse la
-/// compilation de ce test, qui force alors à lui donner un nom au glossaire.
-fn rang(kind: OperationKind) -> usize {
+/// Exhaustive match without `_`: a type added to `OperationKind` breaks the
+/// compilation of this test, which then forces giving it a name in the glossary.
+fn rank(kind: OperationKind) -> usize {
     match kind {
         OperationKind::Baseline => 0,
         OperationKind::Correct => 1,
@@ -103,135 +103,142 @@ fn rang(kind: OperationKind) -> usize {
     }
 }
 
-fn ligne(kind: OperationKind, count: usize) -> String {
+fn count_line(kind: OperationKind, count: usize) -> String {
     group_line(&LowRSquaredGroup { kind, count })
 }
 
-/// Le nom d'un type sans son compteur : « 12 reconvolutions » -> « reconvolutions ».
-fn nom(kind: OperationKind, count: usize) -> String {
-    let line = ligne(kind, count);
+/// The name of a type without its counter: "12 reconvolutions" -> "reconvolutions".
+fn type_name(kind: OperationKind, count: usize) -> String {
+    let line = count_line(kind, count);
     let prefix = format!("{count} ");
     line.strip_prefix(&prefix)
-        .unwrap_or_else(|| panic!("« {line} » ne commence pas par « {prefix}»"))
+        .unwrap_or_else(|| panic!("\"{line}\" does not start with \"{prefix}\""))
         .to_string()
 }
 
 #[test]
-fn tous_les_types_ont_un_nom_singulier_et_pluriel_distincts_en_fr_et_en() {
+fn every_type_has_a_distinct_singular_and_plural_name_in_fr_and_en() {
     for language in [Language::English, Language::French] {
-        avec_langue(language, || {
+        with_language(language, || {
             assert_eq!(OperationKind::ALL.len(), 8);
-            let mut singuliers = Vec::new();
-            let mut pluriels = Vec::new();
+            let mut singulars = Vec::new();
+            let mut plurals = Vec::new();
             for (i, kind) in OperationKind::ALL.into_iter().enumerate() {
-                assert_eq!(rang(kind), i, "ALL est dans l'ordre des rangs");
-                let (un, deux) = (nom(kind, 1), nom(kind, 2));
-                assert!(!un.trim().is_empty(), "{kind:?} {language:?}");
-                assert!(!deux.trim().is_empty(), "{kind:?} {language:?}");
-                assert_ne!(un, deux, "{kind:?} {language:?} : singulier = pluriel");
+                assert_eq!(rank(kind), i, "ALL is in rank order");
+                let (one, two) = (type_name(kind, 1), type_name(kind, 2));
+                assert!(!one.trim().is_empty(), "{kind:?} {language:?}");
+                assert!(!two.trim().is_empty(), "{kind:?} {language:?}");
+                assert_ne!(one, two, "{kind:?} {language:?}: singular = plural");
                 assert!(
-                    !un.contains("low-r2") && !deux.contains("low-r2"),
-                    "clé non résolue : {un} / {deux}"
+                    !one.contains("low-r2") && !two.contains("low-r2"),
+                    "unresolved key: {one} / {two}"
                 );
-                singuliers.push(un);
-                pluriels.push(deux);
+                singulars.push(one);
+                plurals.push(two);
             }
-            for noms in [&singuliers, &pluriels] {
-                let mut tri = noms.clone();
-                tri.sort();
-                tri.dedup();
-                assert_eq!(tri.len(), noms.len(), "noms de types confondus : {noms:?}");
+            for names in [&singulars, &plurals] {
+                let mut sorted_names = names.clone();
+                sorted_names.sort();
+                sorted_names.dedup();
+                assert_eq!(
+                    sorted_names.len(),
+                    names.len(),
+                    "type names merged: {names:?}"
+                );
             }
         });
     }
 }
 
 #[test]
-fn les_pluriels_suivent_la_regle_du_catalogue_en_anglais_et_en_francais() {
-    let valeurs = [0usize, 1, 2, 5, 12, 21, 100, 101];
-    // (anglais : 0 est pluriel ; français : 0 et 1 sont singuliers)
-    avec_langue(Language::English, || {
-        for n in valeurs {
-            let attendu = if n == 1 { "fit" } else { "fits" };
-            assert_eq!(ligne(OperationKind::Fit, n), format!("{n} {attendu}"));
-            let attendu = if n == 1 {
+fn plurals_follow_the_catalog_rule_in_english_and_french() {
+    let values = [0usize, 1, 2, 5, 12, 21, 100, 101];
+    // (English: 0 is plural; French: 0 and 1 are singular)
+    with_language(Language::English, || {
+        for n in values {
+            let expected = if n == 1 { "fit" } else { "fits" };
+            assert_eq!(count_line(OperationKind::Fit, n), format!("{n} {expected}"));
+            let expected = if n == 1 {
                 "peak decomposition"
             } else {
                 "peak decompositions"
             };
-            assert_eq!(ligne(OperationKind::Peaks, n), format!("{n} {attendu}"));
+            assert_eq!(
+                count_line(OperationKind::Peaks, n),
+                format!("{n} {expected}")
+            );
         }
         assert_eq!(badge_text(0), "0 low R²");
         assert_eq!(badge_text(21), "21 low R²");
     });
-    avec_langue(Language::French, || {
-        for n in valeurs {
-            let attendu = if n <= 1 { "ajustement" } else { "ajustements" };
+    with_language(Language::French, || {
+        for n in values {
+            let expected = if n <= 1 { "ajustement" } else { "ajustements" };
             assert_eq!(
-                ligne(OperationKind::Fit, n),
-                format!("{n} {attendu}"),
+                count_line(OperationKind::Fit, n),
+                format!("{n} {expected}"),
                 "n = {n}"
             );
-            let attendu = if n <= 1 {
+            let expected = if n <= 1 {
                 "déconvolution directe"
             } else {
                 "déconvolutions directes"
             };
             assert_eq!(
-                ligne(OperationKind::DirectDeconvolution, n),
-                format!("{n} {attendu}"),
+                count_line(OperationKind::DirectDeconvolution, n),
+                format!("{n} {expected}"),
                 "n = {n}"
             );
-            let attendu = if n <= 1 { "R² faible" } else { "R² faibles" };
-            assert_eq!(badge_text(n), format!("{n} {attendu}"), "n = {n}");
+            let expected = if n <= 1 { "R² faible" } else { "R² faibles" };
+            assert_eq!(badge_text(n), format!("{n} {expected}"), "n = {n}");
         }
     });
 }
 
 #[test]
-fn le_message_de_la_boite_pour_un_type_deux_types_et_tous_les_types() {
-    avec_langue(Language::English, || {
-        let un = group_by_kind([(OperationKind::Fit, 1)]);
+fn the_dialog_message_for_one_type_two_types_and_all_types() {
+    with_language(Language::English, || {
+        let one = group_by_kind([(OperationKind::Fit, 1)]);
         assert_eq!(
-            summary_text(&un),
+            summary_text(&one),
             "R² < 0.6 for:\n• 1 fit\nSee the Results pane for the values."
         );
-        let douze = group_by_kind([(OperationKind::Reconvolution, 12)]);
+        let twelve = group_by_kind([(OperationKind::Reconvolution, 12)]);
         assert_eq!(
-            summary_text(&douze),
+            summary_text(&twelve),
             "R² < 0.6 for:\n• 12 reconvolutions\nSee the Results pane for the values."
         );
-        let deux = group_by_kind([(OperationKind::Reconvolution, 12), (OperationKind::Fit, 1)]);
+        let two = group_by_kind([(OperationKind::Reconvolution, 12), (OperationKind::Fit, 1)]);
         assert_eq!(
-            summary_text(&deux),
+            summary_text(&two),
             "R² < 0.6 for:\n• 1 fit\n• 12 reconvolutions\nSee the Results pane for the values."
         );
-        // Tous les types, passés dans l'ordre inverse : l'ordre de sortie est
-        // celui de ALL, une ligne par type, chacune avec son compteur.
-        let tous = group_by_kind(
+        // All types, passed in reverse order: the output order is that of
+        // ALL, one line per type, each with its counter.
+        let all_kinds = group_by_kind(
             OperationKind::ALL
                 .into_iter()
                 .rev()
-                .map(|k| (k, rang(k) + 1)),
+                .map(|k| (k, rank(k) + 1)),
         );
-        assert_eq!(tous.len(), 8);
-        let texte = summary_text(&tous);
-        let lignes: Vec<&str> = texte.lines().collect();
-        assert_eq!(lignes.len(), 10, "tête + 8 types + renvoi : {texte}");
-        assert_eq!(lignes[0], "R² < 0.6 for:");
+        assert_eq!(all_kinds.len(), 8);
+        let summary = summary_text(&all_kinds);
+        let lines: Vec<&str> = summary.lines().collect();
+        assert_eq!(lines.len(), 10, "head + 8 types + pointer: {summary}");
+        assert_eq!(lines[0], "R² < 0.6 for:");
         for kind in OperationKind::ALL {
             assert_eq!(
-                lignes[1 + rang(kind)],
-                format!("• {}", ligne(kind, rang(kind) + 1)),
+                lines[1 + rank(kind)],
+                format!("• {}", count_line(kind, rank(kind) + 1)),
                 "{kind:?}"
             );
         }
-        assert_eq!(total(&tous), 36);
+        assert_eq!(total(&all_kinds), 36);
     });
 }
 
 #[test]
-fn le_regroupement_fusionne_et_ecarte_les_zeros_quel_que_soit_l_ordre() {
+fn grouping_merges_and_drops_zeros_whatever_the_order() {
     let a = group_by_kind([
         (OperationKind::Peaks, 2),
         (OperationKind::Fit, 3),
@@ -243,7 +250,7 @@ fn le_regroupement_fusionne_et_ecarte_les_zeros_quel_que_soit_l_ordre() {
         (OperationKind::Peaks, 6),
         (OperationKind::Baseline, 0),
     ]);
-    assert_eq!(a, b, "fusion et ordre indépendants de l'ordre d'entrée");
+    assert_eq!(a, b, "merging and order independent of the input order");
     assert_eq!(
         a.iter().map(|g| (g.kind, g.count)).collect::<Vec<_>>(),
         vec![(OperationKind::Fit, 3), (OperationKind::Peaks, 6)]

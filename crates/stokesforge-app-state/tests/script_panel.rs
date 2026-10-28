@@ -1,37 +1,36 @@
-//! Critères d'acceptation de la console de script, pilotés **sans fenêtre**
-//! mais **avec** l'interpréteur.
+//! Acceptance criteria of the script console, driven **without a window**
+//! but **with** the interpreter.
 //!
-//! Symétrique de `tests/shell.rs` : celui-là prouve que le banc fonctionne
-//! sans le pont Python, celui-ci prouve que le pont, une fois branché, tient
-//! les promesses de la tâche 5.6 — sortie récupérée, grille rafraîchie sans
-//! action supplémentaire, annulation par `Action::Undo` de ce qu'un script a
-//! écrit, exception de script qui ne casse rien — vues depuis `AppState`,
-//! exactement comme les verrait la fenêtre.
+//! Symmetric to `tests/shell.rs`: that one proves the bench works without the
+//! Python bridge, this one proves that the bridge, once plugged in, keeps the
+//! promises of task 5.6 — output retrieved, grid refreshed without any extra
+//! action, `Action::Undo` undoing what a script wrote, script exception that
+//! breaks nothing — seen from `AppState`, exactly as the window would see
+//! them.
 //!
-//! Exige le préfixe vendorisé et l'environnement Python décrit dans
-//! `.codex/README.md`, puis `cargo test -p stokesforge-app-state --features python
-//! --test script_panel`. `scripts/python-test.sh` lance aussi les tests de
-//! l'état de l'application, dont ce fichier et le parcours numpy → colonnes → graphe.
+//! Requires the vendored prefix and the Python environment described in
+//! `.codex/README.md`, then `cargo test -p stokesforge-app-state --features python
+//! --test script_panel`. `scripts/python-test.sh` also runs the application
+//! state tests, including this file and the numpy → columns → graph path.
 //!
-//! # `Action::RunScript` ne bloque pas
+//! # `Action::RunScript` does not block
 //!
-//! [`AppState::dispatch`] ne bloque jamais, `RunScript` compris (voir la doc
-//! de tête de `stokesforge_app_state::state`) : le résultat n'arrive que par
-//! [`AppState::poll_script`]. Chaque test attend donc une exécution en
-//! sondant cette méthode dans une boucle courte ([`run_and_wait`]) — le même
-//! geste que `stokesforge_app::app` fait à chaque image, jamais un `sleep` bloquant qui
-//! espère juste.
+//! [`AppState::dispatch`] never blocks, `RunScript` included (see the top-level
+//! doc of `stokesforge_app_state::state`): the result arrives only through
+//! [`AppState::poll_script`]. Each test therefore waits for a run by polling
+//! this method in a short loop ([`run_and_wait`]) — the same gesture that
+//! `stokesforge_app::app` makes on every frame, never a blocking `sleep` that
+//! just hopes.
 //!
-//! # Le démarrage paresseux de l'interpréteur n'est PAS prouvé ici
+//! # The lazy start of the interpreter is NOT proven here
 //!
-//! `EmbeddedPython::is_initialized()` est un état **global au processus**, et
-//! Cargo exécute les tests d'un même binaire en parallèle par défaut : ce
-//! fichier contient plusieurs tests qui démarrent tous un script, donc
-//! l'interpréteur est de toute façon initialisé dès le premier d'entre eux à
-//! s'exécuter, dans un ordre non garanti. La preuve « faux avant, vrai après »
-//! (critère 8) exige d'être **seule** à toucher Python dans son processus :
-//! elle vit dans son propre fichier, `tests/script_bridge_lazy.rs`, qui est
-//! son propre binaire de test.
+//! `EmbeddedPython::is_initialized()` is a **process-global** state, and Cargo
+//! runs the tests of a single binary in parallel by default: this file
+//! contains several tests that all start a script, so the interpreter is
+//! initialized anyway from the first of them to run, in an unguaranteed order.
+//! The "false before, true after" proof (criterion 8) requires being the
+//! **only one** to touch Python in its process: it lives in its own file,
+//! `tests/script_bridge_lazy.rs`, which is its own test binary.
 
 #![cfg(feature = "python")]
 
@@ -44,8 +43,8 @@ use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_session::Session;
 
-/// Résout le préfixe embarqué : `STOKESFORGE_PYTHON_HOME` si posée par le script
-/// de test, sinon `vendor/python/extracted/python` relatif au manifeste.
+/// Resolves the embedded prefix: `STOKESFORGE_PYTHON_HOME` if set by the test
+/// script, otherwise `vendor/python/extracted/python` relative to the manifest.
 fn home() -> PathBuf {
     match std::env::var_os(interpreter::HOME_ENV) {
         Some(value) => PathBuf::from(value),
@@ -55,70 +54,67 @@ fn home() -> PathBuf {
     }
 }
 
-/// Délai maximal qu'un test attend la fin d'un script avant d'abandonner :
-/// aucun test ne doit attendre indéfiniment.
+/// Maximum time a test waits for a script to finish before giving up: no test
+/// must wait indefinitely.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Projet de démonstration de ce fichier : un classeur `Book1` avec `Sheet1`
-/// et une colonne numérique `Temps`. Indépendant du projet de démonstration
-/// du binaire (`main.rs`) : ce fichier ne doit pas casser si celui-là change,
-/// et réciproquement — même principe que `tests/shell.rs`.
+/// Demo project of this file: a `Book1` workbook with `Sheet1` and a numeric
+/// column `Time`. Independent of the binary's demo project (`main.rs`): this
+/// file must not break if that one changes, and vice versa — same principle
+/// as `tests/shell.rs`.
 fn demo_project() -> Project {
-    let mut project = Project::new("Demo").expect("projet de démonstration");
+    let mut project = Project::new("Demo").expect("demo project");
     let root = project.root();
     let book = project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
+        .expect("workbook Book1");
     let sheet1 = project
         .tree()
         .child_by_name(book, "Sheet1")
-        .expect("Book1 lisible")
-        .expect("Sheet1 créée avec le classeur");
+        .expect("Book1 readable")
+        .expect("Sheet1 created with the workbook");
     project
         .add_column(
             sheet1,
             None,
-            Some("Temps"),
+            Some("Time"),
             Column::from_f64(&[0.0, 0.5, 1.0, 1.5, 2.0]),
         )
-        .expect("colonne Temps");
+        .expect("Time column");
     project
 }
 
-/// Démarre une session sur le projet de démonstration et l'état applicatif
-/// associé, avec un descripteur d'interpréteur posé (mais **pas démarré** —
-/// voir la doc de `stokesforge_app_state::state`). Rend la session, à garder vivante,
-/// et la feuille explicite que les tests pilotent, comme `tests/shell.rs`.
+/// Starts a session on the demo project and the associated application state,
+/// with an interpreter descriptor set (but **not started** — see the doc of
+/// `stokesforge_app_state::state`). Returns the session, to be kept alive, and
+/// the explicit sheet that the tests drive, like `tests/shell.rs`.
 fn start() -> (Session, AppState, NodeId) {
     let project = demo_project();
-    let sheet = project
-        .tree()
-        .resolve("[Book1]Sheet1")
-        .expect("feuille de démonstration");
-    let session = Session::spawn(project, None).expect("thread de session");
+    let sheet = project.tree().resolve("[Book1]Sheet1").expect("demo sheet");
+    let session = Session::spawn(project, None).expect("session thread");
     let mut state = AppState::new_with_preferences(
         session.handle(),
         "script-test.stf".to_string(),
         stokesforge_app_state::preferences::Preferences::load_from(None),
     )
-    .expect("état applicatif initial");
+    .expect("initial application state");
     state.set_python(EmbeddedPython::with_home(home()));
     (session, state, sheet)
 }
 
-/// Identifiant de la colonne `name` dans `sheet`.
+/// Identifier of the column `name` in `sheet`.
 fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
     state
         .visible_columns(sheet)
         .into_iter()
         .find(|(_, column_name, _)| column_name == name)
         .map(|(id, _, _)| id)
-        .unwrap_or_else(|| panic!("colonne {name} visible dans {sheet}"))
+        .unwrap_or_else(|| panic!("column {name} visible in {sheet}"))
 }
 
-/// Pose `source` comme script courant, le lance et attend — en sondant
-/// [`AppState::poll_script`], comme `stokesforge_app::app` le fait à chaque image —
-/// que le résultat soit prêt. Panique si `TIMEOUT` est dépassé.
+/// Sets `source` as the current script, runs it and waits — by polling
+/// [`AppState::poll_script`], as `stokesforge_app::app` does on every frame —
+/// until the result is ready. Panics if `TIMEOUT` is exceeded.
 fn run_and_wait(state: &mut AppState, source: &str) {
     state.set_script_source(source.to_string());
     state.dispatch(Action::RunScript);
@@ -127,86 +123,82 @@ fn run_and_wait(state: &mut AppState, source: &str) {
     while state.script_running() {
         assert!(
             Instant::now() <= deadline,
-            "le script n'a pas terminé sous {TIMEOUT:?}"
+            "the script did not finish within {TIMEOUT:?}"
         );
         thread::sleep(Duration::from_millis(1));
         state.poll_script();
     }
 }
 
-// --- 4. Un script s'exécute et sa sortie revient ----------------------------
+// --- 4. A script runs and its output comes back -----------------------------
 
 #[test]
 fn a_script_runs_and_its_output_comes_back() {
     let (_session, mut state, _sheet) = start();
 
-    run_and_wait(&mut state, "print(\"bonjour\")\n");
+    run_and_wait(&mut state, "print(\"hello\")\n");
 
-    let output = state.script_output().expect("une sortie enregistrée");
+    let output = state.script_output().expect("a recorded output");
+    assert!(output.error.is_none(), "script failed: {:?}", output.error);
     assert!(
-        output.error.is_none(),
-        "script en échec : {:?}",
-        output.error
-    );
-    assert!(
-        output.stdout.contains("bonjour"),
-        "sortie : {:?}",
+        output.stdout.contains("hello"),
+        "output: {:?}",
         output.stdout
     );
 }
 
-// --- 5. La grille reflète le modèle après le script --------------------------
+// --- 5. The grid reflects the model after the script -------------------------
 
 #[test]
 fn the_grid_reflects_the_model_after_a_script_without_any_extra_action() {
     let (_session, mut state, sheet) = start();
-    let temps = column_id(&state, sheet, "Temps");
-    assert_eq!(state.cell_text(temps, 0), "0");
-    assert_eq!(state.cell_text(temps, 4), "2");
+    let time_column = column_id(&state, sheet, "Time");
+    assert_eq!(state.cell_text(time_column, 0), "0");
+    assert_eq!(state.cell_text(time_column, 4), "2");
 
     run_and_wait(
         &mut state,
-        "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\n\
+        "a = pyst.resolve(\"[Book1]Sheet1!Time\")\n\
          pyst.set_column(a, pyst.column(a) * 0.0 + 42.0)\n",
     );
 
-    // Aucune action supplémentaire n'a été dispatchée : c'est `poll_script`,
-    // sondé par `run_and_wait` (comme `stokesforge_app::app` le fait à chaque image),
-    // qui a rafraîchi l'instantané. C'est le piège de cette tâche.
-    assert_eq!(state.cell_text(temps, 0), "42");
-    assert_eq!(state.cell_text(temps, 4), "42");
+    // No extra action was dispatched: it is `poll_script`, polled by
+    // `run_and_wait` (as `stokesforge_app::app` does on every frame), that
+    // refreshed the snapshot. This is the trap of this task.
+    assert_eq!(state.cell_text(time_column, 0), "42");
+    assert_eq!(state.cell_text(time_column, 4), "42");
 }
 
-// --- 6. Annulation de ce qu'un script a écrit --------------------------------
+// --- 6. Undoing what a script wrote ------------------------------------------
 
 #[test]
 fn action_undo_reverts_what_a_script_wrote() {
     let (_session, mut state, sheet) = start();
-    let temps = column_id(&state, sheet, "Temps");
-    assert_eq!(state.cell_text(temps, 1), "0.5");
+    let time_column = column_id(&state, sheet, "Time");
+    assert_eq!(state.cell_text(time_column, 1), "0.5");
 
     run_and_wait(
         &mut state,
-        "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\n\
+        "a = pyst.resolve(\"[Book1]Sheet1!Time\")\n\
          pyst.set_column(a, pyst.column(a) * 0.0 + 99.0)\n",
     );
-    assert_eq!(state.cell_text(temps, 1), "99");
+    assert_eq!(state.cell_text(time_column, 1), "99");
     assert!(
         state.can_undo(),
-        "l'écriture du script doit être dans l'historique"
+        "the script's write must be in the history"
     );
 
-    // Ctrl+Z côté fenêtre : c'est le critère de fin, vu depuis l'interface.
+    // Ctrl+Z on the window side: this is the final criterion, seen from the interface.
     state.dispatch(Action::Undo);
 
     assert_eq!(
-        state.cell_text(temps, 1),
+        state.cell_text(time_column, 1),
         "0.5",
-        "Action::Undo doit défaire l'écriture faite par le script"
+        "Action::Undo must undo the write made by the script"
     );
 }
 
-// --- 7. Une exception de script est signalée, sa trace reste dans la console --
+// --- 7. A script exception is reported, its trace stays in the console -------
 
 #[test]
 fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
@@ -215,13 +207,13 @@ fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
 
     run_and_wait(&mut state, "1 / 0\n");
 
-    let output = state.script_output().expect("une sortie enregistrée");
+    let output = state.script_output().expect("a recorded output");
     assert!(
         output
             .error
             .as_deref()
             .is_some_and(|trace| trace.contains("ZeroDivisionError")),
-        "trace attendue avec ZeroDivisionError : {:?}",
+        "expected a trace with ZeroDivisionError: {:?}",
         output.error
     );
     assert!(
@@ -229,24 +221,24 @@ fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
             .error
             .as_deref()
             .is_some_and(|trace| trace.contains("Traceback")),
-        "trace d'appels complète attendue : {:?}",
+        "expected a full call trace: {:?}",
         output.error
     );
 
-    // S-M10 (#230) : l'exception est signalée dans la barre d'état, la trace
-    // restant dans la console — un seul message court, jamais la trace.
+    // S-M10 (#230): the exception is reported in the status bar, the trace
+    // staying in the console — a single short message, never the trace.
     let status = state.status();
     assert!(
         status.is_some_and(
             |status| status.is_error() && status.text == "Script failed. See the console"
         ),
-        "une exception de script doit être signalée en erreur courte : {status:?}"
+        "a script exception must be reported as a short error: {status:?}"
     );
-    // Rien n'a été écrit dans le modèle : la révision n'a pas bougé.
+    // Nothing was written to the model: the revision did not move.
     assert_eq!(state.snapshot().revision, before);
 
-    // L'état reste utilisable pour de vrai : une action normale marche
-    // encore après une exception de script.
+    // The state really remains usable: a normal action still works after a
+    // script exception.
     let columns_before = state.visible_columns(sheet).len();
     state.dispatch(Action::AddColumn { sheet });
     assert!(state.status().is_some_and(|status| !status.is_error()));
@@ -254,16 +246,16 @@ fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
 }
 
 #[test]
-fn lecture_calcul_resultats_et_graphe_se_rafraichissent_et_sannulent_ensemble() {
+fn reading_calculation_results_and_graph_refresh_and_undo_together() {
     let (_session, mut state, _sheet) = start();
     let before = state.snapshot().tree.clone();
     run_and_wait(
         &mut state,
         r#"
 import numpy as np
-source = pyst.column(pyst.resolve('[Book1]Sheet1!Temps'))
+source = pyst.column(pyst.resolve('[Book1]Sheet1!Time'))
 book = pyst.create_workbook('Résultats')
-sheet = pyst.create_worksheet(book, 'Calcul')
+sheet = pyst.create_worksheet(book, 'Calculation')
 x = pyst.create_column(sheet, 'X')
 y = pyst.create_column(sheet, 'Y')
 pyst.set_values(x, np.asarray(source, dtype=np.float64))
@@ -281,7 +273,7 @@ pyst.plot(y, x, name='Graph1', title='$t^2$')
     let y = state
         .snapshot()
         .tree
-        .resolve("[Résultats]Calcul!Y")
+        .resolve("[Résultats]Calculation!Y")
         .unwrap();
     assert_eq!(
         state
@@ -303,14 +295,14 @@ pyst.plot(y, x, name='Graph1', title='$t^2$')
     assert_eq!(*state.snapshot().tree, *after);
 }
 
-/// #315 : Save est refusé pendant un script (rien n'est écrit, un message le
-/// dit) et abandonne le geste en attente ; une fois le script fini, un Save
-/// ne rejoue pas ce geste.
+/// #315: Save is refused during a script (nothing is written, a message says
+/// so) and abandons the pending gesture; once the script is done, a Save does
+/// not replay that gesture.
 #[test]
-fn save_est_refuse_pendant_un_script() {
+fn save_is_refused_during_a_script() {
     let (_session, mut state, _sheet) = start();
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("pendant.stf");
+    let file = dir.path().join("during.stf");
     state.set_path(file.display().to_string());
     state.dispatch(Action::AddWorkbook);
     state.set_script_source("import time\ntime.sleep(0.5)\n".to_string());
@@ -321,7 +313,7 @@ fn save_est_refuse_pendant_un_script() {
         pending_edits: false,
     });
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
-    assert!(!file.exists(), "rien n'est écrit pendant le script");
+    assert!(!file.exists(), "nothing is written during the script");
     assert!(state.status().is_some_and(|status| status.is_error()));
     assert!(!state.take_quit_ready());
 
@@ -334,27 +326,27 @@ fn save_est_refuse_pendant_un_script() {
     state.dispatch(Action::Save);
     assert!(
         file.is_file(),
-        "témoin : Save écrit une fois le script fini"
+        "witness: Save writes once the script is done"
     );
     assert!(
         !state.take_quit_ready(),
-        "le geste en attente a été abandonné"
+        "the pending gesture was abandoned"
     );
 }
 
-// --- Enregistrement depuis un script (#331) ----------------------------------
+// --- Saving from a script (#331) ---------------------------------------------
 
-/// `pyst.save_as` enregistre le projet : le titre de la fenêtre ne reste pas
-/// « modifié » (`saved_revision` suit), et l'application adopte le chemin.
+/// `pyst.save_as` saves the project: the window title does not stay
+/// "modified" (`saved_revision` follows), and the application adopts the path.
 #[test]
 fn a_script_save_clears_the_modified_mark_and_adopts_the_path() {
     let (_session, mut state, _sheet) = start();
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("par_script.stf");
+    let file = dir.path().join("by_script.stf");
     run_and_wait(
         &mut state,
         &format!(
-            "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\n\
+            "a = pyst.resolve(\"[Book1]Sheet1!Time\")\n\
              pyst.set_values(a, [1.0, 2.0])\n\
              pyst.save_as({file:?})\n"
         ),
@@ -363,19 +355,19 @@ fn a_script_save_clears_the_modified_mark_and_adopts_the_path() {
     assert_eq!(state.path(), file.to_str().unwrap());
     assert!(
         !state.window_title().contains('•'),
-        "titre : {}",
+        "title: {}",
         state.window_title()
     );
-    // Témoin : une écriture sans enregistrement marque bien le projet modifié.
+    // Witness: a write without saving does mark the project modified.
     run_and_wait(
         &mut state,
-        "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\npyst.set_values(a, [5.0])\n",
+        "a = pyst.resolve(\"[Book1]Sheet1!Time\")\npyst.set_values(a, [5.0])\n",
     );
     assert!(state.window_title().contains('•'));
 }
 
-/// Garde #309 : `pyst.save()` refuse d'écraser la source d'une lecture qui a
-/// écarté des données ; `save_as` reste permis.
+/// Guard #309: `pyst.save()` refuses to overwrite the source of a read that
+/// discarded data; `save_as` stays allowed.
 #[test]
 fn a_script_save_refuses_to_overwrite_a_source_that_lost_data() {
     let (_session, mut state, _sheet) = start();
@@ -399,7 +391,7 @@ fn a_script_save_refuses_to_overwrite_a_source_that_lost_data() {
     assert!(output.stdout.contains("save_as"));
     assert_eq!(std::fs::read(&source).unwrap(), b"original");
 
-    let elsewhere = dir.path().join("ailleurs.stf");
+    let elsewhere = dir.path().join("elsewhere.stf");
     run_and_wait(
         &mut state,
         &format!("pyst.save_as({elsewhere:?})\npyst.save()\n"),

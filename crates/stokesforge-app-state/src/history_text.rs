@@ -1,15 +1,14 @@
-//! Mise en phrase des libellés d'historique (issue #46, chantier #39).
+//! Turning history labels into sentences (issue #46, work package #39).
 //!
-//! `stokesforge-commands` rend un [`HistoryLabel`] — une action et ses paramètres —
-//! et jamais une phrase ; c'est ici, et seulement ici, qu'il devient un texte
-//! dans la langue courante, par les clés `history-*` du catalogue `en`. Les
-//! pluriels (« Insert 1 Row » / « Insert 3 Rows ») sont ceux de Fluent, pas du
-//! Rust.
+//! `stokesforge-commands` returns a [`HistoryLabel`] — an action and its
+//! parameters — and never a sentence; here, and only here, it becomes a text
+//! in the current language, through the `history-*` keys of the `en` catalog.
+//! The plurals ("Insert 1 Row" / "Insert 3 Rows") are Fluent's, not Rust's.
 //!
-//! Le `match` n'a **pas** de branche par défaut : une variante ajoutée à
-//! `HistoryLabel` ne compile pas tant qu'elle n'a pas sa phrase, donc sa clé.
-//! `Display` de `HistoryLabel` (anglais, pour les journaux et le CLI) double le
-//! catalogue `en` ; `tests/shell.rs` vérifie qu'ils disent la même chose.
+//! The `match` has **no** default branch: a variant added to `HistoryLabel`
+//! does not compile until it has its sentence, hence its key. The `Display` of
+//! `HistoryLabel` (English, for logs and the CLI) duplicates the `en`
+//! catalog; `tests/shell.rs` checks that they say the same thing.
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_commands::{HistoryLabel, MacroKind, PlotEditKind};
@@ -18,13 +17,13 @@ use i18n_embed::fluent::FluentLanguageLoader;
 
 use crate::i18n::loader;
 
-/// Un nombre pour Fluent, qui ne convertit pas `usize` : saturé à `i64::MAX`
-/// (inatteignable : une feuille ne porte pas 9×10¹⁸ lignes).
+/// A number for Fluent, which does not convert `usize`: saturated at
+/// `i64::MAX` (unreachable: a sheet does not hold 9×10¹⁸ rows).
 fn number(count: usize) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
 }
 
-/// Le nom d'une famille d'opération d'analyse, dans la langue du chargeur.
+/// The name of an analysis operation family, in the loader's language.
 pub fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String {
     macro_rules! tr {
         ($($arguments:tt)*) => {
@@ -43,14 +42,14 @@ pub fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String 
     }
 }
 
-/// La phrase d'un libellé d'historique, dans la langue courante.
+/// The sentence of a history label, in the current language.
 pub fn history_text(label: &HistoryLabel) -> String {
     history_text_in(loader(), label)
 }
 
-/// La phrase d'un libellé d'historique dans la langue du chargeur `loader` : un
-/// test compare ainsi l'anglais, ou la pseudo-langue, sans dépendre de la
-/// langue de l'environnement.
+/// The sentence of a history label in the language of `loader`: a test thus
+/// compares English, or the pseudo-language, without depending on the
+/// environment's language.
 pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> String {
     macro_rules! tr {
         ($($arguments:tt)*) => {

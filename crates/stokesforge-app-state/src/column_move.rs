@@ -1,62 +1,63 @@
-//! Déplacer des colonnes dans leur feuille (#319) : la logique pure du sous-menu
-//! `Move ▸` — quel ordre vise chaque geste, et quelle suite de `Command::Move`
-//! y mène. Aucun état d'interface, aucune commande exécutée ici : `AppState`
-//! l'appelle, le menu l'interroge pour griser ses entrées.
+//! Moving columns within their sheet (#319): the pure logic of the `Move ▸`
+//! submenu — which order each gesture aims at, and which sequence of
+//! `Command::Move` leads there. No interface state, no command executed here:
+//! `AppState` calls it, the menu queries it to grey out its entries.
 //!
-//! # Règles (décisions du 2026-10-21)
+//! # Rules (decisions of 2026-10-21)
 //!
-//! - **Même feuille seulement.** Un ordre est celui des colonnes visibles d'une
-//!   feuille.
-//! - **Left / Right** : chaque colonne sélectionnée avance d'une place, et
-//!   l'écart entre colonnes non contiguës reste (`A [B] C [D] E` → `B A D C E`,
-//!   et non un bloc resserré `B D A C E`).
-//! - **First / Last** : les colonnes sélectionnées se regroupent en tête ou en
-//!   fin, dans leur ordre.
-//! - **Tout ou rien** : si le geste ne changerait rien — ou si une seule des
-//!   colonnes sélectionnées ne peut pas avancer (`[A] C` ou `[A] [C]`, Left) —
-//!   il n'y a pas d'ordre cible. Le menu grise alors l'entrée, avec sa raison.
+//! - **Same sheet only.** An order is that of the visible columns of a
+//!   sheet.
+//! - **Left / Right**: each selected column advances one place, and the gap
+//!   between non-contiguous columns stays (`A [B] C [D] E` → `B A D C E`,
+//!   not a tightened block `B D A C E`).
+//! - **First / Last**: the selected columns gather at the start or at the
+//!   end, in their order.
+//! - **All or nothing**: if the gesture would change nothing — or if just one
+//!   of the selected columns cannot advance (`[A] C` or `[A] [C]`, Left) —
+//!   there is no target order. The menu then greys out the entry, with its
+//!   reason.
 //!
-//! # De l'ordre cible aux commandes
+//! # From the target order to commands
 //!
-//! `Command::Move { id, new_parent, index }` compte l'index **après retrait** du
-//! nœud (`Tree::move_node`). Un enfant `Unknown` peut vivre sous une feuille
-//! (invariant 10) sans être une colonne visible : l'ordre se calcule sur les
-//! colonnes visibles, puis l'index se traduit dans la liste **complète** des
-//! enfants ([`plan`]). Seules les colonnes sélectionnées bougent, de proche en
-//! proche à partir du bord vers lequel elles vont : l'ordre est celui d'un
-//! avancement sans enjambement (ascendant pour Left et First, descendant pour
-//! Right et Last), de sorte que chaque colonne trouve sa place finale sans que
-//! les suivantes la défassent.
+//! `Command::Move { id, new_parent, index }` counts the index **after
+//! removal** of the node (`Tree::move_node`). An `Unknown` child can live
+//! under a sheet (invariant 10) without being a visible column: the order is
+//! computed on the visible columns, then the index is translated into the
+//! **full** list of children ([`plan`]). Only the selected columns move, one
+//! after another starting from the edge they head to: the order is that of an
+//! advance without jumping over (ascending for Left and First, descending for
+//! Right and Last), so that each column finds its final place without the
+//! following ones undoing it.
 
 use stokesforge_core::NodeId;
 
-/// Où va la sélection : les quatre entrées du sous-menu `Move ▸`.
+/// Where the selection goes: the four entries of the `Move ▸` submenu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnMove {
-    /// En tête de feuille, dans l'ordre de la sélection.
+    /// To the start of the sheet, in the selection's order.
     First,
-    /// D'une place vers la gauche, chaque colonne.
+    /// One place to the left, each column.
     Left,
-    /// D'une place vers la droite, chaque colonne.
+    /// One place to the right, each column.
     Right,
-    /// En fin de feuille, dans l'ordre de la sélection.
+    /// To the end of the sheet, in the selection's order.
     Last,
 }
 
-/// Une étape : `Command::Move { id, new_parent: <la feuille>, index }`, l'index
-/// comptant **après retrait** de `id` dans la liste complète des enfants.
+/// One step: `Command::Move { id, new_parent: <the sheet>, index }`, the index
+/// counting **after removal** of `id` in the full list of children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoveStep {
-    /// Colonne à déplacer.
+    /// Column to move.
     pub id: NodeId,
-    /// Position d'accueil, après retrait.
+    /// Destination position, after removal.
     pub index: usize,
 }
 
-/// L'ordre visé par `direction` pour la sélection `selected` sur les colonnes
-/// visibles `order`, ou `None` si le geste ne changerait rien (grisé).
-/// Les identifiants de `selected` absents de `order` sont ignorés ; sans
-/// colonne sélectionnée dans `order`, `None`.
+/// The order aimed at by `direction` for the selection `selected` over the
+/// visible columns `order`, or `None` if the gesture would change nothing
+/// (greyed out). Identifiers of `selected` absent from `order` are ignored;
+/// with no selected column in `order`, `None`.
 pub fn target_order(
     order: &[NodeId],
     selected: &[NodeId],
@@ -104,11 +105,11 @@ pub fn target_order(
     (target != order).then_some(target)
 }
 
-/// La suite de déplacements qui mène `children` (tous les enfants de la feuille,
-/// colonnes visibles et autres) à l'ordre `direction` pour `selected` sur les
-/// colonnes visibles `order`. `None` quand [`target_order`] n'a rien à faire.
-/// Les étapes sont à exécuter dans l'ordre, chacune sur l'état laissé par la
-/// précédente ; une colonne déjà à sa place n'a pas d'étape.
+/// The sequence of moves that leads `children` (all the sheet's children,
+/// visible columns and others) to the order `direction` for `selected` over
+/// the visible columns `order`. `None` when [`target_order`] has nothing to do.
+/// The steps are to be executed in order, each on the state left by the
+/// previous one; a column already in place has no step.
 pub fn plan(
     children: &[NodeId],
     order: &[NodeId],
@@ -139,10 +140,10 @@ pub fn plan(
     Some(steps)
 }
 
-/// Traduit « la position `wanted` parmi les colonnes visibles » en position dans
-/// la liste complète `current` (sans la colonne qui bouge) : juste avant la
-/// colonne visible qui occupe `wanted`, ou à la suite de la dernière colonne
-/// visible quand `wanted` est la fin.
+/// Translates "position `wanted` among the visible columns" into a position in
+/// the full list `current` (without the moving column): just before the
+/// visible column that occupies `wanted`, or right after the last visible
+/// column when `wanted` is the end.
 fn full_index(current: &[NodeId], target: &[NodeId], wanted: usize) -> usize {
     let visible: Vec<usize> = current
         .iter()
@@ -177,8 +178,8 @@ mod tests {
         target_order(&ids(order), &ids(selected), direction).map(|t| names(&t))
     }
 
-    /// `A [B] C [D] E`, Left : chaque colonne recule d'une place, l'écart
-    /// reste. Témoin : resserrer le bloc donnerait `B D A C E`.
+    /// `A [B] C [D] E`, Left: each column steps back one place, the gap
+    /// stays. Witness: tightening the block would give `B D A C E`.
     #[test]
     fn left_keeps_the_gap_between_non_contiguous_columns() {
         assert_eq!(target("ABCDE", "BD", ColumnMove::Left).unwrap(), "BADCE");
@@ -189,12 +190,12 @@ mod tests {
     fn first_and_last_gather_the_selection_in_its_order() {
         assert_eq!(target("ABCDE", "BD", ColumnMove::First).unwrap(), "BDACE");
         assert_eq!(target("ABCDE", "BD", ColumnMove::Last).unwrap(), "ACEBD");
-        // L'ordre est celui de la feuille, pas celui où la sélection est donnée.
+        // The order is the sheet's, not the one in which the selection is given.
         assert_eq!(target("ABCDE", "DB", ColumnMove::First).unwrap(), "BDACE");
     }
 
-    /// Tout ou rien : une colonne qui ne peut pas avancer bloque le geste.
-    /// Témoin : ne bouger que C.
+    /// All or nothing: a column that cannot advance blocks the gesture.
+    /// Witness: moving only C.
     #[test]
     fn a_column_that_cannot_move_greys_the_whole_gesture() {
         assert_eq!(target("ABC", "AC", ColumnMove::Left), None);
@@ -210,25 +211,25 @@ mod tests {
         assert_eq!(target("ABCDE", "DE", ColumnMove::Last), None);
         assert_eq!(target("ABCDE", "ABCDE", ColumnMove::First), None);
         assert_eq!(target("ABCDE", "", ColumnMove::Left), None);
-        // Une colonne d'une autre feuille n'est pas dans l'ordre : ignorée.
+        // A column from another sheet is not in the order: ignored.
         assert_eq!(target("ABC", "Z", ColumnMove::First), None);
     }
 
-    /// Rejoue une suite d'étapes sur une liste de nœuds, en comptant l'index
-    /// après retrait comme `Tree::move_node`.
+    /// Replays a sequence of steps on a list of nodes, counting the index
+    /// after removal like `Tree::move_node`.
     fn replay(children: &[NodeId], steps: &[MoveStep]) -> Vec<NodeId> {
         let mut list = children.to_vec();
         for step in steps {
             list.retain(|id| *id != step.id);
-            assert!(step.index <= list.len(), "index hors des bornes");
+            assert!(step.index <= list.len(), "index out of bounds");
             list.insert(step.index, step.id);
         }
         list
     }
 
-    /// Les étapes mènent exactement à l'ordre cible, pour toute sélection et
-    /// les quatre sens, sur une feuille de six colonnes. Témoin : compter
-    /// l'index avant retrait (hors borne ou mauvaise place).
+    /// The steps lead exactly to the target order, for every selection and
+    /// the four directions, on a sheet of six columns. Witness: counting the
+    /// index before removal (out of bounds or wrong place).
     #[test]
     fn the_steps_reach_the_target_order_for_every_selection() {
         let order = ids("ABCDEF");
@@ -252,7 +253,7 @@ mod tests {
                         wanted,
                         "{mask:b} {direction:?} : {steps:?}"
                     );
-                    // Seules les colonnes sélectionnées bougent.
+                    // Only the selected columns move.
                     assert!(steps.iter().all(|step| selected.contains(&step.id)));
                     assert!(!steps.is_empty());
                 }
@@ -260,11 +261,11 @@ mod tests {
         }
     }
 
-    /// Un enfant `Unknown` sous la feuille n'est pas une colonne visible : il
-    /// garde sa place relative, et l'index se compte dans la liste complète.
+    /// An `Unknown` child under the sheet is not a visible column: it keeps
+    /// its relative place, and the index is counted in the full list.
     #[test]
     fn an_unknown_child_keeps_its_place_and_indexes_are_full_list_indexes() {
-        // Enfants : A, ?, B, C, ? ; colonnes visibles : A B C.
+        // Children: A, ?, B, C, ?; visible columns: A B C.
         let unknown_1 = NodeId::from_raw(100);
         let unknown_2 = NodeId::from_raw(101);
         let [a, b, c] = [ids("A")[0], ids("B")[0], ids("C")[0]];
@@ -297,7 +298,7 @@ mod tests {
         }
     }
 
-    /// Une colonne seule qui bouge : une seule étape, sur cette colonne.
+    /// A single column moving: a single step, on that column.
     #[test]
     fn one_selected_column_makes_one_step() {
         let order = ids("ABC");

@@ -1,35 +1,35 @@
-//! Sauvegarde automatique et récupération au démarrage (#317).
+//! Automatic save and recovery at startup (#317).
 //!
-//! Toutes les `autosave_minutes` (5 par défaut, 1 à 60), si le projet a changé
-//! depuis le dernier repère (démarrage, enregistrement, chargement, copie
-//! précédente), `AppState` demande à l'acteur d'écrire le projet dans
-//! l'**emplacement** de ce processus (`recovery::Slot`, un seul fichier écrasé).
-//! C'est `handle.save` : il ne crée aucune entrée d'historique, ne change ni
-//! `saved_revision`, ni le chemin, ni le titre « modifié », et n'écrit jamais
-//! le `.stf` de l'utilisateur (invariant 1 : rien du modèle ne bouge).
+//! Every `autosave_minutes` (5 by default, 1 to 60), if the project has changed
+//! since the last mark (startup, save, load, previous copy), `AppState` asks
+//! the actor to write the project into the **slot** of this process
+//! (`recovery::Slot`, a single overwritten file). This is `handle.save`: it
+//! creates no history entry, changes neither `saved_revision`, nor the path,
+//! nor the "modified" title, and never writes the user's `.stf` (invariant 1:
+//! nothing of the model moves).
 //!
-//! L'horloge est **injectée** (`poll_autosave(now)`) : l'application l'appelle
-//! une fois par image depuis `logic()` et programme son réveil sur le délai
-//! rendu ; un test avance `now` sans attendre. Une échéance tombée pendant une
-//! macro, un script, un import ou un recalcul est repoussée de quelques
-//! secondes, sans erreur : `handle.save` refuse pendant une macro, et un
-//! recalcul fait attendre l'acteur.
+//! The clock is **injected** (`poll_autosave(now)`): the application calls it
+//! once per frame from `logic()` and schedules its wake-up on the returned
+//! delay; a test advances `now` without waiting. A deadline that falls during
+//! a macro, a script, an import or a recalculation is pushed back by a few
+//! seconds, without error: `handle.save` refuses during a macro, and a
+//! recalculation makes the actor wait.
 //!
-//! Un échec d'écriture (dossier impossible) dit **un seul** avertissement tant
-//! qu'il dure ; la copie suivante, réussie, le rearme.
+//! A write failure (impossible folder) gives **a single** warning as long as it
+//! lasts; the next successful copy re-arms it.
 //!
-//! Au démarrage, `scan_recovery` (appelé par le binaire racine seulement)
-//! dresse la liste des copies de processus disparus, plus récentes que leur
-//! `.stf` ; la fenêtre propose Open, Ignore et Delete (avec confirmation, la
-//! suppression ne s'annule pas). Open charge la copie dans la fenêtre courante,
-//! derrière « Enregistrer ? » s'il y a du travail, sous le **chemin d'origine**
-//! (vide pour Untitled) et comme travail non enregistré ; la copie ouverte est
-//! alors recopiée dans l'emplacement de ce processus, puis effacée. Ignore la
-//! laisse sur disque : elle revient au démarrage suivant.
+//! At startup, `scan_recovery` (called by the root binary only) lists the
+//! copies of vanished processes that are newer than their `.stf`; the window
+//! offers Open, Ignore and Delete (with confirmation, deletion cannot be
+//! undone). Open loads the copy into the current window, behind "Save?" if
+//! there is work, under the **original path** (empty for Untitled) and as
+//! unsaved work; the opened copy is then recopied into the slot of this
+//! process, then erased. Ignore leaves it on disk: it comes back at the next
+//! startup.
 //!
-//! L'emplacement disparaît à l'enregistrement, à la fermeture propre, et pour
-//! New, Open d'un autre projet et Discard (qui sont des fermetures propres de
-//! l'ancien projet). Session perdue : la copie est gardée.
+//! The slot disappears at save, at clean close, and for New, Open of another
+//! project and Discard (which are clean closes of the old project). Lost
+//! session: the copy is kept.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -39,24 +39,24 @@ use crate::errors;
 use crate::recovery::{self, Found, Slot};
 use crate::tr;
 
-/// Délai de nouvel essai quand une échéance tombe pendant un travail en cours.
+/// Retry delay when a deadline falls during work in progress.
 pub const AUTOSAVE_RETRY: Duration = Duration::from_secs(5);
 
-/// L'état de la sauvegarde automatique et de la liste de récupération.
+/// The state of the automatic save and of the recovery list.
 #[derive(Debug, Default)]
 pub(super) struct AutosaveState {
-    /// Prochaine échéance ; `None` : à armer au prochain `poll_autosave`.
+    /// Next deadline; `None`: to arm at the next `poll_autosave`.
     deadline: Option<Instant>,
-    /// Les révisions déjà couvertes (enregistrées, chargées ou copiées) ;
-    /// `None` : le projet est à copier quoi qu'il en soit.
+    /// The revisions already covered (saved, loaded or copied);
+    /// `None`: the project is to be copied anyway.
     mark: Option<(u64, u64)>,
-    /// L'emplacement de ce processus, une fois pris.
+    /// The slot of this process, once taken.
     slot: Option<Slot>,
-    /// La dernière écriture a échoué (l'avertissement est déjà dit).
+    /// The last write failed (the warning has already been given).
     failed: bool,
-    /// Les copies proposées au démarrage, tant que la fenêtre est ouverte.
+    /// The copies offered at startup, as long as the window is open.
     found: Vec<Found>,
-    /// La copie dont la suppression attend confirmation.
+    /// The copy whose deletion is waiting for confirmation.
     pending_delete: Option<PathBuf>,
 }
 
@@ -69,12 +69,12 @@ impl AutosaveState {
     }
 }
 
-/// Une ligne de la fenêtre de récupération.
+/// A line of the recovery window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryRow {
-    /// La copie ; c'est la clé des actions Open, Ignore et Delete.
+    /// The copy; it is the key of the Open, Ignore and Delete actions.
     pub path: PathBuf,
-    /// « nom · date », prêt à peindre.
+    /// "name · date", ready to paint.
     pub text: String,
 }
 
@@ -84,12 +84,12 @@ enum AutosaveError {
 }
 
 impl AppState {
-    /// La sauvegarde automatique est-elle active (préférence) ?
+    /// Is automatic save active (preference)?
     pub fn autosave_enabled(&self) -> bool {
         self.object_manager_preferences.autosave()
     }
 
-    /// Sa période, en minutes.
+    /// Its period, in minutes.
     pub fn autosave_minutes(&self) -> u32 {
         self.object_manager_preferences.autosave_minutes()
     }
@@ -105,8 +105,8 @@ impl AppState {
         }
     }
 
-    /// Voir [`super::Action::SetAutosaveMinutes`] : la nouvelle période compte
-    /// à partir de maintenant.
+    /// See [`super::Action::SetAutosaveMinutes`]: the new period counts from
+    /// now on.
     pub(super) fn set_autosave_minutes(&mut self, minutes: u32) {
         self.autosave.deadline = None;
         if let Err(error) = self
@@ -120,7 +120,7 @@ impl AppState {
         }
     }
 
-    /// Les révisions du projet tel qu'il est maintenant.
+    /// The revisions of the project as it is now.
     fn autosave_revisions(&self) -> (u64, u64) {
         (
             self.snapshot.revision.max(self.applied_revision),
@@ -128,24 +128,24 @@ impl AppState {
         )
     }
 
-    /// Le projet vient d'être enregistré, chargé ou remplacé : il n'y a plus
-    /// rien à copier avant le prochain changement.
+    /// The project has just been saved, loaded or replaced: there is nothing
+    /// more to copy before the next change.
     pub(super) fn autosave_mark_clean(&mut self) {
         self.autosave.mark = Some(self.autosave_revisions());
     }
 
-    /// Supprime la copie de ce processus : le projet est enregistré, ou
-    /// refermé proprement.
+    /// Deletes the copy of this process: the project is saved, or closed
+    /// cleanly.
     pub(super) fn autosave_remove_slot(&mut self) {
         if let Some(slot) = self.autosave.slot.take() {
             slot.remove();
         }
     }
 
-    /// À appeler à chaque image (`logic()` de la fenêtre racine) avec l'heure
-    /// courante. Écrit la copie si l'échéance est tombée et que le projet a
-    /// changé ; rend le délai jusqu'à la prochaine échéance (pour programmer le
-    /// réveil), `None` si la sauvegarde est coupée.
+    /// To call at every frame (`logic()` of the root window) with the current
+    /// time. Writes the copy if the deadline has fallen and the project has
+    /// changed; returns the delay until the next deadline (to schedule the
+    /// wake-up), `None` if the save is off.
     pub fn poll_autosave(&mut self, now: Instant) -> Option<Duration> {
         if !self.autosave_enabled() || self.session_lost {
             self.autosave.deadline = None;
@@ -183,8 +183,8 @@ impl AppState {
         Some(period)
     }
 
-    /// Écrit le projet dans l'emplacement de ce processus (changé de nom si le
-    /// projet a changé de chemin). Sans dossier de secours (tests) : rien.
+    /// Writes the project into the slot of this process (renamed if the
+    /// project changed path). Without a backup folder (tests): nothing.
     fn write_autosave(&mut self) -> Result<(), AutosaveError> {
         let Some(dir) = self.recovery_dir.clone() else {
             return Ok(());
@@ -210,16 +210,16 @@ impl AppState {
         Ok(())
     }
 
-    /// Dresse la liste des copies à proposer (dossier de secours connu).
-    /// Appelé au démarrage par le binaire racine.
+    /// Lists the copies to offer (backup folder known).
+    /// Called at startup by the root binary.
     pub fn scan_recovery(&mut self) {
         if let Some(dir) = &self.recovery_dir {
             self.autosave.found = recovery::scan(dir);
         }
     }
 
-    /// Les lignes de la fenêtre de récupération ; `None` : rien à proposer,
-    /// la fenêtre est fermée.
+    /// The lines of the recovery window; `None`: nothing to offer, the window
+    /// is closed.
     pub fn recovery_rows(&self) -> Option<Vec<RecoveryRow>> {
         if self.autosave.found.is_empty() {
             return None;
@@ -247,7 +247,7 @@ impl AppState {
         )
     }
 
-    /// Le nom de la copie dont la suppression attend confirmation.
+    /// The name of the copy whose deletion is waiting for confirmation.
     pub fn pending_recovery_delete(&self) -> Option<String> {
         let path = self.autosave.pending_delete.as_ref()?;
         let found = self.autosave.found.iter().find(|f| &f.stf == path)?;
@@ -263,16 +263,16 @@ impl AppState {
         self.autosave.found.iter().find(|f| &f.stf == path)
     }
 
-    /// Voir [`super::Action::RecoveryOpen`] : le même chemin que File › Open…,
-    /// donc la même question « Enregistrer ? » s'il y a du travail.
+    /// See [`super::Action::RecoveryOpen`]: the same path as File › Open…,
+    /// hence the same "Save?" question if there is work.
     pub(super) fn recovery_open(&mut self, path: PathBuf) {
         if self.recovery_found(&path).is_some() {
             self.request_unsaved(super::UnsavedGesture::OpenRecovery(path), false);
         }
     }
 
-    /// Ouvre la copie `path` dans la fenêtre courante (réponse à la question
-    /// « Enregistrer ? » faite, ou rien à perdre).
+    /// Opens the copy `path` in the current window (answer to the "Save?"
+    /// question given, or nothing to lose).
     pub(super) fn open_recovery(&mut self, path: PathBuf) {
         let Some(found) = self.recovery_found(&path).cloned() else {
             return;
@@ -287,16 +287,16 @@ impl AppState {
             self.path = previous;
             return;
         }
-        // Le projet est celui de la copie, sous le chemin d'où elle vient : un
-        // travail non enregistré (le `.stf` d'origine ne l'a pas).
+        // The project is that of the copy, under the path it comes from: unsaved
+        // work (the original `.stf` does not have it).
         self.path = origin;
         self.saved_revision = None;
         self.discarded_source = None;
         self.autosave.mark = None;
-        // Recopié chez nous avant d'effacer la copie ouverte : un plantage
-        // juste après ne perd rien.
+        // Recopied into ours before erasing the opened copy: a crash right
+        // after loses nothing.
         if self.write_autosave().is_ok() && self.recovery_dir.is_some() {
-            // Les deux ne sont jamais le même fichier (acquire écarte l'ancien).
+            // The two are never the same file (acquire rules out the old one).
             found.delete();
             self.autosave.found.retain(|f| f.stf != found.stf);
         }
@@ -307,7 +307,7 @@ impl AppState {
         self.notice(text);
     }
 
-    /// Voir [`super::Action::RecoveryIgnore`] : la copie reste sur disque.
+    /// See [`super::Action::RecoveryIgnore`]: the copy stays on disk.
     pub(super) fn recovery_ignore(&mut self, path: &PathBuf) {
         self.autosave.found.retain(|f| &f.stf != path);
     }
@@ -333,13 +333,13 @@ impl AppState {
         self.autosave.found.retain(|f| f.stf != path);
     }
 
-    /// Voir [`super::Action::CloseRecovery`] : chaque copie est ignorée.
+    /// See [`super::Action::CloseRecovery`]: each copy is ignored.
     pub(super) fn recovery_close(&mut self) {
         self.autosave.found.clear();
         self.autosave.pending_delete = None;
     }
 
-    /// Une confirmation de suppression attend-elle ? (dialogue bloquant)
+    /// Is a deletion confirmation waiting? (blocking dialog)
     pub(super) fn recovery_delete_pending(&self) -> bool {
         self.autosave.pending_delete.is_some()
     }

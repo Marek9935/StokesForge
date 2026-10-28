@@ -1,42 +1,41 @@
-//! Pseudo-langue `en-XA`, fabriquée **à la volée** depuis le catalogue `en`
-//! (issue #41) : aucun fichier à tenir à jour, elle suit l'anglais clé par clé.
+//! The `en-XA` pseudo-locale, built **on the fly** from the `en` catalog
+//! (issue #41): no file to keep up to date, it follows English key by key.
 //!
-//! Elle sert à *voir* ce que la traduction ne couvre pas, sans savoir lire une
-//! autre langue :
+//! It is used to *see* what the translation does not cover, without being able
+//! to read another language:
 //!
-//! - les lettres sont accentuées (« Save Project » → « Šàṽé Þŕöĵéçţ »), donc un
-//!   texte reste lisible mais reconnaissable ;
-//! - chaque message est encadré de `[[ ]]` : **un texte sans `[[ ]]` à l'écran n'est
-//!   pas passé par le catalogue** (littéral resté dans le code), et un `]]`
-//!   manquant signale un texte **tronqué** par la mise en page ;
-//! - chaque message est allongé de 30 % (le français est plus long que
-//!   l'anglais) : une disposition qui ne tient pas en `en-XA` ne tiendra pas en
-//!   français.
+//! - letters are accented ("Save Project" -> "Šàṽé Þŕöĵéçţ"), so a text stays
+//!   readable but recognizable;
+//! - every message is wrapped in `[[ ]]`: **a text without `[[ ]]` on screen
+//!   did not go through the catalog** (a literal left in the code), and a
+//!   missing `]]` flags a text **truncated** by the layout;
+//! - every message is lengthened by 30% (French is longer than English): a
+//!   layout that does not fit in `en-XA` will not fit in French.
 //!
-//! La transformation passe par l'arbre syntaxique de Fluent (`fluent-syntax`),
-//! pas par une expression régulière : seuls les **textes** sont touchés, jamais
-//! les `{ $variable }`, les références `{ -terme }`, les clés de variante
-//! (`[one]`, `*[other]`) ni les identifiants. C'est ce qui garantit que la
-//! pseudo-langue accepte les mêmes arguments que l'anglais.
+//! The transformation goes through the Fluent syntax tree (`fluent-syntax`),
+//! not a regular expression: only the **texts** are touched, never the
+//! `{ $variable }`, the `{ -term }` references, the variant keys (`[one]`,
+//! `*[other]`) or the identifiers. This guarantees that the pseudo-locale
+//! accepts the same arguments as English.
 //!
-//! Dans un `select` (pluriel), chaque variante est allongée séparément ; le
-//! cadre `[[ ]]` n'entoure que le message entier. Les termes (`-nom = …`) sont
-//! seulement accentués : ils entrent dans d'autres messages, déjà encadrés.
+//! In a `select` (plural), each variant is lengthened separately; the `[[ ]]`
+//! frame wraps only the whole message. Terms (`-name = ...`) are only
+//! accented: they enter other messages, which are already wrapped.
 
 use fluent_syntax::ast::{Entry, Expression, InlineExpression, Pattern, PatternElement};
 use fluent_syntax::{parser, serializer};
 
-/// Ouvre un message de la pseudo-langue. ASCII, pour que toute police
-/// l'affiche (`⟦ ⟧` sortaient en carrés « glyphe absent » avec Noto Sans).
+/// Opens a pseudo-locale message. ASCII, so that any font displays it (`⟦ ⟧`
+/// came out as "missing glyph" squares with Noto Sans).
 pub const OPEN: &str = "[[";
-/// Ferme un message de la pseudo-langue. Absent à l'écran : texte tronqué.
+/// Closes a pseudo-locale message. Absent on screen: truncated text.
 pub const CLOSE: &str = "]]";
-/// Allongement visé, en pourcent du texte d'origine.
+/// Target lengthening, as a percentage of the original text.
 pub const EXTRA_PERCENT: usize = 30;
-/// Lettre qui sert à allonger : accentuée, de largeur courante.
+/// Letter used for lengthening: accented, of ordinary width.
 const FILLER: char = 'ŏ';
 
-/// Un littéral de chaîne Fluent, `{ "…" }`.
+/// A Fluent string literal, `{ "…" }`.
 fn literal(value: &str) -> PatternElement<String> {
     PatternElement::Placeable {
         expression: Expression::Inline(InlineExpression::StringLiteral {
@@ -45,10 +44,10 @@ fn literal(value: &str) -> PatternElement<String> {
     }
 }
 
-/// Produit la pseudo-langue d'un catalogue Fluent. Une source qui ne
-/// s'analyse pas entièrement garde ses entrées valides ; les morceaux
-/// illisibles restent tels quels (invariant 10 : on dégrade, on ne panique pas
-/// — le test `le_catalogue_anglais_s_analyse_sans_erreur` tient l'anglais).
+/// Produces the pseudo-locale of a Fluent catalog. A source that does not
+/// parse entirely keeps its valid entries; the unreadable pieces stay as they
+/// are (invariant 10: degrade, do not panic — the test
+/// `the_english_catalog_parses_without_error` holds English to this).
 pub fn localize(source: &str) -> String {
     let mut resource = match parser::parse(source.to_string()) {
         Ok(resource) => resource,
@@ -76,22 +75,22 @@ pub fn localize(source: &str) -> String {
     serializer::serialize(&resource)
 }
 
-/// Ce qu'on fait d'un motif selon sa place.
+/// What is done with a pattern depending on where it sits.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
-    /// Message ou attribut entier : accentué, allongé, encadré.
+    /// Whole message or attribute: accented, lengthened, framed.
     Message,
-    /// Variante d'un `select` : accentuée et allongée, sans cadre.
+    /// Variant of a `select`: accented and lengthened, without a frame.
     Variant,
-    /// Terme : accentué seulement.
+    /// Term: accented only.
     Term,
 }
 
 fn localize_pattern(pattern: &mut Pattern<String>, role: Role) {
-    // `letters` décide s'il y a du texte à allonger ; `length` (espaces compris)
-    // fixe l'allongement : 30 % de la longueur *affichée*, pas des seules
-    // lettres, sinon un message riche en espaces (une phrase d'erreur) resterait
-    // en deçà de +30 %.
+    // `letters` decides whether there is text to lengthen; `length` (spaces
+    // included) sets the lengthening: 30% of the *displayed* length, not of
+    // the letters alone, otherwise a message rich in spaces (an error
+    // sentence) would stay under +30%.
     let mut letters = 0usize;
     let mut length = 0usize;
     for element in &mut pattern.elements {
@@ -118,9 +117,9 @@ fn localize_pattern(pattern: &mut Pattern<String>, role: Role) {
             }
         }
         Role::Message => {
-            // Le cadre est un littéral `{ "[[" }`, pas du texte : un `[` en
-            // tête de ligne d'un motif sur plusieurs lignes se lirait comme
-            // une clé de variante. Fluent n'isole pas les littéraux (FSI/PDI).
+            // The frame is a `{ "[[" }` literal, not text: a `[` at the start
+            // of a line of a multi-line pattern would read as a variant key.
+            // Fluent does not isolate literals (FSI/PDI).
             if letters > 0 {
                 pattern
                     .elements
@@ -132,9 +131,8 @@ fn localize_pattern(pattern: &mut Pattern<String>, role: Role) {
     }
 }
 
-/// Descend dans les expressions qui contiennent des motifs (un `select`, un
-/// placeable imbriqué) ; une variable, une référence ou un littéral ne sont
-/// jamais touchés.
+/// Descend into the expressions that contain patterns (a `select`, a nested
+/// placeable); a variable, a reference or a literal is never touched.
 fn localize_expression(expression: &mut Expression<String>, role: Role) {
     match expression {
         Expression::Select { variants, .. } => {
@@ -154,7 +152,7 @@ fn localize_expression(expression: &mut Expression<String>, role: Role) {
     }
 }
 
-/// Une lettre ASCII devient une lettre accentuée ; le reste est inchangé.
+/// An ASCII letter becomes an accented letter; the rest is unchanged.
 fn accent(c: char) -> char {
     match c {
         'a' => 'à',
@@ -217,10 +215,10 @@ fn accent(c: char) -> char {
 mod tests {
     use super::*;
 
-    /// Un catalogue qui réunit tout ce que la transformation ne doit pas
-    /// abîmer : variable, pluriel, terme, attribut, commentaire, littéral.
+    /// A catalog that gathers everything the transformation must not damage:
+    /// variable, plural, term, attribute, comment, literal.
     const SAMPLE: &str = "\
-# Un commentaire
+# A comment
 -brand = StokesForge
 save = Save Project
 open-file = Open { $name } now
@@ -235,7 +233,7 @@ literal = Say { \"hi\" }
 ";
 
     #[test]
-    fn la_pseudo_langue_garde_la_meme_forme_de_catalogue() {
+    fn the_pseudo_locale_keeps_the_same_catalog_shape() {
         let pseudo = localize(SAMPLE);
         let (resource, errors) = match parser::parse(pseudo.as_str()) {
             Ok(resource) => (resource, vec![]),
@@ -243,7 +241,7 @@ literal = Say { \"hi\" }
         };
         assert!(
             errors.is_empty(),
-            "la pseudo-langue s'analyse : {errors:?}\n{pseudo}"
+            "the pseudo-locale parses: {errors:?}\n{pseudo}"
         );
         let (original, _) = match parser::parse(SAMPLE) {
             Ok(resource) => (resource, ()),
@@ -260,30 +258,30 @@ literal = Say { \"hi\" }
                 })
                 .collect()
         };
-        assert_eq!(ids(&resource), ids(&original), "mêmes clés, même ordre");
+        assert_eq!(ids(&resource), ids(&original), "same keys, same order");
     }
 
     #[test]
-    fn un_message_est_accentue_encadre_et_allonge() {
+    fn a_message_is_accented_framed_and_lengthened() {
         let pseudo = localize("save = Save Project\n");
         let text = pseudo
             .strip_prefix("save = ")
             .and_then(|rest| rest.strip_suffix('\n'))
-            .expect("une ligne");
-        // Le source sérialisé porte le cadre en littéraux `{ "[[" }`.
+            .expect("one line");
+        // The serialized source carries the frame as `{ "[[" }` literals.
         let (open, close) = (format!("{{ \"{OPEN}\" }}"), format!("{{ \"{CLOSE}\" }}"));
         assert!(text.starts_with(&open), "{text}");
         assert!(text.ends_with(&close), "{text}");
-        assert!(text.contains("Šàṽé Þŕöĵéçţ"), "accentué : {text}");
+        assert!(text.contains("Šàṽé Þŕöĵéçţ"), "accented: {text}");
         let inner = text.trim_start_matches(&open).trim_end_matches(&close);
         assert!(
             inner.chars().count() >= "Save Project".chars().count() * 13 / 10,
-            "allongé d'au moins 30 % : {inner}"
+            "lengthened by at least 30%: {inner}"
         );
     }
 
     #[test]
-    fn les_variables_les_termes_et_les_cles_ne_sont_pas_touches() {
+    fn variables_terms_and_keys_are_not_touched() {
         let pseudo = localize(SAMPLE);
         for fragment in [
             "{ $name }",
@@ -294,28 +292,28 @@ literal = Say { \"hi\" }
             "-brand = ŠţöķéšƑöŕĝé",
             ".hint = ",
             "{ \"hi\" }",
-            "# Un commentaire",
+            "# A comment",
         ] {
             assert!(
                 pseudo.contains(fragment),
-                "{fragment:?} absent de :\n{pseudo}"
+                "{fragment:?} missing from:\n{pseudo}"
             );
         }
         assert!(
             !pseudo.contains("-brand = { \"[[\" }"),
-            "un terme n'est pas encadré"
+            "a term is not framed"
         );
     }
 
     #[test]
-    fn chaque_variante_d_un_pluriel_est_allongee() {
+    fn each_variant_of_a_plural_is_lengthened() {
         let pseudo = localize(SAMPLE);
         assert!(pseudo.contains("[one] { $count } îţéɱ ŏ"), "{pseudo}");
         assert!(pseudo.contains("*[other] { $count } îţéɱš ŏ"), "{pseudo}");
     }
 
     #[test]
-    fn un_message_sans_texte_est_quand_meme_encadre() {
+    fn a_message_without_text_is_still_framed() {
         let pseudo = localize("only = { $n }\n");
         assert!(pseudo.contains("{ \"[[\" }{ $n }{ \"]]\" }"), "{pseudo}");
     }

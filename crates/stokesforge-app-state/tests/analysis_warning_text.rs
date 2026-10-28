@@ -1,12 +1,12 @@
-//! Les phrases des avertissements de calcul (#281, #203) dans les deux langues
-//! du catalogue : aucune vide, aucune clé nue, le nombre interpolé, l'espace
-//! insécable française devant « : ». Chargeurs propres (`build_loader`) : la
-//! langue globale n'est pas touchée.
+//! The sentences of the calculation warnings (#281, #203) in both languages of
+//! the catalog: none empty, no bare key, the interpolated number, the French
+//! non-breaking space before ":". Clean loaders (`build_loader`): the global
+//! language is not touched.
 
 use stokesforge_app_state::i18n::{build_loader, Language};
 use stokesforge_app_state::tr;
 
-/// Les clés `analysis-warning-*` du catalogue `en`, et leur texte dans `loader`.
+/// The `analysis-warning-*` keys of the `en` catalog, and their text in `loader`.
 fn phrases(language: Language) -> Vec<(&'static str, String)> {
     let loader = build_loader(language);
     vec![
@@ -46,27 +46,23 @@ fn phrases(language: Language) -> Vec<(&'static str, String)> {
 }
 
 #[test]
-fn chaque_avertissement_a_une_phrase_non_vide_et_distincte_en_anglais_et_en_francais() {
+fn each_warning_has_a_non_empty_distinct_sentence_in_english_and_french() {
     for language in [Language::English, Language::French] {
         let found = phrases(language);
         for (key, text) in &found {
             assert!(!text.trim().is_empty(), "{language:?} {key}");
-            assert!(!text.contains(key), "{language:?} : clé nue {key}");
-            assert!(!text.contains("{ $"), "{language:?} {key} : {text}");
+            assert!(!text.contains(key), "{language:?}: bare key {key}");
+            assert!(!text.contains("{ $"), "{language:?} {key}: {text}");
         }
         let mut texts: Vec<&String> = found.iter().map(|(_, t)| t).collect();
         texts.sort();
         texts.dedup();
-        assert_eq!(
-            texts.len(),
-            found.len(),
-            "{language:?} : phrases distinctes"
-        );
+        assert_eq!(texts.len(), found.len(), "{language:?}: distinct sentences");
     }
 }
 
 #[test]
-fn la_phrase_de_non_convergence_dit_l_arret_et_la_piste_dans_les_deux_langues() {
+fn the_non_convergence_sentence_states_the_stop_and_the_lead_in_both_languages() {
     let en = phrases(Language::English)[3].1.clone();
     let fr = phrases(Language::French)[3].1.clone();
     assert!(
@@ -81,7 +77,7 @@ fn la_phrase_de_non_convergence_dit_l_arret_et_la_piste_dans_les_deux_langues() 
 }
 
 #[test]
-fn les_nombres_sont_interpoles_sans_separateur_de_milliers() {
+fn numbers_are_interpolated_without_a_thousands_separator() {
     let loader_en = build_loader(Language::English);
     let loader_fr = build_loader(Language::French);
     let n = 12_345_i64;
@@ -100,14 +96,14 @@ fn les_nombres_sont_interpoles_sans_separateur_de_milliers() {
 }
 
 #[test]
-fn en_francais_un_deux_points_est_precede_d_une_espace_insecable() {
+fn in_french_a_colon_is_preceded_by_a_non_breaking_space() {
     for (key, text) in phrases(Language::French) {
         for (i, c) in text.char_indices() {
             if c == ':' {
                 let before = text[..i].chars().next_back();
                 assert!(
                     matches!(before, Some('\u{a0}' | '\u{202f}')),
-                    "{key} : « : » sans espace insécable devant dans {text:?}"
+                    "{key}: ':' without a non-breaking space before it in {text:?}"
                 );
             }
         }
@@ -115,8 +111,8 @@ fn en_francais_un_deux_points_est_precede_d_une_espace_insecable() {
 }
 
 #[test]
-fn en_anglais_le_deux_points_est_colle() {
+fn in_english_the_colon_is_attached() {
     for (key, text) in phrases(Language::English) {
-        assert!(!text.contains(" :"), "{key} : {text:?}");
+        assert!(!text.contains(" :"), "{key}: {text:?}");
     }
 }
