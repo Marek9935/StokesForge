@@ -251,7 +251,7 @@ pub(super) fn preferences_proto(ctx: &egui::Context, bench: &mut Bench) {
                 || {},
             );
             let current = *page;
-            egui::ScrollArea::vertical().show(ui, |ui| match current {
+            crate::theme::page_scroll_area().show(ui, |ui| match current {
                 Page::General => general_page(ui, draft),
                 Page::Display => display_page(ui, draft),
                 Page::Export => export_page(ui, draft),

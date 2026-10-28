@@ -33,6 +33,15 @@ that must reserve room for a bar reads it through
 `theme::scroll_bar_allocated_width`. The test `no_scroll_style_outside_the_theme`
 fails the CI otherwise.
 
+**End margin of a scrolling page (#347).** `scroll_style` is global and
+stays free of any content margin (it would hit pop-ups, tables and trees).
+A page that scrolls uses `theme::page_scroll_area()` (a vertical area with
+`SPACE_SECTION` under its content) so the last control does not touch the
+bottom edge; call sites add `id_salt`, `auto_shrink`, `max_height`. An area
+that is not a page (tree, table, canvas, computed height) stays raw and
+carries `// RAW-SCROLL(#347): <why>`; the guard
+`no_raw_scroll_area_without_justification` fails otherwise.
+
 **Icons.** Phosphor duotone, a single component (`icons.rs`: `icon_image`,
 `icon_button`, single size, mandatory tooltip), color "neutral by
 default, rare afterwards": rules and procedure in [`icons.md`](../icons.md).

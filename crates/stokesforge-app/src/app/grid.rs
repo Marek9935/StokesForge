@@ -316,6 +316,7 @@ pub(super) fn show_grid_vertical_bar(
     let scale = grid_vertical_bar_scale(strip.height(), table.inner_rect.height());
     let bar_offset = table.state.offset.y * scale;
     let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
+    // RAW-SCROLL(#347): mirror bar, its height is computed by grid_vertical_bar_scale
     let bar = egui::ScrollArea::vertical()
         .id_salt(pending_id)
         .auto_shrink([false, false])

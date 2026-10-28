@@ -330,6 +330,7 @@ impl Workspace<'_> {
         // paints on its own layer (`show_floating_window`),
         // independent of any ambient scroll area — only the
         // resulting offset is used, applied by hand below.
+        // RAW-SCROLL(#347): workspace canvas, not a page: no end margin under the last window
         let workspace_scroll_output = egui::ScrollArea::both()
             .id_salt("stokesforge_workspace")
             .auto_shrink([false, false])

@@ -28,7 +28,7 @@ pub(super) fn recovery_window(ctx: &egui::Context, state: &AppState, actions: &m
         PlainSize::Content(egui::vec2(560.0, 230.0)),
         |ui| {
             ui.label(tr!("recovery-message"));
-            egui::ScrollArea::vertical()
+            crate::theme::page_scroll_area()
                 .max_height(260.0)
                 .show(ui, |ui| {
                     for row in &rows {

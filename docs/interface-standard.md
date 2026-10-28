@@ -157,6 +157,7 @@ two rules above:
 | "form" building block (`app/form.rs`: `form`, `Form`, `choice`), widths and spacings of `theme.rs` | two-column grid, radio/list choice (S-C1, S-C2) | **in place** (#227) |
 | exclusive choice in a menu (`menu_sections::menu_choice`) | check mark alone (S-C3) | **in place** (#227) |
 | "framed texts" building block (`app/form.rs`: `toggle_texts`) | toggle exclusive choice, rounded frame around each label (active: solid accent fill; inactive: outline only); reserved for the gesture row of the analysis preview (exception S-K7) | **in place** (#270) |
+| page scroll area (`theme::page_scroll_area`) + guard: no raw scroll area without justification (`no_raw_scroll_area_without_justification`, witness `the_scroll_area_guard_sees_a_bare_area`) | end margin `SPACE_SECTION` under the last control of a scrolling page; trees, tables, canvas: `// RAW-SCROLL(#347)` | **in place** (#347) |
 | guard: no literal `add_space` outside `theme.rs` (`no_literal_add_space_outside_the_theme`) | | **in place** (#227) |
 | message area of the footer of `modal_dialog_with`, initial focus, remembered size, `modal_wizard`, `modal_live_settings`, `modal_read_only` | button order, error and reason in the footer, Esc, S-F8, S-F9 | **in place** (#228) |
 | window nature (`app/dialogs.rs`: `DialogNature`, `SizeClass`, `InteractiveSize`, `PlainSize`, `DialogFooter::always` / `gated`) | footer, size class, initial focus and default button imposed by exhaustive `match` (S-F11) | **in place** (#300) |

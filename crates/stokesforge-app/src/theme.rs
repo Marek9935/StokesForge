@@ -400,6 +400,20 @@ const SCROLL_BAR_HANDLE_INTERACT_OPACITY: f32 = 0.8;
 /// Opacity of the track background (`extreme_bg_color`).
 const SCROLL_BAR_TRACK_OPACITY: f32 = 1.0;
 
+/// A vertical scroll area for a **page** (a settings tab, a form, a
+/// list of help): same as `egui::ScrollArea::vertical()` plus an end
+/// margin of [`SPACE_SECTION`] under the content, so the last control does
+/// not touch the bottom edge once scrolled down (#347). Call sites keep
+/// their own builders (`id_salt`, `auto_shrink`, `max_height`). Areas that
+/// are not pages (trees, tables, mirror bars, canvas) stay raw and carry
+/// `// RAW-SCROLL(#347): <why>` (guard in `tests/guards.rs`).
+pub fn page_scroll_area() -> egui::ScrollArea {
+    egui::ScrollArea::vertical().content_margin(egui::Margin {
+        bottom: SPACE_SECTION as i8,
+        ..egui::Margin::ZERO
+    })
+}
+
 /// The style of **all** StokesForge scroll bars — see the
 /// "Scroll bars" section at the top of the module.
 ///
@@ -497,6 +511,22 @@ mod tests {
             !visuals().dark_mode,
             "the StokesForge theme must stay light"
         );
+    }
+
+    /// #347: the content of a page scroll area ends `SPACE_SECTION` below
+    /// its last widget, and the width is untouched.
+    #[test]
+    fn a_page_scroll_area_adds_an_end_margin() {
+        let ctx = egui::Context::default();
+        let mut content = egui::Vec2::ZERO;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let out = page_scroll_area().show(ui, |ui| {
+                ui.allocate_space(egui::vec2(50.0, 40.0));
+            });
+            content = out.content_size;
+        });
+        output.textures_delta.clear();
+        assert_eq!(content, egui::vec2(50.0, 40.0 + SPACE_SECTION));
     }
 
     /// The drop stroke (#170, point 2) is the accent green, for an external

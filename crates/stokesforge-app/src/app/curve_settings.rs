@@ -103,7 +103,7 @@ pub(super) fn curve_settings_page(
         });
         ui.separator();
         ui.vertical(|ui| {
-            egui::ScrollArea::vertical()
+            theme::page_scroll_area()
                 .id_salt("curve_settings_editor")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -236,6 +236,7 @@ fn series_list(
             .map(|live| live.item),
         hover: Hover::default(),
     };
+    // RAW-SCROLL(#347): list whose height is computed with LIST_FOOTER
     egui::ScrollArea::vertical()
         .id_salt("curve_settings_list")
         .auto_shrink([false, false])

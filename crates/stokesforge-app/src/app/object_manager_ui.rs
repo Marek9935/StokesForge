@@ -638,6 +638,7 @@ pub(super) fn object_manager_contents(
         visible: std::cell::RefCell::new(Vec::new()),
         has_focus: ui.memory(|m| m.focused()) == Some(focus),
     };
+    // RAW-SCROLL(#347): tree: the area under the last row is the drop target of object_dnd::end_of_frame
     egui::ScrollArea::both().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         paint.graph(ui, model, actions, &mut requests, &mut selected);

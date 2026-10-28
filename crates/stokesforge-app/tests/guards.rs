@@ -2092,6 +2092,112 @@ fn the_sizes_guard_sees_a_bare_free_size() {
 }
 
 // ---------------------------------------------------------------------------
+// A scroll area has an end margin or a justified exception (#347)
+// ---------------------------------------------------------------------------
+
+/// The marker of a scroll area left raw:
+/// `// RAW-SCROLL(#347): <why no end margin>`.
+const SCROLL_MARKER: &str = "RAW-SCROLL(#347):";
+
+/// The raw constructors of a vertical scroll area.
+const RAW_SCROLL_CALLS: [&str; 2] = ["ScrollArea::vertical(", "ScrollArea::both("];
+
+/// The raw vertical scroll areas of the production code outside `theme.rs`
+/// without their justified exception, `path:line: reason`.
+fn raw_scroll_areas_without_justification(sources: &[SourceFile]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in sources {
+        if file.path == "theme.rs" {
+            continue;
+        }
+        let source = file.production();
+        for i in 0..source.mask.len() {
+            if !RAW_SCROLL_CALLS
+                .iter()
+                .any(|call| starts_with_at(&source.mask, i, call))
+            {
+                continue;
+            }
+            let line = line_of(&source.original, i);
+            let place = format!("src/{}:{line}", file.path);
+            match marker_justification(&source.original, line, SCROLL_MARKER) {
+                None => found.push(format!("{place}: no marker")),
+                Some(text) if text.chars().count() < MINIMUM_JUSTIFICATION => {
+                    found.push(format!("{place}: empty or too short justification"));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    found
+}
+
+/// Rule #347: a page that scrolls uses `theme::page_scroll_area()` (end
+/// margin under the last control). A raw `ScrollArea::vertical()` /
+/// `::both()` (tree, table, canvas, computed height) requires
+/// `// RAW-SCROLL(#347): <justification>` in the twelve lines before.
+#[test]
+fn no_raw_scroll_area_without_justification() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.path == "theme.rs"),
+        "theme.rs not read: the guard would no longer see the page_scroll_area helper"
+    );
+    let offenders = raw_scroll_areas_without_justification(&sources);
+    assert!(
+        offenders.is_empty(),
+        "raw scroll area without justification — use `theme::page_scroll_area()` or write \
+         `// {SCROLL_MARKER} <justification>` right before (docs/ui-principles.md): {offenders:?}"
+    );
+}
+
+/// The witness: a bare area (vertical or both) is seen; an empty, too short,
+/// wrong-number or too distant exception is seen too; a justified exception,
+/// a comment, a string, test code and `theme.rs` pass.
+#[test]
+fn the_scroll_area_guard_sees_a_bare_area() {
+    for bare in [
+        "fn f() { egui::ScrollArea::vertical().show(ui, |ui| {}); }",
+        "fn f() { egui::ScrollArea::both().show(ui, |ui| {}); }",
+    ] {
+        assert_eq!(
+            raw_scroll_areas_without_justification(&[file("app/w.rs", bare)]).len(),
+            1,
+            "bare area missed: {bare}"
+        );
+    }
+    let far = "\n".repeat(MARKER_SCOPE + 2);
+    for before in [
+        "// RAW-SCROLL(#347):\n".to_string(),
+        "// RAW-SCROLL(#347): ok\n".to_string(),
+        "// RAW-SCROLL: the tree owns its drop area\n".to_string(),
+        "// RAW-SCROLL(#346): the tree owns its drop area\n".to_string(),
+        format!("// RAW-SCROLL(#347): the tree owns its drop area{far}"),
+    ] {
+        let code =
+            format!("fn f() {{\n{before}egui::ScrollArea::vertical().show(ui, |ui| {{}});\n}}");
+        assert_eq!(
+            raw_scroll_areas_without_justification(&[file("app/w.rs", &code)]).len(),
+            1,
+            "exception wrongly accepted: {code}"
+        );
+    }
+    for code in [
+        "fn f() {\n// RAW-SCROLL(#347): the tree owns its drop area\negui::ScrollArea::both().show(ui, |ui| {});\n}",
+        "fn f() { // ScrollArea::vertical()\n let _ = \"ScrollArea::vertical()\"; }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { egui::ScrollArea::vertical(); } }",
+        "fn f() { theme::page_scroll_area().show(ui, |ui| {}); egui::ScrollArea::horizontal(); }",
+    ] {
+        assert!(
+            raw_scroll_areas_without_justification(&[file("app/w.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+    let in_theme = "fn page_scroll_area() { egui::ScrollArea::vertical(); }";
+    assert!(raw_scroll_areas_without_justification(&[file("theme.rs", in_theme)]).is_empty());
+}
+
+// ---------------------------------------------------------------------------
 // The window catalog and the code agree (#300, S-F11)
 // ---------------------------------------------------------------------------
 
