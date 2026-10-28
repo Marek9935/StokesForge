@@ -9,7 +9,7 @@ observe it; the content of the version is in [`CHANGELOG.md`](../CHANGELOG.md).
 | Promise | Held by |
 |---|---|
 | A `.stf` file written by V1 can be read back and migrated up to V3; a file of a newer **format** (higher format number) is refused with a clear message | [`persistance.md`](persistance.md) § Version rule: every V1 file can be read back up to V3, [`invariants.md`](invariants.md) no. 12, witness file `crates/stokesforge-persistence/tests/witnesses/v1/` |
-| A `pyst` script written against V1 keeps working | [`python-et-script.md`](python-et-script.md) § Frozen API V1 (#331), test `crates/stokesforge-script/tests/surface_figee.rs` |
+| A `pyst` script written against V1 keeps working | [`python-et-script.md`](python-et-script.md) § Frozen API V1 (#331), test `crates/stokesforge-script/tests/frozen_api.rs` |
 | The application and its embedded Python install and start on Linux x86_64 and Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § Where the binaries are) |
 
 The rest of the code has **no** compatibility promise from one major

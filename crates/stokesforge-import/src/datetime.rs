@@ -1,30 +1,29 @@
-//! Lecture des dates et heures en timestamps POSIX (secondes), la
-//! représentation de `stokesforge_core::ColumnType::DateTime`. Pas de dépendance à
-//! un crate de calendrier : quelques formats courants des instruments.
+//! Reading of dates and times into POSIX timestamps (seconds), the
+//! representation of `stokesforge_core::ColumnType::DateTime`. No dependency
+//! on a calendar crate: a few common instrument formats.
 //!
-//! Formats reconnus (séparateurs de date `-`, `/` ou `.`) :
-//! - `AAAA-MM-JJ`, avec une heure facultative (`T` ou espace, puis `HH:MM` ou
-//!   `HH:MM:SS`, fraction de seconde admise) ;
-//! - `JJ/MM/AAAA` et `JJ/MM/AA` (jour d'abord par défaut ; `AA < 70` →
-//!   20AA, sinon 19AA), même heure facultative. Avec
-//!   [`DateOrder::MonthFirst`] (réglage `date_order` de la recette) les deux
-//!   premiers champs sont permutés : `03/04/2026` vaut alors le 4 mars. Un
-//!   mois hors 1..=12 après permutation donne `None`, jamais une date
-//!   devinée. La forme ISO `AAAA-MM-JJ` ne dépend pas de l'ordre. Le crate
-//!   `stokesforge-core` garde, lui, le jour d'abord (#217).
-//! - une heure seule (`HH:MM[:SS]`), comptée depuis minuit le 1970-01-01.
+//! Recognized formats (date separators `-`, `/` or `.`):
+//! - `YYYY-MM-DD`, with an optional time (`T` or space, then `HH:MM` or
+//!   `HH:MM:SS`, fractional seconds allowed);
+//! - `DD/MM/YYYY` and `DD/MM/YY` (day first by default; `YY < 70` →
+//!   20YY, otherwise 19YY), same optional time. With
+//!   [`DateOrder::MonthFirst`] (the recipe's `date_order` setting) the first
+//!   two fields are swapped: `03/04/2026` is then March 4. A month outside
+//!   1..=12 after the swap gives `None`, never a guessed date. The ISO form
+//!   `YYYY-MM-DD` does not depend on the order. The `stokesforge-core` crate,
+//!   for its part, keeps day first (#217).
+//! - a time alone (`HH:MM[:SS]`), counted from midnight on 1970-01-01.
 //!
-//! Tout le reste est `None` : la cellule reste un texte, jamais une date
-//! inventée.
+//! Everything else is `None`: the cell stays text, never an invented date.
 
 use crate::recipe::DateOrder;
 
-/// Timestamp POSIX (secondes, UTC) du texte, jour d'abord, ou `None`.
+/// POSIX timestamp (seconds, UTC) of the text, day first, or `None`.
 pub fn parse_datetime(text: &str) -> Option<f64> {
     parse_datetime_with(text, DateOrder::DayFirst)
 }
 
-/// Comme [`parse_datetime`], avec l'ordre jour/mois de la recette.
+/// Like [`parse_datetime`], with the recipe's day/month order.
 pub fn parse_datetime_with(text: &str, order: DateOrder) -> Option<f64> {
     let text = text.trim();
     if text.is_empty() {
@@ -75,8 +74,8 @@ fn days_since_epoch(date: &str, order: DateOrder) -> Option<i64> {
         .iter()
         .map(|f| f.parse().ok())
         .collect::<Option<_>>()?;
-    // Les deux premiers champs d'une date finissant par l'année : (jour, mois)
-    // ou (mois, jour) selon la recette.
+    // The first two fields of a date ending with the year: (day, month) or
+    // (month, day) depending on the recipe.
     let (first, second) = match order {
         DateOrder::DayFirst => (numbers[0], numbers[1]),
         DateOrder::MonthFirst => (numbers[1], numbers[0]),
@@ -106,7 +105,7 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-/// Jours depuis le 1970-01-01 (algorithme de Howard Hinnant).
+/// Days since 1970-01-01 (Howard Hinnant's algorithm).
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
@@ -127,7 +126,7 @@ mod tests {
         assert_eq!(parse_datetime("2000-01-01 00:00:00"), Some(946_684_800.0));
         assert_eq!(parse_datetime("2000-03-01T12:30:15"), Some(951_913_815.0));
         assert_eq!(parse_datetime("01/01/2000"), Some(946_684_800.0));
-        // L'exemple Jasco : 25/11/24 à 15:17:22.
+        // The Jasco example: 25/11/24 at 15:17:22.
         assert_eq!(parse_datetime("25/11/24 15:17:22"), Some(1_732_547_842.0));
         assert_eq!(parse_datetime("25.11.2024"), Some(1_732_492_800.0));
         assert_eq!(parse_datetime("15:17:22"), Some(55_042.0));
@@ -139,7 +138,7 @@ mod tests {
     fn month_first_swaps_day_and_month_but_not_iso() {
         use super::parse_datetime_with;
         use crate::recipe::DateOrder::{DayFirst, MonthFirst};
-        // 4 mars 2026 mois d'abord ; 3 avril 2026 jour d'abord.
+        // March 4, 2026 month first; April 3, 2026 day first.
         assert_eq!(
             parse_datetime_with("03/04/2026", MonthFirst),
             parse_datetime_with("2026-03-04", DayFirst)
@@ -152,15 +151,15 @@ mod tests {
             parse_datetime_with("03/04/2026", MonthFirst),
             parse_datetime_with("03/04/2026", DayFirst)
         );
-        // Mois 13 : pas une date.
+        // Month 13: not a date.
         assert_eq!(parse_datetime_with("13/01/2026", MonthFirst), None);
         assert!(parse_datetime_with("13/01/2026", DayFirst).is_some());
-        // Année sur deux chiffres, avec heure.
+        // Two-digit year, with time.
         assert_eq!(
             parse_datetime_with("11/25/24 15:17:22", MonthFirst),
             Some(1_732_547_842.0)
         );
-        // ISO : identique dans les deux ordres.
+        // ISO: identical in both orders.
         assert_eq!(
             parse_datetime_with("2026-03-04 10:00", MonthFirst),
             parse_datetime_with("2026-03-04 10:00", DayFirst)

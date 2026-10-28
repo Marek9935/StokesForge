@@ -1,20 +1,20 @@
-//! `stokesforge-selftest` — rejoue, **depuis une distribution empaquetée**, le
-//! critère de fin de tout le socle, et sort en 0 ou en 1.
+//! `stokesforge-selftest` replays, **from a packaged distribution**, the
+//! completion criterion of the whole foundation, and exits with 0 or 1.
 //!
-//! Coquille volontairement mince : toute la logique vit dans
-//! [`stokesforge_script::run_selftest`], pour être aussi exercée par un test
-//! `cargo` ordinaire (`crates/stokesforge-script/tests/selftest.rs`). Ce binaire
-//! se contente de localiser le préfixe Python embarqué à côté de
-//! lui-même — [`EmbeddedPython::locate`] — d'appeler `run_selftest`,
-//! d'imprimer le compte rendu, et de traduire le verdict en code de sortie.
+//! A deliberately thin shell: all the logic lives in
+//! [`stokesforge_script::run_selftest`], so that an ordinary `cargo` test
+//! (`crates/stokesforge-script/tests/selftest.rs`) exercises it too. This
+//! binary only locates the embedded Python prefix next to itself
+//! ([`EmbeddedPython::locate`]), calls `run_selftest`, prints the report, and
+//! translates the verdict into an exit code.
 //!
-//! `--quiet` n'affiche que les étapes en échec et le verdict final, utile en
-//! intégration continue : quand tout va bien, seule la dernière ligne compte.
+//! `--quiet` prints only the failed steps and the final verdict, useful in
+//! continuous integration: when all goes well, only the last line matters.
 //!
-//! Ce binaire n'existe que pour être lancé depuis `dist/stokesforge-app/` (à côté
-//! de `stokesforge-app`, dans la même disposition `lib/python`) — voir
-//! `scripts/app-dist.sh`, qui le construit, l'assemble puis le relance en fin
-//! de script dans un environnement nettoyé et piégé.
+//! This binary exists only to be run from `dist/stokesforge-app/` (next to
+//! `stokesforge-app`, in the same `lib/python` layout); see
+//! `scripts/app-dist.sh`, which builds it, assembles it, then runs it again at
+//! the end of the script in a cleaned and trapped environment.
 
 use std::process::ExitCode;
 
@@ -27,7 +27,7 @@ fn main() -> ExitCode {
     let python = match EmbeddedPython::locate() {
         Ok(python) => python,
         Err(error) => {
-            eprintln!("stokesforge-selftest : préfixe Python embarqué introuvable : {error}");
+            eprintln!("stokesforge-selftest: embedded Python prefix not found: {error}");
             return ExitCode::FAILURE;
         }
     };
@@ -37,25 +37,29 @@ fn main() -> ExitCode {
     if quiet {
         for step in &report.steps {
             if !step.passed {
-                println!("[ÉCHEC] {} — {}", step.name, step.detail);
+                println!("[FAILED] {} — {}", step.name, step.detail);
             }
         }
     } else {
-        println!("=== stokesforge-selftest : environnement ===");
+        println!("=== stokesforge-selftest: environment ===");
         for (label, value) in &report.environment {
             println!("{label:<20}: {value}");
         }
         println!();
-        println!("=== stokesforge-selftest : étapes du critère de fin ===");
+        println!("=== stokesforge-selftest: completion criterion steps ===");
         println!("{}", report.render());
         println!();
     }
 
     if report.passed() {
-        println!("stokesforge-selftest : OK — critère de fin du socle vérifié depuis le paquet");
+        println!(
+            "stokesforge-selftest: OK - foundation completion criterion verified from the package"
+        );
         ExitCode::SUCCESS
     } else {
-        println!("stokesforge-selftest : ÉCHEC — le critère de fin du socle n'est pas vérifié");
+        println!(
+            "stokesforge-selftest: FAILED - the foundation completion criterion is not verified"
+        );
         ExitCode::FAILURE
     }
 }

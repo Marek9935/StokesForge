@@ -1,6 +1,6 @@
-//! Tests d'intégration contre les fichiers réels de `test/import/` à la
-//! racine du dépôt (fixtures Jasco, AnalytikJena, RPE, JCAMP-like, matrice
-//! large, binaire propriétaire…).
+//! Integration tests against the real files in `test/import/` at the
+//! repository root (Jasco, AnalytikJena, RPE, JCAMP-like fixtures, wide
+//! matrix, proprietary binary...).
 
 use stokesforge_import::{
     DecimalStyle, HeaderSkip, ImportError, ImportRecipe, NameSource, Separator,
@@ -10,7 +10,7 @@ fn fixture(name: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/import")
         .join(name);
-    std::fs::read(&path).unwrap_or_else(|e| panic!("lecture de {path:?} impossible : {e}"))
+    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path:?}: {e}"))
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn jasco_uvvis_semicolon() {
     recipe.has_column_header_row = false;
     recipe.name_source = NameSource::HeaderKey("TITLE".into());
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.row_count(), 6);
     assert_eq!(table.columns.len(), 2);
     assert_eq!(
@@ -41,7 +41,7 @@ fn jasco_fluo_tab() {
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
     recipe.name_source = NameSource::HeaderKey("TITLE".into());
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.row_count(), 6);
     assert_eq!(
         stokesforge_import::resolve_series_name(&recipe, &table, "jasco_fluo_tab"),
@@ -58,7 +58,7 @@ fn jasco_english_locale_dot() {
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
     recipe.name_source = NameSource::HeaderKey("TITLE".into());
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.row_count(), 6);
     assert_eq!(
         stokesforge_import::resolve_series_name(&recipe, &table, "jasco_english_locale_dot"),
@@ -68,21 +68,21 @@ fn jasco_english_locale_dot() {
 }
 
 #[test]
-fn jasco_npoints_mismatch_ne_bloque_pas() {
+fn jasco_npoints_mismatch_does_not_block() {
     let bytes = fixture("jasco_npoints_mismatch.txt");
     let mut recipe = ImportRecipe::new("Jasco NPOINTS mismatch");
     recipe.separator = Separator::Tab;
     recipe.decimal = DecimalStyle::Comma;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("le parsing réussit malgré tout");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeds anyway");
     assert_eq!(table.row_count(), 4);
     assert!(
         table
             .warnings
             .iter()
             .any(|w| w.contains("99") && w.contains('4')),
-        "attendu un avertissement mentionnant 99 vs 4, obtenu : {:?}",
+        "expected a warning mentioning 99 vs 4, got: {:?}",
         table.warnings
     );
 }
@@ -96,7 +96,7 @@ fn analytikjena_nohead_semicolon() {
     recipe.header = HeaderSkip::None;
     recipe.has_column_header_row = false;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns.len(), 2);
     assert_eq!(table.row_count(), 20);
 }
@@ -109,7 +109,7 @@ fn rpe_nohead_tab() {
     recipe.decimal = DecimalStyle::Dot;
     recipe.header = HeaderSkip::None;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns.len(), 2);
     assert_eq!(table.row_count(), 20);
     assert_eq!(table.columns[1].values[0], -1.2);
@@ -118,13 +118,13 @@ fn rpe_nohead_tab() {
 #[test]
 fn generic_named_header() {
     let bytes = fixture("generic_named_header.csv");
-    let mut recipe = ImportRecipe::new("Générique");
+    let mut recipe = ImportRecipe::new("Generic");
     recipe.separator = Separator::Comma;
     recipe.decimal = DecimalStyle::Dot;
     recipe.header = HeaderSkip::None;
     recipe.has_column_header_row = true;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns[0].name, Some("Time".to_string()));
     assert_eq!(table.columns[1].name, Some("Signal".to_string()));
     assert_eq!(table.columns[0].values[0], 0.0);
@@ -132,15 +132,15 @@ fn generic_named_header() {
 }
 
 #[test]
-fn generic_named_header_avec_separateur_auto() {
+fn generic_named_header_with_auto_separator() {
     let bytes = fixture("generic_named_header.csv");
-    let mut recipe = ImportRecipe::new("Générique auto");
+    let mut recipe = ImportRecipe::new("Generic auto");
     recipe.separator = Separator::Auto;
     recipe.decimal = DecimalStyle::Dot;
     recipe.header = HeaderSkip::None;
     recipe.has_column_header_row = true;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns[0].name, Some("Time".to_string()));
     assert_eq!(table.columns[1].name, Some("Signal".to_string()));
 }
@@ -149,13 +149,13 @@ fn generic_named_header_avec_separateur_auto() {
 fn ir_jcamp_lookalike() {
     let bytes = fixture("ir_jcamp_lookalike.txt");
     let mut recipe = ImportRecipe::new("IR JCAMP-like");
-    // Le fichier a 4 lignes de métadonnées `##CLÉ=VALEUR` avant les
-    // données (##TITLE, ##DATA TYPE, ##XUNITS, ##YUNITS).
+    // The file has 4 metadata lines `##KEY=VALUE` before the data (##TITLE,
+    // ##DATA TYPE, ##XUNITS, ##YUNITS).
     recipe.header = HeaderSkip::Lines(4);
     recipe.separator = Separator::Whitespace;
     recipe.decimal = DecimalStyle::Dot;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns.len(), 2);
     assert_eq!(table.columns[0].values[0], 401.19);
     assert_eq!(table.columns[1].values[0], 91.38);
@@ -164,13 +164,13 @@ fn ir_jcamp_lookalike() {
 #[test]
 fn irradiation_wide_matrix() {
     let bytes = fixture("irradiation_wide_matrix.txt");
-    let mut recipe = ImportRecipe::new("Matrice large");
+    let mut recipe = ImportRecipe::new("Wide matrix");
     recipe.separator = Separator::Tab;
     recipe.decimal = DecimalStyle::Dot;
     recipe.header = HeaderSkip::None;
     recipe.has_column_header_row = true;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns.len(), 31);
     assert_eq!(table.columns[0].name, Some("wavelength".to_string()));
 
@@ -183,9 +183,9 @@ fn irradiation_wide_matrix() {
 }
 
 #[test]
-fn proprietary_binary_rend_not_text_sans_paniquer() {
+fn proprietary_binary_gives_not_text_without_panicking() {
     let bytes = fixture("proprietary_binary.dat");
-    let recipe = ImportRecipe::new("N'importe quoi");
+    let recipe = ImportRecipe::new("Anything");
     assert_eq!(
         stokesforge_import::parse(&bytes, &recipe),
         Err(ImportError::NotText)
@@ -193,7 +193,7 @@ fn proprietary_binary_rend_not_text_sans_paniquer() {
 }
 
 #[test]
-fn jasco_uvvis_windows_1252_avec_pied_etendu() {
+fn jasco_uvvis_windows_1252_with_extended_footer() {
     let bytes = fixture("JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
     recipe.data_end = stokesforge_import::DataEnd::Auto;
@@ -203,11 +203,11 @@ fn jasco_uvvis_windows_1252_avec_pied_etendu() {
     recipe.has_column_header_row = false;
     recipe.name_source = NameSource::HeaderKey("TITLE".into());
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert_eq!(table.columns.len(), 2);
-    // Exactement les 551 points (NPOINTS) : la fin automatique (issue #4)
-    // coupe à la ligne vide qui suit le dernier point ; le bloc « Extended
-    // Information » devient le pied de page.
+    // Exactly the 551 points (NPOINTS): the automatic end (issue #4) cuts at
+    // the empty line after the last point; the "Extended Information" block
+    // becomes the footer.
     assert_eq!(table.row_count(), 551);
     let (x, y) = (&table.columns[0].values, &table.columns[1].values);
     assert_eq!((x[0], y[0]), (800.0, -0.000371463));
@@ -218,17 +218,17 @@ fn jasco_uvvis_windows_1252_avec_pied_etendu() {
         stokesforge_import::resolve_series_name(&recipe, &table, "JascoUV_vis"),
         "S13"
     );
-    // L'octet 0xB0 du pied de page, lu en Windows-1252, redonne « °C ».
+    // The footer's 0xB0 byte, read as Windows-1252, gives "°C" back.
     assert!(table
         .footer_lines()
         .iter()
         .any(|line| line.contains("19.91 °C")));
 }
 
-/// Sans coupure, le pied de page retombe dans les données (colonne Y mixte) :
-/// l'ancien comportement reste disponible, et le réglage est explicite.
+/// Without a cut, the footer falls back into the data (mixed Y column): the
+/// old behavior stays available, and the setting is explicit.
 #[test]
-fn jasco_uvvis_sans_coupure_garde_le_pied_dans_les_donnees() {
+fn jasco_uvvis_without_a_cut_keeps_the_footer_in_the_data() {
     let bytes = fixture("JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
     recipe.separator = Separator::Semicolon;
@@ -236,16 +236,16 @@ fn jasco_uvvis_sans_coupure_garde_le_pied_dans_les_donnees() {
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
     recipe.data_end = stokesforge_import::DataEnd::None;
 
-    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing réussi");
+    let table = stokesforge_import::parse(&bytes, &recipe).expect("parsing succeeded");
     assert!(table.row_count() > 551);
     assert!(table.footer_lines().is_empty());
     assert!(table.columns[1].texts.iter().any(Option::is_some));
 }
 
-/// L'en-tête Jasco est conservé en clé / valeur ; le pied de page ne l'est que
-/// si la recette le demande (issue #5).
+/// The Jasco header is kept as key / value; the footer is kept only if the
+/// recipe asks for it (issue #5).
 #[test]
-fn jasco_uvvis_conserve_les_metadonnees() {
+fn jasco_uvvis_keeps_the_metadata() {
     let bytes = fixture("JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
     recipe.data_end = stokesforge_import::DataEnd::Auto;
@@ -269,7 +269,7 @@ fn jasco_uvvis_conserve_les_metadonnees() {
             .metadata()
             .iter()
             .any(|l| l.value.contains("Extended")),
-        "le pied de page n'est pas conservé par défaut"
+        "the footer is not kept by default"
     );
 
     recipe.keep_footer_metadata = true;

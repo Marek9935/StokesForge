@@ -1,33 +1,33 @@
-//! Aller-retour de tableaux entre Rust et numpy : **lecture sans copie**,
-//! **écriture par copie**, et le contrat de sûreté qui rend la paire tenable.
+//! Round trip of arrays between Rust and numpy: **zero-copy reading**,
+//! **writing by copy**, and the safety contract that makes the pair workable.
 //!
-//! # L'asymétrie est une décision
+//! # The asymmetry is a decision
 //!
-//! | Sens | Mécanisme | Copie ? |
+//! | Direction | Mechanism | Copy? |
 //! |---|---|---|
-//! | Rust → Python (lecture) | tableau numpy **empruntant** le `Arc<Vec<f64>>`, `writeable = False` | **non** |
-//! | Python → Rust (écriture) | copie du tableau numpy dans un `Vec<f64>` neuf | **oui** |
+//! | Rust → Python (read) | numpy array **borrowing** the `Arc<Vec<f64>>`, `writeable = False` | **no** |
+//! | Python → Rust (write) | copy of the numpy array into a fresh `Vec<f64>` | **yes** |
 //!
-//! L'écriture copie **par choix** : le modèle doit posséder ses buffers.
-//! Adopter de la mémoire allouée par l'allocateur Python ferait dépendre la
-//! durée de vie d'une colonne de celle d'un objet Python. Seconde raison,
-//! indépendante : un `Vec<f64>` copié est du Rust pur, il se détruit sur
-//! n'importe quel fil — alors que détruire un objet Python exige le GIL, ce qui
-//! interdirait de faire traverser la valeur au fil qui possède le modèle
-//! (tâche 5.4).
+//! Writing copies **by choice**: the model must own its buffers.
+//! Adopting memory allocated by the Python allocator would make the
+//! lifetime of a column depend on that of a Python object. A second,
+//! independent reason: a copied `Vec<f64>` is pure Rust, it is destroyed on
+//! any thread — whereas destroying a Python object requires the GIL, which
+//! would forbid passing the value to the thread that owns the model
+//! (task 5.4).
 //!
-//! # Ce module ne connaît pas le modèle
+//! # This module does not know the model
 //!
-//! Il manipule des `Arc<Vec<f64>>` — un type de la bibliothèque standard — et
-//! non des colonnes. `stokesforge-python` ne dépend pas de `stokesforge-core` : c'est une
-//! frontière vérifiée par le compilateur, et c'est elle qui permettra à un
-//! moteur de rendu Matplotlib de se poser ici sans passer par la couche de
-//! script.
+//! It handles `Arc<Vec<f64>>` — a standard library type — and
+//! not columns. `stokesforge-python` does not depend on `stokesforge-core`: this is a
+//! compiler-checked boundary, and it is what will let a Matplotlib
+//! rendering engine sit here without going through the script
+//! layer.
 //!
-//! # Préalable
+//! # Precondition
 //!
-//! Comme le reste du crate, ces fonctions supposent l'interpréteur démarré
-//! (cf. [`crate::interpreter::EmbeddedPython::initialize`]).
+//! Like the rest of the crate, these functions assume the interpreter is started
+//! (see [`crate::interpreter::EmbeddedPython::initialize`]).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -46,93 +46,93 @@ create_exception!(
     stokesforge_python,
     MaskedArrayError,
     PyException,
-    "Un `numpy.ma.masked_array` porte au moins une valeur masquée : la copier \
-     écrirait cette valeur cachée comme une donnée réelle. Rendez le masque \
-     explicite avant l'appel — `.filled(float('nan'))` pour le traduire dans \
-     la valeur manquante du modèle, `.compressed()` pour l'écarter — plutôt \
-     que de laisser `copy_array_to_vec` deviner."
+    "A `numpy.ma.masked_array` carries at least one masked value: copying it \
+     would write this hidden value as real data. Make the mask \
+     explicit before the call — `.filled(float('nan'))` to translate it into \
+     the model's missing value, `.compressed()` to drop it — rather \
+     than letting `copy_array_to_vec` guess."
 );
 
-/// Conteneur Python qui maintient vivant le buffer Rust sous une vue numpy.
+/// Python container that keeps the Rust buffer alive under a numpy view.
 ///
-/// C'est l'attribut `base` du tableau rendu par [`borrowed_readonly_array`] :
-/// tant qu'il vit, le compteur de références de l'`Arc` reste **≥ 2**, donc
-/// toute écriture côté modèle passe par `Arc::make_mut` et **alloue un buffer
-/// neuf**. Le buffer sous la vue n'est alors ni déplacé, ni réalloué, ni
-/// libéré : la clause de sûreté de `borrow_from_array` est honorée **par
-/// construction, pas par vigilance**.
+/// It is the `base` attribute of the array returned by [`borrowed_readonly_array`]:
+/// as long as it lives, the `Arc` reference count stays **≥ 2**, so
+/// any write on the model side goes through `Arc::make_mut` and **allocates a fresh
+/// buffer**. The buffer under the view is then neither moved, nor reallocated, nor
+/// freed: the safety clause of `borrow_from_array` is honored **by
+/// construction, not by vigilance**.
 ///
-/// Le `pyclass` est `frozen` : rien, depuis Python, ne peut remplacer ou muter
-/// l'`Arc` qu'il détient.
+/// The `pyclass` is `frozen`: nothing, from Python, can replace or mutate
+/// the `Arc` it holds.
 #[pyclass(frozen, module = "stokesforge")]
 pub struct FloatBufferOwner {
-    /// Clone de l'`Arc` emprunté. Ce n'est **pas** un pointeur ni une référence
-    /// empruntée : c'est ce clone, et lui seul, qui tient le compteur au-dessus
-    /// de 1.
+    /// Clone of the borrowed `Arc`. It is **not** a pointer nor a borrowed
+    /// reference: it is this clone, and only this one, that keeps the count above
+    /// 1.
     data: Arc<Vec<f64>>,
 }
 
 impl FloatBufferOwner {
-    /// Longueur du buffer maintenu vivant — utile aux tests et au diagnostic.
+    /// Length of the buffer kept alive — useful for tests and diagnostics.
     #[must_use]
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    /// Vrai si le buffer maintenu vivant est vide.
+    /// True if the buffer kept alive is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 }
 
-/// Rend une vue numpy **sans copie** sur `data`, en lecture seule.
+/// Returns a **zero-copy** numpy view of `data`, read-only.
 ///
-/// Le tableau rendu pointe **exactement** sur `data.as_ptr()` : aucun octet
-/// n'est dupliqué, quelle que soit la taille de la colonne. Son attribut `base`
-/// est un [`FloatBufferOwner`] qui détient un clone de l'`Arc`.
+/// The returned array points **exactly** to `data.as_ptr()`: not a single byte
+/// is duplicated, whatever the size of the column. Its `base` attribute
+/// is a [`FloatBufferOwner`] that holds a clone of the `Arc`.
 ///
-/// # `writeable = False` est un garde-fou, pas une frontière
+/// # `writeable = False` is a guard, not a boundary
 ///
-/// Il attrape la faute d'inattention (`col[0] = 3` dans un script) et documente
-/// l'intention. Il ne résiste pas à un script déterminé, et n'a pas à le faire :
-/// le modèle de confiance donne déjà les pleins pouvoirs à l'interpréteur.
+/// It catches the slip of attention (`col[0] = 3` in a script) and documents
+/// the intent. It does not resist a determined script, and does not have to:
+/// the trust model already gives the interpreter full powers.
 ///
-/// # Une vue est un instantané, pas un abonnement
+/// # A view is a snapshot, not a subscription
 ///
-/// Une vue prise **avant** une écriture reste sur l'**ancien** buffer. Le script
-/// continue d'y lire des valeurs périmées, silencieusement :
+/// A view taken **before** a write stays on the **old** buffer. The script
+/// keeps reading stale values from it, silently:
 ///
 /// ```python
-/// v = pyst.column(col)       # v regarde directement la mémoire du modèle
+/// v = pyst.column(col)       # v looks straight at the model's memory
 /// print(v[0])               # 1.0
-/// pyst.set_column(col, autres_valeurs)
-/// print(v[0])               # 1.0  ← toujours l'ancienne valeur
-/// print(pyst.column(col)[0]) # 2.0  ← la nouvelle
+/// pyst.set_column(col, other_values)
+/// print(v[0])               # 1.0  ← still the old value
+/// print(pyst.column(col)[0]) # 2.0  ← the new one
 /// ```
 ///
-/// **C'est le comportement retenu**, et c'est le seul choix sûr : muter le
-/// buffer sous les pieds de numpy serait un plantage, pas une valeur
-/// surprenante. Les deux options écartées, pour mémoire : *invalider la vue*
-/// (numpy ne permet pas d'invalider proprement un tableau ; il faudrait rendre
-/// un objet enveloppant, donc perdre le fait que ce soit un vrai `ndarray`, ce
-/// que toute la bibliothèque scientifique attend) ; *vue vivante qui se met à
-/// jour* (impossible sans copie ni verrou — précisément ce que le zéro-copie
-/// interdit).
+/// **This is the chosen behavior**, and it is the only safe choice: mutating the
+/// buffer under numpy's feet would be a crash, not a
+/// surprising value. The two rejected options, for the record: *invalidating the view*
+/// (numpy cannot cleanly invalidate an array; we would have to return
+/// a wrapper object, thus losing the fact that it is a real `ndarray`, which
+/// the whole scientific library expects); *live view that updates itself*
+/// (impossible without a copy or a lock — precisely what zero-copy
+/// forbids).
 ///
-/// **Règle simple qui évite tout le problème : ne gardez pas une vue plus
-/// longtemps qu'un calcul ; relisez la colonne après toute écriture.**
+/// **Simple rule that avoids the whole problem: do not keep a view longer
+/// than a computation; re-read the column after any write.**
 ///
-/// # Erreurs
+/// # Errors
 ///
-/// [`Err`] si l'allocation du conteneur Python échoue, ou si le drapeau
-/// d'écriture n'a pas pu être retiré.
+/// [`Err`] if allocating the Python container fails, or if the write
+/// flag could not be removed.
 pub fn borrowed_readonly_array<'py>(
     py: Python<'py>,
     data: &Arc<Vec<f64>>,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    // Le conteneur est créé AVANT l'emprunt : s'il ne peut pas être alloué, on
-    // sort sans avoir fabriqué de tableau qui pointerait dans le vide.
+    // The container is created BEFORE the borrow: if it cannot be allocated, we
+    // leave without having built an array that would point to nothing.
     let owner = Bound::new(
         py,
         FloatBufferOwner {
@@ -140,38 +140,37 @@ pub fn borrowed_readonly_array<'py>(
         },
     )?;
 
-    // Vue `ndarray` empruntée sur la tranche — aucun octet copié : `aview1` ne
-    // fait que retenir pointeur, longueur et pas.
+    // `ndarray` view borrowed over the slice — no byte copied: `aview1` only
+    // retains pointer, length and stride.
     let view = aview1(&data[..]);
 
-    // SAFETY : la clause de `PyArray::borrow_from_array` exige deux choses.
+    // SAFETY: the clause of `PyArray::borrow_from_array` demands two things.
     //
-    // (1) « `container` est posé comme objet de base du tableau rendu, lequel
-    //     ne doit pas être détruit avant `container` ». C'est l'inverse qui est
-    //     construit ici : `owner` est *consommé* par l'appel, sa référence est
-    //     transférée au tableau numpy, qui la relâchera à sa propre destruction.
-    //     Le conteneur survit donc mécaniquement au tableau.
+    // (1) "`container` is set as the base object of the returned array, which
+    //     must not be destroyed before `container`". The opposite is what is
+    //     built here: `owner` is *consumed* by the call, its reference is
+    //     transferred to the numpy array, which releases it at its own destruction.
+    //     The container therefore mechanically outlives the array.
     //
-    // (2) « `array` ne doit pas être réalloué tant que `container` vit ».
-    //     `owner` détient un CLONE de l'`Arc`, donc le compteur de références
-    //     du buffer vaut ≥ 2 tant que la vue existe. Côté modèle, toute écriture
-    //     passe par `Arc::make_mut`, qui, avec un compteur ≥ 2, **alloue un
-    //     buffer neuf** et laisse l'ancien intact : ni mutation en place, ni
-    //     réallocation (croissance du `Vec`), ni libération ne peuvent atteindre
-    //     le buffer sous la vue. Le `Vec` lui-même ne peut pas être libéré : le
-    //     clone de l'`Arc` le maintient vivant même si l'appelant relâche le
-    //     sien.
+    // (2) "`array` must not be reallocated while `container` lives".
+    //     `owner` holds a CLONE of the `Arc`, so the buffer's reference count
+    //     is ≥ 2 as long as the view exists. On the model side, any write
+    //     goes through `Arc::make_mut`, which, with a count ≥ 2, **allocates a
+    //     fresh buffer** and leaves the old one intact: neither in-place mutation,
+    //     nor reallocation (growth of the `Vec`), nor freeing can reach
+    //     the buffer under the view. The `Vec` itself cannot be freed: the
+    //     `Arc` clone keeps it alive even if the caller releases its own.
     //
-    // Conséquence assumée et documentée ci-dessus : la vue devient un
-    // instantané de l'ancien buffer. C'est une valeur périmée, jamais un accès
-    // invalide.
+    // Accepted consequence, documented above: the view becomes a
+    // snapshot of the old buffer. It is a stale value, never an invalid
+    // access.
     let array = unsafe { PyArray1::borrow_from_array(&view, owner.into_any()) };
 
-    // `writeable = False`. Le chemin passe par l'emprunt exclusif de
-    // rust-numpy, seule API *sûre* qui retire le drapeau ; le garde d'emprunt
-    // est relâché aussitôt, il ne survit pas à cette fonction. Le tableau ne
-    // peut pas être déjà emprunté : il vient d'être créé et personne d'autre
-    // n'en a la référence.
+    // `writeable = False`. The path goes through rust-numpy's exclusive borrow,
+    // the only *safe* API that removes the flag; the borrow guard
+    // is released at once, it does not outlive this function. The array cannot
+    // already be borrowed: it was just created and nobody else
+    // has a reference to it.
     let readonly = array
         .try_readwrite()
         .map_err(|err| PyRuntimeError::new_err(format!("exclusive borrow refused: {err}")))?
@@ -181,47 +180,47 @@ pub fn borrowed_readonly_array<'py>(
     Ok(array)
 }
 
-/// Copie un tableau numpy de `float64` vers un `Vec<f64>` neuf.
+/// Copies a numpy `float64` array into a fresh `Vec<f64>`.
 ///
-/// Accepte les tableaux **non contigus** — une tranche `v[::2]` en est un : le
-/// chemin de compactage est explicite, il ne suppose jamais la contiguïté.
+/// Accepts **non-contiguous** arrays — a slice `v[::2]` is one: the
+/// compaction path is explicit, it never assumes contiguity.
 ///
-/// La copie est le sens *écriture* de l'asymétrie décrite en tête de module :
-/// le `Vec` rendu appartient à Rust, il ne dépend plus d'aucun objet Python et
-/// se détruit sur n'importe quel fil, GIL ou pas.
+/// The copy is the *write* direction of the asymmetry described at the top of the module:
+/// the returned `Vec` belongs to Rust, it no longer depends on any Python object and
+/// is destroyed on any thread, GIL or not.
 ///
-/// # Un `numpy.ma.masked_array` est refusé, jamais deviné
+/// # A `numpy.ma.masked_array` is refused, never guessed
 ///
-/// `numpy.ma.MaskedArray` est une sous-classe d'`ndarray` : sans contrôle
-/// dédié, elle traverserait les trois vérifications ci-dessous (c'est un
-/// tableau, `float64`, une dimension) et ses cases masquées seraient copiées
-/// **comme si elles étaient des données réelles** — le masque, qui dit
-/// « valeur absente », serait tout simplement ignoré.
+/// `numpy.ma.MaskedArray` is a subclass of `ndarray`: without a dedicated
+/// check, it would pass the three checks below (it is an
+/// array, `float64`, one dimension) and its masked cells would be copied
+/// **as if they were real data** — the mask, which says
+/// "value absent", would simply be ignored.
 ///
-/// Le modèle a exactement une valeur manquante (`NaN`, documentée en tête de
-/// `stokesforge-core::column`), mais choisir **ici** de traduire un masque en `NaN`
-/// couperait le script de la décision : `.filled()`, `.compressed()`, ou une
-/// autre valeur de repli lui appartiennent. Le dépôt a déjà tranché ce genre
-/// de cas pour `int64`, refusé plutôt que converti en silence « une
-/// conversion implicite cacherait une perte de précision au-delà de 2⁵³ » —
-/// le même raisonnement s'applique mot pour mot au masque : une conversion
-/// implicite cacherait la perte du masque lui-même. D'où [`MaskedArrayError`]
-/// dès qu'au moins une case est masquée ; un `MaskedArray` sans case masquée
-/// (masque `nomask`, ou entièrement `False`) ne cache rien et traverse comme
-/// un `ndarray` ordinaire.
+/// The model has exactly one missing value (`NaN`, documented at the top of
+/// `stokesforge-core::column`), but choosing **here** to translate a mask into `NaN`
+/// would take the decision away from the script: `.filled()`, `.compressed()`, or another
+/// fallback value belong to it. The repository already ruled on this kind
+/// of case for `int64`, refused rather than silently converted: "an
+/// implicit conversion would hide a loss of precision beyond 2⁵³" —
+/// the same reasoning applies word for word to the mask: an implicit
+/// conversion would hide the loss of the mask itself. Hence [`MaskedArrayError`]
+/// as soon as at least one cell is masked; a `MaskedArray` with no masked cell
+/// (`nomask` mask, or entirely `False`) hides nothing and passes like
+/// an ordinary `ndarray`.
 ///
-/// # Erreurs
+/// # Errors
 ///
-/// [`Err`] avec un message explicite si l'objet n'est pas un tableau numpy, ou
-/// pas de `dtype` `float64`, ou pas à une dimension, ou [`MaskedArrayError`]
-/// si l'objet est un `numpy.ma.masked_array` portant au moins une valeur
-/// masquée.
+/// [`Err`] with an explicit message if the object is not a numpy array, or
+/// not of `dtype` `float64`, or not one-dimensional, or [`MaskedArrayError`]
+/// if the object is a `numpy.ma.masked_array` carrying at least one masked
+/// value.
 pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
     let py = array.py();
 
-    // 0. Masque numpy, avant tout le reste : un `MaskedArray` est un
-    //    `ndarray` valide aux yeux des trois contrôles suivants, donc c'est
-    //    le seul endroit où le distinguer.
+    // 0. numpy mask, before everything else: a `MaskedArray` is a valid
+    //    `ndarray` in the eyes of the next three checks, so this is
+    //    the only place to tell it apart.
     if has_hidden_masked_values(array)? {
         return Err(MaskedArrayError::new_err(format!(
             "masked numpy array (`{}`) refused: at least one value is \
@@ -233,7 +232,7 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
         )));
     }
 
-    // 1. Est-ce seulement un tableau numpy ? Une liste Python échoue ici.
+    // 1. Is it even a numpy array? A Python list fails here.
     let untyped = array.cast::<PyUntypedArray>().map_err(|_| {
         PyTypeError::new_err(format!(
             "expected a one-dimensional numpy float64 array, got an object of type `{}`",
@@ -241,7 +240,7 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
         ))
     })?;
 
-    // 2. Dimension. Un tableau 2-D échoue ici, avec sa forme dans le message.
+    // 2. Dimension. A 2-D array fails here, with its shape in the message.
     if untyped.ndim() != 1 {
         return Err(PyTypeError::new_err(format!(
             "expected a one-dimensional numpy array, got {} dimensions (shape {:?})",
@@ -250,9 +249,9 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
         )));
     }
 
-    // 3. `dtype`. Un tableau d'`int64` échoue ici : on refuse explicitement
-    //    plutôt que de convertir en silence — une conversion implicite cacherait
-    //    une perte de précision au-delà de 2^53.
+    // 3. `dtype`. An `int64` array fails here: we refuse explicitly
+    //    rather than silently converting — an implicit conversion would hide
+    //    a loss of precision beyond 2^53.
     let expected = dtype::<f64>(py);
     let actual = untyped.dtype();
     if !actual.is_equiv_to(&expected) {
@@ -269,36 +268,36 @@ pub fn copy_array_to_vec(array: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
         .map_err(|err| PyRuntimeError::new_err(format!("shared borrow refused: {err}")))?;
     let view = readonly.as_array();
 
-    // Compactage explicite : `as_slice` ne rend `Some` que pour un tableau
-    // contigu en mémoire. Sinon on parcourt en suivant les pas, ce qui couvre
-    // `v[::2]`, `v[::-1]` et toute vue exotique.
+    // Explicit compaction: `as_slice` returns `Some` only for an array
+    // contiguous in memory. Otherwise we iterate following the strides, which covers
+    // `v[::2]`, `v[::-1]` and any exotic view.
     match view.as_slice() {
         Some(contiguous) => Ok(contiguous.to_vec()),
         None => Ok(view.iter().copied().collect()),
     }
 }
 
-/// Vrai si `object` est un `numpy.ma.masked_array` avec **au moins une**
-/// valeur masquée.
+/// True if `object` is a `numpy.ma.masked_array` with **at least one**
+/// masked value.
 ///
-/// Délègue à `numpy.ma.is_masked`, plutôt que de relire l'attribut `mask` et
-/// d'en décider ici : c'est numpy qui connaît le cas `nomask` (le sentinelle
-/// que porte un `MaskedArray` sans case masquée, pour lequel un examen manuel
-/// devrait aussi couvrir un masque explicite mais entièrement `False`).
-/// `is_masked` rend `False` pour tout objet qui n'est pas un `MaskedArray` —
-/// une liste, un entier, un `ndarray` ordinaire — donc cet appel est sûr avant
-/// même de savoir si `object` est un tableau numpy.
+/// Delegates to `numpy.ma.is_masked`, rather than re-reading the `mask` attribute and
+/// deciding here: numpy knows the `nomask` case (the sentinel
+/// carried by a `MaskedArray` with no masked cell, for which a manual check
+/// would also have to cover an explicit but entirely `False` mask).
+/// `is_masked` returns `False` for any object that is not a `MaskedArray` —
+/// a list, an integer, an ordinary `ndarray` — so this call is safe even
+/// before knowing whether `object` is a numpy array.
 ///
-/// `numpy.ma` est déjà chargé dès que `numpy` l'est (son `__init__.py`
-/// importe son sous-module `ma`) : `py.import` retrouve donc un module déjà en
-/// mémoire, jamais un accès disque.
+/// `numpy.ma` is already loaded as soon as `numpy` is (its `__init__.py`
+/// imports its `ma` submodule): `py.import` therefore finds a module already in
+/// memory, never a disk access.
 fn has_hidden_masked_values(object: &Bound<'_, PyAny>) -> PyResult<bool> {
     let py = object.py();
     let ma = py.import("numpy.ma")?;
     ma.call_method1("is_masked", (object,))?.extract()
 }
 
-/// Nom du type Python d'un objet, pour les messages d'erreur.
+/// Name of the Python type of an object, for error messages.
 fn type_name(object: &Bound<'_, PyAny>) -> String {
     object
         .get_type()
@@ -307,30 +306,30 @@ fn type_name(object: &Bound<'_, PyAny>) -> String {
         .unwrap_or_else(|_| "?".to_owned())
 }
 
-/// Mesures du verrou : `(durée d'un emprunt, durée d'une copie)` pour `len`
-/// valeurs, en **nanosecondes**.
+/// Lock measurements: `(duration of a borrow, duration of a copy)` for `len`
+/// values, in **nanoseconds**.
 ///
-/// Les deux gestes sont mesurés dans une seule prise du GIL, après un
-/// préchauffage **à la même taille** : il absorbe l'initialisation paresseuse
-/// de la C-API numpy et du type [`FloatBufferOwner`], mais surtout il fait
-/// payer d'avance les défauts de page du premier tableau de 8 Mo. Sans lui, la
-/// copie mesurée est celle d'une allocation *froide* (≈ 2,7 ms pour 1 M `f64`)
-/// au lieu du régime établi (≈ 0,8 ms) — l'écart est du système, pas de numpy,
-/// et il fausserait la comparaison avec la tâche 5.1a.
+/// Both gestures are measured within a single GIL acquisition, after a
+/// warm-up **at the same size**: it absorbs the lazy initialization
+/// of the numpy C API and of the [`FloatBufferOwner`] type, but above all it makes
+/// the page faults of the first 8 MB array be paid in advance. Without it, the
+/// measured copy is that of a *cold* allocation (≈ 2.7 ms for 1 M `f64`)
+/// instead of the steady state (≈ 0.8 ms) — the gap comes from the system, not from numpy,
+/// and it would skew the comparison with task 5.1a.
 ///
-/// L'emprunt est en temps **constant** (il n'alloue que deux objets Python) là
-/// où la copie est **linéaire** : l'écart croît avec la taille de la colonne.
+/// The borrow takes **constant** time (it allocates only two Python objects) whereas
+/// the copy is **linear**: the gap grows with the size of the column.
 ///
-/// # Erreurs
+/// # Errors
 ///
-/// [`Err`] si un appel Python échoue.
+/// [`Err`] if a Python call fails.
 pub fn measure_borrow_vs_copy(len: usize) -> Result<(u128, u128), PythonError> {
     let data: Arc<Vec<f64>> = Arc::new((0..len).map(|index| index as f64).collect());
 
     attached(|py| {
-        // Préchauffage à la taille réelle : type de `FloatBufferOwner`,
-        // `PY_ARRAY_API`, drapeaux d'emprunt, et défauts de page de l'allocation
-        // de 8 Mo. Le tableau de chauffe est détruit avant la mesure.
+        // Warm-up at the real size: `FloatBufferOwner` type,
+        // `PY_ARRAY_API`, borrow flags, and page faults of the 8 MB
+        // allocation. The warm-up array is destroyed before the measurement.
         std::hint::black_box(borrowed_readonly_array(py, &data)?);
         std::hint::black_box(PyArray1::from_slice(py, &data));
 

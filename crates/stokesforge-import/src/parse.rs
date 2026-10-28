@@ -1,70 +1,66 @@
-//! Le moteur de parsing : applique une [`crate::ImportRecipe`] à des octets
-//! bruts pour en tirer un [`ParsedTable`]. Aucun jeton illisible ni aucune
-//! ligne mal formée n'interrompt l'import — voir l'invariant 10
-//! (« un défaut de donnée dégrade, il ne plante pas ») : les valeurs
-//! non-analysables deviennent `f64::NAN`, jamais une erreur.
+//! The parsing engine: applies an [`crate::ImportRecipe`] to raw bytes to
+//! produce a [`ParsedTable`]. No unreadable token and no malformed line
+//! interrupts the import. See invariant 10 ("a data defect degrades, it does
+//! not crash"): unparseable values become `f64::NAN`, never an error.
 //!
-//! Seuls trois cas font échouer tout l'import : un fichier qui n'est pas du
-//! texte (binaire — voir [`crate::decode`] pour les encodages acceptés), un
-//! fichier vide, ou un fichier dont on ne trouve aucune ligne de
-//! donnée après application de la recette (marqueur d'en-tête introuvable,
-//! ou plus rien après en-tête/pied de page).
+//! Only three cases fail the whole import: a file that is not text (binary;
+//! see [`crate::decode`] for the accepted encodings), an empty file, or a
+//! file in which no data line is found after the recipe is applied (header
+//! marker not found, or nothing left after the header/footer).
 
-/// Une colonne telle que lue dans le fichier.
+/// A column as read from the file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedColumn {
-    /// Nom lu sur la ligne d'en-tête de colonnes, si `has_column_header_row`
-    /// et que cette colonne y avait une entrée non vide.
+    /// Name read from the column header line, if `has_column_header_row` is
+    /// set and this column had a non-empty entry there.
     pub name: Option<String>,
-    /// Une valeur par ligne de données, dans l'ordre. `f64::NAN` pour une
-    /// valeur manquante ou non analysable — jamais d'erreur bloquante pour
-    /// un jeton individuel illisible (invariant 10).
+    /// One value per data line, in order. `f64::NAN` for a missing or
+    /// unparseable value; never a blocking error for an individual unreadable
+    /// token (invariant 10).
     pub values: Vec<f64>,
-    /// Le jeton d'origine (`trim`é) pour chaque ligne où `values` porte un
-    /// `NaN` **parce que le jeton n'était pas un nombre** — `None` sinon (le
-    /// jeton était absent, vide, ou s'est bien analysé). Même longueur que
-    /// `values`. Sert à distinguer, en aval, une vraie valeur manquante d'un
-    /// texte à conserver (`stokesforge_core::ColumnType::Mixed`, chantier
-    /// « colonnes à types mixtes ») — c'est le premier consommateur réel de
-    /// ce type : sans ce champ, `1,2 / n/a / 1,5` perdait le `n/a`.
+    /// The original token (trimmed) for each line where `values` holds a
+    /// `NaN` **because the token was not a number**; `None` otherwise (the
+    /// token was absent, empty, or parsed fine). Same length as `values`.
+    /// Used downstream to tell a real missing value from text to keep
+    /// (`stokesforge_core::ColumnType::Mixed`, the "mixed-type columns" work
+    /// package). It is the first real consumer of that type: without this
+    /// field, `1,2 / n/a / 1,5` lost the `n/a`.
     pub texts: Vec<Option<String>>,
-    /// Nom long extrait des lignes de sous-en-tête assignées au rôle
-    /// « Long Names » ([`crate::recipe::SubheaderRoles::long_name`]), le cas
-    /// échéant.
+    /// Long name extracted from the sub-header lines assigned to the "Long
+    /// Names" role ([`crate::recipe::SubheaderRoles::long_name`]), if any.
     pub long_name: Option<String>,
-    /// Unité extraite des lignes de sous-en-tête assignées au rôle
-    /// « Units ».
+    /// Unit extracted from the sub-header lines assigned to the "Units"
+    /// role.
     pub unit: Option<String>,
-    /// Commentaire extrait des lignes de sous-en-tête assignées au rôle
-    /// « Comments ».
+    /// Comment extracted from the sub-header lines assigned to the "Comments"
+    /// role.
     pub comment: Option<String>,
-    /// Valeur x' lue dans la ligne assignée au rôle `x_prime` (#164), avec
-    /// le format numérique de la recette ; `None` si la ligne manque ou si le
-    /// jeton n'est pas un nombre fini.
+    /// x' value read from the line assigned to the `x_prime` role (#164),
+    /// with the recipe's number format; `None` if the line is missing or the
+    /// token is not a finite number.
     pub x_prime: Option<f64>,
-    /// Colonne lue comme dates et heures ([`crate::recipe::ColumnKind::DateTime`]) :
-    /// `values` porte alors des timestamps POSIX en secondes.
+    /// Column read as dates and times ([`crate::recipe::ColumnKind::DateTime`]):
+    /// `values` then holds POSIX timestamps in seconds.
     pub datetime: bool,
 }
 
-/// Le séparateur effectivement utilisé pour ce fichier, une fois
-/// `Separator::Auto` (et `Separator::Whitespace`) résolu. `pub(crate)` :
-/// utile aussi à [`crate::preview`] (aperçu en direct) et à la détection
-/// automatique des lignes d'en-tête, pas seulement à retrouver les couples
-/// clé/valeur des lignes d'en-tête ignorées.
+/// The separator actually used for this file, once `Separator::Auto` (and
+/// `Separator::Whitespace`) is resolved. `pub(crate)`: also useful to
+/// [`crate::preview`] (live preview) and to the automatic detection of header
+/// lines, not only to find the key/value pairs of the skipped header lines.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectiveSeparator {
     Char(char),
     Whitespace,
-    /// Colonnes à largeur fixe : la largeur de chacune sauf la dernière.
+    /// Fixed-width columns: the width of each one except the last.
     Fixed(Vec<usize>),
 }
 
 impl EffectiveSeparator {
-    /// Découpe une ligne en jetons selon ce séparateur. Ne retire jamais les
-    /// jetons vides pour un séparateur caractère (un CSV `a;;c` a bien 3
-    /// champs, le second vide) ; `Whitespace` les absorbe naturellement ;
-    /// `Fixed` coupe aux positions données (en caractères).
+    /// Splits a line into tokens with this separator. Never removes empty
+    /// tokens for a character separator (a CSV `a;;c` does have 3 fields, the
+    /// second empty); `Whitespace` absorbs them naturally; `Fixed` cuts at the
+    /// given positions (in characters).
     pub(crate) fn tokenize<'a>(&self, line: &'a str) -> Vec<&'a str> {
         match self {
             EffectiveSeparator::Char(c) => line.split(*c).collect(),
@@ -86,9 +82,9 @@ impl EffectiveSeparator {
         }
     }
 
-    /// Coupe une ligne « CLÉ<séparateur>VALEUR » en `(clé, valeur)` à la
-    /// première occurrence du séparateur. Sans objet pour des colonnes à
-    /// largeur fixe : la ligne n'a alors pas de forme clé/valeur.
+    /// Splits a `KEY<separator>VALUE` line into `(key, value)` at the first
+    /// occurrence of the separator. Not applicable to fixed-width columns: the
+    /// line then has no key/value form.
     pub(crate) fn split_key_value<'a>(&self, line: &'a str) -> Option<(&'a str, &'a str)> {
         match self {
             EffectiveSeparator::Char(c) => line.split_once(*c),
@@ -98,15 +94,15 @@ impl EffectiveSeparator {
     }
 }
 
-/// Le résultat d'un import réussi : les colonnes lues, plus toute anomalie
-/// non bloquante constatée en chemin.
+/// The result of a successful import: the columns read, plus any non-blocking
+/// anomaly noticed along the way.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedTable {
     pub columns: Vec<ParsedColumn>,
-    /// Anomalies non bloquantes constatées pendant le parsing (ex. un
-    /// nombre de points annoncé dans l'en-tête qui ne correspond pas au
-    /// nombre de lignes réellement lues) — jamais vide en cas d'erreur, ce
-    /// sont des avertissements sur un import qui a réussi.
+    /// Non-blocking anomalies noticed while parsing (e.g. a point count
+    /// announced in the header that does not match the number of lines
+    /// actually read). Never filled in case of error: these are warnings on an
+    /// import that succeeded.
     pub warnings: Vec<String>,
     header_lines: Vec<String>,
     footer_lines: Vec<String>,
@@ -115,35 +111,34 @@ pub struct ParsedTable {
 }
 
 impl ParsedTable {
-    /// Nombre de lignes de données (0 si `columns` est vide).
+    /// Number of data lines (0 if `columns` is empty).
     pub fn row_count(&self) -> usize {
         self.columns.first().map_or(0, |c| c.values.len())
     }
 
-    /// Métadonnées à conserver, selon la recette (en-tête, pied de page,
-    /// exclusions) — voir [`crate::metadata`].
+    /// Metadata to keep, according to the recipe (header, footer, exclusions);
+    /// see [`crate::metadata`].
     pub fn metadata(&self) -> &[crate::metadata::MetadataLine] {
         &self.metadata
     }
 
-    /// Lignes qui suivent la fin des données (pied de page), telles qu'elles
-    /// sont dans le fichier — jamais importées.
+    /// Lines that follow the end of the data (footer), as they are in the
+    /// file. Never imported.
     pub fn footer_lines(&self) -> &[String] {
         &self.footer_lines
     }
 
-    /// Cherche, parmi les lignes d'en-tête ignorées lors du parsing, une
-    /// ligne de la forme « CLÉ<séparateur>VALEUR » où CLÉ correspond à `key`
-    /// (insensible à la casse, bordures blanches ignorées) — rend VALEUR
-    /// (`trim`ée), ou `None` si absente. `<séparateur>` est celui
-    /// effectivement résolu pour ce fichier (utile même quand la recette
-    /// demandait `Separator::Auto`).
+    /// Looks, among the header lines skipped during parsing, for a line of
+    /// the form `KEY<separator>VALUE` where KEY matches `key` (case
+    /// insensitive, surrounding whitespace ignored). Returns VALUE (trimmed),
+    /// or `None` if absent. `<separator>` is the one actually resolved for
+    /// this file (useful even when the recipe asked for `Separator::Auto`).
     pub fn header_value(&self, key: &str) -> Option<String> {
         lookup_header_value(&self.header_lines, &self.separator, key)
     }
 }
 
-/// Cherche `key` dans `header_lines`, sous la forme CLÉ<séparateur>VALEUR.
+/// Looks for `key` in `header_lines`, in the form `KEY<separator>VALUE`.
 fn lookup_header_value(
     header_lines: &[String],
     separator: &EffectiveSeparator,
@@ -160,8 +155,8 @@ fn lookup_header_value(
     })
 }
 
-/// Les façons dont un import peut échouer entièrement — tout le reste
-/// dégrade plutôt que d'échouer (invariant 10).
+/// The ways an import can fail entirely; everything else degrades rather than
+/// failing (invariant 10).
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ImportError {
     #[error("the file is not readable text (binary file)")]
@@ -170,34 +165,33 @@ pub enum ImportError {
     Empty,
     #[error("no data line found after the header")]
     NoDataRows,
-    /// Séparateur « espaces » (choisi, ou détecté) avec l'espace pour milliers :
-    /// `1 234,5` serait coupé en deux colonnes. Refusé à l'aperçu comme à
-    /// l'import.
+    /// "Whitespace" separator (chosen, or detected) with the space as
+    /// thousands separator: `1 234,5` would be split into two columns.
+    /// Rejected in the preview as in the import.
     #[error("whitespace column separator cannot be combined with a space as thousands separator")]
     WhitespaceWithSpaceThousands,
 }
 
 use crate::recipe::{DecimalStyle, ImportRecipe, NameSource, Separator};
 
-/// Parse `bytes` selon `recipe`. `Err(ImportError::NotText)` si `bytes`
-/// n'est pas du texte ([`crate::decode::decode_with`] : l'encodage choisi, ou
-/// détecté — UTF-8, UTF-16 avec marque, Windows-1252) — jamais de panique sur
-/// un fichier binaire.
+/// Parses `bytes` according to `recipe`. `Err(ImportError::NotText)` if
+/// `bytes` is not text ([`crate::decode::decode_with`]: the chosen or
+/// detected encoding: UTF-8, UTF-16 with a mark, Windows-1252). Never panics
+/// on a binary file.
 ///
-/// Le découpage en zones (en-tête, données, pied de page…) vient de
-/// [`crate::layout::analyze`], le même que celui de l'aperçu.
+/// The split into zones (header, data, footer...) comes from
+/// [`crate::layout::analyze`], the same as the preview's.
 ///
-/// Un fichier à **plusieurs blocs** (`recipe.block_split`) rend ici son premier
-/// bloc ; [`parse_blocks`] les rend tous.
+/// A file with **several blocks** (`recipe.block_split`) returns its first
+/// block here; [`parse_blocks`] returns them all.
 pub fn parse(bytes: &[u8], recipe: &ImportRecipe) -> Result<ParsedTable, ImportError> {
     parse_blocks(bytes, recipe).map(|mut tables| tables.remove(0))
 }
 
-/// Comme [`parse`], mais rend **un tableau par bloc** de données
-/// (`recipe.block_split`) : un fichier qui enchaîne plusieurs spectres en donne
-/// plusieurs, chacun avec son propre en-tête. Sans découpage, un seul tableau.
-/// Un bloc qui n'a aucune donnée est écarté ; l'import n'échoue que si aucun
-/// bloc n'en a.
+/// Like [`parse`], but returns **one table per data block**
+/// (`recipe.block_split`): a file that chains several spectra gives several
+/// tables, each with its own header. Without splitting, a single table. A
+/// block with no data is dropped; the import fails only if no block has any.
 pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTable>, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
@@ -218,8 +212,8 @@ pub fn parse_blocks(bytes: &[u8], recipe: &ImportRecipe) -> Result<Vec<ParsedTab
     }
 }
 
-/// Construit la table d'un [`crate::layout::Layout`] : colonnes, sous-en-têtes,
-/// métadonnées, avertissements.
+/// Builds the table of a [`crate::layout::Layout`]: columns, sub-headers,
+/// metadata, warnings.
 pub(crate) fn table_from_layout(
     layout: &crate::layout::Layout<'_>,
     recipe: &ImportRecipe,
@@ -232,10 +226,9 @@ pub(crate) fn table_from_layout(
         .iter()
         .map(|&i| layout.raw[i].to_string())
         .collect();
-    // Rôles des lignes de sous-en-tête (« Long Names »/« Units »/
-    // « Comments »), résolus une fois : chaque rôle pointe la **première**
-    // ligne de sa plage (une plage multi-lignes n'est pas répartie entre
-    // colonnes — limite documentée).
+    // Roles of the sub-header lines ("Long Names"/"Units"/"Comments"),
+    // resolved once: each role points at the **first** line of its range (a
+    // multi-line range is not spread across columns; documented limit).
     let subheader_lines = &header_lines[layout.subheader_start..];
     let role_line = |range: Option<crate::recipe::SubheaderLineRange>| {
         range.and_then(|r| subheader_lines.get(r.from.checked_sub(1)?))
@@ -245,7 +238,7 @@ pub(crate) fn table_from_layout(
     let comment_line = role_line(recipe.subheader_roles.comment);
     let x_prime_line = role_line(recipe.subheader_roles.x_prime);
 
-    // Ligne d'en-tête de colonnes, le cas échéant.
+    // Column header line, if any.
     let column_names: Option<Vec<String>> = layout.column_header.map(|i| {
         separator
             .tokenize(skip_str(layout.raw[i], recipe.skip_chars))
@@ -254,8 +247,8 @@ pub(crate) fn table_from_layout(
             .collect()
     });
 
-    // Une valeur par colonne de données, dans le même ordre, pour chaque ligne
-    // de sous-en-tête assignée à un rôle.
+    // One value per data column, in the same order, for each sub-header line
+    // assigned to a role.
     let role_values = |line: Option<&String>| -> Option<Vec<String>> {
         line.map(|l| {
             separator
@@ -267,9 +260,9 @@ pub(crate) fn table_from_layout(
     };
     let long_names = role_values(long_name_line);
     let units = if recipe.subheader_roles.same_line_name_unit {
-        // Même ligne que `long_name` : chaque jeton est de la forme
-        // « Nom (unité) » — sans parenthèses reconnues, tout le jeton reste
-        // le nom long et l'unité reste vide.
+        // Same line as `long_name`: each token has the form "Name (unit)".
+        // Without recognized parentheses, the whole token stays the long name
+        // and the unit stays empty.
         long_names.as_ref().map(|names| {
             names
                 .iter()
@@ -300,9 +293,9 @@ pub(crate) fn table_from_layout(
     let comments = role_values(comment_line);
     let x_primes = role_values(x_prime_line);
 
-    // Tokenise et analyse chaque ligne de données, en gardant le jeton
-    // d'origine à côté de la valeur : c'est ce que `texts` restitue pour une
-    // cellule qui n'est pas un nombre (colonnes à types mixtes).
+    // Tokenizes and parses each data line, keeping the original token next to
+    // the value: this is what `texts` returns for a cell that is not a number
+    // (mixed-type columns).
     let rows: Vec<Vec<(f64, Option<String>)>> = layout
         .data
         .iter()
@@ -358,7 +351,7 @@ pub(crate) fn table_from_layout(
         })
         .collect();
 
-    // Pied de page : tout ce qui suit la dernière donnée, tel quel.
+    // Footer: everything after the last data line, as is.
     let last_data = layout.data.last().copied().unwrap_or(layout.start);
     let footer_lines: Vec<String> = layout.raw[(last_data + 1).min(layout.end)..layout.end]
         .iter()
@@ -397,9 +390,9 @@ pub(crate) fn table_from_layout(
     }
 }
 
-/// Lit un jeton selon la nature choisie de sa colonne : `(valeur, texte
-/// conservé)`. Une seule règle, pour l'import comme pour l'aperçu (dont
-/// l'annotation « texte » se déduit du second élément).
+/// Reads a token according to the chosen kind of its column: `(value, kept
+/// text)`. A single rule, for the import as for the preview (whose "text"
+/// annotation is derived from the second element).
 pub(crate) fn read_cell(
     token: &str,
     kind: crate::recipe::ColumnKind,
@@ -426,18 +419,19 @@ pub(crate) fn read_cell(
     }
 }
 
-/// Résout `Separator::Auto`/`Whitespace` en un séparateur concret, sur la
-/// base de la première ligne restante après l'en-tête et le retrait des
-/// `skip_chars` — **ligne de noms de colonnes comprise**. `pub(crate)` :
-/// appelé par [`crate::layout::analyze`], seul endroit où cette décision est
-/// prise pour l'import comme pour l'aperçu (issue #23).
+/// Resolves `Separator::Auto`/`Whitespace` into a concrete separator, based
+/// on the first line remaining after the header and the removal of
+/// `skip_chars`, **column names line included**. `pub(crate)`: called by
+/// [`crate::layout::analyze`], the only place where this decision is made for
+/// the import and for the preview (issue #23).
 ///
-/// Avec la virgule pour décimale, la virgule n'est jamais candidate : elle
-/// ne peut pas être à la fois séparateur et décimale, et deux virgules
-/// décimales sur une ligne battraient sinon une seule tabulation.
+/// With the comma as decimal, the comma is never a candidate: it cannot be
+/// both separator and decimal, and two decimal commas on a line would
+/// otherwise beat a single tab.
 ///
-/// `Err(WhitespaceWithSpaceThousands)` si le séparateur résolu est « espaces »
-/// et que les milliers sont l'espace : la combinaison est ambiguë et refusée.
+/// `Err(WhitespaceWithSpaceThousands)` if the resolved separator is
+/// "whitespace" and the thousands separator is the space: the combination is
+/// ambiguous and rejected.
 pub(crate) fn resolve_separator(
     separator: &Separator,
     first_line: &str,
@@ -477,10 +471,11 @@ pub(crate) fn resolve_separator(
     Ok(resolved)
 }
 
-/// Résout le nom de série selon `recipe.name_source` : `Filename` rend
-/// `file_stem` tel quel ; `HeaderKey(key)` rend `table.header_value(key)`,
-/// ou replie sur `file_stem` si la clé est absente de l'en-tête — jamais
-/// d'échec dur pour un nom manquant (invariant 10).
+/// Resolves the series name according to `recipe.name_source`: `Filename`
+/// returns `file_stem` as is; `HeaderKey(key)` returns
+/// `table.header_value(key)`, or falls back to `file_stem` if the key is
+/// absent from the header. Never a hard failure for a missing name
+/// (invariant 10).
 pub fn resolve_series_name(recipe: &ImportRecipe, table: &ParsedTable, file_stem: &str) -> String {
     match &recipe.name_source {
         NameSource::Filename => file_stem.to_string(),
@@ -496,21 +491,21 @@ mod tests {
     use crate::recipe::{HeaderSkip, ImportRecipe};
 
     #[test]
-    fn fichier_binaire_rend_not_text_sans_paniquer() {
+    fn binary_file_gives_not_text_without_panicking() {
         let bytes: &[u8] = &[0xff, 0xfe, 0x00, 0x01, 0x02];
-        let recipe = ImportRecipe::new("défaut");
+        let recipe = ImportRecipe::new("default");
         assert_eq!(parse(bytes, &recipe), Err(ImportError::NotText));
     }
 
     #[test]
-    fn fichier_vide_rend_empty() {
-        let recipe = ImportRecipe::new("défaut");
+    fn empty_file_gives_empty() {
+        let recipe = ImportRecipe::new("default");
         assert_eq!(parse(b"", &recipe), Err(ImportError::Empty));
     }
 
     #[test]
-    fn ligne_plus_courte_est_completee_par_nan() {
-        let recipe = ImportRecipe::new("défaut");
+    fn a_shorter_line_is_padded_with_nan() {
+        let recipe = ImportRecipe::new("default");
         let table = parse(b"1,2,3\n4,5\n6,7,8\n", &recipe).unwrap();
         assert_eq!(table.columns.len(), 3);
         assert_eq!(table.row_count(), 3);
@@ -520,21 +515,18 @@ mod tests {
     }
 
     #[test]
-    fn marqueur_introuvable_rend_no_data_rows() {
-        let mut recipe = ImportRecipe::new("défaut");
+    fn missing_marker_gives_no_data_rows() {
+        let mut recipe = ImportRecipe::new("default");
         recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
-        let table = parse(b"une\ndeux\ntrois\n", &recipe);
+        let table = parse(b"one\ntwo\nthree\n", &recipe);
         assert_eq!(table, Err(ImportError::NoDataRows));
     }
 
     #[test]
-    fn resolve_series_name_replie_sur_filename_si_cle_absente() {
-        let mut recipe = ImportRecipe::new("défaut");
+    fn resolve_series_name_falls_back_to_filename_when_the_key_is_absent() {
+        let mut recipe = ImportRecipe::new("default");
         recipe.name_source = NameSource::HeaderKey("TITLE".into());
         let table = parse(b"1,2\n3,4\n", &recipe).unwrap();
-        assert_eq!(
-            resolve_series_name(&recipe, &table, "mon_fichier"),
-            "mon_fichier"
-        );
+        assert_eq!(resolve_series_name(&recipe, &table, "my_file"), "my_file");
     }
 }

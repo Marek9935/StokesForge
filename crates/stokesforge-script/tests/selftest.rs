@@ -1,18 +1,18 @@
-//! Intègre [`stokesforge_script::run_selftest`] à la suite de tests ordinaire :
-//! rejoue le critère de fin du socle et affirme que chaque étape est passée.
+//! Plugs [`stokesforge_script::run_selftest`] into the ordinary test suite:
+//! replays the end criterion of the foundation and asserts that every step
+//! passed.
 //!
-//! Un seul test dans ce fichier, à dessein. `cargo test` compile chaque
-//! fichier de `tests/` en son **propre binaire**, donc son propre processus :
-//! c'est ce qui isole cette vérification de `tests/script.rs` sans avoir à
-//! partager son verrou d'accès à l'interpréteur — CPython ne démarre qu'une
-//! fois par processus, et [`run_selftest`] démarre son propre moteur de
-//! script. Un second test dans ce fichier tournerait sur un fil du même
-//! processus et se heurterait au « un script à la fois » du moteur ; un seul
-//! test l'évite sans discipline à tenir.
+//! One test only in this file, on purpose. `cargo test` compiles each file of
+//! `tests/` into its **own binary**, hence its own process: this isolates the
+//! check from `tests/script.rs` without having to share its interpreter access
+//! lock. CPython starts only once per process, and [`run_selftest`] starts its
+//! own script engine. A second test in this file would run on a thread of the
+//! same process and would hit the engine's "one script at a time"; a single
+//! test avoids it with no discipline to keep up.
 //!
-//! Exige le préfixe vendorisé : lance `scripts/python-vendor.sh` puis
-//! `scripts/python-test.sh` (qui pose `STOKESFORGE_PYTHON_HOME` avant d'appeler
-//! `cargo test`).
+//! Requires the vendored prefix: run `scripts/python-vendor.sh` then
+//! `scripts/python-test.sh` (which sets `STOKESFORGE_PYTHON_HOME` before
+//! calling `cargo test`).
 
 #![cfg(feature = "python")]
 
@@ -21,9 +21,9 @@ use std::path::PathBuf;
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::run_selftest;
 
-/// Résout le préfixe embarqué : `STOKESFORGE_PYTHON_HOME` si posée par le script
-/// de test, sinon `vendor/python/extracted/python` relatif au manifeste —
-/// même résolution que `tests/script.rs`.
+/// Resolves the embedded prefix: `STOKESFORGE_PYTHON_HOME` if set by the test
+/// script, otherwise `vendor/python/extracted/python` relative to the
+/// manifest, the same resolution as `tests/script.rs`.
 fn home() -> PathBuf {
     match std::env::var_os(interpreter::HOME_ENV) {
         Some(value) => PathBuf::from(value),
@@ -34,21 +34,17 @@ fn home() -> PathBuf {
 }
 
 #[test]
-fn le_critere_de_fin_du_socle_passe_de_bout_en_bout_depuis_larbre_de_sources() {
+fn the_foundation_end_criterion_passes_end_to_end_from_the_source_tree() {
     let report = run_selftest(EmbeddedPython::with_home(home()));
 
     for step in &report.steps {
         assert!(
             step.passed,
-            "étape en échec : {} — {}\n\ncompte rendu complet :\n{}",
+            "failed step: {} — {}\n\nfull report:\n{}",
             step.name,
             step.detail,
             report.render()
         );
     }
-    assert!(
-        report.passed(),
-        "compte rendu complet :\n{}",
-        report.render()
-    );
+    assert!(report.passed(), "full report:\n{}", report.render());
 }

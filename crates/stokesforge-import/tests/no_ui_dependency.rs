@@ -1,15 +1,15 @@
-//! Garde-fou : `stokesforge-import` reste indépendant de `stokesforge-core`, des
-//! commandes, de la session et de toute interface (`src/lib.rs` : vocabulaire de
-//! sortie `f64`/`NaN`, conversion faite par `stokesforge-app`). Plutôt que de deviner
-//! ce qu'est « une dépendance interdite », ce test liste les seules dépendances
-//! autorisées — toute addition dans `Cargo.toml` doit être ajoutée ici
-//! explicitement, ce qui force une décision consciente.
+//! Guard: `stokesforge-import` stays independent of `stokesforge-core`, of
+//! commands, of the session and of any interface (`src/lib.rs`: `f64`/`NaN`
+//! output vocabulary, conversion done by `stokesforge-app`). Rather than
+//! guessing what "a forbidden dependency" is, this test lists the only allowed
+//! dependencies: any addition to `Cargo.toml` must be added here explicitly,
+//! which forces a conscious decision.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "serde",       // recettes sérialisables
-    "serde_json",  // stockage des modèles (RecipeStore)
-    "directories", // dossier de configuration des modèles
-    "thiserror",   // erreurs typées, sans surface UI
+    "serde",       // serializable recipes
+    "serde_json",  // template storage (RecipeStore)
+    "directories", // configuration folder of the templates
+    "thiserror",   // typed errors, with no UI surface
 ];
 
 #[test]

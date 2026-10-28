@@ -1,36 +1,37 @@
-//! `pyst.analysis` (#181) : les calculs du menu Analysis, depuis un script.
+//! `pyst.analysis` (#181): the computations of the Analysis menu, from a script.
 //!
-//! Chaque fonction décrit **une opération** de `stokesforge-analysis` sur une
-//! série (une colonne Y, son X facultatif) et l'enregistre comme un calcul du
-//! projet — les mêmes colonnes de sortie, la même trace, le même recalcul
-//! automatique que depuis la fenêtre d'analyse. L'écriture est une
-//! `Command::AddCalculation` du groupe d'écritures du script : un seul Ctrl+Z
-//! (ou `pyst.undo()`) annule le calcul avec ses colonnes.
+//! Each function describes **one operation** of `stokesforge-analysis` on a
+//! series (a Y column, its optional X) and records it as a project
+//! calculation: the same output columns, the same trace, the same automatic
+//! recalculation as from the analysis window. The write is a
+//! `Command::AddCalculation` of the script's write group: a single Ctrl+Z
+//! (or `pyst.undo()`) undoes the calculation with its columns.
 //!
-//! # Ce qui est rendu
+//! # What is returned
 //!
-//! Un dictionnaire : `columns` (clé de sortie → poignée de la colonne écrite ;
-//! `"peak.2"` pour le deuxième pic), `values` (`"area.total"`, `"param.tau"`,
-//! `"peak.height.1"`…), `errors` (erreur type des valeurs qui en ont une) et
-//! `warnings` (phrases anglaises). Les clés sont celles du crate de calcul.
+//! A dictionary: `columns` (output key -> handle of the written column;
+//! `"peak.2"` for the second peak), `values` (`"area.total"`, `"param.tau"`,
+//! `"peak.height.1"`...), `errors` (standard error of the values that have
+//! one) and `warnings` (English sentences). The keys are those of the
+//! computation crate.
 //!
-//! # Lots (#201)
+//! # Batches (#201)
 //!
-//! `y` accepte une poignée **ou une liste** de poignées : le lot est un seul
-//! calcul multi-séries, comme dans la fenêtre d'analyse, annulé d'un seul
-//! Ctrl+Z. `x` et `sigma` valent pour toutes les séries (une poignée) ou une
-//! par série (une liste de même longueur). Le résultat d'un lot est
-//! `{"series": [dict, …]}`, un dictionnaire par série dans l'ordre de `y` ;
-//! `fit(shared=[noms])` en fait un ajustement global.
+//! `y` accepts a handle **or a list** of handles: the batch is a single
+//! multi-series calculation, as in the analysis window, undone by a single
+//! Ctrl+Z. `x` and `sigma` apply to all the series (one handle) or one per
+//! series (a list of the same length). A batch's result is
+//! `{"series": [dict, ...]}`, one dictionary per series in the order of `y`;
+//! `fit(shared=[names])` makes it a global fit.
 //!
-//! # Noms des colonnes écrites
+//! # Names of the written columns
 //!
-//! Nom long, unité et commentaire sont ceux de la fenêtre d'analyse, par la
-//! règle unique de `stokesforge-core` (`OutputName`, #256) : « Intensity
-//! (B-corr) », « Baseline of B »… L'unité est celle de la source, le
-//! commentaire le titre de la famille. Seule différence : le texte est toujours
-//! en anglais (la langue de l'interface ne passe pas par les scripts). Le nom
-//! est figé à la création ; le recalcul n'en réécrit que les données.
+//! Long name, unit and comment are those of the analysis window, through the
+//! single rule of `stokesforge-core` (`OutputName`, #256): "Intensity
+//! (B-corr)", "Baseline of B"... The unit is the source's, the comment is
+//! the family title. Only difference: the text is always in English (the
+//! interface language does not go through scripts). The name is frozen at
+//! creation; recalculation rewrites only the data.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -80,10 +81,10 @@ fn finite_range(name: &str, range: Option<(f64, f64)>) -> PyResult<Option<(f64, 
     }
 }
 
-/// Le lot à enregistrer. Le nom, l'unité et le commentaire de chaque colonne
-/// sont la règle du cœur (`OutputName`, `output_unit`, `family_english`) : les
-/// mêmes que ceux de la fenêtre d'analyse, en anglais ; `wants_output` choisit
-/// les colonnes écrites.
+/// The batch to record. The name, unit and comment of each column are the
+/// core rule (`OutputName`, `output_unit`, `family_english`): the same as
+/// those of the analysis window, in English; `wants_output` chooses the
+/// columns written.
 #[allow(clippy::too_many_arguments)]
 fn draft(
     tree: &Tree,
@@ -136,16 +137,16 @@ fn host<T>(result: Result<T, impl std::fmt::Display>) -> PyResult<T> {
     result.map_err(|e| invalid(e.to_string()))
 }
 
-/// Une poignée lue d'un argument, avant validation contre l'instantané.
+/// A handle read from an argument, before validation against the snapshot.
 type Raw = (NodeId, u64);
 
-/// Les poignées d'entrée : une ou plusieurs séries (un **lot**, un seul calcul
-/// multi-séries comme dans la fenêtre d'analyse, #201).
+/// The input handles: one or several series (a **batch**, a single
+/// multi-series calculation as in the analysis window, #201).
 struct Inputs {
-    /// `y` était une liste : le résultat est rendu série par série.
+    /// `y` was a list: the result is returned series by series.
     batch: bool,
     y: Vec<Raw>,
-    /// Un X par série (le même répété quand un seul est donné).
+    /// One X per series (the same one repeated when only one is given).
     x: Vec<Option<Raw>>,
     sigma: Vec<Option<Raw>>,
     aux: Option<(Raw, Option<Raw>)>,
@@ -155,7 +156,7 @@ fn raw(handle: &Handle) -> Raw {
     (handle.id, handle.epoch)
 }
 
-/// `Handle` ou liste de `Handle`.
+/// `Handle` or list of `Handle`.
 fn handles(name: &str, object: &Bound<'_, PyAny>) -> PyResult<(Vec<Raw>, bool)> {
     if let Ok(one) = object.cast::<Handle>() {
         return Ok((vec![raw(one.get())], false));
@@ -178,8 +179,8 @@ fn handles(name: &str, object: &Bound<'_, PyAny>) -> PyResult<(Vec<Raw>, bool)> 
 }
 
 impl Inputs {
-    /// Rassemble les arguments `y`, `x`, `sigma` (chacun une poignée ou une
-    /// liste) : une poignée seule pour `x` ou `sigma` vaut pour toutes les séries.
+    /// Gathers the `y`, `x`, `sigma` arguments (each a handle or a list): a
+    /// single handle for `x` or `sigma` applies to all the series.
     fn new(
         y: &Bound<'_, PyAny>,
         x: Option<&Bound<'_, PyAny>>,
@@ -226,7 +227,7 @@ impl Inputs {
     }
 }
 
-/// Le dictionnaire d'une série : `columns`, `values`, `errors`, `warnings`.
+/// A series' dictionary: `columns`, `values`, `errors`, `warnings`.
 fn series_dict<'py>(
     py: Python<'py>,
     calc: &stokesforge_core::Calculation,
@@ -290,8 +291,8 @@ fn series_dict<'py>(
     Ok(dict)
 }
 
-/// Enregistre l'opération et rend le dictionnaire de résultats : à plat pour
-/// une série, `{"series": [dict, …]}` pour un lot.
+/// Records the operation and returns the results dictionary: flat for a
+/// single series, `{"series": [dict, ...]}` for a batch.
 fn run(
     py: Python<'_>,
     op: Operation,
@@ -329,12 +330,12 @@ fn run(
             let snapshot = session.snapshot().map_err(HostError::from_session)?;
             let (mut series, mut aux, mut computed) = prepare(&snapshot)?;
             let mut tree = snapshot.tree.clone();
-            // Les calculs d'avant : le nôtre est celui qui s'y ajoute, même si un
-            // autre client en crée un au même moment.
+            // The earlier calculations: ours is the one added to them, even if
+            // another client creates one at the same moment.
             let mut known: std::collections::BTreeSet<NodeId> =
                 snapshot.tree.calculations().keys().copied().collect();
             if context.begin_write()? {
-                // Le groupe vient de s'ouvrir : relire pour valider l'époque.
+                // The group has just opened: read again to validate the epoch.
                 let snapshot = session.snapshot().map_err(HostError::from_session)?;
                 (series, aux, computed) = prepare(&snapshot)?;
                 tree = snapshot.tree.clone();
@@ -438,8 +439,8 @@ fn run(
     Ok(result.unbind())
 }
 
-/// L'opération « ligne de base » décrite par les arguments de `baseline`
-/// (partagée avec `readiness`).
+/// The "baseline" operation described by the arguments of `baseline`
+/// (shared with `readiness`).
 fn baseline_operation(
     method: &str,
     points: Vec<(f64, f64)>,
@@ -505,8 +506,8 @@ fn baseline_operation(
     Ok(operation)
 }
 
-/// L'opération « intégrale » décrite par les arguments de `integrate`
-/// (partagée avec `readiness`).
+/// The "integral" operation described by the arguments of `integrate`
+/// (shared with `readiness`).
 fn integrate_operation(
     ranges: Option<Vec<(f64, f64)>>,
     under: &str,
@@ -527,8 +528,8 @@ fn integrate_operation(
     Ok(Operation::Integrate { spec })
 }
 
-/// L'opération « ajustement » décrite par les arguments de `fit` (partagée
-/// avec `readiness`).
+/// The "fit" operation described by the arguments of `fit` (shared
+/// with `readiness`).
 #[allow(clippy::too_many_arguments)]
 fn fit_operation(
     model: &str,
@@ -558,9 +559,9 @@ fn fit_operation(
     let range = finite_range("fit_range", fit_range)?;
     let compiled = match model.compile() {
         Ok(compiled) => compiled,
-        // `readiness` doit pouvoir *dire* qu'une expression est illisible :
-        // l'opération est alors rendue sans paramètre, et c'est elle qui
-        // porte le refus (`Operation::readiness`).
+        // `readiness` must be able to *say* that an expression is unreadable:
+        // the operation is then returned without parameters, and it is the
+        // one that carries the refusal (`Operation::readiness`).
         Err(_) if lenient => {
             return Ok(Operation::Fit {
                 spec: FitSpec {
@@ -611,10 +612,10 @@ fn fit_operation(
     Ok(operation)
 }
 
-/// Ligne de base : `method` = `"anchors"` (avec `points=[(x, y), …]`),
-/// `"constant"` (un point ou une zone), `"line"` (deux `points`) ou
-/// `"zones"` (avec `zones=[(de, à), …]` et
-/// `degree`). `op` : `"subtract"` ou `"divide"`.
+/// Baseline: `method` = `"anchors"` (with `points=[(x, y), ...]`),
+/// `"constant"` (a point or a zone), `"line"` (two `points`) or
+/// `"zones"` (with `zones=[(from, to), ...]` and
+/// `degree`). `op`: `"subtract"` or `"divide"`.
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, method="anchors", points=None, zones=None, degree=1, interpolation="segments", op="subtract", keep_baseline=false, keep_results=false, auto_recalc=true, replace_original=false))]
 #[allow(clippy::too_many_arguments)]
@@ -653,9 +654,9 @@ fn baseline(
     )
 }
 
-/// Correction par une colonne de référence : `op` = `"divide"`, `"multiply"`
-/// ou `"subtract"`. La référence est interpolée sur les X de la série ; hors
-/// d'elle, les cellules restent vides.
+/// Correction by a reference column: `op` = `"divide"`, `"multiply"`
+/// or `"subtract"`. The reference is interpolated on the series' X values;
+/// outside it, the cells stay empty.
 #[pyfunction]
 #[pyo3(signature = (y, reference, x=None, reference_x=None, *, op="divide", keep_results=false, auto_recalc=true, replace_original=false))]
 #[allow(clippy::too_many_arguments)]
@@ -690,10 +691,10 @@ fn correct(
     )
 }
 
-/// Lissage : `method` = `"adjacent"` (moyenne adjacente), `"savitzky-golay"`
-/// (`order`, 2 à 5) ou `"median"` (médiane glissante). `window` est un nombre de
-/// points impair (`window_unit="points"`, défaut) ou une largeur en unités de X
-/// (`window_unit="x"`, convertie par le pas médian de X).
+/// Smoothing: `method` = `"adjacent"` (adjacent average), `"savitzky-golay"`
+/// (`order`, 2 to 5) or `"median"` (moving median). `window` is an odd number
+/// of points (`window_unit="points"`, default) or a width in X units
+/// (`window_unit="x"`, converted through the median X step).
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, method="adjacent", window=5.0, window_unit="points", order=2, keep_results=false, auto_recalc=true, replace_original=false))]
 #[allow(clippy::too_many_arguments)]
@@ -742,8 +743,8 @@ fn smooth(
     )
 }
 
-/// Intégrale : `ranges=[(de, à), …]` (vide : toute la courbe), `under` =
-/// `"zero"` ou `"line"`.
+/// Integral: `ranges=[(from, to), ...]` (empty: the whole curve), `under` =
+/// `"zero"` or `"line"`.
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, ranges=None, under="zero", cumulative=false, normalize=false, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
@@ -770,11 +771,12 @@ fn integrate(
     )
 }
 
-/// Ajustement : `model` = `"linear"`, `"polynomial"` (avec `degree`),
-/// `"exponential"` (`A·exp(−x/τ)`), `"exponential_offset"` (avec `y0`),
-/// `"exponential2"` (deux composantes), `"logarithm"`, `"power"`, `"gaussian"`, `"lorentzian"` ou
-/// une formule (`model="a*exp(-x/b)+c"`). `initial`, `bounds` (nom →
-/// `(min, max)`) et `fixed` (noms) règlent les paramètres ; `sigma` pondère.
+/// Fit: `model` = `"linear"`, `"polynomial"` (with `degree`),
+/// `"exponential"` (`A·exp(−x/τ)`), `"exponential_offset"` (with `y0`),
+/// `"exponential2"` (two components), `"logarithm"`, `"power"`, `"gaussian"`,
+/// `"lorentzian"` or a formula (`model="a*exp(-x/b)+c"`). `initial`, `bounds`
+/// (name → `(min, max)`) and `fixed` (names) set the parameters; `sigma`
+/// weights.
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, model="linear", degree=3, initial=None, bounds=None, fixed=None, shared=None, fit_range=None, residuals=false, sigma=None, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
@@ -808,12 +810,12 @@ fn fit(
     )
 }
 
-/// Décomposition en pics : `centers=[…]` place les pics, sinon ils sont
-/// détectés (`prominence` en fraction de l'étendue, `max_peaks`).
-/// `center_window` borne chaque centre à ± cette distance de sa position de
-/// départ. `peak_columns` écrit une colonne par pic (`peak.N`) et le fond
-/// (`background`), `sum_column` la somme des pics (`peaks_sum`) : les deux cases
-/// de la fenêtre, cochées par défaut.
+/// Peak decomposition: `centers=[...]` places the peaks, otherwise they are
+/// detected (`prominence` as a fraction of the range, `max_peaks`).
+/// `center_window` bounds each center to ± this distance from its starting
+/// position. `peak_columns` writes one column per peak (`peak.N`) and the
+/// background (`background`), `sum_column` the sum of the peaks (`peaks_sum`):
+/// the two checkboxes of the window, checked by default.
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, shape="gaussian", background="constant", centers=None, link_widths=false, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=false, peak_columns=true, sum_column=true, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
@@ -894,8 +896,8 @@ fn peaks(
     )
 }
 
-/// Reconvolution : `components` exponentielles (1 à 4) convoluées avec la
-/// réponse instrumentale `response`.
+/// Reconvolution: `components` exponentials (1 to 4) convolved with the
+/// instrument response `response`.
 #[pyfunction]
 #[pyo3(signature = (y, response, x=None, response_x=None, *, components=1, shift=0.0, fit_shift=true, window=None, residuals=false, keep_results=false, auto_recalc=false))]
 #[allow(clippy::too_many_arguments)]
@@ -934,8 +936,8 @@ fn reconvolve(
     )
 }
 
-/// Déconvolution directe : `method` = `"richardson-lucy"` (`iterations`) ou
-/// `"wiener"` (`noise`, estimé si absent).
+/// Direct deconvolution: `method` = `"richardson-lucy"` (`iterations`) or
+/// `"wiener"` (`noise`, estimated if absent).
 #[pyfunction]
 #[pyo3(signature = (y, response, x=None, response_x=None, *, method="richardson-lucy", iterations=50, noise=None, shift=0.0, keep_results=false, auto_recalc=false))]
 #[allow(clippy::too_many_arguments)]
@@ -972,18 +974,18 @@ fn deconvolve(
     )
 }
 
-/// Ce qui manque à une analyse avant de la lancer, **sans lire de donnée** et
-/// sans rien écrire : la même règle que le bouton Apply de la fenêtre
-/// d'analyse (`Operation::readiness`).
+/// What an analysis is missing before it can be started, **without reading any
+/// data** and without writing anything: the same rule as the Apply button of
+/// the analysis window (`Operation::readiness`).
 ///
-/// `kind` : `"baseline"`, `"integrate"`, `"fit"` (avec les mêmes options que la
-/// fonction du même nom : `method`, `points`, `zones`, `ranges`, `model`…, un
-/// point ou une zone `nan` étant « pas encore posé »), ou `"correct"`,
-/// `"smooth"`, `"peaks"`, `"reconvolve"`, `"deconvolve"` (sans option, toujours
-/// prêts). Rend un dict `ready` (bool), `reason` (`None`, `"needs_points"`,
-/// `"needs_zone"`, `"bad_expression"`, `"no_parameter"` ou `"invalid"`) et
-/// `message` (anglais, `None` si prêt) ; `needs_points` ajoute `needed` et
-/// `have`. Une option inconnue ou mal typée lève `InvalidValueError`.
+/// `kind`: `"baseline"`, `"integrate"`, `"fit"` (with the same options as the
+/// function of the same name: `method`, `points`, `zones`, `ranges`,
+/// `model`..., a `nan` point or zone meaning "not set yet"), or `"correct"`,
+/// `"smooth"`, `"peaks"`, `"reconvolve"`, `"deconvolve"` (no options, always
+/// ready). Returns a dict `ready` (bool), `reason` (`None`, `"needs_points"`,
+/// `"needs_zone"`, `"bad_expression"`, `"no_parameter"` or `"invalid"`) and
+/// `message` (English, `None` if ready); `needs_points` adds `needed` and
+/// `have`. An unknown or mistyped option raises `InvalidValueError`.
 #[pyfunction]
 #[pyo3(signature = (kind, **options))]
 fn readiness(
@@ -1065,8 +1067,8 @@ fn readiness(
     Ok(result.unbind())
 }
 
-/// Les options de `readiness` : extraites une à une, puis plus rien ne doit
-/// rester (une faute de frappe lève au lieu d'être ignorée).
+/// The options of `readiness`: taken one by one, then nothing must be left
+/// (a typo raises instead of being ignored).
 struct Options<'a, 'py> {
     dict: Option<&'a Bound<'py, PyDict>>,
     seen: Vec<String>,
@@ -1118,10 +1120,10 @@ impl<'a, 'py> Options<'a, 'py> {
     }
 }
 
-/// Documentation du module `pyst.analysis`.
+/// Documentation of the `pyst.analysis` module.
 const MODULE_DOC: &str = "\
-Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être une poignée ou une liste
-(lot : un seul calcul multi-séries, résultat {'series': [...]}), x et sigma une poignée ou une liste.
+StokesForge analysis calculations: one call, one project calculation. y can be a handle or a list
+(batch: a single multi-series calculation, result {'series': [...]}), x and sigma a handle or a list.
 
     pyst.analysis.baseline(y, x=None, *, method='anchors', points=None, zones=None, degree=1,
                            interpolation='segments', op='subtract', keep_baseline=False)
@@ -1136,14 +1138,14 @@ Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être u
     pyst.analysis.reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, ...)
     pyst.analysis.deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', ...)
 
-    pyst.analysis.readiness(kind, **options)   # ce qui manque avant un calcul, sans rien écrire
+    pyst.analysis.readiness(kind, **options)   # what is missing before a calculation, without writing anything
 
-Chaque fonction accepte aussi keep_results=False et auto_recalc=True (False pour
-reconvolve et deconvolve). Elle rend un dict : columns (clé de sortie -> Handle),
-values, errors et warnings.
+Each function also accepts keep_results=False and auto_recalc=True (False for
+reconvolve and deconvolve). It returns a dict: columns (output key -> Handle),
+values, errors and warnings.
 ";
 
-/// Construit `pyst.analysis` et l'enregistre dans `sys.modules`.
+/// Builds `pyst.analysis` and registers it in `sys.modules`.
 pub(crate) fn install(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<()> {
     let module = PyModule::new(py, "pyst.analysis")?;
     module.add("__doc__", MODULE_DOC)?;

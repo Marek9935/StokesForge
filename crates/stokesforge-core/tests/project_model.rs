@@ -285,7 +285,7 @@ fn criterion_5_bis_sibling_uniqueness_does_not_depend_on_order() {
     // only among windows — an asymmetry that made a folder
     // with the same name as a window unfindable by its canonical path depending on
     // the creation order of the two
-    // (`b11_path_of_se_re_resout_toujours_sur_le_meme_noeud`). This
+    // (`b11_path_of_always_resolves_back_to_the_same_node`). This
     // asymmetry is no longer "accepted": refuse more, never less (§6 of the
     // guide) — a folder and a sibling window never share a name,
     // whichever order each one took it in.

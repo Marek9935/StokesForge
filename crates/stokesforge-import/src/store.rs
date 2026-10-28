@@ -1,19 +1,19 @@
-//! Persistance des recettes d'import sur disque : un unique fichier JSON
-//! dans le dossier de config utilisateur, jamais de panique si ce fichier
-//! est absent, illisible, ou corrompu (invariant 10).
+//! Persistence of import recipes on disk: a single JSON file in the user
+//! config folder, never a panic if that file is missing, unreadable or
+//! corrupt (invariant 10).
 
 use crate::recipe::ImportRecipe;
 
-/// L'ensemble des recettes enregistrées par l'utilisateur.
+/// The set of recipes saved by the user.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecipeStore {
     recipes: Vec<ImportRecipe>,
 }
 
 impl RecipeStore {
-    /// Charge depuis le fichier de config utilisateur — jamais de panique :
-    /// fichier absent, illisible ou JSON corrompu rendent `Self::default()`
-    /// (liste vide), pas une erreur qui bloquerait l'appelant.
+    /// Loads from the user config file. Never panics: a missing or unreadable
+    /// file or corrupt JSON gives `Self::default()` (empty list), not an error
+    /// that would block the caller.
     pub fn load() -> Self {
         recipes_path()
             .and_then(|path| std::fs::read_to_string(path).ok())
@@ -21,9 +21,9 @@ impl RecipeStore {
             .unwrap_or_default()
     }
 
-    /// Comme [`RecipeStore::load`], plus les modèles fournis d'office
-    /// ([`crate::builtin_recipes`]) que l'utilisateur n'a pas remplacés par un
-    /// modèle de même nom. Les siens passent en premier.
+    /// Like [`RecipeStore::load`], plus the templates provided out of the box
+    /// ([`crate::builtin_recipes`]) that the user has not replaced with a
+    /// template of the same name. The user's own come first.
     pub fn load_with_builtins() -> Self {
         let mut store = Self::load();
         for builtin in crate::builtin_recipes() {
@@ -34,19 +34,19 @@ impl RecipeStore {
         store
     }
 
-    /// Ce modèle est-il un modèle fourni, tel quel (pas une version modifiée) ?
+    /// Is this template a provided one, as is (not a modified version)?
     pub fn is_builtin(recipe: &ImportRecipe) -> bool {
         crate::builtin_recipes().iter().any(|b| b == recipe)
     }
 
-    /// Écrit sur disque (crée le dossier de config s'il n'existe pas). Les
-    /// modèles fournis, inchangés, ne sont pas écrits : ils viennent du
-    /// programme, pas du fichier de l'utilisateur.
+    /// Writes to disk (creates the config folder if it does not exist). The
+    /// provided templates, unchanged, are not written: they come from the
+    /// program, not from the user's file.
     pub fn save(&self) -> std::io::Result<()> {
         let path = recipes_path().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "aucun dossier de config exploitable pour cet OS",
+                "no usable config folder for this OS",
             )
         })?;
         if let Some(dir) = path.parent() {
@@ -69,8 +69,8 @@ impl RecipeStore {
         &self.recipes
     }
 
-    /// Ajoute la recette, ou remplace celle de même `name` si elle existe
-    /// déjà.
+    /// Adds the recipe, or replaces the one with the same `name` if it
+    /// already exists.
     pub fn upsert(&mut self, recipe: ImportRecipe) {
         if let Some(existing) = self.recipes.iter_mut().find(|r| r.name == recipe.name) {
             *existing = recipe;
@@ -84,9 +84,9 @@ impl RecipeStore {
     }
 }
 
-/// Chemin du fichier de recettes : `import_recipes.json` dans le dossier de
-/// config de StokesForge ([`crate::config_dir::config_dir`], #332). `None` si
-/// aucun dossier de config n'est exploitable (très rare).
+/// Path of the recipes file: `import_recipes.json` in StokesForge's config
+/// folder ([`crate::config_dir::config_dir`], #332). `None` if no config
+/// folder is usable (very rare).
 fn recipes_path() -> Option<std::path::PathBuf> {
     crate::config_dir::config_dir().map(|dir| dir.join("import_recipes.json"))
 }
@@ -97,15 +97,15 @@ mod tests {
     use crate::recipe::ImportRecipe;
 
     #[test]
-    fn upsert_remplace_sans_dupliquer() {
+    fn upsert_replaces_without_duplicating() {
         let mut store = RecipeStore::default();
         store.upsert(ImportRecipe::new("Jasco"));
-        store.upsert(ImportRecipe::new("Autre"));
+        store.upsert(ImportRecipe::new("Other"));
         assert_eq!(store.recipes().len(), 2);
 
-        let mut modifiee = ImportRecipe::new("Jasco");
-        modifiee.footer_skip_lines = 3;
-        store.upsert(modifiee);
+        let mut modified = ImportRecipe::new("Jasco");
+        modified.footer_skip_lines = 3;
+        store.upsert(modified);
 
         assert_eq!(store.recipes().len(), 2);
         let jasco = store.recipes().iter().find(|r| r.name == "Jasco").unwrap();
@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_retire_par_nom() {
+    fn remove_deletes_by_name() {
         let mut store = RecipeStore::default();
         store.upsert(ImportRecipe::new("Jasco"));
         store.remove("Jasco");
@@ -121,41 +121,40 @@ mod tests {
     }
 
     #[test]
-    fn load_sans_fichier_rend_liste_vide_sans_paniquer() {
-        // On ne peut pas garantir l'absence du vrai fichier de config sur la
-        // machine qui exécute les tests ; on vérifie seulement l'invariant
-        // qui compte vraiment : `load` ne panique jamais et rend toujours
-        // un `RecipeStore` exploitable, y compris quand le fichier n'existe
-        // pas ou n'est pas lisible.
+    fn load_without_a_file_gives_an_empty_list_without_panicking() {
+        // We cannot guarantee that the real config file is absent on the
+        // machine running the tests; we only check the invariant that really
+        // matters: `load` never panics and always returns a usable
+        // `RecipeStore`, including when the file does not exist or is not
+        // readable.
         let store = RecipeStore::load();
         let _ = store.recipes().len();
     }
 
     #[test]
-    fn deserialisation_json_corrompu_rend_defaut() {
-        let corrompu = "{ceci n'est pas du json";
-        let result: Result<RecipeStore, _> = serde_json::from_str(corrompu);
+    fn deserializing_corrupt_json_gives_the_default() {
+        let corrupt = "{this is not json";
+        let result: Result<RecipeStore, _> = serde_json::from_str(corrupt);
         let store = result.unwrap_or_default();
         assert!(store.recipes().is_empty());
     }
 
-    /// Protège les tests qui redirigent le dossier de config contre ceux qui
-    /// en feraient autant en parallèle dans ce même binaire de test —
-    /// `std::env::set_var` est un état du *processus*, jamais scopé à un
-    /// thread.
+    /// Protects the tests that redirect the config folder from others doing
+    /// the same in parallel in this same test binary: `std::env::set_var` is
+    /// *process* state, never scoped to a thread.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// `save` puis `load`, en aller-retour réel sur disque — jamais exercé
-    /// avant ce test (les autres testent la logique en mémoire, ou la
-    /// tolérance de `load` à un fichier absent/corrompu, jamais l'écriture
-    /// elle-même). `recipes_path` suit `config_dir` (#332) : poser
-    /// `STOKESFORGE_CONFIG_DIR` (et `XDG_CONFIG_HOME`, la seule que
-    /// `directories` respecte, sur Linux) vers un répertoire temporaire isole
-    /// ce test du vrai dossier de config de la machine qui l'exécute.
+    /// `save` then `load`, a real round trip on disk, never exercised before
+    /// this test (the others test the in-memory logic, or `load`'s tolerance
+    /// of a missing/corrupt file, never the write itself). `recipes_path`
+    /// follows `config_dir` (#332): pointing `STOKESFORGE_CONFIG_DIR` (and
+    /// `XDG_CONFIG_HOME`, the only one `directories` honors on Linux) at a
+    /// temporary directory isolates this test from the real config folder of
+    /// the machine running it.
     #[test]
-    fn save_puis_load_realise_un_aller_retour_fidele_sur_disque() {
+    fn save_then_load_makes_a_faithful_round_trip_on_disk() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let names = [crate::config_dir::CONFIG_DIR_VARIABLE, "XDG_CONFIG_HOME"];
         let previous = names.map(|name| (name, std::env::var_os(name)));
         for name in names {
@@ -178,15 +177,15 @@ mod tests {
             }
         }
 
-        save_result.expect("l'écriture sur le répertoire temporaire doit réussir");
+        save_result.expect("writing to the temporary directory must succeed");
         assert!(
             dir.path().join("import_recipes.json").is_file(),
-            "le fichier est écrit dans le dossier désigné par STOKESFORGE_CONFIG_DIR"
+            "the file is written to the folder designated by STOKESFORGE_CONFIG_DIR"
         );
         assert_eq!(
             reloaded.recipes(),
             store.recipes(),
-            "ce qui est relu après `save` doit être bit à bit ce qui a été écrit"
+            "what is read back after `save` must be bit for bit what was written"
         );
     }
 }

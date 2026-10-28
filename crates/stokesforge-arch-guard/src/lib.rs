@@ -1,24 +1,24 @@
-//! Lecture **commune** des manifestes pour les garde-fous de dépendances
-//! (`tests/no_ui_dependency.rs` des crates du socle, d'`stokesforge-import`…).
-//! Chaque crate garde sa propre liste blanche — c'est une décision par crate —
-//! mais la façon de lire un `Cargo.toml` est écrite ici une seule fois, pour ne
-//! pas reproduire le même angle mort six fois (issue #24).
+//! **Shared** reading of manifests for the dependency guards
+//! (`tests/no_ui_dependency.rs` of the foundation crates, of `stokesforge-import`…).
+//! Each crate keeps its own allowlist — that is a per-crate decision —
+//! but the way to read a `Cargo.toml` is written here once, so as not to
+//! repeat the same blind spot six times (issue #24).
 //!
-//! # Politique
+//! # Policy
 //!
-//! - **Comptent** : `[dependencies]`, `[build-dependencies]` et leurs variantes
-//!   conditionnelles `[target.'cfg(…)'.dependencies]` /
-//!   `[target.….build-dependencies]` — une dépendance conditionnelle est une
-//!   dépendance ; les dépendances optionnelles (features) comptent aussi.
-//! - **Ne comptent pas** : `[dev-dependencies]` (outillage de test, jamais
-//!   livré) — y compris conditionnelles.
-//! - **Nom réel** : une dépendance renommée (`alias = { package = "réel" }`)
-//!   est jugée sur son paquet **réel**, pas sur sa clé locale ; l'alias n'ouvre
-//!   aucun droit.
+//! - **Count**: `[dependencies]`, `[build-dependencies]` and their conditional
+//!   variants `[target.'cfg(…)'.dependencies]` /
+//!   `[target.….build-dependencies]` — a conditional dependency is a
+//!   dependency; optional dependencies (features) count too.
+//! - **Do not count**: `[dev-dependencies]` (test tooling, never
+//!   shipped) — conditional ones included.
+//! - **Real name**: a renamed dependency (`alias = { package = "real" }`)
+//!   is judged on its **real** package, not on its local key; the alias grants
+//!   no right.
 
 use toml::Value;
 
-/// Les sections de dépendances qui comptent, avec leur chemin lisible.
+/// The dependency sections that count, with their readable path.
 fn dependency_tables(manifest: &Value) -> Vec<(String, &toml::map::Map<String, Value>)> {
     let mut tables = Vec::new();
     for kind in ["dependencies", "build-dependencies"] {
@@ -38,16 +38,16 @@ fn dependency_tables(manifest: &Value) -> Vec<(String, &toml::map::Map<String, V
     tables
 }
 
-/// Nom du paquet réel derrière une entrée de dépendance.
+/// Name of the real package behind a dependency entry.
 fn real_package_name<'a>(key: &'a str, spec: &'a Value) -> &'a str {
     spec.get("package").and_then(Value::as_str).unwrap_or(key)
 }
 
-/// Les dépendances de `manifest` (texte TOML) qui ne figurent pas dans
-/// `allowed`, sous la forme `section: clé` (ou `section: clé (paquet réel)`
-/// pour un alias). Liste vide : le manifeste respecte la liste blanche.
+/// The dependencies of `manifest` (TOML text) that are not in
+/// `allowed`, as `section: key` (or `section: key (real package)`
+/// for an alias). Empty list: the manifest respects the allowlist.
 pub fn undeclared_dependencies(manifest: &str, allowed: &[&str]) -> Vec<String> {
-    let parsed: Value = manifest.parse().expect("Cargo.toml valide");
+    let parsed: Value = manifest.parse().expect("valid Cargo.toml");
     let mut found = Vec::new();
     for (section, table) in dependency_tables(&parsed) {
         for (key, spec) in table {
@@ -56,7 +56,7 @@ pub fn undeclared_dependencies(manifest: &str, allowed: &[&str]) -> Vec<String> 
                 found.push(if package == key {
                     format!("{section}: {key}")
                 } else {
-                    format!("{section}: {key} (paquet réel : {package})")
+                    format!("{section}: {key} (real package: {package})")
                 });
             }
         }
@@ -64,18 +64,18 @@ pub fn undeclared_dependencies(manifest: &str, allowed: &[&str]) -> Vec<String> 
     found
 }
 
-/// Vérifie le `Cargo.toml` du crate situé dans `manifest_dir` (passer
-/// `env!("CARGO_MANIFEST_DIR")`) : panique, avec la liste des dépendances
-/// hors liste blanche, si l'une d'elles n'est pas dans `allowed`.
+/// Checks the `Cargo.toml` of the crate located in `manifest_dir` (pass
+/// `env!("CARGO_MANIFEST_DIR")`): panics, with the list of dependencies
+/// outside the allowlist, if any of them is not in `allowed`.
 pub fn assert_only_allowed_dependencies(manifest_dir: &str, allowed: &[&str]) {
     let path = std::path::Path::new(manifest_dir).join("Cargo.toml");
-    let manifest = std::fs::read_to_string(&path).expect("Cargo.toml lisible");
+    let manifest = std::fs::read_to_string(&path).expect("readable Cargo.toml");
     let offending = undeclared_dependencies(&manifest, allowed);
     assert!(
         offending.is_empty(),
-        "dépendance(s) non listée(s) dans ALLOWED_DEPENDENCIES de {} : {offending:?}. \
-         Une addition se décide consciemment : l'ajouter à la liste blanche du crate, \
-         jamais élargir la liste pour faire passer le test.",
+        "dependencies not listed in ALLOWED_DEPENDENCIES of {}: {offending:?}. \
+         An addition is a conscious decision: add it to the crate's allowlist, \
+         never widen the list just to make the test pass.",
         path.display()
     );
 }
@@ -90,7 +90,7 @@ mod tests {
         undeclared_dependencies(manifest, ALLOWED)
     }
 
-    /// Témoin : un manifeste conforme ne remonte rien.
+    /// Witness: a conforming manifest reports nothing.
     #[test]
     fn a_conforming_manifest_passes() {
         let manifest = r#"
@@ -103,14 +103,14 @@ mod tests {
         assert!(offending(manifest).is_empty());
     }
 
-    /// Témoin négatif 1 : la section normale.
+    /// Negative witness 1: the normal section.
     #[test]
     fn a_normal_forbidden_dependency_is_caught() {
         let manifest = "[dependencies]\neframe = \"0.36\"\n";
         assert_eq!(offending(manifest), vec!["dependencies: eframe"]);
     }
 
-    /// Témoin négatif 2 : la section `target` (l'angle mort de l'audit).
+    /// Negative witness 2: the `target` section (the audit's blind spot).
     #[test]
     fn a_target_specific_dependency_is_caught() {
         let manifest = r#"
@@ -122,8 +122,8 @@ mod tests {
         assert!(found[0].contains("eframe"));
     }
 
-    /// Témoin négatif 3 : un alias sur une clé autorisée ne masque pas le
-    /// paquet réel.
+    /// Negative witness 3: an alias on an allowed key does not hide the
+    /// real package.
     #[test]
     fn a_renamed_package_is_judged_by_its_real_name() {
         let manifest = r#"
@@ -132,24 +132,24 @@ mod tests {
         "#;
         let found = offending(manifest);
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].contains("paquet réel : eframe"));
+        assert!(found[0].contains("real package: eframe"));
     }
 
-    /// Un alias dont le paquet réel est autorisé est accepté.
+    /// An alias whose real package is allowed is accepted.
     #[test]
     fn an_alias_of_an_allowed_package_passes() {
         let manifest = "[dependencies]\nerrors = { package = \"thiserror\", version = \"2\" }\n";
         assert!(offending(manifest).is_empty());
     }
 
-    /// Témoin négatif 4 : une dépendance optionnelle (feature) compte.
+    /// Negative witness 4: an optional dependency (feature) counts.
     #[test]
     fn an_optional_dependency_is_caught() {
         let manifest = "[dependencies]\neframe = { version = \"0.36\", optional = true }\n";
         assert_eq!(offending(manifest), vec!["dependencies: eframe"]);
     }
 
-    /// Les dépendances de build comptent ; celles de test, non.
+    /// Build dependencies count; test dependencies do not.
     #[test]
     fn build_dependencies_count_and_dev_dependencies_do_not() {
         let manifest = r#"

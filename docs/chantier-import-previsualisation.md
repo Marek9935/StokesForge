@@ -137,7 +137,7 @@ in detail for that reason. The only compatibility that mattered was
 JSON→JSON: all the new fields carry `#[serde(default)]`
 (`header_layout`, `subheader_roles`, `skip_chars`, `preview_lines`), checked
 by a dedicated test
-(`recette_json_anterieure_au_chantier_se_charge_avec_les_defauts`,
+(`json_recipe_older_than_the_work_package_loads_with_the_defaults`,
 `crates/stokesforge-import/src/recipe.rs`) that deserializes a JSON written before this
 work package and asserts that the new fields take their default values
 rather than making the load fail.

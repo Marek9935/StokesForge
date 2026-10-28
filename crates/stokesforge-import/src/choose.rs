@@ -1,21 +1,22 @@
-//! Choix automatique du modèle d'après un fichier : extension, morceau du nom,
-//! signature dans le début du contenu (`ORIGIN;JASCO`…). Le principe des
-//! « Import Filters » d'Origin.
+//! Automatic choice of the template from a file: extension, part of the name,
+//! signature in the start of the content (`ORIGIN;JASCO`...). The principle of
+//! Origin's "Import Filters".
 
 use std::path::Path;
 
 use crate::recipe::ImportRecipe;
 
-/// Combien d'octets du début du fichier cherchent la signature de contenu.
+/// How many bytes from the start of the file are searched for the content
+/// signature.
 const SIGNATURE_BYTES: usize = 4096;
 
-/// Le modèle de `recipes` qui correspond le mieux au fichier `path` (dont
-/// `bytes` est le contenu), ou `None` si aucun ne correspond.
+/// The template in `recipes` that best matches the file `path` (whose content
+/// is `bytes`), or `None` if none matches.
 ///
-/// Un modèle correspond si **tous** ses critères non vides
-/// ([`crate::recipe::AutoMatch`]) sont satisfaits ; un modèle sans critère
-/// n'est jamais choisi. Le plus spécifique l'emporte : la signature de contenu
-/// pèse 4, le nom 2, l'extension 1 ; à égalité, le premier de la liste.
+/// A template matches if **all** its non-empty criteria
+/// ([`crate::recipe::AutoMatch`]) are met; a template without criteria is
+/// never chosen. The most specific wins: the content signature weighs 4, the
+/// name 2, the extension 1; on a tie, the first in the list.
 pub fn choose_recipe<'a>(
     recipes: &'a [ImportRecipe],
     path: &Path,
@@ -117,12 +118,12 @@ ORIGIN;JASCO
         assert!(choose_recipe(&recipes, Path::new("a_fluo.txt"), b"ORIGIN\tJASCO").is_some());
         assert!(choose_recipe(&recipes, Path::new("a.txt"), b"ORIGIN\tJASCO").is_none());
         assert!(choose_recipe(&recipes, Path::new("a_fluo.csv"), b"ORIGIN\tJASCO").is_none());
-        assert!(choose_recipe(&recipes, Path::new("a_fluo.txt"), b"autre").is_none());
+        assert!(choose_recipe(&recipes, Path::new("a_fluo.txt"), b"other").is_none());
     }
 
     #[test]
     fn a_recipe_without_criteria_is_never_chosen() {
-        let recipes = vec![ImportRecipe::new("Manuel")];
+        let recipes = vec![ImportRecipe::new("Manual")];
         assert!(choose_recipe(&recipes, Path::new("a.csv"), b"1,2").is_none());
         assert!(choose_recipe(&[], Path::new("a.csv"), b"1,2").is_none());
     }

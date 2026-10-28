@@ -1,29 +1,29 @@
-//! Même garde-fou que `stokesforge-core` et `stokesforge-session`, appliqué au fil de
-//! script : ce crate a le droit de connaître Python — c'est sa raison d'être —
-//! mais **jamais** l'interface. Plutôt que de deviner ce qu'est « une
-//! dépendance UI », ce test liste les seules dépendances autorisées : toute
-//! addition dans `Cargo.toml` doit être ajoutée ici explicitement, ce qui force
-//! une décision consciente plutôt qu'un import qui se glisse.
+//! Same guard as `stokesforge-core` and `stokesforge-session`, applied to the
+//! script thread: this crate may know Python (that is its reason to exist) but
+//! **never** the interface. Rather than guess what "a UI dependency" is, this
+//! test lists the only allowed dependencies: any addition to `Cargo.toml` must
+//! be added here explicitly, which forces a conscious decision instead of an
+//! import that slips in.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "stokesforge-analysis", // calculs d'analyse purs : `pyst.analysis`, sans interface
-    "stokesforge-core",     // le modèle
-    "stokesforge-commands", // le bus de commandes : tout passe par lui
-    "stokesforge-plot", // description native des graphes et objets graphiques, sans rendu ni interface
-    "stokesforge-session", // l'acteur, seul détenteur du `&mut Project`
-    "stokesforge-python", // l'interpréteur embarqué et le pont de tableaux
-    "stokesforge-import", // recettes et choix du modèle, sans interface
-    "stokesforge-importer", // conversion fichiers → colonnes commune au CLI et à l'application
-    "stokesforge-render-svg", // export de figure (`pyst.export_graph`) : SVG/PDF/PNG, ni egui ni winit
-    "pyo3",                   // liaison CPython, version verrouillée avec stokesforge-python
-    "numpy",                  // liaison de la C-API numpy, liée à celle de pyo3
-    "thiserror",              // erreurs typées, sans surface UI
+    "stokesforge-analysis", // pure analysis computations: `pyst.analysis`, no interface
+    "stokesforge-core",     // the model
+    "stokesforge-commands", // the command bus: everything goes through it
+    "stokesforge-plot", // native description of graphs and graphic objects, no rendering or interface
+    "stokesforge-session", // the actor, sole holder of the `&mut Project`
+    "stokesforge-python", // the embedded interpreter and the array bridge
+    "stokesforge-import", // recipes and template choices, no interface
+    "stokesforge-importer", // file → column conversion shared by the CLI and the application
+    "stokesforge-render-svg", // figure export (`pyst.export_graph`): SVG/PDF/PNG, neither egui nor winit
+    "pyo3",                   // CPython binding, version locked with stokesforge-python
+    "numpy",                  // binding of the numpy C-API, tied to pyo3's
+    "thiserror",              // typed errors, no UI surface
 ];
 
 #[test]
 fn only_allowed_dependencies_are_declared() {
-    // Lecture commune (`stokesforge-arch-guard`) : dépendances normales, de build,
-    // conditionnelles (`target`) et renommées (`package`) — issue #24.
+    // Shared reading (`stokesforge-arch-guard`): normal, build, conditional
+    // (`target`) and renamed (`package`) dependencies (issue #24).
     stokesforge_arch_guard::assert_only_allowed_dependencies(
         env!("CARGO_MANIFEST_DIR"),
         ALLOWED_DEPENDENCIES,

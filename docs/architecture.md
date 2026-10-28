@@ -153,7 +153,7 @@ or in plain text), detailed in [`rendu.md`](rendu.md#typst-r8).
 | `stokesforge-cli` | `stokesforge-cli` | `import`: instruments → `.stf`, new project without a session; `recipes`; `run` (python): script through a session without a window |
 | `stokesforge-selftest` | `stokesforge-script` | replay the end criterion of the foundation from a packaged distribution |
 | `stokesforge-pyhello` | `stokesforge-python` | prove the isolation of the packaged Python stack |
-| `stokesforge-sonde-alloc`, `stokesforge-sonde-pile` | `stokesforge-robustesse` | two out-of-process probes (allocation failure, stack overflow) |
+| `stokesforge-alloc-probe`, `stokesforge-stack-probe` | `stokesforge-robustesse` | two out-of-process probes (allocation failure, stack overflow) |
 
 The `scripts/*.sh` at the root assemble and rerun the distributions
 (`dist/`) in a clean environment.

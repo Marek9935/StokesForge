@@ -1,12 +1,12 @@
-//! Batterie 1 — valeurs limites de la logique métier (hors allocation géante,
-//! qui vit dans b6 pour ne pas tuer la machine de test).
+//! Battery 1: boundary values of the business logic (huge allocations excluded;
+//! they live in b6 so as not to kill the test machine).
 
 use std::num::NonZeroU32;
 use stokesforge_core::{Cell, Column, ColumnType, ColumnValues, MixedCell, Project, ValueBlock};
 use stokesforge_plot::{PanelSpec, PlotSpec};
 
-/// Fabrique un projet [Book1]Sheet1 avec une colonne A de `values`.
-fn projet_avec_colonne(values: &[f64]) -> (Project, stokesforge_core::NodeId) {
+/// Builds a project with [Book1]Sheet1 and a column A holding `values`.
+fn project_with_column(values: &[f64]) -> (Project, stokesforge_core::NodeId) {
     let mut project = Project::new("T").unwrap();
     let root = project.root();
     project.add_workbook(root, Some("Book1")).unwrap();
@@ -20,46 +20,46 @@ fn projet_avec_colonne(values: &[f64]) -> (Project, stokesforge_core::NodeId) {
 // -- histogram --
 
 #[test]
-fn b1_histogram_intervalle_infini_ne_produit_pas_de_nan() {
-    // Deux valeurs finies dont l'écart déborde f64 : width = +inf.
+fn b1_histogram_infinite_interval_produces_no_nan() {
+    // Two finite values whose gap overflows f64: width = +inf.
     let values = [-f64::MAX, f64::MAX];
     let (edges, counts) = stokesforge_core::histogram(&values, NonZeroU32::new(4).unwrap());
     println!("edges = {edges:?}");
     println!("counts = {counts:?}");
     assert!(
         edges.iter().all(|e| e.is_finite()),
-        "des bornes d'histogramme non finies : {edges:?}"
+        "non-finite histogram edges: {edges:?}"
     );
     assert_eq!(
         counts.iter().sum::<f64>(),
         values.len() as f64,
-        "des points ont été perdus ou comptés deux fois : {counts:?}"
+        "points were lost or counted twice: {counts:?}"
     );
 }
 
 #[test]
-fn b1_histogram_compte_tous_les_points_finis() {
+fn b1_histogram_counts_all_finite_points() {
     let values = [1.0, 2.0, 3.0, 4.0, f64::NAN, f64::INFINITY];
     let (_edges, counts) = stokesforge_core::histogram(&values, NonZeroU32::new(3).unwrap());
     assert_eq!(counts.iter().sum::<f64>(), 4.0, "counts = {counts:?}");
 }
 
 #[test]
-fn b1_histogram_valeurs_vides() {
+fn b1_histogram_empty_values() {
     let (edges, counts) = stokesforge_core::histogram(&[], NonZeroU32::new(5).unwrap());
-    println!("vide -> edges={edges:?} counts={counts:?}");
-    // Documenté : (vec![0.0], vec![]). On vérifie juste l'absence de panique
-    // et la cohérence edges.len() == counts.len() + 1 attendue d'un histogramme.
+    println!("empty -> edges={edges:?} counts={counts:?}");
+    // Documented: (vec![0.0], vec![]). We only check that nothing panics and
+    // that edges.len() == counts.len() + 1, as expected of a histogram.
     assert_eq!(
         edges.len(),
         counts.len() + 1,
-        "invariant d'histogramme rompu : edges={edges:?}, counts={counts:?}"
+        "histogram invariant broken: edges={edges:?}, counts={counts:?}"
     );
 }
 
 #[test]
-fn b1_histogram_grand_nombre_de_classes_ne_panique_pas() {
-    // bins énorme : le vecteur de comptage est alloué à cette taille.
+fn b1_histogram_large_number_of_bins_does_not_panic() {
+    // Huge bins: the count vector is allocated at that size.
     let values = [1.0, 2.0];
     let (edges, counts) = stokesforge_core::histogram(&values, NonZeroU32::new(1_000_000).unwrap());
     assert_eq!(edges.len(), 1_000_001);
@@ -69,16 +69,16 @@ fn b1_histogram_grand_nombre_de_classes_ne_panique_pas() {
 // -- bar_width --
 
 #[test]
-fn b1_bar_width_demandee_absurde_est_filtree() {
-    // La doc dit « celle demandée si elle est positive, sinon 80 % du pas
-    // médian ». On vérifie que le contrat documenté est tenu.
+fn b1_bar_width_absurd_request_is_filtered() {
+    // The doc says "the requested one if positive, else 80% of the median
+    // step". We check that the documented contract holds.
     let x = [0.0, 1.0, 2.0, 3.0];
-    for demandee in [-5.0, 0.0, f64::NAN, f64::INFINITY] {
-        let w = stokesforge_core::bar_width(Some(&x), Some(demandee));
-        println!("bar_width(demandee={demandee}) = {w}");
+    for requested in [-5.0, 0.0, f64::NAN, f64::INFINITY] {
+        let w = stokesforge_core::bar_width(Some(&x), Some(requested));
+        println!("bar_width(requested={requested}) = {w}");
         assert!(
             w.is_finite() && w > 0.0,
-            "largeur de barre inutilisable ({w}) pour une demande de {demandee}"
+            "unusable bar width ({w}) for a request of {requested}"
         );
     }
 }
@@ -86,36 +86,36 @@ fn b1_bar_width_demandee_absurde_est_filtree() {
 // -- PlotSpec grid --
 
 #[test]
-fn b1_plotspec_rows_columns_sur_position_extreme() {
+fn b1_plotspec_rows_columns_at_extreme_position() {
     let spec = PlotSpec {
         panels: vec![PanelSpec::at(usize::MAX, usize::MAX)].into(),
         ..PlotSpec::default()
     };
-    // B2 — `saturating_add(1)` : ni panique, ni débordement vers 0.
+    // B2: `saturating_add(1)`: neither a panic nor an overflow to 0.
     println!("rows = {}", spec.rows());
     println!("columns = {}", spec.columns());
     assert_eq!(spec.rows(), usize::MAX);
     assert_eq!(spec.columns(), usize::MAX);
 }
 
-// -- colonne --
+// -- column --
 
 #[test]
-fn b1_conversion_texte_vers_numerique_puis_retour() {
-    let (mut project, col) = projet_avec_colonne(&[]);
-    let textes: Vec<Option<String>> = vec![
+fn b1_text_to_numeric_conversion_and_back() {
+    let (mut project, col) = project_with_column(&[]);
+    let texts: Vec<Option<String>> = vec![
         Some("1.5".into()),
         Some(" 2.5 ".into()),
         Some("".into()),
         None,
-        Some("pas un nombre".into()),
-        Some("1e400".into()), // déborde f64
+        Some("not a number".into()),
+        Some("1e400".into()), // overflows f64
         Some("-0".into()),
         Some("inf".into()),
         Some("NaN".into()),
     ];
     project.set_column_type(col, ColumnType::Mixed).unwrap();
-    let cellules: Vec<MixedCell> = textes
+    let cells: Vec<MixedCell> = texts
         .iter()
         .cloned()
         .map(|value| match value {
@@ -124,49 +124,48 @@ fn b1_conversion_texte_vers_numerique_puis_retour() {
         })
         .collect();
     project
-        .set_values(col, 0, ValueBlock::Mixed(cellules))
+        .set_values(col, 0, ValueBlock::Mixed(cells))
         .unwrap();
     project.set_column_type(col, ColumnType::Numeric).unwrap();
     let tree = project.tree();
     let column = tree.node(col).unwrap().as_column().unwrap();
     let vals: Vec<f64> = match column.values() {
         ColumnValues::Float(v) => v.as_ref().clone(),
-        _ => panic!("type inattendu"),
+        _ => panic!("unexpected type"),
     };
-    println!("texte -> numérique : {vals:?}");
-    assert_eq!(vals.len(), textes.len(), "des lignes ont disparu");
-    // C2 — décidé : un texte fini en toutes lettres dont la valeur déborde
-    // f64 ("1e400") est refusé, jamais silencieusement +inf ; il retombe sur
-    // la valeur manquante du modèle, exactement comme "pas un nombre".
+    println!("text -> numeric: {vals:?}");
+    assert_eq!(vals.len(), texts.len(), "rows disappeared");
+    // C2, decided: a finite text in full letters whose value overflows f64
+    // ("1e400") is refused, never silently +inf; it falls back to the
+    // model's missing value, exactly like "not a number".
     assert!(
         vals[5].is_nan(),
-        "« 1e400 » déborde et doit devenir la valeur manquante (NaN), pas {}",
+        "\"1e400\" overflows and must become the missing value (NaN), not {}",
         vals[5]
     );
-    // Une non-finitude *explicitement demandée*, elle, n'est pas un
-    // débordement : elle est prise au mot.
+    // A non-finiteness that is *explicitly requested* is not an overflow:
+    // it is taken at its word.
     assert_eq!(
         vals[6].to_bits(),
         (-0.0_f64).to_bits(),
-        "« -0 » doit rester -0.0"
+        "\"-0\" must stay -0.0"
     );
-    assert_eq!(vals[7], f64::INFINITY, "« inf » doit rester +inf");
-    assert!(vals[8].is_nan(), "« NaN » doit devenir la valeur manquante");
+    assert_eq!(vals[7], f64::INFINITY, "\"inf\" must stay +inf");
+    assert!(vals[8].is_nan(), "\"NaN\" must become the missing value");
 }
 
-// `b1_aller_retour_numerique_texte_numerique_preserve_les_valeurs` a été
-// retiré : il vérifiait qu'un aller-retour `Numeric → Text → Numeric`
-// (formatage par `format_f64_for_display` puis reparsing par
-// `parse_f64_text`) était fidèle bit à bit. Il n'y a plus de conversion vers
-// une forme textuelle formatée : `Numeric → Mixed` est sans perte
-// (`MixedCell::Number`, jamais une chaîne), donc `Numeric → Mixed →
-// Numeric` préserve les valeurs *trivialement*, sans passer par un
-// formatage — l'invariant qui donnait son intérêt à ce test (la fidélité
-// d'un aller-retour texte) n'a plus de chemin de code à couvrir.
+// `b1_round_trip_numeric_text_numeric_preserves_values` was removed: it
+// checked that a `Numeric → Text → Numeric` round trip (formatting by
+// `format_f64_for_display`, then reparsing by `parse_f64_text`) was
+// bit-for-bit faithful. There is no longer any conversion to a formatted
+// text form: `Numeric → Mixed` is lossless (`MixedCell::Number`, never a
+// string), so `Numeric → Mixed → Numeric` preserves the values *trivially*,
+// without any formatting. The invariant that made this test worthwhile (the
+// fidelity of a text round trip) no longer has a code path to cover.
 
 #[test]
-fn b1_cellule_texte_vide_est_distincte_de_manquante() {
-    let (mut project, col) = projet_avec_colonne(&[]);
+fn b1_empty_text_cell_is_distinct_from_missing() {
+    let (mut project, col) = project_with_column(&[]);
     project.set_column_type(col, ColumnType::Mixed).unwrap();
     project
         .set_values(
@@ -179,14 +178,14 @@ fn b1_cellule_texte_vide_est_distincte_de_manquante() {
     let column = tree.node(col).unwrap().as_column().unwrap();
     assert_eq!(column.get(0), Cell::Text(Some(String::new())));
     assert_eq!(column.get(1), Cell::Text(None));
-    // Documenté : les deux comptent comme « manquantes » à l'affichage.
+    // Documented: both count as "missing" for display.
     assert!(column.is_missing(0));
     assert!(column.is_missing(1));
 }
 
 #[test]
-fn b1_lecture_hors_bornes_rend_manquant_jamais_erreur() {
-    let (project, col) = projet_avec_colonne(&[1.0]);
+fn b1_out_of_bounds_read_returns_missing_never_error() {
+    let (project, col) = project_with_column(&[1.0]);
     let tree = project.tree();
     let column = tree.node(col).unwrap().as_column().unwrap();
     assert_eq!(column.get(usize::MAX), Cell::Float(f64::NAN));
@@ -194,7 +193,7 @@ fn b1_lecture_hors_bornes_rend_manquant_jamais_erreur() {
 }
 
 #[test]
-fn b1_delete_rows_count_max_ne_deborde_pas() {
+fn b1_delete_rows_count_max_does_not_overflow() {
     let mut project = Project::new("T").unwrap();
     let root = project.root();
     project.add_workbook(root, Some("Book1")).unwrap();
@@ -209,14 +208,13 @@ fn b1_delete_rows_count_max_ne_deborde_pas() {
 }
 
 #[test]
-fn b1_insert_rows_at_egal_longueur_ajoute_en_fin_de_feuille() {
-    // B5 (`guide-de-correction-robustesse.md` §F5) — `at == len` est
-    // désormais une cible pour `insert_rows` (pas pour `delete_rows`, qui ne
-    // désigne aucune ligne existante à cette position) : c'est la seule
-    // façon d'ajouter une ligne en fin de feuille, la plage que
-    // `Column::insert_rows` accepte déjà par colonne (`at ∈ 0..=len`). Cette
-    // reproduction couvrait auparavant le bug inverse (« ignoré ») ; elle
-    // couvre maintenant la garantie qui le remplace.
+fn b1_insert_rows_at_equal_to_length_appends_at_end_of_sheet() {
+    // B5 (`guide-de-correction-robustesse.md` §F5): `at == len` is now a
+    // valid target for `insert_rows` (not for `delete_rows`, which names no
+    // existing row at that position): it is the only way to add a row at the
+    // end of a sheet, the range that `Column::insert_rows` already accepts
+    // per column (`at ∈ 0..=len`). This reproduction used to cover the
+    // opposite bug ("ignored"); it now covers the guarantee that replaces it.
     let mut project = Project::new("T").unwrap();
     let root = project.root();
     project.add_workbook(root, Some("Book1")).unwrap();
@@ -230,8 +228,8 @@ fn b1_insert_rows_at_egal_longueur_ajoute_en_fin_de_feuille() {
 }
 
 #[test]
-fn b1_compteur_de_version_avance_a_chaque_ecriture() {
-    let (mut project, col) = projet_avec_colonne(&[1.0]);
+fn b1_version_counter_advances_on_every_write() {
+    let (mut project, col) = project_with_column(&[1.0]);
     let v0 = project
         .tree()
         .node(col)
@@ -249,8 +247,8 @@ fn b1_compteur_de_version_avance_a_chaque_ecriture() {
         .as_column()
         .unwrap()
         .version();
-    assert_ne!(v0, v1, "le compteur n'a pas bougé après une écriture");
-    // Un refus ne doit pas l'incrémenter.
+    assert_ne!(v0, v1, "the counter did not move after a write");
+    // A refusal must not increment it.
     let _ = project.set_values(col, 0, ValueBlock::Mixed(vec![MixedCell::Empty]));
     let v2 = project
         .tree()
@@ -259,5 +257,5 @@ fn b1_compteur_de_version_avance_a_chaque_ecriture() {
         .as_column()
         .unwrap()
         .version();
-    assert_eq!(v1, v2, "une écriture refusée a fait avancer le compteur");
+    assert_eq!(v1, v2, "a refused write advanced the counter");
 }

@@ -1,53 +1,53 @@
-//! La règle **unique** du dossier de configuration de StokesForge (#332).
+//! The **single** rule for StokesForge's configuration folder (#332).
 //!
-//! Recettes d'import, fichiers récents, couleurs enregistrées et préférences
-//! vivent dans le même dossier ; la copie de secours (`recovery/`) en dérive.
-//! Cette règle tient en deux lignes :
+//! Import recipes, recent files, saved colors and preferences live in the
+//! same folder; the recovery copy (`recovery/`) derives from it. The rule
+//! takes two lines:
 //!
-//! 1. la variable d'environnement [`CONFIG_DIR_VARIABLE`]
-//!    (`STOKESFORGE_CONFIG_DIR`), si elle est posée et non vide : ce dossier,
-//!    tel quel, sans suffixe ni canonicalisation ;
-//! 2. sinon `directories::ProjectDirs::from("", "", "StokesForge")`.
+//! 1. the environment variable [`CONFIG_DIR_VARIABLE`]
+//!    (`STOKESFORGE_CONFIG_DIR`), if it is set and not empty: that folder,
+//!    as is, with no suffix and no canonicalization;
+//! 2. otherwise `directories::ProjectDirs::from("", "", "StokesForge")`.
 //!
-//! Elle sert aussi en production (installation portable : tout le profil dans
-//! un dossier au choix) et aux tests : `directories` ignore `XDG_CONFIG_HOME`
-//! hors Linux, si bien que les tests redirigés par cette seule variable
-//! écrivaient dans le vrai profil sous Windows et macOS. Une redirection de
-//! test pose donc `STOKESFORGE_CONFIG_DIR` (en plus de `XDG_CONFIG_HOME`).
+//! It is also used in production (portable install: the whole profile in a
+//! folder of the user's choice) and by tests: `directories` ignores
+//! `XDG_CONFIG_HOME` outside Linux, so tests redirected by that variable
+//! alone wrote into the real profile on Windows and macOS. A test redirection
+//! therefore sets `STOKESFORGE_CONFIG_DIR` (in addition to `XDG_CONFIG_HOME`).
 //!
-//! `ProjectDirs::from` ne s'appelle **nulle part ailleurs** (verrouillé par
-//! `stokesforge-arch-guard/tests/config_dir.rs`) : tout chemin du profil passe
-//! par [`config_dir`] ou [`recovery_dir`].
+//! `ProjectDirs::from` is called **nowhere else** (locked by
+//! `stokesforge-arch-guard/tests/config_dir.rs`): every profile path goes
+//! through [`config_dir`] or [`recovery_dir`].
 //!
-//! Les formes `*_from` reçoivent la valeur de la variable, pour se tester sans
-//! `set_var` (état global du processus).
+//! The `*_from` forms take the value of the variable, so they can be tested
+//! without `set_var` (global process state).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-/// Nom de la variable d'environnement qui désigne le dossier de configuration.
+/// Name of the environment variable that designates the configuration folder.
 pub const CONFIG_DIR_VARIABLE: &str = "STOKESFORGE_CONFIG_DIR";
 
-/// Le dossier de configuration de StokesForge, d'après l'environnement du
-/// processus. `None` si la variable est absente ou vide **et** que le système
-/// ne fournit aucun dossier (très rare).
+/// StokesForge's configuration folder, from the process environment. `None`
+/// if the variable is missing or empty **and** the system provides no folder
+/// (very rare).
 pub fn config_dir() -> Option<PathBuf> {
     config_dir_from(std::env::var_os(CONFIG_DIR_VARIABLE))
 }
 
-/// Le dossier des copies de secours : `<STOKESFORGE_CONFIG_DIR>/recovery`
-/// quand la variable est posée, sinon `recovery/` dans le dossier de données
-/// du système (inchangé).
+/// The recovery copies folder: `<STOKESFORGE_CONFIG_DIR>/recovery` when the
+/// variable is set, otherwise `recovery/` in the system data folder
+/// (unchanged).
 pub fn recovery_dir() -> Option<PathBuf> {
     recovery_dir_from(std::env::var_os(CONFIG_DIR_VARIABLE))
 }
 
-/// [`config_dir`] pour une valeur de variable donnée.
+/// [`config_dir`] for a given variable value.
 pub fn config_dir_from(variable: Option<OsString>) -> Option<PathBuf> {
     explicit(variable).or_else(|| system_dirs().map(|dirs| dirs.config_dir().to_path_buf()))
 }
 
-/// [`recovery_dir`] pour une valeur de variable donnée.
+/// [`recovery_dir`] for a given variable value.
 pub fn recovery_dir_from(variable: Option<OsString>) -> Option<PathBuf> {
     match explicit(variable) {
         Some(dir) => Some(dir.join("recovery")),
@@ -55,12 +55,12 @@ pub fn recovery_dir_from(variable: Option<OsString>) -> Option<PathBuf> {
     }
 }
 
-/// Le dossier désigné par la variable : absente ou vide, rien.
+/// The folder designated by the variable: nothing if missing or empty.
 fn explicit(variable: Option<OsString>) -> Option<PathBuf> {
     variable.filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-/// Le seul appel à `ProjectDirs::from` du dépôt.
+/// The only call to `ProjectDirs::from` in the repository.
 fn system_dirs() -> Option<directories::ProjectDirs> {
     directories::ProjectDirs::from("", "", "StokesForge")
 }
@@ -69,42 +69,45 @@ fn system_dirs() -> Option<directories::ProjectDirs> {
 mod tests {
     use super::*;
 
-    fn systeme() -> PathBuf {
+    fn system_config_dir() -> PathBuf {
         system_dirs()
-            .expect("dossiers du système")
+            .expect("system directories")
             .config_dir()
             .to_path_buf()
     }
 
     #[test]
-    fn une_variable_posee_est_le_dossier_tel_quel() {
-        let dossier = std::env::temp_dir().join("profil portable").join("sub");
+    fn a_set_variable_is_the_folder_as_is() {
+        let folder = std::env::temp_dir().join("portable profile").join("sub");
         assert_eq!(
-            config_dir_from(Some(dossier.clone().into_os_string())),
-            Some(dossier),
-            "sans suffixe ni canonicalisation"
+            config_dir_from(Some(folder.clone().into_os_string())),
+            Some(folder),
+            "no suffix and no canonicalization"
         );
     }
 
     #[test]
-    fn une_variable_vide_retombe_sur_le_dossier_du_systeme() {
-        assert_eq!(config_dir_from(Some(OsString::new())), Some(systeme()));
-    }
-
-    #[test]
-    fn sans_variable_c_est_le_dossier_du_systeme() {
-        assert_eq!(config_dir_from(None), Some(systeme()));
-    }
-
-    #[test]
-    fn la_recuperation_suit_la_variable_sinon_le_dossier_de_donnees() {
-        let dossier = std::env::temp_dir().join("profil");
+    fn an_empty_variable_falls_back_to_the_system_folder() {
         assert_eq!(
-            recovery_dir_from(Some(dossier.clone().into_os_string())),
-            Some(dossier.join("recovery"))
+            config_dir_from(Some(OsString::new())),
+            Some(system_config_dir())
         );
-        let donnees = system_dirs().unwrap().data_dir().join("recovery");
-        assert_eq!(recovery_dir_from(None), Some(donnees.clone()));
-        assert_eq!(recovery_dir_from(Some(OsString::new())), Some(donnees));
+    }
+
+    #[test]
+    fn without_a_variable_it_is_the_system_folder() {
+        assert_eq!(config_dir_from(None), Some(system_config_dir()));
+    }
+
+    #[test]
+    fn recovery_follows_the_variable_otherwise_the_data_folder() {
+        let folder = std::env::temp_dir().join("profile");
+        assert_eq!(
+            recovery_dir_from(Some(folder.clone().into_os_string())),
+            Some(folder.join("recovery"))
+        );
+        let data = system_dirs().unwrap().data_dir().join("recovery");
+        assert_eq!(recovery_dir_from(None), Some(data.clone()));
+        assert_eq!(recovery_dir_from(Some(OsString::new())), Some(data));
     }
 }

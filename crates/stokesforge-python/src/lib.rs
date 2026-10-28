@@ -1,27 +1,27 @@
-//! Pont Python de StokesForge : interpréteur CPython **embarqué**, isolé du système.
+//! StokesForge's Python bridge: **embedded** CPython interpreter, isolated from the system.
 //!
-//! Ce crate est le **seul** du dépôt autorisé à démarrer l'interpréteur et à
-//! donner accès au GIL. Il ne connaît pas le modèle de données de StokesForge : il
-//! ne manipule que des types scalaires et des tranches de `f64`.
+//! This crate is the **only** one in the repository allowed to start the interpreter and to
+//! give access to the GIL. It does not know StokesForge's data model: it
+//! only handles scalar types and slices of `f64`.
 //!
 //! # Feature `python`
 //!
-//! Tout ce qui touche à PyO3 est derrière la feature Cargo `python`, absente de
-//! `default`. Sans elle, ce crate compile vide et ne tire aucune dépendance
-//! PyO3 : `cargo build`, `cargo test` et la CI restent verts sur une machine
-//! sans interpréteur vendorisé.
+//! Everything that touches PyO3 is behind the `python` Cargo feature, absent from
+//! `default`. Without it, this crate compiles empty and pulls in no PyO3
+//! dependency: `cargo build`, `cargo test` and CI stay green on a machine
+//! without a vendored interpreter.
 //!
-//! Avec la feature, la compilation exige la variable d'environnement
-//! `PYO3_CONFIG_FILE` produite par `scripts/python-config.sh` (cf. README,
-//! piège n°1).
+//! With the feature, compilation requires the `PYO3_CONFIG_FILE` environment
+//! variable produced by `scripts/python-config.sh` (see the README,
+//! pitfall no. 1).
 //!
-//! # Cycle de vie
+//! # Lifecycle
 //!
-//! L'initialisation est **explicite et paresseuse** (`auto-initialize` de PyO3
-//! n'est pas activée) : voir [`interpreter::EmbeddedPython::initialize`].
-//! L'interpréteur n'est **jamais finalisé** : `Py_Finalize` est une source
-//! connue de plantages en sortie et n'apporte rien à un processus qui se
-//! termine. Conséquence assumée : les `atexit` Python ne s'exécutent pas.
+//! Initialization is **explicit and lazy** (PyO3's `auto-initialize`
+//! is not enabled): see [`interpreter::EmbeddedPython::initialize`].
+//! The interpreter is **never finalized**: `Py_Finalize` is a known
+//! source of crashes on exit and brings nothing to a process that is
+//! ending. Accepted consequence: Python `atexit` handlers do not run.
 
 #![cfg_attr(
     not(test),
@@ -33,20 +33,20 @@ pub mod array;
 #[cfg(feature = "python")]
 pub mod interpreter;
 
-/// Indique si ce binaire embarque le pont Python (feature `python`).
+/// Tells whether this binary embeds the Python bridge (`python` feature).
 ///
-/// Permet au reste de l'application de dégrader proprement son interface
-/// (console de script masquée, renderer Matplotlib indisponible) sans avoir à
-/// tester la feature elle-même.
+/// Lets the rest of the application degrade its interface cleanly
+/// (script console hidden, Matplotlib renderer unavailable) without having to
+/// test the feature itself.
 pub const PYTHON_ENABLED: bool = cfg!(feature = "python");
 
 #[cfg(test)]
 mod tests {
     use super::PYTHON_ENABLED;
 
-    /// Compile et passe dans les deux configurations de features.
+    /// Compiles and passes in both feature configurations.
     #[test]
-    fn python_enabled_reflete_la_feature() {
+    fn python_enabled_reflects_the_feature() {
         assert_eq!(PYTHON_ENABLED, cfg!(feature = "python"));
     }
 }

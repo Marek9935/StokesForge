@@ -83,7 +83,7 @@ mod tests {
     }
 
     /// C7 (`guide-de-correction-robustesse.md` §F4·F9) — reproduces here the
-    /// scenario of `b21_les_noms_de_controle_sont_refuses`
+    /// scenario of `b21_control_names_are_rejected`
     /// (`stokesforge-robustesse`) as close as possible to the function it fixes.
     #[test]
     fn rejects_control_and_deceptive_format_characters() {

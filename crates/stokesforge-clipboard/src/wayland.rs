@@ -1,10 +1,10 @@
-//! Wayland : le worker de presse-papiers **partagé** avec egui-winit.
+//! Wayland: the clipboard worker **shared** with egui-winit.
 //!
-//! `vendor/smithay-clipboard` garde un worker par `wl_display` (voir
-//! `vendor/winit/STOKESFORGE.md`) ; `Clipboard::new` sur le même pointeur rend
-//! le même. On ne garde pas notre poignée : egui-winit tient la sienne tant
-//! que la fenêtre existe, ce qui garde le worker — et donc la source de
-//! sélection — en vie après cet appel.
+//! `vendor/smithay-clipboard` keeps one worker per `wl_display` (see
+//! `vendor/winit/STOKESFORGE.md`); `Clipboard::new` on the same pointer returns
+//! the same one. We do not keep our own handle: egui-winit holds its own as long
+//! as the window exists, which keeps the worker — and so the selection
+//! source — alive after this call.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::{ClipboardError, Representation};
 
-/// Offre `representations` par le worker partagé du `wl_display` `display`.
+/// Offers `representations` through the shared worker of the `wl_display` `display`.
 pub(crate) fn offer(
     display: NonNull<c_void>,
     representations: &[Representation],
@@ -21,9 +21,9 @@ pub(crate) fn offer(
         .iter()
         .map(|rep| (rep.mime.to_owned(), Arc::clone(&rep.bytes)))
         .collect();
-    // SAFETY : `display` vient d'un `DisplayHandle` emprunté par `offer`, donc
-    // valide pendant tout cet appel ; le worker partagé qu'on rejoint (ou crée)
-    // est celui d'egui-winit pour ce même affichage.
+    // SAFETY: `display` comes from a `DisplayHandle` borrowed by `offer`, so
+    // valid during this whole call; the shared worker we join (or create)
+    // is egui-winit's for this same display.
     let clipboard = unsafe { smithay_clipboard::Clipboard::new(display.as_ptr()) };
     clipboard.store_formats(formats);
     Ok(())

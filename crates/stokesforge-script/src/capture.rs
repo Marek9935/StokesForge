@@ -1,27 +1,27 @@
-//! Capture de `sys.stdout` et `sys.stderr` pendant l'exécution d'un script.
+//! Capture of `sys.stdout` and `sys.stderr` while a script runs.
 //!
-//! # Pourquoi un aiguillage par fil plutôt qu'un `redirect_stdout`
+//! # Why a per-thread switch rather than a `redirect_stdout`
 //!
-//! `sys.stdout` est **global à l'interpréteur**. La recette habituelle —
-//! sauver, remplacer, restaurer — n'est correcte que si un seul acteur s'en
-//! sert à la fois : deux moteurs de script vivant dans le même processus (ce
-//! qui arrive dans le binaire de tests, et arrivera le jour où l'application
-//! ouvrira deux projets) se voleraient mutuellement leur restauration.
+//! `sys.stdout` is **global to the interpreter**. The usual recipe (save,
+//! replace, restore) is correct only if a single actor uses it at a time: two
+//! script engines living in the same process (which happens in the test
+//! binary, and will happen the day the application opens two projects) would
+//! steal each other's restore.
 //!
-//! On pose donc **une seule fois** un objet-relais dans `sys.stdout` et
-//! `sys.stderr`, et c'est lui qui aiguille : vers le tampon du **fil courant**
-//! s'il y en a un ([`begin`] l'installe, [`end`] le retire), sinon vers la
-//! sortie réelle du processus (`sys.__stdout__`). L'objet est donc partagé et
-//! sans état ; le seul état vit dans un `thread_local!`.
+//! So a relay object is installed **once** in `sys.stdout` and `sys.stderr`,
+//! and it does the switching: to the buffer of the **current thread** if there
+//! is one ([`begin`] installs it, [`end`] removes it), otherwise to the
+//! process's real output (`sys.__stdout__`). The object is therefore shared
+//! and stateless; the only state lives in a `thread_local!`.
 //!
-//! Conséquence voulue : un `print` exécuté hors script (un futur moteur de
-//! rendu, par exemple) continue d'aller sur la sortie du processus.
+//! Intended consequence: a `print` run outside a script (a future renderer,
+//! for example) keeps going to the process output.
 
 use std::cell::RefCell;
 
 use pyo3::prelude::*;
 
-/// Laquelle des deux sorties standard ce relais représente.
+/// Which of the two standard outputs this relay stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stream {
     /// `sys.stdout`.
@@ -31,7 +31,7 @@ enum Stream {
 }
 
 impl Stream {
-    /// Nom de l'attribut de `sys` que ce relais remplace.
+    /// Name of the `sys` attribute this relay replaces.
     fn attribute(self) -> &'static str {
         match self {
             Stream::Out => "stdout",
@@ -39,7 +39,7 @@ impl Stream {
         }
     }
 
-    /// Nom de l'attribut de `sys` qui garde la sortie **réelle** du processus.
+    /// Name of the `sys` attribute that keeps the process's **real** output.
     fn original_attribute(self) -> &'static str {
         match self {
             Stream::Out => "__stdout__",
@@ -48,27 +48,27 @@ impl Stream {
     }
 }
 
-/// Tampons du fil courant, présents seulement pendant l'exécution d'un script.
+/// Buffers of the current thread, present only while a script runs.
 #[derive(Debug, Default)]
 struct Buffers {
-    /// Ce qui a été écrit sur la sortie standard.
+    /// What was written to standard output.
     out: String,
-    /// Ce qui a été écrit sur la sortie d'erreur.
+    /// What was written to the error output.
     err: String,
 }
 
 thread_local! {
-    /// Tampons du fil courant. `None` hors exécution de script : les écritures
-    /// repartent alors vers la sortie réelle du processus.
+    /// Buffers of the current thread. `None` outside a script run: writes then
+    /// go back to the process's real output.
     static BUFFERS: RefCell<Option<Buffers>> = const { RefCell::new(None) };
 }
 
-/// Ouvre la capture sur le fil courant. Écrase un éventuel tampon résiduel.
+/// Opens the capture on the current thread. Overwrites any leftover buffer.
 pub(crate) fn begin() {
     BUFFERS.with(|cell| *cell.borrow_mut() = Some(Buffers::default()));
 }
 
-/// Ferme la capture sur le fil courant et rend `(stdout, stderr)`.
+/// Closes the capture on the current thread and returns `(stdout, stderr)`.
 pub(crate) fn end() -> (String, String) {
     BUFFERS.with(|cell| {
         cell.borrow_mut()
@@ -78,7 +78,7 @@ pub(crate) fn end() -> (String, String) {
     })
 }
 
-/// Ajoute `text` au tampon du fil courant. Rend `false` s'il n'y en a pas.
+/// Appends `text` to the current thread's buffer. Returns `false` if there is none.
 fn push(stream: Stream, text: &str) -> bool {
     BUFFERS.with(|cell| match cell.borrow_mut().as_mut() {
         Some(buffers) => {
@@ -92,23 +92,23 @@ fn push(stream: Stream, text: &str) -> bool {
     })
 }
 
-/// Relais posé dans `sys.stdout` / `sys.stderr`.
+/// Relay installed in `sys.stdout` / `sys.stderr`.
 ///
-/// Sans état propre (d'où `frozen`) : il ne porte que la sortie qu'il
-/// représente. Tout l'état de capture vit dans un `thread_local!`, ce qui rend
-/// l'objet partageable entre plusieurs moteurs de script sans qu'ils se
-/// marchent dessus.
-#[pyclass(frozen, module = "pyst", name = "_SortieDeScript")]
+/// It has no state of its own (hence `frozen`): it carries only the output it
+/// stands for. All the capture state lives in a `thread_local!`, which makes
+/// the object shareable between several script engines without them
+/// stepping on each other.
+#[pyclass(frozen, module = "pyst", name = "_ScriptOutput")]
 pub(crate) struct CaptureStream {
-    /// Sortie représentée par ce relais.
+    /// Output this relay stands for.
     stream: Stream,
 }
 
 #[pymethods]
 impl CaptureStream {
-    /// Écrit `text` dans le tampon du fil courant, ou sur la sortie réelle du
-    /// processus si aucun script ne tourne sur ce fil. Rend le nombre de
-    /// caractères écrits, comme `io.TextIOBase.write`.
+    /// Writes `text` to the current thread's buffer, or to the process's real
+    /// output if no script runs on this thread. Returns the number of
+    /// characters written, like `io.TextIOBase.write`.
     fn write(&self, py: Python<'_>, text: &str) -> PyResult<usize> {
         if !push(self.stream, text) {
             let original = py
@@ -121,8 +121,8 @@ impl CaptureStream {
         Ok(text.chars().count())
     }
 
-    /// Vide la sortie réelle si la capture n'est pas active ; sans effet
-    /// sinon (un tampon en mémoire n'a rien à vider).
+    /// Flushes the real output if the capture is not active; no effect
+    /// otherwise (an in-memory buffer has nothing to flush).
     fn flush(&self, py: Python<'_>) -> PyResult<()> {
         let capturing = BUFFERS.with(|cell| cell.borrow().is_some());
         if capturing {
@@ -137,51 +137,51 @@ impl CaptureStream {
         Ok(())
     }
 
-    /// Toujours vrai : ce relais est une sortie.
+    /// Always true: this relay is an output.
     fn writable(&self) -> bool {
         true
     }
 
-    /// Toujours faux : on n'y lit pas.
+    /// Always false: it is not read from.
     fn readable(&self) -> bool {
         false
     }
 
-    /// Toujours faux : ce n'est pas un flux positionnable.
+    /// Always false: this is not a seekable stream.
     fn seekable(&self) -> bool {
         false
     }
 
-    /// Toujours faux : la sortie d'un script n'est pas un terminal, ce qui
-    /// évite qu'une bibliothèque tente d'y écrire des codes de couleur.
+    /// Always false: a script's output is not a terminal, which keeps a
+    /// library from trying to write color codes to it.
     fn isatty(&self) -> bool {
         false
     }
 
-    /// Encodage annoncé, pour les bibliothèques qui l'interrogent.
+    /// Advertised encoding, for libraries that query it.
     #[getter]
     fn encoding(&self) -> &'static str {
         "utf-8"
     }
 
-    /// Politique d'erreur d'encodage annoncée.
+    /// Advertised encoding error policy.
     #[getter]
     fn errors(&self) -> &'static str {
         "strict"
     }
 
-    /// Représentation lisible, pour qu'un script qui inspecte `sys.stdout`
-    /// comprenne ce qu'il regarde.
+    /// Readable representation, so a script that inspects `sys.stdout`
+    /// understands what it is looking at.
     fn __repr__(&self) -> String {
         format!("<StokesForge script output: {}>", self.stream.attribute())
     }
 }
 
-/// Pose le relais dans `sys.stdout` et `sys.stderr` s'il n'y est pas déjà.
+/// Installs the relay in `sys.stdout` and `sys.stderr` if it is not there yet.
 ///
-/// Idempotent, et volontairement **définitif** : le relais n'est jamais
-/// retiré. Hors capture il redirige vers la sortie réelle, si bien que le
-/// laisser en place ne change le comportement de personne.
+/// Idempotent, and deliberately **permanent**: the relay is never removed.
+/// Outside a capture it redirects to the real output, so leaving it in place
+/// changes nobody's behavior.
 pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     let sys = py.import("sys")?;
     for stream in [Stream::Out, Stream::Err] {

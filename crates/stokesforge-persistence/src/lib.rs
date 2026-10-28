@@ -802,7 +802,7 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
 // stack) — the same address becomes "current" again while the
 // save counter has advanced in the meantime, and the registry wrongly saw a
 // stale counter there, refusing a perfectly legitimate save
-// (found by `b14_laller_retour_disque_tient_a_chaque_pas`, a random sweep
+// (found by `b14_the_disk_round_trip_holds_at_every_step`, a random sweep
 // of operations including `Undo`/`Redo`). `Project::identity
 // ()` is stable over the whole life of an instance, whatever tree
 // it shows at a given moment, and it is exactly the identity that

@@ -1,22 +1,22 @@
-//! Le CLI headless : pas d'interface, donc utilisable en lot. Une seule
-//! commande `import` lit des fichiers d'appareils avec un modèle (choisi
-//! d'après le fichier, ou nommé) et écrit un projet `.stf`. Avec la feature
-//! `python`, `run` exécute un script dans une session et sauve son résultat.
+//! The headless CLI: no interface, so usable in batch. The single
+//! `import` command reads instrument files with a template (chosen
+//! from the file, or named) and writes a `.stf` project. With the `python`
+//! feature, `run` executes a script in a session and saves its result.
 //!
 //! ```text
-//! stokesforge-cli import [--recipe NOM] [--layout per-file|side-by-side|shared-x]
-//!                   [--out projet.stf] FICHIER...
-//! stokesforge-cli recipes            # liste les modèles connus
-//! stokesforge-cli run [--project entree.stf] [--out sortie.stf] script.pyst
+//! stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x]
+//!                   [--out project.stf] FILE...
+//! stokesforge-cli recipes            # lists the known templates
+//! stokesforge-cli run [--project input.stf] [--out output.stf] script.pyst
 //! ```
 //!
-//! Pour `import`, le projet est construit directement (`Project` neuf, primitives de
-//! `stokesforge-core`) : pas de session ni d'historique, c'est la construction d'un
-//! projet avant toute édition (voir `docs/invariants.md` §1). La conversion des
-//! fichiers en colonnes est celle de l'application, `stokesforge-importer`.
-//! `run` (feature python) démarre une session sans fenêtre : pyst conserve
-//! le même acteur, les commandes et l'annulation que dans la console. Le
-//! fichier de sortie n'est enregistré qu'après une exécution réussie.
+//! For `import`, the project is built directly (fresh `Project`, `stokesforge-core`
+//! primitives): no session and no history, it is the construction of a
+//! project before any edit (see `docs/invariants.md` §1). The conversion of
+//! files into columns is the application's, `stokesforge-importer`.
+//! `run` (python feature) starts a session without a window: pyst keeps
+//! the same actor, commands and undo as in the console. The
+//! output file is saved only after a successful run.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -29,8 +29,8 @@ const USAGE: &str = "usage:
   stokesforge-cli recipes
   stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst";
 
-/// L'avertissement (anglais, stderr) de ce qu'une lecture a écarté, `None`
-/// pour un fichier propre (#309).
+/// The warning (English, stderr) about what a read discarded, `None`
+/// for a clean file (#309).
 #[cfg(feature = "python")]
 fn discarded_warning(
     path: &std::path::Path,
@@ -47,9 +47,9 @@ fn discarded_warning(
     ))
 }
 
-/// Exécute la ligne de commande `args` (sans le nom du programme), en écrivant
-/// les résultats dans `out`. `Err` : un message pour l'erreur standard (code de
-/// sortie non nul).
+/// Runs the command line `args` (without the program name), writing
+/// the results to `out`. `Err`: a message for standard error (non-zero
+/// exit code).
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     match args.first().map(String::as_str) {
         None => writeln!(
@@ -70,7 +70,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     }
 }
 
-/// « 1 column », « 2 columns ».
+/// "1 column", "2 columns".
 fn counted(count: usize, noun: &str) -> String {
     if count == 1 {
         format!("{count} {noun}")
@@ -141,8 +141,8 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         ),
         None => None,
     };
-    // Un modèle par fichier : celui qu'on a nommé, sinon le choix automatique,
-    // sinon la recette permissive.
+    // One template per file: the one named, otherwise the automatic choice,
+    // otherwise the permissive recipe.
     let mut items = Vec::new();
     for path in &args.files {
         let mut recipe = match &named {
@@ -150,7 +150,7 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             None => std::fs::read(path)
                 .ok()
                 .and_then(|bytes| choose_recipe(store.recipes(), path, &bytes).cloned())
-                .unwrap_or_else(|| ImportRecipe::new("Sans titre")),
+                .unwrap_or_else(|| ImportRecipe::new("Untitled")),
         };
         if let Some(layout) = args.layout {
             recipe.files_layout = layout;
@@ -217,7 +217,7 @@ fn import(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     Ok(())
 }
 
-/// Le refus est détectable sans charger Python, et explique comment l'activer.
+/// The refusal is detectable without loading Python, and explains how to enable it.
 #[cfg(not(feature = "python"))]
 fn run_script(_args: &[String], _out: &mut dyn Write) -> Result<(), String> {
     Err("Python scripting is unavailable: build stokesforge-cli with --features python".into())
@@ -265,8 +265,8 @@ fn run_script(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         Some(path) => {
             let (project, _, report) =
                 stokesforge_persistence::load_with_report(&path).map_err(|err| err.to_string())?;
-            // Ce que la lecture a écarté est dit sur stderr (#309) : le
-            // script tourne quand même, sans erreur.
+            // What the read discarded is reported on stderr (#309): the
+            // script runs anyway, without error.
             if let Some(warning) = discarded_warning(&path, &report) {
                 eprintln!("{warning}");
             }

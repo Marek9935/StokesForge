@@ -1,20 +1,20 @@
-//! Tests d'intégration de l'aller-retour de tableaux Rust ↔ numpy (tâche 5.2).
+//! Integration tests of the Rust ↔ numpy array round trip (task 5.2).
 //!
-//! Ils ne s'exécutent qu'avec la feature `python` et exigent le préfixe
-//! vendorisé : lance `scripts/python-vendor.sh` puis `scripts/python-test.sh`.
+//! They run only with the `python` feature and require the vendored
+//! prefix: run `scripts/python-vendor.sh` then `scripts/python-test.sh`.
 //!
-//! Chaque test correspond à un critère d'acceptation du verrou. Deux d'entre
-//! eux méritent d'être lus avant les autres :
+//! Each test matches an acceptance criterion of the lock. Two of
+//! them deserve to be read before the others:
 //!
-//! * [`emprunt_reel_pas_copie`] est le test décisif : il compare l'adresse du
-//!   buffer vue par numpy à `Vec::as_ptr` — côté Python **et** côté Rust ;
-//! * [`vue_perimee_reste_sur_l_ancien_buffer`] grave la politique retenue :
-//!   une vue est un **instantané**, pas un abonnement.
+//! * [`real_borrow_not_copy`] is the decisive test: it compares the address of the
+//!   buffer seen by numpy to `Vec::as_ptr` — on the Python **and** the Rust side;
+//! * [`stale_view_stays_on_the_old_buffer`] engraves the chosen policy:
+//!   a view is a **snapshot**, not a subscription.
 //!
-//! Comme dans `tests/embedded.rs`, CPython ne démarre qu'une fois par
-//! processus : [`prepare`] est le point d'entrée unique, protégé par un `Once`.
-//! Les deux binaires de test étant des processus distincts, cette amorce est
-//! volontairement dupliquée plutôt que partagée par un module `common`.
+//! As in `tests/embedded.rs`, CPython starts only once per
+//! process: [`prepare`] is the single entry point, guarded by a `Once`.
+//! Since the two test binaries are separate processes, this bootstrap is
+//! deliberately duplicated rather than shared through a `common` module.
 
 #![cfg(feature = "python")]
 
@@ -31,8 +31,8 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 
 static PREPARE: Once = Once::new();
 
-/// Résout le préfixe embarqué : `STOKESFORGE_PYTHON_HOME` si posée par le script de
-/// test, sinon `vendor/python/extracted/python` relatif au manifeste.
+/// Resolves the embedded prefix: `STOKESFORGE_PYTHON_HOME` if set by the test
+/// script, otherwise `vendor/python/extracted/python` relative to the manifest.
 fn home() -> PathBuf {
     match std::env::var_os(interpreter::HOME_ENV) {
         Some(value) => PathBuf::from(value),
@@ -42,36 +42,36 @@ fn home() -> PathBuf {
     }
 }
 
-/// Démarre l'interpréteur embarqué, une seule fois pour tout le binaire.
+/// Starts the embedded interpreter, only once for the whole binary.
 fn prepare() {
     PREPARE.call_once(|| {
         EmbeddedPython::with_home(home())
             .initialize()
-            .expect("l'interpréteur embarqué doit démarrer");
+            .expect("the embedded interpreter must start");
     });
 }
 
-/// Lit le contenu d'un tableau numpy de `f64` par l'emprunt partagé de
-/// rust-numpy (jamais par `unsafe`).
+/// Reads the content of a numpy `f64` array through rust-numpy's shared
+/// borrow (never through `unsafe`).
 fn values(array: &Bound<'_, PyArray1<f64>>) -> Vec<f64> {
-    let readonly = array.try_readonly().expect("emprunt partagé");
+    let readonly = array.try_readonly().expect("shared borrow");
     readonly.as_array().iter().copied().collect()
 }
 
-/// Adresse du buffer telle que **numpy** la publie, lue depuis Python.
+/// Buffer address as **numpy** publishes it, read from Python.
 fn python_data_pointer(array: &Bound<'_, PyArray1<f64>>) -> usize {
     array
         .getattr("__array_interface__")
         .expect("__array_interface__")
         .get_item("data")
-        .expect("clé data")
+        .expect("data key")
         .get_item(0)
-        .expect("adresse")
+        .expect("address")
         .extract::<usize>()
-        .expect("adresse entière")
+        .expect("integer address")
 }
 
-/// Un dictionnaire de globales contenant `numpy`, pour les `eval` des tests.
+/// A dictionary of globals containing `numpy`, for the tests' `eval`s.
 fn numpy_globals<'py>(py: Python<'py>) -> Bound<'py, PyDict> {
     let globals = PyDict::new(py);
     globals
@@ -80,14 +80,14 @@ fn numpy_globals<'py>(py: Python<'py>) -> Bound<'py, PyDict> {
     globals
 }
 
-// --- 1. Lecture correcte ----------------------------------------------------
+// --- 1. Correct reading ----------------------------------------------------
 
 #[test]
-fn vue_rend_les_valeurs_et_la_longueur() {
+fn view_returns_the_values_and_the_length() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
         assert_eq!(view.len(), 3);
         assert_eq!(view.ndim(), 1);
         assert_eq!(values(&view), vec![1.0, 2.0, 3.0]);
@@ -95,69 +95,69 @@ fn vue_rend_les_valeurs_et_la_longueur() {
 }
 
 #[test]
-fn vue_sur_un_buffer_vide() {
+fn view_over_an_empty_buffer() {
     prepare();
     let data: Arc<Vec<f64>> = Arc::new(Vec::new());
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt vide");
+        let view = borrowed_readonly_array(py, &data).expect("empty borrow");
         assert_eq!(view.len(), 0);
         assert!(values(&view).is_empty());
     });
 }
 
-// --- 2. Emprunt réel, pas copie (test décisif) ------------------------------
+// --- 2. Real borrow, not a copy (decisive test) ------------------------------
 
 #[test]
-fn emprunt_reel_pas_copie() {
+fn real_borrow_not_copy() {
     prepare();
     let data = Arc::new((0..1024).map(|index| index as f64).collect::<Vec<f64>>());
     let rust_pointer = data.as_ptr() as usize;
 
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
 
-        // Côté Rust : rust-numpy expose le pointeur de données du tableau.
+        // Rust side: rust-numpy exposes the array's data pointer.
         assert_eq!(
             view.data() as usize,
             rust_pointer,
-            "le tableau numpy doit pointer EXACTEMENT sur le buffer du Vec"
+            "the numpy array must point EXACTLY to the Vec buffer"
         );
-        // Côté Python : la même adresse, publiée par numpy lui-même.
+        // Python side: the same address, published by numpy itself.
         assert_eq!(
             python_data_pointer(&view),
             rust_pointer,
-            "__array_interface__ doit publier l'adresse du buffer Rust"
+            "__array_interface__ must publish the address of the Rust buffer"
         );
     });
 }
 
-// --- 3. `base` posé ---------------------------------------------------------
+// --- 3. `base` set ---------------------------------------------------------
 
 #[test]
-fn base_est_un_float_buffer_owner() {
+fn base_is_a_float_buffer_owner() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
-        let base = view.getattr("base").expect("attribut base");
-        assert!(!base.is_none(), "base ne doit pas être None");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
+        let base = view.getattr("base").expect("base attribute");
+        assert!(!base.is_none(), "base must not be None");
 
         let owner = base
             .cast::<FloatBufferOwner>()
-            .expect("base doit être un FloatBufferOwner");
+            .expect("base must be a FloatBufferOwner");
         assert_eq!(owner.get().len(), 3);
         assert!(!owner.get().is_empty());
     });
 }
 
-// --- 4. Lecture seule -------------------------------------------------------
+// --- 4. Read-only -------------------------------------------------------
 
 #[test]
-fn vue_en_lecture_seule() {
+fn view_is_read_only() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
 
         let writeable = view
             .getattr("flags")
@@ -166,61 +166,61 @@ fn vue_en_lecture_seule() {
             .expect("writeable")
             .extract::<bool>()
             .expect("bool");
-        assert!(!writeable, "arr.flags.writeable doit être faux");
+        assert!(!writeable, "arr.flags.writeable must be false");
 
-        // Une écriture depuis Python lève une exception…
+        // A write from Python raises an exception…
         let globals = PyDict::new(py);
         globals.set_item("arr", &view).expect("set arr");
-        let erreur = py.run(c"arr[0] = 9.0", Some(&globals), None);
-        assert!(erreur.is_err(), "arr[0] = 9.0 doit lever une exception");
+        let error = py.run(c"arr[0] = 9.0", Some(&globals), None);
+        assert!(error.is_err(), "arr[0] = 9.0 must raise an exception");
 
-        // …et le buffer Rust est inchangé.
+        // …and the Rust buffer is unchanged.
         assert_eq!(data[0], 1.0);
         assert_eq!(values(&view), vec![1.0, 2.0, 3.0]);
     });
 }
 
 #[test]
-fn le_drapeau_writeable_ne_peut_pas_etre_remis() {
+fn the_writeable_flag_cannot_be_set_back() {
     prepare();
-    // `borrow_from_array` laisse OWNDATA à zéro : numpy refuse alors de rendre
-    // le tableau réinscriptible. Ce n'est PAS ce qui garantit la sûreté (le
-    // clone de l'Arc s'en charge), mais c'est un garde-fou de plus, et le
-    // vérifier documente ce qu'un script peut ou ne peut pas faire.
+    // `borrow_from_array` leaves OWNDATA at zero: numpy then refuses to make
+    // the array writeable again. This is NOT what guarantees safety (the
+    // Arc clone does), but it is one more guard, and checking it
+    // documents what a script can or cannot do.
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
         let globals = PyDict::new(py);
         globals.set_item("arr", &view).expect("set arr");
-        let remise = py.run(c"arr.flags.writeable = True", Some(&globals), None);
+        let reset = py.run(c"arr.flags.writeable = True", Some(&globals), None);
         assert!(
-            remise.is_err(),
-            "un script ne doit pas pouvoir rendre la vue inscriptible"
+            reset.is_err(),
+            "a script must not be able to make the view writeable"
         );
     });
 }
 
-// --- 5. Compteur de références ---------------------------------------------
+// --- 5. Reference count ---------------------------------------------
 
 #[test]
-fn compteur_de_references_autour_de_la_vue() {
+fn reference_count_around_the_view() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
-    assert_eq!(Arc::strong_count(&data), 1, "avant l'emprunt");
+    assert_eq!(Arc::strong_count(&data), 1, "before the borrow");
 
     Python::attach(|py| {
-        let view = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
         assert!(
             Arc::strong_count(&data) >= 2,
-            "pendant la vue, le compteur doit valoir au moins 2 (vu {})",
+            "during the view, the count must be at least 2 (saw {})",
             Arc::strong_count(&data)
         );
 
         drop(view);
-        // CPython compte les références immédiatement : la destruction du
-        // tableau relâche `base`, donc le `FloatBufferOwner`, donc le clone de
-        // l'Arc. `gc.collect()` n'est là que pour les cycles éventuels ; s'il
-        // devenait nécessaire, ce serait le signe d'un cycle à documenter.
+        // CPython counts references immediately: destroying the
+        // array releases `base`, hence the `FloatBufferOwner`, hence the Arc
+        // clone. `gc.collect()` is there only for possible cycles; if it
+        // became necessary, it would be the sign of a cycle to document.
         py.import("gc")
             .expect("import gc")
             .call_method0("collect")
@@ -229,108 +229,108 @@ fn compteur_de_references_autour_de_la_vue() {
         assert_eq!(
             Arc::strong_count(&data),
             1,
-            "après destruction de la vue, le compteur doit retomber à 1"
+            "after the view is destroyed, the count must fall back to 1"
         );
     });
 }
 
 #[test]
-fn deux_vues_coexistent_sur_le_meme_buffer() {
+fn two_views_coexist_on_the_same_buffer() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let une = borrowed_readonly_array(py, &data).expect("première vue");
-        let deux = borrowed_readonly_array(py, &data).expect("seconde vue");
+        let first = borrowed_readonly_array(py, &data).expect("first view");
+        let second = borrowed_readonly_array(py, &data).expect("second view");
 
-        // Même buffer, deux conteneurs distincts, donc compteur à 3.
-        assert_eq!(une.data() as usize, deux.data() as usize);
+        // Same buffer, two distinct containers, so the count is 3.
+        assert_eq!(first.data() as usize, second.data() as usize);
         assert_eq!(Arc::strong_count(&data), 3);
-        assert_eq!(values(&une), values(&deux));
+        assert_eq!(values(&first), values(&second));
 
-        drop(une);
+        drop(first);
         assert_eq!(Arc::strong_count(&data), 2);
-        drop(deux);
+        drop(second);
         assert_eq!(Arc::strong_count(&data), 1);
     });
 }
 
-// --- 6. Vue périmée : la politique retenue ---------------------------------
+// --- 6. Stale view: the chosen policy ---------------------------------
 
 #[test]
-fn vue_perimee_reste_sur_l_ancien_buffer() {
+fn stale_view_stays_on_the_old_buffer() {
     prepare();
     let mut data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let ancienne = borrowed_readonly_array(py, &data).expect("emprunt");
-        let ancien_pointeur = ancienne.data() as usize;
+        let old_view = borrowed_readonly_array(py, &data).expect("borrow");
+        let old_pointer = old_view.data() as usize;
 
-        // Écriture côté « modèle ». Le compteur vaut ≥ 2 : `make_mut` alloue un
-        // buffer neuf et laisse l'ancien intact.
+        // Write on the "model" side. The count is ≥ 2: `make_mut` allocates a
+        // fresh buffer and leaves the old one intact.
         Arc::make_mut(&mut data)[0] = 42.0;
 
-        // La vue relit l'ANCIENNE valeur, sans planter. C'est le comportement
-        // retenu : une vue est un instantané, pas un abonnement.
-        assert_eq!(values(&ancienne), vec![1.0, 2.0, 3.0]);
+        // The view re-reads the OLD value, without crashing. This is the chosen
+        // behavior: a view is a snapshot, not a subscription.
+        assert_eq!(values(&old_view), vec![1.0, 2.0, 3.0]);
 
-        let nouvelle = borrowed_readonly_array(py, &data).expect("nouvel emprunt");
-        assert_eq!(values(&nouvelle), vec![42.0, 2.0, 3.0]);
+        let new_view = borrowed_readonly_array(py, &data).expect("new borrow");
+        assert_eq!(values(&new_view), vec![42.0, 2.0, 3.0]);
 
         assert_ne!(
-            ancien_pointeur,
-            nouvelle.data() as usize,
-            "make_mut avec un compteur ≥ 2 doit avoir alloué un buffer neuf"
+            old_pointer,
+            new_view.data() as usize,
+            "make_mut with a count ≥ 2 must have allocated a fresh buffer"
         );
     });
 }
 
-// --- 7. Croissance sous la vue ---------------------------------------------
+// --- 7. Growth under the view ---------------------------------------------
 
 #[test]
-fn croissance_sous_la_vue() {
+fn growth_under_the_view() {
     prepare();
     let mut data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let vue = borrowed_readonly_array(py, &data).expect("emprunt");
-        let ancien_pointeur = vue.data() as usize;
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
+        let old_pointer = view.data() as usize;
 
-        // Ajout de lignes : sans le clone de l'Arc, le Vec grandirait en place
-        // et la réallocation laisserait la vue sur de la mémoire libérée.
+        // Adding rows: without the Arc clone, the Vec would grow in place
+        // and the reallocation would leave the view on freed memory.
         Arc::make_mut(&mut data).extend([4.0, 5.0, 6.0, 7.0, 8.0]);
 
-        assert_eq!(vue.len(), 3, "la vue garde sa longueur d'origine");
-        assert_eq!(values(&vue), vec![1.0, 2.0, 3.0]);
+        assert_eq!(view.len(), 3, "the view keeps its original length");
+        assert_eq!(values(&view), vec![1.0, 2.0, 3.0]);
         assert_eq!(data.len(), 8);
-        assert_ne!(ancien_pointeur, data.as_ptr() as usize);
+        assert_ne!(old_pointer, data.as_ptr() as usize);
     });
 }
 
-// --- 8. Survie au relâchement côté Rust ------------------------------------
+// --- 8. Survival after release on the Rust side ------------------------------------
 
 #[test]
-fn la_vue_survit_au_drop_cote_rust() {
+fn the_view_survives_the_rust_side_drop() {
     prepare();
     let data = Arc::new(vec![1.0, 2.0, 3.0]);
     Python::attach(|py| {
-        let vue = borrowed_readonly_array(py, &data).expect("emprunt");
-        let pointeur = vue.data() as usize;
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
+        let pointer = view.data() as usize;
 
-        // Le conteneur détient désormais la dernière référence : c'est la
-        // preuve directe que `base` fait son travail.
+        // The container now holds the last reference: this is the
+        // direct proof that `base` does its job.
         drop(data);
 
-        assert_eq!(values(&vue), vec![1.0, 2.0, 3.0]);
-        assert_eq!(vue.data() as usize, pointeur, "le buffer n'a pas bougé");
+        assert_eq!(values(&view), vec![1.0, 2.0, 3.0]);
+        assert_eq!(view.data() as usize, pointer, "the buffer did not move");
     });
 }
 
-// --- 9. Retour : contigu, non contigu, et les refus -------------------------
+// --- 9. Return: contiguous, non-contiguous, and the refusals -------------------------
 
 #[test]
-fn retour_non_contigu() {
+fn return_non_contiguous() {
     prepare();
     Python::attach(|py| {
         let globals = numpy_globals(py);
-        let tranche = py
+        let slice = py
             .eval(
                 c"numpy.arange(10, dtype=numpy.float64)[::2]",
                 Some(&globals),
@@ -338,18 +338,18 @@ fn retour_non_contigu() {
             )
             .expect("eval");
         assert_eq!(
-            copy_array_to_vec(&tranche).expect("copie non contiguë"),
+            copy_array_to_vec(&slice).expect("non-contiguous copy"),
             vec![0.0, 2.0, 4.0, 6.0, 8.0]
         );
     });
 }
 
 #[test]
-fn retour_contigu() {
+fn return_contiguous() {
     prepare();
     Python::attach(|py| {
         let globals = numpy_globals(py);
-        let tableau = py
+        let array = py
             .eval(
                 c"numpy.arange(5, dtype=numpy.float64)",
                 Some(&globals),
@@ -357,18 +357,18 @@ fn retour_contigu() {
             )
             .expect("eval");
         assert_eq!(
-            copy_array_to_vec(&tableau).expect("copie contiguë"),
+            copy_array_to_vec(&array).expect("contiguous copy"),
             vec![0.0, 1.0, 2.0, 3.0, 4.0]
         );
     });
 }
 
 #[test]
-fn retour_inverse() {
+fn return_reversed() {
     prepare();
     Python::attach(|py| {
         let globals = numpy_globals(py);
-        let tableau = py
+        let array = py
             .eval(
                 c"numpy.arange(4, dtype=numpy.float64)[::-1]",
                 Some(&globals),
@@ -376,142 +376,139 @@ fn retour_inverse() {
             )
             .expect("eval");
         assert_eq!(
-            copy_array_to_vec(&tableau).expect("copie à pas négatif"),
+            copy_array_to_vec(&array).expect("negative-stride copy"),
             vec![3.0, 2.0, 1.0, 0.0]
         );
     });
 }
 
 #[test]
-fn retour_refuse_un_int64() {
+fn return_refuses_an_int64() {
     prepare();
     Python::attach(|py| {
         let globals = numpy_globals(py);
-        let tableau = py
+        let array = py
             .eval(c"numpy.arange(4, dtype=numpy.int64)", Some(&globals), None)
             .expect("eval");
-        let message = copy_array_to_vec(&tableau)
-            .expect_err("un int64 doit être refusé")
+        let message = copy_array_to_vec(&array)
+            .expect_err("an int64 must be refused")
             .to_string();
         assert!(
             message.contains("float64") && message.contains("int64"),
-            "message peu explicite : {message}"
+            "unclear message: {message}"
         );
     });
 }
 
 #[test]
-fn retour_refuse_deux_dimensions() {
+fn return_refuses_two_dimensions() {
     prepare();
     Python::attach(|py| {
         let globals = numpy_globals(py);
-        let tableau = py
+        let array = py
             .eval(
                 c"numpy.zeros((2, 3), dtype=numpy.float64)",
                 Some(&globals),
                 None,
             )
             .expect("eval");
-        let message = copy_array_to_vec(&tableau)
-            .expect_err("un tableau 2-D doit être refusé")
+        let message = copy_array_to_vec(&array)
+            .expect_err("a 2-D array must be refused")
             .to_string();
         assert!(
             message.contains("2 dimensions"),
-            "message peu explicite : {message}"
+            "unclear message: {message}"
         );
     });
 }
 
 #[test]
-fn retour_refuse_une_liste_python() {
+fn return_refuses_a_python_list() {
     prepare();
     Python::attach(|py| {
-        let liste = py.eval(c"[1.0, 2.0, 3.0]", None, None).expect("eval");
-        let message = copy_array_to_vec(&liste)
-            .expect_err("une liste doit être refusée")
+        let list = py.eval(c"[1.0, 2.0, 3.0]", None, None).expect("eval");
+        let message = copy_array_to_vec(&list)
+            .expect_err("a list must be refused")
             .to_string();
         assert!(
             message.contains("list") && message.contains("numpy"),
-            "message peu explicite : {message}"
+            "unclear message: {message}"
         );
     });
 }
 
-// --- 10. Aller-retour complet, bit à bit ------------------------------------
+// --- 10. Full round trip, bit for bit ------------------------------------
 
 #[test]
-fn aller_retour_bit_a_bit() {
+fn bit_for_bit_round_trip() {
     prepare();
-    let mut valeurs: Vec<f64> = (0..1000).map(|index| index as f64 * 0.5).collect();
-    valeurs[7] = f64::NAN;
-    valeurs[9] = -0.0;
-    valeurs[11] = f64::INFINITY;
-    valeurs[13] = f64::NEG_INFINITY;
-    valeurs[17] = f64::MIN_POSITIVE / 3.0; // sous-normal
-    let data = Arc::new(valeurs);
+    let mut values_list: Vec<f64> = (0..1000).map(|index| index as f64 * 0.5).collect();
+    values_list[7] = f64::NAN;
+    values_list[9] = -0.0;
+    values_list[11] = f64::INFINITY;
+    values_list[13] = f64::NEG_INFINITY;
+    values_list[17] = f64::MIN_POSITIVE / 3.0; // subnormal
+    let data = Arc::new(values_list);
 
     Python::attach(|py| {
-        let vue = borrowed_readonly_array(py, &data).expect("emprunt");
+        let view = borrowed_readonly_array(py, &data).expect("borrow");
         let globals = numpy_globals(py);
-        globals.set_item("vue", &vue).expect("set vue");
-        let copie = py
-            .eval(c"numpy.copy(vue)", Some(&globals), None)
+        globals.set_item("view", &view).expect("set view");
+        let copy = py
+            .eval(c"numpy.copy(view)", Some(&globals), None)
             .expect("numpy.copy");
 
-        let retour = copy_array_to_vec(&copie).expect("retour");
-        assert_eq!(retour.len(), data.len());
-        // Comparaison bit à bit : `NaN != NaN` en IEEE, et `-0.0 == 0.0`.
-        for (index, (avant, apres)) in data.iter().zip(retour.iter()).enumerate() {
+        let returned = copy_array_to_vec(&copy).expect("return");
+        assert_eq!(returned.len(), data.len());
+        // Bit-for-bit comparison: `NaN != NaN` in IEEE, and `-0.0 == 0.0`.
+        for (index, (before, after)) in data.iter().zip(returned.iter()).enumerate() {
             assert_eq!(
-                avant.to_bits(),
-                apres.to_bits(),
-                "valeur {index} altérée par l'aller-retour"
+                before.to_bits(),
+                after.to_bits(),
+                "value {index} altered by the round trip"
             );
         }
     });
 }
 
-// --- 11. Mesure -------------------------------------------------------------
+// --- 11. Measurement -------------------------------------------------------------
 
 #[test]
-fn emprunt_au_moins_vingt_fois_plus_rapide_que_la_copie() {
+fn borrow_at_least_twenty_times_faster_than_copy() {
     prepare();
     const LEN: usize = 1_000_000;
-    let (borrow_ns, copy_ns) = measure_borrow_vs_copy(LEN).expect("mesure");
+    let (borrow_ns, copy_ns) = measure_borrow_vs_copy(LEN).expect("measurement");
 
-    println!("emprunt de {LEN} f64 : {borrow_ns} ns");
-    println!("copie   de {LEN} f64 : {copy_ns} ns");
-    println!("rapport : ×{:.1}", copy_ns as f64 / borrow_ns.max(1) as f64);
+    println!("borrow of {LEN} f64: {borrow_ns} ns");
+    println!("copy   of {LEN} f64: {copy_ns} ns");
+    println!("ratio: ×{:.1}", copy_ns as f64 / borrow_ns.max(1) as f64);
 
-    assert!(
-        borrow_ns > 0,
-        "mesure d'emprunt nulle : horloge trop grossière"
-    );
+    assert!(borrow_ns > 0, "zero borrow measurement: clock too coarse");
 
-    // `scripts/python-memcheck.sh` pose STOKESFORGE_UNDER_VALGRIND=1 avant de
-    // lancer ce binaire sous valgrind. Sous instrumentation, tout est
-    // ralenti, mais PAS uniformément : l'emprunt est dominé par quelques
-    // appels (allocation du FloatBufferOwner, construction du ndarray), que
-    // valgrind pénalise proportionnellement bien plus qu'un déroulé linéaire ;
-    // la copie, elle, est dominée par un transfert mémoire, que valgrind
-    // ralentit d'un facteur beaucoup plus modeste. Le RAPPORT mesuré sous
-    // instrumentation n'a donc aucun sens et ferait échouer ce test sur un
-    // faux négatif (constaté : ×9 sous valgrind contre ×240 à ×370 en
-    // exécution ordinaire). On se contente alors d'afficher les deux mesures,
-    // sans affirmer le rapport. Hors instrumentation, l'assertion reste
-    // active : c'est elle qui protège le zéro-copie contre une régression
-    // silencieuse en copie.
+    // `scripts/python-memcheck.sh` sets STOKESFORGE_UNDER_VALGRIND=1 before
+    // running this binary under valgrind. Under instrumentation, everything is
+    // slowed down, but NOT uniformly: the borrow is dominated by a few
+    // calls (allocation of the FloatBufferOwner, construction of the ndarray), which
+    // valgrind penalizes proportionally much more than a linear run;
+    // the copy is dominated by a memory transfer, which valgrind
+    // slows down by a much more modest factor. The RATIO measured under
+    // instrumentation therefore means nothing and would make this test fail on a
+    // false negative (observed: ×9 under valgrind versus ×240 to ×370 in
+    // ordinary execution). We then just print the two measurements,
+    // without asserting the ratio. Outside instrumentation, the assertion stays
+    // active: it is what protects zero-copy against a silent
+    // regression into a copy.
     if std::env::var_os("STOKESFORGE_UNDER_VALGRIND").is_some() {
         println!(
-            "STOKESFORGE_UNDER_VALGRIND posée : rapport non affirmé (valgrind ralentit \
-             l'emprunt et la copie de façon non uniforme, le rapport mesuré ici \
-             n'a pas de sens)"
+            "STOKESFORGE_UNDER_VALGRIND set: ratio not asserted (valgrind slows down \
+             the borrow and the copy non-uniformly, the ratio measured here \
+             is meaningless)"
         );
         return;
     }
 
     assert!(
         copy_ns >= borrow_ns * 20,
-        "l'emprunt doit être au moins 20× plus rapide : emprunt {borrow_ns} ns, copie {copy_ns} ns"
+        "the borrow must be at least 20× faster: borrow {borrow_ns} ns, copy {copy_ns} ns"
     );
 }

@@ -1,22 +1,22 @@
-//! Rejoue, en bibliothèque, le **critère de fin** de tout le socle :
+//! Replays, as a library, the **completion criterion** of the whole foundation:
 //!
-//! > depuis un binaire empaqueté sur Linux : une cellule éditée s'annule par
-//! > `Ctrl+Z` et se rétablit par `Ctrl+Y` ; `Ctrl+S` écrit un fichier que
-//! > `Ctrl+O` rouvre à l'identique ; et un script Python lit une colonne
-//! > sans copie, en écrit une autre via le bus — et `Ctrl+Z` annule ce que le
-//! > script vient d'écrire.
+//! > from a packaged binary on Linux: an edited cell is undone by
+//! > `Ctrl+Z` and redone by `Ctrl+Y`; `Ctrl+S` writes a file that
+//! > `Ctrl+O` reopens identically; and a Python script reads a column
+//! > without copying, writes another through the bus, and `Ctrl+Z` undoes what the
+//! > script just wrote.
 //!
-//! Toute la logique vit ici, pas dans `src/bin/stokesforge-selftest.rs` : c'est ce
-//! qui permet à [`tests/selftest.rs`](../../tests/selftest.rs) d'exercer
-//! exactement le même chemin qu'un utilisateur qui lance le binaire depuis la
-//! distribution empaquetée, sous le harnais `cargo test` habituel.
+//! All the logic lives here, not in `src/bin/stokesforge-selftest.rs`: this
+//! is what lets [`tests/selftest.rs`](../../tests/selftest.rs) exercise
+//! exactly the same path as a user who runs the binary from the
+//! packaged distribution, under the usual `cargo test` harness.
 //!
-//! [`run_selftest`] construit lui-même le projet de démonstration (`Book1` /
-//! `Sheet1` / colonnes `A` et `B`), fait tourner l'acteur et le fil de script
-//! le temps de la vérification, puis arrête proprement les deux. Il ne
-//! panique jamais : toute défaillance — y compris le démarrage de
-//! l'interpréteur lui-même — devient un [`SelfTestStep`] en échec, jamais une
-//! interruption du programme.
+//! [`run_selftest`] builds the demo project itself (`Book1` /
+//! `Sheet1` / columns `A` and `B`), runs the actor and the script thread
+//! for the time of the check, then stops both cleanly. It never
+//! panics: every failure, including the startup of the
+//! interpreter itself, becomes a failed [`SelfTestStep`], never an
+//! interruption of the program.
 
 use std::path::PathBuf;
 
@@ -27,33 +27,33 @@ use stokesforge_session::{Session, SessionHandle};
 
 use crate::engine::ScriptEngine;
 
-/// Noms des sept étapes, dans l'ordre où [`run_selftest`] les rejoue. Sert à
-/// la fois à nommer une étape réussie et à remplir les étapes restées
-/// **non vérifiées** quand une défaillance en amont empêche de les atteindre.
+/// Names of the seven steps, in the order [`run_selftest`] replays them. Serves
+/// both to name a passed step and to fill the steps left
+/// **unverified** when a failure upstream prevents reaching them.
 const STEP_NAMES: [&str; 7] = [
-    "Interpréteur embarqué et isolé",
-    "Édition, annulation, rétablissement",
-    "Aller-retour disque",
-    "Lecture sans copie depuis un script",
-    "Écriture par le bus, annulée depuis l'hôte",
-    "Annulation depuis Python",
-    "Sortie et erreurs d'un script",
+    "Embedded, isolated interpreter",
+    "Edit, undo, redo",
+    "Disk round trip",
+    "Zero-copy read from a script",
+    "Write through the bus, undone from the host",
+    "Undo from Python",
+    "Output and errors of a script",
 ];
 
-/// Une étape de la vérification, et son verdict.
+/// A step of the check, and its verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelfTestStep {
-    /// Nom de l'étape, un de [`STEP_NAMES`].
+    /// Name of the step, one of [`STEP_NAMES`].
     pub name: String,
-    /// Vrai si l'étape a réussi.
+    /// True if the step passed.
     pub passed: bool,
-    /// Explication lisible du verdict : ce qui a été vérifié si l'étape
-    /// passe, ce qui a été observé au lieu de l'attendu sinon.
+    /// Readable explanation of the verdict: what was checked if the step
+    /// passes, what was observed instead of what was expected otherwise.
     pub detail: String,
 }
 
 impl SelfTestStep {
-    /// Étape réussie.
+    /// Passed step.
     fn ok(name: &str, detail: String) -> Self {
         Self {
             name: name.to_owned(),
@@ -62,7 +62,7 @@ impl SelfTestStep {
         }
     }
 
-    /// Étape en échec.
+    /// Failed step.
     fn fail(name: &str, detail: String) -> Self {
         Self {
             name: name.to_owned(),
@@ -72,32 +72,32 @@ impl SelfTestStep {
     }
 }
 
-/// Le compte rendu complet d'une vérification.
+/// The full report of a check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelfTestReport {
-    /// Les étapes rejouées, dans l'ordre de [`STEP_NAMES`].
+    /// The steps replayed, in the order of [`STEP_NAMES`].
     pub steps: Vec<SelfTestStep>,
-    /// Ce qui a été vérifié : préfixe embarqué, versions, isolation,
-    /// nombre d'entrées de `sys.path`, exécutable courant. Une paire
-    /// `(étiquette, valeur)` par ligne, dans l'ordre où elle a été établie.
+    /// What was checked: embedded prefix, versions, isolation,
+    /// number of `sys.path` entries, current executable. One `(label, value)`
+    /// pair per line, in the order in which it was established.
     pub environment: Vec<(String, String)>,
 }
 
 impl SelfTestReport {
-    /// Vrai si toutes les étapes sont passées.
+    /// True if all the steps passed.
     #[must_use]
     pub fn passed(&self) -> bool {
         self.steps.iter().all(|step| step.passed)
     }
 
-    /// Rendu textuel, en français, une ligne par étape, préfixée d'un
-    /// marqueur de réussite (`[OK]`) ou d'échec (`[ÉCHEC]`).
+    /// Text rendering, in English, one line per step, prefixed with a
+    /// success marker (`[OK]`) or failure marker (`[FAILED]`).
     #[must_use]
     pub fn render(&self) -> String {
         self.steps
             .iter()
             .map(|step| {
-                let marker = if step.passed { "[OK]   " } else { "[ÉCHEC]" };
+                let marker = if step.passed { "[OK]   " } else { "[FAILED]" };
                 format!("{marker} {} — {}", step.name, step.detail)
             })
             .collect::<Vec<_>>()
@@ -105,28 +105,28 @@ impl SelfTestReport {
     }
 }
 
-/// Rejoue le critère de fin du socle de bout en bout. Ne panique jamais :
-/// une étape qui échoue est un [`SelfTestStep`] en échec, pas une
-/// interruption du programme.
+/// Replays the foundation's completion criterion end to end. Never panics:
+/// a step that fails is a failed [`SelfTestStep`], not an
+/// interruption of the program.
 ///
-/// `python` dit où trouver l'interpréteur embarqué — typiquement
-/// [`EmbeddedPython::locate`] depuis le binaire, ou
-/// [`EmbeddedPython::with_home`] pointé sur le préfixe vendorisé depuis un
+/// `python` says where to find the embedded interpreter, typically
+/// [`EmbeddedPython::locate`] from the binary, or
+/// [`EmbeddedPython::with_home`] pointed at the vendored prefix from a
 /// test.
 #[must_use]
 pub fn run_selftest(python: EmbeddedPython) -> SelfTestReport {
-    // Les deux informations qui ne dépendent d'aucune étape : toujours
-    // présentes, même si tout le reste échoue avant d'avoir pu s'exécuter.
+    // The two pieces of information that depend on no step: always
+    // present, even if everything else fails before it could run.
     let mut environment = vec![
         (
-            "préfixe Python embarqué".to_owned(),
+            "embedded Python prefix".to_owned(),
             python.home().display().to_string(),
         ),
         (
-            "exécutable courant".to_owned(),
+            "current executable".to_owned(),
             match std::env::current_exe() {
                 Ok(path) => path.display().to_string(),
-                Err(error) => format!("indisponible : {error}"),
+                Err(error) => format!("unavailable: {error}"),
             },
         ),
     ];
@@ -138,7 +138,7 @@ pub fn run_selftest(python: EmbeddedPython) -> SelfTestReport {
             return abort(
                 steps,
                 environment,
-                format!("préparation du projet de démonstration impossible : {error}"),
+                format!("preparing the demo project failed: {error}"),
             );
         }
     };
@@ -149,7 +149,7 @@ pub fn run_selftest(python: EmbeddedPython) -> SelfTestReport {
             return abort(
                 steps,
                 environment,
-                format!("l'acteur de session n'a pas pu démarrer : {error}"),
+                format!("the session actor could not start: {error}"),
             );
         }
     };
@@ -162,7 +162,7 @@ pub fn run_selftest(python: EmbeddedPython) -> SelfTestReport {
             return abort(
                 steps,
                 environment,
-                format!("le moteur de script n'a pas pu démarrer : {error}"),
+                format!("the script engine could not start: {error}"),
             );
         }
     };
@@ -175,16 +175,16 @@ pub fn run_selftest(python: EmbeddedPython) -> SelfTestReport {
     steps.push(step_undo_from_python(&engine, &session, column_b));
     steps.push(step_output_and_errors(&engine));
 
-    // Arrêt best-effort : un arrêt qui se passe mal ne remet pas en cause ce
-    // que les étapes ci-dessus ont déjà, positivement, vérifié.
+    // Best-effort stop: a stop that goes wrong does not call into question what
+    // the steps above have already, positively, verified.
     let _ = engine.shutdown();
     let _ = actor.shutdown();
 
     SelfTestReport { steps, environment }
 }
 
-/// Construit le projet de démonstration : `Book1`/`Sheet1`, colonnes
-/// `A = [1.0, 2.0, 3.0]` et `B = [10.0, 20.0, 30.0]`.
+/// Builds the demo project: `Book1`/`Sheet1`, columns
+/// `A = [1.0, 2.0, 3.0]` and `B = [10.0, 20.0, 30.0]`.
 fn build_demo_project() -> CoreResult<(Project, NodeId, NodeId)> {
     let mut project = Project::new("StokesForgeSelfTest")?;
     let root = project.root();
@@ -201,11 +201,11 @@ fn build_demo_project() -> CoreResult<(Project, NodeId, NodeId)> {
     Ok((project, column_a, column_b))
 }
 
-/// Termine le compte rendu quand une défaillance survenue **avant** la
-/// première étape empêche toute vérification : pousse une étape en échec
-/// pour l'interpréteur (rien n'a pu être vérifié sans lui) et marque les six
-/// autres comme non atteintes, sans jamais laisser le compte rendu
-/// incomplet.
+/// Completes the report when a failure occurring **before** the
+/// first step prevents any check: pushes a failed step
+/// for the interpreter (nothing could be checked without it) and marks the other six
+/// as not reached, never leaving the report
+/// incomplete.
 fn abort(
     mut steps: Vec<SelfTestStep>,
     environment: Vec<(String, String)>,
@@ -215,15 +215,15 @@ fn abort(
     for name in &STEP_NAMES[1..] {
         steps.push(SelfTestStep::fail(
             name,
-            "non atteinte : une défaillance en amont a empêché toute vérification".to_owned(),
+            "not reached: a failure upstream prevented any check".to_owned(),
         ));
     }
     SelfTestReport { steps, environment }
 }
 
-/// Étape 1 : version de l'interpréteur et de numpy, isolation, et
-/// **aucune** entrée de `sys.path` hors du préfixe embarqué. Alimente aussi
-/// `environment` avec ces quatre informations.
+/// Step 1: interpreter and numpy version, isolation, and
+/// **no** `sys.path` entry outside the embedded prefix. Also feeds
+/// `environment` with these four pieces of information.
 fn step_interpreter(
     python: &EmbeddedPython,
     environment: &mut Vec<(String, String)>,
@@ -236,7 +236,7 @@ fn step_interpreter(
         Err(error) => {
             environment.push((
                 "version de Python".to_owned(),
-                format!("indisponible : {error}"),
+                format!("unavailable: {error}"),
             ));
             problems.push(format!("version de Python indisponible : {error}"));
         }
@@ -247,58 +247,58 @@ fn step_interpreter(
         Err(error) => {
             environment.push((
                 "version de numpy".to_owned(),
-                format!("indisponible : {error}"),
+                format!("unavailable: {error}"),
             ));
             problems.push(format!("version de numpy indisponible : {error}"));
         }
     }
 
     match interpreter::sys_flags_isolated() {
-        Ok(true) => environment.push(("sys.flags.isolated".to_owned(), "vrai".to_owned())),
+        Ok(true) => environment.push(("sys.flags.isolated".to_owned(), "true".to_owned())),
         Ok(false) => {
-            environment.push(("sys.flags.isolated".to_owned(), "faux".to_owned()));
+            environment.push(("sys.flags.isolated".to_owned(), "false".to_owned()));
             problems
-                .push("sys.flags.isolated est faux : l'interpréteur n'est pas isolé".to_owned());
+                .push("sys.flags.isolated is false: the interpreter is not isolated".to_owned());
         }
         Err(error) => {
             environment.push((
                 "sys.flags.isolated".to_owned(),
-                format!("indisponible : {error}"),
+                format!("unavailable: {error}"),
             ));
-            problems.push(format!("sys.flags.isolated indisponible : {error}"));
+            problems.push(format!("sys.flags.isolated unavailable: {error}"));
         }
     }
 
     match interpreter::sys_path() {
         Ok(paths) => {
-            environment.push(("entrées de sys.path".to_owned(), paths.len().to_string()));
-            let intrus: Vec<&str> = paths
+            environment.push(("sys.path entries".to_owned(), paths.len().to_string()));
+            let strays: Vec<&str> = paths
                 .iter()
                 .filter(|entry| !python.contains_path(entry))
                 .map(String::as_str)
                 .collect();
-            if !intrus.is_empty() {
+            if !strays.is_empty() {
                 problems.push(format!(
-                    "sys.path contient {} entrée(s) hors du préfixe embarqué : {}",
-                    intrus.len(),
-                    intrus.join(", ")
+                    "sys.path holds {} entry(ies) outside the embedded prefix: {}",
+                    strays.len(),
+                    strays.join(", ")
                 ));
             }
         }
         Err(error) => {
             environment.push((
-                "entrées de sys.path".to_owned(),
-                format!("indisponible : {error}"),
+                "sys.path entries".to_owned(),
+                format!("unavailable: {error}"),
             ));
-            problems.push(format!("sys.path indisponible : {error}"));
+            problems.push(format!("sys.path unavailable: {error}"));
         }
     }
 
     if problems.is_empty() {
         SelfTestStep::ok(
             name,
-            "version, isolation et sys.path exhaustif (aucune entrée hors du préfixe embarqué), \
-             tous vérifiés"
+            "version, isolation and exhaustive sys.path (no entry outside the embedded prefix), \
+             all checked"
                 .to_owned(),
         )
     } else {
@@ -306,8 +306,8 @@ fn step_interpreter(
     }
 }
 
-/// Valeur de la première ligne d'une colonne numérique, ou `None` si la
-/// colonne est absente ou n'est pas numérique.
+/// Value of the first row of a numeric column, or `None` if the
+/// column is absent or not numeric.
 fn first_float(tree: &Tree, column: NodeId) -> Option<f64> {
     tree.node(column)?
         .as_column()?
@@ -316,34 +316,32 @@ fn first_float(tree: &Tree, column: NodeId) -> Option<f64> {
         .copied()
 }
 
-/// Valeurs courantes d'une colonne numérique, lues côté Rust via un
-/// instantané frais.
+/// Current values of a numeric column, read on the Rust side through a
+/// fresh snapshot.
 fn column_values(session: &SessionHandle, column: NodeId) -> Result<Vec<f64>, String> {
     let snapshot = session
         .snapshot()
-        .map_err(|error| format!("instantané impossible : {error}"))?;
+        .map_err(|error| format!("snapshot failed: {error}"))?;
     let node = snapshot
         .tree
         .node(column)
-        .ok_or_else(|| format!("{column} n'existe plus dans le projet"))?;
+        .ok_or_else(|| format!("{column} no longer exists in the project"))?;
     node.as_column()
         .and_then(|col| col.float_values())
         .map(|values| values.as_slice().to_vec())
-        .ok_or_else(|| format!("{column} n'est pas une colonne numérique"))
+        .ok_or_else(|| format!("{column} is not a numeric column"))
 }
 
-/// Étape 2 : une écriture par le bus s'annule et se rétablit, bit à bit.
+/// Step 2: a write through the bus is undone and redone, bit for bit.
 ///
-/// Termine par une seconde annulation qui ramène l'arbre à l'état pristine
-/// d'avant cette étape : les étapes suivantes supposent `A = [1.0, 2.0, 3.0]`.
+/// Ends with a second undo that brings the tree back to the pristine state
+/// from before this step: the following steps assume `A = [1.0, 2.0, 3.0]`.
 fn step_edit_undo_redo(session: &SessionHandle, column_a: NodeId) -> SelfTestStep {
     let name = STEP_NAMES[1];
 
     let before = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
-        Err(error) => {
-            return SelfTestStep::fail(name, format!("instantané initial impossible : {error}"))
-        }
+        Err(error) => return SelfTestStep::fail(name, format!("initial snapshot failed: {error}")),
     };
 
     if let Err(error) = session.execute(Command::SetCells {
@@ -352,23 +350,20 @@ fn step_edit_undo_redo(session: &SessionHandle, column_a: NodeId) -> SelfTestSte
         values: ValueBlock::Float(vec![99.0]),
         expected_version: None,
     }) {
-        return SelfTestStep::fail(name, format!("écriture par le bus refusée : {error}"));
+        return SelfTestStep::fail(name, format!("write through the bus refused: {error}"));
     }
 
     let after_edit = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
         Err(error) => {
-            return SelfTestStep::fail(
-                name,
-                format!("instantané après édition impossible : {error}"),
-            )
+            return SelfTestStep::fail(name, format!("snapshot after edit failed: {error}"))
         }
     };
     if first_float(&after_edit, column_a) != Some(99.0) {
         return SelfTestStep::fail(
             name,
             format!(
-                "valeur écrite absente : attendu 99.0, obtenu {:?}",
+                "written value missing: expected 99.0, got {:?}",
                 first_float(&after_edit, column_a)
             ),
         );
@@ -377,87 +372,73 @@ fn step_edit_undo_redo(session: &SessionHandle, column_a: NodeId) -> SelfTestSte
     match session.undo() {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return SelfTestStep::fail(name, "annulation sans effet : rien à annuler".to_owned())
+            return SelfTestStep::fail(name, "undo had no effect: nothing to undo".to_owned())
         }
-        Err(error) => return SelfTestStep::fail(name, format!("annulation refusée : {error}")),
+        Err(error) => return SelfTestStep::fail(name, format!("undo refused: {error}")),
     }
     let after_undo = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
         Err(error) => {
-            return SelfTestStep::fail(
-                name,
-                format!("instantané après annulation impossible : {error}"),
-            )
+            return SelfTestStep::fail(name, format!("snapshot after undo failed: {error}"))
         }
     };
     if after_undo != before {
         return SelfTestStep::fail(
             name,
-            "après annulation, l'arbre diffère bit à bit de l'état d'avant l'édition".to_owned(),
+            "after undo, the tree differs bit for bit from the state before the edit".to_owned(),
         );
     }
 
     match session.redo() {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return SelfTestStep::fail(
-                name,
-                "rétablissement sans effet : rien à rétablir".to_owned(),
-            )
+            return SelfTestStep::fail(name, "redo had no effect: nothing to redo".to_owned())
         }
-        Err(error) => return SelfTestStep::fail(name, format!("rétablissement refusé : {error}")),
+        Err(error) => return SelfTestStep::fail(name, format!("redo refused: {error}")),
     }
     let after_redo = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
         Err(error) => {
-            return SelfTestStep::fail(
-                name,
-                format!("instantané après rétablissement impossible : {error}"),
-            )
+            return SelfTestStep::fail(name, format!("snapshot after redo failed: {error}"))
         }
     };
     if after_redo != after_edit {
         return SelfTestStep::fail(
             name,
-            "après rétablissement, l'arbre diffère bit à bit de l'état d'après l'édition"
-                .to_owned(),
+            "after redo, the tree differs bit for bit from the state after the edit".to_owned(),
         );
     }
 
-    // Nettoyage : les étapes suivantes supposent A pristine.
+    // Cleanup: the following steps assume A pristine.
     match session.undo() {
         Ok(Some(_)) => {}
         Ok(None) => {
             return SelfTestStep::fail(
                 name,
-                "annulation de nettoyage sans effet après vérification".to_owned(),
+                "cleanup undo had no effect after the check".to_owned(),
             )
         }
-        Err(error) => {
-            return SelfTestStep::fail(name, format!("annulation de nettoyage refusée : {error}"))
-        }
+        Err(error) => return SelfTestStep::fail(name, format!("cleanup undo refused: {error}")),
     }
     let restored = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
-        Err(error) => {
-            return SelfTestStep::fail(name, format!("instantané final impossible : {error}"))
-        }
+        Err(error) => return SelfTestStep::fail(name, format!("final snapshot failed: {error}")),
     };
     if restored != before {
         return SelfTestStep::fail(
             name,
-            "l'état pristine n'a pas pu être restauré après la vérification".to_owned(),
+            "the pristine state could not be restored after the check".to_owned(),
         );
     }
 
     SelfTestStep::ok(
         name,
-        "écriture par le bus, annulation et rétablissement bit à bit conformes".to_owned(),
+        "write through the bus, undo and redo conform bit for bit".to_owned(),
     )
 }
 
-/// Garde de nettoyage : supprime le fichier temporaire à la fin de l'étape 3,
-/// que celle-ci réussisse ou échoue.
+/// Cleanup guard: removes the temporary file at the end of step 3,
+/// whether it succeeds or fails.
 struct TempFileGuard(PathBuf);
 
 impl Drop for TempFileGuard {
@@ -466,17 +447,15 @@ impl Drop for TempFileGuard {
     }
 }
 
-/// Étape 3 : aller-retour disque, égal bit à bit à ce qui a été sauvegardé —
-/// y compris après une modification intermédiaire, que le rechargement doit
-/// écraser entièrement.
+/// Step 3: disk round trip, bit-for-bit equal to what was saved,
+/// including after an intermediate change, which the reload must
+/// overwrite entirely.
 fn step_disk_roundtrip(session: &SessionHandle, column_b: NodeId) -> SelfTestStep {
     let name = STEP_NAMES[2];
 
     let before = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
-        Err(error) => {
-            return SelfTestStep::fail(name, format!("instantané initial impossible : {error}"))
-        }
+        Err(error) => return SelfTestStep::fail(name, format!("initial snapshot failed: {error}")),
     };
 
     let path =
@@ -484,56 +463,50 @@ fn step_disk_roundtrip(session: &SessionHandle, column_b: NodeId) -> SelfTestSte
     let _guard = TempFileGuard(path.clone());
 
     if let Err(error) = session.save(&path) {
-        return SelfTestStep::fail(name, format!("sauvegarde refusée : {error}"));
+        return SelfTestStep::fail(name, format!("save refused: {error}"));
     }
 
-    // Modifie autre chose que ce qui vient d'être sauvegardé : la relecture
-    // doit tout écraser, y compris cette modification intermédiaire.
+    // Changes something other than what was just saved: the reread
+    // must overwrite everything, including this intermediate change.
     if let Err(error) = session.execute(Command::SetCells {
         column: column_b,
         start: 0,
         values: ValueBlock::Float(vec![-1.0]),
         expected_version: None,
     }) {
-        return SelfTestStep::fail(
-            name,
-            format!("modification intermédiaire refusée : {error}"),
-        );
+        return SelfTestStep::fail(name, format!("intermediate change refused: {error}"));
     }
 
     if let Err(error) = session.load(&path) {
-        return SelfTestStep::fail(name, format!("rechargement refusé : {error}"));
+        return SelfTestStep::fail(name, format!("reload refused: {error}"));
     }
 
     let after = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
         Err(error) => {
-            return SelfTestStep::fail(
-                name,
-                format!("instantané après rechargement impossible : {error}"),
-            )
+            return SelfTestStep::fail(name, format!("snapshot after reload failed: {error}"))
         }
     };
 
     if after != before {
         return SelfTestStep::fail(
             name,
-            "l'arbre rechargé diffère bit à bit de celui sauvegardé".to_owned(),
+            "the reloaded tree differs bit for bit from the saved one".to_owned(),
         );
     }
 
     SelfTestStep::ok(
         name,
         format!(
-            "aller-retour disque bit à bit conforme, y compris après une modification écrasée par \
-             le rechargement ({})",
+            "disk round trip conforms bit for bit, including after a change overwritten by \
+             the reload ({})",
             path.display()
         ),
     )
 }
 
-/// Étape 4 : la vue numpy prise par un script pointe **exactement** sur le
-/// buffer Rust de la colonne — pas une copie aux valeurs justes.
+/// Step 4: the numpy view taken by a script points **exactly** at the
+/// column's Rust buffer, not a copy with the right values.
 fn step_zero_copy_read(
     engine: &ScriptEngine,
     session: &SessionHandle,
@@ -552,11 +525,11 @@ fn step_zero_copy_read(
             None => {
                 return SelfTestStep::fail(
                     name,
-                    "colonne A introuvable ou non numérique côté Rust".to_owned(),
+                    "column A not found or not numeric on the Rust side".to_owned(),
                 )
             }
         },
-        Err(error) => return SelfTestStep::fail(name, format!("instantané impossible : {error}")),
+        Err(error) => return SelfTestStep::fail(name, format!("snapshot failed: {error}")),
     };
 
     let outcome = match engine.run(
@@ -565,11 +538,11 @@ fn step_zero_copy_read(
     ) {
         Ok(outcome) => outcome,
         Err(error) => {
-            return SelfTestStep::fail(name, format!("le moteur a refusé le script : {error}"))
+            return SelfTestStep::fail(name, format!("the engine refused the script: {error}"))
         }
     };
     if let Some(error) = &outcome.error {
-        return SelfTestStep::fail(name, format!("le script a échoué : {error}"));
+        return SelfTestStep::fail(name, format!("the script failed: {error}"));
     }
 
     let printed = outcome.stdout.trim();
@@ -578,7 +551,7 @@ fn step_zero_copy_read(
         Err(_) => {
             return SelfTestStep::fail(
                 name,
-                format!("adresse illisible dans la sortie du script : {printed:?}"),
+                format!("unreadable address in the script output: {printed:?}"),
             )
         }
     };
@@ -587,22 +560,22 @@ fn step_zero_copy_read(
         return SelfTestStep::fail(
             name,
             format!(
-                "numpy regarde une autre adresse que le Vec du modèle (rust=0x{rust_address:x}, \
-                 numpy=0x{numpy_address:x}) : une copie silencieuse aux valeurs justes rendrait \
-                 exactement ce symptôme"
+                "numpy looks at a different address than the model's Vec (rust=0x{rust_address:x}, \
+                 numpy=0x{numpy_address:x}): a silent copy with the right values would give \
+                 exactly this symptom"
             ),
         );
     }
 
     SelfTestStep::ok(
         name,
-        format!("vue numpy sans copie confirmée : même adresse (0x{rust_address:x}) côté Rust et côté numpy"),
+        format!("zero-copy numpy view confirmed: same address (0x{rust_address:x}) on the Rust and numpy sides"),
     )
 }
 
-/// Étape 5 : le script écrit `B` à partir de la vue de `A` par
-/// `pyst.set_column`, et une annulation **côté hôte** — comme le ferait
-/// `Ctrl+Z` dans la fenêtre — rétablit `B` et l'arbre entier, bit à bit.
+/// Step 5: the script writes `B` from the view of `A` through
+/// `pyst.set_column`, and an undo **on the host side**, as `Ctrl+Z` in the
+/// window would do, restores `B` and the whole tree, bit for bit.
 fn step_bus_write_host_undo(
     engine: &ScriptEngine,
     session: &SessionHandle,
@@ -612,9 +585,7 @@ fn step_bus_write_host_undo(
 
     let before_script = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
-        Err(error) => {
-            return SelfTestStep::fail(name, format!("instantané initial impossible : {error}"))
-        }
+        Err(error) => return SelfTestStep::fail(name, format!("initial snapshot failed: {error}")),
     };
 
     let outcome = match engine.run(
@@ -624,11 +595,11 @@ fn step_bus_write_host_undo(
     ) {
         Ok(outcome) => outcome,
         Err(error) => {
-            return SelfTestStep::fail(name, format!("le moteur a refusé le script : {error}"))
+            return SelfTestStep::fail(name, format!("the engine refused the script: {error}"))
         }
     };
     if let Some(error) = &outcome.error {
-        return SelfTestStep::fail(name, format!("le script a échoué : {error}"));
+        return SelfTestStep::fail(name, format!("the script failed: {error}"));
     }
 
     match column_values(session, column_b) {
@@ -636,7 +607,7 @@ fn step_bus_write_host_undo(
         Ok(values) => {
             return SelfTestStep::fail(
                 name,
-                format!("B après le script : attendu [1.0, 2.0, 3.0], obtenu {values:?}"),
+                format!("B after the script: expected [1.0, 2.0, 3.0], got {values:?}"),
             )
         }
         Err(detail) => return SelfTestStep::fail(name, detail),
@@ -645,43 +616,37 @@ fn step_bus_write_host_undo(
     match session.undo() {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return SelfTestStep::fail(
-                name,
-                "l'annulation côté hôte n'a rien trouvé à annuler".to_owned(),
-            )
+            return SelfTestStep::fail(name, "the host-side undo found nothing to undo".to_owned())
         }
         Err(error) => {
-            return SelfTestStep::fail(name, format!("l'annulation côté hôte a échoué : {error}"))
+            return SelfTestStep::fail(name, format!("the host-side undo failed: {error}"))
         }
     }
 
     let after_undo = match session.snapshot() {
         Ok(snapshot) => snapshot.tree,
         Err(error) => {
-            return SelfTestStep::fail(
-                name,
-                format!("instantané après annulation impossible : {error}"),
-            )
+            return SelfTestStep::fail(name, format!("snapshot after undo failed: {error}"))
         }
     };
     if after_undo != before_script {
         return SelfTestStep::fail(
             name,
-            "après l'annulation côté hôte, l'arbre diffère bit à bit de celui d'avant le script"
+            "after the host-side undo, the tree differs bit for bit from the one before the script"
                 .to_owned(),
         );
     }
 
     SelfTestStep::ok(
         name,
-        "écriture par le bus annulée depuis l'hôte : B rétabli et arbre égal bit à bit à celui \
-         d'avant le script"
+        "write through the bus undone from the host: B restored and tree equal bit for bit to the one \
+         before the script"
             .to_owned(),
     )
 }
 
-/// Étape 6 : `pyst.undo()` défait ce que le script vient d'écrire, et un
-/// second appel sur une pile vide rend `False` sans lever d'exception.
+/// Step 6: `pyst.undo()` undoes what the script just wrote, and a
+/// second call on an empty stack returns `False` without raising an exception.
 fn step_undo_from_python(
     engine: &ScriptEngine,
     session: &SessionHandle,
@@ -698,11 +663,11 @@ fn step_undo_from_python(
     ) {
         Ok(outcome) => outcome,
         Err(error) => {
-            return SelfTestStep::fail(name, format!("le moteur a refusé le script : {error}"))
+            return SelfTestStep::fail(name, format!("the engine refused the script: {error}"))
         }
     };
     if let Some(error) = &outcome.error {
-        return SelfTestStep::fail(name, format!("le script a échoué : {error}"));
+        return SelfTestStep::fail(name, format!("the script failed: {error}"));
     }
 
     let lines: Vec<&str> = outcome.stdout.lines().map(str::trim).collect();
@@ -718,9 +683,7 @@ fn step_undo_from_python(
         Ok(values) => {
             return SelfTestStep::fail(
                 name,
-                format!(
-                    "B après la double annulation : attendu [10.0, 20.0, 30.0], obtenu {values:?}"
-                ),
+                format!("B after the double undo: expected [10.0, 20.0, 30.0], got {values:?}"),
             )
         }
         Err(detail) => return SelfTestStep::fail(name, detail),
@@ -728,14 +691,14 @@ fn step_undo_from_python(
 
     SelfTestStep::ok(
         name,
-        "pyst.undo() défait l'écriture du script, puis rend False sur une pile vide sans lever \
-         d'exception"
+        "pyst.undo() undoes the script's write, then returns False on an empty stack without raising \
+         an exception"
             .to_owned(),
     )
 }
 
-/// Étape 7 : la sortie standard d'un script est capturée, une exception rend
-/// une trace complète, et le moteur reste utilisable après.
+/// Step 7: a script's standard output is captured, an exception returns
+/// a full traceback, and the engine stays usable afterward.
 fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
     let name = STEP_NAMES[6];
     const MARKER: &str = "STOKESFORGE-SELFTEST-2f8e19a4";
@@ -743,17 +706,14 @@ fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
     let printed = match engine.run(&format!("print(\"{MARKER}\")\n")) {
         Ok(outcome) => outcome,
         Err(error) => {
-            return SelfTestStep::fail(name, format!("le moteur a refusé le script : {error}"))
+            return SelfTestStep::fail(name, format!("the engine refused the script: {error}"))
         }
     };
     if let Some(error) = &printed.error {
-        return SelfTestStep::fail(
-            name,
-            format!("un simple print ne doit pas échouer : {error}"),
-        );
+        return SelfTestStep::fail(name, format!("a plain print must not fail: {error}"));
     }
     if !printed.stdout.contains(MARKER) {
-        return SelfTestStep::fail(name, "le print du script n'a pas été capturé".to_owned());
+        return SelfTestStep::fail(name, "the script's print was not captured".to_owned());
     }
 
     let failing = match engine.run("1 / 0\n") {
@@ -761,7 +721,7 @@ fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
         Err(error) => {
             return SelfTestStep::fail(
                 name,
-                format!("le moteur a refusé le script en échec : {error}"),
+                format!("the engine refused the failing script: {error}"),
             )
         }
     };
@@ -770,7 +730,7 @@ fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
         None => {
             return SelfTestStep::fail(
                 name,
-                "une exception aurait dû être rendue par le script".to_owned(),
+                "an exception should have been returned by the script".to_owned(),
             )
         }
     };
@@ -778,7 +738,7 @@ fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
         return SelfTestStep::fail(
             name,
             format!(
-                "trace incomplète : attendu \"Traceback\" et \"ZeroDivisionError\", obtenu {trace:?}"
+                "incomplete traceback: expected \"Traceback\" and \"ZeroDivisionError\", got {trace:?}"
             ),
         );
     }
@@ -788,21 +748,21 @@ fn step_output_and_errors(engine: &ScriptEngine) -> SelfTestStep {
         Err(error) => {
             return SelfTestStep::fail(
                 name,
-                format!("le moteur ne survit pas à un script en échec : {error}"),
+                format!("the engine does not survive a failing script: {error}"),
             )
         }
     };
     if after.error.is_some() || !after.stdout.contains("moteur encore utilisable") {
         return SelfTestStep::fail(
             name,
-            "le script suivant l'erreur ne s'exécute pas normalement".to_owned(),
+            "the script after the error does not run normally".to_owned(),
         );
     }
 
     SelfTestStep::ok(
         name,
-        "print capturé, trace d'exception complète (type et \"Traceback\"), moteur utilisable après \
-         l'erreur"
+        "print captured, full exception traceback (type and \"Traceback\"), engine usable after \
+         the error"
             .to_owned(),
     )
 }

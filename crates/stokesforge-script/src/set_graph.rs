@@ -1,13 +1,12 @@
-//! `pyst.set_graph` : régler un graphe existant (#331, lot 2, S4).
+//! `pyst.set_graph`: set an existing graph (#331, batch 2, S4).
 //!
-//! Les clés sont celles de la fenêtre Graph Properties, nommées comme les
-//! options de `plot` quand elles existent là aussi (`title`, `x_title`,
-//! `x_scale`, `x_from`/`x_to`…). Aucune règle nouvelle : on édite le
-//! [`PlotSpec`] puis on l'écrit par `SetPlotSpec`, donc **une seule entrée
-//! d'historique** quel que soit le nombre de clés, dans le groupe annulable du
-//! script. Toutes les clés sont lues et validées avant la moindre écriture : une
-//! clé inconnue ou une valeur refusée ne laisse rien derrière elle. Un appel qui
-//! ne change rien n'écrit rien.
+//! The keys are those of the Graph Properties window, named like the `plot`
+//! options when they exist there too (`title`, `x_title`, `x_scale`,
+//! `x_from`/`x_to`...). No new rule: the [`PlotSpec`] is edited then written
+//! through `SetPlotSpec`, hence **a single history entry** whatever the number
+//! of keys, in the script's undoable group. All keys are read and validated
+//! before the first write: an unknown key or a refused value leaves nothing
+//! behind. A call that changes nothing writes nothing.
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -20,19 +19,19 @@ use crate::engine::{self, ScriptContext};
 use crate::graph::{axis_range, invalid, update_axis};
 use crate::surface::{to_py_error, Handle};
 
-/// Les clés que `set_graph` accepte, en un seul endroit : l'analyse des options,
-/// la documentation et le test de surface partent de cette liste.
+/// The keys `set_graph` accepts, in one place: option parsing, the
+/// documentation and the surface test all start from this list.
 pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
-    // Le graphe.
+    // The graph.
     "title",
     "title_visible",
     "title_color",
     "background",
     "stale_warning",
     "decimal_comma",
-    // Le panneau visé.
+    // The targeted panel.
     "panel_title",
-    // L'axe X (bas) et l'axe Y (gauche ou droite selon `axis`).
+    // The X axis (bottom) and the Y axis (left or right depending on `axis`).
     "x_title",
     "y_title",
     "x_unit",
@@ -51,12 +50,12 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     "y_grid",
     "x_visible",
     "y_visible",
-    // La légende du panneau visé.
+    // The targeted panel's legend.
     "legend_visible",
     "legend_position",
 ];
 
-/// Ce qu'on demande de changer sur un axe ; `None` = ne pas y toucher.
+/// What is asked to change on an axis; `None` = leave it alone.
 #[derive(Default)]
 struct AxisChange {
     title: Option<String>,
@@ -92,14 +91,13 @@ impl AxisChange {
         if let Some(visible) = self.visible {
             axis.visible = visible;
         }
-        // Titre, échelle et bornes : le même geste que `plot`, avec son refus
-        // d'une borne non positive sur une échelle logarithmique.
+        // Title, scale and bounds: the same gesture as `plot`, with its refusal
+        // of a non-positive bound on a logarithmic scale.
         update_axis(axis, &self.title, self.scale, range)
     }
 }
 
-/// Les changements demandés : données Rust seulement, elles traversent
-/// `Python::detach`.
+/// The requested changes: Rust data only, they cross `Python::detach`.
 #[derive(Default)]
 struct Changes {
     title: Option<String>,
@@ -130,7 +128,7 @@ impl Changes {
                     .extract::<bool>()
                     .map_err(|_| invalid(format!("{key} must be True or False")))
             };
-            // Vide = automatique, sinon `#RRGGBB` ou `#RRGGBBAA`.
+            // Empty = automatic, otherwise `#RRGGBB` or `#RRGGBBAA`.
             let color = || {
                 let text = string()?;
                 if !text.is_empty() && stokesforge_plot::parse_hex(&text).is_none() {
@@ -203,7 +201,7 @@ impl Changes {
         Ok(changes)
     }
 
-    /// Applique les changements au spec ; `layer` est le rang du panneau visé.
+    /// Applies the changes to the spec; `layer` is the rank of the targeted panel.
     fn apply(&self, spec: &mut PlotSpec, layer: usize, side: SeriesAxis) -> Result<(), HostError> {
         if let Some(title) = &self.title {
             spec.title.clone_from(title);
@@ -270,7 +268,7 @@ fn set_graph_native(
         return Ok(());
     }
     if context.begin_write()? {
-        // Même validation sous la réservation exclusive du groupe du script.
+        // Same validation under the script group's exclusive reservation.
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         (spec, changed) = prepare(&snapshot)?;
     }
@@ -280,24 +278,25 @@ fn set_graph_native(
     Ok(())
 }
 
-/// Règle un graphe existant par les clés de la fenêtre Graph Properties ; une
-/// seule entrée d'historique (`pyst.undo()` la défait). Les clés non données ne
-/// changent rien.
+/// Sets an existing graph through the keys of the Graph Properties window; a
+/// single history entry (`pyst.undo()` undoes it). Keys not given change
+/// nothing.
 ///
-/// Le graphe : `title`, `title_visible`, `title_color` (`'#RRGGBB'`, `''` =
-/// automatique), `background` (`'#RRGGBB[AA]'`, `''` = blanc), `stale_warning`,
-/// `decimal_comma` (booléens). Le panneau `panel=(ligne, colonne)` : `panel_title`,
+/// The graph: `title`, `title_visible`, `title_color` (`'#RRGGBB'`, `''` =
+/// automatic), `background` (`'#RRGGBB[AA]'`, `''` = white), `stale_warning`,
+/// `decimal_comma` (booleans). The panel `panel=(row, column)`: `panel_title`,
 /// `legend_visible`, `legend_position` (`'top_left'`, `'top_right'`,
-/// `'bottom_left'`, `'bottom_right'`). L'axe X (en bas) et l'axe Y (`axis='left'`
-/// ou `'right'`) : `x_title`/`y_title`, `x_unit`/`y_unit`, `x_scale`/`y_scale`
-/// (`'linear'`, `'log'`), `x_from` et `x_to` (ensemble et différents ; `from > to`
-/// trace l'axe à l'envers) et `y_from`/`y_to`, `x_auto_range`/`y_auto_range`
-/// (rend le cadrage automatique), `x_inverted`/`y_inverted`, `x_grid`/`y_grid`,
-/// `x_visible`/`y_visible`. Titres : markup Typst, comme dans `plot`.
+/// `'bottom_left'`, `'bottom_right'`). The X axis (bottom) and the Y axis
+/// (`axis='left'` or `'right'`): `x_title`/`y_title`, `x_unit`/`y_unit`,
+/// `x_scale`/`y_scale` (`'linear'`, `'log'`), `x_from` and `x_to` (given
+/// together and different; `from > to` draws the axis reversed) and
+/// `y_from`/`y_to`, `x_auto_range`/`y_auto_range` (turns view framing back to
+/// automatic), `x_inverted`/`y_inverted`, `x_grid`/`y_grid`,
+/// `x_visible`/`y_visible`. Titles: Typst markup, as in `plot`.
 ///
-/// Une clé inconnue, une valeur du mauvais type ou des bornes refusées lèvent
-/// `InvalidValueError` sans rien écrire ; `BrokenReferenceError` pour une
-/// poignée périmée.
+/// An unknown key, a value of the wrong type or refused bounds raise
+/// `InvalidValueError` without writing anything; `BrokenReferenceError` for a
+/// stale handle.
 #[pyfunction]
 #[pyo3(signature = (graph, *, panel=(0, 0), axis="left", **options))]
 pub(crate) fn set_graph(

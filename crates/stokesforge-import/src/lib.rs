@@ -1,27 +1,26 @@
-//! Import de fichiers de données d'instruments scientifiques (CSV/TXT/ASC)
-//! dans une feuille de calcul, à la façon de l'assistant d'import ASCII
-//! d'OriginLab : l'utilisateur choisit une **recette** ([`ImportRecipe`])
-//! décrivant le format d'un appareil donné (séparateur, séparateur
-//! décimal, lignes d'en-tête à ignorer, nom de série…), l'applique à un
-//! fichier via [`parse`], et peut l'enregistrer pour la réutiliser
-//! ([`RecipeStore`]).
+//! Import of scientific instrument data files (CSV/TXT/ASC) into a
+//! spreadsheet, in the manner of OriginLab's ASCII import wizard: the user
+//! picks a **recipe** ([`ImportRecipe`]) that describes the format of a given
+//! device (separator, decimal separator, header lines to skip, series
+//! name...), applies it to a file through [`parse`], and can save it for
+//! reuse ([`RecipeStore`]).
 //!
-//! Crate volontairement pur : zéro dépendance UI, zéro dépendance à
-//! `stokesforge-commands`/`stokesforge-session`, et zéro dépendance à `stokesforge-core` —
-//! le vocabulaire de sortie du parseur (`f64`, `NaN` pour une valeur
-//! manquante) est le plus simple qui existe, pour rester indépendant.
-//! `stokesforge-app` fait la conversion vers `stokesforge_core::Column` de son côté.
+//! Deliberately pure crate: no UI dependency, no dependency on
+//! `stokesforge-commands`/`stokesforge-session`, and no dependency on
+//! `stokesforge-core`. The parser's output vocabulary (`f64`, `NaN` for a
+//! missing value) is the simplest there is, to stay independent.
+//! `stokesforge-app` does the conversion to `stokesforge_core::Column` on its
+//! side.
 //!
-//! [`preview`] classe chaque ligne d'un fichier en rôle (en-tête principal,
-//! sous-en-tête et son rôle éventuel, donnée, pied de page), façon
-//! l'assistant d'import ASCII d'OriginLab, pour que la fenêtre d'import
-//! montre en direct comment un fichier va être découpé pendant que
-//! l'utilisateur règle la recette — voir sa doc de tête pour le budget de
-//! coût sur un gros fichier.
+//! [`preview`] classifies each line of a file by role (main header,
+//! sub-header and its optional role, data, footer), like OriginLab's ASCII
+//! import wizard, so that the import window shows live how a file will be
+//! split while the user adjusts the recipe. See its top-level doc for the
+//! cost budget on a large file.
 //!
-//! [`decode`] transforme les octets en texte avant tout découpage : UTF-8,
-//! UTF-16 avec marque d'ordre, et en repli Windows-1252, la page de code
-//! des logiciels d'appareil sous Windows.
+//! [`decode`] turns bytes into text before any splitting: UTF-8, UTF-16 with a
+//! byte order mark, and as a fallback Windows-1252, the code page of device
+//! software on Windows.
 
 pub mod builtin;
 pub mod choose;
@@ -30,7 +29,7 @@ mod data_end;
 mod datetime;
 
 #[doc(hidden)]
-pub use datetime::parse_datetime as parse_datetime_for_accord;
+pub use datetime::parse_datetime as parse_datetime_for_agreement;
 pub mod decode;
 mod layout;
 pub mod metadata;

@@ -1,15 +1,15 @@
-//! Du résultat de [`stokesforge_import`] aux **colonnes du modèle** : quels fichiers
-//! (et quels blocs) vont sur quelles feuilles ([`plan_import`]), et comment se
-//! construit chaque colonne ([`make_import_column`] : type numérique,
-//! date-heure ou mixte, nom long, unité, rôle, métadonnées du fichier, source
-//! d'import).
+//! From the result of [`stokesforge_import`] to the **model columns**: which files
+//! (and which blocks) go on which worksheets ([`plan_import`]), and how each
+//! column is built ([`make_import_column`]: numeric, date-time or mixed
+//! type, long name, unit, role, file metadata, import
+//! source).
 //!
-//! Ce crate **n'écrit dans aucun projet** : il rend des `Column` et des plans.
-//! Chaque consommateur décide de la façon d'écrire — l'application par des
-//! commandes annulables dans une macro « Importer », le CLI directement dans un
-//! `Project` neuf, les scripts `pyst` par le bus de commandes de leur session.
-//! C'est ce qui permet à une seule écriture de la conversion de servir partout
-//! (`stokesforge-import` reste, lui, indépendant du modèle).
+//! This crate **writes into no project**: it returns `Column`s and plans.
+//! Each consumer decides how to write — the application through undoable
+//! commands in an "Import" macro, the CLI directly into a fresh
+//! `Project`, the `pyst` scripts through the command bus of their session.
+//! This is what lets a single implementation of the conversion serve everywhere
+//! (`stokesforge-import` itself stays independent of the model).
 
 use std::path::{Path, PathBuf};
 
@@ -20,24 +20,24 @@ use stokesforge_import::{
     ColumnKind, ColumnRoleChoice, FilesLayout, ImportError, ImportRecipe, ParsedTable,
 };
 
-/// Pourquoi un fichier n'a pas pu être lu ou analysé. Structuré, pour que
-/// l'application le mette en phrase dans la langue de l'interface ; le
-/// [`Display`](std::fmt::Display) anglais sert au CLI et aux scripts.
+/// Why a file could not be read or parsed. Structured, so that the
+/// application puts it into a sentence in the interface language; the English
+/// [`Display`](std::fmt::Display) serves the CLI and the scripts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportFailure {
-    /// Le fichier en cause.
+    /// The file concerned.
     pub path: PathBuf,
-    /// La cause.
+    /// The cause.
     pub cause: ImportFailureCause,
 }
 
-/// La cause d'un [`ImportFailure`].
+/// The cause of an [`ImportFailure`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportFailureCause {
-    /// Le fichier n'a pas pu être lu : le message du système (`io::Error`
-    /// n'est pas `Clone`).
+    /// The file could not be read: the system message (`io::Error`
+    /// is not `Clone`).
     Read(String),
-    /// Le fichier a été lu mais pas analysé.
+    /// The file was read but not parsed.
     Parse(ImportError),
 }
 
@@ -58,21 +58,21 @@ impl std::fmt::Display for ImportFailure {
 
 impl std::error::Error for ImportFailure {}
 
-/// Un fichier (ou un bloc de fichier) à importer : son chemin, la recette qui
-/// le lit, et le résultat de l'analyse (ou son erreur).
+/// A file (or a block of a file) to import: its path, the recipe that
+/// reads it, and the parse result (or its error).
 #[derive(Debug, Clone)]
 pub struct ImportItem {
     pub path: PathBuf,
     pub recipe: ImportRecipe,
     pub table: Result<ParsedTable, ImportFailure>,
-    /// Rang du bloc quand le fichier en contient plusieurs
-    /// (`ImportRecipe::block_split`) ; `None` pour un fichier à un seul bloc.
+    /// Rank of the block when the file contains several
+    /// (`ImportRecipe::block_split`); `None` for a single-block file.
     pub block: Option<usize>,
 }
 
-/// Lit un fichier et rend **un élément par bloc** de données (un seul pour un
-/// fichier ordinaire) ; une erreur de lecture ou d'analyse donne un élément en
-/// erreur.
+/// Reads a file and returns **one item per data block** (just one for an
+/// ordinary file); a read or parse error gives one item in
+/// error.
 pub fn import_items(path: &Path, recipe: &ImportRecipe) -> Vec<ImportItem> {
     let failed = |cause: ImportFailureCause| {
         vec![ImportItem {
@@ -107,15 +107,15 @@ pub fn import_items(path: &Path, recipe: &ImportRecipe) -> Vec<ImportItem> {
     }
 }
 
-/// Une colonne à créer : la colonne `column` de l'élément `item`.
+/// A column to create: column `column` of item `item`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlannedColumn {
     pub item: usize,
     pub column: usize,
 }
 
-/// Une feuille à remplir : son nom, ses colonnes, les éléments qui y
-/// contribuent.
+/// A worksheet to fill: its name, its columns, the items that
+/// contribute to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPlan {
     pub name: String,
@@ -123,17 +123,17 @@ pub struct ImportPlan {
     pub items: Vec<usize>,
 }
 
-/// Répartit les colonnes des éléments lisibles en feuilles selon `layout` : une
-/// feuille par élément, ou tous côte à côte, ou tous avec le X du premier
-/// partagé. Les colonnes « Ignorer » sont exclues partout.
+/// Distributes the columns of the readable items into worksheets according to `layout`: one
+/// worksheet per item, or all side by side, or all sharing the
+/// first one's X. The "Ignore" columns are excluded everywhere.
 pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan> {
-    // Nom de la feuille : le fichier, suivi du rang du bloc s'il y en a plusieurs.
+    // Worksheet name: the file, followed by the block rank if there are several.
     let stem = |item: usize| {
         let base = items[item]
             .path
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or("fichier");
+            .unwrap_or("file");
         match items[item].block {
             Some(block) => format!("{base}_{}", block + 1),
             None => base.to_string(),
@@ -168,7 +168,7 @@ pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan>
             let mut columns = Vec::new();
             for &item in &readable {
                 for column in kept(item) {
-                    // X partagé : celui du premier ; les suivants n'en apportent pas.
+                    // Shared X: the first one's; the following ones bring none.
                     let is_x = items[item].recipe.column_role(column) == ColumnRoleChoice::X;
                     if layout == FilesLayout::SharedX && item != first && is_x {
                         continue;
@@ -185,9 +185,9 @@ pub fn plan_import(items: &[ImportItem], layout: FilesLayout) -> Vec<ImportPlan>
     }
 }
 
-/// Les valeurs d'une colonne planifiée, en bloc prêt à écrire : des nombres, ou
-/// des cellules mixtes dès qu'un texte est conservé (colonne forcée en texte
-/// comprise).
+/// The values of a planned column, as a block ready to write: numbers, or
+/// mixed cells as soon as a text is kept (a column forced to text
+/// included).
 pub fn import_block(items: &[ImportItem], planned: PlannedColumn) -> Option<ValueBlock> {
     let ImportItem { recipe, table, .. } = items.get(planned.item)?;
     let parsed = table.as_ref().ok()?.columns.get(planned.column)?;
@@ -209,10 +209,10 @@ pub fn import_block(items: &[ImportItem], planned: PlannedColumn) -> Option<Valu
     })
 }
 
-/// Construit la colonne `planned` : valeurs typées (numérique, date-heure,
-/// mixte), nom long, unité, commentaire, rôle, métadonnées du fichier et source
-/// d'import. `None` pour une colonne « Ignorer ». `prefix` cases vides sont
-/// ajoutées en tête (colonne neuve d'un import « ajouter des lignes »).
+/// Builds the `planned` column: typed values (numeric, date-time,
+/// mixed), long name, unit, comment, role, file metadata and import
+/// source. `None` for an "Ignore" column. `prefix` empty cells are
+/// added at the top (new column of an "append rows" import).
 pub fn make_import_column(
     items: &[ImportItem],
     planned: PlannedColumn,
@@ -230,9 +230,9 @@ pub fn make_import_column(
     let file_stem = path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .unwrap_or("fichier");
-    // Rôle choisi à l'étape « Colonnes » de l'assistant : une colonne « Ignorer »
-    // n'est pas importée.
+        .unwrap_or("file");
+    // Role chosen at the "Columns" step of the wizard: an "Ignore" column
+    // is not imported.
     let role = match recipe.column_role(index) {
         ColumnRoleChoice::Ignore => return None,
         ColumnRoleChoice::X => ColumnRole::X,
@@ -240,10 +240,10 @@ pub fn make_import_column(
         ColumnRoleChoice::YError => ColumnRole::YError,
         ColumnRoleChoice::Y | ColumnRoleChoice::Auto => ColumnRole::Y,
     };
-    // Une colonne dont au moins une cellule porte un texte conservé (`n/a`, un
-    // code d'instrument…) devient une colonne à types mixtes plutôt qu'une colonne
-    // numérique qui aurait tout aplati en `NaN` ; une colonne entièrement
-    // numérique garde le chemin `Numeric`.
+    // A column with at least one cell carrying a kept text (`n/a`, an
+    // instrument code…) becomes a mixed-type column rather than a numeric
+    // column that would have flattened everything to `NaN`; a fully
+    // numeric column keeps the `Numeric` path.
     let mut column = match import_block(items, planned)? {
         ValueBlock::Mixed(mut cells) => {
             if prefix > 0 {
@@ -261,16 +261,16 @@ pub fn make_import_column(
             }
             let mut numeric = Column::from_f64(&values);
             if parsed_column.datetime {
-                // Dates et heures : les mêmes `f64` (timestamps POSIX), typés
-                // `DateTime` pour l'affichage et les axes.
+                // Dates and times: the same `f64`s (POSIX timestamps), typed
+                // `DateTime` for display and axes.
                 numeric.set_column_type(ColumnType::DateTime);
             }
             numeric
         }
     };
-    // Le nom long privilégie le rôle de sous-en-tête `long_name`, quand la
-    // recette en assigne un — sinon la ligne de noms de colonnes, puis « X » pour
-    // la première colonne, puis le nom de la série (fichier ou clé d'en-tête).
+    // The long name prefers the `long_name` sub-header role, when the
+    // recipe assigns one — otherwise the column names row, then "X" for
+    // the first column, then the series name (file or header key).
     let long_name =
         parsed_column
             .long_name
@@ -285,8 +285,8 @@ pub fn make_import_column(
         unit: parsed_column.unit.clone().unwrap_or_default(),
         comment: parsed_column.comment.clone().unwrap_or_default(),
         x_prime: parsed_column.x_prime,
-        // Métadonnées du fichier, copiées sur chaque colonne : plusieurs fichiers
-        // dans une même feuille gardent chacun les leurs.
+        // File metadata, copied onto each column: several files
+        // in the same worksheet each keep their own.
         file_metadata: table
             .metadata()
             .iter()
@@ -295,10 +295,10 @@ pub fn make_import_column(
                 value: line.value.clone(),
             })
             .collect(),
-        // Par défaut la première colonne importée est l'abscisse
+        // By default the first imported column is the abscissa
         // (`ImportRecipe::column_role`).
         role,
-        // De quoi actualiser la colonne depuis son fichier.
+        // Enough to refresh the column from its file.
         import_source: Some(ImportSource {
             path: path.display().to_string(),
             recipe_json: recipe.to_json(),
@@ -311,11 +311,11 @@ pub fn make_import_column(
 }
 
 #[cfg(test)]
-mod accord_dates {
-    /// #218 : le lecteur de dates du cœur (grille, collage, script) et celui de
-    /// l'import sont deux copies ; elles lisent les mêmes textes pareil.
+mod date_reader_agreement {
+    /// #218: the core's date reader (grid, paste, script) and the import's
+    /// are two copies; they read the same texts the same way.
     #[test]
-    fn le_lecteur_de_dates_du_coeur_accorde_celui_de_l_import() {
+    fn the_core_date_reader_agrees_with_the_import_one() {
         for text in [
             "2026-10-10",
             "2026-10-10 14:30",
@@ -336,7 +336,7 @@ mod accord_dates {
         ] {
             assert_eq!(
                 stokesforge_core::datetime::parse_datetime(text).map(f64::to_bits),
-                stokesforge_import::parse_datetime_for_accord(text).map(f64::to_bits),
+                stokesforge_import::parse_datetime_for_agreement(text).map(f64::to_bits),
                 "{text:?}"
             );
         }

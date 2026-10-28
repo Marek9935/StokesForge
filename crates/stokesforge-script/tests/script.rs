@@ -1,16 +1,16 @@
-//! Tests d'intégration du fil de script (tâches 5.3 à 5.5).
+//! Integration tests of the script thread (tasks 5.3 to 5.5).
 //!
-//! Ils ne s'exécutent qu'avec la feature `python` et exigent le préfixe
-//! vendorisé : lance `scripts/python-vendor.sh` puis `scripts/python-test.sh`.
+//! They run only with the `python` feature and require the vendored prefix:
+//! run `scripts/python-vendor.sh` then `scripts/python-test.sh`.
 //!
-//! Chaque test correspond à un critère d'acceptation. Un seul mérite d'être lu
-//! avant les autres : [`critere_de_fin_lecture_sans_copie_ecriture_par_le_bus_annulation_par_ctrl_z`],
-//! qui traverse d'un coup l'acteur, le GIL, la durée de vie des buffers
-//! partagés et l'historique. Tant qu'il ne passe pas, le pont n'est pas prouvé.
+//! Each test matches an acceptance criterion. Only one deserves to be read
+//! before the others: [`end_criterion_zero_copy_read_write_through_the_bus_undo_with_ctrl_z`],
+//! which crosses the actor, the GIL, the lifetime of the shared buffers and
+//! the history in one go. Until it passes, the bridge is not proven.
 //!
-//! Comme dans `stokesforge-python/tests/zerocopy.rs`, CPython ne démarre qu'une fois
-//! par processus ; ici c'est le fil de script du **premier** moteur créé qui
-//! s'en charge, et les moteurs suivants réutilisent l'interpréteur.
+//! As in `stokesforge-python/tests/zerocopy.rs`, CPython starts only once per
+//! process; here the script thread of the **first** engine created takes care
+//! of it, and the following engines reuse the interpreter.
 
 #![cfg(feature = "python")]
 
@@ -27,8 +27,8 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::{ScriptEngine, ScriptError, ScriptOutcome};
 use stokesforge_session::{Session, SessionHandle};
 
-/// Résout le préfixe embarqué : `STOKESFORGE_PYTHON_HOME` si posée par le script de
-/// test, sinon `vendor/python/extracted/python` relatif au manifeste.
+/// Resolves the embedded prefix: `STOKESFORGE_PYTHON_HOME` if set by the test
+/// script, otherwise `vendor/python/extracted/python` relative to the manifest.
 fn home() -> PathBuf {
     match std::env::var_os(interpreter::HOME_ENV) {
         Some(value) => PathBuf::from(value),
@@ -38,112 +38,106 @@ fn home() -> PathBuf {
     }
 }
 
-/// Verrou d'accès à l'interpréteur, **partagé par tout le binaire de tests**.
+/// Interpreter access lock, **shared by the whole test binary**.
 ///
-/// `sys.setswitchinterval` est un réglage **global à l'interpréteur**. Le
-/// critère 11 doit le pousser très haut pour être décisif — et pendant ce
-/// temps, tout autre fil Python du binaire est affamé : mesuré, un seul test
-/// laissé en parallèle de celui-là faisait passer la durée de la suite de
-/// 0,1 s à plus de 60 s. Ce verrou lecteur/rédacteur dit exactement la
-/// contrainte : tout test qui exécute un script prend l'accès **partagé** ;
-/// le seul qui déplace l'intervalle de commutation prend l'accès
-/// **exclusif**.
-fn verrou_interpreteur() -> &'static RwLock<()> {
-    static VERROU: OnceLock<RwLock<()>> = OnceLock::new();
-    VERROU.get_or_init(|| RwLock::new(()))
+/// `sys.setswitchinterval` is a setting **global to the interpreter**.
+/// Criterion 11 must push it very high to be decisive, and meanwhile every
+/// other Python thread of the binary is starved: measured, a single test left
+/// running in parallel with that one raised the duration of the suite from
+/// 0.1 s to over 60 s. This reader/writer lock states exactly the constraint:
+/// any test that runs a script takes **shared** access; the only one that
+/// moves the switch interval takes **exclusive** access.
+fn interpreter_lock() -> &'static RwLock<()> {
+    static LOCK: OnceLock<RwLock<()>> = OnceLock::new();
+    LOCK.get_or_init(|| RwLock::new(()))
 }
 
-/// L'accès à l'interpréteur détenu par un banc, gardé vivant tant que le banc
-/// l'est.
+/// The interpreter access held by a bench, kept alive as long as the bench is.
 ///
-/// Les gardes ne sont jamais *lus* : leur seule raison d'être est leur durée
-/// de vie, d'où le `allow` — un garde qu'on lirait serait un garde qu'on
-/// aurait mal compris.
+/// The guards are never *read*: their only purpose is their lifetime, hence
+/// the `allow`; a guard that was read would be a guard misunderstood.
 #[allow(dead_code)]
-enum Acces {
-    /// Cohabite avec les autres tests.
-    Partage(RwLockReadGuard<'static, ()>),
-    /// Exclut tout autre test qui exécuterait du Python.
-    Exclusif(RwLockWriteGuard<'static, ()>),
+enum Access {
+    /// Coexists with the other tests.
+    Shared(RwLockReadGuard<'static, ()>),
+    /// Excludes any other test that would run Python.
+    Exclusive(RwLockWriteGuard<'static, ()>),
 }
 
-/// Le banc : un projet « Demo », son acteur, et un moteur de script branché
-/// dessus.
+/// The bench: a project "Demo", its actor, and a script engine plugged into it.
 ///
-/// `Book1` contient `Sheet1` avec `A = [1, 2, 3]`, `B = [10, 20, 30]` et une
-/// colonne texte `T` — cette dernière n'est pas dans la fixture du cahier des
-/// charges, elle sert au seul critère 6 (« `column` refuse ce qu'il doit »).
-struct Banc {
-    /// Le moteur, dans un `Arc` pour pouvoir le partager avec un fil de test
-    /// qu'on doit pouvoir abandonner si un critère borné expire.
+/// `Book1` contains `Sheet1` with `A = [1, 2, 3]`, `B = [10, 20, 30]` and a
+/// text column `T`. The latter is not in the specification's fixture; it
+/// serves criterion 6 only ("`column` refuses what it must").
+struct Bench {
+    /// The engine, in an `Arc` so it can be shared with a test thread that
+    /// must be abandonable if a bounded criterion expires.
     engine: Arc<ScriptEngine>,
-    /// Poignée cliente vers l'acteur, côté Rust (« ce que ferait la fenêtre »).
+    /// Client handle to the actor, on the Rust side ("what the window would do").
     session: SessionHandle,
-    /// L'acteur lui-même ; le garder en vie est tout son rôle ici.
+    /// The actor itself; keeping it alive is its whole role here.
     _actor: Session,
     /// Colonne `A`.
     a: NodeId,
     /// Colonne `B`.
     b: NodeId,
-    /// Accès à l'interpréteur, relâché à la destruction du banc.
-    _acces: Acces,
+    /// Interpreter access, released when the bench is dropped.
+    _access: Access,
 }
 
-/// Monte un banc neuf, en cohabitation avec les autres tests.
-fn banc() -> Banc {
-    monter(Acces::Partage(
-        verrou_interpreteur()
+/// Builds a fresh bench, coexisting with the other tests.
+fn bench() -> Bench {
+    build_bench(Access::Shared(
+        interpreter_lock()
             .read()
             .unwrap_or_else(PoisonError::into_inner),
     ))
 }
 
-/// Monte un banc neuf qui **exclut** tout autre test exécutant du Python.
-fn banc_exclusif() -> Banc {
-    monter(Acces::Exclusif(
-        verrou_interpreteur()
+/// Builds a fresh bench that **excludes** any other test running Python.
+fn exclusive_bench() -> Bench {
+    build_bench(Access::Exclusive(
+        interpreter_lock()
             .write()
             .unwrap_or_else(PoisonError::into_inner),
     ))
 }
 
-/// Isole le magasin de modèles d'import de la machine qui exécute les tests.
+/// Isolates the import template store from the machine running the tests.
 ///
-/// `pyst.import_file` lit `import_recipes.json` du dossier de configuration de
-/// l'utilisateur ; un modèle enregistré nommé « Jasco » passait devant le
-/// modèle intégré « Jasco (point-virgule) » et faisait échouer le choix
-/// automatique (#195). Le dossier de config est un état du *processus*
-/// (`STOKESFORGE_CONFIG_DIR`, la seule variable que `directories` n'ignore pas
-/// hors Linux, #332 ; `XDG_CONFIG_HOME` reste posée aussi) : on le pose une
-/// seule fois, vers un dossier vide gardé jusqu'à la fin du binaire,
-/// avant tout banc, donc sans course entre tests parallèles ni restauration.
-fn configuration_hermetique() {
-    static DOSSIER: OnceLock<tempfile::TempDir> = OnceLock::new();
-    DOSSIER.get_or_init(|| {
-        let dossier = tempfile::tempdir().expect("dossier de configuration temporaire");
+/// `pyst.import_file` reads `import_recipes.json` from the user's
+/// configuration folder; a saved template named "Jasco" came ahead of the
+/// built-in template "Jasco (point-virgule)" and made the automatic choice
+/// fail (#195). The config folder is a *process* state
+/// (`STOKESFORGE_CONFIG_DIR`, the only variable that `directories` does not
+/// ignore outside Linux, #332; `XDG_CONFIG_HOME` is also still set): it is set
+/// once, to an empty folder kept until the end of the binary, before any
+/// bench, so there is no race between parallel tests and no restoring.
+fn hermetic_configuration() {
+    static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().expect("temporary configuration folder");
         std::env::set_var(
             stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
-            dossier.path(),
+            dir.path(),
         );
-        std::env::set_var("XDG_CONFIG_HOME", dossier.path());
-        dossier
+        std::env::set_var("XDG_CONFIG_HOME", dir.path());
+        dir
     });
 }
 
-/// Monte le projet « Demo », son acteur et un moteur de script branché dessus.
-fn monter(acces: Acces) -> Banc {
-    configuration_hermetique();
-    let mut project = Project::new("Demo").expect("projet Demo");
+/// Builds the project "Demo", its actor and a script engine plugged into it.
+fn build_bench(access: Access) -> Bench {
+    hermetic_configuration();
+    let mut project = Project::new("Demo").expect("project Demo");
     let root = project.root();
     project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
-    let sheet = project
-        .resolve_path("[Book1]Sheet1")
-        .expect("feuille Sheet1");
+        .expect("workbook Book1");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet Sheet1");
     let a = project
         .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
-        .expect("colonne A");
+        .expect("column A");
     let b = project
         .add_column(
             sheet,
@@ -151,7 +145,7 @@ fn monter(acces: Acces) -> Banc {
             Some("B"),
             Column::from_f64(&[10.0, 20.0, 30.0]),
         )
-        .expect("colonne B");
+        .expect("column B");
     project
         .add_column(
             sheet,
@@ -159,58 +153,58 @@ fn monter(acces: Acces) -> Banc {
             Some("T"),
             Column::from_text(&[Some("x".to_owned()), None, Some("z".to_owned())]),
         )
-        .expect("colonne T");
+        .expect("column T");
 
-    let actor = Session::spawn(project, None).expect("acteur démarré");
+    let actor = Session::spawn(project, None).expect("actor started");
     let session = actor.handle();
     let engine = ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(home()))
-        .expect("moteur de script démarré");
+        .expect("script engine started");
 
-    Banc {
+    Bench {
         engine: Arc::new(engine),
         session,
         _actor: actor,
         a,
         b,
-        _acces: acces,
+        _access: access,
     }
 }
 
-/// Exécute un script et exige qu'il se termine sans erreur ; rend la sortie.
-fn executer(banc: &Banc, source: &str) -> ScriptOutcome {
-    let outcome = banc
+/// Runs a script and requires it to finish without error; returns the output.
+fn execute(bench: &Bench, source: &str) -> ScriptOutcome {
+    let outcome = bench
         .engine
         .run(source)
-        .expect("le moteur accepte le script");
+        .expect("the engine accepts the script");
     assert!(
         outcome.error.is_none(),
-        "script en échec :\n{}",
+        "script failed:\n{}",
         outcome.error.clone().unwrap_or_default()
     );
     outcome
 }
 
-/// L'import Python emploie le modèle fourni et la conversion commune ; un
-/// seul Ctrl+Z retire classeur, feuilles, colonnes et métadonnées.
+/// The Python import uses the supplied template and the shared conversion; a
+/// single Ctrl+Z removes workbook, sheets, columns and metadata.
 #[test]
-fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
-    let banc = banc();
+fn python_import_by_template_reads_and_undoes_in_one_gesture() {
+    let bench = bench();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/import/jasco_uvvis_semicolon.csv");
-    let before = banc.session.snapshot().unwrap();
-    executer(
-        &banc,
+    let before = bench.session.snapshot().unwrap();
+    execute(
+        &bench,
         &format!(
-            "feuilles = pyst.import_file({:?}, recipe='Jasco (point-virgule)')\n\
-         assert len(feuilles) == 1\n",
+            "sheets_handle = pyst.import_file({:?}, recipe='Jasco (point-virgule)')\n\
+         assert len(sheets_handle) == 1\n",
             path.to_str().unwrap()
         ),
     );
-    let imported = banc.session.snapshot().unwrap();
+    let imported = bench.session.snapshot().unwrap();
     let root = imported.tree.root();
     let book = *imported.tree.node(root).unwrap().children().last().unwrap();
     let sheets = imported.tree.node(book).unwrap().children();
-    assert_eq!(sheets.len(), 1, "aucune feuille vide supplémentaire");
+    assert_eq!(sheets.len(), 1, "no extra empty sheet");
     let columns = imported.tree.node(sheets[0]).unwrap().children();
     let x = imported.tree.node(columns[0]).unwrap().as_column().unwrap();
     let y = imported.tree.node(columns[1]).unwrap().as_column().unwrap();
@@ -226,8 +220,8 @@ fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
         imported.history.undo_label,
         Some(HistoryLabel::Macro(MacroKind::Script))
     );
-    executer(
-        &banc,
+    execute(
+        &bench,
         &format!(
             "x = pyst.resolve('[{}]{}!{}')\n\
          assert list(pyst.column(x)) == [800., 798., 796., 794., 792., 790.]\n\
@@ -237,27 +231,27 @@ fn import_python_par_modele_se_lit_et_sannule_en_un_geste() {
             imported.tree.node(columns[0]).unwrap().name()
         ),
     );
-    let undone = banc.session.snapshot().unwrap();
+    let undone = bench.session.snapshot().unwrap();
     assert_eq!(*undone.tree, *before.tree);
     assert!(!undone.history.can_undo);
-    banc.session.redo().unwrap();
-    assert_eq!(*banc.session.snapshot().unwrap().tree, *imported.tree);
+    bench.session.redo().unwrap();
+    assert_eq!(*bench.session.snapshot().unwrap().tree, *imported.tree);
 }
 
-/// Le choix automatique utilise la même signature Jasco que l'application.
+/// The automatic choice uses the same Jasco signature as the application.
 #[test]
-fn import_python_choisit_le_modele_automatiquement() {
-    let banc = banc();
+fn python_import_chooses_the_template_automatically() {
+    let bench = bench();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/import/jasco_uvvis_semicolon.csv");
-    executer(
-        &banc,
+    execute(
+        &bench,
         &format!(
             "from pathlib import Path\nassert len(pyst.import_file(Path({:?}))) == 1",
             path.to_str().unwrap()
         ),
     );
-    let snapshot = banc.session.snapshot().unwrap();
+    let snapshot = bench.session.snapshot().unwrap();
     let source = snapshot
         .tree
         .walk_all()
@@ -276,25 +270,25 @@ fn import_python_choisit_le_modele_automatiquement() {
     assert!(source.recipe_json.contains("Jasco (point-virgule)"));
 }
 
-/// Modèle inconnu, fichier absent ou binaire : aucune mutation et aucune
-/// macro laissée ouverte. Une macro de l'interface n'est jamais absorbée.
+/// Unknown template, missing or binary file: no mutation and no macro left
+/// open. An interface macro is never absorbed.
 #[test]
-fn import_python_refuse_sans_toucher_au_projet_ni_aux_macros_dautrui() {
-    let banc = banc();
+fn python_import_refuses_without_touching_the_project_or_others_macros() {
+    let bench = bench();
     let dir = tempfile::tempdir().unwrap();
-    let binary = dir.path().join("binaire.dat");
+    let binary = dir.path().join("binary.dat");
     std::fs::write(&binary, [0u8, 159, 146, 150, 0, 0]).unwrap();
     let absent = dir.path().join("absent.csv");
-    let before = banc.session.snapshot().unwrap();
+    let before = bench.session.snapshot().unwrap();
     for source in [
         format!(
-            "pyst.import_file({:?}, recipe='Modèle inexistant')",
+            "pyst.import_file({:?}, recipe='Nonexistent template')",
             binary.to_str().unwrap()
         ),
         format!("pyst.import_file({:?})", absent.to_str().unwrap()),
         format!("pyst.import_file({:?})", binary.to_str().unwrap()),
     ] {
-        let outcome = banc.engine.run(&source).unwrap();
+        let outcome = bench.engine.run(&source).unwrap();
         assert!(
             outcome
                 .error
@@ -302,16 +296,16 @@ fn import_python_refuse_sans_toucher_au_projet_ni_aux_macros_dautrui() {
                 .is_some_and(|e| e.contains("InvalidValueError")),
             "{outcome:?}"
         );
-        let snapshot = banc.session.snapshot().unwrap();
+        let snapshot = bench.session.snapshot().unwrap();
         assert_eq!(*snapshot.tree, *before.tree);
         assert_eq!(snapshot.revision, before.revision);
         assert!(!snapshot.history.in_macro);
     }
-    let csv = dir.path().join("mesure.csv");
+    let csv = dir.path().join("measurement.csv");
     std::fs::write(&csv, "1,10\n2,20\n").unwrap();
-    let interface = banc._actor.handle();
+    let interface = bench._actor.handle();
     interface.begin_macro(MacroKind::Import).unwrap();
-    let outcome = banc
+    let outcome = bench
         .engine
         .run(&format!("pyst.import_file({:?})", csv.to_str().unwrap()))
         .unwrap();
@@ -319,58 +313,55 @@ fn import_python_refuse_sans_toucher_au_projet_ni_aux_macros_dautrui() {
         .error
         .as_deref()
         .is_some_and(|e| e.contains("InvalidValueError")));
-    let snapshot = banc.session.snapshot().unwrap();
+    let snapshot = bench.session.snapshot().unwrap();
     assert_eq!(*snapshot.tree, *before.tree);
-    assert!(
-        snapshot.history.in_macro,
-        "la macro de l'interface reste ouverte"
-    );
+    assert!(snapshot.history.in_macro, "the interface macro stays open");
     interface.abort_macro().unwrap();
 }
 
-/// Valeurs actuelles d'une colonne numérique, lues côté Rust.
-fn valeurs(session: &SessionHandle, id: NodeId) -> Vec<f64> {
+/// Current values of a numeric column, read on the Rust side.
+fn values(session: &SessionHandle, id: NodeId) -> Vec<f64> {
     session
         .snapshot()
-        .expect("instantané")
+        .expect("snapshot")
         .tree
         .node(id)
-        .expect("nœud présent")
+        .expect("node present")
         .as_column()
-        .expect("colonne")
+        .expect("column")
         .float_values()
-        .expect("colonne numérique")
+        .expect("numeric column")
         .as_slice()
         .to_vec()
 }
 
-/// Adresse du `Vec<f64>` d'une colonne, telle que Rust la voit.
-fn adresse_rust(session: &SessionHandle, id: NodeId) -> usize {
+/// Address of a column's `Vec<f64>`, as Rust sees it.
+fn rust_address(session: &SessionHandle, id: NodeId) -> usize {
     session
         .snapshot()
-        .expect("instantané")
+        .expect("snapshot")
         .tree
         .node(id)
-        .expect("nœud présent")
+        .expect("node present")
         .as_column()
-        .expect("colonne")
+        .expect("column")
         .float_values()
-        .expect("colonne numérique")
+        .expect("numeric column")
         .as_ptr() as usize
 }
 
-/// Arbre courant du projet.
-fn arbre(session: &SessionHandle) -> Arc<Tree> {
-    session.snapshot().expect("instantané").tree
+/// Current tree of the project.
+fn tree(session: &SessionHandle) -> Arc<Tree> {
+    session.snapshot().expect("snapshot").tree
 }
 
-/// Révision courante du projet.
+/// Current revision of the project.
 fn revision(session: &SessionHandle) -> u64 {
-    session.snapshot().expect("instantané").revision
+    session.snapshot().expect("snapshot").revision
 }
 
-/// Les lignes de la sortie standard d'un script, sans les blancs de bordure.
-fn lignes(outcome: &ScriptOutcome) -> Vec<String> {
+/// The lines of a script's standard output, without the border whitespace.
+fn stdout_lines(outcome: &ScriptOutcome) -> Vec<String> {
     outcome
         .stdout
         .lines()
@@ -378,11 +369,11 @@ fn lignes(outcome: &ScriptOutcome) -> Vec<String> {
         .collect()
 }
 
-/// Attend que `condition` devienne vraie, au plus `delai`. Rend `false` si le
-/// délai expire — aucun test ne doit attendre indéfiniment.
-fn attendre(delai: Duration, mut condition: impl FnMut() -> bool) -> bool {
-    let limite = Instant::now() + delai;
-    while Instant::now() < limite {
+/// Waits for `condition` to become true, for at most `delay`. Returns `false`
+/// if the delay expires: no test may wait indefinitely.
+fn wait_until(delay: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + delay;
+    while Instant::now() < deadline {
         if condition() {
             return true;
         }
@@ -391,139 +382,139 @@ fn attendre(delai: Duration, mut condition: impl FnMut() -> bool) -> bool {
     condition()
 }
 
-// --- 1. Le moteur démarre ---------------------------------------------------
+// --- 1. The engine starts ---------------------------------------------------
 
 #[test]
-fn le_moteur_demarre_et_execute_un_script_vide() {
-    let banc = banc();
-    assert!(!banc.engine.is_running(), "aucun script au démarrage");
+fn the_engine_starts_and_runs_an_empty_script() {
+    let bench = bench();
+    assert!(!bench.engine.is_running(), "no script at startup");
 
-    let outcome = executer(&banc, "");
+    let outcome = execute(&bench, "");
     assert_eq!(outcome, ScriptOutcome::default());
     assert!(outcome.succeeded());
-    assert!(!banc.engine.is_running(), "plus rien ne tourne après coup");
+    assert!(!bench.engine.is_running(), "nothing runs afterwards");
 
-    Arc::try_unwrap(banc.engine)
-        .expect("un seul détenteur du moteur")
+    Arc::try_unwrap(bench.engine)
+        .expect("a single holder of the engine")
         .shutdown()
-        .expect("arrêt propre");
+        .expect("clean shutdown");
 }
 
-// --- 2. `print` capturé -----------------------------------------------------
+// --- 2. `print` captured -----------------------------------------------------
 
-/// Marqueur assez singulier pour qu'aucune autre sortie du binaire de tests ne
-/// puisse le produire par hasard.
-const MARQUEUR: &str = "bonjour-4f1c9a2e-temoin";
+/// Marker unusual enough that no other output of the test binary can produce
+/// it by chance.
+const MARKER: &str = "hello-4f1c9a2e-witness";
 
-/// Détourne le descripteur 1 du **processus** vers un tuyau le temps de
-/// `action`, puis rend ce qui y a coulé.
+/// Redirects descriptor 1 of the **process** to a pipe for the duration of
+/// `action`, then returns what flowed into it.
 ///
-/// C'est la seule façon honnête de vérifier « rien n'apparaît sur la sortie du
-/// processus » : `sys.stdout` vu de Python ne dit rien de ce qui atteint
-/// réellement le descripteur. L'assertion porte sur l'**absence du marqueur**,
-/// et non sur un tuyau vide : d'autres tests peuvent écrire sur la sortie du
-/// processus pendant cette fenêtre (le harnais `libtest`, notamment).
-fn sortie_du_processus_pendant<T>(action: impl FnOnce() -> T) -> (T, String) {
-    let (sauvegarde, lecture) = Python::attach(|py| {
+/// This is the only honest way to check that "nothing appears on the process
+/// output": `sys.stdout` as seen from Python says nothing about what actually
+/// reaches the descriptor. The assertion is on the **absence of the marker**,
+/// not on an empty pipe: other tests may write to the process output during
+/// this window (the `libtest` harness, notably).
+fn process_output_during<T>(action: impl FnOnce() -> T) -> (T, String) {
+    let (saved, read_end) = Python::attach(|py| {
         let os = py.import("os").expect("import os");
-        let sauvegarde: i32 = os
+        let saved: i32 = os
             .call_method1("dup", (1,))
             .expect("dup")
             .extract()
-            .expect("descripteur");
-        let tuyau = os.call_method0("pipe").expect("pipe");
-        let lecture: i32 = tuyau
+            .expect("descriptor");
+        let pipe = os.call_method0("pipe").expect("pipe");
+        let read_end: i32 = pipe
             .get_item(0)
-            .expect("bout de lecture")
+            .expect("read end")
             .extract()
-            .expect("descripteur");
-        let ecriture: i32 = tuyau
+            .expect("descriptor");
+        let write_end: i32 = pipe
             .get_item(1)
-            .expect("bout d'écriture")
+            .expect("write end")
             .extract()
-            .expect("descripteur");
-        os.call_method1("dup2", (ecriture, 1)).expect("dup2");
-        os.call_method1("close", (ecriture,)).expect("close");
-        (sauvegarde, lecture)
+            .expect("descriptor");
+        os.call_method1("dup2", (write_end, 1)).expect("dup2");
+        os.call_method1("close", (write_end,)).expect("close");
+        (saved, read_end)
     });
 
-    let valeur = action();
+    let value = action();
 
-    let fuite = Python::attach(|py| {
+    let leak = Python::attach(|py| {
         let os = py.import("os").expect("import os");
-        // Remettre la vraie sortie en place ferme le dernier bout d'écriture du
-        // tuyau : la lecture qui suit voit donc la fin de fichier et ne bloque
-        // pas.
-        os.call_method1("dup2", (sauvegarde, 1)).expect("dup2");
-        os.call_method1("close", (sauvegarde,)).expect("close");
-        let octets: Vec<u8> = os
-            .call_method1("read", (lecture, 65_536))
+        // Putting the real output back closes the last write end of the pipe:
+        // the read that follows therefore sees end of file and does not
+        // block.
+        os.call_method1("dup2", (saved, 1)).expect("dup2");
+        os.call_method1("close", (saved,)).expect("close");
+        let bytes: Vec<u8> = os
+            .call_method1("read", (read_end, 65_536))
             .expect("read")
             .extract()
-            .expect("octets");
-        os.call_method1("close", (lecture,)).expect("close");
-        String::from_utf8_lossy(&octets).into_owned()
+            .expect("bytes");
+        os.call_method1("close", (read_end,)).expect("close");
+        String::from_utf8_lossy(&bytes).into_owned()
     });
 
-    (valeur, fuite)
+    (value, leak)
 }
 
 #[test]
-fn print_est_capture_et_ne_fuit_pas_sur_la_sortie_du_processus() {
-    let banc = banc();
+fn print_is_captured_and_does_not_leak_onto_the_process_output() {
+    let bench = bench();
     let source =
-        format!("print(\"{MARQUEUR}\")\nimport sys\nprint(\"vers stderr\", file=sys.stderr)\n");
+        format!("print(\"{MARKER}\")\nimport sys\nprint(\"to stderr\", file=sys.stderr)\n");
 
-    let (outcome, fuite) = sortie_du_processus_pendant(|| executer(&banc, &source));
+    let (outcome, leak) = process_output_during(|| execute(&bench, &source));
 
     assert!(
-        outcome.stdout.contains(MARQUEUR),
-        "stdout capturé : {:?}",
+        outcome.stdout.contains(MARKER),
+        "stdout captured: {:?}",
         outcome.stdout
     );
     assert!(
-        outcome.stderr.contains("vers stderr"),
-        "stderr capturé : {:?}",
+        outcome.stderr.contains("to stderr"),
+        "stderr captured: {:?}",
         outcome.stderr
     );
     assert!(
-        !fuite.contains(MARQUEUR),
-        "le marqueur a fui sur la sortie du processus : {fuite:?}"
+        !leak.contains(MARKER),
+        "the marker leaked onto the process output: {leak:?}"
     );
 }
 
-// --- 3. Trace d'appels ------------------------------------------------------
+// --- 3. Call trace ------------------------------------------------------
 
 #[test]
-fn une_exception_rend_la_trace_complete_et_garde_la_sortie_deja_ecrite() {
-    let banc = banc();
-    let outcome = banc
+fn an_exception_returns_the_full_trace_and_keeps_the_output_already_written() {
+    let bench = bench();
+    let outcome = bench
         .engine
-        .run("print(\"avant\")\n1 / 0\n")
-        .expect("le moteur accepte le script");
+        .run("print(\"before\")\n1 / 0\n")
+        .expect("the engine accepts the script");
 
-    let erreur = outcome.error.clone().expect("le script a échoué");
-    assert!(erreur.contains("ZeroDivisionError"), "{erreur}");
-    assert!(erreur.contains("Traceback"), "{erreur}");
+    let error = outcome.error.clone().expect("the script failed");
+    assert!(error.contains("ZeroDivisionError"), "{error}");
+    assert!(error.contains("Traceback"), "{error}");
     assert!(
-        outcome.stdout.contains("avant"),
-        "ce qui a été imprimé avant l'erreur est conservé : {:?}",
+        outcome.stdout.contains("before"),
+        "what was printed before the error is kept: {:?}",
         outcome.stdout
     );
-    assert!(!outcome.interrupted, "ce n'est pas une interruption");
+    assert!(!outcome.interrupted, "this is not an interruption");
 }
 
 // --- 4. `resolve` -----------------------------------------------------------
 
 #[test]
-fn resolve_rend_une_poignee_opaque() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn resolve_returns_an_opaque_handle() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
 h = pyst.resolve("[Book1]Sheet1!A")
 print(repr(h))
-print(sorted(nom for nom in dir(h) if not nom.startswith("_")))
+print(sorted(name for name in dir(h) if not name.startswith("_")))
 try:
     type(h)(1)
     print("CONSTRUCTIBLE")
@@ -532,57 +523,57 @@ except TypeError:
 "#,
     );
 
-    let lignes = lignes(&outcome);
+    let stdout_lines = stdout_lines(&outcome);
     assert!(
-        lignes[0].starts_with("Handle(") && lignes[0].ends_with(')'),
-        "repr lisible attendu, obtenu {:?}",
-        lignes[0]
+        stdout_lines[0].starts_with("Handle(") && stdout_lines[0].ends_with(')'),
+        "readable repr expected, got {:?}",
+        stdout_lines[0]
     );
     assert_eq!(
-        lignes[1], "[]",
-        "aucun attribut public ne doit exposer l'entier : {:?}",
-        lignes[1]
+        stdout_lines[1], "[]",
+        "no public attribute may expose the integer: {:?}",
+        stdout_lines[1]
     );
     assert_eq!(
-        lignes[2], "NON-CONSTRUCTIBLE",
-        "un script ne doit pas pouvoir fabriquer une poignée"
+        stdout_lines[2], "NON-CONSTRUCTIBLE",
+        "a script must not be able to forge a handle"
     );
 }
 
 #[test]
-fn resolve_leve_unknown_path_error_sur_un_chemin_inconnu_ou_invalide() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn resolve_raises_unknown_path_error_on_an_unknown_or_invalid_path() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
-for chemin in ("[Absent]Sheet1!A", "[Book1]Sheet1!ColonneQuiNexistePas", "[Book1", "", "!!"):
+for path in ("[Absent]Sheet1!A", "[Book1]Sheet1!NonexistentColumn", "[Book1", "", "!!"):
     try:
-        pyst.resolve(chemin)
-        print("RESOLU", chemin)
+        pyst.resolve(path)
+        print("RESOLVED", path)
     except pyst.UnknownPathError:
-        print("INCONNU", chemin)
-    except Exception as erreur:
-        print("AUTRE", type(erreur).__name__, chemin)
+        print("UNKNOWN", path)
+    except Exception as error:
+        print("OTHER", type(error).__name__, path)
 "#,
     );
 
-    for ligne in lignes(&outcome) {
+    for line in stdout_lines(&outcome) {
         assert!(
-            ligne.starts_with("INCONNU"),
-            "tout chemin fautif doit lever UnknownPathError : {ligne}"
+            line.starts_with("UNKNOWN"),
+            "every faulty path must raise UnknownPathError: {line}"
         );
     }
 }
 
-// --- 5. `column` sans copie -------------------------------------------------
+// --- 5. `column` without copy -------------------------------------------------
 
 #[test]
-fn column_est_une_vue_sans_copie_sur_le_buffer_du_modele() {
-    let banc = banc();
-    let attendue = adresse_rust(&banc.session, banc.a);
+fn column_is_a_zero_copy_view_on_the_model_buffer() {
+    let bench = bench();
+    let expected = rust_address(&bench.session, bench.a);
 
-    let outcome = executer(
-        &banc,
+    let outcome = execute(
+        &bench,
         r#"
 v = pyst.column(pyst.resolve("[Book1]Sheet1!A"))
 print([float(x) for x in v])
@@ -591,52 +582,52 @@ print(v.__array_interface__["data"][0])
 "#,
     );
 
-    let lignes = lignes(&outcome);
-    assert_eq!(lignes[0], "[1.0, 2.0, 3.0]");
-    assert_eq!(lignes[1], "False", "la vue doit être en lecture seule");
-    let vue: usize = lignes[2].parse().expect("adresse entière");
+    let stdout_lines = stdout_lines(&outcome);
+    assert_eq!(stdout_lines[0], "[1.0, 2.0, 3.0]");
+    assert_eq!(stdout_lines[1], "False", "the view must be read-only");
+    let view: usize = stdout_lines[2].parse().expect("integer address");
     assert_eq!(
-        vue, attendue,
-        "numpy doit regarder EXACTEMENT le Vec du modèle : une copie silencieuse \
-         rendrait les mêmes valeurs à une autre adresse"
+        view, expected,
+        "numpy must look at EXACTLY the model's Vec: a silent copy \
+         would return the same values at another address"
     );
 }
 
-// --- 6. `column` refuse ce qu'il doit ---------------------------------------
+// --- 6. `column` refuses what it must ---------------------------------------
 
 #[test]
-fn column_refuse_une_feuille_et_une_colonne_texte() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn column_refuses_a_sheet_and_a_text_column() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
-for chemin in ("[Book1]Sheet1", "[Book1]Sheet1!T"):
+for path in ("[Book1]Sheet1", "[Book1]Sheet1!T"):
     try:
-        pyst.column(pyst.resolve(chemin))
-        print("ACCEPTE", chemin)
+        pyst.column(pyst.resolve(path))
+        print("ACCEPTED", path)
     except pyst.InvalidValueError:
-        print("REFUSE", chemin)
-    except Exception as erreur:
-        print("AUTRE", type(erreur).__name__, chemin)
+        print("REFUSED", path)
+    except Exception as error:
+        print("OTHER", type(error).__name__, path)
 "#,
     );
 
     assert_eq!(
-        lignes(&outcome),
+        stdout_lines(&outcome),
         vec![
-            "REFUSE [Book1]Sheet1".to_owned(),
-            "REFUSE [Book1]Sheet1!T".to_owned()
+            "REFUSED [Book1]Sheet1".to_owned(),
+            "REFUSED [Book1]Sheet1!T".to_owned()
         ]
     );
 }
 
-// --- 7. `set_column` passe par le bus ---------------------------------------
+// --- 7. `set_column` goes through the bus ---------------------------------------
 
 #[test]
-fn set_column_ecrit_par_le_bus() {
-    let banc = banc();
-    executer(
-        &banc,
+fn set_column_writes_through_the_bus() {
+    let bench = bench();
+    execute(
+        &bench,
         r#"
 a = pyst.resolve("[Book1]Sheet1!A")
 b = pyst.resolve("[Book1]Sheet1!B")
@@ -644,77 +635,73 @@ pyst.set_column(b, pyst.column(a))
 "#,
     );
 
-    assert_eq!(valeurs(&banc.session, banc.b), vec![1.0, 2.0, 3.0]);
+    assert_eq!(values(&bench.session, bench.b), vec![1.0, 2.0, 3.0]);
     assert!(
-        banc.session
-            .snapshot()
-            .expect("instantané")
-            .history
-            .can_undo,
-        "l'écriture doit avoir laissé une entrée d'historique"
+        bench.session.snapshot().expect("snapshot").history.can_undo,
+        "the write must have left a history entry"
     );
 }
 
 #[test]
-fn set_column_refuse_une_longueur_differente_sans_envoyer_de_commande() {
-    let banc = banc();
-    let avant = revision(&banc.session);
+fn set_column_refuses_a_different_length_without_sending_a_command() {
+    let bench = bench();
+    let before = revision(&bench.session);
 
-    let outcome = executer(
-        &banc,
+    let outcome = execute(
+        &bench,
         r#"
 import numpy
 b = pyst.resolve("[Book1]Sheet1!B")
-for tableau in (numpy.array([1.0, 2.0]), numpy.array([1.0, 2.0, 3.0, 4.0])):
+for array in (numpy.array([1.0, 2.0]), numpy.array([1.0, 2.0, 3.0, 4.0])):
     try:
-        pyst.set_column(b, tableau)
-        print("ACCEPTE", len(tableau))
+        pyst.set_column(b, array)
+        print("ACCEPTED", len(array))
     except pyst.InvalidValueError:
-        print("REFUSE", len(tableau))
+        print("REFUSED", len(array))
 "#,
     );
 
     assert_eq!(
-        lignes(&outcome),
-        vec!["REFUSE 2".to_owned(), "REFUSE 4".to_owned()]
+        stdout_lines(&outcome),
+        vec!["REFUSED 2".to_owned(), "REFUSED 4".to_owned()]
     );
     assert_eq!(
-        revision(&banc.session),
-        avant,
-        "un refus de longueur ne doit envoyer aucune commande"
+        revision(&bench.session),
+        before,
+        "a length refusal must send no command"
     );
-    assert_eq!(valeurs(&banc.session, banc.b), vec![10.0, 20.0, 30.0]);
+    assert_eq!(values(&bench.session, bench.b), vec![10.0, 20.0, 30.0]);
 }
 
 #[test]
-fn set_column_accepte_un_tableau_non_contigu() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn set_column_accepts_a_non_contiguous_array() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
 import numpy
 source = numpy.arange(6.0)
-tranche = source[::2]
-print(tranche.flags["C_CONTIGUOUS"])
-pyst.set_column(pyst.resolve("[Book1]Sheet1!B"), tranche)
+slice = source[::2]
+print(slice.flags["C_CONTIGUOUS"])
+pyst.set_column(pyst.resolve("[Book1]Sheet1!B"), slice)
 "#,
     );
 
     assert_eq!(
-        lignes(&outcome)[0],
+        stdout_lines(&outcome)[0],
         "False",
-        "la tranche doit bien être non contiguë, sinon le test ne prouve rien"
+        "the slice must indeed be non-contiguous, otherwise the test proves nothing"
     );
-    assert_eq!(valeurs(&banc.session, banc.b), vec![0.0, 2.0, 4.0]);
+    assert_eq!(values(&bench.session, bench.b), vec![0.0, 2.0, 4.0]);
 }
 
-// --- 8. `undo` depuis Python ------------------------------------------------
+// --- 8. `undo` from Python ------------------------------------------------
 
 #[test]
-fn undo_depuis_python_defait_les_ecritures_puis_rend_false() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn undo_from_python_undoes_the_writes_then_returns_false() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
 import numpy
 a = pyst.resolve("[Book1]Sheet1!A")
@@ -731,340 +718,347 @@ print(pyst.undo())
     );
 
     assert_eq!(
-        lignes(&outcome),
+        stdout_lines(&outcome),
         vec![
             "[7.0, 8.0, 9.0]".to_owned(),
             "True".to_owned(),
             "[10.0, 20.0, 30.0]".to_owned(),
             "False".to_owned(),
             "[10.0, 20.0, 30.0]".to_owned(),
-            // Pile vide : `False`, jamais une exception.
+            // Empty stack: `False`, never an exception.
             "False".to_owned(),
         ]
     );
-    assert_eq!(valeurs(&banc.session, banc.b), vec![10.0, 20.0, 30.0]);
+    assert_eq!(values(&bench.session, bench.b), vec![10.0, 20.0, 30.0]);
 }
 
-// --- 9. Une seule pile ------------------------------------------------------
+// --- 9. A single stack ------------------------------------------------------
 
 #[test]
-fn une_seule_pile_dhistorique_pour_lacteur_et_le_script() {
-    let banc = banc();
-    // Une commande venue du côté Rust, comme le ferait une saisie de cellule.
-    banc.session
+fn a_single_history_stack_for_the_actor_and_the_script() {
+    let bench = bench();
+    // A command coming from the Rust side, as a cell entry would.
+    bench
+        .session
         .execute(Command::SetCells {
-            column: banc.a,
+            column: bench.a,
             start: 0,
             values: stokesforge_core::ValueBlock::Float(vec![42.0]),
             expected_version: None,
         })
-        .expect("commande de l'acteur");
-    assert_eq!(valeurs(&banc.session, banc.a), vec![42.0, 2.0, 3.0]);
+        .expect("actor command");
+    assert_eq!(values(&bench.session, bench.a), vec![42.0, 2.0, 3.0]);
 
-    let outcome = executer(&banc, "print(pyst.undo())\n");
+    let outcome = execute(&bench, "print(pyst.undo())\n");
 
-    assert_eq!(lignes(&outcome), vec!["True".to_owned()]);
+    assert_eq!(stdout_lines(&outcome), vec!["True".to_owned()]);
     assert_eq!(
-        valeurs(&banc.session, banc.a),
+        values(&bench.session, bench.a),
         vec![1.0, 2.0, 3.0],
-        "c'est bien la commande de l'acteur que le script a annulée"
+        "it is indeed the actor's command that the script undid"
     );
 }
 
-// --- 10. LE CRITÈRE DE FIN --------------------------------------------------
+// --- 10. THE END CRITERION --------------------------------------------------
 
 #[test]
-fn critere_de_fin_lecture_sans_copie_ecriture_par_le_bus_annulation_par_ctrl_z() {
-    let banc = banc();
-    let arbre_avant = arbre(&banc.session);
-    let adresse_de_a = adresse_rust(&banc.session, banc.a);
+fn end_criterion_zero_copy_read_write_through_the_bus_undo_with_ctrl_z() {
+    let bench = bench();
+    let tree_before = tree(&bench.session);
+    let address_of_a = rust_address(&bench.session, bench.a);
 
-    // Un script lit A sans copie et écrit B par le bus.
-    let outcome = executer(
-        &banc,
+    // A script reads A without copying and writes B through the bus.
+    let outcome = execute(
+        &bench,
         r#"
 a = pyst.resolve("[Book1]Sheet1!A")
 b = pyst.resolve("[Book1]Sheet1!B")
-lu = pyst.column(a)
-print(lu.__array_interface__["data"][0])
-pyst.set_column(b, lu)
+view_read = pyst.column(a)
+print(view_read.__array_interface__["data"][0])
+pyst.set_column(b, view_read)
 print([float(x) for x in pyst.column(b)])
 "#,
     );
 
-    let lignes = lignes(&outcome);
-    let adresse_vue_par_numpy: usize = lignes[0].parse().expect("adresse entière");
+    let stdout_lines = stdout_lines(&outcome);
+    let address_seen_by_numpy: usize = stdout_lines[0].parse().expect("integer address");
     assert_eq!(
-        adresse_vue_par_numpy, adresse_de_a,
-        "la lecture doit être SANS COPIE : numpy regarde le Vec du modèle"
+        address_seen_by_numpy, address_of_a,
+        "the read must be WITHOUT COPY: numpy looks at the model's Vec"
     );
-    assert_eq!(lignes[1], "[1.0, 2.0, 3.0]");
-    assert_eq!(valeurs(&banc.session, banc.b), vec![1.0, 2.0, 3.0]);
+    assert_eq!(stdout_lines[1], "[1.0, 2.0, 3.0]");
+    assert_eq!(values(&bench.session, bench.b), vec![1.0, 2.0, 3.0]);
 
-    // Ctrl+Z dans la fenêtre : une annulation venue du côté Rust.
-    let annule = banc.session.undo().expect("undo de l'hôte");
-    assert!(annule.is_some(), "il y avait bien quelque chose à annuler");
+    // Ctrl+Z in the window: an undo coming from the Rust side.
+    let undone = bench.session.undo().expect("host undo");
+    assert!(undone.is_some(), "there was indeed something to undo");
 
-    assert_eq!(valeurs(&banc.session, banc.b), vec![10.0, 20.0, 30.0]);
+    assert_eq!(values(&bench.session, bench.b), vec![10.0, 20.0, 30.0]);
     assert_eq!(
-        arbre(&banc.session),
-        arbre_avant,
-        "après annulation, l'arbre doit être égal bit à bit à celui d'avant le script"
+        tree(&bench.session),
+        tree_before,
+        "after undo, the tree must be bit-for-bit equal to the one before the script"
     );
 }
 
-// --- 11. Le GIL est relâché pendant l'attente de l'acteur -------------------
+// --- 11. The GIL is released while waiting for the actor -------------------
 
 #[test]
-fn le_gil_est_relache_pendant_lattente_de_lacteur() {
-    // Accès exclusif : ce test déplace un réglage global de l'interpréteur.
-    let banc = banc_exclusif();
+fn the_gil_is_released_while_waiting_for_the_actor() {
+    // Exclusive access: this test moves a global setting of the interpreter.
+    let bench = exclusive_bench();
 
-    // Un intervalle de commutation énorme empêche l'interpréteur de lâcher le
-    // GIL de lui-même entre deux instructions. Si un autre fil parvient quand
-    // même à exécuter du Python pendant la boucle, c'est que le fil de script
-    // l'a relâché EXPLICITEMENT — c'est-à-dire que `Python::detach` fait son
-    // travail. Sans cette précaution, le test passerait tout seul : CPython
-    // rend la main toutes les 5 ms, quoi que fasse le script.
+    // A huge switch interval prevents the interpreter from releasing the GIL
+    // on its own between two instructions. If another thread nonetheless
+    // manages to run Python during the loop, the script thread released it
+    // EXPLICITLY, meaning `Python::detach` does its job. Without this
+    // precaution, the test would pass by itself: CPython yields every 5 ms,
+    // whatever the script does.
     let source = r#"
 import sys
-ancien = sys.getswitchinterval()
+previous = sys.getswitchinterval()
 sys.setswitchinterval(5.0)
 try:
     b = pyst.resolve("[Book1]Sheet1!B")
-    valeurs = pyst.column(pyst.resolve("[Book1]Sheet1!A"))
+    values = pyst.column(pyst.resolve("[Book1]Sheet1!A"))
     for _ in range(500):
-        pyst.set_column(b, valeurs)
+        pyst.set_column(b, values)
 finally:
-    sys.setswitchinterval(ancien)
+    sys.setswitchinterval(previous)
 "#;
 
-    let compteur = Arc::new(AtomicUsize::new(0));
-    let temoin_compteur = Arc::clone(&compteur);
-    let temoin_moteur = Arc::clone(&banc.engine);
-    let temoin = thread::spawn(move || {
-        if !attendre(Duration::from_secs(30), || temoin_moteur.is_running()) {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let witness_counter = Arc::clone(&counter);
+    let witness_engine = Arc::clone(&bench.engine);
+    let witness = thread::spawn(move || {
+        if !wait_until(Duration::from_secs(30), || witness_engine.is_running()) {
             return;
         }
-        while temoin_moteur.is_running() {
+        while witness_engine.is_running() {
             Python::attach(|py| {
                 let _ = py.eval(c"1 + 1", None, None);
             });
-            temoin_compteur.fetch_add(1, Ordering::Relaxed);
-            // Sans cette pause, le fil témoin reprend le GIL aussitôt relâché
-            // et met le fil de script en convoi : la boucle de 500 tours
-            // passait de quelques dizaines de millisecondes à une vingtaine de
-            // secondes. Le test mesure la POSSIBILITÉ de prendre le GIL, pas
-            // la capacité à le monopoliser.
+            witness_counter.fetch_add(1, Ordering::Relaxed);
+            // Without this pause, the witness thread retakes the GIL as soon as
+            // it is released and puts the script thread in a convoy: the
+            // 500-round loop went from a few tens of milliseconds to about
+            // twenty seconds. The test measures the POSSIBILITY of taking the
+            // GIL, not the ability to monopolize it.
             thread::sleep(Duration::from_micros(200));
         }
     });
 
-    let outcome = banc
+    let outcome = bench
         .engine
         .run(source)
-        .expect("le moteur accepte le script");
-    temoin.join().expect("le fil témoin se termine");
+        .expect("the engine accepts the script");
+    witness.join().expect("the witness thread finishes");
 
     assert!(
         outcome.error.is_none(),
-        "script en échec :\n{}",
+        "script failed:\n{}",
         outcome.error.clone().unwrap_or_default()
     );
-    let tours = compteur.load(Ordering::Relaxed);
+    let rounds = counter.load(Ordering::Relaxed);
     assert!(
-        tours >= 20,
-        "un autre fil doit pouvoir exécuter du Python pendant la boucle : \
-         {tours} tour(s) obtenu(s). Avec un intervalle de commutation de 5 s, \
-         un fil de script qui garderait le GIL pendant ses allers-retours n'en \
-         laisserait passer aucun."
+        rounds >= 20,
+        "another thread must be able to run Python during the loop: \
+         {rounds} round(s) obtained. With a switch interval of 5 s, \
+         a script thread that kept the GIL during its round trips would let \
+         none through."
     );
 }
 
 // --- 12. Interruption -------------------------------------------------------
 
-/// Lance `source` sur un fil détaché et rend le canal qui portera son résultat.
+/// Runs `source` on a detached thread and returns the channel that will carry
+/// its result.
 ///
-/// Détaché, et non `thread::scope` : si un critère borné expire, il faut
-/// pouvoir abandonner le fil plutôt que de bloquer le test sur sa jointure.
-fn lancer_en_arriere_plan(
-    moteur: &Arc<ScriptEngine>,
+/// Detached, and not `thread::scope`: if a bounded criterion expires, the
+/// thread must be abandonable rather than blocking the test on its join.
+fn spawn_in_background(
+    engine: &Arc<ScriptEngine>,
     source: &'static str,
 ) -> mpsc::Receiver<Result<ScriptOutcome, ScriptError>> {
     let (tx, rx) = mpsc::channel();
-    let moteur = Arc::clone(moteur);
+    let engine = Arc::clone(engine);
     thread::spawn(move || {
-        let _ = tx.send(moteur.run(source));
+        let _ = tx.send(engine.run(source));
     });
     rx
 }
 
 #[test]
-fn interruption_dune_boucle_dappels_pyst() {
-    let banc = banc();
-    let resultat = lancer_en_arriere_plan(&banc.engine, "while True:\n    pyst.undo()\n");
+fn interruption_of_a_loop_of_pyst_calls() {
+    let bench = bench();
+    let result = spawn_in_background(&bench.engine, "while True:\n    pyst.undo()\n");
 
     assert!(
-        attendre(Duration::from_secs(30), || banc.engine.is_running()),
-        "le script doit avoir démarré"
+        wait_until(Duration::from_secs(30), || bench.engine.is_running()),
+        "the script must have started"
     );
-    banc.engine.interrupt();
+    bench.engine.interrupt();
 
-    let outcome = resultat
+    let outcome = result
         .recv_timeout(Duration::from_secs(30))
-        .expect("le script doit s'arrêter")
-        .expect("le moteur avait accepté le script");
-    assert!(outcome.interrupted, "l'arrêt doit être signalé comme voulu");
+        .expect("the script must stop")
+        .expect("the engine had accepted the script");
+    assert!(outcome.interrupted, "the stop must be reported as intended");
     assert!(
         outcome
             .error
             .as_deref()
-            .is_some_and(|erreur| erreur.contains("KeyboardInterrupt")),
-        "la trace doit dire où le script s'est arrêté : {:?}",
+            .is_some_and(|error| error.contains("KeyboardInterrupt")),
+        "the trace must say where the script stopped: {:?}",
         outcome.error
     );
 }
 
 #[test]
-fn interruption_dune_boucle_python_pure() {
-    let banc = banc();
-    let resultat = lancer_en_arriere_plan(&banc.engine, "while True:\n    pass\n");
+fn interruption_of_a_pure_python_loop() {
+    let bench = bench();
+    let result = spawn_in_background(&bench.engine, "while True:\n    pass\n");
 
     assert!(
-        attendre(Duration::from_secs(30), || banc.engine.is_running()),
-        "le script doit avoir démarré"
+        wait_until(Duration::from_secs(30), || bench.engine.is_running()),
+        "the script must have started"
     );
-    // Laisser la boucle entrer dans le `while` : l'exception asynchrone n'a
-    // d'effet qu'à un point de contrôle de l'interpréteur.
+    // Let the loop enter the `while`: the asynchronous exception only takes
+    // effect at an interpreter check point.
     thread::sleep(Duration::from_millis(50));
-    banc.engine.interrupt();
+    bench.engine.interrupt();
 
-    let outcome = resultat
+    let outcome = result
         .recv_timeout(Duration::from_secs(30))
-        .expect("une boucle Python pure doit s'arrêter aussi")
-        .expect("le moteur avait accepté le script");
-    assert!(outcome.interrupted, "l'arrêt doit être signalé comme voulu");
+        .expect("a pure Python loop must stop too")
+        .expect("the engine had accepted the script");
+    assert!(outcome.interrupted, "the stop must be reported as intended");
     assert!(
         outcome
             .error
             .as_deref()
-            .is_some_and(|erreur| erreur.contains("KeyboardInterrupt")),
-        "la boucle doit avoir été cassée par un KeyboardInterrupt : {:?}",
+            .is_some_and(|error| error.contains("KeyboardInterrupt")),
+        "the loop must have been broken by a KeyboardInterrupt: {:?}",
         outcome.error
     );
 }
 
-// --- 13. Un script à la fois ------------------------------------------------
+// --- 13. One script at a time ------------------------------------------------
 
 #[test]
-fn un_seul_script_a_la_fois() {
-    let banc = banc();
-    let resultat = lancer_en_arriere_plan(&banc.engine, "while True:\n    pyst.undo()\n");
+fn one_script_at_a_time() {
+    let bench = bench();
+    let result = spawn_in_background(&bench.engine, "while True:\n    pyst.undo()\n");
 
     assert!(
-        attendre(Duration::from_secs(30), || banc.engine.is_running()),
-        "le premier script doit avoir démarré"
+        wait_until(Duration::from_secs(30), || bench.engine.is_running()),
+        "the first script must have started"
     );
-    let refus = banc.engine.run("pass");
+    let refusal = bench.engine.run("pass");
     assert!(
-        matches!(refus, Err(ScriptError::Busy)),
-        "un second script doit être refusé : {refus:?}"
+        matches!(refusal, Err(ScriptError::Busy)),
+        "a second script must be refused: {refusal:?}"
     );
 
-    banc.engine.interrupt();
-    let _ = resultat.recv_timeout(Duration::from_secs(30));
+    bench.engine.interrupt();
+    let _ = result.recv_timeout(Duration::from_secs(30));
 }
 
-// --- 14. Le fil survit à un script en erreur --------------------------------
+// --- 14. The thread survives a script in error --------------------------------
 
 #[test]
-fn le_fil_survit_a_un_script_en_erreur() {
-    let banc = banc();
-    let en_erreur = banc
+fn the_thread_survives_a_script_in_error() {
+    let bench = bench();
+    let failed = bench
         .engine
-        .run("print(\"avant\")\n1 / 0\n")
-        .expect("le moteur accepte le script");
-    assert!(en_erreur.error.is_some());
+        .run("print(\"before\")\n1 / 0\n")
+        .expect("the engine accepts the script");
+    assert!(failed.error.is_some());
 
-    let ensuite = executer(
-        &banc,
+    let afterwards = execute(
+        &bench,
         "print([float(x) for x in pyst.column(pyst.resolve(\"[Book1]Sheet1!A\"))])\n",
     );
-    assert_eq!(lignes(&ensuite), vec!["[1.0, 2.0, 3.0]".to_owned()]);
-    assert!(!banc.engine.is_running());
+    assert_eq!(
+        stdout_lines(&afterwards),
+        vec!["[1.0, 2.0, 3.0]".to_owned()]
+    );
+    assert!(!bench.engine.is_running());
 }
 
-// --- 15. Poignée et annulation ----------------------------------------------
+// --- 15. Handle and undo ----------------------------------------------
 
 #[test]
-fn une_poignee_survit_a_une_suppression_annulee() {
-    let banc = banc();
-    // L'espace de noms est conservé d'une exécution à l'autre : la poignée
-    // posée ici sera encore là au troisième script.
-    executer(&banc, "h = pyst.resolve(\"[Book1]Sheet1!B\")\n");
+fn a_handle_survives_an_undone_deletion() {
+    let bench = bench();
+    // The namespace is kept from one run to the next: the handle set here
+    // will still be there at the third script.
+    execute(&bench, "h = pyst.resolve(\"[Book1]Sheet1!B\")\n");
 
-    banc.session
-        .execute(Command::DeleteColumn { column: banc.b })
-        .expect("suppression côté Rust");
+    bench
+        .session
+        .execute(Command::DeleteColumn { column: bench.b })
+        .expect("deletion on the Rust side");
 
-    let cassee = executer(
-        &banc,
+    let broken = execute(
+        &bench,
         r#"
 try:
     pyst.column(h)
-    print("ENCORE LA")
+    print("STILL THERE")
 except pyst.BrokenReferenceError:
-    print("CASSEE")
+    print("BROKEN")
 "#,
     );
-    assert_eq!(lignes(&cassee), vec!["CASSEE".to_owned()]);
+    assert_eq!(stdout_lines(&broken), vec!["BROKEN".to_owned()]);
 
-    banc.session.undo().expect("annulation de la suppression");
+    bench.session.undo().expect("undo of the deletion");
 
-    let revenue = executer(&banc, "print([float(x) for x in pyst.column(h)])\n");
+    let restored = execute(&bench, "print([float(x) for x in pyst.column(h)])\n");
     assert_eq!(
-        lignes(&revenue),
+        stdout_lines(&restored),
         vec!["[10.0, 20.0, 30.0]".to_owned()],
-        "une poignée reste valide après une suppression annulée"
+        "a handle stays valid after an undone deletion"
     );
 }
 
-// --- Compléments ---------------------------------------------------------------
+// --- Additions -----------------------------------------------------------------
 //
-// La liste exacte des appels, signatures, clés et valeurs de `pyst` n'est plus
-// vérifiée ici : voir `tests/surface_figee.rs` (#331), qui lit « API figée V1 ».
+// The exact list of `pyst` calls, signatures, keys and values is no longer
+// checked here: see `tests/frozen_api.rs` (#331), which reads "Frozen API V1".
 
 #[test]
-fn la_surface_pyst_est_inutilisable_depuis_un_fil_cree_par_le_script() {
-    let banc = banc();
-    let outcome = executer(
-        &banc,
+fn the_pyst_surface_is_unusable_from_a_thread_created_by_the_script() {
+    let bench = bench();
+    let outcome = execute(
+        &bench,
         r#"
 import threading
-resultat = []
-def travail():
+result = []
+def work():
     try:
         pyst.undo()
-        resultat.append("PASSE")
+        result.append("PASSED")
     except RuntimeError:
-        resultat.append("REFUSE")
-fil = threading.Thread(target=travail)
-fil.start()
-fil.join()
-print(resultat[0])
+        result.append("REFUSED")
+worker = threading.Thread(target=work)
+worker.start()
+worker.join()
+print(result[0])
 "#,
     );
-    assert_eq!(lignes(&outcome), vec!["REFUSE".to_owned()]);
+    assert_eq!(stdout_lines(&outcome), vec!["REFUSED".to_owned()]);
 }
 
-/// `pyst.add_shape` / `pyst.remove_shape` (issue #76) passent par `SetPlotSpec` :
-/// les appels rejoignent le groupe du script, l'objet est posé au-dessus des autres, et un
-/// refus (genre inconnu, couleur invalide, non-graphe) ne touche à rien.
+/// `pyst.add_shape` / `pyst.remove_shape` (issue #76) go through `SetPlotSpec`:
+/// the calls join the script's group, the object is placed above the others,
+/// and a refusal (unknown kind, invalid color, non-graph) touches nothing.
 #[test]
-fn les_objets_graphiques_se_posent_se_retirent_et_sannulent_depuis_python() {
-    let banc = banc();
-    let root = banc.session.snapshot().unwrap().tree.root();
-    banc.session
+fn graphic_objects_can_be_placed_removed_and_undone_from_python() {
+    let bench = bench();
+    let root = bench.session.snapshot().unwrap().tree.root();
+    bench
+        .session
         .execute(stokesforge_commands::Command::AddGraph {
             parent: root,
             name: Some("Graph1".to_owned()),
@@ -1072,41 +1066,41 @@ fn les_objets_graphiques_se_posent_se_retirent_et_sannulent_depuis_python() {
                 stokesforge_plot::Panels::new(vec![stokesforge_plot::PanelSpec::at(0, 0)]),
             ),
         })
-        .expect("graphe");
-    let formes = |banc: &Banc| -> Vec<stokesforge_plot::ShapeSpec> {
-        let snapshot = banc.session.snapshot().unwrap();
+        .expect("graph");
+    let shapes = |bench: &Bench| -> Vec<stokesforge_plot::ShapeSpec> {
+        let snapshot = bench.session.snapshot().unwrap();
         let id = snapshot.tree.resolve("[Graph1]").unwrap();
         match snapshot.tree.node(id).unwrap().kind() {
             stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.panels[0].shapes.clone(),
-            _ => panic!("pas un graphe"),
+            _ => panic!("not a graph"),
         }
     };
 
-    executer(
-        &banc,
+    execute(
+        &bench,
         r##"
 g = pyst.resolve("[Graph1]")
 assert pyst.add_shape(g, "rectangle", 1, 2, 3, 4, fill_color="#33669980", line_width=2) == 0
 assert pyst.add_shape(g, "arrow", 0, 0, 5, 5, line_color="#aa3311") == 1
 "##,
     );
-    let posees = formes(&banc);
-    assert_eq!(posees.len(), 2);
-    assert_eq!(posees[0].kind, stokesforge_plot::ShapeKind::Rectangle);
-    assert_eq!(posees[0].fill_color, "#33669980");
-    assert_eq!(posees[0].line_width, 2.0);
-    assert_eq!(posees[1].kind, stokesforge_plot::ShapeKind::Arrow);
-    assert_eq!((posees[1].x2, posees[1].y2), (5.0, 5.0));
+    let placed = shapes(&bench);
+    assert_eq!(placed.len(), 2);
+    assert_eq!(placed[0].kind, stokesforge_plot::ShapeKind::Rectangle);
+    assert_eq!(placed[0].fill_color, "#33669980");
+    assert_eq!(placed[0].line_width, 2.0);
+    assert_eq!(placed[1].kind, stokesforge_plot::ShapeKind::Arrow);
+    assert_eq!((placed[1].x2, placed[1].y2), (5.0, 5.0));
 
-    // Un refus ne change rien et lève InvalidValueError.
-    let avant = banc.session.snapshot().unwrap().revision;
-    executer(
-        &banc,
+    // A refusal changes nothing and raises InvalidValueError.
+    let before = bench.session.snapshot().unwrap().revision;
+    execute(
+        &bench,
         r##"
 g = pyst.resolve("[Graph1]")
-for appel in (
+for call in (
     lambda: pyst.add_shape(g, "triangle", 0, 0, 1, 1),
-    lambda: pyst.add_shape(g, "line", 0, 0, 1, 1, line_color="rouge"),
+    lambda: pyst.add_shape(g, "line", 0, 0, 1, 1, line_color="red"),
     lambda: pyst.add_shape(g, "line", 0, 0, float("nan"), 1),
     lambda: pyst.add_shape(g, "line", 0, 0, 1, 1, panel=(4, 4)),
     lambda: pyst.add_shape(g, "line", 0, 0, 1, 1, axis="top"),
@@ -1114,19 +1108,23 @@ for appel in (
     lambda: pyst.add_shape(pyst.resolve("[Book1]Sheet1!A"), "line", 0, 0, 1, 1),
 ):
     try:
-        appel()
+        call()
     except pyst.InvalidValueError:
         pass
     else:
-        raise AssertionError("refus attendu")
+        raise AssertionError("refusal expected")
 "##,
     );
-    assert_eq!(banc.session.snapshot().unwrap().revision, avant);
+    assert_eq!(bench.session.snapshot().unwrap().revision, before);
 
-    executer(&banc, "pyst.remove_shape(pyst.resolve('[Graph1]'), 0)\n");
-    let restantes = formes(&banc);
-    assert_eq!(restantes.len(), 1);
-    assert_eq!(restantes[0].kind, stokesforge_plot::ShapeKind::Arrow);
-    executer(&banc, "assert pyst.undo()\n");
-    assert_eq!(formes(&banc).len(), 2, "Ctrl+Z rend l'objet retiré");
+    execute(&bench, "pyst.remove_shape(pyst.resolve('[Graph1]'), 0)\n");
+    let remaining = shapes(&bench);
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].kind, stokesforge_plot::ShapeKind::Arrow);
+    execute(&bench, "assert pyst.undo()\n");
+    assert_eq!(
+        shapes(&bench).len(),
+        2,
+        "Ctrl+Z restores the removed object"
+    );
 }

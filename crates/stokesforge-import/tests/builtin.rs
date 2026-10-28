@@ -1,5 +1,6 @@
-//! Les modèles fournis d'office lisent leurs fixtures, et le choix automatique
-//! propose le bon (ou aucun) pour chaque fichier réel de `test/import/`.
+//! The templates provided out of the box read their fixtures, and the
+//! automatic choice proposes the right one (or none) for each real file in
+//! `test/import/`.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +10,7 @@ fn fixture(name: &str) -> (PathBuf, Vec<u8>) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/import")
         .join(name);
-    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path:?} : {e}"));
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
     (path, bytes)
 }
 
@@ -17,7 +18,7 @@ fn recipe(name: &str) -> ImportRecipe {
     builtin_recipes()
         .into_iter()
         .find(|r| r.name == name)
-        .unwrap_or_else(|| panic!("modèle fourni « {name} » absent"))
+        .unwrap_or_else(|| panic!("provided template \"{name}\" missing"))
 }
 
 fn auto_name(file: &str) -> Option<String> {
@@ -86,14 +87,14 @@ fn automatic_choice_proposes_the_right_model_or_none() {
         auto_name("rpe_nohead_tab.asc").as_deref(),
         Some("RPE (tabulation)")
     );
-    // Sans signature propre : jamais proposé d'office.
+    // Without a signature of its own: never proposed automatically.
     assert_eq!(auto_name("analytikjena_nohead_semicolon.csv"), None);
     assert_eq!(auto_name("generic_named_header.csv"), None);
     assert_eq!(auto_name("proprietary_binary.dat"), None);
 }
 
-/// Protège les tests de ce binaire qui redirigent le dossier de config
-/// (état du *processus*, partagé par les threads de `cargo test`).
+/// Protects the tests in this binary that redirect the config folder
+/// (*process* state, shared by the `cargo test` threads).
 static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
@@ -102,15 +103,15 @@ fn builtins_are_listed_but_never_written_to_the_user_file() {
         .lock()
         .unwrap_or_else(|err| err.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    // Un dossier neuf, donc aucune recette utilisateur : `config_dir` lit
-    // `STOKESFORGE_CONFIG_DIR` (#332), `directories` ignore `XDG_CONFIG_HOME`
-    // hors Linux. Les valeurs d'avant sont restaurées, même sur panique.
-    let _restauration = ConfigRestauree::redirige(dir.path());
+    // A fresh folder, so no user recipe: `config_dir` reads
+    // `STOKESFORGE_CONFIG_DIR` (#332), `directories` ignores `XDG_CONFIG_HOME`
+    // outside Linux. The previous values are restored, even on panic.
+    let _restoration = RestoredConfig::redirect(dir.path());
     let store = RecipeStore::load_with_builtins();
     assert!(store.recipes().len() >= builtin_recipes().len());
     assert!(RecipeStore::load().recipes().is_empty());
     store.save().unwrap();
-    assert!(RecipeStore::load().recipes().is_empty(), "rien d'écrit");
+    assert!(RecipeStore::load().recipes().is_empty(), "nothing written");
 
     let mut mine = store.clone();
     let mut edited = recipe("RPE (tabulation)");
@@ -123,37 +124,33 @@ fn builtins_are_listed_but_never_written_to_the_user_file() {
         .iter()
         .filter(|r| r.name == "RPE (tabulation)")
         .collect();
-    assert_eq!(
-        rpe.len(),
-        1,
-        "la version modifiée remplace celle du programme"
-    );
+    assert_eq!(rpe.len(), 1, "the modified version replaces the program's");
     assert_eq!(rpe[0].skip_chars, 3);
 }
 
-/// Pose `STOKESFORGE_CONFIG_DIR` et `XDG_CONFIG_HOME`, restaure les deux.
-struct ConfigRestauree([(&'static str, Option<std::ffi::OsString>); 2]);
+/// Sets `STOKESFORGE_CONFIG_DIR` and `XDG_CONFIG_HOME`, restores both.
+struct RestoredConfig([(&'static str, Option<std::ffi::OsString>); 2]);
 
-impl ConfigRestauree {
-    fn redirige(dossier: &std::path::Path) -> Self {
-        let noms = [
+impl RestoredConfig {
+    fn redirect(folder: &std::path::Path) -> Self {
+        let names = [
             stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
             "XDG_CONFIG_HOME",
         ];
-        let avant = noms.map(|nom| (nom, std::env::var_os(nom)));
-        for nom in noms {
-            std::env::set_var(nom, dossier);
+        let before = names.map(|name| (name, std::env::var_os(name)));
+        for name in names {
+            std::env::set_var(name, folder);
         }
-        Self(avant)
+        Self(before)
     }
 }
 
-impl Drop for ConfigRestauree {
+impl Drop for RestoredConfig {
     fn drop(&mut self) {
-        for (nom, valeur) in self.0.iter_mut() {
-            match valeur.take() {
-                Some(valeur) => std::env::set_var(nom, valeur),
-                None => std::env::remove_var(nom),
+        for (name, value) in self.0.iter_mut() {
+            match value.take() {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
             }
         }
     }
@@ -164,5 +161,5 @@ fn a_recipe_survives_export_to_a_file() {
     let original = recipe("Jasco (tabulation)");
     let text = original.to_json();
     assert_eq!(ImportRecipe::from_json(&text).unwrap(), original);
-    assert!(ImportRecipe::from_json("pas une recette").is_err());
+    assert!(ImportRecipe::from_json("not a recipe").is_err());
 }

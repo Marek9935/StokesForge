@@ -1,11 +1,11 @@
-//! Garde-fou : `stokesforge-importer` fait le pont entre `stokesforge-import` (fichiers) et
-//! `stokesforge-core` (modèle), utilisé par l'application, le CLI et les scripts. Il ne
-//! doit connaître ni interface, ni commandes, ni session : chacun de ses
-//! consommateurs décide de **comment** écrire dans le projet.
+//! Guard: `stokesforge-importer` bridges `stokesforge-import` (files) and
+//! `stokesforge-core` (model), used by the application, the CLI and the scripts. It must
+//! know no interface, no commands and no session: each of its
+//! consumers decides **how** to write into the project.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "stokesforge-import", // la lecture des fichiers
-    "stokesforge-core",   // les colonnes du modèle
+    "stokesforge-import", // reading the files
+    "stokesforge-core",   // the model columns
 ];
 
 #[test]

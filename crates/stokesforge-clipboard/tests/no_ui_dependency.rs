@@ -1,10 +1,10 @@
-//! `stokesforge-clipboard` est une feuille : aucune dépendance au reste du
-//! workspace, ni à egui. Il ne reçoit que des octets étiquetés par un type
-//! MIME et un `HasDisplayHandle` (`raw-window-handle`, la norme des
-//! fenêtres) ; l'interface le pilote, jamais l'inverse.
+//! `stokesforge-clipboard` is a leaf: no dependency on the rest of the
+//! workspace, nor on egui. It only receives bytes labeled with a MIME type
+//! and a `HasDisplayHandle` (`raw-window-handle`, the window
+//! standard); the interface drives it, never the reverse.
 
 #[test]
-fn le_crate_ne_depend_d_aucun_crate_du_workspace_ni_d_egui() {
+fn the_crate_depends_on_no_workspace_crate_nor_egui() {
     stokesforge_arch_guard::assert_only_allowed_dependencies(
         env!("CARGO_MANIFEST_DIR"),
         &[

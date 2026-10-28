@@ -1,6 +1,7 @@
-//! Édition de classeur depuis `pyst` (#331, lot 2, S5) : `insert_rows`,
-//! `delete_rows`, `set_column_type`, `move`, `duplicate`, `set_note`. Chaque
-//! appel passe par une commande annulable ; `pyst.undo()` rend l'état d'avant.
+//! Workbook editing from `pyst` (#331, batch 2, S5): `insert_rows`,
+//! `delete_rows`, `set_column_type`, `move`, `duplicate`, `set_note`. Each
+//! call goes through an undoable command; `pyst.undo()` restores the earlier
+//! state.
 #![cfg(feature = "python")]
 
 use std::path::PathBuf;
@@ -11,16 +12,16 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::{ScriptEngine, ScriptOutcome};
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: Arc<ScriptEngine>,
     session: SessionHandle,
     _actor: Session,
 }
 
-/// `[Book1]Sheet1` : `A` = 1, 2, 3 ; `B` = 4, 5, 6 ; `C` mixte = "x", vide, 3.
-/// Un dossier `Dossier` et une note `Note1` à la racine.
-fn banc() -> Banc {
-    let mut project = Project::new("Édition").unwrap();
+/// `[Book1]Sheet1`: `A` = 1, 2, 3; `B` = 4, 5, 6; `C` mixed = "x", empty, 3.
+/// A folder `Folder` and a note `Note1` at the root.
+fn bench() -> Bench {
+    let mut project = Project::new("Editing").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
     project
@@ -41,9 +42,9 @@ fn banc() -> Banc {
             ]),
         )
         .unwrap();
-    project.add_folder(project.root(), "Dossier").unwrap();
+    project.add_folder(project.root(), "Folder").unwrap();
     project
-        .add_note(project.root(), Some("Note1"), "avant")
+        .add_note(project.root(), Some("Note1"), "before")
         .unwrap();
     let actor = Session::spawn(project, None).unwrap();
     let session = actor.handle();
@@ -54,15 +55,15 @@ fn banc() -> Banc {
         });
     let engine =
         Arc::new(ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(prefix)).unwrap());
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
     }
 }
 
-fn run(banc: &Banc, source: &str) -> ScriptOutcome {
-    let outcome = banc.engine.run(source).unwrap();
+fn run(bench: &Bench, source: &str) -> ScriptOutcome {
+    let outcome = bench.engine.run(source).unwrap();
     assert!(outcome.error.is_none(), "{:?}", outcome.error);
     outcome
 }
@@ -73,22 +74,22 @@ const HANDLES: &str = "import math\n\
     b = pyst.resolve('[Book1]Sheet1!B')\n\
     c = pyst.resolve('[Book1]Sheet1!C')\n";
 
-/// Exécute `body` après les poignées usuelles.
-fn script(banc: &Banc, body: &str) -> ScriptOutcome {
-    run(banc, &format!("{HANDLES}{body}"))
+/// Runs `body` after the usual handles.
+fn script(bench: &Bench, body: &str) -> ScriptOutcome {
+    run(bench, &format!("{HANDLES}{body}"))
 }
 
-/// Le script doit lever `kind` ; rend le message.
-fn refused(banc: &Banc, kind: &str, body: &str) -> String {
+/// The script must raise `kind`; returns the message.
+fn refused(bench: &Bench, kind: &str, body: &str) -> String {
     let source = format!(
         "{HANDLES}try:\n    {body}\nexcept pyst.{kind} as error:\n    caught = str(error)\nelse:\n    raise AssertionError('no {kind}')\nprint(caught)"
     );
-    run(banc, &source).stdout.trim().to_owned()
+    run(bench, &source).stdout.trim().to_owned()
 }
 
 #[test]
-fn insert_rows_insere_des_lignes_vides_et_s_annule() {
-    let b = banc();
+fn insert_rows_inserts_empty_rows_and_undoes() {
+    let b = bench();
     script(
         &b,
         "pyst.insert_rows(sheet, 1, 2)\n\
@@ -108,9 +109,9 @@ fn insert_rows_insere_des_lignes_vides_et_s_annule() {
 }
 
 #[test]
-fn les_ecritures_de_lignes_ne_perimment_pas_la_version_lue_par_le_script() {
-    let b = banc();
-    // Lire `a`, changer ses lignes, puis réécrire : pas de ConcurrentWriteError.
+fn row_writes_do_not_stale_the_version_read_by_the_script() {
+    let b = bench();
+    // Read `a`, change its rows, then write again: no ConcurrentWriteError.
     script(
         &b,
         "pyst.values(a)\npyst.insert_rows(sheet, 0)\npyst.set_values(a, [9.0, 9.0, 9.0, 9.0])\n\
@@ -120,8 +121,8 @@ fn les_ecritures_de_lignes_ne_perimment_pas_la_version_lue_par_le_script() {
 }
 
 #[test]
-fn insert_rows_refuse_ce_qui_n_est_pas_une_feuille_ou_deborde() {
-    let b = banc();
+fn insert_rows_refuses_a_non_worksheet_or_an_overflow() {
+    let b = bench();
     let message = refused(&b, "InvalidValueError", "pyst.insert_rows(a, 0)");
     assert!(message.contains("not a worksheet"), "{message}");
     refused(&b, "InvalidValueError", "pyst.insert_rows(sheet, 10, 1)");
@@ -136,8 +137,8 @@ fn insert_rows_refuse_ce_qui_n_est_pas_une_feuille_ou_deborde() {
 }
 
 #[test]
-fn delete_rows_supprime_des_lignes_et_s_annule() {
-    let b = banc();
+fn delete_rows_removes_rows_and_undoes() {
+    let b = bench();
     script(
         &b,
         "pyst.delete_rows(sheet, 0)\n\
@@ -154,8 +155,8 @@ fn delete_rows_supprime_des_lignes_et_s_annule() {
 }
 
 #[test]
-fn set_column_type_convertit_et_s_annule() {
-    let b = banc();
+fn set_column_type_converts_and_undoes() {
+    let b = bench();
     script(
         &b,
         "pyst.set_column_type(a, 'mixed')\n\
@@ -174,8 +175,8 @@ fn set_column_type_convertit_et_s_annule() {
 }
 
 #[test]
-fn set_column_type_refuse_un_type_inconnu_ou_un_non_colonne() {
-    let b = banc();
+fn set_column_type_refuses_an_unknown_type_or_a_non_column() {
+    let b = bench();
     let message = refused(&b, "InvalidValueError", "pyst.set_column_type(a, 'text')");
     assert!(message.contains("unknown column type"), "{message}");
     refused(
@@ -187,8 +188,8 @@ fn set_column_type_refuse_un_type_inconnu_ou_un_non_colonne() {
 }
 
 #[test]
-fn move_reordonne_et_deplace_sans_changer_la_poignee() {
-    let b = banc();
+fn move_reorders_and_relocates_without_changing_the_handle() {
+    let b = bench();
     script(
         &b,
         "pyst.move(a, sheet)\n\
@@ -196,10 +197,10 @@ fn move_reordonne_et_deplace_sans_changer_la_poignee() {
          pyst.move(c, sheet, 0)\n\
          assert [pyst.info(h)['name'] for h in pyst.children(sheet)] == ['C', 'B', 'A']\n\
          note = pyst.resolve('[Note1]')\n\
-         folder = pyst.resolve('Dossier')\n\
+         folder = pyst.resolve('Folder')\n\
          pyst.move(note, folder)\n\
-         assert pyst.info(pyst.info(note)['parent'])['name'] == 'Dossier'\n\
-         assert pyst.resolve('/Dossier/[Note1]') is not None\n",
+         assert pyst.info(pyst.info(note)['parent'])['name'] == 'Folder'\n\
+         assert pyst.resolve('/Folder/[Note1]') is not None\n",
     );
     script(
         &b,
@@ -210,13 +211,13 @@ fn move_reordonne_et_deplace_sans_changer_la_poignee() {
 }
 
 #[test]
-fn move_refuse_un_parent_inadapte_un_cycle_ou_un_index_hors_limites() {
-    let b = banc();
+fn move_refuses_an_unfit_parent_a_cycle_or_an_out_of_range_index() {
+    let b = bench();
     for body in [
-        "pyst.move(a, pyst.resolve('Dossier'))",
-        "pyst.move(pyst.resolve('Dossier'), pyst.resolve('Dossier'))",
+        "pyst.move(a, pyst.resolve('Folder'))",
+        "pyst.move(pyst.resolve('Folder'), pyst.resolve('Folder'))",
         "pyst.move(a, sheet, 7)",
-        "pyst.move(pyst.root(), pyst.resolve('Dossier'))",
+        "pyst.move(pyst.root(), pyst.resolve('Folder'))",
     ] {
         refused(&b, "InvalidValueError", body);
     }
@@ -227,8 +228,8 @@ fn move_refuse_un_parent_inadapte_un_cycle_ou_un_index_hors_limites() {
 }
 
 #[test]
-fn duplicate_copie_une_feuille_juste_apres_l_originale() {
-    let b = banc();
+fn duplicate_copies_a_sheet_right_after_the_original() {
+    let b = bench();
     script(
         &b,
         "copy = pyst.duplicate(sheet)\n\
@@ -238,8 +239,8 @@ fn duplicate_copie_une_feuille_juste_apres_l_originale() {
          assert pyst.values(ca) == (1.0, 2.0, 3.0)\n\
          pyst.set_values(ca, [0.0])\n\
          assert pyst.values(a) == (1.0, 2.0, 3.0)\n\
-         named = pyst.duplicate(sheet, name='Autre')\n\
-         assert pyst.info(named)['name'] == 'Autre'\n\
+         named = pyst.duplicate(sheet, name='Other')\n\
+         assert pyst.info(named)['name'] == 'Other'\n\
          again = pyst.duplicate(sheet)\n\
          assert pyst.info(again)['name'] == 'Sheet1 copy 2'\n",
     );
@@ -252,8 +253,8 @@ fn duplicate_copie_une_feuille_juste_apres_l_originale() {
 }
 
 #[test]
-fn duplicate_copie_aussi_une_note_et_refuse_la_racine_ou_un_nom_pris() {
-    let b = banc();
+fn duplicate_also_copies_a_note_and_refuses_the_root_or_a_taken_name() {
+    let b = bench();
     script(
         &b,
         "note = pyst.resolve('[Note1]')\n\
@@ -275,9 +276,9 @@ fn duplicate_copie_aussi_une_note_et_refuse_la_racine_ou_un_nom_pris() {
 }
 
 #[test]
-fn set_note_remplace_le_texte_et_s_annule() {
-    let b = banc();
-    let text = |b: &Banc| {
+fn set_note_replaces_the_text_and_undoes() {
+    let b = bench();
+    let text = |b: &Bench| {
         let snapshot = b.session.snapshot().unwrap();
         let id = snapshot.tree.resolve("[Note1]").unwrap();
         match snapshot.tree.node(id).unwrap().kind() {
@@ -285,14 +286,14 @@ fn set_note_remplace_le_texte_et_s_annule() {
             other => panic!("{other:?}"),
         }
     };
-    assert_eq!(text(&b), "avant");
+    assert_eq!(text(&b), "before");
     script(
         &b,
-        "pyst.set_note(pyst.resolve('[Note1]'), 'ligne 1\\nligne 2')",
+        "pyst.set_note(pyst.resolve('[Note1]'), 'line 1\\nline 2')",
     );
-    assert_eq!(text(&b), "ligne 1\nligne 2");
+    assert_eq!(text(&b), "line 1\nline 2");
     script(&b, "assert pyst.undo() is True");
-    assert_eq!(text(&b), "avant");
+    assert_eq!(text(&b), "before");
     let message = refused(&b, "InvalidValueError", "pyst.set_note(a, 'x')");
     assert!(message.contains("not a note"), "{message}");
 }

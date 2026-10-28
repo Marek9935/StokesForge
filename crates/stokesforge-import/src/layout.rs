@@ -1,41 +1,41 @@
-//! Le découpage d'un fichier en zones — en-tête, sous-en-tête, ligne de noms,
-//! données, pied de page, commentaires — calculé **une seule fois** et partagé
-//! par [`crate::parse::parse`] (qui en tire les colonnes) et
-//! [`crate::preview::preview`] (qui en montre les rôles). Les deux ne peuvent
-//! donc plus diverger (issue #23 : ils réécrivaient chacun la même suite
-//! d'étapes, avec des entrées différentes).
+//! The split of a file into zones (header, sub-header, names line, data,
+//! footer, comments), computed **once** and shared by
+//! [`crate::parse::parse`] (which draws the columns from it) and
+//! [`crate::preview::preview`] (which shows its roles). The two can no longer
+//! diverge (issue #23: each rewrote the same sequence of steps, with
+//! different inputs).
 
 use crate::numbers::NumberFormat;
 use crate::parse::{resolve_separator, EffectiveSeparator, ImportError};
 use crate::preview::LineRole;
 use crate::recipe::{HeaderSkip, ImportRecipe};
 
-/// Le découpage d'un texte selon une recette.
+/// The split of a text according to a recipe.
 pub(crate) struct Layout<'a> {
-    /// Toutes les lignes du texte, blanches comprises (terminateurs retirés).
+    /// All the lines of the text, blank ones included (terminators removed).
     pub raw: Vec<&'a str>,
-    /// Première ligne non blanche, et fin (exclue) après retrait des lignes
-    /// blanches de queue : la zone analysée.
+    /// First non-blank line, and end (exclusive) after removing trailing
+    /// blank lines: the analyzed zone.
     pub start: usize,
     pub end: usize,
-    /// Rôle de chaque ligne de `raw` ; `Blank` hors de `start..end`.
+    /// Role of each line of `raw`; `Blank` outside `start..end`.
     pub roles: Vec<LineRole>,
-    /// Indices (dans `raw`) des lignes d'en-tête, principal puis sous-en-tête.
+    /// Indices (in `raw`) of the header lines, main then sub-header.
     pub header: Vec<usize>,
-    /// Position, dans `header`, de la première ligne de sous-en-tête.
+    /// Position, in `header`, of the first sub-header line.
     pub subheader_start: usize,
-    /// Indice de la ligne de noms de colonnes, si la recette en demande une.
+    /// Index of the column names line, if the recipe asks for one.
     pub column_header: Option<usize>,
-    /// Indices des lignes de données gardées, dans l'ordre.
+    /// Indices of the kept data lines, in order.
     pub data: Vec<usize>,
     pub separator: EffectiveSeparator,
     pub numbers: NumberFormat,
 }
 
-/// **Le** découpage en lignes : `\r\n`, `\n` et `\r` seul (anciens Mac)
-/// terminent une ligne. Un texte qui finit par un terminateur donne une
-/// dernière ligne vide (blanche, retirée ensuite). Employé par [`analyze`] et
-/// par `preview::detect_header_layout` : jamais d'autre découpeur.
+/// **The** line splitting: `\r\n`, `\n` and a lone `\r` (old Macs) end a
+/// line. A text that ends with a terminator gives a last empty line (blank,
+/// removed afterwards). Used by [`analyze`] and by
+/// `preview::detect_header_layout`: never another splitter.
 pub(crate) fn split_lines(text: &str) -> Vec<&str> {
     let bytes = text.as_bytes();
     let mut lines = Vec::new();
@@ -62,7 +62,7 @@ pub(crate) fn split_lines(text: &str) -> Vec<&str> {
     lines
 }
 
-/// `line` privée de ses `skip_chars` premiers caractères.
+/// `line` without its first `skip_chars` characters.
 pub(crate) fn skip_str(line: &str, skip_chars: usize) -> &str {
     if skip_chars == 0 {
         return line;
@@ -77,14 +77,14 @@ fn is_comment(line: &str, prefix: &str) -> bool {
     !prefix.is_empty() && line.trim_start().starts_with(prefix)
 }
 
-/// Découpe `text` selon `recipe`. Mêmes échecs que [`crate::parse::parse`] :
-/// fichier vide, ou plus aucune ligne de donnée après l'en-tête, le pied de
-/// page, la ligne de noms ou les lignes ignorées.
+/// Splits `text` according to `recipe`. Same failures as
+/// [`crate::parse::parse`]: empty file, or no data line left after the header,
+/// the footer, the names line or the skipped lines.
 pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout<'a>, ImportError> {
     let raw = split_lines(text);
-    // Lignes blanches aux deux extrémités seulement : une ligne vide au milieu
-    // reste à sa place (elle finira toute en NaN plutôt que de décaler
-    // discrètement les suivantes).
+    // Blank lines at both ends only: an empty line in the middle stays in
+    // place (it ends up all NaN rather than quietly shifting the following
+    // ones).
     let mut start = 0usize;
     while start < raw.len() && raw[start].trim().is_empty() {
         start += 1;
@@ -101,8 +101,8 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     let mut header: Vec<usize> = Vec::new();
     let mut idx = start;
     let subheader_start;
-    // Deux modes d'en-tête : dès que `header_layout` compte une ligne, il
-    // remplace `recipe.header` (voir `docs/chantier-import-previsualisation.md`).
+    // Two header modes: as soon as `header_layout` counts a line, it
+    // replaces `recipe.header` (see `docs/chantier-import-previsualisation.md`).
     if recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0 {
         let main_n = recipe.header_layout.main_header_lines.min(end - idx);
         for _ in 0..main_n {
@@ -156,7 +156,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         return Err(ImportError::NoDataRows);
     }
 
-    // Lignes restantes, commentaires exclus.
+    // Remaining lines, comments excluded.
     let mut remaining: Vec<usize> = Vec::with_capacity(footer_start - idx);
     for i in idx..footer_start {
         if is_comment(skip_str(raw[i], recipe.skip_chars), &recipe.comment_prefix)
@@ -171,9 +171,9 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         return Err(ImportError::NoDataRows);
     }
 
-    // Format des nombres et séparateur : résolus **sur les mêmes lignes** pour
-    // l'import et l'aperçu — les premières lignes restantes (ligne de noms
-    // comprise), préfixe retiré.
+    // Number format and separator: resolved **on the same lines** for the
+    // import and the preview: the first remaining lines (names line
+    // included), prefix removed.
     let numbers = NumberFormat::resolve(
         recipe,
         remaining
@@ -194,7 +194,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     } else {
         None
     };
-    // Plage de lignes : les `skip_data_rows` premières sont ignorées.
+    // Line range: the first `skip_data_rows` are ignored.
     let skipped = recipe.skip_data_rows.min(remaining.len());
     for &i in &remaining[..skipped] {
         roles[i] = LineRole::Skipped;
@@ -204,7 +204,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         return Err(ImportError::NoDataRows);
     }
 
-    // Fin des données : la coupure, puis le pied de page.
+    // Data end: the cut, then the footer.
     let kept = crate::data_end::data_len(
         candidates
             .iter()
@@ -229,8 +229,8 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
             *role = LineRole::Footer;
         }
     }
-    // Les commentaires au-delà de la dernière donnée restent des
-    // commentaires ; toute autre ligne restante est du pied de page.
+    // Comments beyond the last data line stay comments; any other remaining
+    // line is footer.
     Ok(Layout {
         raw,
         start,
@@ -245,15 +245,15 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     })
 }
 
-/// Découpe `text` en blocs selon `split` : des tranches **contiguës** du texte,
-/// dans l'ordre. `BlockSplit::None` rend le texte entier. Un bloc qui n'a que
-/// des lignes blanches n'existe pas.
+/// Splits `text` into blocks according to `split`: **contiguous** slices of
+/// the text, in order. `BlockSplit::None` returns the whole text. A block
+/// with only blank lines does not exist.
 pub(crate) fn split_blocks<'a>(text: &'a str, split: &crate::recipe::BlockSplit) -> Vec<&'a str> {
     use crate::recipe::BlockSplit;
     if matches!(split, BlockSplit::None) {
         return vec![text];
     }
-    // Début (octet) de chaque ligne, et texte de la ligne sans son `\r`/`\n`.
+    // Start (byte) of each line, and the line text without its `\r`/`\n`.
     let mut lines: Vec<(usize, &str)> = Vec::new();
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
@@ -265,8 +265,8 @@ pub(crate) fn split_blocks<'a>(text: &'a str, split: &crate::recipe::BlockSplit)
         BlockSplit::None => {}
         BlockSplit::BeforeLine(marker) => {
             let marker = marker.trim().to_lowercase();
-            // Le premier marqueur n'ouvre pas de bloc : ce qui le précède (une
-            // préface) reste avec le premier bloc. Chacun des suivants en ouvre un.
+            // The first marker does not open a block: what precedes it (a
+            // preface) stays with the first block. Each following one opens one.
             let mut seen_marker = false;
             for (index, (_, line)) in lines.iter().enumerate() {
                 let is_marker =
@@ -337,13 +337,13 @@ mod block_tests {
         let text = "TITLE;a\nX\n1;2\nTITLE;b\nX\n3;4\n";
         let blocks = split_blocks(text, &BlockSplit::BeforeLine("title".into()));
         assert_eq!(blocks, vec!["TITLE;a\nX\n1;2\n", "TITLE;b\nX\n3;4\n"]);
-        // Du texte avant le premier marqueur reste dans le premier bloc.
+        // Text before the first marker stays in the first block.
         let text = "préface\nTITLE;a\n1;2\nTITLE;b\n3;4\n";
         let blocks = split_blocks(text, &BlockSplit::BeforeLine("TITLE".into()));
         assert_eq!(
             blocks,
             vec!["préface\nTITLE;a\n1;2\n", "TITLE;b\n3;4\n"],
-            "la préface reste avec le premier bloc"
+            "the preface stays with the first block"
         );
     }
 

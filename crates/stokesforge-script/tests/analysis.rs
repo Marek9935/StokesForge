@@ -1,5 +1,5 @@
-//! `pyst.analysis` (#181) : les mêmes calculs que le menu Analysis, depuis un
-//! script — mêmes colonnes, même trace, un seul groupe d'annulation.
+//! `pyst.analysis` (#181): the same computations as the Analysis menu, from a
+//! script: same columns, same trace, a single undo group.
 #![cfg(feature = "python")]
 
 use std::path::PathBuf;
@@ -11,22 +11,22 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::{ScriptEngine, ScriptOutcome};
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: Arc<ScriptEngine>,
     session: SessionHandle,
     _actor: Session,
     sheet: NodeId,
 }
 
-/// Une feuille `[Book1]Sheet1` : X = 0..20, Y = 2x + 1, Ref = 2.
-fn banc() -> Banc {
-    banc_avec(false)
+/// A sheet `[Book1]Sheet1`: X = 0..20, Y = 2x + 1, Ref = 2.
+fn bench() -> Bench {
+    bench_with(false)
 }
 
-/// Comme [`banc`], avec en plus (si `pic`) une colonne `G` : une gaussienne
+/// Like [`bench`], plus (if `peak`) a column `G`: a Gaussian with
 /// xc = 8, A = 5, fwhm = 3 (#281).
-fn banc_avec(pic: bool) -> Banc {
-    let mut project = Project::new("Analyse").unwrap();
+fn bench_with(peak: bool) -> Bench {
+    let mut project = Project::new("Analysis").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
     let xs: Vec<f64> = (0..21).map(f64::from).collect();
@@ -40,7 +40,7 @@ fn banc_avec(pic: bool) -> Banc {
     project
         .add_column(sheet, None, Some("Ref"), Column::from_f64(&[2.0; 21]))
         .unwrap();
-    if pic {
+    if peak {
         let g: Vec<f64> = xs
             .iter()
             .map(|v| 5.0 * (-0.5 * ((v - 8.0) / (3.0 / 2.354_820_045)).powi(2)).exp())
@@ -67,7 +67,7 @@ fn banc_avec(pic: bool) -> Banc {
         });
     let engine =
         Arc::new(ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(prefix)).unwrap());
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
@@ -81,23 +81,23 @@ y = pyst.resolve('[Book1]Sheet1!Y')
 ref = pyst.resolve('[Book1]Sheet1!Ref')
 ";
 
-fn run(banc: &Banc, source: &str) -> ScriptOutcome {
-    let outcome = banc.engine.run(&format!("{SETUP}{source}")).unwrap();
+fn run(bench: &Bench, source: &str) -> ScriptOutcome {
+    let outcome = bench.engine.run(&format!("{SETUP}{source}")).unwrap();
     assert!(outcome.error.is_none(), "{:?}", outcome.error);
     outcome
 }
 
-fn columns(banc: &Banc) -> usize {
-    let snapshot = banc.session.snapshot().unwrap();
-    snapshot.tree.children(banc.sheet).unwrap().len()
+fn columns(bench: &Bench) -> usize {
+    let snapshot = bench.session.snapshot().unwrap();
+    snapshot.tree.children(bench.sheet).unwrap().len()
 }
 
 #[test]
-fn un_ajustement_rend_les_parametres_et_ecrit_une_colonne_annulable() {
-    let banc = banc();
-    let before = columns(&banc);
+fn a_fit_returns_the_parameters_and_writes_an_undoable_column() {
+    let bench = bench();
+    let before = columns(&bench);
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 r = pyst.analysis.fit(y, x, model='linear', residuals=True)
 assert abs(r['values']['param.slope'] - 2.0) < 1e-6, r['values']
@@ -109,15 +109,15 @@ print('ok')
 "#,
     );
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
-    assert_eq!(columns(&banc), before + 2);
-    let snapshot = banc.session.snapshot().unwrap();
+    assert_eq!(columns(&bench), before + 2);
+    let snapshot = bench.session.snapshot().unwrap();
     let calc = snapshot.tree.calculations().values().next().unwrap();
     assert_eq!(calc.operation.kind(), OperationKind::Fit);
     assert!(calc.auto_recalc);
-    // Un seul Ctrl+Z annule le calcul et ses colonnes.
-    banc.session.undo().unwrap();
-    assert_eq!(columns(&banc), before);
-    assert!(banc
+    // A single Ctrl+Z undoes the computation and its columns.
+    bench.session.undo().unwrap();
+    assert_eq!(columns(&bench), before);
+    assert!(bench
         .session
         .snapshot()
         .unwrap()
@@ -127,10 +127,10 @@ print('ok')
 }
 
 #[test]
-fn integrale_correction_ligne_de_base_et_pics_ecrivent_leurs_colonnes() {
-    let banc = banc();
+fn integral_correction_baseline_and_peaks_write_their_columns() {
+    let bench = bench();
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 i = pyst.analysis.integrate(y, x, cumulative=True)
 assert abs(i['values']['area.total'] - 420.0) < 1e-6, i['values']
@@ -144,9 +144,9 @@ print('ok')
 "#,
     );
     assert!(outcome.stdout.contains("ok"));
-    let snapshot = banc.session.snapshot().unwrap();
+    let snapshot = bench.session.snapshot().unwrap();
     assert_eq!(snapshot.tree.calculations().len(), 3);
-    // Les noms longs disent la source.
+    // The long names state the source.
     let corrected = snapshot
         .tree
         .calculations()
@@ -168,9 +168,9 @@ print('ok')
 }
 
 #[test]
-fn un_argument_invalide_leve_invalid_value_error_sans_rien_ecrire() {
-    let banc = banc();
-    let before = columns(&banc);
+fn an_invalid_argument_raises_invalid_value_error_without_writing_anything() {
+    let bench = bench();
+    let before = columns(&bench);
     for bad in [
         "pyst.analysis.fit(y, x, model='a*')",
         "pyst.analysis.fit(y, x, model='linear', initial={'zz': 1.0})",
@@ -186,7 +186,7 @@ fn un_argument_invalide_leve_invalid_value_error_sans_rien_ecrire() {
         "pyst.analysis.smooth(y, x, window=-1, window_unit='x')",
     ] {
         run(
-            &banc,
+            &bench,
             &format!(
                 "
 try:
@@ -199,8 +199,8 @@ else:
             ),
         );
     }
-    assert_eq!(columns(&banc), before);
-    assert!(banc
+    assert_eq!(columns(&bench), before);
+    assert!(bench
         .session
         .snapshot()
         .unwrap()
@@ -210,10 +210,10 @@ else:
 }
 
 #[test]
-fn une_colonne_de_calcul_refuse_l_ecriture_directe() {
-    let banc = banc();
+fn a_computed_column_refuses_direct_writing() {
+    let bench = bench();
     run(
-        &banc,
+        &bench,
         r#"
 r = pyst.analysis.integrate(y, x, cumulative=True)
 col = r['columns']['cumulative']
@@ -228,18 +228,18 @@ else:
 }
 
 #[test]
-fn le_calcul_se_recalcule_quand_la_source_change() {
-    let banc = banc();
+fn the_computation_recomputes_when_the_source_changes() {
+    let bench = bench();
     run(
-        &banc,
+        &bench,
         r#"
 r = pyst.analysis.correct(y, ref, x, op='divide')
 out = r['columns']['corrected']
 assert pyst.column(out)[2] == 2.5
-# La référence est figée en copie (#248) : modifier l'original ne change rien.
+# The reference is frozen as a copy (#248): changing the original changes nothing.
 pyst.set_values(ref, [4.0] * 21)
 assert pyst.column(out)[2] == 2.5, list(pyst.column(out))[:4]
-# La source, elle, est relue : y / 2 = 5 / 2.
+# The source, however, is reread: y / 2 = 5 / 2.
 pyst.set_values(y, [10.0] * 21)
 assert pyst.column(out)[2] == 5.0, list(pyst.column(out))[:4]
 "#,
@@ -247,13 +247,13 @@ assert pyst.column(out)[2] == 5.0, list(pyst.column(out))[:4]
 }
 
 #[test]
-fn les_pics_sont_detectes_et_chaque_pic_a_sa_colonne() {
-    let banc = banc();
+fn the_peaks_are_detected_and_each_peak_has_its_column() {
+    let bench = bench();
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 import numpy as np
-book = pyst.create_workbook('Spectre')
+book = pyst.create_workbook('Spectrum')
 sheet = pyst.create_worksheet(book, 'S')
 sx = pyst.create_column(sheet, 'Lambda')
 sy = pyst.create_column(sheet, 'Counts')
@@ -272,11 +272,11 @@ print('ok')
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
 
-/// Les colonnes écrites par le dernier calcul : `(clé, nom long, unité, commentaire)`,
-/// triées par clé (le rang d'un pic est dans la clé : `peak` tout court, le
-/// nom long dit le numéro).
-fn sorties(banc: &Banc) -> Vec<(String, String, String, String)> {
-    let snapshot = banc.session.snapshot().unwrap();
+/// The columns written by the last computation: `(key, long name, unit, comment)`,
+/// sorted by key (a peak's rank is not in the key: plain `peak`, the long
+/// name gives the number).
+fn outputs(bench: &Bench) -> Vec<(String, String, String, String)> {
+    let snapshot = bench.session.snapshot().unwrap();
     let (_, calc) = snapshot.tree.calculations().iter().next_back().unwrap();
     let mut out: Vec<_> = calc
         .outputs
@@ -297,47 +297,47 @@ fn sorties(banc: &Banc) -> Vec<(String, String, String, String)> {
     out
 }
 
-/// #256 : les noms, l'unité et le commentaire sont ceux de la fenêtre
-/// d'analyse (règle unique de `stokesforge-core`) — mêmes attentes que
-/// `the_saved_batch_names_columns_after_their_source` côté interface.
+/// #256: the names, unit and comment are those of the analysis window (single
+/// rule of `stokesforge-core`), with the same expectations as
+/// `the_saved_batch_names_columns_after_their_source` on the interface side.
 #[test]
-fn la_ligne_de_base_porte_les_noms_l_unite_et_le_commentaire_de_l_interface() {
-    let banc = banc();
+fn the_baseline_carries_the_names_unit_and_comment_of_the_interface() {
+    let bench = bench();
     run(
-        &banc,
+        &bench,
         "
 pyst.set_column_meta(y, long_name='Intensity', unit='counts')
 pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)], keep_baseline=True)
 ",
     );
-    let sorties = sorties(&banc);
-    let colonne = |cle: &str| sorties.iter().find(|s| s.0 == cle).unwrap().clone();
-    // La source s'appelle « Y » : le nom court de la correction est « Y ».
-    assert_eq!(colonne("corrected").1, "Intensity (Y-corr)");
-    assert_eq!(colonne("baseline").1, "Baseline of Y");
-    for cle in ["corrected", "baseline"] {
-        assert_eq!(colonne(cle).2, "counts", "{cle}");
-        assert_eq!(colonne(cle).3, "Correction", "{cle}");
+    let outputs = outputs(&bench);
+    let column = |key: &str| outputs.iter().find(|s| s.0 == key).unwrap().clone();
+    // The source is called "Y": the short name of the correction is "Y".
+    assert_eq!(column("corrected").1, "Intensity (Y-corr)");
+    assert_eq!(column("baseline").1, "Baseline of Y");
+    for key in ["corrected", "baseline"] {
+        assert_eq!(column(key).2, "counts", "{key}");
+        assert_eq!(column(key).3, "Correction", "{key}");
     }
-    assert_eq!(sorties.len(), 2);
+    assert_eq!(outputs.len(), 2);
 }
 
 #[test]
-fn sans_ligne_de_base_ecrite_seule_la_courbe_corrigee_est_ajoutee() {
-    let banc = banc();
+fn without_a_written_baseline_only_the_corrected_curve_is_added() {
+    let bench = bench();
     run(
-        &banc,
+        &bench,
         "pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)])",
     );
-    let sorties = sorties(&banc);
-    assert_eq!(sorties.len(), 1, "{sorties:?}");
-    // Sans nom long, le nom court sert des deux côtés.
-    assert_eq!(sorties[0].1, "Y (Y-corr)");
+    let outputs = outputs(&bench);
+    assert_eq!(outputs.len(), 1, "{outputs:?}");
+    // Without a long name, the short name serves on both sides.
+    assert_eq!(outputs[0].1, "Y (Y-corr)");
 }
 
-const DEUX_PICS: &str = "
+const TWO_PEAKS: &str = "
 import numpy as np
-book = pyst.create_workbook('Spectre')
+book = pyst.create_workbook('Spectrum')
 sheet = pyst.create_worksheet(book, 'S')
 sx = pyst.create_column(sheet, 'Lambda')
 sy = pyst.create_column(sheet, 'Counts')
@@ -348,68 +348,64 @@ pyst.set_values(sy, ys)
 pyst.set_column_meta(sx, role='x')
 ";
 
-/// #256 : `peaks` a les deux options de la fenêtre, cochées par défaut.
+/// #256: `peaks` has the two options of the window, checked by default.
 #[test]
-fn les_pics_ecrivent_par_defaut_les_pics_le_fond_et_la_somme() {
-    let banc = banc();
+fn peaks_write_by_default_the_peaks_the_background_and_the_sum() {
+    let bench = bench();
     run(
-        &banc,
-        &format!("{DEUX_PICS}\nr = pyst.analysis.peaks(sy, sx, max_peaks=2)\nprint(sorted(r['columns']))"),
+        &bench,
+        &format!("{TWO_PEAKS}\nr = pyst.analysis.peaks(sy, sx, max_peaks=2)\nprint(sorted(r['columns']))"),
     );
-    let sorties = sorties(&banc);
-    let noms: Vec<(&str, &str)> = sorties
+    let outputs = outputs(&bench);
+    let names: Vec<(&str, &str)> = outputs
         .iter()
         .map(|s| (s.0.as_str(), s.1.as_str()))
         .collect();
-    assert_eq!(noms.len(), 4, "{noms:?}");
-    for attendu in [
+    assert_eq!(names.len(), 4, "{names:?}");
+    for expected in [
         ("background", "Background of Counts"),
         ("peaks_sum", "Sum of peaks of Counts"),
     ] {
-        assert!(noms.contains(&attendu), "{noms:?}");
+        assert!(names.contains(&expected), "{names:?}");
     }
-    let pics: Vec<&str> = sorties
+    let peaks: Vec<&str> = outputs
         .iter()
         .filter(|s| s.0 == "peak")
         .map(|s| s.1.as_str())
         .collect();
-    assert_eq!(pics.len(), 2);
-    assert!(pics.contains(&"Peak 1 of Counts") && pics.contains(&"Peak 2 of Counts"));
-    assert!(sorties.iter().all(|s| s.3 == "Peak Decomposition"));
+    assert_eq!(peaks.len(), 2);
+    assert!(peaks.contains(&"Peak 1 of Counts") && peaks.contains(&"Peak 2 of Counts"));
+    assert!(outputs.iter().all(|s| s.3 == "Peak Decomposition"));
 }
 
 #[test]
-fn les_options_des_pics_retirent_les_colonnes_comme_les_cases_de_la_fenetre() {
-    let cles = |options: &str| {
-        let banc = banc();
+fn the_peak_options_remove_the_columns_like_the_window_checkboxes() {
+    let keys = |options: &str| {
+        let bench = bench();
         run(
-            &banc,
-            &format!("{DEUX_PICS}\npyst.analysis.peaks(sy, sx, max_peaks=2{options})"),
+            &bench,
+            &format!("{TWO_PEAKS}\npyst.analysis.peaks(sy, sx, max_peaks=2{options})"),
         );
-        let mut cles: Vec<String> = sorties(&banc).into_iter().map(|s| s.0).collect();
-        cles.dedup();
-        cles
+        let mut keys: Vec<String> = outputs(&bench).into_iter().map(|s| s.0).collect();
+        keys.dedup();
+        keys
     };
-    assert_eq!(cles(", peak_columns=False"), ["peaks_sum"]);
-    assert_eq!(
-        cles(", sum_column=False"),
-        ["background", "peak"],
-        "pas de somme"
-    );
-    assert!(cles(", peak_columns=False, sum_column=False").is_empty());
+    assert_eq!(keys(", peak_columns=False"), ["peaks_sum"]);
+    assert_eq!(keys(", sum_column=False"), ["background", "peak"], "no sum");
+    assert!(keys(", peak_columns=False, sum_column=False").is_empty());
 }
 
-/// #204 : `"exponential"` est l'exponentielle simple (`A·exp(−x/τ)`), comme dans
-/// le menu Fit ; l'avec-palier et la double ont leur propre nom ; la fenêtre
-/// de centre borne les pics.
+/// #204: `"exponential"` is the simple exponential (`A·exp(−x/τ)`), as in the
+/// Fit menu; the one with a plateau and the double one have their own name; the
+/// center window bounds the peaks.
 #[test]
-fn les_trois_exponentielles_et_la_fenetre_de_centre_ont_leur_nom() {
-    let banc = banc();
+fn the_three_exponentials_and_the_center_window_have_their_name() {
+    let bench = bench();
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 import numpy as np
-book = pyst.create_workbook('Declin')
+book = pyst.create_workbook('Decay')
 sheet = pyst.create_worksheet(book, 'S')
 t = pyst.create_column(sheet, 'T')
 v = pyst.create_column(sheet, 'V')
@@ -436,16 +432,16 @@ print('ok')
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
 
-/// #201 : `y` peut être une liste — un seul calcul multi-séries, rendu série par
-/// série, annulé d'un seul coup ; `shared=[…]` en fait un ajustement global.
+/// #201: `y` can be a list: a single multi-series computation, returned series
+/// by series, undone in one go; `shared=[…]` makes it a global fit.
 #[test]
-fn un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup() {
-    let banc = banc();
+fn a_batch_is_a_single_multi_series_computation_undone_in_one_go() {
+    let bench = bench();
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 import numpy as np
-book = pyst.create_workbook('Lot')
+book = pyst.create_workbook('Batch')
 sheet = pyst.create_worksheet(book, 'S')
 t = pyst.create_column(sheet, 'T')
 pyst.set_values(t, np.linspace(0, 10, 101))
@@ -469,14 +465,14 @@ print('ok')
 "#,
     );
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
-    let snapshot = banc.session.snapshot().unwrap();
+    let snapshot = bench.session.snapshot().unwrap();
     let calcs: Vec<_> = snapshot.tree.calculations().values().collect();
-    assert_eq!(calcs.len(), 2, "un calcul par appel, pas par série");
+    assert_eq!(calcs.len(), 2, "one computation per call, not per series");
     assert!(calcs.iter().all(|c| c.series.len() == 3));
-    // Le script entier est un groupe d'annulation : un seul Ctrl+Z défait les
-    // deux lots et leurs colonnes.
-    banc.session.undo().unwrap();
-    assert!(banc
+    // The whole script is an undo group: a single Ctrl+Z undoes both batches
+    // and their columns.
+    bench.session.undo().unwrap();
+    assert!(bench
         .session
         .snapshot()
         .unwrap()
@@ -486,31 +482,32 @@ print('ok')
 }
 
 #[test]
-fn un_lot_mal_forme_est_refuse_avec_un_message() {
-    let banc = banc();
+fn a_malformed_batch_is_refused_with_a_message() {
+    let bench = bench();
     for (source, needle) in [
         ("pyst.analysis.fit([], x)", "empty"),
         ("pyst.analysis.fit([y, y], [x])", "one per series"),
         ("pyst.analysis.fit([y, 3], x)", "only handles"),
         ("pyst.analysis.fit(3, x)", "handle or a list"),
     ] {
-        let outcome = banc.engine.run(&format!("{SETUP}{source}")).unwrap();
+        let outcome = bench.engine.run(&format!("{SETUP}{source}")).unwrap();
         let error = format!("{:?}", outcome.error);
-        assert!(outcome.error.is_some(), "{source} devait échouer");
-        assert!(error.contains(needle), "{source} : {error}");
+        assert!(outcome.error.is_some(), "{source} should have failed");
+        assert!(error.contains(needle), "{source}: {error}");
     }
 }
 
-/// scipy fait partie de la pile embarquée (#191) : un script `pyst` ajuste une
-/// exponentielle avec `scipy.optimize.curve_fit` et retrouve les paramètres,
-/// puis les écrit dans une colonne annulable. L'interface n'en dépend pas ;
-/// c'est le témoin que la roue est bien chargée depuis le préfixe embarqué.
+/// scipy is part of the embedded stack (#191): a `pyst` script fits an
+/// exponential with `scipy.optimize.curve_fit` and recovers the parameters,
+/// then writes them into an undoable column. The interface does not depend on
+/// it; this is the witness that the wheel is indeed loaded from the embedded
+/// prefix.
 #[test]
-fn scipy_ajuste_une_exponentielle_depuis_un_script() {
-    let banc = banc();
-    let before = columns(&banc);
+fn scipy_fits_an_exponential_from_a_script() {
+    let bench = bench();
+    let before = columns(&bench);
     let outcome = run(
-        &banc,
+        &bench,
         r#"
 import numpy as np
 import scipy
@@ -534,17 +531,17 @@ print('scipy', scipy.__version__)
 "#,
     );
     assert!(outcome.stdout.contains("scipy 1."), "{}", outcome.stdout);
-    assert_eq!(columns(&banc), before + 1);
-    banc.session.undo().unwrap();
-    assert_eq!(columns(&banc), before);
+    assert_eq!(columns(&bench), before + 1);
+    bench.session.undo().unwrap();
+    assert_eq!(columns(&bench), before);
 }
 
 #[test]
-fn ligne_de_base_constante_par_point_ou_moyenne_de_zone() {
-    let banc = banc();
-    let before = columns(&banc);
+fn constant_baseline_by_point_or_zone_mean() {
+    let bench = bench();
+    let before = columns(&bench);
     run(
-        &banc,
+        &bench,
         r#"
 p = pyst.analysis.baseline(y, x, method='constant', points=[(5., 4.)], keep_baseline=True)
 z = pyst.analysis.baseline(y, x, method='constant', zones=[(1., 3.)])
@@ -561,14 +558,14 @@ for kwargs in [dict(points=[]), dict(points=[(0., 1.), (1., 2.)]), dict(points=[
         pass
 "#,
     );
-    assert_eq!(columns(&banc), before + 3);
-    banc.session.undo().unwrap();
-    assert_eq!(columns(&banc), before);
+    assert_eq!(columns(&bench), before + 3);
+    bench.session.undo().unwrap();
+    assert_eq!(columns(&bench), before);
 }
 
 #[test]
-fn remplacement_python_utilise_la_colonne_source_et_le_groupe_annulable() {
-    let b = banc();
+fn python_replacement_uses_the_source_column_and_the_undoable_group() {
+    let b = bench();
     let before = b.session.snapshot().unwrap();
     run(
         &b,
@@ -592,9 +589,9 @@ assert abs(pyst.column(y)[3] - 3.0) < 1e-10
 }
 
 #[test]
-fn un_ajustement_arrete_sur_un_plateau_dit_qu_il_n_a_pas_converge() {
-    // #281 : xc = 1000, loin du pic. Les messages `warnings` sont de l'anglais.
-    let b = banc_avec(true);
+fn a_fit_stopped_on_a_plateau_says_it_did_not_converge() {
+    // #281: xc = 1000, far from the peak. The `warnings` messages are in English.
+    let b = bench_with(true);
     run(
         &b,
         r#"
@@ -610,14 +607,14 @@ assert ok['warnings'] == [], ok['warnings']
     );
 }
 
-/// #324 : `pyst.analysis.smooth` écrit la colonne lissée avec le nom, l'unité
-/// et le commentaire de l'interface, et remplace les Y sur demande. Une droite
-/// reste une droite sous les trois méthodes (hors des bords pour la moyenne).
+/// #324: `pyst.analysis.smooth` writes the smoothed column with the name, unit
+/// and comment of the interface, and replaces the Y values on request. A line
+/// stays a line under the three methods (away from the edges for the mean).
 #[test]
-fn le_lissage_ecrit_sa_colonne_nommee_et_remplace_les_y_sur_demande() {
-    let banc = banc();
+fn smoothing_writes_its_named_column_and_replaces_the_y_values_on_request() {
+    let bench = bench();
     run(
-        &banc,
+        &bench,
         "
 pyst.set_column_meta(y, long_name='Intensity', unit='counts')
 for m in ('adjacent', 'savitzky-golay', 'median'):
@@ -628,26 +625,26 @@ r = pyst.analysis.smooth(y, x, window=4.0, window_unit='x')
 assert r['values']['count.window'] == 5.0
 ",
     );
-    let sorties = sorties(&banc);
-    assert_eq!(sorties.len(), 1, "{sorties:?}");
-    assert_eq!(sorties[0].0, "smoothed");
-    assert_eq!(sorties[0].1, "Intensity (smoothed)");
-    assert_eq!(sorties[0].2, "counts");
-    assert_eq!(sorties[0].3, "Smoothing");
+    let outputs = outputs(&bench);
+    assert_eq!(outputs.len(), 1, "{outputs:?}");
+    assert_eq!(outputs[0].0, "smoothed");
+    assert_eq!(outputs[0].1, "Intensity (smoothed)");
+    assert_eq!(outputs[0].2, "counts");
+    assert_eq!(outputs[0].3, "Smoothing");
 
-    let banc = banc_avec(false);
-    let before = banc.session.snapshot().unwrap();
+    let bench = bench_with(false);
+    let before = bench.session.snapshot().unwrap();
     run(
-        &banc,
+        &bench,
         "
 r = pyst.analysis.smooth(y, x, method='median', window=3, replace_original=True)
 assert repr(r['columns']['smoothed']) == repr(y)
 ",
     );
-    let after = banc.session.snapshot().unwrap();
+    let after = bench.session.snapshot().unwrap();
     assert!(after.tree.calculations().is_empty());
     assert_eq!(after.tree.correction_traces().len(), 1);
-    assert_eq!(columns(&banc), 3);
-    banc.session.undo().unwrap();
-    assert_eq!(banc.session.snapshot().unwrap().tree, before.tree);
+    assert_eq!(columns(&bench), 3);
+    bench.session.undo().unwrap();
+    assert_eq!(bench.session.snapshot().unwrap().tree, before.tree);
 }

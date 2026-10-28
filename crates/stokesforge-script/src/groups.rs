@@ -1,12 +1,12 @@
-//! Groupes de séries depuis pyst (#196) : lecture, création, modification.
+//! Series groups from pyst (#196): reading, creating, changing.
 //!
-//! Aucune règle ici : tout passe par les gestes de `PanelSpec` que l'interface
-//! emploie aussi (`group_series`, `set_series_group`, `rename_group`,
-//! `dissolve_group`, `remove_group`, `apply_group_gradient`), et l'écriture est
-//! un `SetPlotSpec` dans le groupe annulable du script. Le calque visé est le
-//! calque ordinaire de la case `panel=(ligne, colonne)`, comme `add_shape`.
-//! Les numéros de groupe sont ceux du spec : stables tant que le groupe existe,
-//! jamais réutilisés tant qu'un nom les réserve.
+//! No rule here: everything goes through the `PanelSpec` gestures that the
+//! interface also uses (`group_series`, `set_series_group`, `rename_group`,
+//! `dissolve_group`, `remove_group`, `apply_group_gradient`), and the write is
+//! a `SetPlotSpec` in the script's undoable group. The targeted layer is the
+//! ordinary layer of the cell `panel=(row, column)`, like `add_shape`.
+//! Group numbers are those of the spec: stable as long as the group exists,
+//! never reused while a name reserves them.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -21,10 +21,10 @@ use crate::surface::{to_py_error, Handle};
 
 type Panel = (usize, usize);
 
-/// Modifie le panneau `panel` du graphe et rend ce que `edit` calcule ; un
-/// geste qui ne change pas le spec n'écrit rien. `edit`
-/// tourne sur l'instantané lu avant la réservation du groupe d'écritures, puis
-/// de nouveau sur celui qu'elle fige si elle vient d'ouvrir la macro (#67).
+/// Changes the graph's `panel` and returns what `edit` computes; a
+/// gesture that does not change the spec writes nothing. `edit` runs on the
+/// snapshot read before the write group's reservation, then again on the one
+/// it freezes if it just opened the macro (#67).
 fn edit_panel<T>(
     context: &ScriptContext,
     graph: NodeId,
@@ -46,8 +46,8 @@ fn edit_panel<T>(
             .get_mut(layer)
             .ok_or_else(|| HostError::InvalidValue("the graph has no such panel".to_owned()))?;
         let value = edit(panel, snapshot)?;
-        // Un geste sans effet n'écrit rien : pas d'entrée d'historique vide,
-        // pas de macro ouverte pour rien.
+        // A gesture with no effect writes nothing: no empty history entry,
+        // no macro opened for nothing.
         let changed = spec != before;
         Ok::<_, HostError>((spec, value, changed))
     };
@@ -71,7 +71,7 @@ fn unknown_group(group: u32) -> HostError {
     HostError::InvalidValue(format!("the panel has no group {group}"))
 }
 
-/// Les séries du panneau, dans l'ordre du dessin, chacune avec son groupe.
+/// The panel's series, in drawing order, each with its group.
 #[pyfunction]
 #[pyo3(signature = (graph, *, panel=(0, 0)))]
 pub(crate) fn series(py: Python<'_>, graph: &Handle, panel: Panel) -> PyResult<Py<PyList>> {
@@ -120,8 +120,8 @@ pub(crate) fn series(py: Python<'_>, graph: &Handle, panel: Panel) -> PyResult<P
     Ok(list.unbind())
 }
 
-/// Les groupes du panneau, dans l'ordre du dessin : `id`, `name` (`None` =
-/// nom automatique) et `members` (rangs des séries).
+/// The panel's groups, in drawing order: `id`, `name` (`None` =
+/// automatic name) and `members` (series ranks).
 #[pyfunction]
 #[pyo3(signature = (graph, *, panel=(0, 0)))]
 pub(crate) fn series_groups(py: Python<'_>, graph: &Handle, panel: Panel) -> PyResult<Py<PyList>> {
@@ -166,8 +166,8 @@ pub(crate) fn series_groups(py: Python<'_>, graph: &Handle, panel: Panel) -> PyR
     Ok(list.unbind())
 }
 
-/// Rassemble les séries `indices` (rangs de `pyst.series`) en un groupe neuf,
-/// à la place de la première, et rend son numéro. `name` le nomme.
+/// Gathers the series `indices` (ranks from `pyst.series`) into a new group,
+/// in place of the first one, and returns its number. `name` names it.
 #[pyfunction]
 #[pyo3(signature = (graph, indices, *, name=None, panel=(0, 0)))]
 pub(crate) fn group_series(
@@ -196,8 +196,8 @@ pub(crate) fn group_series(
     .map_err(to_py_error)
 }
 
-/// Met la série `index` dans le groupe `group` (derrière ses membres), ou la
-/// sort de son groupe avec `None`. Rend son nouveau rang.
+/// Puts series `index` into group `group` (behind its members), or takes it
+/// out of its group with `None`. Returns its new rank.
 #[pyfunction]
 #[pyo3(signature = (graph, index, group, *, panel=(0, 0)))]
 pub(crate) fn set_series_group(
@@ -231,7 +231,7 @@ pub(crate) fn set_series_group(
     .map_err(to_py_error)
 }
 
-/// Nomme le groupe ; `""` rend le nom automatique.
+/// Names the group; `""` makes the name automatic.
 #[pyfunction]
 #[pyo3(signature = (graph, group, name, *, panel=(0, 0)))]
 pub(crate) fn rename_group(
@@ -256,7 +256,7 @@ pub(crate) fn rename_group(
     .map_err(to_py_error)
 }
 
-/// Dissout le groupe : les séries restent, avec leur style.
+/// Dissolves the group: the series stay, with their style.
 #[pyfunction]
 #[pyo3(signature = (graph, group, *, panel=(0, 0)))]
 pub(crate) fn ungroup(py: Python<'_>, graph: &Handle, group: u32, panel: Panel) -> PyResult<()> {
@@ -274,7 +274,7 @@ pub(crate) fn ungroup(py: Python<'_>, graph: &Handle, group: u32, panel: Panel) 
     .map_err(to_py_error)
 }
 
-/// Supprime le groupe **et ses séries**.
+/// Removes the group **and its series**.
 #[pyfunction]
 #[pyo3(signature = (graph, group, *, panel=(0, 0)))]
 pub(crate) fn remove_group(
@@ -297,7 +297,7 @@ pub(crate) fn remove_group(
     .map_err(to_py_error)
 }
 
-/// Style commun : chaque option donnée est posée sur tous les membres.
+/// Common style: each given option is set on all the members.
 #[pyfunction]
 #[pyo3(signature = (graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None))]
 #[allow(clippy::too_many_arguments)]
@@ -350,9 +350,9 @@ pub(crate) fn set_group_style(
     .map_err(to_py_error)
 }
 
-/// Répartit un nuancier sur les membres du groupe. `gradient` : l'identifiant
-/// d'un nuancier fourni (`"blue-red"`…), le nom d'un nuancier enregistré dans
-/// le projet, ou une liste d'arrêts `"#RRGGBB"`.
+/// Spreads a color gradient over the group's members. `gradient`: the id of
+/// a built-in gradient (`"blue-red"`...), the name of a gradient saved in the
+/// project, or a list of `"#RRGGBB"` stops.
 #[pyfunction]
 #[pyo3(signature = (graph, group, gradient, *, panel=(0, 0)))]
 pub(crate) fn apply_gradient(

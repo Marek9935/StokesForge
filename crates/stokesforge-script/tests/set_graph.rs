@@ -1,5 +1,5 @@
-//! `pyst.set_graph` (#331, lot 2, S4) : réglages d'un graphe existant par les
-//! clés de Graph Properties, en une seule écriture annulable.
+//! `pyst.set_graph` (#331, batch 2, S4): settings of an existing graph through
+//! the Graph Properties keys, in a single undoable write.
 #![cfg(feature = "python")]
 
 use std::path::PathBuf;
@@ -11,14 +11,14 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::{ScriptEngine, ScriptOutcome};
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: Arc<ScriptEngine>,
     session: SessionHandle,
     _actor: Session,
 }
 
-fn banc() -> Banc {
-    let mut project = Project::new("Graphe").unwrap();
+fn bench() -> Bench {
+    let mut project = Project::new("Graph").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
     project
@@ -36,24 +36,24 @@ fn banc() -> Banc {
         });
     let engine =
         Arc::new(ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(prefix)).unwrap());
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
     }
 }
 
-fn run(banc: &Banc, source: &str) -> ScriptOutcome {
-    let outcome = banc.engine.run(source).unwrap();
+fn run(bench: &Bench, source: &str) -> ScriptOutcome {
+    let outcome = bench.engine.run(source).unwrap();
     assert!(outcome.error.is_none(), "{:?}", outcome.error);
     outcome
 }
 
-/// Crée le graphe `g` (un tracé de B en fonction de A) dans un script à part.
+/// Creates the graph `g` (a plot of B against A) in a separate script.
 const GRAPH: &str = "a = pyst.resolve('[Book1]Sheet1!A')\nb = pyst.resolve('[Book1]Sheet1!B')\ng = pyst.plot(b, a, name='G')\n";
 
-fn graph_spec(banc: &Banc) -> PlotSpec {
-    let snapshot = banc.session.snapshot().unwrap();
+fn graph_spec(bench: &Bench) -> PlotSpec {
+    let snapshot = bench.session.snapshot().unwrap();
     let id: NodeId = snapshot.tree.resolve("[G]").unwrap();
     match snapshot.tree.node(id).unwrap().kind() {
         NodeKind::Graph { spec, .. } => spec.clone(),
@@ -61,16 +61,16 @@ fn graph_spec(banc: &Banc) -> PlotSpec {
     }
 }
 
-fn refused(banc: &Banc, body: &str) -> String {
+fn refused(bench: &Bench, body: &str) -> String {
     let source = format!(
         "g = pyst.resolve('[G]')\ntry:\n    {body}\nexcept pyst.InvalidValueError as error:\n    caught = str(error)\nelse:\n    raise AssertionError('no InvalidValueError')\nprint(caught)"
     );
-    run(banc, &source).stdout.trim().to_owned()
+    run(bench, &source).stdout.trim().to_owned()
 }
 
 #[test]
-fn set_graph_regle_le_graphe_et_le_panneau() {
-    let b = banc();
+fn set_graph_sets_the_graph_and_the_panel() {
+    let b = bench();
     run(&b, GRAPH);
     run(
         &b,
@@ -123,8 +123,8 @@ fn set_graph_regle_le_graphe_et_le_panneau() {
 }
 
 #[test]
-fn set_graph_ne_touche_pas_aux_cles_absentes_et_vise_l_axe_de_droite() {
-    let b = banc();
+fn set_graph_leaves_absent_keys_alone_and_targets_the_right_axis() {
+    let b = bench();
     run(&b, GRAPH);
     run(
         &b,
@@ -144,11 +144,11 @@ fn set_graph_ne_touche_pas_aux_cles_absentes_et_vise_l_axe_de_droite() {
 }
 
 #[test]
-fn set_graph_est_une_seule_ecriture_annulable() {
-    let b = banc();
+fn set_graph_is_a_single_undoable_write() {
+    let b = bench();
     run(&b, GRAPH);
     let before = graph_spec(&b);
-    // `undo` dans le même script : tout ce que `set_graph` a posé revient d'un coup.
+    // `undo` in the same script: everything `set_graph` set comes back at once.
     run(
         &b,
         "g = pyst.resolve('[G]')\n\
@@ -156,7 +156,7 @@ fn set_graph_est_une_seule_ecriture_annulable() {
          assert pyst.undo() is True\n",
     );
     assert_eq!(graph_spec(&b), before);
-    // Et par un Ctrl+Z de l'interface après l'exécution : une seule entrée.
+    // And through a Ctrl+Z of the interface after the run: a single entry.
     run(
         &b,
         "pyst.set_graph(pyst.resolve('[G]'), title='T', x_title='X', y_scale='log')",
@@ -169,8 +169,8 @@ fn set_graph_est_une_seule_ecriture_annulable() {
 }
 
 #[test]
-fn set_graph_sans_effet_n_ecrit_rien() {
-    let b = banc();
+fn set_graph_with_no_effect_writes_nothing() {
+    let b = bench();
     run(&b, GRAPH);
     let history = b.session.snapshot().unwrap().history;
     run(
@@ -181,8 +181,8 @@ fn set_graph_sans_effet_n_ecrit_rien() {
 }
 
 #[test]
-fn set_graph_refuse_sans_rien_ecrire() {
-    let b = banc();
+fn set_graph_refuses_without_writing_anything() {
+    let b = bench();
     run(&b, GRAPH);
     let before = graph_spec(&b);
     let history = b.session.snapshot().unwrap().history;
@@ -210,8 +210,8 @@ fn set_graph_refuse_sans_rien_ecrire() {
 }
 
 #[test]
-fn set_graph_rend_le_cadrage_automatique() {
-    let b = banc();
+fn set_graph_restores_automatic_framing() {
+    let b = bench();
     run(&b, GRAPH);
     run(&b, "pyst.set_graph(pyst.resolve('[G]'), x_from=1, x_to=2)");
     assert!(!graph_spec(&b).panels[0].bottom.auto_range);
@@ -220,8 +220,8 @@ fn set_graph_rend_le_cadrage_automatique() {
 }
 
 #[test]
-fn chaque_cle_annoncee_par_l_erreur_est_reellement_acceptee() {
-    let b = banc();
+fn each_key_announced_by_the_error_is_really_accepted() {
+    let b = bench();
     run(&b, GRAPH);
     let message = refused(&b, "pyst.set_graph(g, nope=1)");
     let list = message
@@ -232,8 +232,8 @@ fn chaque_cle_annoncee_par_l_erreur_est_reellement_acceptee() {
     let keys: Vec<&str> = list.split(", ").collect();
     assert!(keys.len() >= 20, "{keys:?}");
     for key in keys {
-        // Un objet d'un type qu'aucune clé n'accepte : le refus porte sur la
-        // valeur, jamais sur « unknown graph option ».
+        // An object of a type that no key accepts: the refusal concerns the
+        // value, never "unknown graph option".
         let source = format!(
             "g = pyst.resolve('[G]')\ntry:\n    pyst.set_graph(g, {key}=object())\nexcept pyst.InvalidValueError as error:\n    print(str(error))"
         );
@@ -245,12 +245,12 @@ fn chaque_cle_annoncee_par_l_erreur_est_reellement_acceptee() {
     }
 }
 
-/// #344 : le sens se lit sur l'ordre des bornes. `x_inverted=True` sur des
-/// bornes croissantes les échange ; `x_from > x_to` donne un axe inversé ;
-/// les clés `pyst` elles-mêmes ne changent pas.
+/// #344: the direction is read from the order of the bounds. `x_inverted=True`
+/// on increasing bounds swaps them; `x_from > x_to` gives an inverted axis;
+/// the `pyst` keys themselves do not change.
 #[test]
-fn set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes() {
-    let b = banc();
+fn set_graph_orients_the_axes_from_the_order_of_the_bounds() {
+    let b = bench();
     run(&b, GRAPH);
     run(
         &b,
@@ -258,7 +258,7 @@ fn set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes() {
     );
     let panel = &graph_spec(&b).panels[0];
     assert!(!panel.bottom.inverted);
-    assert!(panel.left.inverted, "y_from=7 > y_to=2 : axe inversé");
+    assert!(panel.left.inverted, "y_from=7 > y_to=2: inverted axis");
     assert_eq!(
         (panel.left.range_min, panel.left.range_max),
         (Some(7.0), Some(2.0))
@@ -269,6 +269,6 @@ fn set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes() {
     assert_eq!(
         (panel.bottom.range_min, panel.bottom.range_max),
         (Some(5.0), Some(1.0)),
-        "(1, 5) devient (5, 1)"
+        "(1, 5) becomes (5, 1)"
     );
 }

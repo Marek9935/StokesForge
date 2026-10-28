@@ -1,21 +1,21 @@
-//! Modèles fournis d'office, d'après les fichiers d'appareils de
-//! `test/import/` : au premier lancement, la liste des modèles n'est pas vide.
-//! Chacun est vérifié contre sa fixture (`tests/builtin.rs`).
+//! Templates provided out of the box, based on the device files in
+//! `test/import/`: on first launch, the template list is not empty.
+//! Each one is checked against its fixture (`tests/builtin.rs`).
 
 use crate::recipe::{
     AutoMatch, DataEnd, DecimalStyle, HeaderSkip, ImportRecipe, NameSource, Separator,
 };
 
-/// Les modèles fournis. L'utilisateur peut en enregistrer une version
-/// modifiée sous le même nom : la sienne prend le dessus.
+/// The provided templates. The user can save a modified version of one under
+/// the same name: theirs takes precedence.
 pub fn builtin_recipes() -> Vec<ImportRecipe> {
     let mut jasco_semicolon = ImportRecipe::new("Jasco (point-virgule)");
     jasco_semicolon.separator = Separator::Semicolon;
     jasco_semicolon.decimal = DecimalStyle::Auto;
     jasco_semicolon.header = HeaderSkip::UntilMarker("XYDATA".into());
     jasco_semicolon.name_source = NameSource::HeaderKey("TITLE".into());
-    // Le pied « Extended Information » doit être coupé : la coupure n'est plus
-    // le défaut, on la demande ici.
+    // The "Extended Information" footer must be cut: cutting is no longer
+    // the default, so it is requested here.
     jasco_semicolon.data_end = DataEnd::Auto;
     jasco_semicolon.auto_match = AutoMatch {
         extensions: vec!["csv".into()],

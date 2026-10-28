@@ -1,26 +1,26 @@
-//! `stokesforge-pyhello` — preuve d'empaquetage de la pile Python embarquée.
+//! `stokesforge-pyhello` — proof that the embedded Python stack packages correctly.
 //!
-//! Démarre l'interpréteur vendorisé, importe numpy, fait un aller simple puis
-//! un aller-retour de tableau, et mesure les trois temps qui décident de
-//! l'architecture : démarrage, envoi de 1 M `f64`, rapatriement de 1 M `f64`.
+//! Starts the vendored interpreter, imports numpy, does a one-way then a
+//! round-trip of an array, and measures the three timings that decide the
+//! architecture: startup, sending 1 M `f64`, bringing back 1 M `f64`.
 //!
-//! Ce binaire n'existe que pour être lancé depuis `dist/pyhello/` dans un
-//! environnement nettoyé (cf. `scripts/pyhello-dist.sh`) : sa sortie est la
-//! preuve que l'isolation tient.
+//! This binary exists only to be run from `dist/pyhello/` in a cleaned
+//! environment (see `scripts/pyhello-dist.sh`): its output is the
+//! proof that isolation holds.
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use stokesforge_python::interpreter::{self, EmbeddedPython, PythonError};
 
-/// Taille des tableaux de mesure : assez grand pour que la copie soit mesurable.
+/// Size of the measurement arrays: large enough for the copy to be measurable.
 const BENCH_LEN: usize = 1_000_000;
 
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("stokesforge-pyhello : {err}");
+            eprintln!("stokesforge-pyhello: {err}");
             ExitCode::FAILURE
         }
     }
@@ -28,15 +28,18 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), PythonError> {
     let embedded = EmbeddedPython::locate()?;
-    println!("préfixe embarqué      : {}", embedded.home().display());
+    println!("embedded prefix       : {}", embedded.home().display());
 
-    // (a) démarrage de l'interpréteur + import numpy.
+    // (a) interpreter startup + numpy import.
     let start = Instant::now();
     embedded.initialize()?;
     let init_ms = start.elapsed().as_secs_f64() * 1e3;
 
-    println!("version Python        : {}", interpreter::python_version()?);
-    println!("version numpy         : {}", interpreter::numpy_version()?);
+    println!(
+        "Python version         : {}",
+        interpreter::python_version()?
+    );
+    println!("numpy version          : {}", interpreter::numpy_version()?);
     println!(
         "sys.flags.isolated    : {}",
         interpreter::sys_flags_isolated()?
@@ -44,29 +47,29 @@ fn run() -> Result<(), PythonError> {
     println!("sys.prefix            : {}", interpreter::sys_prefix()?);
 
     let path = interpreter::sys_path()?;
-    println!("sys.path              : {} entrées", path.len());
+    println!("sys.path              : {} entries", path.len());
     for (index, entry) in path.iter().take(3).enumerate() {
         println!("sys.path[{index}]           : {entry}");
     }
 
-    // Auto-contrôle : la distribution se déclare cassée si une seule entrée de
-    // `sys.path` sort du préfixe embarqué. C'est ce test, exécuté depuis un
-    // environnement piégé, qui fait la preuve d'isolation.
-    if let Some(intrus) = path.iter().find(|entry| !embedded.contains_path(entry)) {
+    // Self-check: the distribution declares itself broken if a single `sys.path`
+    // entry lies outside the embedded prefix. This test, run from a
+    // trapped environment, is the proof of isolation.
+    if let Some(stray) = path.iter().find(|entry| !embedded.contains_path(entry)) {
         return Err(PythonError::InitFailed(format!(
-            "sys.path contient une entrée hors du préfixe embarqué : {intrus}"
+            "sys.path contains an entry outside the embedded prefix: {stray}"
         )));
     }
 
-    // Aller simple : copie Rust → numpy puis somme côté Python.
+    // One way: Rust → numpy copy then sum on the Python side.
     let values: Vec<f64> = (0..BENCH_LEN).map(|index| index as f64).collect();
     let sum = interpreter::roundtrip_sum(&values)?;
     println!("roundtrip_sum(1M)     : {sum}");
 
-    // Aller-retour complet : `arr * 2.0` côté Python puis rapatriement.
+    // Full round trip: `arr * 2.0` on the Python side then bring back.
     let doubled = interpreter::roundtrip_vec(&values)?;
     println!(
-        "roundtrip_vec(1M)     : {} valeurs, dernière = {:?}",
+        "roundtrip_vec(1M)     : {} values, last = {:?}",
         doubled.len(),
         doubled.last()
     );
@@ -75,17 +78,17 @@ fn run() -> Result<(), PythonError> {
         interpreter::roundtrip_vec(&values[..10])?
     );
 
-    // (b) et (c) : les deux moitiés de la copie, mesurées séparément.
+    // (b) and (c): the two halves of the copy, measured separately.
     let timings = interpreter::measure_copy(&values)?;
 
-    println!("--- mesures (ms) ---");
-    println!("(a) init : interpréteur + import numpy : {init_ms:.1}");
+    println!("--- measurements (ms) ---");
+    println!("(a) init : interpreter + numpy import : {init_ms:.1}");
     println!(
-        "(b) aller  1M f64 (Rust → numpy, copie)  : {:.1}",
+        "(b) send   1M f64 (Rust → numpy, copy)   : {:.1}",
         timings.send_ms
     );
     println!(
-        "(c) retour 1M f64 (numpy → Vec<f64>)     : {:.1}",
+        "(c) return 1M f64 (numpy → Vec<f64>)     : {:.1}",
         timings.recv_ms
     );
 

@@ -1,15 +1,15 @@
-//! Métadonnées d'un fichier importé : l'en-tête (et, si la recette le demande,
-//! le pied de page) découpé en lignes clé / valeur, dans l'ordre du fichier.
-//! Vocabulaire propre à ce crate (il ne connaît pas `stokesforge-core`) : `stokesforge-app`
-//! le convertit en `stokesforge_core::MetaLine`.
+//! Metadata of an imported file: the header (and, if the recipe asks for it,
+//! the footer) split into key / value lines, in file order. Vocabulary
+//! specific to this crate (it does not know `stokesforge-core`):
+//! `stokesforge-app` converts it to `stokesforge_core::MetaLine`.
 
 use crate::parse::EffectiveSeparator;
 use crate::recipe::ImportRecipe;
 
-/// Une ligne de métadonnées. Trois formes : un titre de section
-/// (`key = "[Measurement Information]"`, `value` vide), un couple clé / valeur
-/// (`XUNITS;NANOMETERS`), ou une ligne qui n'a pas cette forme, gardée telle
-/// quelle (`key` vide, toute la ligne dans `value`).
+/// A metadata line. Three forms: a section title
+/// (`key = "[Measurement Information]"`, empty `value`), a key / value pair
+/// (`XUNITS;NANOMETERS`), or a line that has neither form, kept as is (empty
+/// `key`, the whole line in `value`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetadataLine {
     pub key: String,
@@ -17,15 +17,15 @@ pub struct MetadataLine {
 }
 
 impl MetadataLine {
-    /// Vrai pour un titre de section.
+    /// True for a section title.
     pub fn is_section(&self) -> bool {
         self.value.is_empty() && self.key.starts_with('[') && self.key.ends_with(']')
     }
 }
 
-/// Découpe `lines` en [`MetadataLine`] avec le séparateur effectif du fichier.
-/// Les lignes vides sont ignorées ; `recipe.excluded_metadata` écarte des
-/// clés, ou des sections entières (jusqu'au titre de section suivant).
+/// Splits `lines` into [`MetadataLine`]s with the file's effective separator.
+/// Empty lines are ignored; `recipe.excluded_metadata` drops keys, or whole
+/// sections (up to the next section title).
 pub(crate) fn split_lines<'a>(
     lines: impl Iterator<Item = &'a str>,
     separator: &EffectiveSeparator,
@@ -44,7 +44,7 @@ pub(crate) fn split_lines<'a>(
         if trimmed.is_empty() {
             continue;
         }
-        // Un titre de section peut traîner des séparateurs (`[Section];;`).
+        // A section title can trail separators (`[Section];;`).
         let bare = trimmed.trim_end_matches([';', ',', '\t', ' ']);
         let entry = if bare.starts_with('[') && bare.ends_with(']') {
             MetadataLine {

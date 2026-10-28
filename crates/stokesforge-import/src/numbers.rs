@@ -1,29 +1,30 @@
-//! Lecture des nombres : séparateur décimal (fixé ou détecté), séparateur de
-//! milliers (avec milliers espace : U+00A0 et U+202F aussi), jetons de valeur
-//! manquante. Un résultat non fini (`inf`, `Infinity`, `1e400`) n'est pas un
-//! nombre ici : `NaN`, donc jeton conservé en texte. Un [`NumberFormat`] est résolu **une
-//! fois** par fichier, sur les mêmes lignes pour [`crate::parse::parse`] et
-//! [`crate::preview::preview`] : c'est ce qui les garde d'accord.
+//! Number reading: decimal separator (fixed or detected), thousands
+//! separator (with a space as thousands separator: U+00A0 and U+202F too),
+//! missing-value tokens. A non-finite result (`inf`, `Infinity`, `1e400`) is
+//! not a number here: `NaN`, so the token is kept as text. A [`NumberFormat`]
+//! is resolved **once** per file, on the same lines for
+//! [`crate::parse::parse`] and [`crate::preview::preview`]: that is what keeps
+//! them in agreement.
 
 use crate::recipe::{DecimalStyle, ImportRecipe};
 
-/// Nombre de lignes examinées pour détecter la décimale.
+/// Number of lines examined to detect the decimal separator.
 const DETECTION_LINES: usize = 50;
 
-/// Règles de lecture d'un nombre, déjà résolues pour un fichier.
+/// Number reading rules, already resolved for a file.
 #[derive(Debug, Clone)]
 pub(crate) struct NumberFormat {
-    /// Jamais `Auto` : résolu en `Dot` ou `Comma`.
+    /// Never `Auto`: resolved to `Dot` or `Comma`.
     pub decimal: DecimalStyle,
     thousands: Option<char>,
-    /// Jetons (en minuscules, bordures retirées) qui valent « valeur
-    /// manquante » : lus comme vides, pas comme du texte à conserver.
+    /// Tokens (lowercase, trimmed) that mean "missing value": read as empty,
+    /// not as text to keep.
     missing: Vec<String>,
 }
 
 impl NumberFormat {
-    /// Résout le format d'une recette d'après `sample` (les premières lignes
-    /// de données, `skip_chars` déjà retiré).
+    /// Resolves a recipe's format from `sample` (the first data lines, with
+    /// `skip_chars` already removed).
     pub fn resolve<'a>(recipe: &ImportRecipe, sample: impl Iterator<Item = &'a str>) -> Self {
         Self::new(
             recipe.decimal,
@@ -54,22 +55,21 @@ impl NumberFormat {
         }
     }
 
-    /// Ce jeton (non vide) est-il un marqueur de valeur manquante ?
+    /// Is this (non-empty) token a missing-value marker?
     pub fn is_missing(&self, token: &str) -> bool {
         let token = token.trim().to_lowercase();
         !token.is_empty() && self.missing.contains(&token)
     }
 
-    /// Le séparateur de milliers de la recette.
+    /// The recipe's thousands separator.
     pub fn thousands(&self) -> Option<char> {
         self.thousands
     }
 
-    /// Analyse un jeton en `f64` ; `NaN` pour tout ce qui ne s'y prête pas —
-    /// jamais d'erreur (invariant 10). Un résultat non fini (`inf`,
-    /// `Infinity`, `-inf`, `1e400`) vaut aussi `NaN` : le jeton reste alors
-    /// visible en texte (colonne `Mixed`), au lieu d'entrer comme `±inf`
-    /// dans une colonne numérique.
+    /// Parses a token into an `f64`; `NaN` for anything unsuitable, never an
+    /// error (invariant 10). A non-finite result (`inf`, `Infinity`, `-inf`,
+    /// `1e400`) is also `NaN`: the token then stays visible as text (`Mixed`
+    /// column), instead of entering a numeric column as `±inf`.
     pub fn parse(&self, token: &str) -> f64 {
         let value = self.parse_raw(token);
         if value.is_finite() {
@@ -79,9 +79,9 @@ impl NumberFormat {
         }
     }
 
-    /// Le jeton a-t-il la forme d'un nombre, infini compris ? Pour les
-    /// décisions de structure (fin automatique des données, sous-en-tête) :
-    /// une ligne `inf` est une ligne de données, pas la fin du fichier.
+    /// Does the token have the shape of a number, infinity included? For
+    /// structure decisions (automatic data end, sub-header): an `inf` line is
+    /// a data line, not the end of the file.
     pub fn is_numeric(&self, token: &str) -> bool {
         !self.parse_raw(token).is_nan()
     }
@@ -107,11 +107,10 @@ impl NumberFormat {
     }
 }
 
-/// Devine la décimale d'après les lignes de données. Une virgule entre deux
-/// chiffres n'est une décimale que si la ligne a un autre séparateur de
-/// colonnes (`;` ou tabulation) — dans un CSV « 1,2,3 » c'est un séparateur.
-/// La décimale est la virgule si ces indices l'emportent sur les points entre
-/// deux chiffres, sinon le point.
+/// Guesses the decimal separator from the data lines. A comma between two
+/// digits is a decimal only if the line has another column separator (`;` or
+/// tab): in a CSV "1,2,3" it is a separator. The decimal is the comma if
+/// these clues outnumber the dots between two digits, otherwise the dot.
 fn detect_decimal<'a>(lines: impl Iterator<Item = &'a str>) -> DecimalStyle {
     let (mut commas, mut dots) = (0usize, 0usize);
     for line in lines {

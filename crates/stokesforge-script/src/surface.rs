@@ -1,35 +1,34 @@
-//! La surface `pyst` : navigation et lecture du projet, puis les écritures du socle.
+//! The `pyst` surface: project navigation and reading, then the foundation's writes.
 //!
-//! Le chantier Python (#65, lots #66 et #67) étend l'existant ; l'ancienne API v1
-//! archivée n'est plus une cible à recopier. Les poignées et les lectures
-//! fonctionnent sans état de vue, aussi bien pour la console que pour une
-//! session sans interface.
+//! The Python work package (#65, batches #66 and #67) extends what exists; the old archived
+//! v1 API is no longer a target to copy. Handles and reads
+//! work without view state, equally for the console and for a
+//! session with no interface.
 //!
-//! Deux lectures distinctes évitent une conversion implicite : `column`
-//! conserve son vrai tableau numpy numérique sans copie ; `values` copie les
-//! cellules en un tuple Python, sans perdre les textes ni confondre `None`,
-//! une chaîne vide et un nombre NaN. Les métadonnées sont des dictionnaires
-//! détachés du modèle : les modifier ne constitue jamais une écriture.
+//! Two distinct reads avoid an implicit conversion: `column`
+//! keeps its real numeric numpy array without copying; `values` copies the
+//! cells into a Python tuple, without losing the texts or confusing `None`,
+//! an empty string and a NaN number. Metadata are dictionaries
+//! detached from the model: changing them is never a write.
 //!
-//! # Vocabulaire d'erreurs
+//! # Error vocabulary
 //!
-//! Quatre exceptions, et seulement quatre : [`UnknownPathError`],
+//! Four exceptions, and only four: [`UnknownPathError`],
 //! [`BrokenReferenceError`], [`InvalidValueError`], [`ConcurrentWriteError`].
-//! Les trois premières sont reprises telles quelles de la spécification de
-//! l'API v1, pour ne pas avoir à les renommer ensuite ; la quatrième
-//! l'anticipe (A2, `guide-de-correction-robustesse.md` §F6, puis #312) :
-//! `set_column` et `set_values` refusent aussitôt une écriture dont la colonne
-//! a changé depuis sa lecture, et doivent distinguer ce conflit des autres refus. Toute
-//! erreur de l'hôte (`SessionError`, `CommandError`, `CoreError`) est
-//! **traduite** en l'une d'elles (cf. [`crate::bridge`]), jamais transportée
-//! telle quelle à travers le canal de l'acteur.
+//! The first three are taken as is from the v1 API specification, so as not to
+//! rename them later; the fourth anticipates it (A2, `guide-de-correction-robustesse.md` §F6, then #312):
+//! `set_column` and `set_values` refuse at once a write whose column
+//! changed since it was read, and must tell this conflict apart from the other refusals. Every
+//! host error (`SessionError`, `CommandError`, `CoreError`) is
+//! **translated** into one of them (see [`crate::bridge`]), never carried
+//! as is across the actor's channel.
 //!
-//! # Où le GIL est relâché
+//! # Where the GIL is released
 //!
-//! Chaque appel prépare ses
-//! arguments en Rust pur, puis traverse `Python::detach` pour attendre
-//! l'acteur. Le marqueur `Ungil` interdit à la compilation qu'une valeur liée
-//! au GIL entre dans ce bloc ou en ressorte.
+//! Each call prepares its
+//! arguments in pure Rust, then goes through `Python::detach` to wait for
+//! the actor. The `Ungil` marker forbids at compile time that a GIL-bound value
+//! enters this block or comes out of it.
 
 use numpy::PyArray1;
 use pyo3::exceptions::PyException;
@@ -73,7 +72,7 @@ create_exception!(
      read the column again, then write."
 );
 
-/// Traduit une erreur de l'hôte, déjà classée, en exception Python.
+/// Translates a host error, already classified, into a Python exception.
 pub(crate) fn to_py_error(error: HostError) -> PyErr {
     match error {
         HostError::UnknownPath(message) => UnknownPathError::new_err(message),
@@ -83,49 +82,49 @@ pub(crate) fn to_py_error(error: HostError) -> PyErr {
     }
 }
 
-/// Poignée **opaque** vers un objet du projet.
+/// **Opaque** handle to a project object.
 ///
-/// Un script ne peut ni l'inspecter ni la fabriquer : elle n'a pas de
-/// constructeur Python et n'expose aucun entier. [`resolve`], [`root`],
-/// [`children`], [`info`] et [`import_file`] en produisent.
+/// A script can neither inspect nor forge it: it has no
+/// Python constructor and exposes no integer. [`resolve`], [`root`],
+/// [`children`], [`info`] and [`import_file`] produce them.
 ///
-/// Une poignée reste valide après un renommage, après un déplacement, et après
-/// une suppression **suivie d'une annulation** : c'est le contrat de
-/// l'identité, assuré par le modèle lui-même (identifiants monotones, jamais
-/// réutilisés). Entre la suppression et l'annulation, l'utiliser lève
+/// A handle stays valid after a rename, after a move, and after
+/// a deletion **followed by an undo**: this is the identity contract,
+/// ensured by the model itself (monotonic identifiers, never reused).
+/// Between the deletion and the undo, using it raises
 /// `BrokenReferenceError`.
 ///
-/// **Elle ne survit en revanche pas à un rechargement de projet** (A3,
-/// `guide-de-correction-robustesse.md` §F2/F6) : `epoch` mémorise l'identité
-/// du projet au moment de [`resolve`], et toute fonction qui reçoit une
-/// `Handle` la compare à l'époque courante **avant** de chercher `id` dans
-/// l'arbre — sans quoi un `NodeId` qui existe par coïncidence dans le
-/// nouveau projet (même forme de fichier, mêmes identifiants réattribués)
-/// désignerait silencieusement un tout autre objet.
+/// **It does not, however, survive a project reload** (A3,
+/// `guide-de-correction-robustesse.md` §F2/F6): `epoch` remembers the project's
+/// identity at the time of [`resolve`], and every function that receives a
+/// `Handle` compares it with the current epoch **before** looking for `id` in
+/// the tree; otherwise a `NodeId` that exists by coincidence in the
+/// new project (same file shape, same identifiers reassigned)
+/// would silently designate a completely different object.
 #[pyclass(frozen, module = "pyst", name = "Handle")]
 #[derive(Debug)]
 pub struct Handle {
-    /// Nœud désigné. Champ privé : rien, depuis Python, n'y donne accès.
+    /// Designated node. Private field: nothing, from Python, gives access to it.
     pub(crate) id: NodeId,
-    /// Époque du projet au moment où [`resolve`] a produit cette poignée.
+    /// Project epoch at the time [`resolve`] produced this handle.
     pub(crate) epoch: u64,
 }
 
 #[pymethods]
 impl Handle {
-    /// Représentation lisible, par exemple `Handle(nœud 412)`.
+    /// Readable representation, for example `Handle(node 412)`.
     fn __repr__(&self) -> String {
         format!("Handle({})", self.id)
     }
 }
 
-/// Résout un chemin d'objet et rend une poignée opaque.
+/// Resolves an object path and returns an opaque handle.
 ///
-/// La grammaire est celle de StokesForge : `[Book1]Sheet1!ColA`, éventuellement
-/// préfixée de dossiers (`/Manips/[Book1]Sheet1!ColA`).
+/// The grammar is StokesForge's: `[Book1]Sheet1!ColA`, possibly
+/// prefixed with folders (`/Runs/[Book1]Sheet1!ColA`).
 ///
-/// Lève `UnknownPathError` si le chemin est mal formé **ou** s'il ne désigne
-/// rien : les deux cas sont pour un script la même impasse.
+/// Raises `UnknownPathError` if the path is malformed **or** designates
+/// nothing: for a script, both cases are the same dead end.
 #[pyfunction]
 #[pyo3(text_signature = "(path)")]
 fn resolve(py: Python<'_>, path: &str) -> PyResult<Handle> {
@@ -138,7 +137,7 @@ fn resolve(py: Python<'_>, path: &str) -> PyResult<Handle> {
     Ok(Handle { id, epoch })
 }
 
-/// Rend la poignée du dossier racine du projet courant.
+/// Returns the handle of the current project's root folder.
 #[pyfunction]
 fn root(py: Python<'_>) -> PyResult<Handle> {
     let context = engine::current_context()?;
@@ -149,10 +148,10 @@ fn root(py: Python<'_>) -> PyResult<Handle> {
     Ok(Handle { id, epoch })
 }
 
-/// Rend les enfants directs dans leur ordre : dossiers et fenêtres d'un
-/// dossier, feuilles d'un classeur, colonnes d'une feuille. Sans poignée,
-/// part du dossier racine. Une colonne ou une autre feuille de l'arbre rend
-/// une liste vide. Une poignée périmée lève `BrokenReferenceError`.
+/// Returns the direct children in their order: folders and windows of a
+/// folder, sheets of a workbook, columns of a sheet. Without a handle,
+/// starts from the root folder. A column or another sheet of the tree returns
+/// an empty list. A stale handle raises `BrokenReferenceError`.
 #[pyfunction]
 #[pyo3(signature = (handle=None))]
 fn children(py: Python<'_>, handle: Option<&Handle>) -> PyResult<Vec<Handle>> {
@@ -168,13 +167,13 @@ fn children(py: Python<'_>, handle: Option<&Handle>) -> PyResult<Vec<Handle>> {
         .collect())
 }
 
-/// Décrit un nœud par un dictionnaire indépendant du modèle : `name`, `kind`,
-/// `parent` (poignée ou None), `row_count` (feuille/colonne, sinon None),
-/// `column` (métadonnées d'une colonne, sinon None). Le nombre de lignes d'une
-/// feuille est le maximum des longueurs de ses colonnes, zéro si elle est vide.
-/// Les métadonnées comprennent `type`, `role`, `long_name`, `unit`, `comment`, `x_prime`,
-/// `display_format`, `formula` (en lettres) et `version`. Une poignée périmée lève
-/// `BrokenReferenceError` ; aucune lecture ne change l'historique.
+/// Describes a node through a dictionary independent of the model: `name`, `kind`,
+/// `parent` (handle or None), `row_count` (sheet/column, otherwise None),
+/// `column` (a column's metadata, otherwise None). A sheet's row count
+/// is the maximum of its columns' lengths, zero if it is empty.
+/// The metadata include `type`, `role`, `long_name`, `unit`, `comment`, `x_prime`,
+/// `display_format`, `formula` (in letters) and `version`. A stale handle raises
+/// `BrokenReferenceError`; no read changes the history.
 #[pyfunction]
 fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
     let context = engine::current_context()?;
@@ -235,8 +234,8 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
         description.set_item("comment", meta.comment.as_str())?;
         description.set_item("x_prime", meta.x_prime)?;
         description.set_item("display_format", meta.display_format.as_str())?;
-        // En lettres : celles d'aujourd'hui, `#REF` pour une colonne lue qui
-        // n'est plus dans la feuille (une formule `#REF` ne se réécrit pas).
+        // In letters: today's, `#REF` for a read column that
+        // is no longer in the sheet (a `#REF` formula is not rewritten).
         description.set_item("formula", formula.as_deref())?;
         description.set_item("version", column.version())?;
         result.set_item("column", description)?;
@@ -246,13 +245,13 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
     Ok(result)
 }
 
-/// Copie les cellules stockées d'une colonne en un tuple Python : `float`,
-/// `str` ou `None`. Ne réanalyse jamais un texte numérique et conserve les
-/// distinctions entre cellule vide, chaîne vide et nombre NaN. Les dates
-/// restent des timestamps POSIX en secondes. Le tuple est un instantané ;
-/// pour une lecture numérique sans copie, utiliser `column`.
-/// Lève `InvalidValueError` sur un autre nœud, `BrokenReferenceError` sur une
-/// poignée périmée.
+/// Copies a column's stored cells into a Python tuple: `float`,
+/// `str` or `None`. Never reparses a numeric text and keeps the
+/// distinctions between empty cell, empty string and NaN number. Dates
+/// stay POSIX timestamps in seconds. The tuple is a snapshot;
+/// for a numeric read without copy, use `column`.
+/// Raises `InvalidValueError` on another node, `BrokenReferenceError` on a
+/// stale handle.
 #[pyfunction]
 fn values<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyTuple>> {
     let context = engine::current_context()?;
@@ -280,20 +279,20 @@ fn values<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyTuple>
     PyTuple::new(py, cells)
 }
 
-/// Rend une vue numpy **en lecture seule et sans copie** sur les valeurs de la
-/// colonne.
+/// Returns a numpy view, **read-only and without copy**, on the column's
+/// values.
 ///
-/// Le tableau pointe sur la mémoire réelle du modèle : aucun octet n'est
-/// dupliqué, quelle que soit la taille de la colonne.
+/// The array points at the model's real memory: not a byte is
+/// duplicated, whatever the column's size.
 ///
-/// **Une vue est un instantané, pas un abonnement.** Une vue prise avant une
-/// écriture continue de montrer les anciennes valeurs, silencieusement. Règle
-/// simple qui évite tout le problème : ne gardez pas une vue plus longtemps
-/// qu'un calcul, et relisez la colonne après toute écriture.
+/// **A view is a snapshot, not a subscription.** A view taken before a
+/// write keeps showing the old values, silently. Simple rule
+/// that avoids the whole problem: do not keep a view longer
+/// than a calculation, and read the column again after any write.
 ///
-/// Lève `BrokenReferenceError` si la poignée ne désigne plus rien, et
-/// `InvalidValueError` si elle ne désigne pas une colonne numérique (une
-/// feuille, un classeur, une colonne texte).
+/// Raises `BrokenReferenceError` if the handle designates nothing anymore, and
+/// `InvalidValueError` if it does not designate a numeric column (a
+/// sheet, a workbook, a text column).
 #[pyfunction]
 #[pyo3(text_signature = "(handle)")]
 fn column<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyArray1<f64>>> {
@@ -309,25 +308,25 @@ fn column<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyArray1
     borrowed_readonly_array(py, &buffer)
 }
 
-/// Écrit `values` dans la colonne, **par le bus de commandes** : l'écriture
-/// entre dans l'historique et s'annule par `pyst.undo()` comme par le `Ctrl+Z`
-/// de la fenêtre.
+/// Writes `values` into the column, **through the command bus**: the write
+/// enters the history and is undone by `pyst.undo()` as by the window's
+/// `Ctrl+Z`.
 ///
-/// `values` doit être un tableau numpy de `float64` à une dimension ; les
-/// tableaux non contigus (`v[::2]`) sont acceptés. Les valeurs sont
-/// **copiées** vers Rust : le modèle possède ses buffers et ne dépend jamais
-/// de la durée de vie d'un objet Python.
+/// `values` must be a one-dimensional `float64` numpy array; non-contiguous
+/// arrays (`v[::2]`) are accepted. The values are
+/// **copied** to Rust: the model owns its buffers and never depends
+/// on the lifetime of a Python object.
 ///
-/// La longueur doit rester exactement celle de la colonne. Une autre
-/// longueur lève `InvalidValueError` avant toute commande. Pour remplacer la
-/// longueur et écrire du texte, utiliser `set_values`.
+/// The length must stay exactly the column's. Any other
+/// length raises `InvalidValueError` before any command. To change the
+/// length and write text, use `set_values`.
 ///
-/// Écriture protégée : la colonne doit être inchangée depuis la dernière
-/// lecture du script (`column`/`values`), sinon `ConcurrentWriteError`
-/// aussitôt, sans retentative ni écrasement. `expected_version` (facultatif,
-/// la `version` rendue par `info`) remplace cette version de lecture. Une
-/// colonne jamais lue par le script n'est pas protégée. `undo()` oublie les
-/// versions lues.
+/// Protected write: the column must be unchanged since the script's last
+/// read (`column`/`values`), otherwise `ConcurrentWriteError`
+/// at once, with no retry and no overwrite. `expected_version` (optional,
+/// the `version` returned by `info`) replaces this read version. A
+/// column the script never read is not protected. `undo()` forgets the
+/// versions read.
 #[pyfunction]
 #[pyo3(signature = (handle, values, *, expected_version=None))]
 fn set_column(
@@ -340,9 +339,9 @@ fn set_column(
     context.check_interrupt()?;
     let id = handle.id;
     let epoch = handle.epoch;
-    // La copie se fait GIL en main ; le `Vec<f64>` obtenu est du Rust pur, il
-    // peut traverser l'attente de l'acteur et se détruire sur n'importe quel
-    // fil.
+    // The copy happens with the GIL in hand; the resulting `Vec<f64>` is pure Rust, it
+    // can cross the wait for the actor and be dropped on any
+    // thread.
     if let Ok(array) = values.cast::<numpy::PyUntypedArray>() {
         use numpy::PyUntypedArrayMethods;
         check_value_count(array.len())?;
@@ -353,15 +352,15 @@ fn set_column(
         .map_err(to_py_error)
 }
 
-/// Annule un cran de la pile d'historique de la session.
+/// Undoes one step of the session's history stack.
 ///
-/// Rend `True` si quelque chose a été annulé, **`False` s'il n'y avait rien** —
-/// jamais une exception : une pile vide n'est pas une erreur, c'est le cas que
-/// l'interface traduit par un bouton grisé. C'est aussi ce qui s'écrit
-/// naturellement dans une boucle « annuler tant qu'il y a quelque chose ».
+/// Returns `True` if something was undone, **`False` if there was nothing**,
+/// never an exception: an empty stack is not an error, it is the case the
+/// interface translates as a greyed-out button. It is also what is written
+/// naturally in an "undo while there is something" loop.
 ///
-/// Il n'y a **qu'une seule pile** dans la session : `pyst.undo()` annule aussi
-/// bien une commande venue de l'interface qu'une commande venue du script.
+/// There is **only one stack** in the session: `pyst.undo()` undoes a
+/// command that came from the interface just as well as one from the script.
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 fn undo(py: Python<'_>) -> PyResult<bool> {
@@ -370,13 +369,13 @@ fn undo(py: Python<'_>) -> PyResult<bool> {
     py.detach(|| bridge::undo(&context)).map_err(to_py_error)
 }
 
-/// Rétablit l'entrée annulée la plus récente, symétrique de `undo`.
+/// Redoes the most recently undone entry, symmetric to `undo`.
 ///
-/// Rend `True` si quelque chose a été rétabli, `False` s'il n'y avait rien
-/// (jamais une exception). Un groupe d'écritures ouvert par le script est
-/// d'abord validé, ce qui vide la pile de rétablissement : `redo()` placé
-/// directement après des écritures rend donc `False`. Il rétablit aussi bien
-/// une commande venue de l'interface qu'une commande du script.
+/// Returns `True` if something was redone, `False` if there was nothing
+/// (never an exception). A write group opened by the script is
+/// first committed, which empties the redo stack: a `redo()` placed
+/// right after writes therefore returns `False`. It redoes a command from the
+/// interface just as well as a command from the script.
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 fn redo(py: Python<'_>) -> PyResult<bool> {
@@ -385,16 +384,16 @@ fn redo(py: Python<'_>) -> PyResult<bool> {
     py.detach(|| bridge::redo(&context)).map_err(to_py_error)
 }
 
-/// Enregistre le projet au chemin courant (celui du fichier ouvert dans
-/// l'application, ou du dernier `save_as`).
+/// Saves the project at the current path (that of the file opened in
+/// the application, or of the last `save_as`).
 ///
-/// Le groupe d'écritures du script est d'abord **validé** (comme `undo`) : ce
-/// qui précède l'enregistrement n'est plus annulé si le script échoue ensuite.
-/// L'enregistrement n'est pas une commande annulable et ne touche pas à
-/// l'historique. Les poignées restent valides.
+/// The script's write group is first **committed** (like `undo`): what
+/// precedes the save is no longer undone if the script fails afterward.
+/// Saving is not an undoable command and does not touch the
+/// history. Handles stay valid.
 ///
-/// Lève `InvalidValueError` si le projet n'a pas encore de chemin (utiliser
-/// `save_as`), ou si l'écriture échoue.
+/// Raises `InvalidValueError` if the project has no path yet (use
+/// `save_as`), or if the write fails.
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 fn save(py: Python<'_>) -> PyResult<()> {
@@ -404,9 +403,9 @@ fn save(py: Python<'_>) -> PyResult<()> {
         .map_err(to_py_error)
 }
 
-/// Enregistre le projet sous `path` (texte ou `pathlib.Path`), qui devient le
-/// chemin courant de `save()`. Même validation du groupe d'écritures et mêmes
-/// erreurs que `save`. Les poignées restent valides.
+/// Saves the project under `path` (text or `pathlib.Path`), which becomes the
+/// current path of `save()`. Same write-group commit and same
+/// errors as `save`. Handles stay valid.
 #[pyfunction]
 #[pyo3(text_signature = "(path)")]
 fn save_as(py: Python<'_>, path: std::path::PathBuf) -> PyResult<()> {
@@ -416,15 +415,15 @@ fn save_as(py: Python<'_>, path: std::path::PathBuf) -> PyResult<()> {
         .map_err(to_py_error)
 }
 
-/// Exporte un graphe dans un fichier, avec le même rendu que l'export de
-/// l'application (Typst compris). Le format vient de l'extension de `path`
-/// (texte ou `pathlib.Path`) : `.svg` (texte conservé en texte), `.pdf` ou
-/// `.png` (`png_scale` : facteur appliqué à la taille de la figure, 4 par
-/// défaut comme l'application). Ne change pas le projet.
+/// Exports a graph to a file, with the same rendering as the
+/// application's export (Typst included). The format comes from the extension of `path`
+/// (text or `pathlib.Path`): `.svg` (text kept as text), `.pdf` or
+/// `.png` (`png_scale`: factor applied to the figure's size, 4 by
+/// default like the application). Does not change the project.
 ///
-/// Lève `InvalidValueError` pour une extension inconnue, un `png_scale` non
-/// positif, une poignée qui n'est pas un graphe, ou une écriture impossible ;
-/// `BrokenReferenceError` pour une poignée périmée.
+/// Raises `InvalidValueError` for an unknown extension, a non-positive
+/// `png_scale`, a handle that is not a graph, or an impossible write;
+/// `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (graph, path, *, png_scale=bridge::DEFAULT_PNG_SCALE))]
 fn export_graph(
@@ -440,12 +439,12 @@ fn export_graph(
         .map_err(to_py_error)
 }
 
-/// Importe un fichier dans un classeur neuf et rend les poignées de ses
-/// feuilles. `recipe` nomme un modèle enregistré ou fourni ; sans ce nom,
-/// le modèle est choisi automatiquement, sinon la recette permissive.
-/// Colonnes, rôles, métadonnées et source sont ceux de l'assistant.
-/// Un seul Ctrl+Z (ou `pyst.undo()`) annule tout l'import. Un fichier illisible
-/// ou un modèle inconnu lève `InvalidValueError` sans toucher au projet.
+/// Imports a file into a new workbook and returns the handles of its
+/// sheets. `recipe` names a saved or built-in template; without this name,
+/// the template is chosen automatically, otherwise the permissive recipe.
+/// Columns, roles, metadata and source are those of the wizard.
+/// A single Ctrl+Z (or `pyst.undo()`) undoes the whole import. An unreadable file
+/// or an unknown template raises `InvalidValueError` without touching the project.
 #[pyfunction]
 #[pyo3(signature = (path, recipe=None))]
 fn import_file(
@@ -464,8 +463,8 @@ fn import_file(
         .collect())
 }
 
-/// Crée un classeur vide dans `parent` (dossier), ou dans la racine.
-/// Sans nom, utilise le premier BookN libre. Rend une poignée stable.
+/// Creates an empty workbook in `parent` (folder), or in the root.
+/// Without a name, uses the first free BookN. Returns a stable handle.
 #[pyfunction]
 #[pyo3(signature = (name=None, parent=None))]
 fn create_workbook(
@@ -487,7 +486,7 @@ fn create_workbook(
     Ok(Handle { id, epoch })
 }
 
-/// Crée une feuille vide en fin de classeur. Sans nom, utilise SheetN.
+/// Creates an empty sheet at the end of the workbook. Without a name, uses SheetN.
 #[pyfunction]
 #[pyo3(signature = (workbook, name=None))]
 fn create_worksheet(py: Python<'_>, workbook: &Handle, name: Option<String>) -> PyResult<Handle> {
@@ -505,7 +504,7 @@ fn create_worksheet(py: Python<'_>, workbook: &Handle, name: Option<String>) -> 
     Ok(Handle { id, epoch })
 }
 
-/// Le type de colonne nommé côté script : `numeric`, `datetime` ou `mixed`.
+/// The column type named on the script side: `numeric`, `datetime` or `mixed`.
 pub(crate) fn parse_column_type(name: &str) -> PyResult<ColumnType> {
     match name {
         "numeric" => Ok(ColumnType::Numeric),
@@ -517,8 +516,8 @@ pub(crate) fn parse_column_type(name: &str) -> PyResult<ColumnType> {
     }
 }
 
-/// Crée une colonne vide en fin de feuille, de type numeric, datetime ou
-/// mixed. Les colonnes texte utilisent mixed. Sans nom, utilise A, B, C…
+/// Creates an empty column at the end of the sheet, of type numeric, datetime or
+/// mixed. Text columns use mixed. Without a name, uses A, B, C...
 #[pyfunction]
 #[pyo3(signature = (worksheet, name=None, column_type="numeric"))]
 fn create_column(
@@ -544,8 +543,8 @@ fn create_column(
     Ok(Handle { id, epoch })
 }
 
-/// Renomme un objet sans changer sa poignée. Les règles de nom du modèle
-/// s'appliquent : nom non vide, au plus 255 caractères, unique dans le parent.
+/// Renames an object without changing its handle. The model's name rules
+/// apply: non-empty name, at most 255 characters, unique within the parent.
 #[pyfunction]
 fn rename(py: Python<'_>, handle: &Handle, name: String) -> PyResult<()> {
     let context = engine::current_context()?;
@@ -555,8 +554,8 @@ fn rename(py: Python<'_>, handle: &Handle, name: String) -> PyResult<()> {
         .map_err(to_py_error)
 }
 
-/// Supprime l'objet et ses descendants. La poignée redevient valide après
-/// annulation. La racine du projet ne peut pas être supprimée.
+/// Deletes the object and its descendants. The handle becomes valid again after
+/// an undo. The project root cannot be deleted.
 #[pyfunction]
 fn remove(py: Python<'_>, handle: &Handle) -> PyResult<()> {
     let context = engine::current_context()?;
@@ -566,9 +565,9 @@ fn remove(py: Python<'_>, handle: &Handle) -> PyResult<()> {
         .map_err(to_py_error)
 }
 
-/// Copie explicite des entrées avant toute attente d'acteur. La voie numpy
-/// garde les contrôles existants : float64, une dimension, masque refusé.
-/// La voie iterable conserve les textes tels quels, même "12" et "".
+/// Explicit copy of the inputs before any wait for the actor. The numpy path
+/// keeps the existing checks: float64, one dimension, mask refused.
+/// The iterable path keeps texts as they are, even "12" and "".
 fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
     let invalid = |message: String| InvalidValueError::new_err(message);
     if let Ok(array) = values.cast::<numpy::PyUntypedArray>() {
@@ -583,8 +582,8 @@ fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
             "expected an iterable of cells, not a single string".into(),
         ));
     }
-    // Ne pas croire __len__ pour borner l'itération : un générateur n'en a
-    // pas, et un objet utilisateur peut mentir. Le comptage protège les deux.
+    // Do not trust __len__ to bound the iteration: a generator has none,
+    // and a user object can lie. Counting protects against both.
     if let Ok(length) = values.len() {
         check_value_count(length)?;
     }
@@ -600,8 +599,8 @@ fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
         } else if value.is_instance_of::<pyo3::types::PyString>() {
             MixedCell::Text(value.extract::<String>()?)
         } else if value.is_instance_of::<pyo3::types::PyBool>() {
-            // bool est une sous-classe de int : le tester avant, sinon
-            // True/False seraient écrits en silence comme 1.0/0.0.
+            // bool is a subclass of int: test for it first, otherwise
+            // True/False would be silently written as 1.0/0.0.
             return Err(invalid(
                 "bool is not a valid cell: convert it explicitly to int or float".into(),
             ));
@@ -632,8 +631,8 @@ fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
     Ok(ValueBlock::Mixed(cells))
 }
 
-/// Refuse avant de copier les gros tableaux ou de traverser l'acteur. Le
-/// plafond est celui du modèle, pas une seconde valeur à garder en accord.
+/// Refuses before copying large arrays or crossing the actor. The
+/// cap is the model's, not a second value to keep in agreement.
 fn check_value_count(count: usize) -> PyResult<()> {
     let limit = stokesforge_core::column::MAX_COLUMN_ROWS;
     if count > limit {
@@ -644,17 +643,17 @@ fn check_value_count(count: usize) -> PyResult<()> {
     Ok(())
 }
 
-/// Remplace toutes les cellules, en allongeant ou tronquant cette seule
-/// colonne. Accepte numpy float64 1D ou un iterable de float/int/str/None.
-/// Numeric/datetime refusent les textes et traduisent None en NaN ; mixed
-/// conserve None, texte vide, texte numérique, NaN et zéro signé distincts.
-/// Copie les entrées ; le type et les métadonnées restent inchangés. `True`
-/// et `False` sont refusés (`InvalidValueError`, colonne inchangée). L'écriture
-/// et la troncature de la queue forment une seule opération atomique. La
-/// colonne doit être inchangée depuis la dernière lecture du script
-/// (`column`/`values`), ou depuis `expected_version` si fourni (facultatif) :
-/// sinon `ConcurrentWriteError` aussitôt, sans écrasement. Une colonne jamais
-/// lue n'est pas protégée.
+/// Replaces all the cells, lengthening or truncating this one
+/// column. Accepts a 1D numpy float64 or an iterable of float/int/str/None.
+/// Numeric/datetime refuse texts and turn None into NaN; mixed
+/// keeps None, empty text, numeric text, NaN and signed zero distinct.
+/// Copies the inputs; the type and metadata stay unchanged. `True`
+/// and `False` are refused (`InvalidValueError`, column unchanged). The write
+/// and the truncation of the tail form a single atomic operation. The
+/// column must be unchanged since the script's last read
+/// (`column`/`values`), or since `expected_version` if given (optional):
+/// otherwise `ConcurrentWriteError` at once, with no overwrite. A column never
+/// read is not protected.
 #[pyfunction]
 #[pyo3(signature = (handle, values, *, expected_version=None))]
 fn set_values(
@@ -672,9 +671,9 @@ fn set_values(
         .map_err(to_py_error)
 }
 
-/// Les champs que `set_column_meta` accepte, en un seul endroit : le message
-/// d'erreur d'un champ inconnu et le test de surface (`tests/surface_figee.rs`,
-/// #331) partent de cette liste.
+/// The fields that `set_column_meta` accepts, in one place: the error
+/// message for an unknown field and the surface test (`tests/frozen_api.rs`,
+/// #331) start from this list.
 pub(crate) const COLUMN_META_FIELDS: &[&str] = &[
     "role",
     "long_name",
@@ -684,12 +683,12 @@ pub(crate) const COLUMN_META_FIELDS: &[&str] = &[
     "formula",
 ];
 
-/// Modifie les seuls champs nommés : role (x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error,
+/// Changes only the named fields: role (x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error,
 /// label, none), long_name, unit, comment, display_format, formula.
-/// Les valeurs sont des str ; formula=None retire la formule. La formule se
-/// saisit en lettres : une lettre qui ne désigne aucune colonne de la feuille,
-/// la colonne elle-même ou `#REF` lèvent `InvalidValueError`. Type, version
-/// et provenance sont préservés. Une colonne-formule refuse les écritures.
+/// Values are str; formula=None removes the formula. The formula is
+/// entered in letters: a letter that designates no column of the sheet,
+/// the column itself or `#REF` raise `InvalidValueError`. Type, version
+/// and provenance are preserved. A formula column refuses writes.
 #[pyfunction]
 #[pyo3(signature = (handle, **metadata))]
 fn set_column_meta(
@@ -725,15 +724,15 @@ fn set_column_meta(
         .map_err(to_py_error)
 }
 
-/// Pose un objet graphique sur un graphe et rend son rang dans le panneau.
+/// Places a graphic object on a graph and returns its rank in the panel.
 ///
-/// `kind` : `"rectangle"`, `"ellipse"`, `"line"` ou `"arrow"` (pointe en
-/// `(x2, y2)`). Les points sont en **coordonnées de données** du panneau
-/// `panel = (ligne, colonne)` et de l'ordonnée `axis` (`"left"` ou
-/// `"right"`) : l'objet suit le zoom. Couleurs `"#RRGGBB"` ou `"#RRGGBBAA"` ;
-/// `line_color=""` = automatique, `fill_color=""` = aucun remplissage.
-/// L'objet est posé au-dessus des autres. Les écritures d'une exécution sont
-/// groupées : un `pyst.undo()` ou Ctrl+Z les annule ensemble.
+/// `kind`: `"rectangle"`, `"ellipse"`, `"line"` or `"arrow"` (head at
+/// `(x2, y2)`). Points are in the panel's **data coordinates**
+/// `panel = (row, column)` and of the `axis` ordinate (`"left"` or
+/// `"right"`): the object follows the zoom. Colors `"#RRGGBB"` or `"#RRGGBBAA"`;
+/// `line_color=""` = automatic, `fill_color=""` = no fill.
+/// The object is placed above the others. A run's writes are
+/// grouped: a `pyst.undo()` or Ctrl+Z undoes them together.
 #[pyfunction]
 #[pyo3(signature = (graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color=""))]
 #[allow(clippy::too_many_arguments)]
@@ -767,8 +766,8 @@ fn add_shape(
         .map_err(to_py_error)
 }
 
-/// Retire l'objet graphique de rang `index` du panneau `panel`. Les objets
-/// au-dessus de lui descendent d'un rang. Annulable par `pyst.undo()`.
+/// Removes the graphic object of rank `index` from panel `panel`. The objects
+/// above it move down one rank. Undoable by `pyst.undo()`.
 #[pyfunction]
 #[pyo3(signature = (graph, index, *, panel=(0, 0)))]
 fn remove_shape(
@@ -784,86 +783,86 @@ fn remove_shape(
         .map_err(to_py_error)
 }
 
-/// Documentation du module telle qu'un script la voit (`help(pyst)`).
+/// Module documentation as a script sees it (`help(pyst)`).
 const MODULE_DOC: &str = "\
-Surface de script de StokesForge : navigation, lecture, écriture, annulation, import,
-enregistrement et export de figure.
+StokesForge script surface: navigation, reading, writing, undo, import,
+saving and figure export.
 
     pyst.root()                     -> Handle (dossier racine)
-    pyst.children(handle=None)      -> list[Handle] (enfants directs ordonnés)
-    pyst.info(handle)               -> dict (nom, nature, parent, lignes, métadonnées)
-    pyst.values(handle)             -> tuple (copie des cellules float/str/None)
+    pyst.children(handle=None)      -> list[Handle] (ordered direct children)
+    pyst.info(handle)               -> dict (name, kind, parent, rows, metadata)
+    pyst.values(handle)             -> tuple (copy of the float/str/None cells)
     pyst.resolve(path)              -> Handle
-    pyst.column(handle)             -> numpy.ndarray (lecture seule, sans copie)
-    pyst.set_column(handle, values) -> None (passe par l'historique)
-    pyst.create_workbook(name=None, parent=None) -> Handle (classeur vide)
+    pyst.column(handle)             -> numpy.ndarray (read-only, no copy)
+    pyst.set_column(handle, values) -> None (goes through the history)
+    pyst.create_workbook(name=None, parent=None) -> Handle (empty workbook)
     pyst.create_worksheet(workbook, name=None) -> Handle
     pyst.create_column(worksheet, name=None, column_type=\"numeric\") -> Handle
     pyst.rename(handle, name)       -> None
     pyst.remove(handle)             -> None
-    pyst.set_values(handle, values) -> None (remplacement, longueur comprise)
+    pyst.set_values(handle, values) -> None (replacement, length included)
     pyst.set_column_meta(handle, **metadata) -> None
     pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
-                  (y : une colonne, ou une liste de colonnes = un groupe de séries ;
-                   label=[...] un nom par série, group_name='...')
-    pyst.set_graph(graph, *, panel=(0, 0), axis='left', **options) -> None (titres, échelles,
-                  bornes, légende… ; une entrée d'historique ; clés dans help(pyst.set_graph))
+                  (y: a column, or a list of columns = a series group;
+                   label=[...] one name per series, group_name='...')
+    pyst.set_graph(graph, *, panel=(0, 0), axis='left', **options) -> None (titles, scales,
+                  bounds, legend...; one history entry; keys in help(pyst.set_graph))
     pyst.insert_rows(worksheet, at, count=1) -> None
     pyst.delete_rows(worksheet, at, count=1) -> None
     pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed')
-    pyst.move(handle, parent, index=None) -> None (index parmi les autres enfants ; défaut : en dernier)
-    pyst.duplicate(handle, name=None) -> Handle (la copie, dans le même parent)
+    pyst.move(handle, parent, index=None) -> None (index among the other children; default: last)
+    pyst.duplicate(handle, name=None) -> Handle (the copy, in the same parent)
     pyst.set_note(note, text) -> None
     pyst.series(graph, *, panel=(0, 0)) -> list[dict] (index, name, group, color, visible, y)
     pyst.series_groups(graph, *, panel=(0, 0)) -> list[dict] (id, name, members)
-    pyst.group_series(graph, indices, *, name=None, panel=(0, 0)) -> int (numéro du groupe)
-    pyst.set_series_group(graph, index, group, *, panel=(0, 0)) -> int (nouveau rang ;
-                  group=None sort la série de son groupe)
-    pyst.rename_group(graph, group, name, *, panel=(0, 0)) -> None ('' = nom automatique)
-    pyst.ungroup(graph, group, *, panel=(0, 0)) -> None (les séries restent)
-    pyst.remove_group(graph, group, *, panel=(0, 0)) -> None (supprime aussi les séries)
+    pyst.group_series(graph, indices, *, name=None, panel=(0, 0)) -> int (group number)
+    pyst.set_series_group(graph, index, group, *, panel=(0, 0)) -> int (new rank;
+                  group=None takes the series out of its group)
+    pyst.rename_group(graph, group, name, *, panel=(0, 0)) -> None ('' = automatic name)
+    pyst.ungroup(graph, group, *, panel=(0, 0)) -> None (the series stay)
+    pyst.remove_group(graph, group, *, panel=(0, 0)) -> None (also removes the series)
     pyst.set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None,
                   symbol=None, symbol_size=None) -> None
-    pyst.apply_gradient(graph, group, gradient, *, panel=(0, 0)) -> None (nom d'un nuancier
-                  fourni ou enregistré dans le projet, ou liste d'arrêts '#RRGGBB')
+    pyst.apply_gradient(graph, group, gradient, *, panel=(0, 0)) -> None (name of a built-in
+                  or project-saved color gradient, or list of '#RRGGBB' stops)
     pyst.add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left',
                   line_color='', line_width=1.5, fill_color='') -> int
     pyst.remove_shape(graph, index, *, panel=(0, 0)) -> None
-    pyst.undo()                     -> bool (False si rien à annuler)
-    pyst.redo()                     -> bool (False si rien à rétablir)
-    pyst.save()                     -> None (au chemin courant du projet)
-    pyst.save_as(path)              -> None (et path devient le chemin courant)
-    pyst.export_graph(graph, path, *, png_scale=4.0) -> None (.svg, .pdf ou .png)
-    pyst.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
+    pyst.undo()                     -> bool (False if nothing to undo)
+    pyst.redo()                     -> bool (False if nothing to redo)
+    pyst.save()                     -> None (at the project's current path)
+    pyst.save_as(path)              -> None (and path becomes the current path)
+    pyst.export_graph(graph, path, *, png_scale=4.0) -> None (.svg, .pdf or .png)
+    pyst.import_file(path, recipe=None) -> list[Handle] (sheets of a new workbook)
     pyst.analysis.baseline / correct / integrate / fit / peaks / reconvolve /
-        deconvolve(y, x=None, ...) -> dict (voir help(pyst.analysis))
-    pyst.analysis.readiness(kind, **options) -> dict (ce qui manque avant un calcul)
+        deconvolve(y, x=None, ...) -> dict (see help(pyst.analysis))
+    pyst.analysis.readiness(kind, **options) -> dict (what is missing before a calculation)
 
-Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
+Errors: UnknownPathError, BrokenReferenceError, InvalidValueError,
           ConcurrentWriteError.
 
-Limites connues de cette surface :
-  - la sortie (print) n'est rendue qu'à la fin du script, pas au fil de l'eau ;
-  - un seul Ctrl+Z annule les écritures du script ;
-    une erreur non rattrapée ou un arrêt demandé annule le groupe courant ;
-  - undo() termine puis annule le groupe courant ;
-  - set_column exige la longueur exacte ; set_values remplace aussi la longueur ;
-  - les autres clients ne peuvent pas écrire pendant le groupe du script ;
-  - une Handle ne survit pas à un rechargement de projet (BrokenReferenceError
-    à la prochaine utilisation) ;
-  - atexit ne s'exécute jamais (l'interpréteur n'est pas finalisé) : tout ce
-    qui doit être écrit sur disque doit l'être explicitement ;
-  - une interruption ne coupe pas un appel natif long (une opération numpy sur
-    dix millions de points ira à son terme).
+Known limits of this surface:
+  - the output (print) is returned only at the end of the script, not as it is produced;
+  - a single Ctrl+Z undoes the script's writes;
+    an uncaught error or a requested stop undoes the current group;
+  - undo() ends then undoes the current group;
+  - set_column requires the exact length; set_values also replaces the length;
+  - other clients cannot write during the script's group;
+  - a Handle does not survive a project reload (BrokenReferenceError
+    on next use);
+  - atexit never runs (the interpreter is not finalized): anything that
+    must be written to disk must be written explicitly;
+  - an interruption does not cut a long native call (a numpy operation on
+    ten million points will run to completion).
 ";
 
-/// Construit le module `pyst` et l'enregistre dans `sys.modules`.
+/// Builds the `pyst` module and registers it in `sys.modules`.
 ///
-/// Le module est **sans état** : les fonctions retrouvent la session par
-/// le contexte du fil courant (cf. [`crate::engine`]). Deux moteurs de script
-/// vivant dans le même processus peuvent donc partager le même module sans se
-/// gêner, et les quatre types d'exception sont des singletons du processus —
-/// un script attrape le même `pyst.UnknownPathError` quel que soit le moteur.
+/// The module is **stateless**: the functions find the session through
+/// the current thread's context (see [`crate::engine`]). Two script engines
+/// living in the same process can therefore share the same module without getting
+/// in each other's way, and the four exception types are process singletons:
+/// a script catches the same `pyst.UnknownPathError` whatever the engine.
 pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     let module = PyModule::new(py, "pyst")?;
     module.add("__doc__", MODULE_DOC)?;
