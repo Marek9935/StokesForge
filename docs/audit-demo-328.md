@@ -15,7 +15,7 @@ The numbers in brackets refer to the gaps numbered below.
 | Graph | Element | Interface gesture |
 |---|---|---|
 | `Graph1` (:66) | curve, axis labels, color and width | ✓ Graph › Plot (menu/drag), Graph Properties › Axes / Series |
-| `Panneaux` (:90) | 2×2 grid of 4 cells (`PanelSpec::at(l,c)`) | **✗ [1]** |
+| `Panels` (:90) | 2×2 grid of 4 cells (`PanelSpec::at(l,c)`) | **✗ [1]** |
 | | one series per cell, type Line/Scatter/Histogram/Bar | ✓ per cell, but only in 1×1 |
 | | Histogram 20 bins (:92) | **✗ [2]** |
 | `Axes` (:144) | log scale, grid | ✓ Graph Properties › Axes (`plot_settings.rs`) |
@@ -23,7 +23,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | title of the right axis | ✓ Axes › Right tab (`PlotAxis::Right`, state.rs:2213) |
 | | layer with secondary axes (:181) | ✓ Graph › New Layer (menus.rs:456-505), or X2/Y2 columns (`ColumnRole`, column.rs:205) |
 | | titles and units of the layer axes | ✓ Axes tab (Top and Right) |
-| `TypesTrace` (:197) | 5 cells in a 2×3 grid | **✗ [1]** |
+| `PlotTypes` (:197) | 5 cells in a 2×3 grid | **✗ [1]** |
 | | the 5 plot types | ✓ type list (plot_settings.rs:771-776) |
 | | ErrorBar with `y_error` (:205) | **✗ [4]** |
 | | Histogram 30 bins | **✗ [2]** |
@@ -31,9 +31,9 @@ The numbers in brackets refer to the gaps numbered below.
 | `Annotations` (:265) | text with a Typst formula | ✓ Graph › Add Text, or the Text tool |
 | | rectangle, ellipse, line, arrow | ✓ Tools bar (`shape_tools.rs`), drag on the plot area |
 | | legend in a corner | ✓ Legend tab (`legend_editor`) |
-| `Groupes` (:302) | six curves in a group | ✓ plotting several columns together (state.rs:9400) |
+| `Groups` (:302) | six curves in a group | ✓ plotting several columns together (state.rs:9400) |
 | | color gradient of the group | ✓ `curve_settings.rs` (`set_group_gradient`) |
-| `Lignes` (:336) | "row" series | ✓ dragging rows from the gutter (gestes.md:96), `Action::PlotRows`, row menu (grid.rs:915) |
+| `Rows` (:336) | "row" series | ✓ dragging rows from the gutter (gestes.md:96), `Action::PlotRows`, row menu (grid.rs:915) |
 
 ## Elements without a gesture
 
@@ -78,9 +78,9 @@ missing feature.
 
 - **S1 (A, small)**: complete `gestes.md` and the tooltips: New Layer,
   shapes, groups and color gradient, Typst in Add Text. Check: redo `Annotations`,
-  `Groupes` and `Lignes` by following the documentation.
+  `Groups` and `Rows` by following the documentation.
 - **S2 (B, small)**: "Bins" widget (`histogram_bins`) in Series. It
-  covers `Panneaux` and `TypesTrace`.
+  covers `Panels` and `PlotTypes`.
 - **S3 (B, medium)**: designate the error column of an ErrorBar series. To
   decide between a column role (`yEr`, like X2/Y2) and a field in Series.
 - **S4 (B, to arbitrate)**: assign a series to the right Y axis of the panel, or
@@ -89,8 +89,8 @@ missing feature.
   removing, row/column placement). Depends on the product choice "multi-panel
   figures in V1". Before the code, a decision form: gesture
   (Graph menu, drag, Object Manager), number of cells, independence of axes.
-- **Option**: if S5 is postponed after V1, rewrite the `Panneaux` and
-  `TypesTrace` demos as separate graphs and say so in the demo documentation.
+- **Option**: if S5 is postponed after V1, rewrite the `Panels` and
+  `PlotTypes` demos as separate graphs and say so in the demo documentation.
   Issue #328 explicitly accepts a demo graph that cannot be reproduced.
 
 **Consistency**: `docs/application/etat-et-console.md` (description of the demo),

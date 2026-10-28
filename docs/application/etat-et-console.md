@@ -129,13 +129,13 @@ as hidden keys of the demonstration: the readable titles are long
 column names.
 
 The demonstration lives in the code, `demo/` module of the binary (no file):
-`Book1` + `Graph1` unchanged, a `Classeurs` folder (`Types`: one example of
-each column type and columns with formulas; `Mesures`: the data of the
-graphs; a matrix; the `Lisez-moi` note), an `Analyse` folder (one workbook
-per calculation family, including `Integrate`, `FitPolynome` and `FitGaussienne` with
-their calculation already done, visible in the Results panel) and six graphs (`Panneaux`,
-`Axes`, `TypesTrace`, `Annotations`, `Groupes`, `Lignes`). The window names there
-are unique across the whole project. `demo_session` requests a full
+`Book1` + `Graph1` unchanged, a `Workbooks` folder (`Types`: one example of
+each column type and columns with formulas; `Measurements`: the data of the
+graphs; a matrix; the `ReadMe` note), an `Analysis` folder (one workbook
+per calculation family, including `Integrate`, `FitPolynomial` and `FitGaussian` with
+their calculation already done, visible in the Results panel) and six graphs (`Panels`,
+`Axes`, `PlotTypes`, `Annotations`, `Groups`, `Rows`). The window names there
+are unique across the whole project. All its names and texts are English, hard-coded (#379). `demo_session` requests a full
 recalculation right after `Session::spawn`: the columns with formulas carry only
 their formula (invariant 11) and would stay empty without it. The noise of the measurements
 uses a fixed seed: the demonstration is the same at every launch.

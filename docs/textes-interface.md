@@ -4,7 +4,8 @@
 > section 4.
 
 The interface is **written in English first**; French is its translation
-(#39). This guide is the single source of terms and rules: a visible text that
+(#39). The demo project (`crates/stokesforge-app/src/demo/`) is the exception: its
+names and texts are hard-coded English, outside Fluent and the `fr` catalog (#379). This guide is the single source of terms and rules: a visible text that
 departs from it is a defect. The paths `app.rs:N` refer to
 `crates/stokesforge-app/src/` on 2026-10-01, before `app.rs` was split into
 modules (#115): the code of each surface has since lived in `src/app/` (module
