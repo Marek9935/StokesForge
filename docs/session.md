@@ -26,9 +26,9 @@ comparing the `revision` — a monotonic counter — never by comparing trees wi
 each other.
 
 ```rust
-Session::spawn(project, history_limit) -> Session   // démarre le fil
-session.handle()                       -> SessionHandle  // clonable, à donner aux clients
-session.shutdown()                     -> Project        // rend le projet
+Session::spawn(project, history_limit) -> Session   // starts the thread
+session.handle()                       -> SessionHandle  // cloneable, to give to the clients
+session.shutdown()                     -> Project        // hands the project back
 ```
 
 `SessionHandle`: `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,
@@ -71,7 +71,7 @@ could designate another object.
 ## `save`, `load` and `new_project`
 
 `save` and `load` go through `stokesforge-persistence`
-([`persistance.md`](persistance.md)).
+([`persistence.md`](persistence.md)).
 
 - `save` writes the current project **without touching** the revision or the
   history;
@@ -142,7 +142,7 @@ So: every assumption must travel in the request and be checked by the actor
 **at the moment of applying it**, never before.
 
 This is the same principle as `Command::SetCells { expected_version }`
-([`commandes-et-historique.md`](commandes-et-historique.md)): check nothing on
+([`commands-and-history.md`](commands-and-history.md)): check nothing on
 the client side, check everything on the actor side.
 
 ## Recalculation of formula columns (#193)
@@ -173,7 +173,7 @@ the growth of its source is undone.
 | what empties it | `Load` (the values of a file are not taken on trust) and `NewProject` |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
-| what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustesse` `b22` (two twin sessions, same trees at each step) |
+| what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` (two twin sessions, same trees at each step) |
 
 ### Interruptible recalculation (#239)
 

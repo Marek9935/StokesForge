@@ -1,6 +1,6 @@
-# rôle	trait	fond (le fond reçoit l'opacité 0.2 du duotone Phosphor)
-# Principe (#54) : neutre par défaut, couleur rare — types d'objets, action
-# destructive, état à repérer.
+# role	stroke	background (the background gets the 0.2 opacity of Phosphor duotone)
+# Principle (#54): neutral by default, color is rare — object types, destructive
+# action, state to spot.
 neutral	#1B2433	#5B7094
 workbook	#5E4600	#E0A800
 graph	#12427A	#2F80E0

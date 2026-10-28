@@ -56,19 +56,19 @@ checks the pointers of all project skills.
 | Add a feature | [`stokesforge-feature`](../.agents/skills/stokesforge-feature/SKILL.md) |
 | Diagnose a symptom, triage feedback | [`stokesforge-bug-report`](../.agents/skills/stokesforge-bug-report/SKILL.md) |
 | Fix a reproduced bug | [`stokesforge-bug-fix`](../.agents/skills/stokesforge-bug-fix/SKILL.md) |
-| Change the model or add an undoable action | [`stokesforge-commande`](../.agents/skills/stokesforge-commande/SKILL.md) |
-| Plotting, axes, legends and exports | [`stokesforge-rendu`](../.agents/skills/stokesforge-rendu/SKILL.md) |
+| Change the model or add an undoable action | [`stokesforge-command`](../.agents/skills/stokesforge-command/SKILL.md) |
+| Plotting, axes, legends and exports | [`stokesforge-rendering`](../.agents/skills/stokesforge-rendering/SKILL.md) |
 | CSV/TXT/ASC import and preview | [`stokesforge-import`](../.agents/skills/stokesforge-import/SKILL.md) |
 | PyO3 bridge, scripts and Python console | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
 | Tests, final verification and commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
 | Launch, drive and capture the real application on Linux | [`run-stokesforge`](../.agents/skills/run-stokesforge/SKILL.md) |
-| Explain what the software can do and how it is split | [`stokesforge-expliquer`](../.agents/skills/stokesforge-expliquer/SKILL.md) |
-| Write or change a visible text | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
+| Explain what the software can do and how it is split | [`stokesforge-explain`](../.agents/skills/stokesforge-explain/SKILL.md) |
+| Write or change a visible text | [`stokesforge-ui-texts`](../.agents/skills/stokesforge-ui-texts/SKILL.md) |
 
 The skills chain as needed: `stokesforge-feature` or
 `stokesforge-bug-report` → `stokesforge-bug-fix` if a fix in the code is explicitly requested →
-`stokesforge-verification` after a change. Add `stokesforge-commande`,
-`stokesforge-rendu`, `stokesforge-import` or `stokesforge-python` only for the domains
+`stokesforge-verification` after a change. Add `stokesforge-command`,
+`stokesforge-rendering`, `stokesforge-import` or `stokesforge-python` only for the domains
 touched. In Codex, you can invoke a skill explicitly with
 `$stokesforge-feature` (not Claude's `/stokesforge-feature` syntax).
 Tool mentions specific to Claude, such as `AskUserQuestion`, name
@@ -96,23 +96,23 @@ The paths in this table are relative to the repository root.
 | Domain | Starting documentation | Code to examine |
 |---|---|---|
 | Split and dependencies | `docs/architecture.md` | `Cargo.toml`, crate manifests |
-| Tree, columns, identifiers, graph description | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
-| Object copy and clipboard | `docs/application/gestionnaires.md` (§ Project Manager and windows by content), `docs/persistance.md` (§ Object clipboard (#105)) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
-| Undo/redo and macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, the `stokesforge-core` methods called |
-| Save, load and `.stf` format | `docs/persistance.md` | `stokesforge-persistence`, model and graph types |
+| Tree, columns, identifiers, graph description | `docs/data-model.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
+| Object copy and clipboard | `docs/application/managers.md` (§ Project Manager and windows by content), `docs/persistence.md` (§ Object clipboard (#105)) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
+| Undo/redo and macros | `docs/commands-and-history.md` | `stokesforge-commands`, the `stokesforge-core` methods called |
+| Save, load and `.stf` format | `docs/persistence.md` | `stokesforge-persistence`, model and graph types |
 | Actor, concurrency, snapshots | `docs/session.md` | `stokesforge-session`, commands and persistence called |
-| Plotting, axes, legends, export, Typst | `docs/rendu.md` | `stokesforge-render` first, then `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
-| Menus and right-clicks | `docs/menus.md` (grammar), `docs/application/menus-et-barres.md` (§ Themed menus (#114)) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
-| Interface behaviour (fields, messages, dialogs, disabling, keyboard) | `docs/standard-interface.md` (#217, *in place* / *planned* sections) | the module of the surface in `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
-| Window, grid, shortcuts | `docs/application/coquille-et-code.md` (§ Code split: `app.rs` and `src/app/` (#115)) | `stokesforge-app-state/src/state.rs`, the module of the surface in `src/app/` (`app.rs` for orchestration only), `selection.rs`, `object_manager.rs` (also in `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs`; `stokesforge-session` |
-| New window or dialog, interface gestures | `docs/fenetres.md`, `docs/principes-ui.md`, `docs/gestes.md` | a reference window of the same nature in `stokesforge-app/src/app/`, `app/dialogs.rs` (`DialogNature`) |
-| Interface smoothness | `docs/mesure-performance.md` | `scripts/perf/`, `.claude/skills/run-stokesforge/driver.py` (`SF_APP` to choose the binary); measure in release or compare debug/release |
-| CSV/TXT/ASC import and preview | `docs/chantier-import-previsualisation.md` (handover) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, integration in `stokesforge-app-state/src/state.rs` and `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
-| Embedded Python and `pyst` scripts | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
-| Tests and robustness | `docs/tests.md` | tests of the crate; index `stokesforge-robustesse/src/lib.rs`, then the battery `bN` concerned |
+| Plotting, axes, legends, export, Typst | `docs/rendering.md` | `stokesforge-render` first, then `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
+| Menus and right-clicks | `docs/menus.md` (grammar), `docs/application/menus-and-toolbars.md` (§ Themed menus (#114)) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
+| Interface behaviour (fields, messages, dialogs, disabling, keyboard) | `docs/interface-standard.md` (#217, *in place* / *planned* sections) | the module of the surface in `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
+| Window, grid, shortcuts | `docs/application/shell-and-code.md` (§ Code split: `app.rs` and `src/app/` (#115)) | `stokesforge-app-state/src/state.rs`, the module of the surface in `src/app/` (`app.rs` for orchestration only), `selection.rs`, `object_manager.rs` (also in `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs`; `stokesforge-session` |
+| New window or dialog, interface gestures | `docs/windows.md`, `docs/ui-principles.md`, `docs/gestures.md` | a reference window of the same nature in `stokesforge-app/src/app/`, `app/dialogs.rs` (`DialogNature`) |
+| Interface smoothness | `docs/performance-measurement.md` | `scripts/perf/`, `.claude/skills/run-stokesforge/driver.py` (`SF_APP` to choose the binary); measure in release or compare debug/release |
+| CSV/TXT/ASC import and preview | `docs/import-preview-work-package.md` (handover) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, integration in `stokesforge-app-state/src/state.rs` and `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
+| Embedded Python and `pyst` scripts | `docs/python-and-scripting.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
+| Tests and robustness | `docs/tests.md` | tests of the crate; index `stokesforge-robustness/src/lib.rs`, then the battery `bN` concerned |
 | Linux CI on GitHub, Windows on GitLab and results feedback | `docs/tests.md` (§ CI (GitHub Actions for Linux and Windows) and GitHub results visible in GitLab) | `.gitlab-ci.yml`, `.github/workflows/{ci,gitlab-status}.yml`, `scripts/gitlab-status{,-test}.py` |
-| Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
-| License, contributions and extension interfaces | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
+| Distribution | `crates/stokesforge-python/README.md`, `docs/application/state-and-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
+| License, contributions and extension interfaces | `docs/license-and-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
 
 Crate names mean `crates/<name>/`. The root manifest includes
 `stokesforge-import`, even if some older pages do not list it.
@@ -120,8 +120,8 @@ The `stokesforge-cli` CLI also lets you check the foundation without an interfac
 
 The documents in `docs/archive/` explain the historical decisions.
 Old references to `architecture-choisie.md`, `format-fichier-plx.md`
-or `questions-ouvertes.md` resolve there. The notes `docs/chantier-*.md` and
-`docs/chantiers/` need a check against the code before taking up a
+or `questions-ouvertes.md` resolve there. The notes `docs/*-work-package.md` and
+`docs/work-packages/` need a check against the code before taking up a
 "remaining to do". `legacy-python/` was removed from this branch;
 the old implementation stays available under the `legacy-python` tag.
 
@@ -168,7 +168,7 @@ the old implementation stays available under the `legacy-python` tag.
   GIL while waiting. The interpreter starts at the first script
   run, without blocking the UI thread.
 - The `pyst` surface is frozen (#331): any change to the public contract updates
-  the `pyst-api` blocks of `docs/python-et-script.md` in the same commit.
+  the `pyst-api` blocks of `docs/python-and-scripting.md` in the same commit.
   Read the skill `stokesforge-python`; `stokesforge-script/tests/frozen_api.rs`
   guards the agreement between these blocks and the API.
 - Preserve the distinctions between missing values, empty text, numbers
@@ -192,6 +192,7 @@ Before delivering a Rust change, repeat the CI checks:
 
 ```sh
 cargo fmt --all -- --check
+python3 scripts/french-guard.py   # no French outside exempt places (docs/tests.md, "French guard")
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
@@ -224,7 +225,7 @@ For Python, first examine the interpreter in
 `scripts/python-vendor.sh` downloads the versions declared in
 `vendor/python/lock.env`. Then `scripts/python-test.sh` configures PyO3, the
 rpath and the embedded prefix, and tests `stokesforge-python`, `stokesforge-script`,
-`stokesforge-robustesse` (serially), `stokesforge-app-state`, `stokesforge-app` and `stokesforge-cli` with `python`.
+`stokesforge-robustness` (serially), `stokesforge-app-state`, `stokesforge-app` and `stokesforge-cli` with `python`.
 The CI job `test-python` runs this script automatically and blocks on
 failure. The `#[ignore]` reproductions still need `-- --ignored`.
 Apply the same environment to the Clippy checks with
@@ -238,7 +239,7 @@ in a separate copy of the runtime; see `docs/python-matplotlib-spike.md`.
   exercise the exports concerned and the features changed.
   The manual bench for large curves (#141),
   `stokesforge-render-egui/tests/curve_bench.rs`, runs with `--release`
-  and `--ignored`; protocol, command and measurements in `docs/rendu.md`.
+  and `--ignored`; protocol, command and measurements in `docs/rendering.md`.
 - UI: test the logic through `AppState`; for keyboard, focus or
   presentation, complete with a check in the real application
   with `run-stokesforge` if a display is available. For texts,
@@ -253,7 +254,7 @@ in a separate copy of the runtime; see `docs/python-matplotlib-spike.md`.
   Wayland is the default; `STOKESFORGE_X11=1` forces the X11 fallback. The manual
   protocol, the alternatives and the removal are in `vendor/winit/STOKESFORGE.md`.
 - Robustness: read the reason of each `#[ignore]` before running it.
-  `cargo test -p stokesforge-robustesse -- --ignored` replays these cases; some
+  `cargo test -p stokesforge-robustness -- --ignored` replays these cases; some
   may be costly or depend on scheduling. Do not remove an
   `ignore` without checking that the test becomes a reliable guard.
 - Distribution: read the scripts before running them; they rebuild their
@@ -262,7 +263,7 @@ in a separate copy of the runtime; see `docs/python-matplotlib-spike.md`.
   with an emptied and trapped environment. Use these scripts as part of work
   on packaging, not as a simple documentation check.
 - Licenses (#129): install the versions of `scripts/licenses-tools.env`
-  following `docs/licence-et-extensions.md`, then `cargo deny --locked check licenses`.
+  following `docs/license-and-extensions.md`, then `cargo deny --locked check licenses`.
   The CI job `licenses` also generates the notices with `cargo-about`, all
   platforms and features. Distributions call `scripts/licenses-dist.sh`
   and refuse outdated Python notices or a runtime without its texts.

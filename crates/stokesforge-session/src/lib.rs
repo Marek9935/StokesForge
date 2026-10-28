@@ -97,7 +97,7 @@
 //! needs to know that it changed in order to repaint, without it looking like
 //! a model mutation that would invalidate a display cache (the
 //! `(revision, rect, pixels_per_point, view_generation)` of
-//! `stokesforge-render-egui`, see `docs/rendu.md`) that has no reason to be.
+//! `stokesforge-render-egui`, see `docs/rendering.md`) that has no reason to be.
 //! Separating the two counters closes that question: `revision` never moves
 //! for a geometry, `geometry_revision` never moves for a model mutation.
 //!
@@ -123,7 +123,7 @@
 //! `load_with_geometries`, which write/read this block **separate from the
 //! undoable tree** in the `.stf` file (`FileBody::window_geometries` and
 //! `FileBody::column_widths`,
-//! `#[serde(default)]` — see `docs/persistance.md`) — never mixed into the
+//! `#[serde(default)]` — see `docs/persistence.md`) — never mixed into the
 //! `NodeRecord`s, never through `convert.rs`.
 //!
 //! **`Session::shutdown` during an open macro — finding not reproducible,
@@ -506,7 +506,7 @@ impl Session {
 
     /// Like [`Session::spawn`], choosing how the actor recalculates formula
     /// columns. [`FormulaRecalc::Full`] exists only as the oracle of the
-    /// differential test (`stokesforge-robustesse`, battery `b22`): a
+    /// differential test (`stokesforge-robustness`, battery `b22`): a
     /// production session takes [`Session::spawn`].
     pub fn spawn_with_recalc(
         project: Project,

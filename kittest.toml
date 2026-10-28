@@ -1,9 +1,9 @@
-# Tolérance des captures d'écran (`egui_kittest`, `harness.snapshot`).
-# Les images de référence viennent de Linux ; un autre pilote graphique
-# rasterise le texte fin au pixel près différemment. Linux garde la rigueur par
-# défaut (seuil 0.6, aucun pixel hors seuil) ; ailleurs, quelques pixels isolés
-# sont tolérés. Une vraie régression en touche des centaines.
-# Voir docs/tests.md, « Captures d'écran ».
+# Screenshot tolerance (`egui_kittest`, `harness.snapshot`).
+# The reference images come from Linux; another graphics driver rasterizes
+# fine text differently down to the pixel. Linux keeps the default strictness
+# (threshold 0.6, no pixel over the threshold); elsewhere, a few isolated
+# pixels are tolerated. A real regression touches hundreds.
+# See docs/tests.md, "Screenshots".
 
 [windows]
 max_failed_pixels = 10

@@ -29,7 +29,7 @@
 //! # Five properties held from version 1
 //!
 //! Adding them afterwards would cost a migration; they are therefore in the
-//! format since version 1, frozen (version rule: `docs/persistance.md`):
+//! format since version 1, frozen (version rule: `docs/persistence.md`):
 //!
 //! 1. **Atomic write.** `save` writes to a temporary file in the same
 //!    directory as the destination, then renames it onto the target

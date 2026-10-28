@@ -169,7 +169,7 @@ impl NodeKind {
     /// `Unknown`); `Workbook` and `Worksheet` did not, and that is
     /// how an unknown column type — a mixed column read by an
     /// earlier reader, for example — took the whole file down
-    /// (`stokesforge-robustesse`, `b19_an_unknown_column_type_loses_only_that_column`).
+    /// (`stokesforge-robustness`, `b19_an_unknown_column_type_loses_only_that_column`).
     ///
     /// An unknown node stored this way is never mistaken for a column:
     /// everything that reads a sheet goes through `Node::as_column`, which returns

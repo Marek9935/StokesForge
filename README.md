@@ -48,7 +48,7 @@ Copyright © 2026 Aliocha Skrzypczak. This branch is under
 instrument): an additional permission or a separate license can be requested
 from the author, who considers it case by case and grants it, if at all, in
 writing. None is granted by default. The third-party notices are described in
-[`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+[`docs/license-and-extensions.md`](docs/license-and-extensions.md).
 
 The distributions ship `LICENSE`,
 `THIRD-PARTY-LICENSES.txt` and a `licenses/` folder (fonts, icons, patches,

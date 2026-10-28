@@ -1,4 +1,4 @@
-//! The "form" building block (#227, `docs/standard-interface.md`, § Choices,
+//! The "form" building block (#227, `docs/interface-standard.md`, § Choices,
 //! layout): a **two-column** grid — labels on the left, fields
 //! aligned on one vertical, checkboxes and notes in the fields column
 //! (S-L1) — and the **exclusive choice** that is painted as radio buttons for

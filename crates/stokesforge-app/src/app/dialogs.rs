@@ -6,7 +6,7 @@
 //! building block (`window_chrome::show_window_in_layer`).
 //!
 //! Moved out of `app.rs` as is (#117), then extended by #228
-//! (`docs/standard-interface.md`, § Windows and dialogs):
+//! (`docs/interface-standard.md`, § Windows and dialogs):
 //!
 //! - **nature** (#300, S-F11): [`DialogNature`] says what the window is —
 //!   settings, draft, choice, wizard, read-only, confirmation,

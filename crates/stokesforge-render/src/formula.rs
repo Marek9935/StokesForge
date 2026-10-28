@@ -1565,7 +1565,7 @@ mod tests {
     }
 
     /// Sanity measurement on the **real pipeline** — not R0's throwaway spike.
-    /// Ignored by default, like the costly benches of `stokesforge-robustesse`
+    /// Ignored by default, like the costly benches of `stokesforge-robustness`
     /// (`cargo test -- --ignored`): it is not a correctness assertion, just a
     /// numeric marker to compare with the 150 ms threshold already set and
     /// already measured under that threshold by R0.

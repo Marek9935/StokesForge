@@ -54,6 +54,7 @@ fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
     let text = summary_text(&groups());
     assert_eq!(
         text,
+        // lang: fr
         "R² < 0,6 pour :\n• 1 ajustement\n• 12 reconvolutions\nLes valeurs sont dans le volet Résultats."
     );
     assert_eq!(badge_text(1), "1 R² faible");

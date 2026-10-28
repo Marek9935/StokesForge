@@ -12,7 +12,7 @@
 //!
 //! # Gestures
 //!
-//! As on the graph (#270, D3 of #299; matrix: `docs/gestes.md`):
+//! As on the graph (#270, D3 of #299; matrix: `docs/gestures.md`):
 //!
 //! - **Ctrl + wheel**: zoom anchored under the pointer; over an axis, that
 //!   axis alone. The wheel alone does nothing;

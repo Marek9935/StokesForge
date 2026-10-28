@@ -68,7 +68,7 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
 /// The options `plot` accepts (`**options`), in one place: the error message
 /// for an unknown option and the surface test (`tests/frozen_api.rs`, #331)
 /// start from this list. An option added to `plot`'s `match` goes in here
-/// too, and in "Frozen API V1" (`docs/python-et-script.md`).
+/// too, and in "Frozen API V1" (`docs/python-and-scripting.md`).
 pub(crate) const PLOT_OPTIONS: &[&str] = &[
     "plot_type",
     "color",

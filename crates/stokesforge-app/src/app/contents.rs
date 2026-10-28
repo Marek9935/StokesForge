@@ -43,7 +43,7 @@ pub(super) fn tab_contents(
 
 /// Contents of a [`Tab::Matrix`] — **documented placeholder**. Matrix
 /// editing is explicitly out of scope for this task
-/// (`docs/application/gestionnaires.md`): the window opens and takes focus
+/// (`docs/application/managers.md`): the window opens and takes focus
 /// exactly like the three other kinds, but shows only a message instead of
 /// an editor. `stokesforge-core::NodeKind::Matrix` has no content today
 /// (just window metadata) — so there is literally nothing else to show

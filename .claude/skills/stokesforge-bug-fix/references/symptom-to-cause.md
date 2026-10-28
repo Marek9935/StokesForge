@@ -9,7 +9,7 @@ Read at step 3 of `stokesforge-bug-fix`. The costly reflex is repairing where th
 | grid, sheet tabs or bars misplaced in a workbook | `book_contents` (`app/workbook.rs`), shared floating/detached. Tests: `app::workbook::tests` |
 | undo does not restore the previous state | `stokesforge-commands`: the delta computed at apply time, or the structural/data nature of the command |
 | state lost after save + reload | `stokesforge-persistence` (`convert.rs`, `schema.rs`): a model field without transport |
-| screen ≠ SVG/PDF/PNG export | text measurement (invariant 4) or a feature written in one backend (invariant 5): `stokesforge-rendu` |
+| screen ≠ SVG/PDF/PNG export | text measurement (invariant 4) or a feature written in one backend (invariant 5): `stokesforge-rendering` |
 | figure does not update | cache key `(revision, rect, pixels_per_point, view_generation)` of `stokesforge-render-egui` |
 | detached window up to date only on hover | publication in `app/window_detach.rs` (`snapshot_stamp`, `sync_window_views`, `show_detached_tabs`): compare epoch, revision and geometry revision, then `request_repaint_of`; also test the return to idle without periodic repaint (#104) |
 | action wrongly greyed, wrong label, inconsistent menu | `AppState` (`grid_menu`, `undo_label`…), never the egui code |

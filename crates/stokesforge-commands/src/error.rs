@@ -29,7 +29,7 @@ pub enum CommandError {
     /// `Entry::Macro`). Nothing capped this nesting before this fix: beyond
     /// ~10,891 levels, undoing such a deep nesting overflowed the actor
     /// thread's stack and `abort()`ed the process — see
-    /// `stokesforge-robustesse/src/bin/stack_probe.rs`. The field names the
+    /// `stokesforge-robustness/src/bin/stack_probe.rs`. The field names the
     /// refused limit.
     #[error("macro nesting too deep (limit: {0})")]
     MacroTooDeep(usize),

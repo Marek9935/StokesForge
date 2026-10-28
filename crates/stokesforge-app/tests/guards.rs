@@ -40,13 +40,13 @@
 //!   whose arguments name a tool is not in a window; exception
 //!   through `// TOOL-IN-WINDOW(#299): <justification>` written just before;
 //! - `no_gesture_outside_the_matrix` (#299, D4): every file that reads a
-//!   mouse wheel or a double click is cited by `docs/gestes.md`;
+//!   mouse wheel or a double click is cited by `docs/gestures.md`;
 //! - `no_free_size_without_justification` (#300, S-F11): an interactive window
 //!   takes a size class; a free size (`InteractiveSize::Free`) requires
 //!   `// FREE-SIZE(#300): <justification>` just before;
 //! - `the_window_catalog_and_the_code_agree` (#300, S-F11): every
 //!   `stokesforge_…` identifier passed to a `modal_*` function appears in
-//!   `docs/fenetres.md`, and conversely; does not check the sizes.
+//!   `docs/windows.md`, and conversely; does not check the sizes.
 //!
 //! The old guard "the state modules do not name egui" (#255) is gone: since
 //! #263 these modules live in `stokesforge-app-state`, which depends on no
@@ -707,7 +707,7 @@ fn selectable_buttons_outside_choice(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #169 (`docs/application/fenetres-et-panneaux.md`, § Tabs, lists and
+/// Rule #169 (`docs/application/windows-and-panels.md`, § Tabs, lists and
 /// selection): the
 /// rounded green background of an egui selected button marks only an
 /// **exclusive choice** in a menu, a combo box or the color picker.
@@ -1093,7 +1093,7 @@ fn egui_numeric_fields(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #220 (`docs/standard-interface.md`, § Numeric fields): a number
+/// Rule #220 (`docs/interface-standard.md`, § Numeric fields): a number
 /// is typed through `number_field::number_field`, with its quantity from
 /// `quantities.rs`; bounds, step and decimals are not written in place.
 #[test]
@@ -1212,7 +1212,7 @@ fn tooltips_on_field(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #225 (`docs/standard-interface.md`, § Messages and help, S-M2): a
+/// Rule #225 (`docs/interface-standard.md`, § Messages and help, S-M2): a
 /// form field never has a bare tooltip; its reminder is the "?" icon
 /// (`app/hover_help.rs`), its effect or scope a plain text.
 #[test]
@@ -1312,7 +1312,7 @@ fn disabled_without_reason(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #226 (`docs/standard-interface.md`, § Disabled, S-G1/S-G2): an element
+/// Rule #226 (`docs/interface-standard.md`, § Disabled, S-G1/S-G2): an element
 /// disabled through `add_enabled` says why and what to do, in the
 /// `.on_disabled_hover_text` tooltip of the element itself.
 #[test]
@@ -1418,7 +1418,7 @@ fn keys_outside_registry(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #231 (`docs/standard-interface.md`, § Keyboard and mouse, S-K1): a
+/// Rule #231 (`docs/interface-standard.md`, § Keyboard and mouse, S-K1): a
 /// single registry of keys, `app/shortcuts.rs`.
 #[test]
 fn no_consume_key_outside_the_registry() {
@@ -1484,7 +1484,7 @@ fn cursors_outside_module(sources: &[SourceFile]) -> Vec<String> {
     found
 }
 
-/// Rule #231 (`docs/standard-interface.md`, § Keyboard and mouse, S-X2): a
+/// Rule #231 (`docs/interface-standard.md`, § Keyboard and mouse, S-X2): a
 /// single module names the cursors.
 #[test]
 fn no_cursor_outside_the_cursors_module() {
@@ -1525,7 +1525,7 @@ fn the_cursors_guard_sees_a_cursor_written_in_place() {
     .is_empty());
 }
 
-/// Rule #227 (`docs/standard-interface.md`, § Choices, layout, S-L4): two
+/// Rule #227 (`docs/interface-standard.md`, § Choices, layout, S-L4): two
 /// spacing constants in `theme.rs`, no numeric `add_space`
 /// elsewhere.
 #[test]
@@ -1777,7 +1777,7 @@ fn tool_pickers_without_exception(sources: &[SourceFile]) -> Vec<String> {
 /// in the Tools bar. One may leave it — the analysis tools, for example —
 /// provided it is written in the code: `// TOOL-IN-WINDOW(#299): <why>`
 /// in the twelve lines before, non-empty justification. Gesture matrix:
-/// `docs/gestes.md`.
+/// `docs/gestures.md`.
 #[test]
 fn no_tool_picker_outside_the_tools_bar() {
     let sources = sources::sources();
@@ -1789,7 +1789,7 @@ fn no_tool_picker_outside_the_tools_bar() {
     assert!(
         offenders.is_empty(),
         "tool picker outside the Tools bar — place it in the bar, or \
-         write `// {TOOL_MARKER} <justification>` right before (docs/gestes.md): \
+         write `// {TOOL_MARKER} <justification>` right before (docs/gestures.md): \
          {offenders:?}"
     );
 }
@@ -1868,7 +1868,7 @@ fn gesture_matrix() -> String {
         .join("..")
         .join("..")
         .join("docs")
-        .join("gestes.md");
+        .join("gestures.md");
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} unreadable: {e}", path.display()))
 }
 
@@ -1914,7 +1914,7 @@ fn matrix_deviations(sources: &[SourceFile], matrix: &str) -> Vec<String> {
         if let Some(i) = lit {
             if !cited.contains(&file.path) {
                 deviations.push(format!(
-                    "src/{}:{} reads a gesture absent from docs/gestes.md",
+                    "src/{}:{} reads a gesture absent from docs/gestures.md",
                     file.path,
                     line_of(&source.original, i)
                 ));
@@ -1924,14 +1924,14 @@ fn matrix_deviations(sources: &[SourceFile], matrix: &str) -> Vec<String> {
     for citation in cited {
         if !sources.iter().any(|f| f.path == citation) {
             deviations.push(format!(
-                "`{citation}` cited by docs/gestes.md does not exist"
+                "`{citation}` cited by docs/gestures.md does not exist"
             ));
         }
     }
     deviations
 }
 
-/// Rule #299 (D4): the `docs/gestes.md` matrix names each surface that reads
+/// Rule #299 (D4): the `docs/gestures.md` matrix names each surface that reads
 /// a wheel or a double click. A new surface, or a new wheel gesture
 /// in a file that read none, is entered in the matrix — where
 /// one sees whether the same gesture does something else elsewhere. The guard does not judge the
@@ -2046,7 +2046,7 @@ fn no_free_size_without_justification() {
     assert!(
         offenders.is_empty(),
         "free size without justification — take a class (SizeClass) or write \
-         `// {SIZE_MARKER} <justification>` right before (docs/fenetres.md): {offenders:?}"
+         `// {SIZE_MARKER} <justification>` right before (docs/windows.md): {offenders:?}"
     );
 }
 
@@ -2177,7 +2177,7 @@ fn catalog_deviations(sources: &[SourceFile], catalog: &str, built_ids: &[&str])
         for (identifier, line) in identifiers_passed_to_dialogs(file) {
             if !in_catalog.contains(&identifier) {
                 deviations.push(format!(
-                    "src/{}:{line}: `{identifier}` passed to a dialog, absent from docs/fenetres.md",
+                    "src/{}:{line}: `{identifier}` passed to a dialog, absent from docs/windows.md",
                     file.path
                 ));
             }
@@ -2189,14 +2189,14 @@ fn catalog_deviations(sources: &[SourceFile], catalog: &str, built_ids: &[&str])
             && literals.contains(&format!("\"{identifier}\""));
         if !called.contains(identifier) && !built_id {
             deviations.push(format!(
-                "docs/fenetres.md: `{identifier}` without a dialog call in the code"
+                "docs/windows.md: `{identifier}` without a dialog call in the code"
             ));
         }
     }
     for built_id in built_ids {
         if !in_catalog.iter().any(|id| id == built_id) {
             deviations.push(format!(
-                "`{built_id}` (built identifier) absent from docs/fenetres.md"
+                "`{built_id}` (built identifier) absent from docs/windows.md"
             ));
         }
     }
@@ -2209,11 +2209,11 @@ fn window_catalog() -> String {
         .join("..")
         .join("..")
         .join("docs")
-        .join("fenetres.md");
+        .join("windows.md");
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} unreadable: {e}", path.display()))
 }
 
-/// Rule #300 (S-F11): `docs/fenetres.md` is the window catalog. Every
+/// Rule #300 (S-F11): `docs/windows.md` is the window catalog. Every
 /// `stokesforge_…` identifier passed to a `modal_*` function appears in it, and
 /// every catalog line has its call: a new window enters the catalog
 /// in the same commit, a removed window leaves it. The identifiers built

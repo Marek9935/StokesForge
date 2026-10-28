@@ -30,7 +30,7 @@ against this interpreter. One is never changed without rerunning
 ## Build and verify
 
 Before the distribution scripts, install the pinned license tools
-according to [`docs/licence-et-extensions.md`](../../docs/licence-et-extensions.md).
+according to [`docs/license-and-extensions.md`](../../docs/license-and-extensions.md).
 They also deliver the notices of the code, the resources, CPython and
 numpy. An update of the Python lock refreshes
 [`vendor/python/licenses-linux/`](../../vendor/python/licenses-linux/README.md) and

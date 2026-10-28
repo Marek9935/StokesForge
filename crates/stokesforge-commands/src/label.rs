@@ -15,7 +15,7 @@
 //! compared (`==`) without parsing a text (the application used to ask
 //! `label == "Importer"`), and it is carried as is if the history is one day
 //! written to a file — the history is **not** in the `.stf` today
-//! (`docs/persistance.md`).
+//! (`docs/persistence.md`).
 //!
 //! # The English `Display`
 //!

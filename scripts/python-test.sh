@@ -48,7 +48,7 @@ cargo test -p stokesforge-script --features python "$@"
 # doc): this line runs only the guards, and stays green. To replay the
 # reproductions of the Python boundary:
 #     scripts/python-test.sh -- --ignored
-RUST_TEST_THREADS=1 cargo test -p stokesforge-robustesse --features python "$@"
+RUST_TEST_THREADS=1 cargo test -p stokesforge-robustness --features python "$@"
 
 # Console integration and headless CLI: same variables, same runtime.
 # The state (script console, lazy bridge) lives in `stokesforge-app-state`

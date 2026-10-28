@@ -1,5 +1,5 @@
 //! The application's **blocking** dialogs (#229,
-//! `docs/standard-interface.md`, § Confirmations): while one waits for its
+//! `docs/interface-standard.md`, § Confirmations): while one waits for its
 //! answer, it is the only one acting in the frame (`StokesForgeApp::
 //! blocking_confirmations` empties the other actions).
 //!

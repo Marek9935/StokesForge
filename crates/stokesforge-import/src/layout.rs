@@ -102,7 +102,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
     let mut idx = start;
     let subheader_start;
     // Two header modes: as soon as `header_layout` counts a line, it
-    // replaces `recipe.header` (see `docs/chantier-import-previsualisation.md`).
+    // replaces `recipe.header` (see `docs/import-preview-work-package.md`).
     if recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0 {
         let main_n = recipe.header_layout.main_header_lines.min(end - idx);
         for _ in 0..main_n {

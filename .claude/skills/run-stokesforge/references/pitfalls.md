@@ -16,8 +16,8 @@ Read from `run-stokesforge` when a click, key or capture does not do what you ex
 
 ## Troubleshooting
 
-- `touche inconnue : #` → character missing from the `names` table of `type_text`.
-- `app: MORTE` after `start` → read `/tmp/stokesforge-run/app.log`.
-- `fenêtre de l'app introuvable` (`focus`) → the app is not mapped yet: wait or rerun `start`.
+- `unknown key: #` → character missing from the `names` table of `type_text`.
+- `app: DEAD` after `start` → read `/tmp/stokesforge-run/app.log`.
+- `app window not found` (`focus`) → the app is not mapped yet: wait or rerun `start`.
 - Capture shows the menu open but not its effect → the click was lost or a second `ss` is needed; click again.
 - Known-good scenario: Preferences → switch to Français (whole UI changes) → back to English; Book1 in the Project Manager → `F2` → `type Renamed` → `Return` → renamed → `ctrl+z` → undone.

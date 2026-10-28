@@ -1,4 +1,4 @@
-//! The `S-XN` codes of the interface standard (`docs/standard-interface.md`,
+//! The `S-XN` codes of the interface standard (`docs/interface-standard.md`,
 //! "Rule index") are cited everywhere: comments, docs, skills,
 //! test messages. The `S-` prefix was added by script (#301, F3/F4);
 //! nothing checked the names. This guard reads the index, then refuses any
@@ -78,7 +78,7 @@ fn files(folder: &Path, output: &mut Vec<PathBuf>) {
 #[test]
 fn cited_s_codes_exist_in_the_standard_index() {
     let root = root();
-    let standard = fs::read_to_string(root.join("docs/standard-interface.md")).expect("standard");
+    let standard = fs::read_to_string(root.join("docs/interface-standard.md")).expect("standard");
     let known = index(&standard);
     assert!(known.len() >= 89, "index badly read: {} codes", known.len());
     assert!(known.contains("S-N1") && known.contains("S-R16"));

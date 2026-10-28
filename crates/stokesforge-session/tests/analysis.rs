@@ -4,7 +4,7 @@
 //! values, an input lost then found again restarts from zero.
 //!
 //! The contract "targeted recalculation gives exactly the full recalculation"
-//! is held by the differential battery `stokesforge-robustesse` (`b22`); these
+//! is held by the differential battery `stokesforge-robustness` (`b22`); these
 //! cases name each behavior.
 
 use stokesforge_analysis::fit::FitSpec;

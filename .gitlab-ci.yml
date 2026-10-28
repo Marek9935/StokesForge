@@ -62,8 +62,13 @@ fmt:
   script:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
+    # python3 ships with rust:1 (Debian buildpack-deps); install it if an image lacks it.
+    - command -v python3 >/dev/null || (apt-get update -qq && apt-get install -y -qq python3)
+    # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").
+    - python3 scripts/french-guard-test.py
+    - python3 scripts/french-guard.py
     - scripts/release-notes-test.sh
-    - scripts/versions-alignees.sh
+    - scripts/versions-aligned.sh
     - scripts/release-tag-test.sh
 
 # #129: policy and notices, all platforms and the python feature included,
@@ -99,14 +104,14 @@ clippy:
     - rustup component add clippy
     - cargo clippy --workspace --all-targets -- -D warnings
 
-# `cargo test --workspace` now also covers `stokesforge-robustesse` (robustness
+# `cargo test --workspace` now also covers `stokesforge-robustness` (robustness
 # bench, added on 2026-09-11). Mind what this covers: this crate holds TWO
 # kinds of test, and this job runs only one of them.
 #
 #   - the GUARDS pass and must keep passing — they run here, like any test
 #     of the repository;
 #   - the REPRODUCTIONS of anomalies fail on purpose. They are `#[ignore]`,
-#     so they are NOT run here: the `robustesse` job below handles them.
+#     so they are NOT run here: the `robustness` job below handles them.
 test:
   stage: check
   extends: .linux-job
@@ -116,7 +121,7 @@ test:
     - cargo test --workspace
 
 # Reproductions of anomalies of the robustness bench: the `#[ignore]` tests of
-# `stokesforge-robustesse`, one per anomaly, under the identifier their
+# `stokesforge-robustness`, one per anomaly, under the identifier their
 # attribute carries. None is left today (V1, #333: "zero red" criterion); the
 # job runs `--ignored` so that a reproduction added in the future is seen in
 # every pipeline.
@@ -129,14 +134,14 @@ test:
 # guard takes over in the `test` job. Original anomalies and fixing order:
 # `docs/archive/rustrewrite/` (robustness reports,
 # `guide-de-correction-robustesse.md`).
-robustesse:
+robustness:
   stage: check
   extends: .linux-job
   image: rust:1
   <<: *rust-cache
   allow_failure: true
   script:
-    - cargo test -p stokesforge-robustesse -- --ignored
+    - cargo test -p stokesforge-robustness -- --ignored
 
 # Python #70: automatic and blocking, runtime and compilations cached.
 # scripts/python-test.sh covers bridge, scripts, robustness, application and CLI.

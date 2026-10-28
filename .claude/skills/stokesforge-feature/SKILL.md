@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implement a StokesForge feature end to end — layer, menus, toolbars, icons, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute », « implémente », « fais que… », « traite #N » for an évolution issue); during issue reporting, only once implementation is explicitly asked.
+description: Implement a StokesForge feature end to end — layer, menus, toolbars, icons, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute » / add, « implémente » / implement, « fais que… » / make it so that…, « traite #N » for a change-request issue); during issue reporting, only once implementation is explicitly asked.
 ---
 
 A feature almost always spans several layers. This skill keeps each piece in the right one and none forgotten.
@@ -9,23 +9,23 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
-Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches and versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
+Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/v1-criteria.md` § Branches and versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
 
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
 2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routing, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
 3. Search what exists (`rg`): an `Action`, a `Command`, a helper that already does most of it. Reuse beats writing.
 4. A limit that looks wrong may be arbitrated: `docs/archive/rustrewrite/questions-ouvertes.md` §11.
-5. Resolve edge-case ambiguities now, in one batch: [`../stokesforge-bug-report/references/formulaire-de-decisions.md`](../stokesforge-bug-report/references/formulaire-de-decisions.md) says when and how to ask.
-6. New window, dialog or gesture: name the existing twin you imitate (`docs/fenetres.md`, `docs/gestes.md`), compare screenshots with `run-stokesforge`; a new window gets a mockup the user validates before code.
+5. Resolve edge-case ambiguities now, in one batch: [`../stokesforge-bug-report/references/decision-form.md`](../stokesforge-bug-report/references/decision-form.md) says when and how to ask.
+6. New window, dialog or gesture: name the existing twin you imitate (`docs/windows.md`, `docs/gestures.md`), compare screenshots with `run-stokesforge`; a new window gets a mockup the user validates before code.
 7. Announce what you reuse, the zone you change and the checks you will run, then code. Scope and delegation: `CLAUDE.md` § Delegation and model choice (agent `perimetre`, Sonnet implements).
 
-A work note (`docs/chantier-*.md`, `docs/chantiers/`) proves nothing: the code is the truth.
+A work note (`docs/*-work-package.md`, `docs/work-packages/`) proves nothing: the code is the truth.
 
 ## 2. Choose the layer
 
 | The feature… | Lives in | Trap |
 |---|---|---|
-| changes the model | a `Command` (`stokesforge-commande`) | never a `core` primitive directly (invariant 1) |
+| changes the model | a `Command` (`stokesforge-command`) | never a `core` primitive directly (invariant 1) |
 | is a per-document view setting | egui memory under the node id; default for new documents in preferences (`grid::header_rows`) | never a global flag; nothing in the `.stf` |
 | is a per-node view setting that survives the file (#325) | a `NodeId -> value` table beside `window_geometries` (`ViewTables`, `geometry_revision`) | no command; never purged on mutation (invariant 7); pushed at gesture end; reset = remove the key |
 | analyses a row (#253) | a linked transposed sheet (`Command::TransposeRows`), then the existing tool | never a "by rows" tool; `MacroKind::AnalyzeRows` |
@@ -33,7 +33,7 @@ A work note (`docs/chantier-*.md`, `docs/chantiers/`) proves nothing: the code i
 | changes zoom or pan | `ViewState` on `GraphView` | not a model mutation |
 | is a UI decision (offer, grey out, name) | `stokesforge-app-state/src/state.rs` (no egui, #263) | must stay testable without a window |
 | is egui drawing or events | the surface's module in `stokesforge-app/src/app/` | `app.rs` only orchestrates |
-| is a plotting feature | `stokesforge-render` (`stokesforge-rendu`) | never one backend (invariant 5) |
+| is a plotting feature | `stokesforge-render` (`stokesforge-rendering`) | never one backend (invariant 5) |
 | reads a data file | `stokesforge-import` (`stokesforge-import`) | independent of UI, core, commands, session |
 
 ## 3. Topic sheets
@@ -51,7 +51,7 @@ Each sheet holds only pointers to the rule (`docs/`, `.claude/conventions.md`) a
 | [behaviour-standard](references/behaviour-standard.md) | field, message, greying, number, keyboard, mouse, long task |
 | [object-manager-analysis](references/object-manager-analysis.md) | Object Manager, graph selection, analysis correction |
 
-Texts: `stokesforge-textes-interface`. Commands, rendering, import, Python: their own skills.
+Texts: `stokesforge-ui-texts`. Commands, rendering, import, Python: their own skills.
 
 ## 4. Test, look, document
 

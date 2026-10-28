@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Produces the icon SVGs of stokesforge-app (one variant per icon and per color
-# role) and the contact sheet. See docs/icones.md.
+# role) and the contact sheet. See docs/icons.md.
 #
 #   scripts/icons-build.sh            # variants only
 #   scripts/icons-build.sh --sheet    # + contact sheet (Inkscape)

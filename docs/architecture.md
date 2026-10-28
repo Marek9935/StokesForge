@@ -10,46 +10,46 @@ Arrow = "depends on" (`Cargo.toml` manifests, checked with
 `cargo metadata --no-deps --format-version 1 --offline`).
 
 ```text
-stokesforge-id            NodeId seul, zéro dépendance
+stokesforge-id            NodeId only, zero dependencies
    ↑
-stokesforge-analysis      calcul pur (lignes de base, intégrales, ajustements, pics,
-                          déconvolution) : f64 en entrée et en sortie, aucune
-                          dépendance stokesforge — lu par core, commands,
-                          persistence, session, script et app
+stokesforge-analysis      pure computation (baselines, integrals, fits, peaks,
+                          deconvolution): f64 in and out, no stokesforge
+                          dependency — read by core, commands,
+                          persistence, session, script and app
    ↑
-stokesforge-plot          PlotSpec : quoi tracer, sans savoir comment
+stokesforge-plot          PlotSpec: what to plot, without knowing how
    ↑
-stokesforge-core          arbre de projet, colonnes, résolution d'un spec
+stokesforge-core          project tree, columns, resolution of a spec
    ↑            ↑            ↑
 stokesforge-commands  stokesforge-persistence  stokesforge-render ← stokesforge-render-svg
 (core, plot)     (core, plot, import)  (core, plot)     (core, plot, render)
    ↑       ↑
-stokesforge-session       l'acteur : le &mut Project de la session
+stokesforge-session       the actor: the session's &mut Project
 (commands, persistence, core)
    ↑            ↑
 stokesforge-script   stokesforge-render-egui (core, plot, render, session)
 (analysis, commands, core, import, importer, plot, python, render-svg, session)
-+ stokesforge-python (aucune dépendance stokesforge)
++ stokesforge-python (no stokesforge dependency)
 
 stokesforge-cli    (core, commands, import, importer, persistence)
-               import : un `Project` neuf construit directement, puis `.stf`
-               run (python) : script, python, session ; même acteur que la console
-stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil ;
-               lu par persistence : le miroir de la recette dans le `.stf` (S2, #323)
-stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle, sans
-               commandes : partagé par l'application, le CLI et les scripts
-stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au
-               presse-papiers système (SVG, PNG, PDF), un backend par affichage
+               import: a fresh `Project` built directly, then `.stf`
+               run (python): script, python, session; same actor as the console
+stokesforge-import (no stokesforge dependency) — reading instrument files;
+               read by persistence: the mirror of the recipe in the `.stf` (S2, #323)
+stokesforge-importer (core, import) — plan of sheets and model columns, without
+               commands: shared by the application, the CLI and the scripts
+stokesforge-clipboard (no stokesforge dependency) — multi-format offer to the
+               system clipboard (SVG, PNG, PDF), one backend per display server
 stokesforge-app-state (analysis, commands, core, import, importer, persistence, plot,
-               render, render-svg, session ; script et python en option) — l'état de
-               l'application SANS interface : AppState, sélection, préférences,
-               formulaires d'analyse, textes (Fluent) et erreurs mises en phrase
+               render, render-svg, session ; script and python optional) — the state of
+               the application WITHOUT an interface: AppState, selection, preferences,
+               analysis forms, texts (Fluent) and errors put into sentences
 stokesforge-app    (app-state, analysis, clipboard, commands, core, import, plot,
-               render, render-egui, render-svg, session ; python en option) — la
-               coquille eframe : peint l'état, traduit clavier et souris en actions
+               render, render-egui, render-svg, session ; python optional) — the
+               eframe shell: paints the state, turns keyboard and mouse into actions
 ```
 
-`stokesforge-robustesse` stands apart: it depends on the foundation and the Python bridge, and
+`stokesforge-robustness` stands apart: it depends on the foundation and the Python bridge, and
 contains no production code ([`tests.md`](tests.md)). `stokesforge-arch-guard`
 is a test tool: the shared reading of manifests for the dependency
 guards.
@@ -58,25 +58,25 @@ guards.
 
 | Crate | Role | Page |
 |---|---|---|
-| `stokesforge-id` | `NodeId`, and nothing else | [model](modele-de-donnees.md) |
-| `stokesforge-analysis` | pure mathematical processing (#181): baselines, correction by reference, integrals, fits, peaks, deconvolution; `f64` where `NaN` means "empty", results with stable keys; transcendental functions through `libm`, same bits on all platforms (#332); no UI, no Python, no other workspace crate | [model](modele-de-donnees.md) |
-| `stokesforge-plot` | `PlotSpec`: the description of a graph, neutral toward the renderer | [model](modele-de-donnees.md) |
-| `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` (spec → data) and `compose` (columns → series of a graph, #257: X/Y pairing, palette by rank, layers; reading of the `PlotSpec`; no sentence, no mutation) | [model](modele-de-donnees.md) |
-| `stokesforge-commands` | the commands, the hybrid undo stack, the macros | [commands](commandes-et-historique.md) |
-| `stokesforge-persistence` | `save`/`load`, transport schema, `.stf` format | [persistence](persistance.md) |
+| `stokesforge-id` | `NodeId`, and nothing else | [model](data-model.md) |
+| `stokesforge-analysis` | pure mathematical processing (#181): baselines, correction by reference, integrals, fits, peaks, deconvolution; `f64` where `NaN` means "empty", results with stable keys; transcendental functions through `libm`, same bits on all platforms (#332); no UI, no Python, no other workspace crate | [model](data-model.md) |
+| `stokesforge-plot` | `PlotSpec`: the description of a graph, neutral toward the renderer | [model](data-model.md) |
+| `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` (spec → data) and `compose` (columns → series of a graph, #257: X/Y pairing, palette by rank, layers; reading of the `PlotSpec`; no sentence, no mutation) | [model](data-model.md) |
+| `stokesforge-commands` | the commands, the hybrid undo stack, the macros | [commands](commands-and-history.md) |
+| `stokesforge-persistence` | `save`/`load`, transport schema, `.stf` format | [persistence](persistence.md) |
 | `stokesforge-session` | the actor, the `Snapshot`s, the `revision` | [session](session.md) |
-| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC), recipes, preview; independent of core/UI | [application](application/projet-et-import.md) |
-| `stokesforge-render` | text measurement, Plotters pipeline, **all the rendering** | [rendering](rendu.md) |
-| `stokesforge-render-egui` | screen backend (`DrawingBackend` → `egui::Shape`), shape cache, reading of egui inputs (wheel, drag), feathering; the computation of zoom/pan and of the nearest point is in `stokesforge-render` (#262) | [rendering](rendu.md) |
-| `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it | [rendering](rendu.md) |
-| `stokesforge-python` | embedded CPython interpreter, numpy round trip | [python](python-et-script.md) |
-| `stokesforge-script` | the script thread, the `pyst` surface, the interruption | [python](python-et-script.md) |
-| `stokesforge-app-state` | the application state **without egui** (#263): `AppState` and its `Action`s, selection, preferences, analysis forms, Object Manager, interface text (`tr!`, Fluent catalogs `en`/`fr`) and errors turned into sentences; testable without a window (`tests/shell.rs`). No `egui`, no `eframe`, no `winit`, no `wgpu`: the compiler holds the boundary | [application](application/etat-et-console.md) |
-| `stokesforge-app` | the eframe UI shell (test bench): windows, grid, menus, theme, icons, copy of the figure to the clipboard; paints the state of `stokesforge-app-state`. Together with it, the **only** crates that translate the interface (Fluent: `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application/coquille-et-code.md) |
-| `stokesforge-cli` | import and Python scripts without an interface | [application](application/etat-et-console.md) |
-| `stokesforge-importer` | from the result of `stokesforge-import` to the columns of the model (sheet plan, column construction) — no commands, no interface, shared by the application, the CLI and the scripts | [application](application/projet-et-import.md) |
-| `stokesforge-clipboard` | offers the same content to the system clipboard under several MIME types (the figure of a graph: SVG, PNG, PDF); Wayland, X11, Windows, macOS; independent of the rest of the workspace | [application](application/graphe.md) |
-| `stokesforge-robustesse` | 22 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
+| `stokesforge-import` | reading of instrument files (CSV/TXT/ASC), recipes, preview; independent of core/UI | [application](application/project-and-import.md) |
+| `stokesforge-render` | text measurement, Plotters pipeline, **all the rendering** | [rendering](rendering.md) |
+| `stokesforge-render-egui` | screen backend (`DrawingBackend` → `egui::Shape`), shape cache, reading of egui inputs (wheel, drag), feathering; the computation of zoom/pan and of the nearest point is in `stokesforge-render` (#262) | [rendering](rendering.md) |
+| `stokesforge-render-svg` | SVG export, and PDF and PNG on top of it | [rendering](rendering.md) |
+| `stokesforge-python` | embedded CPython interpreter, numpy round trip | [python](python-and-scripting.md) |
+| `stokesforge-script` | the script thread, the `pyst` surface, the interruption | [python](python-and-scripting.md) |
+| `stokesforge-app-state` | the application state **without egui** (#263): `AppState` and its `Action`s, selection, preferences, analysis forms, Object Manager, interface text (`tr!`, Fluent catalogs `en`/`fr`) and errors turned into sentences; testable without a window (`tests/shell.rs`). No `egui`, no `eframe`, no `winit`, no `wgpu`: the compiler holds the boundary | [application](application/state-and-console.md) |
+| `stokesforge-app` | the eframe UI shell (test bench): windows, grid, menus, theme, icons, copy of the figure to the clipboard; paints the state of `stokesforge-app-state`. Together with it, the **only** crates that translate the interface (Fluent: `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application/shell-and-code.md) |
+| `stokesforge-cli` | import and Python scripts without an interface | [application](application/state-and-console.md) |
+| `stokesforge-importer` | from the result of `stokesforge-import` to the columns of the model (sheet plan, column construction) — no commands, no interface, shared by the application, the CLI and the scripts | [application](application/project-and-import.md) |
+| `stokesforge-clipboard` | offers the same content to the system clipboard under several MIME types (the figure of a graph: SVG, PNG, PDF); Wayland, X11, Windows, macOS; independent of the rest of the workspace | [application](application/graph.md) |
+| `stokesforge-robustness` | 22 test batteries at the limits, 2 out-of-process probes | [tests](tests.md) |
 | `stokesforge-arch-guard` | shared reading of the `Cargo.toml` files for the dependency guards (dev-dependency) | [tests](tests.md) |
 
 ## The three separation lines
@@ -130,7 +130,7 @@ tests entirely without it.
 
 | Feature | Crates | What it adds | What it requires |
 |---|---|---|---|
-| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app-state`, `stokesforge-app`, `stokesforge-cli`, `stokesforge-robustesse` | PyO3, embedded interpreter, script thread, script console | `PYO3_CONFIG_FILE` (see `scripts/python-config.sh`) and the vendored interpreter in `vendor/python/` |
+| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app-state`, `stokesforge-app`, `stokesforge-cli`, `stokesforge-robustness` | PyO3, embedded interpreter, script thread, script console | `PYO3_CONFIG_FILE` (see `scripts/python-config.sh`) and the vendored interpreter in `vendor/python/` |
 
 Without the `python` feature, the crates concerned compile empty — this is the
 condition for the right to drop Python without taking anything apart. Practical
@@ -143,7 +143,7 @@ exercise it, `scripts/python-test.sh` sets the environment variables
 `stokesforge-render`, `stokesforge-render-egui` and `stokesforge-render-svg`, always
 compiled: `cargo build` and `cargo test --workspace` cover them. What
 remains optional is the **execution path** of a backend (formulas through Typst
-or in plain text), detailed in [`rendu.md`](rendu.md#typst-r8).
+or in plain text), detailed in [`rendering.md`](rendering.md#typst-r8).
 
 ## Where the binaries are
 
@@ -153,7 +153,7 @@ or in plain text), detailed in [`rendu.md`](rendu.md#typst-r8).
 | `stokesforge-cli` | `stokesforge-cli` | `import`: instruments → `.stf`, new project without a session; `recipes`; `run` (python): script through a session without a window |
 | `stokesforge-selftest` | `stokesforge-script` | replay the end criterion of the foundation from a packaged distribution |
 | `stokesforge-pyhello` | `stokesforge-python` | prove the isolation of the packaged Python stack |
-| `stokesforge-alloc-probe`, `stokesforge-stack-probe` | `stokesforge-robustesse` | two out-of-process probes (allocation failure, stack overflow) |
+| `stokesforge-alloc-probe`, `stokesforge-stack-probe` | `stokesforge-robustness` | two out-of-process probes (allocation failure, stack overflow) |
 
 The `scripts/*.sh` at the root assemble and rerun the distributions
 (`dist/`) in a clean environment.
@@ -161,11 +161,11 @@ The `scripts/*.sh` at the root assemble and rerun the distributions
 **Release (#333).** `scripts/release-linux.sh` packages `dist/stokesforge-app`
 (already proven by `app-dist.sh`) as `StokesForge-<version>-linux-x86_64.tar.gz`;
 `scripts/release-notes.sh` checks that a `vX.Y.Z` tag matches the versions of the
-crates (alignment by `scripts/versions-alignees.sh`, also run on every push by `fmt`: crates, internal dependencies, `Cargo.lock`, format witness; refusal of a tag outside `main` or not increasing by `scripts/release-tag-sur-main.sh` and `scripts/release-tag-croissant.sh`) and a section of `CHANGELOG.md`, and prints the notes;
-`scripts/release-televerser.sh linux|windows` uploads the archive or the installer to
-the GitLab package registry; `scripts/release-publier.sh` creates the GitLab
+crates (alignment by `scripts/versions-aligned.sh`, also run on every push by `fmt`: crates, internal dependencies, `Cargo.lock`, format witness; refusal of a tag outside `main` or not increasing by `scripts/release-tag-on-main.sh` and `scripts/release-tag-increasing.sh`) and a section of `CHANGELOG.md`, and prints the notes;
+`scripts/release-upload.sh linux|windows` uploads the archive or the installer to
+the GitLab package registry; `scripts/release-publish.sh` creates the GitLab
 release, which links the two. Linux and Windows are built on GitHub
-(hosted runners), and everything is published on GitLab (the release is created by the GitHub `publier` job): [`criteres-v1.md`](criteres-v1.md).
+(hosted runners), and everything is published on GitLab (the release is created by the GitHub `publier` job): [`v1-criteria.md`](v1-criteria.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) is the counterpart of `app-dist.sh`: it

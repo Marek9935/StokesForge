@@ -33,6 +33,7 @@ pub fn fixture_project() -> Project {
         .set_window_meta(
             book_in_manips,
             WindowMeta {
+                // lang: fr
                 label: "Étiquette du classeur".to_string(),
                 comment: "Commentaire du classeur".to_string(),
                 ..Default::default()
@@ -116,6 +117,7 @@ pub fn fixture_project() -> Project {
                 role: ColumnRole::Y,
                 unit: "V".to_string(),
                 long_name: "Tension mesurée".to_string(),
+                // lang: fr
                 comment: "avec des n/a".to_string(),
                 x_prime: None,
                 display_format: String::new(),
@@ -152,6 +154,7 @@ pub fn fixture_project() -> Project {
         .expect("matrix created");
 
     project
+        // lang: fr
         .add_note(root, Some("Note1"), "Texte de la note, avec accents éàü.")
         .expect("note created");
 
@@ -304,6 +307,7 @@ pub fn non_trivial_spec(
             ),
         ],
         // Name of group 3 (#197).
+        // lang: fr
         group_names: [(3, "Séries d'été".to_string())].into(),
         // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),

@@ -4,7 +4,7 @@ Read from `stokesforge-python` when touching the console or packaging the runtim
 
 ## The console never freezes the window
 
-Source: `docs/application/etat-et-console.md` § The script console does not freeze the window. `ScriptEngine::run` **blocks** until the script ends, so three decisions live in `stokesforge-app-state/src/state.rs`, not in `app.rs`:
+Source: `docs/application/state-and-console.md` § The script console does not freeze the window. `ScriptEngine::run` **blocks** until the script ends, so three decisions live in `stokesforge-app-state/src/state.rs`, not in `app.rs`:
 
 1. the interpreter never starts at window opening — only the first `RunScript` builds it (locked by `stokesforge-app-state/tests/script_bridge_lazy.rs`);
 2. `RunScript` never blocks: the work goes to a detached thread and the call returns;
@@ -18,4 +18,4 @@ The painted console lives in `stokesforge-app/src/app/script_console.rs` (`scrip
 
 `scripts/app-dist-windows.sh` (Git Bash) assembles the staging, validates it (window, `stokesforge-selftest` in an emptied environment, two witnesses: without `python312.dll` or without `lib/python` it must fail), compiles the installer `scripts/stokesforge.iss` (Inno Setup 6), installs into a folder with a space and an accent, reruns the selftest and uninstalls. Differences from Linux: no rpath, Visual C++ DLLs beside the exe, `PATH` reduced to `System32`, `MSYS2_ARG_CONV_EXCL='*'` for `/DIR=…`, `python -X utf8` to read Python output from Git Bash. `stokesforge-app` is a windowed subsystem in release and reattaches to the parent terminal (`console_windows.rs`).
 
-Linux: `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`. Notices and policy: `docs/licence-et-extensions.md` § Third-party licenses and distribution.
+Linux: `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`. Notices and policy: `docs/license-and-extensions.md` § Third-party licenses and distribution.

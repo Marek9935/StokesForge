@@ -4,7 +4,7 @@
 //! `convert.rs` that knows how to build a `NodeRecord` from a `Node` and
 //! the reverse, never the other way. The schema is deliberately
 //! independent of the in-memory model (see the crate doc): it evolves according to the
-//! version rule of `docs/persistance.md` (additive `#[serde(default)]`
+//! version rule of `docs/persistence.md` (additive `#[serde(default)]`
 //! fields; removal or rename = new version, with
 //! migration) without ever deriving `Serialize` on
 //! the types of `stokesforge-core`.

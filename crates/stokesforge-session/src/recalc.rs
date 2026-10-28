@@ -126,7 +126,7 @@ pub enum FormulaRecalc {
     Targeted,
     /// Rewrites all formula columns of all sheets, every time — the behavior
     /// before #193. Serves as the **oracle** of the differential test
-    /// (`stokesforge-robustesse`, battery `b22`): no production client uses
+    /// (`stokesforge-robustness`, battery `b22`): no production client uses
     /// it.
     Full,
 }
@@ -229,7 +229,7 @@ impl Recalculator {
     /// access to `Project` (`Project::set_length`/`Project::set_values`),
     /// never via `History::apply`/`Command::execute`: it is a silent side
     /// effect replayed afterwards, not an undoable mutation (see the
-    /// crate-level docs, `docs/commandes-et-historique.md`) — exactly the same
+    /// crate-level docs, `docs/commands-and-history.md`) — exactly the same
     /// status as `actor::purge_orphaned_geometries`. The formula text
     /// (`Command::SetColumnMeta`) and the source cells (`Command::SetCells`,
     /// `InsertRows`, `DeleteRows`, ...) stay normally undoable: only the

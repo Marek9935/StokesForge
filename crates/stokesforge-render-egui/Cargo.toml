@@ -3,7 +3,7 @@ name = "stokesforge-render-egui"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Backend egui de plotters : collecte des egui::Shape dans un Vec, cache sur (revision, rect, pixels_per_point)."
+description = "egui backend for plotters: collects egui::Shape values in a Vec, cache keyed on (revision, rect, pixels_per_point)."
 
 [lints]
 workspace = true
@@ -18,25 +18,23 @@ plotters = { version = "0.3", default-features = false, features = [
     "all_elements",
 ] }
 plotters-backend = "0.3"
-# Alignée sur `stokesforge-app`, qui est sur eframe 0.36.2 : `egui-plotter` a été
-# écarté précisément parce qu'aucune de ses versions ne suit
+# Aligned with `stokesforge-app`, which is on eframe 0.36.2: `egui-plotter`
+# was ruled out precisely because none of its versions follows
 # (`architecture-choisie.md` §4).
 egui = "0.36.2"
-# R8, chemin écran (8.3) : le type `Font`/`Bytes` de `TypstScreen` et le
-# rendu RGBA d'une page compilée (`typst-render` → texture → `Shape::Mesh`).
-# `stokesforge-render` apporte le `World`, la compilation et le cache générique ;
-# ce crate n'ajoute que ce qui est propre à l'écran. Dépendance ferme depuis
-# l'issue #29 (plus de feature `typst`). Version épinglée exactement, comme
-# dans `stokesforge-render` — même raison (API non stabilisée entre versions
-# mineures).
+# R8, screen path (8.3): the `Font`/`Bytes` type of `TypstScreen` and the
+# RGBA rendering of a compiled page (`typst-render` → texture → `Shape::Mesh`).
+# `stokesforge-render` provides the `World`, the compilation and the generic
+# cache; this crate only adds what is specific to the screen. Firm dependency
+# since issue #29 (no more `typst` feature). Version pinned exactly, as in
+# `stokesforge-render` — same reason (API not stable between minor versions).
 typst = "=0.15.1"
 typst-render = "=0.15.1"
 
 [dev-dependencies]
 stokesforge-import = { path = "../stokesforge-import" }
 stokesforge-commands = { path = "../stokesforge-commands" }
-# Le test d'accord (R4.5) vit ici et non dans `stokesforge-render-svg` : en
-# dépendance de développement, il ferait entrer egui dans l'arbre du crate
-# d'export, ce que `cargo tree -p stokesforge-render-svg` doit continuer à
-# démentir.
+# The agreement test (R4.5) lives here and not in `stokesforge-render-svg`: as
+# a development dependency, it would bring egui into the tree of the export
+# crate, which `cargo tree -p stokesforge-render-svg` must keep disproving.
 stokesforge-render-svg = { path = "../stokesforge-render-svg" }

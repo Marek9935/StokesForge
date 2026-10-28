@@ -2,11 +2,11 @@
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow the numbering `MAJOR.MINOR.PATCH`; the V1 criteria are in
-[`docs/criteres-v1.md`](docs/criteres-v1.md).
+[`docs/v1-criteria.md`](docs/v1-criteria.md).
 
 What counts as compatibility from V1 on: the `.stf` file format (a V1 file can
 be read back and migrated up to V3, invariant 12) and the `pyst` API
-(["V1 frozen API"](docs/python-et-script.md)). The rest of the code has no
+(["V1 frozen API"](docs/python-and-scripting.md)). The rest of the code has no
 compatibility promise.
 
 One section per version, titled `## [X.Y.Z] - date`. The release job
@@ -19,7 +19,7 @@ there, in the commit that carries it. The version commit renames this section
 to `[X.Y.Z] - date` and opens a new empty one. A fix cherry-picked to
 `release/N.x` also carries its line there. An additive field of the `.stf`
 format is announced there (an older version that saves the file again loses it
-without a message, see `docs/persistance.md`).
+without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
@@ -29,14 +29,22 @@ without a message, see `docs/persistance.md`).
   (Jasco, AnalytikJena, RPE, generic CSV) are gone from the application, the
   CLI and `pyst`. The first launch starts with an empty template list; only
   the templates you saved exist. `pyst.import_file(recipe=...)` and
-  `stokesforge-cli import --recipe` refuse the former names ("Jasco
-  (point-virgule)", "Jasco (tabulation)", "AnalytikJena (sans en-tête)",
-  "RPE (tabulation)", "CSV avec noms de colonnes"). Templates embedded in
+  `stokesforge-cli import --recipe` refuse the former names («Jasco
+  (point-virgule)», «Jasco (tabulation)», «AnalytikJena (sans en-tête)»,
+  «RPE (tabulation)», «CSV avec noms de colonnes»). Templates embedded in
   `.stf` files are unaffected: a file imported with one of them still
   reimports.
 
 ### Added
 
+- French guard (#377): `scripts/french-guard.py` (and its tests,
+  `scripts/french-guard-test.py`) fails CI on French text outside the exempt
+  places or a `lang: fr` marker. Run it locally with
+  `python3 scripts/french-guard.py`; contributors mark deliberate French test
+  data as described in `docs/tests.md`.
+- Interaction language setting (#377): one line in `CLAUDE.md` and `AGENTS.md`
+  sets the language agents use to talk to the developer; the repository stays
+  English.
 - Minor ticks on axes (#344): a "Show minor ticks" box per axis (on in a new
   graph, off in an existing file), alone or together with the major ticks, the
   number of minor ticks between two ticks, and "Label every" n to write only
@@ -53,6 +61,13 @@ without a message, see `docs/persistance.md`).
 
 ### Changed
 
+- Repository in English (#377): docs, skills and scripts are translated, and
+  renamed accordingly: `scripts/ci-status.sh`, `versions-aligned.sh`,
+  `release-publish.sh`, `release-upload.sh`, `release-tag-increasing.sh`,
+  `release-tag-on-main.sh`, `perf/measure-windows.sh`; most `docs/` files
+  (`docs/chantiers/` is now `docs/work-packages/`); the skills
+  `stokesforge-command`, `-explain`, `-rendering`, `-ui-texts`; the crate
+  `stokesforge-robustesse` is now `stokesforge-robustness`.
 - The demo project is now in English (#379): folders, workbooks, sheets,
   column titles, units, graph names, axis labels, series names and the
   note (`Workbooks`, `Analysis`, `Spectrum`, `Kinetics`, `Panels`,

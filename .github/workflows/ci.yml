@@ -40,8 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/gitlab-status-test.py
+      - run: python3 scripts/french-guard-test.py
+      # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").
+      - run: python3 scripts/french-guard.py
       - run: scripts/release-notes-test.sh
-      - run: scripts/versions-alignees.sh
+      - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
@@ -73,8 +76,8 @@ jobs:
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  # Includes the guards of `stokesforge-robustesse`; the `#[ignore]` tests
-  # (reproductions of anomalies) are in the `robustesse` job.
+  # Includes the guards of `stokesforge-robustness`; the `#[ignore]` tests
+  # (reproductions of anomalies) are in the `robustness` job.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -89,13 +92,13 @@ jobs:
   # Reproductions of anomalies (`#[ignore]` in robustness; none today): they
   # fail until the anomaly is fixed, so the job is non-blocking
   # (`allow_failure` on the GitLab side).
-  robustesse:
+  robustness:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      # `-p stokesforge-robustesse` alone pulls in `wayland-sys`, which links
+      # `-p stokesforge-robustness` alone pulls in `wayland-sys`, which links
       # with pkg-config: without this package the job failed at compilation,
       # without ever running a test (observed on 2026-10-26).
       - name: Wayland development files
@@ -105,10 +108,10 @@ jobs:
       # because this job is non-blocking and its log is not sent back to GitLab.
       - run: |
           set +e
-          cargo test -p stokesforge-robustesse -- --ignored > robustesse.log 2>&1
+          cargo test -p stokesforge-robustness -- --ignored > robustness.log 2>&1
           code=$?
           if [ "$code" -ne 0 ]; then
-            echo "::error title=robustesse::$( (grep -m6 -E '^error|panicked|FAILED' robustesse.log; echo ...; tail -n 12 robustesse.log) | tr '\n' '|' | cut -c1-1500)"
+            echo "::error title=robustness::$( (grep -m6 -E '^error|panicked|FAILED' robustness.log; echo ...; tail -n 12 robustness.log) | tr '\n' '|' | cut -c1-1500)"
           fi
           exit "$code"
 
@@ -153,9 +156,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: The tagged commit is on main or on a release branch
-        run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+        run: scripts/release-tag-on-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: The tag is above the existing tags
-        run: scripts/release-tag-croissant.sh "$GITHUB_REF_NAME"
+        run: scripts/release-tag-increasing.sh "$GITHUB_REF_NAME"
       - name: Tag and notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
@@ -188,7 +191,7 @@ jobs:
       - name: Archive to GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
-        run: scripts/release-televerser.sh linux "$GITHUB_REF_NAME"
+        run: scripts/release-upload.sh linux "$GITHUB_REF_NAME"
 
   # #333: Windows on a hosted runner (clean machine, parallel to Linux).
   # Blocking: `publier` waits for them. On failure, the first errors and the
@@ -274,16 +277,16 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
-        run: scripts/release-televerser.sh windows "$GITHUB_REF_NAME"
+        run: scripts/release-upload.sh windows "$GITHUB_REF_NAME"
 
   # #333: GitLab release. On a tag vX.Y.Z or vX.Y.Z-rcN, when the blocking
   # checks (Linux and Windows) and the two package uploads are done. A -rcN is
   # a trial: the release is created then deleted (see
-  # scripts/release-publier.sh), the tag stays. Does not depend on any GitLab
+  # scripts/release-publish.sh), the tag stays. Does not depend on any GitLab
   # runner.
   publier:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, licenses, clippy, test, test-python, robustesse, test-python-windows, release-linux, dist-windows]
+    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, release-linux, dist-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -292,10 +295,10 @@ jobs:
         with:
           fetch-depth: 0
       - name: The tagged commit is on main or on a release branch
-        run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+        run: scripts/release-tag-on-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: The tag is above the existing tags
-        run: scripts/release-tag-croissant.sh "$GITHUB_REF_NAME"
+        run: scripts/release-tag-increasing.sh "$GITHUB_REF_NAME"
       - name: Release GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
-        run: scripts/release-publier.sh "$GITHUB_REF_NAME"
+        run: scripts/release-publish.sh "$GITHUB_REF_NAME"

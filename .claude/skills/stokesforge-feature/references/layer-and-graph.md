@@ -4,10 +4,10 @@ Read when the feature touches a graph (continuous gesture, free text, adding ser
 
 ## Where the rule lives
 
-- State / shell split: `docs/application/coquille-et-code.md` § Two crates: the state and the shell ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards.
-- Action that needs the view state (zoom): `docs/application/graphe.md` § Graph properties (`GraphView::framed_spec`, `Action::ExportGraph`).
-- Continuous gesture, in-place text editing: `docs/application/graphe.md` § Graph properties (`annotation_interactions`) ; `docs/rendu.md` § Text and scale colors: automatic ink.
-- Layer by index, active layer, adding series: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog) ; `docs/application/graphe.md` § Dragging a column selection to a graph.
+- State / shell split: `docs/application/shell-and-code.md` § Two crates: the state and the shell ; `.claude/conventions.md` § Application (`stokesforge-app` and `stokesforge-app-state`): building blocks and guards.
+- Action that needs the view state (zoom): `docs/application/graph.md` § Graph properties (`GraphView::framed_spec`, `Action::ExportGraph`).
+- Continuous gesture, in-place text editing: `docs/application/graph.md` § Graph properties (`annotation_interactions`) ; `docs/rendering.md` § Text and scale colors: automatic ink.
+- Layer by index, active layer, adding series: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog) ; `docs/application/graph.md` § Dragging a column selection to a graph.
 - New graph without a title: `.claude/conventions.md` § New graphs and detached windows.
 - Composing series from columns: `.claude/conventions.md` § New graphs and detached windows (point "Graph composition (#257)").
 

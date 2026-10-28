@@ -1,6 +1,6 @@
-# Contrôle de tout le workspace, toutes plateformes et feature python comprise.
-# Les textes de distribution sont produits avec about.toml ; garder les deux
-# politiques en accord lors d'une modification de Cargo.lock.
+# Checks the whole workspace, all platforms and the python feature included.
+# The distribution texts are produced with about.toml; keep the two policies
+# in agreement when Cargo.lock changes.
 [graph]
 all-features = true
 
@@ -22,8 +22,8 @@ allow = [
     "OFL-1.1",
 ]
 
-# Permissions limitées aux composants effectivement relus, pas à toute
-# dépendance future. Les polices restent sous leurs licences d'origine.
+# Permissions limited to the components actually reviewed, not to any future
+# dependency. The fonts stay under their original licenses.
 [[licenses.exceptions]]
 crate = "epaint_default_fonts@0.36.2"
 allow = ["Ubuntu-font-1.0"]
@@ -32,15 +32,15 @@ allow = ["Ubuntu-font-1.0"]
 crate = "option-ext@0.2.0"
 allow = ["MPL-2.0"]
 
-# Dépendance de test seulement (egui_kittest → dify), jamais livrée : aucune
-# notice à fournir. MPL-2.0 est compatible GPL et ne s'applique qu'aux fichiers
-# de la crate, que l'on ne modifie pas.
+# Test-only dependency (egui_kittest → dify), never shipped: no notice to
+# provide. MPL-2.0 is GPL-compatible and applies only to the crate's own
+# files, which we do not modify.
 [[licenses.exceptions]]
 crate = "colored@2.2.0"
 allow = ["MPL-2.0"]
 
-# Le manifeste 5.0.3 annonce MIT mais son fichier LICENSE est BSD-3-Clause.
-# Conserver le texte de Dropbox ; le hash lie la clarification à ce fichier.
+# The 5.0.3 manifest announces MIT but its LICENSE file is BSD-3-Clause.
+# Keep Dropbox's text; the hash ties the clarification to that file.
 [[licenses.clarify]]
 crate = "brotli-decompressor@5.0.3"
 expression = "BSD-3-Clause"

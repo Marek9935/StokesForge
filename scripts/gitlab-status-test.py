@@ -79,7 +79,7 @@ class ReportTest(unittest.TestCase):
         self.uploads.append((package, version, filename, data))
         return "https://gitlab.example/pkg"
 
-    def test_succes_et_reproduction_toleree_gardent_liens_sha_et_pipeline(self):
+    def test_success_and_tolerated_rerun_keep_links_sha_and_pipeline(self):
         self.jobs[4]["steps"] = [{"conclusion": "failure"}]
         self.report()
         self.assertEqual(len(self.posts), 6)
@@ -90,7 +90,7 @@ class ReportTest(unittest.TestCase):
         self.assertEqual([p["state"] for p in self.posts], ["success"] * 4 + ["skipped", "success"])
         self.assertIn("Non-blocking failure", self.posts[4]["description"])
 
-    def test_echec_timeout_et_annulation_ne_deviennent_pas_verts(self):
+    def test_failure_timeout_and_cancellation_do_not_turn_green(self):
         for conclusion, expected in [("failure", "failed"), ("timed_out", "failed"), ("cancelled", "canceled")]:
             with self.subTest(conclusion=conclusion):
                 self.posts.clear()
@@ -103,7 +103,7 @@ class ReportTest(unittest.TestCase):
         self.report()
         self.assertEqual([p["state"] for p in self.posts], ["canceled"] * 6)
 
-    def test_echec_publie_etape_et_premiere_erreur_du_journal(self):
+    def test_failure_publishes_step_and_first_error_of_the_log(self):
         self.jobs[2]["conclusion"] = "failure"
         self.jobs[2]["steps"] = [
             {"name": "Set up job", "conclusion": "success"},
@@ -125,7 +125,7 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("unused variable", description)
         self.assertLessEqual(len(description), status.DESCRIPTION_MAX)
 
-    def test_echec_poste_un_commentaire_de_commit_de_cinquante_lignes(self):
+    def test_failure_posts_a_fifty_line_commit_comment(self):
         self.jobs[3]["conclusion"] = "failure"
         self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
         before = [f"line before {n}" for n in range(30)]
@@ -143,7 +143,7 @@ class ReportTest(unittest.TestCase):
         code = note.split("```text\n")[1].split("\n```")[0]
         self.assertEqual(len(code.splitlines()), status.CONTEXT_LINES)
 
-    def test_fenetre_ancree_sur_le_marqueur_d_erreur_github(self):
+    def test_window_anchored_on_the_github_error_marker(self):
         # Real log of `cargo fmt --check`: no `error:` line, the useful output
         # is just before `##[error]`, the job cleanup after.
         log = "\n".join(
@@ -157,7 +157,7 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("Post job cleanup", context)
         self.assertLessEqual(len(context.splitlines()), status.CONTEXT_LINES)
 
-    def test_commentaire_seulement_pour_un_echec_et_sans_journal_il_reste_utile(self):
+    def test_comment_only_for_a_failure_and_without_a_log_it_stays_useful(self):
         self.report()
         self.assertEqual(self.comments, [])
         self.jobs[0]["conclusion"] = "failure"
@@ -166,7 +166,7 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("```", self.comments[0])
         self.assertIn("Full log", self.comments[0])
 
-    def test_commentaire_refuse_ne_casse_pas_le_rapport(self):
+    def test_rejected_comment_does_not_break_the_report(self):
         self.jobs[0]["conclusion"] = "failure"
         def api(url, headers, data=None):
             if url.endswith("/comments"):
@@ -178,7 +178,7 @@ class ReportTest(unittest.TestCase):
                     status.report(self.event, "github", "secret-sentinelle")
         self.assertEqual(len(self.posts), 6)
 
-    def test_licences_deposees_en_paquet_gitlab_seulement_si_le_travail_reussit(self):
+    def test_licenses_uploaded_as_gitlab_package_only_if_the_job_succeeds(self):
         self.report()
         self.assertEqual(self.uploads, [("third-party-licenses", "a" * 12, "THIRD-PARTY-LICENSES.txt", b"rapport")])
         self.uploads.clear()
@@ -191,7 +191,7 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(self.uploads, [])
         self.assertEqual(len(self.posts), 18)  # statuses always go through
 
-    def test_depot_de_licences_refuse_ne_casse_pas_le_rapport(self):
+    def test_rejected_license_upload_does_not_break_the_report(self):
         with patch.object(status, "request_json", side_effect=self.api):
             with patch.object(status, "fetch_artifact_file", return_value=b"x"):
                 with patch.object(status, "upload_package", side_effect=RuntimeError("API : erreur HTTP 403")):
@@ -199,7 +199,7 @@ class ReportTest(unittest.TestCase):
                         status.report(self.event, "github", "secret-sentinelle")
         self.assertEqual(len(self.posts), 6)
 
-    def test_artefact_zip_extrait_sans_envoyer_le_jeton_ailleurs(self):
+    def test_zip_artifact_extracted_without_sending_the_token_elsewhere(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as bundle:
             bundle.writestr("THIRD-PARTY-LICENSES.txt", "licences")
@@ -216,7 +216,7 @@ class ReportTest(unittest.TestCase):
         with patch.object(status, "request_json", return_value=listing):
             self.assertIsNone(status.fetch_artifact_file(42, status.LICENSES_ARTIFACT, "THIRD-PARTY-LICENSES.txt", "gh", {}))
 
-    def test_redirection_non_https_ou_absente_refusee(self):
+    def test_non_https_or_missing_redirect_rejected(self):
         for location in (None, "http://evil.example/x"):
             headers = {} if location is None else {"Location": location}
             error = urllib.error.HTTPError("https://api.github.com", 302, "redirect", headers, None)
@@ -225,7 +225,7 @@ class ReportTest(unittest.TestCase):
                     self.assertIsNone(status.fetch_github_bytes("https://api.github.com/x", "gh", 10))
                     direct.assert_not_called()
 
-    def test_journal_indisponible_ou_enorme_ne_casse_pas_le_rapport(self):
+    def test_unavailable_or_huge_log_does_not_break_the_report(self):
         self.jobs[3]["conclusion"] = "failure"
         self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
         self.report()  # log missing: the step alone is enough
@@ -236,14 +236,14 @@ class ReportTest(unittest.TestCase):
         self.assertLessEqual(len(self.posts[3]["description"]), status.DESCRIPTION_MAX)
         self.assertTrue(self.posts[3]["description"].endswith("…"))
 
-    def test_succes_ne_telecharge_aucun_journal(self):
+    def test_success_downloads_no_log(self):
         with patch.object(status, "request_json", side_effect=self.api):
             with patch.object(status, "fetch_job_log") as fetch:
                 with contextlib.redirect_stdout(io.StringIO()):
                     status.report(self.event, "github", "secret-sentinelle")
         fetch.assert_not_called()
 
-    def test_la_panique_garde_son_message_et_passe_avant_la_ligne_failed(self):
+    def test_panic_keeps_its_message_and_comes_before_the_failed_line(self):
         log = (
             "test a::b ... FAILED\n"
             "thread 'a::b' (1) panicked at /root/.cargo/registry/src/index-1/k-0.1/src/x.rs:7:6:\n"
@@ -254,13 +254,13 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("/root/.cargo", excerpt)
         self.assertEqual(status.failure_excerpt("test a::b ... FAILED\n"), "test a::b ... FAILED")
 
-    def test_travail_absent_est_un_echec_et_non_un_succes_implicite(self):
+    def test_missing_job_is_a_failure_not_an_implicit_success(self):
         self.jobs.pop(0)
         self.report()
         self.assertEqual(self.posts[0]["state"], "failed")
         self.assertIn("missing", self.posts[0]["description"])
 
-    def test_pr_fork_et_autre_workflow_ne_font_aucune_requete(self):
+    def test_fork_pr_and_other_workflow_make_no_request(self):
         for field, value in [("event", "pull_request"), ("head_repository", {"full_name": "fork/repo"}), ("path", ".github/workflows/autre.yml")]:
             with self.subTest(field=field):
                 candidate = event()
@@ -270,13 +270,13 @@ class ReportTest(unittest.TestCase):
                         status.report(candidate, None, None)
                     api.assert_not_called()
 
-    def test_ancienne_tentative_ne_republie_pas(self):
+    def test_old_attempt_does_not_republish(self):
         with patch.object(status, "request_json", return_value={"run_attempt": 3}) as api:
             with contextlib.redirect_stdout(io.StringIO()):
                 status.report(self.event, "github", "gitlab")
             self.assertEqual(api.call_count, 1)
 
-    def test_pagination_et_creation_du_pipeline(self):
+    def test_pagination_and_pipeline_creation(self):
         self.pipeline = []
         fake_jobs = [{"name": "autre", "id": 100, "conclusion": "success"}] * 100
         def paginated(url, headers, data=None):
@@ -293,7 +293,7 @@ class ReportTest(unittest.TestCase):
         self.assertTrue(all(p["pipeline_id"] == 99 for p in self.posts[1:]))
         self.assertTrue(all(p["state"] == "success" for p in self.posts))
 
-    def test_erreurs_http_reprises_bornees_et_aucun_secret_dans_les_messages(self):
+    def test_http_errors_retried_bounded_and_no_secret_in_messages(self):
         success = io.BytesIO(b'{}')
         conflict = urllib.error.HTTPError("https://gitlab.com", 409, "secret-sentinelle", {}, None)
         with patch.object(status.urllib.request, "urlopen", side_effect=[conflict, success]) as api:

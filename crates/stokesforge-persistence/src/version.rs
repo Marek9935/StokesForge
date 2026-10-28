@@ -4,7 +4,7 @@
 //! only place that knows a version. The day the format changes meaning
 //! (removal, rename, change of meaning of a field), `FORMAT_VERSION`
 //! goes up, the type of the old version is copied here (`schema/v1.rs`…) and
-//! its `match` arm migrates it to the current `FileBody`. `docs/persistance.md`,
+//! its `match` arm migrates it to the current `FileBody`. `docs/persistence.md`,
 //! « Version rule », says when to bump the number and when to stay additive.
 
 use crate::schema::{FileBody, FORMAT_VERSION, MAGIC};

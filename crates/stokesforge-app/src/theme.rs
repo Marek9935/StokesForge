@@ -2,7 +2,7 @@
 //!
 //! The application does **not** follow the system light/dark theme: it
 //! imposes its own palette, derived from [`egui::Visuals::light`] (never from
-//! the dark one — see `docs/application/theme-i18n-systeme.md` § "Theme"). Two reasons for this choice:
+//! the dark one — see `docs/application/theme-i18n-system.md` § "Theme"). Two reasons for this choice:
 //!
 //! - a scientific application is judged on its graphs, not on its chrome —
 //!   `stokesforge-render`/`stokesforge-render-egui` draw the plots on an
@@ -147,7 +147,7 @@ pub fn table_header(text: impl Into<String>) -> egui::RichText {
 }
 
 /// Level 3: the secondary text (detail, help), muted and in small text. The
-/// usage rules are those of muted text (`docs/standard-interface.md`).
+/// usage rules are those of muted text (`docs/interface-standard.md`).
 pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).small().weak()
 }
@@ -291,7 +291,7 @@ pub fn preview_peak_color(index: usize) -> Color32 {
 
 /// Frame of a field whose input is **refused** (#219): unreadable text,
 /// constraint between fields, Typst error. Red is reserved for this case, with one
-/// **explicit** exception: [`r_squared_color`] (`docs/standard-interface.md`).
+/// **explicit** exception: [`r_squared_color`] (`docs/interface-standard.md`).
 pub fn field_refused_color() -> Color32 {
     Color32::from_rgb(200, 30, 30)
 }

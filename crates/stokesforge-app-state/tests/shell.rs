@@ -5070,7 +5070,7 @@ fn cell_f64(state: &AppState, column: NodeId, row: usize) -> f64 {
 /// becomes `Mixed` and keeps the original token — this is the motivating
 /// use case of the "import preview" work package, which finally consumes on the import
 /// side the "mixed-type columns" work package
-/// (`ParsedColumn::texts`, see `docs/chantier-import-previsualisation.md`).
+/// (`ParsedColumn::texts`, see `docs/import-preview-work-package.md`).
 /// A fully numeric column, for its part, still produces a
 /// `Numeric` column identical to before that work package — checked
 /// elsewhere (all the other assertions of this file on numeric
@@ -9343,7 +9343,7 @@ fn stopping_a_background_import_creates_nothing() {
     };
 
     start(&mut state);
-    assert!(state.import_work().is_some(), "un import est en cours");
+    assert!(state.import_work().is_some(), "an import is in progress");
     state.dispatch(Action::StopImport);
     assert!(state.import_work().is_none() && state.import_progress().is_none());
     assert!(!state.poll_import(), "nothing to apply");

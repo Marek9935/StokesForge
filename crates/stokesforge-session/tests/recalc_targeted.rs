@@ -17,7 +17,7 @@
 //!
 //! The complete contract — "targeted recalculation gives exactly the full
 //! recalculation" — is held by the differential battery
-//! `stokesforge-robustesse/tests/b22_targeted_recalc.rs`; these named cases say
+//! `stokesforge-robustness/tests/b22_targeted_recalc.rs`; these named cases say
 //! *why* each component of the fingerprint exists
 //! (`stokesforge-session/src/recalc.rs`, `Fingerprint`).
 

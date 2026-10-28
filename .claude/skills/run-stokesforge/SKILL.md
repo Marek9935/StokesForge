@@ -1,6 +1,6 @@
 ---
 name: run-stokesforge
-description: Build, launch, drive and screenshot the real StokesForge desktop app on Linux — clicks, keys, PNG captures. Use for « lance l'app », « screenshot », « vérifie dans l'app », to look at a visual symptom, or to confirm a UI change works in the real app, not only in tests.
+description: Build, launch, drive and screenshot the real StokesForge desktop app on Linux — clicks, keys, PNG captures. Use for « lance l'app » (launch the app), « screenshot », « vérifie dans l'app » (check in the app), to look at a visual symptom, or to confirm a UI change works in the real app, not only in tests.
 ---
 
 StokesForge is an egui desktop app with no port and no API. Drive it with `driver.py` (rootful Xwayland + XTEST mouse/keyboard + ImageMagick capture). Paths are relative to the repo root; no `sudo`. Prerequisites: `Xwayland`, ImageMagick (`import`, `magick`), Python 3 with `python-xlib`, an open Wayland session.
@@ -20,7 +20,7 @@ StokesForge is an egui desktop app with no port and no API. Drive it with `drive
    python3 $D stop                  # kills the app and Xwayland
    ```
 
-   Screen pixels, app window 1100x700 at (0,0), scale 1.0. Without argument, `start` opens the demo project (the driver sets `STOKESFORGE_DEMO=1`; a normal launch opens it only the first time, #333) (Book1, Graph1, folders Workbooks and Analysis, graphs Panels, Axes, PlotTypes, Annotations, Groups, Rows; `crates/stokesforge-app/src/demo/`). A project to open: `target/debug/stokesforge-cli import --out p.stf file.csv`. Logs: `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR`). `SF_APP` picks the binary (release measurements: `docs/mesure-performance.md` § Running the application in release).
+   Screen pixels, app window 1100x700 at (0,0), scale 1.0. Without argument, `start` opens the demo project (the driver sets `STOKESFORGE_DEMO=1`; a normal launch opens it only the first time, #333) (Book1, Graph1, folders Workbooks and Analysis, graphs Panels, Axes, PlotTypes, Annotations, Groups, Rows; `crates/stokesforge-app/src/demo/`). A project to open: `target/debug/stokesforge-cli import --out p.stf file.csv`. Logs: `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR`). `SF_APP` picks the binary (release measurements: `docs/performance-measurement.md` § Running the application in release).
 3. **Single capture in native Wayland**, or text checks with the pseudo-language: [references/quick-capture.md](references/quick-capture.md).
 4. **Read the PNG** with the Read tool and compare before / after; a visual claim without a capture is not made.
 5. **Stop**: always `stop` (or `kill` by pid); reset the language to English if a test switched it.

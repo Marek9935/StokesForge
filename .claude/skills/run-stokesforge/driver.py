@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Pilote de stokesforge-app : Xwayland « rootful » + injection XTEST + capture.
+"""Driver for stokesforge-app: rootful Xwayland + XTEST injection + capture.
 
-Sous-commandes (chaque appel est indépendant ; l'état vit dans $SF_RUN_DIR) :
-  start [fichier.stf]   lance Xwayland :99 puis l'app (X11), attend la 1re image
-  ss FICHIER.png        capture l'écran X (toute la fenêtre racine :99)
-  click X Y [left|right|double]   déplace le pointeur et clique
-  move X Y              déplace le pointeur
-  key NOM [NOM...]      touches (ex. ctrl+n, F2, Return, Escape)
-  type TEXTE            saisit du texte
-  stop                  tue l'app et Xwayland
+Subcommands (each call is independent; state lives in $SF_RUN_DIR):
+  start [fichier.stf]   starts Xwayland :99 then the app (X11), waits for the first frame
+  ss FICHIER.png        captures the X screen (the whole root window :99)
+  click X Y [left|right|double]   moves the pointer and clicks
+  move X Y              moves the pointer
+  key NOM [NOM...]      keys (e.g. ctrl+n, F2, Return, Escape)
+  type TEXTE            types text
+  stop                  kills the app and Xwayland
 """
 import os, subprocess, sys, time, signal, pathlib
 
@@ -42,10 +42,10 @@ def spawn(name, argv, env=None):
 def start(args):
     RUN.mkdir(parents=True, exist_ok=True)
     if not APP.exists():
-        sys.exit(f"{APP} absent : cargo build -p stokesforge-app")
+        sys.exit(f"{APP} missing: cargo build -p stokesforge-app")
     if not alive("xwayland"):
-        # Rootful : s'ouvre comme une fenêtre dans la session Wayland courante
-        # (pas de Xvfb ici, pas de sudo pour l'installer).
+        # Rootful: opens as a window in the current Wayland session
+        # (no Xvfb here, no sudo to install it).
         spawn("xwayland", ["Xwayland", DISPLAY, "-geometry", GEOM, "-noreset"])
         time.sleep(3)
     if alive("app"):
@@ -53,8 +53,8 @@ def start(args):
     env = dict(os.environ, DISPLAY=DISPLAY, STOKESFORGE_X11="1", STOKESFORGE_DEMO="1")
     env.pop("WAYLAND_DISPLAY", None)
     spawn("app", [str(APP), *args], env)
-    time.sleep(10)  # le premier rendu wgpu/llvmpipe est lent
-    print("app:", "vivante" if alive("app") else "MORTE (voir app.log)")
+    time.sleep(10)  # the first wgpu/llvmpipe render is slow
+    print("app:", "alive" if alive("app") else "DEAD (see app.log)")
     focus()
 
 
@@ -76,9 +76,9 @@ def click(x, y, how="left"):
     from Xlib.ext import xtest
     d = xconn()
     xtest.fake_input(d, X.MotionNotify, x=int(x), y=int(y))
-    d.sync(); time.sleep(0.5)  # egui doit voir le survol à une image AVANT le clic
-    # 1er mouvement vers une cible lointaine : egui ne le prend pas pour un
-    # survol exploitable (clic perdu) ; un 2e micro-mouvement le fiabilise.
+    d.sync(); time.sleep(0.5)  # egui must see the hover one frame BEFORE the click
+    # 1st move to a distant target: egui does not take it for a usable
+    # hover (click lost); a 2nd micro-move makes it reliable.
     xtest.fake_input(d, X.MotionNotify, x=int(x) + 1, y=int(y))
     d.sync(); time.sleep(0.4)
     xtest.fake_input(d, X.MotionNotify, x=int(x), y=int(y))
@@ -87,7 +87,7 @@ def click(x, y, how="left"):
     for _ in range(2 if how == "double" else 1):
         xtest.fake_input(d, X.ButtonPress, btn); d.sync(); time.sleep(0.05)
         xtest.fake_input(d, X.ButtonRelease, btn); d.sync(); time.sleep(0.08)
-    time.sleep(0.8)  # egui ne repeint qu'à l'événement : laisser l'image sortir
+    time.sleep(0.8)  # egui only repaints on events: let the frame come out
 
 
 def move(x, y):
@@ -103,10 +103,10 @@ def press(d, keysym_name, mods=()):
     from Xlib.ext import xtest
     ks = XK.string_to_keysym(keysym_name)
     if ks == 0:
-        sys.exit(f"touche inconnue : {keysym_name}")
+        sys.exit(f"unknown key: {keysym_name}")
     code = d.keysym_to_keycode(ks)
-    # Shift nécessaire si le keysym est en 2e colonne de la table du clavier
-    # (majuscules, '_', '#', '(' ...).
+    # Shift needed if the keysym is in the 2nd column of the keyboard table
+    # (capitals, '_', '#', '(' ...).
     shift = d.keycode_to_keysym(code, 0) != ks and d.keycode_to_keysym(code, 1) == ks
     modcodes = [d.keysym_to_keycode(XK.string_to_keysym(m)) for m in mods]
     if shift:
@@ -124,7 +124,7 @@ MODS = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
 
 
 def focus():
-    """Sans gestionnaire de fenêtres, personne ne donne le focus clavier."""
+    """Without a window manager, nobody gives keyboard focus."""
     from Xlib import X
     d = xconn()
     def walk(w):
@@ -138,7 +138,7 @@ def focus():
                 d.sync(); return
         except Exception:
             pass
-    sys.exit("fenêtre de l'app introuvable")
+    sys.exit("app window not found")
 
 
 def key(names):
@@ -161,9 +161,9 @@ def type_text(text):
 
 
 def flush_frames():
-    """egui ne repeint que sur événement et la capture X voit l'image
-    PRÉCÉDENTE (retard de 2-3 images sous Xwayland) : quatre micro-mouvements du pointeur forcent les images
-    qui font apparaître l'état courant."""
+    """egui only repaints on events and the X capture sees the PREVIOUS
+    image (2-3 frames behind under Xwayland): four pointer micro-moves force
+    the frames that bring out the current state."""
     from Xlib import X
     from Xlib.ext import xtest
     d = xconn()
@@ -174,8 +174,8 @@ def flush_frames():
 
 
 def ss(path):
-    # Empirique : la 1re capture après une action montre encore l'état d'avant ;
-    # la 2e (après un nouveau flush) montre l'état courant.
+    # Empirical: the 1st capture after an action still shows the previous state;
+    # the 2nd (after a new flush) shows the current state.
     flush_frames()
     subprocess.run(["import", "-display", DISPLAY, "-window", "root", path], check=True)
     flush_frames()

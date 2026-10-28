@@ -1,4 +1,4 @@
-//! **The** contract of in-place editing (#224, `docs/standard-interface.md`,
+//! **The** contract of in-place editing (#224, `docs/interface-standard.md`,
 //! § Text fields and in-place editing, S-T4): the grid, sheet tabs, Project
 //! Manager, Object Manager and graph titles all call it.
 //!

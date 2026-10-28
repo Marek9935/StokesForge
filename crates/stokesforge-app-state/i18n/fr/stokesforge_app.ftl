@@ -1,7 +1,7 @@
 # Catalogue français de l'interface de StokesForge (issue #49, chantier #39).
 #
 # Traduction du catalogue de référence `en` : mêmes clés, mêmes arguments, selon
-# la colonne française de `docs/textes-interface.md` (infinitif pour les
+# la colonne française de `docs/ui-texts.md` (infinitif pour les
 # consignes, minuscule après la première lettre, « … » en un caractère,
 # espace insécable avant « : », « ; », « ? » et dans les guillemets « »).
 # Toute clé ajoutée à `en` s'ajoute ici dans le même commit : le test de

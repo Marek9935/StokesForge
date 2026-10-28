@@ -1,21 +1,21 @@
 # Script writes, plotting and messages
 
-Read from `stokesforge-python` before adding or changing what a script writes or sees. Contracts live in the tests named below and in `docs/python-et-script.md`.
+Read from `stokesforge-python` before adding or changing what a script writes or sees. Contracts live in the tests named below and in `docs/python-and-scripting.md`.
 
 ## Writes go through the same undoable commands
 
-- `Ctrl+Z` undoes what a script just wrote: that is the end criterion of the core, replayed by `stokesforge-script::run_selftest`. Source: `docs/python-et-script.md` § Writes and undo of a script (#67).
+- `Ctrl+Z` undoes what a script just wrote: that is the end criterion of the core, replayed by `stokesforge-script::run_selftest`. Source: `docs/python-and-scripting.md` § Writes and undo of a script (#67).
 - The first write reserves a `Script` macro (reads open none); revalidate the handle after acquiring it. Success closes it; an uncaught error or a requested interruption aborts it, GIL released. Imports nest their macro. `undo()` ends then undoes the current group.
 - `set_column` keeps a fixed length; `set_values` replaces length and cells without changing type or provenance; `True`/`False` are refused (`PyBool` tested before `PyInt`). Contract: `stokesforge-script/tests/mutations.rs`.
-- **Read version (#312)**: a new write exposed to scripts carries `expected_version` (kept at read by `ScriptContext`, optional keyword `expected_version=`, immediate `ConcurrentWriteError`, no retry). Source: `docs/python-et-script.md` § Read version (#312).
+- **Read version (#312)**: a new write exposed to scripts carries `expected_version` (kept at read by `ScriptContext`, optional keyword `expected_version=`, immediate `ConcurrentWriteError`, no retry). Source: `docs/python-and-scripting.md` § Read version (#312).
 - **Formulas (#321)**: `meta["formula"]` reads and writes **column letters**; the only passage is `Tree::formula_from_letters`; writing another field keeps the **stored** formula, never a round trip through letters. A script never sees an id.
 - `pyst.import_file` reuses `stokesforge-importer`, then the commands in an « Importer » macro.
 
 ## Plotting without a window
 
-`pyst.plot` creates a `PlotSpec` by `AddGraph` or adds a series to the first layer (index 0 of `PlotSpec::panels`). Composition rules are the interface's, in `stokesforge_core::compose` (#257): without `x=`, the nearest X-role column **to the left**; automatic colour by `SeriesSpec::from_palette`. A list of columns forms a group (`push_series_batch`); group gestures call `PanelSpec` methods (`crates/stokesforge-script/src/groups.rs`): a new group gesture is written in `PanelSpec` first. `add_shape` / `remove_shape` also go through the `Script` macro. Explicit titles are Typst markup; automatic labels stay literal. Contract and SVG witnesses: `stokesforge-script/tests/graphs.rs`. Source: `docs/python-et-script.md` § Native graphs (#68).
+`pyst.plot` creates a `PlotSpec` by `AddGraph` or adds a series to the first layer (index 0 of `PlotSpec::panels`). Composition rules are the interface's, in `stokesforge_core::compose` (#257): without `x=`, the nearest X-role column **to the left**; automatic colour by `SeriesSpec::from_palette`. A list of columns forms a group (`push_series_batch`); group gestures call `PanelSpec` methods (`crates/stokesforge-script/src/groups.rs`): a new group gesture is written in `PanelSpec` first. `add_shape` / `remove_shape` also go through the `Script` macro. Explicit titles are Typst markup; automatic labels stay literal. Contract and SVG witnesses: `stokesforge-script/tests/graphs.rs`. Source: `docs/python-and-scripting.md` § Native graphs (#68).
 
-`stokesforge-cli run` uses the same engine and session, never a parallel Python API; it saves `--out` only on success (`docs/python-et-script.md` § CLI without a window (#71)).
+`stokesforge-cli run` uses the same engine and session, never a parallel Python API; it saves `--out` only on success (`docs/python-and-scripting.md` § CLI without a window (#71)).
 
 ## Texts a script sees are raw English
 

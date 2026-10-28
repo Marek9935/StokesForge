@@ -1,7 +1,7 @@
 //! Text format: the Typst tags that the format bar inserts (issue #63).
 //!
 //! Titles, axis titles, legend entries and free texts are already **Typst
-//! markup** (`docs/rendu.md`, issue #32): making a word bold means wrapping it
+//! markup** (`docs/rendering.md`, issue #32): making a word bold means wrapping it
 //! in `#strong[…]`. So no field is added to the model or to the `.stf` for
 //! bold, italic, color and size of a passage; the bar writes into the text,
 //! and each write goes through the same undoable action as typing. **The font

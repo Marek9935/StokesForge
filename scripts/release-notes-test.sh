@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test of scripts/release-notes.sh and scripts/versions-alignees.sh on a fake repository (#333): no network,
+# Test of scripts/release-notes.sh and scripts/versions-aligned.sh on a fake repository (#333): no network,
 # the real repository is not touched. Usage: scripts/release-notes-test.sh
 set -euo pipefail
 
@@ -31,7 +31,7 @@ attend() { # attend <code> <description> <tag>
 aligne() { # aligne <code> <description> [version]
     local code="$1" desc="$2" got=0
     shift 2
-    STOKESFORGE_REPO_ROOT="$tmp" "$HERE/versions-alignees.sh" "$@" >/dev/null 2>"$tmp/err" || got=$?
+    STOKESFORGE_REPO_ROOT="$tmp" "$HERE/versions-aligned.sh" "$@" >/dev/null 2>"$tmp/err" || got=$?
     if [ "$got" != "$code" ]; then
         echo "FAILED: $desc (code $got, expected $code)" >&2
         fail=1
@@ -115,7 +115,7 @@ aligne 1 "Cargo.lock missing"
 grep -q "Cargo.lock missing" "$tmp/err" || { echo "FAILED: message \"Cargo.lock missing\" missing" >&2; fail=1; }
 lock 1.2.3 1.2.3
 
-# versions-alignees.sh alone: neither tag nor CHANGELOG read.
+# versions-aligned.sh alone: neither tag nor CHANGELOG read.
 aligne 0 "crates in line, no argument"
 aligne 0 "crates in line, right argument" 1.2.3
 aligne 1 "argument differs from crates" 1.2.4

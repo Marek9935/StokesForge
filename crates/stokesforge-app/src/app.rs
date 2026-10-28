@@ -50,7 +50,7 @@
 //! # Where the rest lives
 //!
 //! The complete module → role table is in
-//! `docs/application/coquille-et-code.md`, § Code split.
+//! `docs/application/shell-and-code.md`, § Code split.
 //!
 //! - menus and status bar: `menus.rs` ([`StokesForgeApp::menu_bar`],
 //!   [`StokesForgeApp::status_bar`]); format bars and contextual bar:

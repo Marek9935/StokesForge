@@ -18,7 +18,7 @@
 //!   gesture does not count either: it disappears with it.
 //!
 //! The stored text of a formula is never rewritten
-//! (`docs/modele-de-donnees.md`): the displayed letters follow the columns.
+//! (`docs/data-model.md`): the displayed letters follow the columns.
 
 use std::collections::BTreeSet;
 

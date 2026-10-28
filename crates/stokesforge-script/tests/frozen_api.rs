@@ -1,7 +1,7 @@
 //! Guard of the frozen V1 API of `pyst` (#331, batch 3).
 //!
 //! The reference list is the "Frozen API V1" section of
-//! `docs/python-et-script.md`, in blocks ```` ```pyst-api <kind> <name> ````.
+//! `docs/python-and-scripting.md`, in blocks ```` ```pyst-api <kind> <name> ````.
 //! This test **reads those blocks** (it keeps no copy of them) and compares
 //! them with the module actually built:
 //!
@@ -33,7 +33,7 @@ use stokesforge_session::Session;
 
 /// What the failure message reminds whoever touches the surface of.
 const GUIDANCE: &str = "The `pyst` surface no longer matches the frozen list \
-\"Frozen API V1\" of docs/python-et-script.md (#331). A change of surface \
+\"Frozen API V1\" of docs/python-and-scripting.md (#331). A change of surface \
 (call, parameter, default, exception, key, enumerated value) requires an \
 explicit DECISION and an update of this list in the same commit as the code.";
 
@@ -46,12 +46,12 @@ struct Block {
 }
 
 fn doc_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/python-et-script.md")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/python-and-scripting.md")
 }
 
 /// All the ```` ```pyst-api <kind> <name> ```` blocks of the doc, in order.
 fn blocks() -> Vec<Block> {
-    let text = std::fs::read_to_string(doc_path()).expect("docs/python-et-script.md readable");
+    let text = std::fs::read_to_string(doc_path()).expect("docs/python-and-scripting.md readable");
     let mut blocks = Vec::new();
     let mut current: Option<Block> = None;
     for line in text.lines() {
