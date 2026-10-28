@@ -57,6 +57,17 @@ without a message, see `docs/persistance.md`).
 - The default name proposed when exporting a graph without a name is
   "graph" (was "graphe") (#374).
 
+### Fixed
+
+- Texts written in French in the English interface (#369): the "(broken
+  reference)" placeholder and the "… and N more" line of the legend, the
+  Light and Dark theme names, the import failure messages of the status
+  bar and the tooltips of the window header buttons (close, detach,
+  reattach, maximize, show/hide contents) now follow the interface language
+  (en/fr); the "Row N" name of an
+  unnamed row series too. Figures exported by a `pyst` script or the CLI keep
+  English.
+
 ## [1.0.0] - 2026-10-27
 
 Première version publiée. Portage de StokesForge de Python/Qt vers Rust

@@ -25,7 +25,7 @@
 //! the children **shown** in the tree (#173,
 //! [`VisibilityTarget::contents_shown`]).
 
-use stokesforge_core::{series_label, NodeId, Tree};
+use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
     AnnotationRef, AxisSide, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSlot,
     SeriesSpec, ShapeKind, ShapeRef, TextTarget,
@@ -692,7 +692,7 @@ pub fn object_tree_of_spec(
                             let target = SeriesRef::new(index, rank);
                             SeriesRow {
                                 target,
-                                label: series_label(s, tree),
+                                label: crate::state::series_list_label(tree, s),
                                 spec: s.clone(),
                                 selected: selected == Some(VisibilityTarget::Series(target)),
                                 stale: spec.stale_warning

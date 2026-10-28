@@ -170,6 +170,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Min / Max | Min / Max | Ends of the range | De / À | O |
 | Reverse axis | Axe inversé | Values decreasing in the reading direction; **no checkbox** since #344: « De » > « À » reverses the axis | Axe retourné | O |
 | Legend | Légende | List of the series with their style | — | G |
+| Broken reference | Référence rompue | A series whose Y column no longer exists; kept in the legend, annotated « (broken reference) » / « (référence rompue) » (`graph-series-broken-reference*`, #369) | Lien cassé, Référence invalide | G |
 | Legend entry | Entrée de légende | One line of the legend | Libellé de légende | G |
 | Position | Position | Corner of the legend: Top left…; Reset Position / Réinitialiser la position: puts a title or the legend back at its default place | Emplacement | G |
 | Series | Série | Plotted data of a Y column | Courbe, Trace, Plot, Jeu de données | G (Q3) |

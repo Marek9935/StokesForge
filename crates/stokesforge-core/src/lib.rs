@@ -93,6 +93,7 @@ pub use project::{spreadsheet_name, Project};
 pub use resolve::{
     bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
     series_label, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+    SeriesLabel,
 };
 pub use transpose::{
     content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,

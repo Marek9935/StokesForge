@@ -356,8 +356,10 @@ title (quantity and units), scale, display, axis color),
 "Legend" and "Theme". The series no longer have a tab (#179): they have their
 own window, **Series Properties**, described below. The texts of the whole window are `plot-*` keys
 of the `en` catalog (tooltip in a `.hint` attribute), following the glossary
-`docs/textes-interface.md`; the names that are typed in (titles, series names, themes)
-are data, never translated.
+`docs/textes-interface.md`; the names that are typed in (titles, series names)
+are data, never translated. The theme names and the texts the figure draws by itself
+(broken-reference placeholder, « … and N more » line, row series name) are
+catalog keys (`plot-theme-*`, `graph-series-*`, `graph-legend-more`, `graph-row-series`).
 
 **Graph texts**: title, panel title, axis label and unit, series name
 are composed by Typst and read as **markup** (`docs/rendu.md`
@@ -371,8 +373,8 @@ Typst text (interface side: "Math", #322) goes through `formula_field`; any othe
 The test `chaque_exemple_du_memo_compile` checks that each example compiles. A
 series name left empty takes that of the column, displayed as is.
 
-**"Theme" tab**: two predefined themes (`stokesforge_plot::THEMES`: Clair,
-Sombre) and three global colors: background, text, axes. A global
+**"Theme" tab**: two predefined themes (`stokesforge_plot::THEMES`, identified by `Theme::id`
+`light` and `dark`; named `plot-theme-light`/`plot-theme-dark`) and three global colors: background, text, axes. A global
 color is **written into all the local fields** (graph title,
 title and scale of each axis of each panel;
 `PlotSpec::set_text_color`/`set_axes_color`/`apply_theme`): the last
@@ -575,9 +577,9 @@ in `stokesforge-plot` (read before writing, as requested):
   Former description of the list: (`egui::ScrollArea` bounded in height,
   `selectable_label` per series, label `state::series_list_label`: the name
   of the series if set, otherwise the long name of the Y column, otherwise
-  its node name, otherwise « (référence rompue) », the same computation as
-  `label_for` in private in `stokesforge-core/src/resolve.rs`, duplicated rather than
-  made public because it is a display rule, not a resolution rule), then, for the chosen
+  its node name, otherwise the `graph-series-broken-reference` placeholder:
+  `stokesforge_core::series_label` returns data (`SeriesLabel`: `Text`, `Row`,
+  `Missing`) and `figure_texts::series_label_text` phrases it), then, for the chosen
   series: `SeriesSpec::name`,
   `plot_type` (`PlotType`, all variants except `Unknown`, see
   below), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,

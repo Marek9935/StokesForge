@@ -64,8 +64,9 @@ use stokesforge_plot::{
 };
 use stokesforge_render::pipeline::{self, DrawnPlot};
 use stokesforge_render::sample::{self, Sample};
+use stokesforge_render::FigureTexts;
 use stokesforge_render::TextMeasurer;
-use stokesforge_render_egui::collect_shapes;
+use stokesforge_render_egui::collect_shapes_with_texts;
 
 /// Dimensions of the compared figure, in backend units.
 const SIZE: (u32, u32) = (800, 600);
@@ -243,23 +244,43 @@ fn unescape(text: &str) -> String {
 // -- renderings --
 
 fn render_egui(tree: &Tree, spec: &PlotSpec, size: (u32, u32)) -> (Vec<Primitive>, DrawnPlot) {
+    render_egui_with_texts(tree, spec, size, &FigureTexts::default())
+}
+
+fn render_egui_with_texts(
+    tree: &Tree,
+    spec: &PlotSpec,
+    size: (u32, u32),
+    texts: &FigureTexts,
+) -> (Vec<Primitive>, DrawnPlot) {
     let plot = resolve_spec(tree, spec);
     let measurer = TextMeasurer::default();
     let mut shapes = Vec::new();
     let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32));
-    let drawn = collect_shapes(&mut shapes, rect, &measurer, &plot).expect("egui drawing");
+    let drawn = collect_shapes_with_texts(&mut shapes, rect, &measurer, &plot, texts)
+        .expect("egui drawing");
     (primitives_egui(&shapes), drawn)
 }
 
 fn render_svg(tree: &Tree, spec: &PlotSpec, size: (u32, u32)) -> (Vec<Primitive>, DrawnPlot) {
+    render_svg_with_texts(tree, spec, size, &FigureTexts::default())
+}
+
+fn render_svg_with_texts(
+    tree: &Tree,
+    spec: &PlotSpec,
+    size: (u32, u32),
+    texts: &FigureTexts,
+) -> (Vec<Primitive>, DrawnPlot) {
     let plot = resolve_spec(tree, spec);
     // Deliberately a **second** `TextMeasurer`, not the one of the egui rendering:
     // task R4.1 says that sharing the `FontDefinitions` is enough, and that is
     // precisely what this test must put to the proof.
     let measurer = TextMeasurer::default();
-    let (document, drawn) =
-        stokesforge_render_svg::render_to_string_with_geometry(&plot, size, &measurer)
-            .expect("SVG export");
+    let (document, drawn) = stokesforge_render_svg::render_to_string_with_geometry_and_texts(
+        &plot, size, &measurer, texts,
+    )
+    .expect("SVG export");
     (primitives_svg(&document), drawn)
 }
 
@@ -306,8 +327,19 @@ fn agree(
     size: (u32, u32),
     what: &str,
 ) -> (Vec<Primitive>, DrawnPlot) {
-    let (egui_primitives, egui_drawn) = render_egui(tree, spec, size);
-    let (svg_primitives, svg_drawn) = render_svg(tree, spec, size);
+    agree_with_texts(tree, spec, size, what, &FigureTexts::default())
+}
+
+/// [`agree`] with the same [`FigureTexts`] given to both backends.
+fn agree_with_texts(
+    tree: &Tree,
+    spec: &PlotSpec,
+    size: (u32, u32),
+    what: &str,
+    texts: &FigureTexts,
+) -> (Vec<Primitive>, DrawnPlot) {
+    let (egui_primitives, egui_drawn) = render_egui_with_texts(tree, spec, size, texts);
+    let (svg_primitives, svg_drawn) = render_svg_with_texts(tree, spec, size, texts);
 
     assert!(
         !egui_primitives.is_empty(),
@@ -402,12 +434,51 @@ fn a_broken_reference_breaks_neither_the_rendering_nor_the_agreement() {
     assert!(
         primitives.iter().any(|p| matches!(
             p,
-            Primitive::Text(text) if text.contains("référence rompue")
+            Primitive::Text(text) if text.contains(&FigureTexts::default().broken_reference)
         )),
         "the broken reference appears nowhere in the figure: it is \
          silenced, which §11.1 forbids"
     );
     assert_eq!(drawn.panels[0].legend_entries, 2);
+}
+
+/// #369: the texts the renderer draws by itself come from the caller. Both
+/// backends given the same non-English texts agree, and draw them: a
+/// legend of 26 entries (« … and N more ») with one broken reference.
+#[test]
+fn the_two_backends_agree_on_the_texts_they_are_given() {
+    let texts = FigureTexts::new(
+        "xx",
+        "(xx-placeholder)",
+        |name| format!("{name} xx-named"),
+        |count| format!("xx-more {count}"),
+        |number| format!("xx-row {number}"),
+    );
+    let mut fixture = minimal();
+    let ghost = NodeId::from_raw(u64::MAX);
+    let column = fixture.spec.panels[0].series[0].y;
+    if let Some(panel) = fixture.spec.panels.get_mut(0) {
+        panel.series.push(SeriesSpec::new(ghost));
+        for _ in 0..25 {
+            panel.series.push(SeriesSpec::new(column));
+        }
+    }
+
+    let (primitives, drawn) = agree_with_texts(
+        fixture.project.tree(),
+        &fixture.spec,
+        SIZE,
+        "custom texts",
+        &texts,
+    );
+    let has = |needle: &str| {
+        primitives
+            .iter()
+            .any(|p| matches!(p, Primitive::Text(text) if text.contains(needle)))
+    };
+    assert_eq!(drawn.broken_series, 1);
+    assert!(has("xx-more 3"), "the omitted-entries line is not drawn");
+    assert!(!has("and 3 more"), "the English default leaked");
 }
 
 // -- R5: the realistic graph --

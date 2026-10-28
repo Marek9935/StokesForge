@@ -43,7 +43,7 @@
 //! Consequence: a title or legend text is compiled **as Typst markup**. This
 //! is intended for typed text (raw Typst syntax: `*bold*`, `$x^2$`, `\$` for
 //! a dollar). Text taken over automatically (column name in a legend, the
-//! "… et N autres" line) takes [`literal_style`]: Typst composes it too, but
+//! "… and N more" line) takes [`literal_style`]: Typst composes it too, but
 //! **as is**, through [`escape`] (issue #33) — an `Abs_280` imported from an
 //! instrument does not turn italic. A string that does not compile is
 //! displayed raw by `epaint` (invariant 10): this is the only case where the
@@ -451,7 +451,7 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
 /// so — `...` as an ellipsis, `--` as a dash, `'` and `"` as typographic
 /// quotes. A string is none of that: it is text. Nothing valid can follow the
 /// string without a space in what the renderer produces (a `.` stuck to it
-/// would read a field): the only addition is "— référence rompue", preceded
+/// would read a field): the only addition is the broken-reference suffix, preceded
 /// by a space.
 pub fn escape(text: &str) -> String {
     if text.is_empty() {

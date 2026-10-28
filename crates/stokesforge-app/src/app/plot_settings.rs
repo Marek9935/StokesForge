@@ -472,8 +472,11 @@ fn theme_editor(
         let mut commit = false;
         form.section(tr!("plot-theme-themes"));
         form.field(|ui| {
-            for theme in &stokesforge_plot::THEMES {
-                if ui.button(theme.name).clicked() {
+            for (index, theme) in stokesforge_plot::THEMES.iter().enumerate() {
+                if ui
+                    .button(stokesforge_app_state::figure_texts::theme_name(index))
+                    .clicked()
+                {
                     spec.apply_theme(theme);
                     commit = true;
                 }
@@ -1395,19 +1398,13 @@ mod tests {
             let settings = banc.state.plot_settings().expect("fenêtre restée ouverte");
             assert_eq!(settings.tab, tab);
 
-            // Les données ne passent pas par le catalogue : noms des thèmes
-            // (`stokesforge_plot::THEMES`, des données comme les noms saisis,
-            // `docs/application/graphe.md` § Graph properties),
+            // Les données ne passent pas par le catalogue :
             // libellé de la série tiré de ses colonnes, valeurs numériques,
             // champs de saisie vides (titres non renseignés).
             let tree = banc.state.tree().clone();
             let serie = series_list_label(&tree, &original.panels[0].series[0]);
-            let donnee = |texte: &str| {
-                texte.is_empty()
-                    || THEMES.iter().any(|theme| theme.name == texte)
-                    || texte == serie
-                    || texte.parse::<f64>().is_ok()
-            };
+            let donnee =
+                |texte: &str| texte.is_empty() || texte == serie || texte.parse::<f64>().is_ok();
             for peint in &peints {
                 if langue == Language::PseudoEnglish && !donnee(&peint.texte) {
                     assert!(
@@ -2715,17 +2712,13 @@ mod tests {
         ] {
             assert!(est_peint(&peints, &libelle), "{libelle:?} absent");
         }
-        for theme in &THEMES {
-            assert!(
-                est_peint(&peints, theme.name),
-                "thème {:?} absent",
-                theme.name
-            );
+        for libelle in [tr!("plot-theme-light"), tr!("plot-theme-dark")] {
+            assert!(est_peint(&peints, &libelle), "thème {libelle:?} absent");
         }
 
         let sombre = &THEMES[1];
         assert_ne!(spec.background, sombre.background);
-        let pos = texte_exact(&peints, sombre.name).centre;
+        let pos = texte_exact(&peints, &tr!("plot-theme-dark")).centre;
         let mut commits = Vec::new();
         for events in [
             vec![egui::Event::PointerMoved(pos)],

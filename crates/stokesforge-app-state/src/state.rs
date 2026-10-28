@@ -1469,7 +1469,7 @@ fn row_series_name(row: usize) -> String {
 /// same rule as the graph legend, [`stokesforge_core::series_label`] (single
 /// source, issue #25).
 pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
-    stokesforge_core::series_label(series, tree)
+    crate::figure_texts::series_label_text(&stokesforge_core::series_label(series, tree))
 }
 
 /// Payload of the drag of **whole rows** of a sheet to an open
@@ -7177,13 +7177,14 @@ impl AppState {
         };
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
-        match stokesforge_render_svg::export_to_file(
+        match stokesforge_render_svg::export_to_file_with_texts(
             path,
             &plot,
             stokesforge_render_svg::DEFAULT_SIZE,
             &measurer,
             &stokesforge_render_svg::FontChoice::default(),
             format,
+            &crate::figure_texts::figure_texts(),
         ) {
             Ok(()) => self.notice(tr!(
                 "status-graph-exported",
@@ -7228,12 +7229,13 @@ impl AppState {
             })
             .collect();
         let formats: Vec<ExportFormat> = wanted.iter().map(|(_, format)| *format).collect();
-        let results = match stokesforge_render_svg::export_bytes_many(
+        let results = match stokesforge_render_svg::export_bytes_many_with_texts(
             &plot,
             stokesforge_render_svg::DEFAULT_SIZE,
             &measurer,
             &stokesforge_render_svg::FontChoice::default(),
             &formats,
+            &crate::figure_texts::figure_texts(),
         ) {
             Ok(results) => results,
             Err(err) => {
@@ -9184,7 +9186,7 @@ impl AppState {
         }
         let imported = done_paths.len();
         if self.handle.end_macro().is_err() {
-            failures.push("échec de la clôture de l'entrée d'historique d'import".to_string());
+            failures.push(tr!("error-import-close-group"));
         }
         if imported > 0 {
             // Material for "Reopen Last Import…" and the recent files.
@@ -9238,7 +9240,7 @@ impl AppState {
                 }
                 let book = self.create_import_book(None);
                 if book.is_none() {
-                    failures.push(format!("{}: échec de la création du classeur", plan.name));
+                    failures.push(tr!("error-import-create-book", name = plan.name.clone()));
                 }
                 *shared_book = book;
                 book
@@ -9246,7 +9248,7 @@ impl AppState {
             ImportDestination::NewBookPerFile => {
                 let book = self.create_import_book(Some(&plan.name));
                 if book.is_none() {
-                    failures.push(format!("{}: échec de la création du classeur", plan.name));
+                    failures.push(tr!("error-import-create-book", name = plan.name.clone()));
                 }
                 book
             }
@@ -9281,7 +9283,7 @@ impl AppState {
             .and_then(|node| node.children().last().copied())
             .filter(|sheet| Some(*sheet) != previous);
         let Some(sheet) = sheet else {
-            failures.push(format!("{name}: échec de la création de la feuille"));
+            failures.push(tr!("error-import-create-sheet", name = name));
             return None;
         };
         self.execute(Command::Rename {

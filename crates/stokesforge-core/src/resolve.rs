@@ -135,8 +135,9 @@ pub struct ResolvedSeries<'s> {
     /// The original series.
     pub spec: &'s SeriesSpec,
     /// Displayed name: the spec's if set, otherwise that of the Y
-    /// column, otherwise `"(référence rompue)"`.
-    pub label: String,
+    /// column, otherwise [`SeriesLabel::Missing`]. Data, not a sentence: the
+    /// interface phrases the placeholders.
+    pub label: SeriesLabel,
     /// X values. `None` if the series has none (histogram) or if the
     /// reference is broken.
     pub x: Option<ResolvedValues>,
@@ -225,35 +226,59 @@ pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
     tree.node(id).and_then(Node::as_column)
 }
 
+/// Displayed name of a series, as data. Core makes no sentence: the
+/// placeholders are phrased by the interface (Fluent keys in
+/// `stokesforge-app-state`, English default in the renderer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeriesLabel {
+    /// A name: the spec's, the long name of the Y column, or its node name.
+    Text(String),
+    /// An unnamed "row" series (#166): the 0-based row (the interface shows
+    /// `row + 1`, as the grid does).
+    Row(usize),
+    /// An unnamed series whose Y column no longer exists.
+    Missing,
+}
+
+impl SeriesLabel {
+    /// The name if there is one (`Text`), otherwise `None`.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
 /// Displayed name of a series: `SeriesSpec::name` if set, otherwise the
-/// long name of the Y column, otherwise its node name, otherwise "(référence
-/// rompue)" if the column no longer exists.
+/// long name of the Y column, otherwise its node name, otherwise
+/// [`SeriesLabel::Missing`] if the column no longer exists.
 ///
 /// **Single source**: the graph legend (via [`resolve_series`]) and the
 /// series list of the properties window (`stokesforge-app`) both call it,
 /// so that a rename or a rule change reaches
 /// both (issue #25). It lives here, in `stokesforge-core`, because it is
 /// the place that knows how to read a column; the interface need not rewrite it.
-pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
+pub fn series_label(series: &SeriesSpec, tree: &Tree) -> SeriesLabel {
     if !series.name.is_empty() {
-        return series.name.clone();
+        return SeriesLabel::Text(series.name.clone());
     }
     if let Some(row) = series.row {
         // "Row" series (#166): the row is its name, as in the grid.
-        return format!("Row {}", row.saturating_add(1));
+        return SeriesLabel::Row(row);
     }
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
-        return "(référence rompue)".to_string();
+        return SeriesLabel::Missing;
     };
     let long_name = y_node
         .as_column()
         .map(|column| column.meta().long_name.as_str())
         .unwrap_or_default();
-    if long_name.is_empty() {
+    SeriesLabel::Text(if long_name.is_empty() {
         y_node.name().to_string()
     } else {
         long_name.to_string()
-    }
+    })
 }
 
 /// `f64` view of a column referenced by `id`, or `None` if the reference is
@@ -392,9 +417,9 @@ fn resolve_row_series<'s>(
     tree: &Tree,
     series: &'s SeriesSpec,
     row: usize,
-    label: String,
+    label: SeriesLabel,
 ) -> ResolvedSeries<'s> {
-    let broken = |label: String| ResolvedSeries {
+    let broken = |label: SeriesLabel| ResolvedSeries {
         spec: series,
         label,
         x: None,
@@ -706,7 +731,7 @@ mod tests {
         // "Voltage", and nothing in the spec freezes the old name "Y".
         assert_eq!(
             series_label(&series, project.tree()),
-            "Voltage",
+            SeriesLabel::Text("Voltage".to_string()),
             "the displayed name must follow the column rename"
         );
     }
@@ -732,7 +757,11 @@ mod tests {
             resolved.x.is_none(),
             "the whole series is marked, not just Y"
         );
-        assert_eq!(resolved.label, "(référence rompue)");
+        assert_eq!(
+            resolved.label,
+            SeriesLabel::Missing,
+            "an unnamed series with no Y column is data, not a sentence"
+        );
     }
 
     /// There is no longer a non-plottable column type (`Text` disappeared in
@@ -831,7 +860,7 @@ mod tests {
         };
         let resolved = resolve_series(project.tree(), &series);
         assert!(resolved.ok());
-        assert_eq!(resolved.label, "Row 2");
+        assert_eq!(resolved.label, SeriesLabel::Row(1));
         assert_eq!(resolved.point_count(), 3);
         assert_eq!(resolved.x.as_ref().unwrap().as_slice(), &[0.0, 10.0, 20.0]);
         assert_eq!(resolved.y.as_ref().unwrap().as_slice(), &[2.0, 5.0, 8.0]);
@@ -848,7 +877,7 @@ mod tests {
         };
         assert_eq!(
             series_label(&series, project.tree()),
-            "Row 18446744073709551615"
+            SeriesLabel::Row(usize::MAX)
         );
     }
 
@@ -960,14 +989,20 @@ mod tests {
             name: "My series".to_string(),
             ..SeriesSpec::new(f.y)
         };
-        assert_eq!(series_label(&series, f.project.tree()), "My series");
+        assert_eq!(
+            series_label(&series, f.project.tree()),
+            SeriesLabel::Text("My series".to_string())
+        );
     }
 
     #[test]
     fn empty_name_falls_back_to_the_long_name_then_the_column_name() {
         let f = Fixture::new();
         let series = SeriesSpec::new(f.y);
-        assert_eq!(series_label(&series, f.project.tree()), "Y");
+        assert_eq!(
+            series_label(&series, f.project.tree()),
+            SeriesLabel::Text("Y".to_string())
+        );
 
         let mut project = f.project;
         project
@@ -979,7 +1014,10 @@ mod tests {
                 },
             )
             .expect("valid metadata");
-        assert_eq!(series_label(&series, project.tree()), "Voltage");
+        assert_eq!(
+            series_label(&series, project.tree()),
+            SeriesLabel::Text("Voltage".to_string())
+        );
     }
 
     #[test]

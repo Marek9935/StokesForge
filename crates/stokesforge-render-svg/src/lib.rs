@@ -63,14 +63,17 @@ use stokesforge_render::pipeline::{self, DrawnPlot};
 use stokesforge_render::text::TextMeasurer;
 
 pub use backend::MeasuredSvgBackend;
-pub use export::{export_bytes, export_bytes_many, export_to_file, ExportError, ExportFormat};
+pub use export::{
+    export_bytes, export_bytes_many, export_bytes_many_with_texts, export_bytes_with_texts,
+    export_to_file, export_to_file_with_texts, ExportError, ExportFormat,
+};
 pub use typst_export::SvgTextMode;
 // The export's font choice, so that a caller without egui (the application
 // state) does not have to declare an edge to `stokesforge-render`.
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 pub use stokesforge_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
-pub use stokesforge_render::FontChoice;
+pub use stokesforge_render::{FigureTexts, FontChoice};
 
 /// Default size of an exported figure, in SVG units.
 ///
@@ -124,10 +127,21 @@ pub fn render_to_string(
     size: (u32, u32),
     measurer: &TextMeasurer,
 ) -> Result<String, SvgError> {
+    render_to_string_with_texts(plot, size, measurer, &FigureTexts::default())
+}
+
+/// [`render_to_string`] with the texts of the figure in the caller's language
+/// ([`FigureTexts`]); the screen must be given the same ones (invariant 5).
+pub fn render_to_string_with_texts(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    texts: &FigureTexts,
+) -> Result<String, SvgError> {
     let mut buffer = String::new();
     {
         let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer);
-        pipeline::draw(backend, plot)?;
+        pipeline::draw_with_texts(backend, plot, texts)?;
     }
     Ok(subpixel::resolve(buffer))
 }
@@ -150,6 +164,26 @@ pub fn render_to_string_with_typst(
     choice: &stokesforge_render::FontChoice,
     mode: SvgTextMode,
 ) -> Result<String, SvgError> {
+    render_to_string_with_typst_and_texts(
+        plot,
+        size,
+        measurer,
+        choice,
+        mode,
+        &FigureTexts::default(),
+    )
+}
+
+/// [`render_to_string_with_typst`] with the texts of the figure
+/// ([`FigureTexts`]).
+pub fn render_to_string_with_typst_and_texts(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+    mode: SvgTextMode,
+    texts: &FigureTexts,
+) -> Result<String, SvgError> {
     let cache = stokesforge_render::formula::FormulaCache::new();
     let typst = typst_export::TypstExport::new(&cache, choice, mode).map_err(SvgError::Typst)?;
     let mut buffer = String::new();
@@ -157,7 +191,7 @@ pub fn render_to_string_with_typst(
         let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer)
             .with_typst(&typst)
             .with_font(choice, mode);
-        pipeline::draw(backend, plot)?;
+        pipeline::draw_with_texts(backend, plot, texts)?;
     }
     Ok(typst_export::splice(&subpixel::resolve(buffer), &typst))
 }
@@ -172,10 +206,21 @@ pub fn render_to_string_with_geometry(
     size: (u32, u32),
     measurer: &TextMeasurer,
 ) -> Result<(String, DrawnPlot), SvgError> {
+    render_to_string_with_geometry_and_texts(plot, size, measurer, &FigureTexts::default())
+}
+
+/// [`render_to_string_with_geometry`] with the texts of the figure
+/// ([`FigureTexts`]).
+pub fn render_to_string_with_geometry_and_texts(
+    plot: &ResolvedPlot<'_>,
+    size: (u32, u32),
+    measurer: &TextMeasurer,
+    texts: &FigureTexts,
+) -> Result<(String, DrawnPlot), SvgError> {
     let mut buffer = String::new();
     let drawn = {
         let backend = MeasuredSvgBackend::with_string(&mut buffer, size, measurer);
-        pipeline::draw(backend, plot)?
+        pipeline::draw_with_texts(backend, plot, texts)?
     };
     Ok((subpixel::resolve(buffer), drawn))
 }
