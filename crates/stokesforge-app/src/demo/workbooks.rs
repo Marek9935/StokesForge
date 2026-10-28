@@ -1,5 +1,5 @@
 //! The demo workbooks: `Book1` (the example script's: its letters and values
-//! do not change) and the `Classeurs` folder (the column types, the
+//! do not change) and the `Workbooks` folder (the column types, the
 //! measurements that feed the graphs, a matrix, a note).
 //!
 //! Everything is built on a fresh `Project`, **before** `Session::spawn`
@@ -20,13 +20,13 @@ use super::set_x_role;
 pub(super) struct Book1 {
     pub(super) spectrum_x: NodeId,
     pub(super) spectrum_y: NodeId,
-    /// A column of `Cinetique`: the "row" series designate the sheet by any of
+    /// A column of `Kinetics`: the "row" series designate the sheet by any of
     /// its columns.
     pub(super) kinetics: NodeId,
 }
 
-/// The columns of the `Mesures` workbook, which the `Types`, `Panneaux`,
-/// `Axes` and `Groupes` graphs plot.
+/// The columns of the `Measurements` workbook, which the `Types`, `Panels`,
+/// `Axes` and `Groups` graphs plot.
 pub(super) struct Measures {
     pub(super) time: NodeId,
     /// Strictly positive: it goes to a logarithmic scale (invariant 10).
@@ -106,9 +106,9 @@ pub(super) fn book1(project: &mut Project) -> anyhow::Result<Book1> {
     // the grid, which would give a curve that is hard to read. A bench must
     // show the model's twisted cases *and* a rendering that can be judged by
     // eye.
-    let spectre = project
-        .add_worksheet(book, Some("Spectre"))
-        .context("Spectre sheet")?;
+    let spectrum = project
+        .add_worksheet(book, Some("Spectrum"))
+        .context("Spectrum sheet")?;
     let xs: Vec<f64> = (0..=120).map(|i| 400.0 + i as f64 * 2.5).collect();
     let ys: Vec<f64> = xs
         .iter()
@@ -119,18 +119,18 @@ pub(super) fn book1(project: &mut Project) -> anyhow::Result<Book1> {
         })
         .collect();
     let x = project
-        .add_column(spectre, None, None, Column::from_f64(&xs))
-        .context("column A of Spectre")?;
+        .add_column(spectrum, None, None, Column::from_f64(&xs))
+        .context("column A of Spectrum")?;
     set_x_role(project, x)?;
     let y = project
-        .add_column(spectre, None, None, Column::from_f64(&ys))
-        .context("column B of Spectre")?;
+        .add_column(spectrum, None, None, Column::from_f64(&ys))
+        .context("column B of Spectrum")?;
     // A kinetics to test row dragging (#166): one column per instant (row x' =
     // time in s), one row per wavelength. Selecting row numbers then grabbing
     // the block edge plots one curve per row, against the x'.
     let kinetics = project
-        .add_worksheet(book, Some("Cinetique"))
-        .context("Cinetique sheet")?;
+        .add_worksheet(book, Some("Kinetics"))
+        .context("Kinetics sheet")?;
     let mut last = None;
     for time in [0.0, 30.0, 60.0, 120.0, 240.0] {
         let values: Vec<f64> = (0..8)
@@ -141,7 +141,7 @@ pub(super) fn book1(project: &mut Project) -> anyhow::Result<Book1> {
             .collect();
         let column = project
             .add_column(kinetics, None, None, Column::from_f64(&values))
-            .context("column of Cinetique")?;
+            .context("column of Kinetics")?;
         let mut meta = project
             .tree()
             .node(column)
@@ -149,16 +149,16 @@ pub(super) fn book1(project: &mut Project) -> anyhow::Result<Book1> {
             .map(|column| column.meta().clone())
             .unwrap_or_default();
         meta.x_prime = Some(time);
-        meta.unit = "u.a.".into();
+        meta.unit = String::new();
         project
             .set_column_meta(column, meta)
-            .context("x' of Cinetique")?;
+            .context("x' of Kinetics")?;
         last = Some(column);
     }
     Ok(Book1 {
         spectrum_x: x,
         spectrum_y: y,
-        kinetics: last.context("Cinetique has columns")?,
+        kinetics: last.context("Kinetics has columns")?,
     })
 }
 
@@ -216,7 +216,7 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
         .copied()
         .context("sheet of the Types workbook")?;
     let time: Vec<f64> = (0..12).map(f64::from).collect();
-    titled_column(project, sheet, &time, ("Temps", "s"), ColumnRole::X)?;
+    titled_column(project, sheet, &time, ("Time", "s"), ColumnRole::X)?;
 
     // Numeric, with missing values (`NaN`) and complete metadata: unit, long
     // name, comment and format.
@@ -228,27 +228,27 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
         project,
         sheet,
         &temperature,
-        ("Température", "°C"),
+        ("Temperature", "°C"),
         ColumnRole::Y,
     )?;
     apply_meta(project, column, |meta| {
-        meta.comment = "Capteur 2 : deux mesures manquantes (NaN).".into();
+        meta.comment = "Sensor 2: two missing measurements (NaN).".into();
         meta.display_format = "0.00".into();
     })?;
 
     // Mixed, text only: `None` and `Some("")` display the same.
     let labels = [
-        Some("échantillon A".to_string()),
+        Some("sample A".to_string()),
         None,
         Some(String::new()),
-        Some("échantillon D".to_string()),
+        Some("sample D".to_string()),
         Some("A12".to_string()),
     ];
     let column = project
         .add_column(sheet, None, None, Column::from_text(&labels))
         .context("mixed text column")?;
     apply_meta(project, column, |meta| {
-        meta.long_name = "Étiquette".into();
+        meta.long_name = "Label".into();
         meta.role = ColumnRole::Label;
     })?;
 
@@ -258,7 +258,7 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
         MixedCell::Text("n.d.".into()),
         MixedCell::Empty,
         MixedCell::Number(4.0),
-        MixedCell::Text("<LD".into()),
+        MixedCell::Text("<LOD".into()),
         MixedCell::Number(6.5),
         MixedCell::Empty,
         MixedCell::Number(8.0),
@@ -267,7 +267,7 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
         .add_column(sheet, None, None, Column::from_mixed(&readings))
         .context("blended mixed column")?;
     apply_meta(project, reading, |meta| {
-        meta.long_name = "Lecture manuelle".into();
+        meta.long_name = "Manual reading".into();
         meta.unit = "mg/L".into();
     })?;
 
@@ -283,7 +283,7 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
                 ColumnType::DateTime,
                 ValueBlock::Float(timestamp),
                 ColumnMeta {
-                    long_name: "Horodatage".into(),
+                    long_name: "Timestamp".into(),
                     ..ColumnMeta::default()
                 },
             )
@@ -292,27 +292,27 @@ fn types(project: &mut Project, folder: NodeId) -> anyhow::Result<()> {
         .context("date and time column")?;
     apply_meta(project, column, |meta| meta.role = ColumnRole::None)?;
 
-    // The formulas read letters (A = Temps, B = Température, D = reading).
+    // The formulas read letters (A = Time, B = Temperature, D = reading).
     formula_column(project, sheet, "A*2+1", "2·t + 1")?;
     formula_column(project, sheet, "(B-A)/2", "(T − t) / 2")?;
-    formula_column(project, sheet, "D+1", "Lecture + 1")?;
+    formula_column(project, sheet, "D+1", "Reading + 1")?;
     Ok(())
 }
 
-/// The `Mesures` workbook: the graphs' data (decay and growth strictly
+/// The `Measurements` workbook: the graphs' data (decay and growth strictly
 /// positive for the logarithmic scale, error bars, histogram, bars, family of
 /// six curves).
 fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
     let mut noise = Noise::new(7);
     let workbook = project
-        .add_workbook(folder, Some("Mesures"))
-        .context("Mesures workbook")?;
+        .add_workbook(folder, Some("Measurements"))
+        .context("Measurements workbook")?;
     let sheet = project
         .tree()
         .children(workbook)?
         .first()
         .copied()
-        .context("sheet of the Mesures workbook")?;
+        .context("sheet of the Measurements workbook")?;
     let t: Vec<f64> = (1..=60).map(f64::from).collect();
     let decay: Vec<f64> = t
         .iter()
@@ -326,27 +326,21 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
     let histogram: Vec<f64> = (0..300).map(|_| 5.0 + noise.gauss(1.0)).collect();
     let oscillation: Vec<f64> = t.iter().map(|t| 25.0 + 20.0 * (t / 6.0).sin()).collect();
 
-    let time = titled_column(project, sheet, &t, ("Temps", "s"), ColumnRole::X)?;
-    let decay = titled_column(
-        project,
-        sheet,
-        &decay,
-        ("Décroissance", "mV"),
-        ColumnRole::Y,
-    )?;
-    let growth = titled_column(project, sheet, &growth, ("Croissance", "mV"), ColumnRole::Y)?;
+    let time = titled_column(project, sheet, &t, ("Time", "s"), ColumnRole::X)?;
+    let decay = titled_column(project, sheet, &decay, ("Decay", "mV"), ColumnRole::Y)?;
+    let growth = titled_column(project, sheet, &growth, ("Growth", "mV"), ColumnRole::Y)?;
     let error = titled_column(
         project,
         sheet,
         &uncertainty,
-        ("Incertitude", "mV"),
+        ("Uncertainty", "mV"),
         ColumnRole::YError,
     )?;
     let noise_col = titled_column(
         project,
         sheet,
         &histogram,
-        ("Bruit du détecteur", "mV"),
+        ("Detector noise", "mV"),
         ColumnRole::Y,
     )?;
     let oscillation = titled_column(
@@ -358,24 +352,18 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
     )?;
 
     let bars = project
-        .add_worksheet(workbook, Some("Barres"))
-        .context("Barres sheet")?;
+        .add_worksheet(workbook, Some("Bars"))
+        .context("Bars sheet")?;
     let numbers: Vec<f64> = (1..=8).map(f64::from).collect();
     let yields = [62.0, 71.0, 55.0, 80.0, 68.0, 90.0, 47.0, 76.0];
-    let bars_x = titled_column(project, bars, &numbers, ("Échantillon", ""), ColumnRole::X)?;
-    let bars_y = titled_column(project, bars, &yields, ("Rendement", "%"), ColumnRole::Y)?;
+    let bars_x = titled_column(project, bars, &numbers, ("Sample", ""), ColumnRole::X)?;
+    let bars_y = titled_column(project, bars, &yields, ("Yield", "%"), ColumnRole::Y)?;
 
     let families = project
-        .add_worksheet(workbook, Some("Familles"))
-        .context("Familles sheet")?;
+        .add_worksheet(workbook, Some("Families"))
+        .context("Families sheet")?;
     let x: Vec<f64> = (0..=50).map(|i| f64::from(i) * 0.2).collect();
-    let families_x = titled_column(
-        project,
-        families,
-        &x,
-        ("Temps de réaction", "h"),
-        ColumnRole::X,
-    )?;
+    let families_x = titled_column(project, families, &x, ("Reaction time", "h"), ColumnRole::X)?;
     let mut families_y = Vec::new();
     for (rank, tau) in [0.8, 1.5, 2.5, 4.0, 6.0, 9.0].into_iter().enumerate() {
         let y: Vec<f64> = x
@@ -405,33 +393,33 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
 
 /// The text of the note: what the demo contains and where to look for it.
 const NOTE: &str = "\
-Projet de démonstration de StokesForge.\n\
+StokesForge demo project.\n\
 \n\
-Book1 / Graph1 : le classeur du script d'exemple (Sheet1!A, une valeur manquante, \
-des colonnes de longueurs différentes, une cinétique pour glisser des lignes).\n\
-Classeurs : Types (un exemplaire de chaque type de colonne, des formules), Mesures \
-(les données des graphes), une matrice, cette note.\n\
-Analyse : un classeur par famille de calcul (ligne de base, correction, intégrale, \
-ajustements, pics, reconvolution, déconvolution) ; Integrate, FitPolynome et \
-FitGaussienne ont déjà leur calcul, visible dans le volet Results.\n\
-Graphes : Panneaux, Axes, Types, Annotations, Groupes, Lignes.\n\
+Book1 / Graph1: the example script's workbook (Sheet1!A, a missing value, \
+columns of different lengths, a kinetics sheet to drag rows from).\n\
+Workbooks: Types (one example of each column type, formulas), Measurements \
+(the graphs' data), a matrix, this note.\n\
+Analysis: one workbook per computation family (baseline, correction, integral, \
+fits, peaks, reconvolution, deconvolution); Integrate, FitPolynomial and \
+FitGaussian already have their calculation, visible in the Results pane.\n\
+Graphs: Panels, Axes, PlotTypes, Annotations, Groups, Rows.\n\
 \n\
-Tout est construit par le code (aucun fichier) ; le bruit est à graine fixe, donc \
-identique à chaque lancement.";
+Everything is built by the code (no file); the noise has a fixed seed, so it \
+is the same at every launch.";
 
-/// The `Classeurs` folder: `Types`, `Mesures`, a matrix and the note.
+/// The `Workbooks` folder: `Types`, `Measurements`, a matrix and the note.
 pub(super) fn folder(project: &mut Project) -> anyhow::Result<Measures> {
     let root = project.root();
     let folder = project
-        .add_folder(root, "Classeurs")
-        .context("Classeurs folder")?;
+        .add_folder(root, "Workbooks")
+        .context("Workbooks folder")?;
     types(project, folder)?;
     let measures = measures(project, folder)?;
     project
-        .add_matrix(folder, Some("Matrice"))
+        .add_matrix(folder, Some("Matrix"))
         .context("demo matrix")?;
     project
-        .add_note(folder, Some("Lisez-moi"), NOTE)
+        .add_note(folder, Some("ReadMe"), NOTE)
         .context("demo note")?;
     Ok(measures)
 }

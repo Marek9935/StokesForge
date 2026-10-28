@@ -16,7 +16,7 @@ export STOKESFORGE_PROF=1
 
 essai() {
     python3 "$driver" start > /dev/null
-    # Double-click on the graphs in the Project Manager (Panneaux … Lignes).
+    # Double-click on the graphs in the Project Manager (Panels … Rows).
     for ((i = 0; i < nb; i++)); do python3 "$driver" click 60 $((216 + 27 * i)) double; done
     python3 "$driver" key Escape   # leaves the rename left by the last double-click
     sleep 6

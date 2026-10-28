@@ -1,4 +1,4 @@
-//! `Analyse` folder of the demo: **one workbook per computation family** of
+//! `Analysis` folder of the demo: **one workbook per computation family** of
 //! the Analysis menu, each with data whose answer is known.
 //!
 //! Each [`Dataset`] carries its data, the operation that suits them and what
@@ -189,7 +189,7 @@ fn baseline() -> Dataset {
         .collect();
     dataset(
         "Baseline",
-        [("Déplacement", "mm"), ("Signal", "mV")],
+        [("Displacement", "mm"), ("Signal", "mV")],
         (x, noise.noisy(&clean, 0.05)),
         Operation::Baseline {
             method: BaselineMethod::Zones {
@@ -211,7 +211,7 @@ fn smoothing() -> Dataset {
     let clean: Vec<f64> = x.iter().map(|&x| gaussian(x, 10.0, 50.0, 8.0)).collect();
     dataset(
         "Smooth",
-        [("Déplacement", "mm"), ("Signal", "mV")],
+        [("Displacement", "mm"), ("Signal", "mV")],
         (x, noise.noisy(&clean, 0.5)),
         Operation::Smooth {
             spec: SmoothSpec {
@@ -239,7 +239,7 @@ fn correct() -> Dataset {
     let yr = xr.iter().map(|&x| lamp(x)).collect();
     let mut dataset = dataset(
         "Correct",
-        [("Longueur d'onde", "nm"), ("Signal", "u.a.")],
+        [("Wavelength", "nm"), ("Signal", "a.u.")],
         (x, noise.noisy(&clean, 3.0)),
         Operation::Correct {
             op: CorrectOp::Divide,
@@ -264,7 +264,7 @@ fn integrate() -> Dataset {
         .collect();
     let mut dataset = dataset(
         "Integrate",
-        [("Temps de rétention", "min"), ("Absorbance", "u.a.")],
+        [("Retention time", "min"), ("Absorbance", "")],
         (x, noise.noisy(&clean, 0.01)),
         Operation::Integrate {
             spec: IntegrateSpec {
@@ -295,8 +295,8 @@ fn linear_fit() -> Dataset {
         .map(|(&x, &s)| 2.0 + 0.5 * x + noise.gauss(s))
         .collect();
     let mut dataset = dataset(
-        "FitLineaire",
-        [("Concentration", "mmol/L"), ("Absorbance", "u.a.")],
+        "FitLinear",
+        [("Concentration", "mmol/L"), ("Absorbance", "")],
         (x, y),
         fit_operation(Model::Linear),
         vec![
@@ -316,8 +316,8 @@ fn polynomial_fit() -> Dataset {
         .map(|&x| 1.0 - 2.0 * x + 0.5 * x * x + 0.3 * x * x * x)
         .collect();
     let mut dataset = dataset(
-        "FitPolynome",
-        [("Tension", "V"), ("Courant", "mA")],
+        "FitPolynomial",
+        [("Voltage", "V"), ("Current", "mA")],
         (x, noise.noisy(&clean, 0.1)),
         fit_operation(Model::Polynomial { degree: 3 }),
         vec![
@@ -336,8 +336,8 @@ fn exponential_fit() -> Dataset {
     let x = grid(0.0, 10.0, 0.1);
     let clean: Vec<f64> = x.iter().map(|&x| 0.5 + 4.0 * (-x / 2.2).exp()).collect();
     dataset(
-        "FitExponentielle",
-        [("Temps", "s"), ("Intensité", "u.a.")],
+        "FitExponential",
+        [("Time", "s"), ("Intensity", "a.u.")],
         (x, noise.noisy(&clean, 0.05)),
         fit_operation(Model::ExponentialOffset),
         vec![
@@ -356,8 +356,8 @@ fn double_exponential_fit() -> Dataset {
         .map(|&x| 0.2 + 3.0 * (-x / 1.2).exp() + 2.0 * (-x / 9.0).exp())
         .collect();
     dataset(
-        "FitExponentielle2",
-        [("Temps", "ns"), ("Intensité", "u.a.")],
+        "FitExponential2",
+        [("Time", "ns"), ("Intensity", "a.u.")],
         (x, noise.noisy(&clean, 0.02)),
         fit_operation(Model::Exponential2),
         vec![
@@ -375,8 +375,8 @@ fn power_fit() -> Dataset {
         .map(|&x| 2.5 * x.powf(0.7) * (1.0 + noise.gauss(0.02)))
         .collect();
     dataset(
-        "FitPuissance",
-        [("Fréquence", "Hz"), ("Amplitude", "u.a.")],
+        "FitPower",
+        [("Frequency", "Hz"), ("Amplitude", "a.u.")],
         (x, y),
         fit_operation(Model::Power),
         vec![
@@ -392,8 +392,8 @@ fn logarithm_fit() -> Dataset {
     let x = grid(1.0, 100.0, 1.0);
     let clean: Vec<f64> = x.iter().map(|&x| 3.0 + 1.8 * x.ln()).collect();
     dataset(
-        "FitLogarithme",
-        [("Dose", "mg"), ("Réponse", "%")],
+        "FitLogarithm",
+        [("Dose", "mg"), ("Response", "%")],
         (x, noise.noisy(&clean, 0.1)),
         fit_operation(Model::Logarithm),
         vec![
@@ -411,8 +411,8 @@ fn gaussian_fit() -> Dataset {
         .map(|&x| 0.1 + gaussian(x, 3.2, 0.4, 1.8 / (2.0 * LN_2.sqrt())))
         .collect();
     let mut dataset = dataset(
-        "FitGaussienne",
-        [("Énergie", "eV"), ("Intensité", "u.a.")],
+        "FitGaussian",
+        [("Energy", "eV"), ("Intensity", "a.u.")],
         (x, noise.noisy(&clean, 0.05)),
         fit_operation(Model::Gaussian),
         vec![
@@ -434,8 +434,8 @@ fn lorentzian_fit() -> Dataset {
         .map(|&x| 0.05 + 2.4 / (1.0 + 4.0 * (x + 0.6) * (x + 0.6) / (2.2 * 2.2)))
         .collect();
     dataset(
-        "FitLorentzienne",
-        [("Fréquence", "MHz"), ("Intensité", "u.a.")],
+        "FitLorentzian",
+        [("Frequency", "MHz"), ("Intensity", "a.u.")],
         (x, noise.noisy(&clean, 0.04)),
         fit_operation(Model::Lorentzian),
         vec![
@@ -452,8 +452,8 @@ fn custom_fit() -> Dataset {
     let x = grid(0.2, 10.0, 0.2);
     let clean: Vec<f64> = x.iter().map(|&x| 5.0 * x / (1.5 + x)).collect();
     dataset(
-        "FitLibre",
-        [("Substrat", "mmol/L"), ("Vitesse", "µmol/min")],
+        "FitCustom",
+        [("Substrate", "mmol/L"), ("Rate", "µmol/min")],
         (x, noise.noisy(&clean, 0.08)),
         fit_operation(Model::Custom {
             formula: "a*x/(b+x)".into(),
@@ -480,7 +480,7 @@ fn peaks() -> Dataset {
         .collect();
     dataset(
         "Peaks",
-        [("Déplacement Raman", "cm⁻¹"), ("Intensité", "cps")],
+        [("Raman shift", "cm⁻¹"), ("Intensity", "cps")],
         (x, noise.noisy(&clean, 0.03)),
         Operation::Peaks {
             spec: PeaksSpec {
@@ -519,7 +519,7 @@ fn decay(name: &'static str, seed: u64, components: &[(f64, f64)]) -> Dataset {
     let clean = measured_decay(&t, &response, 2.0, components);
     let mut dataset = dataset(
         name,
-        [("Temps", "ns"), ("Intensité", "cps")],
+        [("Time", "ns"), ("Intensity", "cps")],
         (t, noise.noisy(&clean, 1.5)),
         Operation::Reconvolution {
             spec: ReconvSpec {
@@ -631,7 +631,7 @@ pub(super) fn build(
                 project,
                 sheet,
                 values,
-                ("Incertitude", dataset.titles[1].1),
+                ("Uncertainty", dataset.titles[1].1),
                 ColumnRole::YError,
             )
         })
@@ -641,9 +641,9 @@ pub(super) fn build(
         .as_ref()
         .map(|(rx, ry)| -> anyhow::Result<AuxRef> {
             let (title_x, title_y) = if matches!(dataset.operation, Operation::Correct { .. }) {
-                (("Longueur d'onde (réf.)", "nm"), ("Référence", "u.a."))
+                (("Wavelength (ref.)", "nm"), ("Reference", "a.u."))
             } else {
-                (("Temps (IRF)", "ns"), ("Réponse de l'appareil", "u.a."))
+                (("Time (IRF)", "ns"), ("Instrument response", "a.u."))
             };
             Ok(AuxRef {
                 x: Some(titled_column(project, sheet, rx, title_x, ColumnRole::X)?),
@@ -708,13 +708,13 @@ fn record_calculation(
     Ok(())
 }
 
-/// The `Analyse` folder: one workbook per dataset, and the calculation of
+/// The `Analysis` folder: one workbook per dataset, and the calculation of
 /// those that have one.
 pub(super) fn folder(project: &mut Project) -> anyhow::Result<NodeId> {
     let root = project.root();
     let folder = project
-        .add_folder(root, "Analyse")
-        .context("Analyse folder")?;
+        .add_folder(root, "Analysis")
+        .context("Analysis folder")?;
     for dataset in datasets() {
         let columns = build(project, folder, &dataset)?;
         if dataset.computed {
