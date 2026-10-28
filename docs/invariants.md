@@ -282,7 +282,7 @@ drawn sequence. What to test when extending the mechanism:
 
 Two things cannot be fixed after a version is released: **what it writes** and
 **what it does with a newer file**. The second point is held by
-`UnsupportedVersion` (no degraded reading, message « mettez à jour StokesForge »); the
+`UnsupportedVersion` (no degraded reading, message "update StokesForge"); the
 first by the witness files: the file of the version is read back giving the
 expected project, and saving gives back its bytes. Removing, renaming or
 changing the meaning of a field **raises the version number** and adds a

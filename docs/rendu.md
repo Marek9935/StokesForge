@@ -514,7 +514,7 @@ none under a decade of step. Never on a major tick; none
 on the axes of an overlaid layer. Plotters' light grid is not
 aligned with them. Tests: `scale.rs`, `miroirs.rs`, `accord.rs`.
 
-**« Avancé » settings for tick marks (#344).** `AxisSpec::tick_length` (major
+**"Advanced" settings for tick marks (#344).** `AxisSpec::tick_length` (major
 tick marks), `minor_tick_length` (minor ones), `tick_width` and `tick_mark_color`
 (`None` / empty = Auto). Units: figure pixels for lengths, points
 for the thickness (rounded to the integer by Plotters). Auto: major tick marks

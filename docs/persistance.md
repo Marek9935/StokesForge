@@ -334,7 +334,7 @@ preferences (File › Preferences › General, 512 MB by default, from 16 MB to
 session (`main.rs`, `session_for_startup`). A refusal on opening leaves the
 current project and path unchanged (`open_project`). On saving, a file that
 exceeds the limit is still written, but a warning (`status-saved-over-limit`)
-replaces « Enregistré » and says how to raise it.
+replaces "Saved to" and says how to raise it.
 
 ## What to know before modifying
 
@@ -349,7 +349,7 @@ replaces « Enregistré » and says how to raise it.
   `minor_tick_count` (`Option`, `None` = automatic) and `label_every` (1 by
   default), `tick_length` / `minor_tick_length` / `tick_width` (`Option`,
   `None` = automatic) and `tick_mark_color` (empty = scale color),
-  the « Avancé » settings of the tick marks (#344; the raw value is kept, the
+  the "Advanced" settings of the tick marks (#344; the raw value is kept, the
   rendering bounds it), and `tick_direction` (`TickDirectionRecord`, unknown value read
   as `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`); the text colors (`PlotSpecRecord::title_color`,
   `AxisSpecRecord::title_color`/`tick_color`) — an older file
@@ -521,7 +521,7 @@ transport is limited to `MAX_OBJECT_CLIPBOARD_BYTES` (64 MiB).
 - **Confirmation on saving**: `AppState` keeps the source path of a
   load that dropped something (`discarded_source`, set by
   `mark_loaded` and `load`). Saving **to that path** goes through the window
-  « Écraser un fichier lu avec des écarts » (`Action::ConfirmDiscardedSave`,
+  "Replace File" (`Action::ConfirmDiscardedSave`,
   `pending_discarded_save`, catalog `docs/fenetres.md`): waiting is not
   a failure (no alert, `after_save` kept). Accepting writes (and clears the
   marker: the question does not come back); Cancel writes nothing, forgets the pending

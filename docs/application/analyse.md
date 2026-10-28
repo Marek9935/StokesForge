@@ -38,8 +38,8 @@ The mathematical processing interface is split as follows:
   frame (5% margin, remembered bounds, inversion), snapping
   to the curve (the orange circle covers the averaged zone: radius = largest
   half-side of the X zone converted to pixels by the screen transform,
-  6 px at minimum, the plot diagonal at most; the text « Moyenne sur N
-  points » gives the real number of points, #334) and ticks come from `stokesforge-render`
+  6 px at minimum, the plot diagonal at most; the text "Average over N
+  points" gives the real number of points, #334) and ticks come from `stokesforge-render`
   (`PanelTransform::new`, `zoom`, `pan`, `axis_frame`, `snap_to_curve_zone`,
   `scale::axis_ticks`);
   the application builds one transform per frame (a second one for the

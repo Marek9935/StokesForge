@@ -153,8 +153,8 @@ texts** (title of the graph and of the layers, axis titles, legend) are
 never listed there (#214): they are edited by double-click on the figure or in the
 properties window, and do not count in the parent checkboxes. The group
 "Objects" lists only free objects, is collapsed by default and disappears
-when it is empty. "Objects" has its toggle « Afficher les objets » (`show_objects`, listed by default); when unchecked, its objects do not count in the parent checkboxes. The **axes** (#111, #147) follow the same
-pattern with their own toggle, « Afficher les axes »
+when it is empty. "Objects" has its toggle "Show Objects" (`show_objects`, listed by default); when unchecked, its objects do not count in the parent checkboxes. The **axes** (#111, #147) follow the same
+pattern with their own toggle, "Show Axes"
 (`Action::SetObjectManagerShowScales`, preference `object_manager_show_scales`,
 same View submenu and in the background menu): not listed by default, they
 add under each layer, after the plot group, an "Axes" group
@@ -168,8 +168,8 @@ when no series is attached to it, it controls `AxisSpec::mirror`
 occupies this side (`AxisRef::blocked`). The checkbox of the
 "Axes" group controls its axes and stays mixed as long as a mirror is unchecked; its
 Properties open the Axes tab (Top and Right pages: `mirror_axis_editor`,
-« afficher l'axe miroir », « afficher les étiquettes de graduation », « afficher
-les graduations », their direction, the subticks and the « Avancé » block of the
+"Show mirror axis", "Show tick labels", "Show
+ticks", their direction, the subticks and the "Advanced" block of the
 dashes, no title or axis color). **Closed frame** (#344):
 `PanelSpec::frame_closed` / `set_frame_closed`, `Action::SetClosedFrame`, history
 pattern `PlotEditKind::ClosedFrame` (**one** undoable entry) still
@@ -181,7 +181,7 @@ right as long as no series is attached to it, as a mirror without numbers and co
 **once** the presence, direction and subticks of the bottom and left ticks; it has
 no effect on an overlaid layer. An **overlaid layer** (#171)
 lists only the axes it displays (`object_manager::axis_sides`): its X axis
-named « X (haut) » if `x_top`, its Y axis named « Y (droite) » if `y_right`,
+named "X (top)" if `x_top`, its Y axis named "Y (right)" if `y_right`,
 each controlling the `AxisSpec` `bottom` / `left` that carries it; its dead
 `right` / `top` rows do not exist. The group is **collapsed by
 default** (#138): a click on its arrow expands the axis rows, without touching

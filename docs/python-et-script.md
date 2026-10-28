@@ -248,7 +248,7 @@ Both methods are recorded with their settings in the `.stf`.
 Writes go through the commands the application already uses.
 The first mutation opens an exclusive `MacroKind::Script` macro; later
 mutations, imports included, join this group. On success, a single Ctrl+Z
-undoes the whole run (label « Exécuter le script »). An uncaught exception or a
+undoes the whole run (label "Run Script"). An uncaught exception or a
 requested interruption undoes the mutations of the current group and preserves
 the previous history, redo included. A caught error lets the script continue
 and commit its other writes.

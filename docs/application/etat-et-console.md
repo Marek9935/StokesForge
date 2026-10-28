@@ -92,7 +92,7 @@ is shown, without ever marking the status as an error.
 ### What Qt gave for free, and must be written here
 
 A `QAction` linked to a `QUndoStack` carried at once the keyboard shortcut,
-the menu entry, its disabled state and its label (« Annuler *Renommer* »). Here the
+the menu entry, its disabled state and its label ("Undo *Rename*"). Here the
 four are separate: the shortcut is declared and consumed by hand
 (`SHORTCUT_UNDO` and company), the disabled state goes through `add_enabled`, the label
 comes from `AppState::undo_label` — and **nothing guarantees their consistency except
@@ -109,7 +109,7 @@ and `chemin` becomes the target of a future save.
 **Without an argument (#333)**: the demonstration is offered **only once**, at the
 first opening. It is written to `demo.stf`, next to
 `preferences.json` (configuration folder), then opened from that file,
-which the user finds again through « Ouvrir »; the `first_run_done` marker of the
+which the user finds again through "Open"; the `first_run_done` marker of the
 preferences is then set and the following launches start from an empty project.
 If `demo.stf` cannot be written, the demonstration stays in memory, without a
 path, and startup does not fail. The decision is

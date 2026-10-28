@@ -14,7 +14,7 @@ from the mockup or completes it, the decision prevails.
 - **M1 B**: submenus by family (`Baseline ▸`, `Fit ▸`,
   `Peaks and Deconvolution ▸`), the method is chosen in the menu. The window
   must still be able to change the method (for `Edit Calculation…`).
-- **M2 A**: `Analysis ▸` submenu in the « Créer » section of the right-click
+- **M2 A**: `Analysis ▸` submenu in the "Create" section of the right-click
   menu.
 - **M3 A**: modal with its own clickable preview. This preview will also
   show **visual aids specific to each operation** (background zones, hatched
@@ -153,7 +153,7 @@ without closing. Short menu, no submenu.
 
 Closer to Origin, one click less for those who know what they want; but
 changing the method means cancelling and reopening, and the window must
-still be able to change the method (for « Modifier les paramètres »).
+still be able to change the method (for "Edit Calculation…").
 
 ### C — A, with the fit models in a submenu
 
@@ -178,7 +178,7 @@ The same entries as the bar menu (one shared painting,
 `analysis_menu_contents`, wrapped in the bar, flat or as a submenu in the
 right-click menu depending on the option).
 
-### A ★ — `Analysis ▸` submenu in the « Créer » section
+### A ★ — `Analysis ▸` submenu in the "Create" section
 
 ```
  Courbe (graphe, Object Manager)          En-tête de colonne Y
@@ -201,7 +201,7 @@ right-click menu depending on the option).
 
 The curve menu grows by only one line. Depth 2 respected.
 
-### B — Flat entries in the « Créer » section
+### B — Flat entries in the "Create" section
 
 The six operations directly in the curve menu: one click less, but a menu of
 14 lines, and the grammar asks for short context menus.
@@ -212,7 +212,7 @@ The six operations directly in the curve menu: one click less, but a menu of
 | Cost | ref. | same cost |
 
 **On a computed column** (header, or curve that plots it), the same menu
-gains at the top of the « Organiser » section: `Edit Calculation…` (reopens
+gains at the top of the "Organize" section: `Edit Calculation…` (reopens
 the window on this calculation), `Recalculate` (disabled if up to date),
 `Detach from Calculation` (see M9 d). Proposed for all options.
 
@@ -260,7 +260,7 @@ See finding 1. This is **the** structuring choice of the base.
   apply to all (per-series option: later).
 - Cost: a `GraphView` in the window, ≈ +1.5 d on the base.
 
-### B — Modal that steps aside during placement (« Pick on Graph », Origin style)
+### B — Modal that steps aside during placement ("Pick on Graph", Origin style)
 
 ```
 ┌ Subtract Baseline ───────────────────────── ✕ ┐

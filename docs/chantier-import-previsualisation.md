@@ -120,7 +120,7 @@ explicit action, never applied continuously).
 
 `HeaderLayout::auto_detect` (the checkbox) triggers nothing by itself
 — it is `AppState::auto_detect_import_header`, called on a click of the button
-« Réévaluer maintenant », that reads the file and rewrites
+"Re-evaluate Now", that reads the file and rewrites
 `main_header_lines`/`subheader_lines`. A deliberate decision: recomputing on
 every frame would have continuously overwritten a value the user had just
 corrected by hand, preventing them from ever departing from it — the same flaw as
@@ -217,11 +217,11 @@ in the metadata with `keep_footer_metadata`.
 `excluded_metadata` (excluded keys or sections) drive `ParsedTable::metadata()`
 (`crate::metadata`, key / value lines, `[...]` sections, lines without a key
 kept as they are). `stokesforge-app` copies them into `ColumnMeta::file_metadata`
-of each imported column — in the « Importer » macro, with no
-edit command: read-only. Display: "Metadata" row of the header (« 📋 N
-clés »), click → modal viewing window (`column_metadata_window`).
+of each imported column — in the "Import" macro, with no
+edit command: read-only. Display: "Metadata" row of the header ("📋 N
+keys"), click → modal viewing window (`column_metadata_window`).
 The row can be hidden (Window menu); selection by key is in the
-« Métadonnées » step of the wizard; no automatic filling of units
+"Metadata" step of the wizard; no automatic filling of units
 (decided).
 
 ## Step-by-step wizard (issue #6)
@@ -230,8 +230,7 @@ The row can be hidden (Window menu); selection by key is in the
 `docs/application/projet-et-import.md` § "Import wizard"). On the `stokesforge-import` side:
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignore removes the column
 at import), `unify_header`, `detect_encoding`. The header setting no longer
-exposes the « Détection automatique » checkbox: only the button « Détecter depuis le
-fichier » acts (`HeaderLayout::auto_detect` stays in the recipe, with no effect).
+exposes the "Automatic detection" checkbox: only the button "Detect Header" acts (`HeaderLayout::auto_detect` stays in the recipe, with no effect).
 
 Numbers: a non-finite result (`inf`, `Infinity`, `1e400`) reads as `NaN` and the token stays visible as text (`Mixed` column), like `nan`; the automatic end of data and the subheader detection nevertheless count it as a number (`NumberFormat::is_numeric`).
 

@@ -4,7 +4,7 @@ Continuation of the index [`README.md`](README.md). Contents: new project and em
 
 ### New project and empty graph (#73)
 
-**File › New › New Project** (« Fichier › Nouveau projet », Ctrl+N) replaces the
+**File › New › New Project** ("File › New Project", Ctrl+N) replaces the
 current project in the same window. The File bar offers the same gesture.
 A project with unsaved work, including local input in a detached window or a
 graph text, asks "Discard Changes · Cancel · Save" (#229; Enter = Save, which
@@ -44,7 +44,7 @@ Discard; a lost session keeps it. At startup (`main`, root window),
 `scan_recovery` lists the copies with no held lock and newer than their `.stf`
 (including the copies from #310) in the recovery window (Open, Ignore, Delete
 with confirmation; `docs/fenetres.md`). Open loads into the current window
-(behind « Enregistrer ? » if there is work), under the original path (empty for
+(behind "Save?" if there is work), under the original path (empty for
 Untitled), as unsaved work, and the list stays open. Ignore leaves the copy,
 offered again at the next startup.
 
@@ -53,10 +53,10 @@ and the geometries and changes the epoch to invalidate the old Python
 references. The content windows, caches and selections of the previous project
 are forgotten, and its detached windows close. The visibility of the bars and
 the language are kept. The gesture is disabled during a script, an import in
-progress or an open macro. The first **Save** (« Enregistrer ») asks for a
+progress or an open macro. The first **Save** ("Save") asks for a
 destination, then the following ones use that file.
 
-**File › New › Add Graph** (« Fichier › Ajouter un graphique ») and the File bar
+**File › New › Add Graph** ("File › Add Graph") and the File bar
 create an empty graph at the root: one plot area, no series or title.
 Its window opens in the foreground. It goes through the existing `AddGraph`
 command: Undo removes it, Redo brings back the same identity, and the `.stf`
@@ -79,7 +79,7 @@ of the menu import (#266): `drop_files` keeps on the interface thread only the
 refusals and the queuing of `.stf` files, then goes through `start_import`, the
 single entry point of import (indicator and Stop as for File › Import; a drop
 during an import in progress is refused). `poll_import` applies the result — a
-single « Importer » entry — and posts the message of the templates used; a file
+single "Import" entry — and posts the message of the templates used; a file
 that gives no numeric value opens the pre-filled import window instead, when
 the thread returns. Pure decision: `state::file_drop_plan`. The drop always
 creates new sheets, even if the recipe of the last import replaced or merged a
@@ -104,7 +104,7 @@ numbers and dates, comment lines, blocks and encoding, ignored lines.
 These headings use the same section building block as the other forms; they
 change neither the recipe nor the order of the controls.
 
-« Importer… » opens a six-step wizard in the Origin style (`import_window`,
+"Import…" opens a six-step wizard in the Origin style (`import_window`,
 `ImportStep`; module `src/app/import_wizard.rs`, #118, the only entry point
 called by `app.rs`), a **modal dialog of the common building block**
 (`modal_dialog_with`: same frame, same title bar, same blocking of the rest of
@@ -125,9 +125,9 @@ disabled and inactive when *Names in first line* is checked: the names then come
 from that line. Otherwise, the *Filename* and *Header key* choices are active;
 their values are kept while disabled. A file drop while the wizard is open adds
 them to its list. *Finish* launches `Action::StartImport`: the analysis of the
-files runs on a background thread (with progress « Import en cours… k/n »,
+files runs on a background thread (with progress "Importing… k of n",
 `AppState::poll_import` called at each frame) and the sheets are created at the
-end, in a single « Importer » entry.
+end, in a single "Import" entry.
 Shortcut: **Ctrl+"** (`SHORTCUT_IMPORT`: the key of the 3 without Shift on
 AZERTY, `SHORTCUT_IMPORT_QWERTY`: Ctrl+Shift+' on QWERTY). Recent files and
 remembered folder: `stokesforge_import::RecentFiles` (`import_recent.json`, next
@@ -145,7 +145,7 @@ reference and reports the error.
 (column *j* of the file extends column *j* of the sheet). Several files are
 spread according to `FilesLayout`: one sheet per file, a single sheet side by
 side (X Y X Y…), or a single sheet with the X of the first file shared. The plan
-(`plan_import`) is computed then executed in the same « Importer » macro. By
+(`plan_import`) is computed then executed in the same "Import" macro. By
 default, the first column of each file gets the X role and the following ones
 the Y role; these roles are kept when the import is redone after an undo.
 
@@ -156,7 +156,7 @@ templates ask for it. It arms at the first numeric X, then cuts at the first
 non-numeric X (empty line included). The text and empty lines that precede that
 first number are kept; text in Y does not cut. The `skip_chars` prefix is
 removed before this test; with the spaces delimiter, X is the first non-empty
-token. The « En-tête et fin des données » step also offers « Aucune coupure »,
+token. The "Header and Data End" step also offers "No cut",
 first empty line, marker, N lines after the header or N lines before the end.
 The right-click on the preview allows cancelling the automatic cut; the preview
 and the import use the same split (`stokesforge_import::layout`, `data_end`).
@@ -164,7 +164,7 @@ and the import use the same split (`stokesforge_import::layout`, `data_end`).
 **Number format, dates and encoding (#314).** A "spaces" delimiter (chosen, or
 resolved from Auto) with the space as thousands separator is refused, in the
 preview (message in the window) as in the import: `1 234,5` would be split into
-two columns; `;` and tab accept these thousands. The « Ordre des dates » setting
+two columns; `;` and tab accept these thousands. The "Date order" setting
 (day first by default, or month first) settles `03/04/2026`; ISO does not
 change. With Auto encoding, an almost-UTF-8 file is decoded in a mixed way:
 valid UTF-8 sequences are kept, each invalid byte is read as Windows-1252; a

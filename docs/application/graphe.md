@@ -88,7 +88,7 @@ paste, clear and Tab follow the other fields; the mutation remains
 `x_prime` (`SubheaderRoles::x_prime`, row "x'" of the wizard,
 code `X'` of the preview), read with the numeric format of the recipe.
 **Metadata**: the metadata window of a column offers, in front of each numeric
-value of the file, « Utiliser comme x' » (the mini selector: the chosen key
+value of the file, "Use as x'" (the mini selector: the chosen key
 feeds the x' row of this column).
 
 **Dragging rows.** The same gesture as for columns, on **whole rows**
@@ -245,8 +245,8 @@ background; as soon as it loses focus (you adjust the rotation or the size), it 
 transparent and the **rotated** preview is visible (issue #36); a click in its frame
 gives control back to the input. The final size differs slightly after
 recompilation by Typst (a `$…$` formula is typeset differently from its source).
-Double-click or right-click → « Modifier le texte » reopen the editor; a click
-selects (blue outline), Del or « Supprimer » removes it; a drag
+Double-click or right-click → "Edit Text" reopen the editor; a click
+selects (blue outline), Del or "Delete" removes it; a drag
 moves it. The preview lives in the view (`GraphView::set_annotation_preview`) and
 the editor state in egui's memory, under the identifier of the view: the same
 code for the floating window and the detached window, nothing in
@@ -412,7 +412,7 @@ checkerboard (in the swatch of the picker). **One palette per use** (`stokesforg
   backgrounds (the automatic text turns white, see `docs/rendu.md`). An
   empty background (files written before this default) stays white.
 
-**Saved colors**: « Enregistrer » keeps the current color
+**Saved colors**: "Save Color" keeps the current color
 **in the project** (by default: undoable command `SetSavedColors`,
 saved in the `.stf`) or **for the user** (file
 `couleurs.json` in the StokesForge configuration folder (`STOKESFORGE_CONFIG_DIR`
@@ -509,13 +509,13 @@ in `stokesforge-plot` (read before writing, as requested):
   `PanelSpec::uses_right_axis()` (the top axis, hidden by default and with no
   UI in this bench to enable it, has no section): `AxisSpec::label`,
   `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, the
-  De / À limits (#344: **neither an « Axe inversé » box nor a « Plage auto » box**;
+  De / À limits (#344: **neither an "Inverted axis" box nor an "Auto range" box**;
   De and À are always editable, show the computed limits as long as
   `auto_range` is true (in display order, the upper limit first
   on an inverted axis), an input freezes both limits (`auto_range` false,
   `inverted = De > À`), the "Auto" button makes `auto_range` true again keeping
-  the direction), then the « Graduations » section (dashes, direction, minor ticks)
-  and its collapsible « Avancé » block (`tick_length`, `minor_tick_length`,
+  the direction), then the "Ticks" section (dashes, direction, minor ticks)
+  and its collapsible "Advanced" block (`tick_length`, `minor_tick_length`,
   `tick_width`, `tick_mark_color`, closed by default, `Form::collapsible`);
   `app/plot_settings.rs`, `axis_editor` and `mirror_axis_editor` (same
   sections, each for itself);
@@ -586,7 +586,7 @@ in `stokesforge-plot` (read before writing, as requested):
 
 **`PlotType::Unknown` never appears in the dropdown menu**, but a
 series that carries it is still displayed: the plot type field becomes a
-read-only text (« type inconnu de cette version, non modifiable »),
+read-only text ("type unknown to this version, not editable"),
 the rest (name, visibility, style...) stays editable as usual. This is
 invariant 10 ("a data defect degrades, it does not crash") applied
 to this window: offering `Unknown` in the list would suggest that one can go back to

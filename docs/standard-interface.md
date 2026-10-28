@@ -98,10 +98,10 @@ mechanics.
 | S-L2 | `quatre-largeurs-de-champ` | Four named field widths in `theme.rs`: a few digits, short, medium, full. |
 | S-L3 | `titre-de-section-entre-blocs` | A section heading between two blocks, never a rule line alone. |
 | S-L4 | `deux-espacements` | Two spacing constants in `theme.rs`; no numeric `add_space` elsewhere. |
-| S-L5 | `pas-de-section-repliable` | No collapsible section in a form; too long, switch to tabs. Only exception: the « Avancé » block (S-L8). |
+| S-L5 | `pas-de-section-repliable` | No collapsible section in a form; too long, switch to tabs. Only exception: the "Advanced" block (S-L8). |
 | S-L6 | `trois-niveaux-de-texte` | Three text levels named in `theme.rs`: section heading, table header, secondary text; never `bold(…).small()` written in place. |
 | S-L7 | `hauteur-de-ligne-unique` | A list or tree row has a single height, `LIST_ROW_HEIGHT`, composed or not. |
-| S-L8 | `bloc-avance-replie` | Settings that are almost never touched, all Auto by default, go in a collapsible « Avancé » block, closed by default, at the bottom of their section; never a common setting nor one without Auto. |
+| S-L8 | `bloc-avance-replie` | Settings that are almost never touched, all Auto by default, go in a collapsible "Advanced" block, closed by default, at the bottom of their section; never a common setting nor one without Auto. |
 | S-K1 | `registre-des-touches` | All keys are in the registry of `app/shortcuts.rs`; no `consume_key` elsewhere. |
 | S-K2 | `suppr-immediat-annulable` | Del deletes the selection right away, undoable, everywhere (the grid empties first). |
 | S-K3 | `double-clic-par-sorte` | Double-click: text or name → in-place editing; object → Properties; empty background of a graph → view reset; Project Manager → activates the window, never closes it, and collapses a folder. |
@@ -249,7 +249,7 @@ has its "Auto" entry (editable list, S-C4).
   bounds **computed** at plotting, in display order (a reversed axis
   shows its high bound in From); typing one **freezes both** (the other is
   taken from the computation) and the direction of the axis follows the order (From > To = reversed, no more
-  « Axe inversé » checkbox). The "Auto" button of the row (or the typed word `auto`)
+  "Inverted axis" checkbox). The "Auto" button of the row (or the typed word `auto`)
   gives both bounds back to the data and **keeps the direction**. Emptying From or To is
   refused (red frame, tooltip "Type Auto to follow the data").
 - The word `auto` typed on the keyboard is accepted by a field whose quantity has
@@ -326,12 +326,12 @@ History: #219; wiring: #220, #224, #240 (S-N11, S-T3).
   Never for the live preview nor when opening a project. An existing save or open
   alert is not overwritten; several calculations
   at the same snapshot: **a single box**, with text grouped by type (#290):
-  « R² < 0,6 pour : • 12 reconvolutions • 1 ajustement », then a pointer to the
+  "R² < 0.6 for: • 12 reconvolutions • 1 fit", then a pointer to the
   Results panel. The unit of count is the **series** (a fit of 5
   columns of which 2 are faulty counts 2); the types follow the fixed order of
   `OperationKind::ALL`, their names come from the glossary (keys
   `low-r2-count-*`, plurals fr+en). No series names and no scrolling list.
-- **Status bar badge** (#290): « ⚠ 13 R² faibles », on the right of the
+- **Status bar badge** (#290): "⚠ 13 low R²", on the right of the
   bar, in R² red (`theme::r_squared_color`), with a tooltip. It is a
   **state** recomputed at each snapshot (`AppState::low_r2_groups`,
   `low_r2_total`), not an event: it stays after the box is closed,
@@ -653,7 +653,7 @@ History: #226.
 - **Two spacing constants** in `theme.rs`, no numeric `add_space`
   elsewhere (S-L4).
 - **No collapsible section** in a form; too long → tabs (S-L5).
-  A single exception, the **« Avancé »** block (S-L8, #344, `Form::collapsible`):
+  A single exception, the **"Advanced"** block (S-L8, #344, `Form::collapsible`):
   closed by default, at the bottom of its section, for settings that are all Auto by
   default (length, thickness and color of the tick marks); its arrow
   and its title form a single clickable area, without dead space, in the

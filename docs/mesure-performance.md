@@ -79,6 +79,6 @@ Findings:
 ## Known limits
 
 - Software rendering (llvmpipe) under Xwayland: the GPU part is not representative.
-- The « Lignes » window takes the full width of the work area and cannot be moved: the script targets another window (coordinates 440,138 of the demo project). Another project or another resolution requires adapting these coordinates in `mesure-fenetres.sh`.
+- The "Rows" window takes the full width of the work area and cannot be moved: the script targets another window (coordinates 440,138 of the demo project). Another project or another resolution requires adapting these coordinates in `mesure-fenetres.sh`.
 - Not measured yet: a workbook of 10 columns × 400 rows (#341), which needs a project to import (`stokesforge-cli import`) and a pan or selection gesture in the grid.
 - Leads from #341 not confirmed by measurement: `column_staleness` and `is_selected` called per cell (`docs/` says nothing about it; see `grid.rs`).

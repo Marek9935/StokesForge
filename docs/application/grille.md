@@ -2,7 +2,7 @@
 
 Continuation of the index [`README.md`](README.md). Contents: Metadata and x' rows, context menus and multiple selection of the grid, gutter, Tab and arrows, alignment, input.
 
-### The « Metadata » and x' header rows
+### The "Metadata" and x' header rows
 
 Two optional rows, **set per workbook**: Workbook › Show Metadata Row / Show x'
 Row, the right-click of the "#" cell (under the selection section), and, for
@@ -25,11 +25,9 @@ navigation can still reach the hidden x' row.
 ### Grid context menus
 
 The workbook no longer has an action strip above the grid. A right-click
-in the empty space to the right of the last column offers « Ajouter une
-colonne »; a right-click on a sheet tab offers « Ajouter une
-feuille », « Renommer », « Dupliquer » and « Supprimer », and on the empty part of
-its strip only « Ajouter une feuille » — directly, without a submenu (#158). The strip stays below the grid in the
-floating and detached windows. « Importer… » is in the File menu.
+in the empty space to the right of the last column offers "Add Column"; a right-click on a sheet tab offers "Add Sheet", "Rename", "Duplicate" and "Delete", and on the empty part of
+its strip only "Add Sheet" — directly, without a submenu (#158). The strip stays below the grid in the
+floating and detached windows. "Import…" is in the File menu.
 Its dialog chooses between the active workbook, one new workbook per file
 and a single new workbook for the whole batch. Each valid file creates its
 own sheet; the new workbooks are created only after a successful
@@ -58,8 +56,7 @@ selection at the start or at the end, in its order. All or nothing: an entry is
 first selected column is already in A, Right symmetrically, First and Last if
 the order does not change); a selection of whole rows, which covers all the
 columns, disables all four. One column: one `Move “B”` entry; several: one
-`MacroKind::MoveColumns` macro, a single Ctrl+Z. **No** « Colonne
-utilisée » window: since #321 a formula follows its column. Graphs already plotted do not
+`MacroKind::MoveColumns` macro, a single Ctrl+Z. **No** "Column in use" window: since #321 a formula follows its column. Graphs already plotted do not
 move; only later plots pair the Ys with the Xs that are to their
 new left. The ordering logic is pure (`stokesforge-app-state`,
 `column_move.rs`) and serves both the disabling and the execution; an `Unknown` child
@@ -67,8 +64,8 @@ under the sheet keeps its place (the index is translated into the full list of
 children). The width of a column follows its identifier, so its column
 (#325).
 
-The entries are **bare** verbs: « Copier », not « Copier la cellule »;
-« Annuler », not « Annuler Edit Cells in Column A ». The right-click has just
+The entries are **bare** verbs: "Copy", not "Copy the cell";
+"Undo", not "Undo Edit Cells in Column A". The right-click has just
 landed on its target, and the shortcut is already shown on the right of
 the entry — naming the target as well made every line longer without teaching
 anything. `GridMenu::target_label`/`copy_full_columns_label` and
@@ -83,16 +80,16 @@ name the target the day it is useful) lives in `AppState::grid_menu` →
 window in `stokesforge-app-state/tests/shell.rs`, like the rest of the copy/paste matrix.
 Two contextualizations are played out there:
 
-- the number agreement of `target_label` (« la cellule » / « les champs » /
-  « les colonnes » / « les lignes »), with two distinct plurals — that of the
+- the number agreement of `target_label` ("the cell" / "the fields" /
+  "the columns" / "the rows"), with two distinct plurals — that of the
   **cells** (`GridMenu::plural`) and that of the **columns**
   (`GridMenu::multi_column`): three stacked cells are plural without
-  « Copier la colonne entière » having to become plural.
+  "Copy the whole column" having to become plural.
   `GridZone::Rows` (the gutter) is an exception to `plural`: its labels
   speak of **rows**, not cells, so a single selected row stays
   "the row" even on a sheet with several columns — `plural` counts there
   only the number of rows covered, never `multi_column`;
-- « Supprimer et décaler » **does not appear in the header**: a field is not
+- "Delete and Shift Up" **does not appear in the header**: a field is not
   repeated per row, Del just clears there, and offering it would make two
   entries for a single effect — true both for a field of a single
   column and for a whole field across all columns (`GridZone::
@@ -247,7 +244,7 @@ a display, reread on every frame: inserting, deleting or moving columns
 (including the outputs of an analysis) never changes what the formula reads,
 the displayed letter follows the column (`a*2` is written `A*2`). If a column read is no
 longer in the sheet, the cell shows `#REF` and paints a red frame with the
-tooltip « Colonne supprimée. Remplacer #REF par une lettre de colonne ». Three
+tooltip "Column deleted. Replace #REF with a column letter". Three
 inputs are **refused**: a letter that designates no column of the
 sheet, the column itself, and a modified `#REF`. Enter or Tab on a refused
 text leave the field open (red frame, tooltip that says why); a click
@@ -260,7 +257,7 @@ the status bar states the refusal after the writes. The decision is made in
 paints it.
 
 `stokesforge_commands::Command::label` used to build its history labels on
-the node name, and so announced « Saisie dans Temps » for a column that
+the node name, and so announced "Input in Temps" for a column that
 the user only knows as "A" — a word not to be found on screen, and
 downright misleading when the two diverge (a node named `T` in third
 position is displayed "C"). The label now designates the column by its
@@ -474,18 +471,17 @@ gutter, which made the gap visible.
 
 Two deliberate differences between the menu and the keyboard:
 
-- **« Supprimer et décaler » deletes right away**, whereas the Del key
+- **"Delete and Shift Up" deletes right away**, whereas the Del key
   clears on the first press and deletes only on the second. The double
   press exists only to protect against a reflex keystroke on an
   easy-to-reach key; a context menu is an explicit, designated gesture.
-- **« Coller » is never disabled.** egui exposes no API to *read* the
+- **"Paste" is never disabled.** egui exposes no API to *read* the
   clipboard (Ctrl+V works only because `egui-winit` reads the
   clipboard itself before pushing the `Event::Paste`), so `app::grid::
   system_clipboard_text` reads it directly via `arboard` — the library
   that `egui-winit` already uses internally. Knowing whether there is anything to
   paste would require this read on *every frame* where the menu is open: we
-  try on click, and show a notice if it gives nothing. « Coller à
-  l'identique », for its part, can be disabled at no cost — it replays the **internal**
+  try on click, and show a notice if it gives nothing. "Paste in Place", for its part, can be disabled at no cost — it replays the **internal**
   clipboard, whose state is known.
 
 Finally, the five constants `SHORTCUT_COPY`/`SHORTCUT_CUT`/`SHORTCUT_PASTE`/

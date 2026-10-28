@@ -29,7 +29,7 @@ menu, the keyboard and the icon panel.
 
 ### F1 — Remove the workbook banner
 
-- [ ] Remove the « Ajouter une colonne » and « Importer… » buttons, and the
+- [ ] Remove the "Add Column" and "Import…" buttons, and the
       "N rows × M columns" display.
 
 **Two writes to handle**: `book_contents` (`app.rs:3653`) **and**
@@ -42,10 +42,10 @@ explains what must stay separate (the transient input buffers, because of the
 `'static` closure of `show_viewport_deferred`) — a banner that only pushes
 `Action`s does not run into it.
 
-### F2 — Context menu « Ajouter une colonne » at the end of the grid
+### F2 — Context menu "Add Column" at the end of the grid
 
 - [ ] Right-click in the empty area to the right of the last column → entry
-      « Ajouter une colonne ».
+      "Add Column".
 
 Reminder of the house rule: the grid context menu is the **exact mirror of the
 keyboard**, and the decision (what to offer, what to disable, how to name it)
