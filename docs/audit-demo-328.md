@@ -32,7 +32,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | rectangle, ellipse, line, arrow | ✓ Tools bar (`shape_tools.rs`), drag on the plot area |
 | | legend in a corner | ✓ Legend tab (`legend_editor`) |
 | `Groupes` (:302) | six curves in a group | ✓ plotting several columns together (state.rs:9400) |
-| | swatch set of the group | ✓ `curve_settings.rs` (`set_group_gradient`) |
+| | color gradient of the group | ✓ `curve_settings.rs` (`set_group_gradient`) |
 | `Lignes` (:336) | "row" series | ✓ dragging rows from the gutter (gestes.md:96), `Action::PlotRows`, row menu (grid.rs:915) |
 
 ## Elements without a gesture
@@ -67,7 +67,7 @@ missing feature.
 ## Documentation (case A, to handle right away)
 
 - `gestes.md` cites neither New Layer, nor adding shapes, nor grouping by
-  multiple plotting, nor the swatch set. These gestures exist and are found in
+  multiple plotting, nor the color gradient. These gestures exist and are found in
   `graphe.md:131` and `menus-et-barres.md:21`, but not in the gesture
   catalog.
 - The Typst syntax of texts (`$lambda_1$`) is documented only on the rendering
@@ -77,7 +77,7 @@ missing feature.
 ## Proposed split into sub-issues (not created)
 
 - **S1 (A, small)**: complete `gestes.md` and the tooltips: New Layer,
-  shapes, groups and swatch set, Typst in Add Text. Check: redo `Annotations`,
+  shapes, groups and color gradient, Typst in Add Text. Check: redo `Annotations`,
   `Groupes` and `Lignes` by following the documentation.
 - **S2 (B, small)**: "Bins" widget (`histogram_bins`) in Series. It
   covers `Panneaux` and `TypesTrace`.

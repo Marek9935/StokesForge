@@ -192,7 +192,7 @@ detached window (another sender identity: refused by the session) and the
 actions it sends up to the root (`reject_detached_actions`). Every
 grouped operation ends with `AppState::end_grouped_macro`, which refreshes
 the snapshot (otherwise `can_undo`/the label stay stale, issue #22). The window is built
-from the same brick as the content windows (`show_window_in_layer`,
+from the same building block as the content windows (`show_window_in_layer`,
 `window_header`, `floating_resize_handles`), with the same frame and the same title
 bar, and not from a raw `egui::Window`; only the layer order and the
 full-screen layer that captures clicks set it apart. This layer is

@@ -67,7 +67,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/results_pane.rs` | Results pane under the grid of a workbook: counter, Sheet / Workbook scope, list and series × value table |
 | `app/format.rs` | text and object format bars, contextual bar: `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (the bars themselves: `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager: `project_manager_panel` (fixed panel) and the tree `project_manager_contents_from_tree`, shared by the panel and the detached window |
-| `app/curve_settings.rs` | series properties window (#177–#179): list, group, common style, swatch sets (`curve_settings_page`); opened as the `PlotSettingsTab::Series` tab of `plot_settings_window` |
+| `app/curve_settings.rs` | series properties window (#177–#179): list, group, common style, color gradients (`curve_settings_page`); opened as the `PlotSettingsTab::Series` tab of `plot_settings_window` |
 | `app/object_manager_ui.rs` | painted Object Manager: `object_manager_panel`, `run_object_manager_request`, rows, checkboxes, menus, dragging of series, groups and free objects by the handle (the model: `crate::object_manager`) |
 | `app/script_console.rs` | script console: `script_panel`, `ScriptConsoleModel` reading, content shared by attached/detached, input, Run/Stop, output |
 | `app/tab.rs` | `Tab`, the tab of a content window (workbook, graph, matrix, note), its translations to the model (`tab_for_window`, `tab_node`), its title (`tab_title`, `tab_title_from_tree`, deleted node included) and its mirror readable by `crate::state` (`active_tab_kind`) |

@@ -699,7 +699,7 @@ How it is held:
   with the series window), analysis form, import wizard
   (files, format, header, metadata, destination; the rules between
   blocks became headings). The series window (group, scope,
-  swatch — `curve_settings.rs`) is migrated, as are the tools of
+  color gradient — `curve_settings.rs`) is migrated, as are the tools of
   the scope of the Results panel (#241;
   its series × value table and the "from / to" lists stay
   data tables/lists). Remaining to migrate: the future preferences (#148).
