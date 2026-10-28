@@ -1,45 +1,45 @@
-//! Offrir **une même figure sous plusieurs formes** au presse-papiers système
-//! (issue #149) : SVG de préférence, puis PNG, puis PDF.
+//! Offer **the same figure in several forms** to the system clipboard
+//! (issue #149): SVG preferably, then PNG, then PDF.
 //!
-//! # Pourquoi un crate à part
+//! # Why a separate crate
 //!
-//! egui n'écrit que du texte (`Context::copy_text`) et `arboard`, que l'arbre
-//! contient déjà, ne sait écrire que du texte, du HTML ou une image bitmap :
-//! aucun des deux n'offre `image/svg+xml` ni `application/pdf`, ni plusieurs
-//! types à la fois. Une offre multi-format est du code **propre à chaque
-//! plateforme**, avec du FFI : il vit ici, sans dépendance au reste du
-//! workspace, plutôt que dans la coquille d'interface. Ce crate ne sait rien
-//! de StokesForge — il reçoit des octets étiquetés par un type MIME, dans
-//! l'ordre de préférence de l'appelant.
+//! egui only writes text (`Context::copy_text`) and `arboard`, which the tree
+//! already contains, can only write text, HTML or a bitmap image:
+//! neither offers `image/svg+xml` or `application/pdf`, nor several
+//! types at once. A multi-format offer is **platform-specific** code,
+//! with FFI: it lives here, with no dependency on the rest of the
+//! workspace, rather than in the interface shell. This crate knows nothing
+//! about StokesForge — it receives bytes labeled with a MIME type, in
+//! the caller's order of preference.
 //!
-//! # Une offre, pas un choix
+//! # An offer, not a choice
 //!
-//! [`offer`] publie toutes les [`Representation`]s ; c'est **l'application
-//! destinataire** qui choisit parmi elles, et certaines ignorent l'ordre
-//! proposé (un traitement de texte prend souvent le PNG avant le SVG). L'ordre
-//! donné est celui de l'intention — SVG, PNG, PDF — sans promesse sur le choix
-//! du destinataire.
+//! [`offer`] publishes all the [`Representation`]s; it is **the receiving
+//! application** that chooses among them, and some ignore the proposed
+//! order (a word processor often takes the PNG before the SVG). The order
+//! given is the order of intent — SVG, PNG, PDF — with no promise about the
+//! receiver's choice.
 //!
-//! # Les plateformes
+//! # Platforms
 //!
-//! | Affichage | Mécanisme | Vérifié |
+//! | Display | Mechanism | Verified |
 //! |---|---|---|
-//! | Wayland | `Clipboard::store_formats` du patch `vendor/smithay-clipboard` : le worker partagé avec egui-winit offre un `wl_data_source` par type MIME | à la main (voir `docs/application/graphe.md`) |
-//! | X11 | un propriétaire de la sélection `CLIPBOARD` ([`x11`]), `TARGETS` puis un type par représentation | test réel, `--ignored` |
-//! | Windows | un format enregistré par représentation (`PNG`, `image/svg+xml`, `application/pdf`) | compile seulement |
-//! | macOS | `NSPasteboard`, un type UTI par représentation | compile seulement |
+//! | Wayland | `Clipboard::store_formats` of the `vendor/smithay-clipboard` patch: the worker shared with egui-winit offers one `wl_data_source` per MIME type | by hand (see `docs/application/graphe.md`) |
+//! | X11 | an owner of the `CLIPBOARD` selection ([`x11`]), `TARGETS` then one type per representation | real test, `--ignored` |
+//! | Windows | one registered format per representation (`PNG`, `image/svg+xml`, `application/pdf`) | compiles only |
+//! | macOS | `NSPasteboard`, one UTI type per representation | compiles only |
 //!
-//! # Limites assumées
+//! # Accepted limits
 //!
-//! - Wayland : le compositeur n'accepte la sélection que de la fenêtre qui
-//!   a le focus clavier et vient de recevoir une entrée (le « serial ») ;
-//!   sinon l'offre est **perdue sans erreur** — c'est le comportement du
-//!   texte d'egui-winit aussi, et c'est pourquoi l'appel part du geste Ctrl+C.
-//! - X11 : pas de protocole `INCR` ; une représentation plus grosse qu'une
-//!   requête X (256 Kio sans l'extension BIG-REQUESTS, de l'ordre de 16 Mio
-//!   avec) n'est pas offerte. Elle est ignorée, les autres restent offertes.
-//! - Le contenu disparaît avec le processus (pas de gestionnaire de
-//!   presse-papiers pris en charge côté X11).
+//! - Wayland: the compositor accepts the selection only from the window that
+//!   has keyboard focus and has just received an input (the "serial");
+//!   otherwise the offer is **lost without an error** — this is also the
+//!   behavior of egui-winit's text, and it is why the call starts from the Ctrl+C gesture.
+//! - X11: no `INCR` protocol; a representation larger than an
+//!   X request (256 KiB without the BIG-REQUESTS extension, about 16 MiB
+//!   with it) is not offered. It is skipped, the others stay offered.
+//! - The content disappears with the process (no clipboard manager
+//!   supported on the X11 side).
 
 use std::sync::Arc;
 
@@ -55,28 +55,28 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
-/// Types MIME des représentations d'une figure, dans l'ordre de préférence
-/// de StokesForge.
+/// MIME types of a figure's representations, in StokesForge's order of
+/// preference.
 pub mod mime {
-    /// Image vectorielle.
+    /// Vector image.
     pub const SVG: &str = "image/svg+xml";
-    /// Image matricielle.
+    /// Raster image.
     pub const PNG: &str = "image/png";
-    /// Document PDF.
+    /// PDF document.
     pub const PDF: &str = "application/pdf";
 }
 
-/// Une forme du contenu offert : ses octets sous un type MIME.
+/// One form of the offered content: its bytes under a MIME type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Representation {
-    /// Type MIME (voir [`mime`]).
+    /// MIME type (see [`mime`]).
     pub mime: &'static str,
-    /// Le contenu ; partagé, il n'est jamais recopié par l'offre.
+    /// The content; shared, it is never copied by the offer.
     pub bytes: Arc<[u8]>,
 }
 
 impl Representation {
-    /// Une représentation de `bytes` sous `mime`.
+    /// A representation of `bytes` under `mime`.
     pub fn new(mime: &'static str, bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
             mime,
@@ -85,36 +85,36 @@ impl Representation {
     }
 }
 
-/// Ce qui peut empêcher d'offrir le contenu. Le texte est en anglais brut,
-/// comme celui des autres crates du dessous : l'interface le met en phrase.
+/// What can prevent offering the content. The text is raw English,
+/// like that of the other crates below: the interface puts it into a sentence.
 #[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
-    /// Aucune représentation n'a été donnée.
+    /// No representation was given.
     #[error("no representation to offer")]
     Empty,
-    /// Ce type d'affichage ne sait pas recevoir l'offre.
+    /// This kind of display cannot receive the offer.
     #[error("the clipboard offer is not supported on this display ({0})")]
     Unsupported(&'static str),
-    /// Le système a refusé ou raté l'offre.
+    /// The system refused or failed the offer.
     #[error("could not offer the clipboard content: {0}")]
     Backend(String),
 }
 
-/// Offre `representations` comme contenu courant du presse-papiers système,
-/// en remplacement du précédent.
+/// Offers `representations` as the current content of the system clipboard,
+/// replacing the previous one.
 ///
-/// `display` est l'affichage de la fenêtre qui a reçu le geste de copie
-/// (`eframe::Frame` en est un) : il choisit le mécanisme, et sa durée de vie
-/// garantit qu'un pointeur Wayland reste valide pendant l'appel.
+/// `display` is the display of the window that received the copy gesture
+/// (`eframe::Frame` is one): it chooses the mechanism, and its lifetime
+/// guarantees that a Wayland pointer stays valid during the call.
 ///
-/// `Ok` veut dire « offre émise », pas « offre acceptée » : sous Wayland le
-/// compositeur peut l'écarter sans rien répondre (voir *Limites assumées*).
+/// `Ok` means "offer sent", not "offer accepted": under Wayland the
+/// compositor may discard it without answering (see *Accepted limits*).
 ///
 /// # Errors
 ///
-/// [`ClipboardError::Empty`] sans représentation ; [`ClipboardError::Unsupported`]
-/// pour un affichage sans backend ; [`ClipboardError::Backend`] si le système
-/// refuse.
+/// [`ClipboardError::Empty`] without a representation; [`ClipboardError::Unsupported`]
+/// for a display without a backend; [`ClipboardError::Backend`] if the system
+/// refuses.
 pub fn offer(
     display: &impl HasDisplayHandle,
     representations: &[Representation],
@@ -138,7 +138,7 @@ pub fn offer(
     }
 }
 
-/// Le nom d'un affichage, pour [`ClipboardError::Unsupported`].
+/// The name of a display, for [`ClipboardError::Unsupported`].
 fn display_name(display: &RawDisplayHandle) -> &'static str {
     match display {
         RawDisplayHandle::Wayland(_) => "Wayland",
@@ -150,9 +150,9 @@ fn display_name(display: &RawDisplayHandle) -> &'static str {
     }
 }
 
-/// Le nom du format du presse-papiers Windows pour un type MIME : le format
-/// enregistré par les applications est `PNG` (Office, navigateurs, GIMP) ; les
-/// autres gardent leur type MIME comme nom, la convention d'Inkscape pour le SVG.
+/// The Windows clipboard format name for a MIME type: the format
+/// registered by applications is `PNG` (Office, browsers, GIMP); the
+/// others keep their MIME type as name, Inkscape's convention for SVG.
 #[cfg(any(windows, test))]
 fn windows_format_name(mime: &str) -> &str {
     if mime == mime::PNG {
@@ -162,8 +162,8 @@ fn windows_format_name(mime: &str) -> &str {
     }
 }
 
-/// L'identifiant de type uniforme (UTI) macOS d'un type MIME, `None` sans
-/// équivalent connu.
+/// The macOS uniform type identifier (UTI) of a MIME type, `None` with no
+/// known equivalent.
 #[cfg(any(target_os = "macos", test))]
 fn macos_uti(mime: &str) -> Option<&'static str> {
     match mime {
@@ -178,8 +178,8 @@ fn macos_uti(mime: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    struct Sans;
-    impl HasDisplayHandle for Sans {
+    struct Without;
+    impl HasDisplayHandle for Without {
         fn display_handle(
             &self,
         ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
@@ -188,32 +188,35 @@ mod tests {
     }
 
     #[test]
-    fn sans_representation_l_offre_est_refusee_avant_tout_affichage() {
-        // Témoin : même avec un affichage valide, rien à offrir est une
-        // erreur de l'appelant, pas un succès vide.
-        assert!(matches!(offer(&Sans, &[]), Err(ClipboardError::Empty)));
+    fn without_a_representation_the_offer_is_refused_before_any_display() {
+        // Witness: even with a valid display, having nothing to offer is a
+        // caller error, not an empty success.
+        assert!(matches!(offer(&Without, &[]), Err(ClipboardError::Empty)));
     }
 
     #[test]
-    fn un_affichage_indisponible_est_une_erreur_et_pas_une_panique() {
-        let un = [Representation::new(mime::PNG, vec![1, 2, 3])];
-        assert!(matches!(offer(&Sans, &un), Err(ClipboardError::Backend(_))));
+    fn an_unavailable_display_is_an_error_not_a_panic() {
+        let one = [Representation::new(mime::PNG, vec![1, 2, 3])];
+        assert!(matches!(
+            offer(&Without, &one),
+            Err(ClipboardError::Backend(_))
+        ));
     }
 
     #[test]
-    fn les_formats_windows_et_les_uti_macos_couvrent_les_trois_types() {
+    fn windows_formats_and_macos_utis_cover_the_three_types() {
         assert_eq!(windows_format_name(mime::PNG), "PNG");
         assert_eq!(windows_format_name(mime::SVG), "image/svg+xml");
         assert_eq!(windows_format_name(mime::PDF), "application/pdf");
         assert_eq!(macos_uti(mime::PNG), Some("public.png"));
         assert_eq!(macos_uti(mime::SVG), Some("public.svg-image"));
         assert_eq!(macos_uti(mime::PDF), Some("com.adobe.pdf"));
-        // Un type inconnu n'est pas inventé.
+        // An unknown type is not invented.
         assert_eq!(macos_uti("text/plain"), None);
     }
 
     #[test]
-    fn une_representation_partage_ses_octets() {
+    fn a_representation_shares_its_bytes() {
         let bytes: Arc<[u8]> = Arc::from(vec![9u8; 4]);
         let a = Representation::new(mime::SVG, bytes.clone());
         let b = a.clone();

@@ -88,7 +88,7 @@ echo "[memcheck] binary: $BINARY" >&2
 # without asserting the ratio, rather than failing on a false negative.
 # --nocapture: without it, libtest swallows the output of passing tests, and
 # it is precisely under valgrind that we want to SEE the two measurements of
-# the test emprunt_au_moins_vingt_fois_plus_rapide_que_la_copie, not only to
+# the test borrow_at_least_twenty_times_faster_than_copy, not only to
 # know that it passed.
 echo "[memcheck] running under valgrind (PYTHONMALLOC=malloc, without --leak-check)" >&2
 PYTHONMALLOC=malloc STOKESFORGE_UNDER_VALGRIND=1 valgrind \

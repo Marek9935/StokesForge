@@ -1,16 +1,16 @@
-# Gabarit de configuration PyO3 pour l'interpréteur embarqué (piège n°1).
+# PyO3 configuration template for the embedded interpreter (pitfall no. 1).
 #
-# python-build-standalone expose un sysconfig dont LIBDIR vaut /install/lib
-# (chemin de la machine de build d'Astral, inexistant ici) : la détection
-# automatique de PyO3 échoue ou pointe dans le vide. On court-circuite donc
-# entièrement l'interrogation de l'interpréteur en fournissant ce fichier via
-# la variable d'environnement PYO3_CONFIG_FILE.
+# python-build-standalone exposes a sysconfig whose LIBDIR is /install/lib
+# (a path on Astral's build machine, nonexistent here): PyO3's automatic
+# detection fails or points to nothing. So we bypass the interpreter
+# query entirely by providing this file through the
+# PYO3_CONFIG_FILE environment variable.
 #
-# Le jeton de substitution ci-dessous est remplacé par scripts/python-config.sh,
-# qui écrit le
-# fichier réel dans target/pyo3-config.txt (non versionné : le chemin absolu
-# dépend de la machine). Ce script retire aussi les lignes de commentaire :
-# le parseur de pyo3-build-config n'attend que des paires clé=valeur.
+# The substitution token below is replaced by scripts/python-config.sh,
+# which writes the
+# real file to target/pyo3-config.txt (not versioned: the absolute path
+# depends on the machine). This script also removes the comment lines:
+# the pyo3-build-config parser expects only key=value pairs.
 implementation=CPython
 version=3.12
 shared=true

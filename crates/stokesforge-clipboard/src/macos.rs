@@ -1,17 +1,17 @@
-//! macOS : `NSPasteboard`, un type UTI par représentation.
+//! macOS: `NSPasteboard`, one UTI type per representation.
 //!
-//! Le pasteboard général reçoit chaque représentation sous son identifiant de
-//! type uniforme (`public.png`, `public.svg-image`, `com.adobe.pdf`) ; l'ordre
-//! d'écriture est l'ordre de préférence. **Non exécuté** : ce module est
-//! compilé pour macOS par `cargo check --target aarch64-apple-darwin`, rien
-//! de plus.
+//! The general pasteboard receives each representation under its uniform
+//! type identifier (`public.png`, `public.svg-image`, `com.adobe.pdf`); the
+//! writing order is the order of preference. **Not run**: this module is
+//! compiled for macOS by `cargo check --target aarch64-apple-darwin`, nothing
+//! more.
 
 use objc2_app_kit::NSPasteboard;
 use objc2_foundation::{NSData, NSString};
 
 use crate::{macos_uti, ClipboardError, Representation};
 
-/// Remplace le pasteboard général par `representations`.
+/// Replaces the general pasteboard with `representations`.
 pub(crate) fn offer(representations: &[Representation]) -> Result<(), ClipboardError> {
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();

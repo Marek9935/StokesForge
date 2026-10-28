@@ -48,7 +48,7 @@ The skills point to sections of `docs/` or of `.claude/conventions.md`
 instead of copying the rules; the topic sheets of
 `stokesforge-feature` (#301) hold only these pointers: read only
 those of the topic touched, then the cited sources. Maintain the rules in
-these sources; the test `stokesforge-arch-guard/tests/renvois_fiches.rs`
+these sources; the test `stokesforge-arch-guard/tests/skill_references.rs`
 checks the pointers of all project skills.
 
 | Need | Skill to consult |
@@ -169,7 +169,7 @@ the old implementation stays available under the `legacy-python` tag.
   run, without blocking the UI thread.
 - The `pyst` surface is frozen (#331): any change to the public contract updates
   the `pyst-api` blocks of `docs/python-et-script.md` in the same commit.
-  Read the skill `stokesforge-python`; `stokesforge-script/tests/surface_figee.rs`
+  Read the skill `stokesforge-python`; `stokesforge-script/tests/frozen_api.rs`
   guards the agreement between these blocks and the API.
 - Preserve the distinctions between missing values, empty text, numbers
   and mixed cells. For saved files, reread the conversions,

@@ -1,31 +1,31 @@
-//! Démarrage et pilotage de l'interpréteur CPython **embarqué**.
+//! Startup and driving of the **embedded** CPython interpreter.
 //!
-//! Ce module est le point d'entrée unique du processus vers Python. Il résout
-//! l'emplacement du préfixe embarqué, démarre l'interpréteur **une seule fois**
-//! en mode isolé, et expose quelques fonctions de preuve (aller-retour de
-//! tableaux `f64`, versions, état d'isolation).
+//! This module is the process's single entry point to Python. It resolves
+//! the location of the embedded prefix, starts the interpreter **only once**
+//! in isolated mode, and exposes a few proof functions (round trip of
+//! `f64` arrays, versions, isolation state).
 //!
-//! # Isolation (pièges n°4 et n°5)
+//! # Isolation (pitfalls no. 4 and no. 5)
 //!
-//! `PYTHONHOME` seul n'isole rien : il laisse entrer `PYTHONPATH`, le
-//! `site-packages` utilisateur (`~/.local/lib/python3.12/…`) et les `.pth` du
-//! système. On initialise donc par [`ffi::Py_InitializeFromConfig`] avec une
-//! [`ffi::PyConfig`] issue de `PyConfig_InitIsolatedConfig`, en fixant
+//! `PYTHONHOME` alone isolates nothing: it lets `PYTHONPATH`, the user
+//! `site-packages` (`~/.local/lib/python3.12/…`) and the system's `.pth` files
+//! in. So we initialize through [`ffi::Py_InitializeFromConfig`] with a
+//! [`ffi::PyConfig`] coming from `PyConfig_InitIsolatedConfig`, setting
 //! `isolated`, `use_environment`, `user_site_directory`, `install_signal_handlers`
-//! et surtout `module_search_paths` **explicitement**. Les anciens setters
-//! `Py_SetPythonHome`/`Py_SetProgramName` (dépréciés en 3.11, supprimés en 3.13)
-//! ne sont pas utilisés, ni aucune variable d'environnement.
+//! and above all `module_search_paths` **explicitly**. The old setters
+//! `Py_SetPythonHome`/`Py_SetProgramName` (deprecated in 3.11, removed in 3.13)
+//! are not used, nor is any environment variable.
 //!
-//! PyO3 0.29 n'offre **aucune** API sûre pour une configuration d'initialisation
-//! personnalisée : `Python::initialize()` appelle `Py_InitializeEx(0)`, qui lit
-//! l'environnement. Le passage par `pyo3::ffi` est donc obligatoire ici — c'est
-//! le seul `unsafe` de l'initialisation ; le crate n'en porte qu'un autre,
-//! l'emprunt sans copie de `array.rs` (`PyArray1::borrow_from_array`).
+//! PyO3 0.29 offers **no** safe API for a custom initialization
+//! configuration: `Python::initialize()` calls `Py_InitializeEx(0)`, which reads
+//! the environment. Going through `pyo3::ffi` is therefore mandatory here — this is
+//! the only `unsafe` of the initialization; the crate carries just one other,
+//! the zero-copy borrow of `array.rs` (`PyArray1::borrow_from_array`).
 //!
-//! # Fin de vie (piège n°7)
+//! # End of life (pitfall no. 7)
 //!
-//! `Py_Finalize` n'est **jamais** appelé. Conséquence assumée : les `atexit`
-//! Python ne s'exécutent pas.
+//! `Py_Finalize` is **never** called. Accepted consequence: Python `atexit`
+//! handlers do not run.
 
 use std::ffi::{CString, NulError};
 use std::path::{Path, PathBuf};
@@ -38,50 +38,50 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTracebackMethods};
 
-/// Version courte de l'interpréteur embarqué, verrouillée avec la roue numpy
-/// et la version de rust-numpy (cf. `vendor/python/lock.env`, piège n°6).
+/// Short version of the embedded interpreter, locked together with the numpy wheel
+/// and the rust-numpy version (see `vendor/python/lock.env`, pitfall no. 6).
 pub const PYTHON_XY: &str = "3.12";
 
-/// Variable d'environnement de surcharge du préfixe embarqué.
+/// Environment variable overriding the embedded prefix.
 ///
-/// **Réservée aux tests et au développement** : elle permet de pointer sur
-/// `vendor/python/extracted/python` sans assembler une distribution. Ce n'est
-/// pas un mécanisme utilisateur — l'application livrée résout toujours son
-/// préfixe à côté de son exécutable, et rien dans l'interface ne l'expose.
+/// **Reserved for tests and development**: it lets us point to
+/// `vendor/python/extracted/python` without assembling a distribution. It is not
+/// a user mechanism — the shipped application always resolves its
+/// prefix next to its executable, and nothing in the interface exposes it.
 pub const HOME_ENV: &str = "STOKESFORGE_PYTHON_HOME";
 
-/// Résultat de l'initialisation, mémorisé pour rendre [`EmbeddedPython::initialize`]
-/// idempotent : CPython ne peut être démarré qu'une fois par processus.
+/// Result of the initialization, remembered to make [`EmbeddedPython::initialize`]
+/// idempotent: CPython can be started only once per process.
 static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
-/// Erreurs du pont Python.
+/// Errors of the Python bridge.
 #[derive(Debug, thiserror::Error)]
 pub enum PythonError {
-    /// Le préfixe embarqué est absent ou mal formé (pas de `lib/python3.12`).
+    /// The embedded prefix is missing or malformed (no `lib/python3.12`).
     #[error("embedded Python prefix not found: {0} (expected {0}/lib/python{PYTHON_XY})")]
     HomeNotFound(PathBuf),
-    /// L'interpréteur n'a pas pu démarrer.
+    /// The interpreter could not start.
     #[error("could not initialise the embedded interpreter: {0}")]
     InitFailed(String),
-    /// Une exception Python est remontée, avec sa trace formatée.
+    /// A Python exception was raised, with its formatted traceback.
     #[error("Python error:\n{0}")]
     Python(String),
 }
 
-/// Préfixe Python embarqué et interpréteur associé.
+/// Embedded Python prefix and its associated interpreter.
 #[derive(Debug, Clone)]
 pub struct EmbeddedPython {
     home: PathBuf,
 }
 
 impl EmbeddedPython {
-    /// Résout le préfixe embarqué et vérifie qu'il contient bien une
-    /// bibliothèque standard.
+    /// Resolves the embedded prefix and checks that it really contains a
+    /// standard library.
     ///
-    /// Ordre de résolution :
-    /// 1. la variable [`HOME_ENV`] si elle est posée (tests et développement) ;
-    /// 2. sinon `<répertoire de l'exécutable>/lib/python`, disposition produite
-    ///    par `scripts/pyhello-dist.sh`.
+    /// Resolution order:
+    /// 1. the [`HOME_ENV`] variable if set (tests and development);
+    /// 2. otherwise `<executable directory>/lib/python`, the layout produced
+    ///    by `scripts/pyhello-dist.sh`.
     pub fn locate() -> Result<Self, PythonError> {
         let candidate = match std::env::var_os(HOME_ENV) {
             Some(value) => PathBuf::from(value),
@@ -102,29 +102,29 @@ impl EmbeddedPython {
         }
     }
 
-    /// Construit un préfixe sans vérification (utile pour les tests).
+    /// Builds a prefix without checking (useful for tests).
     #[must_use]
     pub fn with_home(home: PathBuf) -> Self {
         Self { home }
     }
 
-    /// Racine du préfixe embarqué.
+    /// Root of the embedded prefix.
     #[must_use]
     pub fn home(&self) -> &Path {
         &self.home
     }
 
-    /// Vrai si `entry` (une entrée de `sys.path`) est sous le préfixe.
-    /// Comparaison par composants, pas par préfixe de chaîne : sous Windows,
-    /// le préfixe peut arriver en `C:/…` (Git Bash) quand `sys.path` porte
+    /// True if `entry` (a `sys.path` entry) is under the prefix.
+    /// Compared by components, not by string prefix: on Windows,
+    /// the prefix may arrive as `C:/…` (Git Bash) when `sys.path` carries
     /// `C:\…` (#332).
     #[must_use]
     pub fn contains_path(&self, entry: &str) -> bool {
         Path::new(entry).starts_with(&self.home)
     }
 
-    /// La bibliothèque standard : `<home>/lib/python3.12` sous Unix,
-    /// `<home>/Lib` dans la distribution python-build-standalone de Windows.
+    /// The standard library: `<home>/lib/python3.12` on Unix,
+    /// `<home>/Lib` in the Windows python-build-standalone distribution.
     fn stdlib_dir(&self) -> PathBuf {
         #[cfg(windows)]
         return self.home.join("Lib");
@@ -132,8 +132,8 @@ impl EmbeddedPython {
         return self.home.join("lib").join(format!("python{PYTHON_XY}"));
     }
 
-    /// Les modules d'extension : `lib-dynload` sous Unix, `<home>/DLLs`
-    /// (`.pyd`) sous Windows.
+    /// The extension modules: `lib-dynload` on Unix, `<home>/DLLs`
+    /// (`.pyd`) on Windows.
     fn dynload_dir(&self) -> PathBuf {
         #[cfg(windows)]
         return self.home.join("DLLs");
@@ -141,10 +141,10 @@ impl EmbeddedPython {
         return self.stdlib_dir().join("lib-dynload");
     }
 
-    /// Les trois répertoires injectés dans `sys.path`, dans l'ordre.
+    /// The three directories injected into `sys.path`, in order.
     ///
-    /// Rien d'autre n'y entre : ni `PYTHONPATH`, ni `~/.local`, ni les `.pth`
-    /// d'un Python système.
+    /// Nothing else gets in: no `PYTHONPATH`, no `~/.local`, no `.pth` files
+    /// of a system Python.
     fn search_paths(&self) -> [PathBuf; 3] {
         let stdlib = self.stdlib_dir();
         let dynload = self.dynload_dir();
@@ -152,18 +152,18 @@ impl EmbeddedPython {
         [stdlib, dynload, site]
     }
 
-    /// Démarre l'interpréteur, **une seule fois par processus**, en mode isolé,
-    /// sans gestion des signaux et sans finalisation, puis importe numpy.
+    /// Starts the interpreter, **only once per process**, in isolated mode,
+    /// without signal handling and without finalization, then imports numpy.
     ///
-    /// Idempotent : les appels suivants renvoient le même résultat sans rien
-    /// refaire. Le premier appelant fixe le préfixe utilisé par le processus.
+    /// Idempotent: later calls return the same result without redoing
+    /// anything. The first caller fixes the prefix used by the process.
     pub fn initialize(&self) -> Result<(), PythonError> {
         let outcome = INIT.get_or_init(|| {
-            // SAFETY : appelé une seule fois, avant tout autre usage de la
-            // C-API, depuis le fil qui deviendra le fil principal de CPython.
+            // SAFETY: called only once, before any other use of the
+            // C API, from the thread that will become CPython's main thread.
             unsafe { start_interpreter(self) }?;
-            // Import de numpy inclus dans la mesure d'initialisation : c'est le
-            // coût réel de « Python prêt à servir » pour StokesForge.
+            // The numpy import is part of the initialization measurement: it is the
+            // real cost of "Python ready to serve" for StokesForge.
             import_numpy()
         });
         match outcome {
@@ -172,18 +172,18 @@ impl EmbeddedPython {
         }
     }
 
-    /// Vrai si l'interpréteur a été démarré avec succès dans ce processus.
+    /// True if the interpreter was started successfully in this process.
     #[must_use]
     pub fn is_initialized() -> bool {
         matches!(INIT.get(), Some(Ok(())))
     }
 }
 
-/// Démarre CPython à partir d'une `PyConfig` isolée.
+/// Starts CPython from an isolated `PyConfig`.
 ///
 /// # Safety
 ///
-/// Ne doit être appelée qu'une fois, avant tout autre appel à la C-API Python.
+/// Must be called only once, before any other call to the Python C API.
 unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
     let home = to_cstring(&embedded.home)?;
     let paths = embedded.search_paths();
@@ -192,9 +192,9 @@ unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
     let config_ptr: *mut ffi::PyConfig = &mut config;
     ffi::PyConfig_InitIsolatedConfig(config_ptr);
 
-    // Verrouillage explicite de l'isolation. `PyConfig_InitIsolatedConfig` pose
-    // déjà la plupart de ces valeurs ; on les réaffirme pour que l'intention
-    // soit lisible et ne dépende pas des défauts d'une version de CPython.
+    // Explicit lock-down of the isolation. `PyConfig_InitIsolatedConfig` already
+    // sets most of these values; we restate them so that the intent is
+    // readable and does not depend on the defaults of a CPython version.
     (*config_ptr).isolated = 1;
     (*config_ptr).use_environment = 0;
     (*config_ptr).user_site_directory = 0;
@@ -202,7 +202,7 @@ unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
     (*config_ptr).parse_argv = 0;
     (*config_ptr).pathconfig_warnings = 0;
 
-    // `home` : sert de `sys.prefix`/`sys.exec_prefix`.
+    // `home`: serves as `sys.prefix`/`sys.exec_prefix`.
     let status = ffi::PyConfig_SetBytesString(
         config_ptr,
         std::ptr::addr_of_mut!((*config_ptr).home),
@@ -213,9 +213,9 @@ unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
         return Err(message);
     }
 
-    // `module_search_paths` : c'est ce champ, et lui seul, qui fabrique
-    // `sys.path`. Avec `module_search_paths_set = 1`, CPython ne calcule plus
-    // rien et n'ajoute plus rien depuis l'environnement.
+    // `module_search_paths`: this field, and only this one, builds
+    // `sys.path`. With `module_search_paths_set = 1`, CPython computes
+    // nothing more and adds nothing more from the environment.
     (*config_ptr).module_search_paths_set = 1;
     for path in &paths {
         if let Err(message) = append_search_path(config_ptr, path) {
@@ -225,26 +225,26 @@ unsafe fn start_interpreter(embedded: &EmbeddedPython) -> Result<(), String> {
     }
 
     let status = ffi::Py_InitializeFromConfig(config_ptr);
-    // La config est copiée par CPython : on peut la libérer aussitôt.
+    // The config is copied by CPython: we can free it right away.
     ffi::PyConfig_Clear(config_ptr);
     check_status(status, "Py_InitializeFromConfig")?;
 
-    // L'initialisation laisse le GIL pris par ce fil. On le relâche pour que
-    // `Python::attach` (donc `PyGILState_Ensure`) fonctionne depuis n'importe
-    // quel fil, y compris celui-ci. Même geste que `Python::initialize` de PyO3.
+    // Initialization leaves the GIL held by this thread. We release it so that
+    // `Python::attach` (hence `PyGILState_Ensure`) works from any
+    // thread, this one included. Same gesture as PyO3's `Python::initialize`.
     ffi::PyEval_SaveThread();
     Ok(())
 }
 
-/// Ajoute un répertoire à `config.module_search_paths`.
+/// Appends a directory to `config.module_search_paths`.
 ///
 /// # Safety
 ///
-/// `config_ptr` doit pointer sur une `PyConfig` valide en cours de construction.
+/// `config_ptr` must point to a valid `PyConfig` under construction.
 unsafe fn append_search_path(config_ptr: *mut ffi::PyConfig, path: &Path) -> Result<(), String> {
     let bytes = to_cstring(path)?;
-    // `Py_DecodeLocale` est l'API documentée pour fabriquer un `wchar_t*` avant
-    // l'initialisation ; la mémoire rendue se libère par `PyMem_RawFree`.
+    // `Py_DecodeLocale` is the documented API to build a `wchar_t*` before
+    // initialization; the returned memory is freed with `PyMem_RawFree`.
     let wide = ffi::Py_DecodeLocale(bytes.as_ptr(), std::ptr::null_mut());
     if wide.is_null() {
         return Err(format!("Py_DecodeLocale failed on {}", path.display()));
@@ -257,11 +257,11 @@ unsafe fn append_search_path(config_ptr: *mut ffi::PyConfig, path: &Path) -> Res
     check_status(status, "PyWideStringList_Append")
 }
 
-/// Traduit un `PyStatus` en `Result`.
+/// Translates a `PyStatus` into a `Result`.
 fn check_status(status: ffi::PyStatus, what: &str) -> Result<(), String> {
-    // SAFETY : `PyStatus_Exception` ne fait qu'inspecter la structure passée par
-    // valeur ; les pointeurs de message appartiennent à CPython et restent
-    // valides le temps de la lecture.
+    // SAFETY: `PyStatus_Exception` only inspects the structure passed by
+    // value; the message pointers belong to CPython and stay valid for the
+    // duration of the read.
     let failed = unsafe { ffi::PyStatus_Exception(status) } != 0;
     if !failed {
         return Ok(());
@@ -269,7 +269,7 @@ fn check_status(status: ffi::PyStatus, what: &str) -> Result<(), String> {
     let detail = if status.err_msg.is_null() {
         "no message".to_owned()
     } else {
-        // SAFETY : pointeur non nul fourni par CPython sur une chaîne C statique.
+        // SAFETY: non-null pointer provided by CPython to a static C string.
         unsafe { std::ffi::CStr::from_ptr(status.err_msg) }
             .to_string_lossy()
             .into_owned()
@@ -277,7 +277,7 @@ fn check_status(status: ffi::PyStatus, what: &str) -> Result<(), String> {
     Err(format!("{what}: {detail}"))
 }
 
-/// Importe numpy une fois l'interpréteur démarré ; échoue avec la trace Python.
+/// Imports numpy once the interpreter has started; fails with the Python traceback.
 fn import_numpy() -> Result<(), String> {
     Python::attach(|py| match py.import("numpy") {
         Ok(_) => Ok(()),
@@ -285,7 +285,7 @@ fn import_numpy() -> Result<(), String> {
     })
 }
 
-/// Convertit un chemin en `CString` pour les API `*_SetBytesString`.
+/// Converts a path into a `CString` for the `*_SetBytesString` APIs.
 fn to_cstring(path: &Path) -> Result<CString, String> {
     let text = path
         .to_str()
@@ -293,15 +293,15 @@ fn to_cstring(path: &Path) -> Result<CString, String> {
     CString::new(text).map_err(|err: NulError| format!("path contains a null byte: {err}"))
 }
 
-/// Prend le GIL et convertit toute exception Python en [`PythonError::Python`]
-/// avec sa trace formatée.
+/// Takes the GIL and converts any Python exception into [`PythonError::Python`]
+/// with its formatted traceback.
 pub(crate) fn attached<T>(
     f: impl for<'py> FnOnce(Python<'py>) -> PyResult<T>,
 ) -> Result<T, PythonError> {
     Python::attach(|py| f(py).map_err(|err| PythonError::Python(format_error(py, &err))))
 }
 
-/// Formate une exception Python avec sa trace, comme le ferait `traceback.print_exc`.
+/// Formats a Python exception with its traceback, as `traceback.print_exc` would.
 fn format_error(py: Python<'_>, err: &PyErr) -> String {
     match err.traceback(py).and_then(|tb| tb.format().ok()) {
         Some(trace) => format!("{trace}{err}"),
@@ -309,10 +309,10 @@ fn format_error(py: Python<'_>, err: &PyErr) -> String {
     }
 }
 
-/// Aller simple : copie `values` dans un `ndarray` numpy, y calcule `np.sum`.
+/// One way: copies `values` into a numpy `ndarray`, computes `np.sum` there.
 ///
-/// La copie est **assumée** ici : la lecture sans copie (emprunt d'un
-/// `Arc<Vec<f64>>` côté Rust) est la tâche 5.2.
+/// The copy is **accepted** here: zero-copy reading (borrowing an
+/// `Arc<Vec<f64>>` on the Rust side) is task 5.2.
 pub fn roundtrip_sum(values: &[f64]) -> Result<f64, PythonError> {
     attached(|py| {
         let array = PyArray1::from_slice(py, values);
@@ -321,7 +321,7 @@ pub fn roundtrip_sum(values: &[f64]) -> Result<f64, PythonError> {
     })
 }
 
-/// Aller-retour complet : copie vers numpy, `arr * 2.0` côté Python, rapatriement.
+/// Full round trip: copy to numpy, `arr * 2.0` on the Python side, bring back.
 pub fn roundtrip_vec(values: &[f64]) -> Result<Vec<f64>, PythonError> {
     attached(|py| {
         let array = PyArray1::from_slice(py, values);
@@ -336,19 +336,19 @@ pub fn roundtrip_vec(values: &[f64]) -> Result<Vec<f64>, PythonError> {
     })
 }
 
-/// Temps des deux moitiés d'un aller-retour, en millisecondes.
+/// Timings of the two halves of a round trip, in milliseconds.
 #[derive(Debug, Clone, Copy)]
 pub struct CopyTimings {
-    /// Rust → numpy : allocation du `ndarray` et copie des octets.
+    /// Rust → numpy: allocation of the `ndarray` and copy of the bytes.
     pub send_ms: f64,
-    /// numpy → Rust : copie vers un `Vec<f64>` neuf.
+    /// numpy → Rust: copy to a fresh `Vec<f64>`.
     pub recv_ms: f64,
 }
 
-/// Mesure séparément l'aller et le retour d'une **copie** de `values`, dans une
-/// seule prise du GIL, sans calcul Python entre les deux.
+/// Measures separately the way there and the way back of a **copy** of `values`, in a
+/// single GIL acquisition, with no Python computation in between.
 ///
-/// C'est le chiffre qui décide de l'intérêt du zéro-copie (tâche 5.2).
+/// This is the figure that decides the value of zero-copy (task 5.2).
 pub fn measure_copy(values: &[f64]) -> Result<CopyTimings, PythonError> {
     attached(|py| {
         let before_send = Instant::now();
@@ -361,7 +361,7 @@ pub fn measure_copy(values: &[f64]) -> Result<CopyTimings, PythonError> {
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         let recv_ms = before_recv.elapsed().as_secs_f64() * 1e3;
 
-        // Garde-fou : empêche l'optimiseur d'escamoter la copie retour.
+        // Guard: keeps the optimizer from eliding the return copy.
         debug_assert_eq!(back.len(), values.len());
         std::hint::black_box(&back);
 
@@ -369,7 +369,7 @@ pub fn measure_copy(values: &[f64]) -> Result<CopyTimings, PythonError> {
     })
 }
 
-/// Version de numpy vue par l'interpréteur embarqué.
+/// numpy version seen by the embedded interpreter.
 pub fn numpy_version() -> Result<String, PythonError> {
     attached(|py| {
         py.import("numpy")?
@@ -378,7 +378,7 @@ pub fn numpy_version() -> Result<String, PythonError> {
     })
 }
 
-/// Version de l'interpréteur embarqué, au format `X.Y.Z`.
+/// Version of the embedded interpreter, in `X.Y.Z` format.
 pub fn python_version() -> Result<String, PythonError> {
     attached(|py| {
         py.import("platform")?
@@ -387,17 +387,17 @@ pub fn python_version() -> Result<String, PythonError> {
     })
 }
 
-/// `sys.prefix` — doit pointer dans le préfixe embarqué.
+/// `sys.prefix` — must point inside the embedded prefix.
 pub fn sys_prefix() -> Result<String, PythonError> {
     attached(|py| py.import("sys")?.getattr("prefix")?.extract::<String>())
 }
 
-/// `sys.path` — preuve d'isolation : ne doit contenir que le préfixe embarqué.
+/// `sys.path` — proof of isolation: must contain only the embedded prefix.
 pub fn sys_path() -> Result<Vec<String>, PythonError> {
     attached(|py| py.import("sys")?.getattr("path")?.extract::<Vec<String>>())
 }
 
-/// `sys.flags.isolated` — preuve que le mode isolé est actif.
+/// `sys.flags.isolated` — proof that isolated mode is active.
 pub fn sys_flags_isolated() -> Result<bool, PythonError> {
     attached(|py| {
         let flag = py

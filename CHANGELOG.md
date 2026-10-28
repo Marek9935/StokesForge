@@ -67,6 +67,15 @@ without a message, see `docs/persistance.md`).
   (en/fr); the "Row N" name of an
   unnamed row series too. Figures exported by a `pyst` script or the CLI keep
   English.
+- English text in the tools (#376): the `pyst` docstrings (`help()` in the
+  console), the output of `stokesforge-selftest` and `stokesforge-pyhello`,
+  the default recipe name of the CLI and of `pyst` ("Untitled", was "Sans
+  titre"), the encoding shown for UTF-16 files in the import window
+  ("little-endian"/"big-endian"), and the name given to an imported file
+  without a stem ("file"). Names and parameters of the `pyst` API do not
+  change; the built-in recipe names stay as they are (#378).
+- The robustness probes are renamed `stokesforge-alloc-probe` and
+  `stokesforge-stack-probe` (arguments `build`, `undo`, `clear`, `drop`).
 
 ## [1.0.0] - 2026-10-27
 

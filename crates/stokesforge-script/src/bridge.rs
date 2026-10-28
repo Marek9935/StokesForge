@@ -1,22 +1,21 @@
-//! Le côté **hôte** de la surface `pyst` : navigation, métadonnées, lecture et
-//! écriture de colonnes, annulation — le tout **sans jamais toucher au GIL**.
+//! The **host** side of the `pyst` surface: navigation, metadata, column
+//! reading and writing, undo, all of it **without ever touching the GIL**.
 //!
-//! Tout ce module s'exécute à l'intérieur d'un `Python::detach`, c'est-à-dire
-//! GIL relâché. Rien ici ne nomme un type PyO3 : c'est ce qui permet au
-//! marqueur `Ungil` de vérifier à la compilation qu'aucune valeur liée au GIL
-//! ne traverse l'attente de l'acteur.
+//! This whole module runs inside a `Python::detach`, that is, with the GIL
+//! released. Nothing here names a PyO3 type: this is what lets the `Ungil` marker
+//! check at compile time that no GIL-bound value crosses the wait for the actor.
 //!
-//! # La résolution de chemin n'est plus réécrite ici
+//! # Path resolution is no longer rewritten here
 //!
-//! Ce module a longtemps porté une copie de `Project::resolve` : la résolution
-//! vivait dans le `Project`, que **l'acteur** possède, alors qu'un client n'a
-//! qu'un `Arc<Tree>` via [`stokesforge_session::Snapshot`]. Le doublon était assumé
-//! et documenté, faute d'avoir le droit de toucher au socle.
+//! This module long carried a copy of `Project::resolve`: resolution lived in
+//! the `Project`, which **the actor** owns, whereas a client only has an
+//! `Arc<Tree>` through [`stokesforge_session::Snapshot`]. The duplicate was
+//! accepted and documented, for lack of permission to touch the foundation.
 //!
-//! Il a été supprimé : `stokesforge-core` expose désormais [`Tree::resolve`], seule
-//! implémentation de la grammaire `[Book1]Sheet1!ColA` du dépôt, et le pont
-//! l'appelle sur l'arbre de son instantané. Il n'y a plus rien à garder
-//! synchronisé ici.
+//! It was removed: `stokesforge-core` now exposes [`Tree::resolve`], the only
+//! implementation of the `[Book1]Sheet1!ColA` grammar in the repository, and the
+//! bridge calls it on its snapshot's tree. There is nothing left to keep in sync
+//! here.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -27,33 +26,32 @@ use stokesforge_core::{ColumnMeta, ColumnValues, CoreError, Node, NodeId, ValueB
 use stokesforge_plot::{PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
 use stokesforge_session::{SessionError, SessionHandle, Snapshot};
 
-/// Erreur de l'hôte **déjà traduite** dans le vocabulaire des quatre
-/// exceptions de la surface `pyst`.
+/// Host error **already translated** into the vocabulary of the four
+/// exceptions of the `pyst` surface.
 ///
-/// La traduction se fait ici, côté Rust pur ; c'est le fil de script qui la
-/// convertit en exception Python, GIL en main. Aucune erreur de l'hôte
-/// (`SessionError`, `CommandError`, `CoreError`) n'est transportée telle
-/// quelle jusqu'à Python.
+/// The translation happens here, in pure Rust; the script thread converts it
+/// to a Python exception, with the GIL in hand. No host error (`SessionError`,
+/// `CommandError`, `CoreError`) is carried as is all the way to Python.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HostError {
-    /// Chemin d'objet mal formé, ou qui ne désigne rien dans le projet.
+    /// Malformed object path, or one that designates nothing in the project.
     UnknownPath(String),
-    /// La poignée désigne un nœud absent de l'arbre courant — supprimé, ou
-    /// d'un projet rechargé depuis (A3 : l'époque mémorisée par la poignée
-    /// ne coïncide plus avec celle de l'instantané courant).
+    /// The handle designates a node absent from the current tree: deleted, or
+    /// from a project reloaded since (A3: the epoch remembered by the handle no
+    /// longer matches that of the current snapshot).
     BrokenReference(String),
-    /// Valeur refusée : mauvais type, mauvaise longueur, mauvaise nature
-    /// d'objet.
+    /// Refused value: wrong type, wrong length, wrong kind of
+    /// object.
     InvalidValue(String),
-    /// #312 — la colonne a changé depuis la version lue (ou fournie par
-    /// `expected_version`) : l'écriture est refusée aussitôt, sans retentative.
+    /// #312: the column changed since the version read (or provided by
+    /// `expected_version`): the write is refused at once, with no retry.
     ConcurrentWrite(String),
 }
 
 impl HostError {
-    /// Traduit une erreur du modèle. Le `match` est **exhaustif** à dessein :
-    /// une nouvelle variante de `CoreError` forcera une décision de traduction
-    /// plutôt que de tomber dans un fourre-tout.
+    /// Translates a model error. The `match` is **exhaustive** on purpose:
+    /// a new `CoreError` variant will force a translation decision rather than
+    /// falling into a catch-all.
     pub(crate) fn from_core(error: CoreError) -> Self {
         match error {
             CoreError::Path(message) => HostError::UnknownPath(message),
@@ -65,43 +63,42 @@ impl HostError {
             | CoreError::Structure(message)
             | CoreError::IndexOutOfBounds(message)
             | CoreError::TypeMismatch(message) => HostError::InvalidValue(message),
-            // B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — plus aucun
-            // nœud ne peut être créé : ce n'est ni un chemin, ni une
-            // référence cassée, mais la commande qui l'aurait créé qui doit
-            // être refusée.
+            // B1 (`guide-de-correction-robustesse.md` §F2/F3/F4): no more node
+            // can be created; it is neither a path nor a broken reference, but the
+            // command that would have created it that must be refused.
             CoreError::IdentifiersExhausted => {
                 HostError::InvalidValue(CoreError::IdentifiersExhausted.to_string())
             }
-            // #312 (D2) — refus immédiat, sans retentative : le script lève
-            // `ConcurrentWriteError` et décide lui-même de relire.
+            // #312 (D2): immediate refusal, with no retry: the script raises
+            // `ConcurrentWriteError` and decides by itself whether to read again.
             CoreError::ConcurrentModification { .. } => HostError::ConcurrentWrite(format!(
                 "{error}: another client modified the column since it was read; \
                  read it again before writing"
             )),
-            // Une colonne-formule refuse toute écriture directe de cellule
-            // (`stokesforge-commands::History::apply_data`) : côté script, c'est
-            // une valeur invalide au même titre qu'un type incompatible, pas
-            // une référence cassée ni un conflit de version.
+            // A formula column refuses any direct cell write
+            // (`stokesforge-commands::History::apply_data`): on the script side, that is
+            // an invalid value just like an incompatible type, not a broken
+            // reference nor a version conflict.
             CoreError::FormulaColumnReadOnly { .. } => HostError::InvalidValue(error.to_string()),
-            // Même raison pour une colonne écrite par un calcul d'analyse (#181) :
-            // `pyst.analysis` la recalcule, un script ne l'écrit pas à la main.
+            // Same reason for a column written by an analysis calculation (#181):
+            // `pyst.analysis` recalculates it, a script does not write it by hand.
             CoreError::CalculatedColumnReadOnly { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
-            // #253 : une ligne ne se transpose que si toutes les colonnes de
-            // sa feuille sont numériques et portent un x'.
+            // #253: a row transposes only if all the columns of
+            // its sheet are numeric and carry an x'.
             CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
         }
     }
 
-    /// Traduit une erreur de la session.
+    /// Translates a session error.
     ///
-    /// `Disconnected` devient une **référence cassée** : quand la session est
-    /// fermée, plus aucune poignée du script ne désigne quoi que ce soit. Le
-    /// message le dit explicitement pour que la cause ne se confonde pas avec
-    /// une colonne supprimée.
+    /// `Disconnected` becomes a **broken reference**: when the session is
+    /// closed, no handle of the script designates anything anymore. The message
+    /// says so explicitly so the cause is not confused with a deleted
+    /// column.
     pub(crate) fn from_session(error: SessionError) -> Self {
         match error {
             SessionError::Disconnected => HostError::BrokenReference(
@@ -114,16 +111,16 @@ impl HostError {
     }
 }
 
-/// `pyst.resolve` : chemin d'objet → identifiant de nœud, et l'époque du
-/// projet au moment de la résolution (A3, `guide-de-correction-robustesse.md`
-/// §F2/F6) — c'est cette paire que [`crate::surface::Handle`] mémorise, pour
-/// pouvoir refuser plus tard si le projet a changé d'identité entre-temps
-/// (un `Load`).
+/// `pyst.resolve`: object path -> node identifier, and the project's epoch
+/// at the time of resolution (A3, `guide-de-correction-robustesse.md`
+/// §F2/F6). This is the pair that [`crate::surface::Handle`] remembers, to
+/// be able to refuse later if the project changed identity in the meantime
+/// (a `Load`).
 pub(crate) fn resolve(session: &SessionHandle, path: &str) -> Result<(NodeId, u64), HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
-    // Toute erreur de résolution — syntaxe comprise — est un chemin qu'on ne
-    // sait pas suivre : c'est `UnknownPathError` dans les deux cas, et le
-    // message d'origine dit lequel des deux.
+    // Any resolution error, syntax included, is a path we do not know how
+    // to follow: it is `UnknownPathError` in both cases, and the original
+    // message says which of the two.
     let id = snapshot
         .tree
         .resolve(path)
@@ -131,15 +128,14 @@ pub(crate) fn resolve(session: &SessionHandle, path: &str) -> Result<(NodeId, u6
     Ok((id, snapshot.epoch))
 }
 
-/// Refuse (`BrokenReference`) quand l'époque mémorisée par une poignée ne
-/// coïncide plus avec celle de l'instantané courant (A3) : un `Load` a eu
-/// lieu depuis que la poignée a été produite par `resolve`, et `id`, même
-/// s'il existe encore dans le nouvel arbre, peut y désigner un tout autre
-/// objet — exactement le cas de la reproduction
-/// `b6_poignee_survit_a_un_load_et_designe_un_autre_objet`. Vérifié **avant**
-/// toute recherche de `id` dans l'arbre, pas après : chercher d'abord
-/// laisserait passer la coïncidence que cette vérification existe pour
-/// écarter.
+/// Refuses (`BrokenReference`) when the epoch remembered by a handle no
+/// longer matches that of the current snapshot (A3): a `Load` took place since
+/// the handle was produced by `resolve`, and `id`, even if it still exists in
+/// the new tree, may designate a completely different object there: exactly
+/// the case of the reproduction
+/// `b6_handle_survives_a_load_and_names_another_object`. Checked **before**
+/// any lookup of `id` in the tree, not after: looking first would let through
+/// the coincidence that this check exists to rule out.
 fn check_epoch(id: NodeId, expected_epoch: u64, current_epoch: u64) -> Result<(), HostError> {
     if expected_epoch == current_epoch {
         return Ok(());
@@ -150,9 +146,9 @@ fn check_epoch(id: NodeId, expected_epoch: u64, current_epoch: u64) -> Result<()
     )))
 }
 
-/// Valide l'identité avant de chercher le nœud. Tous les nouveaux appels
-/// de lecture suivent le même ordre que les appels du socle : un identifiant
-/// réapparu après un chargement ne rend jamais une ancienne poignée valide.
+/// Validates the identity before looking for the node. All the new read
+/// calls follow the same order as the foundation's calls: an identifier that
+/// reappeared after a load never makes an old handle valid.
 pub(crate) fn checked_node(
     snapshot: &Snapshot,
     id: NodeId,
@@ -165,15 +161,15 @@ pub(crate) fn checked_node(
         .ok_or_else(|| HostError::BrokenReference(format!("{id} no longer exists in the project")))
 }
 
-/// Racine du projet courant, avec son identité.
+/// Root of the current project, with its identity.
 pub(crate) fn root(session: &SessionHandle) -> Result<(NodeId, u64), HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     Ok((snapshot.tree.root(), snapshot.epoch))
 }
 
-/// Enfants directs, dans l'ordre du modèle. Sans poignée, part de la racine.
-/// Identifiants et époque proviennent du même instantané, même si un autre
-/// client charge un projet pendant que le script reçoit la réponse.
+/// Direct children, in model order. Without a handle, starts from the root.
+/// Identifiers and epoch come from the same snapshot, even if another
+/// client loads a project while the script receives the reply.
 pub(crate) fn children(
     session: &SessionHandle,
     handle: Option<(NodeId, u64)>,
@@ -184,15 +180,14 @@ pub(crate) fn children(
     Ok(node.children().iter().map(|id| (*id, epoch)).collect())
 }
 
-/// Ce que rend [`info`] : le nœud partagé, son nombre de lignes éventuel et la
-/// formule de la colonne en lettres.
+/// What [`info`] returns: the shared node, its row count if any, and the
+/// column's formula in letters.
 pub(crate) type NodeInfo = (Arc<Node>, Option<usize>, Option<String>);
 
-/// Description du nœud, nombre de lignes éventuel et formule d'une colonne
-/// **en lettres** (celles d'aujourd'hui, `#REF` pour une colonne lue qui n'est
-/// plus dans la feuille), sur un seul instantané. Partager le nœud évite de
-/// recopier ses buffers ou ses métadonnées de fichier pour en extraire quelques
-/// champs, une fois le GIL repris.
+/// Node description, row count if any, and formula of a column
+/// **in letters** (today's, `#REF` for a read column that is no longer in the
+/// sheet), on a single snapshot. Sharing the node avoids copying its buffers or
+/// its file metadata to extract a few fields, once the GIL is taken back.
 pub(crate) fn info(session: &SessionHandle, id: NodeId, epoch: u64) -> Result<NodeInfo, HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let node = checked_node(&snapshot, id, epoch)?;
@@ -208,8 +203,8 @@ pub(crate) fn info(session: &SessionHandle, id: NodeId, epoch: u64) -> Result<No
     ))
 }
 
-/// Cellules stockées, sans conversion : seul l'Arc est cloné ici. La copie
-/// en valeurs Python appartient au fil de script, après la reprise du GIL.
+/// Stored cells, with no conversion: only the Arc is cloned here. The copy
+/// into Python values belongs to the script thread, after the GIL is retaken.
 pub(crate) fn column_values(
     session: &SessionHandle,
     id: NodeId,
@@ -226,12 +221,12 @@ pub(crate) fn column_values(
     Ok((column.values().clone(), column.version()))
 }
 
-/// `pyst.column` : le buffer `f64` partagé de la colonne, prêt à être emprunté
-/// sans copie par numpy.
+/// `pyst.column`: the column's shared `f64` buffer, ready to be borrowed
+/// without copy by numpy.
 ///
-/// Rend un **clone de l'`Arc`** : c'est lui qui maintiendra le buffer vivant
-/// sous la vue numpy, et qui forcera toute écriture ultérieure côté modèle à
-/// passer par `Arc::make_mut`, donc à allouer un buffer neuf.
+/// Returns a **clone of the `Arc`**: it is what keeps the buffer alive
+/// under the numpy view, and what forces any later write on the model side to
+/// go through `Arc::make_mut`, hence to allocate a new buffer.
 pub(crate) fn float_buffer(
     session: &SessionHandle,
     id: NodeId,
@@ -245,11 +240,11 @@ pub(crate) fn float_buffer(
             node.kind().with_article()
         ))
     })?;
-    // `float_values`, pas `numeric_view` : cette surface rend une vue sans
-    // copie sur le buffer de la colonne, ce qu'une colonne mixte n'a pas
-    // (voir `stokesforge_core::Column::numeric_view`). Lui rendre une copie
-    // matérialisée serait une vue qui ne suit plus la colonne — un piège
-    // silencieux pour un script qui croirait tenir le buffer.
+    // `float_values`, not `numeric_view`: this surface returns a view with no
+    // copy on the column's buffer, which a mixed column does not have
+    // (see `stokesforge_core::Column::numeric_view`). Returning it a
+    // materialized copy would be a view that no longer follows the column: a
+    // silent trap for a script that thinks it holds the buffer.
     let buffer = column.float_values().cloned().ok_or_else(|| {
         HostError::InvalidValue(format!(
             "column \"{}\" is of type {}: pyst.column only returns numeric \
@@ -261,22 +256,22 @@ pub(crate) fn float_buffer(
     Ok((buffer, column.version()))
 }
 
-/// `pyst.set_column` : écrit `values` dans la colonne, **par une commande**,
-/// donc par le bus, donc par Ctrl+Z.
+/// `pyst.set_column`: writes `values` into the column, **through a command**,
+/// hence through the bus, hence through Ctrl+Z.
 ///
-/// Refuse toute longueur différente de celle de la colonne (voir la doc de la
-/// surface pour la raison de cette restriction), **avant** d'envoyer quoi que
-/// ce soit à l'acteur : un refus ne fait pas bouger la révision.
+/// Refuses any length different from the column's (see the surface doc for
+/// the reason for this restriction), **before** sending anything to the
+/// actor: a refusal does not move the revision.
 ///
-/// La longueur est validée avant de réserver la macro du script. Si cette
-/// réservation est nouvelle, relire et revérifier l'époque et la longueur :
-/// une écriture ou un Load a pu passer avant la réservation. Sous la macro,
-/// les autres clients ne peuvent plus écrire.
+/// The length is validated before reserving the script's macro. If this
+/// reservation is new, read again and recheck the epoch and the length:
+/// a write or a Load may have gone through before the reservation. Under the
+/// macro, other clients can no longer write.
 ///
-/// #312 — version attendue, par priorité : l'argument `expected` du script,
-/// puis la version **retenue à la lecture** (`pyst.column`/`pyst.values`), puis
-/// la version courante (colonne jamais lue : écriture permise, non protégée).
-/// Un refus pour version périmée est **immédiat** (`ConcurrentWrite`).
+/// #312: expected version, by priority: the script's `expected` argument,
+/// then the version **retained at read time** (`pyst.column`/`pyst.values`), then
+/// the current version (column never read: write allowed, not protected).
+/// A refusal for a stale version is **immediate** (`ConcurrentWrite`).
 pub(crate) fn set_column(
     context: &ScriptContext,
     id: NodeId,
@@ -315,7 +310,7 @@ pub(crate) fn set_column(
             )));
         }
         if context.begin_write()? {
-            // Valider à nouveau sous la macro exclusive, avant la commande.
+            // Validate again under the exclusive macro, before the command.
             continue;
         }
         let expected_version = expected
@@ -334,11 +329,11 @@ pub(crate) fn set_column(
     }
 }
 
-/// Après une écriture réussie du script sur une colonne **qu'il a lue**, la
-/// version retenue devient la version neuve (relue sur l'instantané, sous la
-/// macro) : le script connaît ce qu'il vient d'écrire, ses écritures suivantes
-/// ne se refusent pas elles-mêmes. Une colonne jamais lue reste non retenue
-/// (limite documentée : écriture non protégée).
+/// After a successful script write to a column **it has read**, the
+/// retained version becomes the new version (read again on the snapshot, under
+/// the macro): the script knows what it just wrote, its following writes do
+/// not refuse themselves. A column never read stays unretained
+/// (documented limit: unprotected write).
 pub(crate) fn retain_written_version(
     context: &ScriptContext,
     id: NodeId,
@@ -357,15 +352,15 @@ pub(crate) fn retain_written_version(
     Ok(())
 }
 
-/// `pyst.undo` : un cran de la pile d'historique de l'hôte.
+/// `pyst.undo`: one step of the host's history stack.
 ///
-/// Rend `false` quand il n'y a rien à annuler — une pile vide n'est pas une
-/// erreur, c'est le cas que l'interface traduit par un bouton grisé.
+/// Returns `false` when there is nothing to undo: an empty stack is not an
+/// error, it is the case the interface translates as a greyed-out button.
 pub(crate) fn undo(context: &ScriptContext) -> Result<bool, HostError> {
-    // L'annulation explicite est un point de validation : elle annule le
-    // groupe entier construit jusqu'ici, puis permet de nouvelles écritures.
+    // Explicit undo is a commit point: it undoes the whole group built
+    // so far, then allows new writes.
     context.finish_write(true)?;
-    // #312 — les versions lues décrivent un état que l'annulation défait.
+    // #312: the versions read describe a state that the undo undoes.
     context.forget_versions();
     context
         .session()
@@ -374,9 +369,9 @@ pub(crate) fn undo(context: &ScriptContext) -> Result<bool, HostError> {
         .map_err(HostError::from_session)
 }
 
-/// `pyst.redo` : symétrique de [`undo`]. Un groupe d'écritures ouvert est
-/// d'abord validé, ce qui vide la pile de rétablissement : un `redo()` qui suit
-/// des écritures du script rend donc `false`.
+/// `pyst.redo`: symmetric to [`undo`]. An open write group is
+/// first committed, which empties the redo stack: a `redo()` that follows
+/// script writes therefore returns `false`.
 pub(crate) fn redo(context: &ScriptContext) -> Result<bool, HostError> {
     context.finish_write(true)?;
     context.forget_versions();
@@ -387,12 +382,12 @@ pub(crate) fn redo(context: &ScriptContext) -> Result<bool, HostError> {
         .map_err(HostError::from_session)
 }
 
-/// `pyst.save` / `pyst.save_as`. L'enregistrement n'est pas une commande
-/// (il ne change pas le modèle) : il passe par `SessionHandle::save`, comme
-/// l'application. Un groupe d'écritures ouvert est d'abord **validé** (point de
-/// validation, comme `undo`) : la session refuse d'écrire un état qu'un
-/// abandon de macro pourrait défaire. Sans `path`, écrit au chemin courant du
-/// moteur ; avec, l'enregistre et en fait le chemin courant.
+/// `pyst.save` / `pyst.save_as`. Saving is not a command
+/// (it does not change the model): it goes through `SessionHandle::save`, like
+/// the application. An open write group is first **committed** (commit point,
+/// like `undo`): the session refuses to write a state that a macro
+/// abort could undo. Without `path`, writes to the engine's current path; with
+/// one, saves there and makes it the current path.
 pub(crate) fn save(context: &ScriptContext, path: Option<&Path>) -> Result<(), HostError> {
     let target = match path {
         Some(path) => path.to_path_buf(),
@@ -424,14 +419,14 @@ pub(crate) fn save(context: &ScriptContext, path: Option<&Path>) -> Result<(), H
     Ok(())
 }
 
-/// Facteur de rastérisation PNG par défaut de `pyst.export_graph` : celui de
-/// l'application (`DEFAULT_PNG_EXPORT_SCALE` de `stokesforge-app-state`, que ce
-/// crate ne peut pas lire).
+/// Default PNG rasterization factor of `pyst.export_graph`: the
+/// application's (`DEFAULT_PNG_EXPORT_SCALE` of `stokesforge-app-state`, which this
+/// crate cannot read).
 pub(crate) const DEFAULT_PNG_SCALE: f32 = 4.0;
 
-/// `pyst.export_graph` : le même rendu que l'export de l'application (taille
-/// `DEFAULT_SIZE`, polices par défaut, Typst), le format venant de l'extension.
-/// Le texte d'un SVG reste du texte (le défaut de l'application).
+/// `pyst.export_graph`: the same rendering as the application's export (size
+/// `DEFAULT_SIZE`, default fonts, Typst), the format coming from the extension.
+/// The text of an SVG stays text (the application's default).
 pub(crate) fn export_graph(
     session: &SessionHandle,
     id: NodeId,
@@ -466,8 +461,8 @@ pub(crate) fn export_graph(
     .map_err(|error| HostError::InvalidValue(error.to_string()))
 }
 
-/// Les arguments de `pyst.add_shape`, tels qu'un script les écrit : du texte et
-/// des nombres, validés ici en Rust pur.
+/// The arguments of `pyst.add_shape`, as a script writes them: text and
+/// numbers, validated here in pure Rust.
 #[derive(Debug, Clone)]
 pub(crate) struct ShapeArgs {
     pub(crate) kind: String,
@@ -534,7 +529,7 @@ impl ShapeArgs {
     }
 }
 
-/// Le spec du graphe `id`, après les contrôles d'époque et de nature.
+/// The spec of graph `id`, after the epoch and kind checks.
 pub(crate) fn graph_spec(
     snapshot: &Snapshot,
     id: NodeId,
@@ -561,17 +556,17 @@ pub(crate) fn set_graph_spec(
         .map_err(HostError::from_session)
 }
 
-/// Le calque ordinaire (non superposé) de la case `(row, column)` : celui que
-/// désigne `panel=(ligne, colonne)` côté Python (#167).
+/// The ordinary (non-overlaid) layer of the cell `(row, column)`: the one
+/// designated by `panel=(row, column)` on the Python side (#167).
 pub(crate) fn base_layer_at(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
     spec.panels
         .iter()
         .position(|p| p.row == row && p.column == column && p.overlay.is_none())
 }
 
-/// `pyst.add_shape` : pose un objet graphique au-dessus des autres du panneau
-/// et rend son rang. `SetPlotSpec` rejoint le groupe d'écritures du script,
-/// même si l'objet est sa première mutation (#67 + #76).
+/// `pyst.add_shape`: places a graphic object above the others of the panel
+/// and returns its rank. `SetPlotSpec` joins the script's write group,
+/// even if the object is its first mutation (#67 + #76).
 pub(crate) fn add_shape(
     context: &ScriptContext,
     id: NodeId,
@@ -596,8 +591,8 @@ pub(crate) fn add_shape(
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let (mut spec, mut index) = prepare(&snapshot)?;
     if context.begin_write()? {
-        // Époque, panneau et rang viennent de l'instantané réservé : aucun
-        // autre client ne peut écraser le graphe entre cette lecture et l'écriture.
+        // Epoch, panel and rank come from the reserved snapshot: no
+        // other client can overwrite the graph between this read and the write.
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         (spec, index) = prepare(&snapshot)?;
     }
@@ -605,8 +600,8 @@ pub(crate) fn add_shape(
     Ok(index)
 }
 
-/// `pyst.remove_shape` : retire l'objet de rang `index` du panneau, dans le
-/// même groupe que les autres écritures de l'exécution.
+/// `pyst.remove_shape`: removes the object of rank `index` from the panel, in the
+/// same group as the other writes of the run.
 pub(crate) fn remove_shape(
     context: &ScriptContext,
     id: NodeId,
@@ -639,12 +634,12 @@ pub(crate) fn remove_shape(
     set_graph_spec(session, id, spec)
 }
 
-/// Importe un fichier dans un classeur neuf, une feuille par plan. Toute
-/// l'analyse et la conversion restent celles du CLI et de l'application.
-/// Les erreurs de fichier sont détectées avant la première commande ; une
-/// erreur d'application avorte la macro, sans laisser un import partiel.
-/// La macro exclut les autres clients et les chargements de projet pendant
-/// la création : les identifiants rendus appartiennent à une seule époque.
+/// Imports a file into a new workbook, one sheet per plane. All the
+/// analysis and conversion stay those of the CLI and the application.
+/// File errors are detected before the first command; an
+/// application error aborts the macro, leaving no partial import.
+/// The macro excludes other clients and project loads during
+/// creation: the identifiers returned belong to a single epoch.
 pub(crate) fn import_file(
     context: &ScriptContext,
     path: &Path,
@@ -664,7 +659,7 @@ pub(crate) fn import_file(
                 .map_err(|err| HostError::InvalidValue(format!("{}: {err}", path.display())))?;
             stokesforge_import::choose_recipe(store.recipes(), path, &bytes)
                 .cloned()
-                .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Sans titre"))
+                .unwrap_or_else(|| stokesforge_import::ImportRecipe::new("Untitled"))
         }
     };
     let items = stokesforge_importer::import_items(path, &recipe);
@@ -693,8 +688,8 @@ pub(crate) fn import_file(
         )?;
         let mut sheets = Vec::new();
         for plan in plans {
-            // Comme le CLI : si le nom du fichier n'est pas un nom de nœud
-            // valide (ou s'il est pris), garder un nom automatique.
+            // Like the CLI: if the file name is not a valid node name
+            // (or if it is taken), keep an automatic name.
             let sheet = add_created_node(
                 session,
                 book,
@@ -732,15 +727,15 @@ pub(crate) fn import_file(
         }
         Err(error) => {
             session.abort_macro().map_err(HostError::from_session)?;
-            // L'abandon défait l'écriture : les versions lues sont périmées.
+            // Abort undoes the write: the versions read are stale.
             context.forget_versions();
             Err(error)
         }
     }
 }
 
-/// Les commandes de création ne rendent pas d'identifiant : sous la macro
-/// exclusive, le dernier enfant de `parent` est celui qu'on vient de créer.
+/// Creation commands return no identifier: under the exclusive macro,
+/// the last child of `parent` is the one just created.
 pub(crate) fn add_created_node(
     session: &SessionHandle,
     parent: NodeId,
@@ -755,9 +750,9 @@ pub(crate) fn add_created_node(
         .ok_or_else(|| HostError::InvalidValue("created node not found after creation".into()))
 }
 
-/// Instantané de mutation : vérifier avant la réservation, puis revérifier
-/// sous la macro. Un Load entre ces deux gestes ne réhabilite jamais une
-/// poignée d'une ancienne époque, même si son identifiant existe à nouveau.
+/// Mutation snapshot: check before the reservation, then recheck
+/// under the macro. A Load between these two gestures never rehabilitates a
+/// handle from an old epoch, even if its identifier exists again.
 pub(crate) fn write_snapshot(
     context: &ScriptContext,
     id: NodeId,
@@ -775,8 +770,8 @@ pub(crate) fn write_snapshot(
     }
 }
 
-/// Crée en fin de parent ; la macro exclusive rend fiable la récupération
-/// du dernier enfant, comme pour l'import. Le parent absent désigne la racine.
+/// Creates at the end of the parent; the exclusive macro makes recovering
+/// the last child reliable, as for import. A missing parent means the root.
 pub(crate) fn create_node(
     context: &ScriptContext,
     parent: Option<(NodeId, u64)>,
@@ -791,7 +786,7 @@ pub(crate) fn create_node(
     Ok((id, epoch))
 }
 
-/// Renommage et suppression réutilisent les commandes génériques du modèle.
+/// Rename and delete reuse the model's generic commands.
 pub(crate) fn mutate_node(
     context: &ScriptContext,
     id: NodeId,
@@ -806,10 +801,10 @@ pub(crate) fn mutate_node(
     Ok(())
 }
 
-/// Remplace les valeurs, longueur comprise, sans changer le type, l'identité
-/// ni les métadonnées. Écrire d'abord ferme les refus (type, formule, plafond)
-/// avant de retirer la queue : un refus rattrapé ne laisse pas de troncature.
-/// Les autres colonnes de la feuille ne sont jamais redimensionnées.
+/// Replaces the values, length included, without changing the type, identity
+/// or metadata. Writing first closes the refusals (type, formula, cap)
+/// before removing the tail: a caught refusal leaves no truncation.
+/// The sheet's other columns are never resized.
 pub(crate) fn set_values(
     context: &ScriptContext,
     id: NodeId,
@@ -844,7 +839,7 @@ pub(crate) fn set_values(
             ValueBlock::Float(values)
         }
         (false, ValueBlock::Mixed(cells)) => ValueBlock::Mixed(cells),
-        // into_mixed normalise NaN en Empty : ici, conserver le NaN explicite.
+        // into_mixed normalizes NaN to Empty: here, keep the explicit NaN.
         (false, ValueBlock::Float(values)) => ValueBlock::Mixed(
             values
                 .into_iter()
@@ -858,17 +853,17 @@ pub(crate) fn set_values(
         .as_column()
         .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
     let previous_length = column.len();
-    // #312 — même priorité que `set_column`.
+    // #312: same priority as `set_column`.
     let version = expected
         .or_else(|| context.remembered_version(id, epoch))
         .unwrap_or_else(|| column.version());
     let session = context.session();
-    // Atomicité : SetCells puis DeleteCells sont un seul geste. Une macro
-    // imbriquée (LIFO dans la macro `Script`, invariant 8) permet de défaire
-    // l'écriture si la suppression de la queue échouait. Aucun chemin d'échec
-    // de `DeleteCells` n'est connu sous la macro exclusive du script (la
-    // colonne vient d'être validée et personne d'autre n'écrit) : pas de
-    // témoin boîte noire, la garde reste défensive.
+    // Atomicity: SetCells then DeleteCells are a single gesture. A nested
+    // macro (LIFO inside the `Script` macro, invariant 8) allows undoing
+    // the write if the tail deletion failed. No failure path of
+    // `DeleteCells` is known under the script's exclusive macro (the
+    // column was just validated and nobody else writes): no black-box
+    // witness, the guard stays defensive.
     session
         .begin_macro(MacroKind::Script)
         .map_err(HostError::from_session)?;
@@ -904,8 +899,8 @@ pub(crate) fn set_values(
     }
 }
 
-/// Modifie uniquement les champs demandés, en préservant provenance d'import
-/// et autres métadonnées. Le type et la version restent des lectures seules.
+/// Changes only the requested fields, preserving import provenance
+/// and other metadata. The type and version stay read-only.
 pub(crate) fn set_column_meta(
     context: &ScriptContext,
     id: NodeId,
@@ -944,11 +939,11 @@ pub(crate) fn set_column_meta(
             "unit" => meta.unit = value.unwrap_or_default(),
             "comment" => meta.comment = value.unwrap_or_default(),
             "display_format" => meta.display_format = value.unwrap_or_default(),
-            // Seule une clé `formula` fournie touche à la formule : les autres
-            // champs laissent la formule stockée telle quelle (jamais un
-            // aller-retour par les lettres, sinon un `#REF` bloquerait toute
-            // modification de l'unité). Lettres vers identifiants par
-            // `Tree::formula_from_letters`, comme l'interface.
+            // Only a provided `formula` key touches the formula: the other
+            // fields leave the stored formula as is (never a round trip
+            // through letters, otherwise a `#REF` would block any change
+            // of the unit). Letters to identifiers through
+            // `Tree::formula_from_letters`, like the interface.
             "formula" => {
                 meta.formula = match value {
                     None => None,

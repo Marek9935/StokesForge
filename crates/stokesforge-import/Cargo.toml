@@ -3,7 +3,7 @@ name = "stokesforge-import"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Import de fichiers de données d'instruments (CSV/TXT) via des recettes de parsing réutilisables."
+description = "Import of instrument data files (CSV/TXT) through reusable parsing recipes."
 
 [lints]
 workspace = true

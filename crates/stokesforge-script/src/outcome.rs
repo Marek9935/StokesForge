@@ -1,38 +1,38 @@
-//! Ce qu'une exécution de script a produit.
+//! What a script run produced.
 
-/// Résultat d'une exécution de script.
+/// Result of a script run.
 ///
-/// La sortie du script est **capturée**, jamais mêlée à celle du processus
-/// hôte : `print` atterrit dans [`ScriptOutcome::stdout`].
+/// The script's output is **captured**, never mixed with that of the host
+/// process: `print` lands in [`ScriptOutcome::stdout`].
 ///
-/// # Limite connue : la sortie n'est pas diffusée au fil de l'eau
+/// # Known limit: the output is not streamed as it is produced
 ///
-/// Dans le socle, `stdout` et `stderr` ne sont lisibles qu'**après** la fin du
-/// script : une exécution longue n'affiche rien avant de finir. C'est une
-/// limite assumée, pas un oubli — la diffusion incrémentale demanderait un
-/// canal de progression que le protocole de ce socle ne porte pas.
+/// In the foundation, `stdout` and `stderr` can be read only **after** the
+/// script ends: a long run shows nothing before it finishes. This is an
+/// accepted limit, not an oversight: incremental streaming would need a
+/// progress channel that this foundation's protocol does not carry.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScriptOutcome {
-    /// Ce que le script a écrit sur la sortie standard (`print`), jamais perdu
-    /// dans celle du processus.
+    /// What the script wrote to standard output (`print`), never lost in
+    /// that of the process.
     pub stdout: String,
-    /// Ce que le script a écrit sur la sortie d'erreur.
+    /// What the script wrote to the error output.
     pub stderr: String,
-    /// Message d'erreur **avec sa trace d'appels Python complète**, si le
-    /// script a échoué.
+    /// Error message **with its full Python traceback**, if the script
+    /// failed.
     ///
-    /// Quand [`ScriptOutcome::interrupted`] est vrai, ce champ contient
-    /// normalement la trace du `KeyboardInterrupt` qui a arrêté le script :
-    /// c'est un renseignement (*où* le script s'est arrêté), pas un échec à
-    /// présenter en rouge.
+    /// When [`ScriptOutcome::interrupted`] is true, this field normally
+    /// holds the traceback of the `KeyboardInterrupt` that stopped the script:
+    /// it is information (*where* the script stopped), not a failure to
+    /// show in red.
     pub error: Option<String>,
-    /// Vrai si l'exécution s'est arrêtée parce qu'une interruption avait été
-    /// demandée pendant qu'elle tournait.
+    /// True if the run stopped because an interruption was requested while
+    /// it was running.
     pub interrupted: bool,
 }
 
 impl ScriptOutcome {
-    /// Vrai si le script s'est terminé sans exception et sans interruption.
+    /// True if the script ended with no exception and no interruption.
     #[must_use]
     pub fn succeeded(&self) -> bool {
         self.error.is_none() && !self.interrupted

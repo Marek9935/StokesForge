@@ -1,22 +1,22 @@
-//! Fichiers importés récemment, et dossier mémorisé : un fichier JSON à côté
-//! des recettes (`import_recent.json`), même politique que [`crate::store`] —
-//! jamais de panique si le fichier est absent, illisible ou corrompu
-//! (invariant 10). Le dossier mémorisé est celui du fichier le plus récent.
+//! Recently imported files, and the remembered folder: a JSON file next to
+//! the recipes (`import_recent.json`), same policy as [`crate::store`]:
+//! never panic if the file is missing, unreadable or corrupt (invariant 10).
+//! The remembered folder is that of the most recent file.
 
 use std::path::{Path, PathBuf};
 
-/// Nombre maximal de fichiers récents gardés.
+/// Maximum number of recent files kept.
 pub const MAX_RECENT_FILES: usize = 10;
 
-/// Les fichiers importés récemment, du plus récent au plus ancien.
+/// The recently imported files, from most recent to oldest.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RecentFiles {
     files: Vec<PathBuf>,
 }
 
 impl RecentFiles {
-    /// Charge depuis le dossier de config utilisateur ; liste vide au moindre
-    /// problème.
+    /// Loads from the user config folder; empty list at the slightest
+    /// problem.
     pub fn load() -> Self {
         recent_path()
             .and_then(|path| std::fs::read_to_string(path).ok())
@@ -24,12 +24,12 @@ impl RecentFiles {
             .unwrap_or_default()
     }
 
-    /// Écrit sur disque (crée le dossier de config s'il n'existe pas).
+    /// Writes to disk (creates the config folder if it does not exist).
     pub fn save(&self) -> std::io::Result<()> {
         let path = recent_path().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "aucun dossier de config exploitable pour cet OS",
+                "no usable config folder for this OS",
             )
         })?;
         if let Some(dir) = path.parent() {
@@ -40,13 +40,13 @@ impl RecentFiles {
         std::fs::write(path, json)
     }
 
-    /// Les fichiers, du plus récent au plus ancien.
+    /// The files, from most recent to oldest.
     pub fn files(&self) -> &[PathBuf] {
         &self.files
     }
 
-    /// Place `paths` en tête (dans l'ordre donné : le premier devient le plus
-    /// récent), sans doublon, borné à [`MAX_RECENT_FILES`].
+    /// Puts `paths` at the front (in the given order: the first becomes the
+    /// most recent), without duplicates, bounded to [`MAX_RECENT_FILES`].
     pub fn record(&mut self, paths: &[PathBuf]) {
         let mut files: Vec<PathBuf> = Vec::new();
         for path in paths.iter().chain(self.files.iter()) {
@@ -58,7 +58,7 @@ impl RecentFiles {
         self.files = files;
     }
 
-    /// Le dossier du fichier le plus récent : là où rouvrir le sélecteur.
+    /// The folder of the most recent file: where to reopen the picker.
     pub fn last_dir(&self) -> Option<&Path> {
         self.files.first().and_then(|file| file.parent())
     }
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn a_corrupt_file_reads_as_empty() {
-        let parsed: Option<RecentFiles> = serde_json::from_str("{ pas du json").ok();
+        let parsed: Option<RecentFiles> = serde_json::from_str("{ not json").ok();
         assert!(parsed.is_none());
         assert!(RecentFiles::default().last_dir().is_none());
     }

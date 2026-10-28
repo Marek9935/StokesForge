@@ -1,13 +1,13 @@
-//! Tests d'intégration du pont Python embarqué.
+//! Integration tests of the embedded Python bridge.
 //!
-//! Ils ne s'exécutent qu'avec la feature `python` et exigent le préfixe
-//! vendorisé : lance `scripts/python-vendor.sh` puis `scripts/python-test.sh`.
+//! They run only with the `python` feature and require the vendored
+//! prefix: run `scripts/python-vendor.sh` then `scripts/python-test.sh`.
 //!
-//! CPython ne démarre qu'une fois par processus : tous les tests d'un même
-//! binaire de test partagent donc **le même** interpréteur. [`prepare`] est le
-//! point d'entrée unique, protégé par un `Once`, qui pose le piège
-//! `PYTHONPATH` **avant** toute initialisation — ainsi la preuve d'isolation
-//! vaut quel que soit l'ordre d'exécution des tests.
+//! CPython starts only once per process: all the tests of a single
+//! test binary therefore share **the same** interpreter. [`prepare`] is the
+//! single entry point, guarded by a `Once`, which sets the `PYTHONPATH`
+//! trap **before** any initialization — so the proof of isolation
+//! holds whatever the order in which the tests run.
 
 #![cfg(feature = "python")]
 
@@ -16,27 +16,27 @@ use std::sync::Once;
 
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 
-/// Valeur de piège injectée dans `PYTHONPATH` : elle ne doit jamais apparaître
-/// dans `sys.path`.
-const PYTHONPATH_PIEGE: &str = "/tmp/piege-stokesforge-pythonpath";
+/// Trap value injected into `PYTHONPATH`: it must never appear
+/// in `sys.path`.
+const PYTHONPATH_TRAP: &str = "/tmp/trap-stokesforge-pythonpath";
 
-/// Verrou de versions, lu à la compilation : une seule source de vérité.
+/// Version lock, read at compile time: a single source of truth.
 const LOCK_ENV: &str = include_str!("../../../vendor/python/lock.env");
 
 static PREPARE: Once = Once::new();
 
-/// Lit une clé du verrou `vendor/python/lock.env`.
+/// Reads a key of the `vendor/python/lock.env` lock.
 fn locked(key: &str) -> String {
     LOCK_ENV
         .lines()
         .filter_map(|line| line.split_once('='))
         .find(|(name, _)| name.trim() == key)
         .map(|(_, value)| value.trim().to_owned())
-        .unwrap_or_else(|| panic!("clé {key} absente de vendor/python/lock.env"))
+        .unwrap_or_else(|| panic!("key {key} missing from vendor/python/lock.env"))
 }
 
-/// Résout le préfixe embarqué : `STOKESFORGE_PYTHON_HOME` si posée par le script de
-/// test, sinon `vendor/python/extracted/python` relatif au manifeste.
+/// Resolves the embedded prefix: `STOKESFORGE_PYTHON_HOME` if set by the test
+/// script, otherwise `vendor/python/extracted/python` relative to the manifest.
 fn home() -> PathBuf {
     match std::env::var_os(interpreter::HOME_ENV) {
         Some(value) => PathBuf::from(value),
@@ -46,24 +46,24 @@ fn home() -> PathBuf {
     }
 }
 
-/// Pose le piège d'environnement puis démarre l'interpréteur, une seule fois.
+/// Sets the environment trap then starts the interpreter, only once.
 fn prepare() -> EmbeddedPython {
     let embedded = EmbeddedPython::with_home(home());
     PREPARE.call_once(|| {
-        // Posé AVANT l'initialisation : c'est le seul moment où CPython
-        // pourrait le lire. En mode isolé, il ne le lit pas.
-        std::env::set_var("PYTHONPATH", PYTHONPATH_PIEGE);
+        // Set BEFORE initialization: it is the only moment when CPython
+        // could read it. In isolated mode, it does not read it.
+        std::env::set_var("PYTHONPATH", PYTHONPATH_TRAP);
         embedded
             .initialize()
-            .expect("l'interpréteur embarqué doit démarrer");
+            .expect("the embedded interpreter must start");
     });
     embedded
 }
 
-/// #332 : l'appartenance au préfixe se juge par composants — ni un voisin
-/// au nom prolongé, ni (sous Windows) une différence de séparateur.
+/// #332: membership of the prefix is judged by components — neither a neighbor
+/// with an extended name, nor (on Windows) a difference of separator.
 #[test]
-fn contains_path_compare_par_composants() {
+fn contains_path_compares_by_components() {
     let embedded = EmbeddedPython::with_home(PathBuf::from("/opt/sf/python"));
     assert!(embedded.contains_path("/opt/sf/python"));
     assert!(embedded.contains_path("/opt/sf/python/lib/site-packages"));
@@ -79,121 +79,121 @@ fn contains_path_compare_par_composants() {
 }
 
 #[test]
-fn initialisation_idempotente() {
+fn idempotent_initialization() {
     let embedded = prepare();
-    assert!(embedded.initialize().is_ok(), "deuxième appel");
-    assert!(embedded.initialize().is_ok(), "troisième appel");
+    assert!(embedded.initialize().is_ok(), "second call");
+    assert!(embedded.initialize().is_ok(), "third call");
     assert!(EmbeddedPython::is_initialized());
 }
 
 #[test]
-fn locate_refuse_un_prefixe_absent() {
-    let bidon = EmbeddedPython::with_home(PathBuf::from("/n/existe/pas"));
-    assert!(!bidon.home().join("lib").exists());
+fn locate_refuses_a_missing_prefix() {
+    let bogus = EmbeddedPython::with_home(PathBuf::from("/does/not/exist"));
+    assert!(!bogus.home().join("lib").exists());
 }
 
 #[test]
-fn version_python_verrouillee() {
+fn python_version_is_locked() {
     prepare();
-    let version = interpreter::python_version().expect("version Python");
-    let attendue = locked("PYTHON_VERSION");
+    let version = interpreter::python_version().expect("Python version");
+    let expected = locked("PYTHON_VERSION");
     assert!(
-        version.starts_with(&attendue),
-        "version {version}, attendue {attendue}"
+        version.starts_with(&expected),
+        "version {version}, expected {expected}"
     );
 }
 
 #[test]
-fn version_numpy_verrouillee() {
+fn numpy_version_is_locked() {
     prepare();
-    let version = interpreter::numpy_version().expect("version numpy");
+    let version = interpreter::numpy_version().expect("numpy version");
     assert_eq!(version, locked("NUMPY_VERSION"));
 }
 
 #[test]
-fn aller_simple_somme() {
+fn one_way_sum() {
     prepare();
-    let somme = interpreter::roundtrip_sum(&[1.0, 2.0, 3.0]).expect("roundtrip_sum");
-    assert!((somme - 6.0).abs() < f64::EPSILON, "somme = {somme}");
+    let sum = interpreter::roundtrip_sum(&[1.0, 2.0, 3.0]).expect("roundtrip_sum");
+    assert!((sum - 6.0).abs() < f64::EPSILON, "sum = {sum}");
 }
 
 #[test]
-fn aller_retour_double() {
+fn round_trip_doubles() {
     prepare();
-    let sortie = interpreter::roundtrip_vec(&[1.0, 2.0]).expect("roundtrip_vec");
-    assert_eq!(sortie, vec![2.0, 4.0]);
+    let output = interpreter::roundtrip_vec(&[1.0, 2.0]).expect("roundtrip_vec");
+    assert_eq!(output, vec![2.0, 4.0]);
 }
 
 #[test]
-fn aller_retour_vide() {
+fn empty_round_trip() {
     prepare();
-    let sortie = interpreter::roundtrip_vec(&[]).expect("roundtrip_vec vide");
-    assert!(sortie.is_empty());
+    let output = interpreter::roundtrip_vec(&[]).expect("empty roundtrip_vec");
+    assert!(output.is_empty());
 }
 
 #[test]
-fn mode_isole_actif() {
+fn isolated_mode_is_active() {
     prepare();
     assert!(
         interpreter::sys_flags_isolated().expect("sys.flags.isolated"),
-        "l'interpréteur doit tourner en mode isolé"
+        "the interpreter must run in isolated mode"
     );
 }
 
 #[test]
-fn sys_path_ne_contient_que_le_prefixe_embarque() {
+fn sys_path_contains_only_the_embedded_prefix() {
     let embedded = prepare();
-    let prefixe = embedded
+    let prefix = embedded
         .home()
         .canonicalize()
-        .expect("le préfixe embarqué doit exister");
-    // Comparaison de chemins canoniques, pas de chaînes : sous Windows,
-    // `canonicalize` rend la forme `\\?\C:\…` alors que `sys.path` porte
-    // `C:\…` (#332). Une entrée introuvable ne se canonicalise pas et reste
-    // donc étrangère.
-    let dans_le_prefixe = |chemin: &str| {
-        std::path::Path::new(chemin)
+        .expect("the embedded prefix must exist");
+    // Comparison of canonical paths, not strings: on Windows,
+    // `canonicalize` returns the form `\\?\C:\…` whereas `sys.path` carries
+    // `C:\…` (#332). An entry that cannot be found does not canonicalize and
+    // therefore stays foreign.
+    let in_the_prefix = |path: &str| {
+        std::path::Path::new(path)
             .canonicalize()
-            .is_ok_and(|c| c.starts_with(&prefixe))
+            .is_ok_and(|c| c.starts_with(&prefix))
     };
 
-    let chemins = interpreter::sys_path().expect("sys.path");
-    assert!(!chemins.is_empty());
-    for chemin in &chemins {
+    let paths = interpreter::sys_path().expect("sys.path");
+    assert!(!paths.is_empty());
+    for path in &paths {
         assert!(
-            !chemin.starts_with("/usr"),
-            "sys.path contient un chemin système : {chemin}"
+            !path.starts_with("/usr"),
+            "sys.path contains a system path: {path}"
         );
         assert!(
-            !chemin.contains("/.local/"),
-            "sys.path contient un site utilisateur : {chemin}"
+            !path.contains("/.local/"),
+            "sys.path contains a user site: {path}"
         );
         assert!(
-            !chemin.contains("site-packages") || dans_le_prefixe(chemin),
-            "sys.path contient un site-packages étranger : {chemin}"
+            !path.contains("site-packages") || in_the_prefix(path),
+            "sys.path contains a foreign site-packages: {path}"
         );
     }
 }
 
 #[test]
-fn pythonpath_est_ignore() {
+fn pythonpath_is_ignored() {
     prepare();
-    let chemins = interpreter::sys_path().expect("sys.path");
+    let paths = interpreter::sys_path().expect("sys.path");
     assert_eq!(
         std::env::var("PYTHONPATH").as_deref(),
-        Ok(PYTHONPATH_PIEGE),
-        "le piège doit bien être posé dans l'environnement du processus"
+        Ok(PYTHONPATH_TRAP),
+        "the trap must really be set in the process environment"
     );
     assert!(
-        !chemins.iter().any(|c| c == PYTHONPATH_PIEGE),
-        "PYTHONPATH a fui dans sys.path : {chemins:?}"
+        !paths.iter().any(|c| c == PYTHONPATH_TRAP),
+        "PYTHONPATH leaked into sys.path: {paths:?}"
     );
 }
 
 #[test]
-fn sys_prefix_pointe_sur_le_prefixe_embarque() {
+fn sys_prefix_points_to_the_embedded_prefix() {
     let embedded = prepare();
-    let prefixe = interpreter::sys_prefix().expect("sys.prefix");
-    let attendu = embedded.home().to_string_lossy().into_owned();
-    assert_eq!(prefixe, attendu);
+    let prefix = interpreter::sys_prefix().expect("sys.prefix");
+    let wanted = embedded.home().to_string_lossy().into_owned();
+    assert_eq!(prefix, wanted);
 }

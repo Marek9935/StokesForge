@@ -1,6 +1,6 @@
-//! Contrat de navigation et de lecture du projet depuis `pyst` (issue #66).
-//! Les mêmes instantanés et poignées servent à une console et à une session
-//! sans interface ; aucun test ne dépend d'une feuille active ou d'une fenêtre.
+//! Contract for navigating and reading the project from `pyst` (issue #66).
+//! The same snapshots and handles serve a console and a session without an
+//! interface; no test depends on an active sheet or a window.
 
 #![cfg(feature = "python")]
 
@@ -15,7 +15,7 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::ScriptEngine;
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: ScriptEngine,
     session: SessionHandle,
     _actor: Session,
@@ -25,14 +25,14 @@ struct Banc {
     mixed: NodeId,
 }
 
-fn banc() -> Banc {
-    let mut project = Project::new("Lecture").unwrap();
+fn bench() -> Bench {
+    let mut project = Project::new("Reading").unwrap();
     let root = project.root();
-    let folder = project.add_folder(root, "Manips").unwrap();
-    let empty_folder = project.add_folder(root, "Vide").unwrap();
+    let folder = project.add_folder(root, "Experiments").unwrap();
+    let empty_folder = project.add_folder(root, "Empty").unwrap();
     let book = project.add_workbook(folder, Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
-    project.add_worksheet(book, Some("Vide")).unwrap();
+    project.add_worksheet(book, Some("Empty")).unwrap();
     let number = project
         .add_column(
             sheet,
@@ -45,7 +45,7 @@ fn banc() -> Banc {
                     role: ColumnRole::X,
                     long_name: "Température".into(),
                     unit: "°C".into(),
-                    comment: "Essai μ".into(),
+                    comment: "Trial μ".into(),
                     display_format: ".2f".into(),
                     ..Default::default()
                 },
@@ -112,7 +112,7 @@ fn banc() -> Banc {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/python/extracted/python")
         });
     let engine = ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(home)).unwrap();
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
@@ -123,8 +123,8 @@ fn banc() -> Banc {
     }
 }
 
-fn executer(banc: &Banc, source: &str) {
-    let outcome = banc.engine.run(source).unwrap();
+fn execute(bench: &Bench, source: &str) {
+    let outcome = bench.engine.run(source).unwrap();
     assert!(
         outcome.error.is_none(),
         "{}",
@@ -133,30 +133,30 @@ fn executer(banc: &Banc, source: &str) {
 }
 
 #[test]
-fn navigation_ordonnees_metadonnees_et_longueurs_sans_mutation() {
-    let banc = banc();
-    let before = banc.session.snapshot().unwrap();
-    executer(
-        &banc,
+fn navigation_ordering_metadata_and_lengths_without_mutation() {
+    let bench = bench();
+    let before = bench.session.snapshot().unwrap();
+    execute(
+        &bench,
         r#"
-def noms(handles):
+def names(handles):
     return [pyst.info(h)['name'] for h in handles]
-racine = pyst.root()
-assert pyst.info(racine) == dict(name='Lecture', kind='folder', parent=None, row_count=None, column=None)
-assert noms(pyst.children()) == ['Manips', 'Vide', 'Note1', 'Graph1', 'Matrix1']
-assert noms(pyst.children(racine)) == noms(pyst.children())
+root_handle = pyst.root()
+assert pyst.info(root_handle) == dict(name='Reading', kind='folder', parent=None, row_count=None, column=None)
+assert names(pyst.children()) == ['Experiments', 'Empty', 'Note1', 'Graph1', 'Matrix1']
+assert names(pyst.children(root_handle)) == names(pyst.children())
 folder = pyst.children()[0]
 book = pyst.children(folder)[0]
 assert pyst.info(book)['kind'] == 'workbook'
-assert pyst.info(pyst.info(book)['parent'])['name'] == 'Manips'
-assert noms(pyst.children(book)) == ['Sheet1', 'Vide']
+assert pyst.info(pyst.info(book)['parent'])['name'] == 'Experiments'
+assert names(pyst.children(book)) == ['Sheet1', 'Empty']
 sheet, empty_sheet = pyst.children(book)
 assert pyst.info(sheet)['kind'] == 'worksheet'
 assert pyst.info(sheet)['row_count'] == 7
 assert pyst.info(empty_sheet)['row_count'] == 0
 assert pyst.children(empty_sheet) == []
 assert pyst.children(pyst.children()[1]) == []
-assert noms(pyst.children(sheet)) == ['A', 'T', 'M', 'Date', 'Empty']
+assert names(pyst.children(sheet)) == ['A', 'T', 'M', 'Date', 'Empty']
 a = pyst.children(sheet)[0]
 description = pyst.info(a)
 assert description['name'] == 'A' and description['kind'] == 'column'
@@ -166,7 +166,7 @@ meta = description['column']
 assert set(meta) == {'type', 'role', 'long_name', 'unit', 'comment', 'x_prime', 'display_format', 'formula', 'version'}
 assert meta['type'] == 'numeric' and meta['role'] == 'x'
 assert meta['long_name'] == 'Température' and meta['unit'] == '°C'
-assert meta['comment'] == 'Essai μ' and meta['display_format'] == '.2f'
+assert meta['comment'] == 'Trial μ' and meta['display_format'] == '.2f'
 assert meta['formula'] is None and meta['x_prime'] is None and isinstance(meta['version'], int)
 assert pyst.info(pyst.resolve('[Book1]Sheet1!Date'))['column']['type'] == 'datetime'
 assert pyst.info(pyst.resolve('[Book1]Sheet1!T'))['column']['type'] == 'mixed'
@@ -176,11 +176,11 @@ for name, kind in [('Note1', 'note'), ('Graph1', 'graph'), ('Matrix1', 'matrix')
     assert pyst.info(h)['kind'] == kind
     assert pyst.info(h)['column'] is None and pyst.info(h)['row_count'] is None
     assert pyst.children(h) == []
-# Le dictionnaire et la liste sont des valeurs détachées du modèle.
+# The dictionary and the list are values detached from the model.
 meta['unit'] = 'K'
-description['name'] = 'Autre'
-colonnes = pyst.children(sheet)
-colonnes.clear()
+description['name'] = 'Other'
+columns = pyst.children(sheet)
+columns.clear()
 assert pyst.info(a)['column']['unit'] == '°C'
 assert pyst.info(a)['name'] == 'A' and len(pyst.children(sheet)) == 5
 assert not hasattr(a, 'id') and not hasattr(a, 'epoch')
@@ -189,67 +189,68 @@ try:
 except TypeError:
     pass
 else:
-    raise AssertionError('poignée constructible depuis Python')
+    raise AssertionError('handle constructible from Python')
 "#,
     );
-    let after = banc.session.snapshot().unwrap();
+    let after = bench.session.snapshot().unwrap();
     assert_eq!(after.revision, before.revision);
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.history, before.history);
 }
 
 #[test]
-fn cellules_texte_mixtes_et_numeriques_conservees_exactement() {
-    let banc = banc();
-    executer(
-        &banc,
+fn text_mixed_and_numeric_cells_kept_exactly() {
+    let bench = bench();
+    execute(
+        &bench,
         r#"
 import math
 import numpy
-texte = pyst.values(pyst.resolve('[Book1]Sheet1!T'))
-assert texte == ('étiquette', None, '', '12.5')
+text = pyst.values(pyst.resolve('[Book1]Sheet1!T'))
+assert text == ('étiquette', None, '', '12.5')
 m = pyst.resolve('[Book1]Sheet1!M')
-cellules = pyst.values(m)
-assert isinstance(cellules, tuple) and len(cellules) == 7
-assert cellules[0] is None and cellules[1] == '' and math.isnan(cellules[2])
-assert cellules[3] == 0 and math.copysign(1, cellules[3]) == -1
-assert cellules[4] == '12.5' and type(cellules[4]) is str
-assert math.isinf(cellules[5]) and cellules[6] == 'μ\nλ'
+cells = pyst.values(m)
+assert isinstance(cells, tuple) and len(cells) == 7
+assert cells[0] is None and cells[1] == '' and math.isnan(cells[2])
+assert cells[3] == 0 and math.copysign(1, cells[3]) == -1
+assert cells[4] == '12.5' and type(cells[4]) is str
+assert math.isinf(cells[5]) and cells[6] == 'μ\nλ'
 try:
-    cellules[0] = 42
+    cells[0] = 42
 except TypeError:
     pass
 else:
     raise AssertionError('tuple modifiable')
 assert pyst.values(pyst.resolve('[Book1]Sheet1!Empty')) == ()
 a = pyst.resolve('[Book1]Sheet1!A')
-nombres = pyst.values(a)
-assert nombres[0] == 1 and math.copysign(1, nombres[1]) == -1 and math.isnan(nombres[2])
-vue = pyst.column(a)
-assert isinstance(vue, numpy.ndarray) and vue.dtype == numpy.float64 and not vue.flags.writeable
-assert numpy.shares_memory(vue, pyst.column(a))
+numbers = pyst.values(a)
+assert numbers[0] == 1 and math.copysign(1, numbers[1]) == -1 and math.isnan(numbers[2])
+view = pyst.column(a)
+assert isinstance(view, numpy.ndarray) and view.dtype == numpy.float64 and not view.flags.writeable
+assert numpy.shares_memory(view, pyst.column(a))
 date = pyst.resolve('[Book1]Sheet1!Date')
 assert pyst.values(date) == (0., 1700000000.)
 assert list(pyst.column(date)) == [0., 1700000000.]
 "#,
     );
-    banc.session
+    bench
+        .session
         .execute(Command::SetCells {
-            column: banc.mixed,
+            column: bench.mixed,
             start: 0,
-            values: ValueBlock::Mixed(vec![MixedCell::Text("nouveau".into())]),
+            values: ValueBlock::Mixed(vec![MixedCell::Text("new".into())]),
             expected_version: None,
         })
         .unwrap();
-    executer(&banc, "assert cellules[0] is None\nassert pyst.values(m)[0] == 'nouveau'\nassert texte == ('étiquette', None, '', '12.5')");
+    execute(&bench, "assert cells[0] is None\nassert pyst.values(m)[0] == 'new'\nassert text == ('étiquette', None, '', '12.5')");
 }
 
 #[test]
-fn lectures_refusent_les_mauvaises_cibles_avec_les_exceptions_du_pont() {
-    let banc = banc();
-    let before = banc.session.snapshot().unwrap();
-    executer(
-        &banc,
+fn reads_refuse_wrong_targets_with_the_bridge_exceptions() {
+    let bench = bench();
+    let before = bench.session.snapshot().unwrap();
+    execute(
+        &bench,
         r#"
 for h in [pyst.root(), pyst.resolve('[Book1]'), pyst.resolve('[Book1]Sheet1'), pyst.resolve('[Note1]')]:
     try:
@@ -257,103 +258,106 @@ for h in [pyst.root(), pyst.resolve('[Book1]'), pyst.resolve('[Book1]Sheet1'), p
     except pyst.InvalidValueError as e:
         assert 'not a column' in str(e)
     else:
-        raise AssertionError('une lecture de cellules accepte un autre objet')
-for path in ['[Absent]', '[Book1]Absent', '[Book1]Sheet1!Absent', '[malforme']:
+        raise AssertionError('a cell read accepts another object')
+for path in ['[Absent]', '[Book1]Absent', '[Book1]Sheet1!Absent', '[malformed']:
     try:
         pyst.resolve(path)
     except pyst.UnknownPathError:
         pass
     else:
-        raise AssertionError('chemin inconnu accepté')
+        raise AssertionError('unknown path accepted')
 "#,
     );
-    let after = banc.session.snapshot().unwrap();
+    let after = bench.session.snapshot().unwrap();
     assert_eq!(after.revision, before.revision);
     assert_eq!(after.history, before.history);
 }
 
 #[test]
-fn poignees_de_navigation_survivent_au_renommage_deplacement_et_annulation() {
-    let banc = banc();
-    executer(
-        &banc,
+fn navigation_handles_survive_renaming_moving_and_undo() {
+    let bench = bench();
+    execute(
+        &bench,
         "book = pyst.children(pyst.children()[0])[0]\na = pyst.children(pyst.children(book)[0])[0]",
     );
-    banc.session
+    bench
+        .session
         .execute(Command::Rename {
-            id: banc.number,
-            name: "Renommee".into(),
+            id: bench.number,
+            name: "Renamed".into(),
         })
         .unwrap();
-    banc.session
+    bench
+        .session
         .execute(Command::Move {
-            id: banc.book,
-            new_parent: banc.empty_folder,
+            id: bench.book,
+            new_parent: bench.empty_folder,
             index: 0,
         })
         .unwrap();
-    executer(
-        &banc,
+    execute(
+        &bench,
         r#"
-assert pyst.info(a)['name'] == 'Renommee'
+assert pyst.info(a)['name'] == 'Renamed'
 assert pyst.values(a)[0] == 1
-assert pyst.info(pyst.info(book)['parent'])['name'] == 'Vide'
-assert pyst.info(pyst.children(pyst.children(book)[0])[0])['name'] == 'Renommee'
+assert pyst.info(pyst.info(book)['parent'])['name'] == 'Empty'
+assert pyst.info(pyst.children(pyst.children(book)[0])[0])['name'] == 'Renamed'
 "#,
     );
-    banc.session
+    bench
+        .session
         .execute(Command::DeleteColumn {
-            column: banc.number,
+            column: bench.number,
         })
         .unwrap();
-    executer(
-        &banc,
+    execute(
+        &bench,
         r#"
-for lecture in [pyst.info, pyst.children, pyst.values, pyst.column]:
+for reader in [pyst.info, pyst.children, pyst.values, pyst.column]:
     try:
-        lecture(a)
+        reader(a)
     except pyst.BrokenReferenceError:
         pass
     else:
-        raise AssertionError('poignée supprimée acceptée')
+        raise AssertionError('removed handle accepted')
 "#,
     );
-    banc.session.undo().unwrap();
-    executer(
-        &banc,
-        "assert pyst.info(a)['name'] == 'Renommee'\nassert pyst.values(a)[0] == 1",
+    bench.session.undo().unwrap();
+    execute(
+        &bench,
+        "assert pyst.info(a)['name'] == 'Renamed'\nassert pyst.values(a)[0] == 1",
     );
 }
 
 #[test]
-fn chargement_invalide_toutes_les_lectures_meme_si_les_identifiants_reapparaissent() {
-    let banc = banc();
-    executer(
-        &banc,
+fn loading_invalidates_all_reads_even_if_the_identifiers_reappear() {
+    let bench = bench();
+    execute(
+        &bench,
         r#"
-racine = pyst.root()
+root_handle = pyst.root()
 book = pyst.children(pyst.children()[0])[0]
 sheet = pyst.children(book)[0]
-a, texte, mixte, date, vide = pyst.children(sheet)
+a, text, mixed_col, date, empty_col = pyst.children(sheet)
 parent = pyst.info(a)['parent']
 "#,
     );
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("identique.stf");
-    banc.session.save(&path).unwrap();
-    banc.session.load(&path).unwrap();
-    executer(
-        &banc,
+    let path = dir.path().join("identical.stf");
+    bench.session.save(&path).unwrap();
+    bench.session.load(&path).unwrap();
+    execute(
+        &bench,
         r#"
-for h in [racine, book, sheet, parent, a, texte, mixte, date, vide]:
-    for lecture in [pyst.info, pyst.children, pyst.values, pyst.column]:
+for h in [root_handle, book, sheet, parent, a, text, mixed_col, date, empty_col]:
+    for reader in [pyst.info, pyst.children, pyst.values, pyst.column]:
         try:
-            lecture(h)
+            reader(h)
         except pyst.BrokenReferenceError as e:
             assert 'loaded' in str(e)
         else:
-            raise AssertionError('une ancienne poignée désigne le projet rechargé')
-assert pyst.info(pyst.root())['name'] == 'Lecture'
+            raise AssertionError('a stale handle designates the reloaded project')
+assert pyst.info(pyst.root())['name'] == 'Reading'
 assert len(pyst.children()) == 5
 assert pyst.values(pyst.resolve('[Book1]Sheet1!T')) == ('étiquette', None, '', '12.5')
 "#,
@@ -361,8 +365,8 @@ assert pyst.values(pyst.resolve('[Book1]Sheet1!T')) == ('étiquette', None, '', 
 }
 
 #[test]
-fn metadonnees_relues_et_roles_de_colonne_stables() {
-    let banc = banc();
+fn metadata_read_back_and_stable_column_roles() {
+    let bench = bench();
     for (role, expected) in [
         (ColumnRole::X, "x"),
         (ColumnRole::Y, "y"),
@@ -378,9 +382,10 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
         (ColumnRole::Label, "label"),
         (ColumnRole::None, "none"),
     ] {
-        banc.session
+        bench
+            .session
             .execute(Command::SetColumnMeta {
-                column: banc.number,
+                column: bench.number,
                 meta: ColumnMeta {
                     role,
                     unit: "K".into(),
@@ -391,17 +396,17 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
                 },
             })
             .unwrap();
-        executer(&banc, &format!("meta = pyst.info(pyst.resolve('[Book1]Sheet1!A'))['column']\nassert meta['role'] == {expected:?}\nassert meta['unit'] == 'K'\nassert meta['formula'] == '2+3'"));
+        execute(&bench, &format!("meta = pyst.info(pyst.resolve('[Book1]Sheet1!A'))['column']\nassert meta['role'] == {expected:?}\nassert meta['unit'] == 'K'\nassert meta['formula'] == '2+3'"));
     }
 }
 
-/// #168 : `set_column_meta(role='y4')` se relit `'y4'` ; un rôle hors liste
-/// (`'x5'`) est refusé.
+/// #168: `set_column_meta(role='y4')` reads back as `'y4'`; a role outside the
+/// list (`'x5'`) is refused.
 #[test]
-fn les_roles_x3_a_y4_s_ecrivent_et_x5_est_refuse() {
-    let banc = banc();
-    executer(
-        &banc,
+fn roles_x3_to_y4_can_be_written_and_x5_is_refused() {
+    let bench = bench();
+    execute(
+        &bench,
         r#"
 a = pyst.resolve('[Book1]Sheet1!A')
 pyst.set_column_meta(a, role='y4')
@@ -411,20 +416,20 @@ try:
 except pyst.InvalidValueError:
     pass
 else:
-    raise AssertionError('rôle x5 accepté')
+    raise AssertionError('role x5 accepted')
 "#,
     );
 }
 
-/// Formules en lettres côté `pyst` (#321) : `info` lit des lettres, une lettre
-/// inconnue est refusée, une colonne lue qui disparaît laisse `#REF` (qu'on ne
-/// peut pas réécrire), et changer un autre champ de cette colonne réussit sans
-/// toucher à la formule.
+/// Formulas in letters on the `pyst` side (#321): `info` reads letters, an
+/// unknown letter is refused, a read column that disappears leaves `#REF`
+/// (which cannot be rewritten), and changing another field of that column
+/// succeeds without touching the formula.
 #[test]
-fn les_formules_se_lisent_et_s_ecrivent_en_lettres_et_ref_est_refuse() {
-    let banc = banc();
-    executer(
-        &banc,
+fn formulas_are_read_and_written_in_letters_and_ref_is_refused() {
+    let bench = bench();
+    execute(
+        &bench,
         r#"
 e = pyst.resolve('[Book1]Sheet1!Empty')
 pyst.set_column_meta(e, formula='a * 2')
@@ -435,7 +440,7 @@ try:
 except pyst.InvalidValueError:
     pass
 else:
-    raise AssertionError('lettre sans colonne acceptée')
+    raise AssertionError('letter without a column accepted')
 assert pyst.info(e)['column']['formula'] == 'A * 2'
 
 pyst.remove(pyst.resolve('[Book1]Sheet1!A'))
@@ -446,7 +451,7 @@ try:
 except pyst.InvalidValueError:
     pass
 else:
-    raise AssertionError('#REF réécrit')
+    raise AssertionError('#REF rewritten')
 pyst.set_column_meta(e, unit='m')
 meta = pyst.info(e)['column']
 assert meta['unit'] == 'm' and meta['formula'] == '#REF * 2'
@@ -455,28 +460,28 @@ assert meta['unit'] == 'm' and meta['formula'] == '#REF * 2'
 }
 
 #[test]
-fn session_fermee_refuse_aussi_la_racine_et_les_lectures_sans_poignee() {
-    let Banc {
+fn closed_session_also_refuses_the_root_and_reads_without_a_handle() {
+    let Bench {
         engine,
         _actor: actor,
         ..
-    } = banc();
+    } = bench();
     let outcome = engine
-        .run("racine = pyst.root()\na = pyst.resolve('[Book1]Sheet1!A')")
+        .run("root_handle = pyst.root()\na = pyst.resolve('[Book1]Sheet1!A')")
         .unwrap();
     assert!(outcome.error.is_none());
     actor.shutdown().unwrap();
     let outcome = engine
         .run(
             r#"
-for lecture in [pyst.root, pyst.children, lambda: pyst.children(racine),
+for reader in [pyst.root, pyst.children, lambda: pyst.children(root_handle),
                 lambda: pyst.info(a), lambda: pyst.values(a), lambda: pyst.column(a)]:
     try:
-        lecture()
+        reader()
     except pyst.BrokenReferenceError as e:
         assert 'session is closed' in str(e)
     else:
-        raise AssertionError('la lecture ignore la fermeture de la session')
+        raise AssertionError('the read ignores the closing of the session')
 "#,
         )
         .unwrap();

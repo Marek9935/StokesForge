@@ -1,12 +1,12 @@
-//! Édition de classeur depuis pyst (#331, lot 2, S5) : lignes, type de colonne,
-//! déplacement, duplication, texte d'une note.
+//! Workbook editing from pyst (#331, batch 2, S5): rows, column type,
+//! move, duplication, text of a note.
 //!
-//! Aucune règle ici : chaque appel envoie la commande annulable que
-//! l'interface emploie aussi (`InsertRows`, `DeleteRows`, `SetColumnType`,
-//! `Move`, `DuplicateWorksheet`/`InsertCopy`, `SetNoteText`), dans le groupe
-//! annulable du script. Les poignées sont revalidées sous la réservation.
-//! Une écriture de colonne par le script met à jour la version qu'il avait lue
-//! de cette colonne : ses écritures suivantes ne se refusent pas elles-mêmes.
+//! No rule here: each call sends the undoable command that the interface
+//! also uses (`InsertRows`, `DeleteRows`, `SetColumnType`, `Move`,
+//! `DuplicateWorksheet`/`InsertCopy`, `SetNoteText`), in the script's
+//! undoable group. Handles are revalidated under the reservation.
+//! A column write by the script updates the version it had read of that
+//! column: its following writes do not refuse themselves.
 
 use pyo3::prelude::*;
 use stokesforge_commands::Command;
@@ -17,7 +17,7 @@ use crate::engine::{self, ScriptContext};
 use crate::graph::invalid;
 use crate::surface::{to_py_error, Handle};
 
-/// Les colonnes de la feuille `sheet` (celles que des lignes touchent).
+/// The columns of worksheet `sheet` (the ones that rows touch).
 fn sheet_columns(
     context: &ScriptContext,
     sheet: NodeId,
@@ -40,7 +40,7 @@ fn sheet_columns(
         .collect())
 }
 
-/// Insère (`insert`) ou supprime des lignes au niveau de la feuille.
+/// Inserts (`insert`) or deletes rows at the worksheet level.
 fn edit_rows(
     context: &ScriptContext,
     sheet: NodeId,
@@ -58,8 +58,8 @@ fn edit_rows(
             "{sheet} is not a worksheet"
         )));
     }
-    // Le modèle ignore en silence une plage hors de toutes les colonnes ; pour
-    // un script, c'est une faute de frappe qu'il vaut mieux dire.
+    // The model silently ignores a range outside all the columns; for a
+    // script, that is a typo that is better reported.
     let rows = sheet_columns(context, sheet, epoch)?
         .into_iter()
         .filter_map(|id| snapshot.tree.node(id)?.as_column().map(|c| c.len()))
@@ -95,15 +95,15 @@ fn check_row_count(count: usize) -> PyResult<()> {
     Ok(())
 }
 
-/// Insère `count` lignes vides (une par défaut) à la ligne `at` (0 = en tête)
-/// de la feuille : toutes ses colonnes d'au moins `at` lignes s'allongent, les
-/// cellules suivantes descendent. `at` égal au nombre de lignes de la feuille ajoute
-/// en fin ; une colonne plus courte que `at` n'est pas touchée. Annulable par
+/// Inserts `count` empty rows (one by default) at row `at` (0 = at the top)
+/// of the worksheet: all its columns of at least `at` rows grow, the following
+/// cells move down. An `at` equal to the worksheet's row count appends at the
+/// end; a column shorter than `at` is not touched. Undoable with
 /// `pyst.undo()`.
 ///
-/// Lève `InvalidValueError` pour une poignée qui n'est pas une feuille, un
-/// `at` au-delà de la dernière ligne ou un total au-dessus du plafond du modèle ;
-/// `BrokenReferenceError` pour une poignée périmée.
+/// Raises `InvalidValueError` for a handle that is not a worksheet, an
+/// `at` past the last row or a total above the model's cap;
+/// `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (worksheet, at, count=1))]
 pub(crate) fn insert_rows(
@@ -120,12 +120,12 @@ pub(crate) fn insert_rows(
         .map_err(to_py_error)
 }
 
-/// Supprime `count` lignes (une par défaut) à partir de la ligne `at` (0 = la
-/// première) dans les colonnes de la feuille qui ont une ligne `at`, et remonte
-/// ce qui suit. Annulable par `pyst.undo()`, qui rend les cellules retirées.
+/// Deletes `count` rows (one by default) starting at row `at` (0 = the
+/// first) in the worksheet's columns that have a row `at`, and moves up
+/// what follows. Undoable with `pyst.undo()`, which returns the removed cells.
 ///
-/// Lève `InvalidValueError` pour une poignée qui n'est pas une feuille ou un
-/// `at` au-delà de la dernière ligne ; `BrokenReferenceError` pour une poignée périmée.
+/// Raises `InvalidValueError` for a handle that is not a worksheet or an
+/// `at` past the last row; `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (worksheet, at, count=1))]
 pub(crate) fn delete_rows(
@@ -141,13 +141,13 @@ pub(crate) fn delete_rows(
         .map_err(to_py_error)
 }
 
-/// Change le type d'une colonne : `'numeric'`, `'datetime'` ou `'mixed'` (les
-/// colonnes texte sont `'mixed'`). **La conversion peut perdre des valeurs** (un
-/// texte vers `'numeric'` ne se relit pas) ; `pyst.undo()` rend type et valeurs.
-/// Rôle, unité et nom restent. Une colonne-formule refuse la conversion.
+/// Changes a column's type: `'numeric'`, `'datetime'` or `'mixed'` (text
+/// columns are `'mixed'`). **The conversion can lose values** (a text turned
+/// into `'numeric'` does not read back); `pyst.undo()` restores type and
+/// values. Role, unit and name stay. A formula column refuses the conversion.
 ///
-/// Lève `InvalidValueError` pour un type inconnu ou une poignée qui n'est pas
-/// une colonne ; `BrokenReferenceError` pour une poignée périmée.
+/// Raises `InvalidValueError` for an unknown type or a handle that is not
+/// a column; `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (column, column_type))]
 pub(crate) fn set_column_type(py: Python<'_>, column: &Handle, column_type: &str) -> PyResult<()> {
@@ -175,15 +175,15 @@ pub(crate) fn set_column_type(py: Python<'_>, column: &Handle, column_type: &str
     .map_err(to_py_error)
 }
 
-/// Déplace un objet sous `parent` (dossier, classeur ou feuille selon sa
-/// nature) à la position `index` parmi les autres enfants de `parent` ; sans
-/// `index`, en dernier. Avec le même parent, c'est un simple réordonnancement.
-/// La poignée reste valide. Annulable par `pyst.undo()`.
+/// Moves an object under `parent` (folder, workbook or worksheet depending on
+/// its kind) to position `index` among `parent`'s other children; without
+/// `index`, last. With the same parent, it is a plain reordering.
+/// The handle stays valid. Undoable with `pyst.undo()`.
 ///
-/// Lève `InvalidValueError` si `parent` n'accepte pas ce genre d'objet, si le
-/// déplacement est circulaire, si le nom est déjà pris dans `parent`, si `index`
-/// est hors limites ou si l'objet est la racine ; `BrokenReferenceError` pour
-/// une poignée périmée.
+/// Raises `InvalidValueError` if `parent` does not accept this kind of object,
+/// if the move is circular, if the name is already taken in `parent`, if
+/// `index` is out of bounds or if the object is the root; `BrokenReferenceError`
+/// for a stale handle.
 #[pyfunction]
 #[pyo3(name = "move", signature = (handle, parent, index=None))]
 pub(crate) fn move_node(
@@ -214,7 +214,7 @@ pub(crate) fn move_node(
     .map_err(to_py_error)
 }
 
-/// Le premier « <nom> copy N » libre parmi les enfants de `parent`.
+/// The first free "<name> copy N" among `parent`'s children.
 fn free_copy_name(
     snapshot: &stokesforge_session::Snapshot,
     parent: NodeId,
@@ -239,14 +239,14 @@ fn free_copy_name(
         .unwrap_or_else(|| origin.to_owned())
 }
 
-/// Duplique un objet (et ses descendants, identifiants neufs) dans le même
-/// parent et rend la poignée de la copie. Une feuille est copiée juste après
-/// l'original, les autres objets en fin de parent. `name` nomme la copie ; sans
-/// lui, le premier « <nom> copy N » libre. Annulable par `pyst.undo()`.
+/// Duplicates an object (and its descendants, with new identifiers) in the same
+/// parent and returns the copy's handle. A worksheet is copied right after
+/// the original, other objects at the end of the parent. `name` names the copy;
+/// without it, the first free "<name> copy N". Undoable with `pyst.undo()`.
 ///
-/// Lève `InvalidValueError` pour la racine, un nom refusé ou déjà pris, ou un
-/// objet que le modèle ne copie pas ; `BrokenReferenceError` pour une poignée
-/// périmée.
+/// Raises `InvalidValueError` for the root, a refused or already taken name,
+/// or an object the model does not copy; `BrokenReferenceError` for a stale
+/// handle.
 #[pyfunction]
 #[pyo3(signature = (handle, name=None))]
 pub(crate) fn duplicate(py: Python<'_>, handle: &Handle, name: Option<String>) -> PyResult<Handle> {
@@ -275,8 +275,8 @@ pub(crate) fn duplicate(py: Python<'_>, handle: &Handle, name: Option<String>) -
                 .session()
                 .execute(command)
                 .map_err(HostError::from_session)?;
-            // Sous la macro du script, personne d'autre n'écrit : l'enfant
-            // apparu est la copie.
+            // Under the script's macro, nobody else writes: the child that
+            // appeared is the copy.
             let after = context
                 .session()
                 .snapshot()
@@ -294,11 +294,11 @@ pub(crate) fn duplicate(py: Python<'_>, handle: &Handle, name: Option<String>) -
     Ok(Handle { id: created, epoch })
 }
 
-/// Remplace le texte d'une note (`text` est le texte entier, sauts de ligne
-/// compris). Annulable par `pyst.undo()`.
+/// Replaces a note's text (`text` is the whole text, line breaks
+/// included). Undoable with `pyst.undo()`.
 ///
-/// Lève `InvalidValueError` si la poignée n'est pas une note ;
-/// `BrokenReferenceError` pour une poignée périmée.
+/// Raises `InvalidValueError` if the handle is not a note;
+/// `BrokenReferenceError` for a stale handle.
 #[pyfunction]
 #[pyo3(signature = (note, text))]
 pub(crate) fn set_note(py: Python<'_>, note: &Handle, text: String) -> PyResult<()> {

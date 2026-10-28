@@ -1,40 +1,39 @@
-//! Décodage des octets d'un fichier en texte, avant tout découpage.
+//! Decoding of a file's bytes into text, before any splitting.
 //!
-//! Les logiciels d'appareil sous Windows (Spectra Manager de Jasco, entre
-//! autres) écrivent encore leurs exports dans la page de code locale — en
-//! France, Windows-1252 : « 19.91 °C » y donne l'octet `0xB0`, invalide en
-//! UTF-8. Un tel fichier n'est pas corrompu ; le refuser ferait échouer tout
-//! l'import pour un seul caractère d'un commentaire de pied de page.
+//! Device software on Windows (Jasco's Spectra Manager, among others) still
+//! writes its exports in the local code page. In France that is Windows-1252:
+//! "19.91 °C" gives the byte `0xB0` there, invalid in UTF-8. Such a file is
+//! not corrupt; rejecting it would fail the whole import for a single
+//! character in a footer comment.
 //!
-//! Ordre d'essai, du plus sûr au plus permissif :
+//! Order of attempts, from safest to most permissive:
 //!
-//! 1. marque d'ordre UTF-16 (`FF FE` / `FE FF`) → UTF-16 ;
-//! 2. UTF-8 valide (marque `EF BB BF` retirée si présente) → tel quel ;
-//! 3. sinon, **décodage mixte** : chaque séquence UTF-8 valide est gardée,
-//!    chaque octet invalide est lu en Windows-1252 (un fichier presque UTF-8
-//!    dont un seul octet est invalide garde ses autres accents) ;
-//! 4. dans tous les cas, si les octets ne ressemblent pas à du texte → refus.
+//! 1. UTF-16 byte order mark (`FF FE` / `FE FF`) → UTF-16;
+//! 2. valid UTF-8 (`EF BB BF` mark removed if present) → as is;
+//! 3. otherwise, **mixed decoding**: each valid UTF-8 sequence is kept, each
+//!    invalid byte is read as Windows-1252 (an almost-UTF-8 file with a single
+//!    invalid byte keeps its other accents);
+//! 4. in every case, if the bytes do not look like text → rejected.
 //!
-//! Risque accepté : un fichier réellement écrit en Windows-1252 dont deux
-//! octets consécutifs forment par hasard une séquence UTF-8 valide (`Ã©`,
-//! octets `C3 A9`) est lu `é`, pas `Ã©`. Pour ce cas rare, l'encodage se force
-//! dans la recette (`Encoding::Windows1252`).
+//! Accepted risk: a file really written in Windows-1252 whose two consecutive
+//! bytes happen to form a valid UTF-8 sequence (`Ã©`, bytes `C3 A9`) is read
+//! as `é`, not `Ã©`. For this rare case, the encoding is forced in the recipe
+//! (`Encoding::Windows1252`).
 //!
-//! Un fichier entièrement Windows-1252 (sans séquence UTF-8 valide) est lu
-//! comme avant. Windows-1252 accepte les 256 octets sans échec ; c'est donc le filtre
-//! « ressemble à du texte » qui distingue un fichier texte d'un binaire :
-//! aucun caractère de contrôle C0 hors tabulation, saut de ligne, retour
-//! chariot, saut de page, et `0x1A` (fin de fichier DOS). Un fichier binaire
-//! en contient presque toujours dans ses premiers octets ; un export texte
-//! jamais.
+//! A fully Windows-1252 file (with no valid UTF-8 sequence) is read as
+//! before. Windows-1252 accepts all 256 bytes without failure; so it is the
+//! "looks like text" filter that tells a text file from a binary: no C0
+//! control character other than tab, line feed, carriage return, form feed,
+//! and `0x1A` (DOS end of file). A binary file almost always contains some in
+//! its first bytes; a text export never does.
 
 use std::borrow::Cow;
 
 use crate::parse::ImportError;
 
-/// Décode `bytes` en texte selon l'ordre décrit dans la doc du module.
-/// `Err(ImportError::NotText)` pour un fichier binaire. N'emprunte que
-/// dans le cas courant (UTF-8 valide) ; les autres cas allouent une copie.
+/// Decodes `bytes` into text in the order described in the module doc.
+/// `Err(ImportError::NotText)` for a binary file. Borrows only in the common
+/// case (valid UTF-8); the other cases allocate a copy.
 pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
         return decode_utf16(rest, u16::from_le_bytes);
@@ -53,8 +52,8 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
     Ok(text)
 }
 
-/// Décodage mixte : les séquences UTF-8 valides sont gardées, chaque octet
-/// invalide est lu en Windows-1252. Ne panique sur aucun octet (invariant 10).
+/// Mixed decoding: valid UTF-8 sequences are kept, each invalid byte is read
+/// as Windows-1252. Panics on no byte (invariant 10).
 fn decode_mixed(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());
     for chunk in bytes.utf8_chunks() {
@@ -64,10 +63,10 @@ fn decode_mixed(bytes: &[u8]) -> String {
     out
 }
 
-/// Décode `bytes` avec l'encodage **choisi** dans la recette
-/// ([`crate::recipe::Encoding`]) ; `Auto` se comporte comme [`decode_text`].
-/// Un encodage forcé ne fait jamais échouer l'import pour un octet invalide
-/// (il devient `U+FFFD`) ; seul un fichier de type binaire est refusé.
+/// Decodes `bytes` with the encoding **chosen** in the recipe
+/// ([`crate::recipe::Encoding`]); `Auto` behaves like [`decode_text`]. A
+/// forced encoding never fails the import for an invalid byte (it becomes
+/// `U+FFFD`); only a binary-like file is rejected.
 pub fn decode_with(
     bytes: &[u8],
     encoding: crate::recipe::Encoding,
@@ -108,14 +107,14 @@ pub fn decode_with(
     Ok(text)
 }
 
-/// Nom de l'encodage que [`decode_text`] retiendrait pour `bytes`, pour
-/// l'afficher dans l'assistant d'import ; `None` pour un fichier binaire.
+/// Name of the encoding [`decode_text`] would pick for `bytes`, to show it in
+/// the import wizard; `None` for a binary file.
 pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
     decode_text(bytes).ok()?;
     Some(if bytes.starts_with(&[0xFF, 0xFE]) {
-        "UTF-16 (petit-boutiste)"
+        "UTF-16 (little-endian)"
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
-        "UTF-16 (gros-boutiste)"
+        "UTF-16 (big-endian)"
     } else {
         let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
         if std::str::from_utf8(body).is_err() {
@@ -130,8 +129,8 @@ pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
     })
 }
 
-/// Vrai si `bytes` contient au moins une séquence UTF-8 multi-octets valide
-/// (sinon le décodage mixte ne diffère pas de Windows-1252 pur).
+/// True if `bytes` contains at least one valid multi-byte UTF-8 sequence
+/// (otherwise mixed decoding does not differ from pure Windows-1252).
 fn has_valid_multibyte(bytes: &[u8]) -> bool {
     bytes.utf8_chunks().any(|c| !c.valid().is_ascii())
 }
@@ -155,9 +154,9 @@ fn is_binary_control(c: char) -> bool {
     c.is_ascii_control() && !matches!(c, '\t' | '\n' | '\r' | '\x0C' | '\x1A')
 }
 
-/// Un octet Windows-1252 vers son caractère. Identique à Latin-1 hors de
-/// `0x80..=0x9F`, où Windows-1252 place des caractères typographiques ; les
-/// cinq positions non attribuées retombent sur le contrôle C1 de Latin-1.
+/// A Windows-1252 byte to its character. Identical to Latin-1 outside
+/// `0x80..=0x9F`, where Windows-1252 places typographic characters; the five
+/// unassigned positions fall back to Latin-1's C1 control.
 fn windows_1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
@@ -175,19 +174,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn utf8_valide_est_emprunte_tel_quel() {
+    fn valid_utf8_is_borrowed_as_is() {
         let text = decode_text("λ;1,5\n".as_bytes()).unwrap();
         assert!(matches!(text, Cow::Borrowed("λ;1,5\n")));
     }
 
     #[test]
-    fn marque_utf8_est_retiree() {
+    fn utf8_bom_is_removed() {
         assert_eq!(decode_text(b"\xEF\xBB\xBFa;b").unwrap(), "a;b");
     }
 
     #[test]
-    fn windows_1252_en_repli() {
-        // « 19.91 °C » et « 5 € » écrits en page de code Windows française.
+    fn windows_1252_as_a_fallback() {
+        // "19.91 °C" and "5 €" written in the French Windows code page.
         assert_eq!(
             decode_text(b"T;19.91 \xB0C\nP;5 \x80").unwrap(),
             "T;19.91 °C\nP;5 €"
@@ -195,23 +194,23 @@ mod tests {
     }
 
     #[test]
-    fn octet_invalide_isole_dans_du_utf8_est_lu_en_windows_1252() {
-        // « °C ok » en UTF-8 valide, puis un 0xB0 isolé : le premier degré est
-        // gardé, le second lu en Windows-1252 — pas de mojibake global.
+    fn an_isolated_invalid_byte_in_utf8_is_read_as_windows_1252() {
+        // "°C ok" in valid UTF-8, then a lone 0xB0: the first degree sign is
+        // kept, the second read as Windows-1252, so no global mojibake.
         let mut bytes = "°C ok".as_bytes().to_vec();
         bytes.push(0xB0);
         assert_eq!(decode_text(&bytes).unwrap(), "°C ok°");
     }
 
     #[test]
-    fn octet_e9_suivi_d_ascii_donne_e_accent_aigu() {
+    fn byte_e9_followed_by_ascii_gives_e_acute() {
         assert_eq!(decode_text(b"caf\xE9 noir").unwrap(), "café noir");
-        // Octet de tête tronqué en fin de fichier : pas de panique.
+        // Lead byte truncated at the end of the file: no panic.
         assert_eq!(decode_text(b"a\xE2\x82").unwrap(), "a\u{e2}\u{201a}");
     }
 
     #[test]
-    fn utf16_avec_marque() {
+    fn utf16_with_a_bom() {
         let le: Vec<u8> = [0xFF, 0xFE]
             .into_iter()
             .chain("x;°".encode_utf16().flat_map(u16::to_le_bytes))
@@ -225,14 +224,14 @@ mod tests {
     }
 
     #[test]
-    fn controles_binaires_refuses() {
+    fn binary_controls_are_rejected() {
         assert_eq!(decode_text(b"a\x00b"), Err(ImportError::NotText));
         assert_eq!(decode_text(b"a\x01\xFF"), Err(ImportError::NotText));
         assert_eq!(decode_text(&[0xFF, 0xFE, 0x61]), Err(ImportError::NotText));
     }
 
     #[test]
-    fn controles_de_texte_acceptes() {
+    fn text_controls_are_accepted() {
         assert_eq!(
             decode_text(b"a\tb\r\n\x0Cc\x1A").unwrap(),
             "a\tb\r\n\x0Cc\x1A"
@@ -253,7 +252,7 @@ mod encoding_tests {
         assert_eq!(detect_encoding(&mixed), Some("UTF-8 (+ Windows-1252)"));
         assert_eq!(
             detect_encoding(&[0xFF, 0xFE, b'a', 0]),
-            Some("UTF-16 (petit-boutiste)")
+            Some("UTF-16 (little-endian)")
         );
         assert_eq!(detect_encoding(&[0, 1, 2, 3]), None);
     }
@@ -266,8 +265,8 @@ mod forced_encoding_tests {
 
     #[test]
     fn a_forced_encoding_overrides_detection() {
-        // « 1°C » en UTF-8 valide, lu de force comme Windows-1252 : deux
-        // caractères pour le degré.
+        // "1°C" in valid UTF-8, forcibly read as Windows-1252: two characters
+        // for the degree sign.
         let utf8 = "1°C".as_bytes();
         assert_eq!(decode_with(utf8, Encoding::Utf8).unwrap(), "1°C");
         assert_eq!(decode_with(utf8, Encoding::Windows1252).unwrap(), "1Â°C");

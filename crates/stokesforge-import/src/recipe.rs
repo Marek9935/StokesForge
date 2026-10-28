@@ -1,8 +1,8 @@
-//! Le modèle de recette : la description figée (sérialisable) de comment un
-//! appareil donné écrit ses fichiers, sans rien connaître du moteur de
-//! parsing lui-même (voir [`crate::parse`]).
+//! The recipe model: the frozen (serializable) description of how a given
+//! device writes its files, without knowing anything about the parsing engine
+//! itself (see [`crate::parse`]).
 
-/// Une recette de parsing réutilisable pour un format de fichier d'appareil.
+/// A reusable parsing recipe for a device file format.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ImportRecipe {
     pub name: String,
@@ -12,177 +12,175 @@ pub struct ImportRecipe {
     pub footer_skip_lines: usize,
     pub has_column_header_row: bool,
     pub name_source: NameSource,
-    /// Découpage de l'en-tête en en-tête « principal » et « sous-en-tête »,
-    /// façon assistant d'import ASCII d'OriginLab (chantier « prévisualisation
-    /// d'import ») — voir [`HeaderLayout`]. `Default` (zéro partout) laisse
-    /// `header` (ci-dessus) entièrement aux commandes, comme avant ce
-    /// chantier : les deux modèles ne se recouvrent que si l'appelant met
-    /// `header_layout` à autre chose que zéro. `#[serde(default)]` pour
-    /// qu'une recette JSON enregistrée avant ce chantier se recharge à
-    /// l'identique (`RecipeStore`, voir sa doc de tête).
+    /// Split of the header into "main" header and "sub-header", in the manner
+    /// of OriginLab's ASCII import wizard (the "import preview" work package);
+    /// see [`HeaderLayout`]. `Default` (zero everywhere) leaves `header`
+    /// (above) fully in charge, as before that work package: the two models
+    /// overlap only if the caller sets `header_layout` to anything other than
+    /// zero. `#[serde(default)]` so that a JSON recipe saved before that work
+    /// package reloads identically (`RecipeStore`, see its top-level doc).
     #[serde(default)]
     pub header_layout: HeaderLayout,
-    /// Assignation des rôles `long_name`/`unit`/`comment` à des plages de
-    /// lignes de sous-en-tête — voir [`SubheaderRoles`]. Sans effet tant que
-    /// `header_layout` ne définit aucune ligne de sous-en-tête.
+    /// Assignment of the `long_name`/`unit`/`comment` roles to ranges of
+    /// sub-header lines; see [`SubheaderRoles`]. Has no effect as long as
+    /// `header_layout` defines no sub-header line.
     #[serde(default)]
     pub subheader_roles: SubheaderRoles,
-    /// Nombre de caractères à retirer en tête de chaque ligne de données
-    /// avant analyse (préfixes fixes de certains formats d'instrument).
+    /// Number of characters to remove at the start of each data line before
+    /// parsing (fixed prefixes of some instrument formats).
     #[serde(default)]
     pub skip_chars: usize,
-    /// Nombre de lignes de données à annoter dans l'aperçu en direct
-    /// ([`crate::preview::preview`]) — n'affecte jamais [`crate::parse`], qui
-    /// analyse toujours le fichier entier. Plafonne le travail de l'aperçu
-    /// indépendamment de la taille réelle du fichier.
+    /// Number of data lines to annotate in the live preview
+    /// ([`crate::preview::preview`]). Never affects [`crate::parse`], which
+    /// always parses the whole file. Caps the preview's work regardless of the
+    /// real file size.
     #[serde(default = "default_preview_lines")]
     pub preview_lines: usize,
-    /// Où s'arrêtent les données (le reste est le pied de page) — voir
-    /// [`DataEnd`]. S'applique **après** `footer_skip_lines`, qui continue de
-    /// retirer un nombre fixe de lignes en fin de fichier.
+    /// Where the data stops (the rest is the footer); see [`DataEnd`]. Applies
+    /// **after** `footer_skip_lines`, which still removes a fixed number of
+    /// lines at the end of the file.
     #[serde(default)]
     pub data_end: DataEnd,
-    /// Conserver l'en-tête du fichier comme métadonnées de chaque colonne
-    /// (vrai par défaut : tout est conservé). Voir [`crate::metadata`].
+    /// Keep the file header as metadata of each column (true by default:
+    /// everything is kept). See [`crate::metadata`].
     #[serde(default = "default_true")]
     pub keep_header_metadata: bool,
-    /// Conserver aussi le pied de page (les lignes après la fin des données,
-    /// [`DataEnd`]) comme métadonnées. Faux par défaut.
+    /// Also keep the footer (the lines after the end of the data,
+    /// [`DataEnd`]) as metadata. False by default.
     #[serde(default)]
     pub keep_footer_metadata: bool,
-    /// Clés ou sections à ne **pas** conserver (nom de clé, ou titre de
-    /// section entre crochets : toute la section est alors écartée),
-    /// comparés sans casse ni bordures blanches.
+    /// Keys or sections **not** to keep (a key name, or a section title in
+    /// brackets: the whole section is then dropped), compared ignoring case
+    /// and surrounding whitespace.
     #[serde(default)]
     pub excluded_metadata: Vec<String>,
-    /// Rôle choisi pour chaque colonne du fichier, par position (étape
-    /// « Colonnes » de l'assistant). Plus court que le nombre de colonnes :
-    /// les colonnes suivantes sont en [`ColumnRoleChoice::Auto`].
+    /// Role chosen for each column of the file, by position ("Columns" step of
+    /// the wizard). Shorter than the number of columns: the following columns
+    /// are [`ColumnRoleChoice::Auto`].
     #[serde(default)]
     pub column_roles: Vec<ColumnRoleChoice>,
-    /// Séparateur de milliers à ignorer dans les nombres (`' '`, `','`, `'.'`,
-    /// `'\''`…), `None` s'il n'y en a pas.
+    /// Thousands separator to ignore in numbers (`' '`, `','`, `'.'`,
+    /// `'\''`...), `None` if there is none.
     #[serde(default)]
     pub thousands: Option<char>,
-    /// Ordre des champs d'une date à barres ou points (`03/04/2026`) : jour
-    /// d'abord (défaut) ou mois d'abord. Sans effet sur `AAAA-MM-JJ`.
+    /// Field order of a date with slashes or dots (`03/04/2026`): day first
+    /// (default) or month first. No effect on `YYYY-MM-DD`.
     #[serde(default)]
     pub date_order: DateOrder,
-    /// Jetons qui valent « valeur manquante » (`--`, `n/a`, `*`, `NaN`…) : la
-    /// cellule reste vide au lieu de devenir du texte (et une colonne mixte).
+    /// Tokens that mean "missing value" (`--`, `n/a`, `*`, `NaN`...): the cell
+    /// stays empty instead of becoming text (and a mixed column).
     #[serde(default)]
     pub missing_tokens: Vec<String>,
-    /// Préfixe des lignes de commentaire à ignorer dans la zone de données
-    /// (`#`, `;`, `//`…), vide s'il n'y en a pas. Une ligne qui commence (après
-    /// ses espaces) par ce préfixe n'est jamais une donnée.
+    /// Prefix of comment lines to ignore in the data zone (`#`, `;`, `//`...),
+    /// empty if there is none. A line that starts (after its spaces) with this
+    /// prefix is never data.
     #[serde(default)]
     pub comment_prefix: String,
-    /// Nombre de lignes de données à ignorer au début (après l'en-tête et la
-    /// ligne de noms de colonnes) : avec [`DataEnd`], la plage de lignes à
-    /// importer.
+    /// Number of data lines to ignore at the start (after the header and the
+    /// column names line): together with [`DataEnd`], the range of lines to
+    /// import.
     #[serde(default)]
     pub skip_data_rows: usize,
-    /// Encodage du fichier ; `Auto` le détecte ([`crate::decode`]).
+    /// Encoding of the file; `Auto` detects it ([`crate::decode`]).
     #[serde(default)]
     pub encoding: Encoding,
-    /// Critères de choix automatique de ce modèle d'après un fichier — voir
-    /// [`crate::choose_recipe`]. Vide : jamais choisi automatiquement.
+    /// Criteria for automatically choosing this template from a file; see
+    /// [`crate::choose_recipe`]. Empty: never chosen automatically.
     #[serde(default)]
     pub auto_match: AutoMatch,
-    /// Nature forcée de chaque colonne, par position (étape « Colonnes »).
-    /// Plus court que le nombre de colonnes : les suivantes sont `Auto`.
+    /// Forced kind of each column, by position ("Columns" step). Shorter than
+    /// the number of columns: the following ones are `Auto`.
     #[serde(default)]
     pub column_kinds: Vec<ColumnKind>,
-    /// Où les colonnes importées atterrissent dans le classeur actif — voir
-    /// [`ImportMode`]. Sans effet pour un nouveau classeur.
+    /// Where the imported columns land in the active workbook; see
+    /// [`ImportMode`]. No effect for a new workbook.
     #[serde(default)]
     pub import_mode: ImportMode,
-    /// Comment plusieurs fichiers se répartissent en feuilles — voir
-    /// [`FilesLayout`].
+    /// How several files are distributed into sheets; see [`FilesLayout`].
     #[serde(default)]
     pub files_layout: FilesLayout,
-    /// Comment un fichier qui contient **plusieurs blocs de données** (un
-    /// spectre après l'autre) se découpe — voir [`BlockSplit`]. Chaque bloc est
-    /// analysé avec la même recette, son propre en-tête compris.
+    /// How a file that contains **several data blocks** (one spectrum after
+    /// the other) is split; see [`BlockSplit`]. Each block is parsed with the
+    /// same recipe, its own header included.
     #[serde(default)]
     pub block_split: BlockSplit,
 }
 
-/// Découpage d'un fichier en blocs de données indépendants.
+/// Split of a file into independent data blocks.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BlockSplit {
-    /// Un seul bloc : tout le fichier.
+    /// A single block: the whole file.
     #[default]
     None,
-    /// Un nouveau bloc commence à chaque ligne qui débute par ce texte (sans
-    /// casse, bordures blanches retirées) — par exemple `TITLE` pour un fichier
-    /// Jasco qui enchaîne plusieurs spectres, chacun avec son en-tête.
+    /// A new block starts at each line that begins with this text (ignoring
+    /// case, surrounding whitespace removed), for example `TITLE` for a Jasco
+    /// file that chains several spectra, each with its header.
     BeforeLine(String),
-    /// Les blocs sont séparés par une ou plusieurs lignes vides.
+    /// Blocks are separated by one or more empty lines.
     BlankLines,
 }
 
-/// Mode d'import dans le classeur actif, comme les options d'Origin.
+/// Import mode into the active workbook, like Origin's options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ImportMode {
-    /// Une nouvelle feuille (le comportement d'origine).
+    /// A new sheet (the original behavior).
     #[default]
     NewSheet,
-    /// Remplace le contenu de la feuille active.
+    /// Replaces the content of the active sheet.
     ReplaceSheet,
-    /// Ajoute des colonnes à la suite de la feuille active.
+    /// Appends columns after those of the active sheet.
     AddColumns,
-    /// Ajoute des lignes à la suite de la feuille active : la colonne `j` du
-    /// fichier prolonge la colonne `j` de la feuille.
+    /// Appends rows after those of the active sheet: column `j` of the file
+    /// extends column `j` of the sheet.
     AddRows,
 }
 
-/// Répartition de plusieurs fichiers en feuilles.
+/// Distribution of several files into sheets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum FilesLayout {
-    /// Une feuille par fichier.
+    /// One sheet per file.
     #[default]
     SheetPerFile,
-    /// Tous les fichiers dans une même feuille, côte à côte (X Y X Y…).
+    /// All files in the same sheet, side by side (X Y X Y...).
     SideBySide,
-    /// Tous les fichiers dans une même feuille avec le **X du premier fichier
-    /// partagé** : une colonne X, puis les autres colonnes de chaque fichier.
+    /// All files in the same sheet with the **X of the first file shared**:
+    /// one X column, then the other columns of each file.
     SharedX,
 }
 
-/// Nature d'une colonne importée.
+/// Kind of an imported column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ColumnKind {
-    /// Nombres ; un jeton illisible est conservé en texte (colonne mixte).
+    /// Numbers; an unreadable token is kept as text (mixed column).
     #[default]
     Auto,
-    /// Texte : chaque jeton non vide est gardé tel quel, même s'il ressemble
-    /// à un nombre (codes, identifiants d'échantillon…).
+    /// Text: each non-empty token is kept as is, even if it looks like a
+    /// number (codes, sample identifiers...).
     Text,
-    /// Dates et heures, lues en timestamps POSIX ([`crate::datetime`]) ; un
-    /// jeton qui n'est pas une date reste en texte.
+    /// Dates and times, read as POSIX timestamps ([`crate::datetime`]); a
+    /// token that is not a date stays text.
     DateTime,
 }
 
-/// Critères auxquels un fichier doit **tous** répondre (les non vides) pour
-/// qu'un modèle soit proposé d'office : extension, morceau du nom, signature
-/// dans le début du contenu (comme `ORIGIN;JASCO`) — le principe des
-/// « Import Filters » d'Origin.
+/// Criteria that a file must **all** meet (the non-empty ones) for a template
+/// to be proposed automatically: extension, part of the name, signature in the
+/// start of the content (like `ORIGIN;JASCO`). The principle of Origin's
+/// "Import Filters".
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct AutoMatch {
-    /// Extensions acceptées, sans point, sans casse (`csv`, `txt`…).
+    /// Accepted extensions, without dot, ignoring case (`csv`, `txt`...).
     #[serde(default)]
     pub extensions: Vec<String>,
-    /// Texte que le nom du fichier doit contenir (sans casse).
+    /// Text the file name must contain (ignoring case).
     #[serde(default)]
     pub name_contains: String,
-    /// Texte que le début du fichier doit contenir (sans casse).
+    /// Text the start of the file must contain (ignoring case).
     #[serde(default)]
     pub content_contains: String,
 }
 
 impl AutoMatch {
-    /// Aucun critère : le modèle n'est jamais choisi automatiquement.
+    /// No criterion: the template is never chosen automatically.
     pub fn is_empty(&self) -> bool {
         self.extensions.is_empty()
             && self.name_contains.trim().is_empty()
@@ -191,64 +189,64 @@ impl AutoMatch {
 }
 
 impl ImportRecipe {
-    /// La recette en JSON lisible — le fichier qu'on passe à un collègue.
+    /// The recipe as readable JSON: the file you hand to a colleague.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Relit une recette exportée par [`ImportRecipe::to_json`]. `Err` avec un
-    /// message lisible si le texte n'est pas une recette.
+    /// Reads back a recipe exported by [`ImportRecipe::to_json`]. `Err` with a
+    /// readable message if the text is not a recipe.
     pub fn from_json(text: &str) -> Result<Self, String> {
         serde_json::from_str(text).map_err(|err| format!("unreadable template: {err}"))
     }
 }
 
-/// Ordre jour/mois d'une date `JJ/MM/AAAA` ou `MM/JJ/AAAA` (réglage de la
-/// recette). Le jour d'abord est la règle du projet (#217) et le défaut.
+/// Day/month order of a date `DD/MM/YYYY` or `MM/DD/YYYY` (recipe setting).
+/// Day first is the project rule (#217) and the default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DateOrder {
-    /// `03/04/2026` = 3 avril 2026.
+    /// `03/04/2026` = April 3, 2026.
     #[default]
     DayFirst,
-    /// `03/04/2026` = 4 mars 2026.
+    /// `03/04/2026` = March 4, 2026.
     MonthFirst,
 }
 
-/// Encodage forcé d'un fichier, quand la détection automatique se trompe.
+/// Encoding forced on a file, when automatic detection gets it wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Encoding {
-    /// UTF-16 avec marque, sinon UTF-8 (un octet invalide isolé est lu en
-    /// Windows-1252 : décodage mixte, voir [`crate::decode`]).
+    /// UTF-16 with a mark, otherwise UTF-8 (an isolated invalid byte is read
+    /// as Windows-1252: mixed decoding, see [`crate::decode`]).
     #[default]
     Auto,
-    /// UTF-8 (une marque d'ordre est retirée ; un octet invalide devient
-    /// `U+FFFD` au lieu de faire échouer l'import).
+    /// UTF-8 (a byte order mark is removed; an invalid byte becomes `U+FFFD`
+    /// instead of failing the import).
     Utf8,
-    /// Windows-1252, la page de code des appareils sous Windows.
+    /// Windows-1252, the code page of devices on Windows.
     Windows1252,
     /// ISO 8859-1.
     Latin1,
-    /// UTF-16 petit-boutiste, avec ou sans marque.
+    /// UTF-16 little-endian, with or without a mark.
     Utf16Le,
-    /// UTF-16 gros-boutiste, avec ou sans marque.
+    /// UTF-16 big-endian, with or without a mark.
     Utf16Be,
 }
 
-/// Rôle d'une colonne importée, tel que choisi dans l'assistant.
+/// Role of an imported column, as chosen in the wizard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ColumnRoleChoice {
-    /// La première colonne est l'abscisse (X), les autres sont des Y.
+    /// The first column is the abscissa (X), the others are Y.
     #[default]
     Auto,
-    /// Abscisse.
+    /// Abscissa.
     X,
-    /// Ordonnée.
+    /// Ordinate.
     Y,
-    /// Barre d'erreur en X.
+    /// X error bar.
     XError,
-    /// Barre d'erreur en Y.
+    /// Y error bar.
     YError,
-    /// Colonne non importée.
+    /// Column not imported.
     Ignore,
 }
 
@@ -256,34 +254,32 @@ fn default_true() -> bool {
     true
 }
 
-/// Fin de la zone de données d'un fichier. Les lignes qui suivent la coupure
-/// forment le pied de page : jamais importées, mais montrées par l'aperçu
-/// ([`crate::preview::LineRole::Footer`]) et gardées par
-/// [`crate::parse::ParsedTable::footer_lines`].
+/// End of a file's data zone. The lines after the cut form the footer: never
+/// imported, but shown by the preview ([`crate::preview::LineRole::Footer`])
+/// and kept by [`crate::parse::ParsedTable::footer_lines`].
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DataEnd {
-    /// Coupure automatique. Elle s'arme à la première ligne dont la première
-    /// colonne est un nombre ; une fois armée, elle coupe à la première ligne
-    /// dont la première colonne (le X) n'est pas un nombre — une ligne vide
-    /// coupe aussi. Une case texte dans une autre colonne ne coupe pas.
+    /// Automatic cut. It arms at the first line whose first column is a
+    /// number; once armed, it cuts at the first line whose first column (the
+    /// X) is not a number. An empty line cuts too. A text cell in another
+    /// column does not cut.
     ///
-    /// **Pas le défaut** : une mesure manquante (« n/a », « - », « NaN ») en X
-    /// arrête la lecture et fait perdre sans avertissement toutes les lignes
-    /// qui suivent. À choisir pour un appareil dont on sait qu'il écrit un
-    /// pied de page (les modèles Jasco) ; les recettes déjà enregistrées avec
-    /// `"data_end":"Auto"` continuent de couper.
+    /// **Not the default**: a missing measurement ("n/a", "-", "NaN") in X
+    /// stops the reading and silently loses all the following lines. To
+    /// choose for a device known to write a footer (the Jasco templates);
+    /// recipes already saved with `"data_end":"Auto"` keep cutting.
     Auto,
-    /// Aucune coupure : les données vont jusqu'à la fin du fichier. Défaut.
+    /// No cut: the data runs to the end of the file. Default.
     #[default]
     None,
-    /// Coupe à la première ligne vide (ou blanche).
+    /// Cuts at the first empty (or blank) line.
     FirstBlankLine,
-    /// Coupe à la première ligne égale à ce marqueur (comparaison insensible
-    /// à la casse, bordures blanches retirées) ; cette ligne est exclue.
+    /// Cuts at the first line equal to this marker (case-insensitive
+    /// comparison, surrounding whitespace removed); that line is excluded.
     Marker(String),
-    /// Garde seulement les `n` premières lignes de données.
+    /// Keeps only the first `n` data lines.
     LinesAfterHeader(usize),
-    /// Retire les `n` dernières lignes (comme `footer_skip_lines`).
+    /// Removes the last `n` lines (like `footer_skip_lines`).
     LinesBeforeEnd(usize),
 }
 
@@ -291,10 +287,10 @@ fn default_preview_lines() -> usize {
     20
 }
 
-/// Plage de lignes de sous-en-tête, 1-based et incluse aux deux bornes,
-/// **relative au bloc de sous-en-tête** (donc indépendante du nombre de
-/// lignes d'en-tête principal qui le précèdent) — c'est le « from … to … »
-/// de l'assistant OriginLab pour un rôle donné.
+/// Range of sub-header lines, 1-based and inclusive at both ends, **relative
+/// to the sub-header block** (so independent of the number of main header
+/// lines before it): the "from ... to ..." of OriginLab's wizard for a given
+/// role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SubheaderLineRange {
     pub from: usize,
@@ -302,8 +298,8 @@ pub struct SubheaderLineRange {
 }
 
 impl SubheaderLineRange {
-    /// Une plage d'une seule ligne — le cas de très loin le plus courant
-    /// (l'exemple OriginLab de référence est `18` à `18`).
+    /// A single-line range, by far the most common case (the reference
+    /// OriginLab example is `18` to `18`).
     pub fn single(line: usize) -> Self {
         Self {
             from: line,
@@ -312,114 +308,112 @@ impl SubheaderLineRange {
     }
 }
 
-/// Combien de lignes d'en-tête « principal » et de « sous-en-tête » compte le
-/// fichier, façon assistant d'import ASCII d'OriginLab. Distinct de
-/// `ImportRecipe::header` (qui ne connaît qu'un bloc unique à sauter) :
-/// seul le sous-en-tête peut porter des rôles assignés par ligne
-/// ([`SubheaderRoles`]) — c'est la seule raison de la distinction, StokesForge ne
-/// traite pas le contenu de l'en-tête principal autrement que pour le
-/// sauter.
+/// How many "main" header lines and "sub-header" lines the file has, in the
+/// manner of OriginLab's ASCII import wizard. Distinct from
+/// `ImportRecipe::header` (which only knows a single block to skip): only the
+/// sub-header can carry roles assigned per line ([`SubheaderRoles`]). That is
+/// the only reason for the distinction; StokesForge does not treat the content
+/// of the main header other than to skip it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct HeaderLayout {
     pub main_header_lines: usize,
     pub subheader_lines: usize,
-    /// Coché, l'outil recalcule ces deux comptes depuis le contenu du
-    /// fichier plutôt que de les garder tels que saisis — voir
-    /// `crate::preview::detect_header_layout`. Ce champ ne fait rien tout
-    /// seul : c'est la couche appelante (`stokesforge-app`) qui, en le voyant
-    /// coché, appelle la détection et réécrit `main_header_lines`/
-    /// `subheader_lines` — comme le bouton de réévaluation d'OriginLab, la
-    /// détection ne s'applique pas en continu à chaque frappe.
+    /// When checked, the tool recomputes these two counts from the file
+    /// content instead of keeping them as entered; see
+    /// `crate::preview::detect_header_layout`. This field does nothing by
+    /// itself: it is the calling layer (`stokesforge-app`) that, seeing it
+    /// checked, calls the detection and rewrites `main_header_lines`/
+    /// `subheader_lines`. Like OriginLab's re-evaluation button, the detection
+    /// is not applied continuously at every keystroke.
     pub auto_detect: bool,
 }
 
-/// Séparateur de colonnes.
+/// Column separator.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Separator {
     Comma,
     Semicolon,
     Tab,
     Whitespace,
-    /// Un caractère au choix (`|`, `:`…).
+    /// Any character of choice (`|`, `:`...).
     Custom(char),
-    /// Colonnes à largeur fixe : la largeur, en caractères, de chacune sauf
-    /// la dernière, qui prend le reste de la ligne.
+    /// Fixed-width columns: the width, in characters, of each one except the
+    /// last, which takes the rest of the line.
     FixedWidth(Vec<usize>),
-    /// Détecté automatiquement à partir de la première ligne de données.
+    /// Detected automatically from the first data line.
     Auto,
 }
 
-/// Convention de séparateur décimal.
+/// Decimal separator convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DecimalStyle {
     Dot,
     Comma,
-    /// Détecté d'après les premières lignes de données : virgule si elle
-    /// s'y trouve entre deux chiffres avec un autre séparateur de colonnes
-    /// (`;`, tabulation), point sinon.
+    /// Detected from the first data lines: comma if it appears there between
+    /// two digits together with another column separator (`;`, tab), dot
+    /// otherwise.
     Auto,
 }
 
-/// Combien de lignes ignorer avant les données.
+/// How many lines to skip before the data.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum HeaderSkip {
     None,
-    /// Ignore les `n` premières lignes, quel que soit leur contenu.
+    /// Skips the first `n` lines, whatever their content.
     Lines(usize),
-    /// Ignore tout jusqu'à la première ligne dont le texte, une fois
-    /// bordures blanches retirées, est égal (comparaison insensible à la
-    /// casse) à ce marqueur — cette ligne elle-même est ignorée aussi.
+    /// Skips everything up to the first line whose text, with surrounding
+    /// whitespace removed, equals this marker (case-insensitive comparison);
+    /// that line itself is skipped too.
     UntilMarker(String),
 }
 
-/// D'où vient le nom de la série importée.
+/// Where the name of the imported series comes from.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum NameSource {
-    /// Le nom de fichier (sans extension), fourni par l'appelant.
+    /// The file name (without extension), supplied by the caller.
     Filename,
-    /// Une valeur lue dans les lignes d'en-tête ignorées : cherche une ligne
-    /// « CLÉ<séparateur>VALEUR » où CLÉ correspond à cette chaîne
-    /// (insensible à la casse, bordures blanches ignorées des deux côtés),
-    /// et prend VALEUR (`trim`ée) comme nom.
+    /// A value read from the skipped header lines: looks for a
+    /// `KEY<separator>VALUE` line where KEY matches this string
+    /// (case-insensitive, surrounding whitespace ignored on both sides), and
+    /// takes VALUE (trimmed) as the name.
     HeaderKey(String),
 }
 
-/// Assignation des rôles `long_name`/`unit`/`comment`/`x_prime` de
-/// [`stokesforge_core::ColumnMeta`] (le crate ne dépend pas de `stokesforge-core`, voir
-/// la doc de tête de [`crate`] — les noms de rôle restent ceux de
-/// `ColumnMeta`, pas ceux d'OriginLab, précisément pour que la correspondance
-/// soit directe côté `stokesforge-app`) à des plages de lignes de sous-en-tête.
+/// Assignment of the `long_name`/`unit`/`comment`/`x_prime` roles of
+/// [`stokesforge_core::ColumnMeta`] (the crate does not depend on
+/// `stokesforge-core`, see the top-level doc of [`crate`]; the role names stay
+/// those of `ColumnMeta`, not OriginLab's, precisely so the mapping is direct
+/// on the `stokesforge-app` side) to ranges of sub-header lines.
 ///
-/// N'a pas d'équivalent pour « System Parameters »/« User Parameters »
-/// d'OriginLab, délibérément : voir `docs/chantier-import-previsualisation.md`
-/// (décision à ne pas rouvrir sans raison nouvelle).
+/// Has no equivalent for OriginLab's "System Parameters"/"User Parameters",
+/// deliberately: see `docs/chantier-import-previsualisation.md` (a decision
+/// not to reopen without a new reason).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SubheaderRoles {
     pub long_name: Option<SubheaderLineRange>,
     pub unit: Option<SubheaderLineRange>,
     pub comment: Option<SubheaderLineRange>,
-    /// Ligne dont chaque jeton numérique devient la valeur x'
-    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) de sa colonne — le
-    /// temps d'un spectre, dans une cinétique.
+    /// Line whose every numeric token becomes the x' value
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) of its column: the
+    /// time of a spectrum, in a kinetic series.
     #[serde(default)]
     pub x_prime: Option<SubheaderLineRange>,
-    /// Coché, `unit` est ignoré : chaque jeton de la ligne `long_name` est
-    /// lu comme « Nom (unité) », l'unité étant ce qui suit la première
-    /// parenthèse ouvrante jusqu'à la première fermante — un jeton sans
-    /// parenthèses reconnues garde tout son texte comme nom long et rend une
-    /// unité vide, plutôt que de couper arbitrairement (voir
-    /// `crate::parse::parse`).
+    /// When checked, `unit` is ignored: each token of the `long_name` line is
+    /// read as "Name (unit)", the unit being what follows the first opening
+    /// parenthesis up to the first closing one. A token without recognized
+    /// parentheses keeps all its text as the long name and gives an empty
+    /// unit, rather than cutting arbitrarily (see `crate::parse::parse`).
     pub same_line_name_unit: bool,
 }
 
 impl ImportRecipe {
-    /// Nature choisie pour la colonne `index` (`Auto` par défaut).
+    /// Kind chosen for column `index` (`Auto` by default).
     pub fn column_kind(&self, index: usize) -> ColumnKind {
         self.column_kinds.get(index).copied().unwrap_or_default()
     }
 
-    /// Rôle effectif de la colonne `index` : le choix explicite, sinon X pour
-    /// la première colonne et Y pour les suivantes.
+    /// Effective role of column `index`: the explicit choice, otherwise X for
+    /// the first column and Y for the following ones.
     pub fn column_role(&self, index: usize) -> ColumnRoleChoice {
         match self.column_roles.get(index).copied().unwrap_or_default() {
             ColumnRoleChoice::Auto if index == 0 => ColumnRoleChoice::X,
@@ -428,10 +422,10 @@ impl ImportRecipe {
         }
     }
 
-    /// Ramène les deux réglages d'en-tête concurrents (`header` et
-    /// `header_layout`) à un seul : `HeaderSkip::Lines(n)` devient `n` lignes
-    /// d'en-tête principal. `UntilMarker` reste tel quel. Sans effet si le
-    /// découpage structuré est déjà utilisé.
+    /// Brings the two competing header settings (`header` and
+    /// `header_layout`) down to one: `HeaderSkip::Lines(n)` becomes `n` main
+    /// header lines. `UntilMarker` stays as is. No effect if the structured
+    /// split is already used.
     pub fn unify_header(&mut self) {
         if self.header_layout.main_header_lines == 0 && self.header_layout.subheader_lines == 0 {
             if let HeaderSkip::Lines(n) = self.header {
@@ -441,7 +435,7 @@ impl ImportRecipe {
         }
     }
 
-    /// Nouvelle recette aux réglages les plus permissifs.
+    /// New recipe with the most permissive settings.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -480,7 +474,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_est_permissive_par_defaut() {
+    fn new_is_permissive_by_default() {
         let recipe = ImportRecipe::new("test");
         assert_eq!(recipe.name, "test");
         assert_eq!(recipe.separator, Separator::Auto);
@@ -506,14 +500,14 @@ mod tests {
         recipe.unify_header();
         assert_eq!(recipe.header, HeaderSkip::None);
         assert_eq!(recipe.header_layout.main_header_lines, 3);
-        // Le drapeau `auto_detect` seul (recettes anciennes) ne compte pas.
+        // The `auto_detect` flag alone (old recipes) does not count.
         let mut old = ImportRecipe::new("t");
         old.header = HeaderSkip::Lines(2);
         old.header_layout.auto_detect = true;
         old.unify_header();
         assert_eq!(old.header_layout.main_header_lines, 2);
         assert_eq!(old.header, HeaderSkip::None);
-        // Déjà structuré, ou marqueur : rien ne bouge.
+        // Already structured, or marker: nothing moves.
         recipe.header = HeaderSkip::UntilMarker("X".into());
         recipe.unify_header();
         assert_eq!(recipe.header, HeaderSkip::UntilMarker("X".into()));
@@ -580,14 +574,14 @@ mod tests {
         assert_eq!(recipe, back);
     }
 
-    /// Une recette enregistrée par `RecipeStore` **avant** ce chantier (donc
-    /// sans `header_layout`/`subheader_roles`/`skip_chars`/`preview_lines`
-    /// dans son JSON) doit continuer à se charger, avec les nouveaux champs
-    /// à leurs valeurs par défaut — `#[serde(default)]` est ce qui tient
-    /// cette promesse, ce test la vérifie plutôt que de la supposer.
+    /// A recipe saved by `RecipeStore` **before** that work package (so
+    /// without `header_layout`/`subheader_roles`/`skip_chars`/`preview_lines`
+    /// in its JSON) must keep loading, with the new fields at their default
+    /// values. `#[serde(default)]` is what keeps this promise; this test
+    /// checks it rather than assuming it.
     #[test]
-    fn recette_json_anterieure_au_chantier_se_charge_avec_les_defauts() {
-        let json_avant_chantier = r#"{
+    fn json_recipe_older_than_the_work_package_loads_with_the_defaults() {
+        let json_before_work_package = r#"{
             "name": "Jasco UV-Vis",
             "separator": "Semicolon",
             "decimal": "Comma",
@@ -596,14 +590,14 @@ mod tests {
             "has_column_header_row": true,
             "name_source": "Filename"
         }"#;
-        let recipe: ImportRecipe = serde_json::from_str(json_avant_chantier)
-            .expect("un JSON sans les nouveaux champs doit rester lisible");
+        let recipe: ImportRecipe = serde_json::from_str(json_before_work_package)
+            .expect("a JSON without the new fields must stay readable");
         assert_eq!(recipe.header_layout, HeaderLayout::default());
         assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::None);
-        assert!(recipe.keep_header_metadata, "tout est conservé par défaut");
+        assert!(recipe.keep_header_metadata, "everything is kept by default");
         assert_eq!(recipe.date_order, DateOrder::DayFirst);
     }
 }

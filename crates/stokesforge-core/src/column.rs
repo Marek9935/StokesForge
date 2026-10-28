@@ -757,7 +757,7 @@ impl PartialEq for Column {
 /// B3 (`guide-de-correction-robustesse.md` §F4) — cap shared by
 /// `write_block`, `insert_rows` and `set_length`: beyond it, sizing
 /// the requested allocation causes `abort()` (allocation failure, not
-/// recoverable — see `stokesforge-sonde-alloc`) before an error
+/// recoverable — see `stokesforge-alloc-probe`) before an error
 /// has the slightest chance of being built. One hundred million rows,
 /// arbitrary but documented: far beyond any realistic project, far
 /// below what threatens the process (at 8 bytes/value, the allocation stays
@@ -1178,7 +1178,7 @@ impl Column {
     /// B3 (`guide-de-correction-robustesse.md` §F4): `length` is first bounded to
     /// [`MAX_COLUMN_ROWS`], so as never to attempt a `resize` that would size a
     /// catastrophic allocation (allocation failure → `abort()`, not recoverable — see
-    /// `stokesforge-sonde-alloc`). Unlike [`Column::set_values`] and
+    /// `stokesforge-alloc-probe`). Unlike [`Column::set_values`] and
     /// [`Column::insert_rows`], this method stays **infallible** by necessity: it is the
     /// primitive that `History::revert_delta` uses to restore a previous length
     /// during an undo, and undoing must never be able to fail. In practice a

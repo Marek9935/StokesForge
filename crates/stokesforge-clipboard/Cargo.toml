@@ -3,7 +3,7 @@ name = "stokesforge-clipboard"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Offre d'un même contenu au presse-papiers système sous plusieurs types MIME (figure SVG, PNG, PDF)."
+description = "Offers the same content to the system clipboard under several MIME types (SVG, PNG, PDF figure)."
 
 [lints]
 workspace = true
@@ -12,9 +12,9 @@ workspace = true
 raw-window-handle = "0.6.2"
 thiserror = "2"
 
-# Linux et BSD : Wayland passe par le récepteur partagé de `vendor/smithay-clipboard`
-# (le même worker que le texte d'egui-winit), X11 par un propriétaire de
-# sélection écrit ici.
+# Linux and BSD: Wayland goes through the shared receiver of `vendor/smithay-clipboard`
+# (the same worker as egui-winit's text), X11 through a selection
+# owner written here.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 smithay-clipboard = "0.7.3"
 x11rb = "0.13.2"

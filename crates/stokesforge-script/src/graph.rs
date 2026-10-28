@@ -1,14 +1,14 @@
-//! Tracé natif depuis pyst : conversion explicite des options, puis commandes.
+//! Native plotting from pyst: explicit option conversion, then commands.
 //!
-//! Aucun moteur ici : le script produit le même PlotSpec que l'interface.
-//! Les noms de série vides restent automatiques : le rendu partagé les lit
-//! comme du texte littéral, sans interpréter le markup d'une colonne. Les
-//! titres et labels explicitement fournis, eux, sont du markup Typst.
-//! Sans option `title`, un nouveau graphe reste sans titre (#103) ; ajouter
-//! une série à un graphe existant conserve son titre.
-//! Le premier panneau est étendu sans réécrire les autres ni ses réglages.
-//! Plusieurs colonnes `y` en une fois (#196) forment un groupe, comme les
-//! séries ajoutées ensemble depuis l'interface (`push_series_batch`).
+//! No engine here: the script produces the same PlotSpec as the interface.
+//! Empty series names stay automatic: the shared rendering reads them as
+//! literal text, without interpreting a column's markup. Titles and labels
+//! explicitly given, on the other hand, are Typst markup.
+//! Without a `title` option, a new graph stays untitled (#103); adding a
+//! series to an existing graph keeps its title.
+//! The first panel is extended without rewriting the others or its settings.
+//! Several `y` columns at once (#196) form a group, like the series added
+//! together from the interface (`push_series_batch`).
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -26,9 +26,9 @@ use crate::surface::{to_py_error, Handle, InvalidValueError};
 
 type Target = (NodeId, u64);
 
-/// Données Rust seulement : elles traversent Python::detach, jamais un objet Python.
-/// L'option `color=` : une chaîne (`scalar`, valable pour toutes les séries du
-/// lot) ou une liste d'une couleur par série.
+/// Rust data only: it crosses Python::detach, never a Python object.
+/// The `color=` option: a string (`scalar`, valid for all the series of the
+/// batch) or a list with one color per series.
 struct ColorOption {
     list: Vec<String>,
     scalar: bool,
@@ -36,14 +36,14 @@ struct ColorOption {
 
 struct Request {
     references: Vec<Target>,
-    /// Une série par entrée : colonne y, colonne x propre (ou partagée) et nom.
+    /// One series per entry: y column, own (or shared) x column and name.
     members: Vec<Member>,
     group_name: Option<String>,
     graph: Option<Target>,
     parent: Option<Target>,
     name: Option<String>,
     series: SeriesSpec,
-    /// Une couleur par série (liste) ou une pour toutes (chaîne), #207.
+    /// One color per series (list) or one for all (string), #207.
     color: Option<ColorOption>,
     title: Option<String>,
     x_title: Option<String>,
@@ -54,7 +54,7 @@ struct Request {
     y_bounds: (Option<f64>, Option<f64>),
 }
 
-/// Les colonnes d'une série du lot ; `label` vide = nom automatique.
+/// The columns of one series of the batch; empty `label` = automatic name.
 struct Member {
     y: NodeId,
     x: Option<NodeId>,
@@ -65,10 +65,10 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
     InvalidValueError::new_err(message.into())
 }
 
-/// Les options que `plot` accepte (`**options`), en un seul endroit : le message
-/// d'erreur d'une option inconnue et le test de surface (`tests/surface_figee.rs`,
-/// #331) partent de cette liste. Une option ajoutée au `match` de `plot` y entre
-/// aussi, et dans « Frozen API V1 » (`docs/python-et-script.md`).
+/// The options `plot` accepts (`**options`), in one place: the error message
+/// for an unknown option and the surface test (`tests/frozen_api.rs`, #331)
+/// start from this list. An option added to `plot`'s `match` goes in here
+/// too, and in "Frozen API V1" (`docs/python-et-script.md`).
 pub(crate) const PLOT_OPTIONS: &[&str] = &[
     "plot_type",
     "color",
@@ -93,21 +93,22 @@ pub(crate) const PLOT_OPTIONS: &[&str] = &[
     "histogram_bins",
 ];
 
-/// Crée un graphe natif et rend sa poignée ; graph= ajoute au premier panneau.
-/// y est une colonne, ou une liste d'au moins deux colonnes qui forment un
-/// groupe de séries (#196) ; sans x, chaque y prend la colonne de rôle X la plus
-/// proche à sa gauche dans sa feuille (X2 pour un y de rôle Y2), comme la
-/// fenêtre, et l'indice de ligne s'il n'y en a pas (#257) ; x peut être une
-/// colonne partagée ou une liste de même longueur que y. Avec plusieurs
-/// séries, label est une liste (un nom par série) et group_name nomme le
-/// groupe ; x_error/y_error ne servent qu'à une série seule. Options : plot_type
-/// (line, scatter, line_scatter, bar, histogram, error_bar), color (#RRGGBB ou
-/// #RRGGBBAA ; une liste donne une couleur par série, une chaîne vaut pour toutes), line_style (none, solid, dash, dot, dash_dot), line_width,
+/// Creates a native graph and returns its handle; graph= adds to the first panel.
+/// y is a column, or a list of at least two columns that form a series group
+/// (#196); without x, each y takes the nearest X-role column to its left in
+/// its sheet (X2 for a Y2-role y), like the window, and the row index if there
+/// is none (#257); x can be a shared column or a list of the same length as y.
+/// With several series, label is a list (one name per series) and group_name
+/// names the group; x_error/y_error serve a single series only. Options:
+/// plot_type (line, scatter, line_scatter, bar, histogram, error_bar), color
+/// (#RRGGBB or #RRGGBBAA; a list gives one color per series, a string applies
+/// to all), line_style (none, solid, dash, dot, dash_dot), line_width,
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
-/// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to et
-/// y_from/y_to (les deux ensemble ; from > to trace l'axe à l'envers), axis (left, right), x_error/y_error (poignées), histogram_bins.
-/// Titres et label explicites : markup Typst. Label absent : nom automatique
-/// de la colonne, affiché littéralement. Une exécution = un groupe annulable.
+/// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to and
+/// y_from/y_to (both together; from > to draws the axis reversed), axis (left,
+/// right), x_error/y_error (handles), histogram_bins.
+/// Explicit titles and label: Typst markup. No label: the column's automatic
+/// name, shown literally. One run = one undoable group.
 #[pyfunction]
 #[pyo3(signature = (y, x=None, *, graph=None, name=None, parent=None, **options))]
 pub(crate) fn plot(
@@ -304,7 +305,7 @@ pub(crate) fn parse_symbol(name: &str) -> PyResult<SymbolShape> {
     })
 }
 
-/// Une poignée de colonne, ou une liste de poignées.
+/// A column handle, or a list of handles.
 fn column_handles(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<Target>> {
     if let Ok(handle) = value.extract::<PyRef<'_, Handle>>() {
         return Ok(vec![(handle.id, handle.epoch)]);
@@ -318,8 +319,8 @@ fn column_handles(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<Target>>
     Ok(list.iter().map(|h| (h.id, h.epoch)).collect())
 }
 
-/// Les bornes `de … à …` d'un axe : les deux ou aucune, différentes ; `from >
-/// to` est permis et trace l'axe à l'envers.
+/// The `from ... to` bounds of an axis: both or neither, different; `from >
+/// to` is allowed and draws the axis reversed.
 pub(crate) fn axis_range(
     axis: &str,
     (from, to): (Option<f64>, Option<f64>),
@@ -364,14 +365,14 @@ pub(crate) fn update_axis(
             "logarithmic axis bounds must be positive".into(),
         ));
     }
-    // Le sens se lit sur l'ordre des bornes (#344) : `x_inverted=True` sur
-    // (1, 5) donne (5, 1), `x_from=5, x_to=1` donne un axe inversé. La surface
-    // `pyst` (`x_inverted`, `x_auto_range`) ne change pas.
+    // The direction is read from the order of the bounds (#344): `x_inverted=True` on
+    // (1, 5) gives (5, 1), `x_from=5, x_to=1` gives a reversed axis. The `pyst`
+    // surface (`x_inverted`, `x_auto_range`) does not change.
     *axis = axis.orient();
     Ok(())
 }
 
-/// Construit depuis un même instantané, avant ET après la réservation exclusive.
+/// Builds from one snapshot, both BEFORE and AFTER the exclusive reservation.
 fn build_spec(
     snapshot: &Snapshot,
     request: &Request,
@@ -418,15 +419,15 @@ fn build_spec(
         .map(|(rank, member)| {
             let mut series = request.series.clone();
             series.y = member.y;
-            // `x=` explicite garde la main ; sinon la colonne X la plus proche
-            // à gauche par rôle, comme la fenêtre, et le numéro de ligne si la
-            // feuille n'en a pas (`compose::x_for`, #257).
+            // An explicit `x=` wins; otherwise the nearest X column to the
+            // left by role, like the window, and the row number if the
+            // sheet has none (`compose::x_for`, #257).
             series.x = member
                 .x
                 .or_else(|| compose::x_for(&snapshot.tree, member.y));
             series.name.clone_from(&member.label);
-            // Sans `color=`, la couleur de palette du rang de la série dans le
-            // panneau (`SeriesSpec::from_palette`, trait et marqueurs).
+            // Without `color=`, the palette color of the series' rank in the
+            // panel (`SeriesSpec::from_palette`, line and markers).
             let palette = SeriesSpec::from_palette(member.y, panel.series.len() + rank);
             let chosen =
                 request

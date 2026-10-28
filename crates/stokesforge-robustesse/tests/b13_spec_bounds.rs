@@ -1,17 +1,17 @@
-//! Batterie 13 — ce qu'un `PlotSpec` venu du disque peut demander au rendu.
+//! Battery 13 — what a `PlotSpec` coming from disk can ask of the renderer.
 //!
-//! `stokesforge-plot` a rendu « zéro classe » inexprimable (`histogram_bins:
-//! NonZeroU32`), et `stokesforge-persistence` refuse le zéro d'un fichier
-//! (`ConvertError::ZeroHistogramBins`). L'autre bout de l'intervalle a
-//! longtemps été le seul non borné — ni le type, ni la conversion. B4
-//! (`guide-de-correction-robustesse.md` §F4) a fermé les deux :
-//! `stokesforge_plot::BinCount` rend l'excès inexprimable au niveau du type
-//! (`b13_le_type_lui_meme_borne_le_nombre_de_classes`), et
-//! `stokesforge_persistence::convert::record_to_series_spec` refuse à la lecture
-//! une valeur brute qui dépasse la même borne
-//! (`b13_histogram_bins_venu_du_disque_est_borne`) — nécessaire séparément,
-//! puisqu'un fichier hostile écrit par un autre outil n'est pas tenu de
-//! passer par `BinCount` pour exister sur disque.
+//! `stokesforge-plot` made "zero bins" inexpressible (`histogram_bins:
+//! NonZeroU32`), and `stokesforge-persistence` rejects a zero from a file
+//! (`ConvertError::ZeroHistogramBins`). The other end of the interval was for
+//! a long time the only unbounded one — neither the type nor the conversion
+//! bounded it. B4 (`guide-de-correction-robustesse.md` §F4) closed both:
+//! `stokesforge_plot::BinCount` makes an excess inexpressible at the type
+//! level (`b13_the_type_itself_bounds_the_number_of_bins`), and
+//! `stokesforge_persistence::convert::record_to_series_spec` rejects on read a
+//! raw value that exceeds the same bound
+//! (`b13_histogram_bins_from_disk_is_bounded`) — needed separately, since a
+//! hostile file written by another tool is not required to go through
+//! `BinCount` to exist on disk.
 
 use std::num::NonZeroU32;
 
@@ -19,101 +19,98 @@ use stokesforge_core::{Column, Project};
 use stokesforge_plot::{BinCount, PanelSpec, Panels, PlotSpec, PlotType, SeriesSpec};
 use tempfile::TempDir;
 
-/// Ordre de grandeur au-delà duquel un nombre de classes ne décrit plus un
-/// histogramme mais un fichier corrompu. Un écran fait quelques milliers de
-/// pixels de large ; 65 536 classes sont déjà dix fois trop — c'est aussi
-/// [`stokesforge_plot::MAX_HISTOGRAM_BINS`], vérifié plus bas.
-const PLAFOND_RAISONNABLE: u32 = 1 << 16;
+/// Order of magnitude beyond which a number of bins no longer describes a
+/// histogram but a corrupted file. A screen is a few thousand pixels wide;
+/// 65,536 bins are already ten times too many — this is also
+/// [`stokesforge_plot::MAX_HISTOGRAM_BINS`], checked below.
+const REASONABLE_CAP: u32 = 1 << 16;
 
-// -- garde-fous -----------------------------------------------------------
+// -- guards ---------------------------------------------------------------
 
 #[test]
-fn b13_un_nombre_de_classes_ordinaire_traverse_le_disque_a_lidentique() {
-    let bins = BinCount::new(40).expect("40 est dans les bornes");
-    let dir = TempDir::new().expect("répertoire temporaire");
-    let chemin = dir.path().join("histogramme.stf");
+fn b13_an_ordinary_number_of_bins_crosses_the_disk_unchanged() {
+    let bins = BinCount::new(40).expect("40 is within bounds");
+    let dir = TempDir::new().expect("temporary directory");
+    let path = dir.path().join("histogram.stf");
 
-    let mut project = Project::new("Demo").expect("projet valide");
+    let mut project = Project::new("Demo").expect("valid project");
     let root = project.root();
-    project.add_workbook(root, Some("Book1")).expect("classeur");
-    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("worksheet");
     let y = project
         .add_column(sheet, None, Some("Y"), Column::from_f64(&[1.0, 2.0, 3.0]))
-        .expect("colonne Y");
-    let serie = SeriesSpec {
+        .expect("column Y");
+    let series = SeriesSpec {
         plot_type: PlotType::Histogram,
         histogram_bins: bins,
         ..SeriesSpec::new(y)
     };
-    let panneau = PanelSpec {
-        series: vec![serie],
+    let panel = PanelSpec {
+        series: vec![series],
         ..PanelSpec::default()
     };
     project
         .add_graph(
             root,
             Some("Fig1"),
-            PlotSpec::default().with_panels(Panels::one(panneau)),
+            PlotSpec::default().with_panels(Panels::one(panel)),
         )
-        .expect("graphe");
+        .expect("graph");
 
-    stokesforge_persistence::save(&project, &chemin).expect("sauvegarde");
-    let relu = stokesforge_persistence::load(&chemin).expect("rechargement");
-    let fig = relu.resolve_path("[Fig1]").expect("graphe présent");
-    let node = relu.tree().node(fig).expect("nœud présent");
-    let bins_relus = match node.kind() {
+    stokesforge_persistence::save(&project, &path).expect("save");
+    let reloaded = stokesforge_persistence::load(&path).expect("reload");
+    let fig = reloaded.resolve_path("[Fig1]").expect("graph present");
+    let node = reloaded.tree().node(fig).expect("node present");
+    let reloaded_bins = match node.kind() {
         stokesforge_core::NodeKind::Graph { spec, .. } => spec.panels[0].series[0].histogram_bins,
-        autre => panic!("attendu un graphe, obtenu {}", autre.type_name()),
+        other => panic!("expected a graph, got {}", other.type_name()),
     };
-    assert_eq!(bins_relus, bins);
+    assert_eq!(reloaded_bins, bins);
 }
 
 #[test]
-fn b13_un_histogramme_ordinaire_se_calcule_sans_incident() {
+fn b13_an_ordinary_histogram_computes_without_incident() {
     let (edges, counts) = stokesforge_core::resolve::histogram(
         &[1.0, 2.0, 3.0, 4.0],
-        NonZeroU32::new(4).expect("non nul"),
+        NonZeroU32::new(4).expect("non-zero"),
     );
     assert_eq!(edges.len(), counts.len() + 1);
     assert_eq!(counts.iter().sum::<f64>(), 4.0);
 }
 
 #[test]
-fn b13_le_plafond_du_type_est_bien_celui_documente() {
-    assert_eq!(stokesforge_plot::MAX_HISTOGRAM_BINS, PLAFOND_RAISONNABLE);
+fn b13_the_type_cap_is_the_documented_one() {
+    assert_eq!(stokesforge_plot::MAX_HISTOGRAM_BINS, REASONABLE_CAP);
 }
 
 // -- reproductions --------------------------------------------------------
 
 #[test]
-fn b13_le_type_lui_meme_borne_le_nombre_de_classes() {
-    // B4 — `BinCount` (contrairement au `NonZeroU32` nu d'avant ce correctif)
-    // rend un excès inexprimable : la construction elle-même échoue, il n'y a
-    // plus de valeur absurde à inspecter après coup.
-    let trop_grand = BinCount::new(u32::MAX);
-    println!("BinCount::new(u32::MAX) = {trop_grand:?}");
+fn b13_the_type_itself_bounds_the_number_of_bins() {
+    // B4 — `BinCount` (unlike the bare `NonZeroU32` from before this fix)
+    // makes an excess inexpressible: the construction itself fails, there is no
+    // absurd value left to inspect afterwards.
+    let too_large = BinCount::new(u32::MAX);
+    println!("BinCount::new(u32::MAX) = {too_large:?}");
     assert!(
-        trop_grand.is_none(),
-        "le type doit refuser de représenter {} classes, au-delà du plafond {}",
+        too_large.is_none(),
+        "the type must refuse to represent {} bins, beyond the cap {}",
         u32::MAX,
-        PLAFOND_RAISONNABLE
+        REASONABLE_CAP
     );
-    let limite = BinCount::new(PLAFOND_RAISONNABLE);
+    let limit = BinCount::new(REASONABLE_CAP);
+    assert!(limit.is_some(), "the cap itself must remain constructible");
     assert!(
-        limite.is_some(),
-        "le plafond lui-même doit rester constructible"
-    );
-    assert!(
-        BinCount::new(PLAFOND_RAISONNABLE + 1).is_none(),
-        "un classe de plus que le plafond doit être refusée"
+        BinCount::new(REASONABLE_CAP + 1).is_none(),
+        "one bin more than the cap must be rejected"
     );
 }
 
-/// Schéma sur disque redéclaré à l'identique pour fabriquer un fichier
-/// hostile — voir `b3_fichiers_hostiles.rs`, qui documente pourquoi c'est
-/// légitime (format auto-descriptif : deux déclarations d'accord sur les
-/// noms produisent les mêmes octets). Réduit aux seuls champs qu'un graphe à
-/// un histogramme nécessite.
+/// On-disk schema redeclared identically to forge a hostile file — see
+/// `b3_hostile_files.rs`, which documents why this is legitimate
+/// (self-describing format: two declarations that agree on the names produce
+/// the same bytes). Reduced to the only fields that a one-histogram graph
+/// needs.
 mod hostile {
     use serde::Serialize;
     use std::io::Write;
@@ -302,9 +299,9 @@ mod hostile {
         TopRight,
     }
 
-    pub(super) fn ecrire(dir: &TempDir, nom: &str, body: &FileBody) -> PathBuf {
+    pub(super) fn write_file(dir: &TempDir, name: &str, body: &FileBody) -> PathBuf {
         let payload = rmp_serde::to_vec_named(body).unwrap();
-        let path = dir.path().join(nom);
+        let path = dir.path().join(name);
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(b"STKF").unwrap();
         f.write_all(&1u32.to_le_bytes()).unwrap();
@@ -313,20 +310,20 @@ mod hostile {
         path
     }
 
-    /// Un fichier valide portant un seul graphe, dont l'unique série est un
-    /// histogramme à `bins` classes brutes — pas de `BinCount` ici, ce module
-    /// simule un fichier écrit par un outil qui n'en a jamais entendu parler.
-    pub(super) fn projet_avec_histogram_bins(dir: &TempDir, bins: u32) -> PathBuf {
-        let serie = SeriesSpecRecord {
+    /// A valid file holding a single graph, whose only series is a histogram
+    /// with `bins` raw bins — no `BinCount` here, this module simulates a file
+    /// written by a tool that never heard of it.
+    pub(super) fn project_with_histogram_bins(dir: &TempDir, bins: u32) -> PathBuf {
+        let series = SeriesSpecRecord {
             histogram_bins: bins,
             ..SeriesSpecRecord::default()
         };
-        let panneau = PanelSpecRecord {
-            series: vec![serie],
+        let panel = PanelSpecRecord {
+            series: vec![series],
             ..PanelSpecRecord::default()
         };
         let spec = PlotSpecRecord {
-            panels: vec![panneau],
+            panels: vec![panel],
             ..PlotSpecRecord::default()
         };
         let body = FileBody {
@@ -369,29 +366,29 @@ mod hostile {
                 },
             ],
         };
-        ecrire(dir, "histogramme_hostile.stf", &body)
+        write_file(dir, "hostile_histogram.stf", &body)
     }
 }
 
 #[test]
-fn b13_histogram_bins_venu_du_disque_est_borne() {
-    let dir = TempDir::new().expect("répertoire temporaire");
-    // `BinCount` empêche désormais d'écrire ce scénario via l'API publique
-    // (voir `b13_le_type_lui_meme_borne_le_nombre_de_classes`) : un fichier
-    // hostile écrit par un outil tiers, lui, n'est pas tenu de passer par
-    // `BinCount` pour exister — d'où le fichier hostile forgé ici.
-    let chemin = hostile::projet_avec_histogram_bins(&dir, u32::MAX);
-    let resultat = stokesforge_persistence::load(&chemin);
+fn b13_histogram_bins_from_disk_is_bounded() {
+    let dir = TempDir::new().expect("temporary directory");
+    // `BinCount` now prevents writing this scenario through the public API
+    // (see `b13_the_type_itself_bounds_the_number_of_bins`): a hostile file
+    // written by a third-party tool is not required to go through `BinCount`
+    // to exist — hence the hostile file forged here.
+    let path = hostile::project_with_histogram_bins(&dir, u32::MAX);
+    let result = stokesforge_persistence::load(&path);
     println!(
-        "chargement d'un fichier avec histogram_bins = {} → {resultat:?}",
+        "loading a file with histogram_bins = {} → {result:?}",
         u32::MAX
     );
     assert!(
-        resultat.is_err(),
-        "un histogram_bins de {} (bien au-delà du plafond {PLAFOND_RAISONNABLE}) doit être \
-         refusé au chargement plutôt que de laisser le rendu demander l'allocation qui \
-         ferait abort() le processus (`cargo run --bin stokesforge-sonde-alloc -- histogram_bins \
-         4294967295`)",
+        result.is_err(),
+        "a histogram_bins of {} (far beyond the cap {REASONABLE_CAP}) must be \
+         rejected at load time rather than letting the renderer ask for the \
+         allocation that would abort() the process (`cargo run --bin \
+         stokesforge-alloc-probe -- histogram_bins 4294967295`)",
         u32::MAX
     );
 }

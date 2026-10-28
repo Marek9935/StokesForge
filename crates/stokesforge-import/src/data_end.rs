@@ -1,16 +1,16 @@
-//! Fin de la zone de données : la règle de coupure, écrite une seule fois pour
-//! que [`crate::parse::parse`] et [`crate::preview::preview`] coupent au même
-//! endroit (un aperçu qui montrerait une coupure différente de l'import
-//! serait pire que pas d'aperçu).
+//! End of the data zone: the cutting rule, written once so that
+//! [`crate::parse::parse`] and [`crate::preview::preview`] cut at the same
+//! place (a preview that showed a different cut from the import would be
+//! worse than no preview).
 
 use crate::numbers::NumberFormat;
 use crate::parse::EffectiveSeparator;
 use crate::recipe::DataEnd;
 
-/// Nombre de lignes de données à **garder** parmi `lines` (les lignes qui
-/// suivent l'en-tête et la ligne d'en-tête de colonnes, `skip_chars` déjà
-/// retiré). `lines` est parcouru paresseusement : la coupure automatique
-/// s'arrête à la première ligne fautive.
+/// Number of data lines to **keep** among `lines` (the lines that follow the
+/// header and the column header line, with `skip_chars` already removed).
+/// `lines` is walked lazily: the automatic cut stops at the first faulty
+/// line.
 pub(crate) fn data_len<'a>(
     lines: impl Iterator<Item = &'a str>,
     total: usize,
@@ -38,12 +38,12 @@ pub(crate) fn data_len<'a>(
                 .unwrap_or(total)
         }
         DataEnd::Auto => {
-            // Seule la première colonne compte : le premier jeton non vide en
-            // séparateur « espaces », le premier champ sinon. Ligne vide :
-            // aucun nombre, donc coupure (une fois armée).
-            // « Nombre » selon la nature de la première colonne : un nombre, une
-            // date lisible, ou — pour une colonne forcée en texte — n'importe
-            // quel jeton non vide.
+            // Only the first column counts: the first non-empty token with a
+            // "whitespace" separator, the first field otherwise. Empty line:
+            // no number, so a cut (once armed).
+            // "Number" according to the kind of the first column: a number, a
+            // readable date, or, for a column forced to text, any non-empty
+            // token.
             let first_is_number = |line: &str| {
                 separator
                     .tokenize(line)
@@ -83,17 +83,17 @@ mod tests {
 
     const FILE: &str = "note;x\n\n1;10\n2;n/a\n3;30\n\nData points;551\n4;40\n";
 
-    /// Le texte qui précède la première ligne numérique est importé tel quel ;
-    /// la coupure ne s'arme qu'à la première ligne numérique.
+    /// The text before the first numeric line is imported as is; the cut only
+    /// arms at the first numeric line.
     #[test]
     fn auto_armed_only_at_first_numeric_line() {
-        let text = "texte;a\n;\n1;10\n2;20\n\n9;9\n";
-        // Lignes 1 et 2 (texte, cellule vide) gardées, puis 1 et 2, coupure à la ligne vide.
+        let text = "text;a\n;\n1;10\n2;20\n\n9;9\n";
+        // Lines 1 and 2 (text, empty cell) kept, then 1 and 2, cut at the empty line.
         assert_eq!(rows(text, DataEnd::Auto, Separator::Semicolon), 4);
     }
 
-    /// Seule la première colonne compte : `2;n/a` continue ; une clé en tête
-    /// de ligne coupe même si un nombre suit.
+    /// Only the first column counts: `2;n/a` continues; a key at the start of
+    /// a line cuts even if a number follows.
     #[test]
     fn auto_looks_at_first_column_only() {
         let text = "1;10\n2;n/a\n3;30\nData points;551\n4;40\n";
@@ -101,11 +101,11 @@ mod tests {
         assert_eq!(rows(text, DataEnd::None, Separator::Semicolon), 5);
     }
 
-    /// Séparateur espaces : la « première colonne » est le premier jeton non
-    /// vide, malgré des espaces en tête de ligne.
+    /// Whitespace separator: the "first column" is the first non-empty token,
+    /// despite leading spaces on the line.
     #[test]
     fn auto_with_whitespace_ignores_leading_spaces() {
-        let text = "   1   10\n  2  20\n   fin   x\n";
+        let text = "   1   10\n  2  20\n   end   x\n";
         assert_eq!(rows(text, DataEnd::Auto, Separator::Whitespace), 2);
     }
 
@@ -131,7 +131,7 @@ mod tests {
         );
     }
 
-    /// L'aperçu coupe exactement là où l'import coupe, et le pied est marqué.
+    /// The preview cuts exactly where the import cuts, and the footer is marked.
     #[test]
     fn preview_agrees_with_parse() {
         let mut recipe = ImportRecipe::new("t");

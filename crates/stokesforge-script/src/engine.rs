@@ -1,53 +1,53 @@
-//! Le fil de script : un **service permanent** qui possède l'interpréteur.
+//! The script thread: a **permanent service** that owns the interpreter.
 //!
-//! # Un script, un groupe d'écritures
+//! # One script, one write group
 //!
-//! Le contexte ouvre une macro exclusive à la première mutation. Une lecture
-//! seule laisse la session disponible. À la fin, GIL relâché et interruption
-//! désarmée, le groupe est validé ou avorté (exception, arrêt demandé). Une
-//! annulation explicite depuis pyst est un point de validation du groupe.
+//! The context opens an exclusive macro at the first mutation. A read-only
+//! run leaves the session available. At the end, with the GIL released and the
+//! interruption disarmed, the group is committed or aborted (exception, stop
+//! requested). An explicit undo from pyst is a commit point of the group.
 //!
-//! # Deux fils, pas un
+//! # Two threads, not one
 //!
-//! * le **fil de script** (`stokesforge-script`) démarre CPython, en devient donc le
-//!   fil principal, et exécute les scripts l'un après l'autre ;
-//! * un **fil d'interruption** (`stokesforge-script-irq`), minuscule, existe pour
-//!   que [`ScriptEngine::interrupt`] ne bloque **jamais**. Lever une exception
-//!   asynchrone dans le fil de script exige le GIL ; le prendre depuis le fil
-//!   qui demande l'arrêt (l'interface, par exemple) pourrait l'y faire
-//!   attendre. L'interface pose donc un drapeau et envoie un message ; c'est ce
-//!   petit fil qui attend le GIL à sa place.
+//! * the **script thread** (`stokesforge-script`) starts CPython, thereby
+//!   becomes its main thread, and runs the scripts one after the other;
+//! * an **interruption thread** (`stokesforge-script-irq`), tiny, exists so
+//!   that [`ScriptEngine::interrupt`] **never** blocks. Raising an asynchronous
+//!   exception in the script thread requires the GIL; taking it from the thread
+//!   that asks for the stop (the interface, for example) could make it wait
+//!   there. The interface therefore sets a flag and sends a message; this
+//!   small thread is the one that waits for the GIL in its place.
 //!
-//! # Deux drapeaux, pas un
+//! # Two flags, not one
 //!
-//! `busy` est posé par [`ScriptEngine::run`] **avant** l'envoi du travail : il
-//! sert au refus [`ScriptError::Busy`]. `running` est posé par le fil de script
-//! **une fois qu'il est vraiment entré dans le script**, et c'est lui que
-//! [`ScriptEngine::is_running`] rend. La distinction n'est pas cosmétique :
-//! elle garantit qu'une interruption demandée pendant que `is_running()` est
-//! vrai ne peut plus être effacée par la remise à zéro de début d'exécution.
+//! `busy` is set by [`ScriptEngine::run`] **before** the work is sent: it
+//! serves the [`ScriptError::Busy`] refusal. `running` is set by the script thread
+//! **once it has really entered the script**, and it is what
+//! [`ScriptEngine::is_running`] returns. The distinction is not cosmetic:
+//! it guarantees that an interruption requested while `is_running()` is true
+//! can no longer be erased by the start-of-run reset.
 //!
-//! # L'interruption, en deux moitiés
+//! # Interruption, in two halves
 //!
-//! L'interpréteur démarre **sans gestion des signaux** : aucun
-//! `KeyboardInterrupt` ne sera levé tout seul. L'arrêt d'un script est donc
-//! entièrement à notre charge, et se joue en deux moitiés complémentaires :
+//! The interpreter starts **without signal handling**: no
+//! `KeyboardInterrupt` will be raised on its own. Stopping a script is therefore
+//! entirely our job, and plays out in two complementary halves:
 //!
-//! 1. un **drapeau atomique** vérifié par chaque appel de la surface `pyst` —
-//!    il attrape un script qui boucle en appelant l'API, sans surcoût ;
-//! 2. **`PyThreadState_SetAsyncExc`** depuis le fil d'interruption, qui lève un
-//!    `KeyboardInterrupt` dans le fil de script au prochain point de contrôle
-//!    de l'interpréteur — il attrape une boucle Python **pure**.
+//! 1. an **atomic flag** checked by each call of the `pyst` surface:
+//!    it catches a script that loops while calling the API, at no extra cost;
+//! 2. **`PyThreadState_SetAsyncExc`** from the interruption thread, which raises a
+//!    `KeyboardInterrupt` in the script thread at the interpreter's next
+//!    checkpoint: it catches a **pure** Python loop.
 //!
-//! *Écarté :* un hook de trace via `sys.settrace`, qui coûterait à chaque ligne
-//! exécutée, en permanence, pour une granularité dont on n'a pas besoin.
+//! *Ruled out:* a trace hook through `sys.settrace`, which would cost on every
+//! line executed, permanently, for a granularity we do not need.
 //!
-//! **Limite à dire honnêtement** : ni l'un ni l'autre n'interrompt un appel
-//! **natif** long. Une opération numpy sur dix millions de points ira à son
-//! terme ; l'exception ne sera levée qu'en revenant dans l'interpréteur.
-//! Un script qui avale les exceptions (`except: pass` dans une boucle Python
-//! pure) résiste également à la seconde moitié — la première le rattrape dès
-//! qu'il touche à `pyst`.
+//! **Limit to state honestly**: neither half interrupts a long **native**
+//! call. A numpy operation on ten million points will run to completion; the
+//! exception will be raised only on returning to the interpreter.
+//! A script that swallows exceptions (`except: pass` in a pure Python loop)
+//! also resists the second half; the first catches it as soon as
+//! it touches `pyst`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -71,65 +71,65 @@ use crate::error::ScriptError;
 use crate::outcome::ScriptOutcome;
 use crate::{bridge::HostError, capture, surface};
 
-/// État partagé entre le fil de script, le fil d'interruption et les clients.
+/// State shared between the script thread, the interruption thread and the clients.
 ///
-/// Rien ici n'est un objet Python : ces drapeaux traversent les fils sans
-/// jamais toucher au GIL.
+/// Nothing here is a Python object: these flags cross threads without
+/// ever touching the GIL.
 #[derive(Debug, Default)]
 struct Shared {
-    /// Vrai dès qu'un travail est accepté par [`ScriptEngine::run`] et jusqu'à
-    /// ce que sa réponse soit prête. Sert au refus `Busy`.
+    /// True as soon as a job is accepted by [`ScriptEngine::run`] and until
+    /// its reply is ready. Serves the `Busy` refusal.
     busy: AtomicBool,
-    /// Vrai pendant que le fil de script est effectivement **dans** le script.
+    /// True while the script thread is actually **inside** the script.
     running: AtomicBool,
-    /// Vrai quand une interruption a été demandée pour l'exécution en cours.
+    /// True when an interruption was requested for the current run.
     interrupt_requested: AtomicBool,
-    /// Numéro de l'exécution en cours (ou de la dernière) ; incrémenté au
-    /// début de chaque script. Un message d'interruption porte le numéro
-    /// qu'il visait et ne frappe aucun autre script.
+    /// Number of the current (or last) run; incremented at the start of each
+    /// script. An interruption message carries the number it targeted and strikes
+    /// no other script.
     generation: AtomicU64,
-    /// Identifiant Python (`threading.get_ident()`) du fil de script, `0` tant
-    /// que l'interpréteur n'a pas démarré.
+    /// Python identifier (`threading.get_ident()`) of the script thread, `0` until
+    /// the interpreter has started.
     py_thread_ident: AtomicU64,
-    /// Chemin courant du projet, pour `pyst.save()` : posé par l'hôte
-    /// ([`ScriptEngine::set_project_path`]) et mis à jour par `pyst.save_as`.
-    /// Donnée Rust pure ; la session, elle, ne connaît aucun chemin.
+    /// Current project path, for `pyst.save()`: set by the host
+    /// ([`ScriptEngine::set_project_path`]) and updated by `pyst.save_as`.
+    /// Pure Rust data; the session itself knows no path.
     project_path: Mutex<Option<PathBuf>>,
-    /// Chemin que `pyst.save()` (sans argument) refuse d'écraser : la source
-    /// d'une lecture qui a écarté des données (garde #309 de l'application).
-    /// `save_as` reste permis.
+    /// Path that `pyst.save()` (without argument) refuses to overwrite: the source
+    /// of a read that discarded data (application guard #309).
+    /// `save_as` stays allowed.
     protected_path: Mutex<Option<PathBuf>>,
-    /// Révision `(modèle, géométrie)` du dernier enregistrement du script, que
-    /// l'hôte relève ([`ScriptEngine::take_saved_revision`]).
+    /// `(model, geometry)` revision of the script's last save, which the host
+    /// picks up ([`ScriptEngine::take_saved_revision`]).
     saved_revision: Mutex<Option<(u64, u64)>>,
 }
 
-/// Ce dont la surface `pyst` a besoin pour servir un appel : la session, et de
-/// quoi savoir si l'on doit s'arrêter.
+/// What the `pyst` surface needs to serve a call: the session, and
+/// what it needs to know whether to stop.
 pub(crate) struct ScriptContext {
-    /// Poignée cliente vers l'acteur qui possède le `Project`.
+    /// Client handle to the actor that owns the `Project`.
     session: SessionHandle,
-    /// Drapeaux partagés avec le moteur.
+    /// Flags shared with the engine.
     shared: Arc<Shared>,
-    /// Ouverte seulement à la première écriture ; un script de lecture ne
-    /// réserve jamais la session. Atomique pour rester utilisable GIL relâché.
+    /// Opened only at the first write; a read script never
+    /// reserves the session. Atomic to stay usable with the GIL released.
     macro_open: AtomicBool,
-    /// #312 — version de chaque colonne telle qu'elle a été **lue** par le
-    /// script (`pyst.column`, `pyst.values`), clé `(nœud, époque de la
-    /// poignée)`. Données Rust pures (invariant 9). Le contexte vit autant que
-    /// le fil de script : la table survit d'une saisie de console à l'autre.
+    /// #312: version of each column as it was **read** by the
+    /// script (`pyst.column`, `pyst.values`), keyed by `(node, handle
+    /// epoch)`. Pure Rust data (invariant 9). The context lives as long as
+    /// the script thread: the table survives from one console input to the next.
     read_versions: Mutex<HashMap<(NodeId, u64), u64>>,
 }
 
 impl ScriptContext {
-    /// Retient la version lue d'une colonne (la plus récente lecture gagne).
+    /// Retains the version read of a column (the most recent read wins).
     pub(crate) fn remember_version(&self, id: NodeId, epoch: u64, version: u64) {
         if let Ok(mut table) = self.read_versions.lock() {
             table.insert((id, epoch), version);
         }
     }
 
-    /// Version retenue pour la colonne, si le script l'a lue.
+    /// Version retained for the column, if the script read it.
     pub(crate) fn remembered_version(&self, id: NodeId, epoch: u64) -> Option<u64> {
         self.read_versions
             .lock()
@@ -137,14 +137,14 @@ impl ScriptContext {
             .and_then(|table| table.get(&(id, epoch)).copied())
     }
 
-    /// Oublie toutes les versions retenues (après un `undo`).
+    /// Forgets all the retained versions (after an `undo`).
     pub(crate) fn forget_versions(&self) {
         if let Ok(mut table) = self.read_versions.lock() {
             table.clear();
         }
     }
 
-    /// Chemin courant du projet (`None` : pas encore enregistré).
+    /// Current project path (`None`: not saved yet).
     pub(crate) fn project_path(&self) -> Option<PathBuf> {
         self.shared
             .project_path
@@ -153,7 +153,7 @@ impl ScriptContext {
             .and_then(|path| path.clone())
     }
 
-    /// Chemin que `save()` sans argument refuse d'écraser.
+    /// Path that `save()` without argument refuses to overwrite.
     pub(crate) fn protected_path(&self) -> Option<PathBuf> {
         self.shared
             .protected_path
@@ -162,28 +162,28 @@ impl ScriptContext {
             .and_then(|path| path.clone())
     }
 
-    /// Retient la révision enregistrée par le script.
+    /// Retains the revision saved by the script.
     pub(crate) fn record_saved(&self, revision: (u64, u64)) {
         if let Ok(mut saved) = self.shared.saved_revision.lock() {
             *saved = Some(revision);
         }
     }
 
-    /// Retient le chemin du projet après un `pyst.save_as`.
+    /// Retains the project path after a `pyst.save_as`.
     pub(crate) fn set_project_path(&self, path: PathBuf) {
         if let Ok(mut current) = self.shared.project_path.lock() {
             *current = Some(path);
         }
     }
 
-    /// Poignée vers l'acteur.
+    /// Handle to the actor.
     pub(crate) fn session(&self) -> &SessionHandle {
         &self.session
     }
 
-    /// Ouvre le groupe exclusif du script. Rend vrai si l'appel vient de
-    /// l'ouvrir : le pont doit alors relire et valider son instantané, car un
-    /// chargement ou une écriture a pu précéder l'acquisition de la macro.
+    /// Opens the script's exclusive group. Returns true if the call just
+    /// opened it: the bridge must then read again and validate its snapshot, since a
+    /// load or a write may have preceded the macro acquisition.
     pub(crate) fn begin_write(&self) -> Result<bool, HostError> {
         if self.macro_open.load(Ordering::Acquire) {
             return Ok(false);
@@ -195,9 +195,9 @@ impl ScriptContext {
         Ok(true)
     }
 
-    /// Termine le groupe GIL relâché, y compris après une exception Python.
-    /// Une interruption demandée entraîne l'abandon même si elle a été avalée
-    /// par le script. Les imports ferment leurs seules macros imbriquées.
+    /// Ends the group with the GIL released, including after a Python exception.
+    /// A requested interruption causes an abort even if the script
+    /// swallowed it. Imports close only their own nested macros.
     pub(crate) fn finish_write(&self, commit: bool) -> Result<(), HostError> {
         if !self.macro_open.load(Ordering::Acquire) {
             return Ok(());
@@ -211,8 +211,8 @@ impl ScriptContext {
             Ok(_) => {
                 self.macro_open.store(false, Ordering::Release);
                 if !commit {
-                    // #312 — l'abandon défait les écritures du script : les
-                    // versions retenues ne décrivent plus rien.
+                    // #312: the abort undoes the script's writes: the
+                    // retained versions describe nothing anymore.
                     self.forget_versions();
                 }
                 Ok(())
@@ -226,8 +226,8 @@ impl ScriptContext {
         }
     }
 
-    /// Première moitié du mécanisme d'interruption : chaque appel de la
-    /// surface `pyst` passe par ici.
+    /// First half of the interruption mechanism: every call of the
+    /// `pyst` surface goes through here.
     pub(crate) fn check_interrupt(&self) -> PyResult<()> {
         if self.shared.interrupt_requested.load(Ordering::Acquire) {
             return Err(PyKeyboardInterrupt::new_err(
@@ -239,13 +239,13 @@ impl ScriptContext {
 }
 
 thread_local! {
-    /// Contexte du fil courant. Posé uniquement sur le fil de script : c'est ce
-    /// qui rend la surface `pyst` inutilisable depuis un fil que le script
-    /// aurait créé lui-même, avec un message clair plutôt qu'une course.
+    /// Context of the current thread. Set only on the script thread: this is what
+    /// makes the `pyst` surface unusable from a thread that the script
+    /// created itself, with a clear message rather than a race.
     static CONTEXT: RefCell<Option<Arc<ScriptContext>>> = const { RefCell::new(None) };
 }
 
-/// Contexte du fil courant, ou une erreur Python explicite.
+/// Context of the current thread, or an explicit Python error.
 pub(crate) fn current_context() -> PyResult<Arc<ScriptContext>> {
     CONTEXT.with(|cell| cell.borrow().clone()).ok_or_else(|| {
         PyRuntimeError::new_err(
@@ -254,47 +254,47 @@ pub(crate) fn current_context() -> PyResult<Arc<ScriptContext>> {
     })
 }
 
-/// Un travail à exécuter et le canal de réponse à usage unique qui lui est
-/// propre.
+/// A job to run and the single-use reply channel that is
+/// its own.
 struct Job {
-    /// Source Python à exécuter.
+    /// Python source to run.
     source: String,
-    /// Canal sur lequel rendre le résultat.
+    /// Channel on which to return the result.
     reply: mpsc::Sender<ScriptOutcome>,
 }
 
-/// Message envoyé au fil de script.
+/// Message sent to the script thread.
 enum Message {
-    /// Exécuter un script.
+    /// Run a script.
     Run(Job),
-    /// Arrêter le fil.
+    /// Stop the thread.
     Stop,
 }
 
-/// Message envoyé au fil d'interruption.
+/// Message sent to the interruption thread.
 enum InterruptMessage {
-    /// Lever une exception asynchrone dans le fil de script, si c'est encore
-    /// l'exécution portant ce numéro.
+    /// Raise an asynchronous exception in the script thread, if it is still
+    /// the run carrying this number.
     Now(u64),
-    /// Arrêter le fil d'interruption.
+    /// Stop the interruption thread.
     Stop,
 }
 
-/// Le fil de script : un service permanent, créé une fois, qui possède
-/// l'interpréteur.
+/// The script thread: a permanent service, created once, that owns
+/// the interpreter.
 ///
-/// `run` est appelable depuis n'importe quel fil ; c'est ainsi que l'interface
-/// l'appellera, sans jamais toucher elle-même à Python.
+/// `run` can be called from any thread; this is how the interface
+/// will call it, without ever touching Python itself.
 pub struct ScriptEngine {
-    /// Canal FIFO vers le fil de script.
+    /// FIFO channel to the script thread.
     jobs: mpsc::Sender<Message>,
-    /// Canal vers le fil d'interruption.
+    /// Channel to the interruption thread.
     interrupts: mpsc::Sender<InterruptMessage>,
-    /// Drapeaux partagés.
+    /// Shared flags.
     shared: Arc<Shared>,
-    /// Fil de script, `None` après [`ScriptEngine::shutdown`].
+    /// Script thread, `None` after [`ScriptEngine::shutdown`].
     script_thread: Option<JoinHandle<()>>,
-    /// Fil d'interruption, `None` après [`ScriptEngine::shutdown`].
+    /// Interruption thread, `None` after [`ScriptEngine::shutdown`].
     interrupt_thread: Option<JoinHandle<()>>,
 }
 
@@ -307,22 +307,22 @@ impl std::fmt::Debug for ScriptEngine {
 }
 
 impl ScriptEngine {
-    /// Démarre le fil de script et initialise l'interpréteur embarqué.
+    /// Starts the script thread and initializes the embedded interpreter.
     ///
-    /// `python` dit où trouver l'interpréteur ; `session` est la poignée vers
-    /// l'acteur que les scripts piloteront. Bloque jusqu'à ce que
-    /// l'interpréteur soit prêt, de sorte qu'un `Ok` signifie « la surface
-    /// `pyst` est posée et un script peut partir ».
+    /// `python` says where to find the interpreter; `session` is the handle to
+    /// the actor that scripts will drive. Blocks until the interpreter is ready,
+    /// so that an `Ok` means "the `pyst` surface is installed and a script can
+    /// start".
     ///
-    /// # Erreurs
+    /// # Errors
     ///
-    /// [`ScriptError::Thread`] si le système refuse de créer un fil,
-    /// [`ScriptError::Interpreter`] si CPython ne démarre pas,
-    /// [`ScriptError::Install`] si la surface `pyst` n'a pas pu être posée.
+    /// [`ScriptError::Thread`] if the system refuses to create a thread,
+    /// [`ScriptError::Interpreter`] if CPython does not start,
+    /// [`ScriptError::Install`] if the `pyst` surface could not be installed.
     pub fn spawn(session: SessionHandle, python: EmbeddedPython) -> Result<Self, ScriptError> {
-        // Le moteur est toujours un émetteur distinct de son appelant : une
-        // simple clone fournie par l'hôte ne doit pas absorber ses écritures
-        // dans la macro du script (ni permettre au script d'avorter la sienne).
+        // The engine is always a sender distinct from its caller: a plain
+        // clone provided by the host must not absorb its writes into the
+        // script's macro (nor let the script abort the host's own).
         let session = session.with_new_identity();
         let shared = Arc::new(Shared::default());
         let (jobs_tx, jobs_rx) = mpsc::channel();
@@ -336,11 +336,11 @@ impl ScriptEngine {
         match init_rx.recv() {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                // Le fil s'arrête tout seul après avoir signalé son échec.
+                // The thread stops by itself after reporting its failure.
                 let _ = script_thread.join();
                 return Err(error);
             }
-            // Le fil a disparu sans rien dire : seule une panique le permet.
+            // The thread vanished without a word: only a panic can do that.
             Err(_) => {
                 let _ = script_thread.join();
                 return Err(ScriptError::Stopped);
@@ -355,7 +355,7 @@ impl ScriptEngine {
         {
             Ok(thread) => thread,
             Err(error) => {
-                // Ne pas laisser derrière soi un fil de script orphelin.
+                // Do not leave an orphaned script thread behind.
                 let _ = jobs_tx.send(Message::Stop);
                 let _ = script_thread.join();
                 return Err(ScriptError::Thread(error));
@@ -371,27 +371,27 @@ impl ScriptEngine {
         })
     }
 
-    /// Dit au moteur sous quel chemin le projet est enregistré (`None` : il ne
-    /// l'est pas encore). C'est ce que `pyst.save()` écrit ; l'hôte l'appelle
-    /// avant chaque exécution. Ne touche ni à la session ni à Python.
+    /// Tells the engine under which path the project is saved (`None`: it is not
+    /// yet). This is what `pyst.save()` writes; the host calls it
+    /// before each run. Touches neither the session nor Python.
     pub fn set_project_path(&self, path: Option<PathBuf>) {
         if let Ok(mut current) = self.shared.project_path.lock() {
             *current = path;
         }
     }
 
-    /// Interdit à `pyst.save()` (sans argument) d'écraser `path` : l'hôte y
-    /// met la source d'une lecture qui a écarté des données. `pyst.save_as`
-    /// reste permis. À reposer avant chaque exécution.
+    /// Forbids `pyst.save()` (without argument) from overwriting `path`: the host
+    /// puts there the source of a read that discarded data. `pyst.save_as`
+    /// stays allowed. To be set again before each run.
     pub fn set_protected_path(&self, path: Option<PathBuf>) {
         if let Ok(mut current) = self.shared.protected_path.lock() {
             *current = path;
         }
     }
 
-    /// Révision `(modèle, géométrie)` du dernier `save`/`save_as` du script
-    /// depuis le dernier appel, une seule fois : l'hôte la prend pour ne pas
-    /// laisser le projet « modifié ».
+    /// `(model, geometry)` revision of the script's last `save`/`save_as`
+    /// since the last call, once only: the host takes it so as not to
+    /// leave the project "modified".
     pub fn take_saved_revision(&self) -> Option<(u64, u64)> {
         self.shared
             .saved_revision
@@ -400,8 +400,8 @@ impl ScriptEngine {
             .and_then(|mut saved| saved.take())
     }
 
-    /// Le chemin courant du projet tel que le script le voit : celui posé par
-    /// [`Self::set_project_path`], ou celui d'un `pyst.save_as` depuis.
+    /// The project's current path as the script sees it: the one set by
+    /// [`Self::set_project_path`], or that of a `pyst.save_as` since.
     pub fn project_path(&self) -> Option<PathBuf> {
         self.shared
             .project_path
@@ -410,21 +410,21 @@ impl ScriptEngine {
             .and_then(|path| path.clone())
     }
 
-    /// Exécute une source Python et **bloque** jusqu'à son terme.
+    /// Runs a Python source and **blocks** until it ends.
     ///
-    /// Appelable depuis n'importe quel fil. L'espace de noms est **conservé
-    /// d'une exécution à l'autre**, comme dans une console : une variable
-    /// posée par un script reste visible du suivant. C'est ce qui permet de
-    /// garder une poignée d'un script à l'autre — et c'est aussi pourquoi une
-    /// vue numpy laissée dans une variable **retient l'ancien buffer** d'une
-    /// colonne jusqu'à ce qu'elle soit remplacée.
+    /// Callable from any thread. The namespace is **kept
+    /// from one run to the next**, as in a console: a variable
+    /// set by a script stays visible to the next. This is what lets a
+    /// handle be kept from one script to another, and also why a numpy
+    /// view left in a variable **retains the old buffer** of a
+    /// column until it is replaced.
     ///
-    /// # Erreurs
+    /// # Errors
     ///
-    /// [`ScriptError::Busy`] si un script tourne déjà (le socle en autorise un
-    /// à la fois), [`ScriptError::Stopped`] si le fil de script est arrêté.
-    /// Une exception **du script** n'est pas une erreur ici : elle est rendue
-    /// dans [`ScriptOutcome::error`], avec sa trace d'appels.
+    /// [`ScriptError::Busy`] if a script is already running (the foundation allows one
+    /// at a time), [`ScriptError::Stopped`] if the script thread is stopped.
+    /// An exception **of the script** is not an error here: it is returned
+    /// in [`ScriptOutcome::error`], with its traceback.
     pub fn run(&self, source: &str) -> Result<ScriptOutcome, ScriptError> {
         if self
             .shared
@@ -449,10 +449,10 @@ impl ScriptEngine {
         })
     }
 
-    /// Demande l'arrêt du script en cours. Sans effet s'il n'y en a pas.
+    /// Requests the running script to stop. No effect if there is none.
     ///
-    /// **Ne bloque pas** : pose un drapeau et poste un message. C'est le fil
-    /// d'interruption qui attendra le GIL pour lever l'exception asynchrone.
+    /// **Does not block**: sets a flag and posts a message. The interruption
+    /// thread is the one that will wait for the GIL to raise the asynchronous exception.
     pub fn interrupt(&self) {
         self.shared
             .interrupt_requested
@@ -461,31 +461,31 @@ impl ScriptEngine {
         let _ = self.interrupts.send(InterruptMessage::Now(generation));
     }
 
-    /// Vrai pendant qu'un script s'exécute.
+    /// True while a script is running.
     ///
-    /// Passe à vrai quand le fil de script entre effectivement dans le script,
-    /// pas dès l'appel de [`ScriptEngine::run`] : c'est ce décalage qui rend
-    /// une interruption demandée « pendant que ça tourne » impossible à
-    /// perdre.
+    /// Becomes true when the script thread actually enters the script,
+    /// not as soon as [`ScriptEngine::run`] is called: this offset is what makes
+    /// an interruption requested "while it is running" impossible to
+    /// lose.
     #[must_use]
     pub fn is_running(&self) -> bool {
         self.shared.running.load(Ordering::Acquire)
     }
 
-    /// Arrête les deux fils et attend leur fin.
+    /// Stops both threads and waits for them to end.
     ///
-    /// Si un script tourne encore, son exécution est menée à son terme avant
-    /// l'arrêt — l'arrêt n'est pas une interruption. Appelez
-    /// [`ScriptEngine::interrupt`] d'abord si vous voulez couper court.
+    /// If a script is still running, its run is carried to completion before
+    /// the stop; the stop is not an interruption. Call
+    /// [`ScriptEngine::interrupt`] first if you want to cut it short.
     ///
-    /// L'interpréteur n'est **pas** finalisé : `Py_Finalize` est une source
-    /// connue de plantages en sortie et n'apporte rien à un processus qui se
-    /// termine. Conséquence assumée, la même que dans `stokesforge-python` : les
-    /// `atexit` Python ne s'exécutent jamais.
+    /// The interpreter is **not** finalized: `Py_Finalize` is a known
+    /// source of crashes at exit and brings nothing to a process that
+    /// ends. Accepted consequence, the same as in `stokesforge-python`: Python
+    /// `atexit` handlers never run.
     ///
-    /// # Erreurs
+    /// # Errors
     ///
-    /// [`ScriptError::Stopped`] si l'un des deux fils a paniqué.
+    /// [`ScriptError::Stopped`] if either thread panicked.
     pub fn shutdown(mut self) -> Result<(), ScriptError> {
         let _ = self.jobs.send(Message::Stop);
         let _ = self.interrupts.send(InterruptMessage::Stop);
@@ -504,18 +504,18 @@ impl ScriptEngine {
 }
 
 impl Drop for ScriptEngine {
-    /// Demande l'arrêt des deux fils **sans les attendre**.
+    /// Requests both threads to stop **without waiting for them**.
     ///
-    /// Attendre serait piégeux : un moteur lâché pendant qu'un script boucle
-    /// sans fin bloquerait le fil qui le lâche. Qui veut la garantie que tout
-    /// est fini appelle [`ScriptEngine::shutdown`].
+    /// Waiting would be a trap: an engine dropped while a script loops
+    /// forever would block the thread that drops it. Whoever wants the guarantee that
+    /// everything is over calls [`ScriptEngine::shutdown`].
     fn drop(&mut self) {
         let _ = self.jobs.send(Message::Stop);
         let _ = self.interrupts.send(InterruptMessage::Stop);
     }
 }
 
-/// Boucle du fil de script.
+/// Script thread loop.
 fn script_main(
     python: EmbeddedPython,
     session: SessionHandle,
@@ -539,22 +539,22 @@ fn script_main(
             Message::Stop => break,
             Message::Run(job) => {
                 let outcome = execute(&job.source, &globals, &shared);
-                // Le drapeau `busy` tombe AVANT la réponse : sinon un client
-                // qui relance aussitôt verrait encore le moteur occupé.
+                // The `busy` flag drops BEFORE the reply: otherwise a client
+                // that relaunches at once would still see the engine busy.
                 shared.busy.store(false, Ordering::Release);
                 let _ = job.reply.send(outcome);
             }
         }
     }
 
-    // Les objets Python détenus par ce fil se détruisent GIL en main, jamais
-    // au fil de l'eau : décrémenter un compteur de références est une
-    // opération Python.
+    // The Python objects held by this thread are dropped with the GIL in hand, never
+    // as they come: decrementing a reference count is a Python
+    // operation.
     Python::attach(move |_py| drop(globals));
 }
 
-/// Démarre l'interpréteur, pose la surface `pyst`, la capture de sortie et
-/// l'espace de noms persistant.
+/// Starts the interpreter, installs the `pyst` surface, the output capture and
+/// the persistent namespace.
 fn start(
     python: &EmbeddedPython,
     session: SessionHandle,
@@ -571,8 +571,8 @@ fn start(
     CONTEXT.with(|cell| *cell.borrow_mut() = Some(context));
 
     Python::attach(|py| -> PyResult<Py<PyDict>> {
-        // L'identifiant Python du fil, seul argument que
-        // `PyThreadState_SetAsyncExc` sache reconnaître.
+        // The thread's Python identifier, the only argument that
+        // `PyThreadState_SetAsyncExc` knows how to recognize.
         let ident = py
             .import("threading")?
             .call_method0("get_ident")?
@@ -581,11 +581,11 @@ fn start(
 
         surface::install(py)?;
         capture::install(py)?;
-        // `traceback` est importé ici, une fois pour toutes : sur le chemin
-        // d'erreur, `py.import` se réduit alors à une lecture de
-        // `sys.modules`, sans prendre le verrou d'importation de CPython. Un
-        // import au moment de formater une trace serait le pire endroit pour
-        // se bloquer.
+        // `traceback` is imported here, once and for all: on the error
+        // path, `py.import` then boils down to a read of
+        // `sys.modules`, without taking CPython's import lock. An
+        // import at the moment of formatting a traceback would be the worst place
+        // to get stuck.
         py.import("traceback")?;
 
         let globals = PyDict::new(py);
@@ -597,11 +597,11 @@ fn start(
     .map_err(|error| ScriptError::Install(Python::attach(|py| format_exception(py, &error))))
 }
 
-/// Exécute une source, capture ses sorties, formate son éventuelle exception.
+/// Runs a source, captures its outputs, formats its possible exception.
 fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome {
-    // Remise à zéro AVANT que `running` ne passe à vrai : une interruption
-    // demandée alors que `is_running()` est déjà vrai ne peut plus être
-    // effacée par cette ligne.
+    // Reset BEFORE `running` becomes true: an interruption
+    // requested while `is_running()` is already true can no longer be
+    // erased by this line.
     shared.interrupt_requested.store(false, Ordering::Release);
     shared.generation.fetch_add(1, Ordering::AcqRel);
 
@@ -617,25 +617,24 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
             )),
         };
 
-        // Ces deux lignes forment un tout, et leur ordre est le cœur de la
-        // sûreté de l'interruption. Elles s'exécutent GIL en main, et le fil
-        // d'interruption relit `running` GIL en main lui aussi : dès que
-        // `running` retombe, plus aucune exception asynchrone ne peut être
-        // armée, et celle qui l'était déjà est retirée avant que la moindre
-        // instruction Python ne soit exécutée pour formater le résultat.
+        // These two lines form a whole, and their order is the core of the
+        // interruption's safety. They run with the GIL in hand, and the
+        // interruption thread rereads `running` with the GIL in hand too: as soon as
+        // `running` drops, no asynchronous exception can be armed anymore, and the
+        // one that already was is removed before any Python
+        // instruction runs to format the result.
         //
-        // Sans cela, une interruption arrivée juste avant la fin d'un script
-        // pouvait se déclencher **à l'intérieur** d'un `import` du formatage
-        // d'erreur, et laisser le verrou d'importation global de CPython pris
-        // pour toujours — c'est-à-dire figer tout l'interpréteur. C'est le
-        // « naive misuse » contre lequel la documentation de
-        // `PyThreadState_SetAsyncExc` met en garde.
+        // Without this, an interruption arriving just before the end of a script
+        // could fire **inside** an `import` of the error formatting, and leave
+        // CPython's global import lock taken forever, that is, freeze the
+        // whole interpreter. This is the "naive misuse" that the documentation of
+        // `PyThreadState_SetAsyncExc` warns against.
         shared.running.store(false, Ordering::Release);
         clear_pending_async_exception(py, shared);
 
         let interrupted = shared.interrupt_requested.load(Ordering::Acquire);
-        // Aucun appel Python pendant la fermeture : l'exception asynchrone
-        // est désarmée et l'acteur ne reçoit que des données Rust.
+        // No Python call during closing: the asynchronous exception
+        // is disarmed and the actor receives only Rust data.
         if let Ok(context) = current_context() {
             if let Err(error) = py.detach(|| context.finish_write(result.is_ok() && !interrupted)) {
                 result = Err(surface::to_py_error(error));
@@ -652,21 +651,21 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
     })
 }
 
-/// Formate une exception Python avec sa trace d'appels complète, chaînage
-/// compris — c'est ce que l'utilisateur doit lire pour comprendre son erreur.
+/// Formats a Python exception with its full traceback, chaining
+/// included: this is what the user must read to understand their error.
 fn format_exception(py: Python<'_>, error: &PyErr) -> String {
     if let Ok(text) = format_with_traceback_module(py, error) {
         return text;
     }
-    // Repli si le module `traceback` est indisponible : la trace brute reste
-    // meilleure que rien.
+    // Fallback if the `traceback` module is unavailable: the raw trace is
+    // better than nothing.
     match error.traceback(py).and_then(|trace| trace.format().ok()) {
         Some(trace) => format!("{trace}{error}"),
         None => error.to_string(),
     }
 }
 
-/// Formate par `traceback.format_exception`, comme le ferait l'interpréteur.
+/// Formats through `traceback.format_exception`, as the interpreter would.
 fn format_with_traceback_module(py: Python<'_>, error: &PyErr) -> PyResult<String> {
     let parts = py.import("traceback")?.call_method1(
         "format_exception",
@@ -675,25 +674,25 @@ fn format_with_traceback_module(py: Python<'_>, error: &PyErr) -> PyResult<Strin
     Ok(parts.extract::<Vec<String>>()?.concat())
 }
 
-/// Retire l'exception asynchrone éventuellement en attente sur le fil de
-/// script.
+/// Removes the asynchronous exception possibly pending on the script
+/// thread.
 fn clear_pending_async_exception(py: Python<'_>, shared: &Shared) {
     let ident = shared.py_thread_ident.load(Ordering::Acquire);
     if ident == 0 {
         return;
     }
     let _ = py;
-    // SAFETY : `PyThreadState_SetAsyncExc` exige le GIL — le jeton `py` en est
-    // la preuve — et un identifiant de fil ; un identifiant inconnu est un
-    // no-op documenté (la fonction rend alors 0). Le second argument nul
-    // signifie « retire l'exception en attente », ne transfère aucune
-    // référence et ne peut pas échouer.
+    // SAFETY: `PyThreadState_SetAsyncExc` requires the GIL (the `py` token is
+    // the proof) and a thread identifier; an unknown identifier is a documented
+    // no-op (the function then returns 0). The null second argument
+    // means "remove the pending exception", transfers no
+    // reference and cannot fail.
     unsafe {
         ffi::PyThreadState_SetAsyncExc(ident as c_long, std::ptr::null_mut());
     }
 }
 
-/// Boucle du fil d'interruption.
+/// Interruption thread loop.
 fn interrupt_main(messages: &mpsc::Receiver<InterruptMessage>, shared: &Arc<Shared>) {
     while let Ok(message) = messages.recv() {
         match message {
@@ -704,29 +703,28 @@ fn interrupt_main(messages: &mpsc::Receiver<InterruptMessage>, shared: &Arc<Shar
                     continue;
                 }
                 Python::attach(|py| {
-                    // `running` est relu **GIL en main**, et le fil de script
-                    // le remet à faux GIL en main lui aussi : les deux gestes
-                    // sont donc ordonnés l'un par rapport à l'autre. C'est ce
-                    // qui garantit qu'aucune exception asynchrone ne peut être
-                    // armée après la fin d'un script — un test hors script
-                    // laisserait passer une interruption qui exploserait dans
-                    // le script suivant, ou pire, au milieu d'un `import` de
-                    // l'hôte.
-                    // Le numéro écarte aussi le script **suivant** : un `Now`
-                    // resté en file après une interruption déjà servie par
-                    // `check_interrupt` ne vise plus l'exécution courante.
+                    // `running` is reread **with the GIL in hand**, and the script thread
+                    // sets it to false with the GIL in hand too: the two gestures are
+                    // therefore ordered with respect to each other. This is what
+                    // guarantees that no asynchronous exception can be armed after a script
+                    // ends; a test outside the script would let through an interruption that would
+                    // blow up in the next script, or worse, in the middle of a host
+                    // `import`.
+                    // The number also rules out the **next** script: a `Now` left
+                    // queued after an interruption already served by
+                    // `check_interrupt` no longer targets the current run.
                     if !shared.running.load(Ordering::Acquire)
                         || shared.generation.load(Ordering::Acquire) != target
                     {
                         return;
                     }
                     let exception = py.get_type::<PyKeyboardInterrupt>();
-                    // SAFETY : le GIL est détenu (jeton `py`), l'identifiant
-                    // est celui du fil de script relevé après le démarrage de
-                    // l'interpréteur, et `exception` est un type-objet vivant
-                    // le temps de l'appel — `PyThreadState_SetAsyncExc` ne vole
-                    // aucune référence. Un identifiant devenu inconnu est un
-                    // no-op documenté.
+                    // SAFETY: the GIL is held (`py` token), the identifier
+                    // is that of the script thread read after the interpreter started, and
+                    // `exception` is a live type object for the duration of the call;
+                    // `PyThreadState_SetAsyncExc` steals no
+                    // reference. An identifier that became unknown is a documented
+                    // no-op.
                     unsafe {
                         ffi::PyThreadState_SetAsyncExc(ident as c_long, exception.as_ptr());
                     }
@@ -744,8 +742,8 @@ mod tests {
     use stokesforge_python::interpreter::{self, EmbeddedPython};
     use stokesforge_session::Session;
 
-    /// #215 : un `Now` resté en file après un script fini ne frappe pas le
-    /// script suivant. On le poste à la main, une fois le suivant démarré.
+    /// #215: a `Now` left queued after a finished script does not strike the next
+    /// script. It is posted by hand, once the next one has started.
     #[test]
     fn interruption_perimee_ne_frappe_pas_le_script_suivant() {
         let actor = Session::spawn(Project::new("Course").unwrap(), None).unwrap();

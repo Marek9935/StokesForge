@@ -58,8 +58,8 @@ handle) or one per series (list of the same length; otherwise
 `InvalidValueError`). The result of a batch is
 `{"series": [{columns, values, errors, warnings}, …]}`, in the order of `y`;
 a single handle keeps the flat dictionary. `fit(shared=['tau'])` fits globally.
-Witnesses: `un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup`,
-`un_lot_mal_forme_est_refuse_avec_un_message`.
+Witnesses: `a_batch_is_a_single_multi_series_computation_undone_in_one_go`,
+`a_malformed_batch_is_refused_with_a_message`.
 
 ### `pyst.analysis.fit`: models (#204)
 
@@ -68,7 +68,7 @@ Witnesses: `un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup`,
 components and `y0`), `logarithm`, `power`, `gaussian`, `lorentzian`, or a
 formula. `pyst.analysis.peaks(center_window=…)` bounds each center to ± this
 distance from its starting position. Witness:
-`les_trois_exponentielles_et_la_fenetre_de_centre_ont_leur_nom`.
+`the_three_exponentials_and_the_center_window_have_their_name`.
 
 ### scipy in the embedded prefix (#191)
 
@@ -85,7 +85,7 @@ pure Rust (`stokesforge-analysis`). Weight: ≈ 140 MB installed
 (`scipy` 109 MB + `scipy.libs` 30 MB, OpenBLAS, libgfortran and libquadmath
 included), to be counted in the package. The notices go in `licenses/scipy/`
 (`scripts/licenses-dist.sh`). Witness: `stokesforge-script/tests/analysis.rs`,
-`scipy_ajuste_une_exponentielle_depuis_un_script` (`test-python` CI job).
+`scipy_fits_an_exponential_from_a_script` (`test-python` CI job).
 Windows: the same script (under Git Bash, #332) installs the `win_amd64` wheel,
 and the `test-python-windows` CI job runs the script tests with it.
 
@@ -594,15 +594,14 @@ signatures, exceptions, option keys, keys of the returned dictionaries
 and their enumerated values. A script written against it must keep
 working; the tables of the neighboring sections **comment on** it (effects,
 examples) but do not replace it. Docstrings and error messages stay
-outside the list (S8: docstrings stay in French, error
-messages in English).
+outside the list (S8: both in English; docstrings since #376).
 
 **Change rule.** Any change to this list — call, parameter,
 default, exception, option key, key or value of a return — is an **explicit
 decision** (issue or user request), made **in the same commit**
 as the code: the relevant block is updated here, and only then the code.
 An addition is an evolution of the API, not a detail; a removal or a rename
-breaks scripts. The test `crates/stokesforge-script/tests/surface_figee.rs`
+breaks scripts. The test `crates/stokesforge-script/tests/frozen_api.rs`
 reads the blocks below (it keeps no copy of them) and fails on any
 difference with the module actually built, saying which one.
 

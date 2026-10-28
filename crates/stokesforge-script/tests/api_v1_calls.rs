@@ -1,5 +1,5 @@
-//! Figer l'API `pyst` (#331, lot 1) : paramètres en anglais, `redo`, `save` /
-//! `save_as`, `export_graph` et `analysis.readiness`.
+//! Freezing the `pyst` API (#331, batch 1): English parameters, `redo`, `save` /
+//! `save_as`, `export_graph` and `analysis.readiness`.
 #![cfg(feature = "python")]
 
 use std::path::PathBuf;
@@ -10,16 +10,16 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::{ScriptEngine, ScriptOutcome};
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: Arc<ScriptEngine>,
     session: SessionHandle,
     _actor: Session,
     a: NodeId,
 }
 
-/// `[Book1]Sheet1` : `A` = 1, 2, 3 et `B` = 4, 5, 6.
-fn banc() -> Banc {
-    let mut project = Project::new("Figer").unwrap();
+/// `[Book1]Sheet1`: `A` = 1, 2, 3 and `B` = 4, 5, 6.
+fn bench() -> Bench {
+    let mut project = Project::new("Freeze").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
     let a = project
@@ -37,7 +37,7 @@ fn banc() -> Banc {
         });
     let engine =
         Arc::new(ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(prefix)).unwrap());
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
@@ -45,14 +45,15 @@ fn banc() -> Banc {
     }
 }
 
-fn run(banc: &Banc, source: &str) -> ScriptOutcome {
-    let outcome = banc.engine.run(source).unwrap();
+fn run(bench: &Bench, source: &str) -> ScriptOutcome {
+    let outcome = bench.engine.run(source).unwrap();
     assert!(outcome.error.is_none(), "{:?}", outcome.error);
     outcome
 }
 
-fn floats(banc: &Banc, id: NodeId) -> Vec<f64> {
-    banc.session
+fn floats(bench: &Bench, id: NodeId) -> Vec<f64> {
+    bench
+        .session
         .snapshot()
         .unwrap()
         .tree
@@ -68,23 +69,23 @@ fn floats(banc: &Banc, id: NodeId) -> Vec<f64> {
 
 const HANDLES: &str = "a = pyst.resolve('[Book1]Sheet1!A')\nb = pyst.resolve('[Book1]Sheet1!B')\n";
 
-/// Le script doit lever une exception du type `kind` ; rend son message.
-fn refused(banc: &Banc, kind: &str, body: &str) -> String {
-    refused_after(banc, kind, "", body)
+/// The script must raise an exception of type `kind`; returns its message.
+fn refused(bench: &Bench, kind: &str, body: &str) -> String {
+    refused_after(bench, kind, "", body)
 }
 
-/// Comme [`refused`], avec une préparation `setup` hors du `try` : une erreur
-/// de la préparation ne doit pas passer pour le refus attendu.
-fn refused_after(banc: &Banc, kind: &str, setup: &str, body: &str) -> String {
+/// Like [`refused`], with a `setup` outside the `try`: an error in the setup
+/// must not pass for the expected refusal.
+fn refused_after(bench: &Bench, kind: &str, setup: &str, body: &str) -> String {
     let source = format!(
         "{HANDLES}{setup}try:\n    {body}\nexcept pyst.{kind} as error:\n    caught = str(error)\nelse:\n    raise AssertionError('no {kind}')\nprint(caught)"
     );
-    run(banc, &source).stdout.trim().to_owned()
+    run(bench, &source).stdout.trim().to_owned()
 }
 
 #[test]
-fn les_parametres_sont_en_anglais() {
-    let b = banc();
+fn parameters_are_in_english() {
+    let b = bench();
     run(
         &b,
         r#"
@@ -110,8 +111,8 @@ for call in (
 }
 
 #[test]
-fn redo_retablit_ce_que_undo_a_annule() {
-    let b = banc();
+fn redo_restores_what_undo_undid() {
+    let b = bench();
     run(
         &b,
         &format!(
@@ -128,10 +129,10 @@ fn redo_retablit_ce_que_undo_a_annule() {
 }
 
 #[test]
-fn save_sans_chemin_est_refuse_puis_save_as_fixe_le_chemin() {
-    let b = banc();
+fn save_without_a_path_is_refused_then_save_as_sets_the_path() {
+    let b = bench();
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("projet.stf");
+    let file = dir.path().join("project.stf");
     let message = refused(&b, "InvalidValueError", "pyst.save()");
     assert!(message.contains("save_as"), "{message}");
     assert!(!file.exists());
@@ -146,15 +147,15 @@ fn save_sans_chemin_est_refuse_puis_save_as_fixe_le_chemin() {
     assert!(file.metadata().unwrap().len() > 0);
     assert_eq!(b.engine.project_path().as_deref(), Some(file.as_path()));
 
-    // `save()` écrit maintenant au chemin retenu : supprimer le fichier le
-    // prouve, car seul un enregistrement le refait.
+    // `save()` now writes to the retained path: deleting the file proves it,
+    // since only a save recreates it.
     std::fs::remove_file(&file).unwrap();
     run(
         &b,
         &format!("{HANDLES}pyst.save()\nassert pyst.info(a)['name'] == 'A'"),
     );
     assert!(file.exists());
-    // Le fichier est un projet relisible, avec les données du moment.
+    // The file is a readable project, with the current data.
     b.session.load(&file).unwrap();
     let snapshot = b.session.snapshot().unwrap();
     let sheet = snapshot.tree.resolve("[Book1]Sheet1!A").unwrap();
@@ -173,14 +174,14 @@ fn save_sans_chemin_est_refuse_puis_save_as_fixe_le_chemin() {
 }
 
 #[test]
-fn save_utilise_le_chemin_pose_par_lhote_et_valide_le_groupe() {
-    let b = banc();
+fn save_uses_the_path_set_by_the_host_and_commits_the_group() {
+    let b = bench();
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hote.stf");
+    let file = dir.path().join("host.stf");
     b.engine.set_project_path(Some(file.clone()));
-    // L'écriture précède `save()` dans le même groupe : sans validation du
-    // groupe, la session refuserait d'écrire (macro ouverte). Une erreur
-    // ultérieure n'annule plus ce qui a été validé.
+    // The write precedes `save()` in the same group: without committing the
+    // group, the session would refuse to write (open macro). A later error
+    // no longer undoes what was committed.
     let outcome = b
         .engine
         .run(&format!(
@@ -194,14 +195,14 @@ fn save_utilise_le_chemin_pose_par_lhote_et_valide_le_groupe() {
     assert_eq!(floats(&b, b.a), vec![5.0, 5.0, 5.0]);
 }
 
-fn graphe(b: &Banc) -> &'static str {
+fn graph(b: &Bench) -> &'static str {
     let _ = b;
-    "g = pyst.plot(b, a, name='Graph1', title='Titre')\n"
+    "g = pyst.plot(b, a, name='Graph1', title='Title')\n"
 }
 
 #[test]
-fn export_graph_ecrit_svg_pdf_et_png_comme_lapplication() {
-    let b = banc();
+fn export_graph_writes_svg_pdf_and_png_like_the_application() {
+    let b = bench();
     let dir = tempfile::tempdir().unwrap();
     let (svg, pdf, png, png1) = (
         dir.path().join("f.svg"),
@@ -216,11 +217,11 @@ fn export_graph_ecrit_svg_pdf_et_png_comme_lapplication() {
              pyst.export_graph(g, {pdf:?})\n\
              pyst.export_graph(g, {png:?})\n\
              pyst.export_graph(g, {png1:?}, png_scale=1.0)\n",
-            graphe(&b)
+            graph(&b)
         ),
     );
-    // Même rendu que l'application : mêmes octets que `export_bytes` sur le
-    // spec du graphe, taille et mode de texte par défaut.
+    // Same rendering as the application: same bytes as `export_bytes` on the
+    // graph spec, default size and text mode.
     let snapshot = b.session.snapshot().unwrap();
     let node = snapshot.tree.resolve("[Graph1]").unwrap();
     let spec = match snapshot.tree.node(node).unwrap().kind() {
@@ -244,16 +245,16 @@ fn export_graph_ecrit_svg_pdf_et_png_comme_lapplication() {
     let small = std::fs::read(&png1).unwrap();
     assert!(big.starts_with(b"\x89PNG"));
     let width = |bytes: &[u8]| u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-    assert_eq!(width(&big), 4 * width(&small), "png_scale agrandit le PNG");
+    assert_eq!(width(&big), 4 * width(&small), "png_scale enlarges the PNG");
 }
 
 #[test]
-fn export_graph_refuse_extension_inconnue_echelle_nulle_et_non_graphe() {
-    let b = banc();
+fn export_graph_refuses_an_unknown_extension_a_zero_scale_and_a_non_graph() {
+    let b = bench();
     let dir = tempfile::tempdir().unwrap();
     let jpg = dir.path().join("f.jpg");
     let (png, svg) = (dir.path().join("f.png"), dir.path().join("f.svg"));
-    let setup = graphe(&b);
+    let setup = graph(&b);
     let message = refused_after(
         &b,
         "InvalidValueError",
@@ -262,8 +263,8 @@ fn export_graph_refuse_extension_inconnue_echelle_nulle_et_non_graphe() {
     );
     assert!(message.contains(".svg"), "{message}");
     assert!(!jpg.exists());
-    // Refusé aussi pour un format qui ignore l'échelle (le SVG) : un
-    // paramètre faux n'est pas toléré en silence.
+    // Also refused for a format that ignores the scale (SVG): a wrong
+    // parameter is not silently tolerated.
     for path in [&png, &svg] {
         let message = refused_after(
             &b,
@@ -284,8 +285,8 @@ fn export_graph_refuse_extension_inconnue_echelle_nulle_et_non_graphe() {
 }
 
 #[test]
-fn readiness_dit_ce_qui_manque_sans_rien_ecrire() {
-    let b = banc();
+fn readiness_says_what_is_missing_without_writing_anything() {
+    let b = bench();
     let before = b.session.snapshot().unwrap();
     run(
         &b,
@@ -314,7 +315,7 @@ fn readiness_dit_ce_qui_manque_sans_rien_ecrire() {
     ] {
         refused(&b, "InvalidValueError", body);
     }
-    // Lecture seule : ni projet ni historique touchés.
+    // Read-only: neither project nor history touched.
     let after = b.session.snapshot().unwrap();
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.revision, before.revision);

@@ -1,79 +1,77 @@
-//! Aperçu en direct du découpage d'un fichier par une [`crate::ImportRecipe`],
-//! façon assistant d'import ASCII d'OriginLab : classe **chaque ligne** en
-//! rôle (en-tête principal, sous-en-tête avec son rôle, en-tête de colonnes,
-//! donnée, pied de page) exactement comme [`crate::parse::parse`] la
-//! traiterait, pour que le panneau qui affiche cet aperçu retexte en direct à
-//! chaque changement de réglage — voir
-//! `docs/chantier-import-previsualisation.md` (l'objectif du chantier qui a
-//! ajouté ce module).
+//! Live preview of how a file is split by an [`crate::ImportRecipe`], in the
+//! manner of OriginLab's ASCII import wizard: classifies **each line** by
+//! role (main header, sub-header with its role, column header, data, footer)
+//! exactly as [`crate::parse::parse`] would treat it, so that the panel that
+//! shows this preview updates live at every settings change. See
+//! `docs/chantier-import-previsualisation.md` (the goal of the work package
+//! that added this module).
 //!
-//! Point de vigilance qui a guidé toute l'écriture de ce module : rester
-//! utilisable sur un fichier de plusieurs dizaines de milliers de lignes
-//! sans reparser (encore moins analyser cellule à cellule) tout le fichier à
-//! chaque frappe. Deux bornes distinctes y pourvoient :
+//! The point of vigilance that guided the whole writing of this module: stay
+//! usable on a file of several tens of thousands of lines without reparsing
+//! (even less analyzing cell by cell) the whole file at every keystroke. Two
+//! distinct bounds provide for it:
 //!
-//! - le **découpage en lignes** (`layout::split_lines` : `\r\n`, `\n` ou `\r`) est fait une fois, sur
-//!   tout le fichier — c'est `O(taille du fichier)`, incompressible pour
-//!   savoir où sont les lignes, mais ne fait qu'indexer des tranches de la
-//!   chaîne d'origine (pas de copie) ;
-//! - **construire un [`PreviewLine`] possédé** (avec sa propre `String`) et
-//!   **tokeniser/analyser une ligne cellule à cellule** ne sont faits que
-//!   pour les lignes réellement montrées : l'en-tête et le pied de page (des
-//!   comptes petits, fixés par l'utilisateur, jamais proportionnels à la
-//!   taille du fichier) et au plus `recipe.preview_lines` lignes de données —
-//!   jamais pour le reste, aussi long soit-il. [`FilePreview::total_data_lines`]
-//!   restitue le compte réel sans avoir matérialisé chaque ligne.
+//! - the **line splitting** (`layout::split_lines`: `\r\n`, `\n` or `\r`) is
+//!   done once, on the whole file. It is `O(file size)`, incompressible to
+//!   know where the lines are, but only indexes slices of the original string
+//!   (no copy);
+//! - **building an owned [`PreviewLine`]** (with its own `String`) and
+//!   **tokenizing/analyzing a line cell by cell** are done only for the lines
+//!   actually shown: the header and the footer (small counts, set by the
+//!   user, never proportional to the file size) and at most
+//!   `recipe.preview_lines` data lines, never for the rest, however long.
+//!   [`FilePreview::total_data_lines`] returns the real count without having
+//!   materialized every line.
 
 use crate::numbers::NumberFormat;
 use crate::parse::{resolve_separator, ImportError};
 use crate::recipe::{ImportRecipe, SubheaderRoles};
 
-/// Rôle attribué à une ligne du fichier, pour l'aperçu. Vocabulaire calqué
-/// sur la légende de l'assistant d'import ASCII d'OriginLab
-/// (`S`/`L`/`U`/`C`/`MH`/`SH`, voir [`LineRole::code`]) — `P` (« System/User
-/// Parameters ») n'a pas d'équivalent StokesForge, voir la doc de tête de
-/// [`crate::recipe::SubheaderRoles`]. `Footer` est un rôle StokesForge en plus :
-/// OriginLab ne le distingue pas dans sa légende.
+/// Role given to a file line, for the preview. Vocabulary modeled on the
+/// legend of OriginLab's ASCII import wizard (`S`/`L`/`U`/`C`/`MH`/`SH`, see
+/// [`LineRole::code`]). `P` ("System/User Parameters") has no StokesForge
+/// equivalent, see the top-level doc of [`crate::recipe::SubheaderRoles`].
+/// `Footer` is an extra StokesForge role: OriginLab does not distinguish it in
+/// its legend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineRole {
-    /// Ligne blanche à une extrémité du fichier, retirée avant toute analyse
-    /// (même règle que [`crate::parse::parse`]) — jamais comptée dans
-    /// l'en-tête ni les données. Interne : jamais dans un [`PreviewLine`]
-    /// rendu par [`preview`], seulement la valeur par défaut du tableau de
-    /// travail avant classification (voir son code).
+    /// Blank line at one end of the file, removed before any analysis (same
+    /// rule as [`crate::parse::parse`]); never counted in the header or the
+    /// data. Internal: never in a [`PreviewLine`] returned by [`preview`],
+    /// only the default value of the working array before classification (see
+    /// its code).
     Blank,
-    /// En-tête « principal » (`HeaderLayout::main_header_lines`, ou tout
-    /// l'en-tête classique `HeaderSkip::Lines`/`UntilMarker` quand la recette
-    /// n'utilise pas le modèle structuré — les deux ne se distinguent pas
-    /// dans ce cas, voir la doc de [`crate::recipe::HeaderLayout`]).
+    /// "Main" header (`HeaderLayout::main_header_lines`, or the whole classic
+    /// header `HeaderSkip::Lines`/`UntilMarker` when the recipe does not use
+    /// the structured model; the two are not distinguished in that case, see
+    /// the doc of [`crate::recipe::HeaderLayout`]).
     MainHeader,
-    /// Ligne de sous-en-tête sans rôle assigné à aucun des trois rôles
-    /// reconnus.
+    /// Sub-header line with none of the three recognized roles assigned.
     Subheader,
-    /// Ligne de sous-en-tête assignée au rôle `long_name`.
+    /// Sub-header line assigned to the `long_name` role.
     SubheaderLongName,
-    /// Ligne de sous-en-tête assignée au rôle `unit`.
+    /// Sub-header line assigned to the `unit` role.
     SubheaderUnit,
-    /// Ligne de sous-en-tête assignée au rôle `comment`.
+    /// Sub-header line assigned to the `comment` role.
     SubheaderComment,
-    /// Ligne de sous-en-tête assignée au rôle `x_prime` (#164).
+    /// Sub-header line assigned to the `x_prime` role (#164).
     SubheaderXPrime,
-    /// Ligne de noms courts de colonnes (`has_column_header_row`) — le `S`
-    /// (« Short Name ») d'OriginLab.
+    /// Line of short column names (`has_column_header_row`): OriginLab's `S`
+    /// ("Short Name").
     ColumnHeaderRow,
-    /// Ligne de données.
+    /// Data line.
     Data,
-    /// Pied de page : `footer_skip_lines`, et tout ce qui suit la fin des
-    /// données ([`crate::recipe::DataEnd`]).
+    /// Footer: `footer_skip_lines`, and everything after the end of the data
+    /// ([`crate::recipe::DataEnd`]).
     Footer,
-    /// Ligne de commentaire (`comment_prefix`) : jamais une donnée.
+    /// Comment line (`comment_prefix`): never data.
     Comment,
-    /// Ligne de données ignorée au début (`skip_data_rows`).
+    /// Data line skipped at the start (`skip_data_rows`).
     Skipped,
 }
 
 impl LineRole {
-    /// Code affiché dans l'aperçu — vocabulaire OriginLab où il existe.
+    /// Code shown in the preview, OriginLab vocabulary where it exists.
     pub fn code(self) -> &'static str {
         match self {
             LineRole::Blank => "",
@@ -92,52 +90,51 @@ impl LineRole {
     }
 }
 
-/// Une cellule d'une ligne de données montrée dans l'aperçu.
+/// A cell of a data line shown in the preview.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewCell {
-    /// Jeton d'origine, `trim`é.
+    /// Original token, trimmed.
     pub text: String,
-    /// Vrai si cette cellule deviendrait un texte conservé plutôt qu'un
-    /// `NaN` muet dans une colonne mixte (jeton non vide qui ne s'analyse
-    /// pas en nombre) — même règle que [`crate::parse::ParsedColumn::texts`].
+    /// True if this cell would become kept text rather than a silent `NaN` in
+    /// a mixed column (non-empty token that does not parse as a number); same
+    /// rule as [`crate::parse::ParsedColumn::texts`].
     pub is_text: bool,
 }
 
-/// Une ligne du fichier telle que l'aperçu la montre.
+/// A file line as the preview shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewLine {
-    /// Numéro de ligne dans le fichier d'origine, 1-based.
+    /// Line number in the original file, 1-based.
     pub number: usize,
     pub role: LineRole,
     pub text: String,
-    /// Cellule par cellule, seulement pour une ligne de données comprise
-    /// dans la fenêtre `recipe.preview_lines` — `None` pour toute autre
-    /// ligne, y compris une ligne de données au-delà de cette fenêtre (voir
-    /// la doc de tête du module).
+    /// Cell by cell, only for a data line within the `recipe.preview_lines`
+    /// window; `None` for any other line, including a data line beyond this
+    /// window (see the module's top-level doc).
     pub cells: Option<Vec<PreviewCell>>,
 }
 
-/// Le résultat d'un aperçu : les lignes à montrer, plus le compte réel de
-/// lignes de données (qu'elles soient montrées ou non).
+/// The result of a preview: the lines to show, plus the real count of data
+/// lines (whether shown or not).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilePreview {
     pub lines: Vec<PreviewLine>,
     pub total_data_lines: usize,
-    /// Nombre de blocs de données du fichier (`recipe.block_split`) ; l'aperçu
-    /// montre le premier.
+    /// Number of data blocks in the file (`recipe.block_split`); the preview
+    /// shows the first.
     pub block_count: usize,
 }
 
-/// Nombre maximal de lignes autres que des données (en-tête, pied de page,
-/// commentaires, lignes ignorées) montrées par l'aperçu : un pied de page de
-/// plusieurs millions de lignes ne doit pas devenir autant d'allocations.
+/// Maximum number of non-data lines (header, footer, comments, skipped lines)
+/// shown by the preview: a footer of several million lines must not turn into
+/// as many allocations.
 const MAX_OTHER_LINES: usize = 500;
 
-/// Classe chaque ligne de `bytes` selon `recipe`, jusqu'à
-/// `recipe.preview_lines` lignes de données. Mêmes conditions d'échec que
-/// [`crate::parse::parse`] — `Err` exactement dans les mêmes cas, avec le
-/// même sens : les deux s'appuient sur le **même** découpage
-/// ([`crate::layout::analyze`]), donc l'aperçu montre ce que l'import fera.
+/// Classifies each line of `bytes` according to `recipe`, up to
+/// `recipe.preview_lines` data lines. Same failure conditions as
+/// [`crate::parse::parse`]: `Err` in exactly the same cases, with the same
+/// meaning. Both rely on the **same** split ([`crate::layout::analyze`]), so
+/// the preview shows what the import will do.
 pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, ImportError> {
     if bytes.is_empty() {
         return Err(ImportError::Empty);
@@ -150,10 +147,10 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     let total_data_lines = layout.data.len();
     let shown_data_lines = total_data_lines.min(recipe.preview_lines);
 
-    // N'émet un `PreviewLine` possédé que pour les lignes réellement
-    // montrées : en-tête, pied de page et autres zones (des comptes
-    // bornés par `MAX_OTHER_LINES`) et au plus `preview_lines` lignes de
-    // données — jamais pour le reste, voir la doc de tête du module.
+    // Emits an owned `PreviewLine` only for the lines actually shown: header,
+    // footer and other zones (counts bounded by `MAX_OTHER_LINES`) and at
+    // most `preview_lines` data lines, never for the rest; see the module's
+    // top-level doc.
     let mut lines = Vec::new();
     let (mut data_seen, mut others) = (0usize, 0usize);
     for i in layout.start..layout.end {
@@ -205,13 +202,12 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
     })
 }
 
-/// Rôle d'une ligne de sous-en-tête, 1-based **dans le bloc de
-/// sous-en-tête** (indépendant du nombre de lignes d'en-tête principal qui
-/// le précèdent) — une ligne qui tombe dans plusieurs plages assignées (cas
-/// improbable mais possible : rien n'empêche l'utilisateur de faire se
-/// chevaucher deux rôles) suit la priorité `long_name` > `unit` > `comment` > `x_prime`,
-/// documentée ici plutôt que de porter plusieurs rôles à la fois — ce que
-/// [`LineRole`] ne modélise pas.
+/// Role of a sub-header line, 1-based **within the sub-header block**
+/// (independent of the number of main header lines before it). A line that
+/// falls in several assigned ranges (unlikely but possible: nothing prevents
+/// the user from overlapping two roles) follows the priority `long_name` >
+/// `unit` > `comment` > `x_prime`, documented here rather than carrying
+/// several roles at once, which [`LineRole`] does not model.
 pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> LineRole {
     let contains = |range: Option<crate::recipe::SubheaderLineRange>| {
         range.is_some_and(|r| r.from <= sub_index && sub_index <= r.to)
@@ -229,32 +225,29 @@ pub(crate) fn subheader_line_role(sub_index: usize, roles: &SubheaderRoles) -> L
     }
 }
 
-/// Détecte automatiquement `(main_header_lines, subheader_lines)` à partir
-/// du contenu du fichier — le bouton de réévaluation d'OriginLab
-/// (`auto_detect`, voir [`crate::recipe::HeaderLayout`]).
+/// Automatically detects `(main_header_lines, subheader_lines)` from the
+/// file content: OriginLab's re-evaluation button (`auto_detect`, see
+/// [`crate::recipe::HeaderLayout`]).
 ///
-/// Heuristique en deux passes, sur les 500 premières lignes non blanches du
-/// fichier au plus (un plafond documenté, pas une erreur : un en-tête plus
-/// long que ça n'existe pas en pratique dans ce domaine, et ça borne le coût
-/// indépendamment de la taille du fichier — même esprit que les six plafonds
-/// de `docs/archive/rustrewrite/questions-ouvertes.md` §11) :
+/// Two-pass heuristic, on at most the first 500 non-blank lines of the file
+/// (a documented cap, not an error: a header longer than that does not exist
+/// in practice in this domain, and it bounds the cost regardless of the file
+/// size; same spirit as the six caps of
+/// `docs/archive/rustrewrite/questions-ouvertes.md` §11):
 ///
-/// 1. **En-tête principal** : à partir du début, tant qu'une ligne n'a pas le
-///    même nombre de champs (une fois tokenisée par `separator`) que la
-///    ligne de référence (la dernière ligne examinée, généralement une
-///    ligne de données) ;
-/// 2. **Sous-en-tête** : à partir de là, tant qu'une ligne a le bon nombre de
-///    champs mais qu'au moins un de ses jetons ne s'analyse pas en nombre
-///    (une ligne de sous-en-tête « aligne » ses champs sur les colonnes sans
-///    en être elle-même une donnée numérique — un nom de colonne ou une
-///    unité, typiquement).
+/// 1. **Main header**: from the start, as long as a line does not have the
+///    same number of fields (once tokenized by `separator`) as the reference
+///    line (the last line examined, usually a data line);
+/// 2. **Sub-header**: from there, as long as a line has the right number of
+///    fields but at least one of its tokens does not parse as a number (a
+///    sub-header line "aligns" its fields with the columns without being
+///    numeric data itself: typically a column name or a unit).
 ///
-/// Limite connue, documentée plutôt que corrigée : un fichier sans aucune
-/// ligne de données parmi les 500 examinées (en-tête anormalement long, ou
-/// fichier qui n'a que du texte) fait dégénérer la détection à « tout est
-/// en-tête principal, rien n'est sous-en-tête » — pas un panic, juste une
-/// détection peu utile, à corriger à la main comme n'importe quelle
-/// détection automatique qui se trompe.
+/// Known limit, documented rather than fixed: a file with no data line among
+/// the 500 examined (abnormally long header, or a file with only text) makes
+/// the detection degenerate to "everything is main header, nothing is
+/// sub-header". Not a panic, just a not very useful detection, to correct by
+/// hand like any automatic detection that is wrong.
 pub fn detect_header_layout(
     bytes: &[u8],
     separator: crate::recipe::Separator,
@@ -273,7 +266,7 @@ pub fn detect_header_layout(
         return crate::recipe::HeaderLayout::default();
     }
     let numbers = NumberFormat::new(decimal, None, &[], lines.iter().copied());
-    // Sans milliers (`None`) : `resolve_separator` ne refuse jamais ici.
+    // Without thousands (`None`): `resolve_separator` never rejects here.
     let Ok(effective) =
         resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal, None)
     else {
@@ -314,8 +307,8 @@ mod tests {
     };
 
     #[test]
-    fn sans_reglage_structure_tout_est_donnee() {
-        let recipe = ImportRecipe::new("défaut");
+    fn without_structure_settings_everything_is_data() {
+        let recipe = ImportRecipe::new("default");
         let result = preview(b"1,2,3\n4,5,6\n", &recipe).unwrap();
         assert_eq!(result.total_data_lines, 2);
         assert!(result.lines.iter().all(|l| l.role == LineRole::Data));
@@ -323,8 +316,8 @@ mod tests {
     }
 
     #[test]
-    fn en_tete_structure_classe_principal_et_sous_en_tete() {
-        let mut recipe = ImportRecipe::new("défaut");
+    fn structured_header_classifies_main_and_sub_header() {
+        let mut recipe = ImportRecipe::new("default");
         recipe.header_layout = HeaderLayout {
             main_header_lines: 1,
             subheader_lines: 2,
@@ -354,8 +347,8 @@ mod tests {
     }
 
     #[test]
-    fn cellule_non_numerique_est_annotee_texte() {
-        let recipe = ImportRecipe::new("défaut");
+    fn non_numeric_cell_is_annotated_as_text() {
+        let recipe = ImportRecipe::new("default");
         let result = preview(b"1,n/a,3\n", &recipe).unwrap();
         let cells = result.lines[0].cells.as_ref().unwrap();
         assert!(!cells[0].is_text);
@@ -365,29 +358,29 @@ mod tests {
     }
 
     #[test]
-    fn preview_lines_borne_les_cellules_analysees() {
-        let mut recipe = ImportRecipe::new("défaut");
+    fn preview_lines_bounds_the_analyzed_cells() {
+        let mut recipe = ImportRecipe::new("default");
         recipe.preview_lines = 2;
         let bytes = b"1\n2\n3\n4\n5\n";
         let result = preview(bytes, &recipe).unwrap();
         assert_eq!(result.total_data_lines, 5);
         let with_cells = result.lines.iter().filter(|l| l.cells.is_some()).count();
         assert_eq!(with_cells, 2);
-        // Les lignes au-delà de la fenêtre ne sont même pas émises : coût
-        // borné indépendamment du nombre réel de lignes de données.
+        // Lines beyond the window are not even emitted: cost bounded
+        // regardless of the real number of data lines.
         assert_eq!(result.lines.len(), 2);
     }
 
     #[test]
-    fn marqueur_introuvable_rend_la_meme_erreur_que_parse() {
-        let mut recipe = ImportRecipe::new("défaut");
+    fn missing_marker_gives_the_same_error_as_parse() {
+        let mut recipe = ImportRecipe::new("default");
         recipe.header = crate::recipe::HeaderSkip::UntilMarker("XYDATA".into());
-        let result = preview(b"une\ndeux\ntrois\n", &recipe);
+        let result = preview(b"one\ntwo\nthree\n", &recipe);
         assert_eq!(result, Err(ImportError::NoDataRows));
     }
 
     #[test]
-    fn detecte_en_tete_et_sous_en_tete_sur_un_fichier_plausible() {
+    fn detects_header_and_sub_header_on_a_plausible_file() {
         let bytes =
             b"Instrument XYZ\nDate: 2024-01-01\nTemperature,Pressure\ndegC,bar\n1,2\n3,4\n5,6\n";
         let layout =
@@ -398,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn detection_sur_fichier_binaire_ne_panique_pas() {
+    fn detection_on_a_binary_file_does_not_panic() {
         let layout = detect_header_layout(
             &[0xff, 0xfe, 0x00],
             Separator::Auto,

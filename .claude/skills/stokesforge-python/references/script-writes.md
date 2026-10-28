@@ -19,8 +19,8 @@ Read from `stokesforge-python` before adding or changing what a script writes or
 
 ## Texts a script sees are raw English
 
-Exception messages of `pyst` (`UnknownPathError`, `BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`), numpy, interpreter and script-thread errors are **raw English**, never translated (#47). The console phrases `ScriptError` through `errors::script::error_message`; the traceback stays Python's. Output column names written by `pyst.analysis` come from `stokesforge_core::OutputName::english()` (#256): `pyst` never builds an output name itself. Docstrings stay French; parameter names English.
+Exception messages of `pyst` (`UnknownPathError`, `BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`), numpy, interpreter and script-thread errors are **raw English**, never translated (#47). The console phrases `ScriptError` through `errors::script::error_message`; the traceback stays Python's. Output column names written by `pyst.analysis` come from `stokesforge_core::OutputName::english()` (#256): `pyst` never builds an output name itself. Docstrings (since #376) and parameter names are English.
 
 ## Tests
 
-`stokesforge-script/tests/selftest.rs` (end criterion), `graphs.rs`, `mutations.rs`, `navigation.rs`, `analysis.rs`, `surface_figee.rs`; `stokesforge-cli/tests/run.rs`; `stokesforge-app-state/tests/script_panel.rs` and `script_bridge_lazy.rs`; robustness `b7` (Rust ↔ Python boundary) and `b9` (script under stress).
+`stokesforge-script/tests/selftest.rs` (end criterion), `graphs.rs`, `mutations.rs`, `navigation.rs`, `analysis.rs`, `frozen_api.rs`; `stokesforge-cli/tests/run.rs`; `stokesforge-app-state/tests/script_panel.rs` and `script_bridge_lazy.rs`; robustness `b7` (Rust ↔ Python boundary) and `b9` (script under stress).

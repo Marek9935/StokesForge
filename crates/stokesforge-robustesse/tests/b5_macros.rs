@@ -1,22 +1,23 @@
-//! Batterie 5 — macros imbriquées, avortement, et la pile de rétablissement.
-//! C'est la partie de l'historique que `undo_random.rs` du dépôt ne tire pas.
+//! Battery 5: nested macros, abort, and the redo stack.
+//! This is the part of the history that the repository's `undo_random.rs`
+//! does not draw.
 
 use std::sync::Arc;
 use stokesforge_commands::{Command, History, MacroKind};
 use stokesforge_core::{Column, ColumnType, MixedCell, NodeId, Project, Tree, ValueBlock};
 
-fn projet() -> (Project, NodeId, Vec<NodeId>) {
+fn sample_project() -> (Project, NodeId, Vec<NodeId>) {
     let mut p = Project::new("M").unwrap();
     let root = p.root();
     p.add_workbook(root, Some("Book1")).unwrap();
     let sheet = p.resolve_path("[Book1]Sheet1").unwrap();
     let mut cols = Vec::new();
-    for (i, nom) in ["A", "B", "C"].iter().enumerate() {
+    for (i, name) in ["A", "B", "C"].iter().enumerate() {
         cols.push(
             p.add_column(
                 sheet,
                 None,
-                Some(nom),
+                Some(name),
                 Column::from_f64(&[i as f64, i as f64 + 1.0, i as f64 + 2.0]),
             )
             .unwrap(),
@@ -25,15 +26,15 @@ fn projet() -> (Project, NodeId, Vec<NodeId>) {
     (p, sheet, cols)
 }
 
-fn identique(a: &Arc<Tree>, b: &Arc<Tree>) -> bool {
+fn same_tree(a: &Arc<Tree>, b: &Arc<Tree>) -> bool {
     a.as_ref() == b.as_ref()
 }
 
 #[test]
-fn b5_macro_avortee_ne_laisse_aucune_trace() {
-    let (mut p, sheet, cols) = projet();
+fn b5_aborted_macro_leaves_no_trace() {
+    let (mut p, sheet, cols) = sample_project();
     let mut h = History::new();
-    // Un peu d'historique préalable, et un cran annulé pour peupler le redo.
+    // Some prior history, and one undone step to populate the redo.
     h.execute(
         &mut p,
         Command::SetCells {
@@ -53,12 +54,9 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
     )
     .unwrap();
     h.undo(&mut p).unwrap();
-    let avant = Arc::clone(p.tree());
-    let (undo_avant, redo_avant) = (h.len(), h.redo_len());
-    assert_eq!(
-        redo_avant, 1,
-        "mise en place : un cran doit être rétablissable"
-    );
+    let before = Arc::clone(p.tree());
+    let (undo_before, redo_before) = (h.len(), h.redo_len());
+    assert_eq!(redo_before, 1, "setup: one step must be redoable");
 
     h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
@@ -86,22 +84,18 @@ fn b5_macro_avortee_ne_laisse_aucune_trace() {
     h.abort_macro(&mut p).unwrap();
 
     assert!(
-        identique(&avant, p.tree()),
-        "l'arbre diffère après avortement"
+        same_tree(&before, p.tree()),
+        "the tree differs after the abort"
     );
-    assert_eq!(h.len(), undo_avant, "la pile d'annulation a changé");
-    assert_eq!(
-        h.redo_len(),
-        redo_avant,
-        "la pile de rétablissement n'a pas été restaurée"
-    );
-    // Et le rétablissement sauvé doit toujours marcher.
-    assert!(h.redo(&mut p).unwrap(), "le cran rétablissable est perdu");
+    assert_eq!(h.len(), undo_before, "the undo stack changed");
+    assert_eq!(h.redo_len(), redo_before, "the redo stack was not restored");
+    // And the saved redo must still work.
+    assert!(h.redo(&mut p).unwrap(), "the redoable step is lost");
 }
 
 #[test]
-fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
-    let (mut p, sheet, cols) = projet();
+fn b5_nested_aborted_macro_does_not_touch_the_parent() {
+    let (mut p, sheet, cols) = sample_project();
     let mut h = History::new();
     h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
@@ -112,7 +106,7 @@ fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
         },
     )
     .unwrap();
-    let apres_externe = Arc::clone(p.tree());
+    let after_outer = Arc::clone(p.tree());
 
     h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
@@ -138,23 +132,23 @@ fn b5_macro_imbriquee_avortee_ne_touche_pas_la_parente() {
     h.abort_macro(&mut p).unwrap();
 
     assert!(
-        identique(&apres_externe, p.tree()),
-        "l'avortement de la macro interne a défait (ou laissé) autre chose que ses propres pas"
+        same_tree(&after_outer, p.tree()),
+        "aborting the inner macro undid (or left) something other than its own steps"
     );
-    assert_eq!(h.macro_depth(), 1, "la macro externe doit rester ouverte");
+    assert_eq!(h.macro_depth(), 1, "the outer macro must stay open");
     h.end_macro(&mut p).unwrap();
-    assert_eq!(h.len(), 1, "la macro externe doit faire une entrée");
+    assert_eq!(h.len(), 1, "the outer macro must make one entry");
     assert!(h.undo(&mut p).unwrap());
     assert_eq!(
         p.tree().node(cols[0]).unwrap().name(),
         "A",
-        "annuler la macro externe n'a pas rendu son nom à la colonne"
+        "undoing the outer macro did not give the column its name back"
     );
 }
 
 #[test]
-fn b5_macro_vide_ne_laisse_rien_et_rend_le_redo() {
-    let (mut p, _sheet, cols) = projet();
+fn b5_empty_macro_leaves_nothing_and_keeps_the_redo() {
+    let (mut p, _sheet, cols) = sample_project();
     let mut h = History::new();
     h.execute(
         &mut p,
@@ -170,14 +164,14 @@ fn b5_macro_vide_ne_laisse_rien_et_rend_le_redo() {
     h.begin_macro(MacroKind::Import).unwrap();
     h.end_macro(&mut p).unwrap();
     assert_eq!(h.len(), 0);
-    assert_eq!(h.redo_len(), 1, "une macro vide a mangé le rétablissement");
+    assert_eq!(h.redo_len(), 1, "an empty macro ate the redo");
 }
 
 #[test]
-fn b5_macro_avec_commande_refusee_reste_coherente() {
-    let (mut p, sheet, cols) = projet();
+fn b5_macro_with_a_refused_command_stays_consistent() {
+    let (mut p, sheet, cols) = sample_project();
     let mut h = History::new();
-    let avant = Arc::clone(p.tree());
+    let before = Arc::clone(p.tree());
     h.begin_macro(MacroKind::Import).unwrap();
     h.execute(
         &mut p,
@@ -187,18 +181,15 @@ fn b5_macro_avec_commande_refusee_reste_coherente() {
         },
     )
     .unwrap();
-    // Refusée : « B » est déjà pris dans la feuille.
-    let refus = h.execute(
+    // Refused: "B" is already taken in the sheet.
+    let refusal = h.execute(
         &mut p,
         Command::Rename {
             id: cols[0],
             name: "B".into(),
         },
     );
-    assert!(
-        refus.is_err(),
-        "un renommage vers un nom pris doit être refusé"
-    );
+    assert!(refusal.is_err(), "a rename to a taken name must be refused");
     h.execute(
         &mut p,
         Command::SetCells {
@@ -209,8 +200,8 @@ fn b5_macro_avec_commande_refusee_reste_coherente() {
         },
     )
     .unwrap();
-    // Et une commande sur une feuille qui n'existe pas.
-    let refus2 = h.execute(
+    // And a command on a sheet that does not exist.
+    let refusal2 = h.execute(
         &mut p,
         Command::InsertRows {
             sheet: NodeId::from_raw(4242),
@@ -218,23 +209,23 @@ fn b5_macro_avec_commande_refusee_reste_coherente() {
             count: 1,
         },
     );
-    assert!(refus2.is_err());
+    assert!(refusal2.is_err());
     h.end_macro(&mut p).unwrap();
 
     assert_eq!(h.len(), 1);
     assert!(h.undo(&mut p).unwrap());
     assert!(
-        identique(&avant, p.tree()),
-        "annuler la macro n'a pas ramené l'arbre initial malgré des commandes refusées en son sein"
+        same_tree(&before, p.tree()),
+        "undoing the macro did not bring back the initial tree despite refused commands inside it"
     );
     let _ = sheet;
 }
 
 #[test]
-fn b5_macro_profondement_imbriquee() {
-    let (mut p, _sheet, cols) = projet();
+fn b5_deeply_nested_macro() {
+    let (mut p, _sheet, cols) = sample_project();
     let mut h = History::new();
-    let avant = Arc::clone(p.tree());
+    let before = Arc::clone(p.tree());
     const N: usize = 64;
     for i in 0..N {
         h.begin_macro(MacroKind::Import).unwrap();
@@ -253,22 +244,18 @@ fn b5_macro_profondement_imbriquee() {
         h.end_macro(&mut p).unwrap();
     }
     assert_eq!(h.macro_depth(), 0);
-    assert_eq!(
-        h.len(),
-        1,
-        "les {N} macros imbriquées doivent faire une seule entrée"
-    );
+    assert_eq!(h.len(), 1, "the {N} nested macros must make a single entry");
     assert!(h.undo(&mut p).unwrap());
     assert!(
-        identique(&avant, p.tree()),
-        "l'imbrication profonde ne s'annule pas complètement"
+        same_tree(&before, p.tree()),
+        "the deep nesting is not fully undone"
     );
-    assert!(h.redo(&mut p).unwrap(), "et ne se rétablit pas");
+    assert!(h.redo(&mut p).unwrap(), "and is not redone");
 }
 
 #[test]
-fn b5_undo_refuse_en_macro_ne_casse_rien() {
-    let (mut p, _sheet, cols) = projet();
+fn b5_undo_refused_in_macro_breaks_nothing() {
+    let (mut p, _sheet, cols) = sample_project();
     let mut h = History::new();
     h.execute(
         &mut p,
@@ -287,74 +274,74 @@ fn b5_undo_refuse_en_macro_ne_casse_rien() {
         },
     )
     .unwrap();
-    let pendant = Arc::clone(p.tree());
-    assert!(h.undo(&mut p).is_err(), "undo doit être refusé en macro");
-    assert!(h.redo(&mut p).is_err(), "redo doit être refusé en macro");
-    assert!(h.clear().is_err(), "clear doit être refusé en macro");
+    let during = Arc::clone(p.tree());
+    assert!(h.undo(&mut p).is_err(), "undo must be refused in a macro");
+    assert!(h.redo(&mut p).is_err(), "redo must be refused in a macro");
+    assert!(h.clear().is_err(), "clear must be refused in a macro");
     assert!(
-        identique(&pendant, p.tree()),
-        "une opération refusée pendant une macro a modifié l'arbre"
+        same_tree(&during, p.tree()),
+        "an operation refused during a macro modified the tree"
     );
     h.end_macro(&mut p).unwrap();
 }
 
 #[test]
-fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
-    // Séquence longue mêlant macros, structure et données, puis undo complet.
-    let (mut p, sheet, cols) = projet();
+fn b5_macro_then_full_undo_restores_the_initial_tree() {
+    // Long sequence mixing macros, structure and data, then a full undo.
+    let (mut p, sheet, cols) = sample_project();
     let mut h = History::new();
     let initial = Arc::clone(p.tree());
 
-    for tour in 0..20u64 {
-        if tour % 3 == 0 {
+    for round in 0..20u64 {
+        if round % 3 == 0 {
             h.begin_macro(MacroKind::Import).unwrap();
         }
-        // Le bloc doit suivre le type courant de la colonne visée : une
-        // commande refusée pour cause de type est un refus légitime du cœur,
-        // pas ce que ce test cherche.
-        let cible = cols[(tour % 3) as usize];
-        let bloc = match p
+        // The block must follow the current type of the target column: a
+        // command refused because of its type is a legitimate refusal by the
+        // core, not what this test is looking for.
+        let target = cols[(round % 3) as usize];
+        let block = match p
             .tree()
-            .node(cible)
+            .node(target)
             .unwrap()
             .as_column()
             .unwrap()
             .column_type()
         {
             ColumnType::Mixed => {
-                ValueBlock::Mixed(vec![MixedCell::Text(format!("t{tour}")), MixedCell::Empty])
+                ValueBlock::Mixed(vec![MixedCell::Text(format!("t{round}")), MixedCell::Empty])
             }
-            _ => ValueBlock::Float(vec![tour as f64, f64::NAN]),
+            _ => ValueBlock::Float(vec![round as f64, f64::NAN]),
         };
         h.execute(
             &mut p,
             Command::SetCells {
-                column: cible,
-                start: (tour % 4) as usize,
-                values: bloc,
+                column: target,
+                start: (round % 4) as usize,
+                values: block,
                 expected_version: None,
             },
         )
         .unwrap();
-        if tour % 5 == 0 {
-            let nom = format!("N{tour}");
+        if round % 5 == 0 {
+            let name = format!("N{round}");
             h.execute(
                 &mut p,
                 Command::AddColumn {
                     sheet,
                     index: None,
-                    name: Some(nom),
-                    column: Column::from_f64(&[tour as f64]),
+                    name: Some(name),
+                    column: Column::from_f64(&[round as f64]),
                 },
             )
             .unwrap();
         }
-        if tour % 7 == 0 {
+        if round % 7 == 0 {
             h.execute(
                 &mut p,
                 Command::SetColumnType {
                     column: cols[1],
-                    column_type: if tour % 2 == 0 {
+                    column_type: if round % 2 == 0 {
                         ColumnType::Mixed
                     } else {
                         ColumnType::Numeric
@@ -363,38 +350,41 @@ fn b5_macro_puis_annulation_totale_ramene_larbre_initial() {
             )
             .unwrap();
         }
-        if tour % 3 == 2 && h.in_macro() {
+        if round % 3 == 2 && h.in_macro() {
             h.end_macro(&mut p).unwrap();
         }
     }
     while h.in_macro() {
         h.end_macro(&mut p).unwrap();
     }
-    let mut crans = 0;
+    let mut steps = 0;
     while h.undo(&mut p).unwrap() {
-        crans += 1;
-        assert!(crans < 1000, "boucle d'annulation sans fin");
+        steps += 1;
+        assert!(steps < 1000, "endless undo loop");
     }
     assert!(
-        identique(&initial, p.tree()),
-        "après annulation complète, l'arbre n'est pas l'arbre initial"
+        same_tree(&initial, p.tree()),
+        "after a full undo, the tree is not the initial tree"
     );
     while h.redo(&mut p).unwrap() {}
-    let mut crans2 = 0;
+    let mut steps2 = 0;
     while h.undo(&mut p).unwrap() {
-        crans2 += 1;
+        steps2 += 1;
     }
-    assert_eq!(crans, crans2, "le nombre de crans diffère au second tour");
+    assert_eq!(
+        steps, steps2,
+        "the number of steps differs on the second round"
+    );
     assert!(
-        identique(&initial, p.tree()),
-        "second aller-retour infidèle"
+        same_tree(&initial, p.tree()),
+        "second round trip is unfaithful"
     );
 }
 
 #[test]
-fn b5_limite_en_octets_ne_fait_pas_disparaitre_le_dernier_cran() {
-    let (mut p, _sheet, cols) = projet();
-    // Limite en octets minuscule : chaque entrée la dépasse.
+fn b5_byte_limit_does_not_drop_the_last_step() {
+    let (mut p, _sheet, cols) = sample_project();
+    // Tiny byte limit: every entry exceeds it.
     let mut h = History::with_limits(0, 1);
     for i in 0..10u64 {
         h.execute(
@@ -410,8 +400,8 @@ fn b5_limite_en_octets_ne_fait_pas_disparaitre_le_dernier_cran() {
     }
     assert!(
         h.can_undo(),
-        "la limite en octets a tout évincé : plus rien à annuler"
+        "the byte limit evicted everything: nothing left to undo"
     );
-    assert_eq!(h.len(), 1, "il doit rester exactement le dernier cran");
+    assert_eq!(h.len(), 1, "exactly the last step must remain");
     assert!(h.undo(&mut p).unwrap());
 }

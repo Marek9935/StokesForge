@@ -1,38 +1,38 @@
-//! L'aperçu et l'import doivent découper un fichier de la même façon : mêmes
-//! colonnes, mêmes valeurs. Sans forcer le séparateur — c'est `Auto` qui est
-//! en cause (issue #23).
+//! The preview and the import must split a file the same way: same columns,
+//! same values. Without forcing the separator: it is `Auto` that is at stake
+//! (issue #23).
 
 use stokesforge_import::{
     detect_header_layout, parse, preview, DataEnd, DateOrder, DecimalStyle, HeaderSkip,
     ImportError, ImportRecipe, LineRole, Separator,
 };
 
-/// Nombre de cellules de la première ligne de données de l'aperçu, et
-/// valeurs de la première colonne lues par l'import.
+/// Number of cells of the preview's first data line, and values of the first
+/// column read by the import.
 fn assert_same_split(bytes: &[u8], recipe: &ImportRecipe) {
     let table = parse(bytes, recipe).expect("import");
-    let shown = preview(bytes, recipe).expect("aperçu");
+    let shown = preview(bytes, recipe).expect("preview");
     for line in shown.lines.iter().filter(|l| l.role == LineRole::Data) {
-        let cells = line.cells.as_ref().expect("cellules de données");
+        let cells = line.cells.as_ref().expect("data cells");
         assert_eq!(
             cells.len(),
             table.columns.len(),
-            "ligne {} : l'aperçu montre {} cellules, l'import {} colonnes ({:?})",
+            "line {}: the preview shows {} cells, the import {} columns ({:?})",
             line.number,
             cells.len(),
             table.columns.len(),
             cells.iter().map(|c| c.text.as_str()).collect::<Vec<_>>()
         );
-        assert!(cells.iter().all(|c| !c.is_text), "ligne {}", line.number);
+        assert!(cells.iter().all(|c| !c.is_text), "line {}", line.number);
     }
 }
 
 #[test]
-fn tabulation_et_virgule_decimale_avec_ligne_de_noms() {
+fn tab_and_decimal_comma_with_a_names_line() {
     let mut recipe = ImportRecipe::new("Audit");
     recipe.has_column_header_row = true;
     recipe.decimal = DecimalStyle::Comma;
-    let bytes = b"Temps\tSignal\n1,5\t2,5\n3,5\t4,5\n";
+    let bytes = b"Time\tSignal\n1,5\t2,5\n3,5\t4,5\n";
     assert_same_split(bytes, &recipe);
     let table = parse(bytes, &recipe).unwrap();
     assert_eq!(table.columns.len(), 2);
@@ -41,37 +41,37 @@ fn tabulation_et_virgule_decimale_avec_ligne_de_noms() {
 }
 
 #[test]
-fn memes_colonnes_sans_ligne_de_noms() {
+fn same_columns_without_a_names_line() {
     let mut recipe = ImportRecipe::new("Audit");
     recipe.decimal = DecimalStyle::Comma;
     assert_same_split(b"1,5\t2,5\n3,5\t4,5\n", &recipe);
 }
 
 #[test]
-fn avec_saut_d_en_tete_et_prefixe() {
+fn with_header_skip_and_prefix() {
     let mut recipe = ImportRecipe::new("Audit");
     recipe.decimal = DecimalStyle::Comma;
     recipe.has_column_header_row = true;
     recipe.header = HeaderSkip::Lines(2);
     recipe.skip_chars = 2;
-    assert_same_split(b"titre\nautre\n>>t\ts\n>>1,5\t2,5\n>>3,5\t4,5\n", &recipe);
+    assert_same_split(b"title\nother\n>>t\ts\n>>1,5\t2,5\n>>3,5\t4,5\n", &recipe);
     recipe.header = HeaderSkip::None;
     recipe.header_layout.main_header_lines = 2;
-    assert_same_split(b"titre\nautre\n>>t\ts\n>>1,5\t2,5\n>>3,5\t4,5\n", &recipe);
+    assert_same_split(b"title\nother\n>>t\ts\n>>1,5\t2,5\n>>3,5\t4,5\n", &recipe);
 }
 
 #[test]
-fn separateurs_explicites_inchanges() {
+fn explicit_separators_unchanged() {
     let mut recipe = ImportRecipe::new("Audit");
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     assert_same_split(b"1,5;2,5\n3,5;4,5\n", &recipe);
 }
 
-/// `DecimalStyle::Auto` (issue #7) : la virgule est détectée avec un autre
-/// séparateur, le point sinon ; l'aperçu et l'import s'accordent.
+/// `DecimalStyle::Auto` (issue #7): the comma is detected with another
+/// separator, the dot otherwise; the preview and the import agree.
 #[test]
-fn decimale_automatique() {
+fn automatic_decimal() {
     let mut recipe = ImportRecipe::new("Auto");
     recipe.decimal = DecimalStyle::Auto;
     let comma = b"1,5\t2,5\n3,5\t4,5\n";
@@ -84,11 +84,11 @@ fn decimale_automatique() {
     assert_eq!(parse(integers, &recipe).unwrap().columns.len(), 3);
 }
 
-/// Les jetons de valeur manquante laissent la colonne numérique ; le
-/// séparateur de milliers est ignoré.
+/// Missing-value tokens leave the column numeric; the thousands separator is
+/// ignored.
 #[test]
-fn valeurs_manquantes_et_milliers() {
-    let mut recipe = ImportRecipe::new("Manquantes");
+fn missing_values_and_thousands() {
+    let mut recipe = ImportRecipe::new("Missing");
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     recipe.thousands = Some(' ');
@@ -99,7 +99,7 @@ fn valeurs_manquantes_et_milliers() {
     assert!(table.columns[1].values[0].is_nan());
     assert!(
         table.columns[1].texts.iter().all(Option::is_none),
-        "les manquantes ne sont pas du texte"
+        "the missing ones are not text"
     );
     assert_same_split(bytes, &recipe);
     recipe.missing_tokens.clear();
@@ -107,18 +107,18 @@ fn valeurs_manquantes_et_milliers() {
     assert!(with_text.columns[1].texts.iter().any(Option::is_some));
 }
 
-/// Séparateur au choix et colonnes à largeur fixe (issue #7).
+/// Custom separator and fixed-width columns (issue #7).
 #[test]
-fn separateur_personnalise_et_largeur_fixe() {
-    let mut recipe = ImportRecipe::new("Barre");
+fn custom_separator_and_fixed_width() {
+    let mut recipe = ImportRecipe::new("Bar");
     recipe.separator = Separator::Custom('|');
     let bytes = b"1|10|100\n2|20|200\n";
     assert_same_split(bytes, &recipe);
     assert_eq!(parse(bytes, &recipe).unwrap().columns.len(), 3);
 
-    let mut fixed = ImportRecipe::new("Fixe");
+    let mut fixed = ImportRecipe::new("Fixed");
     fixed.separator = Separator::FixedWidth(vec![4, 6]);
-    // 4 + 6 + reste : « 1.5 », « 20.25 », « 7 ».
+    // 4 + 6 + rest: "1.5", "20.25", "7".
     let bytes = b"1.5 20.25 7\n2.5 30.75 8\n";
     assert_same_split(bytes, &fixed);
     let table = parse(bytes, &fixed).unwrap();
@@ -128,14 +128,14 @@ fn separateur_personnalise_et_largeur_fixe() {
     assert_eq!(table.columns[2].values, vec![7.0, 8.0]);
 }
 
-/// Lignes de commentaire : ignorées à l'import, montrées par l'aperçu avec
-/// leur propre rôle, sans décaler les données ; et plage de lignes.
+/// Comment lines: ignored by the import, shown by the preview with their own
+/// role, without shifting the data; and line range.
 #[test]
-fn commentaires_et_plage_de_lignes() {
-    let mut recipe = ImportRecipe::new("Commentaires");
+fn comments_and_line_range() {
+    let mut recipe = ImportRecipe::new("Comments");
     recipe.separator = Separator::Comma;
     recipe.comment_prefix = "#".into();
-    let bytes = b"# mesure lundi\n1,10\n# recalibrage\n2,20\n3,30\n4,40\n";
+    let bytes = b"# Monday measurement\n1,10\n# recalibration\n2,20\n3,30\n4,40\n";
     let table = parse(bytes, &recipe).unwrap();
     assert_eq!(table.columns[0].values, vec![1.0, 2.0, 3.0, 4.0]);
     assert_same_split(bytes, &recipe);
@@ -148,7 +148,7 @@ fn commentaires_et_plage_de_lignes() {
     assert_eq!(comments, 2);
     assert_eq!(shown.total_data_lines, 4);
 
-    // Les deux premières lignes de données sont ignorées ; l'aperçu les marque.
+    // The first two data lines are skipped; the preview marks them.
     recipe.skip_data_rows = 2;
     let table = parse(bytes, &recipe).unwrap();
     assert_eq!(table.columns[0].values, vec![3.0, 4.0]);
@@ -162,20 +162,20 @@ fn commentaires_et_plage_de_lignes() {
         2
     );
     assert_eq!(shown.total_data_lines, 2);
-    // Tout ignorer : plus aucune donnée.
+    // Skip everything: no data left.
     recipe.skip_data_rows = 10;
     assert!(parse(bytes, &recipe).is_err());
     assert!(preview(bytes, &recipe).is_err());
 }
 
-/// Un encodage forcé s'applique à l'import comme à l'aperçu.
+/// A forced encoding applies to the import as to the preview.
 #[test]
-fn encodage_force() {
+fn forced_encoding() {
     let mut recipe = ImportRecipe::new("Latin");
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     recipe.has_column_header_row = true;
-    // « T°C;Signal » en Windows-1252 : l'octet 0xB0 est invalide en UTF-8.
+    // "T°C;Signal" in Windows-1252: the 0xB0 byte is invalid in UTF-8.
     let bytes: &[u8] = b"T\xB0C;Signal\n1,5;2,5\n";
     recipe.encoding = stokesforge_import::Encoding::Latin1;
     let table = parse(bytes, &recipe).unwrap();
@@ -185,21 +185,21 @@ fn encodage_force() {
     assert_eq!(
         parse(bytes, &recipe).unwrap().columns[0].name.as_deref(),
         Some("T\u{FFFD}C"),
-        "UTF-8 forcé : l'octet invalide ne fait pas échouer l'import"
+        "forced UTF-8: the invalid byte does not fail the import"
     );
 }
 
-/// Nature forcée d'une colonne (issue #7) : texte (même un nombre reste du
-/// texte), date-heure (timestamps POSIX, une cellule illisible reste du texte).
+/// Forced kind of a column (issue #7): text (even a number stays text),
+/// date-time (POSIX timestamps, an unreadable cell stays text).
 #[test]
-fn colonnes_texte_et_date_heure() {
+fn text_and_datetime_columns() {
     use stokesforge_import::ColumnKind;
-    let mut recipe = ImportRecipe::new("Natures");
+    let mut recipe = ImportRecipe::new("Kinds");
     recipe.separator = Separator::Semicolon;
     recipe.column_kinds = vec![ColumnKind::Text, ColumnKind::DateTime, ColumnKind::Auto];
-    let bytes = b"007;25/11/24 15:17:22;1\nA12;2000-01-01;2\nZ9;pas une date;3\n";
+    let bytes = b"007;25/11/24 15:17:22;1\nA12;2000-01-01;2\nZ9;not a date;3\n";
     let table = parse(bytes, &recipe).unwrap();
-    // Texte : les jetons non vides sont gardés tels quels, même « 007 ».
+    // Text: non-empty tokens are kept as is, even "007".
     assert_eq!(
         table.columns[0].texts,
         vec![
@@ -209,13 +209,13 @@ fn colonnes_texte_et_date_heure() {
         ]
     );
     assert!(table.columns[0].values.iter().all(|v| v.is_nan()));
-    // Date-heure : timestamps, la cellule illisible reste du texte.
+    // Date-time: timestamps, the unreadable cell stays text.
     assert!(table.columns[1].datetime);
     assert_eq!(table.columns[1].values[0], 1_732_547_842.0);
     assert_eq!(table.columns[1].values[1], 946_684_800.0);
-    assert_eq!(table.columns[1].texts[2].as_deref(), Some("pas une date"));
+    assert_eq!(table.columns[1].texts[2].as_deref(), Some("not a date"));
     assert!(!table.columns[2].datetime);
-    // L'aperçu annote exactement les mêmes cellules.
+    // The preview annotates exactly the same cells.
     let shown = preview(bytes, &recipe).unwrap();
     let flags: Vec<Vec<bool>> = shown
         .lines
@@ -233,11 +233,11 @@ fn colonnes_texte_et_date_heure() {
     );
 }
 
-/// Un fichier à plusieurs blocs (plusieurs spectres, chacun avec son en-tête)
-/// donne un tableau par bloc ; `parse` rend le premier, l'aperçu en compte le
+/// A file with several blocks (several spectra, each with its header) gives
+/// one table per block; `parse` returns the first, the preview counts the
 /// total (issue #7).
 #[test]
-fn fichier_a_plusieurs_blocs() {
+fn file_with_several_blocks() {
     use stokesforge_import::{parse_blocks, BlockSplit, HeaderSkip};
     let mut recipe = ImportRecipe::new("Multi");
     recipe.separator = Separator::Semicolon;
@@ -246,7 +246,7 @@ fn fichier_a_plusieurs_blocs() {
     recipe.name_source = stokesforge_import::NameSource::HeaderKey("TITLE".into());
     recipe.block_split = BlockSplit::BeforeLine("TITLE".into());
     let bytes =
-        b"TITLE;premier\nXYDATA\n1,5;10\n2,5;20\nTITLE;second\nXYDATA\n3,5;30\n4,5;40\n5,5;50\n";
+        b"TITLE;first\nXYDATA\n1,5;10\n2,5;20\nTITLE;second\nXYDATA\n3,5;30\n4,5;40\n5,5;50\n";
 
     let tables = parse_blocks(bytes, &recipe).unwrap();
     assert_eq!(tables.len(), 2);
@@ -256,51 +256,51 @@ fn fichier_a_plusieurs_blocs() {
         stokesforge_import::resolve_series_name(&recipe, &tables[1], "f"),
         "second"
     );
-    assert_eq!(parse(bytes, &recipe).unwrap().row_count(), 2, "le premier");
+    assert_eq!(parse(bytes, &recipe).unwrap().row_count(), 2, "the first");
     let shown = preview(bytes, &recipe).unwrap();
     assert_eq!(shown.block_count, 2);
     assert_eq!(shown.total_data_lines, 2);
 
-    // Sans découpage : un seul bloc, les « TITLE » suivants sont des données
-    // illisibles coupées par la fin automatique.
+    // Without splitting: a single block, the following "TITLE" lines are
+    // unreadable data cut by the automatic end.
     recipe.block_split = BlockSplit::None;
     assert_eq!(parse_blocks(bytes, &recipe).unwrap().len(), 1);
     assert_eq!(preview(bytes, &recipe).unwrap().block_count, 1);
 
-    // Un bloc sans donnée est écarté, et sans aucune donnée l'import échoue.
+    // A block without data is dropped, and with no data at all the import fails.
     recipe.block_split = BlockSplit::BlankLines;
-    assert!(parse_blocks(b"une\nautre\n", &recipe).is_err());
+    assert!(parse_blocks(b"one\nother\n", &recipe).is_err());
 }
 
-/// La coupure teste le X après retrait du préfixe (compté en caractères),
-/// même avec des espaces en tête. Le texte et le vide avant le premier
-/// nombre restent des données ; le texte dans Y ne coupe jamais (issue #4).
+/// The cut tests X after the prefix is removed (counted in characters), even
+/// with leading spaces. Text and emptiness before the first number stay data;
+/// text in Y never cuts (issue #4).
 #[test]
-fn fin_automatique_apres_prefixe_et_avant_pied() {
+fn automatic_end_after_prefix_and_before_footer() {
     for (separator, text) in [
         (
             Separator::Semicolon,
-            "titre\nλ>texte;avant\nλ>\nλ> 1;10\nλ> 2;n/a\nλ>\nλ>Data points;551\n",
+            "title\nλ>text;before\nλ>\nλ> 1;10\nλ> 2;n/a\nλ>\nλ>Data points;551\n",
         ),
         (
             Separator::Whitespace,
-            "titre\nλ>texte avant\nλ>\nλ>   1   10\nλ>   2   n/a\nλ>\nλ>Data points 551\n",
+            "title\nλ>text before\nλ>\nλ>   1   10\nλ>   2   n/a\nλ>\nλ>Data points 551\n",
         ),
     ] {
-        let mut recipe = ImportRecipe::new("Préfixe d'instrument");
+        let mut recipe = ImportRecipe::new("Instrument prefix");
         recipe.data_end = stokesforge_import::DataEnd::Auto;
         recipe.separator = separator;
         recipe.header = HeaderSkip::Lines(1);
         recipe.skip_chars = 2;
         let table = parse(text.as_bytes(), &recipe).expect("import");
         assert_eq!(table.row_count(), 4);
-        assert_eq!(table.columns[0].texts[0].as_deref(), Some("texte"));
+        assert_eq!(table.columns[0].texts[0].as_deref(), Some("text"));
         assert!(table.columns[0].values[1].is_nan());
         assert!(table.columns[0].texts[1].is_none());
         assert_eq!(&table.columns[0].values[2..], &[1.0, 2.0]);
         assert_eq!(table.columns[1].texts[3].as_deref(), Some("n/a"));
 
-        let shown = preview(text.as_bytes(), &recipe).expect("aperçu");
+        let shown = preview(text.as_bytes(), &recipe).expect("preview");
         assert_eq!(shown.total_data_lines, 4);
         let footer: Vec<_> = shown
             .lines
@@ -319,64 +319,63 @@ fn fin_automatique_apres_prefixe_et_avant_pied() {
             table.footer_lines()
         );
 
-        // La désactivation survit à l'enregistrement de la recette et garde
-        // le pied dans les données : témoin d'une coupure réellement active.
+        // Disabling survives saving the recipe and keeps the footer in the
+        // data: witness of a cut that is really active.
         recipe.data_end = stokesforge_import::DataEnd::None;
-        let restored = ImportRecipe::from_json(&recipe.to_json()).expect("recette relue");
-        let uncut = parse(text.as_bytes(), &restored).expect("sans coupure");
+        let restored = ImportRecipe::from_json(&recipe.to_json()).expect("recipe read back");
+        let uncut = parse(text.as_bytes(), &restored).expect("without a cut");
         assert_eq!(uncut.row_count(), 6);
         assert!(uncut.footer_lines().is_empty());
-        let shown = preview(text.as_bytes(), &restored).expect("aperçu sans coupure");
+        let shown = preview(text.as_bytes(), &restored).expect("preview without a cut");
         assert_eq!(shown.total_data_lines, 6);
         assert!(!shown.lines.iter().any(|line| line.role == LineRole::Footer));
     }
 }
 
-/// Une mesure manquante en X (« n/a », « - », « NaN ») ne coupe plus le
-/// fichier : par défaut aucune coupure, toutes les lignes sont importées et
-/// l'aperçu en montre autant. La coupure automatique perdait sans
-/// avertissement tout ce qui suivait.
+/// A missing measurement in X ("n/a", "-", "NaN") no longer cuts the file:
+/// by default no cut, all lines are imported and the preview shows as many.
+/// The automatic cut silently lost everything that followed.
 #[test]
-fn par_defaut_une_mesure_manquante_en_x_ne_coupe_pas_le_fichier() {
+fn by_default_a_missing_measurement_in_x_does_not_cut_the_file() {
     let text = "1;10\nn/a;20\n3;30\n-;40\n5;50\n";
-    let mut recipe = ImportRecipe::new("Défaut");
+    let mut recipe = ImportRecipe::new("Default");
     recipe.separator = Separator::Semicolon;
     let table = parse(text.as_bytes(), &recipe).expect("import");
-    assert_eq!(table.row_count(), 5, "aucune ligne perdue");
+    assert_eq!(table.row_count(), 5, "no line lost");
     assert_eq!(table.columns[1].values, [10.0, 20.0, 30.0, 40.0, 50.0]);
-    let shown = preview(text.as_bytes(), &recipe).expect("aperçu");
-    assert_eq!(shown.total_data_lines, 5, "l'aperçu suit l'import");
+    let shown = preview(text.as_bytes(), &recipe).expect("preview");
+    assert_eq!(shown.total_data_lines, 5, "the preview follows the import");
 
-    // Témoin : la coupure automatique, demandée en clair, coupe bien.
+    // Witness: the automatic cut, requested explicitly, does cut.
     recipe.data_end = stokesforge_import::DataEnd::Auto;
     let cut = parse(text.as_bytes(), &recipe).expect("import");
     assert_eq!(cut.row_count(), 1);
 }
 
-/// Une recette déjà enregistrée garde sa coupure (`"Auto"` écrit en clair) ;
-/// seule une recette sans le champ prend le nouveau défaut.
+/// An already saved recipe keeps its cut (`"Auto"` written explicitly); only
+/// a recipe without the field takes the new default.
 #[test]
-fn les_recettes_enregistrees_gardent_leur_fin_de_donnees() {
-    let mut recipe = ImportRecipe::new("Ancienne");
+fn saved_recipes_keep_their_data_end() {
+    let mut recipe = ImportRecipe::new("Old");
     recipe.data_end = stokesforge_import::DataEnd::Auto;
-    let json = serde_json::to_string(&recipe).expect("sérialisation");
-    let back: ImportRecipe = serde_json::from_str(&json).expect("relecture");
+    let json = serde_json::to_string(&recipe).expect("serialization");
+    let back: ImportRecipe = serde_json::from_str(&json).expect("read back");
     assert_eq!(back.data_end, stokesforge_import::DataEnd::Auto);
 
     let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
     value.as_object_mut().unwrap().remove("data_end");
-    let without: ImportRecipe = serde_json::from_value(value).expect("sans le champ");
+    let without: ImportRecipe = serde_json::from_value(value).expect("without the field");
     assert_eq!(without.data_end, stokesforge_import::DataEnd::None);
 }
 
-/// Fichier à fins de ligne `\r` seules (anciens Mac) : l'aperçu, l'import et
-/// la détection des lignes d'en-tête découpent pareil.
+/// File with lone `\r` line endings (old Macs): the preview, the import and
+/// the header line detection split the same way.
 #[test]
-fn fichier_cr_seul_avec_ligne_de_noms() {
+fn lone_cr_file_with_a_names_line() {
     let mut recipe = ImportRecipe::new("CR");
     recipe.has_column_header_row = true;
     recipe.separator = Separator::Semicolon;
-    let bytes = b"Temps;Signal\r1;2\r3;4\r5;6\r";
+    let bytes = b"Time;Signal\r1;2\r3;4\r5;6\r";
     assert_same_split(bytes, &recipe);
     let table = parse(bytes, &recipe).unwrap();
     assert_eq!(table.columns.len(), 2);
@@ -384,18 +383,18 @@ fn fichier_cr_seul_avec_ligne_de_noms() {
     assert_eq!(table.columns[1].values, vec![2.0, 4.0, 6.0]);
     let shown = preview(bytes, &recipe).unwrap();
     assert_eq!(shown.total_data_lines, 3);
-    // Deux lignes de titre, puis des données : même compte qu'en `\n`.
-    let cr = b"Titre\rAutre;texte;x\r1;2;3\r4;5;6\r";
-    let lf = b"Titre\nAutre;texte;x\n1;2;3\n4;5;6\n";
+    // Two title lines, then data: same count as with `\n`.
+    let cr = b"Title\rOther;text;x\r1;2;3\r4;5;6\r";
+    let lf = b"Title\nOther;text;x\n1;2;3\n4;5;6\n";
     let layout = |b: &[u8]| detect_header_layout(b, Separator::Semicolon, DecimalStyle::Dot);
     assert_eq!(layout(cr), layout(lf));
     assert_eq!(layout(cr).main_header_lines, 1);
 }
 
-/// `inf` n'entre pas comme infini : jeton gardé en texte, et la fin
-/// automatique des données ne coupe pas avant cette ligne.
+/// `inf` does not enter as infinity: the token is kept as text, and the
+/// automatic data end does not cut before that line.
 #[test]
-fn inf_reste_du_texte_et_ne_coupe_pas_la_fin_automatique() {
+fn inf_stays_text_and_does_not_cut_the_automatic_end() {
     let mut recipe = ImportRecipe::new("Inf");
     recipe.separator = Separator::Semicolon;
     recipe.data_end = DataEnd::Auto;
@@ -410,13 +409,13 @@ fn inf_reste_du_texte_et_ne_coupe_pas_la_fin_automatique() {
     assert_eq!(shown.total_data_lines, 3);
 }
 
-/// Séparateur « espaces » (choisi, ou résolu depuis Auto) avec l'espace pour
-/// milliers : `1 234,5` serait coupé en deux colonnes. L'import et l'aperçu
-/// refusent la combinaison, exactement de la même façon.
+/// "Whitespace" separator (chosen, or resolved from Auto) with the space as
+/// thousands separator: `1 234,5` would be split into two columns. The import
+/// and the preview reject the combination, in exactly the same way.
 #[test]
-fn espaces_et_milliers_espace_sont_refuses_par_parse_et_preview() {
+fn whitespace_and_space_thousands_are_rejected_by_parse_and_preview() {
     for separator in [Separator::Whitespace, Separator::Auto] {
-        let mut recipe = ImportRecipe::new("Milliers");
+        let mut recipe = ImportRecipe::new("Thousands");
         recipe.separator = separator;
         recipe.decimal = DecimalStyle::Comma;
         recipe.thousands = Some(' ');
@@ -427,16 +426,16 @@ fn espaces_et_milliers_espace_sont_refuses_par_parse_et_preview() {
     }
 }
 
-/// Avec un séparateur de colonnes explicite, l'espace reste un séparateur de
-/// milliers valable (espaces insécables compris).
+/// With an explicit column separator, the space stays a valid thousands
+/// separator (non-breaking spaces included).
 #[test]
-fn point_virgule_et_tabulation_acceptent_les_milliers_espace() {
+fn semicolon_and_tab_accept_space_thousands() {
     for (separator, bytes) in [
         (Separator::Semicolon, "1 234,5;7\n"),
         (Separator::Tab, "1 234,5\t7\n"),
         (Separator::Semicolon, "1\u{a0}234,5;7\n"),
     ] {
-        let mut recipe = ImportRecipe::new("Milliers");
+        let mut recipe = ImportRecipe::new("Thousands");
         recipe.separator = separator;
         recipe.decimal = DecimalStyle::Comma;
         recipe.thousands = Some(' ');
@@ -447,10 +446,10 @@ fn point_virgule_et_tabulation_acceptent_les_milliers_espace() {
     }
 }
 
-/// Ordre jour/mois (B2) : la colonne forcée en dates suit le réglage de la
-/// recette, l'ISO n'en dépend pas, un mois 13 reste du texte.
+/// Day/month order (B2): the column forced to dates follows the recipe
+/// setting, ISO does not depend on it, a month 13 stays text.
 #[test]
-fn ordre_jour_mois_de_la_recette_gouverne_les_dates() {
+fn the_recipe_day_month_order_governs_dates() {
     use stokesforge_import::ColumnKind;
     let days = |text: &str, order: DateOrder| {
         let mut recipe = ImportRecipe::new("Dates");
@@ -460,7 +459,7 @@ fn ordre_jour_mois_de_la_recette_gouverne_les_dates() {
         let table = parse(format!("{text};1\n").as_bytes(), &recipe).unwrap();
         table.columns[0].values[0]
     };
-    let ts = |iso: &str| stokesforge_import::parse_datetime_for_accord(iso).unwrap();
+    let ts = |iso: &str| stokesforge_import::parse_datetime_for_agreement(iso).unwrap();
     assert_eq!(days("03/04/2026", DateOrder::MonthFirst), ts("2026-03-04"));
     assert_eq!(days("03/04/2026", DateOrder::DayFirst), ts("2026-04-03"));
     assert!(days("13/01/2026", DateOrder::MonthFirst).is_nan());
@@ -468,12 +467,11 @@ fn ordre_jour_mois_de_la_recette_gouverne_les_dates() {
     assert_eq!(days("2026-03-04", DateOrder::DayFirst), ts("2026-03-04"));
 }
 
-/// La fin automatique des données lit la première colonne comme des dates
-/// selon l'ordre : « 13/01/2026 » est une date en jour d'abord (les lignes
-/// précédentes, mois 13+, sont alors du texte gardé), pas en mois d'abord (où
-/// elle coupe les données).
+/// The automatic data end reads the first column as dates according to the
+/// order: "13/01/2026" is a date day first (the preceding lines, month 13+,
+/// are then kept text), not month first (where it cuts the data).
 #[test]
-fn fin_auto_des_donnees_suit_l_ordre_jour_mois() {
+fn automatic_data_end_follows_the_day_month_order() {
     use stokesforge_import::ColumnKind;
     let bytes = b"01/13/2026;1\n02/14/2026;2\n03/15/2026;3\n13/01/2026;4\n";
     let rows = |order| {

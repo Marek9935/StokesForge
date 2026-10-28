@@ -3,7 +3,7 @@ name = "stokesforge-cli"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Binaire headless : importe des fichiers et exécute des scripts Python dans une session sans interface."
+description = "Headless binary: imports files and runs Python scripts in a session without an interface."
 
 [lints]
 workspace = true

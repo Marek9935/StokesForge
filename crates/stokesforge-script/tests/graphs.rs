@@ -1,4 +1,4 @@
-//! Graphes natifs construits par Python : mêmes identités, spec et export.
+//! Native graphs built by Python: same identities, spec and export.
 #![cfg(feature = "python")]
 
 use std::path::PathBuf;
@@ -10,15 +10,15 @@ use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::ScriptEngine;
 use stokesforge_session::{Session, SessionHandle};
 
-struct Banc {
+struct Bench {
     engine: ScriptEngine,
     session: SessionHandle,
     _actor: Session,
     x: NodeId,
     y: NodeId,
 }
-fn banc() -> Banc {
-    let mut project = Project::new("Graphes").unwrap();
+fn bench() -> Bench {
+    let mut project = Project::new("Graphs").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
     let x = project
@@ -35,7 +35,7 @@ fn banc() -> Banc {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/python/extracted/python")
         });
     let engine = ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(home)).unwrap();
-    Banc {
+    Bench {
         engine,
         session,
         _actor: actor,
@@ -43,41 +43,45 @@ fn banc() -> Banc {
         y,
     }
 }
-fn run(b: &Banc, source: &str) {
+fn run(b: &Bench, source: &str) {
     let out = b.engine.run(source).unwrap();
     assert!(out.error.is_none(), "{:?}", out.error);
 }
-fn graph_spec(b: &Banc) -> PlotSpec {
+fn graph_spec(b: &Bench) -> PlotSpec {
     let snap = b.session.snapshot().unwrap();
     let id = snap.tree.resolve("[Graph1]").unwrap();
     match snap.tree.node(id).unwrap().kind() {
         NodeKind::Graph { spec, .. } => spec.clone(),
-        _ => panic!("graphe attendu"),
+        _ => panic!("graph expected"),
     }
 }
 const HANDLES: &str = "x = pyst.resolve('[Book1]Sheet1!X')\ny = pyst.resolve('[Book1]Sheet1!Y')\n";
 
-/// #103 : ni le nom du graphe ni celui de la colonne ne devient un titre implicite.
+/// #103: neither the graph name nor the column name becomes an implicit title.
 #[test]
-fn un_graphe_python_sans_option_title_reste_sans_titre() {
+fn a_python_graph_without_a_title_option_stays_untitled() {
     for expression in [
         "pyst.plot(y, x, name='Graph1')",
         "pyst.plot(y, name='Graph1')",
     ] {
-        let b = banc();
+        let b = bench();
         run(&b, &format!("{HANDLES}g = {expression}"));
         let spec = graph_spec(&b);
         assert!(
             spec.title.is_empty(),
-            "{expression} doit laisser le titre vide"
+            "{expression} must leave the title empty"
         );
-        assert_eq!(spec.panels[0].series.len(), 1, "le graphe a bien été tracé");
+        assert_eq!(
+            spec.panels[0].series.len(),
+            1,
+            "the graph was indeed plotted"
+        );
     }
 }
 
 #[test]
-fn spec_exact_export_stable_et_temoin_de_style() {
-    let b = banc();
+fn exact_spec_stable_export_and_style_witness() {
+    let b = bench();
     let before = b.session.snapshot().unwrap();
     run(&b, &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', plot_type='line_scatter', color='#12345680', line_style='dash', line_width=2.5, symbol='square', symbol_size=9., title='$alpha$', x_title='Temps (s)', y_title='$I$', x_scale='log', x_from=1., x_to=10., label='Signal')"));
     let mut expected = PlotSpec {
@@ -112,7 +116,7 @@ fn spec_exact_export_stable_et_temoin_de_style() {
     assert_eq!(svg, render(&expected));
     let mut witness = expected.clone();
     witness.panels.get_mut(0).unwrap().series[0].line.color = "#ff0000".into();
-    assert_ne!(svg, render(&witness), "le témoin doit modifier la figure");
+    assert_ne!(svg, render(&witness), "the witness must change the figure");
     let rich = stokesforge_render_svg::render_to_string_with_typst(
         &stokesforge_core::resolve_spec(&snapshot.tree, &expected),
         (640, 480),
@@ -121,7 +125,7 @@ fn spec_exact_export_stable_et_temoin_de_style() {
         stokesforge_render_svg::SvgTextMode::default(),
     )
     .unwrap();
-    assert_ne!(rich, svg, "les titres markup exercent bien Typst");
+    assert_ne!(rich, svg, "markup titles do exercise Typst");
     b.session.undo().unwrap();
     assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
     b.session.redo().unwrap();
@@ -129,8 +133,8 @@ fn spec_exact_export_stable_et_temoin_de_style() {
 }
 
 #[test]
-fn ajoute_sans_ecraser_les_series_panneaux_et_reglages() {
-    let b = banc();
+fn adds_without_overwriting_series_panels_and_settings() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', title='Premier', x_title='Temps')"),
@@ -152,7 +156,7 @@ fn ajoute_sans_ecraser_les_series_panneaux_et_reglages() {
         .unwrap();
     run(&b, "pyst.plot(y, graph=g, plot_type='scatter', axis='right', y_title='Second', y_scale='log', y_from=1., y_to=20.)");
     let second = graph_spec(&b);
-    // `y_from=1., y_to=20.` : bornes dans l'ordre donné, axe à l'endroit.
+    // `y_from=1., y_to=20.`: bounds in the given order, axis not flipped.
     assert_eq!(
         second
             .panels
@@ -183,8 +187,8 @@ fn ajoute_sans_ecraser_les_series_panneaux_et_reglages() {
 }
 
 #[test]
-fn types_erreurs_histogrammes_et_cellules_mixtes_utilisent_le_modele() {
-    let b = banc();
+fn types_errors_histograms_and_mixed_cells_use_the_model() {
+    let b = bench();
     run(
         &b,
         &format!(
@@ -216,7 +220,7 @@ pyst.plot(t, graph=g)
     assert_eq!(panel.series[4].histogram_bins.get(), 12);
     assert!(
         panel.series[6].name.is_empty(),
-        "le nom automatique reste littéral et suit le renommage"
+        "the automatic name stays literal and follows the renaming"
     );
     let snap = b.session.snapshot().unwrap();
     let resolved = stokesforge_core::resolve_spec(&snap.tree, &spec);
@@ -240,8 +244,8 @@ pyst.plot(t, graph=g)
         stokesforge_render_svg::SvgTextMode::default(),
     )
     .unwrap();
-    // Typst compose aussi les textes littéraux. Leur compilation réussit,
-    // alors que le même texte saisi comme markup déclenche le repli SVG brut.
+    // Typst also composes literal texts. Their compilation succeeds, whereas
+    // the same text entered as markup triggers the raw SVG fallback.
     assert!(!with_typst.contains("#fonction_inconnue[x] $alpha$"));
     let mut typed = spec.clone();
     typed.panels.get_mut(0).unwrap().series[6].name = "#fonction_inconnue[x] $alpha$".into();
@@ -256,7 +260,7 @@ pyst.plot(t, graph=g)
     assert!(typed.contains("#fonction_inconnue[x] $alpha$"));
     assert!(
         typed != with_typst,
-        "le témoin doit interpréter le markup explicite"
+        "the witness must interpret the explicit markup"
     );
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("graphe.stf");
@@ -266,8 +270,8 @@ pyst.plot(t, graph=g)
 }
 
 #[test]
-fn refus_ne_modifient_ni_graphe_ni_historique() {
-    let b = banc();
+fn refusals_change_neither_graph_nor_history() {
+    let b = bench();
     run(&b, &format!("{HANDLES}g = pyst.plot(y, name='Graph1')"));
     let before = b.session.snapshot().unwrap();
     run(
@@ -276,11 +280,11 @@ fn refus_ne_modifient_ni_graphe_ni_historique() {
 for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'color':['#ff0000','red']}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
     try: pyst.plot(y, graph=g, **opts)
     except pyst.InvalidValueError: pass
-    else: raise AssertionError('option invalide acceptée')
+    else: raise AssertionError('invalid option accepted')
 for cible in (pyst.root(), pyst.info(y)['parent']):
     try: pyst.plot(cible)
     except pyst.InvalidValueError: pass
-    else: raise AssertionError('mauvaise cible acceptée')
+    else: raise AssertionError('wrong target accepted')
 "#,
     );
     let after = b.session.snapshot().unwrap();
@@ -290,11 +294,11 @@ for cible in (pyst.root(), pyst.info(y)['parent']):
 }
 
 #[test]
-fn exception_annule_creation_et_ajouts_et_load_invalide_les_poignees() {
-    let b = banc();
+fn exception_undoes_creation_and_additions_and_load_invalidates_the_handles() {
+    let b = bench();
     let before = b.session.snapshot().unwrap();
-    let out = b.engine.run(&format!("{HANDLES}g = pyst.plot(y, x, name='Graph1')\npyst.plot(y, graph=g)\nraise RuntimeError('échec')")).unwrap();
-    assert!(out.error.unwrap().contains("échec"));
+    let out = b.engine.run(&format!("{HANDLES}g = pyst.plot(y, x, name='Graph1')\npyst.plot(y, graph=g)\nraise RuntimeError('failure')")).unwrap();
+    assert!(out.error.unwrap().contains("failure"));
     assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
     run(&b, "g = pyst.plot(y, x, name='Graph1')");
     let dir = tempfile::tempdir().unwrap();
@@ -309,7 +313,7 @@ fresh_y = pyst.resolve('[Book1]Sheet1!Y')
 for action in (lambda: pyst.plot(y), lambda: pyst.plot(fresh_y, x), lambda: pyst.plot(fresh_y, graph=g), lambda: pyst.plot(fresh_y, y_error=y)):
     try: action()
     except pyst.BrokenReferenceError: pass
-    else: raise AssertionError('ancienne poignée acceptée')
+    else: raise AssertionError('stale handle accepted')
 "#,
     );
     let after = b.session.snapshot().unwrap();
@@ -318,8 +322,8 @@ for action in (lambda: pyst.plot(y), lambda: pyst.plot(fresh_y, x), lambda: pyst
 }
 
 #[test]
-fn objets_graphiques_seuls_ou_avec_donnees_rejoignent_le_groupe_du_script() {
-    let b = banc();
+fn graphic_objects_alone_or_with_data_join_the_script_group() {
+    let b = bench();
     run(&b, &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1')"));
     run(&b, "pyst.add_shape(g, 'rectangle', 0, 0, 1, 1)");
     let before = b.session.snapshot().unwrap();
@@ -329,13 +333,15 @@ fn objets_graphiques_seuls_ou_avec_donnees_rejoignent_le_groupe_du_script() {
     ] {
         let out = b
             .engine
-            .run(&format!("{mutation}\nraise RuntimeError('rollback objet')"))
+            .run(&format!(
+                "{mutation}\nraise RuntimeError('object rollback')"
+            ))
             .unwrap();
-        assert!(out.error.unwrap().contains("rollback objet"));
+        assert!(out.error.unwrap().contains("object rollback"));
         let after = b.session.snapshot().unwrap();
         assert_eq!(
             *after.tree, *before.tree,
-            "l'objet écrit seul doit être annulé sur erreur"
+            "the object written alone must be undone on error"
         );
         assert_eq!(after.history, before.history);
     }
@@ -355,17 +361,17 @@ fn objets_graphiques_seuls_ou_avec_donnees_rejoignent_le_groupe_du_script() {
     b.session.save(&path).unwrap();
     b.session.load(&path).unwrap();
     let before = b.session.snapshot().unwrap();
-    run(&b, "for action in (lambda: pyst.add_shape(g, 'line', 0, 0, 1, 1), lambda: pyst.remove_shape(g, 0)):\n    try: action()\n    except pyst.BrokenReferenceError: pass\n    else: raise AssertionError('ancienne poignée acceptée')");
+    run(&b, "for action in (lambda: pyst.add_shape(g, 'line', 0, 0, 1, 1), lambda: pyst.remove_shape(g, 0)):\n    try: action()\n    except pyst.BrokenReferenceError: pass\n    else: raise AssertionError('stale handle accepted')");
     let after = b.session.snapshot().unwrap();
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.history, before.history);
 }
 
-/// #196 : plusieurs colonnes en un appel forment un groupe, comme les séries
-/// ajoutées ensemble depuis l'interface ; une colonne seule n'en forme pas.
+/// #196: several columns in one call form a group, like the series added
+/// together from the interface; a single column does not form one.
 #[test]
-fn plusieurs_colonnes_forment_un_groupe_et_une_seule_non() {
-    let b = banc();
+fn several_columns_form_a_group_and_a_single_one_does_not() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1', label=['A', 'B', 'C'], group_name='Lots')"),
@@ -382,7 +388,7 @@ fn plusieurs_colonnes_forment_un_groupe_et_une_seule_non() {
     assert_eq!(colors[0], stokesforge_plot::palette_color(0));
     assert_eq!(colors[2], stokesforge_plot::palette_color(2));
 
-    // Ajouter à un graphe existant : nouveau groupe, l'ancien intact.
+    // Adding to an existing graph: new group, the old one intact.
     run(&b, "pyst.plot([y, y], graph=g)\npyst.plot(y, graph=g)");
     let panel = &graph_spec(&b).panels[0];
     assert_eq!(panel.series.len(), 6);
@@ -394,7 +400,7 @@ fn plusieurs_colonnes_forment_un_groupe_et_une_seule_non() {
         stokesforge_plot::palette_color(4)
     );
 
-    let b = banc();
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y], x, name='Graph1')"),
@@ -403,8 +409,8 @@ fn plusieurs_colonnes_forment_un_groupe_et_une_seule_non() {
 }
 
 #[test]
-fn lire_les_series_et_les_groupes() {
-    let b = banc();
+fn read_the_series_and_the_groups() {
+    let b = bench();
     run(
         &b,
         &format!(
@@ -426,15 +432,15 @@ assert pyst.series_groups(g)[0]['name'] is None
 "
         ),
     );
-    // Rien n'a été écrit par les lectures, hors le renommage.
+    // The reads wrote nothing, apart from the renaming.
     assert_eq!(graph_spec(&b).panels[0].group_names.len(), 0);
 }
 
-/// Toutes les modifications d'un script — rassembler, déplacer, renommer,
-/// dissoudre, supprimer, style, nuancier — se défont d'un seul `undo`.
+/// All the changes of a script (gather, move, rename, dissolve, delete,
+/// style, color gradient) are undone by a single `undo`.
 #[test]
-fn modifier_les_groupes_rejoint_le_groupe_annulable_du_script() {
-    let b = banc();
+fn changing_the_groups_joins_the_undoable_script_group() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', label='A')\nfor n in 'BCD':\n    pyst.plot(y, graph=g, label=n)"),
@@ -490,14 +496,14 @@ assert [r['name'] for r in pyst.series(g)] == ['A', 'D']
     assert_eq!(panel.series.len(), 2);
     assert!(
         panel.group_names.is_empty(),
-        "les noms des groupes disparus s'effacent"
+        "the names of vanished groups are erased"
     );
     assert_eq!(panel.series[0].line.color, "#000000");
 }
 
 #[test]
-fn un_script_en_erreur_ne_laisse_aucun_groupe() {
-    let b = banc();
+fn a_script_in_error_leaves_no_group() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')"),
@@ -505,17 +511,17 @@ fn un_script_en_erreur_ne_laisse_aucun_groupe() {
     let before = b.session.snapshot().unwrap();
     let out = b
         .engine
-        .run("gid = pyst.series_groups(g)[0]['id']\npyst.remove_group(g, gid)\nraise RuntimeError('rollback groupe')")
+        .run("gid = pyst.series_groups(g)[0]['id']\npyst.remove_group(g, gid)\nraise RuntimeError('group rollback')")
         .unwrap();
-    assert!(out.error.unwrap().contains("rollback groupe"));
+    assert!(out.error.unwrap().contains("group rollback"));
     let after = b.session.snapshot().unwrap();
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.history, before.history);
 }
 
 #[test]
-fn les_gestes_de_groupe_incorrects_sont_refuses_sans_rien_changer() {
-    let b = banc();
+fn incorrect_group_gestures_are_refused_without_changing_anything() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')\npyst.plot(y, graph=g)"),
@@ -557,7 +563,7 @@ refus = [
 for action in refus:
     try: action()
     except pyst.InvalidValueError: pass
-    else: raise AssertionError('geste invalide accepté')
+    else: raise AssertionError('invalid gesture accepted')
 "#,
     );
     let after = b.session.snapshot().unwrap();
@@ -567,8 +573,8 @@ for action in refus:
 }
 
 #[test]
-fn une_ancienne_poignee_de_graphe_est_refusee_par_les_gestes_de_groupe() {
-    let b = banc();
+fn a_stale_graph_handle_is_refused_by_group_gestures() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')"),
@@ -584,7 +590,7 @@ fn une_ancienne_poignee_de_graphe_est_refusee_par_les_gestes_de_groupe() {
 for action in (lambda: pyst.series(g), lambda: pyst.series_groups(g), lambda: pyst.group_series(g, [0, 1]), lambda: pyst.ungroup(g, 1), lambda: pyst.remove_group(g, 1)):
     try: action()
     except pyst.BrokenReferenceError: pass
-    else: raise AssertionError('ancienne poignée acceptée')
+    else: raise AssertionError('stale handle accepted')
 "#,
     );
     let after = b.session.snapshot().unwrap();
@@ -592,10 +598,10 @@ for action in (lambda: pyst.series(g), lambda: pyst.series_groups(g), lambda: py
     assert_eq!(after.history, before.history);
 }
 
-/// Un geste de groupe sans effet n'ouvre pas de macro et n'écrit pas d'historique.
+/// A group gesture with no effect opens no macro and writes no history.
 #[test]
-fn un_geste_de_groupe_sans_effet_n_ecrit_rien() {
-    let b = banc();
+fn a_group_gesture_with_no_effect_writes_nothing() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1', group_name='Lots')\npyst.apply_gradient(g, 1, 'blue-red')"),
@@ -615,18 +621,18 @@ pyst.apply_gradient(g, gid, 'blue-red')
     assert_eq!(after.history, before.history);
 }
 
-/// #257 : `plot(y)` sans `x=` cherche la colonne X par rôle (la plus proche à
-/// gauche de y, comme la fenêtre) ; sans colonne X à gauche, l'abscisse reste
-/// le numéro de ligne ; `x=` explicite garde la main.
+/// #257: `plot(y)` without `x=` looks for the X column by role (the nearest
+/// one to the left of y, like the window); without an X column to the left,
+/// the abscissa stays the row number; an explicit `x=` takes precedence.
 #[test]
-fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
-    // Aucune colonne de rôle X : numéro de ligne, comme avant.
-    let b = banc();
+fn plot_without_x_takes_the_x_column_on_the_left_by_role() {
+    // No column with the X role: row number, as before.
+    let b = bench();
     run(&b, &format!("{HANDLES}g = pyst.plot(y, name='Graph1')"));
     assert_eq!(graph_spec(&b).panels[0].series[0].x, None);
 
-    // X est de rôle X et à gauche de Y : Y s'y apparie sans que le script le dise.
-    let b = banc();
+    // X has the X role and is left of Y: Y pairs with it without the script saying so.
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}pyst.set_column_meta(x, role='x')\ng = pyst.plot(y, name='Graph1')"),
@@ -634,16 +640,16 @@ fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
     let series = &graph_spec(&b).panels[0].series;
     assert_eq!((series[0].x, series[0].y), (Some(b.x), b.y));
 
-    // Une colonne X située à droite de y ne compte pas : numéro de ligne.
-    let b = banc();
+    // An X column located to the right of y does not count: row number.
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}pyst.set_column_meta(y, role='x')\ng = pyst.plot(x, name='Graph1')"),
     );
     assert_eq!(graph_spec(&b).panels[0].series[0].x, None);
 
-    // `x=` explicite l'emporte sur le rôle, et la palette suit le rang.
-    let b = banc();
+    // An explicit `x=` wins over the role, and the palette follows the rank.
+    let b = bench();
     run(
         &b,
         &format!(
@@ -654,7 +660,7 @@ fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
     );
     let panel = &graph_spec(&b).panels[0];
     assert_eq!(panel.series[0].x, Some(b.y), "x= explicite");
-    assert_eq!(panel.series[1].x, Some(b.x), "rôle X, y ajouté à un graphe");
+    assert_eq!(panel.series[1].x, Some(b.x), "X role, y added to a graph");
     assert_eq!(
         panel.series[1].line.color,
         stokesforge_plot::palette_color(1)
@@ -665,11 +671,11 @@ fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
     );
 }
 
-/// #207 : `color` accepte une liste (une couleur par série) ; une chaîne vaut
-/// pour toutes les séries ; une liste de mauvaise longueur est refusée.
+/// #207: `color` accepts a list (one color per series); a string applies to
+/// all the series; a list of the wrong length is refused.
 #[test]
-fn color_en_liste_donne_une_couleur_par_serie() {
-    let b = banc();
+fn color_as_a_list_gives_one_color_per_series() {
+    let b = bench();
     run(
         &b,
         &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1', color=['#ff0000', '#00ff00', '#0000ff80'])"),
@@ -679,13 +685,13 @@ fn color_en_liste_donne_une_couleur_par_serie() {
     assert_eq!(colors, ["#ff0000", "#00ff00", "#0000ff80"]);
     assert_eq!(panel.series[1].symbol.color, "#00ff00");
 
-    // Une couleur seule vaut pour toutes les séries du lot.
+    // A single color applies to all the series of the batch.
     run(&b, "pyst.plot([y, y], graph=g, color='#123456')");
     let panel = &graph_spec(&b).panels[0];
     assert_eq!(panel.series[3].line.color, "#123456");
     assert_eq!(panel.series[4].line.color, "#123456");
 
-    // Mauvaise longueur : refus, rien n'est écrit.
+    // Wrong length: refusal, nothing is written.
     let before = b.session.snapshot().unwrap();
     run(
         &b,
@@ -693,7 +699,7 @@ fn color_en_liste_donne_une_couleur_par_serie() {
 for colors in (['#ff0000'], ['#ff0000', '#00ff00', '#0000ff'], []):
     try: pyst.plot([y, y], graph=g, color=colors)
     except pyst.InvalidValueError: pass
-    else: raise AssertionError('liste de mauvaise longueur acceptée')
+    else: raise AssertionError('list of the wrong length accepted')
 "#,
     );
     let after = b.session.snapshot().unwrap();

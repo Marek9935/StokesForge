@@ -1,9 +1,9 @@
-//! Exécution Python sans fenêtre et sauvegarde seulement après succès.
+//! Headless Python execution, saving only after success.
 use std::process::Command;
 
 #[cfg(not(feature = "python"))]
 #[test]
-fn signale_la_feature_absente_sans_interpreteur() {
+fn reports_the_missing_feature_without_an_interpreter() {
     let output = Command::new(env!("CARGO_BIN_EXE_stokesforge-cli"))
         .args(["run", "absent.pyst"])
         .output()
@@ -18,30 +18,30 @@ fn signale_la_feature_absente_sans_interpreteur() {
 fn run(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_stokesforge-cli"))
         .args(args)
-        .env("PYTHONPATH", "/tmp/stokesforge-piege")
-        .env("PYTHONHOME", "/tmp/stokesforge-piege")
+        .env("PYTHONPATH", "/tmp/stokesforge-trap")
+        .env("PYTHONHOME", "/tmp/stokesforge-trap")
         .output()
         .unwrap()
 }
 
 #[cfg(feature = "python")]
 #[test]
-fn calcule_trace_sauve_recharge_et_annule_sans_fenetre() {
+fn computes_plots_saves_reloads_and_undoes_without_a_window() {
     let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("calcul.pyst");
-    let project = dir.path().join("resultat.stf");
+    let script = dir.path().join("computation.pyst");
+    let project = dir.path().join("result.stf");
     std::fs::write(
         &script,
         r#"
 import numpy as np
 book = pyst.create_workbook('Résultats')
-sheet = pyst.create_worksheet(book, 'Calcul')
+sheet = pyst.create_worksheet(book, 'Calc')
 x = pyst.create_column(sheet, 'X')
 y = pyst.create_column(sheet, 'Y')
 pyst.set_values(x, np.arange(3., dtype=np.float64))
 pyst.set_values(y, pyst.column(x) ** 2)
 pyst.plot(y, x, name='Graph1', title='$x^2$')
-print('calcul terminé')
+print('computation done')
 "#,
     )
     .unwrap();
@@ -56,9 +56,9 @@ print('calcul terminé')
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("calcul terminé"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("computation done"));
     let loaded = stokesforge_persistence::load(&project).unwrap();
-    let y = loaded.resolve_path("[Résultats]Calcul!Y").unwrap();
+    let y = loaded.resolve_path("[Résultats]Calc!Y").unwrap();
     assert_eq!(
         loaded
             .tree()
@@ -72,7 +72,7 @@ print('calcul terminé')
         &[0., 1., 4.]
     );
     assert!(loaded.resolve_path("[Graph1]").is_ok());
-    std::fs::write(&script, "y = pyst.resolve('[Résultats]Calcul!Y')\npyst.set_values(y, [42.])\nassert pyst.undo()\nassert pyst.values(y) == (0.,1.,4.)\nprint('annulation vérifiée')").unwrap();
+    std::fs::write(&script, "y = pyst.resolve('[Résultats]Calc!Y')\npyst.set_values(y, [42.])\nassert pyst.undo()\nassert pyst.values(y) == (0.,1.,4.)\nprint('undo verified')").unwrap();
     let out = run(&[
         "run",
         "--project",
@@ -84,17 +84,17 @@ print('calcul terminé')
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("annulation vérifiée"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("undo verified"));
 }
 
 #[cfg(feature = "python")]
 #[test]
-fn erreur_conserve_la_sortie_et_necrase_pas_le_fichier() {
+fn error_keeps_the_output_and_does_not_overwrite_the_file() {
     let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("erreur.pyst");
-    let output = dir.path().join("a_preserver.stf");
-    std::fs::write(&output, b"sentinelle").unwrap();
-    std::fs::write(&script, "import sys\nprint('stdout conservé')\nprint('stderr conservé', file=sys.stderr)\npyst.create_workbook()\nraise RuntimeError('échec volontaire')").unwrap();
+    let script = dir.path().join("error.pyst");
+    let output = dir.path().join("to_preserve.stf");
+    std::fs::write(&output, b"sentinel").unwrap();
+    std::fs::write(&script, "import sys\nprint('stdout kept')\nprint('stderr kept', file=sys.stderr)\npyst.create_workbook()\nraise RuntimeError('deliberate failure')").unwrap();
     let out = run(&[
         "run",
         "--out",
@@ -102,30 +102,30 @@ fn erreur_conserve_la_sortie_et_necrase_pas_le_fichier() {
         script.to_str().unwrap(),
     ]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("stdout conservé"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("stdout kept"));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("stderr conservé"));
+    assert!(err.contains("stderr kept"));
     assert!(err.contains("Traceback"));
-    assert!(err.contains("échec volontaire"));
-    assert_eq!(std::fs::read(&output).unwrap(), b"sentinelle");
+    assert!(err.contains("deliberate failure"));
+    assert_eq!(std::fs::read(&output).unwrap(), b"sentinel");
 }
 
 #[cfg(feature = "python")]
 #[test]
-fn refuse_arguments_et_fichiers_absents_avant_lexecution() {
+fn refuses_arguments_and_missing_files_before_execution() {
     for args in [
         vec!["run"],
         vec!["run", "--out"],
-        vec!["run", "--inconnu"],
+        vec!["run", "--unknown"],
         vec!["run", "a.pyst", "b.pyst"],
-        vec!["run", "/n/existe/pas.pyst"],
+        vec!["run", "/does/not/exist.pyst"],
     ] {
         assert!(!run(&args).status.success(), "{args:?}");
     }
 }
 
-/// Un `.stf` dont le seul calcul de correction est rendu illisible dans les
-/// octets : la lecture l'écarte.
+/// A `.stf` whose only correction calculation is made unreadable in the
+/// bytes: the read discards it.
 #[cfg(feature = "python")]
 fn write_file_with_a_damaged_calculation(path: &std::path::Path) {
     use stokesforge_analysis::correct::CorrectOp;
@@ -168,20 +168,20 @@ fn write_file_with_a_damaged_calculation(path: &std::path::Path) {
     let at = bytes
         .windows(8)
         .position(|w| w == b"subtract")
-        .expect("l'opération est dans le fichier");
+        .expect("the operation is in the file");
     bytes[at..at + 8].copy_from_slice(b"subtraXX");
     std::fs::write(path, bytes).unwrap();
 }
 
-/// #309 : `run --project` dit sur stderr ce que la lecture a écarté, puis le
-/// script tourne (code de sortie 0) ; un fichier propre ne dit rien.
+/// #309: `run --project` reports on stderr what the read discarded, then the
+/// script runs (exit code 0); a clean file reports nothing.
 #[cfg(feature = "python")]
 #[test]
-fn run_project_avertit_des_ecarts_puis_execute_le_script() {
+fn run_project_warns_about_discards_then_runs_the_script() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("hello.pyst");
-    std::fs::write(&script, "print('script exécuté')").unwrap();
-    let damaged = dir.path().join("abime.stf");
+    std::fs::write(&script, "print('script executed')").unwrap();
+    let damaged = dir.path().join("damaged.stf");
     write_file_with_a_damaged_calculation(&damaged);
     let out = run(&[
         "run",
@@ -199,9 +199,9 @@ fn run_project_avertit_des_ecarts_puis_execute_le_script() {
         err.contains("warning:") && err.contains("discarded"),
         "{err}"
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("script exécuté"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("script executed"));
 
-    let clean = dir.path().join("propre.stf");
+    let clean = dir.path().join("clean.stf");
     stokesforge_persistence::save(&stokesforge_core::Project::new("P").unwrap(), &clean).unwrap();
     let out = run(&[
         "run",

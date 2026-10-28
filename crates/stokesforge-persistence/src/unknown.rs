@@ -33,7 +33,7 @@
 //! file) once or twice more than a direct decoding: a `load()`
 //! allocates and copies the measurements of a column several times rather than
 //! once. Nothing in this repository measures the cost of `load()`/
-//! `save()` today (B17, `b4_allocateur.rs` count other operations); this
+//! `save()` today (B17, `b4_allocator.rs` count other operations); this
 //! is therefore not a fix that breaks an existing guard, only a
 //! cost to watch if the format ends up carrying much larger
 //! columns.

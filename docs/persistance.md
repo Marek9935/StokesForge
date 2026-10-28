@@ -236,7 +236,7 @@ mechanisms already in place:
 
 The second row is what makes the choice not to increment `FORMAT_VERSION`
 defensible, and this is why it is **tested**
-(`b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`) rather than
+(`b19_an_unknown_column_type_loses_only_that_column`) rather than
 assumed. Incrementing would have had a cost with no counterpart: *all* the
 files written afterwards, mixed column or not, would have become unreadable by
 earlier readers.

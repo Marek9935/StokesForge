@@ -23,6 +23,6 @@ Module map and symptom → field table: [references/modules-and-symptoms.md](ref
 
 ## Tests
 
-Supporting an instrument means **adding its sample file** (reduced, anonymised) to `crates/stokesforge-import/tests/fixtures.rs` with the expected split; reuse `test/import/` samples first, and check a new one holds nothing the user does not want published. Preview/parse agreement: `tests/accord_apercu_import.rs`.
+Supporting an instrument means **adding its sample file** (reduced, anonymised) to `crates/stokesforge-import/tests/fixtures.rs` with the expected split; reuse `test/import/` samples first, and check a new one holds nothing the user does not want published. Preview/parse agreement: `tests/preview_import_agreement.rs`.
 
 Done when no forbidden dependency was added, an old saved recipe reloads identically, the sample file and its test exist, and `stokesforge-verification` is green.

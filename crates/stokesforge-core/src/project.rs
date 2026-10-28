@@ -76,7 +76,7 @@ pub struct Project {
     /// at the time of an `undo` on a structural entry, computed
     /// from the trees still visible in the history — insufficient:
     /// a random sweep
-    /// (`b14_une_version_ne_designe_jamais_deux_contenus`) found a
+    /// (`b14_a_version_never_designates_two_contents`) found a
     /// number reassigned to two different contents all the same, an
     /// ordinary write being able to advance a column to a number
     /// that another path (undo then new write) also reaches

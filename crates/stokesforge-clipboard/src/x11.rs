@@ -1,17 +1,17 @@
-//! X11 : un propriétaire de la sélection `CLIPBOARD` qui sert plusieurs types.
+//! X11: an owner of the `CLIPBOARD` selection that serves several types.
 //!
-//! X11 n'a pas de presse-papiers : la sélection reste **chez son propriétaire**,
-//! qui répond aux demandes des applications. `arboard` (dans egui-winit) ne
-//! sait y mettre qu'un type à la fois ; on tient donc la connexion et la
-//! fenêtre nous-mêmes, dans un fil, jusqu'à ce qu'un autre prenne la
-//! sélection (`SelectionClear`) — ou que le processus finisse.
+//! X11 has no clipboard: the selection stays **with its owner**,
+//! who answers the applications' requests. `arboard` (in egui-winit) can only
+//! put one type there at a time; so we hold the connection and the
+//! window ourselves, in a thread, until another client takes the
+//! selection (`SelectionClear`) — or the process ends.
 //!
-//! Le protocole ICCCM, dans la mesure utile : `TARGETS` liste les types,
-//! `TIMESTAMP` dit quand on a pris la sélection, un type MIME rend ses
-//! octets. Pas d'`INCR` : une représentation qui ne tient pas dans une
-//! requête X n'est pas offerte (voir la doc du crate). Ce que décide une
-//! réponse est la fonction pure [`answer`], testée sans serveur ; le reste est
-//! de la plomberie testée contre un vrai serveur (`tests/x11.rs`, `--ignored`).
+//! The ICCCM protocol, as far as useful: `TARGETS` lists the types,
+//! `TIMESTAMP` says when we took the selection, a MIME type returns its
+//! bytes. No `INCR`: a representation that does not fit in an
+//! X request is not offered (see the crate docs). What an answer
+//! decides is the pure function [`answer`], tested without a server; the rest is
+//! plumbing tested against a real server (`tests/x11.rs`, `--ignored`).
 
 use std::thread;
 
@@ -27,23 +27,23 @@ use x11rb::COPY_DEPTH_FROM_PARENT;
 
 use crate::{ClipboardError, Representation};
 
-/// Une réponse à une demande de conversion de la sélection.
+/// An answer to a request to convert the selection.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Answer<'a> {
-    /// La liste des types offerts (`TARGETS`), atomes compris.
+    /// The list of offered types (`TARGETS`), atoms included.
     Targets(Vec<u32>),
-    /// L'heure à laquelle on a pris la sélection (`TIMESTAMP`).
+    /// The time at which we took the selection (`TIMESTAMP`).
     Timestamp,
-    /// Les octets d'une représentation.
+    /// The bytes of a representation.
     Data(&'a Representation),
-    /// Rien à répondre : type inconnu, ou trop gros pour une requête X.
+    /// Nothing to answer: unknown type, or too big for an X request.
     Refuse,
 }
 
-/// Ce que vaut la demande du type `target`. `offered` associe chaque atome de
-/// type MIME à sa représentation, dans l'ordre de préférence ; `targets` et
-/// `timestamp` sont les atomes `TARGETS` et `TIMESTAMP` ; `max_bytes` la
-/// taille maximale d'une propriété qu'une requête peut porter.
+/// What the request for type `target` gets. `offered` maps each MIME type
+/// atom to its representation, in order of preference; `targets` and
+/// `timestamp` are the `TARGETS` and `TIMESTAMP` atoms; `max_bytes` is the
+/// maximum size of a property that a request can carry.
 pub(crate) fn answer<'a>(
     target: u32,
     offered: &'a [(u32, Representation)],
@@ -70,7 +70,7 @@ pub(crate) fn answer<'a>(
     }
 }
 
-/// Les atomes dont le propriétaire a besoin.
+/// The atoms the owner needs.
 struct Atoms {
     clipboard: u32,
     targets: u32,
@@ -82,8 +82,8 @@ fn backend<E: std::fmt::Display>(error: E) -> ClipboardError {
     ClipboardError::Backend(error.to_string())
 }
 
-/// Prend la sélection `CLIPBOARD` et sert `representations` depuis un fil, tant
-/// qu'on la possède.
+/// Takes the `CLIPBOARD` selection and serves `representations` from a thread,
+/// as long as we own it.
 pub(crate) fn offer(representations: &[Representation]) -> Result<(), ClipboardError> {
     let (conn, screen_number) = x11rb::connect(None).map_err(backend)?;
     let window = conn.generate_id().map_err(backend)?;
@@ -122,8 +122,8 @@ pub(crate) fn offer(representations: &[Representation]) -> Result<(), ClipboardE
         offered.push((intern(rep.mime)?, rep.clone()));
     }
 
-    // Une sélection se prend « à une heure du serveur », pas à `CurrentTime` :
-    // un changement de propriété vide en rend une par `PropertyNotify`.
+    // A selection is taken "at a server time", not at `CurrentTime`:
+    // an empty property change yields one through `PropertyNotify`.
     conn.change_property8(
         PropMode::APPEND,
         window,
@@ -163,7 +163,7 @@ pub(crate) fn offer(representations: &[Representation]) -> Result<(), ClipboardE
         .map_err(backend)
 }
 
-/// Répond aux demandes jusqu'à la perte de la sélection ou de la connexion.
+/// Answers requests until the selection or the connection is lost.
 fn serve(
     conn: &RustConnection,
     window: u32,
@@ -171,8 +171,8 @@ fn serve(
     offered: &[(u32, Representation)],
     time: u32,
 ) {
-    // Un en-tête de requête et ses marges : une propriété doit tenir dans le
-    // reste, sans quoi la requête serait refusée par le serveur.
+    // A request header and its margins: a property must fit in the
+    // rest, otherwise the server would refuse the request.
     let max_bytes = conn.maximum_request_bytes().saturating_sub(64);
     while let Ok(event) = conn.wait_for_event() {
         match event {
@@ -200,8 +200,8 @@ fn serve(
     let _ = conn.flush();
 }
 
-/// Écrit la réponse sur la fenêtre demandeuse ; rend la propriété à annoncer
-/// (`NONE` — 0 — quand on refuse).
+/// Writes the answer on the requesting window; returns the property to announce
+/// (`NONE` — 0 — when refusing).
 fn reply(
     conn: &RustConnection,
     request: &SelectionRequestEvent,
@@ -214,7 +214,7 @@ fn reply(
     if request.selection != atoms.clipboard {
         return NONE;
     }
-    // ICCCM §2.2 : un demandeur ancien laisse la propriété vide, la cible en tient lieu.
+    // ICCCM §2.2: an old requestor leaves the property empty, the target stands in for it.
     let property = if request.property == NONE {
         request.target
     } else {
@@ -277,20 +277,20 @@ mod tests {
     }
 
     #[test]
-    fn targets_liste_les_types_dans_l_ordre_de_preference() {
+    fn targets_lists_the_types_in_order_of_preference() {
         let offered = offered([10, 10, 10]);
-        let reponse = answer(TARGETS, &offered, TARGETS, TIMESTAMP, 100);
+        let response = answer(TARGETS, &offered, TARGETS, TIMESTAMP, 100);
         assert_eq!(
-            reponse,
+            response,
             Answer::Targets(vec![TARGETS, TIMESTAMP, SVG, PNG, PDF])
         );
     }
 
     #[test]
-    fn un_type_trop_gros_n_est_ni_liste_ni_servi() {
-        // Le PNG dépasse la requête X : il manque de la liste et la demande
-        // directe est refusée ; le SVG et le PDF restent offerts (témoin :
-        // chacun répond bien avant d'être trop gros).
+    fn a_type_too_big_is_neither_listed_nor_served() {
+        // The PNG exceeds the X request: it is missing from the list and the
+        // direct request is refused; the SVG and the PDF stay offered (witness:
+        // each one answers fine before being too big).
         let offered = offered([10, 500, 10]);
         assert_eq!(
             answer(TARGETS, &offered, TARGETS, TIMESTAMP, 100),
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn timestamp_et_type_inconnu() {
+    fn timestamp_and_unknown_type() {
         let offered = offered([1, 1, 1]);
         assert_eq!(
             answer(TIMESTAMP, &offered, TARGETS, TIMESTAMP, 100),

@@ -4,17 +4,17 @@ version = "1.0.0"
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Banc de robustesse : reproductions de pannes et garde-fous de non-régression pour le modèle, la persistance, l'historique, l'acteur de session et le pont Python."
+description = "Robustness bench: failure reproductions and non-regression guards for the model, persistence, history, the session actor and the Python bridge."
 
 [lints]
 workspace = true
 
 [features]
 default = []
-# Même règle que `stokesforge-python` et `stokesforge-script` : tout ce qui touche à
-# PyO3 est derrière cette feature, absente de `default`. Sans elle, les deux
-# batteries de frontière (`b7`, `b9`) compilent vides et le banc reste vert
-# sur une machine sans interpréteur vendorisé.
+# Same rule as `stokesforge-python` and `stokesforge-script`: everything that
+# touches PyO3 is behind this feature, absent from `default`. Without it, the
+# two boundary batteries (`b7`, `b9`) compile empty and the bench stays green
+# on a machine without the vendored interpreter.
 python = ["dep:stokesforge-script", "dep:stokesforge-python"]
 
 [dependencies]
@@ -28,8 +28,8 @@ stokesforge-script = { path = "../stokesforge-script", optional = true, features
 stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
 
 [dev-dependencies]
-# L'état de l'application, pour les batteries qui éprouvent la traduction
-# cellule ↔ texte (`stokesforge-app-state` ne dépend pas d'egui : #263).
+# The application state, for the batteries that test the cell <-> text
+# translation (`stokesforge-app-state` does not depend on egui: #263).
 stokesforge-app-state = { path = "../stokesforge-app-state" }
 proptest = "1"
 tempfile = "3"
@@ -37,16 +37,16 @@ rmp-serde = "1.3.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_bytes = "0.11.19"
 
-# Sonde d'allocation : elle provoque un `abort()` volontaire (reproduction B3)
-# et ne peut donc pas vivre dans un test — un échec d'allocation Rust n'est pas
-# une panique rattrapable, il emporterait le binaire de test entier.
+# Allocation probe: it triggers a deliberate `abort()` (reproduction B3) and
+# so cannot live in a test: a Rust allocation failure is not a catchable
+# panic, it would take down the whole test binary.
 [[bin]]
-name = "stokesforge-sonde-alloc"
-path = "src/bin/sonde_alloc.rs"
+name = "stokesforge-alloc-probe"
+path = "src/bin/alloc_probe.rs"
 
-# Sonde de pile : un débordement de pile n'est pas une panique non plus — le
-# runtime écrit `has overflowed its stack` et appelle `abort()`. Même raison
-# que ci-dessus : cela ne peut pas vivre dans un binaire de test.
+# Stack probe: a stack overflow is not a panic either: the runtime writes
+# `has overflowed its stack` and calls `abort()`. Same reason as above: it
+# cannot live in a test binary.
 [[bin]]
-name = "stokesforge-sonde-pile"
-path = "src/bin/sonde_pile.rs"
+name = "stokesforge-stack-probe"
+path = "src/bin/stack_probe.rs"

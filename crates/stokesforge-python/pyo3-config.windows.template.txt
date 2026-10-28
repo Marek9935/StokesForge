@@ -1,7 +1,7 @@
-# Gabarit de configuration PyO3 pour l'interpréteur embarqué sous Windows
-# (#332). Même rôle que pyo3-config.template.txt ; python-build-standalone
-# livre python312.lib dans <préfixe>/libs et python312.dll à la racine.
-# Rendu par scripts/python-config.sh (sous Git Bash).
+# PyO3 configuration template for the embedded interpreter on Windows
+# (#332). Same role as pyo3-config.template.txt; python-build-standalone
+# ships python312.lib in <prefix>/libs and python312.dll at the root.
+# Rendered by scripts/python-config.sh (under Git Bash).
 implementation=CPython
 version=3.12
 shared=true

@@ -1,4 +1,4 @@
-//! Spike optionnel #69 : runtime isolé, SVG stable et conversion d'export.
+//! Optional spike #69: isolated runtime, stable SVG and export conversion.
 use std::path::PathBuf;
 use std::time::Instant;
 use stokesforge_core::Project;
@@ -8,7 +8,7 @@ use stokesforge_session::Session;
 
 fn main() {
     let prefix =
-        PathBuf::from(std::env::var_os(interpreter::HOME_ENV).expect("runtime du spike requis"));
+        PathBuf::from(std::env::var_os(interpreter::HOME_ENV).expect("spike runtime required"));
     let session = Session::spawn(Project::new("Matplotlib").unwrap(), None).unwrap();
     let start = Instant::now();
     let engine =
@@ -33,7 +33,7 @@ assert matplotlib.__version__ == '3.11.2'
 assert matplotlib.__file__.startswith({prefix:?})
 assert sys.flags.isolated == 1
 matplotlib.rcParams['svg.hashsalt'] = 'stokesforge-spike'
-book = pyst.create_workbook('Entrée')
+book = pyst.create_workbook('Input')
 sheet = pyst.create_worksheet(book)
 x = pyst.create_column(sheet)
 y = pyst.create_column(sheet)
@@ -58,7 +58,7 @@ assert pyst.values(y) == (0.,1.,4.,9.)
     );
     let out = engine.run(&source).unwrap();
     assert!(out.error.is_none(), "{:?}", out.error);
-    println!("initialisation_moteur_ms={init_ms:.3}\n{}", out.stdout);
+    println!("engine_init_ms={init_ms:.3}\n{}", out.stdout);
     let document = std::fs::read_to_string(&svg).unwrap();
     assert!(document.contains("<svg"));
     assert_eq!(document, std::fs::read_to_string(&second).unwrap());

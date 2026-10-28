@@ -1,9 +1,9 @@
-//! L'offre X11 contre un **vrai serveur** : un second client joue
-//! l'application destinataire (`TARGETS`, puis chaque type) comme le ferait
-//! LibreOffice ou Inkscape.
+//! The X11 offer against a **real server**: a second client plays the
+//! receiving application (`TARGETS`, then each type) as LibreOffice or
+//! Inkscape would.
 //!
-//! `#[ignore]` : il faut un serveur (`DISPLAY`, XWayland suffit), absent de la
-//! CI. À lancer à la main :
+//! `#[ignore]`: a server is needed (`DISPLAY`, XWayland is enough), absent from
+//! CI. Run by hand:
 //!
 //! ```sh
 //! cargo test -p stokesforge-clipboard --test x11 -- --ignored
@@ -23,28 +23,28 @@ use x11rb::rust_connection::RustConnection;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::CURRENT_TIME;
 
-/// Un affichage Xlib sans pointeur : le backend X11 se connecte lui-même.
+/// An Xlib display without a pointer: the X11 backend connects by itself.
 struct Xlib;
 
 impl HasDisplayHandle for Xlib {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         let raw = RawDisplayHandle::Xlib(XlibDisplayHandle::new(None, 0));
-        // SAFETY : l'affichage Xlib sans pointeur n'est jamais déréférencé.
+        // SAFETY: the pointerless Xlib display is never dereferenced.
         Ok(unsafe { DisplayHandle::borrow_raw(raw) })
     }
 }
 
-/// Le client destinataire : une connexion, une fenêtre, des demandes.
-struct Demandeur {
+/// The receiving client: one connection, one window, some requests.
+struct Requester {
     conn: RustConnection,
     window: u32,
     clipboard: u32,
     property: u32,
 }
 
-impl Demandeur {
+impl Requester {
     fn new() -> Self {
-        let (conn, screen) = x11rb::connect(None).expect("serveur X11 (DISPLAY)");
+        let (conn, screen) = x11rb::connect(None).expect("X11 server (DISPLAY)");
         let window = conn.generate_id().unwrap();
         let root = conn.setup().roots[screen].root;
         conn.create_window(
@@ -87,9 +87,9 @@ impl Demandeur {
             .atom
     }
 
-    /// Demande `target` ; rend la propriété lue, ou `None` si le propriétaire refuse
-    /// (ou ne répond pas dans les 5 s).
-    fn demander(&self, target: u32) -> Option<(u32, Vec<u8>)> {
+    /// Requests `target`; returns the property read, or `None` if the owner refuses
+    /// (or does not answer within 5 s).
+    fn request(&self, target: u32) -> Option<(u32, Vec<u8>)> {
         self.conn
             .convert_selection(
                 self.window,
@@ -100,11 +100,11 @@ impl Demandeur {
             )
             .unwrap();
         self.conn.flush().unwrap();
-        let limite = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < limite {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
             match self.conn.poll_for_event().unwrap() {
-                // Pas de test sur `response_type` : un événement venu d'un
-                // `SendEvent` porte le bit 0x80.
+                // No test on `response_type`: an event coming from a
+                // `SendEvent` carries the 0x80 bit.
                 Some(Event::SelectionNotify(event)) if event.requestor == self.window => {
                     if event.property == 0 {
                         return None;
@@ -125,8 +125,8 @@ impl Demandeur {
     }
 }
 
-fn atomes(octets: &[u8]) -> Vec<u32> {
-    octets
+fn atoms(bytes: &[u8]) -> Vec<u32> {
+    bytes
         .as_chunks::<4>()
         .0
         .iter()
@@ -135,24 +135,24 @@ fn atomes(octets: &[u8]) -> Vec<u32> {
 }
 
 #[test]
-#[ignore = "exige un serveur X11 (DISPLAY)"]
-fn un_destinataire_lit_la_liste_des_types_puis_chaque_type() {
+#[ignore = "requires an X11 server (DISPLAY)"]
+fn a_receiver_reads_the_list_of_types_then_each_type() {
     let svg = Representation::new(mime::SVG, b"<svg>figure</svg>".to_vec());
     let png = Representation::new(mime::PNG, vec![0x89, b'P', b'N', b'G', 1, 2, 3]);
     let pdf = Representation::new(mime::PDF, b"%PDF-figure".to_vec());
-    offer(&Xlib, &[svg.clone(), png.clone(), pdf.clone()]).expect("offre X11");
+    offer(&Xlib, &[svg.clone(), png.clone(), pdf.clone()]).expect("X11 offer");
 
-    let demandeur = Demandeur::new();
-    let targets = demandeur.atom("TARGETS");
-    let (genre, liste) = demandeur.demander(targets).expect("TARGETS");
-    assert_eq!(genre, u32::from(AtomEnum::ATOM));
-    let noms: Vec<String> = atomes(&liste)
+    let requester = Requester::new();
+    let targets = requester.atom("TARGETS");
+    let (kind, list) = requester.request(targets).expect("TARGETS");
+    assert_eq!(kind, u32::from(AtomEnum::ATOM));
+    let names: Vec<String> = atoms(&list)
         .into_iter()
-        .map(|atome| {
+        .map(|atom| {
             String::from_utf8(
-                demandeur
+                requester
                     .conn
-                    .get_atom_name(atome)
+                    .get_atom_name(atom)
                     .unwrap()
                     .reply()
                     .unwrap()
@@ -161,43 +161,43 @@ fn un_destinataire_lit_la_liste_des_types_puis_chaque_type() {
             .unwrap()
         })
         .collect();
-    // L'ordre est celui de la préférence : SVG, PNG, PDF.
+    // The order is the order of preference: SVG, PNG, PDF.
     assert_eq!(
-        noms,
+        names,
         ["TARGETS", "TIMESTAMP", mime::SVG, mime::PNG, mime::PDF]
     );
 
     for rep in [&svg, &png, &pdf] {
-        let (genre, octets) = demandeur
-            .demander(demandeur.atom(rep.mime))
-            .unwrap_or_else(|| panic!("{} refusé", rep.mime));
-        assert_eq!(genre, demandeur.atom(rep.mime), "type de la propriété");
-        assert_eq!(octets, &*rep.bytes, "octets de {}", rep.mime);
+        let (kind, bytes) = requester
+            .request(requester.atom(rep.mime))
+            .unwrap_or_else(|| panic!("{} refused", rep.mime));
+        assert_eq!(kind, requester.atom(rep.mime), "type of the property");
+        assert_eq!(bytes, &*rep.bytes, "bytes of {}", rep.mime);
     }
 
-    // Témoin : un type qu'on n'offre pas est refusé, pas servi à vide.
-    assert!(demandeur
-        .demander(demandeur.atom("text/x-inconnu"))
+    // Witness: a type we do not offer is refused, not served empty.
+    assert!(requester
+        .request(requester.atom("text/x-unknown"))
         .is_none());
 }
 
 #[test]
-#[ignore = "exige un serveur X11 (DISPLAY)"]
-fn une_representation_plus_grosse_qu_une_requete_est_ecartee_sans_perdre_les_autres() {
-    // 256 Mio dépassent toute requête X, BIG-REQUESTS comprise.
-    let enorme = Representation::new(mime::PNG, vec![7u8; 256 * 1024 * 1024]);
-    let petit = Representation::new(mime::SVG, b"<svg/>".to_vec());
-    offer(&Xlib, &[petit.clone(), enorme]).expect("offre X11");
+#[ignore = "requires an X11 server (DISPLAY)"]
+fn a_representation_larger_than_a_request_is_dropped_without_losing_the_others() {
+    // 256 MiB exceeds any X request, BIG-REQUESTS included.
+    let huge = Representation::new(mime::PNG, vec![7u8; 256 * 1024 * 1024]);
+    let small = Representation::new(mime::SVG, b"<svg/>".to_vec());
+    offer(&Xlib, &[small.clone(), huge]).expect("X11 offer");
 
-    let demandeur = Demandeur::new();
-    let (_, liste) = demandeur
-        .demander(demandeur.atom("TARGETS"))
+    let requester = Requester::new();
+    let (_, list) = requester
+        .request(requester.atom("TARGETS"))
         .expect("TARGETS");
     assert!(
-        !atomes(&liste).contains(&demandeur.atom(mime::PNG)),
-        "le PNG trop gros ne doit pas être annoncé"
+        !atoms(&list).contains(&requester.atom(mime::PNG)),
+        "the PNG that is too big must not be announced"
     );
-    assert!(demandeur.demander(demandeur.atom(mime::PNG)).is_none());
-    let (_, octets) = demandeur.demander(demandeur.atom(mime::SVG)).expect("SVG");
-    assert_eq!(octets, &*petit.bytes);
+    assert!(requester.request(requester.atom(mime::PNG)).is_none());
+    let (_, bytes) = requester.request(requester.atom(mime::SVG)).expect("SVG");
+    assert_eq!(bytes, &*small.bytes);
 }

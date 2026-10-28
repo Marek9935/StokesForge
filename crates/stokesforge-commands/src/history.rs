@@ -330,7 +330,7 @@ pub const DEFAULT_BYTE_LIMIT: usize = 512 * 1024 * 1024;
 /// `Entry::Macro` — beyond ~10,891 levels, one or the other overflows the
 /// stack of the actor thread (2 MiB by default) and `abort()`s the whole
 /// process, including any unsaved work (see
-/// `stokesforge-robustesse/src/bin/sonde_pile.rs`). A thousand levels cover
+/// `stokesforge-robustesse/src/bin/stack_probe.rs`). A thousand levels cover
 /// three orders of magnitude above any plausible use (§7 of the guide) while
 /// leaving a wide margin under the measured overflow threshold.
 pub const MAX_MACRO_DEPTH: usize = 1000;
@@ -798,8 +798,8 @@ impl History {
     /// the entries of the two stacks. The cost of a keystroke thus followed the
     /// size of the project *and* the depth of the history, even when no
     /// eviction took place (see
-    /// `stokesforge-robustesse/tests/b21_cout_et_identite.rs`, reproductions
-    /// `b21_le_cout_dune_ecriture_ne_depend_pas_de_lhistorique` and
+    /// `stokesforge-robustesse/tests/b21_cost_and_identity.rs`, reproductions
+    /// `b21_the_cost_of_a_write_does_not_depend_on_the_history` and
     /// `..._du_nombre_de_colonnes`).
     ///
     /// The fix **never** relaxes the exactness of `retained_bytes`
@@ -1860,7 +1860,7 @@ fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, Co
 // locally — first from the two trees directly involved in the
 // restoration, then from everything the history still kept — and
 // both proved insufficient: a random sweep
-// (`b14_une_version_ne_designe_jamais_deux_contenus`) found that an
+// (`b14_a_version_never_designates_two_contents`) found that an
 // ORDINARY write (never through a `revert`) can, for its part,
 // advance a column to a number that neither local
 // computation could foresee. The only computation that closes the question for
