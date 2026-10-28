@@ -1,11 +1,11 @@
-# Catalogue de référence de l'interface de StokesForge (issue #41, chantier #39).
+# Reference catalog of the StokesForge interface (issue #41, work package #39).
 #
-# L'anglais est la langue source : une clé absente d'ici n'existe pas, et `tr!`
-# (`src/i18n.rs`) refuse à la compilation une clé qui n'y figure pas. Règles de
-# rédaction : `docs/ui-texts.md` ; mécanique : skill
+# English is the source language: a key absent from here does not exist, and `tr!`
+# (`src/i18n.rs`) refuses at compile time a key that is not listed here. Writing
+# rules: `docs/ui-texts.md`; mechanics: skill
 # `stokesforge-ui-texts`.
 #
-# Nommage des clés : `zone-objet[-précision]`, en minuscules et tirets.
+# Key naming: `area-object[-detail]`, lowercase and hyphens.
 
 ## Window
 
@@ -15,7 +15,7 @@ window-title-project-unsaved = { $name } • — StokesForge
 window-title-project-manager = StokesForge — Project Manager
 window-title-detached = StokesForge — { $name }
 
-## Boîtes de fichier du projet (#127)
+## Project file dialogs (#127)
 
 project-open-title = Open Project
 project-save-title = Save Project
@@ -682,13 +682,13 @@ error-python-trace =
     Python error:
     { $trace }
 
-## Propriétés du graphe et export (#43)
+## Graph properties and export (#43)
 ##
-## Zone `plot-*` : fenêtre des propriétés du graphe (six onglets), cibles du
-## clic droit, éditeur de texte sur le graphique. `dialog-*` : pied commun des
-## dialogues modaux. `export-*` : dialogue d'export. Un attribut `.hint` est
-## l'infobulle de son contrôle. Les noms saisis par l'utilisateur, les thèmes et
-## les noms de colonnes sont des données, jamais traduits.
+## Area `plot-*`: graph properties window (six tabs), right-click targets,
+## text editor on the plot. `dialog-*`: common footer of the modal
+## dialogs. `export-*`: export dialog. A `.hint` attribute is the tooltip of
+## its control. User-entered names, themes and column names are data, never
+## translated.
 
 # Footer shared by all modal dialogs (`modal_dialog_with`)
 
@@ -1190,7 +1190,7 @@ history-plot-remove-group = Delete Group
 history-plot-reorder-group = Reorder Group
 history-plot-closed-frame = Change Closed Frame
 
-# Panneaux fixes et fenêtres détachées (#100)
+# Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
 panel-collapse = Collapse the panel
 panel-detach = Detach into a separate window
@@ -1223,13 +1223,13 @@ object-clipboard-use-manager = Select a folder or object in Project Manager to p
 
 action-show-graph-data = Show Data
 
-## Copie du graphe vers une autre application (#149)
+## Copying the graph to another application (#149)
 
 error-clipboard-empty = There is nothing to copy
 error-clipboard-unsupported = This display cannot receive a copied graph ({ $display })
 error-clipboard-backend = Could not copy the graph: { $detail }
 
-# Réglages de vue de l’Object Manager (#139).
+# View settings of the Object Manager (#139).
 object-manager-default-expansion = Expand by Default
     .hint = Only sets the initial state of new groups; groups already expanded or collapsed keep their state
 object-manager-expand-layers = Layers
@@ -1600,7 +1600,7 @@ analysis-stale-manual = Out of date: the source data changed. Recalculate to upd
 analysis-stale-input-missing = Out of date: a source column was deleted. Edit the calculation or detach this column
 analysis-stale-failed = Out of date: the last recalculation failed ({ $detail })
 
-## Erreurs du système de fichiers (#216)
+## File system errors (#216)
 
 error-io-not-found = File or folder not found
 error-io-permission-denied = Access denied
@@ -1616,7 +1616,7 @@ error-io-not-directory = This is a file, not a folder
 error-io-timed-out = The operation timed out
 error-io-other = { $detail }
 
-## Messages de la barre d'état (#216)
+## Status bar messages (#216)
 
 error-window-geometry = Could not update the window position: { $cause }
 error-column-width = Could not save the column width: { $cause }
@@ -1709,7 +1709,7 @@ status-import-dropped = { $count ->
    *[other] { $count } files imported with template “{ $models }”
 }
 
-# Champs : valeur ramenée à une borne fixe (#219).
+# Fields: value clamped to a fixed bound (#219).
 field-clamped-min = Set to the minimum, { $limit }
 field-clamped-max = Set to the maximum, { $limit }
 field-refused-number = Enter a number
@@ -1718,10 +1718,10 @@ field-refused-use-auto = Type Auto to follow the data
 field-refused-name-empty = The name cannot be empty
 field-refused-name-taken = This name is already used
 
-# Champ numérique : bulle du ▼ (#220).
+# Numeric field: bubble of the ▼ (#220).
 number-presets = Common values
 
-## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
+## Reasons for graying out (#226): a grayed-out item says why and what to do
 
 disabled-object-gone = This item no longer exists
 disabled-move-first = Already first
@@ -1888,11 +1888,11 @@ analysis-replace-confirm = Several curves use these data. They will all show the
 analysis-replace-accept = Replace
 analysis-correction-trace = Modified data: { $kind }
 
-# Repère discret des corrections définitives (#212).
+# Discreet marker of definitive corrections (#212).
 grid-column-modified = Original data replaced by a correction. See Results for the correction settings
 
 
-# Glisser-déposer des séries, des groupes et des objets libres.
+# Drag and drop of series, groups and free objects.
 object-drag-end = End of the list
 
 # Column in use by a calculation (#306)
@@ -1957,7 +1957,7 @@ analysis-smooth-window-points = Width (points)
 analysis-smooth-window-x = Width (X units)
 analysis-smooth-order = Polynomial order
 
-# Accessibilité des calques et des poignées de fenêtre (#170)
+# Accessibility of layers and window handles (#170)
 plot-layer-badge-accessible = Layer { $n }
 window-resize-top = Resize from the top edge
 window-resize-bottom = Resize from the bottom edge
@@ -1968,7 +1968,7 @@ window-resize-top-right = Resize from the top right corner
 window-resize-bottom-left = Resize from the bottom left corner
 window-resize-bottom-right = Resize from the bottom right corner
 
-# Groupes de réglages du format d'import (#170)
+# Settings groups of the import format (#170)
 import-format-delimiter-section = Delimiter
 import-format-numbers-section = Numbers and Dates
 import-format-comments-section = Comment Lines

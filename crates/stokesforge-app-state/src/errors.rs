@@ -666,6 +666,7 @@ pub mod formula {
             // The French catalog carries the same key.
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             assert!(fr.contains(
+                // lang: fr
                 "error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne"
             ));
         }
@@ -691,6 +692,7 @@ pub mod formula {
             // The French catalog carries the same key.
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             assert!(fr.contains(
+                // lang: fr
                 "error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)"
             ));
         }

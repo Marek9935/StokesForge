@@ -70,6 +70,7 @@ fn the_non_convergence_sentence_states_the_stop_and_the_lead_in_both_languages()
         "{en}"
     );
     assert!(
+        // lang: fr
         fr.contains("pas convergé") && fr.contains("valeurs de départ"),
         "{fr}"
     );

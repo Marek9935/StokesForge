@@ -1,9 +1,9 @@
-# Les dépendances de test (egui_kittest et ses crates) ne sont jamais livrées :
-# leurs licences n'ont pas à figurer dans les notices du paquet.
+# Test dependencies (egui_kittest and its crates) are never shipped: their
+# licenses need not appear in the package notices.
 ignore-dev-dependencies = true
 
-# MIT est préféré pour les doubles licences MIT/Apache ; les notices et
-# copyrights propres à chaque paquet sont conservés dans le fichier généré.
+# MIT is preferred for MIT/Apache dual licenses; the notices and copyrights
+# specific to each package are kept in the generated file.
 accepted = [
     "MIT",
     "Apache-2.0",

@@ -3,7 +3,7 @@ name = "stokesforge-render-svg"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Export SVG d'un graphe StokesForge : le SVGBackend de plotters, dont estimate_text_size est surchargé sur la mesure partagée du chantier."
+description = "SVG export of a StokesForge graph: the plotters SVGBackend, whose estimate_text_size is overridden with the shared measurement."
 
 [lints]
 workspace = true
@@ -11,9 +11,9 @@ workspace = true
 [dependencies]
 stokesforge-core = { path = "../stokesforge-core" }
 stokesforge-plot = { path = "../stokesforge-plot" }
-# Apporte la mesure de texte (donc `epaint`) et le pipeline Plotters commun
-# aux deux backends. C'est par ici, et non en direct, qu'`epaint` entre dans
-# ce crate : une seule arête, donc une seule version possible.
+# Provides text measurement (hence `epaint`) and the Plotters pipeline shared
+# by both backends. `epaint` enters this crate through here, not directly:
+# one single edge, hence one single possible version.
 stokesforge-render = { path = "../stokesforge-render" }
 plotters = { version = "0.3", default-features = false, features = [
     "all_series",
@@ -22,32 +22,32 @@ plotters = { version = "0.3", default-features = false, features = [
 ] }
 plotters-backend = "0.3"
 thiserror = "2"
-# Conversion SVG → PDF (R6) : vient de l'organisation Typst, donc de la
-# famille déjà adoptée. Pas de troisième backend : ce crate reparse le SVG
-# qu'il vient d'écrire (architecture-choisie.md §5).
+# SVG → PDF conversion (R6): comes from the Typst organization, hence from
+# the family already adopted. No third backend: this crate re-parses the SVG
+# it has just written (architecture-choisie.md §5).
 svg2pdf = "0.13.0"
-# Export PNG : même patron que le PDF (conversion du SVG déjà produit), via
-# `resvg` — module `png`. Épinglé exactement sur la version que `svg2pdf`
-# tire déjà en interne (voir Cargo.lock) pour ne pas faire coexister deux
-# `usvg` dans l'arbre de dépendances.
+# PNG export: same pattern as PDF (conversion of the SVG already produced),
+# through `resvg` — `png` module. Pinned exactly to the version `svg2pdf`
+# already pulls in internally (see Cargo.lock) so that two `usvg` do not
+# coexist in the dependency tree.
 resvg = "=0.45.1"
-# R8, chemin export (8.4) : le type `Font` de `TypstExport` et le fragment
-# SVG d'une page compilée, inliné dans le SVG de Plotters. `stokesforge-render`
-# apporte le `World`, la compilation et le cache générique ; ce crate
-# n'ajoute que ce qui est propre à l'export. Dépendance ferme depuis l'issue
-# #29 (plus de feature `typst`). Version épinglée exactement, comme dans
-# `stokesforge-render` et `stokesforge-render-egui` (même raison).
+# R8, export path (8.4): the `Font` type of `TypstExport` and the SVG
+# fragment of a compiled page, inlined in the Plotters SVG. `stokesforge-render`
+# provides the `World`, the compilation and the generic cache; this crate
+# only adds what is specific to export. Firm dependency since issue #29 (no
+# more `typst` feature). Version pinned exactly, as in `stokesforge-render`
+# and `stokesforge-render-egui` (same reason).
 typst = "=0.15.1"
 typst-svg = "=0.15.1"
 
-# #162 : le contour d'un glyphe sans caractère Unicode (repli par glyphe de
-# `typst_text`). Même version que celle que `typst` tire déjà.
+# #162: the outline of a glyph with no Unicode character (per-glyph fallback
+# of `typst_text`). Same version as the one `typst` already pulls in.
 ttf-parser = "0.25"
 
 [dev-dependencies]
 tempfile = "3"
 toml = "0.8"
-# Relit le PDF produit avec un analyseur indépendant du nôtre — tâche 6.2 :
-# « le PDF s'ouvre ». Sans fonctionnalités optionnelles (chiffrement, image,
-# horodatage) : il ne sert qu'à retrouver le `MediaBox` d'une page.
+# Re-reads the produced PDF with a parser independent of ours — task 6.2:
+# "the PDF opens". Without optional features (encryption, image, timestamp):
+# it is only used to find the `MediaBox` of a page.
 lopdf = { version = "0.45", default-features = false }

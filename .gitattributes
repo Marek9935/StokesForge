@@ -1,5 +1,5 @@
-# Les empreintes de scripts/licenses-rust.sh portent sur les octets : jamais de
-# conversion de fins de ligne (core.autocrlf sous Windows les ferait échouer).
+# The fingerprints of scripts/licenses-rust.sh cover bytes: never convert line
+# endings (core.autocrlf on Windows would make them fail).
 Cargo.lock text eol=lf
 vendor/crate-license-notices/checksums.sha256 text eol=lf
 vendor/crate-license-notices/NOTICE.txt -text
@@ -7,9 +7,9 @@ vendor/crate-license-notices/provenance.json -text
 vendor/python/licenses-linux/** -text
 vendor/python/licenses-windows/** -text
 
-# Les notices importées conservent les espaces et fins de texte des originaux.
+# Imported notices keep the whitespace and text endings of the originals.
 vendor/crate-license-notices/NOTICE.txt whitespace=-blank-at-eol,-blank-at-eof
 vendor/python/licenses-linux/LICENSE.libX11.txt whitespace=-blank-at-eof
 
-# Les fichiers témoins du format .stf sont binaires.
+# The witness files of the .stf format are binary.
 *.stf binary

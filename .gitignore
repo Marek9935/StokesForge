@@ -2,10 +2,10 @@
 /target/
 crates/*/target/
 
-# Distributions assemblées (scripts/pyhello-dist.sh, cf. crates/stokesforge-python/README.md)
+# Assembled distributions (scripts/pyhello-dist.sh, see crates/stokesforge-python/README.md)
 /dist/
 
-# Python (legacy-python/ — gardé comme référence, cf. docs/rustrewrite/roadmap.md)
+# Python (legacy-python/ — kept as a reference, see docs/rustrewrite/roadmap.md)
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -21,7 +21,7 @@ venv/
 /windows/
 /linux/
 
-# Outils
+# Tools
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -29,33 +29,33 @@ venv/
 coverage.xml
 htmlcov/
 
-# Éditeurs / OS
+# Editors / OS
 .vscode/
 .idea/
 *.swp
 .DS_Store
 
-# Données de test lourdes
+# Heavy test data
 /sandbox/
 *.h5
 *.hdf5
 *.pyst-project
-# Projets enregistrés par le banc (`stokesforge-app [chemin]`) : des sauvegardes de
-# travail, pas des fixtures — les jeux d'essai versionnés vivent dans `test/`.
+# Projects saved by the test bench (`stokesforge-app [path]`): working
+# saves, not fixtures — the versioned test sets live in `test/`.
 *.stokesforge
 
-# Interpréteur Python vendored (python-build-standalone, cf. cahier-des-charges-technique.md §8.6.1)
+# Vendored Python interpreter (python-build-standalone, see cahier-des-charges-technique.md §8.6.1)
 /vendor/python/*.tar.gz
 /vendor/python/extracted/
 
-# Icônes Phosphor : seuls `SVGs/` (source des icônes embarquées, cf. docs/icons.md)
-# et `LICENSE` sont versionnés ; le reste du paquet téléchargé est local.
+# Phosphor icons: only `SVGs/` (source of the embedded icons, see docs/icons.md)
+# and `LICENSE` are versioned; the rest of the downloaded package is local.
 /vendor/phosphor-icons/Fonts/
 /vendor/phosphor-icons/PNGs/
 /vendor/phosphor-icons/SVGs Flat/
 
-# Skills d'agent tiers installés localement : non redistribués (seul audit-test
-# porte une licence). Seuls les skills StokesForge sont versionnés.
+# Third-party agent skills installed locally: not redistributed (only
+# audit-test carries a license). Only the StokesForge skills are versioned.
 /.claude/skills/agents-manager/
 /.claude/skills/apex/
 /.claude/skills/audit-memories/

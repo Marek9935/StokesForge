@@ -106,6 +106,7 @@ fn the_broken_reference_texts_follow_the_interface_language() {
             .collect();
         let squeeze = |text: &str| text.replace(' ', "");
         let (other, other_named) = if language == Language::English {
+            // lang: fr
             ("référence rompue", "N—référencerompue")
         } else {
             ("broken reference", "N—brokenreference")
@@ -134,9 +135,11 @@ fn the_broken_reference_texts_follow_the_interface_language() {
         ),
         (
             Language::French,
+            // lang: fr begin
             "l'entrée d'historique de l'import n'a pas pu être fermée",
             "A : le classeur n'a pas pu être créé",
             "A : la feuille n'a pas pu être créée",
+            // lang: fr end
         ),
     ] {
         let loader = build_loader(language);

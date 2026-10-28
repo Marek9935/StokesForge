@@ -31,8 +31,8 @@ license = "GPL-3.0-or-later"
 [workspace.lints.clippy]
 all = "warn"
 
-# Transition #72 : dépôt Wayland sans migration bêta de toute la pile egui.
-# Diff et retrait : vendor/winit/STOKESFORGE.md.
+# Transition #72: Wayland repository without a beta migration of the whole egui stack.
+# Diff and removal: vendor/winit/STOKESFORGE.md.
 [patch.crates-io]
 winit = { path = "vendor/winit" }
 smithay-clipboard = { path = "vendor/smithay-clipboard" }

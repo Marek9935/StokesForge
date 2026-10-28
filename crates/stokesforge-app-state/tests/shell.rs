@@ -9343,7 +9343,7 @@ fn stopping_a_background_import_creates_nothing() {
     };
 
     start(&mut state);
-    assert!(state.import_work().is_some(), "un import est en cours");
+    assert!(state.import_work().is_some(), "an import is in progress");
     state.dispatch(Action::StopImport);
     assert!(state.import_work().is_none() && state.import_progress().is_none());
     assert!(!state.poll_import(), "nothing to apply");

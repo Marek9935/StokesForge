@@ -170,6 +170,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(level, StatusLevel::Warning);
     assert_eq!(
         text,
+        // lang: fr
         format!("1 calcul a été écarté du projet ({})", list(&ids[..1]))
     );
     let ids = write_file(&path, 8, 6);
@@ -177,6 +178,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(
         text,
         format!(
+            // lang: fr
             "6 calculs ont été écartés du projet ({}, …)",
             list(&ids[..5])
         )
