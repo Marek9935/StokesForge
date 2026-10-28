@@ -1,67 +1,65 @@
-//! Typst derrière la feature `typst` — tâche R8.
+//! Typst, behind the `typst` feature — task R8.
 //!
-//! Ce module porte, comme `architecture-choisie.md` §8 le prescrit pour
-//! `stokesforge-render` : le `World` Typst minimal (8.1), la compilation d'une
-//! formule en document (8.1), et le cache générique qui amortit cette
-//! compilation entre deux images (8.2). Ce qu'il ne porte **pas** :
-//! `typst-render` (RGBA, tâche 8.3, `stokesforge-render-egui` uniquement) et
-//! `typst-svg` (fragment SVG, tâche 8.4, `stokesforge-render-svg` uniquement) —
-//! deux dépendances backend-spécifiques que ce crate n'a aucune raison de
-//! tirer, la même règle que R4-R7 appliquent déjà au reste du pipeline.
+//! As `architecture-choisie.md` §8 prescribes for `stokesforge-render`, this
+//! module carries: the minimal Typst `World` (8.1), the compilation of a
+//! formula into a document (8.1), and the generic cache that amortizes this
+//! compilation between two frames (8.2). What it does **not** carry:
+//! `typst-render` (RGBA, task 8.3, `stokesforge-render-egui` only) and
+//! `typst-svg` (SVG fragment, task 8.4, `stokesforge-render-svg` only) — two
+//! backend-specific dependencies this crate has no reason to pull in, the same
+//! rule R4-R7 already apply to the rest of the pipeline.
 //!
-//! # Toujours compilé (issue #29)
+//! # Always compiled (issue #29)
 //!
-//! Ce module était à l'origine derrière une feature `typst` hors défaut
-//! (`architecture-choisie.md` §7, tâche 8.6), pour garder le droit
-//! d'abandonner Typst sans rien démonter. La feature a été supprimée : tout
-//! texte de titre et de légende doit passer par Typst (issue #28), et un
-//! build sans elle aurait dessiné une autre figure que le build par défaut.
-//! Ce qui reste optionnel, c'est l'activation **par backend**
-//! (`with_typst`) : un backend construit sans elle dessine tout en texte
-//! brut, et c'est le témoin des tests qui prouvent que Typst est réellement
-//! consulté. Le repli en texte brut, `$…$` compris, ne joue plus en
-//! production que pour une chaîne qui ne compile pas (invariant 10).
+//! This module was originally behind a non-default `typst` feature
+//! (`architecture-choisie.md` §7, task 8.6), to keep the right to drop Typst
+//! without tearing anything down. The feature has been removed: every title
+//! and legend text must go through Typst (issue #28), and a build without it
+//! would have drawn a different figure than the default build. What remains
+//! optional is the activation **per backend** (`with_typst`): a backend built
+//! without it draws everything as plain text, and that is the witness of the
+//! tests that prove Typst is really consulted. The plain-text fallback,
+//! `$…$` included, now plays in production only for a string that does not
+//! compile (invariant 10).
 //!
-//! # Quels textes passent par Typst : décidé par le rôle (issue #32)
+//! # Which texts go through Typst: decided by role (issue #32)
 //!
-//! **Tout** titre (du graphe, d'un panneau), tout titre d'axe et toute
-//! entrée de légende passe par Typst ; les graduations jamais (une
-//! compilation par graduation, `architecture-choisie.md` §4.3). Le pipeline
-//! le dit au backend par la famille de police du style : [`rich_style`]
-//! pose la famille réservée [`RICH_FAMILY`], et les deux backends aiguillent
-//! sur [`is_rich`], à la mesure comme au dessin — une seule condition, au
-//! même endroit des deux côtés (invariant 4). Côté `epaint`, la famille
-//! réservée retombe sur la police proportionnelle (`text::font_id`) : c'est
-//! le repli.
+//! **Every** title (of the graph, of a panel), every axis title and every
+//! legend entry goes through Typst; ticks never do (one compilation per tick,
+//! `architecture-choisie.md` §4.3). The pipeline tells the backend through the
+//! style's font family: [`rich_style`] sets the reserved family
+//! [`RICH_FAMILY`], and both backends switch on [`is_rich`], at measurement
+//! as at drawing — a single condition, in the same place on both sides
+//! (invariant 4). On the `epaint` side, the reserved family falls back to the
+//! proportional font (`text::font_id`): that is the fallback.
 //!
-//! Avant #32, l'aiguillage portait sur le **contenu** : une chaîne était une
-//! formule si elle contenait `$`. Un titre à moitié formule et son voisin en
-//! texte simple passaient alors par deux moteurs, aux métriques différentes,
-//! et ne s'alignaient pas. Le `$` reste ce qu'il est en Typst, l'entrée en
-//! mode mathématique, mais ne décide plus du chemin. Aucun champ n'a été
-//! ajouté à `stokesforge_plot` : pas de migration du format `.stf`.
+//! Before #32, the switch was on the **content**: a string was a formula if it
+//! contained `$`. A title that was half formula and its neighbor in plain text
+//! then went through two engines, with different metrics, and did not line
+//! up. The `$` stays what it is in Typst, the entry into math mode, but no
+//! longer decides the path. No field was added to `stokesforge_plot`: no
+//! migration of the `.stf` format.
 //!
-//! Conséquence : un texte de titre ou de légende est compilé **comme du
-//! markup Typst**. C'est voulu pour le texte saisi (syntaxe Typst brute :
-//! `*gras*`, `$x^2$`, `\$` pour un dollar). Le texte repris automatiquement
-//! (nom de colonne en légende, ligne « … et N autres ») prend
-//! [`literal_style`] : Typst le compose aussi, mais **tel quel**, via
-//! [`escape`] (issue #33) — un `Abs_280` importé d'un appareil ne passe pas
-//! en italique. Une chaîne qui ne
-//! compile pas s'affiche en brut par `epaint` (invariant 10) : c'est le seul
-//! cas où les deux moteurs se côtoient encore.
+//! Consequence: a title or legend text is compiled **as Typst markup**. This
+//! is intended for typed text (raw Typst syntax: `*bold*`, `$x^2$`, `\$` for
+//! a dollar). Text taken over automatically (column name in a legend, the
+//! "… et N autres" line) takes [`literal_style`]: Typst composes it too, but
+//! **as is**, through [`escape`] (issue #33) — an `Abs_280` imported from an
+//! instrument does not turn italic. A string that does not compile is
+//! displayed raw by `epaint` (invariant 10): this is the only case where the
+//! two engines still sit side by side.
 //!
-//! # Ce que R0 avait déjà noté sur l'API, vérifié de nouveau ici
+//! # What R0 had already noted about the API, verified again here
 //!
-//! - `FileId::new` prend un `RootedPath`, pas un couple `(root, chemin)` —
-//!   confirmé dans `typst_syntax::path` 0.15.1 ;
-//! - `VirtualPath::new` rend un `Result`, pas la valeur ;
-//! - `PagedDocument` vient de `typst_layout`, pas de `typst` ;
-//! - aucun scan de polices système : ce `World` ne connaît que les deux
-//!   polices embarquées passées à [`compile`] ([`crate::fonts::FontSet`]),
-//!   jamais `typst-kit` ni un `fontdb` de plus — la reproductibilité que
-//!   `include_system_fonts(false)` viserait ailleurs est ici acquise par
-//!   construction, sans avoir besoin de cette dépendance.
+//! - `FileId::new` takes a `RootedPath`, not a `(root, path)` pair —
+//!   confirmed in `typst_syntax::path` 0.15.1;
+//! - `VirtualPath::new` returns a `Result`, not the value;
+//! - `PagedDocument` comes from `typst_layout`, not from `typst`;
+//! - no system font scan: this `World` knows only the two embedded fonts
+//!   passed to [`compile`] ([`crate::fonts::FontSet`]), never `typst-kit` nor
+//!   one more `fontdb` — the reproducibility that `include_system_fonts(false)`
+//!   would aim for elsewhere is achieved here by construction, without needing
+//!   that dependency.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -81,17 +79,17 @@ use typst_layout::{Page, PagedDocument};
 
 use crate::fonts::{FontChoice, FontSet};
 
-/// La couleur d'un texte Typst : rouge, vert, bleu, opacité, en octets non
-/// prémultipliés — issue #30.
+/// The color of a Typst text: red, green, blue, opacity, in non-premultiplied
+/// bytes — issue #30.
 ///
-/// Un tableau plutôt que `plotters_backend::BackendColor` : la couleur entre
-/// dans la clé du cache ([`CacheKey`]), et un `f64` d'opacité ne s'y hache
-/// pas. [`ink`] fait la conversion, une fois, pour les deux backends.
+/// An array rather than `plotters_backend::BackendColor`: the color enters
+/// the cache key ([`CacheKey`]), and an `f64` opacity cannot be hashed there.
+/// [`ink`] does the conversion, once, for both backends.
 pub type Ink = [u8; 4];
 
-/// Réglages locaux d'un texte : la barre ne peut alors résumer la zone par
-/// une valeur héritée unique. Lire la syntaxe évite de compiler le document
-/// à chaque image et de prendre du texte brut pour un réglage (#97).
+/// Local settings of a text: the bar then cannot summarize the area by a
+/// single inherited value. Reading the syntax avoids compiling the document
+/// on every frame and mistaking plain text for a setting (#97).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TextOverrides {
     pub font: bool,
@@ -99,9 +97,9 @@ pub struct TextOverrides {
     pub color: bool,
 }
 
-/// Attributs de `text(...)` et `set text(...)`, y compris imbriqués.
-/// Une expression calculée reste locale : l'interface affiche un état neutre
-/// plutôt que de prétendre en connaître la valeur effective.
+/// Attributes of `text(...)` and `set text(...)`, nested ones included.
+/// A computed expression stays local: the interface shows a neutral state
+/// rather than pretending to know the effective value.
 pub fn local_text_overrides(text: &str) -> TextOverrides {
     use typst::syntax::ast;
     let source = Source::detached(text);
@@ -134,38 +132,37 @@ pub fn local_text_overrides(text: &str) -> TextOverrides {
     overrides
 }
 
-/// L'encre Typst d'une couleur de Plotters — celle que `draw_text` reçoit
-/// par `style.color()`, déjà résolue par le pipeline (couleur explicite ou
-/// `color::auto_ink`). Même arrondi de l'opacité que le chemin `epaint`
-/// de l'écran.
+/// The Typst ink of a Plotters color — the one `draw_text` receives through
+/// `style.color()`, already resolved by the pipeline (explicit color or
+/// `color::auto_ink`). Same opacity rounding as the screen's `epaint` path.
 pub fn ink(color: plotters_backend::BackendColor) -> Ink {
     let (r, g, b) = color.rgb;
     let alpha = (color.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
     [r, g, b, alpha]
 }
 
-/// La famille de police réservée qui désigne un texte riche **saisi**,
-/// compilé par Typst comme du markup — voir la tête de module.
+/// The reserved font family that designates a **typed** rich text, compiled
+/// by Typst as markup — see the module header.
 pub const RICH_FAMILY: &str = "stokesforge-typst";
 
-/// La famille réservée d'un texte riche **repris automatiquement** (nom de
-/// colonne en légende, texte généré par le rendu) : composé par Typst comme
-/// les autres, mais affiché tel quel, sans être lu comme du markup (issue
-/// #33). Voir [`source`].
-pub const LITERAL_FAMILY: &str = "stokesforge-typst-litteral";
+/// The reserved family of a rich text **taken over automatically** (column
+/// name in a legend, text generated by the renderer): composed by Typst like
+/// the others, but displayed as is, without being read as markup (issue #33).
+/// See [`source`].
+pub const LITERAL_FAMILY: &str = "stokesforge-typst-literal";
 
-/// Le style d'un texte riche saisi (titre, titre d'axe, nom de série), à la
-/// taille de Plotters et dans la couleur données — le pendant de
-/// `pipeline::text_style` pour les graduations.
+/// The style of a typed rich text (title, axis title, series name), at the
+/// given Plotters size and color — the counterpart of `pipeline::text_style`
+/// for ticks.
 pub fn rich_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
     family_style(RICH_FAMILY, size, color)
 }
 
-/// [`rich_style`] dans la police de la zone de texte (issues #77, #78) :
-/// `font` est le nom de famille choisi, vide ou `None` pour la police du
-/// graphe. La police voyage dans la famille du style, comme l'angle d'un
-/// texte tourné ([`family_with_font`]), et [`source`] la pose dans le
-/// markup — avec la police Math qui lui est associée ([`math_family_for`]).
+/// [`rich_style`] in the text area's font (issues #77, #78): `font` is the
+/// chosen family name, empty or `None` for the graph's font. The font travels
+/// in the style's family, like the angle of a rotated text
+/// ([`family_with_font`]), and [`source`] puts it in the markup — with the
+/// Math font associated with it ([`math_family_for`]).
 pub fn rich_style_font(
     size: f64,
     color: (u8, u8, u8, u8),
@@ -174,7 +171,7 @@ pub fn rich_style_font(
     family_style(interned(family_with_font(RICH_FAMILY, font)), size, color)
 }
 
-/// [`literal_style`] dans la police de la zone de texte.
+/// [`literal_style`] in the text area's font.
 pub fn literal_style_font(
     size: f64,
     color: (u8, u8, u8, u8),
@@ -187,7 +184,7 @@ pub fn literal_style_font(
     )
 }
 
-/// Sépare la police du reste d'un nom de famille de style
+/// Splits the font from the rest of a style family name
 /// (`stokesforge-typst|Fira Sans` → `("stokesforge-typst", Some("Fira Sans"))`).
 fn split_font(name: &str) -> (&str, Option<&str>) {
     let name = name
@@ -200,7 +197,7 @@ fn split_font(name: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Ajoute `font` (vide ou `None` : rien) à la famille de style `base`.
+/// Adds `font` (empty or `None`: nothing) to the style family `base`.
 pub fn family_with_font(base: &str, font: Option<&str>) -> String {
     match font.map(str::trim).filter(|font| !font.is_empty()) {
         Some(font) => format!("{base}{FONT_SEPARATOR}{font}"),
@@ -208,18 +205,18 @@ pub fn family_with_font(base: &str, font: Option<&str>) -> String {
     }
 }
 
-/// La police portée par un nom de famille de style (voir [`split_font`]).
+/// The font carried by a style family name (see [`split_font`]).
 pub fn font_of_family(name: &str) -> Option<&str> {
     split_font(name).1
 }
 
-/// Le séparateur de la mise en page (largeur, alignement) en fin de nom de
-/// famille de style, après la police : `…\u{1f}<largeur>\u{1f}<l|c|r>`. Un
-/// caractère de contrôle, qu'aucun nom de police ne contient (#244).
+/// The layout separator (width, alignment) at the end of a style family name,
+/// after the font: `…\u{1f}<width>\u{1f}<l|c|r>`. A control character, which
+/// no font name contains (#244).
 const LAYOUT_SEPARATOR: char = '\u{1f}';
 
-/// Ajoute à la famille de style `family` une boîte de `width` points
-/// alignée par `align`. `None` : la famille est rendue telle quelle.
+/// Adds to the style family `family` a box of `width` points aligned by
+/// `align`. `None`: the family is returned as is.
 pub fn family_with_layout(family: String, layout: Option<(f64, TextAlign)>) -> String {
     match layout.filter(|(width, _)| width.is_finite() && *width > 0.0) {
         Some((width, align)) => {
@@ -234,7 +231,7 @@ pub fn family_with_layout(family: String, layout: Option<(f64, TextAlign)>) -> S
     }
 }
 
-/// La boîte (largeur en points, alignement) portée par `style`, s'il en a une.
+/// The box (width in points, alignment) carried by `style`, if it has one.
 pub fn layout_of<S: plotters_backend::BackendTextStyle>(style: &S) -> Option<(f64, TextAlign)> {
     let plotters_backend::FontFamily::Name(name) = style.family() else {
         return None;
@@ -249,7 +246,7 @@ pub fn layout_of<S: plotters_backend::BackendTextStyle>(style: &S) -> Option<(f6
     (width.is_finite() && width > 0.0).then_some((width, align))
 }
 
-/// [`rich_style_font`] dans une boîte de largeur fixée (#244).
+/// [`rich_style_font`] in a box of fixed width (#244).
 pub fn rich_style_layout(
     size: f64,
     color: (u8, u8, u8, u8),
@@ -266,14 +263,14 @@ pub fn rich_style_layout(
     )
 }
 
-/// Le séparateur entre la famille de rôle et la police dans un nom de
-/// famille de style. Un nom de police ne le contient pas.
+/// The separator between the role family and the font in a style family name.
+/// A font name does not contain it.
 const FONT_SEPARATOR: char = '|';
 
-/// Un nom de famille de style de durée `'static` : Plotters veut un
-/// `&str` qui vive aussi longtemps que le style. Un nom par police
-/// distincte, retenu pour toujours — borné par le nombre de polices que
-/// l'utilisateur a choisies, pas par le nombre de textes.
+/// A style family name with a `'static` lifetime: Plotters wants a `&str`
+/// that lives as long as the style. One name per distinct font, kept forever
+/// — bounded by the number of fonts the user has chosen, not by the number of
+/// texts.
 fn interned(family: String) -> &'static str {
     static NAMES: OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
         OnceLock::new();
@@ -291,9 +288,9 @@ fn interned(family: String) -> &'static str {
     }
 }
 
-/// La famille Math associée à la police de texte `family` : la Math de la
-/// même paire embarquée (Libertinus Sans → Libertinus Math), sinon — une
-/// police système n'a pas de compagne — Noto Sans Math, le repli.
+/// The Math family associated with the text font `family`: the Math of the
+/// same embedded pair (Libertinus Sans → Libertinus Math), otherwise — a
+/// system font has no companion — Noto Sans Math, the fallback.
 pub fn math_family_for(family: &str) -> &'static str {
     FontSet::ALL
         .iter()
@@ -304,7 +301,7 @@ pub fn math_family_for(family: &str) -> &'static str {
         )
 }
 
-/// Le style d'un texte riche repris automatiquement — voir
+/// The style of a rich text taken over automatically — see
 /// [`LITERAL_FAMILY`].
 pub fn literal_style(size: f64, color: (u8, u8, u8, u8)) -> plotters::style::TextStyle<'static> {
     family_style(LITERAL_FAMILY, size, color)
@@ -319,20 +316,20 @@ fn family_style(
     (family, size).into_font().color(&crate::paint::rgba(color))
 }
 
-/// Le préfixe de famille d'un texte riche saisi **tourné d'un angle
-/// libre** (annotation, issue #35) : `stokesforge-typst@<degrés>`. Plotters ne
-/// tourne le texte que par quarts de tour (`FontTransform`) ; un angle libre
-/// est donc confié à Typst (`#rotate`), et il voyage dans le style comme le
-/// reste du rôle d'un texte.
+/// The family prefix of a typed rich text **rotated by a free angle**
+/// (annotation, issue #35): `stokesforge-typst@<degrees>`. Plotters rotates
+/// text only by quarter turns (`FontTransform`); a free angle is therefore
+/// entrusted to Typst (`#rotate`), and it travels in the style like the rest
+/// of a text's role.
 const ROTATED_PREFIX: &str = "stokesforge-typst@";
 
-/// La famille d'un texte riche saisi tourné de `angle_deg` degrés, sens
-/// antihoraire — [`RICH_FAMILY`] pour un angle nul.
+/// The family of a typed rich text rotated by `angle_deg` degrees,
+/// counterclockwise — [`RICH_FAMILY`] for a zero angle.
 pub fn rotated_family(angle_deg: f64) -> String {
     rotated_family_font(angle_deg, None)
 }
 
-/// [`rotated_family`] dans la police de la zone de texte ([`family_with_font`]).
+/// [`rotated_family`] in the text area's font ([`family_with_font`]).
 pub fn rotated_family_font(angle_deg: f64, font: Option<&str>) -> String {
     let base = if angle_deg == 0.0 || !angle_deg.is_finite() {
         RICH_FAMILY.to_owned()
@@ -342,7 +339,7 @@ pub fn rotated_family_font(angle_deg: f64, font: Option<&str>) -> String {
     family_with_font(&base, font)
 }
 
-/// L'angle porté par la famille de `style` ([`rotated_family`]), 0 sinon.
+/// The angle carried by the family of `style` ([`rotated_family`]), 0 otherwise.
 fn rotation_of<S: plotters_backend::BackendTextStyle>(style: &S) -> f64 {
     match style.family() {
         plotters_backend::FontFamily::Name(name) => split_font(name)
@@ -355,10 +352,9 @@ fn rotation_of<S: plotters_backend::BackendTextStyle>(style: &S) -> f64 {
     }
 }
 
-/// Vrai si `style` désigne un texte riche, saisi, repris ou tourné, à
-/// composer par Typst plutôt qu'à mettre en page par `epaint`. La seule
-/// condition d'aiguillage des deux backends, pour la mesure comme pour le
-/// dessin.
+/// True if `style` designates a rich text, typed, taken over or rotated, to
+/// be composed by Typst rather than laid out by `epaint`. The only switching
+/// condition of both backends, for measurement as for drawing.
 pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
     matches!(
         style.family(),
@@ -368,21 +364,20 @@ pub fn is_rich<S: plotters_backend::BackendTextStyle>(style: &S) -> bool {
     )
 }
 
-/// Le nom, dans le préambule de [`compile`], de la fonction qui tourne un
-/// texte riche. Un texte saisi ne peut pas l'appeler par mégarde : c'est
-/// un identifiant que rien ne documente.
+/// The name, in the preamble of [`compile`], of the function that rotates a
+/// rich text. A typed text cannot call it by accident: it is an identifier
+/// that nothing documents.
 const ROTATE_CALL: &str = "#stokesforge-rotate(";
 
-/// Le source Typst d'un texte riche : le texte lui-même s'il est saisi
-/// (markup voulu), [`escape`]`(text)` s'il est repris automatiquement. Les
-/// deux backends l'appellent dans leur branche Typst ; la décision, elle,
-/// vient du style posé par le pipeline. Le chemin `epaint` (backend sans
-/// Typst, repli de l'invariant 10) affiche le texte d'origine, jamais sa
-/// forme échappée.
+/// The Typst source of a rich text: the text itself if typed (markup
+/// intended), [`escape`]`(text)` if taken over automatically. Both backends
+/// call it in their Typst branch; the decision itself comes from the style set
+/// by the pipeline. The `epaint` path (backend without Typst, fallback of
+/// invariant 10) displays the original text, never its escaped form.
 ///
-/// Un texte tourné ([`rotated_family`]) est enveloppé dans la rotation de
-/// Typst : `#rotate(…, reflow: true)`, dont la page épouse la boîte
-/// tournée, si bien qu'un ancrage centré reste le centre du texte.
+/// A rotated text ([`rotated_family`]) is wrapped in Typst's rotation:
+/// `#rotate(…, reflow: true)`, whose page fits the rotated box, so that a
+/// centered anchor stays the center of the text.
 pub fn source<'a, S: plotters_backend::BackendTextStyle>(
     text: &'a str,
     style: &S,
@@ -396,9 +391,9 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
         }
         _ => (false, None),
     };
-    // La police de la zone (issues #77, #78), posée **dans** le texte : elle
-    // vaut pour toute la zone, et sa police Math suit. Un `#set` est limité
-    // au bloc qui le contient, donc à la rotation éventuelle.
+    // The area's font (issues #77, #78), set **inside** the text: it holds for
+    // the whole area, and its Math font follows. A `#set` is limited to the
+    // block that contains it, hence to the possible rotation.
     let preamble = font.map_or_else(String::new, |font| {
         let quoted = |name: &str| name.replace('\\', "\\\\").replace('"', "\\\"");
         format!(
@@ -407,8 +402,8 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
             quoted(math_family_for(font)),
         )
     });
-    // Une boîte de largeur fixée : le texte y passe à la ligne et s'y aligne
-    // (#244). La boîte entière est la page, donc l'ancrage reste son centre.
+    // A box of fixed width: the text wraps and aligns in it (#244). The whole
+    // box is the page, so the anchor stays its center.
     let boxed = |body: String| match layout {
         Some((width, align)) => {
             let side = match align {
@@ -421,8 +416,8 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
         None => body,
     };
     if angle != 0.0 {
-        // Typst tourne dans le sens horaire (repère écran) : l'angle
-        // antihoraire du modèle change de signe.
+        // Typst rotates clockwise (screen axes): the model's counterclockwise
+        // angle changes sign.
         let body = if literal {
             escape(text)
         } else {
@@ -447,18 +442,17 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
     }
 }
 
-/// Un texte quelconque sous une forme que Typst affiche **tel quel** :
-/// une chaîne Typst, `#"…"`, dont seuls `\` et `"` (et les fins de ligne)
-/// sont échappés (issue #33).
+/// Any text in a form that Typst displays **as is**: a Typst string, `#"…"`,
+/// of which only `\` and `"` (and line ends) are escaped (issue #33).
 ///
-/// Préféré à un `\` devant chaque caractère spécial du markup : la liste en
-/// est longue et dépend du contexte (`-`, `+`, `=`, `/` en début de ligne,
-/// `//` qui ouvre un commentaire), et le markup **remplace** aussi du texte
-/// sans le dire — `...` en points de suspension, `--` en tiret, `'` et `"`
-/// en guillemets typographiques. Une chaîne n'est rien de tout cela : c'est
-/// du texte. Rien de valide ne peut suivre la chaîne sans espace dans ce que
-/// le rendu produit (un `.` collé lirait un champ) : le seul ajout est
-/// « — référence rompue », précédé d'une espace.
+/// Preferred to a `\` before each special markup character: the list is long
+/// and depends on context (`-`, `+`, `=`, `/` at the start of a line, `//`
+/// which opens a comment), and markup also **replaces** text without saying
+/// so — `...` as an ellipsis, `--` as a dash, `'` and `"` as typographic
+/// quotes. A string is none of that: it is text. Nothing valid can follow the
+/// string without a space in what the renderer produces (a `.` stuck to it
+/// would read a field): the only addition is "— référence rompue", preceded
+/// by a space.
 pub fn escape(text: &str) -> String {
     if text.is_empty() {
         return String::new();
@@ -479,25 +473,22 @@ pub fn escape(text: &str) -> String {
     escaped
 }
 
-/// La bibliothèque standard de Typst, construite une fois pour tout le
-/// processus.
+/// Typst's standard library, built once for the whole process.
 ///
-/// Elle ne dépend d'aucun choix de police (`Library` ne porte que les
-/// définitions du langage — fonctions, règles de mise en forme par défaut),
-/// donc rien ne justifie de la reconstruire à chaque compilation : c'est la
-/// part fixe du coût mesuré en R0, amortie une fois pour toutes plutôt que
-/// par formule.
+/// It depends on no font choice (`Library` carries only the language
+/// definitions — functions, default formatting rules), so nothing justifies
+/// rebuilding it at each compilation: it is the fixed part of the cost
+/// measured in R0, amortized once and for all rather than per formula.
 fn library() -> &'static LazyHash<Library> {
     static LIBRARY: OnceLock<LazyHash<Library>> = OnceLock::new();
     LIBRARY.get_or_init(|| LazyHash::new(Library::default()))
 }
 
-/// Le `World` Typst minimal de ce chantier — tâche 8.1.
+/// The minimal Typst `World` of this work package — task 8.1.
 ///
-/// ~90 lignes une fois les imports comptés à part, conforme au calibrage que
-/// R0 avait annoncé (« ~100-150 lignes »). Ne connaît qu'un seul fichier, le
-/// texte de la formule elle-même : pas d'imports, pas de packages, pas de
-/// système de fichiers.
+/// ~90 lines once the imports are counted apart, in line with the sizing R0
+/// had announced ("~100-150 lignes"). It knows a single file, the text of the
+/// formula itself: no imports, no packages, no file system.
 struct FormulaWorld {
     book: LazyHash<FontBook>,
     fonts: Vec<Font>,
@@ -506,15 +497,15 @@ struct FormulaWorld {
 }
 
 impl FormulaWorld {
-    /// Construit un monde pour une seule compilation, sur les deux polices
-    /// (texte et Math) résolues par [`crate::fonts::resolve`].
+    /// Builds a world for a single compilation, on the two fonts (text and
+    /// Math) resolved by [`crate::fonts::resolve`].
     fn new(markup: String, sans: Font, math: Font, extras: Vec<Font>) -> Result<Self, String> {
         let mut fonts = vec![sans, math];
         fonts.extend(noto_italic());
         fonts.extend(extras);
         let book = FontBook::from_fonts(&fonts);
-        let vpath = VirtualPath::new("/formule.typ")
-            .map_err(|err| format!("chemin virtuel Typst invalide : {err}"))?;
+        let vpath = VirtualPath::new("/formula.typ")
+            .map_err(|err| format!("invalid Typst virtual path: {err}"))?;
         let main = RootedPath::new(VirtualRoot::Project, vpath).intern();
         let source = Source::new(main, markup);
         Ok(Self {
@@ -543,9 +534,9 @@ impl World for FormulaWorld {
         if id == self.main {
             Ok(self.source.clone())
         } else {
-            // Aucun fichier externe : ni import, ni package, ni police par
-            // chemin. Une formule qui en réclame un échoue proprement — pas
-            // de panique, pas de scan de système de fichiers.
+            // No external file: no import, no package, no font by path. A
+            // formula that asks for one fails cleanly — no panic, no file
+            // system scan.
             Err(FileError::NotFound(id.vpath().get_with_slash().into()))
         }
     }
@@ -559,51 +550,50 @@ impl World for FormulaWorld {
     }
 
     fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
-        // Aucune formule de ce chantier n'a besoin de la date du jour ; une
-        // formule qui appellerait `datetime.today()` échouerait proprement
-        // plutôt que de rendre une figure dont le contenu dépendrait de
-        // l'instant de son rendu — exactement ce que la reproductibilité
-        // visée par `include_system_fonts(false)` ailleurs demande aussi.
+        // No formula of this work package needs today's date; a formula that
+        // called `datetime.today()` would fail cleanly rather than return a
+        // figure whose content depended on the moment of its rendering —
+        // exactly what the reproducibility aimed at by
+        // `include_system_fonts(false)` elsewhere also asks for.
         None
     }
 }
 
-/// Le résultat d'une compilation Typst réussie — juste assez pour mesurer
-/// et pour dessiner, rien de plus.
+/// The result of a successful Typst compilation — just enough to measure and
+/// to draw, nothing more.
 ///
-/// Ne porte qu'une seule page : une formule ou un libellé mixte tient sur
-/// une page unique tant que `#set page(width: auto, height: auto)` la fait
-/// grandir avec son contenu (voir [`compile`]). Un texte qui produirait un
-/// saut de page (peu probable pour un libellé d'axe) verrait ses pages
-/// suivantes silencieusement ignorées plutôt que provoquer une erreur -
-/// cohérent avec le reste du chantier, où une entrée dégénérée du spec ne
-/// fait jamais planter le rendu (`architecture-choisie.md` §11.1).
+/// Carries a single page: a formula or a mixed label fits on a single page as
+/// long as `#set page(width: auto, height: auto)` makes it grow with its
+/// content (see [`compile`]). A text that would produce a page break (unlikely
+/// for an axis label) would see its following pages silently ignored rather
+/// than raise an error - consistent with the rest of the work package, where a
+/// degenerate spec input never crashes the rendering
+/// (`architecture-choisie.md` §11.1).
 ///
-/// `Clone` pour qu'un artefact d'écran garde son document et le rastérise de
-/// nouveau à une autre résolution sans recompiler
-/// (`stokesforge_render_egui::scaled`, issue #31) ; le document de Typst est fait
-/// de pointeurs partagés, le clone ne recopie pas les glyphes.
+/// `Clone` so that a screen artifact keeps its document and rasterizes it
+/// again at another resolution without recompiling
+/// (`stokesforge_render_egui::scaled`, issue #31); Typst's document is made of
+/// shared pointers, the clone does not copy the glyphs.
 #[derive(Clone)]
 pub struct Compiled {
     document: PagedDocument,
 }
 
 impl Compiled {
-    /// La page compilée, si la formule en a produit une.
+    /// The compiled page, if the formula produced one.
     pub fn page(&self) -> Option<&Page> {
         self.document.pages().first()
     }
 
-    /// La taille de la page en points Typst — le **même** point abstrait
-    /// que celui déjà utilisé par tout ce chantier pour parler de taille de
-    /// police (`text::font_size`, `text::PLOTTERS_SIZE_PER_POINT`) : un
-    /// libellé Typst et un libellé ordinaire se mesurent donc dans la même
-    /// unité, sans conversion supplémentaire au moment de réserver la
-    /// place dans la mise en page de Plotters.
+    /// The page size in Typst points — the **same** abstract point as the one
+    /// already used throughout this work package to speak of font size
+    /// (`text::font_size`, `text::PLOTTERS_SIZE_PER_POINT`): a Typst label and
+    /// an ordinary label are therefore measured in the same unit, with no extra
+    /// conversion when reserving room in Plotters' layout.
     ///
-    /// `(0.0, 0.0)` si la compilation n'a produit aucune page (formule
-    /// vide) : une boîte de taille nulle plutôt qu'une erreur, le
-    /// comportement le plus proche de « rien à dessiner ».
+    /// `(0.0, 0.0)` if the compilation produced no page (empty formula): a
+    /// zero-size box rather than an error, the behavior closest to "nothing to
+    /// draw".
     pub fn size_pt(&self) -> (f64, f64) {
         self.page()
             .map(|page| {
@@ -614,38 +604,35 @@ impl Compiled {
     }
 }
 
-/// Compile `text` (du markup Typst, mode mathématique `$…$` compris) en
-/// document Typst — tâche 8.1.
+/// Compiles `text` (Typst markup, math mode `$…$` included) into a Typst
+/// document — task 8.1.
 ///
-/// `size_pt` est la taille de police au sens de
-/// [`crate::text::font_size`] : le même nombre que celui qui construirait
-/// l'`epaint::FontId` d'un libellé ordinaire de la même taille Plotters,
-/// pour qu'un titre à moitié Typst et à moitié texte brut ne change pas de
-/// corps entre les deux moitiés.
+/// `size_pt` is the font size in the sense of [`crate::text::font_size`]: the
+/// same number that would build the `epaint::FontId` of an ordinary label of
+/// the same Plotters size, so that a title half Typst and half plain text does
+/// not change point size between the two halves.
 ///
-/// `#set page(width: auto, height: auto, margin: 0pt)` est le mécanisme
-/// standard de Typst pour obtenir une page qui épouse son contenu plutôt
-/// qu'une page A4 : c'est ce qui fait qu'une formule compile en un
-/// document d'une page dont la taille **est** la taille du libellé, sans
-/// avoir à la déduire d'un rognage a posteriori.
+/// `#set page(width: auto, height: auto, margin: 0pt)` is Typst's standard
+/// mechanism to get a page that fits its content rather than an A4 page: this
+/// is what makes a formula compile into a one-page document whose size **is**
+/// the label's size, without having to deduce it from a crop afterwards.
 ///
-/// `ink` devient la couleur de tout le texte (`#set text(fill: …)`, que le
-/// mode mathématique hérite) : sans elle, Typst dessine en noir, et un titre
-/// sur fond sombre disparaissait (issue #30). Une couleur écrite dans la
-/// formule elle-même (`#text(fill: red)[…]`) garde la priorité, comme toute
-/// règle locale de Typst — c'est ce qui interdit de rendre en blanc puis de
-/// teinter l'image après coup.
+/// `ink` becomes the color of all the text (`#set text(fill: …)`, which math
+/// mode inherits): without it, Typst draws in black, and a title on a dark
+/// background disappeared (issue #30). A color written in the formula itself
+/// (`#text(fill: red)[…]`) keeps priority, like any local Typst rule — this is
+/// what rules out rendering in white and then tinting the image afterwards.
 ///
-/// `top-edge`/`bottom-edge: "bounds"` : par défaut, Typst borne une ligne
-/// de la hauteur des capitales à la ligne de base. Une page ajustée à son
-/// contenu coupait donc tout ce qui descend sous la ligne de base — les
-/// jambages (« p », « y ») et surtout les indices (`n_i`, `"Ru(bpy)"_3`),
-/// l'essentiel d'une notation scientifique. Le défaut est passé inaperçu
-/// jusqu'à la première capture de l'application avec Typst branché (issue
-/// #29). Avec `"bounds"`, la boîte est l'encre réellement posée : rien
-/// n'est coupé, au prix d'une hauteur qui varie d'un libellé à l'autre
-/// (« a » est moins haut que « Ag ») — l'alignement des lignes de base
-/// entre libellés voisins est le sujet de l'issue #32.
+/// `top-edge`/`bottom-edge: "bounds"`: by default, Typst bounds a line from the
+/// height of capitals to the baseline. A page fitted to its content therefore
+/// cut off everything that goes below the baseline — descenders ("p", "y") and
+/// above all subscripts (`n_i`, `"Ru(bpy)"_3`), the bulk of a scientific
+/// notation. The default went unnoticed until the first capture of the
+/// application with Typst plugged in (issue #29). With `"bounds"`, the box is
+/// the ink actually laid down: nothing is cut, at the price of a height that
+/// varies from one label to another ("a" is shorter than "Ag") — the
+/// alignment of baselines between neighboring labels is the subject of issue
+/// #32.
 pub fn compile(
     text: &str,
     size_pt: f32,
@@ -656,14 +643,14 @@ pub fn compile(
     let sans_name = family_name(&sans);
     let math_name = family_name(&math);
     let [r, g, b, a] = ink;
-    // Un texte tourné porte son étai **dans** la rotation : un étai de plus
-    // à côté de la boîte tournée agrandirait la page d'un côté seulement, et
-    // son centre ne serait plus celui du texte.
+    // A rotated text carries its strut **inside** the rotation: one more strut
+    // next to the rotated box would enlarge the page on one side only, and its
+    // center would no longer be the text's center.
     let strut = if text.starts_with(ROTATE_CALL) {
         ""
     } else {
-        // `;` termine l'expression : sans lui, un texte qui commence par
-        // une lettre prolongerait l'identifiant (`#stokesforge-strutPic`).
+        // `;` ends the expression: without it, a text that starts with a
+        // letter would extend the identifier (`#stokesforge-strutPic`).
         "#stokesforge-strut;"
     };
     let markup = format!(
@@ -680,13 +667,13 @@ pub fn compile(
     compile_markup(markup, sans, math, extras)
 }
 
-/// Le message d'erreur Typst de `text`, ou `None` s'il compile (#240, T3).
+/// The Typst error message of `text`, or `None` if it compiles (#240, T3).
 ///
-/// Sert à l'interface : le rendu, lui, retombe déjà sur le texte brut quand une
-/// formule ne compile pas, sans rien dire. Les polices et la taille ne changent
-/// pas la validité d'un markup : la vérification se fait avec les polices
-/// embarquées par défaut, à 12 pt. Le résultat est mémorisé par texte (un champ
-/// de propriétés le demande à chaque image) ; la mémoire est bornée.
+/// Serves the interface: the rendering already falls back to plain text when a
+/// formula does not compile, saying nothing. Fonts and size do not change the
+/// validity of a markup: the check is done with the default embedded fonts, at
+/// 12 pt. The result is memoized per text (a properties field asks for it on
+/// every frame); the memory is bounded.
 pub fn diagnose(text: &str) -> Option<String> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -702,7 +689,7 @@ pub fn diagnose(text: &str) -> Option<String> {
     }
     let verdict = match resolve_fonts(&FontChoice::default()) {
         Ok((sans, math)) => compile(text, 12.0, [0, 0, 0, 255], sans, math).err(),
-        // Polices introuvables : rien à reprocher au texte.
+        // Fonts not found: nothing to blame on the text.
         Err(_) => None,
     };
     let mut memo = memo.lock().unwrap_or_else(|err| err.into_inner());
@@ -713,7 +700,7 @@ pub fn diagnose(text: &str) -> Option<String> {
     verdict
 }
 
-/// Compile un document Typst complet, réglages de page compris.
+/// Compiles a complete Typst document, page settings included.
 fn compile_markup(
     markup: String,
     sans: Font,
@@ -732,9 +719,9 @@ fn compile_markup(
     Ok(Compiled { document })
 }
 
-/// La face italique de Noto Sans, toujours connue du `World` : Typst ne
-/// fabrique pas d'italique, et le bouton « italique » de la barre de format
-/// de texte (issue #63) resterait sans effet avec la seule face droite.
+/// The italic face of Noto Sans, always known to the `World`: Typst does not
+/// fabricate italics, and the "italic" button of the text format bar (issue
+/// #63) would have no effect with the upright face alone.
 fn noto_italic() -> Option<Font> {
     static ITALIC: OnceLock<Option<Font>> = OnceLock::new();
     ITALIC
@@ -749,10 +736,9 @@ fn noto_italic() -> Option<Font> {
         .clone()
 }
 
-/// Les noms de famille qu'un texte demande lui-même, par
-/// `#text(font: "Nom")` (la barre de format de texte, issue #63), dans
-/// l'ordre et sans doublon. Une lecture lexicale : on cherche `font:` suivi
-/// d'une chaîne entre guillemets.
+/// The family names a text requests itself, through `#text(font: "Name")`
+/// (the text format bar, issue #63), in order and without duplicates. A
+/// lexical read: we look for `font:` followed by a quoted string.
 fn requested_families(text: &str) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut rest = text;
@@ -774,11 +760,11 @@ fn requested_families(text: &str) -> Vec<String> {
     names
 }
 
-/// Les polices que `text` nomme et que le `World` doit connaître en plus du
-/// texte et de la Math : une police embarquée par son nom de famille, sinon
-/// une police du système. Introuvable ⇒ absente : Typst retombe alors sur la
-/// police du document, sans erreur (le texte ne disparaît pas). Mémorisé
-/// par nom, car lire une police système coûte plus qu'une compilation.
+/// The fonts that `text` names and that the `World` must know in addition to
+/// the text and Math ones: an embedded font by its family name, otherwise a
+/// system font. Not found ⇒ absent: Typst then falls back to the document's
+/// font, without error (the text does not disappear). Memoized by name, since
+/// reading a system font costs more than a compilation.
 fn requested_fonts(text: &str) -> Vec<Font> {
     static KNOWN: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<Font>>>> =
         OnceLock::new();
@@ -806,7 +792,7 @@ fn load_named_font(name: &str) -> Option<Font> {
     {
         return embedded_font(set.sans_bytes(), "sans").ok();
     }
-    // Une police Math (celle qu'associe `math_family_for`).
+    // A Math font (the one `math_family_for` associates).
     if let Some(set) = FontSet::ALL
         .iter()
         .find(|set| set.math_family_name() == name)
@@ -816,33 +802,32 @@ fn load_named_font(name: &str) -> Option<Font> {
     crate::fonts::load_system_font(name).and_then(|data| system_font(data, "sans").ok())
 }
 
-/// Le nom de famille d'une `Font` Typst déjà chargée — pour l'écrire dans
-/// le `#set text(font: ...)` généré par [`compile`], plutôt que de le faire
-/// porter séparément par l'appelant et risquer qu'il diverge de la police
-/// réellement chargée dans le `World`.
+/// The family name of an already loaded Typst `Font` — to write it in the
+/// `#set text(font: ...)` generated by [`compile`], rather than have the
+/// caller carry it separately and risk it diverging from the font actually
+/// loaded in the `World`.
 fn family_name(font: &Font) -> String {
     font.info().family.clone()
 }
 
-/// Une clé de cache : la formule, sa taille et sa couleur (le texte généré
-/// les contient déjà, voir [`compile`]) plus le `pixels_per_point` de
-/// l'artefact backend demandé. La couleur y est depuis l'issue #30 : deux
-/// titres identiques de couleurs différentes sont deux artefacts.
+/// A cache key: the formula, its size and its color (the generated text
+/// already contains them, see [`compile`]) plus the `pixels_per_point` of the
+/// requested backend artifact. The color has been in it since issue #30: two
+/// identical titles of different colors are two artifacts.
 ///
-/// **Décision documentée, pas seulement codée** : la compilation Typst
-/// elle-même (`document`, en points) ne dépend pas de `pixels_per_point` —
-/// Typst met en page dans un espace abstrait, sans notion d'écran. Le
-/// mettre quand même dans la clé, comme la tâche 8.2 du roadmap le demande,
-/// n'est donc pas nécessaire à la **correction** de ce cache (contrairement
-/// à `epaint::Fonts`, où la hauteur de ligne dépend réellement de l'échelle
-/// physique, `text.rs`) : c'est un choix délibéré pour offrir un seul
-/// mécanisme de cache aux deux backends plutôt que d'en écrire un second,
-/// plus fin, spécifique à l'écran. `stokesforge-render-svg` (§8.4) appelle
-/// toujours ce cache avec un `pixels_per_point` constant (`1.0`) — sa
-/// clé ne varie donc jamais sur ce terme, sans que rien ne l'empêche de le
-/// faire un jour. `stokesforge-render-egui` (§8.3), lui, y fait effectivement
-/// varier `pixels_per_point` avec l'écran réel : c'est le cas qui justifie
-/// le terme.
+/// **Documented decision, not just coded**: the Typst compilation itself
+/// (`document`, in points) does not depend on `pixels_per_point` — Typst lays
+/// out in an abstract space, with no notion of screen. Putting it in the key
+/// anyway, as task 8.2 of the roadmap asks, is therefore not necessary for the
+/// **correctness** of this cache (unlike `epaint::Fonts`, where the line
+/// height really depends on the physical scale, `text.rs`): it is a deliberate
+/// choice to offer a single cache mechanism to both backends rather than write
+/// a second, finer one, specific to the screen. `stokesforge-render-svg`
+/// (§8.4) always calls this cache with a constant `pixels_per_point` (`1.0`) —
+/// its key therefore never varies on this term, though nothing prevents it
+/// from doing so one day. `stokesforge-render-egui` (§8.3), for its part, does
+/// make `pixels_per_point` vary with the real screen: that is the case that
+/// justifies the term.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
     text: String,
@@ -858,23 +843,22 @@ impl CacheKey {
             text: text.to_owned(),
             size_pt_bits: size_pt.to_bits(),
             ink,
-            // `FontChoice` n'a pas de `Hash` (fonts.rs, ajout du
-            // 2026-09-13, hors périmètre de cette tâche) : sa
-            // représentation `Debug` est déterministe et suffit à
-            // distinguer les choix, sans lui ajouter un trait pour ce
-            // seul usage.
+            // `FontChoice` has no `Hash` (fonts.rs, addition of 2026-09-13,
+            // outside the scope of this task): its `Debug` representation is
+            // deterministic and enough to tell the choices apart, without
+            // adding a trait to it for this single use.
             font_choice: format!("{choice:?}"),
             pixels_per_point_bits: pixels_per_point.to_bits(),
         }
     }
 }
 
-/// Cache générique d'artefacts dérivés d'une compilation Typst — tâche 8.2.
+/// Generic cache of artifacts derived from a Typst compilation — task 8.2.
 ///
-/// Générique sur `V` : `stokesforge-render-egui` y range une texture RGBA
-/// (§8.3), `stokesforge-render-svg` un fragment SVG (§8.4). Ce module ne connaît
-/// ni l'un ni l'autre type — c'est tout l'intérêt, la logique de cache et
-/// de compilation restant unique quel que soit le backend qui l'utilise.
+/// Generic over `V`: `stokesforge-render-egui` stores an RGBA texture in it
+/// (§8.3), `stokesforge-render-svg` an SVG fragment (§8.4). This module knows
+/// neither type — that is the whole point, the cache and compilation logic
+/// staying single whichever backend uses it.
 pub struct FormulaCache<V> {
     entries: Mutex<HashMap<CacheKey, Arc<V>>>,
 }
@@ -886,16 +870,15 @@ impl<V> FormulaCache<V> {
         }
     }
 
-    /// Rend l'artefact déjà en cache pour `text` à `size_pt`, en `ink`, à
-    /// `pixels_per_point`, ou compile puis construit un nouvel artefact
-    /// avec `build`.
+    /// Returns the artifact already cached for `text` at `size_pt`, in `ink`,
+    /// at `pixels_per_point`, or compiles then builds a new artifact with
+    /// `build`.
     ///
-    /// `sans`/`math` sont les polices déjà résolues
-    /// (`crate::fonts::resolve(choice)`) : ce cache ne sait pas les
-    /// résoudre lui-même, pour ne pas décoder deux polices embarquées à
-    /// chaque appel manqué — c'est à l'appelant de les construire une fois
-    /// et de les réutiliser, comme [`crate::text::TextMeasurer`] le fait
-    /// déjà pour `epaint::Fonts`.
+    /// `sans`/`math` are the already resolved fonts
+    /// (`crate::fonts::resolve(choice)`): this cache cannot resolve them
+    /// itself, so as not to decode two embedded fonts on every miss — the
+    /// caller builds them once and reuses them, as
+    /// [`crate::text::TextMeasurer`] already does for `epaint::Fonts`.
     #[allow(clippy::too_many_arguments)]
     pub fn get_or_try_insert(
         &self,
@@ -909,9 +892,9 @@ impl<V> FormulaCache<V> {
         build: impl FnOnce(&Compiled) -> Result<V, String>,
     ) -> Result<Arc<V>, String> {
         let key = CacheKey::new(text, size_pt, ink, choice, pixels_per_point);
-        // Verrou empoisonné : reconstruit plutôt que de faire échouer tout
-        // le rendu pour une raison qu'aucun appelant ne peut corriger — la
-        // même politique que `TextMeasurer::layout_at`.
+        // Poisoned lock: rebuild rather than fail the whole rendering for a
+        // reason no caller can fix — the same policy as
+        // `TextMeasurer::layout_at`.
         if let Some(hit) = self
             .entries
             .lock()
@@ -929,7 +912,7 @@ impl<V> FormulaCache<V> {
         Ok(value)
     }
 
-    /// Nombre d'artefacts actuellement en cache — pour les tests.
+    /// Number of artifacts currently cached — for tests.
     pub fn len(&self) -> usize {
         self.entries
             .lock()
@@ -941,10 +924,9 @@ impl<V> FormulaCache<V> {
         self.len() == 0
     }
 
-    /// Les artefacts actuellement en cache, dans un ordre quelconque — pour
-    /// retrouver l'artefact d'une forme déjà construite
-    /// (`stokesforge_render_egui::scaled`, issue #31, qui rastérise de nouveau
-    /// une formule à la taille affichée).
+    /// The artifacts currently cached, in any order — to find the artifact of
+    /// an already built shape (`stokesforge_render_egui::scaled`, issue #31,
+    /// which rasterizes a formula again at the displayed size).
     pub fn values(&self) -> Vec<Arc<V>> {
         self.entries
             .lock()
@@ -954,11 +936,11 @@ impl<V> FormulaCache<V> {
             .collect()
     }
 
-    /// Vide le cache — pour borner sa taille chez un appelant qui vit
-    /// longtemps (`stokesforge_render_egui::GraphView`, où chaque frappe dans un
-    /// titre crée une entrée). À n'appeler qu'**avant** de reconstruire tout
-    /// ce qui référence les artefacts retirés : une texture libérée alors
-    /// qu'une forme en cache la désigne encore s'afficherait vide.
+    /// Empties the cache — to bound its size in a long-lived caller
+    /// (`stokesforge_render_egui::GraphView`, where each keystroke in a title
+    /// creates an entry). To be called only **before** rebuilding everything
+    /// that references the removed artifacts: a texture freed while a cached
+    /// shape still points to it would display empty.
     pub fn clear(&self) {
         self.entries
             .lock()
@@ -981,97 +963,89 @@ impl<V> Default for FormulaCache<V> {
     }
 }
 
-/// La mesure d'une formule, telle que `estimate_text_size` doit la rendre —
-/// **l'invariant de la tâche 8.5**.
+/// The measurement of a formula, as `estimate_text_size` must return it —
+/// **the invariant of task 8.5**.
 ///
-/// Toujours en points, jamais en pixels d'un écran particulier : c'est le
-/// même contrat que [`crate::text::TextSource::measure`], et il tient ici
-/// pour une raison différente — non pas parce qu'on le décide, mais parce
-/// que la mise en page de Typst ne connaît de toute façon aucune notion de
-/// pixel physique. Convertie en `(u32, u32)` par
-/// [`crate::text::round_size`], **la même fonction** que le chemin
-/// `epaint`, pour que l'arrondi lui-même ne puisse pas diverger entre les
-/// deux chemins de mesure.
+/// Always in points, never in pixels of a particular screen: it is the same
+/// contract as [`crate::text::TextSource::measure`], and it holds here for a
+/// different reason — not because we decide it, but because Typst's layout has
+/// no notion of physical pixel anyway. Converted to `(u32, u32)` by
+/// [`crate::text::round_size`], **the same function** as the `epaint` path, so
+/// that the rounding itself cannot diverge between the two measurement paths.
 pub fn measure(compiled: &Compiled) -> (u32, u32) {
     round_size_pt(compiled.size_pt())
 }
 
-/// Comme [`measure`], mais à partir d'une taille en points déjà connue —
-/// pour un appelant qui a mis en cache autre chose qu'un [`Compiled`]
-/// entier (`stokesforge-render-svg::typst_export`, qui ne garde que le fragment
-/// SVG et sa taille, pas le document Typst).
+/// Like [`measure`], but from an already known size in points — for a caller
+/// that cached something other than a whole [`Compiled`]
+/// (`stokesforge-render-svg::typst_export`, which keeps only the SVG fragment
+/// and its size, not the Typst document).
 pub fn round_size_pt((w, h): (f64, f64)) -> (u32, u32) {
     crate::text::round_size(epaint::Vec2::new(w as f32, h as f32))
 }
 
-/// Un choix de police Math, indépendant du choix de police de texte —
-/// branchement technique du 2026-09-13, en complément de
-/// [`resolve_fonts_with_math`].
+/// A Math font choice, independent of the text font choice — technical
+/// wiring of 2026-09-13, complementing [`resolve_fonts_with_math`].
 ///
-/// Jusqu'ici, [`resolve_fonts`] déterminait la police Math uniquement à
-/// partir du [`FontChoice`] de texte (`crate::fonts::resolve(choice).math`,
-/// toujours une des trois paires embarquées) : aucun moyen d'exprimer « ce
-/// texte, mais cette Math-là ». Ce type comble cette lacune sans rien
-/// décider de plus : aucune valeur par défaut n'en dérive une politique
-/// produit, c'est un simple second axe de choix, au même titre que
-/// [`FontChoice`] pour le texte.
+/// Until now, [`resolve_fonts`] determined the Math font only from the text
+/// [`FontChoice`] (`crate::fonts::resolve(choice).math`, always one of the
+/// three embedded pairs): no way to express "this text, but that Math". This
+/// type fills the gap without deciding anything more: no default value derives
+/// a product policy from it, it is just a second axis of choice, on a par with
+/// [`FontChoice`] for the text.
 ///
-/// **Dégradation silencieuse pour [`MathFontChoice::System`], à savoir
-/// avant d'exposer ce choix à un utilisateur** : rien ne garantit qu'une
-/// police système porte une table Unicode Math (OpenType `MATH`) valide.
-/// Typst compilera quand même avec une police qui n'en a pas — fractions,
-/// exposants, opérateurs empilés seront mis en page avec les seules
-/// métriques de corps ordinaires (mal centrés verticalement, tailles
-/// d'opérateurs agrandissables absentes) — sans erreur ni avertissement
-/// remonté. Ce n'est pas un bug de ce mécanisme mais un fait connu de
-/// l'écosystème des polices Math OpenType (la table `MATH` est rare hors
-/// des polices conçues pour, comme les trois paires embarquées) : un futur
-/// appelant qui proposerait ce choix à un utilisateur doit le savoir avant
-/// de le faire, plutôt que de découvrir un rendu dégradé sans diagnostic.
+/// **Silent degradation for [`MathFontChoice::System`], to know before
+/// exposing this choice to a user**: nothing guarantees that a system font
+/// carries a valid Unicode Math table (OpenType `MATH`). Typst will still
+/// compile with a font that has none — fractions, superscripts, stacked
+/// operators will be laid out with the ordinary body metrics only (badly
+/// centered vertically, no growable operator sizes) — without any error or
+/// warning raised. This is not a bug of this mechanism but a known fact of the
+/// OpenType Math font ecosystem (the `MATH` table is rare outside fonts
+/// designed for it, like the three embedded pairs): a future caller that
+/// offered this choice to a user must know it before doing so, rather than
+/// discover a degraded rendering with no diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MathFontChoice {
-    /// Une des trois paires embarquées — sa moitié Math, indépendamment de
-    /// la police de texte demandée par ailleurs.
+    /// One of the three embedded pairs — its Math half, independently of the
+    /// text font requested otherwise.
     Embedded(FontSet),
-    /// Une police du système, par son nom exact. Introuvable ⇒ repli sur
-    /// [`FontSet::Noto`], la même politique que
-    /// [`crate::fonts::FontChoice::System`] applique déjà côté texte.
+    /// A system font, by its exact name. Not found ⇒ fallback to
+    /// [`FontSet::Noto`], the same policy that
+    /// [`crate::fonts::FontChoice::System`] already applies on the text side.
     System(String),
 }
 
-/// Charge les polices Typst (texte + Math) correspondant à un
-/// [`FontChoice`] — pour que les deux backends (8.3, 8.4) n'aient pas
-/// chacun leur propre façon de le faire.
+/// Loads the Typst fonts (text + Math) matching a [`FontChoice`] — so that
+/// the two backends (8.3, 8.4) do not each have their own way of doing it.
 ///
-/// Équivalent à [`resolve_fonts_with_math`]`(choice, None)` : la police
-/// Math suit le [`FontChoice`] de texte, exactement comme avant l'ajout de
-/// [`MathFontChoice`] — voir sa documentation pour ce que `None` signifie
-/// précisément. Aucun appelant existant n'a besoin de changer pour garder
-/// son comportement actuel.
+/// Equivalent to [`resolve_fonts_with_math`]`(choice, None)`: the Math font
+/// follows the text [`FontChoice`], exactly as before [`MathFontChoice`] was
+/// added — see its documentation for what `None` means precisely. No existing
+/// caller needs to change to keep its current behavior.
 pub fn resolve_fonts(choice: &FontChoice) -> Result<(Font, Font), String> {
     resolve_fonts_with_math(choice, None)
 }
 
-/// Comme [`resolve_fonts`], avec un choix de police Math optionnel et
-/// indépendant du choix de texte.
+/// Like [`resolve_fonts`], with an optional Math font choice independent of
+/// the text choice.
 ///
-/// `math_choice` à `None` reproduit exactement [`resolve_fonts`] tel qu'il
-/// se comportait avant cet ajout : la Math suit le [`FontChoice`] de texte
-/// (une des trois paires embarquées pour [`FontChoice::Embedded`],
-/// [`FontSet::Noto`] pour [`FontChoice::System`] — la même règle que
-/// [`crate::fonts::resolve`] applique déjà). `Some(..)` prend le dessus et
-/// résout la Math séparément via [`MathFontChoice`], dont la documentation
-/// détaille la dégradation silencieuse d'une police système sans table
-/// Math.
+/// `math_choice` at `None` reproduces exactly [`resolve_fonts`] as it behaved
+/// before this addition: the Math follows the text [`FontChoice`] (one of the
+/// three embedded pairs for [`FontChoice::Embedded`], [`FontSet::Noto`] for
+/// [`FontChoice::System`] — the same rule [`crate::fonts::resolve`] already
+/// applies). `Some(..)` takes over and resolves the Math separately through
+/// [`MathFontChoice`], whose documentation details the silent degradation of a
+/// system font without a Math table.
 ///
-/// Contrairement à l'ancienne limite documentée ici pour
-/// [`FontChoice::System`] côté texte (repli sur Noto **que la police soit
-/// trouvée ou non**) : la police système demandée est désormais réellement
-/// cherchée via [`crate::fonts::load_system_font`] — le même mécanisme que
-/// [`crate::fonts::resolve`] utilise côté écran/export ordinaire — et
-/// utilisée si trouvée ; le repli sur Noto ne joue plus que si elle est
-/// introuvable, la même politique que le reste du projet applique déjà à
-/// une police système (`fonts.rs`, tête de module).
+/// Unlike the old limit documented here for [`FontChoice::System`] on the text
+/// side (fallback to Noto **whether the font is found or not**): the requested
+/// system font is now really looked up through
+/// [`crate::fonts::load_system_font`] — the same mechanism
+/// [`crate::fonts::resolve`] uses on the ordinary screen/export side — and
+/// used if found; the fallback to Noto now plays only if it is not found, the
+/// same policy the rest of the project already applies to a system font
+/// (`fonts.rs`, module header).
 pub fn resolve_fonts_with_math(
     choice: &FontChoice,
     math_choice: Option<&MathFontChoice>,
@@ -1090,9 +1064,9 @@ pub fn resolve_fonts_with_math(
             Some(data) => system_font(data, "Math")?,
             None => embedded_font(FontSet::Noto.math_bytes(), "Math")?,
         },
-        // Comportement historique, inchangé : la Math suit le choix de
-        // texte plutôt qu'un scan système propre — voir la documentation
-        // de cette fonction et de `crate::fonts::resolve`.
+        // Historical behavior, unchanged: the Math follows the text choice
+        // rather than a system scan of its own — see the documentation of this
+        // function and of `crate::fonts::resolve`.
         None => {
             let math_set = match choice {
                 FontChoice::Embedded(set) => *set,
@@ -1105,33 +1079,29 @@ pub fn resolve_fonts_with_math(
     Ok((sans, math))
 }
 
-/// Construit une `Font` Typst à partir des octets d'une des paires
-/// embarquées — factorisé entre texte et Math, pour un message d'erreur qui
-/// nomme le rôle plutôt que de dupliquer le même `ok_or_else` quatre fois.
+/// Builds a Typst `Font` from the bytes of one of the embedded pairs —
+/// factored between text and Math, for an error message that names the role
+/// rather than duplicating the same `ok_or_else` four times.
 fn embedded_font(bytes: &'static [u8], role: &str) -> Result<Font, String> {
-    Font::new(Bytes::new(bytes), 0).ok_or_else(|| format!("police {role} embarquée illisible"))
+    Font::new(Bytes::new(bytes), 0).ok_or_else(|| format!("embedded {role} font unreadable"))
 }
 
-/// Construit une `Font` Typst à partir des octets bruts d'une police
-/// système déjà trouvée par [`crate::fonts::load_system_font`] — même
-/// index de face que celui que `fontdb` a résolu, pour ne pas retomber sur
-/// la première face d'un fichier qui en contiendrait plusieurs (une famille
-/// de polices variable, par exemple).
+/// Builds a Typst `Font` from the raw bytes of a system font already found by
+/// [`crate::fonts::load_system_font`] — same face index as the one `fontdb`
+/// resolved, so as not to fall back on the first face of a file that would
+/// contain several (a variable font family, for example).
 fn system_font(data: epaint::text::FontData, role: &str) -> Result<Font, String> {
     let index = data.index;
-    Font::new(Bytes::new(data.font), index)
-        .ok_or_else(|| format!("police {role} système illisible"))
+    Font::new(Bytes::new(data.font), index).ok_or_else(|| format!("system {role} font unreadable"))
 }
 
-/// Le décalage d'ancrage d'une boîte de `size_pt`, dans son propre repère
-/// **non tourné** — c'est-à-dire avant l'éventuelle rotation de
-/// [`rotate_offset`].
+/// The anchor offset of a box of `size_pt`, in its own **unrotated** frame —
+/// that is, before the possible rotation of [`rotate_offset`].
 ///
-/// Transcrit de `stokesforge-render-egui::backend::EguiBackend::draw_text`
-/// (calcul identique, non partagé jusqu'ici parce qu'il n'existait qu'à un
-/// seul endroit) : un label Typst doit s'ancrer exactement comme un label
-/// ordinaire, sous peine d'un décalage visible entre les deux à la
-/// frontière `$...$`.
+/// Transcribed from `stokesforge-render-egui::backend::EguiBackend::draw_text`
+/// (identical computation, not shared until now because it existed in only one
+/// place): a Typst label must anchor exactly like an ordinary label, or there
+/// would be a visible shift between the two at the `$...$` boundary.
 pub fn anchor_offset((width, height): (f64, f64), h: HPos, v: VPos) -> (f64, f64) {
     let dx = match h {
         HPos::Left => 0.0,
@@ -1146,10 +1116,10 @@ pub fn anchor_offset((width, height): (f64, f64), h: HPos, v: VPos) -> (f64, f64
     (dx, dy)
 }
 
-/// Applique à un décalage la même rotation que Plotters applique au texte —
-/// voir `EguiBackend::rotate`, dont ceci est la version partagée (utilisée
-/// aussi par `stokesforge-render-svg`, qui n'avait jusqu'ici aucune raison de
-/// tourner quoi que ce soit).
+/// Applies to an offset the same rotation that Plotters applies to text — see
+/// `EguiBackend::rotate`, of which this is the shared version (also used by
+/// `stokesforge-render-svg`, which until now had no reason to rotate
+/// anything).
 pub fn rotate_offset((dx, dy): (f64, f64), transform: FontTransform) -> (f64, f64) {
     match transform {
         FontTransform::None => (dx, dy),
@@ -1159,10 +1129,10 @@ pub fn rotate_offset((dx, dy): (f64, f64), transform: FontTransform) -> (f64, f6
     }
 }
 
-/// L'angle d'une rotation de Plotters, en degrés horaires — l'unité que
-/// SVG attend (`rotate(deg, cx, cy)`, déjà utilisée telle quelle par
-/// `plotters-svg::draw_text`) et qu'`epaint::TextShape::with_angle` attend
-/// en radians (voir l'appelant côté écran, qui convertit).
+/// The angle of a Plotters rotation, in clockwise degrees — the unit SVG
+/// expects (`rotate(deg, cx, cy)`, already used as is by
+/// `plotters-svg::draw_text`) and that `epaint::TextShape::with_angle` expects
+/// in radians (see the screen-side caller, which converts).
 pub fn rotation_degrees(transform: FontTransform) -> f64 {
     match transform {
         FontTransform::None => 0.0,
@@ -1175,7 +1145,7 @@ pub fn rotation_degrees(transform: FontTransform) -> f64 {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn les_reglages_locaux_se_lisent_dans_la_syntaxe_pas_dans_le_texte_brut() {
+    fn local_settings_are_read_from_the_syntax_not_from_the_raw_text() {
         use super::{local_text_overrides, TextOverrides};
         assert_eq!(
             local_text_overrides("font: x, size: 28pt, fill: red"),
@@ -1193,28 +1163,28 @@ mod tests {
     use super::*;
 
     fn noto() -> (Font, Font) {
-        resolve_fonts(&FontChoice::default()).expect("polices Noto illisibles")
+        resolve_fonts(&FontChoice::default()).expect("Noto fonts unreadable")
     }
 
-    const NOIR: Ink = [0, 0, 0, 255];
+    const BLACK_INK: Ink = [0, 0, 0, 255];
 
-    fn largeur_de(text: &str) -> f64 {
+    fn width_of(text: &str) -> f64 {
         let (sans, math) = noto();
-        compile(text, 14.0, NOIR, sans, math)
-            .unwrap_or_else(|err| panic!("{text:?} ne compile pas : {err}"))
+        compile(text, 14.0, BLACK_INK, sans, math)
+            .unwrap_or_else(|err| panic!("{text:?} does not compile: {err}"))
             .size_pt()
             .0
     }
 
-    /// Issues #77 et #78 : la police d'une zone voyage dans la famille du
-    /// style, et `source` la pose avec sa police Math — Libertinus Sans
-    /// amène Libertinus Math, une police système le repli Noto Sans Math.
+    /// Issues #77 and #78: an area's font travels in the style's family, and
+    /// `source` sets it with its Math font — Libertinus Sans brings Libertinus
+    /// Math, a system font the Noto Sans Math fallback.
     #[test]
-    fn la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math() {
-        let source_de = |style: plotters::style::TextStyle<'static>, text: &str| {
+    fn an_areas_font_is_set_in_the_source_with_its_math() {
+        let source_of = |style: plotters::style::TextStyle<'static>, text: &str| {
             source(text, &style).into_owned()
         };
-        let libertinus = source_de(
+        let libertinus = source_of(
             rich_style_font(16.0, (0, 0, 0, 255), Some("Libertinus Sans")),
             "Pic $x$",
         );
@@ -1227,175 +1197,177 @@ mod tests {
             "{libertinus}"
         );
         assert!(libertinus.ends_with("Pic $x$"));
-        let systeme = source_de(
+        let system = source_of(
             rich_style_font(16.0, (0, 0, 0, 255), Some("Calibri")),
             "Pic",
         );
-        assert!(systeme.contains("font: \"Noto Sans Math\""), "{systeme}");
-        // Sans police : le texte tel quel, comme avant.
+        assert!(system.contains("font: \"Noto Sans Math\""), "{system}");
+        // No font: the text as is, as before.
         assert_eq!(
-            source_de(rich_style_font(16.0, (0, 0, 0, 255), None), "Pic"),
+            source_of(rich_style_font(16.0, (0, 0, 0, 255), None), "Pic"),
             "Pic"
         );
-        // Un texte repris automatiquement reste échappé, police ou non.
-        let litteral = source_de(
+        // A text taken over automatically stays escaped, font or not.
+        let literal = source_of(
             literal_style_font(16.0, (0, 0, 0, 255), Some("Fira Sans")),
             "a_b",
         );
-        assert!(litteral.ends_with("#\"a_b\""), "{litteral}");
-        // Et la police fait toujours du texte riche.
+        assert!(literal.ends_with("#\"a_b\""), "{literal}");
+        // And the font still makes rich text.
         assert!(is_rich(&rich_style_font(
             16.0,
             (0, 0, 0, 255),
             Some("Fira Sans")
         )));
-        // La mise en page change réellement avec la police.
+        // The layout really changes with the font.
         let (sans, math) = noto();
-        let largeur = |texte: &str| {
-            compile(texte, 14.0, NOIR, sans.clone(), math.clone())
+        let width = |text: &str| {
+            compile(text, 14.0, BLACK_INK, sans.clone(), math.clone())
                 .expect("compile")
                 .size_pt()
                 .0
         };
         let fira = rich_style_font(14.0, (0, 0, 0, 255), Some("Fira Sans"));
         assert!(
-            (largeur(&source_de(fira, "Absorbance (a.u.)")) - largeur("Absorbance (a.u.)")).abs()
+            (width(&source_of(fira, "Absorbance (a.u.)")) - width("Absorbance (a.u.)")).abs()
                 > 1e-3
         );
     }
 
-    /// Issue #63 : `#text(font: "Nom")` choisit une police embarquée par son
-    /// nom de famille. Le témoin : le même texte sans la balise est plus
-    /// étroit ou plus large, jamais égal.
+    /// Issue #63: `#text(font: "Name")` chooses an embedded font by its family
+    /// name. The witness: the same text without the tag is narrower or wider,
+    /// never equal.
     #[test]
-    fn une_police_embarquee_se_choisit_par_son_nom() {
-        let defaut = largeur_de("Absorbance (a.u.)");
-        let fira = largeur_de("#text(font: \"Fira Sans\")[Absorbance (a.u.)]");
-        let libertinus = largeur_de("#text(font: \"Libertinus Sans\")[Absorbance (a.u.)]");
-        assert!((defaut - fira).abs() > 1e-3, "Fira = défaut : {fira}");
+    fn an_embedded_font_is_chosen_by_its_name() {
+        let default = width_of("Absorbance (a.u.)");
+        let fira = width_of("#text(font: \"Fira Sans\")[Absorbance (a.u.)]");
+        let libertinus = width_of("#text(font: \"Libertinus Sans\")[Absorbance (a.u.)]");
+        assert!((default - fira).abs() > 1e-3, "Fira = default: {fira}");
         assert!((fira - libertinus).abs() > 1e-3, "Libertinus = Fira");
     }
 
-    /// Une police introuvable ne fait ni échouer ni disparaître le texte : il
-    /// retombe sur la police du document.
+    /// A font that is not found neither fails nor makes the text disappear: it
+    /// falls back on the document's font.
     #[test]
-    fn une_police_introuvable_replie_sur_la_police_du_document() {
-        let defaut = largeur_de("Absorbance");
-        let absente = largeur_de("#text(font: \"Police StokesForge Inexistante\")[Absorbance]");
-        assert!((defaut - absente).abs() < 1e-6);
+    fn a_missing_font_falls_back_to_the_documents_font() {
+        let default = width_of("Absorbance");
+        let absent = width_of("#text(font: \"StokesForge Nonexistent Font\")[Absorbance]");
+        assert!((default - absent).abs() < 1e-6);
     }
 
     #[test]
-    fn les_familles_demandees_sont_lues_dans_le_markup() {
+    fn requested_families_are_read_from_the_markup() {
         assert_eq!(
             requested_families(
-                "#text(font: \"A B\")[x] et #text(size: 9pt, font:\"C\")[y] #text(font: \"A B\")[z]"
+                "#text(font: \"A B\")[x] and #text(size: 9pt, font:\"C\")[y] #text(font: \"A B\")[z]"
             ),
             ["A B", "C"]
         );
-        assert!(requested_families("font: sans guillemets").is_empty());
-        assert!(requested_families("font: \"ouvert").is_empty());
+        assert!(requested_families("font: no quotes").is_empty());
+        assert!(requested_families("font: \"open").is_empty());
     }
 
-    /// Les boutons G et I de la barre (issue #63) doivent changer le rendu
-    /// avec la police par défaut, sinon ils ne servent à rien.
+    /// The B and I buttons of the bar (issue #63) must change the rendering
+    /// with the default font, otherwise they are useless.
     #[test]
-    fn gras_et_italique_changent_la_largeur_avec_la_police_par_defaut() {
-        let normal = largeur_de("Absorbance");
-        let gras = largeur_de("#strong[Absorbance]");
-        let italique = largeur_de("#emph[Absorbance]");
-        assert!((normal - gras).abs() > 1e-3, "gras = normal : {gras}");
-        assert!(
-            (normal - italique).abs() > 1e-3,
-            "italique = normal : {italique}"
-        );
+    fn bold_and_italic_change_the_width_with_the_default_font() {
+        let normal = width_of("Absorbance");
+        let bold = width_of("#strong[Absorbance]");
+        let italic = width_of("#emph[Absorbance]");
+        assert!((normal - bold).abs() > 1e-3, "bold = normal: {bold}");
+        assert!((normal - italic).abs() > 1e-3, "italic = normal: {italic}");
     }
 
-    /// Un texte tourné (issue #35) : sa page épouse la boîte tournée, donc un
-    /// quart de tour échange largeur et hauteur, et le texte d'origine compile
-    /// toujours.
+    /// A rotated text (issue #35): its page fits the rotated box, so a quarter
+    /// turn swaps width and height, and the original text still compiles.
     #[test]
-    fn un_texte_tourne_dun_quart_de_tour_echange_largeur_et_hauteur() {
+    fn a_text_rotated_by_a_quarter_turn_swaps_width_and_height() {
         use plotters::style::{IntoFont, BLACK};
-        let taille = |angle: f64| {
+        let size = |angle: f64| {
             let family = rotated_family(angle);
             let style = (family.as_str(), 16.0).into_font().color(&BLACK);
             let (sans, math) = noto();
-            compile(&source("Pic de référence", &style), 14.0, NOIR, sans, math)
-                .expect("compilation Typst échouée")
-                .size_pt()
+            compile(
+                &source("Reference peak", &style),
+                14.0,
+                BLACK_INK,
+                sans,
+                math,
+            )
+            .expect("Typst compilation failed")
+            .size_pt()
         };
-        let (droit, quart) = (taille(0.0), taille(90.0));
-        assert!((droit.0 - quart.1).abs() < 0.01 && (droit.1 - quart.0).abs() < 0.01);
-        let (w, h) = taille(30.0);
+        let (upright, quarter) = (size(0.0), size(90.0));
+        assert!((upright.0 - quarter.1).abs() < 0.01 && (upright.1 - quarter.0).abs() < 0.01);
+        let (w, h) = size(30.0);
         assert!(
-            w < droit.0 && h > droit.1,
-            "30° : boîte ni plus étroite ni plus haute"
+            w < upright.0 && h > upright.1,
+            "30°: box neither narrower nor taller"
         );
         assert_eq!(rotated_family(0.0), RICH_FAMILY);
     }
 
-    /// Issue #36 : l'angle d'un `DragValue` n'a rien d'un entier — fractionnaire,
-    /// très petit, négatif. Le source Typst doit rester une durée valide
-    /// (jamais de notation `1e-7deg`, que Typst refuserait : le texte
-    /// retomberait alors, non tourné, sur le chemin brut) et la page doit
-    /// épouser la boîte tournée, donc différer de la boîte droite.
+    /// Issue #36: the angle of a `DragValue` is nothing like an integer —
+    /// fractional, very small, negative. The Typst source must remain a valid
+    /// duration (never a `1e-7deg` notation, which Typst would refuse: the text
+    /// would then fall back, unrotated, on the raw path) and the page must fit
+    /// the rotated box, hence differ from the upright box.
     #[test]
-    fn un_angle_libre_fractionnaire_ou_minuscule_est_compile_et_trace_tourne() {
+    fn a_fractional_or_tiny_free_angle_is_compiled_and_drawn_rotated() {
         use plotters::style::{IntoFont, BLACK};
         let (sans, math) = noto();
-        let taille = |angle: f64| {
+        let size = |angle: f64| {
             let family = rotated_family(angle);
             let style = (family.as_str(), 16.0).into_font().color(&BLACK);
-            let code = source("Pic de référence", &style).into_owned();
-            let duree = code
+            let code = source("Reference peak", &style).into_owned();
+            let duration = code
                 .strip_prefix(ROTATE_CALL)
-                .and_then(|reste| reste.split("deg)").next())
-                .unwrap_or_else(|| panic!("{angle}° : pas enveloppé : {code}"));
+                .and_then(|rest| rest.split("deg)").next())
+                .unwrap_or_else(|| panic!("{angle}°: not wrapped: {code}"));
             assert!(
-                duree
+                duration
                     .chars()
                     .all(|c| c.is_ascii_digit() || c == '.' || c == '-'),
-                "{angle}° : durée `{duree}` en notation scientifique"
+                "{angle}°: duration `{duration}` in scientific notation"
             );
-            compile(&code, 14.0, NOIR, sans.clone(), math.clone())
-                .unwrap_or_else(|erreur| panic!("{angle}° : {erreur:?}"))
+            compile(&code, 14.0, BLACK_INK, sans.clone(), math.clone())
+                .unwrap_or_else(|error| panic!("{angle}°: {error:?}"))
                 .size_pt()
         };
-        let droit = {
+        let upright = {
             let style = (RICH_FAMILY, 16.0).into_font().color(&BLACK);
             compile(
-                &source("Pic de référence", &style),
+                &source("Reference peak", &style),
                 14.0,
-                NOIR,
+                BLACK_INK,
                 sans.clone(),
                 math.clone(),
             )
-            .expect("texte droit")
+            .expect("upright text")
             .size_pt()
         };
         for angle in [0.5, 33.3, -33.3, 179.99, -179.99] {
-            let (w, h) = taille(angle);
+            let (w, h) = size(angle);
             assert!(
-                (w, h) != droit,
-                "{angle}° : boîte identique à celle du texte droit"
+                (w, h) != upright,
+                "{angle}°: box identical to the upright text's"
             );
         }
-        // Un angle minuscule reste valide ; il peut être sans effet visible.
-        taille(1e-7);
-        taille(-1e-7);
+        // A tiny angle stays valid; it may have no visible effect.
+        size(1e-7);
+        size(-1e-7);
     }
 
-    /// L'aiguillage porte sur le rôle (la famille du style), pas sur le
-    /// contenu : un texte sans `$` en style riche passe par Typst, une
-    /// formule en style ordinaire non (issue #32).
+    /// The switch is on the role (the style's family), not on the content: a
+    /// text without `$` in rich style goes through Typst, a formula in ordinary
+    /// style does not (issue #32).
     #[test]
-    fn laiguillage_repose_sur_le_style_et_non_sur_le_dollar() {
+    fn the_switch_rests_on_the_style_not_on_the_dollar() {
         use plotters::style::{IntoFont, BLACK};
         assert!(is_rich(&rich_style(16.0, (0, 0, 0, 255))));
         assert!(is_rich(&literal_style(16.0, (0, 0, 0, 255))));
         assert!(!is_rich(&("sans-serif", 16.0).into_font().color(&BLACK)));
-        // Seul le texte repris est échappé.
+        // Only the taken-over text is escaped.
         assert_eq!(source("$x$", &rich_style(16.0, (0, 0, 0, 255))), "$x$");
         assert_eq!(
             source("$x$", &literal_style(16.0, (0, 0, 0, 255))),
@@ -1403,155 +1375,150 @@ mod tests {
         );
     }
 
-    /// Issue #33 : un nom de colonne importé compile, et se compose comme
-    /// son texte littéral — même largeur que le markup échappé caractère par
-    /// caractère, alors que le même texte lu comme markup (le témoin) passe
-    /// en italique ou ne compile pas.
+    /// Issue #33: an imported column name compiles, and is composed like its
+    /// literal text — same width as the markup escaped character by character,
+    /// whereas the same text read as markup (the witness) turns italic or does
+    /// not compile.
     #[test]
-    fn un_texte_echappe_saffiche_tel_quel() {
-        let largeur = |text: &str| {
+    fn an_escaped_text_is_displayed_as_is() {
+        let width = |text: &str| {
             let (sans, math) = noto();
-            compile(text, 14.0, NOIR, sans, math).map(|c| c.size_pt().0)
+            compile(text, 14.0, BLACK_INK, sans, math).map(|c| c.size_pt().0)
         };
-        let litteral = largeur(&escape("Abs_280 #1")).expect("texte échappé non compilé");
-        let a_la_main = largeur("Abs\\_280 \\#1").expect("référence non compilée");
+        let literal = width(&escape("Abs_280 #1")).expect("escaped text did not compile");
+        let by_hand = width("Abs\\_280 \\#1").expect("reference did not compile");
+        assert!((literal - by_hand).abs() < 1e-6, "{literal} ≠ {by_hand}");
+        // The witness: read as markup, `_` opens an emphasis.
         assert!(
-            (litteral - a_la_main).abs() < 1e-6,
-            "{litteral} ≠ {a_la_main}"
-        );
-        // Le témoin : lu comme markup, `_` ouvre une emphase.
-        assert!(
-            largeur("Abs_280 #1").map_or(true, |brut| (brut - litteral).abs() > 1e-3),
-            "le markup brut se compose comme le texte échappé : le test ne prouve rien"
+            width("Abs_280 #1").map_or(true, |raw| (raw - literal).abs() > 1e-3),
+            "raw markup is composed like the escaped text: the test proves nothing"
         );
 
-        for piege in [
-            "Prix ($)",
+        for trap in [
+            "Price ($)",
             "a\\b",
-            "\"cité\"",
+            "\"café\"",
             "x // y",
-            "- liste",
-            "= titre",
+            "- list",
+            "= title",
             "...",
-            "<étiquette>",
+            "<label>",
             "@ref",
             "`code`",
         ] {
-            assert!(largeur(&escape(piege)).is_ok(), "{piege:?} ne compile pas");
+            assert!(width(&escape(trap)).is_ok(), "{trap:?} does not compile");
         }
-        // Ni points de suspension ni guillemets typographiques : le texte
-        // échappé garde ses caractères (même largeur que l'échappement
-        // caractère par caractère).
-        let points = largeur(&escape("a...b")).expect("points");
-        let points_a_la_main = largeur("a\\.\\.\\.b").expect("points à la main");
-        assert!((points - points_a_la_main).abs() < 1e-6);
+        // Neither ellipsis nor typographic quotes: the escaped text keeps its
+        // characters (same width as escaping character by character).
+        let dots = width(&escape("a...b")).expect("dots");
+        let dots_by_hand = width("a\\.\\.\\.b").expect("dots by hand");
+        assert!((dots - dots_by_hand).abs() < 1e-6);
     }
 
-    /// L'étai : texte ordinaire, jambage, indice, exposant ont **la même**
-    /// boîte, donc la même ligne de base ; une fraction l'agrandit sans être
-    /// coupée (issue #32).
+    /// The strut: ordinary text, descender, subscript, superscript have **the
+    /// same** box, hence the same baseline; a fraction enlarges it without being
+    /// cut off (issue #32).
     #[test]
-    fn les_libelles_simples_ont_tous_la_meme_hauteur() {
-        let hauteur = |text: &str| {
+    fn simple_labels_all_have_the_same_height() {
+        let height = |text: &str| {
             let (sans, math) = noto();
-            compile(text, 14.0, NOIR, sans, math)
-                .expect("compilation Typst échouée")
+            compile(text, 14.0, BLACK_INK, sans, math)
+                .expect("Typst compilation failed")
                 .size_pt()
                 .1
         };
-        let reference = hauteur("a");
-        for text in ["Ag", "Temps (s)", "$n_i$", "$x^2$", "$\"Ru(bpy)\"_3^(2+)$"] {
+        let reference = height("a");
+        for text in ["Ag", "Time (s)", "$n_i$", "$x^2$", "$\"Ru(bpy)\"_3^(2+)$"] {
             assert!(
-                (hauteur(text) - reference).abs() < 1e-6,
-                "{text} : {} au lieu de {reference}",
-                hauteur(text)
+                (height(text) - reference).abs() < 1e-6,
+                "{text}: {} instead of {reference}",
+                height(text)
             );
         }
-        assert!(hauteur("$a/b$") > reference, "une fraction est coupée");
+        assert!(height("$a/b$") > reference, "a fraction is cut off");
     }
 
-    /// Une formule triviale compile en une page dont la taille n'est pas
-    /// nulle — le test de sanité qui aurait dû exister avant tout code de
-    /// production consommant cette compilation (consigne de la mission).
+    /// A trivial formula compiles into a page whose size is not zero — the
+    /// sanity test that should have existed before any production code
+    /// consuming this compilation (mission instruction).
     #[test]
-    fn une_formule_triviale_compile_et_mesure_une_taille_non_nulle() {
+    fn a_trivial_formula_compiles_and_measures_a_nonzero_size() {
         let (sans, math) = noto();
         let compiled =
-            compile("$lambda$", 12.0, NOIR, sans, math).expect("compilation Typst échouée");
+            compile("$lambda$", 12.0, BLACK_INK, sans, math).expect("Typst compilation failed");
         let (w, h) = compiled.size_pt();
-        assert!(w > 0.0, "largeur nulle : {w}");
-        assert!(h > 0.0, "hauteur nulle : {h}");
+        assert!(w > 0.0, "zero width: {w}");
+        assert!(h > 0.0, "zero height: {h}");
     }
 
-    /// Un libellé mixte texte + formule compile aussi : c'est la raison
-    /// documentée du choix de détection (pas de découpage manuel ici).
+    /// A mixed text + formula label compiles too: this is the documented reason
+    /// for the detection choice (no manual splitting here).
     #[test]
-    fn un_libelle_mixte_texte_et_formule_compile() {
+    fn a_mixed_text_and_formula_label_compiles() {
         let (sans, math) = noto();
-        let compiled =
-            compile("$lambda$ (nm)", 12.0, NOIR, sans, math).expect("compilation Typst échouée");
+        let compiled = compile("$lambda$ (nm)", 12.0, BLACK_INK, sans, math)
+            .expect("Typst compilation failed");
         assert!(compiled.page().is_some());
     }
 
-    /// Une formule syntaxiquement invalide échoue proprement, sans
-    /// paniquer — condition pour qu'un backend puisse replier sur
-    /// `Shape::Text` brut plutôt que de faire tomber tout le rendu.
+    /// A syntactically invalid formula fails cleanly, without panicking — a
+    /// condition for a backend to be able to fall back on a raw `Shape::Text`
+    /// rather than bring down the whole rendering.
     #[test]
-    fn une_formule_invalide_echoue_sans_paniquer() {
+    fn an_invalid_formula_fails_without_panicking() {
         let (sans, math) = noto();
-        let result = compile("$ (unclosed", 12.0, NOIR, sans, math);
+        let result = compile("$ (unclosed", 12.0, BLACK_INK, sans, math);
         assert!(result.is_err());
     }
 
-    /// T3 : l'interface lit l'erreur Typst d'un texte sans le rendre.
+    /// T3: the interface reads the Typst error of a text without rendering it.
     #[test]
-    fn diagnose_dit_l_erreur_d_un_texte_qui_ne_compile_pas() {
+    fn diagnose_reports_the_error_of_a_text_that_does_not_compile() {
         assert!(diagnose("$ (unclosed").is_some());
         assert_eq!(diagnose("$lambda$ (nm)"), None);
         assert_eq!(diagnose(""), None);
-        // Deuxième demande : même verdict, depuis la mémoire.
+        // Second request: same verdict, from memory.
         assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
     }
 
-    /// Deux tailles différentes de la même formule donnent des tailles de
-    /// page différentes — sanity check qu'on mesure bien le corps de
-    /// police demandé, pas une valeur figée.
+    /// Two different sizes of the same formula give different page sizes —
+    /// sanity check that we measure the requested point size, not a frozen
+    /// value.
     #[test]
-    fn une_taille_de_police_plus_grande_rend_une_boite_plus_grande() {
+    fn a_larger_font_size_gives_a_larger_box() {
         let (sans1, math1) = noto();
         let (sans2, math2) = noto();
-        let petite = compile("$lambda$", 8.0, NOIR, sans1, math1).unwrap();
-        let grande = compile("$lambda$", 32.0, NOIR, sans2, math2).unwrap();
-        assert!(grande.size_pt().0 > petite.size_pt().0);
-        assert!(grande.size_pt().1 > petite.size_pt().1);
+        let small = compile("$lambda$", 8.0, BLACK_INK, sans1, math1).unwrap();
+        let large = compile("$lambda$", 32.0, BLACK_INK, sans2, math2).unwrap();
+        assert!(large.size_pt().0 > small.size_pt().0);
+        assert!(large.size_pt().1 > small.size_pt().1);
     }
 
-    /// Ce qui descend sous la police agrandit la boîte **vers le bas** : la
-    /// page va jusqu'au bas de l'encre, pas jusqu'à la ligne de base (défaut
-    /// de Typst, qui coupait les indices et les jambages à l'écran — issue
-    /// #29). Depuis l'étai de #32, un indice simple tient dans la hauteur de
-    /// la police ; des indices emboîtés la dépassent, et doivent agrandir la
-    /// page plutôt qu'être coupés.
+    /// What goes below the font enlarges the box **downward**: the page goes
+    /// down to the bottom of the ink, not to the baseline (Typst's default,
+    /// which cut off subscripts and descenders on screen — issue #29). Since
+    /// the strut of #32, a simple subscript fits within the font height; nested
+    /// subscripts exceed it, and must enlarge the page rather than be cut off.
     #[test]
-    fn un_indice_ou_un_jambage_nest_pas_coupe_par_la_page() {
-        let hauteur = |text: &str| {
+    fn a_subscript_or_descender_is_not_cut_off_by_the_page() {
+        let height = |text: &str| {
             let (sans, math) = noto();
-            compile(text, 14.0, NOIR, sans, math)
-                .expect("compilation Typst échouée")
+            compile(text, 14.0, BLACK_INK, sans, math)
+                .expect("Typst compilation failed")
                 .size_pt()
                 .1
         };
         assert!(
-            hauteur("$x_(x_(x_(x_x)))$") > hauteur("$x$"),
-            "indices emboîtés coupés"
+            height("$x_(x_(x_(x_x)))$") > height("$x$"),
+            "nested subscripts cut off"
         );
     }
 
-    /// Le cache : une deuxième demande identique ne recompile pas — vérifié
-    /// en comptant les entrées, pas le temps (un temps mesuré serait
-    /// fragile en CI). Tâche 8.2.
+    /// The cache: a second identical request does not recompile — verified by
+    /// counting entries, not time (a measured time would be fragile in CI).
+    /// Task 8.2.
     #[test]
-    fn le_cache_ne_grandit_pas_sur_une_demande_identique() {
+    fn the_cache_does_not_grow_on_an_identical_request() {
         let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
         let choice = FontChoice::default();
         for _ in 0..3 {
@@ -1560,23 +1527,23 @@ mod tests {
                 .get_or_try_insert(
                     "$lambda$",
                     12.0,
-                    NOIR,
+                    BLACK_INK,
                     &choice,
                     1.0,
                     sans,
                     math,
                     |compiled| Ok(compiled.size_pt()),
                 )
-                .expect("échec de compilation/insertion");
+                .expect("compilation/insertion failed");
         }
         assert_eq!(cache.len(), 1);
     }
 
-    /// Deux `pixels_per_point` différents pour la même formule occupent
-    /// deux entrées — la clé documentée par [`CacheKey`], vérifiée plutôt
-    /// que supposée.
+    /// Two different `pixels_per_point` for the same formula occupy two
+    /// entries — the key documented by [`CacheKey`], verified rather than
+    /// assumed.
     #[test]
-    fn deux_pixels_per_point_distincts_occupent_deux_entrees() {
+    fn two_distinct_pixels_per_point_occupy_two_entries() {
         let cache: FormulaCache<(f64, f64)> = FormulaCache::new();
         let choice = FontChoice::default();
         for ppp in [1.0_f32, 1.25_f32] {
@@ -1585,68 +1552,67 @@ mod tests {
                 .get_or_try_insert(
                     "$lambda$",
                     12.0,
-                    NOIR,
+                    BLACK_INK,
                     &choice,
                     ppp,
                     sans,
                     math,
                     |compiled| Ok(compiled.size_pt()),
                 )
-                .expect("échec de compilation/insertion");
+                .expect("compilation/insertion failed");
         }
         assert_eq!(cache.len(), 2);
     }
 
-    /// Mesure de sanité sur le **pipeline réel** — pas le spike jetable de
-    /// R0. Ignoré par défaut, comme les bancs coûteux de
-    /// `stokesforge-robustesse` (`cargo test -- --ignored`) : ce n'est pas une
-    /// assertion de correction, juste un repère chiffré à comparer au seuil
-    /// de 150 ms déjà fixé et déjà mesuré sous ce seuil par R0.
+    /// Sanity measurement on the **real pipeline** — not R0's throwaway spike.
+    /// Ignored by default, like the costly benches of `stokesforge-robustesse`
+    /// (`cargo test -- --ignored`): it is not a correctness assertion, just a
+    /// numeric marker to compare with the 150 ms threshold already set and
+    /// already measured under that threshold by R0.
     #[test]
-    #[ignore = "mesure de latence, pas une assertion — cargo test -- --ignored"]
-    fn latence_de_compilation_dune_formule_inedite() {
+    #[ignore = "latency measurement, not an assertion — cargo test -- --ignored"]
+    fn compilation_latency_of_a_new_formula() {
         let n = 200;
         let start = std::time::Instant::now();
         for i in 0..n {
             let (sans, math) = noto();
             let text = format!("$lambda_{i} = m_{i} c^2$");
-            compile(&text, 14.0, NOIR, sans, math).expect("compilation Typst échouée");
+            compile(&text, 14.0, BLACK_INK, sans, math).expect("Typst compilation failed");
         }
         let elapsed = start.elapsed();
         let per_call = elapsed / n;
         println!(
-            "{n} compilations Typst de formules inédites en {elapsed:?} \
-             ({per_call:?}/formule, seuil R0 : 150 ms)"
+            "{n} Typst compilations of new formulas in {elapsed:?} \
+             ({per_call:?}/formula, R0 threshold: 150 ms)"
         );
         assert!(
             per_call.as_millis() < 150,
-            "latence de compilation {per_call:?} au-delà du seuil fixé en R0"
+            "compilation latency {per_call:?} above the threshold set in R0"
         );
     }
 
-    /// Une police système **introuvable** replie sur Noto pour la police de
-    /// texte et pour la Math — plus « toujours », comme avant le
-    /// branchement sur [`crate::fonts::load_system_font`] : seulement
-    /// quand la recherche système échoue réellement, la même politique que
-    /// `crate::fonts::resolve` applique déjà.
+    /// A system font that is **not found** falls back to Noto for the text font
+    /// and for the Math — no longer "always", as before the wiring to
+    /// [`crate::fonts::load_system_font`]: only when the system lookup really
+    /// fails, the same policy `crate::fonts::resolve` already applies.
     #[test]
-    fn une_police_systeme_introuvable_replie_sur_noto() {
+    fn a_missing_system_font_falls_back_to_noto() {
         let (sans, math) = resolve_fonts(&FontChoice::System(
-            "Police StokesForge Qui Ne Peut Pas Exister — Test R.13".to_owned(),
+            "StokesForge Font That Cannot Exist — Test R.13".to_owned(),
         ))
-        .expect("résolution échouée");
+        .expect("resolution failed");
         assert_eq!(sans.info().family, FontSet::Noto.sans_family_name());
         assert_eq!(math.info().family, FontSet::Noto.math_family_name());
     }
 
-    /// Trouve dynamiquement le nom d'une police système réellement présente
-    /// sur la machine qui exécute le test, pour ne pas coder en dur un nom
-    /// qu'aucune machine CI ne garantit avoir. `None` si la machine n'a
-    /// vraiment aucune police système : le test qui en dépend est alors un
-    /// no-op plutôt qu'un échec qu'aucune correction de ce module ne
-    /// pourrait résoudre (`fonts.rs` n'a pas ce cas à couvrir : il ne teste
-    /// que le repli sur introuvable, jamais la police trouvée).
-    fn une_police_systeme_disponible() -> Option<String> {
+    /// Dynamically finds the name of a system font really present on the
+    /// machine running the test, so as not to hard-code a name that no CI
+    /// machine is guaranteed to have. `None` if the machine really has no
+    /// system font: the test that depends on it is then a no-op rather than a
+    /// failure that no fix in this module could resolve (`fonts.rs` has no such
+    /// case to cover: it tests only the fallback on not found, never the found
+    /// font).
+    fn an_available_system_font() -> Option<String> {
         let mut database = fontdb::Database::new();
         database.load_system_fonts();
         let id = database.faces().next()?.id;
@@ -1654,59 +1620,58 @@ mod tests {
         face.families.first().map(|(name, _)| name.clone())
     }
 
-    /// Une police système **trouvée** est réellement utilisée pour la
-    /// moitié texte — le comportement corrigé par cette tâche : avant,
-    /// `resolve_fonts` repliait sur Noto que la police existe ou non.
+    /// A system font that is **found** is really used for the text half — the
+    /// behavior fixed by this task: before, `resolve_fonts` fell back to Noto
+    /// whether the font existed or not.
     #[test]
-    fn une_police_systeme_disponible_est_reellement_utilisee_pour_le_texte() {
-        let Some(nom) = une_police_systeme_disponible() else {
+    fn an_available_system_font_is_really_used_for_the_text() {
+        let Some(name) = an_available_system_font() else {
             eprintln!(
-                "aucune police système sur cette machine : \
-                 une_police_systeme_disponible_est_reellement_utilisee_pour_le_texte ignoré"
+                "no system font on this machine: \
+                 an_available_system_font_is_really_used_for_the_text skipped"
             );
             return;
         };
         let (sans, _math) =
-            resolve_fonts(&FontChoice::System(nom.clone())).expect("résolution échouée");
+            resolve_fonts(&FontChoice::System(name.clone())).expect("resolution failed");
         assert_eq!(
             sans.info().family,
-            nom,
-            "la police système trouvée n'a pas été utilisée pour le texte"
+            name,
+            "the system font found was not used for the text"
         );
     }
 
-    /// La police Math est choisissable indépendamment de la police de
-    /// texte via [`MathFontChoice`] — texte et Math viennent chacun d'une
-    /// paire embarquée différente, et les deux `Font` obtenues
-    /// correspondent chacune à ce qui a été demandé, pas à une paire liée
-    /// par défaut.
+    /// The Math font can be chosen independently of the text font through
+    /// [`MathFontChoice`] — text and Math each come from a different embedded
+    /// pair, and the two `Font`s obtained each match what was requested, not a
+    /// pair linked by default.
     #[test]
-    fn la_police_math_se_choisit_independamment_du_texte() {
+    fn the_math_font_is_chosen_independently_of_the_text() {
         let (sans, math) = resolve_fonts_with_math(
             &FontChoice::Embedded(FontSet::Libertinus),
             Some(&MathFontChoice::Embedded(FontSet::Fira)),
         )
-        .expect("résolution échouée");
+        .expect("resolution failed");
         assert_eq!(sans.info().family, FontSet::Libertinus.sans_family_name());
         assert_eq!(math.info().family, FontSet::Fira.math_family_name());
     }
 
-    /// `None` passé à [`resolve_fonts_with_math`] reproduit exactement
-    /// [`resolve_fonts`] — le contrat documenté qui garantit qu'aucun
-    /// appelant existant ne change de comportement sans y toucher.
+    /// `None` passed to [`resolve_fonts_with_math`] reproduces exactly
+    /// [`resolve_fonts`] — the documented contract that guarantees no existing
+    /// caller changes behavior without being touched.
     #[test]
-    fn aucun_choix_math_explicite_reproduit_lancien_comportement() {
+    fn no_explicit_math_choice_reproduces_the_old_behavior() {
         let choice = FontChoice::Embedded(FontSet::Fira);
-        let (sans_a, math_a) = resolve_fonts(&choice).expect("résolution échouée");
-        let (sans_b, math_b) = resolve_fonts_with_math(&choice, None).expect("résolution échouée");
+        let (sans_a, math_a) = resolve_fonts(&choice).expect("resolution failed");
+        let (sans_b, math_b) = resolve_fonts_with_math(&choice, None).expect("resolution failed");
         assert_eq!(sans_a.info().family, sans_b.info().family);
         assert_eq!(math_a.info().family, math_b.info().family);
     }
 
-    /// L'ancrage centré retranche bien la moitié de chaque dimension, et
-    /// l'ancrage `Left`/`Top` ne décale rien — les deux cas limites.
+    /// Centered anchoring does subtract half of each dimension, and `Left`/`Top`
+    /// anchoring shifts nothing — the two limit cases.
     #[test]
-    fn lancrage_centre_retranche_la_moitie_de_la_boite() {
+    fn centered_anchoring_subtracts_half_the_box() {
         assert_eq!(
             anchor_offset((10.0, 4.0), HPos::Left, VPos::Top),
             (0.0, 0.0)
@@ -1721,10 +1686,10 @@ mod tests {
         );
     }
 
-    /// Une rotation de 90° horaires envoie l'axe X sur l'axe Y — le
-    /// premier repère qui aurait révélé une inversion de signe.
+    /// A 90° clockwise rotation sends the X axis onto the Y axis — the first
+    /// landmark that would have revealed a sign inversion.
     #[test]
-    fn la_rotation_a_90_degres_envoie_x_sur_y() {
+    fn the_90_degree_rotation_sends_x_onto_y() {
         assert_eq!(
             rotate_offset((1.0, 0.0), FontTransform::Rotate90),
             (0.0, 1.0)
@@ -1732,22 +1697,21 @@ mod tests {
         assert_eq!(rotation_degrees(FontTransform::Rotate90), 90.0);
     }
 
-    /// **Le test de l'invariant 8.5** : la mesure d'une formule ne dépend
-    /// pas de l'échelle d'affichage — contrairement à la hauteur d'un
-    /// galley `epaint` (`text.rs`), qui elle en dépend réellement. Les deux
-    /// chemins de mesure ont des raisons différentes de se comporter comme
-    /// ils le font ; ce test fixe celle de Typst, pour que la fusion des
-    /// deux dans `estimate_text_size` (tâche du backend) ne suppose pas à
-    /// tort la même dépendance des deux côtés.
+    /// **The test of invariant 8.5**: the measurement of a formula does not
+    /// depend on the display scale — unlike the height of an `epaint` galley
+    /// (`text.rs`), which really does. The two measurement paths have different
+    /// reasons to behave as they do; this test pins down Typst's, so that merging
+    /// the two in `estimate_text_size` (backend task) does not wrongly assume the
+    /// same dependency on both sides.
     #[test]
-    fn la_mesure_dune_formule_ne_depend_pas_du_pixels_per_point() {
+    fn the_measurement_of_a_formula_does_not_depend_on_pixels_per_point() {
         let (sans, math) = noto();
-        let a = measure(&compile("$lambda$", 14.0, NOIR, sans, math).unwrap());
+        let a = measure(&compile("$lambda$", 14.0, BLACK_INK, sans, math).unwrap());
         let (sans, math) = noto();
-        let b = measure(&compile("$lambda$", 14.0, NOIR, sans, math).unwrap());
+        let b = measure(&compile("$lambda$", 14.0, BLACK_INK, sans, math).unwrap());
         assert_eq!(
             a, b,
-            "deux compilations identiques mesurent différemment sans raison"
+            "two identical compilations measure differently for no reason"
         );
     }
 }

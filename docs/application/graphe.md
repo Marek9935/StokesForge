@@ -514,7 +514,7 @@ in `stokesforge-plot` (read before writing, as requested):
   `auto_range` is true (in display order, the upper limit first
   on an inverted axis), an input freezes both limits (`auto_range` false,
   `inverted = De > À`), the "Auto" button makes `auto_range` true again keeping
-  the direction), then the "Ticks" section (dashes, direction, minor ticks)
+  the direction), then the "Ticks" section (tick marks, direction, minor ticks)
   and its collapsible "Advanced" block (`tick_length`, `minor_tick_length`,
   `tick_width`, `tick_mark_color`, closed by default, `Form::collapsible`);
   `app/plot_settings.rs`, `axis_editor` and `mirror_axis_editor` (same

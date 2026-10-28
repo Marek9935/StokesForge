@@ -50,13 +50,13 @@ Curves keep their fractional coordinates after projection and clipping, then
 are plotted to one sixteenth of a pixel on screen and in the SVG/PDF/PNG
 exports (#150). Dashes follow the same precision. This avoids artificial
 steps when zooming out, without smoothing the data; LTTB decimation is
-unchanged. `stokesforge-render-egui/tests/jasco_dezoom.rs` checks the two
+unchanged. `stokesforge-render-egui/tests/jasco_zoom_out.rs` checks the two
 framings of the real file `test/import/JascoUV_vis.csv`, fidelity to the
 measurements and agreement of the screen/SVG vertices. To look at the same
 figures:
 
 ```sh
-STOKESFORGE_JASCO_CAPTURE=/tmp/jasco150 cargo test -p stokesforge-render-egui --test jasco_dezoom
+STOKESFORGE_JASCO_CAPTURE=/tmp/jasco150 cargo test -p stokesforge-render-egui --test jasco_zoom_out
 ```
 
 The titles of `sample::minimal()` and `sample::realistic()` are kept
@@ -72,7 +72,7 @@ Any color of the spec can carry an opacity (`#RRGGBBAA`,
 `color::rgba_or`): strokes, markers, bars, text, scales, background. A graph's
 default background has no color (`stokesforge_plot::TRANSPARENT`).
 A background of zero opacity is **not painted**: the SVG, PNG or PDF export has
-no background (`stokesforge-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
+no background (`stokesforge-render-svg`, test `a_colorless_background_gives_a_transparent_png`).
 On screen, `stokesforge-app` paints a white under the figure
 (`app::graph_window::display_backdrop`):
 this white lives in the application, never in this crate, or it would be exported.
@@ -90,7 +90,7 @@ have their own color. An empty string means **automatic**:
 panel title, the frame and text of the legend, and the outline of bars. A dark
 background therefore turns everything in automatic color to white at once —
 on screen as in the export, since the pipeline is shared
-(`stokesforge-render-svg/tests/couleurs.rs`).
+(`stokesforge-render-svg/tests/colors.rs`).
 
 Width of a free text, a title or an axis title (#244): `AnnotationSpec::width` / `TextFont::width` is a fraction of the
 figure (bounded to `[MIN_WIDTH, 1]`, `effective_width`), `align` a `TextAlign`. The
@@ -100,8 +100,8 @@ font (`formula::family_with_layout`, separator `\u{1f}`); `formula::source`
 then wraps the text in `#box(width: …pt)[#align(…)[…]]` (inside the rotation
 if there is one). The whole box is the page: the size rendered at selection
 is that of the box, the anchor stays its center. Both backends go
-through `source`. For an area, `pipeline::font_style` takes the width of the figure (also for a vertical title); the legend does not use it. Tests: `la_largeur_d_un_titre_d_axe_le_fait_passer_a_la_ligne`, `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
-(`render-egui/tests/annotations.rs`), `tirer_la_poignee_fixe_la_largeur`
+through `source`. For an area, `pipeline::font_style` takes the width of the figure (also for a vertical title); the legend does not use it. Tests: `the_width_of_an_axis_title_wraps_it`, `a_fixed_width_wraps_the_text`
+(`render-egui/tests/annotations.rs`), `pulling_the_handle_fixes_the_width`
 (`cache_session.rs`).
 
 Font of a text area (issues #77, #78): the font and size of a
@@ -114,8 +114,8 @@ and `#show math.equation: set text(font: …)` before the text, and both backend
 ignore it. The Math font follows (`math_family_for`): Libertinus Sans →
 Libertinus Math, Fira Sans → Fira Math, Noto Sans → Noto Sans Math, a
 system font → Noto Sans Math (fallback). Tests: `formula.rs`
-(`la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math`), `geometrie.rs`
-(`le_corps_d_une_zone_de_texte_change_sa_taille`), `stokesforge-render-svg/tests/typst.rs`.
+(`an_areas_font_is_set_in_the_source_with_its_math`), `geometry.rs`
+(`the_font_size_of_a_text_box_changes_its_size`), `stokesforge-render-svg/tests/typst.rs`.
 
 The title and the legend are **selected** by a click (`GraphView::selected_text`,
 blue frame like a free text, issue #77); a legend entry designates the
@@ -171,8 +171,8 @@ None of this knows the type of the plotted columns: the pipeline receives
 This is what let **mixed-type columns** come in
 without a line of rendering moving: `stokesforge_core::Column::numeric_view` gives `NaN`
 for a text or empty cell, so a mixed column plots exactly its
-numeric cells (`stokesforge-render/tests/geometrie.rs`,
-`une_colonne_mixte_ne_trace_que_ses_cellules_numeriques`). The right place
+numeric cells (`stokesforge-render/tests/geometry.rs`,
+`a_mixed_column_draws_only_its_numeric_cells`). The right place
 for this kind of translation is always that one — upstream, once — and
 never a backend (invariant 5).
 
@@ -262,7 +262,7 @@ N" loses them.
 
 ### Large-curve bench (#141)
 
-The manual test `stokesforge-render-egui/tests/mesure_courbes.rs` compares
+The manual test `stokesforge-render-egui/tests/curve_bench.rs` compares
 100,000, 1,000,000 and 10,000,000 points **in total**, spread over one or ten
 series. It uses the shared pipeline, `ShapeCache`, `ViewState` and the
 real egui tessellation, without a window or a GPU renderer. The kept bench calls
@@ -273,7 +273,7 @@ replayed by this command. The existing screen/SVG agreement tests cover
 production decimation. The bench is `#[ignore]`, outside ordinary CI.
 
 ```sh
-cargo test -p stokesforge-render-egui --release --test mesure_courbes mesure_courbes_gros_volumes -- --ignored --nocapture --test-threads=1
+cargo test -p stokesforge-render-egui --release --test curve_bench curve_bench_large_volumes -- --ignored --nocapture --test-threads=1
 ```
 
 `STOKESFORGE_BENCH_POINTS=100000,1000000` limits the volumes;
@@ -292,7 +292,7 @@ The zoom varies a central framing of about 80 % with full anti-aliasing;
 the pan moves this framing with the cut fringe, as during a drag.
 The "warm" frames repeat the last framing without changing the generation;
 they correspond to a frame repainted during a pause of the gesture.
-`fenetre_chaud` keeps the initial framing and the key (cost of the graph when
+`window_warm` keeps the initial framing and the key (cost of the graph when
 its window is moved; the application chrome is excluded).
 
 The `PHASES` lines measure `series::prepare` and the isolated LTTB separately
@@ -447,8 +447,8 @@ is that of the covered layer), likewise `left` / `y_right` for the Y axis on the
 Its axes are plotted by Plotters' secondary axes; its series
 have no secondary ordinate. `DrawnPanel::axis_areas.top` holds the top
 area; `PlotComponent::Axis` keeps the side **of the spec** (`Bottom`/`Left`) even
-when the axis is displayed on top or on the right. Test: `geometrie.rs`,
-`stokesforge-render-svg/tests/calques.rs`.
+when the axis is displayed on top or on the right. Test: `geometry.rs`,
+`stokesforge-render-svg/tests/layers.rs`.
 
 **Stacked axes (#168).** Several overlaid layers of the same cell can
 display an axis on the same side: each has its **band** (area of the cell divided
@@ -462,7 +462,7 @@ plot area along the axis direction and is placed at its band.
 `AxisArea::offset` is the distance from the band to the plot area, which
 `hit::axis_component_at` counts. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
-the whole area. Test: `geometrie.rs`, `calques.rs`, `hit.rs`.
+the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
 
 **Shared legend (#172).** The legend of an ordinary layer lists its
 curves first, then, layer by layer in the order of `PlotSpec::panels`, those of the
@@ -471,7 +471,7 @@ by `draw_panel` with the own scales of each layer). The legend of the
 overlaid layer stays hidden when it is created; showing it produces a
 second one, limited to its curves. The added rows have no rank in the
 ordinary layer: `DrawnPlot::legend_rows` does not designate them (no drag
-or selection through them). Test: `geometrie.rs`.
+or selection through them). Test: `geometry.rs`.
 
 **Mirror axes (#176).** On an ordinary layer, `AxisSpec::mirror` of the top
 (`top`) and the right (`right`, when no series is attached there) plots
@@ -480,7 +480,7 @@ left, **without a title**, through Plotters' secondary axes. An overlaid
 layer of the cell that occupies this side wins (`CellPlan::mirror_top` /
 `mirror_right`). `AxisSpec::tick_labels` false keeps the line and the tick marks without
 the numbers (empty formatter); the tick area of a mirror without labels
-is only `BARE_LABEL_AREA`. Test: `stokesforge-render-svg/tests/miroirs.rs`.
+is only `BARE_LABEL_AREA`. Test: `stokesforge-render-svg/tests/mirrors.rs`.
 
 **Tick marks and tick direction (#344).** `AxisSpec::ticks` (plotted tick marks) and
 `AxisSpec::tick_direction` (`TickDirection`: `Out` default, `In`, `Both`)
@@ -512,7 +512,7 @@ ticks: linear, the major step cut in 5 (in 4 for mantissa 2:
 each decade, or the interleaved decades when the step exceeds a decade;
 none under a decade of step. Never on a major tick; none
 on the axes of an overlaid layer. Plotters' light grid is not
-aligned with them. Tests: `scale.rs`, `miroirs.rs`, `accord.rs`.
+aligned with them. Tests: `scale.rs`, `mirrors.rs`, `agreement.rs`.
 
 **"Advanced" settings for tick marks (#344).** `AxisSpec::tick_length` (major
 tick marks), `minor_tick_length` (minor ones), `tick_width` and `tick_mark_color`
@@ -528,19 +528,19 @@ goes through `paint::stroke_width` (1 to 64): the raw value stays in the file,
 rendering bounds it (invariant 10). A setting moves the axis to home-made tick marks
 (`custom_ticks`), like a direction other than "Outward"; the numbers
 then keep their original gap, so a long tick mark (outward) can
-touch them. Tests: `miroirs.rs` (length, Auto minor, color, thickness,
-out-of-bounds values), `accord.rs` (screen = export; the color is invisible there,
-it is guarded by `miroirs.rs`).
+touch them. Tests: `mirrors.rs` (length, Auto minor, color, thickness,
+out-of-bounds values), `agreement.rs` (screen = export; the color is invisible there,
+it is guarded by `mirrors.rs`).
 
 **Axis direction.** `axis_range` always reads "one or the other" (`inverted`
 or `range_min > range_max`), without adding them. `AxisSpec::orient` (crate
 `stokesforge-plot`) brings an axis to its canonical form without changing the rendering:
 `inverted` true as soon as the **used** bounds (non-Auto) are decreasing,
 and an inverted axis puts its remembered bounds back in decreasing order; test
-`un_axe_oriente_se_trace_comme_l_axe_d_origine` (`geometrie.rs`).
+`an_oriented_axis_is_drawn_like_the_original_axis` (`geometry.rs`).
 
-Tests: `miroirs.rs` (SVG), `accord.rs`
-(`les_tirets_maison_s_accordent_et_changent_la_figure`).
+Tests: `mirrors.rs` (SVG), `agreement.rs`
+(`the_custom_ticks_agree_and_change_the_figure`).
 
 The own linear scales of an overlaid layer are **joined** to those of the
 covered layer (#174): without a hand-fixed extent, `scale::aligned_range`
@@ -553,7 +553,7 @@ framing. Linear ticks are written without decimals when they
 are all integers, with the same number of decimals otherwise
 (`scale::TickFormat`, #175); all axes go through a formatter. The corners where two plotted axes
 meet are filled (1 px L-shaped segment per corner, `draw_panel`, test
-`les_axes_se_rejoignent_aux_coins`).
+`the_axes_meet_at_the_corners`).
 
 A layer is identified by its **index in `PlotSpec::panels`**
 (`DrawnPanel::index`), **not by its rank in `DrawnPlot::panels`**: the latter
@@ -604,7 +604,7 @@ two views that each set it would set two contradictory values.
 
 That is why it is written **at the same time** as the screen backend, not after.
 
-This crate knows neither `egui`, nor `eframe`, nor `winit` (`tests/frontiere.rs`),
+This crate knows neither `egui`, nor `eframe`, nor `winit` (`tests/no_ui_dependency.rs`),
 and yet measures text exactly like the screen — the measurement comes
 from `epaint`, pulled in by `stokesforge-render`. Practical consequence: **rendering is tested
 without a graphics server**, hence in continuous integration.
@@ -639,7 +639,7 @@ same figure while composing it only once (the copy to the clipboard,
 out the figure. The display white of a transparent background stays on screen.
 The inlined Typst fragment redeclares `xmlns:xlink` (its glyphs are
 `<use xlink:href>`): without it `usvg` refused the document, hence any PDF or PNG
-of a graph with Typst text (`un_graphe_typst_sexporte_en_svg_pdf_et_png`).
+of a graph with Typst text (`a_typst_graph_exports_to_svg_pdf_and_png`).
 
 ## Typst (R8)
 
@@ -737,7 +737,7 @@ were omitted from the rendering. The context menu keeps this address at the clic
 takes the long name or the column name, often imported from an instrument
 (`Abs_280 #1`). Read as markup, `_` would open italics and `#` code.
 The legend therefore gives it `formula::literal_style` (family
-`stokesforge-typst-litteral`), like the « … et N autres » line: the Typst branch
+`stokesforge-typst-literal`), like the « … et N autres » line: the Typst branch
 of the backends passes it through `formula::source`, which wraps it in a Typst string
 `#"…"` (`formula::escape`) — composed by Typst, displayed as is, without
 typographic quotes or `...` turned into an ellipsis. The path
@@ -831,11 +831,11 @@ Typst, were seen at the first capture and fixed:
   (top-left, top-right, bottom-left, bottom-right), otherwise each
   formula is displayed as noise in a box that is nonetheless right — the
   bounding box does not see it, the test
-  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin` does;
+  `every_mesh_vertex_carries_the_texture_of_its_corner` does;
 - **the page cut off subscripts and descenders**: Typst bounds a line from
   the cap height to the baseline; `compile` sets
   `top-edge`/`bottom-edge: "bounds"` so that the page goes to the bottom of
-  the ink (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`). The height
+  the ink (`a_subscript_or_descender_is_not_cut_off_by_the_page`). The height
   of a label therefore varies with its content; the alignment of baselines
   between neighboring labels belongs to issue #32.
 
@@ -846,7 +846,7 @@ see "Enlarging a graph without blurring the text" below.
 
 - **The only place in the work package where a bug is silent is text
   measurement.** Before touching it, read `stokesforge-render/src/text.rs` and invariant 4.
-- The net is `stokesforge-render-egui/tests/accord.rs`. If it changes, read its two
+- The net is `stokesforge-render-egui/tests/agreement.rs`. If it changes, read its two
   families of **witnesses** first: without them, an equality test between two
   paths passes just as well because both are right as because both
   are wrong in the same way.
@@ -855,25 +855,25 @@ see "Enlarging a graph without blurring the text" below.
   example (in `render-svg`) must cover **the same** graph and the
   two crates cannot depend on each other. To look at it:
   `cargo run -p stokesforge-render-svg --example figure`.
-- The tests: `render/tests/{mesure,geometrie,frontiere}.rs`,
-  `render-egui/tests/{accord,formes,cache_session,feathering,interaction,typst}.rs`,
-  `render-svg/tests/{export,frontiere,pdf,typst}.rs`. On the Typst side:
+- The tests: `render/tests/{measurement,geometry,no_ui_dependency}.rs`,
+  `render-egui/tests/{agreement,shapes,cache_session,feathering,interaction,typst}.rs`,
+  `render-svg/tests/{export,no_ui_dependency,pdf,typst}.rs`. On the Typst side:
   `cache_session.rs` (`graph_view_passe_un_titre_formule_par_typst`,
-  `reconstruire_la_figure_ne_recompile_pas_un_titre_inchange`) locks that
+  `rebuilding_the_figure_does_not_recompile_an_unchanged_title`) locks that
   `GraphView` goes through Typst and does not recompile an unchanged title;
-  `typst_screen.rs` (`mesurer_puis_dessiner_partage_une_seule_entree`,
-  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`) locks the
+  `typst_screen.rs` (`measuring_then_drawing_shares_a_single_entry`,
+  `every_mesh_vertex_carries_the_texture_of_its_corner`) locks the
   sharing of the cache entry between measurement and drawing and the vertex order;
-  `formula.rs` (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`) the
+  `formula.rs` (`a_subscript_or_descender_is_not_cut_off_by_the_page`) the
   page height; `render-egui/tests/typst.rs`
-  (`la_texture_dune_formule_prend_la_couleur_du_texte`) and
-  `render-svg/tests/couleurs.rs` (`un_titre_typst_prend_l_encre_automatique`,
-  `un_titre_typst_suit_title_color`) the color, texture pixels and
+  (`the_texture_of_a_formula_takes_the_text_color`) and
+  `render-svg/tests/colors.rs` (`a_typst_title_takes_the_automatic_ink`,
+  `a_typst_title_follows_title_color`) the color, texture pixels and
   SVG fragment included; `render-egui/tests/typst.rs`
-  (`un_titre_sans_dollar_se_mesure_et_se_dessine_par_typst`,
-  `ecran_et_export_placent_les_textes_typst_au_meme_endroit`,
-  `une_legende_mixte_a_des_lignes_de_meme_hauteur`) and
-  `formula.rs` (`les_libelles_simples_ont_tous_la_meme_hauteur`) the routing
+  (`a_title_without_dollar_is_measured_and_drawn_by_typst`,
+  `screen_and_export_place_the_typst_texts_at_the_same_place`,
+  `a_mixed_legend_has_lines_of_the_same_height`) and
+  `formula.rs` (`simple_labels_all_have_the_same_height`) the routing
   by role and the strut (#32).
 
 ### Enlarging a graph without blurring the text
@@ -897,9 +897,9 @@ image never exceeds `max_texture_side`: beyond it, the resolution is
 capped. Rasterizing directly at the displayed scale during collection was
 ruled out: the displayed rectangle would have entered the main cache key, hence
 the whole pipeline replayed at each step of a resize. Tests:
-`scaled.rs` (`une_formule_agrandie_est_rasterisee_a_la_taille_affichee`,
-`deplacer_sans_agrandir_ne_rasterise_rien`) and `cache_session.rs`
-(`un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee`).
+`scaled.rs` (`an_enlarged_formula_is_rasterized_at_the_displayed_size`,
+`moving_without_enlarging_rasterizes_nothing`) and `cache_session.rs`
+(`an_enlarged_graph_paints_its_formulas_at_the_displayed_size`).
 
 The mesh of a formula is also **snapped to the physical pixel grid**
 (`scaled::snap_to_pixels`, issue #86): top-left corner on a whole
@@ -907,7 +907,7 @@ pixel, box at the exact size of the texture. Placed or stretched at a fraction o
 pixel, the image was blended with its neighbors by linear filtering — blur
 mostly visible on a small text (reduced figure), barely on a large one. The
 shift stays under one pixel; the layout is not touched
-(`une_formule_reduite_est_calee_sur_les_pixels`). Outside the `scaled` path
+(`a_reduced_formula_is_snapped_to_the_pixels`). Outside the `scaled` path
 (`paint` with logical rectangle = displayed rectangle) the snapping is not
 applied.
 
@@ -955,9 +955,9 @@ with an `EguiBackend` set on the displayed rectangle. The handles are therefore
 neither in the cache key (selecting rebuilds nothing) nor in the pipeline
 (the SVG/PDF/PNG export does not see them): the selection is a view state,
 like the zoom. Tests: `series_selection.rs` (spacing, end, display scale,
-cloud and bars), `geometrie.rs` (free end of a negative bar, whiskers
+cloud and bars), `geometry.rs` (free end of a negative bar, whiskers
 outside the runs, ink), `render-egui/tests/interaction.rs`
-(`une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace`). The
+(`selected_series_carries_handles_without_changing_its_plot`). The
 selection of a graphic object keeps its own frame and handles
 (`shape_tools.rs`).
 Object Manager uses `series_swatch`, which calls the shared legend swatch

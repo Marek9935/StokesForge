@@ -170,7 +170,7 @@ occupies this side (`AxisRef::blocked`). The checkbox of the
 Properties open the Axes tab (Top and Right pages: `mirror_axis_editor`,
 "Show mirror axis", "Show tick labels", "Show
 ticks", their direction, the subticks and the "Advanced" block of the
-dashes, no title or axis color). **Closed frame** (#344):
+tick marks, no title or axis color). **Closed frame** (#344):
 `PanelSpec::frame_closed` / `set_frame_closed`, `Action::SetClosedFrame`, history
 pattern `PlotEditKind::ClosedFrame` (**one** undoable entry) still
 exist, but **no interface command** triggers them any more (neither the

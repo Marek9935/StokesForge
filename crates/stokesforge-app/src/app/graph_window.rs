@@ -322,7 +322,7 @@ pub(super) fn graph_view_contents(
     // qui n'est pas celle de l'export. Ce blanc n'est peint **qu'ici**, sous
     // la figure, jamais dans `stokesforge-render` : l'export SVG/PNG/PDF d'un
     // graphe sans fond reste transparent (invariant 5, lu dans l'autre sens ;
-    // test `un_fond_sans_couleur_donne_un_png_transparent`).
+    // test `a_colorless_background_gives_a_transparent_png`).
     let background = stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
         .map(|spec| spec.background)
         .unwrap_or_default();

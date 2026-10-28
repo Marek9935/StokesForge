@@ -1,30 +1,29 @@
-//! `DrawingBackend` de Plotters qui **collecte des `egui::Shape`** — tâche
-//! R4.2.
+//! Plotters `DrawingBackend` that **collects `egui::Shape`s** — task R4.2.
 //!
-//! # La décision de conception : un `Vec<Shape>`, pas un `Painter`
+//! # The design decision: a `Vec<Shape>`, not a `Painter`
 //!
-//! Ce backend ne tient pas de `Painter` : il écrit dans un `&mut Vec<Shape>`
-//! qu'on lui prête. C'est la décision du §4.2 d'`architecture-choisie.md`,
-//! et elle n'est pas cosmétique. egui est en mode immédiat : il repeint à
-//! chaque mouvement de souris. Un backend qui dessinerait dans un `Painter`
-//! rejouerait tout le pipeline Plotters — `ChartBuilder`, axes, graduations,
-//! tous les points — à **chaque image**, même immobile. Avec un collecteur,
-//! le résultat se met en cache ([`crate::cache`]) et une image sans
-//! changement coûte un `painter.extend(...)`.
+//! This backend holds no `Painter`: it writes into a `&mut Vec<Shape>` that
+//! is lent to it. This is the decision of §4.2 of `architecture-choisie.md`,
+//! and it is not cosmetic. egui is in immediate mode: it repaints at every
+//! mouse move. A backend that drew into a `Painter` would replay the whole
+//! Plotters pipeline — `ChartBuilder`, axes, ticks, all the points — at
+//! **every frame**, even a still one. With a collector, the result is cached
+//! ([`crate::cache`]) and a frame without changes costs one
+//! `painter.extend(...)`.
 //!
-//! `epaint` bénit ce stockage, avec une exception qu'il documente lui-même :
-//! `Shape::Text` dépend du `pixels_per_point` et doit être reconstruit quand
-//! il change. D'où la clé de cache à trois termes.
+//! `epaint` blesses this storage, with an exception it documents itself:
+//! `Shape::Text` depends on `pixels_per_point` and must be rebuilt when it
+//! changes. Hence the three-part cache key.
 //!
-//! Effet de bord bienvenu : `ensure_prepared` et `present` n'ont rien à
-//! faire, là où un backend à texture ferait de `present` un point d'upload.
+//! Welcome side effect: `ensure_prepared` and `present` have nothing to do,
+//! where a texture backend would make `present` an upload point.
 //!
-//! # Les huit méthodes surchargées
+//! # The eight overridden methods
 //!
-//! `DrawingBackend` n'exige que `get_size`, `ensure_prepared`, `present` et
-//! `draw_pixel` ; tout le reste retombe sur une rastérisation pixel par
-//! pixel. Pour un backend vectoriel on en surcharge huit, chacune tombant sur
-//! une `Shape` presque en un pour un (`architecture-choisie.md` §4.1) :
+//! `DrawingBackend` only requires `get_size`, `ensure_prepared`, `present`
+//! and `draw_pixel`; everything else falls back on pixel-by-pixel
+//! rasterization. For a vector backend, eight are overridden, each landing
+//! on a `Shape` almost one for one (`architecture-choisie.md` §4.1):
 //!
 //! | plotters | egui |
 //! |---|---|
@@ -32,15 +31,15 @@
 //! | `draw_path` | `Shape::Path` |
 //! | `draw_rect` | `Shape::Rect` |
 //! | `draw_circle` | `Shape::Circle` |
-//! | `fill_polygon` | `Shape::Path` fermé |
+//! | `fill_polygon` | closed `Shape::Path` |
 //! | `draw_text` | `Shape::Text` |
 //! | `estimate_text_size` | [`stokesforge_render::text::estimate`] |
-//! | `blit_bitmap` | **laissée en défaut** — « pas de gestion d'images » |
+//! | `blit_bitmap` | **left as default** — "no image handling" |
 //!
-//! `draw_pixel` est implémentée quand même, parce que le trait l'exige : un
-//! rectangle de 1×1. Rien de ce que R4 trace n'y passe (les huit surcharges
-//! couvrent tout), mais la laisser paniquer transformerait une primitive non
-//! prévue en plantage de l'application.
+//! `draw_pixel` is implemented anyway, because the trait requires it: a 1×1
+//! rectangle. Nothing R4 draws goes through it (the eight overrides cover
+//! everything), but letting it panic would turn an unforeseen primitive into
+//! an application crash.
 
 use egui::epaint::{CircleShape, PathShape, RectShape, TextShape};
 use egui::{Color32, CornerRadius, Pos2, Shape, Stroke, StrokeKind, Vec2};
@@ -51,12 +50,12 @@ use plotters_backend::{
 };
 use stokesforge_render::text::{estimate, font_id, TextSource};
 
-/// L'erreur que ce backend peut rendre — aucune.
+/// The error this backend can return — none.
 ///
-/// Collecter dans un `Vec` ne peut pas échouer. Le type existe parce que
-/// `DrawingBackend::ErrorType` l'exige, et il est volontairement inhabitable
-/// plutôt que d'être un alias d'une erreur d'entrée-sortie qui ne se
-/// produira jamais : la signature dit alors la vérité.
+/// Collecting into a `Vec` cannot fail. The type exists because
+/// `DrawingBackend::ErrorType` requires it, and it is deliberately
+/// uninhabited rather than an alias of an I/O error that will never happen:
+/// the signature then tells the truth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EguiBackendError {}
 
@@ -68,28 +67,27 @@ impl std::fmt::Display for EguiBackendError {
 
 impl std::error::Error for EguiBackendError {}
 
-/// Backend Plotters qui empile des [`egui::Shape`].
+/// Plotters backend that stacks [`egui::Shape`]s.
 ///
-/// `origin` place le coin supérieur gauche de la figure dans le repère de
-/// l'écran : Plotters travaille toujours en `0..width`, `0..height`, et la
-/// translation est appliquée une fois, à la construction de chaque forme,
-/// plutôt qu'après coup sur tout le vecteur. Le cache contient donc des
-/// formes déjà à leur place, et une image sans changement n'a rien à
-/// recalculer du tout.
+/// `origin` places the top-left corner of the figure in screen coordinates:
+/// Plotters always works in `0..width`, `0..height`, and the translation is
+/// applied once, when each shape is built, rather than afterwards on the
+/// whole vector. The cache therefore holds shapes already in place, and a
+/// frame without changes has nothing at all to recompute.
 pub struct EguiBackend<'a> {
     shapes: &'a mut Vec<Shape>,
     origin: Pos2,
     size: (u32, u32),
     text: &'a dyn TextSource,
-    /// Chemin Typst de l'écran (tâche R8.3) — `None` tant que personne n'a
-    /// appelé [`Self::with_typst`] : construire ce backend ne suffit pas à
-    /// activer Typst. [`crate::GraphView`] l'active toujours (issue #29) ;
-    /// un backend sans lui sert de témoin aux tests.
+    /// Typst path of the screen (task R8.3) — `None` as long as nobody has
+    /// called [`Self::with_typst`]: building this backend does not enable
+    /// Typst. [`crate::GraphView`] always enables it (issue #29); a backend
+    /// without it serves as a witness for the tests.
     typst: Option<crate::typst_screen::TypstScreen<'a>>,
 }
 
 impl<'a> EguiBackend<'a> {
-    /// Un backend qui écrira dans `shapes`, décalé de `origin`.
+    /// A backend that writes into `shapes`, offset by `origin`.
     pub fn new(
         shapes: &'a mut Vec<Shape>,
         origin: Pos2,
@@ -105,33 +103,33 @@ impl<'a> EguiBackend<'a> {
         }
     }
 
-    /// Un backend qui remplit exactement le rectangle donné.
+    /// A backend that exactly fills the given rectangle.
     ///
-    /// Les dimensions sont arrondies **vers le bas** : Plotters raisonne en
-    /// entiers et une figure d'un pixel de trop déborderait du rectangle
-    /// alloué par l'UI.
+    /// The dimensions are rounded **down**: Plotters reasons in integers and
+    /// a figure one pixel too big would overflow the rectangle allocated by
+    /// the UI.
     pub fn in_rect(shapes: &'a mut Vec<Shape>, rect: egui::Rect, text: &'a dyn TextSource) -> Self {
         let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
         Self::new(shapes, rect.min, size, text)
     }
 
-    /// Active le chemin Typst (tâche R8.3) sur ce backend : les textes en
-    /// style riche ([`stokesforge_render::formula::is_rich`] — titres, titres
-    /// d'axe, légende, issue #32) passent par `typst`, les graduations
-    /// restent en `Shape::Text`. Additif : les
-    /// appelants existants (`in_rect`, `new`) sont inchangés, et un backend
-    /// construit sans cet appel dessine tout en texte brut, comme avant R8.
+    /// Enables the Typst path (task R8.3) on this backend: texts in rich
+    /// style ([`stokesforge_render::formula::is_rich`] — titles, axis
+    /// titles, legend, issue #32) go through `typst`, ticks stay as
+    /// `Shape::Text`. Additive: existing callers (`in_rect`, `new`) are
+    /// unchanged, and a backend built without this call draws everything as
+    /// plain text, as before R8.
     pub fn with_typst(mut self, typst: crate::typst_screen::TypstScreen<'a>) -> Self {
         self.typst = Some(typst);
         self
     }
 
-    /// Passe d'un point de Plotters au repère de l'écran.
+    /// Converts a Plotters point to screen coordinates.
     fn at(&self, (x, y): BackendCoord) -> Pos2 {
         Pos2::new(self.origin.x + x as f32, self.origin.y + y as f32)
     }
 
-    /// Le trait d'une forme, ou [`Stroke::NONE`] si le style est transparent.
+    /// The stroke of a shape, or [`Stroke::NONE`] if the style is transparent.
     fn stroke<S: BackendStyle>(style: &S) -> Stroke {
         Stroke {
             width: style.stroke_width().max(1) as f32,
@@ -140,21 +138,21 @@ impl<'a> EguiBackend<'a> {
     }
 }
 
-/// Une couleur de Plotters en [`egui::Color32`].
+/// A Plotters color as an [`egui::Color32`].
 ///
-/// `from_rgba_unmultiplied` et non `from_rgba_premultiplied` : l'alpha de
-/// Plotters est une opacité indépendante des composantes.
+/// `from_rgba_unmultiplied` and not `from_rgba_premultiplied`: Plotters'
+/// alpha is an opacity independent of the components.
 fn color(c: BackendColor) -> Color32 {
     let (r, g, b) = c.rgb;
     let alpha = (c.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
     Color32::from_rgba_unmultiplied(r, g, b, alpha)
 }
 
-/// L'angle, en radians horaires, d'une rotation de Plotters.
+/// The angle, in clockwise radians, of a Plotters rotation.
 ///
-/// `FontTransform` ne vaut que 0/90/180/270 alors que `TextShape::angle` est
-/// un `f32` libre : la conversion est triviale, et c'est l'une des raisons
-/// pour lesquelles écrire ce backend coûte moins cher que d'en importer un
+/// `FontTransform` is only 0/90/180/270 while `TextShape::angle` is a free
+/// `f32`: the conversion is trivial, and it is one of the reasons why
+/// writing this backend costs less than importing one
 /// (`architecture-choisie.md` §4.1).
 fn angle_of(transform: &FontTransform) -> f32 {
     match transform {
@@ -165,14 +163,13 @@ fn angle_of(transform: &FontTransform) -> f32 {
     }
 }
 
-/// Applique à un décalage la même rotation que
-/// [`FontTransform::transform`] applique aux glyphes.
+/// Applies to an offset the same rotation that [`FontTransform::transform`]
+/// applies to the glyphs.
 ///
-/// Nécessaire pour que l'ancrage (`HPos`/`VPos`) reste juste sur un texte
-/// tourné : Plotters tourne le décalage d'ancrage en même temps que le
-/// texte, et ne pas le faire mettrait le titre de l'axe de gauche à côté de
-/// sa place. Transcrit sur l'implémentation par défaut de `draw_text`, pas
-/// déduit.
+/// Needed so that the anchor (`HPos`/`VPos`) stays right on a rotated text:
+/// Plotters rotates the anchor offset together with the text, and not doing
+/// so would put the left axis title beside its place. Transcribed from the
+/// default implementation of `draw_text`, not deduced.
 fn rotate(offset: Vec2, transform: &FontTransform) -> Vec2 {
     match transform {
         FontTransform::None => offset,
@@ -182,7 +179,7 @@ fn rotate(offset: Vec2, transform: &FontTransform) -> Vec2 {
     }
 }
 
-/// Couleur du cadre d'un texte riche que Typst refuse (#240, T3).
+/// Color of the frame of a rich text that Typst rejects (#240, T3).
 const COMPILE_ERROR_FRAME: Color32 = Color32::from_rgb(214, 48, 49);
 
 impl DrawingBackend for EguiBackend<'_> {
@@ -192,14 +189,14 @@ impl DrawingBackend for EguiBackend<'_> {
         self.size
     }
 
-    /// Rien à préparer : il n'y a pas de tampon à allouer, pas de contexte
-    /// graphique à ouvrir. Voir la doc de tête.
+    /// Nothing to prepare: there is no buffer to allocate, no graphics
+    /// context to open. See the top-level doc.
     fn ensure_prepared(&mut self) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
         Ok(())
     }
 
-    /// Rien à présenter : les formes sont déjà dans le vecteur de
-    /// l'appelant, qui décidera quand les peindre.
+    /// Nothing to present: the shapes are already in the caller's vector,
+    /// which will decide when to paint them.
     fn present(&mut self) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
         Ok(())
     }
@@ -245,10 +242,10 @@ impl DrawingBackend for EguiBackend<'_> {
         if style.color().alpha == 0.0 {
             return Ok(());
         }
-        // `from_two_pos` plutôt que `from_min_max` : Plotters ne garantit pas
-        // que le premier coin soit le plus petit (un axe inversé peut rendre
-        // un rectangle « à l'envers »), et un `Rect` dégénéré d'egui ne se
-        // peint pas.
+        // `from_two_pos` rather than `from_min_max`: Plotters does not
+        // guarantee that the first corner is the smaller one (an inverted
+        // axis can make a rectangle "upside down"), and a degenerate egui
+        // `Rect` is not painted.
         let rect = egui::Rect::from_two_pos(self.at(upper_left), self.at(bottom_right));
         let shape = if fill {
             RectShape::filled(rect, CornerRadius::ZERO, color(style.color()))
@@ -264,13 +261,13 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(())
     }
 
-    /// La méthode chaude : c'est par elle que passent les séries.
+    /// The hot method: the series go through it.
     ///
-    /// Un seul `Shape::Path` pour toute la polyligne, au lieu des N
-    /// `LineSegment` que produirait l'implémentation par défaut : c'est ce
-    /// qui rend le cache intéressant, et ce que la mesure R0 0.3 a chiffré
-    /// (300 000 points = 2,432 Mo de cache vectoriel, indépendant de la
-    /// résolution).
+    /// A single `Shape::Path` for the whole polyline, instead of the N
+    /// `LineSegment`s the default implementation would produce: this is what
+    /// makes the cache worthwhile, and what the R0 0.3 measurement
+    /// quantified (300,000 points = 2.432 MB of vector cache, independent of
+    /// resolution).
     fn draw_path<S: BackendStyle, I: IntoIterator<Item = BackendCoord>>(
         &mut self,
         path: I,
@@ -279,8 +276,8 @@ impl DrawingBackend for EguiBackend<'_> {
         if style.color().alpha == 0.0 {
             return Ok(());
         }
-        // Un chemin sous-pixel (`stokesforge_render::subpixel`, #91) arrive en
-        // points fixes avec un drapeau dans l'épaisseur.
+        // A subpixel path (`stokesforge_render::subpixel`, #91) arrives in
+        // fixed points with a flag in the width.
         let (width, fixed) = stokesforge_render::subpixel::split_width(style.stroke_width());
         let points: Vec<Pos2> = path
             .into_iter()
@@ -326,15 +323,14 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(())
     }
 
-    /// Polygone plein.
+    /// Filled polygon.
     ///
-    /// `PathShape::convex_polygon` : egui ne sait remplir que les polygones
-    /// convexes, et un polygone concave y rendrait faux **sans erreur**. Ce
-    /// n'est pas un risque en R4 — `draw_path` étant surchargée, Plotters
-    /// n'appelle plus cette méthode pour épaissir un trait, et rien d'autre
-    /// dans le graphe minimal n'a de polygone — mais ça le deviendra en R5
-    /// avec les barres et les aires. **À reprendre à ce moment-là** :
-    /// trianguler soi-même, ou passer par un `Mesh`.
+    /// `PathShape::convex_polygon`: egui can only fill convex polygons, and a
+    /// concave polygon would render wrong **without an error**. This is not a
+    /// risk in R4 — with `draw_path` overridden, Plotters no longer calls
+    /// this method to thicken a stroke, and nothing else in the minimal graph
+    /// has a polygon — but it will become one in R5 with bars and areas.
+    /// **To be revisited then**: triangulate by hand, or go through a `Mesh`.
     fn fill_polygon<S: BackendStyle, I: IntoIterator<Item = BackendCoord>>(
         &mut self,
         vert: I,
@@ -355,15 +351,14 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(())
     }
 
-    /// Texte en `Shape::Text`, ou par Typst pour un texte riche.
+    /// Text as `Shape::Text`, or through Typst for a rich text.
     ///
-    /// Les **graduations** ne passent jamais par Typst : ce serait une
-    /// compilation par graduation (`architecture-choisie.md` §4.3). Titres,
-    /// titres d'axe et légende, si (issue #32) — le pipeline les marque par
-    /// leur style. Pour un texte ordinaire, le
-    /// `Galley` obtenu ici est celui-là même que
-    /// [`DrawingBackend::estimate_text_size`] mesure, ci-dessous : la mesure
-    /// et le dessin ne sont pas « cohérents », ils sont le même objet.
+    /// **Ticks** never go through Typst: it would be one compilation per tick
+    /// (`architecture-choisie.md` §4.3). Titles, axis titles and legend do
+    /// (issue #32) — the pipeline marks them by their style. For an ordinary
+    /// text, the `Galley` obtained here is the very one that
+    /// [`DrawingBackend::estimate_text_size`] measures, below: measurement
+    /// and drawing are not "consistent", they are the same object.
     fn draw_text<S: BackendTextStyle>(
         &mut self,
         text: &str,
@@ -375,13 +370,14 @@ impl DrawingBackend for EguiBackend<'_> {
             return Ok(());
         }
 
-        // Un texte riche (`stokesforge_render::formula::is_rich`, issue #32)
-        // passe par la texture Typst plutôt que par le `Galley` egui.
-        // Dégrade silencieusement vers le chemin ordinaire s'il ne compile
-        // pas ou que Typst n'est pas activé sur ce backend (`typst_screen`,
-        // tête de module) — jamais d'erreur remontée pour un label malformé.
-        // Un texte riche que Typst refuse est dessiné en brut **dans un cadre
-        // rouge** (#240, T3) : repère d'écran, absent des exports (backend SVG).
+        // A rich text (`stokesforge_render::formula::is_rich`, issue #32)
+        // goes through the Typst texture rather than the egui `Galley`.
+        // It silently degrades to the ordinary path if it does not compile
+        // or if Typst is not enabled on this backend (`typst_screen`, module
+        // header) — never an error reported for a malformed label.
+        // A rich text that Typst rejects is drawn as plain text **in a red
+        // frame** (#240, T3): a screen marker, absent from exports (SVG
+        // backend).
         let mut compile_failed = false;
         if let Some(typst) = &self.typst {
             if stokesforge_render::formula::is_rich(style) {
@@ -422,7 +418,7 @@ impl DrawingBackend for EguiBackend<'_> {
         let transform = style.transform();
         let origin = self.at(pos) + rotate(offset, &transform);
         if compile_failed {
-            // Le cadre suit la rotation du texte (titre de l'axe vertical).
+            // The frame follows the rotation of the text (vertical axis title).
             let pad = 2.0;
             let corners = [
                 (-pad, -pad),
@@ -442,21 +438,21 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(())
     }
 
-    /// La mesure — tâche R4.1, et le même appel que dans
+    /// Measurement — task R4.1, and the same call as in
     /// `stokesforge-render-svg`.
     fn estimate_text_size<S: BackendTextStyle>(
         &self,
         text: &str,
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
-        // R8.5 — **l'invariant du chantier** : un texte riche se mesure en
-        // interrogeant Typst, jamais l'heuristique `epaint` (qui mesurerait
-        // le texte source lui-même, pas ce que Typst en compose). La même
-        // condition que `draw_text`, au même endroit.
-        // Dégrade vers la mesure `epaint` si Typst n'est pas activé ou que
-        // la formule ne compile pas — la même politique que `draw_text`,
-        // pour que la mesure et le dessin restent d'accord sur ce qu'ils
-        // font (`architecture-choisie.md` §4.3).
+        // R8.5 — **the invariant of the work package**: a rich text is
+        // measured by querying Typst, never by the `epaint` heuristic (which
+        // would measure the source text itself, not what Typst composes from
+        // it). The same condition as `draw_text`, at the same place.
+        // It degrades to the `epaint` measurement if Typst is not enabled or
+        // the formula does not compile — the same policy as `draw_text`, so
+        // that measurement and drawing stay in agreement on what they do
+        // (`architecture-choisie.md` §4.3).
         if let Some(typst) = &self.typst {
             if stokesforge_render::formula::is_rich(style) {
                 let size_pt = stokesforge_render::text::font_size(style.size());
@@ -470,8 +466,8 @@ impl DrawingBackend for EguiBackend<'_> {
         Ok(estimate(self.text, text, style))
     }
 
-    // `blit_bitmap` est laissée en défaut : le cahier des charges dit « pas
-    // de gestion d'images » (`architecture-choisie.md` §2). Le défaut du
-    // trait la rastérise pixel par pixel, ce qui est lent et correct — la
-    // bonne façon de traiter ce qui ne doit pas arriver.
+    // `blit_bitmap` is left as default: the specification says "no image
+    // handling" (`architecture-choisie.md` §2). The trait default rasterizes
+    // it pixel by pixel, which is slow and correct — the right way to treat
+    // what must not happen.
 }

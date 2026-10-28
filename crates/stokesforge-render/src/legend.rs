@@ -1,36 +1,34 @@
-//! La légende — tâche R5.3.
+//! The legend — task R5.3.
 //!
-//! # Pourquoi elle est écrite ici et non déléguée à Plotters
+//! # Why it is written here and not delegated to Plotters
 //!
-//! `ChartContext::configure_series_labels()` existe et fait presque
-//! l'affaire. Presque : pour dimensionner son cadre, il appelle
-//! `MultiLineText::estimate_dimension`, qui passe par
-//! `FontData::estimate_layout` — **pas** par `estimate_text_size` du
-//! backend. Nos fonts Plotters étant coupées
-//! (`default-features = false`, `architecture-choisie.md` §4.4), cette
-//! estimation est l'heuristique monospace par octets UTF-8 : « λ » compte
-//! pour deux, « Échantillon » pour douze caractères et treize octets.
+//! `ChartContext::configure_series_labels()` exists and almost does the job.
+//! Almost: to size its frame, it calls `MultiLineText::estimate_dimension`,
+//! which goes through `FontData::estimate_layout` — **not** through the
+//! backend's `estimate_text_size`. Since our Plotters fonts are cut down
+//! (`default-features = false`, `architecture-choisie.md` §4.4), this
+//! estimate is the monospace heuristic by UTF-8 bytes: « λ » counts as two,
+//! « Échantillon » as twelve characters and thirteen bytes.
 //!
-//! Le cadre serait donc mesuré faux pendant que le texte dedans serait
-//! dessiné juste — un décalage qui ne lève aucune erreur, exactement le
-//! défaut silencieux que ce chantier est construit pour empêcher. Et il
-//! serait faux **de la même façon des deux côtés**, donc le test d'accord ne
-//! l'attraperait pas : c'est le cas qui justifie de ne pas s'en remettre au
-//! seul test.
+//! The frame would thus be measured wrong while the text inside it was drawn
+//! right — an offset that raises no error, exactly the silent defect this
+//! work package is built to prevent. And it would be wrong **in the same way
+//! on both sides**, so the agreement test would not catch it: this is the
+//! case that justifies not relying on that test alone.
 //!
-//! La légende est donc mise en page ici, sur
-//! [`plotters::drawing::DrawingArea::estimate_text_size`], qui est le
-//! chemin du backend — donc [`crate::text::estimate`], donc la mesure unique
-//! du projet.
+//! The legend is therefore laid out here, on
+//! [`plotters::drawing::DrawingArea::estimate_text_size`], which is the
+//! backend's path — hence [`crate::text::estimate`], hence the project's
+//! single measurement.
 //!
-//! # Ce qu'une entrée montre
+//! # What an entry shows
 //!
-//! Sa vignette est celle de la série : le trait avec son style, le marqueur
-//! avec sa forme, ou un aplat pour une série de barres. Une série à
-//! **référence brisée** y figure aussi, en gris et annotée — c'est le seul
-//! endroit de la figure où elle peut se montrer, puisqu'elle n'a rien à
-//! tracer (`architecture-choisie.md` §11.1 : « à afficher comme telle et
-//! jamais comme une série vide »).
+//! Its thumbnail is the series': the line with its style, the marker with
+//! its shape, or a solid fill for a bar series. A series with a **broken
+//! reference** appears too, in gray and annotated — this is the only place
+//! in the figure where it can show, since it has nothing to draw
+//! (`architecture-choisie.md` §11.1: « à afficher comme telle et jamais
+//! comme une série vide »).
 
 use plotters::coord::Shift;
 use plotters::element::{Rectangle, Text};
@@ -42,72 +40,73 @@ use stokesforge_plot::{LegendPosition, LegendSpec, PlotType};
 use crate::paint::{self, BROKEN, SERIES_FALLBACK};
 use crate::series::{Geometry, Prepared};
 
-/// Marge entre le cadre de la légende et le bord de la zone de tracé.
+/// Margin between the legend frame and the edge of the plot area.
 const MARGIN: i32 = 8;
-/// Marge intérieure du cadre.
+/// Inner margin of the frame.
 const PADDING: i32 = 6;
-/// Largeur de la vignette (le bout de trait, ou l'aplat).
+/// Width of the thumbnail (the line stub, or the solid fill).
 pub const KEY_WIDTH: i32 = 26;
-/// Écart entre la vignette et le texte.
+/// Gap between the thumbnail and the text.
 const KEY_GAP: i32 = 6;
-/// Écart vertical entre deux entrées.
+/// Vertical gap between two entries.
 const ROW_GAP: i32 = 4;
-/// Nombre d'entrées au-delà duquel la légende est tronquée.
+/// Number of entries beyond which the legend is truncated.
 ///
-/// Un graphe peut porter des centaines de séries (le cas de charge du
-/// document en compte 500) ; une légende de 500 lignes ne rentre dans aucune
-/// zone de tracé et coûterait 500 mesures de texte par image. Au-delà, les
-/// premières sont listées et la dernière ligne dit combien manquent.
+/// A graph can carry hundreds of series (the load case of the document has
+/// 500); a 500-line legend fits in no plot area and would cost 500 text
+/// measurements per frame. Beyond the cap, the first entries are listed and
+/// the last line says how many are missing.
 const MAX_ENTRIES: usize = 24;
 
-/// Ce que la légende a effectivement inscrit.
+/// What the legend actually drew.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DrawnLegend {
-    /// Nombre d'entrées dessinées, la ligne de débordement non comprise.
+    /// Number of entries drawn, not counting the overflow line.
     pub entries: usize,
-    /// Nombre d'entrées laissées de côté faute de place.
+    /// Number of entries left out for lack of room.
     pub omitted: usize,
-    /// Le cadre tracé, en pixels de backend : coin haut-gauche et taille
-    /// (issue #53 : désigner la légende sous le pointeur).
+    /// The drawn frame, in backend pixels: top-left corner and size
+    /// (issue #53: pick the legend under the pointer).
     pub frame: Option<((i32, i32), (u32, u32))>,
-    /// Pour chaque entrée dessinée, dans l'ordre : milieu vertical et
-    /// hauteur de sa ligne, en pixels de backend.
+    /// For each drawn entry, in order: vertical middle and height of its
+    /// row, in backend pixels.
     pub rows: Vec<(f64, f64)>,
 }
 
-/// Les deux styles de texte de la légende : celui d'un nom saisi (markup
-/// Typst) et celui d'un texte repris d'une colonne ou généré ici, affiché tel
-/// quel (issue #33). Même corps, même couleur.
+/// The legend's two text styles: that of a typed name (Typst markup) and
+/// that of a text taken from a column or generated here, shown as is
+/// (issue #33). Same size, same color.
 #[derive(Clone)]
 pub struct LegendText<'a> {
-    /// Nom de série saisi (`formula::rich_style`).
+    /// Typed series name (`formula::rich_style`).
     pub typed: TextStyle<'a>,
-    /// Nom repris de la colonne, ligne « … et N autres »
+    /// Name taken from the column, « … et N autres » line
     /// (`formula::literal_style`).
     pub literal: TextStyle<'a>,
 }
 
-/// Couleurs de la légende : le fond de son cadre (celui du graphe) et
-/// l'encre de son contour et de ses vignettes (l'encre automatique du fond,
+/// Legend colors: the background of its frame (the graph's) and the ink of
+/// its outline and thumbnails (the background's automatic ink,
 /// `crate::color::auto_ink`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LegendColors {
-    /// Fond du cadre, opacité comprise (transparent si le graphe n'a pas de
-    /// fond).
+    /// Frame background, opacity included (transparent if the graph has no
+    /// background).
     pub background: (u8, u8, u8, u8),
-    /// Contour du cadre et des vignettes de barres.
+    /// Outline of the frame and of the bar thumbnails.
     pub ink: (u8, u8, u8),
 }
 
-/// Trace la légende d'un panneau dans sa zone de tracé.
+/// Draws a panel's legend in its plot area.
 ///
-/// `area` doit être la zone de tracé en coordonnées **écran**
-/// (`plotting_area().use_screen_coord()`), et `origin`/`size` sa position et
-/// sa taille : la légende se place par rapport à la zone de tracé, pas par
-/// rapport au panneau, pour ne pas chevaucher les graduations.
+/// `area` must be the plot area in **screen** coordinates
+/// (`plotting_area().use_screen_coord()`), and `origin`/`size` its position
+/// and size: the legend is placed relative to the plot area, not to the
+/// panel, so it does not overlap the ticks.
 ///
-/// `center` (issue #53) : le centre où poser le cadre, en pixels de backend,
-/// quand la légende a été déplacée ; il prime sur le coin d'ancrage.
+/// `center` (issue #53): the center where to put the frame, in backend
+/// pixels, when the legend was moved; it takes precedence over the anchor
+/// corner.
 #[allow(clippy::too_many_arguments)]
 pub fn draw<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
@@ -127,8 +126,8 @@ pub fn draw<DB: DrawingBackend>(
     let omitted = entries.len().saturating_sub(MAX_ENTRIES);
     let shown = &entries[..entries.len().min(MAX_ENTRIES)];
 
-    // Les textes sont mesurés une fois, et c'est la même mesure qui décide
-    // du cadre et qui a servi à placer les axes.
+    // The texts are measured once, and the same measurement decides the
+    // frame and was used to place the axes.
     let mut texts: Vec<(String, &TextStyle<'_>)> = shown
         .iter()
         .map(|entry| {
@@ -165,9 +164,9 @@ pub fn draw<DB: DrawingBackend>(
         LegendPosition::TopLeft | LegendPosition::TopRight => MARGIN,
         LegendPosition::BottomLeft | LegendPosition::BottomRight => area_h - box_height - MARGIN,
     };
-    // Une légende plus large que sa zone de tracé reste ancrée en haut à
-    // gauche plutôt que de sortir par le côté opposé : le rognage de
-    // Plotters s'occupe du reste.
+    // A legend wider than its plot area stays anchored at the top left
+    // rather than leaving through the opposite side: Plotters' clipping
+    // handles the rest.
     let (x0, y0) = match center {
         Some((cx, cy)) => (cx - box_width / 2, cy - box_height / 2),
         None => (origin.0 + left.max(0), origin.1 + top.max(0)),
@@ -219,7 +218,7 @@ pub fn draw<DB: DrawingBackend>(
     })
 }
 
-/// La vignette d'une entrée : ce que la série a l'air d'être.
+/// The thumbnail of an entry: what the series looks like.
 fn key<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     entry: &Prepared<'_>,
@@ -236,8 +235,8 @@ fn key<DB: DrawingBackend>(
     )
 }
 
-/// Vignette de style sans préparation des valeurs (#82) : ouvrir le panneau
-/// ne doit ni parcourir une colonne ni calculer son histogramme à chaque image.
+/// Style thumbnail without preparing the values (#82): opening the panel
+/// must neither walk a column nor compute its histogram on every frame.
 pub fn series_key<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     spec: &stokesforge_plot::SeriesSpec,

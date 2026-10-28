@@ -38,7 +38,7 @@ when rereading your own diff.
 does not override `draw_text` panics; one that does not override
 `estimate_text_size` measures the text by its number of UTF-8 bytes, **silently**.
 All measurement goes through `stokesforge_render::text` and nowhere else. The
-safety net is `stokesforge-render-egui/tests/accord.rs`: if it changes, read its two
+safety net is `stokesforge-render-egui/tests/agreement.rs`: if it changes, read its two
 families of **witnesses** first. Without them, an equality test passes when both
 paths are right, and also when both are wrong in the same
 way.

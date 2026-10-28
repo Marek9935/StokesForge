@@ -1,69 +1,66 @@
-//! Le socle commun aux deux backends de rendu — phase R4.
+//! The common base of the two rendering backends — phase R4.
 //!
-//! Ce crate ne dessine rien tout seul. Il porte les deux choses que
-//! `stokesforge-render-egui` et `stokesforge-render-svg` doivent absolument avoir **en
-//! un seul exemplaire**, sans quoi le critère de fin du chantier de rendu —
-//! *axes au même endroit à l'écran et à l'export* — ne serait qu'un vœu :
+//! This crate draws nothing by itself. It carries the two things that
+//! `stokesforge-render-egui` and `stokesforge-render-svg` must absolutely have
+//! **in a single copy**, without which the end criterion of the rendering
+//! work package — *axes in the same place on screen and in the export* —
+//! would only be a wish:
 //!
-//! - [`text`] : la source unique de mesure de texte (tâche R4.1), une
-//!   `epaint::FontDefinitions` et l'unique `estimate_text_size` qui en
-//!   découle ;
-//! - [`pipeline`] : la suite d'appels Plotters, générique sur le backend, de
-//!   sorte qu'il n'existe pas deux façons de construire la même figure ;
-//! - [`color`] : la lecture des couleurs `#RRGGBB` du spec, également
-//!   partagée.
+//! - [`text`]: the single source of text measurement (task R4.1), an
+//!   `epaint::FontDefinitions` and the one `estimate_text_size` that follows
+//!   from it;
+//! - [`pipeline`]: the sequence of Plotters calls, generic over the backend,
+//!   so that there are not two ways to build the same figure;
+//! - [`color`]: the reading of the spec's `#RRGGBB` colors, also shared.
 //!
-//! # Ce que la phase R5 y a ajouté
+//! # What phase R5 added here
 //!
-//! Tout l'élargissement au `PlotSpec` réel est descendu ici, et pas une
-//! ligne dans l'un ou l'autre backend — c'est la règle de la phase
-//! (« aucune fonctionnalité n'entre dans un seul backend »), tenue par la
-//! structure :
+//! The whole extension to the real `PlotSpec` went down here, and not one
+//! line into either backend — this is the phase rule ("no feature enters a
+//! single backend"), held by the structure:
 //!
-//! - [`series`] : les six [`stokesforge_plot::PlotType`] traduits en géométrie,
-//!   une fois, pour le cadrage comme pour le tracé ;
-//! - [`scale`] : les échelles d'axe, dont la logarithmique ;
-//! - [`paint`] : les primitives en pixels — styles de trait, marqueurs,
-//!   barres, moustaches ;
-//! - [`legend`] : la légende, mise en page sur la mesure du projet et non
-//!   sur celle de Plotters (la raison est dans le module) ;
-//! - [`decimate`] : le LTTB ;
-//! - [`sample`] : un graphe réaliste, partagé par l'exemple d'export et par
-//!   le test d'accord, pour que ce qu'on regarde soit ce que le test
-//!   compare.
+//! - [`series`]: the six [`stokesforge_plot::PlotType`]s translated into
+//!   geometry, once, for the framing as well as for the drawing;
+//! - [`scale`]: the axis scales, including the logarithmic one;
+//! - [`paint`]: the pixel primitives — line styles, markers, bars,
+//!   whiskers;
+//! - [`legend`]: the legend, laid out on the project's measurement and not
+//!   on Plotters' (the reason is in the module);
+//! - [`decimate`]: the LTTB;
+//! - [`sample`]: a realistic graph, shared by the export example and by the
+//!   agreement test, so that what one looks at is what the test compares.
 //!
-//! # Un crate non prévu par `architecture-choisie.md` §8
+//! # A crate not planned by `architecture-choisie.md` §8
 //!
-//! Le découpage arrêté ne prévoyait que `stokesforge-render-egui` et
-//! `stokesforge-render-svg`. Ce crate-ci s'ajoute, pour la même raison que
-//! `stokesforge-id` s'était ajouté en R3 : deux crates frères ont besoin de la
-//! même chose, et aucun des deux ne peut dépendre de l'autre sans mentir sur
-//! ce qu'il est. Faire porter la mesure par `stokesforge-render-svg` obligerait le
-//! backend écran à dépendre du crate d'export ; la faire porter par
-//! `stokesforge-render-egui` ferait entrer toute la pile egui dans l'export, ce
-//! que le découpage interdit explicitement. La sortie est la même qu'en R3 :
-//! descendre la partie commune dans un crate en dessous des deux.
+//! The decided split planned only `stokesforge-render-egui` and
+//! `stokesforge-render-svg`. This crate is added, for the same reason that
+//! `stokesforge-id` was added in R3: two sibling crates need the same thing,
+//! and neither can depend on the other without lying about what it is.
+//! Making `stokesforge-render-svg` carry the measurement would force the
+//! screen backend to depend on the export crate; making
+//! `stokesforge-render-egui` carry it would pull the whole egui stack into
+//! the export, which the split explicitly forbids. The way out is the same
+//! as in R3: move the common part down into a crate below the two.
 //!
-//! Conséquence sur les frontières, et elle va dans le bon sens : `epaint`
-//! entre dans `stokesforge-render-svg` par ici, pas en direct, et reste la **même
-//! version** que celle qu'`egui` résout pour `stokesforge-render-egui` — c'est
-//! vérifié par `tests/frontiere.rs` plutôt que supposé.
+//! Consequence on the boundaries, and it goes the right way: `epaint`
+//! enters `stokesforge-render-svg` through here, not directly, and stays the
+//! **same version** as the one `egui` resolves for `stokesforge-render-egui`
+//! — this is checked by `tests/no_ui_dependency.rs` rather than assumed.
 //!
-//! # Ce que ce crate ne connaît pas
+//! # What this crate does not know
 //!
-//! Ni `egui`, ni `eframe`, ni `plotters-svg`. Il voit `epaint` (pour mesurer)
-//! et `plotters` sans ses fonts (pour construire la figure) — rien de la
-//! surface de sortie. C'est ce qui lui permet d'être la référence commune
-//! plutôt qu'un troisième dialecte.
+//! Neither `egui`, nor `eframe`, nor `plotters-svg`. It sees `epaint` (to
+//! measure) and `plotters` without its fonts (to build the figure) — nothing
+//! of the output surface. This is what lets it be the common reference
+//! rather than a third dialect.
 //!
-//! # Ce qu'une tâche ponctuelle du 2026-09-13 y a ajouté
+//! # What a one-off task of 2026-09-13 added here
 //!
-//! [`fonts`] : le choix entre trois paires de polices embarquées
-//! (Libertinus, Fira, Noto — texte et Math) ou une police système désignée
-//! par son nom, avec repli silencieux sur Noto. [`text::font_definitions`]
-//! en devient le point d'entrée par défaut ; l'invariant qui fait foi
-//! (mesurer avec exactement le même jeu de polices des deux côtés) ne change
-//! pas — voir la documentation du module et
+//! [`fonts`]: the choice between three pairs of embedded fonts (Libertinus,
+//! Fira, Noto — text and Math) or a system font designated by its name, with
+//! a silent fallback on Noto. [`text::font_definitions`] becomes the default
+//! entry point; the invariant that holds (measure with exactly the same set
+//! of fonts on both sides) does not change — see the module documentation and
 //! `docs/archive/newarchitecture/architecture-choisie.md` §7.
 
 #![cfg_attr(
@@ -95,15 +92,15 @@ mod test_support;
 
 use stokesforge_core::NodeId;
 
-/// Ce qui peut rater à l'affichage d'un graphe.
+/// What can fail when displaying a graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenderError {
-    /// Le nœud demandé n'existe pas dans l'instantané.
+    /// The requested node does not exist in the snapshot.
     UnknownNode(NodeId),
-    /// Le nœud existe mais n'est pas un graphe.
+    /// The node exists but is not a graph.
     NotAGraph(NodeId),
-    /// Plotters a refusé de tracer. Le message est celui de Plotters : le
-    /// reformuler perdrait la seule information utile.
+    /// Plotters refused to draw. The message is Plotters': rewording it
+    /// would lose the only useful information.
     Drawing(String),
 }
 

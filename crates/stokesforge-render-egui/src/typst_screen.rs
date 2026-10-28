@@ -1,22 +1,22 @@
-//! Chemin écran de Typst — tâche R8.3.
+//! Typst screen path — task R8.3.
 //!
-//! Ce que `stokesforge-render` (feature `typst`) ne pouvait pas porter lui-même
-//! sans faire entrer `egui`/`typst-render` dans un crate qui n'en a pas
-//! besoin (`architecture-choisie.md` §8) : la rastérisation d'une page
-//! compilée en RGBA, son chargement en texture `egui`, et la construction
-//! d'un `Shape::Mesh` positionné exactement comme l'aurait été un
-//! `Shape::Text` ordinaire.
+//! What `stokesforge-render` (feature `typst`) could not carry itself
+//! without pulling `egui`/`typst-render` into a crate that does not need
+//! them (`architecture-choisie.md` §8): the rasterization of a compiled page
+//! to RGBA, its loading as an `egui` texture, and the construction of a
+//! `Shape::Mesh` positioned exactly as an ordinary `Shape::Text` would have
+//! been.
 //!
-//! # Dégradation, pas erreur
+//! # Degradation, not error
 //!
-//! Une formule qui ne compile pas (syntaxe Typst invalide) ne fait pas
-//! échouer le rendu : [`TypstScreen::measure`] et [`TypstScreen::render`]
-//! rendent `None`, et l'appelant ([`crate::backend::EguiBackend`]) retombe
-//! sur le chemin ordinaire — le texte brut, `$...$` compris, s'affiche tel
-//! quel plutôt que de faire disparaître tout le graphe. La même politique
-//! que les références de série brisées ou les types de tracé inconnus
-//! (`architecture-choisie.md` §11.1) : un défaut visible et localisé, jamais
-//! un panic qui remonte.
+//! A formula that does not compile (invalid Typst syntax) does not make the
+//! rendering fail: [`TypstScreen::measure`] and [`TypstScreen::render`]
+//! return `None`, and the caller ([`crate::backend::EguiBackend`]) falls
+//! back on the ordinary path — the plain text, `$...$` included, is shown
+//! as is rather than making the whole graph disappear. The same policy as
+//! broken series references or unknown plot types
+//! (`architecture-choisie.md` §11.1): a visible, localized defect, never a
+//! panic that bubbles up.
 
 use std::sync::Arc;
 
@@ -28,57 +28,57 @@ use typst::text::Font;
 use typst::utils::Scalar;
 use typst_render::RenderOptions;
 
-/// Une formule déjà rasterisée pour l'écran.
+/// A formula already rasterized for the screen.
 ///
-/// `size_pt` est la taille **logique** (le même repère que le reste du
-/// texte, mesuré à l'échelle fixe de [`stokesforge_render::text`]) — pas la
-/// taille en pixels de la texture, qui elle grandit avec `pixels_per_point`
-/// pour rester nette sur un écran HiDPI, exactement comme un `Galley` reste
-/// ancré à une taille logique inchangée pendant que son atlas est mis en
-/// page plus finement (`stokesforge_render::text`, tête de module).
+/// `size_pt` is the **logical** size (the same frame as the rest of the
+/// text, measured at the fixed scale of [`stokesforge_render::text`]) — not
+/// the size in pixels of the texture, which grows with `pixels_per_point` to
+/// stay sharp on a HiDPI screen, exactly as a `Galley` stays anchored to an
+/// unchanged logical size while its atlas is laid out more finely
+/// (`stokesforge_render::text`, module header).
 ///
-/// Garde aussi le document compilé : [`Self::rerender`] en tire une image à
-/// une autre résolution sans recompiler, quand le graphe est agrandi
-/// (`crate::scaled`, issue #31).
+/// It also keeps the compiled document: [`Self::rerender`] draws an image at
+/// another resolution from it without recompiling, when the graph is
+/// enlarged (`crate::scaled`, issue #31).
 pub struct FormulaTexture {
     handle: TextureHandle,
     size_pt: (f64, f64),
-    /// Le `pixels_per_point` **demandé** pour cette image (l'effectif peut
-    /// être plus bas, voir [`rasterize`]).
+    /// The `pixels_per_point` **requested** for this image (the effective
+    /// one can be lower, see [`rasterize`]).
     pixels_per_point: f32,
-    /// `None` pour une formule vide, qui n'a rien à rastériser.
+    /// `None` for an empty formula, which has nothing to rasterize.
     compiled: Option<Compiled>,
     text: String,
 }
 
 impl FormulaTexture {
-    /// La texture egui que le maillage désigne.
+    /// The egui texture the mesh points to.
     pub fn id(&self) -> egui::TextureId {
         self.handle.id()
     }
 
-    /// La taille de l'image, en pixels.
+    /// The size of the image, in pixels.
     pub fn size_pixels(&self) -> [usize; 2] {
         self.handle.size()
     }
 
-    /// Le `pixels_per_point` demandé à la rastérisation.
+    /// The `pixels_per_point` requested from the rasterization.
     pub fn pixels_per_point(&self) -> f32 {
         self.pixels_per_point
     }
 
-    /// La même formule, rastérisée de nouveau à `pixels_per_point` — sans
-    /// recompiler : même document, donc même taille en points et même
-    /// boîte, seule la finesse de l'image change (issue #31). `None` pour
-    /// une formule vide.
+    /// The same formula, rasterized again at `pixels_per_point` — without
+    /// recompiling: same document, so same size in points and same box, only
+    /// the sharpness of the image changes (issue #31). `None` for an empty
+    /// formula.
     pub fn rerender(&self, context: &egui::Context, pixels_per_point: f32) -> Option<Self> {
         let compiled = self.compiled.as_ref()?;
         Some(rasterize(context, compiled, pixels_per_point, &self.text))
     }
 }
 
-/// Ce qu'il faut pour dessiner un label Typst à l'écran — construit une
-/// fois par [`crate::GraphView`], réutilisé à chaque image.
+/// What is needed to draw a Typst label on screen — built once per
+/// [`crate::GraphView`], reused at every frame.
 pub struct TypstScreen<'a> {
     context: &'a egui::Context,
     cache: &'a FormulaCache<FormulaTexture>,
@@ -88,9 +88,9 @@ pub struct TypstScreen<'a> {
 }
 
 impl<'a> TypstScreen<'a> {
-    /// Résout les polices une fois (`choice`) et assemble le contexte de
-    /// dessin. À reconstruire seulement si `choice` change — comme
-    /// [`stokesforge_render::text::TextMeasurer`], pas à chaque image.
+    /// Resolves the fonts once (`choice`) and assembles the drawing context.
+    /// To be rebuilt only if `choice` changes — like
+    /// [`stokesforge_render::text::TextMeasurer`], not at every frame.
     pub fn new(
         context: &'a egui::Context,
         cache: &'a FormulaCache<FormulaTexture>,
@@ -100,12 +100,11 @@ impl<'a> TypstScreen<'a> {
         Ok(Self::with_fonts(context, cache, choice, fonts))
     }
 
-    /// Comme [`Self::new`], sur des polices déjà résolues
-    /// (`formula::resolve_fonts(choice)`) — pour un appelant qui construit
-    /// ce contexte à chaque reconstruction de la figure
-    /// ([`crate::GraphView`]) et ne veut pas redécoder deux polices à
-    /// chaque fois. `fonts` doit venir de `choice` : la clé du cache porte
-    /// `choice`, pas les polices elles-mêmes.
+    /// Like [`Self::new`], on already resolved fonts
+    /// (`formula::resolve_fonts(choice)`) — for a caller that builds this
+    /// context at each rebuild of the figure ([`crate::GraphView`]) and does
+    /// not want to decode two fonts again each time. `fonts` must come from
+    /// `choice`: the cache key carries `choice`, not the fonts themselves.
     pub fn with_fonts(
         context: &'a egui::Context,
         cache: &'a FormulaCache<FormulaTexture>,
@@ -121,35 +120,34 @@ impl<'a> TypstScreen<'a> {
         }
     }
 
-    /// Le `pixels_per_point` réel du `Context` — celui auquel [`Self::render`]
-    /// doit rastériser pour rester net sur un écran HiDPI, à ne pas
-    /// confondre avec l'échelle fixe utilisée par [`Self::measure`].
+    /// The real `pixels_per_point` of the `Context` — the one at which
+    /// [`Self::render`] must rasterize to stay sharp on a HiDPI screen, not
+    /// to be confused with the fixed scale used by [`Self::measure`].
     pub fn pixels_per_point(&self) -> f32 {
         self.context.pixels_per_point()
     }
 
-    /// La taille qu'occuperait `text` compilé par Typst, à `size_pt` de
-    /// corps — l'invariant de la tâche 8.5. `None` si la formule ne
-    /// compile pas.
+    /// The size `text` would occupy compiled by Typst, at `size_pt` of body
+    /// — the invariant of task 8.5. `None` if the formula does not compile.
     ///
-    /// `ink` ne change pas la taille ; il est demandé pour que la mesure
-    /// tombe sur l'entrée que le dessin réutilise. Passe par le **même**
-    /// cache et la **même** entrée que [`Self::render`] (même texte, même
-    /// corps, même couleur, même `pixels_per_point`) :
-    /// Plotters mesure un texte juste avant de le dessiner, donc la
-    /// rastérisation faite ici est celle que le dessin réutilise. Avant
-    /// l'issue #29, chaque mesure recompilait et résolvait de nouveau les
-    /// polices. La taille rendue est celle de la page compilée, en points —
-    /// indépendante du `pixels_per_point` de la texture, arrondie par la
-    /// même fonction que [`formula::measure`].
+    /// `ink` does not change the size; it is requested so that the
+    /// measurement lands on the entry the drawing reuses. It goes through
+    /// the **same** cache and the **same** entry as [`Self::render`] (same
+    /// text, same body, same color, same `pixels_per_point`): Plotters
+    /// measures a text just before drawing it, so the rasterization done
+    /// here is the one the drawing reuses. Before issue #29, each
+    /// measurement recompiled and resolved the fonts again. The returned
+    /// size is that of the compiled page, in points — independent of the
+    /// `pixels_per_point` of the texture, rounded by the same function as
+    /// [`formula::measure`].
     pub fn measure(&self, text: &str, size_pt: f32, ink: Ink) -> Option<(u32, u32)> {
         let texture = self.render(text, size_pt, ink, self.pixels_per_point())?;
         Some(formula::round_size_pt(texture.size_pt))
     }
 
-    /// La texture (compilée et rastérisée, ou reprise du cache) pour
-    /// `text` à `size_pt` de corps, en `ink` (issue #30), au
-    /// `pixels_per_point` demandé. `None` si la formule ne compile pas.
+    /// The texture (compiled and rasterized, or taken from the cache) for
+    /// `text` at `size_pt` of body, in `ink` (issue #30), at the requested
+    /// `pixels_per_point`. `None` if the formula does not compile.
     pub fn render(
         &self,
         text: &str,
@@ -174,12 +172,12 @@ impl<'a> TypstScreen<'a> {
     }
 }
 
-/// Rastérise une page compilée en texture `egui` — tâche 8.3.
+/// Rasterizes a compiled page into an `egui` texture — task 8.3.
 ///
-/// L'image ne dépasse jamais `max_texture_side` du `Context` : un titre
-/// agrandi en plein écran HiDPI (issue #31) peut demander plus que ce que
-/// le GPU accepte. Au-delà, la résolution est plafonnée et l'image un peu
-/// étirée, plutôt qu'une texture refusée.
+/// The image never exceeds the `Context`'s `max_texture_side`: a title
+/// enlarged on a full-screen HiDPI display (issue #31) can ask for more than
+/// the GPU accepts. Beyond that, the resolution is capped and the image a
+/// bit stretched, rather than a texture being refused.
 fn rasterize(
     context: &egui::Context,
     compiled: &Compiled,
@@ -188,9 +186,9 @@ fn rasterize(
 ) -> FormulaTexture {
     let size_pt = compiled.size_pt();
     let Some(page) = compiled.page() else {
-        // Formule vide : une texture 1×1 transparente plutôt qu'un cas
-        // particulier de plus à traiter en aval — `Shape::Mesh` sur un
-        // rectangle de taille nulle ne dessine simplement rien.
+        // Empty formula: a transparent 1×1 texture rather than one more
+        // special case to handle downstream — a `Shape::Mesh` on a
+        // zero-size rectangle simply draws nothing.
         let image = ColorImage::new([1, 1], vec![Color32::TRANSPARENT]);
         let handle = context.load_texture("stokesforge-typst-empty", image, TextureOptions::LINEAR);
         return FormulaTexture {
@@ -213,9 +211,9 @@ fn rasterize(
         [pixmap.width() as usize, pixmap.height() as usize],
         pixmap.data(),
     );
-    // Un nom stable par contenu plutôt qu'un compteur : deux labels
-    // identiques réutilisent la même entrée de l'atlas de textures d'egui
-    // au lieu d'en allouer une par occurrence.
+    // A name that is stable per content rather than a counter: two identical
+    // labels reuse the same entry of egui's texture atlas instead of
+    // allocating one per occurrence.
     let handle = context.load_texture(
         format!("stokesforge-typst:{text}"),
         image,
@@ -230,9 +228,9 @@ fn rasterize(
     }
 }
 
-/// Construit le `Shape::Mesh` d'une formule déjà rastérisée, ancrée et
-/// tournée exactement comme l'aurait été un `Shape::Text` de même boîte —
-/// même calcul que `EguiBackend::draw_text`, via les fonctions partagées de
+/// Builds the `Shape::Mesh` of an already rasterized formula, anchored and
+/// rotated exactly as a `Shape::Text` of the same box would have been — same
+/// computation as `EguiBackend::draw_text`, through the shared functions of
 /// `stokesforge_render::formula`.
 pub fn mesh(
     texture: &FormulaTexture,
@@ -245,19 +243,19 @@ pub fn mesh(
     let origin = screen_origin + egui::vec2(offset.0 as f32, offset.1 as f32);
     let (w, h) = (texture.size_pt.0 as f32, texture.size_pt.1 as f32);
 
-    // Les quatre coins du rectangle **non tourné**, ancré en `origin` — le
-    // même repère que `TextShape::pos` (le coin supérieur gauche du texte
-    // non tourné, `epaint::shapes::text_shape`).
+    // The four corners of the **unrotated** rectangle, anchored at `origin` —
+    // the same frame as `TextShape::pos` (the top-left corner of the
+    // unrotated text, `epaint::shapes::text_shape`).
     //
-    // **Dans l'ordre exact où `Mesh::add_rect_with_uv` pose ses sommets** :
-    // haut-gauche, haut-droit, bas-gauche, bas-droit (epaint 0.36,
-    // `mesh.rs`). Chaque sommet garde la coordonnée de texture qu'epaint lui
-    // a donnée ; un ordre « en tour » (…, bas-droit, bas-gauche) échangeait
-    // la position des deux derniers sans échanger leur texture et cisaillait
-    // l'image en bruit illisible, dans une boîte pourtant juste — défaut de
-    // R8 resté invisible tant que l'application n'affichait pas Typst, vu à
-    // la première capture de l'issue #29 et tenu par
-    // `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`.
+    // **In the exact order in which `Mesh::add_rect_with_uv` places its
+    // vertices**: top-left, top-right, bottom-left, bottom-right (epaint
+    // 0.36, `mesh.rs`). Each vertex keeps the texture coordinate epaint gave
+    // it; a "going around" order (…, bottom-right, bottom-left) swapped the
+    // position of the last two without swapping their texture and sheared
+    // the image into unreadable noise, in a box that was nevertheless right
+    // — an R8 defect that stayed invisible as long as the application did
+    // not display Typst, seen at the first capture of issue #29 and held by
+    // `every_mesh_vertex_carries_the_texture_of_its_corner`.
     let corners = [
         egui::vec2(0.0, 0.0),
         egui::vec2(w, 0.0),
@@ -276,32 +274,32 @@ pub fn mesh(
         uv,
         Color32::WHITE,
     );
-    // `add_rect_with_uv` construit un rectangle **axé sur les axes** ; on
-    // remplace ses quatre sommets par les coins tournés calculés ci-dessus
-    // plutôt que de reproduire la triangulation à la main.
+    // `add_rect_with_uv` builds an **axis-aligned** rectangle; its four
+    // vertices are replaced by the rotated corners computed above rather
+    // than reproducing the triangulation by hand.
     for (vertex, point) in m.vertices.iter_mut().zip(points.iter()) {
         vertex.pos = *point;
     }
     egui::Shape::Mesh(Arc::new(m))
 }
 
-/// L'environnement des étiquettes de formule de l'interface (#204) : un cache
-/// de textures et les polices, résolus une fois et gardés dans la mémoire
-/// d'egui — ni `GraphView` ni figure n'y participent.
+/// The environment of the interface formula labels (#204): a texture cache
+/// and the fonts, resolved once and kept in egui's memory — neither
+/// `GraphView` nor a figure takes part in it.
 struct LabelEnv {
     cache: FormulaCache<FormulaTexture>,
     choice: FontChoice,
     fonts: Option<(Font, Font)>,
 }
 
-/// Plafond des formules gardées : une fenêtre n'en montre que quelques-unes,
-/// le cache ne sert qu'à éviter de recompiler à chaque image.
+/// Cap on the formulas kept: a window shows only a few of them, the cache
+/// only serves to avoid recompiling at every frame.
 const LABEL_CACHE_LIMIT: usize = 64;
 
-/// Peint `source` (du Typst, souvent `$ … $`) comme une étiquette de l'interface
-/// à `size_pt` de corps et à `color`, et rend sa réponse. `None` si la formule
-/// ne compile pas ou qu'aucune police n'est disponible : l'appelant n'affiche
-/// alors rien (une formule d'aide n'est jamais indispensable).
+/// Paints `source` (Typst, often `$ … $`) as an interface label at `size_pt`
+/// of body and in `color`, and returns its response. `None` if the formula
+/// does not compile or no font is available: the caller then shows nothing
+/// (a help formula is never essential).
 pub fn formula_label(
     ui: &mut egui::Ui,
     source: &str,
@@ -355,106 +353,104 @@ mod tests {
         egui::Context::default()
     }
 
-    const NOIR: Ink = [0, 0, 0, 255];
+    const BLACK: Ink = [0, 0, 0, 255];
 
-    /// Une formule triviale mesure une taille non nulle — le test de
-    /// sanité minimal avant tout dessin.
+    /// A trivial formula measures a non-zero size — the minimal sanity test
+    /// before any drawing.
     #[test]
-    fn mesurer_une_formule_triviale_rend_une_taille_non_nulle() {
+    fn measuring_a_trivial_formula_returns_a_non_zero_size() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
         let (w, h) = screen
-            .measure("$lambda$", 14.0, NOIR)
-            .expect("la formule aurait dû compiler");
-        assert!(w > 0 && h > 0, "taille nulle : ({w}, {h})");
+            .measure("$lambda$", 14.0, BLACK)
+            .expect("the formula should have compiled");
+        assert!(w > 0 && h > 0, "zero size: ({w}, {h})");
     }
 
-    /// Une formule invalide dégrade en `None`, sans paniquer — la
-    /// politique documentée en tête de module.
+    /// An invalid formula degrades to `None`, without panicking — the policy
+    /// documented in the module header.
     #[test]
-    fn une_formule_invalide_mesure_none() {
+    fn an_invalid_formula_measures_none() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
-        assert!(screen.measure("$ (unclosed", 14.0, NOIR).is_none());
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
+        assert!(screen.measure("$ (unclosed", 14.0, BLACK).is_none());
     }
 
-    /// Rendre deux fois la même formule au même `pixels_per_point` sert la
-    /// même texture depuis le cache — tâche 8.2, côté écran.
+    /// Rendering the same formula twice at the same `pixels_per_point` serves
+    /// the same texture from the cache — task 8.2, screen side.
     #[test]
-    fn rendre_deux_fois_la_meme_formule_reutilise_le_cache() {
+    fn rendering_the_same_formula_twice_reuses_the_cache() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
         let a = screen
-            .render("$lambda$", 14.0, NOIR, 1.0)
-            .expect("échec du rendu");
+            .render("$lambda$", 14.0, BLACK, 1.0)
+            .expect("rendering failed");
         let b = screen
-            .render("$lambda$", 14.0, NOIR, 1.0)
-            .expect("échec du rendu");
+            .render("$lambda$", 14.0, BLACK, 1.0)
+            .expect("rendering failed");
         assert_eq!(a.handle.id(), b.handle.id());
         assert_eq!(cache.len(), 1);
     }
 
-    /// Deux couleurs du même texte sont deux textures (issue #30) : la
-    /// couleur est dans l'image rastérisée, pas dans une teinte posée après
-    /// coup, donc elle doit être dans la clé du cache.
+    /// Two colors of the same text are two textures (issue #30): the color is
+    /// in the rasterized image, not in a tint applied afterwards, so it must
+    /// be in the cache key.
     #[test]
-    fn deux_couleurs_occupent_deux_entrees() {
+    fn two_colors_occupy_two_entries() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
-        let noir = screen.render("$lambda$", 14.0, NOIR, 1.0).expect("rendu");
-        let blanc = screen
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
+        let black = screen
+            .render("$lambda$", 14.0, BLACK, 1.0)
+            .expect("rendering");
+        let white = screen
             .render("$lambda$", 14.0, [255, 255, 255, 255], 1.0)
-            .expect("rendu");
+            .expect("rendering");
         assert_eq!(cache.len(), 2);
-        assert_ne!(noir.handle.id(), blanc.handle.id());
-        assert_eq!(noir.size_pt, blanc.size_pt, "la couleur change la taille");
+        assert_ne!(black.handle.id(), white.handle.id());
+        assert_eq!(black.size_pt, white.size_pt, "the color changes the size");
     }
 
-    /// La mesure passe par le cache, et par la même entrée que le dessin
-    /// qui la suit : mesurer puis dessiner une formule ne compile qu'une
-    /// fois (issue #29 — avant, chaque mesure recompilait).
+    /// Measurement goes through the cache, and through the same entry as the
+    /// drawing that follows it: measuring then drawing a formula compiles
+    /// only once (issue #29 — before, each measurement recompiled).
     #[test]
-    fn mesurer_puis_dessiner_partage_une_seule_entree() {
+    fn measuring_then_drawing_shares_a_single_entry() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
-        let mesure = screen.measure("$lambda$", 14.0, NOIR).expect("mesure");
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
+        let measured = screen
+            .measure("$lambda$", 14.0, BLACK)
+            .expect("measurement");
         let texture = screen
-            .render("$lambda$", 14.0, NOIR, screen.pixels_per_point())
-            .expect("rendu");
+            .render("$lambda$", 14.0, BLACK, screen.pixels_per_point())
+            .expect("rendering");
         assert_eq!(cache.len(), 1);
-        assert_eq!(mesure, formula::round_size_pt(texture.size_pt));
+        assert_eq!(measured, formula::round_size_pt(texture.size_pt));
     }
 
-    /// Chaque sommet du maillage porte la coordonnée de texture de **son**
-    /// coin : u = 0 au bord gauche, u = 1 au bord droit, v = 0 en haut,
-    /// v = 1 en bas. La boîte englobante seule ne le prouve pas — un
-    /// maillage aux sommets échangés a la même boîte et affiche un bruit
-    /// illisible (le défaut vu à l'écran lors de l'issue #29).
+    /// Each mesh vertex carries the texture coordinate of **its** corner:
+    /// u = 0 at the left edge, u = 1 at the right edge, v = 0 at the top,
+    /// v = 1 at the bottom. The bounding box alone does not prove it — a mesh
+    /// with swapped vertices has the same box and shows unreadable noise
+    /// (the defect seen on screen during issue #29).
     #[test]
-    fn chaque_sommet_du_maillage_porte_la_texture_de_son_coin() {
+    fn every_mesh_vertex_carries_the_texture_of_its_corner() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
         let texture = screen
-            .render("$lambda$", 14.0, NOIR, 1.0)
-            .expect("échec du rendu");
+            .render("$lambda$", 14.0, BLACK, 1.0)
+            .expect("rendering failed");
         let anchor = Pos::new(
             plotters_backend::text_anchor::HPos::Left,
             plotters_backend::text_anchor::VPos::Top,
@@ -465,7 +461,7 @@ mod tests {
             anchor,
             FontTransform::None,
         ) else {
-            panic!("un maillage était attendu")
+            panic!("a mesh was expected")
         };
         let bounds = m.calc_bounds();
         for vertex in &m.vertices {
@@ -473,25 +469,24 @@ mod tests {
             let v = (vertex.pos.y - bounds.min.y) / bounds.height();
             assert!(
                 (u - vertex.uv.x).abs() < 1e-4 && (v - vertex.uv.y).abs() < 1e-4,
-                "sommet en ({u}, {v}) du rectangle mais texture en {:?}",
+                "vertex at ({u}, {v}) of the rectangle but texture at {:?}",
                 vertex.uv
             );
         }
     }
 
-    /// Le maillage produit occupe une boîte de la bonne taille, ancrée à
-    /// l'origine attendue pour un ancrage `Left`/`Top` sans rotation — le
-    /// cas le plus simple, qui aurait révélé un signe d'offset inversé.
+    /// The produced mesh occupies a box of the right size, anchored at the
+    /// expected origin for a `Left`/`Top` anchor without rotation — the
+    /// simplest case, which would have revealed an inverted offset sign.
     #[test]
-    fn le_maillage_occupe_la_taille_de_la_texture_sans_rotation() {
+    fn the_mesh_occupies_the_texture_size_without_rotation() {
         let ctx = context();
         let cache = FormulaCache::new();
         let choice = FontChoice::default();
-        let screen =
-            TypstScreen::new(&ctx, &cache, &choice).expect("résolution des polices échouée");
+        let screen = TypstScreen::new(&ctx, &cache, &choice).expect("font resolution failed");
         let texture = screen
-            .render("$lambda$", 14.0, NOIR, 1.0)
-            .expect("échec du rendu");
+            .render("$lambda$", 14.0, BLACK, 1.0)
+            .expect("rendering failed");
         let anchor = Pos::new(
             plotters_backend::text_anchor::HPos::Left,
             plotters_backend::text_anchor::VPos::Top,
@@ -503,7 +498,7 @@ mod tests {
             FontTransform::None,
         );
         let egui::Shape::Mesh(m) = shape else {
-            panic!("un maillage était attendu")
+            panic!("a mesh was expected")
         };
         let bounds = m.calc_bounds();
         assert!((bounds.min.x - 10.0).abs() < 0.01);
@@ -512,17 +507,17 @@ mod tests {
         assert!((bounds.height() - texture.size_pt.1 as f32).abs() < 0.01);
     }
 
-    /// Une étiquette de formule d'interface alloue la boîte de sa formule et
-    /// peint un maillage texturé ; une source invalide ne peint rien (#204).
+    /// An interface formula label allocates the box of its formula and paints
+    /// a textured mesh; an invalid source paints nothing (#204).
     #[test]
-    fn une_etiquette_de_formule_peint_un_maillage_et_dit_son_echec() {
+    fn a_formula_label_paints_a_mesh_and_reports_its_failure() {
         let ctx = context();
         let mut drawn = None;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             drawn = formula_label(ui, "$ y = a + b x $", 14.0, Color32::BLACK).map(|r| r.rect);
         });
         output.textures_delta.clear();
-        let rect = drawn.expect("une formule valide se peint");
+        let rect = drawn.expect("a valid formula paints");
         assert!(rect.width() > 10.0 && rect.height() > 5.0, "{rect:?}");
         let meshes = output
             .shapes
@@ -539,7 +534,7 @@ mod tests {
         output.textures_delta.clear();
         assert!(
             !invalid_painted,
-            "témoin : une source invalide ne peint rien"
+            "witness: an invalid source paints nothing"
         );
     }
 }

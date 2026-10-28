@@ -1,45 +1,43 @@
-//! Échelles d'axe — tâche R5.2, moitié « logarithmique ».
+//! Axis scales — task R5.2, "logarithmic" half.
 //!
-//! # La décision : transformer les données, pas le type de coordonnée
+//! # The decision: transform the data, not the coordinate type
 //!
-//! Plotters sait faire un axe logarithmique par lui-même
-//! ([`plotters::coord::combinators::LogRange`]), et ce n'est **pas** ce qui
-//! est fait ici. La raison tient au pipeline unique du chantier
-//! (`architecture-choisie.md` §8) : `LogRange` change le *type* de la
-//! coordonnée, donc le type du `ChartContext`. Avec deux axes, deux
-//! échelles, et un axe secondaire qui a la sienne, la fonction qui trace un
-//! panneau devrait exister en **huit** monomorphisations — ou bien être
-//! coupée en huit branches dont chacune redessinerait la même chose. C'est
-//! exactement la divergence que le pipeline unique existe pour empêcher, et
-//! elle rentrerait par la porte du système de types.
+//! Plotters can make a logarithmic axis by itself
+//! ([`plotters::coord::combinators::LogRange`]), and that is **not** what is
+//! done here. The reason lies in the work package's single pipeline
+//! (`architecture-choisie.md` §8): `LogRange` changes the *type* of the
+//! coordinate, hence the type of the `ChartContext`. With two axes, two
+//! scales, and a secondary axis that has its own, the function that draws a
+//! panel would have to exist in **eight** monomorphizations — or be cut into
+//! eight branches each of which would redraw the same thing. This is exactly
+//! the divergence the single pipeline exists to prevent, and it would come
+//! in through the door of the type system.
 //!
-//! Ici, un seul type de coordonnée — `f64` linéaire — et l'échelle est
-//! appliquée **aux valeurs** : la zone de tracé raisonne en log₁₀, et seuls
-//! deux endroits savent qu'il y a une échelle, l'entrée
-//! ([`forward`]) et l'étiquetage ([`format_tick`]). Le prix payé est réel et
-//! se dit en une ligne : les graduations sont des **décades** (et leurs
-//! sous-multiples si Plotters juge bon d'en intercaler), pas les
-//! graduations mineures logarithmiques que `LogRange` sait poser — celles-ci
-//! sont tracées par le pipeline ([`minor_key_points`], #344). Aucun
-//! autre morceau du rendu — séries, barres, légende, axe secondaire — n'a à
-//! savoir laquelle des deux échelles est en vigueur.
+//! Here, a single coordinate type — linear `f64` — and the scale is applied
+//! **to the values**: the plot area reasons in log₁₀, and only two places
+//! know there is a scale, the input ([`forward`]) and the labeling
+//! ([`format_tick`]). The price paid is real and fits in one line: the ticks
+//! are **decades** (and their submultiples if Plotters sees fit to
+//! interleave some), not the logarithmic minor ticks that `LogRange` can
+//! place — those are drawn by the pipeline ([`minor_key_points`], #344). No
+//! other piece of the rendering — series, bars, legend, secondary axis — has
+//! to know which of the two scales is in force.
 //!
-//! # Les valeurs non représentables disparaissent, et c'est dit
+//! # Unrepresentable values disappear, and it is said
 //!
-//! Sur une échelle logarithmique, zéro et les négatifs n'ont pas d'image.
-//! Ils sont **retirés** du tracé, comme le sont déjà les `NaN` (la valeur
-//! manquante du socle). Ce qui compte est que ce soit fait au même endroit
-//! pour les deux backends, et que le cadrage n'en tienne pas compte : une
-//! série entièrement négative sur un axe log ne trace rien plutôt que de
-//! faire échouer la figure.
+//! On a logarithmic scale, zero and negatives have no image. They are
+//! **removed** from the plot, as `NaN`s already are (the base's missing
+//! value). What matters is that it is done in the same place for both
+//! backends, and that the framing ignores them: an entirely negative series
+//! on a log axis draws nothing rather than making the figure fail.
 
 use stokesforge_core::number_format::format_tick as format_linear_tick;
 use stokesforge_plot::AxisScale;
 
-/// Image d'une valeur dans l'espace où la zone de tracé travaille.
+/// Image of a value in the space where the plot area works.
 ///
-/// `None` quand la valeur n'a pas d'image : non finie, ou nulle/négative
-/// sur une échelle logarithmique.
+/// `None` when the value has no image: non-finite, or zero/negative on a
+/// logarithmic scale.
 pub fn forward(scale: AxisScale, value: f64) -> Option<f64> {
     if !value.is_finite() {
         return None;
@@ -57,8 +55,8 @@ pub fn forward(scale: AxisScale, value: f64) -> Option<f64> {
     }
 }
 
-/// Retour à l'espace des données. Réciproque de [`forward`] là où celle-ci
-/// est définie.
+/// Back to the data space. Inverse of [`forward`] where the latter is
+/// defined.
 pub fn inverse(scale: AxisScale, t: f64) -> f64 {
     match scale {
         AxisScale::Linear => t,
@@ -66,11 +64,11 @@ pub fn inverse(scale: AxisScale, t: f64) -> f64 {
     }
 }
 
-/// Nombre de graduations que Plotters vise par défaut sur un axe.
+/// Number of ticks Plotters aims for by default on an axis.
 pub const DEFAULT_LABELS: usize = 11;
 
-/// Combien de graduations demander : une par décade sur une échelle
-/// logarithmique ([`decade_label_count`]), le défaut de Plotters sinon.
+/// How many ticks to ask for: one per decade on a logarithmic scale
+/// ([`decade_label_count`]), Plotters' default otherwise.
 pub fn label_count(scale: AxisScale, range: (f64, f64)) -> usize {
     match scale {
         AxisScale::Linear => DEFAULT_LABELS,
@@ -78,7 +76,7 @@ pub fn label_count(scale: AxisScale, range: (f64, f64)) -> usize {
     }
 }
 
-/// Les graduations que Plotters posera sur un intervalle linéaire.
+/// The ticks Plotters will place on a linear interval.
 pub fn linear_key_points(range: (f64, f64), labels: usize) -> Vec<f64> {
     use plotters::coord::ranged1d::{BoldPoints, Ranged};
     use plotters::coord::types::RangedCoordf64;
@@ -88,18 +86,18 @@ pub fn linear_key_points(range: (f64, f64), labels: usize) -> Vec<f64> {
     RangedCoordf64::from(range.0..range.1).key_points(BoldPoints(labels))
 }
 
-/// Les sous-graduations d'un axe (#344), dans l'espace transformé : celles que
-/// l'on trace entre les graduations principales de [`linear_key_points`], sans
-/// jamais en recouvrir une.
+/// The minor ticks of an axis (#344), in the transformed space: those drawn
+/// between the major ticks of [`linear_key_points`], never overlapping one.
 ///
-/// Linéaire : `count` sous-graduations entre deux principales ; sans `count`, le
-/// pas principal est coupé en 5, ou en 4 quand sa mantisse est 2 (0,2 → 0,05) ; Plotters ne produit que les mantisses 1, 2 et 5, et un pas
-/// de 0,4 entre deux sous-graduations serait laid. Les sous-graduations
-/// prolongent aussi au-delà des graduations principales extrêmes, jusqu'aux
-/// bornes de l'axe. Logarithmique (`count` sans effet) : les multiples 2 à 9 de chaque décade ; quand
-/// le pas principal dépasse une décade, les décades intercalées. Vide sous une
-/// décade de pas (intervalle étroit : aucun repère « rond » à poser), ou si
-/// l'intervalle n'est pas fini ou est nul.
+/// Linear: `count` minor ticks between two major ones; without `count`, the
+/// major step is cut in 5, or in 4 when its mantissa is 2 (0.2 → 0.05);
+/// Plotters only produces the mantissas 1, 2 and 5, and a step of 0.4
+/// between two minor ticks would be ugly. The minor ticks also extend beyond
+/// the outermost major ticks, up to the axis bounds. Logarithmic (`count`
+/// has no effect): the multiples 2 to 9 of each decade; when the major step
+/// exceeds a decade, the interleaved decades. Empty below a decade of step
+/// (narrow interval: no "round" mark to place), or if the interval is not
+/// finite or is zero.
 pub fn minor_key_points(scale: AxisScale, range: (f64, f64), count: Option<u8>) -> Vec<f64> {
     let (low, high) = if range.0 <= range.1 {
         range
@@ -169,8 +167,8 @@ pub fn minor_key_points(scale: AxisScale, range: (f64, f64), count: Option<u8>) 
     points
 }
 
-/// Le plus petit nombre de décimales qui écrit toutes les graduations d'un
-/// axe sans les altérer : 0 quand elles sont toutes entières.
+/// The smallest number of decimals that writes all the ticks of an axis
+/// without altering them: 0 when they are all integers.
 fn decimals_for(points: &[f64]) -> usize {
     (0..=10)
         .find(|&decimals| {
@@ -183,23 +181,23 @@ fn decimals_for(points: &[f64]) -> usize {
         .unwrap_or(10)
 }
 
-/// Comment écrire les graduations d'un axe : le même nombre de décimales
-/// partout, aucune quand toutes sont entières (« 0, 100, 200 », pas
-/// « 0.0, 100.0, 200.0 » que donne le formatage par défaut de Plotters).
+/// How to write the ticks of an axis: the same number of decimals
+/// everywhere, none when all are integers ("0, 100, 200", not
+/// "0.0, 100.0, 200.0" as Plotters' default formatting gives).
 #[derive(Debug, Clone, Copy)]
 pub struct TickFormat {
     scale: AxisScale,
     decimals: usize,
     comma: bool,
-    /// Un nombre sur `every` est écrit, à partir de `origin` par pas de `step`
-    /// (#344) ; `every` à 1 les écrit tous.
+    /// One number in `every` is written, from `origin` in steps of `step`
+    /// (#344); `every` at 1 writes them all.
     every: u32,
     origin: f64,
     step: f64,
 }
 
 impl TickFormat {
-    /// Le format de l'axe de cet intervalle (dans l'espace transformé).
+    /// The format of the axis of this interval (in the transformed space).
     pub fn new(scale: AxisScale, range: (f64, f64)) -> Self {
         let decimals = match scale {
             AxisScale::Linear => decimals_for(&linear_key_points(range, label_count(scale, range))),
@@ -215,9 +213,8 @@ impl TickFormat {
         }
     }
 
-    /// N'écrit qu'un nombre sur `every` (#344) : le premier des graduations
-    /// principales de `range`, puis un tous les `every`. 0 et 1 les écrivent
-    /// tous.
+    /// Writes only one number in `every` (#344): the first of the major
+    /// ticks of `range`, then one every `every`. 0 and 1 write them all.
     pub fn with_label_every(mut self, every: u8, range: (f64, f64)) -> Self {
         let majors = linear_key_points(range, label_count(self.scale, range));
         if let [first, second, ..] = majors[..] {
@@ -228,13 +225,13 @@ impl TickFormat {
         self
     }
 
-    /// Écrit la virgule comme séparateur décimal (#223, réglage du graphe).
+    /// Writes the comma as the decimal separator (#223, graph setting).
     pub fn with_decimal_comma(mut self, comma: bool) -> Self {
         self.comma = comma;
         self
     }
 
-    /// L'étiquette d'une graduation, dans l'espace transformé.
+    /// The label of a tick, in the transformed space.
     pub fn format(&self, t: f64) -> String {
         if self.every > 1 && self.step != 0.0 {
             let index = ((t - self.origin) / self.step).round() as i64;
@@ -254,15 +251,15 @@ impl TickFormat {
     }
 }
 
-/// Les graduations d'un axe, en espace de données, avec leur libellé : ce que
-/// le graphe pose, pour un appelant qui peint lui-même (l'aperçu de la fenêtre
-/// d'analyse, #261).
+/// The ticks of an axis, in data space, with their label: what the graph
+/// places, for a caller that paints by itself (the preview of the analysis
+/// window, #261).
 ///
-/// `range` est en espace de données, dans l'ordre d'affichage (un axe inversé
-/// se donne `(haut, bas)`). Le pas vient de [`linear_key_points`] avec
-/// [`label_count`] dans l'espace transformé, le format de [`TickFormat`] : le
-/// même chemin que le pipeline, donc les mêmes graduations qu'un graphe de
-/// même cadrage. Vide si une borne n'a pas d'image sur l'échelle ([`forward`]).
+/// `range` is in data space, in display order (an inverted axis is given
+/// `(top, bottom)`). The step comes from [`linear_key_points`] with
+/// [`label_count`] in the transformed space, the format from [`TickFormat`]:
+/// the same path as the pipeline, hence the same ticks as a graph with the
+/// same framing. Empty if a bound has no image on the scale ([`forward`]).
 pub fn axis_ticks(scale: AxisScale, range: (f64, f64), decimal_comma: bool) -> Vec<(f64, String)> {
     let (Some(low), Some(high)) = (forward(scale, range.0), forward(scale, range.1)) else {
         return Vec::new();
@@ -275,17 +272,16 @@ pub fn axis_ticks(scale: AxisScale, range: (f64, f64), decimal_comma: bool) -> V
         .collect()
 }
 
-/// Cadre un axe linéaire de calque superposé (#174) pour que ses graduations
-/// tombent **en face** de celles de l'axe du calque recouvert.
+/// Frames a linear axis of an overlaid layer (#174) so that its ticks fall
+/// **opposite** those of the covered layer's axis.
 ///
-/// `base` est l'intervalle de l'axe recouvert, `wanted` celui qui ne ferait
-/// qu'envelopper les données du calque ; tous deux dans le même sens. On
-/// cherche un pas « rond » et une position de la première graduation tels que
-/// l'intervalle obtenu contienne `wanted`, compte autant de graduations que
-/// `base` et les pose aux mêmes fractions de l'axe. Chaque candidat est
-/// vérifié avec les graduations que Plotters posera réellement : on ne devine
-/// pas son algorithme. `None` si rien ne convient (l'appelant garde alors
-/// `wanted`).
+/// `base` is the interval of the covered axis, `wanted` the one that would
+/// only wrap the layer's data; both in the same direction. We look for a
+/// "round" step and a position of the first tick such that the resulting
+/// interval contains `wanted`, has as many ticks as `base` and places them
+/// at the same fractions of the axis. Each candidate is checked against the
+/// ticks Plotters will actually place: we do not guess its algorithm. `None`
+/// if nothing fits (the caller then keeps `wanted`).
 pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)> {
     let inverted = base.0 > base.1;
     if (wanted.0 > wanted.1) != inverted {
@@ -308,7 +304,7 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)>
     if base_step <= 0.0 {
         return None;
     }
-    // Les graduations de base, en fraction de l'axe.
+    // The base ticks, as a fraction of the axis.
     let fractions: Vec<f64> = base_points.iter().map(|t| (t - b0) / (b1 - b0)).collect();
     let steps_in_axis = (b1 - b0) / base_step;
     let first_offset = (base_points[0] - b0) / base_step;
@@ -323,8 +319,8 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)>
             if span < d1 - d0 {
                 continue;
             }
-            // Première graduation `j · step`, placée à `first_offset` pas du
-            // bord bas : le bord bas vaut `(j − first_offset) · step`.
+            // First tick `j · step`, placed `first_offset` steps from the low
+            // edge: the low edge is `(j − first_offset) · step`.
             let lowest = (d1 - span) / step + first_offset;
             let highest = d0 / step + first_offset;
             let (lo_j, hi_j) = ((lowest - 1e-9).ceil(), (highest + 1e-9).floor());
@@ -348,12 +344,12 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)>
     None
 }
 
-/// Élargit un intervalle logarithmique aux décades entières qui l'encadrent.
+/// Widens a logarithmic interval to the whole decades that enclose it.
 ///
-/// C'est ce qui fait que les graduations tombent sur 1, 10, 100 plutôt que
-/// sur 3,16 et 31,6 : Plotters choisit ses points-clés dans l'espace où il
-/// travaille — ici log₁₀ — et un intervalle à bornes entières lui fait
-/// naturellement poser des pas entiers.
+/// This is what makes the ticks fall on 1, 10, 100 rather than on 3.16 and
+/// 31.6: Plotters chooses its key points in the space where it works — here
+/// log₁₀ — and an interval with integer bounds naturally makes it place
+/// integer steps.
 pub fn snap_to_decades((lo, hi): (f64, f64)) -> (f64, f64) {
     if !lo.is_finite() || !hi.is_finite() {
         return (0.0, 1.0);
@@ -364,8 +360,8 @@ pub fn snap_to_decades((lo, hi): (f64, f64)) -> (f64, f64) {
     if high <= low {
         high = low + 1.0;
     }
-    // Un fichier peut porter des bornes démesurées ; au-delà, les
-    // graduations ne décrivent plus rien et `powf` sort de `f64`.
+    // A file can carry oversized bounds; beyond that, the ticks describe
+    // nothing anymore and `powf` leaves `f64`.
     low = low.clamp(-300.0, 300.0);
     high = high.clamp(low + 1.0, 301.0);
     if lo <= hi {
@@ -375,23 +371,22 @@ pub fn snap_to_decades((lo, hi): (f64, f64)) -> (f64, f64) {
     }
 }
 
-/// Combien de graduations demander pour un intervalle logarithmique donné.
+/// How many ticks to ask for on a given logarithmic interval.
 ///
-/// Une par décade, plafonnée au nombre que Plotters vise par défaut (11) :
-/// au-delà il choisit lui-même un pas de plusieurs décades, ce qui est le
-/// comportement voulu.
+/// One per decade, capped at the number Plotters aims for by default (11):
+/// beyond that it chooses a step of several decades by itself, which is the
+/// wanted behavior.
 pub fn decade_label_count((lo, hi): (f64, f64)) -> usize {
     let decades = (hi - lo).abs().round() as usize;
     decades.saturating_add(1).clamp(2, 11)
 }
 
-/// Étiquette d'une graduation, dans l'espace transformé.
+/// Label of a tick, in the transformed space.
 ///
-/// Pour une échelle linéaire, rend la valeur telle quelle — la fonction
-/// existe pour que l'appelant n'ait pas à se demander laquelle appeler, mais
-/// le pipeline ne pose de formateur que pour les échelles qui en ont besoin
-/// ([`needs_formatter`]), afin de laisser le formatage par défaut de
-/// Plotters intact là où il convient.
+/// For a linear scale, returns the value as is — the function exists so the
+/// caller does not have to wonder which one to call, but the pipeline only
+/// places a formatter for the scales that need one ([`needs_formatter`]), to
+/// leave Plotters' default formatting intact where it suits.
 pub fn format_tick(scale: AxisScale, t: f64) -> String {
     match scale {
         AxisScale::Linear => format_plain(t),
@@ -399,11 +394,11 @@ pub fn format_tick(scale: AxisScale, t: f64) -> String {
     }
 }
 
-/// `10^t`, écrit comme un lecteur l'écrirait.
+/// `10^t`, written as a reader would write it.
 ///
-/// Décimal tant que ça reste lisible (de 0,0001 à 1 000 000), puissance de
-/// dix au-delà. Un exposant non entier — Plotters peut en produire si
-/// l'intervalle est étroit — rend la valeur elle-même.
+/// Decimal as long as it stays readable (from 0.0001 to 1,000,000), power of
+/// ten beyond. A non-integer exponent — Plotters can produce some if the
+/// interval is narrow — returns the value itself.
 fn format_decade(t: f64) -> String {
     if !t.is_finite() {
         return String::new();
@@ -420,14 +415,14 @@ fn format_decade(t: f64) -> String {
     }
 }
 
-/// Un nombre sans zéros inutiles, et sans notation scientifique surprise.
+/// A number without useless zeros, and without surprise scientific notation.
 fn format_plain(value: f64) -> String {
     if !value.is_finite() {
         return String::new();
     }
     let text = format!("{value}");
-    // `{}` sur un `f64` bascule en notation scientifique au-delà de 1e16 ;
-    // les valeurs que ce chemin voit sont bornées par `snap_to_decades`.
+    // `{}` on an `f64` switches to scientific notation beyond 1e16; the
+    // values this path sees are bounded by `snap_to_decades`.
     text
 }
 
@@ -435,7 +430,7 @@ fn format_plain(value: f64) -> String {
 mod tests {
 
     #[test]
-    fn un_nombre_sur_n_est_ecrit_en_commencant_par_le_premier() {
+    fn one_number_in_n_is_written_starting_with_the_first() {
         let range = (0.0, 10.0);
         let all = TickFormat::new(AxisScale::Linear, range);
         let thin = all.with_label_every(3, range);
@@ -449,9 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn un_nombre_de_sous_graduations_impose_les_subdivisions() {
+    fn a_number_of_minor_ticks_forces_the_subdivisions() {
         let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(1));
-        assert_eq!(minor.len(), 10, "une au milieu de chaque pas");
+        assert_eq!(minor.len(), 10, "one in the middle of each step");
         assert!((minor[0] - 0.5).abs() < 1e-9);
         let nine = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(9));
         assert_eq!(nine.len(), 90);
@@ -462,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn les_sous_graduations_lineaires_coupent_le_pas_en_cinq() {
+    fn linear_minor_ticks_cut_the_step_in_five() {
         let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
         assert_eq!(minor.len(), 40);
         assert!(approx(&minor[..4], &[0.2, 0.4, 0.6, 0.8]));
@@ -473,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn un_pas_de_mantisse_deux_se_coupe_en_quatre() {
+    fn a_step_with_mantissa_two_is_cut_in_four() {
         let majors = linear_key_points((0.0, 1.6), DEFAULT_LABELS);
         assert!((majors[1] - majors[0] - 0.2).abs() < 1e-9, "{majors:?}");
         let minor = minor_key_points(AxisScale::Linear, (0.0, 1.6), None);
@@ -482,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn les_sous_graduations_prolongent_jusqu_aux_bornes() {
+    fn minor_ticks_extend_to_the_bounds() {
         let minor = minor_key_points(AxisScale::Linear, (-0.5, 10.5), None);
         assert!(minor.iter().any(|m| (m + 0.4).abs() < 1e-9));
         assert!(minor.iter().any(|m| (m - 10.4).abs() < 1e-9));
@@ -490,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn un_axe_inverse_a_les_memes_sous_graduations() {
+    fn an_inverted_axis_has_the_same_minor_ticks() {
         let mut direct = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
         let mut inverse = minor_key_points(AxisScale::Linear, (10.0, 0.0), None);
         direct.sort_by(f64::total_cmp);
@@ -499,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn les_sous_graduations_logarithmiques_sont_les_multiples_de_deux_a_neuf() {
+    fn logarithmic_minor_ticks_are_the_multiples_from_two_to_nine() {
         let minor = minor_key_points(AxisScale::Log, (0.0, 3.0), None);
         assert_eq!(minor.len(), 24);
         assert!((minor[0] - 2f64.log10()).abs() < 1e-9);
@@ -508,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn au_dela_d_une_decade_de_pas_les_sous_graduations_sont_les_decades_intercalees() {
+    fn beyond_a_decade_of_step_the_minor_ticks_are_the_interleaved_decades() {
         let majors = linear_key_points((0.0, 20.0), label_count(AxisScale::Log, (0.0, 20.0)));
         assert!(majors[1] - majors[0] >= 1.5, "{majors:?}");
         let minor = minor_key_points(AxisScale::Log, (0.0, 20.0), None);
@@ -520,20 +515,20 @@ mod tests {
     }
 
     #[test]
-    fn un_intervalle_degenere_n_a_pas_de_sous_graduations() {
+    fn a_degenerate_interval_has_no_minor_ticks() {
         assert!(minor_key_points(AxisScale::Linear, (5.0, 5.0), None).is_empty());
         assert!(minor_key_points(AxisScale::Linear, (f64::NAN, 1.0), None).is_empty());
     }
     use super::*;
 
     #[test]
-    fn le_lineaire_est_lidentite() {
+    fn linear_is_the_identity() {
         assert_eq!(forward(AxisScale::Linear, -3.5), Some(-3.5));
         assert_eq!(inverse(AxisScale::Linear, -3.5), -3.5);
     }
 
     #[test]
-    fn le_log_refuse_ce_qui_na_pas_dimage() {
+    fn log_rejects_what_has_no_image() {
         assert_eq!(forward(AxisScale::Log, 0.0), None);
         assert_eq!(forward(AxisScale::Log, -1.0), None);
         assert_eq!(forward(AxisScale::Log, f64::NAN), None);
@@ -542,31 +537,31 @@ mod tests {
     }
 
     #[test]
-    fn le_non_fini_disparait_aussi_en_lineaire() {
-        // Même règle des deux côtés : ce qui n'a pas de place sur l'axe n'y
-        // va pas, et ce n'est pas une erreur.
+    fn the_non_finite_also_disappears_in_linear() {
+        // Same rule on both sides: what has no place on the axis does not go
+        // on it, and it is not an error.
         assert_eq!(forward(AxisScale::Linear, f64::NAN), None);
         assert_eq!(forward(AxisScale::Linear, f64::NEG_INFINITY), None);
     }
 
     #[test]
-    fn les_bornes_log_sacrochent_aux_decades() {
+    fn log_bounds_snap_to_decades() {
         assert_eq!(snap_to_decades((0.3, 2.7)), (0.0, 3.0));
-        // Un intervalle dégénéré doit rester un intervalle.
+        // A degenerate interval must remain an interval.
         assert_eq!(snap_to_decades((2.0, 2.0)), (2.0, 3.0));
-        // Un axe inversé garde son sens.
+        // An inverted axis keeps its direction.
         assert_eq!(snap_to_decades((2.7, 0.3)), (3.0, 0.0));
     }
 
     #[test]
-    fn les_bornes_demesurees_sont_bornees() {
+    fn oversized_bounds_are_capped() {
         let (lo, hi) = snap_to_decades((-1e300, 1e300));
         assert!(lo >= -300.0 && hi <= 301.0 && lo < hi, "{lo}..{hi}");
         assert!(inverse(AxisScale::Log, hi).is_finite() || hi > 300.0);
     }
 
     #[test]
-    fn une_graduation_log_se_lit_comme_un_nombre() {
+    fn a_log_tick_reads_as_a_number() {
         assert_eq!(format_tick(AxisScale::Log, 0.0), "1");
         assert_eq!(format_tick(AxisScale::Log, 2.0), "100");
         assert_eq!(format_tick(AxisScale::Log, -2.0), "0.01");
@@ -574,13 +569,13 @@ mod tests {
     }
 
     #[test]
-    fn une_graduation_log_non_entiere_rend_sa_valeur() {
-        let etiquette = format_tick(AxisScale::Log, 0.5);
-        assert!(etiquette.starts_with("3.16"), "{etiquette}");
+    fn a_non_integer_log_tick_returns_its_value() {
+        let label = format_tick(AxisScale::Log, 0.5);
+        assert!(label.starts_with("3.16"), "{label}");
     }
 
     #[test]
-    fn le_nombre_de_graduations_suit_les_decades() {
+    fn the_number_of_ticks_follows_the_decades() {
         assert_eq!(decade_label_count((0.0, 3.0)), 4);
         assert_eq!(decade_label_count((0.0, 40.0)), 11);
         assert_eq!(decade_label_count((1.0, 1.0)), 2);
@@ -595,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn des_graduations_entieres_s_ecrivent_sans_decimale() {
+    fn integer_ticks_are_written_without_decimals() {
         let labels = ticks((-40.0, 840.0));
         assert!(labels.contains(&"0".to_owned()), "{labels:?}");
         assert!(labels.contains(&"200".to_owned()), "{labels:?}");
@@ -603,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn des_graduations_fractionnaires_gardent_le_meme_nombre_de_decimales() {
+    fn fractional_ticks_keep_the_same_number_of_decimals() {
         let labels = ticks((-0.6, 0.6));
         assert!(labels.contains(&"0.0".to_owned()), "{labels:?}");
         assert!(labels.contains(&"-0.2".to_owned()), "{labels:?}");
@@ -613,17 +608,17 @@ mod tests {
     }
 
     #[test]
-    fn un_zero_n_a_pas_de_signe() {
+    fn a_zero_has_no_sign() {
         assert_eq!(format_linear_tick(-0.0, 0), "0");
         assert_eq!(format_linear_tick(-1e-12, 1), "0.0");
         assert_eq!(format_linear_tick(-2.0, 0), "-2");
     }
 
     #[test]
-    fn un_axe_aligne_pose_ses_graduations_en_face() {
+    fn an_aligned_axis_places_its_ticks_opposite() {
         let base = (-40.0, 840.0);
         let wanted = (-6.0, 126.0);
-        let range = aligned_range(base, wanted).expect("un cadrage aligné");
+        let range = aligned_range(base, wanted).expect("an aligned framing");
         assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
         let fractions = |r: (f64, f64)| -> Vec<f64> {
             linear_key_points(r, DEFAULT_LABELS)
@@ -639,25 +634,25 @@ mod tests {
     }
 
     #[test]
-    fn l_alignement_respecte_le_sens_de_l_axe() {
-        let inverted = aligned_range((840.0, -40.0), (126.0, -6.0)).expect("aligné");
+    fn alignment_respects_the_axis_direction() {
+        let inverted = aligned_range((840.0, -40.0), (126.0, -6.0)).expect("aligned");
         assert!(inverted.0 > inverted.1);
         assert_eq!(aligned_range((-40.0, 840.0), (126.0, -6.0)), None);
     }
 
     #[test]
-    fn la_virgule_remplace_le_point_dans_les_graduations() {
-        let lineaire = TickFormat::new(AxisScale::Linear, (0.0, 1.0));
-        let virgule = lineaire.with_decimal_comma(true);
-        assert_eq!(lineaire.format(0.5), "0.5");
-        assert_eq!(virgule.format(0.5), "0,5");
-        // Une échelle log écrit aussi ses puissances décimales avec la virgule.
+    fn the_comma_replaces_the_point_in_ticks() {
+        let linear_format = TickFormat::new(AxisScale::Linear, (0.0, 1.0));
+        let comma_format = linear_format.with_decimal_comma(true);
+        assert_eq!(linear_format.format(0.5), "0.5");
+        assert_eq!(comma_format.format(0.5), "0,5");
+        // A log scale also writes its decimal powers with the comma.
         let log = TickFormat::new(AxisScale::Log, (-2.0, 2.0)).with_decimal_comma(true);
         assert_eq!(log.format(-1.0), "0,1");
     }
 
     #[test]
-    fn les_graduations_d_un_axe_lineaire_sont_celles_du_pipeline() {
+    fn the_ticks_of_a_linear_axis_are_the_pipeline_ones() {
         let range = (0.0, 10.0);
         let ticks = axis_ticks(AxisScale::Linear, range, false);
         let expected = linear_key_points(range, label_count(AxisScale::Linear, range));
@@ -668,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn un_axe_inverse_a_les_memes_graduations() {
+    fn an_inverted_axis_has_the_same_ticks() {
         let sorted = |range| {
             let mut values: Vec<f64> = axis_ticks(AxisScale::Linear, range, false)
                 .iter()
@@ -683,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn les_graduations_logarithmiques_sont_les_decades() {
+    fn logarithmic_ticks_are_the_decades() {
         let ticks = axis_ticks(AxisScale::Log, (1.0, 1000.0), false);
         let data: Vec<f64> = ticks.iter().map(|t| t.0.round()).collect();
         assert_eq!(data, vec![1.0, 10.0, 100.0, 1000.0]);
@@ -692,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn la_virgule_decimale_suit_le_reglage() {
+    fn the_decimal_comma_follows_the_setting() {
         let range = (0.0, 1.0);
         let dotted = axis_ticks(AxisScale::Linear, range, false);
         let comma = axis_ticks(AxisScale::Linear, range, true);
@@ -702,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn une_borne_sans_image_ne_donne_aucune_graduation() {
+    fn a_bound_without_image_gives_no_ticks() {
         assert!(axis_ticks(AxisScale::Log, (0.0, 100.0), false).is_empty());
         assert!(axis_ticks(AxisScale::Log, (-5.0, 100.0), false).is_empty());
         assert!(axis_ticks(AxisScale::Linear, (0.0, f64::NAN), false).is_empty());

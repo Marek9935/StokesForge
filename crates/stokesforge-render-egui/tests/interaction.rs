@@ -1,18 +1,17 @@
-//! La navigation — tâches R7.1 à R7.4, vérifiées par de vrais événements
-//! egui rejoués sur plusieurs images plutôt que par un appel direct aux
-//! méthodes privées de `GraphView` (elles ne sont justement pas publiques :
-//! c'est le câblage entrée egui → `ViewState` qui est à l'épreuve ici, pas
-//! la géométrie — déjà couverte, indépendamment d'egui, par
-//! `stokesforge-render/src/interact.rs`).
+//! Navigation — tasks R7.1 to R7.4, checked with real egui events replayed
+//! over several frames rather than by a direct call to the private methods
+//! of `GraphView` (they are precisely not public: what is under test here
+//! is the wiring from egui input to `ViewState`, not the geometry — already
+//! covered, independently of egui, by `stokesforge-render/src/interact.rs`).
 //!
-//! # Pourquoi deux images pour un geste
+//! # Why two frames for one gesture
 //!
-//! `egui` calcule les interactions d'une image à partir des rectangles de
-//! widgets **de l'image précédente** (`egui::interaction` : *"Calculated at
-//! the start of each frame based on: Widget rects from previous frame"*).
-//! Une première image « à blanc » (aucun événement) sert donc uniquement à
-//! faire exister le rectangle interactif de la vue ; les événements de
-//! pointeur eux-mêmes sont envoyés à partir de la deuxième.
+//! `egui` computes the interactions of a frame from the widget rectangles
+//! **of the previous frame** (`egui::interaction`: *"Calculated at the start
+//! of each frame based on: Widget rects from previous frame"*). A first
+//! blank frame (no event) is therefore used only to make the view's
+//! interactive rectangle exist; the pointer events themselves are sent from
+//! the second frame on.
 
 use egui::{Event, MouseWheelUnit, PointerButton, Pos2, Rect, Vec2};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
@@ -26,14 +25,14 @@ const RECT: Rect = Rect {
     max: Pos2::new(800.0, 600.0),
 };
 
-/// Un graphe à une série, cadrée sur `0..100` des deux côtés une fois la
-/// marge de 5 % de `pipeline::padded` retirée mentalement — les tests ne
-/// dépendent que du signe des mouvements, jamais de la marge exacte.
-fn banc() -> (Session, NodeId) {
-    let mut project = Project::new("Navigation").expect("projet");
+/// A graph with one series, framed on `0..100` on both sides once the 5 %
+/// margin of `pipeline::padded` is mentally removed — the tests depend only
+/// on the sign of the movements, never on the exact margin.
+fn fixture() -> (Session, NodeId) {
+    let mut project = Project::new("Navigation").expect("project");
     let root = project.root();
-    let book = project.add_empty_workbook(root, None).expect("classeur");
-    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let book = project.add_empty_workbook(root, None).expect("workbook");
+    let sheet = project.add_worksheet(book, None).expect("sheet");
     let xs: Vec<f64> = (0..=100).map(|i| i as f64).collect();
     let ys = xs.clone();
     let x = project
@@ -48,7 +47,7 @@ fn banc() -> (Session, NodeId) {
         panel
     };
     let spec = PlotSpec::empty("Navigation").with_panels(panel);
-    let graph = project.add_graph(root, None, spec).expect("graphe");
+    let graph = project.add_graph(root, None, spec).expect("graph");
     (Session::spawn(project, None).expect("session"), graph)
 }
 
@@ -58,36 +57,36 @@ fn numeric(values: &[f64]) -> Column {
         ValueBlock::Float(values.to_vec()),
         ColumnMeta::default(),
     )
-    .expect("colonne")
+    .expect("column")
 }
 
-fn contexte() -> egui::Context {
+fn new_context() -> egui::Context {
     let context = egui::Context::default();
     context.set_fonts(font_definitions());
     context
 }
 
-/// Peint une image avec les événements donnés, et rend si elle vient du
-/// cache. Consomme systématiquement le `TexturesDelta` : sans fenêtre,
-/// personne d'autre ne le fait, et `epaint` panique sur un delta laissé de
-/// côté (voir `tests/cache_session.rs`).
-fn image(
+/// Paints a frame with the given events, and returns whether it came from
+/// the cache. Always consumes the `TexturesDelta`: without a window nobody
+/// else does, and `epaint` panics on a delta left aside (see
+/// `tests/cache_session.rs`).
+fn paint_frame(
     context: &egui::Context,
     view: &mut GraphView,
     snapshot: &Snapshot,
     graph: NodeId,
     events: Vec<Event>,
 ) -> bool {
-    let mut depuis_le_cache = false;
+    let mut from_cache = false;
     let input = egui::RawInput {
         events,
         ..Default::default()
     };
-    let mut sortie = context.run_ui(input, |ui| {
-        depuis_le_cache = view.paint(ui, RECT, snapshot, graph).expect("peinture");
+    let mut output = context.run_ui(input, |ui| {
+        from_cache = view.paint(ui, RECT, snapshot, graph).expect("painting");
     });
-    sortie.textures_delta.clear();
-    depuis_le_cache
+    output.textures_delta.clear();
+    from_cache
 }
 
 fn pointer_moved(pos: Pos2) -> Event {
@@ -103,14 +102,14 @@ fn pointer_button(pos: Pos2, button: PointerButton, pressed: bool) -> Event {
     }
 }
 
-/// Un défilement dont l'unité est `Point` et l'amplitude **sous 8,0** :
-/// c'est la condition exacte (`egui::input_state::wheel_state`,
-/// `is_smooth`) sous laquelle `smooth_scroll_delta` reçoit le delta entier
-/// dès l'image où l'événement arrive, sans lissage sur plusieurs images — ce
-/// qui rend le test déterministe en une seule image. Au-delà de 8,0, `egui`
-/// étale le delta sur plusieurs images (pensé pour une molette physique, qui
-/// avance par grands crans), et le test devrait attendre plusieurs images
-/// pour voir tout l'effet.
+/// A scroll whose unit is `Point` and whose amplitude is **under 8.0**:
+/// this is the exact condition (`egui::input_state::wheel_state`,
+/// `is_smooth`) under which `smooth_scroll_delta` receives the whole delta
+/// in the frame where the event arrives, without smoothing over several
+/// frames — which makes the test deterministic in a single frame. Above 8.0,
+/// `egui` spreads the delta over several frames (meant for a physical wheel,
+/// which moves in large notches), and the test would have to wait several
+/// frames to see the whole effect.
 fn wheel(delta_y: f32) -> Event {
     wheel_with(delta_y, egui::Modifiers::CTRL)
 }
@@ -124,59 +123,53 @@ fn wheel_with(delta_y: f32, modifiers: egui::Modifiers) -> Event {
     }
 }
 
-/// Un point du panneau, en pixel — le centre du rectangle du test,
-/// arbitraire mais fixe.
-const SOUS_CURSEUR: Pos2 = Pos2::new(400.0, 300.0);
+/// A point of the panel, in pixels — the center of the test rectangle,
+/// arbitrary but fixed.
+const UNDER_CURSOR: Pos2 = Pos2::new(400.0, 300.0);
 
 #[test]
-fn zoomer_a_la_molette_retrecit_le_cadrage_et_fait_avancer_la_generation() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn wheel_zoom_shrinks_the_framing_and_advances_the_generation() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
 
-    // Image 0 : à blanc, pour que le rectangle interactif existe.
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    let avant = view
-        .last_drawn()
-        .expect("une figure a été tracée")
-        .x_range();
+    // Frame 0: blank, so that the interactive rectangle exists.
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    let before = view.last_drawn().expect("a figure was drawn").x_range();
     assert_eq!(view.view().generation(), 0);
 
-    // Image 1 : la molette, survolée au-dessus de la figure. Le signe est
-    // celui qui, avec `handle_navigation` (`facteur = exp(-défilement × k)`),
-    // donne un facteur `< 1` — donc un rétrécissement ; l'inverse
-    // agrandirait, ce que `wheel_state.rs` ne distingue pas physiquement
-    // d'un sens ou de l'autre (aucune convention n'est imposée par R7).
-    image(
+    // Frame 1: the wheel, hovering over the figure. The sign is the one
+    // that, with `handle_navigation` (`factor = exp(-scroll × k)`), gives a
+    // factor `< 1` — hence a shrink; the opposite would enlarge, which
+    // `wheel_state.rs` does not physically tell apart from one direction or
+    // the other (R7 imposes no convention).
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
-        vec![pointer_moved(SOUS_CURSEUR), wheel(7.9)],
+        vec![pointer_moved(UNDER_CURSOR), wheel(7.9)],
     );
-    // Il faut une deuxième image pour que le pipeline rejoue avec le nouveau
-    // cadrage (la génération a changé la clé de cache **pendant** l'image où
-    // le geste a eu lieu, donc `outcome.cached` de cette image-là peut
-    // encore porter l'ancienne figure selon l'ordre exact des étapes ; ce
-    // test ne fixe que le résultat stable, une image plus tard).
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    // A second frame is needed for the pipeline to replay with the new
+    // framing (the generation changed the cache key **during** the frame
+    // where the gesture happened, so `outcome.cached` of that frame may
+    // still carry the old figure depending on the exact order of the steps;
+    // this test fixes only the stable result, one frame later).
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
 
     assert!(
         view.view().generation() > 0,
-        "la molette n'a pas fait avancer la génération de vue"
+        "the wheel did not advance the view generation"
     );
-    let apres = view
-        .last_drawn()
-        .expect("une figure a été tracée")
-        .x_range();
+    let after = view.last_drawn().expect("a figure was drawn").x_range();
     assert!(
-        (apres.1 - apres.0) < (avant.1 - avant.0),
-        "le cadrage n'a pas rétréci : avant {avant:?}, après {apres:?}"
+        (after.1 - after.0) < (before.1 - before.0),
+        "the framing did not shrink: before {before:?}, after {after:?}"
     );
 }
 
-/// Ctrl tel que le livre un clavier réel : `ctrl` et `command` ensemble.
+/// Ctrl as a real keyboard delivers it: `ctrl` and `command` together.
 fn ctrl(on: bool) -> Event {
     Event::ModifiersChanged(if on {
         egui::Modifiers {
@@ -189,12 +182,12 @@ fn ctrl(on: bool) -> Event {
     })
 }
 
-/// Un glisser rejoué sur cinq images (#318) : pression en `start`, deux
-/// déplacements, relâchement en `end`. `ctrl_pression` : Ctrl enfoncé avant
-/// la pression ; `ctrl_en_route` : son état dès l'image du premier
-/// déplacement. Rend, image par image, si la figure vient du cache.
+/// A drag replayed over five frames (#318): press at `start`, two moves,
+/// release at `end`. `ctrl_on_press`: Ctrl held down before the press;
+/// `ctrl_midway`: its state from the frame of the first move. Returns,
+/// frame by frame, whether the figure came from the cache.
 #[allow(clippy::too_many_arguments)]
-fn glisser(
+fn drag(
     context: &egui::Context,
     view: &mut GraphView,
     snapshot: &Snapshot,
@@ -202,50 +195,50 @@ fn glisser(
     start: Pos2,
     end: Pos2,
     button: PointerButton,
-    ctrl_pression: bool,
-    ctrl_en_route: bool,
+    ctrl_on_press: bool,
+    ctrl_midway: bool,
 ) -> Vec<bool> {
     let mid = start + (end - start) * 0.5;
-    let mut pression = Vec::new();
-    if ctrl_pression {
-        pression.push(ctrl(true));
+    let mut press = Vec::new();
+    if ctrl_on_press {
+        press.push(ctrl(true));
     }
-    pression.push(pointer_moved(start));
-    pression.push(pointer_button(start, button, true));
-    let mut en_route = Vec::new();
-    if ctrl_en_route != ctrl_pression {
-        en_route.push(ctrl(ctrl_en_route));
+    press.push(pointer_moved(start));
+    press.push(pointer_button(start, button, true));
+    let mut midway = Vec::new();
+    if ctrl_midway != ctrl_on_press {
+        midway.push(ctrl(ctrl_midway));
     }
-    en_route.push(pointer_moved(mid));
-    let mut fin = vec![pointer_button(end, button, false)];
-    if ctrl_en_route {
-        fin.push(ctrl(false));
+    midway.push(pointer_moved(mid));
+    let mut finish = vec![pointer_button(end, button, false)];
+    if ctrl_midway {
+        finish.push(ctrl(false));
     }
-    [pression, en_route, vec![pointer_moved(end)], fin, vec![]]
+    [press, midway, vec![pointer_moved(end)], finish, vec![]]
         .into_iter()
-        .map(|events| image(context, view, snapshot, graph, events))
+        .map(|events| paint_frame(context, view, snapshot, graph, events))
         .collect()
 }
 
-fn largeur(range: (f64, f64)) -> f64 {
+fn width_of(range: (f64, f64)) -> f64 {
     range.1 - range.0
 }
 
-/// Le glisser de cadrage de base, sur le fond, pour les tests de #318.
-fn pan_sur_le_fond(
+/// The basic framing drag, on the background, for the #318 tests.
+fn pan_on_background(
     tool: stokesforge_render_egui::GraphTool,
     button: PointerButton,
-    ctrl_pression: bool,
-    ctrl_en_route: bool,
+    ctrl_on_press: bool,
+    ctrl_midway: bool,
 ) -> ((f64, f64), (f64, f64), u64, Vec<bool>) {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
     view.set_tool(tool);
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    let avant = view.last_drawn().expect("figure").x_range();
-    let cache = glisser(
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    let before = view.last_drawn().expect("figure").x_range();
+    let cache = drag(
         &context,
         &mut view,
         &snapshot,
@@ -253,123 +246,120 @@ fn pan_sur_le_fond(
         Pos2::new(300.0, 300.0),
         Pos2::new(500.0, 300.0),
         button,
-        ctrl_pression,
-        ctrl_en_route,
+        ctrl_on_press,
+        ctrl_midway,
     );
-    let apres = view.last_drawn().expect("figure").x_range();
-    (avant, apres, view.view().generation(), cache)
+    let after = view.last_drawn().expect("figure").x_range();
+    (before, after, view.view().generation(), cache)
 }
 
-/// #318 : Ctrl + glisser déplace le cadrage, partout dans le tracé et quel
-/// que soit l'outil Pointeur ; glisser vers la droite fait apparaître ce qui
-/// était à gauche (les deux bornes baissent), sans changer la largeur.
+/// #318: Ctrl + drag pans the framing, anywhere in the plot and whatever the
+/// Pointer tool; dragging to the right reveals what was on the left (both
+/// bounds go down), without changing the width.
 #[test]
-fn ctrl_glisser_deplace_le_cadrage() {
+fn ctrl_drag_pans_the_framing() {
     use stokesforge_render_egui::GraphTool;
-    let (avant, apres, generation, _) =
-        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, true, true);
+    let (before, after, generation, _) =
+        pan_on_background(GraphTool::Pointer, PointerButton::Primary, true, true);
+    assert!(generation > 0, "the drag advanced no generation");
     assert!(
-        generation > 0,
-        "le glissé n'a fait avancer aucune génération"
+        after.0 < before.0 && after.1 < before.1,
+        "wrong direction: before {before:?}, after {after:?}"
     );
     assert!(
-        apres.0 < avant.0 && apres.1 < avant.1,
-        "mauvais sens : avant {avant:?}, après {apres:?}"
-    );
-    assert!(
-        (largeur(apres) - largeur(avant)).abs() < 1e-6,
-        "un pan n'est pas un zoom"
+        (width_of(after) - width_of(before)).abs() < 1e-6,
+        "a pan is not a zoom"
     );
 }
 
-/// #318 : le clic milieu + glisser fait le même pan, sans Ctrl.
+/// #318: middle click + drag does the same pan, without Ctrl.
 #[test]
-fn clic_milieu_glisser_deplace_le_cadrage() {
+fn middle_click_drag_pans_the_framing() {
     use stokesforge_render_egui::GraphTool;
-    let (avant, apres, generation, _) =
-        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Middle, false, false);
-    assert!(generation > 0, "le glissé milieu n'a rien cadré");
+    let (before, after, generation, _) =
+        pan_on_background(GraphTool::Pointer, PointerButton::Middle, false, false);
+    assert!(generation > 0, "the middle drag framed nothing");
     assert!(
-        apres.0 < avant.0 && apres.1 < avant.1,
-        "{avant:?} -> {apres:?}"
+        after.0 < before.0 && after.1 < before.1,
+        "{before:?} -> {after:?}"
     );
-    assert!((largeur(apres) - largeur(avant)).abs() < 1e-6);
+    assert!((width_of(after) - width_of(before)).abs() < 1e-6);
 }
 
-/// #318 : un glisser simple (bouton principal, sans Ctrl) ne fait plus de
-/// pan avec le Pointeur : cadrage et génération inchangés, et la figure
-/// reste servie par le cache pendant tout le geste (rien à reconstruire).
+/// #318: a plain drag (primary button, no Ctrl) no longer pans with the
+/// Pointer: framing and generation unchanged, and the figure stays served
+/// from the cache during the whole gesture (nothing to rebuild).
 #[test]
-fn glisser_simple_sur_le_fond_ne_fait_rien() {
+fn plain_drag_on_the_background_does_nothing() {
     use stokesforge_render_egui::GraphTool;
-    let (avant, apres, generation, cache) =
-        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, false, false);
-    assert_eq!(generation, 0, "un glisser simple a cadré");
-    assert_eq!(avant, apres);
+    let (before, after, generation, cache) =
+        pan_on_background(GraphTool::Pointer, PointerButton::Primary, false, false);
+    assert_eq!(generation, 0, "a plain drag framed");
+    assert_eq!(before, after);
     assert!(
         cache.iter().all(|c| *c),
-        "la figure a été reconstruite : {cache:?}"
+        "the figure was rebuilt: {cache:?}"
     );
 }
 
-/// #318 : Ctrl relâché en route, le pan continue ; Ctrl pressé en route, il
-/// ne démarre pas (le geste est décidé à la pression).
+/// #318: with Ctrl released midway, the pan continues; with Ctrl pressed
+/// midway, it does not start (the gesture is decided at the press).
 #[test]
-fn ctrl_se_lit_a_la_pression_pas_en_route() {
+fn ctrl_is_read_at_press_not_midway() {
     use stokesforge_render_egui::GraphTool;
-    let (avant, apres, generation, _) =
-        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, true, false);
+    let (before, after, generation, _) =
+        pan_on_background(GraphTool::Pointer, PointerButton::Primary, true, false);
     assert!(
-        generation > 0 && apres.0 < avant.0,
-        "le pan s'est arrêté avec Ctrl"
+        generation > 0 && after.0 < before.0,
+        "the pan stopped with Ctrl"
     );
     let (_, _, generation, _) =
-        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, false, true);
-    assert_eq!(generation, 0, "Ctrl pressé en route a déclenché un pan");
+        pan_on_background(GraphTool::Pointer, PointerButton::Primary, false, true);
+    assert_eq!(generation, 0, "Ctrl pressed midway triggered a pan");
 }
 
-/// #318 : l'outil Zoom garde son rectangle au glisser simple ; Ctrl ou clic
-/// milieu y font un pan, sans rectangle (la largeur du cadrage ne change pas).
+/// #318: the Zoom tool keeps its rectangle on a plain drag; Ctrl or middle
+/// click pan there, without a rectangle (the framing width does not change).
 #[test]
-fn zoom_ctrl_glisser_panne_sans_rectangle() {
+fn zoom_tool_ctrl_drag_pans_without_rectangle() {
     use stokesforge_render_egui::GraphTool;
-    let (avant, apres, _, _) =
-        pan_sur_le_fond(GraphTool::ZoomBox, PointerButton::Primary, false, false);
+    let (before, after, _, _) =
+        pan_on_background(GraphTool::ZoomBox, PointerButton::Primary, false, false);
     assert!(
-        largeur(apres) < largeur(avant),
-        "le rectangle de zoom a disparu"
+        width_of(after) < width_of(before),
+        "the zoom rectangle is gone"
     );
-    for (button, ctrl_pression) in [
+    for (button, ctrl_on_press) in [
         (PointerButton::Primary, true),
         (PointerButton::Middle, false),
     ] {
-        let (avant, apres, _, _) =
-            pan_sur_le_fond(GraphTool::ZoomBox, button, ctrl_pression, ctrl_pression);
+        let (before, after, _, _) =
+            pan_on_background(GraphTool::ZoomBox, button, ctrl_on_press, ctrl_on_press);
         assert!(
-            apres.0 < avant.0 && apres.1 < avant.1,
-            "pas de pan : {avant:?} -> {apres:?}"
+            after.0 < before.0 && after.1 < before.1,
+            "no pan: {before:?} -> {after:?}"
         );
         assert!(
-            (largeur(apres) - largeur(avant)).abs() < 1e-6,
-            "un rectangle a zoomé pendant le pan : {avant:?} -> {apres:?}"
+            (width_of(after) - width_of(before)).abs() < 1e-6,
+            "a rectangle zoomed during the pan: {before:?} -> {after:?}"
         );
     }
 }
 
-/// #318 : avec un outil de tracé, Ctrl + glisser panne sans rien tracer et
-/// l'outil reste actif ; Ctrl + clic ne pose ni forme ni texte.
+/// #318: with a drawing tool, Ctrl + drag pans without drawing anything and
+/// the tool stays active; Ctrl + click places neither a shape nor a text.
 #[test]
-fn les_outils_de_trace_ne_tracent_pas_sous_ctrl() {
+fn drawing_tools_do_not_draw_under_ctrl() {
     use stokesforge_render_egui::{GraphEvent, GraphTool};
     for tool in [GraphTool::Rectangle, GraphTool::Line] {
-        let (session, graph) = banc();
-        let snapshot = session.handle().snapshot().expect("instantané");
-        let context = contexte();
+        let (session, graph) = fixture();
+        let snapshot = session.handle().snapshot().expect("snapshot");
+        let context = new_context();
         let mut view = GraphView::new();
         view.set_tool(tool);
-        image(&context, &mut view, &snapshot, graph, vec![]);
-        let avant = view.last_drawn().expect("figure").x_range();
-        glisser(
+        paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+        let before = view.last_drawn().expect("figure").x_range();
+        drag(
             &context,
             &mut view,
             &snapshot,
@@ -382,64 +372,64 @@ fn les_outils_de_trace_ne_tracent_pas_sous_ctrl() {
         );
         assert!(
             view.take_events().is_empty(),
-            "{tool:?} : un événement sous Ctrl"
+            "{tool:?}: an event under Ctrl"
         );
-        assert_eq!(view.tool(), tool, "l'outil a rendu la main");
+        assert_eq!(view.tool(), tool, "the tool handed control back");
         assert!(view.shape_preview().is_none());
-        let apres = view.last_drawn().expect("figure").x_range();
-        assert!(apres.0 < avant.0, "{tool:?} : pas de pan");
+        let after = view.last_drawn().expect("figure").x_range();
+        assert!(after.0 < before.0, "{tool:?}: no pan");
 
-        // Ctrl + clic simple : aucune forme.
+        // Plain Ctrl + click: no shape.
         for events in [
             vec![
                 ctrl(true),
-                pointer_moved(SOUS_CURSEUR),
-                pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+                pointer_moved(UNDER_CURSOR),
+                pointer_button(UNDER_CURSOR, PointerButton::Primary, true),
             ],
-            vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+            vec![pointer_button(UNDER_CURSOR, PointerButton::Primary, false)],
             vec![ctrl(false)],
             vec![],
         ] {
-            image(&context, &mut view, &snapshot, graph, events);
+            paint_frame(&context, &mut view, &snapshot, graph, events);
         }
         let events = view.take_events();
         assert!(
             !events
                 .iter()
                 .any(|e| matches!(e, GraphEvent::ShapeChanged { .. })),
-            "{tool:?} : une forme sous Ctrl + clic : {events:?}"
+            "{tool:?}: a shape under Ctrl + click: {events:?}"
         );
         assert_eq!(view.tool(), tool);
     }
 }
 
-/// #318 : Ctrl + clic avec l'outil Texte ne pose aucun texte.
+/// #318: Ctrl + click with the Text tool places no text.
 #[test]
-fn ctrl_clic_avec_l_outil_texte_ne_pose_rien() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn ctrl_click_with_the_text_tool_places_nothing() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
     view.set_tool(stokesforge_render_egui::GraphTool::Text);
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     for events in [
         vec![
             ctrl(true),
-            pointer_moved(SOUS_CURSEUR),
-            pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+            pointer_moved(UNDER_CURSOR),
+            pointer_button(UNDER_CURSOR, PointerButton::Primary, true),
         ],
-        vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+        vec![pointer_button(UNDER_CURSOR, PointerButton::Primary, false)],
         vec![ctrl(false)],
         vec![],
     ] {
-        image(&context, &mut view, &snapshot, graph, events);
+        paint_frame(&context, &mut view, &snapshot, graph, events);
     }
     assert!(
         view.take_events().is_empty(),
-        "un texte posé sous Ctrl + clic"
+        "a text placed under Ctrl + click"
     );
-    // Un glisser simple avec l'outil Texte ne fait rien non plus.
-    glisser(
+    // A plain drag with the Text tool does nothing either.
+    drag(
         &context,
         &mut view,
         &snapshot,
@@ -454,35 +444,35 @@ fn ctrl_clic_avec_l_outil_texte_ne_pose_rien() {
 }
 
 #[test]
-fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn rubber_band_rectangle_zooms_on_the_chosen_area() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
     view.set_tool(stokesforge_render_egui::GraphTool::ZoomBox);
 
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    // Le cadrage attendu se lit sur la transformation *d'avant* le geste :
-    // c'est elle qui traduit les deux coins choisis en données.
-    let panel_avant = view
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    // The expected framing is read on the transform from *before* the
+    // gesture: it is what translates the two chosen corners into data.
+    let panel_before = view
         .last_drawn()
-        .expect("une figure a été tracée")
+        .expect("a figure was drawn")
         .panel(0)
-        .expect("un panneau")
+        .expect("a panel")
         .clone();
-    let transform_avant = stokesforge_render_egui::PanelTransform::of(&panel_avant)
-        .expect("panneau de taille non nulle");
+    let transform_before =
+        stokesforge_render_egui::PanelTransform::of(&panel_before).expect("panel of non-zero size");
 
     let start = Pos2::new(300.0, 200.0);
     let end = Pos2::new(500.0, 400.0);
-    let attendu = transform_avant
+    let expected = transform_before
         .range_between(
             (start.x as f64, start.y as f64),
             (end.x as f64, end.y as f64),
         )
-        .expect("les deux coins sont dans le cadrage");
+        .expect("both corners are inside the framing");
 
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -492,60 +482,60 @@ fn le_rectangle_elastique_zoome_sur_la_zone_choisie() {
             pointer_button(start, PointerButton::Primary, true),
         ],
     );
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
         vec![pointer_moved(end)],
     );
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
         vec![pointer_button(end, PointerButton::Primary, false)],
     );
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
 
     assert!(
         view.view().generation() > 0,
-        "le rectangle élastique n'a fait avancer aucune génération de vue"
+        "the rubber-band rectangle advanced no view generation"
     );
     let framing = view
         .view()
-        .framing(panel_avant.index)
-        .expect("le panneau devrait porter un cadrage explicite");
+        .framing(panel_before.index)
+        .expect("the panel should carry an explicit framing");
     assert!(
-        (framing.x.unwrap().0 - attendu.0 .0).abs() < 1e-6
-            && (framing.x.unwrap().1 - attendu.0 .1).abs() < 1e-6,
-        "x_range = {:?}, attendu {:?}",
+        (framing.x.unwrap().0 - expected.0 .0).abs() < 1e-6
+            && (framing.x.unwrap().1 - expected.0 .1).abs() < 1e-6,
+        "x_range = {:?}, expected {:?}",
         framing.x,
-        attendu.0
+        expected.0
     );
     assert!(
-        (framing.y.unwrap().0 - attendu.1 .0).abs() < 1e-6
-            && (framing.y.unwrap().1 - attendu.1 .1).abs() < 1e-6,
-        "y_range = {:?}, attendu {:?}",
+        (framing.y.unwrap().0 - expected.1 .0).abs() < 1e-6
+            && (framing.y.unwrap().1 - expected.1 .1).abs() < 1e-6,
+        "y_range = {:?}, expected {:?}",
         framing.y,
-        attendu.1
+        expected.1
     );
 }
 
 #[test]
-fn survoler_ne_grossit_pas_le_compteur_de_calculs() {
-    // La propriété centrale de la tâche 7.3 : le réticule se peint
-    // par-dessus le cache, sans l'invalider (`crate::cache`, tête de
-    // module). Bouger uniquement le curseur ne doit provoquer aucun
-    // nouveau calcul du pipeline Plotters.
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn hovering_does_not_increase_the_computation_counter() {
+    // The central property of task 7.3: the crosshair is painted over the
+    // cache, without invalidating it (`crate::cache`, module head). Moving
+    // only the cursor must not cause any new computation of the Plotters
+    // pipeline.
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
 
-    let premiere = image(&context, &mut view, &snapshot, graph, vec![]);
-    assert!(!premiere, "la première image est forcément un calcul");
-    let calculs = view.cache().misses();
+    let first = paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    assert!(!first, "the first frame is necessarily a computation");
+    let computations = view.cache().misses();
 
     for pos in [
         Pos2::new(200.0, 200.0),
@@ -553,48 +543,47 @@ fn survoler_ne_grossit_pas_le_compteur_de_calculs() {
         Pos2::new(600.0, 450.0),
         Pos2::new(400.0, 300.0),
     ] {
-        let depuis_le_cache = image(
+        let from_cache = paint_frame(
             &context,
             &mut view,
             &snapshot,
             graph,
             vec![pointer_moved(pos)],
         );
-        assert!(depuis_le_cache, "un survol a déclenché un calcul à {pos:?}");
+        assert!(from_cache, "a hover triggered a computation at {pos:?}");
     }
 
     assert_eq!(
         view.cache().misses(),
-        calculs,
-        "bouger le réticule a fait grimper le nombre de calculs du pipeline"
+        computations,
+        "moving the crosshair raised the number of pipeline computations"
     );
 }
 
 #[test]
-fn survoler_un_point_connu_le_designe() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn hovering_over_a_known_point_hits_it() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
 
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let panel = view
         .last_drawn()
-        .expect("une figure a été tracée")
+        .expect("a figure was drawn")
         .panel(0)
-        .expect("un panneau");
+        .expect("a panel");
     let transform =
-        stokesforge_render_egui::PanelTransform::of(panel).expect("panneau de taille non nulle");
-    // La donnée (50, 50) existe dans la série (`banc`, X = Y = 0..=100) :
-    // son pixel est un point de désignation garanti, contrairement à un
-    // pixel choisi au hasard qui pourrait tomber entre deux points sur une
-    // figure décimée.
+        stokesforge_render_egui::PanelTransform::of(panel).expect("panel of non-zero size");
+    // The datum (50, 50) exists in the series (`fixture`, X = Y = 0..=100):
+    // its pixel is a guaranteed hit point, unlike a randomly chosen pixel
+    // that could fall between two points on a decimated figure.
     let (px, py) = transform
         .data_to_pixel(50.0, 50.0)
-        .expect("(50, 50) est dans le cadrage");
+        .expect("(50, 50) is inside the framing");
     let pixel = Pos2::new(px as f32, py as f32);
 
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -602,75 +591,73 @@ fn survoler_un_point_connu_le_designe() {
         vec![pointer_moved(pixel)],
     );
 
-    let hit = view
-        .hovered_point()
-        .expect("un point aurait dû être désigné");
+    let hit = view.hovered_point().expect("a point should have been hit");
     assert_eq!(hit.data, (50.0, 50.0));
     assert!(hit.distance < 1.0, "distance = {}", hit.distance);
 }
 
 #[test]
-fn double_cliquer_reinitialise_le_zoom() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn double_click_resets_the_zoom() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
 
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    image(
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
-        vec![pointer_moved(SOUS_CURSEUR), wheel(7.9)],
+        vec![pointer_moved(UNDER_CURSOR), wheel(7.9)],
     );
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    assert!(!view.view().is_empty(), "le zoom n'a pas posé de cadrage");
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    assert!(!view.view().is_empty(), "the zoom set no framing");
 
-    let double_clic = vec![
-        pointer_moved(SOUS_CURSEUR),
-        pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
-        pointer_button(SOUS_CURSEUR, PointerButton::Primary, false),
-        pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
-        pointer_button(SOUS_CURSEUR, PointerButton::Primary, false),
+    let double_click = vec![
+        pointer_moved(UNDER_CURSOR),
+        pointer_button(UNDER_CURSOR, PointerButton::Primary, true),
+        pointer_button(UNDER_CURSOR, PointerButton::Primary, false),
+        pointer_button(UNDER_CURSOR, PointerButton::Primary, true),
+        pointer_button(UNDER_CURSOR, PointerButton::Primary, false),
     ];
-    image(&context, &mut view, &snapshot, graph, double_clic);
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, double_click);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
 
     assert!(
         view.view().is_empty(),
-        "le double-clic n'a pas réinitialisé le cadrage"
+        "the double click did not reset the framing"
     );
 }
 
 #[test]
-fn la_molette_seule_ne_zoome_plus() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn wheel_alone_no_longer_zooms() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    image(
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
         vec![
-            pointer_moved(SOUS_CURSEUR),
+            pointer_moved(UNDER_CURSOR),
             wheel_with(7.9, egui::Modifiers::default()),
         ],
     );
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    assert_eq!(view.view().generation(), 0, "la molette seule a zoomé");
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    assert_eq!(view.view().generation(), 0, "the wheel alone zoomed");
 }
 
 #[test]
-fn le_glisser_secondaire_ne_trace_plus_de_rectangle() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn secondary_drag_no_longer_draws_a_rectangle() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let (start, end) = (Pos2::new(300.0, 200.0), Pos2::new(500.0, 400.0));
     for events in [
         vec![
@@ -681,58 +668,58 @@ fn le_glisser_secondaire_ne_trace_plus_de_rectangle() {
         vec![pointer_button(end, PointerButton::Secondary, false)],
         vec![],
     ] {
-        image(&context, &mut view, &snapshot, graph, events);
+        paint_frame(&context, &mut view, &snapshot, graph, events);
     }
-    assert_eq!(view.view().generation(), 0, "le clic droit a zoomé");
+    assert_eq!(view.view().generation(), 0, "the right click zoomed");
 }
 
 #[test]
-fn l_outil_texte_demande_un_texte_au_clic_et_ne_fait_pas_defiler() {
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn text_tool_asks_for_text_on_click_and_does_not_scroll() {
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
     view.set_tool(stokesforge_render_egui::GraphTool::Text);
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     for events in [
         vec![
-            pointer_moved(SOUS_CURSEUR),
-            pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+            pointer_moved(UNDER_CURSOR),
+            pointer_button(UNDER_CURSOR, PointerButton::Primary, true),
         ],
-        vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+        vec![pointer_button(UNDER_CURSOR, PointerButton::Primary, false)],
         vec![],
     ] {
-        image(&context, &mut view, &snapshot, graph, events);
+        paint_frame(&context, &mut view, &snapshot, graph, events);
     }
     let events = view.take_events();
     assert!(
         events
             .iter()
             .any(|event| matches!(event, stokesforge_render_egui::GraphEvent::PlaceText { .. })),
-        "aucun PlaceText : {events:?}"
+        "no PlaceText: {events:?}"
     );
     assert_eq!(view.view().generation(), 0);
 }
 
 #[test]
-fn selection_serie_par_clic_et_arbre_sans_mutation_ni_reconstruction() {
+fn series_selection_by_click_and_tree_without_mutation_or_rebuild() {
     use stokesforge_plot::SeriesRef;
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let snapshot = session.handle().snapshot().unwrap();
     let stokesforge_core::node::NodeKind::Graph { spec, .. } =
         snapshot.tree.node(graph).unwrap().kind()
     else {
-        panic!("graphe")
+        panic!("graph")
     };
     let spec = spec.clone();
-    let context = contexte();
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let panel = &view.last_drawn().unwrap().panels[0];
     let point = panel.series_geometry[0].paths[0][50];
     let pos = Pos2::new(point.0 as f32, point.1 as f32);
     assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(0, 0)));
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -742,7 +729,7 @@ fn selection_serie_par_clic_et_arbre_sans_mutation_ni_reconstruction() {
             pointer_button(pos, PointerButton::Primary, true),
         ],
     );
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -756,8 +743,8 @@ fn selection_serie_par_clic_et_arbre_sans_mutation_ni_reconstruction() {
     assert!(view.selected_series().is_none());
     view.select_series(Some(SeriesRef::new(0, 0)), &spec);
     assert!(
-        image(&context, &mut view, &snapshot, graph, vec![]),
-        "sélection hors du cache de figure"
+        paint_frame(&context, &mut view, &snapshot, graph, vec![]),
+        "selection outside the figure cache"
     );
     view.select_series(Some(SeriesRef::new(8, 8)), &spec);
     assert!(view.selected_series().is_none());
@@ -768,16 +755,16 @@ fn selection_serie_par_clic_et_arbre_sans_mutation_ni_reconstruction() {
 }
 
 #[test]
-fn selection_calque_axe_droit_barres_et_rangs_masques() {
+fn selection_layer_right_axis_bars_and_hidden_series() {
     use stokesforge_commands::Command;
     use stokesforge_plot::{PlotType, SeriesAxis, SeriesRef};
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let handle = session.handle();
     let snapshot = handle.snapshot().unwrap();
     let stokesforge_core::node::NodeKind::Graph { spec, .. } =
         snapshot.tree.node(graph).unwrap().kind()
     else {
-        panic!("graphe")
+        panic!("graph")
     };
     let first = spec.panels[0].clone();
     let mut second = first.clone();
@@ -799,16 +786,16 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
         })
         .unwrap();
     let snapshot = handle.snapshot().unwrap();
-    let context = contexte();
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let panel = &view.last_drawn().unwrap().panels[1];
     assert_eq!(panel.series_geometry.len(), 1);
     assert_eq!(panel.series_geometry[0].index, 1);
     let point = panel.series_geometry[0].paths[0][50];
     let pos = Pos2::new(point.0 as f32, point.1 as f32);
     assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(1, 1)));
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -818,7 +805,7 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
             pointer_button(pos, PointerButton::Primary, true),
         ],
     );
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -826,7 +813,7 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
         vec![pointer_button(pos, PointerButton::Primary, false)],
     );
     assert_eq!(view.selected_series(), Some(SeriesRef::new(1, 1)));
-    // Les barres se choisissent aussi à l'intérieur, pas seulement au sommet.
+    // Bars are also picked inside, not only at the top.
     spec.series_at_mut(SeriesRef::new(1, 1)).unwrap().plot_type = PlotType::Bar;
     handle
         .execute(Command::SetPlotSpec {
@@ -835,12 +822,12 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
         })
         .unwrap();
     let snapshot = handle.snapshot().unwrap();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let panel = &view.last_drawn().unwrap().panels[1];
     let (a, b) = panel.series_geometry[0].bars[50];
     let pos = Pos2::new((a.0 + b.0) as f32 / 2.0, (a.1 + b.1) as f32 / 2.0);
     assert_eq!(view.series_at(pos, &spec), Some(SeriesRef::new(1, 1)));
-    // Masquer conserve la sélection de l'arbre et retire toute géométrie.
+    // Hiding keeps the tree selection and removes all geometry.
     spec.series_at_mut(SeriesRef::new(1, 1)).unwrap().visible = false;
     handle
         .execute(Command::SetPlotSpec {
@@ -849,7 +836,7 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
         })
         .unwrap();
     let snapshot = handle.snapshot().unwrap();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     assert_eq!(view.selected_series(), Some(SeriesRef::new(1, 1)));
     assert!(view.last_drawn().unwrap().panels[1]
         .series_geometry
@@ -858,19 +845,19 @@ fn selection_calque_axe_droit_barres_et_rangs_masques() {
 }
 
 #[test]
-fn object_manager_selectionne_les_contenus_masques_sans_deux_selections() {
+fn object_manager_selects_hidden_contents_without_two_selections() {
     use stokesforge_plot::{
         AnnotationRef, AnnotationSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec,
         TextTarget,
     };
-    let mut spec = stokesforge_plot::PlotSpec::empty("Titre");
+    let mut spec = stokesforge_plot::PlotSpec::empty("Title");
     let panel = spec.panels.get_mut(0).unwrap();
     panel
         .series
         .push(SeriesSpec::new(stokesforge_core::NodeId::from_raw(900)));
     panel
         .annotations
-        .push(AnnotationSpec::new("Texte", 0.0, 0.0));
+        .push(AnnotationSpec::new("Text", 0.0, 0.0));
     panel.annotations[0].visible = false;
     panel
         .shapes
@@ -902,34 +889,34 @@ fn object_manager_selectionne_les_contenus_masques_sans_deux_selections() {
     assert_eq!(view.selected_annotation(), None);
 }
 
-/// Peint une image sans événement et rend les formes produites, aplaties,
-/// et si la figure venait du cache.
-fn formes(
+/// Paints a frame without events and returns the shapes produced, flattened,
+/// and whether the figure came from the cache.
+fn painted_shapes(
     context: &egui::Context,
     view: &mut GraphView,
     snapshot: &Snapshot,
     graph: NodeId,
 ) -> (Vec<egui::Shape>, bool) {
-    let mut depuis_le_cache = false;
-    let mut sortie = context.run_ui(egui::RawInput::default(), |ui| {
-        depuis_le_cache = view.paint(ui, RECT, snapshot, graph).expect("peinture");
+    let mut from_cache = false;
+    let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+        from_cache = view.paint(ui, RECT, snapshot, graph).expect("painting");
     });
-    sortie.textures_delta.clear();
-    fn aplatir(shape: egui::Shape, out: &mut Vec<egui::Shape>) {
+    output.textures_delta.clear();
+    fn flatten(shape: egui::Shape, out: &mut Vec<egui::Shape>) {
         match shape {
-            egui::Shape::Vec(shapes) => shapes.into_iter().for_each(|s| aplatir(s, out)),
+            egui::Shape::Vec(shapes) => shapes.into_iter().for_each(|s| flatten(s, out)),
             shape => out.push(shape),
         }
     }
     let mut out = Vec::new();
-    for clipped in sortie.shapes {
-        aplatir(clipped.shape, &mut out);
+    for clipped in output.shapes {
+        flatten(clipped.shape, &mut out);
     }
-    (out, depuis_le_cache)
+    (out, from_cache)
 }
 
-/// Les poignées : carrés pleins de côté `HANDLE_SIDE`, couleur `ink`.
-fn poignees(shapes: &[egui::Shape], ink: (u8, u8, u8)) -> Vec<Rect> {
+/// The handles: filled squares of side `HANDLE_SIDE`, color `ink`.
+fn handles_of(shapes: &[egui::Shape], ink: (u8, u8, u8)) -> Vec<Rect> {
     let side = stokesforge_render::series_selection::HANDLE_SIDE as f32;
     let ink = egui::Color32::from_rgb(ink.0, ink.1, ink.2);
     shapes
@@ -947,36 +934,36 @@ fn poignees(shapes: &[egui::Shape], ink: (u8, u8, u8)) -> Vec<Rect> {
         .collect()
 }
 
-/// #98 : une série sélectionnée porte de petits carrés posés le long de son
-/// tracé, à l'encre automatique du fond, sans que la figure (le tracé de la
-/// courbe compris) change ni soit reconstruite.
+/// #98: a selected series carries small squares laid along its plot, in the
+/// background's automatic ink, without the figure (the curve's plot
+/// included) changing or being rebuilt.
 #[test]
-fn une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace() {
+fn selected_series_carries_handles_without_changing_its_plot() {
     use stokesforge_commands::Command;
     use stokesforge_plot::SeriesRef;
     use stokesforge_render::color::{DARK_INK, LIGHT_INK};
     use stokesforge_render::series_selection::HANDLE_SPACING;
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let handle = session.handle();
     let snapshot = handle.snapshot().unwrap();
     let stokesforge_core::node::NodeKind::Graph { spec, .. } =
         snapshot.tree.node(graph).unwrap().kind()
     else {
-        panic!("graphe")
+        panic!("graph")
     };
     let mut spec = spec.clone();
-    let context = contexte();
+    let context = new_context();
     let mut view = GraphView::new();
-    let (sans, _) = formes(&context, &mut view, &snapshot, graph);
-    assert!(poignees(&sans, DARK_INK).is_empty());
+    let (without, _) = painted_shapes(&context, &mut view, &snapshot, graph);
+    assert!(handles_of(&without, DARK_INK).is_empty());
 
     view.select_series(Some(SeriesRef::new(0, 0)), &spec);
-    let (avec, depuis_le_cache) = formes(&context, &mut view, &snapshot, graph);
-    assert!(depuis_le_cache, "sélectionner a reconstruit la figure");
-    let carres = poignees(&avec, DARK_INK);
-    // La diagonale fait plusieurs centaines de pixels : plusieurs poignées,
-    // chacune posée sur la courbe tracée.
-    assert!(carres.len() >= 5, "{carres:?}");
+    let (with_selection, from_cache) = painted_shapes(&context, &mut view, &snapshot, graph);
+    assert!(from_cache, "selecting rebuilt the figure");
+    let squares = handles_of(&with_selection, DARK_INK);
+    // The diagonal is several hundred pixels long: several handles, each
+    // laid on the drawn curve.
+    assert!(squares.len() >= 5, "{squares:?}");
     let scale = view.display_scale().unwrap();
     let origin = view.display_rect().unwrap().min;
     let path = &view.last_drawn().unwrap().panels[0].series_geometry[0].paths[0];
@@ -984,24 +971,24 @@ fn une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace() {
     let a = origin + Vec2::new(first.0 as f32, first.1 as f32) * scale;
     let b = origin + Vec2::new(last.0 as f32, last.1 as f32) * scale;
     let direction = (b - a).normalized();
-    for carre in &carres {
-        let c = carre.center() - a;
-        let ecart = (c.x * direction.y - c.y * direction.x).abs();
-        assert!(ecart < 2.0, "poignée hors de la courbe : {carre:?}");
+    for square in &squares {
+        let c = square.center() - a;
+        let offset = (c.x * direction.y - c.y * direction.x).abs();
+        assert!(offset < 2.0, "handle off the curve: {square:?}");
     }
-    // Espacées de HANDLE_SPACING à l'écran (à l'arrondi au pixel près).
-    let pas = carres[0].center().distance(carres[1].center());
-    assert!((pas - HANDLE_SPACING as f32).abs() <= 1.5, "pas : {pas}");
-    // Le reste de l'image est exactement celui d'avant : la courbe n'est ni
-    // repeinte ni surlignée.
-    let reste: Vec<_> = avec
+    // Spaced HANDLE_SPACING apart on screen (up to pixel rounding).
+    let step = squares[0].center().distance(squares[1].center());
+    assert!((step - HANDLE_SPACING as f32).abs() <= 1.5, "step : {step}");
+    // The rest of the frame is exactly what it was: the curve is neither
+    // repainted nor highlighted.
+    let rest: Vec<_> = with_selection
         .iter()
-        .filter(|shape| !matches!(shape, egui::Shape::Rect(r) if carres.contains(&r.rect)))
+        .filter(|shape| !matches!(shape, egui::Shape::Rect(r) if squares.contains(&r.rect)))
         .cloned()
         .collect();
-    assert_eq!(reste, sans);
+    assert_eq!(rest, without);
 
-    // Fond sombre : les poignées passent en blanc.
+    // Dark background: the handles turn white.
     spec.background = "#101828".to_owned();
     handle
         .execute(Command::SetPlotSpec {
@@ -1010,39 +997,39 @@ fn une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace() {
         })
         .unwrap();
     let snapshot = handle.snapshot().unwrap();
-    let (sombre, _) = formes(&context, &mut view, &snapshot, graph);
-    assert!(poignees(&sombre, DARK_INK).is_empty());
-    assert_eq!(poignees(&sombre, LIGHT_INK).len(), carres.len());
+    let (dark, _) = painted_shapes(&context, &mut view, &snapshot, graph);
+    assert!(handles_of(&dark, DARK_INK).is_empty());
+    assert_eq!(handles_of(&dark, LIGHT_INK).len(), squares.len());
 
-    // Désélectionner les retire.
+    // Deselecting removes them.
     view.select_series(None, &spec);
-    let (apres, _) = formes(&context, &mut view, &snapshot, graph);
-    assert!(poignees(&apres, LIGHT_INK).is_empty());
+    let (after, _) = painted_shapes(&context, &mut view, &snapshot, graph);
+    assert!(handles_of(&after, LIGHT_INK).is_empty());
 }
 
-/// #98 : les poignées sont un état de la vue, pas du modèle — le spec que
-/// l'application exporte (`framed_spec`) est le même, sélection ou non.
+/// #98: the handles are view state, not model state — the spec the
+/// application exports (`framed_spec`) is the same, selected or not.
 #[test]
-fn la_selection_n_entre_pas_dans_le_spec_exporte() {
+fn selection_does_not_enter_the_exported_spec() {
     use stokesforge_plot::SeriesRef;
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let snapshot = session.handle().snapshot().unwrap();
     let stokesforge_core::node::NodeKind::Graph { spec, .. } =
         snapshot.tree.node(graph).unwrap().kind()
     else {
-        panic!("graphe")
+        panic!("graph")
     };
     let mut view = GraphView::new();
-    let avant = view.framed_spec(spec);
+    let before = view.framed_spec(spec);
     view.select_series(Some(SeriesRef::new(0, 0)), spec);
     assert!(view.selected_series().is_some());
-    assert_eq!(view.framed_spec(spec), avant);
+    assert_eq!(view.framed_spec(spec), before);
 }
 
-/// #153 : le clic insère un objet visible, le glisser conserve son tracé
-/// libre. Les événements sont publiés une seule fois à la validation.
+/// #153: a click inserts a visible object, a drag keeps its free drawing.
+/// The events are published only once, on commit.
 #[test]
-fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
+fn shapes_insert_on_click_with_a_visible_size() {
     use stokesforge_commands::Command;
     use stokesforge_render_egui::{GraphEvent, GraphTool};
     for (tool, width, height) in [
@@ -1051,15 +1038,15 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
         (GraphTool::Line, 80.0, 0.0),
         (GraphTool::Arrow, 80.0, 0.0),
     ] {
-        let (session, graph) = banc();
+        let (session, graph) = fixture();
         let handle = session.handle();
         let snapshot = handle.snapshot().unwrap();
-        let context = contexte();
+        let context = new_context();
         let mut view = GraphView::new();
-        image(&context, &mut view, &snapshot, graph, vec![]);
+        paint_frame(&context, &mut view, &snapshot, graph, vec![]);
         view.set_tool(tool);
         let at = Pos2::new(350.0, 300.0);
-        image(
+        paint_frame(
             &context,
             &mut view,
             &snapshot,
@@ -1070,7 +1057,7 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
             ],
         );
         assert!(view.take_events().is_empty());
-        image(
+        paint_frame(
             &context,
             &mut view,
             &snapshot,
@@ -1086,7 +1073,7 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
         let stokesforge_core::node::NodeKind::Graph { spec, .. } =
             snapshot.tree.node(graph).unwrap().kind()
         else {
-            panic!("graphe")
+            panic!("graph")
         };
         let mut updated = spec.clone();
         assert!(target.set(&mut updated, shape.clone()));
@@ -1096,7 +1083,7 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
                 spec: updated,
             })
             .unwrap();
-        image(
+        paint_frame(
             &context,
             &mut view,
             &handle.snapshot().unwrap(),
@@ -1112,7 +1099,7 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
             snapshot.tree.node(graph).unwrap().kind()
         );
         handle.redo().unwrap();
-        image(
+        paint_frame(
             &context,
             &mut view,
             &handle.snapshot().unwrap(),
@@ -1123,20 +1110,21 @@ fn les_formes_s_inserent_au_clic_avec_une_taille_visible() {
     }
 }
 
-/// Éprouve le câblage egui de Maj et son changement pendant le geste ;
-/// le ratio est celui d'une forme non carrée au départ, jamais celui du défaut.
+/// Tests the egui wiring of Shift and its change during the gesture; the
+/// ratio is that of a shape that is not square at the start, never the
+/// default's.
 #[test]
-fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
+fn shift_constrains_resizing_and_releases_during_the_gesture() {
     use stokesforge_commands::Command;
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
     use stokesforge_render_egui::GraphEvent;
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let handle = session.handle();
     let snapshot = handle.snapshot().unwrap();
     let stokesforge_core::node::NodeKind::Graph { spec, .. } =
         snapshot.tree.node(graph).unwrap().kind()
     else {
-        panic!("graphe")
+        panic!("graph")
     };
     let mut spec = spec.clone();
     spec.panels.get_mut(0).unwrap().shapes.push(ShapeSpec::new(
@@ -1150,16 +1138,16 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
         .execute(Command::SetPlotSpec { graph, spec })
         .unwrap();
     let snapshot = handle.snapshot().unwrap();
-    let context = contexte();
+    let context = new_context();
     let mut view = GraphView::new();
     let target = ShapeRef { panel: 0, index: 0 };
     view.select_shape(Some(target));
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let drawn = *view.drawn_shape(target).unwrap();
     let ratio = (drawn.p2.0 - drawn.p1.0).abs() / (drawn.p2.1 - drawn.p1.1).abs();
     assert!(
         (ratio - 1.0).abs() > 0.1,
-        "forme initiale non carrée à l'écran"
+        "initial shape not square on screen"
     );
     let scale = view.display_scale().unwrap();
     let origin = view.display_rect().unwrap().min;
@@ -1168,7 +1156,7 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
             drawn.p1.0.max(drawn.p2.0) as f32,
             drawn.p1.1.max(drawn.p2.1) as f32,
         ) * scale;
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -1197,7 +1185,7 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
     };
     paint(&mut view, true);
     assert!(view.take_events().is_empty());
-    // L'aperçu est tracé à l'image suivante.
+    // The preview is drawn on the next frame.
     paint(&mut view, true);
     let resized = view.drawn_shape(target).unwrap();
     let constrained = (resized.p2.0 - resized.p1.0).abs() / (resized.p2.1 - resized.p1.1).abs();
@@ -1210,7 +1198,7 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
     let resized = view.drawn_shape(target).unwrap();
     let free = (resized.p2.0 - resized.p1.0).abs() / (resized.p2.1 - resized.p1.1).abs();
     assert!((ratio - free).abs() > 0.1);
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -1223,17 +1211,17 @@ fn maj_contraint_le_redimensionnement_et_se_relache_pendant_le_geste() {
 }
 
 #[test]
-fn glisser_une_forme_garde_le_trace_libre() {
+fn dragging_a_shape_keeps_the_free_drawing() {
     use stokesforge_render_egui::{GraphEvent, GraphTool};
-    let (session, graph) = banc();
+    let (session, graph) = fixture();
     let snapshot = session.handle().snapshot().unwrap();
-    let context = contexte();
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     view.set_tool(GraphTool::Rectangle);
     let start = Pos2::new(300.0, 250.0);
     let end = Pos2::new(420.0, 280.0);
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -1243,7 +1231,7 @@ fn glisser_une_forme_garde_le_trace_libre() {
             pointer_button(start, PointerButton::Primary, true),
         ],
     );
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -1251,13 +1239,13 @@ fn glisser_une_forme_garde_le_trace_libre() {
         vec![pointer_moved(end)],
     );
     assert!(view.take_events().is_empty());
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let (target, _) = view.shape_preview().unwrap();
     let drawn = view.drawn_shape(*target).unwrap();
     let scale = view.display_scale().unwrap() as f64;
     assert!(((drawn.p2.0 - drawn.p1.0).abs() * scale - 120.0).abs() < 2.0);
     assert!(((drawn.p2.1 - drawn.p1.1).abs() * scale - 30.0).abs() < 2.0);
-    image(
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
@@ -1270,58 +1258,58 @@ fn glisser_une_forme_garde_le_trace_libre() {
     ));
 }
 
-/// Trois calques dans la même case : le calque de base, un calque à axes
-/// propres (X en haut, Y à droite) et un calque dont l'axe X est lié.
-fn trois_calques() -> (Session, NodeId) {
+/// Three layers in the same cell: the base layer, a layer with its own axes
+/// (X on top, Y on the right) and a layer whose X axis is linked.
+fn three_layers() -> (Session, NodeId) {
     use stokesforge_plot::{OverlaySpec, Panels};
-    let mut project = Project::new("Calques").expect("projet");
+    let mut project = Project::new("Layers").expect("project");
     let root = project.root();
-    let book = project.add_empty_workbook(root, None).expect("classeur");
-    let sheet = project.add_worksheet(book, None).expect("feuille");
-    let mut colonne = |nom: &str, valeurs: Vec<f64>| {
+    let book = project.add_empty_workbook(root, None).expect("workbook");
+    let sheet = project.add_worksheet(book, None).expect("sheet");
+    let mut column = |name: &str, values: Vec<f64>| {
         project
-            .add_column(sheet, None, Some(nom), numeric(&valeurs))
-            .expect("colonne")
+            .add_column(sheet, None, Some(name), numeric(&values))
+            .expect("column")
     };
     let xs: Vec<f64> = (0..=100).map(f64::from).collect();
-    let x = colonne("X", xs.clone());
-    let y = colonne("Y", xs.clone());
-    let x2 = colonne("X2", xs.iter().map(|v| 400.0 + 4.0 * v).collect());
-    let y2 = colonne("Y2", xs.iter().map(|v| v / 100.0).collect());
+    let x = column("X", xs.clone());
+    let y = column("Y", xs.clone());
+    let x2 = column("X2", xs.iter().map(|v| 400.0 + 4.0 * v).collect());
+    let y2 = column("Y2", xs.iter().map(|v| v / 100.0).collect());
     let mut base = PanelSpec::at(0, 0);
     base.series.push(SeriesSpec::new_xy(x, y));
-    let mut propre = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
-    propre.series.push(SeriesSpec::new_xy(x2, y2));
-    let mut lie = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
-    lie.series.push(SeriesSpec::new_xy(x, y2));
-    let spec = PlotSpec::empty("").with_panels(Panels::new(vec![base, propre, lie]));
-    let graph = project.add_graph(root, None, spec).expect("graphe");
+    let mut own = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+    own.series.push(SeriesSpec::new_xy(x2, y2));
+    let mut linked = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
+    linked.series.push(SeriesSpec::new_xy(x, y2));
+    let spec = PlotSpec::empty("").with_panels(Panels::new(vec![base, own, linked]));
+    let graph = project.add_graph(root, None, spec).expect("graph");
     (Session::spawn(project, None).expect("session"), graph)
 }
 
-/// #167 : un geste de cadrage porte sur les **échelles** de tous les calques
-/// de la case, pas sur le seul calque touché — un calque superposé à axes
-/// propres garde ses graduations alignées sur celles du calque de base, et
-/// une échelle liée (axe non affiché) n'a pas de cadrage à elle.
+/// #167: a framing gesture applies to the **scales** of all the layers of
+/// the cell, not only to the touched layer — an overlay layer with its own
+/// axes keeps its ticks aligned with those of the base layer, and a linked
+/// scale (axis not shown) has no framing of its own.
 #[test]
-fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
-    let (session, graph) = trois_calques();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn zoom_frames_the_scales_of_all_layers_in_the_cell() {
+    let (session, graph) = three_layers();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
     view.set_tool(stokesforge_render_egui::GraphTool::ZoomBox);
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
 
-    let avant = view.last_drawn().expect("figure").clone();
+    let before = view.last_drawn().expect("figure").clone();
     let (start, end) = (Pos2::new(300.0, 200.0), Pos2::new(500.0, 400.0));
-    let attendu = |i: usize| {
-        stokesforge_render_egui::PanelTransform::of(avant.panel(i).expect("calque"))
-            .expect("transformation")
+    let expected = |i: usize| {
+        stokesforge_render_egui::PanelTransform::of(before.panel(i).expect("layer"))
+            .expect("transform")
             .range_between(
                 (start.x as f64, start.y as f64),
                 (end.x as f64, end.y as f64),
             )
-            .expect("coins dans le cadrage")
+            .expect("corners inside the framing")
     };
     for events in [
         vec![
@@ -1332,152 +1320,153 @@ fn le_zoom_cadre_les_echelles_de_tous_les_calques_de_la_case() {
         vec![pointer_button(end, PointerButton::Primary, false)],
         vec![],
     ] {
-        image(&context, &mut view, &snapshot, graph, events);
+        paint_frame(&context, &mut view, &snapshot, graph, events);
     }
 
-    let proche =
-        |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
-    let base = view.view().framing(0).expect("cadrage du calque de base");
-    assert!(proche(base.x.unwrap(), attendu(0).0) && proche(base.y.unwrap(), attendu(0).1));
-    let propre = view
+    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
+    let base = view.view().framing(0).expect("framing of the base layer");
+    assert!(close(base.x.unwrap(), expected(0).0) && close(base.y.unwrap(), expected(0).1));
+    let own = view
         .view()
         .framing(1)
-        .expect("cadrage du calque à axes propres");
+        .expect("framing of the layer with its own axes");
     assert!(
-        proche(propre.x.unwrap(), attendu(1).0) && proche(propre.y.unwrap(), attendu(1).1),
-        "les échelles propres suivent le même geste : {propre:?}"
+        close(own.x.unwrap(), expected(1).0) && close(own.y.unwrap(), expected(1).1),
+        "the own scales follow the same gesture: {own:?}"
     );
-    let lie = view.view().framing(2).expect("cadrage de l'axe Y propre");
+    let linked = view.view().framing(2).expect("framing of the own Y axis");
     assert!(
-        lie.x.is_none(),
-        "l'échelle X liée n'a pas de cadrage à elle"
+        linked.x.is_none(),
+        "the linked X scale has no framing of its own"
     );
-    assert!(proche(lie.y.unwrap(), attendu(2).1));
+    assert!(close(linked.y.unwrap(), expected(2).1));
 
-    // Les graduations restent alignées : la même fraction de chaque axe est
-    // visible dans le calque de base et dans le calque superposé.
-    let apres = view.last_drawn().expect("figure").clone();
-    let fraction = |panel: usize, plein: (f64, f64), vue: (f64, f64)| {
+    // The ticks stay aligned: the same fraction of each axis is visible in
+    // the base layer and in the overlay layer.
+    let after = view.last_drawn().expect("figure").clone();
+    let fraction = |panel: usize, full: (f64, f64), visible: (f64, f64)| {
         let _ = panel;
         (
-            (vue.0 - plein.0) / (plein.1 - plein.0),
-            (vue.1 - plein.0) / (plein.1 - plein.0),
+            (visible.0 - full.0) / (full.1 - full.0),
+            (visible.1 - full.0) / (full.1 - full.0),
         )
     };
     let (b0, b1) = (
-        avant.panel(0).unwrap().x_range,
-        apres.panel(0).unwrap().x_range,
+        before.panel(0).unwrap().x_range,
+        after.panel(0).unwrap().x_range,
     );
     let (p0, p1) = (
-        avant.panel(1).unwrap().x_range,
-        apres.panel(1).unwrap().x_range,
+        before.panel(1).unwrap().x_range,
+        after.panel(1).unwrap().x_range,
     );
     let (fb, fp) = (fraction(0, b0, b1), fraction(1, p0, p1));
     assert!(
-        proche(fb, fp),
-        "fractions visibles : base {fb:?}, superposé {fp:?}"
+        close(fb, fp),
+        "visible fractions: base {fb:?}, overlay {fp:?}"
     );
     assert_eq!(
-        apres.panel(2).unwrap().x_range,
-        apres.panel(0).unwrap().x_range
+        after.panel(2).unwrap().x_range,
+        after.panel(0).unwrap().x_range
     );
 }
 
-/// #167 : au-dessus d'un axe, la molette et le glisser ne cadrent que cette
-/// échelle ; les autres échelles de la case, liées ou non, ne bougent pas.
+/// #167: over an axis, the wheel and the drag frame only that scale; the
+/// other scales of the cell, linked or not, do not move.
 #[test]
-fn la_molette_et_le_glisser_sur_un_axe_ne_cadrent_que_cette_echelle() {
-    let (session, graph) = trois_calques();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+fn wheel_and_drag_on_an_axis_frame_only_that_scale() {
+    let (session, graph) = three_layers();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let panel = view.last_drawn().expect("figure").panel(0).unwrap().clone();
-    let centre_x = panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0;
-    let sous = Pos2::new(
-        centre_x,
+    let center_x = panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0;
+    let below = Pos2::new(
+        center_x,
         (panel.pixel_origin.1 + panel.pixel_size.1 as i32) as f32 + 8.0,
     );
-    let dessus = Pos2::new(centre_x, panel.pixel_origin.1 as f32 - 8.0);
+    let above = Pos2::new(center_x, panel.pixel_origin.1 as f32 - 8.0);
 
-    // Molette sur l'axe X du bas (calque de base).
-    image(
+    // Wheel on the bottom X axis (base layer).
+    paint_frame(
         &context,
         &mut view,
         &snapshot,
         graph,
-        vec![pointer_moved(sous), wheel(7.9)],
+        vec![pointer_moved(below), wheel(7.9)],
     );
-    image(&context, &mut view, &snapshot, graph, vec![]);
-    let base = view.view().framing(0).expect("l'axe X du bas est cadré");
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
+    let base = view.view().framing(0).expect("the bottom X axis is framed");
     assert!(base.x.is_some(), "{base:?}");
-    assert!(base.y.is_none(), "l'axe Y du calque de base n'a pas bougé");
+    assert!(
+        base.y.is_none(),
+        "the Y axis of the base layer did not move"
+    );
     assert!(
         view.view().framing(1).is_none() && view.view().framing(2).is_none(),
-        "les autres calques ne bougent pas"
+        "the other layers do not move"
     );
 
-    // Glisser simple parti d'un axe : rien (#318).
-    let arrivee = Pos2::new(dessus.x + 80.0, dessus.y);
-    glisser(
+    // Plain drag started from an axis: nothing (#318).
+    let arrival = Pos2::new(above.x + 80.0, above.y);
+    drag(
         &context,
         &mut view,
         &snapshot,
         graph,
-        dessus,
-        arrivee,
+        above,
+        arrival,
         PointerButton::Primary,
         false,
         false,
     );
     assert!(
         view.view().framing(1).is_none(),
-        "un glisser simple sur un axe a cadré"
+        "a plain drag on an axis framed"
     );
-    // Ctrl + glisser, puis clic milieu + glisser, parti de l'axe X du haut
-    // (calque à axes propres) : cette échelle seule.
-    glisser(
+    // Ctrl + drag, then middle click + drag, started from the top X axis
+    // (layer with its own axes): that scale only.
+    drag(
         &context,
         &mut view,
         &snapshot,
         graph,
-        dessus,
-        arrivee,
+        above,
+        arrival,
         PointerButton::Primary,
         true,
         true,
     );
-    let apres_ctrl = view.view().framing(1).expect("l'axe X du haut est cadré").x;
-    glisser(
+    let after_ctrl = view.view().framing(1).expect("the top X axis is framed").x;
+    drag(
         &context,
         &mut view,
         &snapshot,
         graph,
-        dessus,
-        arrivee,
+        above,
+        arrival,
         PointerButton::Middle,
         false,
         false,
     );
     assert_ne!(
         view.view().framing(1).unwrap().x,
-        apres_ctrl,
-        "le clic milieu n'a pas cadré l'axe"
+        after_ctrl,
+        "the middle click did not frame the axis"
     );
-    let propre = view.view().framing(1).expect("l'axe X du haut est cadré");
-    assert!(propre.x.is_some() && propre.y.is_none(), "{propre:?}");
+    let own = view.view().framing(1).expect("the top X axis is framed");
+    assert!(own.x.is_some() && own.y.is_none(), "{own:?}");
     assert_eq!(
         view.view().framing(0).unwrap().x,
         base.x,
-        "le calque de base n'a pas suivi"
+        "the base layer did not follow"
     );
 }
 
-/// #197 : un groupe de séries se sélectionne par sa première série ; la
-/// sélection de n'importe quelle autre courbe — même du même groupe — ou d'un
-/// groupe absent la lève.
+/// #197: a series group is selected through its first series; selecting any
+/// other curve — even of the same group — or an absent group lifts it.
 #[test]
-fn un_groupe_se_selectionne_par_sa_premiere_serie_et_une_autre_courbe_le_leve() {
+fn a_group_is_selected_by_its_first_series_and_another_curve_lifts_it() {
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSpec};
     let mut panel = PanelSpec::default();
     panel.push_series_batch(vec![SeriesSpec::new(stokesforge_core::NodeId::from_raw(1))]);
@@ -1494,11 +1483,7 @@ fn un_groupe_se_selectionne_par_sa_premiere_serie_et_une_autre_courbe_le_leve() 
     assert_eq!(view.selected_series(), Some(SeriesRef::new(0, 1)));
 
     view.select_series(Some(SeriesRef::new(0, 2)), &spec);
-    assert_eq!(
-        view.selected_group(),
-        None,
-        "une autre courbe lève le groupe"
-    );
+    assert_eq!(view.selected_group(), None, "another curve lifts the group");
     assert_eq!(view.selected_series(), Some(SeriesRef::new(0, 2)));
 
     view.select_series_group(Some(group), &spec);
@@ -1506,47 +1491,48 @@ fn un_groupe_se_selectionne_par_sa_premiere_serie_et_une_autre_courbe_le_leve() 
     assert_eq!(
         view.selected_group(),
         None,
-        "re-sélectionner la même courbe seule aussi"
+        "re-selecting the same curve alone does too"
     );
 
     view.select_series_group(Some(SeriesGroupRef::new(0, 9)), &spec);
     assert_eq!(view.selected_group(), None);
-    assert_eq!(view.selected_series(), None, "groupe absent : rien");
+    assert_eq!(view.selected_series(), None, "absent group: nothing");
 }
 
-/// #318, invariant 6 : le feathering n'est coupé que par un geste réel. Un
-/// glisser simple sans effet (Pointeur sur le fond) le laisse en place ; un
-/// pan (Ctrl) le coupe le temps du geste et le rétablit au relâchement.
+/// #318, invariant 6: feathering is cut only by a real gesture. A plain drag
+/// with no effect (Pointer on the background) leaves it in place; a pan
+/// (Ctrl) cuts it for the duration of the gesture and restores it on
+/// release.
 #[test]
-fn le_feathering_ne_se_coupe_que_pendant_un_geste_reel() {
+fn feathering_is_cut_only_during_a_real_gesture() {
     use stokesforge_render_egui::feathering;
-    let (session, graph) = banc();
-    let snapshot = session.handle().snapshot().expect("instantané");
-    let context = contexte();
+    let (session, graph) = fixture();
+    let snapshot = session.handle().snapshot().expect("snapshot");
+    let context = new_context();
     let mut view = GraphView::new();
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    paint_frame(&context, &mut view, &snapshot, graph, vec![]);
     let (start, mid, end) = (
         Pos2::new(300.0, 300.0),
         Pos2::new(400.0, 300.0),
         Pos2::new(500.0, 300.0),
     );
-    for (ctrl_on, coupe) in [(false, false), (true, true)] {
-        let mut pression = vec![
+    for (ctrl_on, cut) in [(false, false), (true, true)] {
+        let mut press = vec![
             pointer_moved(start),
             pointer_button(start, PointerButton::Primary, true),
         ];
         if ctrl_on {
-            pression.insert(0, ctrl(true));
+            press.insert(0, ctrl(true));
         }
-        image(&context, &mut view, &snapshot, graph, pression);
-        image(
+        paint_frame(&context, &mut view, &snapshot, graph, press);
+        paint_frame(
             &context,
             &mut view,
             &snapshot,
             graph,
             vec![pointer_moved(mid)],
         );
-        image(
+        paint_frame(
             &context,
             &mut view,
             &snapshot,
@@ -1555,10 +1541,10 @@ fn le_feathering_ne_se_coupe_que_pendant_un_geste_reel() {
         );
         assert_eq!(
             feathering::current(&context).is_on(),
-            !coupe,
-            "Ctrl={ctrl_on} : feathering pendant le glisser"
+            !cut,
+            "Ctrl={ctrl_on}: feathering during the drag"
         );
-        image(
+        paint_frame(
             &context,
             &mut view,
             &snapshot,
@@ -1568,10 +1554,10 @@ fn le_feathering_ne_se_coupe_que_pendant_un_geste_reel() {
                 ctrl(false),
             ],
         );
-        image(&context, &mut view, &snapshot, graph, vec![]);
+        paint_frame(&context, &mut view, &snapshot, graph, vec![]);
         assert!(
             feathering::current(&context).is_on(),
-            "pas rétabli au repos"
+            "not restored at rest"
         );
     }
 }

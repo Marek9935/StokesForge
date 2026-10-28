@@ -1,39 +1,39 @@
-//! Le `SVGBackend` de Plotters, **avec la mesure de texte du projet**.
+//! Plotters' `SVGBackend`, **with the project's text measurement**.
 //!
-//! # Pourquoi une enveloppe plutôt qu'un backend écrit à la main
+//! # Why a wrapper rather than a hand-written backend
 //!
-//! `plotters-svg` fait déjà tout ce qu'il faut : ~800 lignes qui émettent du
-//! SVG correct, maintenues en amont, et le §5 de `architecture-choisie.md`
-//! les retient explicitement. Il ne lui manque **qu'une** méthode, et c'est
-//! précisément celle qui compte.
+//! `plotters-svg` already does everything needed: ~800 lines that emit
+//! correct SVG, maintained upstream, and §5 of `architecture-choisie.md`
+//! explicitly keeps them. It lacks **only one** method, and it is
+//! precisely the one that matters.
 //!
-//! # Le piège documenté, et pourquoi il n'est pas optionnel de l'éviter
+//! # The documented pitfall, and why avoiding it is not optional
 //!
-//! `SVGBackend` ne surcharge pas `estimate_text_size`. Sans rien faire, il
-//! retombe sur l'implémentation par défaut du trait → `layout_box` → et,
-//! nos fonts Plotters étant coupées (`default-features = false`), sur
-//! `plotters/src/style/font/naive.rs` :
+//! `SVGBackend` does not override `estimate_text_size`. Left alone, it
+//! falls back on the trait's default implementation → `layout_box` → and,
+//! our Plotters fonts being cut off (`default-features = false`), on
+//! `plotters/src/style/font/naive.rs`:
 //!
 //! ```text
 //! let em = size / 1.24 / 1.24;
-//! // largeur ≈ em * 0.7 * text.len()
+//! // width ≈ em * 0.7 * text.len()
 //! ```
 //!
-//! Une largeur **monospace estimée sur le nombre d'octets UTF-8** : « λ »
-//! compte pour 2, « µm » pour 3, « 111 » mesure comme « WWW ». Les marges
-//! réservées aux libellés seraient fausses, donc la zone de tracé différente
-//! de celle de l'écran : *la figure exportée ne serait pas la figure vue*, et
-//! rien ne le signalerait. C'est le seul défaut silencieux du chantier
+//! A **monospace width estimated from the number of UTF-8 bytes**: "λ"
+//! counts as 2, "µm" as 3, "111" measures like "WWW". The margins
+//! reserved for labels would be wrong, hence the plot area different
+//! from the screen's: *the exported figure would not be the figure seen*, and
+//! nothing would signal it. It is the only silent defect of the work package
 //! (`architecture-choisie.md` §4.4).
 //!
-//! Un trait Rust ne se surcharge pas depuis l'extérieur : la seule façon de
-//! remplacer une méthode de `DrawingBackend` sur un type d'un autre crate est
-//! de l'envelopper. D'où [`MeasuredSvgBackend`], qui délègue les dix méthodes
-//! de dessin à `SVGBackend` et **n'en réimplémente qu'une**. Le test
-//! `tests/mesure.rs` vérifie que la surcharge est réellement en vigueur, en
-//! comparant à ce qu'aurait rendu l'heuristique naïve : sans ce témoin, une
-//! enveloppe qui déléguerait *aussi* `estimate_text_size` passerait pour
-//! correcte.
+//! A Rust trait cannot be overridden from outside: the only way to
+//! replace a method of `DrawingBackend` on a type from another crate is
+//! to wrap it. Hence [`MeasuredSvgBackend`], which delegates the ten drawing
+//! methods to `SVGBackend` and **reimplements only one**. The test
+//! `tests/measurement.rs` checks that the override is really in force, by
+//! comparing with what the naive heuristic would have returned: without this
+//! witness, a wrapper that *also* delegated `estimate_text_size` would pass
+//! as correct.
 
 use plotters::prelude::*;
 use plotters_backend::{
@@ -46,29 +46,29 @@ use stokesforge_render::FontChoice;
 use crate::typst_export::SvgTextMode;
 use stokesforge_render::text::{estimate, TextMeasurer};
 
-/// `SVGBackend`, augmenté de la mesure de texte partagée du chantier.
+/// `SVGBackend`, augmented with the work package's shared text measurement.
 ///
-/// L'enveloppe est fine par construction : tout ce qui dessine est délégué
-/// tel quel, y compris `present`, dont le `SVGBackend` se sert pour refermer
-/// le document. Ce qui est écrit ici tient en une méthode.
+/// The wrapper is thin by construction: everything that draws is delegated
+/// as is, including `present`, which `SVGBackend` uses to close the
+/// document. What is written here fits in one method.
 pub struct MeasuredSvgBackend<'a> {
     inner: SVGBackend<'a>,
     measurer: &'a TextMeasurer,
-    /// Chemin Typst de l'export (tâche R8.4) — une référence, pas une
-    /// valeur possédée : [`crate::typst_export::TypstExport`] doit rester
-    /// lisible par l'appelant **après** que ce backend a été abandonné
-    /// (`crate::render_to_string_with_typst`), pour que
-    /// [`crate::typst_export::splice`] retrouve les témoins enregistrés
-    /// pendant le tracé. Voir la doc de [`Self::with_typst`].
+    /// Typst path of the export (task R8.4) — a reference, not an owned
+    /// value: [`crate::typst_export::TypstExport`] must remain
+    /// readable by the caller **after** this backend has been dropped
+    /// (`crate::render_to_string_with_typst`), so that
+    /// [`crate::typst_export::splice`] finds the witnesses recorded
+    /// during plotting. See the doc of [`Self::with_typst`].
     typst: Option<&'a crate::typst_export::TypstExport<'a>>,
-    /// Ce qui fait écrire les graduations dans la police du graphe (#162) :
-    /// la valeur de `font-family` et le mode de texte. `None` : le
-    /// `font-family="sans-serif"` générique de Plotters.
+    /// What makes ticks be written in the graph's font (#162): the
+    /// `font-family` value and the text mode. `None`: Plotters' generic
+    /// `font-family="sans-serif"`.
     font: Option<(String, SvgTextMode)>,
 }
 
-/// Un style de texte qui n'en change qu'un trait : la famille écrite dans
-/// `font-family`. Tout le reste est celui du style d'origine.
+/// A text style that changes only one trait: the family written in
+/// `font-family`. Everything else is the original style's.
 struct NamedFamily<'s, S> {
     style: &'s S,
     family: &'s str,
@@ -115,9 +115,9 @@ impl<S: BackendTextStyle> BackendTextStyle for NamedFamily<'_, S> {
     }
 }
 
-/// La valeur de `font-family` qui nomme la police du graphe, suivie d'une
-/// famille générique de repli (#162) : « 'Noto Sans', sans-serif ». Une police
-/// système introuvable est repliée sur Noto, comme à l'écran.
+/// The `font-family` value naming the graph's font, followed by a generic
+/// fallback family (#162): "'Noto Sans', sans-serif". A system font that
+/// cannot be found falls back to Noto, as on the screen.
 fn css_family(choice: &FontChoice) -> String {
     let name = match stokesforge_render::fonts::resolve(choice).source {
         FontSource::Embedded(set) => set.sans_family_name().to_owned(),
@@ -131,7 +131,7 @@ fn css_family(choice: &FontChoice) -> String {
 }
 
 impl<'a> MeasuredSvgBackend<'a> {
-    /// Enveloppe un `SVGBackend` déjà construit.
+    /// Wraps an already built `SVGBackend`.
     pub fn new(inner: SVGBackend<'a>, measurer: &'a TextMeasurer) -> Self {
         Self {
             inner,
@@ -141,7 +141,7 @@ impl<'a> MeasuredSvgBackend<'a> {
         }
     }
 
-    /// Un backend qui écrit dans la `String` donnée.
+    /// A backend that writes into the given `String`.
     pub fn with_string(
         buffer: &'a mut String,
         size: (u32, u32),
@@ -150,21 +150,21 @@ impl<'a> MeasuredSvgBackend<'a> {
         Self::new(SVGBackend::with_string(buffer, size), measurer)
     }
 
-    /// Active le chemin Typst (tâche R8.4) sur ce backend : les textes en
-    /// style riche ([`stokesforge_render::formula::is_rich`], issue #32) rendent un
-    /// témoin substitué après coup par [`crate::typst_export::splice`],
-    /// tous les autres restent le `<text>` ordinaire de `plotters-svg`.
-    /// Additif comme `EguiBackend::with_typst` : `new`/`with_string`
-    /// restent inchangés, tâche 8.6.
+    /// Enables the Typst path (task R8.4) on this backend: texts in
+    /// rich style ([`stokesforge_render::formula::is_rich`], issue #32) emit a
+    /// witness replaced afterwards by [`crate::typst_export::splice`],
+    /// all the others stay the ordinary `<text>` of `plotters-svg`.
+    /// Additive like `EguiBackend::with_typst`: `new`/`with_string`
+    /// stay unchanged, task 8.6.
     pub fn with_typst(mut self, typst: &'a crate::typst_export::TypstExport<'a>) -> Self {
         self.typst = Some(typst);
         self
     }
 
-    /// Les graduations dans la police du graphe (#162) : en mode
-    /// [`SvgTextMode::Text`], elles portent la même famille que les textes
-    /// Typst ; en mode [`SvgTextMode::Outlines`], elles passent par Typst et
-    /// sortent en contours, pour que le document reste homogène.
+    /// Ticks in the graph's font (#162): in [`SvgTextMode::Text`] mode,
+    /// they carry the same family as the Typst texts; in
+    /// [`SvgTextMode::Outlines`] mode, they go through Typst and come out as
+    /// outlines, so the document stays homogeneous.
     pub fn with_font(mut self, choice: &FontChoice, mode: SvgTextMode) -> Self {
         self.font = Some((css_family(choice), mode));
         self
@@ -245,19 +245,19 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         style: &S,
         pos: BackendCoord,
     ) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
-        // R8.4 : un texte riche (issue #32) pose un rectangle-témoin à la place du
-        // `<text>` ordinaire ; `crate::typst_export::splice` le remplace
-        // après coup par le fragment `typst-svg` — voir
-        // `crate::typst_export`, tête de module, pour le mécanisme complet
-        // et pourquoi il n'a pas besoin de toucher `SVGBackend`. Dégrade
-        // vers le `<text>` ordinaire si Typst n'est pas activé ou que la
-        // formule ne compile pas.
+        // R8.4: a rich text (issue #32) places a witness rectangle in place of
+        // the ordinary `<text>`; `crate::typst_export::splice` replaces it
+        // afterwards with the `typst-svg` fragment — see
+        // `crate::typst_export`, module head, for the full mechanism
+        // and why it does not need to touch `SVGBackend`. Degrades
+        // to the ordinary `<text>` if Typst is not enabled or the
+        // formula does not compile.
         if let Some(typst) = &self.typst {
             if stokesforge_render::formula::is_rich(style) {
-                // Un texte transparent ne dessine rien, comme le `<text>` de
-                // `plotters-svg` et le chemin écran : pas de témoin, donc
-                // pas de fragment Typst (qui, lui, ignorerait l'opacité
-                // nulle du style et serait visible).
+                // A transparent text draws nothing, like the `<text>` of
+                // `plotters-svg` and the screen path: no witness, hence
+                // no Typst fragment (which, for its part, would ignore the
+                // style's zero opacity and be visible).
                 if style.color().alpha == 0.0 {
                     return Ok(());
                 }
@@ -270,14 +270,14 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
                     style.transform(),
                     (pos.0 as f64, pos.1 as f64),
                 ) {
-                    // Le témoin n'a besoin d'être ni bien placé ni bien
-                    // dimensionné dans l'absolu : `splice`
-                    // (`crate::typst_export`) le repère par sa couleur
-                    // *propre* à cet appel et revérifie sa géométrie contre
-                    // celle enregistrée par `record` ci-dessus — donc la
-                    // position et la taille passées ici doivent être
-                    // exactement celles que `record` a calculées, pas
-                    // d'approximation possible des deux côtés.
+                    // The witness need be neither well placed nor well
+                    // sized in absolute terms: `splice`
+                    // (`crate::typst_export`) spots it by its color
+                    // *specific* to this call and rechecks its geometry against
+                    // the one recorded by `record` above — so the
+                    // position and size passed here must be
+                    // exactly those `record` computed, no
+                    // approximation possible on either side.
                     let (w, h) = witness.size;
                     return self.inner.draw_rect(
                         (pos.0, pos.1),
@@ -289,8 +289,8 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
             }
         }
         match &self.font {
-            // Graduations en contours : composées par Typst, comme un texte
-            // littéral (échappé), dans la police du graphe.
+            // Ticks as outlines: composed by Typst, like a literal
+            // (escaped) text, in the graph's font.
             Some((_, SvgTextMode::Outlines)) if self.typst.is_some() => {
                 if style.color().alpha == 0.0 {
                     return Ok(());
@@ -323,27 +323,27 @@ impl DrawingBackend for MeasuredSvgBackend<'_> {
         }
     }
 
-    /// **La seule méthode qui n'est pas déléguée** — tâche R4.4.
+    /// **The only method that is not delegated** — task R4.4.
     ///
-    /// Même fonction, littéralement, que celle qu'appelle le backend egui :
-    /// [`stokesforge_render::text::estimate`]. Pas « la même formule », pas « la
-    /// même source » : le même appel. C'est ce qui fait que l'accord des
-    /// deux backends (R4.5) se vérifie au lieu de s'espérer.
+    /// Literally the same function as the one the egui backend calls:
+    /// [`stokesforge_render::text::estimate`]. Not "the same formula", not "the
+    /// same source": the same call. This is what makes the agreement of the
+    /// two backends (R4.5) checkable instead of merely hoped for.
     ///
-    /// Les graduations s'écrivent dans la police du graphe
-    /// ([`Self::with_font`], #162) : la famille nommée est celle que la mesure
-    /// utilise, au lieu du `sans-serif` générique de Plotters. Sans
-    /// `with_font`, l'asymétrie ancienne demeure (mesure sur la police
-    /// embarquée, affichage sur celle du lecteur).
+    /// Ticks are written in the graph's font
+    /// ([`Self::with_font`], #162): the named family is the one the measurement
+    /// uses, instead of Plotters' generic `sans-serif`. Without
+    /// `with_font`, the old asymmetry remains (measurement on the embedded
+    /// font, display on the reader's).
     fn estimate_text_size<S: BackendTextStyle>(
         &self,
         text: &str,
         style: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
-        // R8.5 — le même invariant que côté écran (`EguiBackend`) : un
-        // texte riche se mesure en interrogeant Typst, jamais l'heuristique
-        // `epaint`/naïve. Dégrade vers la mesure `epaint` si Typst n'est
-        // pas activé ou que la formule ne compile pas.
+        // R8.5 — the same invariant as on the screen side (`EguiBackend`): a
+        // rich text is measured by querying Typst, never the `epaint`/naive
+        // heuristic. Degrades to the `epaint` measurement if Typst is
+        // not enabled or the formula does not compile.
         if let Some(typst) = &self.typst {
             if stokesforge_render::formula::is_rich(style) {
                 let size_pt = font_size(style.size());

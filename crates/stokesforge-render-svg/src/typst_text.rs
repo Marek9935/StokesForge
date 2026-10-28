@@ -1,31 +1,31 @@
-//! Émetteur SVG « texte » d'une page Typst (#162).
+//! "Text" SVG emitter for a Typst page (#162).
 //!
-//! `typst-svg` écrit **toujours** ses glyphes en contours (`<use>` de
-//! `<symbol>` dans `<defs>`) : aucune option ne produit du `<text>`. Pour
-//! qu'une figure exportée reste retouchable (sélectionnable, cherchable,
-//! éditable dans Inkscape ou Illustrator), ce module parcourt le `Frame`
-//! compilé et écrit lui-même le fragment SVG :
+//! `typst-svg` **always** writes its glyphs as outlines (`<use>` of
+//! `<symbol>` in `<defs>`): no option produces `<text>`. So that an exported
+//! figure stays editable (selectable, searchable, editable in Inkscape or
+//! Illustrator), this module walks the compiled `Frame` and writes the SVG
+//! fragment itself:
 //!
-//! - un **groupe** garde sa translation et sa transformation ;
-//! - un **texte** devient un `<text>` dont chaque caractère porte la position
-//!   (`x`, `y`) que Typst a calculée pour son glyphe, avec la famille, le
-//!   corps, le gras/l'italique et la couleur de la police du texte ;
-//! - une **forme** (trait de fraction, racine, rectangle) devient un `<path>`
-//!   ou un `<rect>`, comme `typst-svg` ;
-//! - une image, un lien et une balise d'introspection n'ont pas de rendu ici.
+//! - a **group** keeps its translation and transformation;
+//! - a **text** becomes a `<text>` whose every character carries the
+//!   position (`x`, `y`) that Typst computed for its glyph, with the
+//!   family, size, bold/italic and color of the text's font;
+//! - a **shape** (fraction bar, root, rectangle) becomes a `<path>`
+//!   or a `<rect>`, like `typst-svg`;
+//! - an image, a link and an introspection tag have no rendering here.
 //!
-//! # Repli en contour, par glyphe
+//! # Outline fallback, per glyph
 //!
-//! Un glyphe n'est écrit en texte que si son caractère retrouve **exactement**
-//! ce glyphe par la table `cmap` de la police. Un glyphe sans caractère
-//! Unicode (délimiteur étiré, variante mathématique), une ligature ou un
-//! caractère que la police ne lie pas à ce glyphe sort en `<path>` — le contour
-//! de ce seul glyphe — pour que le rendu reste celui de Typst. Les espaces
-//! n'ont pas d'encre : ils sont omis, ce qui évite aussi qu'un lecteur ne
-//! replie les blancs et ne décale les positions suivantes.
+//! A glyph is written as text only if its character finds **exactly** that
+//! glyph through the font's `cmap` table. A glyph with no Unicode character
+//! (stretched delimiter, math variant), a ligature or a character that the
+//! font does not link to that glyph comes out as a `<path>` — the outline
+//! of that glyph alone — so that the rendering stays Typst's. Spaces have
+//! no ink: they are omitted, which also prevents a reader from collapsing
+//! whitespace and shifting the following positions.
 //!
-//! La police n'est **jamais** embarquée dans le SVG : `font-family` nomme la
-//! famille, suivie d'une famille générique de repli (décision du #162).
+//! The font is **never** embedded in the SVG: `font-family` names the
+//! family, followed by a generic fallback family (decision of #162).
 
 use std::fmt::Write;
 
@@ -34,8 +34,8 @@ use typst::layout::{Frame, FrameItem, Point};
 use typst::text::{FontStyle, TextItem};
 use typst::visualize::{Color, CurveItem, FillRule, FixedStroke, Geometry, Paint, Shape};
 
-/// Le fragment SVG de `frame` : tout ce qui irait dans un `<svg>`, sans sa
-/// balise racine.
+/// The SVG fragment of `frame`: everything that would go in an `<svg>`,
+/// without its root tag.
 pub(crate) fn frame_to_svg(frame: &Frame) -> String {
     let mut out = String::new();
     write_frame(&mut out, frame);
@@ -69,7 +69,7 @@ fn write_frame(out: &mut String, frame: &Frame) {
     }
 }
 
-/// Un nombre SVG court : pas de traîne de zéros, jamais `NaN` ni `inf`.
+/// A short SVG number: no trailing zeros, never `NaN` or `inf`.
 fn num(value: f64) -> String {
     if !value.is_finite() {
         return "0".to_owned();
@@ -83,8 +83,8 @@ fn num(value: f64) -> String {
     }
 }
 
-/// `#RRGGBB` et opacité d'une peinture. Un dégradé ou un motif (jamais produits
-/// par les textes du graphe) retombent sur le noir.
+/// `#RRGGBB` and opacity of a paint. A gradient or a pattern (never produced
+/// by the graph's texts) falls back to black.
 fn paint_attrs(paint: &Paint, role: &str) -> String {
     let Paint::Solid(color) = paint else {
         return format!("{role}=\"#000000\"");
@@ -112,7 +112,7 @@ fn escape(text: &str, out: &mut String) {
     }
 }
 
-/// Ce que devient un glyphe : un caractère de `<text>`, ou un contour.
+/// What a glyph becomes: a `<text>` character, or an outline.
 enum Placed {
     Char(char, f64, f64),
     Outline(u16, f64, f64),
@@ -126,7 +126,7 @@ fn write_text(out: &mut String, pos: Point, text: &TextItem) {
     let mut placed = Vec::with_capacity(text.glyphs.len());
     for glyph in &text.glyphs {
         let gx = pos.x.to_pt() + x + glyph.x_offset.at(text.size).to_pt();
-        // Typst compte `y_offset` vers le haut, le SVG vers le bas.
+        // Typst counts `y_offset` upward, SVG downward.
         let gy = pos.y.to_pt() - y - glyph.y_offset.at(text.size).to_pt();
         x += glyph.x_advance.at(text.size).to_pt();
         y += glyph.y_advance.at(text.size).to_pt();
@@ -137,7 +137,7 @@ fn write_text(out: &mut String, pos: Point, text: &TextItem) {
             _ => None,
         };
         match single {
-            // Pas d'encre : omis (voir la doc de tête).
+            // No ink: omitted (see the head doc).
             Some(c) if c.is_whitespace() => {}
             Some(c) if ttf.glyph_index(c) == Some(GlyphId(glyph.id)) => {
                 placed.push(Placed::Char(c, gx, gy));
@@ -205,7 +205,7 @@ fn write_text(out: &mut String, pos: Point, text: &TextItem) {
     }
 }
 
-/// La famille générique qui suit la famille nommée dans `font-family`.
+/// The generic family that follows the named family in `font-family`.
 fn generic_family(family: &str) -> &'static str {
     if family.contains("Libertinus") {
         "serif"
@@ -214,7 +214,7 @@ fn generic_family(family: &str) -> &'static str {
     }
 }
 
-/// Un contour de glyphe, en unités de la police.
+/// A glyph outline, in font units.
 #[derive(Default)]
 struct PathBuilder {
     d: String,
@@ -299,7 +299,7 @@ fn write_shape(out: &mut String, pos: Point, shape: &Shape) {
     }
 }
 
-/// Les attributs de remplissage et de trait d'une forme (précédés d'un blanc).
+/// The fill and stroke attributes of a shape (preceded by a space).
 fn shape_style(shape: &Shape) -> String {
     let mut attrs = String::new();
     match &shape.fill {

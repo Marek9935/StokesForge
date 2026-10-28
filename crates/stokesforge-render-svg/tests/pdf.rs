@@ -1,139 +1,133 @@
-//! Tâche R6.2 : le PDF s'ouvre, et ses dimensions correspondent à celles du
-//! SVG dont il est issu.
+//! Task R6.2: the PDF opens, and its dimensions match those of the
+//! SVG it comes from.
 //!
-//! « S'ouvre » veut dire : un analyseur PDF indépendant du nôtre — `lopdf`,
-//! qui ne partage aucun code avec `svg2pdf` — reparse le document sans
-//! erreur. Une simple recherche d'octets dans notre propre sortie ne
-//! prouverait rien de plus que « `svg2pdf` a écrit les octets que nous lui
-//! avons demandé d'écrire » ; `lopdf` prouve que la structure PDF elle-même
-//! (table d'objets, dictionnaire de page, `MediaBox`) est valide.
+//! "Opens" means: a PDF parser independent of ours — `lopdf`,
+//! which shares no code with `svg2pdf` — re-parses the document without
+//! error. A mere byte search in our own output would prove nothing more
+//! than "`svg2pdf` wrote the bytes we asked it to write"; `lopdf` proves
+//! that the PDF structure itself (object table, page dictionary, `MediaBox`)
+//! is valid.
 //!
-//! « Ses dimensions correspondent » est vérifié à trois sources, pas une
-//! seule : la taille demandée à l'export, la taille réellement écrite dans
-//! l'attribut `width`/`height` du SVG, et la `MediaBox` que `lopdf` retrouve
-//! dans le PDF. Comparer seulement aux deux premières ne verrait pas une
-//! divergence entre [`render_to_string`] et [`render_to_pdf`] — deux appels
-//! séparés au pipeline, même s'ils partagent aujourd'hui tout leur code.
+//! "Its dimensions match" is checked against three sources, not just
+//! one: the size requested at export, the size actually written in the
+//! SVG's `width`/`height` attribute, and the `MediaBox` that `lopdf` finds
+//! in the PDF. Comparing only against the first two would not see a
+//! divergence between [`render_to_string`] and [`render_to_pdf`] — two
+//! separate calls into the pipeline, even if they share all their code today.
 
 use stokesforge_core::resolve::resolve_spec;
 use stokesforge_render::sample;
 use stokesforge_render::TextMeasurer;
 use stokesforge_render_svg::{render_to_pdf, render_to_pdf_file, render_to_string};
 
-/// Extrait la valeur numérique d'un attribut `nom="valeur"` d'un document
-/// SVG. Panique si absent : dans ce fichier, son absence est un échec du
-/// test, pas un cas à tolérer.
-fn attribut_numerique(document: &str, nom: &str) -> f64 {
-    let motif = format!("{nom}=\"");
-    let debut = document
-        .find(&motif)
-        .unwrap_or_else(|| panic!("attribut `{nom}` absent du SVG"))
-        + motif.len();
-    let reste = &document[debut..];
-    let fin = reste
+/// Extracts the numeric value of a `name="value"` attribute of an SVG
+/// document. Panics if absent: in this file, its absence is a test
+/// failure, not a case to tolerate.
+fn numeric_attribute(document: &str, name: &str) -> f64 {
+    let pattern = format!("{name}=\"");
+    let start = document
+        .find(&pattern)
+        .unwrap_or_else(|| panic!("attribute `{name}` missing from the SVG"))
+        + pattern.len();
+    let rest = &document[start..];
+    let end = rest
         .find('"')
-        .unwrap_or_else(|| panic!("attribut `{nom}` non refermé"));
-    reste[..fin]
+        .unwrap_or_else(|| panic!("attribute `{name}` not closed"));
+    rest[..end]
         .parse()
-        .unwrap_or_else(|err| panic!("attribut `{nom}` non numérique : {err}"))
+        .unwrap_or_else(|err| panic!("attribute `{name}` not numeric: {err}"))
 }
 
-/// La `MediaBox` de la première page d'un PDF, `(largeur, hauteur)` en
-/// points — lue par `lopdf`, indépendamment de `svg2pdf`.
+/// The `MediaBox` of the first page of a PDF, `(width, height)` in
+/// points — read by `lopdf`, independently of `svg2pdf`.
 fn media_box(pdf: &[u8]) -> (f64, f64) {
-    let document = lopdf::Document::load_mem(pdf).expect("le PDF doit s'ouvrir sans erreur");
+    let document = lopdf::Document::load_mem(pdf).expect("the PDF must open without error");
     let pages = document.get_pages();
-    assert_eq!(pages.len(), 1, "une figure exportée = une page PDF");
-    let (_, id) = pages.into_iter().next().expect("au moins une page");
+    assert_eq!(pages.len(), 1, "an exported figure = one PDF page");
+    let (_, id) = pages.into_iter().next().expect("at least one page");
     let page = document
         .get_dictionary(id)
-        .expect("dictionnaire de page introuvable");
-    let boite = page
+        .expect("page dictionary not found");
+    let media_box = page
         .get(b"MediaBox")
-        .expect("MediaBox absente de la page")
+        .expect("MediaBox missing from the page")
         .as_array()
-        .expect("MediaBox n'est pas un tableau");
-    let valeur = |i: usize| {
-        boite[i]
+        .expect("MediaBox is not an array");
+    let value = |i: usize| {
+        media_box[i]
             .as_float()
-            .unwrap_or_else(|_| panic!("MediaBox[{i}] n'est pas numérique")) as f64
+            .unwrap_or_else(|_| panic!("MediaBox[{i}] is not numeric")) as f64
     };
-    (valeur(2) - valeur(0), valeur(3) - valeur(1))
+    (value(2) - value(0), value(3) - value(1))
 }
 
 #[test]
-fn le_pdf_souvre_et_ses_dimensions_correspondent_au_svg() {
-    // Le graphe réaliste de R5 : cinq panneaux, six types de tracé, échelle
-    // logarithmique — pas un canevas vide qui s'accorderait trivialement.
-    let echantillon = sample::realistic().expect("graphe réaliste");
-    let plot = resolve_spec(echantillon.project.tree(), &echantillon.spec);
+fn the_pdf_opens_and_its_dimensions_match_the_svg() {
+    // The realistic graph of R5: five panels, six plot types, logarithmic
+    // scale — not an empty canvas that would agree trivially.
+    let sample = sample::realistic().expect("realistic graph");
+    let plot = resolve_spec(sample.project.tree(), &sample.spec);
     let measurer = TextMeasurer::default();
-    let taille = (1280, 860);
+    let size = (1280, 860);
 
-    let document = render_to_string(&plot, taille, &measurer).expect("export SVG");
-    let pdf = render_to_pdf(&plot, taille, &measurer).expect("export PDF");
+    let document = render_to_string(&plot, size, &measurer).expect("SVG export");
+    let pdf = render_to_pdf(&plot, size, &measurer).expect("PDF export");
 
     assert!(
         pdf.len() > 2_000,
-        "PDF suspicieusement court ({} octets) pour cinq panneaux",
+        "suspiciously short PDF ({} bytes) for five panels",
         pdf.len()
     );
 
-    let (largeur_svg, hauteur_svg) = (
-        attribut_numerique(&document, "width"),
-        attribut_numerique(&document, "height"),
+    let (svg_width, svg_height) = (
+        numeric_attribute(&document, "width"),
+        numeric_attribute(&document, "height"),
     );
-    let (largeur_pdf, hauteur_pdf) = media_box(&pdf);
+    let (pdf_width, pdf_height) = media_box(&pdf);
 
-    // Trois sources, un seul nombre attendu de chaque côté : la taille
-    // demandée, celle réellement écrite dans le SVG, et celle que `lopdf`
-    // retrouve dans le PDF — à `PageOptions::default()` (72 DPI), les unités
-    // utilisateur du SVG et les points PDF coïncident un pour un.
+    // Three sources, a single number expected on each side: the requested
+    // size, the one actually written in the SVG, and the one that `lopdf`
+    // finds in the PDF — with `PageOptions::default()` (72 DPI), the SVG's
+    // user units and the PDF points coincide one for one.
+    assert_eq!(svg_width, size.0 as f64, "SVG width ≠ requested width");
+    assert_eq!(svg_height, size.1 as f64, "SVG height ≠ requested height");
     assert_eq!(
-        largeur_svg, taille.0 as f64,
-        "largeur SVG ≠ largeur demandée"
+        pdf_width, svg_width,
+        "PDF width ({pdf_width}) ≠ SVG width ({svg_width})"
     );
     assert_eq!(
-        hauteur_svg, taille.1 as f64,
-        "hauteur SVG ≠ hauteur demandée"
-    );
-    assert_eq!(
-        largeur_pdf, largeur_svg,
-        "largeur PDF ({largeur_pdf}) ≠ largeur SVG ({largeur_svg})"
-    );
-    assert_eq!(
-        hauteur_pdf, hauteur_svg,
-        "hauteur PDF ({hauteur_pdf}) ≠ hauteur SVG ({hauteur_svg})"
+        pdf_height, svg_height,
+        "PDF height ({pdf_height}) ≠ SVG height ({svg_height})"
     );
 }
 
 #[test]
-fn une_autre_taille_de_figure_donne_une_autre_mediabox() {
-    // Témoin : si `media_box` renvoyait toujours la même chose (par exemple
-    // parce que `render_to_pdf` ignorait `taille`), le test précédent
-    // passerait pour une mauvaise raison. Le graphe minimal suffit ici.
-    let echantillon = sample::minimal().expect("graphe minimal");
-    let plot = resolve_spec(echantillon.project.tree(), &echantillon.spec);
+fn another_figure_size_gives_another_mediabox() {
+    // Witness: if `media_box` always returned the same thing (for example
+    // because `render_to_pdf` ignored `size`), the previous test would pass
+    // for the wrong reason. The minimal graph is enough here.
+    let sample = sample::minimal().expect("minimal graph");
+    let plot = resolve_spec(sample.project.tree(), &sample.spec);
     let measurer = TextMeasurer::default();
 
-    let petit = render_to_pdf(&plot, (400, 300), &measurer).expect("export PDF (400×300)");
-    let grand = render_to_pdf(&plot, (900, 600), &measurer).expect("export PDF (900×600)");
+    let small = render_to_pdf(&plot, (400, 300), &measurer).expect("PDF export (400×300)");
+    let large = render_to_pdf(&plot, (900, 600), &measurer).expect("PDF export (900×600)");
 
-    assert_eq!(media_box(&petit), (400.0, 300.0));
-    assert_eq!(media_box(&grand), (900.0, 600.0));
-    assert_ne!(media_box(&petit), media_box(&grand));
+    assert_eq!(media_box(&small), (400.0, 300.0));
+    assert_eq!(media_box(&large), (900.0, 600.0));
+    assert_ne!(media_box(&small), media_box(&large));
 }
 
 #[test]
-fn ecriture_pdf_sur_disque() {
-    let echantillon = sample::minimal().expect("graphe minimal");
-    let plot = resolve_spec(echantillon.project.tree(), &echantillon.spec);
-    let dossier = tempfile::tempdir().expect("dossier temporaire");
-    let cible = dossier.path().join("figure.pdf");
+fn pdf_writing_to_disk() {
+    let sample = sample::minimal().expect("minimal graph");
+    let plot = resolve_spec(sample.project.tree(), &sample.spec);
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let target = dir.path().join("figure.pdf");
 
-    render_to_pdf_file(&cible, &plot, (640, 480), &TextMeasurer::default()).expect("écriture");
+    render_to_pdf_file(&target, &plot, (640, 480), &TextMeasurer::default()).expect("write");
 
-    let contenu = std::fs::read(&cible).expect("relecture");
-    assert!(contenu.starts_with(b"%PDF-"), "en-tête PDF absent");
-    assert_eq!(media_box(&contenu), (640.0, 480.0));
+    let content = std::fs::read(&target).expect("read back");
+    assert!(content.starts_with(b"%PDF-"), "PDF header missing");
+    assert_eq!(media_box(&content), (640.0, 480.0));
 }

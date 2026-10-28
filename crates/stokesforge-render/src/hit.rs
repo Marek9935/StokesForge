@@ -1,79 +1,78 @@
-//! Quel composant d'un graphe est sous un pixel — titre, zone de tracé, axe
-//! ou titre d'axe.
+//! Which component of a graph is under a pixel — title, plot area, axis or
+//! axis title.
 //!
-//! Sert au clic droit de l'interface (« propriétés de ce que je vise »). Vit
-//! ici plutôt que dans `stokesforge-render-egui` pour la même raison que
-//! [`crate::interact`] : c'est de la géométrie pure sur un [`DrawnPlot`],
-//! indépendante du backend.
+//! Used by the interface's right click ("properties of what I point at").
+//! Lives here rather than in `stokesforge-render-egui` for the same reason as
+//! [`crate::interact`]: it is pure geometry on a [`DrawnPlot`], independent of
+//! the backend.
 //!
-//! # D'où vient la géométrie
+//! # Where the geometry comes from
 //!
-//! Rien n'est reconstruit à côté du tracé : la zone de tracé
-//! ([`DrawnPanel::pixel_origin`]/[`DrawnPanel::pixel_size`]), l'épaisseur des
-//! aires de graduation ([`DrawnPanel::axis_areas`]) et la bande du titre
-//! ([`DrawnPlot::title_height`]) sont celles que Plotters a réellement
-//! allouées, recopiées par [`crate::pipeline`].
+//! Nothing is rebuilt next to the drawing: the plot area
+//! ([`DrawnPanel::pixel_origin`]/[`DrawnPanel::pixel_size`]), the thickness
+//! of the tick areas ([`DrawnPanel::axis_areas`]) and the title band
+//! ([`DrawnPlot::title_height`]) are those that Plotters actually allocated,
+//! copied over by [`crate::pipeline`].
 //!
-//! Seule approximation : la séparation, dans une aire de graduation, entre
-//! les libellés de graduation et le titre de l'axe. Plotters pose ce titre
-//! contre le bord **extérieur** de l'aire (`draw_axis_and_labels`) ; on lui
-//! attribue une bande de [`AXIS_TITLE_BAND`] pixels de ce côté, au plus la
-//! moitié de l'aire. Un clic sur la frontière exacte peut donc tomber sur
-//! l'un ou l'autre — sans conséquence, les deux ouvrent les réglages du même
-//! axe.
+//! The only approximation: the split, within a tick area, between the tick
+//! labels and the axis title. Plotters puts this title against the **outer**
+//! edge of the area (`draw_axis_and_labels`); we give it a band of
+//! [`AXIS_TITLE_BAND`] pixels on that side, at most half the area. A click on
+//! the exact boundary may thus land on either one — harmless, both open the
+//! settings of the same axis.
 
 use crate::pipeline::{AxisArea, DrawnPanel, DrawnPlot, AXIS_DESC_SIZE};
 use stokesforge_plot::TextTarget;
 
-/// Épaisseur attribuée au titre d'un axe dans son aire de graduation : la
-/// hauteur d'une ligne de [`AXIS_DESC_SIZE`], interligne compris.
+/// Thickness given to an axis title in its tick area: the height of a line of
+/// [`AXIS_DESC_SIZE`], line spacing included.
 pub const AXIS_TITLE_BAND: f64 = AXIS_DESC_SIZE * 1.5;
 
-/// Un axe d'un panneau.
+/// An axis of a panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AxisSide {
-    /// Abscisses, sous la zone de tracé.
+    /// Abscissas, below the plot area.
     Bottom,
-    /// Ordonnée principale, à gauche.
+    /// Main ordinate, on the left.
     Left,
-    /// Ordonnée secondaire, à droite.
+    /// Secondary ordinate, on the right.
     Right,
 }
 
-/// Un composant d'un graphe, désigné par un pixel.
+/// A component of a graph, picked by a pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotComponent {
-    /// Le titre du graphe, en haut de la figure.
+    /// The graph title, at the top of the figure.
     Title,
-    /// La zone de tracé du panneau d'indice donné (dans
+    /// The plot area of the panel with the given index (in
     /// [`DrawnPlot::panels`]).
     PlotArea { panel: usize },
-    /// Un axe : sa ligne et ses libellés de graduation.
+    /// An axis: its line and its tick labels.
     Axis { panel: usize, side: AxisSide },
-    /// Le titre d'un axe.
+    /// An axis title.
     AxisTitle { panel: usize, side: AxisSide },
-    /// Un texte libre (issue #35) : `index` dans `PanelSpec::annotations`.
-    /// Prioritaire sur tout le reste — il est tracé par-dessus.
+    /// A free text (issue #35): `index` in `PanelSpec::annotations`.
+    /// Takes priority over everything else — it is drawn on top.
     Annotation { panel: usize, index: usize },
-    /// Un objet graphique (issue #76) : `index` dans `PanelSpec::shapes`.
-    /// Désigné sur son trait, ou dedans s'il est rempli ; prioritaire sur la
-    /// zone de tracé, sous les textes libres.
+    /// A graphic object (issue #76): `index` in `PanelSpec::shapes`.
+    /// Picked on its stroke, or inside it if filled; takes priority over the
+    /// plot area, below the free texts.
     Shape { panel: usize, index: usize },
-    /// Un titre ou une légende (issue #53) : double-clic pour l'éditer,
-    /// glisser pour le déplacer. Tracé par-dessus la zone de tracé comme les
-    /// textes libres, donc prioritaire sur elle et sur les axes.
+    /// A title or a legend (issue #53): double-click to edit it,
+    /// drag to move it. Drawn over the plot area like the free texts, hence
+    /// it takes priority over it and over the axes.
     Text(TextTarget),
-    /// Une entrée de la légende : la série du panneau `panel` (rang dans
-    /// `PanelSpec::series`) qu'elle montre. Prioritaire sur [`Self::Text`]
-    /// de la même légende.
+    /// A legend entry: the series of panel `panel` (rank in
+    /// `PanelSpec::series`) that it shows. Takes priority over [`Self::Text`]
+    /// of the same legend.
     LegendEntry { panel: usize, series: usize },
 }
 
-/// Le composant sous le pixel `(x, y)` (repère du backend, celui de
-/// [`DrawnPanel::pixel_origin`]), ou `None` s'il ne vise que le fond (marges,
-/// espace entre panneaux).
+/// The component under pixel `(x, y)` (backend coordinate space, that of
+/// [`DrawnPanel::pixel_origin`]), or `None` if it only points at the
+/// background (margins, space between panels).
 pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
-    // Le dernier tracé est au-dessus : on cherche du dernier au premier.
+    // The last drawn is on top: search from the last to the first.
     for (panel, drawn) in plot.panels.iter().enumerate().rev() {
         if let Some(annotation) = drawn.annotations.iter().rev().find(|a| a.contains(x, y)) {
             return Some(PlotComponent::Annotation {
@@ -82,8 +81,8 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
             });
         }
     }
-    // Les objets graphiques (issue #76) : le plus haut d'abord, et seulement
-    // dans la zone de tracé où ils sont rognés.
+    // The graphic objects (issue #76): the topmost first, and only within
+    // the plot area where they are clipped.
     for (panel, drawn) in plot.panels.iter().enumerate().rev() {
         let (left, top) = (drawn.pixel_origin.0 as f64, drawn.pixel_origin.1 as f64);
         let inside = x >= left
@@ -100,8 +99,8 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
             });
         }
     }
-    // Les titres et légendes (issue #53), du dernier panneau au premier ; la
-    // légende d'abord par ses lignes, puis par son cadre.
+    // The titles and legends (issue #53), from the last panel to the first;
+    // the legend first by its rows, then by its frame.
     for (panel, drawn) in plot.panels.iter().enumerate().rev() {
         let on_legend = drawn
             .texts
@@ -130,8 +129,8 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
     if y >= 0.0 && y < plot.title_height as f64 {
         return Some(PlotComponent::Title);
     }
-    // Les aires de graduation d'abord, tous calques confondus : des calques
-    // superposés (#167) partagent la zone de tracé, mais chacun a ses axes.
+    // The tick areas first, all layers together: overlaid layers (#167)
+    // share the plot area, but each has its own axes.
     plot.panels
         .iter()
         .enumerate()
@@ -147,9 +146,9 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
         })
 }
 
-/// L'axe d'un panneau dont l'aire de graduation contient `(x, y)`. Le côté
-/// rendu est celui de l'axe **dans le spec** : un calque superposé affiche
-/// son axe X en haut et son axe Y à droite, mais ce sont toujours `Bottom` et
+/// The axis of a panel whose tick area contains `(x, y)`. The reported side
+/// is that of the axis **in the spec**: an overlaid layer shows its X axis
+/// at the top and its Y axis on the right, but they are still `Bottom` and
 /// `Left`.
 fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option<PlotComponent> {
     let left = panel.pixel_origin.0 as f64;
@@ -164,8 +163,8 @@ fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option
     } else {
         AxisSide::Right
     };
-    // Distance au bord de la zone de tracé, vers l'extérieur, dans chaque
-    // aire candidate.
+    // Distance to the edge of the plot area, outward, in each candidate
+    // area.
     let candidates = [
         (AxisSide::Bottom, within_x, y - bottom, areas.bottom),
         (AxisSide::Bottom, within_x, top - y, areas.top),
@@ -181,7 +180,7 @@ fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option
         })
 }
 
-/// Axe ou titre d'axe, selon la profondeur du clic dans l'aire.
+/// Axis or axis title, depending on the click depth in the area.
 fn axis_part(panel: usize, side: AxisSide, depth: f64, area: AxisArea) -> PlotComponent {
     let size = area.size as f64;
     let band = AXIS_TITLE_BAND.min(size / 2.0);
@@ -198,9 +197,9 @@ mod tests {
     use crate::pipeline::AxisAreas;
     use stokesforge_plot::AxisScale;
 
-    /// Figure de 480×360 : titre de 40 px, zone de tracé de (80, 60) à
-    /// (440, 280), aire du bas de 52 px, de gauche de 64 px, pas d'axe
-    /// secondaire.
+    /// A 480×360 figure: 40 px title, plot area from (80, 60) to
+    /// (440, 280), 52 px bottom area, 64 px left area, no secondary
+    /// axis.
     fn figure() -> DrawnPlot {
         let area = |size| AxisArea {
             size,
@@ -249,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_zone_designe_son_composant() {
+    fn each_zone_picks_its_component() {
         let plot = figure();
         let panel = 0;
         assert_eq!(component_at(&plot, 240.0, 20.0), Some(PlotComponent::Title));
@@ -257,7 +256,7 @@ mod tests {
             component_at(&plot, 240.0, 150.0),
             Some(PlotComponent::PlotArea { panel })
         );
-        // Juste sous la zone de tracé : les graduations de l'axe du bas.
+        // Just below the plot area: the ticks of the bottom axis.
         assert_eq!(
             component_at(&plot, 240.0, 290.0),
             Some(PlotComponent::Axis {
@@ -265,7 +264,7 @@ mod tests {
                 side: AxisSide::Bottom
             })
         );
-        // Contre le bord extérieur de l'aire du bas : son titre.
+        // Against the outer edge of the bottom area: its title.
         assert_eq!(
             component_at(&plot, 240.0, 328.0),
             Some(PlotComponent::AxisTitle {
@@ -287,16 +286,16 @@ mod tests {
                 side: AxisSide::Left
             })
         );
-        // Marge à droite, sans axe secondaire : rien.
+        // Margin on the right, no secondary axis: nothing.
         assert_eq!(component_at(&plot, 460.0, 150.0), None);
-        // Coin bas-gauche, hors des deux aires : rien.
+        // Bottom-left corner, outside both areas: nothing.
         assert_eq!(component_at(&plot, 40.0, 320.0), None);
     }
 
-    /// #168 : l'axe d'un calque superposé empilé à une seconde bande n'est
-    /// atteint que dans cette bande, pas dans celle du calque plus ancien.
+    /// #168: the axis of an overlaid layer stacked in a second band is only
+    /// reached in that band, not in that of the older layer.
     #[test]
-    fn une_bande_decalee_ne_designe_que_son_calque() {
+    fn an_offset_band_picks_only_its_layer() {
         let mut plot = figure();
         let mut second = plot.panels[0].clone();
         second.index = 1;
@@ -312,8 +311,8 @@ mod tests {
             offset: 8,
         };
         plot.panels.push(second);
-        // La zone de tracé commence à y = 60 : 0-8 px au-dessus pour le
-        // premier calque, 8-16 px pour le second.
+        // The plot area starts at y = 60: 0-8 px above for the
+        // first layer, 8-16 px for the second.
         let axis = |panel| {
             Some(PlotComponent::Axis {
                 panel,
@@ -325,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn un_axe_sans_titre_n_a_pas_de_bande_de_titre() {
+    fn an_untitled_axis_has_no_title_band() {
         let mut plot = figure();
         plot.panels[0].axis_areas.bottom.titled = false;
         assert_eq!(
@@ -337,14 +336,14 @@ mod tests {
         );
     }
 
-    /// Issue #35 : un texte tourné se désigne sur son rectangle **tourné**,
-    /// pas sur sa boîte englobante, et passe devant la zone de tracé et le
-    /// titre d'axe qu'il recouvre.
+    /// Issue #35: a rotated text is picked on its **rotated** rectangle,
+    /// not on its bounding box, and goes in front of the plot area and of the
+    /// axis title that it covers.
     #[test]
-    fn un_texte_tourne_se_designe_sur_son_rectangle_tourne() {
+    fn a_rotated_text_is_picked_on_its_rotated_rectangle() {
         use crate::pipeline::DrawnAnnotation;
         let mut plot = figure();
-        // 100 × 20 px, tourné d'un quart de tour : vertical, centré en
+        // 100 × 20 px, rotated by a quarter turn: vertical, centered at
         // (240, 150).
         plot.panels[0].annotations.push(DrawnAnnotation {
             index: 3,
@@ -356,30 +355,34 @@ mod tests {
         assert_eq!(
             component_at(&plot, 240.0, 105.0),
             annotation,
-            "haut du texte"
+            "top of the text"
         );
         assert_eq!(component_at(&plot, 245.0, 190.0), annotation);
-        // Dans la boîte du texte **droit**, mais hors du texte tourné.
+        // Inside the box of the **upright** text, but outside the rotated text.
         assert_eq!(
             component_at(&plot, 280.0, 150.0),
             Some(PlotComponent::PlotArea { panel: 0 })
         );
-        // À 45°, un coin de la boîte englobante n'est pas le texte.
+        // At 45°, a corner of the bounding box is not the text.
         plot.panels[0].annotations[0].rotation = 45.0;
-        assert_eq!(component_at(&plot, 240.0, 150.0), annotation, "centre");
-        assert_ne!(component_at(&plot, 280.0, 185.0), annotation, "coin vide");
+        assert_eq!(component_at(&plot, 240.0, 150.0), annotation, "center");
+        assert_ne!(
+            component_at(&plot, 280.0, 185.0),
+            annotation,
+            "empty corner"
+        );
         assert_eq!(
             component_at(&plot, 270.0, 120.0),
             annotation,
-            "le long du texte"
+            "along the text"
         );
     }
 
-    /// Issue #53 : un titre, un titre d'axe tourné ou une légende se désignent
-    /// sur leur rectangle (tourné), avant la zone de tracé qu'ils recouvrent,
-    /// et une ligne de légende avant le cadre entier.
+    /// Issue #53: a title, a rotated axis title or a legend are picked
+    /// on their (rotated) rectangle, before the plot area that they cover,
+    /// and a legend row before the whole frame.
     #[test]
-    fn un_titre_ou_une_legende_se_designent_avant_la_zone_de_trace() {
+    fn a_title_or_a_legend_is_picked_before_the_plot_area() {
         use crate::pipeline::{DrawnLegendRow, DrawnText};
         use stokesforge_plot::AxisSide as Side;
         let mut plot = figure();
@@ -388,7 +391,7 @@ mod tests {
             side: Side::Left,
         };
         plot.panels[0].texts = vec![
-            // Titre d'axe vertical, déplacé en plein dans la zone de tracé.
+            // Vertical axis title, moved right into the plot area.
             DrawnText {
                 target: left,
                 center: (200.0, 150.0),
@@ -419,12 +422,12 @@ mod tests {
         assert_eq!(
             component_at(&plot, 200.0, 100.0),
             Some(PlotComponent::Text(left)),
-            "haut du titre vertical"
+            "top of the vertical title"
         );
         assert_eq!(
             component_at(&plot, 230.0, 150.0),
             Some(PlotComponent::PlotArea { panel: 0 }),
-            "à côté du titre tourné : la zone de tracé"
+            "next to the rotated title: the plot area"
         );
         assert_eq!(
             component_at(&plot, 380.0, 112.0),
@@ -436,7 +439,7 @@ mod tests {
         assert_eq!(
             component_at(&plot, 380.0, 72.0),
             Some(PlotComponent::Text(TextTarget::Legend { panel: 0 })),
-            "le cadre, hors des lignes"
+            "the frame, outside the rows"
         );
         plot.title = Some(DrawnText {
             target: TextTarget::Title,
@@ -452,12 +455,12 @@ mod tests {
         assert_eq!(
             component_at(&plot, 40.0, 20.0),
             Some(PlotComponent::Title),
-            "la bande du titre, hors du texte, garde ses propriétés"
+            "the title band, outside the text, keeps its properties"
         );
     }
 
     #[test]
-    fn sans_titre_le_haut_de_la_figure_n_est_pas_le_titre() {
+    fn without_a_title_the_top_of_the_figure_is_not_the_title() {
         let mut plot = figure();
         plot.title_height = 0;
         assert_eq!(component_at(&plot, 240.0, 20.0), None);

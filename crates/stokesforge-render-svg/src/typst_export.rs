@@ -1,57 +1,56 @@
-//! Chemin export de Typst — tâche R8.4.
+//! Typst export path — task R8.4.
 //!
-//! # Le mécanisme, et pourquoi il ne touche pas `SVGBackend`
+//! # The mechanism, and why it does not touch `SVGBackend`
 //!
-//! `plotters-svg::SVGBackend` écrit directement dans sa `String` cible à
-//! chaque appel de `draw_*`, sans repasser par un document qu'on pourrait
-//! modifier après coup — et son champ `target` est privé, donc
-//! [`crate::backend::MeasuredSvgBackend`] ne peut pas y injecter du XML
-//! brut au moment où il dessine un label Typst. `architecture-choisie.md`
-//! §8.1 suggère la sortie : noter des **rectangles-témoins**, à substituer
-//! une fois le document entier écrit.
+//! `plotters-svg::SVGBackend` writes directly into its target `String` on
+//! each `draw_*` call, without going back through a document that could be
+//! modified afterwards — and its `target` field is private, so
+//! [`crate::backend::MeasuredSvgBackend`] cannot inject raw XML into it at
+//! the moment it draws a Typst label. `architecture-choisie.md`
+//! §8.1 suggests the way out: note **witness rectangles**, to be substituted
+//! once the whole document is written.
 //!
-//! Concrètement : [`TypstExport::record`] compile la formule (ou reprend le
-//! cache, tâche 8.2), retient sa position, sa rotation et son fragment SVG
-//! déjà rendu, s'attribue une couleur-témoin **qui n'a encore servi à aucun
-//! autre témoin de cet export** (voir [`TypstExport::next_witness_color`]),
-//! et rend cette couleur avec la taille attendue du rectangle à
-//! [`crate::backend::MeasuredSvgBackend::draw_text`], qui pose un simple
-//! `<rect>` de cette couleur et cette taille à la place du `<text>`
-//! ordinaire. Une fois tout le graphe tracé et la `String` complète
-//! obtenue, [`splice`] retrouve chaque témoin **par sa couleur propre**, en
-//! revérifiant que le `<rect>` trouvé a bien la position et la taille
-//! attendues avant de le remplacer par le fragment enregistré.
+//! Concretely: [`TypstExport::record`] compiles the formula (or reuses the
+//! cache, task 8.2), keeps its position, rotation and already rendered SVG
+//! fragment, assigns itself a witness color **that has not yet been used by
+//! any other witness of this export** (see [`TypstExport::next_witness_color`]),
+//! and returns that color with the expected size of the rectangle to
+//! [`crate::backend::MeasuredSvgBackend::draw_text`], which places a simple
+//! `<rect>` of that color and size in place of the ordinary `<text>`. Once
+//! the whole graph is plotted and the complete `String` obtained,
+//! [`splice`] finds each witness **by its own color**, rechecking that the
+//! `<rect>` found really has the expected position and size before
+//! replacing it with the recorded fragment.
 //!
-//! **Limite assumée** (corrigée depuis la version à couleur unique, dont
-//! ceci documentait le défaut) : la couleur-témoin varie par témoin — la
-//! composante rouge reste fixée à une valeur qu'un utilisateur ou un
-//! défaut du projet n'a raisonnablement aucune raison de choisir pour un
-//! vrai élément du graphe, vert et bleu encodent un compteur (65536
-//! couleurs distinctes par export). [`splice`] exige en plus que le
-//! `<rect>` trouvé ait la position et la taille exactes du témoin posé.
-//! Pour provoquer une collision, un vrai élément du graphe devrait donc
-//! partager *à la fois* une couleur précise et une géométrie précise avec
-//! un témoin — un risque jugé négligeable plutôt qu'éliminé par
-//! construction : un vrai identifiant coûterait de faire porter un
-//! attribut `id` par `plotters-svg`, ce qu'il ne fait justement pas (voir
-//! `architecture-choisie.md` §5.2). Reste aussi le cas, plus théorique que
-//! pratique, d'un export à plus de 65536 témoins : le compteur de couleurs
-//! boucle et deux témoins du même export pourraient à nouveau se partager
-//! une couleur, la vérification de géométrie restant alors le seul filet
-//! entre eux.
+//! **Accepted limit** (fixed since the single-color version, whose defect
+//! this documented): the witness color varies per witness — the red
+//! component stays fixed at a value that a user or a project default has
+//! reasonably no reason to choose for a real graph element, green and blue
+//! encode a counter (65536 distinct colors per export). [`splice`]
+//! additionally requires the `<rect>` found to have the exact position and
+//! size of the placed witness. To cause a collision, a real graph element
+//! would therefore have to share *both* a precise color and a precise
+//! geometry with a witness — a risk judged negligible rather than
+//! eliminated by construction: a real identifier would cost making
+//! `plotters-svg` carry an `id` attribute, which it precisely does not (see
+//! `architecture-choisie.md` §5.2). There also remains the case, more
+//! theoretical than practical, of an export with more than 65536 witnesses:
+//! the color counter wraps around and two witnesses of the same export could
+//! again share a color, the geometry check then being the only safety net
+//! between them.
 //!
-//! # L'unité du fragment imbriqué
+//! # The unit of the nested fragment
 //!
-//! `typst_svg::svg` déclare son `<svg>` racine avec des `width`/`height` en
-//! points CSS (`"12.5pt"`) — une unité **absolue**, différente de la
-//! convention déjà en vigueur dans ce chantier où un nombre nu dans le SVG
-//! de Plotters représente un pixel (`stokesforge_render::text`,
-//! `PLOTTERS_SIZE_PER_POINT`). Imbriquer tel quel le `<svg>` de Typst
-//! ferait donc redimensionner son contenu d'un facteur ~1,33 (1 pt CSS =
-//! 1,3333 px) par rapport au reste du document. [`inner_svg`] retire cette
-//! balise racine ; [`splice`] la remplace par la sienne, en nombres nus
-//! égaux à `size_pt` — cohérents avec le reste du document, puisque
-//! `viewBox` de Typst est déjà en nombres nus dans la même échelle.
+//! `typst_svg::svg` declares its root `<svg>` with `width`/`height` in
+//! CSS points (`"12.5pt"`) — an **absolute** unit, different from the
+//! convention already in force in this work package where a bare number in
+//! Plotters' SVG represents a pixel (`stokesforge_render::text`,
+//! `PLOTTERS_SIZE_PER_POINT`). Nesting Typst's `<svg>` as is would
+//! therefore make its content resize by a factor of ~1.33 (1 CSS pt =
+//! 1.3333 px) relative to the rest of the document. [`inner_svg`] removes
+//! this root tag; [`splice`] replaces it with its own, in bare numbers
+//! equal to `size_pt` — consistent with the rest of the document, since
+//! Typst's `viewBox` is already in bare numbers on the same scale.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -65,81 +64,81 @@ use typst_svg::SvgOptions;
 
 use crate::typst_text;
 
-/// `pixels_per_point` fixe utilisé pour toutes les compilations de l'export
-/// — voir la doc de [`stokesforge_render::formula::FormulaCache`] : ce terme de
-/// la clé de cache ne varie jamais côté export, un fragment SVG étant
-/// vectoriel et donc indépendant de toute résolution d'écran.
+/// Fixed `pixels_per_point` used for all the export's compilations
+/// — see the doc of [`stokesforge_render::formula::FormulaCache`]: this term
+/// of the cache key never varies on the export side, an SVG fragment being
+/// vector and therefore independent of any screen resolution.
 const EXPORT_PIXELS_PER_POINT: f32 = 1.0;
 
-/// Comment le texte composé par Typst s'écrit dans le SVG (#162).
+/// How the text composed by Typst is written in the SVG (#162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SvgTextMode {
-    /// Du **texte SVG** (`<text>`), sélectionnable et éditable dans un
-    /// logiciel de dessin ; la police est nommée, jamais embarquée. Un glyphe
-    /// sans caractère Unicode repasse en contour. Le défaut.
+    /// **SVG text** (`<text>`), selectable and editable in a drawing
+    /// program; the font is named, never embedded. A glyph with no Unicode
+    /// character goes back to an outline. The default.
     #[default]
     Text,
-    /// Des **contours** (`<path>`, via `typst-svg`) : le document ne dépend
-    /// d'aucune police installée. Les graduations passent aussi en contours.
+    /// **Outlines** (`<path>`, via `typst-svg`): the document depends on no
+    /// installed font. Ticks also become outlines.
     Outlines,
 }
 
-/// Un fragment SVG déjà compilé pour l'export — la valeur mise en cache
-/// (tâche 8.2), l'analogue export de `FormulaTexture` côté écran.
+/// An SVG fragment already compiled for the export — the cached value
+/// (task 8.2), the export analogue of `FormulaTexture` on the screen side.
 ///
-/// Public malgré ses champs privés : c'est le paramètre de type du
-/// [`FormulaCache`] qu'un appelant ([`crate::render_to_string_with_typst`])
-/// doit pouvoir nommer pour construire son propre cache.
+/// Public despite its private fields: it is the type parameter of the
+/// [`FormulaCache`] that a caller ([`crate::render_to_string_with_typst`])
+/// must be able to name to build its own cache.
 pub struct FormulaFragment {
-    /// Contenu intérieur d'un document `typst_svg::svg`, sans sa balise
-    /// `<svg>` racine — voir la doc de tête pour la raison.
+    /// Inner content of a `typst_svg::svg` document, without its root
+    /// `<svg>` tag — see the head doc for the reason.
     inner_svg: String,
-    /// Taille en points, le même repère que le reste du texte.
+    /// Size in points, the same frame as the rest of the text.
     size_pt: (f64, f64),
 }
 
-/// Un emplacement à substituer — un témoin déjà posé par `draw_rect`,
-/// remplacé par [`splice`] une fois le document entier écrit.
+/// A slot to substitute — a witness already placed by `draw_rect`,
+/// replaced by [`splice`] once the whole document is written.
 struct PendingFormula {
-    /// Coin supérieur gauche **non tourné** du fragment, dans le repère du
-    /// document — c'est aussi le pivot de la rotation, comme
-    /// `epaint::TextShape::pos` (voir `crate::typst_screen::mesh` côté
-    /// écran, le même calcul).
+    /// **Unrotated** top-left corner of the fragment, in the document's
+    /// frame — it is also the pivot of the rotation, like
+    /// `epaint::TextShape::pos` (see `crate::typst_screen::mesh` on the
+    /// screen side, the same computation).
     origin: (f64, f64),
-    /// Rotation horaire en degrés — l'unité que `rotate(deg, cx, cy)` de
-    /// SVG attend directement.
+    /// Clockwise rotation in degrees — the unit that SVG's
+    /// `rotate(deg, cx, cy)` expects directly.
     angle_deg: f64,
     size_pt: (f64, f64),
     inner_svg: String,
-    /// Couleur-témoin propre à ce témoin — voir
-    /// [`TypstExport::next_witness_color`]. Distincte de celle de tout
-    /// autre témoin du même export.
+    /// Witness color specific to this witness — see
+    /// [`TypstExport::next_witness_color`]. Distinct from that of any
+    /// other witness of the same export.
     color: RGBColor,
-    /// Position **brute** (avant décalage d'ancrage) du `<rect>`-témoin
-    /// réellement posé par `draw_rect`, dans le repère entier du backend —
-    /// distincte de [`Self::origin`], qui sert au placement du fragment
-    /// final et inclut déjà ce décalage. C'est ce que [`splice`] revérifie
-    /// avant de substituer.
+    /// **Raw** position (before anchor offset) of the witness `<rect>`
+    /// actually placed by `draw_rect`, in the backend's integer frame —
+    /// distinct from [`Self::origin`], which serves to place the final
+    /// fragment and already includes that offset. This is what [`splice`]
+    /// rechecks before substituting.
     witness_pos: (i32, i32),
-    /// Taille en pixels de backend du `<rect>`-témoin réellement posé —
-    /// `size_pt` arrondi comme
-    /// [`crate::backend::MeasuredSvgBackend::draw_text`] arrondit pour son
-    /// appel à `draw_rect`. Revérifiée elle aussi par [`splice`].
+    /// Size in backend pixels of the witness `<rect>` actually placed —
+    /// `size_pt` rounded as
+    /// [`crate::backend::MeasuredSvgBackend::draw_text`] rounds for its
+    /// `draw_rect` call. Also rechecked by [`splice`].
     witness_size: (i32, i32),
 }
 
-/// Ce que [`TypstExport::record`] rend à l'appelant : la couleur-témoin
-/// assignée à cet appel et la taille en pixels de backend que le
-/// rectangle-témoin doit avoir — exactement ce que
-/// [`crate::backend::MeasuredSvgBackend::draw_text`] doit passer à
-/// `draw_rect`, et ce que [`splice`] revérifie ensuite avant de substituer.
+/// What [`TypstExport::record`] returns to the caller: the witness color
+/// assigned to this call and the size in backend pixels that the witness
+/// rectangle must have — exactly what
+/// [`crate::backend::MeasuredSvgBackend::draw_text`] must pass to
+/// `draw_rect`, and what [`splice`] then rechecks before substituting.
 pub(crate) struct WitnessRect {
     pub(crate) color: RGBColor,
     pub(crate) size: (i32, i32),
 }
 
-/// Ce qu'il faut pour poser des témoins Typst dans l'export — construit une
-/// fois par appel à [`crate::render_to_string_with_typst`].
+/// What is needed to place Typst witnesses in the export — built once per
+/// call to [`crate::render_to_string_with_typst`].
 pub struct TypstExport<'a> {
     cache: &'a FormulaCache<FormulaFragment>,
     choice: &'a FontChoice,
@@ -147,13 +146,13 @@ pub struct TypstExport<'a> {
     sans: Font,
     math: Font,
     pending: RefCell<Vec<PendingFormula>>,
-    /// Compteur du prochain appel à [`Self::next_witness_color`] — voir sa
-    /// doc pour comment il devient une couleur.
+    /// Counter for the next call to [`Self::next_witness_color`] — see its
+    /// doc for how it becomes a color.
     next_witness: Cell<u16>,
 }
 
 impl<'a> TypstExport<'a> {
-    /// Résout les polices une fois (`choice`) — comme
+    /// Resolves the fonts once (`choice`) — like
     /// `stokesforge_render_egui::TypstScreen::new`.
     pub fn new(
         cache: &'a FormulaCache<FormulaFragment>,
@@ -172,34 +171,33 @@ impl<'a> TypstExport<'a> {
         })
     }
 
-    /// La composante rouge fixe de toute couleur-témoin de cet export —
-    /// une valeur qu'un utilisateur ou un défaut du projet n'a
-    /// raisonnablement aucune raison de choisir pour un vrai élément du
-    /// graphe (c'était déjà, seule, toute la couleur-témoin avant cette
-    /// correction : voir la doc de tête, section « Limite assumée »).
+    /// The fixed red component of every witness color of this export —
+    /// a value that a user or a project default has reasonably no reason
+    /// to choose for a real graph element (it was already, alone, the whole
+    /// witness color before this fix: see the head doc, section
+    /// "Accepted limit").
     const WITNESS_RED: u8 = 1;
 
-    /// La couleur-témoin du prochain témoin de cet export : le rouge reste
-    /// fixé à [`Self::WITNESS_RED`], vert et bleu encodent un compteur —
-    /// 65536 couleurs distinctes par export, largement au-delà de ce
-    /// qu'une figure réaliste peut contenir de labels Typst. C'est ce qui
-    /// rend deux témoins du même export non confondables par couleur, là où
-    /// l'ancien mécanisme (une seule couleur partagée) les rendait
-    /// indiscernables entre eux.
+    /// The witness color of the next witness of this export: red stays
+    /// fixed at [`Self::WITNESS_RED`], green and blue encode a counter —
+    /// 65536 distinct colors per export, far beyond what a realistic figure
+    /// can contain in Typst labels. This is what makes two witnesses of the
+    /// same export impossible to confuse by color, where the old mechanism
+    /// (a single shared color) made them indistinguishable from each other.
     ///
-    /// Au-delà de 65536 appels, le compteur boucle et deux témoins
-    /// pourraient à nouveau partager une couleur — la vérification de
-    /// géométrie de [`splice`] resterait alors le seul filet entre eux, un
-    /// volume qu'une figure réaliste ne devrait pas atteindre.
+    /// Beyond 65536 calls, the counter wraps around and two witnesses
+    /// could again share a color — the geometry check of [`splice`] would
+    /// then be the only safety net between them, a volume that a realistic
+    /// figure should not reach.
     fn next_witness_color(&self) -> RGBColor {
         let n = self.next_witness.get();
         self.next_witness.set(n.wrapping_add(1));
         RGBColor(Self::WITNESS_RED, (n >> 8) as u8, n as u8)
     }
 
-    /// Le fragment compilé (ou repris du cache) pour `text` à `size_pt` de
-    /// corps, en `ink` (issue #30 : `typst-svg` écrit la couleur dans le
-    /// fragment). `None` si la formule ne compile pas.
+    /// The compiled fragment (or reused from the cache) for `text` at
+    /// `size_pt` body size, in `ink` (issue #30: `typst-svg` writes the color
+    /// into the fragment). `None` if the formula does not compile.
     fn fragment(&self, text: &str, size_pt: f32, ink: Ink) -> Option<Arc<FormulaFragment>> {
         self.cache
             .get_or_try_insert(
@@ -215,25 +213,25 @@ impl<'a> TypstExport<'a> {
             .ok()
     }
 
-    /// La taille (arrondie en pixels de backend) qu'occuperait `text`
-    /// compilé par Typst — l'invariant de la tâche 8.5, côté export. `ink`
-    /// ne change pas la taille : il fait tomber la mesure sur l'entrée que
-    /// [`Self::record`] réutilise.
+    /// The size (rounded to backend pixels) that `text` compiled by Typst
+    /// would occupy — the invariant of task 8.5, export side. `ink`
+    /// does not change the size: it makes the measurement land on the entry
+    /// that [`Self::record`] reuses.
     pub fn measure(&self, text: &str, size_pt: f32, ink: Ink) -> Option<(u32, u32)> {
         let fragment = self.fragment(text, size_pt, ink)?;
         Some(formula::round_size_pt(fragment.size_pt))
     }
 
-    /// Enregistre un témoin à substituer par [`splice`] : compile la
-    /// formule, calcule son ancrage et sa rotation exactement comme
-    /// `EguiBackend::draw_text` le fait à l'écran (mêmes fonctions
-    /// partagées de `stokesforge_render::formula`), lui attribue une couleur qui
-    /// n'a encore servi à aucun autre témoin de cet export (voir
-    /// [`Self::next_witness_color`]), et retient le fragment. Rend la
-    /// couleur et la taille en pixels de backend du rectangle-témoin à
-    /// dessiner — exactement ce qu'un appelant (`MeasuredSvgBackend`) doit
-    /// passer à `draw_rect`, et ce que [`splice`] revérifiera. `None` si la
-    /// formule ne compile pas.
+    /// Records a witness to be substituted by [`splice`]: compiles the
+    /// formula, computes its anchor and rotation exactly as
+    /// `EguiBackend::draw_text` does on the screen (same shared functions
+    /// of `stokesforge_render::formula`), assigns it a color that has not
+    /// yet been used by any other witness of this export (see
+    /// [`Self::next_witness_color`]), and keeps the fragment. Returns the
+    /// color and the size in backend pixels of the witness rectangle to
+    /// draw — exactly what a caller (`MeasuredSvgBackend`) must pass to
+    /// `draw_rect`, and what [`splice`] will recheck. `None` if the
+    /// formula does not compile.
     pub(crate) fn record(
         &self,
         text: &str,
@@ -249,10 +247,10 @@ impl<'a> TypstExport<'a> {
         let origin = (pos.0 + offset.0, pos.1 + offset.1);
         let color = self.next_witness_color();
         let witness_pos = (pos.0.round() as i32, pos.1.round() as i32);
-        // Le même arrondi que `MeasuredSvgBackend::draw_text` appliquait
-        // jusqu'ici lui-même avant d'appeler `draw_rect` — rapatrié ici pour
-        // que le rectangle réellement dessiné et celui que `splice`
-        // attend soient calculés par le même code, jamais deux fois.
+        // The same rounding that `MeasuredSvgBackend::draw_text` used to
+        // apply itself before calling `draw_rect` — brought back here so
+        // that the rectangle actually drawn and the one `splice` expects
+        // are computed by the same code, never twice.
         let witness_size = (
             fragment.size_pt.0.ceil().max(1.0) as i32,
             fragment.size_pt.1.ceil().max(1.0) as i32,
@@ -273,7 +271,7 @@ impl<'a> TypstExport<'a> {
     }
 }
 
-/// Compile une page en fragment SVG — tâche 8.4.
+/// Compiles a page into an SVG fragment — task 8.4.
 fn build_fragment(compiled: &Compiled, mode: SvgTextMode) -> FormulaFragment {
     let size_pt = compiled.size_pt();
     let Some(page) = compiled.page() else {
@@ -292,32 +290,32 @@ fn build_fragment(compiled: &Compiled, mode: SvgTextMode) -> FormulaFragment {
     FormulaFragment { inner_svg, size_pt }
 }
 
-/// Le contenu intérieur d'un document SVG autonome produit par
-/// `typst_svg::svg` — entre la balise `<svg ...>` d'ouverture et
-/// `</svg>`. Voir la doc de tête du module pour la raison.
+/// The inner content of a standalone SVG document produced by
+/// `typst_svg::svg` — between the opening `<svg ...>` tag and
+/// `</svg>`. See the module head doc for the reason.
 fn inner_svg(document: &str) -> &str {
     let start = document.find('>').map_or(0, |i| i + 1);
     let end = document.rfind("</svg>").unwrap_or(document.len());
     document.get(start..end.max(start)).unwrap_or("").trim()
 }
 
-/// Substitue chaque témoin posé par [`TypstExport::record`] dans `buffer`
-/// par son fragment Typst — tâche R8.4, corrigée par la couleur propre à
-/// chaque témoin et la vérification de géométrie (voir la doc de tête,
-/// section « Limite assumée »).
+/// Substitutes each witness placed by [`TypstExport::record`] in `buffer`
+/// with its Typst fragment — task R8.4, fixed by the per-witness own color
+/// and the geometry check (see the head doc, section
+/// "Accepted limit").
 ///
-/// `buffer` est le document SVG complet, obtenu **après** que le backend
-/// qui a construit `typst` a été abandonné (le retirer de portée relâche
-/// l'emprunt sur la `String` cible que `SVGBackend` détenait) — voir
+/// `buffer` is the complete SVG document, obtained **after** the backend
+/// that built `typst` has been dropped (taking it out of scope releases
+/// the borrow on the target `String` that `SVGBackend` held) — see
 /// `crate::render_to_string_with_typst`.
 pub fn splice(buffer: &str, typst: &TypstExport<'_>) -> String {
     let pending = typst.pending.borrow();
     let mut result = buffer.to_string();
     for formula in pending.iter() {
-        // Un témoin manquant, ou trouvé mais de géométrie différente de
-        // celle attendue (la signature d'une collision de couleur avec un
-        // vrai élément du graphe), reste tel quel : dégradation plutôt que
-        // panique ou export corrompu, sur un document par ailleurs valide.
+        // A missing witness, or one found but with a geometry different
+        // from the expected one (the signature of a color collision with a
+        // real graph element), is left as is: degradation rather than
+        // panic or corrupted export, on an otherwise valid document.
         if let Some(range) = matching_witness_range(&result, formula) {
             result.replace_range(range, &group_for(formula));
         }
@@ -325,12 +323,12 @@ pub fn splice(buffer: &str, typst: &TypstExport<'_>) -> String {
     result
 }
 
-/// Cherche dans `haystack` le `<rect>`-témoin de `formula` : sa couleur
-/// propre **et** sa géométrie (position, taille) doivent correspondre à ce
-/// que [`TypstExport::record`] a enregistré. Un `<rect>` de la bonne
-/// couleur mais d'une géométrie différente n'est pas retenu — c'est
-/// exactement le cas d'un vrai élément du graphe qui porterait la même
-/// couleur par malchance, que la vérification est censée écarter.
+/// Looks in `haystack` for the witness `<rect>` of `formula`: its own color
+/// **and** its geometry (position, size) must match what
+/// [`TypstExport::record`] recorded. A `<rect>` of the right color but a
+/// different geometry is not kept — it is exactly the case of a real graph
+/// element that would carry the same color by bad luck, which the check is
+/// meant to rule out.
 fn matching_witness_range(
     haystack: &str,
     formula: &PendingFormula,
@@ -343,11 +341,11 @@ fn matching_witness_range(
     geometry_matches(tag, formula.witness_pos, formula.witness_size).then_some(tag_start..tag_end)
 }
 
-/// La valeur d'un attribut `name="..."` dans un fragment de balise XML —
-/// assez pour lire `x`, `y`, `width`, `height` sur le `<rect>` émis par
-/// `plotters-svg::SVGBackend::draw_rect` (voir sa source pour le format
-/// exact des attributs, reproduit ici en lecture comme [`make_hex`]
-/// reproduit son écriture des couleurs).
+/// The value of a `name="..."` attribute in an XML tag fragment —
+/// enough to read `x`, `y`, `width`, `height` on the `<rect>` emitted by
+/// `plotters-svg::SVGBackend::draw_rect` (see its source for the exact
+/// format of the attributes, reproduced here for reading as [`make_hex`]
+/// reproduces its writing of colors).
 fn attr_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let needle = format!("{name}=\"");
     let start = tag.find(&needle)? + needle.len();
@@ -355,10 +353,10 @@ fn attr_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     Some(&tag[start..end])
 }
 
-/// Vrai si le `<rect>` `tag` a la position et la taille attendues, à
-/// 0,5 px près — les coordonnées émises par `plotters-svg` sont des
-/// entiers, la tolérance n'absorbe que l'arrondi du parsing en `f64`, pas
-/// une vraie marge géométrique.
+/// True if the `<rect>` `tag` has the expected position and size, within
+/// 0.5 px — the coordinates emitted by `plotters-svg` are integers, the
+/// tolerance absorbs only the `f64` parsing rounding, not a real geometric
+/// margin.
 fn geometry_matches(tag: &str, pos: (i32, i32), size: (i32, i32)) -> bool {
     const EPS: f64 = 0.5;
     let parse = |name| attr_value(tag, name).and_then(|v| v.parse::<f64>().ok());
@@ -373,16 +371,16 @@ fn geometry_matches(tag: &str, pos: (i32, i32), size: (i32, i32)) -> bool {
         && (h - size.1 as f64).abs() < EPS
 }
 
-/// Le `<g>` de remplacement d'un témoin : rotation puis translation vers
-/// `origin`, un `<svg>` imbriqué dimensionné en nombres nus (voir la doc de
-/// tête pour l'unité), et le fragment intérieur de Typst.
+/// The replacement `<g>` of a witness: rotation then translation to
+/// `origin`, a nested `<svg>` sized in bare numbers (see the head doc for
+/// the unit), and Typst's inner fragment.
 ///
-/// Le `<svg>` imbriqué redéclare `xmlns:xlink` : les glyphes de Typst sont
-/// des `<use xlink:href="#g…">`, et la balise racine qui déclarait ce
-/// préfixe a été retirée par [`inner_svg`]. Sans lui, un navigateur
-/// tolérant affichait le SVG, mais `usvg` refusait tout le document — donc
-/// l'export PDF et PNG d'un graphe à texte Typst échouait (vu en branchant
-/// l'export dans l'application, issue #34).
+/// The nested `<svg>` redeclares `xmlns:xlink`: Typst's glyphs are
+/// `<use xlink:href="#g…">`, and the root tag that declared this
+/// prefix was removed by [`inner_svg`]. Without it, a tolerant browser
+/// displayed the SVG, but `usvg` rejected the whole document — so
+/// the PDF and PNG export of a graph with Typst text failed (seen when
+/// wiring the export into the application, issue #34).
 fn group_for(formula: &PendingFormula) -> String {
     let (ox, oy) = formula.origin;
     let (w, h) = formula.size_pt;
@@ -396,10 +394,10 @@ fn group_for(formula: &PendingFormula) -> String {
     )
 }
 
-/// La même représentation hexadécimale que `plotters-svg::make_svg_color`
-/// (module privé de ce crate tiers) — reproduite ici pour reconnaître la
-/// couleur-témoin dans le document produit, sans dépendre d'une fonction
-/// que `plotters-svg` n'expose pas.
+/// The same hexadecimal representation as `plotters-svg::make_svg_color`
+/// (private module of that third-party crate) — reproduced here to recognize
+/// the witness color in the produced document, without depending on a
+/// function that `plotters-svg` does not expose.
 fn make_hex(color: plotters::style::RGBColor) -> String {
     format!("#{:02X}{:02X}{:02X}", color.0, color.1, color.2)
 }
@@ -409,44 +407,44 @@ mod tests {
     use super::*;
     use plotters_backend::text_anchor::{HPos, VPos};
 
-    const NOIR: Ink = [0, 0, 0, 255];
+    const BLACK: Ink = [0, 0, 0, 255];
 
     fn export() -> (FormulaCache<FormulaFragment>, FontChoice) {
         (FormulaCache::new(), FontChoice::default())
     }
 
-    /// Une formule triviale s'enregistre et rend une taille non nulle.
+    /// A trivial formula gets recorded and returns a non-zero size.
     #[test]
-    fn enregistrer_une_formule_triviale_rend_une_taille_non_nulle() {
+    fn recording_a_trivial_formula_returns_a_non_zero_size() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(
                 "$lambda$",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (10.0, 20.0),
             )
-            .expect("la formule aurait dû compiler");
+            .expect("the formula should have compiled");
         assert!(witness.size.0 > 0 && witness.size.1 > 0);
     }
 
-    /// Une formule invalide ne s'enregistre pas — dégradation, pas panique.
+    /// An invalid formula does not get recorded — degradation, not panic.
     #[test]
-    fn une_formule_invalide_ne_senregistre_pas() {
+    fn an_invalid_formula_is_not_recorded() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         assert!(typst
             .record(
                 "$ (unclosed",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (0.0, 0.0)
@@ -454,24 +452,24 @@ mod tests {
             .is_none());
     }
 
-    /// `splice` retrouve le témoin et injecte le fragment Typst — en
-    /// laissant le reste du document intact.
+    /// `splice` finds the witness and injects the Typst fragment — leaving
+    /// the rest of the document intact.
     #[test]
-    fn splice_remplace_le_temoin_par_le_fragment() {
+    fn splice_replaces_the_witness_with_the_fragment() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(
                 "$lambda$",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (10.0, 20.0),
             )
-            .expect("compilation échouée");
+            .expect("compilation failed");
 
         let hex = make_hex(witness.color);
         let (w, h) = witness.size;
@@ -479,65 +477,65 @@ mod tests {
             "<svg><rect x=\"10\" y=\"20\" width=\"{w}\" height=\"{h}\" fill=\"{hex}\"/><circle/></svg>"
         );
         let result = splice(&document, &typst);
-        assert!(!result.contains(&hex), "le témoin est encore présent");
+        assert!(!result.contains(&hex), "the witness is still present");
         assert!(
             result.contains("<svg width="),
-            "le fragment imbriqué est absent"
+            "the nested fragment is missing"
         );
         assert!(
             result.contains("<circle/>"),
-            "le reste du document a été perdu"
+            "the rest of the document was lost"
         );
     }
 
-    /// Un document sans témoin ne change pas — cas normal quand aucun
-    /// label de la figure n'est une formule.
+    /// A document without a witness does not change — the normal case when no
+    /// label of the figure is a formula.
     #[test]
-    fn sans_temoin_le_document_ne_change_pas() {
+    fn without_a_witness_the_document_does_not_change() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let document = "<svg><circle/></svg>".to_string();
         assert_eq!(splice(&document, &typst), document);
     }
 
-    /// Deux formules différentes dans le même export ne se mélangent pas :
-    /// chacune reçoit son propre fragment, jamais celui de l'autre. Avec
-    /// l'ancien mécanisme à couleur unique, ce test aurait pu passer par
-    /// accident (les deux témoins étaient indiscernables par couleur) ;
-    /// une couleur propre à chaque témoin le rend vérifiable pour de bon.
+    /// Two different formulas in the same export do not get mixed up:
+    /// each receives its own fragment, never the other's. With the old
+    /// single-color mechanism, this test could have passed by accident
+    /// (the two witnesses were indistinguishable by color); a color specific
+    /// to each witness makes it verifiable for real.
     #[test]
-    fn deux_formules_differentes_ne_se_melangent_pas() {
+    fn two_different_formulas_do_not_get_mixed_up() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let anchor = Pos::new(HPos::Left, VPos::Top);
 
         let lambda = typst
             .record(
                 "$lambda$",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (10.0, 20.0),
             )
-            .expect("compilation échouée (lambda)");
+            .expect("compilation failed (lambda)");
         let alpha = typst
             .record(
                 "$alpha$",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (100.0, 200.0),
             )
-            .expect("compilation échouée (alpha)");
+            .expect("compilation failed (alpha)");
 
         assert_ne!(
             make_hex(lambda.color),
             make_hex(alpha.color),
-            "les deux témoins partagent une couleur"
+            "the two witnesses share a color"
         );
 
         let (inner_lambda, inner_alpha) = {
@@ -547,7 +545,7 @@ mod tests {
         assert!(!inner_lambda.is_empty() && !inner_alpha.is_empty());
         assert_ne!(
             inner_lambda, inner_alpha,
-            "les deux formules compilent au même fragment, le test ne peut rien prouver"
+            "the two formulas compile to the same fragment, the test cannot prove anything"
         );
 
         let document = format!(
@@ -563,65 +561,65 @@ mod tests {
 
         let result = splice(&document, &typst);
 
-        // Chaque fragment Typst compilé (lambda, alpha) contient lui-même
-        // des `<g>` internes (Typst structure ses glyphes ainsi) : borner
-        // un bloc au premier `</g>` rencontré couperait donc dans le
-        // fragment plutôt qu'à la fin du groupe de substitution. On borne
-        // plutôt chaque bloc par le début de l'autre — comme les deux
-        // groupes sont écrits dans l'ordre où `record` a été appelé, celui
-        // de lambda précède forcément celui d'alpha dans le document.
+        // Each compiled Typst fragment (lambda, alpha) itself contains
+        // inner `<g>`s (Typst structures its glyphs that way): bounding a
+        // block at the first `</g>` met would therefore cut inside the
+        // fragment rather than at the end of the substitution group. Instead
+        // each block is bounded by the start of the other — as the two
+        // groups are written in the order `record` was called, the lambda
+        // one necessarily precedes the alpha one in the document.
         let lambda_group = result
             .find("translate(10, 20)")
-            .expect("groupe de lambda absent");
+            .expect("lambda group missing");
         let alpha_group = result
             .find("translate(100, 200)")
-            .expect("groupe d'alpha absent");
+            .expect("alpha group missing");
         assert!(
             lambda_group < alpha_group,
-            "le groupe de lambda devrait précéder celui d'alpha dans le document"
+            "the lambda group should precede the alpha one in the document"
         );
 
         let lambda_block = &result[lambda_group..alpha_group];
         let alpha_block = &result[alpha_group..];
         assert!(
             lambda_block.contains(&inner_lambda),
-            "le fragment de lambda n'est pas dans son groupe"
+            "the lambda fragment is not in its group"
         );
         assert!(
             alpha_block.contains(&inner_alpha),
-            "le fragment d'alpha n'est pas dans son groupe"
+            "the alpha fragment is not in its group"
         );
         assert!(
             !lambda_block.contains(&inner_alpha),
-            "le fragment d'alpha a fui dans le groupe de lambda"
+            "the alpha fragment leaked into the lambda group"
         );
         assert!(
             !alpha_block.contains(&inner_lambda),
-            "le fragment de lambda a fui dans le groupe d'alpha"
+            "the lambda fragment leaked into the alpha group"
         );
     }
 
-    /// Un `<rect>` de la bonne couleur-témoin mais d'une taille différente
-    /// de celle attendue — la signature d'une collision avec un vrai
-    /// élément du graphe qui porterait la même couleur par malchance —
-    /// n'est pas substitué : c'est la vérification de géométrie qui doit
-    /// l'écarter, pas seulement en théorie.
+    /// A `<rect>` of the right witness color but a size different from the
+    /// expected one — the signature of a collision with a real graph
+    /// element that would carry the same color by bad luck — is not
+    /// substituted: the geometry check must rule it out, not only in
+    /// theory.
     #[test]
-    fn temoin_de_mauvaise_taille_nest_pas_substitue() {
+    fn a_witness_of_the_wrong_size_is_not_substituted() {
         let (cache, choice) = export();
         let typst = TypstExport::new(&cache, &choice, SvgTextMode::Outlines)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let anchor = Pos::new(HPos::Left, VPos::Top);
         let witness = typst
             .record(
                 "$lambda$",
                 14.0,
-                NOIR,
+                BLACK,
                 anchor,
                 FontTransform::None,
                 (10.0, 20.0),
             )
-            .expect("compilation échouée");
+            .expect("compilation failed");
 
         let hex = make_hex(witness.color);
         let (w, h) = witness.size;
@@ -634,7 +632,7 @@ mod tests {
         let result = splice(&document, &typst);
         assert_eq!(
             result, document,
-            "un témoin de mauvaise taille n'aurait pas dû être substitué"
+            "a witness of the wrong size should not have been substituted"
         );
     }
 }

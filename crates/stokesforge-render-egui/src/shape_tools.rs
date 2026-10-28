@@ -1,22 +1,22 @@
-//! Les objets graphiques à l'écran (issue #76) : tracer au glisser avec les
-//! outils Rectangle / Ellipse / Ligne / Flèche, sélectionner, déplacer,
-//! redimensionner par les poignées.
+//! Graphic objects on screen (issue #76): draw by dragging with the
+//! Rectangle / Ellipse / Line / Arrow tools, select, move, resize with the
+//! handles.
 //!
-//! Même principe que les textes libres (#35) : **un geste = une seule
-//! modification du modèle**. L'aperçu vit dans la vue ([`GraphView`], champ
-//! `shape_preview`), posé sur le clone du spec à la construction de la figure,
-//! et un seul [`GraphEvent::ShapeChanged`] part au relâchement. Les
-//! coordonnées du geste sont des pixels de la figure ; elles sont converties
-//! en données par [`PanelTransform`] à chaque image, donc l'objet reste ancré
-//! aux données (il suivra le zoom ensuite).
+//! Same principle as free texts (#35): **one gesture = a single change of
+//! the model**. The preview lives in the view ([`GraphView`], field
+//! `shape_preview`), set on the clone of the spec when the figure is built,
+//! and a single [`GraphEvent::ShapeChanged`] is sent on release. The gesture
+//! coordinates are figure pixels; they are converted to data by
+//! [`PanelTransform`] at each frame, so the object stays anchored to the data
+//! (it will follow the zoom afterwards).
 //!
-//! Les poignées d'un rectangle ou d'une ellipse sont les huit points de sa
-//! boîte (quatre coins, quatre milieux de côté) ; celles d'une ligne ou d'une
-//! flèche, ses deux extrémités. Elles sont testées **avant** l'objet : un
-//! coin de boîte d'ellipse n'est pas sur le tracé.
-//! Un clic insère une taille par défaut en pixels de figure (#153) ; Maj
-//! contraint les poignées au ratio initial, sans modifier le tracé libre.
-//! Ces gestes passent par la même vue dans les deux types de fenêtre.
+//! The handles of a rectangle or an ellipse are the eight points of its box
+//! (four corners, four side midpoints); those of a line or an arrow, its two
+//! endpoints. They are tested **before** the object: a corner of an ellipse's
+//! box is not on the drawing.
+//! A click inserts a default size in figure pixels (#153); Shift constrains
+//! the handles to the initial ratio, without changing the free drawing.
+//! These gestures go through the same view in both window types.
 
 use egui::{Color32, Painter, PointerButton, Pos2, Rect, Response, Shape, Stroke, StrokeKind};
 use stokesforge_plot::{AxisScale, PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
@@ -25,43 +25,44 @@ use stokesforge_render::{PanelTransform, PlotComponent};
 
 use crate::{GraphEvent, GraphTool, GraphView};
 
-/// Distance, en pixels d'écran, sous laquelle un geste de tracé n'est qu'un
-/// tremblement de main et ne crée rien.
+/// Distance, in screen pixels, below which a drawing gesture is only a hand
+/// tremor and creates nothing.
 const MIN_DRAW_DISTANCE: f32 = 4.0;
-/// Demi-côté d'une poignée, en pixels d'écran, et rayon où elle se saisit.
+/// Half-side of a handle, in screen pixels, and the radius where it is grabbed.
 const HANDLE_HALF: f32 = 4.0;
 const HANDLE_GRAB: f32 = 8.0;
 const SELECTION_BLUE: Color32 = Color32::from_rgb(90, 150, 255);
 
-/// Une poignée de redimensionnement.
+/// A resize handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Handle {
-    /// Un point de la boîte d'un rectangle ou d'une ellipse : `(-1|0|1,
-    /// -1|0|1)` selon le côté (gauche/haut = -1), hors `(0, 0)`.
+    /// A point of the box of a rectangle or an ellipse: `(-1|0|1,
+    /// -1|0|1)` depending on the side (left/top = -1), excluding `(0, 0)`.
     Box(i8, i8),
-    /// Une extrémité de ligne ou de flèche : 1 (queue) ou 2 (pointe).
+    /// An endpoint of a line or an arrow: 1 (tail) or 2 (tip).
     Endpoint(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragMode {
-    /// Tracé d'un objet neuf.
+    /// Drawing a new object.
     Draw,
     Move,
     Resize(Handle),
 }
 
-/// Un geste sur un objet graphique, en cours.
+/// A gesture on a graphic object, in progress.
 #[derive(Debug, Clone)]
 pub(crate) struct ShapeDrag {
     target: ShapeRef,
     original: ShapeSpec,
     mode: DragMode,
-    /// Point d'appui, en repère de la figure.
+    /// Press point, in figure coordinates.
     press: Pos2,
-    /// Les deux points de l'objet au début du geste, en repère de la figure.
+    /// The two points of the object at the start of the gesture, in figure
+    /// coordinates.
     start: (Pos2, Pos2),
-    /// Vrai dès que le pointeur s'est éloigné d'assez pour que le geste compte.
+    /// True as soon as the pointer has moved far enough for the gesture to count.
     armed: bool,
 }
 
@@ -69,7 +70,7 @@ fn point(p: (f64, f64)) -> Pos2 {
     Pos2::new(p.0 as f32, p.1 as f32)
 }
 
-/// Les poignées d'un objet tracé, avec leur position en repère de la figure.
+/// The handles of a drawn object, with their position in figure coordinates.
 pub(crate) fn handles(drawn: &DrawnShape) -> Vec<(Handle, Pos2)> {
     if !drawn.kind.is_closed() {
         return vec![
@@ -99,7 +100,7 @@ pub(crate) fn handles(drawn: &DrawnShape) -> Vec<(Handle, Pos2)> {
     out
 }
 
-/// Taille dans le repère de la figure, indépendante des unités des axes.
+/// Size in figure coordinates, independent of the axis units.
 fn default_extent(kind: ShapeKind) -> egui::Vec2 {
     match kind {
         ShapeKind::Rectangle | ShapeKind::Ellipse => egui::vec2(48.0, 48.0),
@@ -107,10 +108,10 @@ fn default_extent(kind: ShapeKind) -> egui::Vec2 {
     }
 }
 
-/// Maj conserve les proportions **visuelles du début du geste**, même sur
-/// des axes logarithmiques. Un côté garde son côté opposé et le centre de
-/// l'autre dimension ; un coin garde le coin opposé. Une extrémité de ligne
-/// reste sur sa direction initiale (y compris horizontale ou verticale).
+/// Shift keeps the **visual proportions of the start of the gesture**, even
+/// on logarithmic axes. A side keeps its opposite side and the center of the
+/// other dimension; a corner keeps the opposite corner. A line endpoint
+/// stays on its initial direction (including horizontal or vertical).
 fn resized_points(start: (Pos2, Pos2), handle: Handle, current: Pos2, shift: bool) -> (Pos2, Pos2) {
     if let Handle::Endpoint(endpoint) = handle {
         let (fixed, moving) = if endpoint == 1 {
@@ -178,13 +179,13 @@ fn resized_points(start: (Pos2, Pos2), handle: Handle, current: Pos2, shift: boo
 }
 
 impl GraphView {
-    /// L'aperçu d'un objet graphique, s'il y en a un.
+    /// The preview of a graphic object, if there is one.
     pub fn shape_preview(&self) -> Option<&(ShapeRef, ShapeSpec)> {
         self.shape_preview.as_ref()
     }
 
-    /// Pose (ou retire) l'aperçu d'un objet graphique : la figure le montre à
-    /// la prochaine image, sans toucher au modèle.
+    /// Sets (or removes) the preview of a graphic object: the figure shows it
+    /// at the next frame, without touching the model.
     pub fn set_shape_preview(&mut self, preview: Option<(ShapeRef, ShapeSpec)>) {
         self.preview_until = None;
         if self.shape_preview != preview {
@@ -193,13 +194,13 @@ impl GraphView {
         }
     }
 
-    /// L'objet graphique sélectionné, s'il y en a un.
+    /// The selected graphic object, if there is one.
     pub fn selected_shape(&self) -> Option<ShapeRef> {
         self.selected_shape
     }
 
-    /// Sélectionne un objet graphique (ou plus rien) — par exemple après
-    /// l'avoir passé au premier plan, ce qui change son rang.
+    /// Selects a graphic object (or nothing) — for example after bringing it
+    /// to the front, which changes its rank.
     pub fn select_shape(&mut self, target: Option<ShapeRef>) {
         self.selected_shape = target;
         if target.is_some() {
@@ -211,8 +212,8 @@ impl GraphView {
         }
     }
 
-    /// L'objet graphique sous le pixel egui `pos`, cherché dans la dernière
-    /// figure tracée.
+    /// The graphic object under the egui pixel `pos`, looked up in the last
+    /// drawn figure.
     pub fn shape_at(&self, pos: Pos2) -> Option<ShapeRef> {
         match self.component_at(pos)? {
             PlotComponent::Shape { panel, index } => {
@@ -226,7 +227,7 @@ impl GraphView {
         }
     }
 
-    /// L'objet tel qu'il a été tracé dans la dernière figure.
+    /// The object as it was drawn in the last figure.
     pub fn drawn_shape(&self, target: ShapeRef) -> Option<&DrawnShape> {
         self.last
             .as_ref()?
@@ -254,7 +255,7 @@ impl GraphView {
         PanelTransform::of_axis(panel, axis == SeriesAxis::Right)
     }
 
-    /// Reporte deux points de la figure en données dans une copie de `shape`.
+    /// Carries two figure points into data in a copy of `shape`.
     fn moved_shape(
         &self,
         target: ShapeRef,
@@ -274,8 +275,8 @@ impl GraphView {
         })
     }
 
-    /// `drag.original` décalée de l'écart pointeur, calculé en données ;
-    /// `None` si un axe n'est pas linéaire (l'écart n'y est pas constant).
+    /// `drag.original` shifted by the pointer gap, computed in data; `None`
+    /// if an axis is not linear (the gap is not constant there).
     fn shifted_shape(&self, drag: &ShapeDrag, current: Pos2) -> Option<ShapeSpec> {
         let panel = self
             .last
@@ -302,11 +303,11 @@ impl GraphView {
         })
     }
 
-    /// Pose un objet de la taille par défaut de `kind` au pixel egui `pos`
-    /// (menu contextuel, sans geste de tracé) : même événement
-    /// [`GraphEvent::ShapeChanged`] que le clic de l'outil de tracé, et même
-    /// sélection. Rend `false` si `pos` ne tombe dans aucun panneau tracé ou
-    /// si un axe interdit la conversion en données.
+    /// Places an object of the default size of `kind` at the egui pixel `pos`
+    /// (context menu, no drawing gesture): same [`GraphEvent::ShapeChanged`]
+    /// event as the click of the drawing tool, and same selection. Returns
+    /// `false` if `pos` falls in no drawn panel or if an axis forbids the
+    /// conversion to data.
     pub fn insert_shape_at(&mut self, pos: Pos2, kind: ShapeKind, spec: &PlotSpec) -> bool {
         let Some((panel_index, _)) = self.panel_at(pos) else {
             return false;
@@ -337,21 +338,21 @@ impl GraphView {
         true
     }
 
-    /// Outil de tracé actif : un glisser principal trace l'objet (aperçu),
-    /// le relâchement le valide en un seul [`GraphEvent::ShapeChanged`] puis
-    /// rend la main à l'outil Pointeur.
+    /// Active drawing tool: a primary drag draws the object (preview),
+    /// release commits it in a single [`GraphEvent::ShapeChanged`] and then
+    /// hands control back to the Pointer tool.
     pub(crate) fn handle_shape_draw(&mut self, response: &Response, spec: &PlotSpec, pan: bool) {
         let Some(kind) = self.tool.shape_kind() else {
             return;
         };
-        // Ctrl ou bouton milieu à la pression : c'est un pan, pas un tracé,
-        // et un Ctrl + clic ne pose rien (#318).
+        // Ctrl or middle button at press: it is a pan, not a drawing, and a
+        // Ctrl + click places nothing (#318).
         if pan {
             return;
         }
-        // Egui appelle aussi « clic » les petits glissers. Leur garde-fou
-        // de 4 px reste inchangé : seule une pression quasi immobile (1 px
-        // de tolérance écran) insère la taille par défaut.
+        // Egui also calls small drags a "click". Their 4 px guard is
+        // unchanged: only a nearly still press (1 px of screen tolerance)
+        // inserts the default size.
         if response.clicked_by(PointerButton::Primary) {
             let drag = self.shape_drag.take();
             let current = response
@@ -451,9 +452,9 @@ impl GraphView {
         self.shape_drag = Some(drag);
     }
 
-    /// Outil Pointeur : un glisser parti d'une poignée de l'objet sélectionné
-    /// le redimensionne, un glisser parti d'un objet le déplace. Rend `true`
-    /// si le geste est un glisser d'objet (la navigation n'en fait rien).
+    /// Pointer tool: a drag starting from a handle of the selected object
+    /// resizes it, a drag starting from an object moves it. Returns `true` if
+    /// the gesture is an object drag (navigation does nothing with it).
     pub(crate) fn handle_shape_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
         if response.drag_stopped_by(PointerButton::Primary) {
             let Some(drag) = self.shape_drag.take() else {
@@ -516,10 +517,9 @@ impl GraphView {
         let (a, b) = match drag.mode {
             DragMode::Draw => return true,
             DragMode::Move => {
-                // Sur des axes linéaires, l'écart est reporté **en données** :
-                // les points tracés sont arrondis au pixel, les refaire
-                // passer par les pixels rognerait la taille d'un pixel à
-                // chaque déplacement.
+                // On linear axes, the gap is carried **in data**: the drawn
+                // points are rounded to the pixel, passing them through
+                // pixels again would trim the size by a pixel at each move.
                 if let Some(shape) = self.shifted_shape(&drag, current) {
                     self.set_shape_preview(Some((drag.target, shape)));
                     return true;
@@ -540,8 +540,7 @@ impl GraphView {
         true
     }
 
-    /// Les poignées (et la boîte) de l'objet sélectionné, par-dessus la
-    /// figure.
+    /// The handles (and the box) of the selected object, over the figure.
     pub(crate) fn paint_shape_selection(&self, painter: &Painter) {
         let (Some(target), Some(display), Some(scale)) =
             (self.selected_shape, self.display_rect, self.display_scale())
@@ -585,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn un_rectangle_a_huit_poignees_et_une_fleche_deux() {
+    fn a_rectangle_has_eight_handles_and_an_arrow_two() {
         let h = handles(&drawn(ShapeKind::Rectangle));
         assert_eq!(h.len(), 8);
         let at = |handle| h.iter().find(|(x, _)| *x == handle).map(|(_, p)| *p);
@@ -595,15 +594,15 @@ mod tests {
         assert_eq!(handles(&drawn(ShapeKind::Arrow)).len(), 2);
     }
     #[test]
-    fn maj_conserve_le_ratio_initial_sur_les_huit_poignees() {
+    fn shift_keeps_the_initial_ratio_on_the_eight_handles() {
         let start = (Pos2::new(10.0, 20.0), Pos2::new(90.0, 60.0));
         for hx in [-1, 0, 1] {
             for hy in [-1, 0, 1] {
                 if hx == 0 && hy == 0 {
                     continue;
                 }
-                // Agrandir, rétrécir, franchir le point d'appui et tomber
-                // exactement sur sa verticale : aucun ratio infini.
+                // Enlarge, shrink, cross the anchor point and land exactly
+                // on its vertical: no infinite ratio.
                 for at in [
                     Pos2::new(-30.0, -40.0),
                     Pos2::new(40.0, 35.0),
@@ -637,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn maj_conserve_la_direction_des_lignes_et_supporte_les_objets_plats() {
+    fn shift_keeps_the_direction_of_lines_and_supports_flat_objects() {
         for end in [
             Pos2::new(80.0, 40.0),
             Pos2::new(80.0, 0.0),

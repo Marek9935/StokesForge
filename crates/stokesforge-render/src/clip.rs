@@ -1,41 +1,39 @@
-//! Rognage géométrique d'une polyligne contre le rectangle de tracé, en
-//! **pixels** — correctif du défaut documenté dans [`crate::paint`]
-//! (« Le débordement est déjà traité, par Plotters — mais pas
-//! correctement ») et reporté deux fois par `roadmap-rendu.md` (R5, puis
+//! Geometric clipping of a polyline against the plot rectangle, in
+//! **pixels** — fix for the defect documented in [`crate::paint`]
+//! (section "Overflow was mishandled by Plotters") and postponed twice by `roadmap-rendu.md` (R5, then
 //! R7).
 //!
-//! # Pourquoi en pixels, et pas en données
+//! # Why in pixels, and not in data
 //!
-//! Un axe logarithmique n'est linéaire que dans l'espace transformé
-//! ([`crate::scale::forward`]) ; une droite en coordonnées de données n'y
-//! est donc pas forcément une droite en pixels, alors qu'elle **redevient**
-//! une droite dès qu'elle est projetée en pixels (la projection pixel ↔
-//! transformé est, elle, toujours affine — voir [`crate::interact`]). Une
-//! intersection segment/rectangle est une opération sur des droites : elle
-//! doit se faire là où le segment est effectivement rectiligne, c'est-à-dire
-//! après la projection, jamais avant.
+//! A logarithmic axis is linear only in the transformed space
+//! ([`crate::scale::forward`]); a straight line in data coordinates is
+//! therefore not necessarily a straight line in pixels, whereas it
+//! **becomes** a straight line again once projected into pixels (the
+//! pixel ↔ transformed projection is always affine — see
+//! [`crate::interact`]). A segment/rectangle intersection is an operation on
+//! straight lines: it must be done where the segment is actually straight,
+//! that is after the projection, never before.
 //!
-//! # Pourquoi ici, et pas dans un backend
+//! # Why here, and not in a backend
 //!
-//! Même raison que pour [`crate::paint`] et [`crate::pipeline`] : une seule
-//! implémentation, appelée avant que le point n'atteigne
-//! `plotters::element::PathElement`, plutôt qu'une discipline à tenir dans
-//! chacun des deux `DrawingBackend`.
+//! Same reason as for [`crate::paint`] and [`crate::pipeline`]: a single
+//! implementation, called before the point reaches
+//! `plotters::element::PathElement`, rather than a discipline to keep in
+//! each of the two `DrawingBackend`s.
 //!
-//! # L'algorithme
+//! # The algorithm
 //!
-//! Liang-Barsky, sur un rectangle aligné aux axes — plus simple à établir
-//! correctement que Cohen-Sutherland pour ce cas, et suffisant : le
-//! rectangle de tracé n'est jamais incliné. [`clip_segment`] rogne un
-//! segment ; [`clip_polyline`] l'applique à chaque paire de sommets
-//! consécutifs d'une courbe et recolle les tronçons qui restent adjacents en
-//! une seule sous-polyligne, exactement comme [`crate::paint::dashes`]
-//! recolle des tronçons de tirets — un segment entièrement hors du
-//! rectangle est omis, pas ramené sur le bord.
+//! Liang-Barsky, on an axis-aligned rectangle — simpler to get right than
+//! Cohen-Sutherland for this case, and enough: the plot rectangle is never
+//! tilted. [`clip_segment`] clips one segment; [`clip_polyline`] applies it
+//! to each pair of consecutive vertices of a curve and joins the runs that
+//! stay adjacent into a single sub-polyline, exactly like
+//! [`crate::paint::dashes`] joins runs of dashes — a segment entirely
+//! outside the rectangle is omitted, not brought back onto the edge.
 
 use plotters_backend::BackendCoord;
 
-/// Le rectangle de tracé d'un panneau, en pixels de backend.
+/// The plot rectangle of a panel, in backend pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelBounds {
     pub x_min: f64,
@@ -45,9 +43,9 @@ pub struct PixelBounds {
 }
 
 impl PixelBounds {
-    /// Le rectangle d'un panneau tracé, depuis son origine et sa taille en
+    /// The rectangle of a drawn panel, from its origin and its size in
     /// pixels ([`crate::pipeline::DrawnPanel::pixel_origin`] /
-    /// `pixel_size`). `None` si la zone est dégénérée — même garde que
+    /// `pixel_size`). `None` if the area is degenerate — same guard as
     /// [`crate::interact::PanelTransform::of`].
     pub fn of_panel(origin: (i32, i32), size: (u32, u32)) -> Option<Self> {
         if size.0 == 0 || size.1 == 0 {
@@ -62,14 +60,14 @@ impl PixelBounds {
     }
 }
 
-/// Rogne le segment `a`→`b` (en pixels) au rectangle `bounds` par
-/// Liang-Barsky. Rend les deux extrémités du tronçon restant, ou `None` si
-/// le segment ne traverse pas le rectangle.
+/// Clips the segment `a`→`b` (in pixels) to the rectangle `bounds` with
+/// Liang-Barsky. Returns the two ends of the remaining run, or `None` if the
+/// segment does not cross the rectangle.
 ///
-/// Un point de `a` ou `b` non fini (`NaN`, infini) fait rejeter le segment
-/// plutôt que produire un résultat non fini à son tour — cohérent avec la
-/// façon dont [`crate::series::curve_geometry`] traite déjà les valeurs non
-/// représentables en amont (elles n'entrent jamais dans la géométrie).
+/// A non-finite point in `a` or `b` (`NaN`, infinity) makes the segment be
+/// rejected rather than produce a non-finite result in turn — consistent
+/// with how [`crate::series::curve_geometry`] already treats unrepresentable
+/// values upstream (they never enter the geometry).
 pub fn clip_segment(
     bounds: PixelBounds,
     a: (f64, f64),
@@ -86,7 +84,7 @@ pub fn clip_segment(
     let mut t0 = 0.0f64;
     let mut t1 = 1.0f64;
 
-    // Les quatre demi-plans du rectangle : gauche, droite, haut, bas.
+    // The four half-planes of the rectangle: left, right, top, bottom.
     let edges = [
         (-dx, x0 - bounds.x_min),
         (dx, bounds.x_max - x0),
@@ -95,8 +93,8 @@ pub fn clip_segment(
     ];
     for (p, q) in edges {
         if p == 0.0 {
-            // Le segment est parallèle à ce bord : rejeté s'il est du
-            // mauvais côté, inchangé sinon.
+            // The segment is parallel to this edge: rejected if on the
+            // wrong side, unchanged otherwise.
             if q < 0.0 {
                 return None;
             }
@@ -125,14 +123,13 @@ pub fn clip_segment(
     Some(((x0 + t0 * dx, y0 + t0 * dy), (x0 + t1 * dx, y0 + t1 * dy)))
 }
 
-/// Rogne une polyligne entière contre `bounds`, en pixels entiers.
+/// Clips a whole polyline against `bounds`, in integer pixels.
 ///
-/// Rend une ou plusieurs sous-polylignes — plusieurs quand la courbe sort du
-/// rectangle et y rentre à nouveau, aucune si elle lui est entièrement
-/// extérieure. Deux tronçons rognés consécutifs sont recollés en une seule
-/// sous-polyligne quand le second commence exactement là où le premier finit
-/// (le sommet commun est resté à l'intérieur du rectangle) ; sinon chacun
-/// forme sa propre sous-polyligne.
+/// Returns one or more sub-polylines — several when the curve leaves the
+/// rectangle and re-enters it, none if it is entirely outside. Two
+/// consecutive clipped runs are joined into a single sub-polyline when the
+/// second starts exactly where the first ends (the common vertex stayed
+/// inside the rectangle); otherwise each forms its own sub-polyline.
 pub fn clip_polyline(bounds: PixelBounds, points: &[BackendCoord]) -> Vec<Vec<BackendCoord>> {
     let mut runs: Vec<Vec<BackendCoord>> = Vec::new();
     for pair in points.windows(2) {
@@ -144,8 +141,8 @@ pub fn clip_polyline(bounds: PixelBounds, points: &[BackendCoord]) -> Vec<Vec<Ba
         let pa = round(ca);
         let pb = round(cb);
         if pa == pb {
-            // Le rectangle n'a été effleuré qu'en un point (un coin, ou un
-            // segment tangent à un bord) : rien à tracer.
+            // The rectangle was only grazed at one point (a corner, or a
+            // segment tangent to an edge): nothing to draw.
             continue;
         }
         match runs.last_mut() {
@@ -156,8 +153,8 @@ pub fn clip_polyline(bounds: PixelBounds, points: &[BackendCoord]) -> Vec<Vec<Ba
     runs
 }
 
-/// Comme [`clip_polyline`], sur des sommets en pixels **flottants** : rien
-/// n'est arrondi, pour les chemins sous-pixel ([`crate::subpixel`]).
+/// Like [`clip_polyline`], on **floating** pixel vertices: nothing is
+/// rounded, for sub-pixel paths ([`crate::subpixel`]).
 pub fn clip_polyline_f64(bounds: PixelBounds, points: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
     let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
     for pair in points.windows(2) {
@@ -183,8 +180,8 @@ fn round((x, y): (f64, f64)) -> BackendCoord {
 mod tests {
     use super::*;
 
-    /// Le rectangle 0..100 × 0..100, en pixels — le cas courant des tests.
-    fn carre() -> PixelBounds {
+    /// The rectangle 0..100 × 0..100, in pixels — the usual test case.
+    fn square() -> PixelBounds {
         PixelBounds {
             x_min: 0.0,
             y_min: 0.0,
@@ -194,69 +191,68 @@ mod tests {
     }
 
     #[test]
-    fn un_segment_entierement_dedans_est_inchange() {
-        let bounds = carre();
+    fn a_segment_entirely_inside_is_unchanged() {
+        let bounds = square();
         let result = clip_segment(bounds, (10.0, 20.0), (80.0, 90.0)).unwrap();
         assert_eq!(result, ((10.0, 20.0), (80.0, 90.0)));
     }
 
     #[test]
-    fn un_segment_entierement_dehors_est_elimine() {
-        let bounds = carre();
-        // Toute la droite x = 200 est à droite du rectangle.
+    fn a_segment_entirely_outside_is_dropped() {
+        let bounds = square();
+        // The whole line x = 200 is to the right of the rectangle.
         assert!(clip_segment(bounds, (200.0, -50.0), (200.0, 150.0)).is_none());
-        // Un segment purement diagonal, entièrement au-delà du coin.
+        // A purely diagonal segment, entirely beyond the corner.
         assert!(clip_segment(bounds, (150.0, 150.0), (300.0, 300.0)).is_none());
     }
 
     #[test]
-    fn un_segment_qui_traverse_le_cadre_est_coupe_au_bon_point() {
-        let bounds = carre();
-        // De (-50, 50) à (150, 50) : horizontal, coupe x=0 et x=100 à
-        // y = 50 des deux côtés — calculable à la main.
+    fn a_segment_crossing_the_frame_is_cut_at_the_right_point() {
+        let bounds = square();
+        // From (-50, 50) to (150, 50): horizontal, cuts x=0 and x=100 at
+        // y = 50 on both sides — computable by hand.
         let (start, end) = clip_segment(bounds, (-50.0, 50.0), (150.0, 50.0)).unwrap();
         assert_eq!(start, (0.0, 50.0));
         assert_eq!(end, (100.0, 50.0));
     }
 
     #[test]
-    fn un_segment_diagonal_traverse_est_coupe_a_lintersection_geometrique() {
-        let bounds = carre();
-        // De (50, 50) [dedans] à (200, 200) [dehors, en diagonale] : la
-        // droite y = x sort du carré en (100, 100), pas en (100, quelque
-        // chose de tronqué par composante) ni en (quelque chose, 100).
+    fn a_diagonal_segment_is_cut_at_the_geometric_intersection() {
+        let bounds = square();
+        // From (50, 50) [inside] to (200, 200) [outside, diagonally]: the
+        // line y = x leaves the square at (100, 100), not at (100,
+        // something truncated per component) nor at (something, 100).
         let (start, end) = clip_segment(bounds, (50.0, 50.0), (200.0, 200.0)).unwrap();
         assert_eq!(start, (50.0, 50.0));
         assert_eq!(end, (100.0, 100.0));
     }
 
     #[test]
-    fn un_segment_qui_touche_juste_un_bord_ne_plante_pas() {
-        let bounds = carre();
-        // Tangent au bord haut (y = 0) sans jamais entrer dans le carré.
+    fn a_segment_that_just_touches_an_edge_does_not_crash() {
+        let bounds = square();
+        // Tangent to the top edge (y = 0) without ever entering the square.
         let result = clip_segment(bounds, (-10.0, 0.0), (110.0, 0.0));
         assert_eq!(result, Some(((0.0, 0.0), (100.0, 0.0))));
 
-        // Un point exactement sur un coin, l'autre loin dehors : le
-        // tronçon rogné est un point unique (t0 == t1) — pas un crash, et
-        // `clip_polyline` doit alors ne rien produire pour ce segment.
+        // One point exactly on a corner, the other far outside: the
+        // clipped run is a single point (t0 == t1) — not a crash, and
+        // `clip_polyline` must then produce nothing for this segment.
         let bounds_line = clip_segment(bounds, (100.0, 100.0), (200.0, 200.0));
         assert_eq!(bounds_line, Some(((100.0, 100.0), (100.0, 100.0))));
     }
 
     #[test]
-    fn une_polyligne_hors_cadre_disparait_sans_segment_parasite() {
-        let bounds = carre();
+    fn a_polyline_outside_the_frame_disappears_without_a_stray_segment() {
+        let bounds = square();
         let points = [(200, 200), (300, 300), (400, 100)];
         assert!(clip_polyline(bounds, &points).is_empty());
     }
 
     #[test]
-    fn une_polyligne_qui_sort_et_rentre_donne_plusieurs_troncons() {
-        let bounds = carre();
-        // Dedans, sort à droite, revient dedans par le bas : deux
-        // sous-polylignes disjointes, ni l'une ni l'autre plaquée sur un
-        // bord.
+    fn a_polyline_that_leaves_and_reenters_gives_several_runs() {
+        let bounds = square();
+        // Inside, leaves on the right, comes back inside from the bottom: two
+        // disjoint sub-polylines, neither pressed against an edge.
         let points = [(50, 50), (200, 50), (50, 200), (50, 50)];
         let runs = clip_polyline(bounds, &points);
         assert_eq!(runs.len(), 2, "{runs:?}");
@@ -268,15 +264,15 @@ mod tests {
     }
 
     #[test]
-    fn une_polyligne_entierement_dedans_recolle_tous_ses_troncons() {
-        let bounds = carre();
+    fn a_polyline_entirely_inside_joins_all_its_runs() {
+        let bounds = square();
         let points = [(10, 10), (50, 60), (90, 20)];
         let runs = clip_polyline(bounds, &points);
         assert_eq!(runs, vec![vec![(10, 10), (50, 60), (90, 20)]]);
     }
 
     #[test]
-    fn le_rectangle_dune_zone_degeneree_est_absent() {
+    fn the_rectangle_of_a_degenerate_area_is_absent() {
         assert!(PixelBounds::of_panel((0, 0), (0, 10)).is_none());
         assert!(PixelBounds::of_panel((0, 0), (10, 0)).is_none());
         assert!(PixelBounds::of_panel((5, 5), (10, 10)).is_some());

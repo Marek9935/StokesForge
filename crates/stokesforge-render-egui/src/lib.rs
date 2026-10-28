@@ -1,74 +1,74 @@
-//! Rendu d'un graphe StokesForge à l'écran — phase R4, tâches 4.2 et 4.3.
+//! Screen rendering of a StokesForge graph — phase R4, tasks 4.2 and 4.3.
 //!
-//! Trois pièces, dans l'ordre où elles s'emboîtent :
+//! Three pieces, in the order in which they fit together:
 //!
-//! - [`backend`] : le `DrawingBackend` de Plotters qui collecte des
-//!   `egui::Shape` au lieu de peindre ;
-//! - [`cache`] : la clé `(revision, rect, pixels_per_point, view_generation)` qui fait qu'une
-//!   image sans changement ne rejoue pas le pipeline ;
-//! - [`feathering`] : le levier d'anticrénelage de la tâche R5.5 bis — le
-//!   seul morceau du rendu qui n'a pas d'équivalent côté export, parce que
-//!   la tessellation n'existe que pour l'écran ;
-//! - [`GraphView`], ici : ce que l'UI tient réellement, un cache plus la
-//!   mise en relation d'un `Snapshot` de session et d'un nœud `Graph`.
+//! - [`backend`]: the Plotters `DrawingBackend` that collects `egui::Shape`s
+//!   instead of painting;
+//! - [`cache`]: the `(revision, rect, pixels_per_point, view_generation)` key
+//!   that lets a frame without changes skip replaying the pipeline;
+//! - [`feathering`]: the antialiasing lever of task R5.5 bis — the only piece
+//!   of the rendering that has no equivalent on the export side, because
+//!   tessellation exists only for the screen;
+//! - [`GraphView`], here: what the UI actually holds, a cache plus the link
+//!   between a session `Snapshot` and a `Graph` node.
 //!
-//! # Le point de contact avec le socle
+//! # The point of contact with the base
 //!
-//! Ce crate ne connaît du modèle que deux choses, toutes deux construites par
-//! les phases précédentes : `stokesforge_core::resolve` (R3), qui traduit un
-//! `PlotSpec` en données prêtes à tracer en gérant les références brisées de
-//! première main, et `stokesforge_session::Snapshot` (socle), dont la `revision`
-//! est la clé de cache. Rien n'est ré-routé, rien n'est recopié : les
-//! colonnes sont des `Arc<Vec<f64>>` que la résolution clone par compteur.
+//! This crate knows two things about the model, both built by the previous
+//! phases: `stokesforge_core::resolve` (R3), which translates a `PlotSpec`
+//! into data ready to plot while handling broken references first hand, and
+//! `stokesforge_session::Snapshot` (base), whose `revision` is the cache key.
+//! Nothing is re-routed, nothing is copied: the columns are
+//! `Arc<Vec<f64>>`s that the resolution clones by counter.
 //!
-//! # Mesurer et dessiner ne passent pas par le même objet, et c'est voulu
+//! # Measuring and drawing do not go through the same object, on purpose
 //!
-//! [`ScreenText`] est la [`TextSource`] de l'écran : elle **dessine** par
-//! l'`egui::Context` de la fenêtre et **mesure** par un
-//! [`TextMeasurer`] hors écran. Ce n'est pas une duplication de la source de
-//! mesure — les deux partent des mêmes [`font_definitions`] — mais la
-//! conjonction de deux contraintes qui ne peuvent pas être satisfaites par
-//! le même appel :
+//! [`ScreenText`] is the screen's [`TextSource`]: it **draws** through the
+//! window's `egui::Context` and **measures** through an off-screen
+//! [`TextMeasurer`]. This is not a duplication of the measurement source —
+//! both start from the same [`font_definitions`] — but the conjunction of
+//! two constraints that cannot be satisfied by the same call:
 //!
-//! - un `Galley` porte les coordonnées UV de ses glyphes **dans l'atlas qui
-//!   l'a mis en page** ; un `Shape::Text` construit sur un `Galley` étranger
-//!   serait tesselé contre l'atlas du `Context` et afficherait n'importe
-//!   quoi. Le dessin doit donc venir du `Context` ;
-//! - la géométrie de la figure ne doit pas dépendre de l'écran, et
-//!   l'`egui::Context` met toujours en page au `pixels_per_point` courant —
-//!   dont la hauteur de ligne d'`epaint` dépend (voir
-//!   `stokesforge_render::text`). La mesure doit donc venir d'ailleurs.
+//! - a `Galley` carries the UV coordinates of its glyphs **in the atlas that
+//!   laid it out**; a `Shape::Text` built on a foreign `Galley` would be
+//!   tessellated against the `Context`'s atlas and show garbage. The drawing
+//!   must therefore come from the `Context`;
+//! - the geometry of the figure must not depend on the screen, and the
+//!   `egui::Context` always lays out at the current `pixels_per_point` —
+//!   on which `epaint`'s line height depends (see
+//!   `stokesforge_render::text`). The measurement must therefore come from
+//!   elsewhere.
 //!
-//! C'est le cas que la mesure R0 0.1 avait à trancher, et sa réponse est ce
-//! qui rend ce découpage sûr : **0,000000 px d'écart** sur 540 comparaisons
-//! entre une `Fonts` construite à la main et le chemin `Context`. Partager
-//! les `FontDefinitions` suffit ; partager l'objet `Fonts` n'aurait pas été
-//! possible de toute façon.
+//! This is the case the R0 0.1 measurement had to settle, and its answer is
+//! what makes this split safe: **0.000000 px of difference** over 540
+//! comparisons between a hand-built `Fonts` and the `Context` path. Sharing
+//! the `FontDefinitions` is enough; sharing the `Fonts` object would not have
+//! been possible anyway.
 //!
-//! Pour que ce ne soit pas une coïncidence, l'application doit poser
-//! [`font_definitions`] sur son `Context` — `stokesforge-app` le fait au
-//! démarrage.
+//! So that this is not a coincidence, the application must set
+//! [`font_definitions`] on its `Context` — `stokesforge-app` does it at
+//! startup.
 //!
-//! # Typst — tâche R8.3, branché par l'issue #29
+//! # Typst — task R8.3, wired in by issue #29
 //!
-//! [`typst_screen`] rastérise une formule compilée par `stokesforge-render` en
-//! RGBA (`typst-render`), la charge en texture `egui`, et
-//! [`EguiBackend::draw_text`]/[`estimate_text_size`] l'utilisent à la place
-//! du chemin `Shape::Text` pour tout texte riche — titres, titres d'axe,
-//! légende, marqués par leur style ([`stokesforge_render::formula::is_rich`],
-//! issue #32). Un texte qui ne compile pas
-//! dégrade vers le `Shape::Text` brut plutôt que de faire échouer le rendu
-//! (voir `typst_screen`, tête de module).
+//! [`typst_screen`] rasterizes a formula compiled by `stokesforge-render` to
+//! RGBA (`typst-render`), loads it as an `egui` texture, and
+//! [`EguiBackend::draw_text`]/[`estimate_text_size`] use it in place of the
+//! `Shape::Text` path for any rich text — titles, axis titles, legend,
+//! marked by their style ([`stokesforge_render::formula::is_rich`], issue
+//! #32). A text that does not compile degrades to the plain `Shape::Text`
+//! rather than making the rendering fail (see `typst_screen`, module
+//! header).
 //!
-//! Typst est toujours compilé (la feature `typst` a été supprimée, issue
-//! #29), et [`GraphView`] — donc l'application — l'active toujours : il
-//! tient le cache des textures ([`FormulaCache`]) et les polices résolues
-//! une fois pour toutes. Reste optionnel au niveau du **backend** :
-//! [`collect_shapes`] trace tout en texte brut, [`collect_shapes_with_typst`]
-//! passe les formules par Typst. Le premier n'est pas un reliquat : c'est le
-//! témoin des tests qui prouvent que Typst est réellement consulté (une
-//! figure avec formule doit différer d'un chemin à l'autre), et le point
-//! d'entrée des tests qui n'ont pas de `Context` egui à prêter.
+//! Typst is always compiled (the `typst` feature was removed, issue #29),
+//! and [`GraphView`] — hence the application — always enables it: it holds
+//! the texture cache ([`FormulaCache`]) and the fonts resolved once and for
+//! all. It stays optional at the **backend** level: [`collect_shapes`] plots
+//! everything as plain text, [`collect_shapes_with_typst`] passes formulas
+//! through Typst. The first is not a leftover: it is the witness of the
+//! tests that prove Typst is really consulted (a figure with a formula must
+//! differ from one path to the other), and the entry point of the tests that
+//! have no egui `Context` to lend.
 
 #![cfg_attr(
     not(test),
@@ -96,7 +96,7 @@ use stokesforge_render::formula::FormulaCache;
 use stokesforge_render::interact;
 use stokesforge_render::pipeline::{self};
 use stokesforge_render::view::ViewState;
-// Descendue dans `stokesforge-render` (#255) : `errors.rs` de l'app la lit sans egui.
+// Moved down into `stokesforge-render` (#255): the app's `errors.rs` reads it without egui.
 pub use stokesforge_render::RenderError;
 use stokesforge_session::Revision;
 use stokesforge_session::Snapshot;
@@ -104,145 +104,143 @@ use stokesforge_session::Snapshot;
 pub use backend::{EguiBackend, EguiBackendError};
 pub use cache::{CacheKey, Outcome, ShapeCache};
 pub use feathering::Feathering;
-// Réexportés pour que l'UI n'ait pas à déclarer une arête vers
-// `stokesforge-render` pour lire ce que la figure a tracé : ce crate est déjà sa
-// façade de rendu écran.
+// Re-exported so that the UI does not have to declare an edge to
+// `stokesforge-render` to read what the figure drew: this crate is already
+// its screen rendering facade.
 pub use stokesforge_render::pipeline::{
     DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, AXIS_DESC_SIZE,
     DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
 };
-// L'adresse et le modèle d'un texte libre : l'application les manipule avec
-// les signaux de la vue ([`GraphEvent`]).
+// The address and model of a free text: the application handles them with
+// the signals of the view ([`GraphEvent`]).
 pub use stokesforge_plot::{
     AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 pub use stokesforge_render::text::{
     font_definitions, font_definitions_for, TextMeasurer, TextSource,
 };
-// Le choix de police (embed du 2026-09-13, `stokesforge_render::fonts`) : une UI
-// qui veut proposer Fira/Libertinus/Noto ou une police système n'a pas à
-// déclarer sa propre arête vers `stokesforge-render` pour ça non plus.
+// The font choice (embed of 2026-09-13, `stokesforge_render::fonts`): a UI
+// that wants to offer Fira/Libertinus/Noto or a system font does not have to
+// declare its own edge to `stokesforge-render` for that either.
 pub use stokesforge_render::{
     available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts,
 };
-// La correspondance pixel ↔ données (tâche R7) : `stokesforge-render` la porte
-// (voir `stokesforge_render::interact`, générique sur le backend), ce crate ne
-// fait que la consommer avec des types egui.
+// The pixel ↔ data correspondence (task R7): `stokesforge-render` carries it
+// (see `stokesforge_render::interact`, generic over the backend), this crate
+// only consumes it with egui types.
 pub use stokesforge_render::{
     component_at, nearest_on_curve, AxisSide, Gesture, PanelTransform, PlotComponent,
 };
 pub use typst_screen::{formula_label, FormulaTexture, TypstScreen};
-// Typst côté modèle de texte (compilation, échappement) : l'interface en a
-// besoin pour vérifier ce qu'elle propose d'écrire (mémo de syntaxe des
-// propriétés), sans déclarer d'arête vers `stokesforge-render`.
+// Typst on the text model side (compilation, escaping): the interface needs
+// it to check what it offers to write (property syntax memo), without
+// declaring an edge to `stokesforge-render`.
 pub use stokesforge_render::formula;
 
-/// Ce que la vue signale à l'application, à traduire en actions — textes
-/// libres (issue #35). Relevé par [`GraphView::take_events`].
+/// What the view signals to the application, to be translated into actions —
+/// free texts (issue #35). Collected by [`GraphView::take_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum GraphEvent {
-    /// Clic de l'outil Texte (issue #62) : poser un texte libre au point de
-    /// données visé et ouvrir son éditeur. L'outil revient au pointeur.
+    /// Click of the Text tool (issue #62): place a free text at the targeted
+    /// data point and open its editor. The tool goes back to the pointer.
     PlaceText {
-        /// Indice du calque dans `PlotSpec::panels`.
+        /// Index of the layer in `PlotSpec::panels`.
         panel: usize,
-        /// Abscisse de données.
+        /// Data abscissa.
         x: f64,
-        /// Ordonnée de données.
+        /// Data ordinate.
         y: f64,
     },
-    /// Double-clic sur un texte libre : l'éditer sur place.
+    /// Double click on a free text: edit it in place.
     EditAnnotation(AnnotationRef),
-    /// Un texte libre a été glissé puis relâché : sa nouvelle version, à
-    /// valider en **une** modification du modèle. L'aperçu reste affiché
-    /// jusqu'à ce que le modèle change ([`GraphView::hold_preview`]).
+    /// A free text was dragged then released: its new version, to commit as
+    /// **one** change of the model. The preview stays displayed until the
+    /// model changes ([`GraphView::hold_preview`]).
     AnnotationMoved {
-        /// Le texte déplacé.
+        /// The moved text.
         target: AnnotationRef,
-        /// Sa version déplacée.
+        /// Its moved version.
         annotation: AnnotationSpec,
     },
-    /// Un objet graphique a été tracé, déplacé ou redimensionné (issue #76) :
-    /// sa nouvelle version, à valider en **une** modification du modèle
-    /// (`target.index` égal au nombre d'objets du panneau : un ajout).
-    /// L'aperçu reste affiché jusqu'à ce que le modèle change
-    /// ([`GraphView::hold_preview`]).
+    /// A graphic object was drawn, moved or resized (issue #76): its new
+    /// version, to commit as **one** change of the model (`target.index`
+    /// equal to the number of objects of the panel: an addition). The preview
+    /// stays displayed until the model changes ([`GraphView::hold_preview`]).
     ShapeChanged {
-        /// L'objet concerné.
+        /// The object concerned.
         target: ShapeRef,
-        /// Sa nouvelle version.
+        /// Its new version.
         shape: ShapeSpec,
     },
-    /// Double-clic sur un titre : l'éditer sur place (issue #53).
+    /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
-    /// Double-clic sur une entrée de la légende : renommer la série du
-    /// calque `panel` (issue #53).
+    /// Double click on a legend entry: rename the series of layer `panel`
+    /// (issue #53).
     EditLegendEntry {
-        /// Indice du calque dans `PlotSpec::panels`.
+        /// Index of the layer in `PlotSpec::panels`.
         panel: usize,
-        /// Rang de la série dans `PanelSpec::series`.
+        /// Rank of the series in `PanelSpec::series`.
         series: usize,
     },
-    /// Double-clic sur un axe (ligne ou graduations) : ouvrir les
-    /// paramètres de cet axe (issue #113).
+    /// Double click on an axis (line or ticks): open the settings of this
+    /// axis (issue #113).
     OpenAxisProperties {
-        /// Indice du panneau dans la figure dessinée.
+        /// Index of the panel in the drawn figure.
         panel: usize,
-        /// Côté de l'axe.
+        /// Side of the axis.
         side: stokesforge_render::AxisSide,
     },
-    /// Double-clic sur une courbe : ouvrir les paramètres de la série
+    /// Double click on a curve: open the settings of the series
     /// (issue #113).
     OpenSeriesProperties(stokesforge_plot::SeriesRef),
-    /// Double-clic sur un objet graphique : ouvrir ses propriétés
+    /// Double click on a graphic object: open its properties
     /// (issue #113).
     OpenShapeProperties(stokesforge_plot::ShapeRef),
-    /// Un titre ou une légende a été glissé puis relâché : sa nouvelle
-    /// ancre, à valider en **une** modification du modèle. L'aperçu reste
-    /// affiché jusqu'à ce que le modèle change ([`GraphView::hold_preview`]).
+    /// A title or a legend was dragged then released: its new anchor, to
+    /// commit as **one** change of the model. The preview stays displayed
+    /// until the model changes ([`GraphView::hold_preview`]).
     TextMoved {
-        /// Le texte déplacé.
+        /// The moved text.
         target: TextTarget,
-        /// Sa nouvelle ancre.
+        /// Its new anchor.
         anchor: TextAnchor,
     },
-    /// Une poignée de largeur d'un titre ou d'un titre d'axe a été tirée puis
-    /// relâchée (#244) : sa nouvelle largeur, en fraction de la largeur de la
-    /// figure, à valider en **une** modification du modèle.
+    /// A width handle of a title or an axis title was pulled then released
+    /// (#244): its new width, as a fraction of the width of the figure, to
+    /// commit as **one** change of the model.
     TextResized {
-        /// Le texte redimensionné.
+        /// The resized text.
         target: TextTarget,
-        /// Sa largeur, bornée à `[MIN_WIDTH, 1]`.
+        /// Its width, bounded to `[MIN_WIDTH, 1]`.
         width: f64,
     },
 }
 
-/// L'outil actif d'un graphe (issue #62), façon Origin. Un réglage de **vue**,
-/// comme le cadrage : jamais dans le modèle, jamais annulable.
+/// The active tool of a graph (issue #62), Origin style. A **view** setting,
+/// like the framing: never in the model, never undoable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GraphTool {
-    /// Le défaut : un glisser simple ne déplace que les objets (textes,
-    /// formes, titre, légende) ; Ctrl + glisser ou clic milieu + glisser fait
-    /// défiler la vue (une seule échelle si le geste part d'un axe, #318),
-    /// Ctrl+molette zoome.
+    /// The default: a plain drag only moves objects (texts, shapes, title,
+    /// legend); Ctrl + drag or middle click + drag scrolls the view (a single
+    /// scale if the gesture starts from an axis, #318), Ctrl+wheel zooms.
     #[default]
     Pointer,
-    /// Glisser trace un rectangle de zoom.
+    /// Dragging draws a zoom rectangle.
     ZoomBox,
-    /// Un clic dans la zone de tracé pose un texte libre.
+    /// A click in the plot area places a free text.
     Text,
-    /// Glisser trace un rectangle (issue #76).
+    /// Dragging draws a rectangle (issue #76).
     Rectangle,
-    /// Glisser trace une ellipse (issue #76).
+    /// Dragging draws an ellipse (issue #76).
     Ellipse,
-    /// Glisser trace une ligne (issue #76).
+    /// Dragging draws a line (issue #76).
     Line,
-    /// Glisser trace une flèche, pointe au relâchement (issue #76).
+    /// Dragging draws an arrow, tip at release (issue #76).
     Arrow,
 }
 
 impl GraphTool {
-    /// La sorte d'objet que l'outil trace, s'il en trace une.
+    /// The kind of object the tool draws, if it draws one.
     pub fn shape_kind(self) -> Option<ShapeKind> {
         match self {
             Self::Rectangle => Some(ShapeKind::Rectangle),
@@ -254,35 +252,35 @@ impl GraphTool {
     }
 }
 
-/// Un glisser de titre ou de légende en cours (issue #53).
+/// A title or legend drag in progress (issue #53).
 #[derive(Debug, Clone)]
 struct TextDrag {
     target: TextTarget,
-    /// L'ancre au début du geste (`None` : le texte était à sa place par
-    /// défaut).
+    /// The anchor at the start of the gesture (`None`: the text was at its
+    /// default place).
     original: Option<TextAnchor>,
-    /// Centre tracé du texte au début du geste, en repère de la figure.
+    /// Drawn center of the text at the start of the gesture, in figure coordinates.
     start_center: Pos2,
-    /// Point d'appui du geste, en repère de la figure.
+    /// Press point of the gesture, in figure coordinates.
     press: Pos2,
-    /// Le geste tire une poignée de largeur (#244) au lieu de déplacer.
+    /// The gesture pulls a width handle (#244) instead of moving.
     resize: bool,
 }
 
-/// Un glisser de texte libre en cours.
+/// A free text drag in progress.
 #[derive(Debug, Clone)]
 struct AnnotationDrag {
     target: AnnotationRef,
     original: AnnotationSpec,
-    /// Centre tracé du texte au début du geste, en repère de la figure.
+    /// Drawn center of the text at the start of the gesture, in figure coordinates.
     start_center: Pos2,
-    /// Point d'appui du geste, en repère de la figure.
+    /// Press point of the gesture, in figure coordinates.
     press: Pos2,
-    /// Le geste tire une poignée de largeur (#244) au lieu de déplacer.
+    /// The gesture pulls a width handle (#244) instead of moving.
     resize: bool,
 }
 
-/// Peint les deux poignées de largeur d'un texte sélectionné (#244).
+/// Paints the two width handles of a selected text (#244).
 fn paint_width_handles(painter: &Painter, handles: [Pos2; 2]) {
     for handle in handles {
         let square = Rect::from_center_size(handle, egui::vec2(7.0, 7.0));
@@ -296,29 +294,28 @@ fn paint_width_handles(painter: &Painter, handles: [Pos2; 2]) {
     }
 }
 
-/// Distance maximale, en points egui, à laquelle une poignée de largeur est
-/// saisie.
+/// Maximum distance, in egui points, at which a width handle is grabbed.
 const WIDTH_HANDLE_RADIUS: f32 = 7.0;
 
-/// Distance maximale, en pixels, à laquelle un point est encore « désigné »
-/// par le curseur (tâche R7.2). Au-delà, personne n'est sous la souris.
+/// Maximum distance, in pixels, at which a point is still "designated" by
+/// the cursor (task R7.2). Beyond that, nobody is under the mouse.
 pub const HIT_RADIUS: f32 = 12.0;
 
-/// La source de texte de l'écran : dessin par le `Context`, mesure hors
-/// écran.
+/// The screen's text source: drawing through the `Context`, off-screen
+/// measurement.
 ///
-/// Les deux moitiés partent des mêmes [`font_definitions`] ; la raison de
-/// les séparer est en tête de module.
+/// Both halves start from the same [`font_definitions`]; the reason for
+/// separating them is in the module header.
 pub struct ScreenText<'a> {
-    /// Le contexte qui possède l'atlas de glyphes dans lequel le texte sera
-    /// tesselé.
+    /// The context that owns the glyph atlas into which the text will be
+    /// tessellated.
     pub context: &'a egui::Context,
-    /// La source de mesure, indépendante de l'écran.
+    /// The measurement source, independent of the screen.
     pub measurer: &'a TextMeasurer,
 }
 
 impl<'a> ScreenText<'a> {
-    /// Assemble les deux moitiés.
+    /// Assembles the two halves.
     pub fn new(context: &'a egui::Context, measurer: &'a TextMeasurer) -> Self {
         Self { context, measurer }
     }
@@ -335,12 +332,12 @@ impl TextSource for ScreenText<'_> {
     }
 }
 
-/// Construit les formes d'un graphe résolu dans `shapes`.
+/// Builds the shapes of a resolved graph into `shapes`.
 ///
-/// Le point d'entrée bas niveau : sans `Context`, sans cache, sans session.
-/// C'est lui que les tests appellent — le rendu se vérifie ainsi **sans
-/// serveur graphique**, ce qui est l'argument du §9 de `roadmap-rendu.md`
-/// pour faire le renderer avant l'UI.
+/// The low-level entry point: no `Context`, no cache, no session. This is
+/// what the tests call — the rendering is thus checked **without a graphics
+/// server**, which is the argument of §9 of `roadmap-rendu.md` for building
+/// the renderer before the UI.
 pub fn collect_shapes(
     shapes: &mut Vec<Shape>,
     rect: Rect,
@@ -351,11 +348,11 @@ pub fn collect_shapes(
     pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
 }
 
-/// Échantillon partagé avec la légende, pour Object Manager (#82).
+/// Swatch shared with the legend, for the Object Manager (#82).
 pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rect) -> Vec<Shape> {
     use plotters::drawing::IntoDrawingArea;
-    // Vérifier les références par leurs métadonnées, sans convertir les
-    // cellules mixtes ni allouer la géométrie de la série pour une vignette.
+    // Check the references through their metadata, without converting mixed
+    // cells or allocating the series geometry for a thumbnail.
     let references = [
         Some(spec.y),
         spec.x.filter(|_| spec.plot_type.needs_x()),
@@ -387,9 +384,9 @@ pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rec
     shapes
 }
 
-/// Courbe de l'aperçu d'analyse, déjà projetée en pixels locaux. Ce pont
-/// n'interprète aucun style : traits, tirets et symboles sont ceux du rendu
-/// partagé, comme dans le graphe et ses exports (#210).
+/// Curve of the analysis preview, already projected into local pixels. This
+/// bridge interprets no style: strokes, dashes and symbols are those of the
+/// shared rendering, as in the graph and its exports (#210).
 pub fn analysis_curve(
     spec: &stokesforge_plot::SeriesSpec,
     rect: Rect,
@@ -409,8 +406,8 @@ pub fn analysis_curve(
         line.style = stokesforge_plot::LineStyle::Solid;
     }
     for run in points.split(|(x, y)| !x.is_finite() || !y.is_finite()) {
-        // Barres et histogrammes : l'analyse travaille sur les mesures Y
-        // brutes, l'aperçu les relie en conservant le style du trait source.
+        // Bars and histograms: the analysis works on the raw Y measurements,
+        // the preview links them while keeping the style of the source stroke.
         if spec.plot_type.draws_line() || !spec.plot_type.draws_symbols() {
             let _ = stokesforge_render::paint::polyline_f64(&area, run, &line, false);
         }
@@ -426,10 +423,10 @@ pub fn analysis_curve(
     shapes
 }
 
-/// Comme [`collect_shapes`], avec le chemin Typst de la tâche R8.3 activé.
+/// Like [`collect_shapes`], with the Typst path of task R8.3 enabled.
 ///
-/// Point d'entrée bas niveau équivalent, pour tester le chemin écran de
-/// Typst sans passer par un [`GraphView`] complet ni une session.
+/// Equivalent low-level entry point, to test the Typst screen path without
+/// going through a complete [`GraphView`] or a session.
 pub fn collect_shapes_with_typst(
     shapes: &mut Vec<Shape>,
     rect: Rect,
@@ -441,128 +438,124 @@ pub fn collect_shapes_with_typst(
     pipeline::draw(backend, plot).map_err(|error| RenderError::Drawing(error.to_string()))
 }
 
-/// Un point désigné sur une courbe — tâche R7.2.
+/// A point designated on a curve — task R7.2.
 ///
-/// **Limité à l'axe principal** (bas, gauche) : une série de l'axe
-/// secondaire vivrait sur un second `PanelTransform` (bornes `y2_range`,
-/// échelle `right.scale`) qu'il faudrait construire à côté, et rien
-/// aujourd'hui n'en a l'usage (`stokesforge-app` n'affiche encore qu'un banc,
-/// sans axe secondaire visible). Écart assumé, pas une omission tue.
+/// **Limited to the main axis** (bottom, left): a series of the secondary
+/// axis would live on a second `PanelTransform` (bounds `y2_range`, scale
+/// `right.scale`) that would have to be built alongside, and nothing today
+/// has a use for it (`stokesforge-app` still shows only a test bench, without a
+/// visible secondary axis). An accepted gap, not a silent omission.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PointHit {
-    /// Indice du panneau désigné dans [`DrawnPlot::panels`] — donc parmi les
-    /// panneaux effectivement tracés (R5.4), pas dans le spec d'origine.
+    /// Index of the designated panel in [`DrawnPlot::panels`] — thus among
+    /// the panels actually drawn (R5.4), not in the original spec.
     pub panel: usize,
-    /// Indice de la série dans `PanelSpec::series`, résolu dans le même
-    /// ordre (`ResolvedPanel::series`).
+    /// Index of the series in `PanelSpec::series`, resolved in the same
+    /// order (`ResolvedPanel::series`).
     pub series: usize,
-    /// Indice du point désigné dans sa série.
+    /// Index of the designated point in its series.
     pub point_index: usize,
-    /// Position du point, en données.
+    /// Position of the point, in data.
     pub data: (f64, f64),
-    /// Position du point, à l'écran.
+    /// Position of the point, on screen.
     pub pixel: Pos2,
-    /// Distance du curseur au point, en pixels.
+    /// Distance from the cursor to the point, in pixels.
     pub distance: f32,
 }
 
-/// Un graphe affiché : son cache, son état de vue, et de quoi le repeindre.
+/// A displayed graph: its cache, its view state, and what it takes to repaint it.
 ///
-/// Un `GraphView` par vue, pas un par graphe : deux fenêtres sur le même
-/// graphe ont chacune leur cache et, depuis R7, leur propre cadrage de
-/// zoom/pan, ce qui est le comportement attendu
-/// (zoomer dans une fenêtre ne doit pas zoomer l'autre).
+/// One `GraphView` per view, not one per graph: two windows on the same
+/// graph each have their own cache and, since R7, their own zoom/pan
+/// framing, which is the expected behavior (zooming in one window must not
+/// zoom the other).
 #[derive(Debug)]
 pub struct GraphView {
     cache: ShapeCache,
-    /// Les formules Typst déjà rastérisées (issue #29) : vit aussi longtemps
-    /// que la vue, pour qu'une reconstruction de la figure (zoom, révision)
-    /// ne recompile pas des titres inchangés. Borné par
-    /// [`FORMULA_CACHE_LIMIT`].
+    /// The Typst formulas already rasterized (issue #29): lives as long as
+    /// the view, so that a rebuild of the figure (zoom, revision) does not
+    /// recompile unchanged titles. Bounded by [`FORMULA_CACHE_LIMIT`].
     formulas: FormulaCache<FormulaTexture>,
-    /// Le choix de police des formules — la valeur par défaut, comme le
-    /// [`TextMeasurer`] de la vue.
+    /// The font choice of the formulas — the default value, like the view's
+    /// [`TextMeasurer`].
     font_choice: FontChoice,
-    /// Les polices Typst (texte, Math) de `font_choice`, résolues une fois à
-    /// la création de la vue. `None` si la résolution a échoué — alors tout
-    /// le texte reste brut, sans faire échouer le rendu (invariant 10).
+    /// The Typst fonts (text, Math) of `font_choice`, resolved once when the
+    /// view is created. `None` if the resolution failed — then all the text
+    /// stays plain, without making the rendering fail (invariant 10).
     typst_fonts: Option<(typst::text::Font, typst::text::Font)>,
-    /// Les formes du cache mises à l'échelle d'affichage, texte (issue #18)
-    /// et formules Typst (issue #31) compris : voir [`scaled`].
+    /// The cached shapes scaled to the display, text (issue #18) and Typst
+    /// formulas (issue #31) included: see [`scaled`].
     scaled: scaled::ScaledShapes,
     last: Option<DrawnPlot>,
     measurer: TextMeasurer,
     view: ViewState,
     id: Id,
     hover: Option<PointHit>,
-    /// Rectangle visible du dernier rendu ; le cache garde, lui, le repère
-    /// logique de référence quand l'application agrandit ou réduit la figure.
+    /// Visible rectangle of the last rendering; the cache keeps the reference
+    /// logical frame when the application enlarges or reduces the figure.
     display_rect: Option<Rect>,
-    /// Coins du rectangle de zoom élastique en cours (tâche 7.4), en pixels
-    /// d'écran. `None` hors glissé de l'outil Zoom.
+    /// Corners of the rubber-band zoom rectangle in progress (task 7.4), in
+    /// screen pixels. `None` outside a drag of the Zoom tool.
     drag_box: Option<(Pos2, Pos2)>,
-    /// L'outil actif (issue #62).
+    /// The active tool (issue #62).
     tool: GraphTool,
-    /// Réponse d'interaction de la figure au dernier rendu : l'application
-    /// y accroche son menu contextuel (clic droit).
+    /// Interaction response of the figure at the last rendering: the
+    /// application hooks its context menu (right click) on it.
     response: Option<egui::Response>,
-    /// Aperçu d'un texte libre en cours d'édition ou de glisser (issue
-    /// #35) : posé sur le clone du spec à la construction de la figure,
-    /// comme le zoom — jamais dans le modèle tant que l'application n'a pas
-    /// validé.
+    /// Preview of a free text being edited or dragged (issue #35): set on the
+    /// clone of the spec when the figure is built, like the zoom — never in
+    /// the model until the application has committed.
     annotation_preview: Option<(AnnotationRef, AnnotationSpec)>,
-    /// Compteur de l'aperçu, ajouté à la génération de vue dans la clé du
-    /// cache.
+    /// Counter of the preview, added to the view generation in the cache
+    /// key.
     preview_generation: u64,
-    /// Révision du modèle à laquelle l'aperçu a été validé : il s'efface dès
-    /// que le modèle a changé, pour ne pas montrer une image de l'ancienne
-    /// position entre la validation et la mise à jour du modèle.
+    /// Revision of the model at which the preview was committed: it clears as
+    /// soon as the model has changed, so as not to show an image of the old
+    /// position between the commit and the update of the model.
     preview_until: Option<Revision>,
     annotation_drag: Option<AnnotationDrag>,
-    /// Aperçu d'un titre ou d'une légende en cours de glisser (issue #53),
-    /// sur le même principe que `annotation_preview`.
+    /// Preview of a title or legend being dragged (issue #53), on the same
+    /// principle as `annotation_preview`.
     text_preview: Option<(TextTarget, TextAnchor)>,
-    /// Aperçu de la largeur d'un titre en cours de redimensionnement (#244).
+    /// Preview of the width of a title being resized (#244).
     text_width_preview: Option<(TextTarget, f64)>,
     text_drag: Option<TextDrag>,
-    /// Texte libre sélectionné (clic), cible de Suppr.
+    /// Selected free text (click), target of Delete.
     selected_annotation: Option<AnnotationRef>,
-    /// Le titre, titre d'axe ou la légende sélectionné (issue #77).
+    /// The selected title, axis title or legend (issue #77).
     selected_text: Option<TextTarget>,
-    /// Aperçu d'un objet graphique en cours de tracé, de déplacement ou de
-    /// redimensionnement (issue #76), sur le même principe que
-    /// `annotation_preview`.
+    /// Preview of a graphic object being drawn, moved or resized (issue #76),
+    /// on the same principle as `annotation_preview`.
     shape_preview: Option<(ShapeRef, ShapeSpec)>,
     shape_drag: Option<shape_tools::ShapeDrag>,
-    /// Objet graphique sélectionné (clic), cible de Suppr et des poignées.
+    /// Selected graphic object (click), target of Delete and the handles.
     selected_shape: Option<ShapeRef>,
-    /// Série sélectionnée, commune au graphe et à Object Manager (#83).
+    /// Selected series, shared by the graph and the Object Manager (#83).
     selected_series: Option<stokesforge_plot::SeriesRef>,
-    /// Le groupe de séries sélectionné (#197), avec la série qui le désigne :
-    /// il ne vaut que tant que `selected_series` est cette série, donc un clic
-    /// sur une autre courbe le lève sans rien à nettoyer ailleurs.
+    /// The selected series group (#197), with the series that designates it:
+    /// it only holds as long as `selected_series` is that series, so a click
+    /// on another curve lifts it with nothing to clean up elsewhere.
     selected_group: Option<(stokesforge_plot::SeriesRef, u32)>,
-    /// Où est parti le glisser de navigation en cours : décidé à la première
-    /// image du geste, pour que le curseur puisse en sortir sans changer de
-    /// cible.
+    /// Where the navigation drag in progress started: decided at the first
+    /// frame of the gesture, so that the cursor can leave it without changing
+    /// target.
     nav_drag: Option<NavDrag>,
-    /// Calque actif (#161) : le dernier calque sélectionné, cible par défaut
-    /// des ajouts. État d'interface, hors modèle ; jamais dessiné dans la
-    /// figure. Lu par [`Self::active_panel`], qui le revalide.
+    /// Active layer (#161): the last selected layer, default target of
+    /// additions. Interface state, outside the model; never drawn in the
+    /// figure. Read by [`Self::active_panel`], which revalidates it.
     active_panel: usize,
-    /// Sélection vue à l'image précédente : le calque actif suit un
-    /// changement de sélection, pas la sélection elle-même (un clic sur un
-    /// repère de calque reste donc valable tant que rien d'autre n'est
-    /// sélectionné).
+    /// Selection seen at the previous frame: the active layer follows a
+    /// change of selection, not the selection itself (a click on a layer
+    /// marker therefore stays valid as long as nothing else is selected).
     seen_selection: SelectionKey,
     events: Vec<GraphEvent>,
 }
 
-/// Ce que fait le glisser en cours, décidé à la pression (comme `DragMode`
-/// de l'aperçu d'analyse) : toute la zone de tracé, une seule échelle (glisser
-/// parti d'un axe, #167), ou aucun pan. Le pan exige Ctrl ou le bouton milieu
-/// à la pression (#318) ; relâcher Ctrl en route ne l'interrompt pas, le
-/// presser en route ne le déclenche pas.
+/// What the drag in progress does, decided at the press (like `DragMode` of
+/// the analysis preview): the whole plot area, a single scale (drag started
+/// from an axis, #167), or no pan. The pan requires Ctrl or the middle button
+/// at the press (#318); releasing Ctrl on the way does not interrupt it,
+/// pressing it on the way does not trigger it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum NavDrag {
     Plot,
@@ -570,7 +563,7 @@ enum NavDrag {
         panel: usize,
         side: AxisSide,
     },
-    /// Pas de pan : glisser simple (outil, objet ou rien).
+    /// No pan: plain drag (tool, object or nothing).
     Inert,
 }
 
@@ -580,7 +573,7 @@ impl NavDrag {
     }
 }
 
-/// Les quatre sélections d'une vue, pour détecter qu'elles ont changé.
+/// The four selections of a view, to detect that they changed.
 type SelectionKey = (
     Option<stokesforge_plot::SeriesRef>,
     Option<AnnotationRef>,
@@ -594,32 +587,31 @@ impl Default for GraphView {
     }
 }
 
-/// Compteur pour donner à chaque `GraphView` un `egui::Id` d'interaction qui
-/// lui est propre, indépendant du chemin d'`Ui` où elle est peinte.
+/// Counter to give each `GraphView` its own `egui::Id` for interaction,
+/// independent of the `Ui` path where it is painted.
 ///
-/// Sans lui, deux vues peintes depuis le même point du code (une boucle sur
-/// plusieurs graphes, par exemple) partageraient le même `Id` et donc le
-/// même geste de glisser — l'`Id` dérivé de `ui.id()` seul ne les
-/// distinguerait pas.
+/// Without it, two views painted from the same place in the code (a loop
+/// over several graphs, for example) would share the same `Id` and therefore
+/// the same drag gesture — the `Id` derived from `ui.id()` alone would not
+/// tell them apart.
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Nombre de formules au-delà duquel [`GraphView`] vide son cache de
-/// textures avant de reconstruire la figure.
+/// Number of formulas beyond which [`GraphView`] empties its texture cache
+/// before rebuilding the figure.
 ///
-/// Chaque frappe dans un titre à formule crée une entrée (et une texture)
-/// qui ne resservira plus. Une figure réelle compte quelques dizaines de
-/// textes au plus — un titre, trois titres d'axe, vingt-quatre entrées de
-/// légende (`legend::MAX_ENTRIES`) —, donc la limite ne se déclenche
-/// qu'après une longue édition, et coûte alors une recompilation de ce qui
-/// est affiché (0,7 ms par formule).
+/// Each keystroke in a formula title creates an entry (and a texture) that
+/// will not be used again. A real figure has a few dozen texts at most — a
+/// title, three axis titles, twenty-four legend entries
+/// (`legend::MAX_ENTRIES`) —, so the limit only triggers after a long edit,
+/// and then costs a recompilation of what is displayed (0.7 ms per formula).
 pub const FORMULA_CACHE_LIMIT: usize = 256;
 
 impl GraphView {
-    /// Une vue neuve, sans rien en cache et sans zoom.
+    /// A new view, with nothing in the cache and no zoom.
     ///
-    /// Construit sa propre source de mesure : c'est le seul coût notable de
-    /// la vue (le décodage des polices embarquées), payé une fois à
-    /// l'ouverture d'une fenêtre de graphe.
+    /// Builds its own measurement source: this is the only notable cost of
+    /// the view (decoding the embedded fonts), paid once when a graph window
+    /// is opened.
     pub fn new() -> Self {
         let font_choice = FontChoice::default();
         Self {
@@ -661,9 +653,9 @@ impl GraphView {
         }
     }
 
-    /// Le calque actif de `spec` (#161) : le dernier sélectionné, ou le
-    /// premier s'il a disparu. Toujours un indice valide tant que le graphe
-    /// a un calque.
+    /// The active layer of `spec` (#161): the last selected one, or the
+    /// first if it has disappeared. Always a valid index as long as the graph
+    /// has a layer.
     pub fn active_panel(&self, spec: &PlotSpec) -> usize {
         if self.active_panel < spec.panels.len() {
             self.active_panel
@@ -672,15 +664,15 @@ impl GraphView {
         }
     }
 
-    /// Rend le calque `panel` actif (sans effet s'il n'existe pas). Repère
-    /// numéroté de la fenêtre, nœud du calque dans Object Manager.
+    /// Makes layer `panel` active (no effect if it does not exist). Numbered
+    /// marker of the window, layer node in the Object Manager.
     pub fn set_active_panel(&mut self, panel: usize, spec: &PlotSpec) {
         if panel < spec.panels.len() {
             self.active_panel = panel;
         }
     }
 
-    /// Le calque de l'objet sélectionné, s'il y en a un.
+    /// The layer of the selected object, if there is one.
     fn selection_panel(&self, spec: &PlotSpec) -> Option<usize> {
         if let Some(series) = self.selected_series {
             return Some(series.panel);
@@ -693,7 +685,7 @@ impl GraphView {
         (position < spec.panels.len()).then_some(position)
     }
 
-    /// Le calque actif suit la sélection quand elle change.
+    /// The active layer follows the selection when it changes.
     fn follow_selection(&mut self, spec: &PlotSpec) {
         let key = (
             self.selected_series,
@@ -713,7 +705,7 @@ impl GraphView {
         let Some(selected) = self.selected_series else {
             return;
         };
-        // Un groupe sélectionné (#197) montre les poignées de tous ses membres.
+        // A selected group (#197) shows the handles of all its members.
         let members = self.selected_group().and_then(|group| {
             spec.panels
                 .get(group.panel)
@@ -760,18 +752,18 @@ impl GraphView {
         let Some(scale) = self.display_scale() else {
             return;
         };
-        // Poignées de sélection (#98) : placées et peintes par
-        // `stokesforge_render::series_selection`, en pixels d'affichage pour
-        // que leur taille et leur espacement ne suivent pas l'agrandissement
-        // de la figure. Peintes par-dessus la figure en cache, jamais dedans :
-        // sélectionner ne reconstruit rien, et l'export n'en sait rien.
+        // Selection handles (#98): placed and painted by
+        // `stokesforge_render::series_selection`, in display pixels so that
+        // their size and spacing do not follow the enlargement of the
+        // figure. Painted over the cached figure, never inside it: selecting
+        // rebuilds nothing, and the export knows nothing about them.
         let scale = f64::from(scale);
         let centers = series.handle_centers(|(x, y)| (x * scale, y * scale));
         let mut shapes = Vec::with_capacity(centers.len());
         let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
         let mut backend = EguiBackend::new(&mut shapes, rect.min, size, &self.measurer);
-        // `draw_rect` de ce backend n'échoue jamais (`EguiBackendError` est
-        // vide, et un carré ne passe pas par les polices).
+        // `draw_rect` of this backend never fails (`EguiBackendError` is
+        // empty, and a square does not go through fonts).
         let _ = stokesforge_render::series_selection::paint_handles(
             &mut backend,
             &centers,
@@ -780,50 +772,50 @@ impl GraphView {
         painter.extend(shapes);
     }
 
-    /// Le cache, pour l'inspecter (compteurs de la tâche R4.3).
+    /// The cache, to inspect it (counters of task R4.3).
     pub fn cache(&self) -> &ShapeCache {
         &self.cache
     }
 
-    /// Nombre de formules Typst gardées en cache par cette vue — pour les
+    /// Number of Typst formulas kept in the cache by this view — for the
     /// tests (issue #29).
     pub fn formula_count(&self) -> usize {
         self.formulas.len()
     }
 
-    /// La géométrie de la dernière figure construite.
+    /// The geometry of the last figure built.
     pub fn last_drawn(&self) -> Option<&DrawnPlot> {
         self.last.as_ref()
     }
 
-    /// Rectangle réellement occupé à l'écran lors du dernier rendu.
+    /// Rectangle actually occupied on screen at the last rendering.
     pub fn display_rect(&self) -> Option<Rect> {
         self.display_rect
     }
 
-    /// L'état de vue (zoom/pan) de cette vue — tâche R7.1.
+    /// The view state (zoom/pan) of this view — task R7.1.
     pub fn view(&self) -> &ViewState {
         &self.view
     }
 
-    /// L'identifiant d'interaction de cette vue — propre à la vue, stable,
-    /// de quoi y accrocher un état d'interface (l'éditeur sur place d'un
-    /// texte libre, `stokesforge-app`).
+    /// The interaction identifier of this view — specific to the view, stable,
+    /// something to hang an interface state on (the in-place editor of a free
+    /// text, `stokesforge-app`).
     pub fn id(&self) -> Id {
         self.id
     }
 
-    /// Les signaux de la vue depuis le dernier relevé (issue #35).
+    /// The signals of the view since the last collection (issue #35).
     pub fn take_events(&mut self) -> Vec<GraphEvent> {
         std::mem::take(&mut self.events)
     }
 
-    /// La série sélectionnée, visible ou masquée (#83).
+    /// The selected series, visible or hidden (#83).
     pub fn selected_series(&self) -> Option<stokesforge_plot::SeriesRef> {
         self.selected_series
     }
 
-    /// Sélection d'interface : elle ne change ni le modèle, ni son historique.
+    /// Interface selection: it changes neither the model nor its history.
     pub fn select_series(&mut self, target: Option<stokesforge_plot::SeriesRef>, spec: &PlotSpec) {
         self.selected_group = None;
         self.selected_series = target.filter(|target| spec.series_at(*target).is_some());
@@ -835,15 +827,15 @@ impl GraphView {
         }
     }
 
-    /// Le groupe de séries sélectionné (#197), s'il y en a un.
+    /// The selected series group (#197), if there is one.
     pub fn selected_group(&self) -> Option<stokesforge_plot::SeriesGroupRef> {
         let (series, group) = self.selected_group?;
         (self.selected_series == Some(series))
             .then(|| stokesforge_plot::SeriesGroupRef::new(series.panel, group))
     }
 
-    /// Sélectionne un groupe de séries depuis Object Manager (#197) : la série
-    /// qui le désigne est la première de ses membres.
+    /// Selects a series group from the Object Manager (#197): the series that
+    /// designates it is the first of its members.
     pub fn select_series_group(
         &mut self,
         target: Option<stokesforge_plot::SeriesGroupRef>,
@@ -866,7 +858,7 @@ impl GraphView {
         }
     }
 
-    /// Sélection d'un texte libre depuis Object Manager, y compris masqué.
+    /// Selection of a free text from the Object Manager, hidden ones included.
     pub fn select_annotation(&mut self, target: Option<AnnotationRef>, spec: &PlotSpec) {
         self.select_series(None, spec);
         self.selected_shape = None;
@@ -875,7 +867,7 @@ impl GraphView {
         self.tool = GraphTool::Pointer;
     }
 
-    /// Sélection d'un titre ou d'une légende depuis Object Manager.
+    /// Selection of a title or a legend from the Object Manager.
     pub fn select_text(&mut self, target: Option<TextTarget>, spec: &PlotSpec) {
         self.select_series(None, spec);
         self.selected_shape = None;
@@ -884,7 +876,7 @@ impl GraphView {
         self.tool = GraphTool::Pointer;
     }
 
-    /// Série sous le pointeur, par sa géométrie réellement dessinée.
+    /// Series under the pointer, by its geometry as actually drawn.
     pub fn series_at(&self, pos: Pos2, spec: &PlotSpec) -> Option<stokesforge_plot::SeriesRef> {
         let pos = self.figure_position(pos)?;
         let last = self.last.as_ref()?;
@@ -893,21 +885,21 @@ impl GraphView {
         (panel < spec.panels.len()).then(|| stokesforge_plot::SeriesRef::new(panel, index))
     }
 
-    /// Le texte libre sélectionné, s'il y en a un.
+    /// The selected free text, if there is one.
     pub fn selected_annotation(&self) -> Option<AnnotationRef> {
         self.selected_annotation
     }
 
-    /// Le titre, titre d'axe ou la légende sélectionné, s'il y en a un
-    /// (issue #77) : un clic le sélectionne, le glisser le déplace, la barre
-    /// de format règle sa police et son corps.
+    /// The selected title, axis title or legend, if there is one (issue #77):
+    /// a click selects it, dragging moves it, the format bar sets its font
+    /// and size.
     pub fn selected_text(&self) -> Option<TextTarget> {
         self.selected_text
     }
 
-    /// Le titre ou la légende sous le pixel egui `pos`. Une entrée de la
-    /// légende désigne la légende entière : on ne sélectionne ni ne déplace
-    /// une ligne à part.
+    /// The title or legend under the egui pixel `pos`. A legend entry
+    /// designates the whole legend: a line is neither selected nor moved
+    /// separately.
     pub fn text_target_at(&self, pos: Pos2) -> Option<TextTarget> {
         match self.component_at(pos)? {
             PlotComponent::Text(target) => Some(target),
@@ -919,19 +911,19 @@ impl GraphView {
         }
     }
 
-    /// Désélectionne le texte libre (après sa suppression, par exemple).
+    /// Deselects the free text (after its deletion, for example).
     pub fn clear_annotation_selection(&mut self) {
         self.selected_annotation = None;
     }
 
-    /// L'aperçu d'un texte libre, s'il y en a un.
+    /// The preview of a free text, if there is one.
     pub fn annotation_preview(&self) -> Option<&(AnnotationRef, AnnotationSpec)> {
         self.annotation_preview.as_ref()
     }
 
-    /// Pose (ou retire) l'aperçu d'un texte libre : la figure le montre à la
-    /// prochaine image, sans toucher au modèle. Un aperçu identique ne
-    /// reconstruit rien.
+    /// Sets (or removes) the preview of a free text: the figure shows it at
+    /// the next frame, without touching the model. An identical preview
+    /// rebuilds nothing.
     pub fn set_annotation_preview(&mut self, preview: Option<(AnnotationRef, AnnotationSpec)>) {
         self.preview_until = None;
         if self.annotation_preview != preview {
@@ -940,9 +932,9 @@ impl GraphView {
         }
     }
 
-    /// Garde l'aperçu affiché jusqu'à ce que le modèle change — à appeler
-    /// quand l'application vient de valider l'aperçu (une modification du
-    /// modèle est en route). Sans révision connue, l'aperçu s'efface.
+    /// Keeps the preview displayed until the model changes — to call when
+    /// the application has just committed the preview (a change of the model
+    /// is on its way). With no known revision, the preview clears.
     pub fn hold_preview(&mut self) {
         match self.cache.key() {
             Some(key) => self.preview_until = Some(key.revision),
@@ -950,7 +942,7 @@ impl GraphView {
         }
     }
 
-    /// Efface les aperçus (texte libre et titre déplacé).
+    /// Clears the previews (free text and moved title).
     fn clear_previews(&mut self) {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
@@ -958,13 +950,13 @@ impl GraphView {
         self.set_shape_preview(None);
     }
 
-    /// L'aperçu d'un titre ou d'une légende déplacé, s'il y en a un.
+    /// The preview of a moved title or legend, if there is one.
     pub fn text_preview(&self) -> Option<&(TextTarget, TextAnchor)> {
         self.text_preview.as_ref()
     }
 
-    /// Pose (ou retire) l'aperçu d'un titre ou d'une légende déplacé : la
-    /// figure le montre à la prochaine image, sans toucher au modèle.
+    /// Sets (or removes) the preview of a moved title or legend: the figure
+    /// shows it at the next frame, without touching the model.
     pub fn set_text_preview(&mut self, preview: Option<(TextTarget, TextAnchor)>) {
         self.preview_until = None;
         if self.text_preview != preview {
@@ -973,7 +965,7 @@ impl GraphView {
         }
     }
 
-    /// Pose (ou retire) l'aperçu de largeur d'un titre (#244).
+    /// Sets (or removes) the width preview of a title (#244).
     fn set_text_width_preview(&mut self, preview: Option<(TextTarget, f64)>) {
         self.preview_until = None;
         if self.text_width_preview != preview {
@@ -982,8 +974,8 @@ impl GraphView {
         }
     }
 
-    /// Le texte libre sous le pixel egui `pos`, cherché dans la dernière
-    /// figure tracée.
+    /// The free text under the egui pixel `pos`, looked up in the last drawn
+    /// figure.
     pub fn annotation_at(&self, pos: Pos2) -> Option<AnnotationRef> {
         match self.component_at(pos)? {
             PlotComponent::Annotation { panel, index } => {
@@ -997,18 +989,18 @@ impl GraphView {
         }
     }
 
-    /// Où un titre ou la légende est tracé à l'écran : centre, taille du
-    /// texte droit et rotation (degrés, antihoraire) — pour poser l'éditeur
-    /// sur place (issue #53).
+    /// Where a title or the legend is drawn on screen: center, size of the
+    /// unrotated text and rotation (degrees, counterclockwise) — to place the
+    /// in-place editor (issue #53).
     pub fn text_screen_box(&self, target: TextTarget) -> Option<(Pos2, egui::Vec2, f32)> {
         let drawn = self.drawn_text(target)?;
         let (center, size) = self.figure_box_to_screen(drawn.center, drawn.size)?;
         Some((center, size, drawn.rotation as f32))
     }
 
-    /// Où la ligne de légende de la série `series` (rang dans
-    /// `PanelSpec::series`) du calque `panel` est tracée à l'écran :
-    /// centre et taille de la ligne, sur toute la largeur du cadre.
+    /// Where the legend line of series `series` (rank in
+    /// `PanelSpec::series`) of layer `panel` is drawn on screen: center and
+    /// size of the line, over the whole width of the frame.
     pub fn legend_entry_screen_box(
         &self,
         panel: usize,
@@ -1047,7 +1039,7 @@ impl GraphView {
         ))
     }
 
-    /// Le titre ou la légende tracé pour `target`, dans la dernière figure.
+    /// The title or legend drawn for `target`, in the last figure.
     fn drawn_text(&self, target: TextTarget) -> Option<&DrawnText> {
         let last = self.last.as_ref()?;
         match target.panel_index_of() {
@@ -1062,12 +1054,12 @@ impl GraphView {
         }
     }
 
-    /// L'outil actif.
+    /// The active tool.
     pub fn tool(&self) -> GraphTool {
         self.tool
     }
 
-    /// Change d'outil ; un geste de rectangle en cours est abandonné.
+    /// Changes the tool; a rectangle gesture in progress is abandoned.
     pub fn set_tool(&mut self, tool: GraphTool) {
         if self.tool != tool {
             self.tool = tool;
@@ -1076,8 +1068,8 @@ impl GraphView {
         }
     }
 
-    /// Le point de données sous le pixel egui `pos` (ordonnée de gauche), et
-    /// l'indice de son calque.
+    /// The data point under the egui pixel `pos` (left ordinate), and the
+    /// index of its layer.
     pub fn data_at(&self, pos: Pos2) -> Option<(usize, f64, f64)> {
         let (index, transform) = self.panel_at(pos)?;
         let figure = self.figure_position(pos)?;
@@ -1086,16 +1078,15 @@ impl GraphView {
         Some((panel.index, x, y))
     }
 
-    /// Le pixel egui d'un point de données `(x, y)` du calque `panel`
-    /// (#199) — réciproque de [`Self::data_at`] — et le rectangle de sa zone
-    /// de tracé à l'écran. Cherché dans la **dernière** figure tracée.
+    /// The egui pixel of a data point `(x, y)` of layer `panel` (#199) —
+    /// inverse of [`Self::data_at`]. Looked up in the **last** drawn figure.
     pub fn data_to_screen(&self, panel: usize, x: f64, y: f64) -> Option<Pos2> {
         let (transform, display, scale) = self.panel_screen(panel)?;
         let (px, py) = transform.data_to_pixel(x, y)?;
         Some(display.min + egui::vec2(px as f32, py as f32) * scale)
     }
 
-    /// La zone de tracé du calque `panel` à l'écran (#199).
+    /// The plot area of layer `panel` on screen (#199).
     pub fn plot_rect_screen(&self, panel: usize) -> Option<Rect> {
         let drawn = self
             .last
@@ -1124,9 +1115,9 @@ impl GraphView {
         ))
     }
 
-    /// Le point de données au centre de la zone de tracé du calque actif
-    /// (#161), ou du premier panneau tracé si celui-ci ne l'est pas — où
-    /// poser un texte ajouté par la barre de menus.
+    /// The data point at the center of the plot area of the active layer
+    /// (#161), or of the first drawn panel if the former is not — where to
+    /// place a text added by the menu bar.
     pub fn panel_center_data(&self, spec: &PlotSpec) -> Option<(usize, f64, f64)> {
         let last = self.last.as_ref()?;
         let active_index = self.active_panel(spec);
@@ -1144,8 +1135,9 @@ impl GraphView {
         Some((panel.index, x, y))
     }
 
-    /// Où un texte libre est tracé à l'écran : centre, taille du texte droit
-    /// et rotation (degrés, antihoraire) — pour poser l'éditeur sur place.
+    /// Where a free text is drawn on screen: center, size of the unrotated
+    /// text and rotation (degrees, counterclockwise) — to place the in-place
+    /// editor.
     pub fn annotation_screen_box(&self, target: AnnotationRef) -> Option<(Pos2, egui::Vec2, f32)> {
         let drawn = self.drawn_annotation(target)?;
         let display = self.display_rect?;
@@ -1155,8 +1147,8 @@ impl GraphView {
         Some((center, size, drawn.rotation as f32))
     }
 
-    /// Les deux poignées de largeur du texte libre `target`, au milieu de
-    /// ses bords gauche et droit (repère tourné), en points egui (#244).
+    /// The two width handles of free text `target`, at the middle of its
+    /// left and right edges (rotated frame), in egui points (#244).
     fn width_handles(&self, target: AnnotationRef) -> Option<[Pos2; 2]> {
         let (center, size, rotation) = self.annotation_screen_box(target)?;
         let (sin, cos) = rotation.to_radians().sin_cos();
@@ -1165,8 +1157,8 @@ impl GraphView {
         Some([center - axis * half, center + axis * half])
     }
 
-    /// Les poignées de largeur d'un titre ou titre d'axe sélectionné ; pas de
-    /// largeur pour la légende (#244).
+    /// The width handles of a selected title or axis title; no width for the
+    /// legend (#244).
     fn text_width_handles(&self, target: TextTarget) -> Option<[Pos2; 2]> {
         if matches!(target, TextTarget::Legend { .. }) {
             return None;
@@ -1186,7 +1178,7 @@ impl GraphView {
         })
     }
 
-    /// Vrai si `pos` (points egui) tombe sur une poignée de largeur.
+    /// True if `pos` (egui points) falls on a width handle.
     fn width_handle_at(&self, target: AnnotationRef, pos: Pos2) -> bool {
         self.width_handles(target).is_some_and(|handles| {
             handles
@@ -1206,30 +1198,30 @@ impl GraphView {
             .find(|annotation| annotation.index == target.index)
     }
 
-    /// `spec` tel que cette vue le montre : un clone, cadré par le zoom
-    /// courant ([`ViewState::apply`], le même appel que la construction de
-    /// la figure). C'est ce qu'exporte l'application (issue #34) — on
-    /// exporte ce qu'on voit — sans que le zoom touche le `PlotSpec` du
-    /// modèle. Sans zoom, `spec` inchangé.
+    /// `spec` as this view shows it: a clone, framed by the current zoom
+    /// ([`ViewState::apply`], the same call as the construction of the
+    /// figure). This is what the application exports (issue #34) — we export
+    /// what we see — without the zoom touching the model's `PlotSpec`.
+    /// Without zoom, `spec` unchanged.
     pub fn framed_spec(&self, spec: &PlotSpec) -> PlotSpec {
         let mut framed = spec.clone();
         self.view.apply(&mut framed);
         framed
     }
 
-    /// Efface tout cadrage explicite : la vue revient au cadrage sur les
-    /// données, pour tous les panneaux.
+    /// Clears any explicit framing: the view goes back to framing on the
+    /// data, for all panels.
     pub fn reset_view(&mut self) {
         self.view.reset();
     }
 
-    /// Oublie les formes et repères liés à la surface où la vue était peinte.
+    /// Forgets the shapes and frames tied to the surface where the view was
+    /// painted.
     ///
-    /// Une même vue peut migrer entre une fenêtre flottante et un viewport OS
-    /// séparé. Même si leurs rectangles coïncident par hasard, leurs
-    /// coordonnées écran ne désignent pas la même surface : conserver les
-    /// formes ou les transformations précédentes décalerait le rendu et le
-    /// réticule.
+    /// The same view may migrate between a floating window and a separate OS
+    /// viewport. Even if their rectangles coincide by chance, their screen
+    /// coordinates do not designate the same surface: keeping the previous
+    /// shapes or transformations would shift the rendering and the crosshair.
     pub fn invalidate_surface(&mut self) {
         self.cache.invalidate();
         self.last = None;
@@ -1239,37 +1231,36 @@ impl GraphView {
         self.response = None;
     }
 
-    /// Réponse d'interaction de la figure au dernier rendu, pour y accrocher
-    /// un menu contextuel (`Response::context_menu`). Réutiliser celle-ci
-    /// plutôt qu'en créer une seconde sur le même rectangle : une autre
-    /// réponse superposée disputerait le glisser à la navigation.
+    /// Interaction response of the figure at the last rendering, to hang a
+    /// context menu on (`Response::context_menu`). Reuse this one rather than
+    /// creating a second one on the same rectangle: another superimposed
+    /// response would compete with navigation for the drag.
     pub fn response(&self) -> Option<&egui::Response> {
         self.response.as_ref()
     }
 
-    /// Le composant du graphe (titre, zone de tracé, axe, titre d'axe) sous
-    /// le pixel egui `pos`, cherché dans la **dernière** figure tracée — même
-    /// cran de retard, imperceptible, que [`Self::panel_at`].
+    /// The graph component (title, plot area, axis, axis title) under the
+    /// egui pixel `pos`, looked up in the **last** drawn figure — same
+    /// imperceptible one-frame lag as [`Self::panel_at`].
     pub fn component_at(&self, pos: Pos2) -> Option<PlotComponent> {
         let pos = self.figure_position(pos)?;
         component_at(self.last.as_ref()?, pos.x as f64, pos.y as f64)
     }
 
-    /// Le point désigné par le curseur à la dernière image peinte, s'il y en
-    /// a un à moins de [`HIT_RADIUS`] pixels — tâche R7.2.
+    /// The point designated by the cursor at the last painted frame, if
+    /// there is one within [`HIT_RADIUS`] pixels — task R7.2.
     pub fn hovered_point(&self) -> Option<&PointHit> {
         self.hover.as_ref()
     }
 
-    /// Peint le graphe `graph` de `snapshot` dans `rect`, et traite les
-    /// gestes de navigation (molette, glissé, rectangle élastique — R7.1 à
-    /// R7.4) survenus sur cette zone depuis la dernière image.
+    /// Paints graph `graph` of `snapshot` in `rect`, and handles the
+    /// navigation gestures (wheel, drag, rubber-band rectangle — R7.1 to
+    /// R7.4) that occurred on this area since the last frame.
     ///
-    /// Rend `true` si l'image a été servie depuis le cache — c'est-à-dire si
-    /// le pipeline Plotters n'a **pas** été rejoué. `ui` plutôt qu'un
-    /// `Painter` nu (comme avant R7) : il faut désormais un `Response` pour
-    /// recevoir la molette et le glissé, donc un `Sense` plus large que
-    /// `hover()`.
+    /// Returns `true` if the frame was served from the cache — that is, if
+    /// the Plotters pipeline was **not** replayed. `ui` rather than a bare
+    /// `Painter` (as before R7): a `Response` is now needed to receive the
+    /// wheel and the drag, hence a `Sense` wider than `hover()`.
     pub fn paint(
         &mut self,
         ui: &egui::Ui,
@@ -1280,10 +1271,10 @@ impl GraphView {
         self.paint_with_layout(ui, rect, rect, snapshot, graph)
     }
 
-    /// Dispose toujours la figure à `DEFAULT_FIGURE_SIZE`, puis applique une
-    /// transformation uniforme à ses formes. La densité des graduations,
-    /// l'emplacement des légendes et les mesures de texte ne changent donc
-    /// pas avec la taille de la fenêtre ; seule leur taille affichée change.
+    /// Always lays out the figure at `DEFAULT_FIGURE_SIZE`, then applies a
+    /// uniform transformation to its shapes. The density of the ticks, the
+    /// placement of the legends and the text measurements therefore do not
+    /// change with the window size; only their displayed size changes.
     pub fn paint_scaled(
         &mut self,
         ui: &egui::Ui,
@@ -1314,17 +1305,17 @@ impl GraphView {
         self.display_rect = Some(display_rect);
         self.response = Some(response.clone());
 
-        // Le câblage prévu par R5.5 bis, à l'appel près (`architecture-choisie.md`
-        // §4.2, `feathering` R7.3) : coupé pendant tout glissé — pan ou
-        // rectangle de zoom, les deux sont un `dragged()` —, rétabli au repos.
-        // Un réglage de `Context`, donc pour toute la fenêtre : sans effet
-        // tant qu'un seul graphe est affiché à la fois (`stokesforge-app`
-        // aujourd'hui), à revoir si plusieurs vues cohabitent un jour.
-        // Seul un geste réel le coupe (#318) : un glisser simple sans effet
-        // (Pointeur sur le fond) laisse le feathering en place ; il est
-        // appliqué plus bas, une fois la navigation traitée.
+        // The wiring planned by R5.5 bis, give or take the call
+        // (`architecture-choisie.md` §4.2, `feathering` R7.3): off during any
+        // drag — pan or zoom rectangle, both are a `dragged()` —, restored at
+        // rest. A `Context` setting, so for the whole window: no effect as
+        // long as a single graph is displayed at a time (`stokesforge-app`
+        // today), to be reviewed if several views ever coexist.
+        // Only a real gesture turns it off (#318): a plain drag with no effect
+        // (Pointer on the background) leaves feathering in place; it is
+        // applied further down, once the navigation has been handled.
 
-        // Un aperçu validé s'efface dès que le modèle l'a rattrapé.
+        // A committed preview clears as soon as the model has caught up with it.
         if self
             .preview_until
             .is_some_and(|revision| revision != snapshot.revision)
@@ -1352,8 +1343,8 @@ impl GraphView {
             revision: snapshot.revision,
             rect: logical_rect,
             pixels_per_point: context.pixels_per_point(),
-            // Deux compteurs qui ne font que monter : leur somme change à
-            // chaque zoom comme à chaque aperçu de texte libre.
+            // Two counters that only go up: their sum changes at each zoom
+            // as at each free-text preview.
             view_generation: self.view.generation() + self.preview_generation,
         };
         let tree = snapshot.tree.clone();
@@ -1367,8 +1358,8 @@ impl GraphView {
         let font_choice = &self.font_choice;
         let typst_fonts = &self.typst_fonts;
         let outcome = self.cache.get_or_build(key, |shapes| {
-            // R7.1 : la surcharge de cadrage vit sur un clone, jamais sur le
-            // `PlotSpec` d'origine — voir `crate::view` pour la raison.
+            // R7.1: the framing override lives on a clone, never on the
+            // original `PlotSpec` — see `crate::view` for the reason.
             let mut framed = spec.clone();
             view.apply(&mut framed);
             if let Some((target, annotation)) = preview {
@@ -1391,8 +1382,8 @@ impl GraphView {
             let Some(fonts) = typst_fonts.clone() else {
                 return collect_shapes(shapes, logical_rect, &text, &plot);
             };
-            // Vidé ici seulement : les formes que ce cache désignait sont
-            // justement en train d'être remplacées (voir `FormulaCache::clear`).
+            // Cleared here only: the shapes this cache designated are
+            // precisely being replaced (see `FormulaCache::clear`).
             if formulas.len() > FORMULA_CACHE_LIMIT {
                 formulas.clear();
             }
@@ -1402,9 +1393,8 @@ impl GraphView {
         if let Some(drawn) = outcome.built {
             self.last = Some(drawn);
         }
-        // Le cœur de la tâche R4.3 : une image sans changement, c'est
-        // exactement cette ligne — pas de résolution, pas de `ChartBuilder`,
-        // pas de parcours de points.
+        // The core of task R4.3: a frame without changes is exactly this
+        // line — no resolution, no `ChartBuilder`, no walk over the points.
         let painter = ui.painter().with_clip_rect(display_rect);
         let scale = display_rect.width() / logical_rect.width();
         if logical_rect == display_rect {
@@ -1432,21 +1422,21 @@ impl GraphView {
             );
         }
 
-        // R7.2/7.3 : réticule, désignation de point et rectangle élastique,
-        // peints **par-dessus** ce qui précède — jamais dans le `Vec<Shape>`
-        // mis en cache ci-dessus, sous peine de rejouer tout le pipeline à
-        // chaque mouvement de souris (`crate::cache`, tête de module).
+        // R7.2/7.3: crosshair, point designation and rubber-band rectangle,
+        // painted **over** what precedes — never in the `Vec<Shape>` cached
+        // above, on pain of replaying the whole pipeline at each mouse move
+        // (`crate::cache`, module header).
         self.hover = self.paint_overlay(&painter, &response, &snapshot.tree, &spec);
 
         Ok(outcome.cached)
     }
 
-    /// Coordonnée de `pos` dans le repère local de la figure mise en cache.
+    /// Coordinate of `pos` in the local frame of the cached figure.
     ///
-    /// Le pipeline de rendu produit les [`DrawnPanel`] dans ce repère ; egui,
-    /// lui, livre les positions du pointeur dans le repère de la fenêtre.
-    /// Une figure peut être centrée dans une fenêtre flottante, donc les deux
-    /// origines ne coïncident pas en général.
+    /// The rendering pipeline produces the [`DrawnPanel`]s in this frame;
+    /// egui, for its part, delivers pointer positions in the window frame.
+    /// A figure may be centered in a floating window, so the two origins do
+    /// not coincide in general.
     fn figure_position(&self, pos: Pos2) -> Option<Pos2> {
         let display = self.display_rect?;
         let logical = self.cache.key()?.rect;
@@ -1454,20 +1444,20 @@ impl GraphView {
         (scale > 0.0).then(|| Pos2::ZERO + (pos - display.min) / scale)
     }
 
-    /// Le rapport entre un pixel de la figure et un point egui à l'écran
-    /// (1 tant qu'elle n'est ni agrandie ni réduite). `None` avant la
-    /// première figure tracée.
+    /// The ratio between a figure pixel and an egui point on screen
+    /// (1 as long as it is neither enlarged nor reduced). `None` before the
+    /// first drawn figure.
     pub fn display_scale(&self) -> Option<f32> {
         Some(self.display_rect?.width() / self.cache.key()?.rect.width())
     }
 
-    /// Le panneau (et sa transformation pixel ↔ données) sous le pixel egui
-    /// `pos`, s'il y en a un — cherché dans la **dernière** figure tracée.
+    /// The panel (and its pixel ↔ data transformation) under the egui pixel
+    /// `pos`, if there is one — looked up in the **last** drawn figure.
     ///
-    /// Un cran de retard sur la figure du jour : la géométrie ne bouge
-    /// qu'au redimensionnement ou à un zoom déjà commis, donc c'est
-    /// imperceptible, et c'est le prix normal du mode immédiat (interpréter
-    /// l'entrée de cette image avec la géométrie de la précédente).
+    /// One frame behind the current figure: the geometry only moves on a
+    /// resize or an already committed zoom, so it is imperceptible, and it is
+    /// the normal price of immediate mode (interpreting this frame's input
+    /// with the geometry of the previous one).
     fn panel_at(&self, pos: Pos2) -> Option<(usize, PanelTransform)> {
         let pos = self.figure_position(pos)?;
         let last = self.last.as_ref()?;
@@ -1477,8 +1467,8 @@ impl GraphView {
                 .contains(pos.x as f64, pos.y as f64)
                 .then_some((index, transform))
         };
-        // Des calques superposés se recouvrent : le calque actif prend le
-        // geste (#161), à défaut le premier tracé.
+        // Superimposed layers overlap: the active layer takes the gesture
+        // (#161), failing that the first drawn one.
         last.panels
             .iter()
             .enumerate()
@@ -1487,17 +1477,17 @@ impl GraphView {
             .or_else(|| last.panels.iter().enumerate().find_map(hit))
     }
 
-    /// Applique un geste de cadrage (zoom, glisser, rectangle) à toutes les
-    /// échelles propres de la case du calque `panel_index` (dans
-    /// [`DrawnPlot::panels`]) — le calcul est `ViewState::commit_gesture`
-    /// (`stokesforge-render`, sans egui).
+    /// Applies a framing gesture (zoom, drag, rectangle) to all the own
+    /// scales of the box of layer `panel_index` (in [`DrawnPlot::panels`]) —
+    /// the computation is `ViewState::commit_gesture` (`stokesforge-render`,
+    /// without egui).
     fn commit_gesture(&mut self, panel_index: usize, gesture: Gesture) {
         let Some(last) = &self.last else { return };
         self.view.commit_gesture(&last.panels, panel_index, gesture);
     }
 
-    /// L'axe (ligne et graduations) sous le pixel egui `pos`, par l'indice du
-    /// panneau dans [`DrawnPlot::panels`] et le côté **du spec**.
+    /// The axis (line and ticks) under the egui pixel `pos`, by the index of
+    /// the panel in [`DrawnPlot::panels`] and the side **of the spec**.
     fn axis_at(&self, pos: Pos2) -> Option<(usize, AxisSide)> {
         match self.component_at(pos)? {
             PlotComponent::Axis { panel, side } => Some((panel, side)),
@@ -1505,20 +1495,20 @@ impl GraphView {
         }
     }
 
-    /// Applique un geste à une seule échelle : celle de l'axe `side` du
-    /// panneau `panel_index` (dans [`DrawnPlot::panels`]) — le calcul est
-    /// `ViewState::commit_axis_gesture` (`stokesforge-render`, sans egui).
+    /// Applies a gesture to a single scale: that of axis `side` of panel
+    /// `panel_index` (in [`DrawnPlot::panels`]) — the computation is
+    /// `ViewState::commit_axis_gesture` (`stokesforge-render`, without egui).
     fn commit_axis_gesture(&mut self, panel_index: usize, side: AxisSide, gesture: Gesture) {
         let Some(last) = &self.last else { return };
         self.view
             .commit_axis_gesture(&last.panels, panel_index, side, gesture);
     }
 
-    /// Décide, à la pression, ce que fera le glisser en cours (#318) : un pan
-    /// si Ctrl est enfoncé (bouton principal) ou si c'est le bouton milieu,
-    /// sur une seule échelle quand la pression part d'un axe ; sinon aucun
-    /// pan. Rend l'état de ce geste, y compris à l'image du relâchement (un
-    /// Ctrl + clic ne doit rien poser). `None` au repos.
+    /// Decides, at the press, what the drag in progress will do (#318): a pan
+    /// if Ctrl is held (primary button) or if it is the middle button, on a
+    /// single scale when the press starts from an axis; otherwise no pan.
+    /// Returns the state of this gesture, including at the release frame (a
+    /// Ctrl + click must place nothing). `None` at rest.
     fn decide_nav(&mut self, response: &Response, context: &egui::Context) -> Option<NavDrag> {
         let (primary, middle, command, press) = context.input(|input| {
             (
@@ -1532,7 +1522,7 @@ impl GraphView {
             (response.is_pointer_button_down_on() && (primary || middle)) || response.dragged();
         if !down {
             let ended = self.nav_drag.take();
-            // Un clic complet dans une seule image n'a pas laissé d'état.
+            // A full click within a single frame left no state.
             return ended.or_else(|| {
                 (response.clicked_by(PointerButton::Primary) && command).then_some(NavDrag::Plot)
             });
@@ -1555,9 +1545,10 @@ impl GraphView {
         self.nav_drag
     }
 
-    /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
-    /// rectangle de zoom élastique avec l'outil Zoom), clic de l'outil Texte
-    /// et double-clic (réinitialisation) — tâches 7.1 et 7.4, issue #62. Ne fait rien tant qu'aucune figure n'a encore été tracée.
+    /// Ctrl+wheel (zoom), primary drag (pan with the Pointer tool, rubber-band
+    /// zoom rectangle with the Zoom tool), click of the Text tool and double
+    /// click (reset) — tasks 7.1 and 7.4, issue #62. Does nothing as long as
+    /// no figure has been drawn yet.
     fn handle_navigation(&mut self, response: &Response, context: &egui::Context, spec: &PlotSpec) {
         if self.last.is_none() {
             return;
@@ -1565,13 +1556,12 @@ impl GraphView {
         let nav = self.decide_nav(response, context);
         let pan = nav.is_some_and(NavDrag::is_pan);
 
-        // Issue #35 : un clic choisit le texte libre sous le pointeur (ou
-        // aucun), un double-clic sur un texte l'édite au lieu de
-        // réinitialiser le zoom.
+        // Issue #35: a click picks the free text under the pointer (or none),
+        // a double click on a text edits it instead of resetting the zoom.
         let pointer = response.interact_pointer_pos();
-        // Un geste commencé dans la zone de tracé d'un calque (clic, clic
-        // droit, début de glisser d'un outil) l'active (#161), même sans
-        // objet visé.
+        // A gesture started in the plot area of a layer (click, right click,
+        // start of a tool drag) activates it (#161), even with no object
+        // targeted.
         if response.clicked() || response.secondary_clicked() || response.drag_started() {
             let hit = pointer
                 .and_then(|pos| self.panel_at(pos))
@@ -1587,8 +1577,8 @@ impl GraphView {
                 Some(_) => None,
                 None => pointer.and_then(|pos| self.shape_at(pos)),
             };
-            // Issue #77 : un titre ou la légende se sélectionne au clic,
-            // quand ni un texte libre ni un objet n'est visé.
+            // Issue #77: a title or the legend is selected on click, when
+            // neither a free text nor an object is targeted.
             self.selected_text = match (self.selected_annotation, self.selected_shape) {
                 (None, None) => pointer.and_then(|pos| self.text_target_at(pos)),
                 _ => None,
@@ -1611,11 +1601,11 @@ impl GraphView {
                     self.selected_annotation = Some(target);
                     self.events.push(GraphEvent::EditAnnotation(target));
                 }
-                // Issue #53 : un titre s'édite sur place, comme un texte libre.
+                // Issue #53: a title is edited in place, like a free text.
                 (None, Some(PlotComponent::Text(target))) => {
                     self.events.push(match target {
-                        // La légende n'a pas de texte à elle : ce sont les
-                        // noms des séries, un par ligne.
+                        // The legend has no text of its own: it is the series
+                        // names, one per line.
                         TextTarget::Legend { .. } => return,
                         _ => GraphEvent::EditText(target),
                     });
@@ -1629,9 +1619,9 @@ impl GraphView {
                         });
                     }
                 }
-                // Issue #113 : sur un objet, une courbe ou un axe, le
-                // double-clic ouvre leurs paramètres. Ailleurs (zone de
-                // tracé nue, marges), il réinitialise toujours le zoom.
+                // Issue #113: on an object, a curve or an axis, a double click
+                // opens their settings. Elsewhere (bare plot area, margins),
+                // it always resets the zoom.
                 _ => {
                     let shape = pointer.and_then(|pos| self.shape_at(pos));
                     let series = pointer.and_then(|pos| self.series_at(pos, spec));
@@ -1659,7 +1649,7 @@ impl GraphView {
         }
         self.handle_shape_draw(response, spec, pan);
 
-        // Outil Texte : un clic dans la zone de tracé pose le texte.
+        // Text tool: a click in the plot area places the text.
         if self.tool == GraphTool::Text && !pan && response.clicked() {
             if let Some((panel, x, y)) = pointer.and_then(|pos| self.data_at(pos)) {
                 self.events.push(GraphEvent::PlaceText { panel, x, y });
@@ -1672,12 +1662,11 @@ impl GraphView {
                 .filter(|pos| response.interact_rect.contains(*pos))
                 .and_then(|pos| self.figure_position(pos).map(|position| (pos, position)))
             {
-                // Ctrl+molette (ou pincement) : egui range ce geste dans
-                // `zoom_delta`, un facteur multiplicatif (> 1 : vers l'avant,
-                // on zoome). La molette seule ne zoome plus (issue #62).
-                // Le facteur de cadrage est l'inverse, borné pour qu'un
-                // défilement continu (pavé tactile) ne fasse pas s'effondrer
-                // le cadrage d'un coup.
+                // Ctrl+wheel (or pinch): egui files this gesture under
+                // `zoom_delta`, a multiplicative factor (> 1: forward, we
+                // zoom in). The wheel alone no longer zooms (issue #62). The
+                // framing factor is the inverse, bounded so that continuous
+                // scrolling (touchpad) does not collapse the framing at once.
                 let zoom = context.input(|input| input.zoom_delta());
                 if zoom != 1.0 {
                     let factor = (1.0 / zoom as f64).clamp(0.5, 2.0);
@@ -1686,7 +1675,7 @@ impl GraphView {
                         factor,
                     };
                     if let Some((panel_index, side)) = self.axis_at(pos.0) {
-                        // Au-dessus d'un axe, le zoom ne cadre que cette échelle.
+                        // Above an axis, the zoom only frames that scale.
                         self.commit_axis_gesture(panel_index, side, gesture);
                     } else if let Some((panel_index, _)) = self.panel_at(pos.0) {
                         self.commit_gesture(panel_index, gesture);
@@ -1695,10 +1684,10 @@ impl GraphView {
             }
         }
 
-        // Pan : Ctrl + glisser ou clic milieu + glisser, partout dans le
-        // graphe, quel que soit l'outil (#318). La cible est celle décidée à
-        // la pression : une fois qu'on glisse, le curseur peut sortir de la
-        // zone de tracé ou de l'axe sans que la cible ne change.
+        // Pan: Ctrl + drag or middle click + drag, anywhere in the graph,
+        // whatever the tool (#318). The target is the one decided at the
+        // press: once dragging, the cursor can leave the plot area or the axis
+        // without the target changing.
         let panning = response.dragged_by(PointerButton::Primary)
             || response.dragged_by(PointerButton::Middle);
         if let (true, Some(target)) = (panning, nav.filter(|n| n.is_pan())) {
@@ -1725,20 +1714,20 @@ impl GraphView {
 
         if self.tool == GraphTool::ZoomBox && !pan && response.dragged_by(PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
-                // **Ne pas** se fier à `drag_started_by` pour capturer le
-                // point de départ : sur un widget sensible au clic *et* au
-                // glissé, `egui` diffère la décision « clic ou glissé » tant
-                // que le mouvement ne la tranche pas
-                // (`egui::interaction::interact`, commentaire *"the mouse
+                // **Do not** rely on `drag_started_by` to capture the start
+                // point: on a widget sensitive to click *and* drag, `egui`
+                // postpones the "click or drag" decision as long as the
+                // movement does not settle it
+                // (`egui::interaction::interact`, comment *"the mouse
                 // first is pressed, it could be either [...] so we postpone
-                // the decision"*) — `drag_started_by` ne devient vrai qu'à
-                // l'image où la décision tombe, et `interact_pointer_pos()`
-                // porte déjà la position **courante** à ce moment-là, pas
-                // celle de la pression initiale. `drag_delta()` reste fiable
-                // (c'est le mouvement de **cette** image, quelle que soit la
-                // date de la décision) : `pos - drag_delta()` retrouve donc
-                // le point de départ réel la première fois qu'on voit
-                // `dragged_by`, sans dépendre de `drag_started_by` du tout.
+                // the decision"*) — `drag_started_by` only becomes true at the
+                // frame where the decision falls, and `interact_pointer_pos()`
+                // already carries the **current** position at that moment, not
+                // that of the initial press. `drag_delta()` stays reliable
+                // (it is the movement of **this** frame, whatever the date of
+                // the decision): `pos - drag_delta()` thus recovers the real
+                // start point the first time `dragged_by` is seen, without
+                // depending on `drag_started_by` at all.
                 let start = self
                     .drag_box
                     .map_or_else(|| pos - response.drag_delta(), |(start, _)| start);
@@ -1747,12 +1736,12 @@ impl GraphView {
         }
         if self.tool == GraphTool::ZoomBox && response.drag_stopped_by(PointerButton::Primary) {
             if let Some((start, end)) = self.drag_box.take() {
-                // En dessous de quelques pixels, c'est un tremblement de
-                // main, pas un rectangle : un rectangle de zoom d'un pixel
-                // de large produirait un cadrage quasi dégénéré, que le
-                // pipeline redresserait silencieusement en revenant aux
-                // données (`pipeline::axis_range`) — un comportement correct
-                // mais surprenant pour un geste qui se voulait un zoom.
+                // Below a few pixels, it is a hand tremor, not a rectangle: a
+                // zoom rectangle one pixel wide would produce a nearly
+                // degenerate framing, which the pipeline would silently
+                // straighten by going back to the data
+                // (`pipeline::axis_range`) — correct behavior but surprising
+                // for a gesture that meant to be a zoom.
                 if start.distance(end) > 4.0 {
                     if let Some((panel_index, _)) = self.panel_at(start) {
                         if let (Some(start), Some(end)) =
@@ -1772,11 +1761,11 @@ impl GraphView {
         }
     }
 
-    /// Glisser un texte libre (issue #35) : un glisser principal **parti
-    /// d'un texte** le déplace au lieu de faire défiler la vue. L'aperçu suit
-    /// le pointeur ; au relâchement, un seul [`GraphEvent::AnnotationMoved`].
-    /// Rend `true` si le geste est un glisser de texte (la navigation ne
-    /// doit alors rien en faire).
+    /// Dragging a free text (issue #35): a primary drag **starting from a
+    /// text** moves it instead of scrolling the view. The preview follows the
+    /// pointer; at release, a single [`GraphEvent::AnnotationMoved`].
+    /// Returns `true` if the gesture is a text drag (navigation must then do
+    /// nothing with it).
     fn handle_annotation_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
         if response.drag_stopped_by(PointerButton::Primary) {
             if let Some(drag) = self.annotation_drag.take() {
@@ -1800,7 +1789,7 @@ impl GraphView {
             return self.annotation_drag.is_some();
         };
         if self.annotation_drag.is_none() {
-            // Le point de départ réel, comme pour le rectangle élastique.
+            // The real start point, as for the rubber-band rectangle.
             let origin = pos - response.drag_delta();
             let handle = self
                 .selected_annotation
@@ -1834,8 +1823,8 @@ impl GraphView {
             return true;
         };
         if drag.resize {
-            // La poignée tirée fixe la demi-largeur : sa distance au centre,
-            // mesurée le long du texte (tourné), en fraction de la figure.
+            // The pulled handle sets the half-width: its distance to the
+            // center, measured along the (rotated) text, as a fraction of the figure.
             let Some(figure) = self.cache.key().map(|key| key.rect.width()) else {
                 return true;
             };
@@ -1875,13 +1864,13 @@ impl GraphView {
         true
     }
 
-    /// Glisser un titre ou la légende (issue #53) : un glisser principal
-    /// **parti d'un titre** le déplace au lieu de faire défiler la vue.
-    /// L'aperçu suit le pointeur ; au relâchement, un seul
-    /// [`GraphEvent::TextMoved`]. Même principe que
-    /// [`Self::handle_annotation_drag`] — le centre du texte suit le
-    /// pointeur, converti en données du panneau (donc ancré aux données, il
-    /// suit ensuite le zoom).
+    /// Dragging a title or the legend (issue #53): a primary drag **starting
+    /// from a title** moves it instead of scrolling the view. The preview
+    /// follows the pointer; at release, a single
+    /// [`GraphEvent::TextMoved`]. Same principle as
+    /// [`Self::handle_annotation_drag`] — the center of the text follows the
+    /// pointer, converted to panel data (so anchored to the data, it then
+    /// follows the zoom).
     fn handle_text_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
         if response.drag_stopped_by(PointerButton::Primary) {
             if let Some(drag) = self.text_drag.take() {
@@ -1959,9 +1948,9 @@ impl GraphView {
             return true;
         }
         let center = drag.start_center + (current - drag.press);
-        // Le repère de l'ancre : le panneau du texte, ou le premier panneau
-        // tracé pour le titre du graphe ; l'ordonnée de droite si l'ancre
-        // existante y était déjà.
+        // The frame of the anchor: the panel of the text, or the first drawn
+        // panel for the graph title; the right ordinate if the existing
+        // anchor was already on it.
         let right = drag
             .original
             .is_some_and(|anchor| anchor.axis == SeriesAxis::Right);
@@ -1986,10 +1975,10 @@ impl GraphView {
         true
     }
 
-    /// Réticule, désignation de point et rectangle de zoom élastique —
-    /// tâches 7.2 à 7.4. Peint directement sur `painter`, **jamais** dans le
-    /// `Vec<Shape>` du cache : c'est ce qui remplace le blitting
-    /// `copy_from_bbox` de la version Python (voir `crate::cache`).
+    /// Crosshair, point designation and rubber-band zoom rectangle —
+    /// tasks 7.2 to 7.4. Painted directly on `painter`, **never** in the
+    /// cache's `Vec<Shape>`: this is what replaces the `copy_from_bbox`
+    /// blitting of the Python version (see `crate::cache`).
     fn paint_overlay(
         &self,
         painter: &Painter,
@@ -2008,7 +1997,7 @@ impl GraphView {
             );
         }
 
-        // Le texte libre sélectionné : son rectangle tourné (issue #35).
+        // The selected free text: its rotated rectangle (issue #35).
         if let Some((center, size, rotation)) = self
             .selected_annotation
             .and_then(|target| self.annotation_screen_box(target))
@@ -2017,15 +2006,15 @@ impl GraphView {
             let half = size / 2.0 + egui::vec2(3.0, 3.0);
             let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(sx, sy)| {
                 let (u, v) = (sx * half.x, sy * half.y);
-                // Rotation antihoraire à l'écran (axe y vers le bas).
+                // Counterclockwise rotation on screen (y axis pointing down).
                 center + egui::vec2(u * cos + v * sin, -u * sin + v * cos)
             });
             painter.add(Shape::closed_line(
                 corners.to_vec(),
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
             ));
-            // Les poignées de largeur (#244), aux milieux des bords gauche
-            // et droit.
+            // The width handles (#244), at the middles of the left and right
+            // edges.
             if let Some(handles) = self
                 .selected_annotation
                 .and_then(|target| self.width_handles(target))
@@ -2103,10 +2092,10 @@ impl GraphView {
     }
 }
 
-/// Le point désigné du panneau `panel_index` sous le pixel `pos` : l'adaptateur
-/// egui de `stokesforge_render::interact::nearest_point`, qui porte le calcul
-/// en `f64` (#262). Seules les conversions `Pos2` ↔ `(f64, f64)` et le rayon
-/// de désignation ([`HIT_RADIUS`]) restent ici.
+/// The designated point of panel `panel_index` under the pixel `pos`: the egui
+/// adapter of `stokesforge_render::interact::nearest_point`, which carries
+/// the `f64` computation (#262). Only the `Pos2` ↔ `(f64, f64)` conversions
+/// and the designation radius ([`HIT_RADIUS`]) remain here.
 fn nearest_point(
     tree: &Tree,
     spec: &PlotSpec,
@@ -2133,40 +2122,40 @@ fn nearest_point(
     })
 }
 
-/// Le champ de saisie d'un texte libre en cours d'édition (issue #37) : où
-/// il se pose et à quelle taille d'écriture.
+/// The input field of a free text being edited (issue #37): where it is
+/// placed and at what writing size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnnotationField {
-    /// Le rectangle du champ, à l'écran. Toujours **droit** : la rotation du
-    /// texte n'y entre pas (voir [`annotation_field`]).
+    /// The rectangle of the field, on screen. Always **straight**: the
+    /// rotation of the text does not enter into it (see [`annotation_field`]).
     pub rect: egui::Rect,
-    /// La taille de police du champ, en points egui — celle du texte rendu.
+    /// The font size of the field, in egui points — that of the rendered text.
     pub font_size: f32,
 }
 
-/// Réserve de largeur d'un champ à l'écran, en multiples de son corps, pour
-/// qu'un texte très court (ou vide) laisse place à la saisie.
+/// Width reserve of a field on screen, in multiples of its body size, so that
+/// a very short (or empty) text leaves room for input.
 const FIELD_MIN_WIDTH_EM: f32 = 6.0;
-/// Marge autour du texte, en multiples du corps : la hauteur d'une ligne de
-/// saisie, un peu plus que le texte seul.
+/// Margin around the text, in multiples of the body size: the height of an
+/// input line, a little more than the text alone.
 const FIELD_PADDING_EM: f32 = 0.3;
 
-/// Où poser le champ de saisie d'un texte libre, pour qu'on écrive **dans le
-/// cadre du rendu** (issue #37).
+/// Where to place the input field of a free text, so that one writes **inside
+/// the frame of the rendering** (issue #37).
 ///
-/// - **centré** sur `center`, le centre du texte rendu ;
-/// - à la **taille de police** du texte : son corps (`annotation_size`, au
-///   sens de Plotters, comme `AnnotationSpec::effective_size`) ramené au
-///   corps d'epaint, fois `scale`, l'échelle d'affichage de la figure ;
-/// - **sans rotation** : le champ reste droit, quelle que soit celle du
-///   texte, donc rien ici ne la prend en paramètre ;
-/// - au moins aussi grand que le texte droit rendu (`text_size`, à l'écran),
-///   plus une marge et une largeur minimale pour qu'un texte vide reste
-///   saisissable.
+/// - **centered** on `center`, the center of the rendered text;
+/// - at the **font size** of the text: its body size (`annotation_size`, in
+///   the Plotters sense, like `AnnotationSpec::effective_size`) brought back
+///   to the epaint body size, times `scale`, the display scale of the figure;
+/// - **without rotation**: the field stays straight, whatever that of the
+///   text, so nothing here takes it as a parameter;
+/// - at least as large as the rendered straight text (`text_size`, on
+///   screen), plus a margin and a minimum width so that an empty text stays
+///   editable.
 ///
-/// Fonction pure : la taille finale diffère un peu après recompilation par
-/// Typst (une formule `$…$` se compose autrement que sa source), le champ
-/// n'est pas censé la prédire.
+/// Pure function: the final size differs a little after recompilation by
+/// Typst (a `$…$` formula is composed differently from its source), the field
+/// is not meant to predict it.
 pub fn annotation_field(
     center: Pos2,
     text_size: egui::Vec2,
@@ -2185,12 +2174,12 @@ pub fn annotation_field(
     }
 }
 
-/// Le `PlotSpec` d'un nœud, cloné.
+/// The `PlotSpec` of a node, cloned.
 ///
-/// Cloné et non emprunté : le spec ne porte que des identités et du style
-/// (`stokesforge-plot` : « aucune donnée »), donc la copie est bon marché, et
-/// l'emprunt obligerait l'`Arc<Tree>` à survivre à la fermeture de la
-/// `FnOnce` du cache.
+/// Cloned and not borrowed: the spec only carries identities and style
+/// (`stokesforge-plot`: "no data"), so the copy is cheap, and borrowing
+/// would force the `Arc<Tree>` to outlive the closure of the cache's
+/// `FnOnce`.
 fn graph_spec(tree: &Tree, graph: NodeId) -> Result<PlotSpec, RenderError> {
     let node = tree.node(graph).ok_or(RenderError::UnknownNode(graph))?;
     match node.kind() {
@@ -2205,48 +2194,52 @@ mod tests {
     use stokesforge_plot::{PanelSpec, Panels};
     use stokesforge_render::view::Framing;
 
-    /// Issue #37 : le champ de saisie est centré sur le texte rendu, à son
-    /// corps (proportionnel à la taille et à l'échelle d'affichage), et au
-    /// moins aussi grand que lui — la rotation n'y entre pas.
+    /// Issue #37: the input field is centered on the rendered text, at its
+    /// body size (proportional to the size and to the display scale), and at
+    /// least as large as it — the rotation does not enter into it.
     #[test]
-    fn le_champ_de_saisie_est_centre_et_a_la_taille_du_texte() {
-        let centre = Pos2::new(240.0, 130.0);
-        let texte = egui::vec2(90.0, 20.0);
-        let champ = annotation_field(centre, texte, 16.0, 1.0);
-        assert_eq!(champ.rect.center(), centre);
-        assert!(champ.rect.width() >= texte.x && champ.rect.height() >= texte.y);
-        assert_eq!(champ.font_size, stokesforge_render::text::font_size(16.0));
+    fn the_input_field_is_centered_and_sized_to_the_text() {
+        let center = Pos2::new(240.0, 130.0);
+        let text = egui::vec2(90.0, 20.0);
+        let field = annotation_field(center, text, 16.0, 1.0);
+        assert_eq!(field.rect.center(), center);
+        assert!(field.rect.width() >= text.x && field.rect.height() >= text.y);
+        assert_eq!(field.font_size, stokesforge_render::text::font_size(16.0));
 
-        // Le corps suit la taille du texte…
-        let grand = annotation_field(centre, texte, 32.0, 1.0);
-        assert!((grand.font_size - 2.0 * champ.font_size).abs() < 1e-4);
-        // … et l'échelle d'affichage de la figure.
-        let agrandi = annotation_field(centre, texte * 2.0, 16.0, 2.0);
-        assert!((agrandi.font_size - 2.0 * champ.font_size).abs() < 1e-4);
-        assert_eq!(agrandi.rect.center(), centre);
+        // The body size follows the size of the text…
+        let large = annotation_field(center, text, 32.0, 1.0);
+        assert!((large.font_size - 2.0 * field.font_size).abs() < 1e-4);
+        // … and the display scale of the figure.
+        let enlarged = annotation_field(center, text * 2.0, 16.0, 2.0);
+        assert!((enlarged.font_size - 2.0 * field.font_size).abs() < 1e-4);
+        assert_eq!(enlarged.rect.center(), center);
     }
 
-    /// Un texte vide (ou très court) laisse une largeur de saisie ; un texte
-    /// long fait grandir le champ des deux côtés, toujours centré.
+    /// An empty (or very short) text leaves an input width; a long text makes
+    /// the field grow on both sides, always centered.
     #[test]
-    fn le_champ_reste_saisissable_vide_et_suit_un_texte_long() {
-        let centre = Pos2::new(100.0, 50.0);
-        let vide = annotation_field(centre, egui::Vec2::ZERO, 16.0, 1.0);
-        assert!(vide.rect.width() >= 6.0 * vide.font_size);
-        assert!(vide.rect.height() > vide.font_size);
-        let long = annotation_field(centre, egui::vec2(600.0, 20.0), 16.0, 1.0);
+    fn the_field_stays_editable_when_empty_and_follows_a_long_text() {
+        let center = Pos2::new(100.0, 50.0);
+        let empty = annotation_field(center, egui::Vec2::ZERO, 16.0, 1.0);
+        assert!(empty.rect.width() >= 6.0 * empty.font_size);
+        assert!(empty.rect.height() > empty.font_size);
+        let long = annotation_field(center, egui::vec2(600.0, 20.0), 16.0, 1.0);
         assert!(long.rect.width() >= 600.0);
-        assert_eq!(long.rect.center(), centre);
+        assert_eq!(long.rect.center(), center);
     }
 
-    /// Issue #34 : `framed_spec` rend le spec cadré par le zoom — ce que la
-    /// figure montre — sur un clone ; le spec d'origine, celui du modèle,
-    /// ne change pas. Sans zoom, le spec est rendu tel quel.
+    /// Issue #34: `framed_spec` returns the spec framed by the zoom — what
+    /// the figure shows — on a clone; the original spec, the model's, does
+    /// not change. Without zoom, the spec is returned as is.
     #[test]
-    fn framed_spec_applique_le_zoom_sur_un_clone() {
+    fn framed_spec_applies_the_zoom_on_a_clone() {
         let spec = PlotSpec::empty("Zoom").with_panels(Panels::new(vec![PanelSpec::at(0, 0)]));
         let mut view = GraphView::new();
-        assert_eq!(view.framed_spec(&spec), spec, "sans zoom, rien ne change");
+        assert_eq!(
+            view.framed_spec(&spec),
+            spec,
+            "without zoom, nothing changes"
+        );
 
         view.view
             .set_framing(0, Framing::xy((2.0, 3.0), (-1.0, 1.0)));
@@ -2256,7 +2249,7 @@ mod tests {
         assert!(!bottom.auto_range);
         assert!(
             spec.panels[0].bottom.auto_range,
-            "le spec d'origine a changé"
+            "the original spec changed"
         );
     }
 }
