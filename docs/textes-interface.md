@@ -120,7 +120,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Move to First / Move Left / Move Right / Move to Last | Déplacer au début / Déplacer vers la gauche / Déplacer vers la droite / Déplacer à la fin | Entries of the **Move ▸** (Déplacer ▸) submenu of a column; the history says « Move “B” » (one column) or « Move Columns » / « Déplacer des colonnes » (several) (#319) | Avancer, Reculer | O |
 | Edit | Modifier | Change the contents or settings of an existing object (history labels); *Change* only in « Change Type of Column A » | Éditer, Changer | G |
 | Show / Hide | Afficher / Masquer | Make visible / invisible | Cacher | G |
-| Open / Close (fenêtre du Project Manager) | Ouvrir / Fermer | Opens or activates / closes the window, like the cross (#327) | Afficher / Masquer | G |
+| Open / Close (Project Manager window) | Ouvrir / Fermer | Opens or activates / closes the window, like the cross (#327) | Afficher / Masquer | G |
 | Grid | Grille | Cells of a sheet (never the gridlines of a graph) | — | G |
 
 ### 2.4 Import
