@@ -131,10 +131,10 @@ is never opened in advance: `vN` is created from `main` on the day of need,
 `release/(N-1).x` from the last tag of the old major version.
 
 ```
- Phase 1 : une seule ligne            Phase 2 : un chantier qui casse
- main ──●──●──●──●──●──►              main ──●──●──●──►   V1 continue
-       ▼1.0.0 ▼1.0.1 ▼1.1.0                  ↓ fusion  ↓ fusion
-                                       v2 ───●──●──●──●──►  chantier cassant
+ Phase 1: a single line               Phase 2: a breaking work package
+ main ──●──●──●──●──●──►              main ──●──●──●──►   V1 continues
+       ▼1.0.0 ▼1.0.1 ▼1.1.0                  ↓ merge   ↓ merge
+                                       v2 ───●──●──●──●──►  breaking work package
 ```
 
 - **`main`**: the shippable line. Fixes, small risk-free additions

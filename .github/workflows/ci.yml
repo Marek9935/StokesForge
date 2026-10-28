@@ -40,6 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/gitlab-status-test.py
+      - run: python3 scripts/french-guard-test.py
+      # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").
+      - run: python3 scripts/french-guard.py
       - run: scripts/release-notes-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh

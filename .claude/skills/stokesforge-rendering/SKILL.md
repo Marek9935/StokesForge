@@ -1,6 +1,6 @@
 ---
 name: stokesforge-rendering
-description: Work on StokesForge rendering — plots, axes, legend, zoom/pan, SVG/PDF/PNG export, Typst. Use when touching stokesforge-render* or for a visual symptom (« figure décalée », « texte tronqué », screen differs from export, figure not refreshing).
+description: Work on StokesForge rendering — plots, axes, legend, zoom/pan, SVG/PDF/PNG export, Typst. Use when touching stokesforge-render* or for a visual symptom (« figure décalée » (figure shifted), « texte tronqué » (text cut off), screen differs from export, figure not refreshing).
 ---
 
 Rendering is where a bug can be silent: the rules below guard against a wrong figure that looks right, not against a compile error.

@@ -73,7 +73,7 @@ before being taken up.
 cargo build --workspace
 cargo test --workspace                        # inclut stokesforge-robustness, sauf #[ignore]
 cargo test -p <crate> <nom_test>              # un seul test
-cargo test -p stokesforge-robustness -- --ignored  # reproductions et bancs coûteux
+cargo test -p stokesforge-robustness -- --ignored  # reproductions and costly benches
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```

@@ -4,10 +4,10 @@ Three crates, and one rule that explains how they are split: **a plotting
 feature never goes into a single backend** (invariant 5).
 
 ```text
-stokesforge-render          tout le rendu, générique sur DrawingBackend
+stokesforge-render          all the rendering, generic over DrawingBackend
    ↑                        ↑
 stokesforge-render-egui    stokesforge-render-svg
-  (écran)              (SVG → PDF, PNG)
+  (screen)              (SVG → PDF, PNG)
 ```
 
 The two backends differ only in **how they put pixels down**. Everything

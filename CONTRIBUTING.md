@@ -5,7 +5,9 @@ Active development happens on `main`. Read
 documentation of the domain before proposing a change. Bugs and
 changes are tracked in the GitLab issues. Commit messages, documentation
 (`docs/`, except `docs/archive/`, which stays in French) and new code and
-comments are in English. Existing French comments and identifiers are
+comments are in English; French may appear only in exempt places or behind a
+`lang: fr` marker (test data, for instance: see "French guard" in
+[`docs/tests.md`](docs/tests.md), run `python3 scripts/french-guard.py`). Existing French comments and identifiers are
 translated crate by crate (#372–#376).
 
 ## Working with others

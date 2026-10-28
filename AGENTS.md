@@ -1,5 +1,9 @@
 # Codex instructions — StokesForge
 
+## Interaction language
+
+Interaction language: **French**. Agents use it to talk to the developer: answers, questions, decision forms. Change this line to work in another language. The repository itself (code, docs, skills, commit messages) stays English whatever this line says.
+
 ## Before any implementation
 
 Read [.codex/README.md](.codex/README.md), then follow its reading path
@@ -94,7 +98,8 @@ confirmation on the usual choices covered by the request.
   the legend of the shared rendering.
 - Follow the local naming conventions. Commit messages and technical docs
   (`docs/`) are in English (since #368; the earlier history stays in French);
-  `docs/archive/` stays in French. New code, comments, test names and
+  `docs/archive/` stays in French. French elsewhere only in exempt places or behind a
+  `lang: fr` marker (`scripts/french-guard.py`, `docs/tests.md`). New code, comments, test names and
   identifiers are written in English from now on, even in a crate not yet
   translated; existing French ones are translated crate by crate (#372–#376). Explain non-obvious
   decisions as close to the code as possible.

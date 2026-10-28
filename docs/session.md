@@ -26,9 +26,9 @@ comparing the `revision` — a monotonic counter — never by comparing trees wi
 each other.
 
 ```rust
-Session::spawn(project, history_limit) -> Session   // démarre le fil
-session.handle()                       -> SessionHandle  // clonable, à donner aux clients
-session.shutdown()                     -> Project        // rend le projet
+Session::spawn(project, history_limit) -> Session   // starts the thread
+session.handle()                       -> SessionHandle  // cloneable, to give to the clients
+session.shutdown()                     -> Project        // hands the project back
 ```
 
 `SessionHandle`: `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,

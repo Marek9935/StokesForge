@@ -1,7 +1,7 @@
 #!/bin/bash
 # Measures the cost per frame while a floating window is being moved
-# (#340/#341). Prerequisite: `git apply scripts/perf/instrumentation.patch`,
-# then build of the wanted profile. Details: docs/performance-measurement.md.
+# (#340/#341). Prerequisite: a build of the wanted profile instrumented with
+# the timers (STOKESFORGE_PROF=1). Details: docs/performance-measurement.md.
 #
 # usage: scripts/perf/measure-windows.sh debug|release [number_of_graphs_to_open (0-6)]
 set -euo pipefail

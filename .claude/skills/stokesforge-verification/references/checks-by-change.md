@@ -7,6 +7,7 @@ Read at step 3 of `stokesforge-verification`. CI: Linux, Windows and the publica
 | `stokesforge-python`, `stokesforge-script`, the `pyst` surface | `scripts/python-test.sh` (sets `PYO3_CONFIG_FILE`); the `fmt`, `clippy` and `test` jobs do not enable `python` |
 | Python integration of `stokesforge-app-state` / `stokesforge-app`, or CLI `run` | `scripts/python-test.sh` covers these crates; apply its environment to Clippy; `scripts/cli-dist.sh` if CLI packaging changes |
 | Typst formulas, `stokesforge-render::formula` | nothing more: `cargo test --workspace` covers them (firm dependency), exports included |
+| any text file, comment, test data or doc | `python3 scripts/french-guard.py` (translate, or mark deliberate French with `lang: fr`; see `docs/tests.md`) and, if the guard changed, `python3 scripts/french-guard-test.py` |
 | an `#[ignore]` robustness reproduction | `cargo test -p stokesforge-robustness -- --ignored` |
 | formula recalculation (`stokesforge-session/src/recalc.rs`), data read by a formula, a column write | `b22` and `recalc_targeted.rs` run in the workspace, but a green oracle proves nothing if the draw never produces the gesture: `docs/tests.md` § Targeted recalculation (#193) — and what to test when relying on it |
 | a dependency, a resource, the distributed runtime | `cargo deny --locked check licenses` and notice generation (`docs/license-and-extensions.md` § Third-party licenses and distribution); a changed `Cargo.lock` revalidates `vendor/crate-license-notices/` (`CLAUDE.md` § Conventions) |

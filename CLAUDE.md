@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Interaction language
+
+Interaction language: **French**. Agents use it to talk to the developer: answers, questions, decision forms. Change this line to work in another language. The repository itself (code, docs, skills, commit messages) stays English whatever this line says.
+
 ## Context
 
 Branch `main`: port of StokesForge (analysis and plotting of scientific data, OriginLab-style) from Python/Qt to Rust. All the code lives in the Cargo workspace at the root. The old Python/Qt implementation (`legacy-python/`, which served as the behavior spec) was deleted from this branch. It still exists under the tag `legacy-python`.
@@ -21,6 +25,7 @@ cargo test -p <crate> <test_name>             # a single test
 cargo test -p stokesforge-robustness -- --ignored  # costly benches
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+python3 scripts/french-guard.py              # no French outside exempt places / `lang: fr` markers (#377)
 ```
 
 ## Architecture (crates/, dependencies bottom→top)
@@ -69,11 +74,11 @@ sequences: [`.claude/skills/README.md`](.claude/skills/README.md).
   GitHub secret `GITLAB_STATUS_TOKEN`, instructions, runner pitfalls and
   maintenance are in `docs/tests.md` ("Using CI day to day"). Results of a commit, read from GitLab: `scripts/ci-status.sh [commit]`.
 - When a work package installs a new rule (interface standard, pattern to follow, boundary), update **as needed** the skills concerned (`.claude/skills/`) and this file or `.claude/conventions.md`, in the same commit as the code, to keep development consistent. See `.claude/skills/README.md` (cross-cutting rules).
-- Decisions for the user to make: up to four, `AskUserQuestion` (one slide per question); **five or more**, a decision form (multiple-choice) published as an Artifact, never a list of questions in the terminal (one card per decision: context, before and after as diagrams, advantage and flaw of each option; the user is dyslexic). The form itself stays in French (the user reads French). Template and procedure: `.claude/skills/stokesforge-bug-report/references/decision-form.md`.
+- Decisions for the user to make: up to four, `AskUserQuestion` (one slide per question); **five or more**, a decision form (multiple-choice) published as an Artifact, never a list of questions in the terminal (one card per decision: context, before and after as diagrams, advantage and flaw of each option; the user is dyslexic). The form is written in the interaction language (see above). Template and procedure: `.claude/skills/stokesforge-bug-report/references/decision-form.md`.
 - Bugs and changes are tracked as GitLab issues (`glab issue list`), not in `.md` files. Each issue carries a line "**Cohérence**" that says which skills and docs to update.
 - While reporting and while creating or enriching issues, the feedback that follows completes the issues, even when phrased as « ajoute » or « supprime ». Move to code only on an explicit request to implement in the repository; see the context rule of `stokesforge-bug-report`.
 - Versions (#333): all crates share the same version `X.Y.Z` (today `1.0.0`), changed by a dedicated commit with `cargo update --workspace` and a section of `CHANGELOG.md`. `main` is the shippable line: fixes and small additions are tagged there directly (`v1.0.1`, `v1.1.0`). A `vN` branch opens only the day a breaking work package would prevent shipping a fix, and receives `main` by regular merge. No promise of code compatibility from one major to the next; only `.stf` files (invariant 12, `docs/persistence.md`) and the `pyst` API (`docs/python-and-scripting.md`) hold. The rule "the `.stf` format may be broken during development" has been **lifted** since V1. A bug is fixed where it was born (`release/N.x` only to maintain an old major); work on `feature/<n>-<topic>`, `--no-ff` merge into `main`. Tag `vX.Y.Z` → release; criteria and procedure: `docs/v1-criteria.md`. **Never create or push a tag (`v1.0.0-rc1`, `v1.0.0`, any `v*`) without an explicit order from the user**: a tag starts the release, which is visible and hard to undo (GitHub mirror included).
-- Commit messages and technical docs are in English (since #368; the earlier history stays in French). `docs/archive/` stays in French. New code, comments, test names and identifiers are written in English from now on, even in a crate not yet translated; existing French comments and identifiers are translated crate by crate (#372–#376). The decision form for the user (multiple-choice Artifact) stays in French.
+- Commit messages and technical docs are in English (since #368; the earlier history stays in French). `docs/archive/` stays in French. French elsewhere only in exempt places or behind a `lang: fr` marker (`scripts/french-guard.py`, `docs/tests.md`). New code, comments, test names and identifiers are written in English from now on, even in a crate not yet translated; existing French comments and identifiers are translated crate by crate (#372–#376). The decision form (multiple-choice Artifact) is in the interaction language.
 - After a merge and push on `main`, clean up the task's temporary worktree and its merged local branch automatically, unless asked to keep them; follow `stokesforge-verification`, "Clean up after a merge on `main`".
 - Every model mutation goes through an undoable command of `stokesforge-commands`, never through a direct `core` primitive.
 - A history label is **data** (`stokesforge_commands::HistoryLabel`, closed `MacroKind` for `begin_macro`), never a sentence: the crates below put nothing into sentences, `stokesforge-app-state` does it through `history_text` and the `history-*` keys (#46).

@@ -332,12 +332,12 @@ convert this type back automatically.
 import numpy as np
 
 x = pyst.column(pyst.resolve("[Book1]Sheet1!A"))
-book = pyst.create_workbook("Résultats")
-sheet = pyst.create_worksheet(book, "Calcul")
+book = pyst.create_workbook("Results")
+sheet = pyst.create_worksheet(book, "Computation")
 result = pyst.create_column(sheet, "Signal")
 pyst.set_values(result, np.asarray(x * 2, dtype=np.float64))
-pyst.set_column_meta(result, role="y", long_name="Signal doublé", unit="mV")
-# Un seul Ctrl+Z retire ce classeur et toutes ses données.
+pyst.set_column_meta(result, role="y", long_name="Doubled signal", unit="mV")
+# A single Ctrl+Z removes this workbook and all its data.
 ```
 
 Contract: `crates/stokesforge-script/tests/mutations.rs` (creation, lengths,
@@ -384,8 +384,8 @@ the same `Script` group as the column writes.
 x = pyst.resolve('[Book1]Sheet1!A')
 y = pyst.resolve('[Book1]Sheet1!B')
 g = pyst.plot(y, x, name='Graph1', title='$x^2$',
-             plot_type='line_scatter', color='#123456', x_title='Temps (s)')
-pyst.plot(y, x, graph=g, line_style='dash', label='Deuxième série')
+             plot_type='line_scatter', color='#123456', x_title='Time (s)')
+pyst.plot(y, x, graph=g, line_style='dash', label='Second series')
 ```
 
 Contract: `tests/graphs.rs` compares the exact `PlotSpec` and the shared SVG,

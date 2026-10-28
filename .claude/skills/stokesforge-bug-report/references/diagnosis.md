@@ -35,6 +35,9 @@ The displayed text comes from the catalogue (`crates/stokesforge-app-state/i18n/
 
 ## Report template (non-obvious bugs only)
 
+The template's field names are French on purpose (issue text language); kept as is.
+
+<!-- lang: fr begin -->
 ```markdown
 ## <symptom in one sentence, from the user's point of view>
 
@@ -50,6 +53,7 @@ The displayed text comes from the catalogue (`crates/stokesforge-app-state/i18n/
 **Gravité** : perte de données | bloquant | gênant | cosmétique
 **Cohérence** : <skills and docs to update>
 ```
+<!-- lang: fr end -->
 
 Add **Cause probable** only when established, with its `path:line`. « Non localisé » beats an attractive wrong hypothesis; a visual cause stated without looking at the window has no place here. Name an invariant only if one is at stake.
 

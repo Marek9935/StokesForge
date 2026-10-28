@@ -192,6 +192,7 @@ Before delivering a Rust change, repeat the CI checks:
 
 ```sh
 cargo fmt --all -- --check
+python3 scripts/french-guard.py   # no French outside exempt places (docs/tests.md, "French guard")
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```

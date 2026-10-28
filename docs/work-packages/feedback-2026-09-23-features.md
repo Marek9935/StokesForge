@@ -34,7 +34,7 @@ menu, the keyboard and the icon panel.
 
 **Two writes to handle**: `book_contents` (`app.rs:3653`) **and**
 `detached_book_contents` (`app.rs:5592`). A comment in the file already says
-"*Même correctif B5 que `book_contents`*" — the duplication is known and forces
+«Même correctif B5 que `book_contents`» — the duplication is known and forces
 a fix in two places.
 
 Underlying goal: **factor out rather than duplicate**. `docs/application/windows-and-panels.md`

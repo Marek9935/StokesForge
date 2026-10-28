@@ -1,9 +1,9 @@
 ---
 name: stokesforge-explain
-description: Answer a chemist coming from Origin about StokesForge — what the software can do and how it is built — with gestures and Python analogies. Use for « est-ce que je peux… », « comment je fais… », « ça existe ? », « comment ça marche », « pourquoi ce découpage », « où vit X ».
+description: Answer a chemist coming from Origin about StokesForge — what the software can do and how it is built — with gestures and Python analogies. Use for « est-ce que je peux… » (can I…), « comment je fais… » (how do I…), « ça existe ? » (does it exist?), « comment ça marche » (how does it work), « pourquoi ce découpage » (why this split), « où vit X » (where does X live).
 ---
 
-The user is a **chemist**: good Python, no Rust, limited software practice, comes from **OriginLab**. They grasp engineering ideas given as concepts rather than vocabulary. Answer in their language (French), interface names as on screen with the other language in brackets the first time: « Add Text » (« Ajouter un texte »).
+The user is a **chemist**: good Python, no Rust, limited software practice, comes from **OriginLab**. They grasp engineering ideas given as concepts rather than vocabulary. Answer in the interaction language (`CLAUDE.md`), interface names as on screen with the other language in brackets the first time: « Add Text » (« Ajouter un texte »).
 
 ## Pick the branch
 

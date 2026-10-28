@@ -62,6 +62,11 @@ fmt:
   script:
     - rustup component add rustfmt
     - cargo fmt --all -- --check
+    # python3 ships with rust:1 (Debian buildpack-deps); install it if an image lacks it.
+    - command -v python3 >/dev/null || (apt-get update -qq && apt-get install -y -qq python3)
+    # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").
+    - python3 scripts/french-guard-test.py
+    - python3 scripts/french-guard.py
     - scripts/release-notes-test.sh
     - scripts/versions-aligned.sh
     - scripts/release-tag-test.sh

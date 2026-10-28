@@ -1,6 +1,6 @@
 ---
 name: stokesforge-ui-texts
-description: Write or change any visible StokesForge text by the glossary — menu, button, field, tab, window title, tooltip, status or error message, Fluent key in en and fr. Use before adding, changing or translating any user-facing text (« libellé », « infobulle », « message », « traduis »).
+description: Write or change any visible StokesForge text by the glossary — menu, button, field, tab, window title, tooltip, status or error message, Fluent key in en and fr. Use before adding, changing or translating any user-facing text (« libellé » label, « infobulle » tooltip, « message », « traduis » translate).
 ---
 
 Single source: `docs/ui-texts.md` (glossary, rules R1–R16, before/after examples, decisions). This skill says **when** and **in what order**; it never copies the glossary. The rules R1–R16 of the text guide are not the codes `S-R1`… of the behaviour standard.

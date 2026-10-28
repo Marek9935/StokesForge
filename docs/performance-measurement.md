@@ -3,7 +3,8 @@
 A reproducible procedure to measure the per-frame cost of the application
 while a floating window is dragged. It was used on 2026-10-23 to tell "slow
 code" from "slow debug build" (results below). Nothing below is in the
-production code: the timers are a patch to apply and then remove.
+production code: the timers were a throwaway patch (`app/prof.rs` and its calls),
+no longer kept in the repository; rewrite them if needed.
 
 ## Running the application in release
 
@@ -19,15 +20,13 @@ release.
 ## Redoing the measurement
 
 Prerequisites: those of `.claude/skills/run-stokesforge` (Xwayland, ImageMagick,
-Python with `python-xlib`).
+Python with `python-xlib`), and a build instrumented with the timers (see above).
 
 ```sh
-git apply scripts/perf/instrumentation.patch          # ajoute app/prof.rs et ses appels
 cargo build -p stokesforge-app                         # debug
 cargo build --release -p stokesforge-app               # release
 scripts/perf/measure-windows.sh debug 6                # 6 graphes + Book1 + Graph1
 scripts/perf/measure-windows.sh release 6
-git apply -R scripts/perf/instrumentation.patch       # retire les chronomètres
 ```
 
 The script goes through the `run-stokesforge` driver, which sets

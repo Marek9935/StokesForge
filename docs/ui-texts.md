@@ -36,7 +36,7 @@ but its word is already fixed.
 | R10 | **No "(s)"**: plural and agreement are handled by Fluent. |
 | R11 | **No colon** after a field label. |
 | R12 | **Typography.** "…" (one character), "×" and not "x". Quotation marks « » in French, “ ” in English. Non-breaking space before `: ; ? !` in French. |
-| R13 | **French: infinitive** for instructions (*Choisir un fichier*). No informal "tu", no "vous". |
+| R13 | **French: infinitive** for instructions («Choisir un fichier»). No informal "tu", no "vous". |
 | R14 | **Dialog buttons**: the verb of the action (*Delete*, *Replace*, *Discard Changes*); a confirmation is Cancel + verb, never *Keep* alone (#229). *OK* / *Cancel* only to confirm / abandon. Never *Yes* / *No*. Wizard: *Back*, *Next*, *Finish*. |
 | R15 | **Names chosen by the user or by default** (*Book1*, *Sheet1*, column names): never translated. Without a name: *Untitled* / *Sans titre*. |
 | R16 | **Fluent keys**: `zone-element-role` (`menu-file-open`, `plot-axes-tick-length`, `import-step-header-title`). |
@@ -47,6 +47,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 
 ### 2.1 Project and windows
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Project | Projet | Contents of a `.stf` file | Document, Espace de travail | O |
@@ -68,6 +69,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 
 ### 2.2 Application
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | New Project | Nouveau projet | Replace the current project with an empty project, after confirmation if needed | Nouvelle session, Nouveau document | #73 |
@@ -88,6 +90,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 
 ### 2.3 Workbook and grid
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Column | Colonne | Series of values of one type | Champ, Variable | O |
@@ -126,6 +129,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 
 ### 2.4 Import
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Import Wizard | Assistant d'import | Six-step window that sets up the import | Importateur | O |
@@ -150,6 +154,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 
 ### 2.5 Graph
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Graph Properties | Propriétés du graphique | Settings window of a graph | Propriétés du graphe | O |
@@ -173,7 +178,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Legend | Légende | List of the series with their style | — | G |
 | Broken reference | Référence rompue | A series whose Y column no longer exists; kept in the legend, annotated « (broken reference) » / « (référence rompue) » (`graph-series-broken-reference*`, #369) | Lien cassé, Référence invalide | G |
 | Legend entry | Entrée de légende | One line of the legend | Libellé de légende | G |
-| Position | Position | Corner of the legend: Top left…; Reset Position / Réinitialiser la position: puts a title or the legend back at its default place | Emplacement | G |
+| Position | Position | Corner of the legend: Top left…; Reset Position / «Réinitialiser la position»: puts a title or the legend back at its default place | Emplacement | G |
 | Series | Série | Plotted data of a Y column | Courbe, Trace, Plot, Jeu de données | G (Q3) |
 | Series Group | Groupe de séries | Series added together (or gathered by hand) that are set together; collapsible node of the Object Manager and of the series list, named "Group n" until it is renamed (#177, #197) | Groupe de courbes | G |
 | Ungroup | Dissoudre le groupe | Each series of the group becomes a single series, style kept; deletes nothing (#197). Not to be confused with « Delete Group » / « Supprimer le groupe », which also removes the series | Dégrouper, Éclater | G |
@@ -227,6 +232,7 @@ that the interface will have to write. Quantities and units: IUPAC *Green
 Book*; a dimensionless quantity (absorbance) carries no unit. Axis title:
 **quantity / unit** (R6), given last in the definition.
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Spectrum | Spectre | Intensity measured as a function of a spectral abscissa | Courbe, Trace | I |
@@ -266,6 +272,7 @@ Book*; a dimensionless quantity (absorbance) carries no unit. Axis title:
 
 ### 2.7 Analysis (#181)
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Analysis | Analyse | Menu and window of the mathematical processing | Traitement | D |
@@ -302,6 +309,7 @@ Book*; a dimensionless quantity (absorbance) carries no unit. Axis title:
 
 Real labels, quoted as is. Rule: number from section 1 or glossary term.
 
+<!-- lang: fr columns: Before (`fichier:ligne`), French -->
 | # | Before (`fichier:ligne`) | English | French | Rule |
 |---|---|---|---|---|
 | 1 | « Graphique » › « Propriétés du graphe… » (`app.rs:1282-1284`) ; onglet « Graphe » (`state.rs:1296`) | Graph › Graph Properties… ; tab General | Graphique › Propriétés du graphique… ; onglet Général | R2 |
@@ -356,15 +364,15 @@ everywhere, **except Q14 and Q22** where the alternative wins (marked ✔).
 | Q8 | Function of a column: **Role** or **Designation** (Origin "Set As")? And *None* or *Disregard*? | **Role / Rôle**, value **None** | *Designation*; *Disregard / Ignorer* |
 | Q9 | **Auto** or **Automatic**? | **Auto** (short; the tooltip specifies « contraste avec le fond ») | *Automatic / Automatique* written in full |
 | Q10 | « Annuler » names both *Undo* and the *Cancel* button of the properties window. Keep it? | **Yes** (common usage; distinct contexts) | *Abandonner* for *Cancel* (clean, but unusual) |
-| Q11 | Text attached to a point or to a tick: **Label / Étiquette** for the column role and **Tick label / Étiquette de graduation**? | **Étiquette** for both; « libellé » refused everywhere | *Libellé de graduation*; *Valeur de graduation* |
+| Q11 | Text attached to a point or to a tick: **Label / «Étiquette»** for the column role and **Tick label / «Étiquette de graduation»**? | **«Étiquette»** for both; « libellé » refused everywhere | «Libellé de graduation»; «Valeur de graduation» |
 | Q12 | Lines that extend the ticks: **Gridlines / Quadrillage** or **Grid / Grille**? | **Quadrillage** (« grille » is already the sheet grid) | *Grille* (current term) |
-| Q13 | **Units** (Origin's plural) or **Unit**? | **Units / Unités** everywhere | *Unit / Unité* (singular, current in the import preview and the axis) |
+| Q13 | **Units** (Origin's plural) or **Unit**? | **Units / «Unités»** everywhere | *Unit / «Unité»* (singular, current in the import preview and the axis) |
 | Q14 | Units: parentheses **Wavenumber (cm⁻¹)** or IUPAC bar **ν̃ / cm⁻¹**? | *Parentheses* (usage of journals and Origin) | ✔ **Fraction bar** (IUPAC) for axis titles; the interface fields keep parentheses (R6) |
 | Q15 | Tree panel: **Project Manager** (current name) or **Project Explorer** (Origin's name)? | **Project Manager** (already in the code and docs) | *Project Explorer* |
-| Q16 | French for *Raman shift*: **Déplacement Raman** or **Décalage Raman**? And *Offset* (stack): **Décalage**? | **Déplacement Raman**; **Décalage** reserved for the stack, so as not to confuse them | *Décalage Raman*; *Translation* or *Espacement* for the stack |
+| Q16 | French for *Raman shift*: **«Déplacement Raman»** or **«Décalage Raman»**? And *Offset* (stack): **«Décalage»**? | **«Déplacement Raman»**; **«Décalage»** reserved for the stack, so as not to confuse them | «Décalage Raman»; «Translation» or «Espacement» for the stack |
 | Q17 | **Absorbance** without unit (IUPAC) or **Absorbance (a.u.)** (common usage, Origin templates)? | **Absorbance** alone | *Absorbance (a.u.)* |
 | Q18 | French for *Counts*: **Coups** or **Counts** kept? | **Coups** | *Counts* invariant (oral usage in XPS and Raman) |
-| Q19 | Informal "tu", "vous" or infinitive for French instructions? | **Infinitive** (*Choisir un fichier*) | Imperative *vous* (*Choisissez un fichier*) |
+| Q19 | Informal "tu", "vous" or infinitive for French instructions? | **Infinitive** («Choisir un fichier») | Imperative «vous» («Choisissez un fichier») |
 | Q20 | **Detach / Reattach** or **Float / Dock**? | **Detach / Reattach** (verbs already in place, understood without jargon) | *Float / Dock* (Qt, Office) |
 | Q21 | Text placed on the graph: **Text** or **Annotation**? | **Text** (one word, the gesture is "Add Text") | *Annotation* (matplotlib, term of the code); *Text Label* (clashes with *Label*) |
 | Q22 | Plotted subset of a graph: **Panel** or **Layer** (Origin)? | *Panel / Panneau* | ✔ **Layer / Calque** (Origin) |
@@ -374,6 +382,7 @@ everywhere, **except Q14 and Q22** where the alternative wins (marked ✔).
 
 ### Object Manager (#81–85)
 
+<!-- lang: fr columns: French -->
 | English | French | Definition |
 |---|---|---|
 | Object Manager | Gestionnaire d'objets | Tree of the contents of the active graph |
@@ -392,12 +401,14 @@ everywhere, **except Q14 and Q22** where the alternative wins (marked ✔).
 
 ### Embedded data (#107)
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused | Ref. |
 |---|---|---|---|---|
 | Show Data | Afficher les données | Reveal and open the workbooks referenced by the graph | Extraire les données | #107 |
 
 ### Menu groupings (#114)
 
+<!-- lang: fr columns: French, Refused -->
 | English | French | Definition | Refused |
 |---|---|---|---|
 | New | Nouveau | Submenu of project, workbook and graph creations | Créer (pour le groupe) |

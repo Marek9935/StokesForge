@@ -21,7 +21,7 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 ```text
 question ──► stokesforge-explain
 symptom  ──► stokesforge-bug-report ──(explicit request)──► stokesforge-bug-fix ──┐
-request  ──► stokesforge-feature ──► commande / rendu / import / python / textes ──┴─► stokesforge-verification ──► commit (on request)
+request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► commit (on request)
 ```
 
 `run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".

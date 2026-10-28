@@ -1,6 +1,6 @@
 ---
 name: stokesforge-bug-report
-description: Triage and record StokesForge feedback as GitLab issues — repro, bug or change request, layer, open questions. Use when the user reports « ça plante », « c'est faux », « bizarre », « il manque… », says « bug report », « ajoute / ouvre une issue », « ticket », « chantier », « questionnaire », sends a batch of remarks, or creates or fills an issue.
+description: Triage and record StokesForge feedback as GitLab issues — repro, bug or change request, layer, open questions. Use when the user reports « ça plante » (it crashes), « c'est faux » (it's wrong), « bizarre », « il manque… » (…is missing), says « bug report », « ajoute / ouvre une issue » (open an issue), « ticket », « chantier » (work package), « questionnaire », sends a batch of remarks, or creates or fills an issue.
 ---
 
 A useful report can be replayed, and each line is a located cause or a question. The costly mistake is classifying with confidence what needed a question.

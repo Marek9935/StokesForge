@@ -1,6 +1,6 @@
 ---
 name: stokesforge-command
-description: Add or change an undoable StokesForge command, the only way to mutate the model. Use when a task creates, deletes, renames, moves or edits anything in the project (« ajoute une colonne », « renomme », « supprime »), or adds a pub mutating method to stokesforge-core.
+description: Add or change an undoable StokesForge command, the only way to mutate the model. Use when a task creates, deletes, renames, moves or edits anything in the project (« ajoute une colonne » / "add a column", « renomme » / rename, « supprime » / delete), or adds a pub mutating method to stokesforge-core.
 ---
 
 Invariant 1: no model mutation outside a command (`docs/invariants.md` § 1. No model mutation outside a command). A `pub` mutating method added to `stokesforge-core` without its command opens a non-undoable write path. No test catches that today (`docs/invariants.md` names `b21`, which measures cost and identity instead): review is the only guard.

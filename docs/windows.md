@@ -242,9 +242,9 @@ Do not make them by hand: produce them with the `run-stokesforge` skill
 ```sh
 cargo build -p stokesforge-app -p stokesforge-cli
 D=.claude/skills/run-stokesforge/driver.py
-python3 $D start [project.stf]      # sans argument : projet de démonstration
-python3 $D click 20 11             # menu File ; puis l'entrée qui ouvre la fenêtre
-python3 $D ss /tmp/fenetre.png     # capture, à lire avec Read
+python3 $D start [project.stf]      # no argument: demo project
+python3 $D click 20 11             # File menu; then the entry that opens the window
+python3 $D ss /tmp/fenetre.png     # screenshot, to read with Read
 python3 $D stop
 ```
 

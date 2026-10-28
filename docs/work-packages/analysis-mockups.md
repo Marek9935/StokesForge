@@ -181,9 +181,9 @@ right-click menu depending on the option).
 ### A ★ — `Analysis ▸` submenu in the "Create" section
 
 ```
- Courbe (graphe, Object Manager)          En-tête de colonne Y
+ Curve (graph, Object Manager)            Y column header
  ┌──────────────────────────────┐         ┌───────────────────────────────┐
- │ Series: B                    │ (grisé) │ Plot                        ▸ │
+ │ Series: B                    │ (greyed) │ Plot                        ▸ │
  │ Show Data                    │         │ Add Column                    │
  ├──────────────────────────────┤         │ Analysis                    ▸ │
  │ Analysis                   ▸ │         ├───────────────────────────────┤
@@ -265,7 +265,7 @@ See finding 1. This is **the** structuring choice of the base.
 ```
 ┌ Subtract Baseline ───────────────────────── ✕ ┐
 │ …                                             │
-│ Points   3   [ Pick on Graph ]                │   ← la fenêtre se cache
+│ Points   3   [ Pick on Graph ]                │   ← the window hides
 │ …                                             │
 └───────────────────────────────────────────────┘
 
@@ -503,7 +503,7 @@ A single history entry in all cases.
 ### a. An out-of-date column (failure or waiting for manual recalculation)
 
 ```
-│       │ B(Y)      │ C(Y)  (!)          │ ← info-bulle de l'icône :
+│       │ B(Y)      │ C(Y)  (!)          │ ← icon tooltip:
 │ Long  │ Intensity │ Intensity (B-corr) │   « Out of date: the fit no longer
 │ 1     │ 152.3     │ 1.8                │     converges (B changed). Showing
 │ 2     │ 151.9     │ 1.5                │     the last valid values »
@@ -562,8 +562,8 @@ polynomial is fitted; they are shown as pale bands in the preview.
 ```
   Graph1
   │            ╱╲                ╱╲
-  │   ◆_______╱  ╲______◆______╱  ╲______◆      ◆ poignées de la ligne de base
-  │   - - - - - - - - - - - - - - - - - - -     (en pointillés, couleur de B)
+  │   ◆_______╱  ╲______◆______╱  ╲______◆      ◆ baseline handles
+  │   - - - - - - - - - - - - - - - - - - -     (dashed, color of B)
 ```
 
 | Option | When are the baseline and its handles seen | Cost |
@@ -590,12 +590,12 @@ handles for the baseline only, the rest through `Edit Calculation…` (−1 d).
 ```
 ┌ Correct by Reference ───────────────────────────────────────────────── ✕ ┐
 │ Input                                 │ ┌──────────────────────────────┐ │
-│ Series     [ Sheet1 › B         ▾]    │ │  données ───  référence ┄┄┄  │ │
+│ Series     [ Sheet1 › B         ▾]    │ │  data ───  reference ┄┄┄   │ │
 │                                       │ │      ╱╲   ┄┄┄┄┄┄┄┄           │ │
 │ Reference                             │ │ ┄┄┄┄╱  ╲┄┄        ┄┄┄┄       │ │
 │ Column     [ Detector › B (QE)  ▾]    │ │ ___╱    ╲____________        │ │
 │ X          Detector › A (λ / nm)      │ │ ░░░                     ░░░░ │ │
-│ Operation  (•) Divide ( ) Multiply    │ │ ↑ hors de la référence       │ │
+│ Operation  (•) Divide ( ) Multiply    │ │ ↑ outside the reference     │ │
 │            ( ) Subtract               │ └──────────────────────────────┘ │
 │ Outside    32 points outside the      │                                  │
 │ reference  reference range            │                                  │

@@ -23,17 +23,17 @@ Before offering options on an architecture choice, give the figures the user dec
 
 ## How to ask
 
-- **1 to 4 questions: `AskUserQuestion`** (the "small slides"): one question per slide, 2 to 4 options, recommendation first with « (Recommandé) », the advantage and the drawback of each option in its description, a `preview` sketch when a screen or gesture can be drawn.
+- **1 to 4 questions: `AskUserQuestion`** (the "small slides"): one question per slide, 2 to 4 options, recommendation first with « (Recommandé) » ("(Recommended)" in the interaction language), the advantage and the drawback of each option in its description, a `preview` sketch when a screen or gesture can be drawn.
 - **5 questions or more: the multiple-choice form**, a published Artifact page built from [`decision-form.html`](decision-form.html). Never a list of questions in the terminal.
 
-The page itself stays **in French** (the user reads it); interface texts appear in English, as on screen.
+The page is written in the **interaction language** (`CLAUDE.md`, "Interaction language"). The template `decision-form.html` is in French and exempt from the French guard; when the interaction language is not French, translate its wording when filling it. Interface texts appear in English, as on screen.
 
 ## Each card of the form, in this order
 
 1. **Question**: short, as a title, with priority (P1 risk of loss or silent trap, P2 visible inconsistency, P3 polish) and code (`R1`, `N4`…).
 2. **Contexte**: where and when the user meets the case (window, gesture, concrete example) and the **related decisions** by code. Never assume they remember the screen or an earlier answer.
 3. **Aujourd'hui (avant)**: what the software does now, **checked in the code**, with a sketch.
-4. **Les choix (après)**: recommendation first; each option has "after" bullets, a sketch when drawable, a **+** line and a **−** line — for every option, recommendation included.
+4. **«Les choix (après)»**: recommendation first; each option has "after" bullets, a sketch when drawable, a **+** line and a **−** line — for every option, recommendation included.
 5. « Autre / à discuter » and a free comment (built into the template).
 
 Bullets: one idea each, under 12 words when possible, the user's vocabulary (gestures, window names), never a Rust function name unless the user used it.

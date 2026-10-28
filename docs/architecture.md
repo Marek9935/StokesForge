@@ -10,43 +10,43 @@ Arrow = "depends on" (`Cargo.toml` manifests, checked with
 `cargo metadata --no-deps --format-version 1 --offline`).
 
 ```text
-stokesforge-id            NodeId seul, zéro dépendance
+stokesforge-id            NodeId only, zero dependencies
    ↑
-stokesforge-analysis      calcul pur (lignes de base, intégrales, ajustements, pics,
-                          déconvolution) : f64 en entrée et en sortie, aucune
-                          dépendance stokesforge — lu par core, commands,
-                          persistence, session, script et app
+stokesforge-analysis      pure computation (baselines, integrals, fits, peaks,
+                          deconvolution): f64 in and out, no stokesforge
+                          dependency — read by core, commands,
+                          persistence, session, script and app
    ↑
-stokesforge-plot          PlotSpec : quoi tracer, sans savoir comment
+stokesforge-plot          PlotSpec: what to plot, without knowing how
    ↑
-stokesforge-core          arbre de projet, colonnes, résolution d'un spec
+stokesforge-core          project tree, columns, resolution of a spec
    ↑            ↑            ↑
 stokesforge-commands  stokesforge-persistence  stokesforge-render ← stokesforge-render-svg
 (core, plot)     (core, plot, import)  (core, plot)     (core, plot, render)
    ↑       ↑
-stokesforge-session       l'acteur : le &mut Project de la session
+stokesforge-session       the actor: the session's &mut Project
 (commands, persistence, core)
    ↑            ↑
 stokesforge-script   stokesforge-render-egui (core, plot, render, session)
 (analysis, commands, core, import, importer, plot, python, render-svg, session)
-+ stokesforge-python (aucune dépendance stokesforge)
++ stokesforge-python (no stokesforge dependency)
 
 stokesforge-cli    (core, commands, import, importer, persistence)
-               import : un `Project` neuf construit directement, puis `.stf`
-               run (python) : script, python, session ; même acteur que la console
-stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil ;
-               lu par persistence : le miroir de la recette dans le `.stf` (S2, #323)
-stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle, sans
-               commandes : partagé par l'application, le CLI et les scripts
-stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au
-               presse-papiers système (SVG, PNG, PDF), un backend par affichage
+               import: a fresh `Project` built directly, then `.stf`
+               run (python): script, python, session; same actor as the console
+stokesforge-import (no stokesforge dependency) — reading instrument files;
+               read by persistence: the mirror of the recipe in the `.stf` (S2, #323)
+stokesforge-importer (core, import) — plan of sheets and model columns, without
+               commands: shared by the application, the CLI and the scripts
+stokesforge-clipboard (no stokesforge dependency) — multi-format offer to the
+               system clipboard (SVG, PNG, PDF), one backend per display server
 stokesforge-app-state (analysis, commands, core, import, importer, persistence, plot,
-               render, render-svg, session ; script et python en option) — l'état de
-               l'application SANS interface : AppState, sélection, préférences,
-               formulaires d'analyse, textes (Fluent) et erreurs mises en phrase
+               render, render-svg, session ; script and python optional) — the state of
+               the application WITHOUT an interface: AppState, selection, preferences,
+               analysis forms, texts (Fluent) and errors put into sentences
 stokesforge-app    (app-state, analysis, clipboard, commands, core, import, plot,
-               render, render-egui, render-svg, session ; python en option) — la
-               coquille eframe : peint l'état, traduit clavier et souris en actions
+               render, render-egui, render-svg, session ; python optional) — the
+               eframe shell: paints the state, turns keyboard and mouse into actions
 ```
 
 `stokesforge-robustness` stands apart: it depends on the foundation and the Python bridge, and

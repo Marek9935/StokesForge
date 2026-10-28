@@ -11,19 +11,19 @@ renderer.
 
 ```text
 Project
-├── allocateur d'identifiants  (hors de l'arbre — invariant 7)
-└── Arc<Tree>                  (carte plate NodeId → Arc<Node>, une racine,
-        │                          et les couleurs enregistrées du projet)
+├── identifier allocator  (outside the tree — invariant 7)
+└── Arc<Tree>                  (flat map NodeId → Arc<Node>, one root,
+        │                          and the project's saved colors)
         └── Node { id, name, parent, kind }
               └── NodeKind
-                  ├── Folder     { children }   dossiers et fenêtres
-                  ├── Workbook   { children }   feuilles
-                  ├── Worksheet  { children }   colonnes
-                  ├── Column(Column)            les valeurs
-                  ├── Graph      { spec, … }    un PlotSpec
+                  ├── Folder     { children }   folders and windows
+                  ├── Workbook   { children }   sheets
+                  ├── Worksheet  { children }   columns
+                  ├── Column(Column)            the values
+                  ├── Graph      { spec, … }    a PlotSpec
                   ├── Matrix     { … }
                   ├── Note       { … }
-                  └── Unknown(RawVariant)       lu d'un fichier plus récent
+                  └── Unknown(RawVariant)       read from a newer file
 ```
 
 The project's **saved colors** (`stokesforge_plot::SavedColors`, filed by use:
@@ -306,20 +306,20 @@ rollback, `.stf`). It is not a node.
 ```text
 PlotSpec
 ├── title, background
-└── panels : PanelSpec           (grille row/column, au moins un panneau)
+└── panels : PanelSpec           (row/column grid, at least one panel)
     ├── title
-    ├── bottom / left / right / top → AxisSpec  (échelle, limites, grille)
+    ├── bottom / left / right / top → AxisSpec  (scale, limits, grid)
     ├── legend : LegendSpec
     ├── series : SeriesSpec
     │   ├── y : NodeId, x / x_error / y_error : Option<NodeId>
-    │   ├── row : Option<usize>   (série « ligne », #166 : voir ci-dessous)
+    │   ├── row : Option<usize>   ("row" series, #166: see below)
     │   ├── plot_type : PlotType
     │   ├── line : LineSpec, symbol : SymbolSpec
-    │   └── axis : SeriesAxis    (gauche ou droite)
-    └── annotations : AnnotationSpec   (textes libres, issue #35)
+    │   └── axis : SeriesAxis    (left or right)
+    └── annotations : AnnotationSpec   (free texts, issue #35)
         ├── text                  (markup Typst)
-        ├── x, y + axis : SeriesAxis   (centre, en données)
-        └── color, size, rotation (vide = automatique ; degrés, antihoraire)
+        ├── x, y + axis : SeriesAxis   (center, in data units)
+        └── color, size, rotation (empty = automatic; degrees, counter-clockwise)
 ```
 
 A series carries **no data** and **no column name** — only the identity

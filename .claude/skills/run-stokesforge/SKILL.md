@@ -1,6 +1,6 @@
 ---
 name: run-stokesforge
-description: Build, launch, drive and screenshot the real StokesForge desktop app on Linux — clicks, keys, PNG captures. Use for « lance l'app », « screenshot », « vérifie dans l'app », to look at a visual symptom, or to confirm a UI change works in the real app, not only in tests.
+description: Build, launch, drive and screenshot the real StokesForge desktop app on Linux — clicks, keys, PNG captures. Use for « lance l'app » (launch the app), « screenshot », « vérifie dans l'app » (check in the app), to look at a visual symptom, or to confirm a UI change works in the real app, not only in tests.
 ---
 
 StokesForge is an egui desktop app with no port and no API. Drive it with `driver.py` (rootful Xwayland + XTEST mouse/keyboard + ImageMagick capture). Paths are relative to the repo root; no `sudo`. Prerequisites: `Xwayland`, ImageMagick (`import`, `magick`), Python 3 with `python-xlib`, an open Wayland session.

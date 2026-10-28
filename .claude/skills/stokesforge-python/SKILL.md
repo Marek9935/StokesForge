@@ -1,6 +1,6 @@
 ---
 name: stokesforge-python
-description: Work on the StokesForge Python bridge (stokesforge-python, stokesforge-script) — pyst surface, script console, numpy, GIL, PYO3_CONFIG_FILE. Use for a pyst script, an API exposed to scripts, the console, or a defect seen only with the python feature (« mon script plante »).
+description: Work on the StokesForge Python bridge (stokesforge-python, stokesforge-script) — pyst surface, script console, numpy, GIL, PYO3_CONFIG_FILE. Use for a pyst script, an API exposed to scripts, the console, or a defect seen only with the python feature (« mon script plante » / my script crashes).
 ---
 
 Two crates behind the `python` feature, **absent from `default`**: `stokesforge-python` (embedded CPython, knows only scalars and `f64` slices) and `stokesforge-script` (script thread, interruption, the `pyst` surface; talks to the actor). Without the feature both compile **empty**: `cargo build`, `cargo test --workspace` and `clippy` stay green even if the Python code is broken.

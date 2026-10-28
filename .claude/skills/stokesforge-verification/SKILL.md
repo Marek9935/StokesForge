@@ -1,6 +1,6 @@
 ---
 name: stokesforge-verification
-description: Verify a StokesForge change before delivering it — test in the right place, fmt, clippy, tests, python feature, docs, English commit message. Use on « teste », « vérifie », « c'est bon ? », « commit », « pousse », « j'ai fini », and at the end of any implementation or fix.
+description: Verify a StokesForge change before delivering it — test in the right place, fmt, clippy, tests, python feature, docs, English commit message. Use on « teste » (test), « vérifie » (verify), « c'est bon ? » (is it good?), « commit », « pousse » (push), « j'ai fini » (I'm done), and at the end of any implementation or fix.
 ---
 
 A green `cargo test --workspace` does not prove what one assumes in this repo. This skill says what it does not prove.
@@ -8,7 +8,7 @@ A green `cargo test --workspace` does not prove what one assumes in this repo. T
 ## Steps
 
 1. **Place the tests**: unit, integration, robustness, app logic, painted gesture, witness, reproduction: [references/test-placement.md](references/test-placement.md). Value bar for any new test: `audit-test`.
-2. **Run the base checks** of `CLAUDE.md` § Commands (`fmt --check`, `clippy -D warnings`, `cargo test --workspace`). Long output goes to a file, only the summary is shown (`CLAUDE.md` § Delegation and model choice); reread the file instead of rerunning. In Claude's container a heavy test can fail with `Disk quota exceeded` (`/tmp`): that proves nothing about the code. Push `main` and read the CI (`scripts/ci-status.sh`), or ask the user to run `! cargo test …`.
+2. **Run the base checks** of `CLAUDE.md` § Commands (`fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `python3 scripts/french-guard.py`). Long output goes to a file, only the summary is shown (`CLAUDE.md` § Delegation and model choice); reread the file instead of rerunning. In Claude's container a heavy test can fail with `Disk quota exceeded` (`/tmp`): that proves nothing about the code. Push `main` and read the CI (`scripts/ci-status.sh`), or ask the user to run `! cargo test …`.
 3. **Run what the change adds**: `python` feature, ignored reproductions, targeted recalculation, licenses, screenshots, a real window: [references/checks-by-change.md](references/checks-by-change.md). A task that touches an off-default feature compiles and tests it explicitly, or it validates dead code.
 4. **Reread the diff**: `git status --short`, then `git diff`; never carry the user's untracked files or work in progress into a commit: `git add <path>` one by one, never `-A`, and say so when a changed file does not come from the task. No test weakened, no architecture guard bypassed (`docs/tests.md` § Guards not to break), arbitrated limits still in place.
 5. **Update the docs the change made wrong**: the module `//!` (the *why*), the `docs/` page (the *what*); routing files (`.claude/rules.md`, `.codex/README.md`, `CLAUDE.md`, `.claude/conventions.md`, `AGENTS.md`) if paths, scripts or boundaries moved; the skills concerned if a new rule was installed, in the same commit.
