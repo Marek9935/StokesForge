@@ -55,8 +55,8 @@ selecting it first".
 Fix: `grid_contents` now includes `state.import_state().is_none()`
 in the guard. There is no automated test for this specific fix — `AppState`
 does not depend on egui and real keyboard input is tested nowhere
-in this repository (see the head doc of `shell.rs`, criterion 13: "what it
-adds is not automatically testable"), so this is not a coverage
+in this repository (see the head doc of `shell.rs`, criterion 13: « ce qu'elle
+ajoute n'est pas testable automatiquement »), so this is not a coverage
 regression specific to this work package.
 
 ## Decisions on the open questions

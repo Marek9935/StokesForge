@@ -599,8 +599,8 @@ two views that each set it would set two contradictory values.
 
 ## `stokesforge-render-svg` — the export
 
-> "The export is to the `PlotSpec` what persistence was to the model: the only
-> thing that proves the neutral layer is really neutral."
+> « L'export est au `PlotSpec` ce que la persistance était au modèle : la seule
+> chose qui prouve que la couche neutre est réellement neutre. »
 
 That is why it is written **at the same time** as the screen backend, not after.
 

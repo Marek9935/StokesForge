@@ -235,7 +235,7 @@ of `Project::next_column_name`) is a key of the model: it resolves
 a column from a script (`pyst.resolve("[Book1]Sheet1!Temps")`), addresses it
 in a graph spec, finds it again in a `.stf`. The grid shows it
 **nowhere**: it shows the **position** letter (A, B, C…) and the
-four fields of `ColumnMeta` (Long Name, Unit, Comment, Formula), which are
+four fields of `ColumnMeta` (Long Name, Units, Comments, Formula), which are
 yet another thing.
 
 **Formula row (#321).** A formula remembers the columns it reads **by
@@ -426,7 +426,7 @@ detached workbook, both through `book_contents`):
 F2 opens the same editor as a double-click, with the initial content kept
 (#143), only when the grid's anchor has the focus. On a range
 of data or header fields, it edits the top-left cell, in the visible
-order of the columns. Long Name, Unit, Comment and Formula use
+order of the columns. Long Name, Units, Comments and Formula use
 their existing editor; whole columns do not trigger this edit.
 Renaming with F2 stays specific to the focused managers.
 

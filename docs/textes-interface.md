@@ -383,7 +383,7 @@ everywhere, **except Q14 and Q22** where the alternative wins (marked ✔).
 | Closed frame | Cadre fermé | Toggle of a layer (`Action::SetClosedFrame`): top and right as mirror axes without tick labels, ticks copied from the bottom and left (#344). **No command in the interface** since the lightened Axes page: the `action-closed-frame*` keys are removed |
 | Minor ticks | Sous-graduations | Small marks drawn between the major ticks of an axis, in the same direction; their number per interval (Auto or 1 to 9); « Un nombre sur n » writes only one tick number out of n (#344) |
 | Advanced | Avancé | Collapsible block, closed by default, at the bottom of the Ticks section of an axis: length of the major and minor marks (px), width (pt), color; all Auto (S-L8, #344) |
-| Ticks (section) | Graduations | Section of the page of an axis: marks, direction, minor ticks, Advanced block (#344); « Afficher les nombres » and « Un nombre sur » stay in Affichage |
+| Ticks (section) | Graduations | Section of the page of an axis: marks, direction, minor ticks, Advanced block (#344); « Afficher les nombres » and « Un nombre sur » stay in « Affichage » |
 | Tick direction | Sens des graduations | Outward (Outward), inward (Inward) or on both sides (Both sides) of the axis line (#344) |
 | Axes | Axes | The group that gathers the four axes of a layer in the Object Manager (#111, #147) |
 | Detach / Reattach | Détacher / Rattacher | Open a system window / put the panel back at its fixed location (#100) |

@@ -46,7 +46,7 @@ The panel it shows is divided into three areas:
    "from … to …" drop-down menus that chooses **which range of subheader
    lines** feeds this role (a single line in the screenshot: `18` to
    `18` for `Comments`, for example), each with its own re-evaluation button.
-   A `Extract Long Names and Units from Same Line` checkbox
+   An `Extract Long Names and Units from Same Line` checkbox
    reads the two roles on a shared line rather than on two separate
    lines. Next to it, `Characters to skip on each line` removes a fixed
    prefix from each data line before parsing.
