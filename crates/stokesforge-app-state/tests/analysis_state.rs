@@ -374,24 +374,24 @@ fn without_the_box_nothing_is_plotted() {
     assert_eq!(plotted_columns(&s), vec![s.y], "witness: unchecked box");
 }
 
+/// A state reading (and writing) the preferences `file`.
+fn on_preferences_file(s: &mut Setup, dir: &std::path::Path, file: &std::path::Path) {
+    s.state = AppState::new_with_preferences(
+        s._session.handle(),
+        dir.join("p.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(file.to_path_buf())),
+    )
+    .unwrap();
+}
+
+/// M5 (#148): the output choice is remembered **per operation**, across
+/// sessions; validating a window never changes the Preferences default.
 #[test]
-fn the_output_choice_is_remembered_across_sessions() {
+fn the_output_choice_is_remembered_per_operation_across_sessions() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("preferences.json");
-    let make = |keep_expected: bool| {
-        let mut s = setup(dir.path());
-        let preferences =
-            stokesforge_app_state::preferences::Preferences::load_from(Some(file.clone()));
-        assert_eq!(preferences.analysis_keep_results(), keep_expected);
-        s.state = AppState::new_with_preferences(
-            s._session.handle(),
-            dir.path().join("p.stf").display().to_string(),
-            preferences,
-        )
-        .unwrap();
-        s
-    };
-    let mut s = make(false);
+    let mut s = setup(dir.path());
+    on_preferences_file(&mut s, dir.path(), &file);
     open(&mut s, Preset::Fit(Model::Linear));
     assert!(
         !s.state.analysis_form().unwrap().keep_results,
@@ -399,10 +399,51 @@ fn the_output_choice_is_remembered_across_sessions() {
     );
     s.state.analysis_form_mut().unwrap().keep_results = true;
     s.state.dispatch(Action::ApplyAnalysis);
-    // A fresh session finds the choice again.
-    let mut s = make(true);
+    assert!(
+        !s.state.analysis_keep_results_default(),
+        "validating does not change the default"
+    );
+    // A fresh session finds the choice of the Fit again, and only its.
+    let mut s = setup(dir.path());
+    on_preferences_file(&mut s, dir.path(), &file);
     open(&mut s, Preset::Fit(Model::Linear));
     assert!(s.state.analysis_form().unwrap().keep_results);
+    s.state.dispatch(Action::CloseAnalysis);
+    open(&mut s, Preset::Integrate);
+    assert!(
+        !s.state.analysis_form().unwrap().keep_results,
+        "witness: another operation keeps the default"
+    );
+}
+
+/// M5 (#148): Fit set to Show, then Integrate opens with the Preferences default
+/// (Keep); Fit reopens with Show.
+#[test]
+fn an_operation_never_run_takes_the_preferences_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("preferences.json");
+    let mut s = setup(dir.path());
+    on_preferences_file(&mut s, dir.path(), &file);
+    s.state.dispatch(Action::SetAnalysisKeepResults(true));
+    assert!(s.state.analysis_keep_results_default());
+    open(&mut s, Preset::Fit(Model::Linear));
+    assert!(
+        s.state.analysis_form().unwrap().keep_results,
+        "default Keep"
+    );
+    s.state.analysis_form_mut().unwrap().keep_results = false;
+    s.state.dispatch(Action::ApplyAnalysis);
+    open(&mut s, Preset::Integrate);
+    assert!(
+        s.state.analysis_form().unwrap().keep_results,
+        "Integrate was never run: the default"
+    );
+    s.state.dispatch(Action::CloseAnalysis);
+    open(&mut s, Preset::Fit(Model::Linear));
+    assert!(
+        !s.state.analysis_form().unwrap().keep_results,
+        "the Fit remembers its Show"
+    );
 }
 
 #[test]

@@ -16,7 +16,10 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use stokesforge_analysis::ops::OperationKind;
 use stokesforge_render_svg::SvgTextMode;
+
+use crate::state::{DEFAULT_PNG_EXPORT_SCALE, PNG_EXPORT_SCALES};
 
 /// Groups families whose initial collapsed state can be set (#139).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +257,22 @@ struct PreferencesFile {
     /// not yet (#333).
     #[serde(default, deserialize_with = "lenient")]
     first_run_done: Option<bool>,
+    /// Magnification of PNG exports (#148); a value that is not one of
+    /// [`PNG_EXPORT_SCALES`], or of the wrong type: the default (×4).
+    #[serde(default, deserialize_with = "lenient")]
+    png_export_scale: Option<f32>,
+    /// The formula syntax help icon next to the formula fields (#148); missing or
+    /// unreadable: shown.
+    #[serde(default, deserialize_with = "lenient")]
+    show_formula_help: Option<bool>,
+    /// Decimal comma on the axes of **new** graphs (R9, #148); missing or
+    /// unreadable: decimal point.
+    #[serde(default, deserialize_with = "lenient")]
+    new_graph_decimal_comma: Option<bool>,
+    /// "Keep in Results" remembered per analysis operation (M5, #148), by
+    /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
+    #[serde(default)]
+    analysis_keep_by_operation: Option<serde_json::Value>,
 }
 
 /// Name of the demo file in the configuration folder (#333).
@@ -302,6 +321,10 @@ pub struct Preferences {
     dialogs: BTreeMap<String, DialogGeometry>,
     copy_formats: Vec<CopyFormatEntry>,
     first_run_done: bool,
+    png_export_scale: f32,
+    show_formula_help: bool,
+    new_graph_decimal_comma: bool,
+    analysis_keep_by_operation: BTreeMap<String, bool>,
     path: Option<PathBuf>,
 }
 
@@ -361,6 +384,13 @@ impl Preferences {
                 .and_then(|value| serde_json::from_value::<Vec<CopyFormatEntry>>(value).ok())
                 .map_or_else(default_copy_formats, |list| normalize_copy_formats(&list)),
             first_run_done: file.first_run_done.unwrap_or(false),
+            png_export_scale: file
+                .png_export_scale
+                .filter(|scale| PNG_EXPORT_SCALES.contains(scale))
+                .unwrap_or(DEFAULT_PNG_EXPORT_SCALE),
+            show_formula_help: file.show_formula_help.unwrap_or(true),
+            new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
+            analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             path,
         }
     }
@@ -434,6 +464,43 @@ impl Preferences {
         self.save_field("svg_text", name.into())
     }
 
+    /// Magnification of PNG exports, one of [`PNG_EXPORT_SCALES`]; ×4 by default.
+    pub fn png_export_scale(&self) -> f32 {
+        self.png_export_scale
+    }
+
+    /// Remembers the magnification (a value outside [`PNG_EXPORT_SCALES`] is
+    /// ignored) without replacing the other preferences.
+    pub fn save_png_export_scale(&mut self, scale: f32) -> std::io::Result<()> {
+        if !PNG_EXPORT_SCALES.contains(&scale) {
+            return Ok(());
+        }
+        self.png_export_scale = scale;
+        self.save_field("png_export_scale", scale.into())
+    }
+
+    /// Is the formula syntax help icon shown? Yes by default.
+    pub fn show_formula_help(&self) -> bool {
+        self.show_formula_help
+    }
+
+    /// Remembers the choice without replacing the other preferences.
+    pub fn save_show_formula_help(&mut self, show: bool) -> std::io::Result<()> {
+        self.show_formula_help = show;
+        self.save_field("show_formula_help", show.into())
+    }
+
+    /// Do **new** graphs write their numbers with a decimal comma? No by default.
+    pub fn new_graph_decimal_comma(&self) -> bool {
+        self.new_graph_decimal_comma
+    }
+
+    /// Remembers the choice without replacing the other preferences.
+    pub fn save_new_graph_decimal_comma(&mut self, comma: bool) -> std::io::Result<()> {
+        self.new_graph_decimal_comma = comma;
+        self.save_field("new_graph_decimal_comma", comma.into())
+    }
+
     /// Size cap of a `.stf` on open, in MB (A2, #316); 512 by default, always within
     /// `[MIN_MAX_FILE_MB, MAX_MAX_FILE_MB]`.
     pub fn max_file_mb(&self) -> u32 {
@@ -504,6 +571,40 @@ impl Preferences {
     pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
         self.analysis_keep_results = keep;
         self.save_field("analysis_keep_results", keep.into())
+    }
+
+    /// The default of "Keep in Results" for an operation that was never run:
+    /// the Preferences setting.
+    ///
+    /// The choice of an operation is remembered apart
+    /// ([`Preferences::analysis_keep_results_for`]): validating an analysis never
+    /// changes this default.
+    pub fn analysis_keep_results_default(&self) -> bool {
+        self.analysis_keep_results
+    }
+
+    /// "Keep in Results" for `kind`: its last validated choice, else the default.
+    pub fn analysis_keep_results_for(&self, kind: OperationKind) -> bool {
+        self.analysis_keep_by_operation
+            .get(kind.key())
+            .copied()
+            .unwrap_or(self.analysis_keep_results)
+    }
+
+    /// Remembers the choice made for `kind`, keeping the other preferences.
+    pub fn save_analysis_keep_results_for(
+        &mut self,
+        kind: OperationKind,
+        keep: bool,
+    ) -> std::io::Result<()> {
+        if self.analysis_keep_by_operation.get(kind.key()) == Some(&keep) {
+            return Ok(());
+        }
+        self.analysis_keep_by_operation
+            .insert(kind.key().to_string(), keep);
+        let value = serde_json::to_value(&self.analysis_keep_by_operation)
+            .map_err(std::io::Error::other)?;
+        self.save_field("analysis_keep_by_operation", value)
     }
 
     /// Is the "very low R²" dialog box allowed (#288)? On by default; the setting
@@ -689,6 +790,20 @@ fn read_dialogs(value: Option<serde_json::Value>) -> BTreeMap<String, DialogGeom
                 .map(|geometry| (kind, geometry))
         })
         .take(MAX_DIALOG_GEOMETRIES)
+        .collect()
+}
+
+/// The per-operation "Keep in Results" choices read from the file: an entry with
+/// an unknown operation or a non-boolean value is dropped alone.
+fn read_keep_by_operation(value: Option<serde_json::Value>) -> BTreeMap<String, bool> {
+    let Some(serde_json::Value::Object(map)) = value else {
+        return BTreeMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(key, value)| {
+            OperationKind::from_key(&key)?;
+            Some((key, value.as_bool()?))
+        })
         .collect()
 }
 
@@ -987,6 +1102,85 @@ mod tests {
     fn an_unknown_field_is_ignored() {
         let (_dir, path) = written(r#"{ "language": "en", "future": true }"#);
         assert_eq!(Preferences::load_from(Some(path)).language(), Some("en"));
+    }
+
+    // -- Preferences window settings (#148, lot A) --
+
+    /// A value of the wrong type, or outside the list, falls back to its own
+    /// default and never spoils the field next to it (#297).
+    #[test]
+    fn lenient_reads_of_the_window_settings_keep_the_neighbours() {
+        let (_dir, path) = written(
+            r#"{"png_export_scale":"x2","show_formula_help":"no","new_graph_decimal_comma":3,"language":"fr"}"#,
+        );
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.png_export_scale(), 4.0);
+        assert!(preferences.show_formula_help());
+        assert!(!preferences.new_graph_decimal_comma());
+        assert_eq!(preferences.language(), Some("fr"));
+        let (_dir, path) = written(r#"{"png_export_scale":3.0,"language":"fr"}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.png_export_scale(), 4.0, "not in the list");
+        assert_eq!(preferences.language(), Some("fr"));
+    }
+
+    /// The window settings are written and read back, keeping the foreign fields.
+    #[test]
+    fn the_window_settings_round_trip_and_keep_the_other_fields() {
+        let (_dir, path) = written(r#"{"language":"fr","future":{"a":1}}"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_png_export_scale(2.0).unwrap();
+        preferences.save_show_formula_help(false).unwrap();
+        preferences.save_new_graph_decimal_comma(true).unwrap();
+        let reread = Preferences::load_from(Some(path.clone()));
+        assert_eq!(reread.png_export_scale(), 2.0);
+        assert!(!reread.show_formula_help());
+        assert!(reread.new_graph_decimal_comma());
+        assert_eq!(reread.language(), Some("fr"));
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("\"future\""), "{text}");
+    }
+
+    /// M5: the per-operation choices are read entry by entry: an unknown
+    /// operation or a garbled value is dropped alone; an absent one takes the
+    /// default.
+    #[test]
+    fn the_per_operation_output_choice_is_read_entry_by_entry() {
+        let (_dir, path) = written(
+            r#"{"analysis_keep_results":true,"analysis_keep_by_operation":{"fit":false,"integrate":"yes","nonsense":true,"peaks":true}}"#,
+        );
+        let preferences = Preferences::load_from(Some(path));
+        assert!(preferences.analysis_keep_results_default());
+        assert!(!preferences.analysis_keep_results_for(OperationKind::Fit));
+        assert!(
+            preferences.analysis_keep_results_for(OperationKind::Integrate),
+            "garbled entry: the default"
+        );
+        assert!(preferences.analysis_keep_results_for(OperationKind::Peaks));
+        assert!(
+            preferences.analysis_keep_results_for(OperationKind::Smooth),
+            "never run: the default"
+        );
+        let (_dir, path) = written(r#"{"analysis_keep_by_operation":[1,2]}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert!(!preferences.analysis_keep_results_for(OperationKind::Fit));
+    }
+
+    /// Writing the choice of one operation keeps the others and the default.
+    #[test]
+    fn saving_an_operation_choice_keeps_the_default_and_the_other_operations() {
+        let (_dir, path) = written(r#"{"analysis_keep_results":true}"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences
+            .save_analysis_keep_results_for(OperationKind::Fit, false)
+            .unwrap();
+        preferences
+            .save_analysis_keep_results_for(OperationKind::Peaks, true)
+            .unwrap();
+        let reread = Preferences::load_from(Some(path));
+        assert!(reread.analysis_keep_results_default());
+        assert!(!reread.analysis_keep_results_for(OperationKind::Fit));
+        assert!(reread.analysis_keep_results_for(OperationKind::Peaks));
     }
 }
 

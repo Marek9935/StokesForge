@@ -259,19 +259,24 @@ The whole interface changes at once and the choice is remembered. You can also s
 
 Choose **File ▸ Preferences…** to open the **Preferences** window. It sets the application, not the project. The settings apply as soon as you change them. Close the window when you are done.
 
-<img src="../images/preferences-general.png" alt="The General tab of Preferences: language, maximum file size and cells, automatic recovery copy." width="480">
+<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display and Export at the left, the General page on the right." width="480">
 
-It has three tabs:
+The rubrics are listed at the left of the window:
 
 - **General**
   - **Language**.
   - **Maximum file size (MB)** and **Maximum cells (millions)**: the largest project StokesForge agrees to open. A bigger file is refused before it is read, which protects your computer from a file you received. Raise a limit here if you must open a large project.
   - **Save a recovery copy automatically** and **Copy every (min)**: see [Recovery copies](projects-and-workbooks.md#recovery-copies).
-  - **Warn when R² is low**: opens a dialog after a calculation when R² is below 0.6.
-- **Display**
-  - **Show Metadata Row** and **Show x' Row**: which header rows are shown when a **new** workbook opens. Each workbook can then change its own (see [Header rows](projects-and-workbooks.md#header-rows)).
+  - **Analysis**: **Values** sets whether an analysis window starts on **Show** or on **Keep in Results** the first time you use that analysis (see [Analysis](analysis.md)). **Warn when R² is low** opens a dialog after a calculation when R² is below 0.6.
+- **Display** has three tabs across the top:
+  - **Interface**: **Show formula syntax help** shows or hides the small help icon next to the text fields that accept a formula. It is shown by default. If the field has its own hint, a plain **?** icon stays.
+  - **Object Manager**: the same settings as **View ▸ Object Manager** (see [Object Manager](#object-manager)): **Show Axes**, **Show Objects**, the groups to expand by default and **Reset Settings**.
+  - **New**: what a **new** workbook or graph starts with. **Show Metadata Row** and **Show x' Row** set the header rows of new workbooks (see [Header rows](projects-and-workbooks.md#header-rows)). **Decimal comma on tick labels** makes new graphs write 1,5 instead of 1.5. Each graph can then change its own, and graphs that already exist do not change.
 - **Export**
+  - **SVG Text** and **PNG Resolution**: the same choices as in **Graph ▸ Export** (see [Export](export.md)). The resolution is remembered for the next sessions.
   - **Copy Graph**: the formats (SVG, PNG, PDF) offered together when you copy a graph to another application, and their order. Drag a row to reorder.
+
+<img src="../images/preferences-display-object-manager.png" alt="The Display rubric of Preferences, Object Manager tab: the lists and the groups expanded by default." width="480">
 
 ## Keyboard shortcuts
 

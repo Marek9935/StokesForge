@@ -67,12 +67,22 @@
   {
     "image": "preferences-general.png",
     "page": "guide/interface.md",
-    "shows": "The Preferences window, General tab: language, maximum file size and cells, automatic recovery copy."
+    "shows": "The Preferences window, General page with the rubrics at the left: language, maximum file size and cells, automatic recovery copy, analysis defaults."
   },
   {
     "image": "preferences-export.png",
     "page": "guide/export.md",
-    "shows": "The Preferences window, Export tab: the formats offered together by Copy Graph, in order."
+    "shows": "The Preferences window, Export page: SVG text, PNG resolution and the formats offered together by Copy Graph, in order."
+  },
+  {
+    "image": "preferences-display-object-manager.png",
+    "page": "guide/interface.md",
+    "shows": "The Preferences window, Display rubric, Object Manager tab: the lists and the groups expanded by default."
+  },
+  {
+    "image": "preferences-display-new.png",
+    "page": "guide/projects-and-workbooks.md",
+    "shows": "The Preferences window, Display rubric, New tab: the header rows of new workbooks and the decimal comma of new graphs."
   },
   {
     "image": "files-recover-projects.png",

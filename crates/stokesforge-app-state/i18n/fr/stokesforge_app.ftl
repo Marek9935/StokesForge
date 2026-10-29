@@ -3,7 +3,7 @@
 # Traduction du catalogue de référence `en` : mêmes clés, mêmes arguments, selon
 # la colonne française de `docs/ui-texts.md` (infinitif pour les
 # consignes, minuscule après la première lettre, « … » en un caractère,
-# espace insécable avant « : », « ; », « ? » et dans les guillemets « »).
+# espace insécable avant « : », « ; », « ? » et dans les guillemets « »).
 # Toute clé ajoutée à `en` s'ajoute ici dans le même commit : le test de
 # complétude est bloquant.
 
@@ -1777,6 +1777,21 @@ preferences-title = Préférences
 preferences-general = Général
 preferences-export = Export
 preferences-display = Affichage
+preferences-display-interface = Interface
+preferences-display-object-manager = Gestionnaire d'objets
+preferences-display-new = Nouveaux
+preferences-show-formula-help = Afficher l'aide de syntaxe des formules
+    .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
+preferences-om-listed = Listés dans le panneau
+preferences-new-graphs = Nouveaux graphiques
+preferences-new-graphs-note = Point de départ des graphiques que vous créez. Chaque graphique garde ensuite son propre réglage, dans ses Propriétés du graphique ; les graphiques existants ne changent pas.
+preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
+    .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
+preferences-analysis-values = Valeurs
+preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
+preferences-export-graph = Exporter le graphique
+preferences-export-graph-note = Réglable aussi depuis Graphique › Exporter. Copier le graphique utilise la même résolution PNG.
+preferences-png-scale-option = ×{ $scale }
 preferences-files = Fichiers
 preferences-max-file-size = Taille maximale d'un fichier (Mo)
 preferences-max-cells = Nombre maximal de cellules (millions)

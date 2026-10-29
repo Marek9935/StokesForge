@@ -95,7 +95,7 @@ The **Output** block decides what is written and how the analysis is kept.
 |---|---|
 | **New column** / **Replace original data** | Corrections and smoothing only. See [Replacing the original data](#replacing-the-original-data). |
 | **Add to graph** | Plots the new columns on the graph that shows the curve, in the same undo step. Only shown when a graph plots the curve. If several graphs plot it, a list lets you choose. |
-| **Show** / **Keep in Results** | **Show** writes the columns only. **Keep in Results** also keeps the computed values in the [Results pane](#the-results-pane). Your last choice is remembered. |
+| **Show** / **Keep in Results** | **Show** writes the columns only. **Keep in Results** also keeps the computed values in the [Results pane](#the-results-pane). Each analysis remembers your last choice. An analysis you have never run starts on the choice set in **File ▸ Preferences… ▸ General ▸ Values**. |
 | **Recalculate automatically** | Recalculates the columns whenever the source data change. When off, the columns are marked out of date instead. |
 | **Warn when R² is low** | Opens a dialog after the calculation when the R² of a fit is below 0.6. |
 

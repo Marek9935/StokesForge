@@ -1,10 +1,15 @@
-//! File › Preferences (#148): the application preferences window,
-//! in three tabs: **General** (the language, also settable through
-//! File › Language, and the analysis), **Display** (new workbooks) and
-//! **Export** (the Copy Graph formats: the order is changed by dragging,
-//! `reorder_list.rs`, each format is ticked). The other sections of the
-//! inventory of #148 (Folders and Paths) will be added one by one, with
-//! their questions settled.
+//! File › Preferences (#148): the application preferences window.
+//!
+//! Layout (decisions of 2026-10-29): the **rubrics are vertical tabs on the
+//! left** ([`TabStripSide::Left`]) — General, Display, Export — and a rubric
+//! with many settings has **horizontal sub-tabs** at the top (Display:
+//! Interface · Object Manager · New). Pages are short, without scrolling where
+//! possible. **General** holds the language, the file caps, autosave and the
+//! analysis defaults; **Display** the formula help icon, the Object Manager
+//! lists and the settings of *new* workbooks and graphs; **Export** the text of
+//! SVG exports, the PNG resolution and the Copy Graph formats (the order is
+//! changed by dragging, `reorder_list.rs`, each format is ticked). The menus keep
+//! their own entries, which set the same preferences.
 //!
 //! The settings apply **right away** (like the Language menu): the
 //! window has nothing to validate or cancel and goes through `modal_live_settings`
@@ -17,22 +22,34 @@ use eframe::egui;
 
 use super::dialogs::{modal_live_settings, DialogOutcome, InteractiveSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
+use super::object_manager_ui::object_manager_group_label;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
+use crate::theme;
 use stokesforge_app_state::i18n::{self, Language};
-use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry};
+use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry, ObjectManagerGroup};
 use stokesforge_app_state::quantities;
-use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState, PNG_EXPORT_SCALES};
 use stokesforge_app_state::tr;
+use stokesforge_render_svg::SvgTextMode;
 
-/// The sections, in the order of #148, already delivered.
+/// The rubrics, in the order of #148, already delivered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 enum Page {
     #[default]
     General,
     Display,
     Export,
+}
+
+/// The sub-tabs of the Display rubric.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+enum DisplayTab {
+    #[default]
+    Interface,
+    ObjectManager,
+    New,
 }
 
 /// Paints the window while it is open. Returns the chosen language, if
@@ -46,38 +63,49 @@ pub(super) fn preferences_window(
         return None;
     }
     let mut chosen = None;
-    // The open section is only a convenience of the window: neither `AppState`
-    // nor the preferences file.
+    // The open rubric and sub-tab are only a convenience of the window: neither
+    // `AppState` nor the preferences file.
     let page_id = egui::Id::new("stokesforge_preferences_page");
+    let display_id = egui::Id::new("stokesforge_preferences_display_tab");
     let mut page: Page = ctx.data(|data| data.get_temp(page_id)).unwrap_or_default();
+    let mut display_tab: DisplayTab = ctx
+        .data(|data| data.get_temp(display_id))
+        .unwrap_or_default();
     let outcome = modal_live_settings(
         ctx,
-        egui::Id::new("stokesforge_preferences"),
+        // A new identifier since the rubrics moved to the left: the size
+        // remembered (S-F8) for the old, narrow window must not pin the layout.
+        egui::Id::new("stokesforge_preferences_rubrics"),
         &tr!("preferences-title"),
-        InteractiveSize::Class(SizeClass::Medium),
+        InteractiveSize::Class(SizeClass::Large),
         |ui| {
             let tabs = [
                 (Page::General, tr!("preferences-general")),
                 (Page::Display, tr!("preferences-display")),
                 (Page::Export, tr!("preferences-export")),
             ];
-            tab_strip(
-                ui,
-                TabStripSide::Top,
-                &tabs,
-                page,
-                |picked| page = picked,
-                None,
-                || {},
-            );
-            match page {
-                Page::General => chosen = general_page(ui, state, actions),
-                Page::Display => display_page(ui, state, actions),
-                Page::Export => export_page(ui, state, actions),
-            }
+            ui.horizontal_top(|ui| {
+                tab_strip(
+                    ui,
+                    TabStripSide::Left,
+                    &tabs,
+                    page,
+                    |picked| page = picked,
+                    None,
+                    || {},
+                );
+                ui.vertical(|ui| match page {
+                    Page::General => chosen = general_page(ui, state, actions),
+                    Page::Display => display_page(ui, state, actions, &mut display_tab),
+                    Page::Export => export_page(ui, state, actions),
+                });
+            });
         },
     );
-    ctx.data_mut(|data| data.insert_temp(page_id, page));
+    ctx.data_mut(|data| {
+        data.insert_temp(page_id, page);
+        data.insert_temp(display_id, display_tab);
+    });
     if outcome != DialogOutcome::Open {
         actions.push(Action::ClosePreferences);
     }
@@ -99,6 +127,8 @@ fn general_page(
     actions: &mut Vec<Action>,
 ) -> Option<Language> {
     let mut chosen = None;
+    let mut keep_results = state.analysis_keep_results_default();
+    let keep_before = keep_results;
     let mut low_r2 = state.analysis_low_r2_dialog();
     let before = low_r2;
     let mut max_file_mb = state.max_file_mb();
@@ -110,7 +140,8 @@ fn general_page(
     let mut autosave_minutes = state.autosave_minutes();
     let autosave_minutes_before = autosave_minutes;
     form(ui, "preferences", |rows| {
-        rows.section(tr!("preferences-general"));
+        // No section title: the rubric already says "General", and a second label
+        // with the same text would make the rubric ambiguous (kittest, screen readers).
         rows.row(tr!("menu-language"), |ui| {
             let mut language = i18n::language();
             let options = [Language::English, Language::French]
@@ -158,14 +189,31 @@ fn general_page(
             .on_disabled_hover_text(tr!("disabled-autosave-off"));
         });
         rows.note(tr!("preferences-autosave-note"));
-        // Application preference (#288); each computation has its own.
+        // Application preferences (#288, M5); each computation has its own.
         rows.section(tr!("preferences-analysis"));
+        rows.row(tr!("preferences-analysis-values"), |ui| {
+            choice(
+                ui,
+                "preferences_analysis_keep",
+                &mut keep_results,
+                &[
+                    ChoiceOption::new(false, tr!("analysis-output-show"))
+                        .hint(tr!("analysis-output-show", "hint")),
+                    ChoiceOption::new(true, tr!("analysis-output-keep"))
+                        .hint(tr!("analysis-output-keep", "hint")),
+                ],
+            );
+        });
+        rows.note(tr!("preferences-analysis-values-note"));
         rows.checkbox(
             &mut low_r2,
             tr!("preferences-low-r2-dialog"),
             Some(tr!("preferences-low-r2-dialog", "hint")),
         );
     });
+    if keep_results != keep_before {
+        actions.push(Action::SetAnalysisKeepResults(keep_results));
+    }
     if low_r2 != before {
         actions.push(Action::SetAnalysisLowR2Dialog(low_r2));
     }
@@ -184,12 +232,107 @@ fn general_page(
     chosen
 }
 
-/// The header rows of **new** workbooks; open workbooks
-/// keep their own setting (Workbook menu, # checkbox).
-fn display_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+/// Display: Interface · Object Manager · New, as horizontal sub-tabs.
+fn display_page(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    tab: &mut DisplayTab,
+) {
+    let tabs = [
+        (DisplayTab::Interface, tr!("preferences-display-interface")),
+        (
+            DisplayTab::ObjectManager,
+            tr!("preferences-display-object-manager"),
+        ),
+        (DisplayTab::New, tr!("preferences-display-new")),
+    ];
+    let current = *tab;
+    tab_strip(
+        ui,
+        TabStripSide::Top,
+        &tabs,
+        current,
+        |picked| *tab = picked,
+        None,
+        || {},
+    );
+    ui.add_space(theme::SPACE_ITEM);
+    match current {
+        DisplayTab::Interface => interface_tab(ui, state, actions),
+        DisplayTab::ObjectManager => object_manager_tab(ui, state, actions),
+        DisplayTab::New => new_tab(ui, state, actions),
+    }
+}
+
+/// Display › Interface: the formula syntax help icon of the text fields.
+fn interface_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+    let mut help = state.show_formula_help();
+    let before = help;
+    form(ui, "preferences_display_interface", |rows| {
+        rows.checkbox(
+            &mut help,
+            tr!("preferences-show-formula-help"),
+            Some(tr!("preferences-show-formula-help", "hint")),
+        );
+    });
+    if help != before {
+        actions.push(Action::SetShowFormulaHelp(help));
+    }
+}
+
+/// Display › Object Manager: what the panel lists and which groups start
+/// expanded (#139). The same settings as View › Panels › Object Manager and the
+/// right-click on the panel background, so the same actions.
+fn object_manager_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+    let settings = state.object_manager_settings();
+    form(ui, "preferences_display_object_manager", |rows| {
+        rows.section(tr!("preferences-om-listed"));
+        let mut show = settings.show_scales;
+        if rows.checkbox(
+            &mut show,
+            tr!("object-manager-show-axes"),
+            Some(tr!("object-manager-show-axes", "hint")),
+        ) {
+            actions.push(Action::SetObjectManagerShowScales(show));
+        }
+        let mut show = settings.show_objects;
+        if rows.checkbox(
+            &mut show,
+            tr!("object-manager-show-objects"),
+            Some(tr!("object-manager-show-objects", "hint")),
+        ) {
+            actions.push(Action::SetObjectManagerShowObjects(show));
+        }
+        rows.section(tr!("object-manager-default-expansion"));
+        rows.note(tr!("object-manager-default-expansion", "hint"));
+        for group in ObjectManagerGroup::ALL {
+            let mut open = settings.group_open(group);
+            if rows.checkbox(&mut open, object_manager_group_label(group), None) {
+                actions.push(Action::SetObjectManagerGroupOpen { group, open });
+            }
+        }
+        rows.field(|ui| {
+            if ui
+                .button(tr!("object-manager-reset"))
+                .on_hover_text(tr!("object-manager-reset", "hint"))
+                .clicked()
+            {
+                actions.push(Action::ResetObjectManagerSettings);
+            }
+        });
+    });
+}
+
+/// Display › New: the header rows of **new** workbooks (open workbooks keep
+/// their own setting: Workbook menu, # checkbox) and the decimal separator of
+/// **new** graphs (each graph keeps its own, in Graph Properties).
+fn new_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let (mut metadata, mut x_prime) = state.workbook_header_defaults();
     let before = (metadata, x_prime);
-    form(ui, "preferences_display", |rows| {
+    let mut comma = state.new_graph_decimal_comma();
+    let comma_before = comma;
+    form(ui, "preferences_display_new", |rows| {
         rows.section(tr!("preferences-new-workbooks"));
         rows.note(tr!("preferences-new-workbooks-note"));
         rows.field(|ui| {
@@ -198,20 +341,60 @@ fn display_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) 
         rows.field(|ui| {
             ui.checkbox(&mut x_prime, tr!("preferences-show-x-prime-row"));
         });
+        rows.section(tr!("preferences-new-graphs"));
+        rows.note(tr!("preferences-new-graphs-note"));
+        rows.checkbox(
+            &mut comma,
+            tr!("preferences-new-graph-decimal-comma"),
+            Some(tr!("preferences-new-graph-decimal-comma", "hint")),
+        );
     });
     if (metadata, x_prime) != before {
         actions.push(Action::SetWorkbookHeaderDefaults { metadata, x_prime });
     }
+    if comma != comma_before {
+        actions.push(Action::SetNewGraphDecimalComma(comma));
+    }
 }
 
-/// Copy Graph: the formats offered together, in the order in which applications
-/// see them. A setting changes right away (`Action::SetCopyFormats`).
+/// Export: how a graph file is written (SVG text, PNG resolution — the same
+/// settings as Graph › Export) then Copy Graph: the formats offered together,
+/// in the order in which applications see them. A setting changes right away
+/// (`Action::SetCopyFormats`).
 fn export_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let ctx = ui.ctx().clone();
     let mut entries: Vec<CopyFormatEntry> = state.copy_formats().to_vec();
     let before = entries.clone();
     let offered = entries.iter().filter(|entry| entry.on).count();
+    let mut svg_mode = state.svg_text_mode();
+    let svg_before = svg_mode;
+    let mut scale = state.png_export_scale();
+    let scale_before = scale;
     form(ui, "preferences_export", |rows| {
+        rows.section(tr!("preferences-export-graph"));
+        rows.row(tr!("menu-graph-svg-text"), |ui| {
+            choice(
+                ui,
+                "preferences_svg_text",
+                &mut svg_mode,
+                &[
+                    ChoiceOption::new(SvgTextMode::Text, tr!("menu-graph-svg-text-text"))
+                        .hint(tr!("menu-graph-svg-text-text", "hint")),
+                    ChoiceOption::new(SvgTextMode::Outlines, tr!("menu-graph-svg-text-outlines"))
+                        .hint(tr!("menu-graph-svg-text-outlines", "hint")),
+                ],
+            );
+        });
+        rows.row(tr!("menu-graph-png-resolution"), |ui| {
+            let options = PNG_EXPORT_SCALES.map(|option| {
+                ChoiceOption::new(
+                    option,
+                    tr!("preferences-png-scale-option", scale = (option as u32)),
+                )
+            });
+            choice(ui, "preferences_png_scale", &mut scale, &options);
+        });
+        rows.note(tr!("preferences-export-graph-note"));
         rows.section(tr!("preferences-copy-graph"));
         rows.note(tr!("preferences-copy-graph-note"));
         let ids: Vec<egui::Id> = entries
@@ -249,6 +432,12 @@ fn export_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
             move_before(&mut entries, from, to);
         }
     });
+    if svg_mode != svg_before {
+        actions.push(Action::SetSvgTextMode(svg_mode));
+    }
+    if scale != scale_before {
+        actions.push(Action::SetPngExportScale(scale));
+    }
     if entries != before {
         actions.push(Action::SetCopyFormats(entries));
     }
@@ -453,8 +642,7 @@ mod tests {
     #[test]
     fn the_display_section_sets_the_rows_of_new_workbooks() {
         let mut harness = bench();
-        harness.get_by_label(&tr!("preferences-display")).click();
-        harness.run();
+        go_to_display(&mut harness, &tr!("preferences-display-new"));
         assert_eq!(
             harness.state().state.workbook_header_defaults(),
             (true, false)
@@ -471,5 +659,110 @@ mod tests {
             harness.state().state.workbook_header_defaults(),
             (false, true)
         );
+    }
+
+    fn go_to_display(harness: &mut egui_kittest::Harness<'static, Bench>, sub_tab: &str) {
+        harness.get_by_label(&tr!("preferences-display")).click();
+        harness.run();
+        harness.get_by_label(sub_tab).click();
+        harness.run();
+    }
+
+    /// The rubrics are a vertical strip at the left of the content (not a
+    /// horizontal strip above it): the three labels share one column, and the
+    /// content starts to their right.
+    #[test]
+    fn the_rubrics_are_a_column_at_the_left_of_the_content() {
+        let harness = bench();
+        let general = harness.get_by_label(&tr!("preferences-general")).rect();
+        let display = harness.get_by_label(&tr!("preferences-display")).rect();
+        let export = harness.get_by_label(&tr!("preferences-export")).rect();
+        assert!(display.top() >= general.bottom(), "stacked");
+        assert!(export.top() >= display.bottom(), "stacked");
+        assert!((general.left() - display.left()).abs() < 1.0, "one column");
+        let language = harness.get_by_label(&tr!("menu-language")).rect();
+        assert!(language.left() >= general.right(), "content on the right");
+    }
+
+    /// Display › Object Manager: the lists and the expansion defaults are the
+    /// ones of the panel's own menu (same state), and Reset restores them.
+    #[test]
+    fn the_object_manager_sub_tab_sets_the_lists_and_resets() {
+        let mut harness = bench();
+        go_to_display(&mut harness, &tr!("preferences-display-object-manager"));
+        let initial = harness.state().state.object_manager_settings();
+        assert!(!initial.show_scales);
+        harness
+            .get_by_label(&tr!("object-manager-show-axes"))
+            .click();
+        harness.run();
+        harness
+            .get_by_label(&tr!("object-manager-expand-layers"))
+            .click();
+        harness.run();
+        let changed = harness.state().state.object_manager_settings();
+        assert!(changed.show_scales, "Show Axes ticked");
+        assert!(!changed.layers_open, "Layers no longer expanded by default");
+        harness.get_by_label(&tr!("object-manager-reset")).click();
+        harness.run();
+        assert_eq!(harness.state().state.object_manager_settings(), initial);
+    }
+
+    /// The sub-tab is remembered when the rubric is left and reopened.
+    #[test]
+    fn the_display_sub_tab_is_remembered() {
+        let mut harness = bench();
+        go_to_display(&mut harness, &tr!("preferences-display-new"));
+        harness.get_by_label(&tr!("preferences-export")).click();
+        harness.run();
+        harness.get_by_label(&tr!("preferences-display")).click();
+        harness.run();
+        harness.get_by_label(&tr!("preferences-show-x-prime-row"));
+    }
+
+    /// Export: the SVG text mode and the PNG resolution are choices of this rubric.
+    #[test]
+    fn the_export_rubric_sets_the_svg_text_and_the_png_resolution() {
+        let mut harness = bench();
+        go_to_export(&mut harness);
+        assert_eq!(harness.state().state.png_export_scale(), 4.0);
+        harness.get_by_label("×2").click();
+        harness.run();
+        assert_eq!(harness.state().state.png_export_scale(), 2.0);
+        harness
+            .get_by_label(&tr!("menu-graph-svg-text-outlines"))
+            .click();
+        harness.run();
+        assert_eq!(
+            harness.state().state.svg_text_mode(),
+            stokesforge_render_svg::SvgTextMode::Outlines
+        );
+    }
+
+    /// General › Analysis: the default "Values" choice (M5) and, in Display,
+    /// the formula help and the decimal comma of new graphs.
+    #[test]
+    fn the_analysis_default_the_formula_help_and_the_new_graph_comma_are_settable() {
+        let mut harness = bench();
+        assert!(!harness.state().state.analysis_keep_results_default());
+        harness.get_by_label(&tr!("analysis-output-keep")).click();
+        harness.run();
+        assert!(harness.state().state.analysis_keep_results_default());
+
+        go_to_display(&mut harness, &tr!("preferences-display-interface"));
+        assert!(harness.state().state.show_formula_help());
+        harness
+            .get_by_label(&tr!("preferences-show-formula-help"))
+            .click();
+        harness.run();
+        assert!(!harness.state().state.show_formula_help());
+
+        go_to_display(&mut harness, &tr!("preferences-display-new"));
+        assert!(!harness.state().state.new_graph_decimal_comma());
+        harness
+            .get_by_label(&tr!("preferences-new-graph-decimal-comma"))
+            .click();
+        harness.run();
+        assert!(harness.state().state.new_graph_decimal_comma());
     }
 }

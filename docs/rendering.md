@@ -810,7 +810,8 @@ find the embedded fonts, which `pdf::ensure_embedded_fallback` loads all
 into the `fontdb`), the PNG from an SVG in outlines, independent of the installed
 fonts. `export_bytes_many` composes one SVG per requested mode. On the
 application side: "Graph › Export › SVG Text" (`Action::SetSvgTextMode`),
-preference kept in `preferences.json` (`svg_text`), never in the `.stf`;
+preference kept in `preferences.json` (`svg_text`), never in the `.stf` (also set in
+Preferences › Export);
 the copy to the clipboard (#149) always takes Text. `svg2pdf` does not
 number its fonts reproducibly when the PDF carries text:
 two PDFs of the same SVG have the same lengths but not the same bytes.

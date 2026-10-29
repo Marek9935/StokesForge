@@ -204,6 +204,9 @@ The menu is disabled when the panel is closed. **Reset** restores the hidden
 filters, the collapsed axes and the other expanded groups; the collapses already
 chosen stay free and are kept. The initial values apply
 only to groups without egui state, never to a group already painted or manipulated.
+Preferences › Display › Object Manager (#148) shows the same lists, the five
+defaults and Reset, through the same actions (no second source). The panel is always
+shown: there is no "show at startup" setting, folding it is enough.
 `preferences::ObjectManagerSettings` is the single table of defaults; the
 settings go to `preferences.json`, outside `.stf` and history. The old
 fields of the two filters are still read and written for compatibility.

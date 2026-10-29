@@ -13135,3 +13135,108 @@ fn the_about_window_opens_closes_and_copies_the_version_line() {
         stokesforge_app_state::tr!("status-version-copied")
     );
 }
+
+// -- Preferences window settings (#148, lot A) --
+
+/// A state on `session` that reads and writes the preferences `file`.
+fn state_on_preferences(session: &Session, dir: &Path, file: &Path) -> AppState {
+    AppState::new_with_preferences(
+        session.handle(),
+        dir.join("projet.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(file.to_path_buf())),
+    )
+    .expect("state")
+}
+
+/// W3: the PNG resolution and the SVG text mode outlive the session; a value
+/// outside the proposed list is ignored; a file that cannot be written reports it.
+#[test]
+fn the_png_resolution_and_the_svg_text_are_kept_across_states_on_the_same_file() {
+    use stokesforge_render_svg::SvgTextMode;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut first = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(first.png_export_scale(), 4.0, "default");
+    first.dispatch(Action::SetPngExportScale(2.0));
+    first.dispatch(Action::SetPngExportScale(3.0));
+    first.dispatch(Action::SetSvgTextMode(SvgTextMode::Outlines));
+    let second = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(second.png_export_scale(), 2.0);
+    assert_eq!(second.svg_text_mode(), SvgTextMode::Outlines);
+
+    // A write failure (a folder in place of the file) is reported.
+    let mut broken = state_on_preferences(&session, dir.path(), dir.path());
+    broken.dispatch(Action::SetPngExportScale(1.0));
+    assert!(broken.status().is_some_and(|status| status.is_error()));
+}
+
+/// R9: the preference rides in the `PlotSpec` of the three creation sites
+/// (AddGraph, PlotColumns, PlotRows), in the same command (one undo step); the
+/// graphs that exist keep their own setting.
+#[test]
+fn new_graphs_take_the_decimal_comma_preference_and_existing_ones_do_not() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, sheet, columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    let root = state.tree().root();
+    let last_graph = |state: &AppState| {
+        state
+            .tree()
+            .node(root)
+            .and_then(|node| node.children().last().copied())
+            .expect("graph")
+    };
+    state.dispatch(Action::AddGraph);
+    let old = last_graph(&state);
+    assert!(
+        !state.plot_spec(old).unwrap().decimal_comma,
+        "point by default"
+    );
+
+    state.dispatch(Action::SetNewGraphDecimalComma(true));
+    assert!(state.new_graph_decimal_comma());
+    let before = state.tree().len();
+    state.dispatch(Action::AddGraph);
+    assert!(state.plot_spec(last_graph(&state)).unwrap().decimal_comma);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.tree().len(), before, "a single history step");
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: columns.clone(),
+        plot_type: PlotType::Line,
+    });
+    assert!(state.plot_spec(last_graph(&state)).unwrap().decimal_comma);
+    state.dispatch(Action::PlotRows {
+        sheet,
+        rows: vec![0, 1],
+        plot_type: PlotType::Line,
+    });
+    assert!(state.plot_spec(last_graph(&state)).unwrap().decimal_comma);
+    assert!(
+        !state.plot_spec(old).unwrap().decimal_comma,
+        "witness: the existing graph is untouched"
+    );
+    // Remembered, and turned off again.
+    let mut next = state_on_preferences(&session, dir.path(), &file);
+    assert!(next.new_graph_decimal_comma());
+    next.dispatch(Action::SetNewGraphDecimalComma(false));
+    next.dispatch(Action::AddGraph);
+    assert!(!next.plot_spec(last_graph(&next)).unwrap().decimal_comma);
+}
+
+/// W6, M5: the formula help preference is remembered and on by default.
+#[test]
+fn the_formula_help_and_the_analysis_default_are_remembered() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut first = state_on_preferences(&session, dir.path(), &file);
+    assert!(first.show_formula_help(), "shown by default");
+    first.dispatch(Action::SetShowFormulaHelp(false));
+    first.dispatch(Action::SetAnalysisKeepResults(true));
+    let second = state_on_preferences(&session, dir.path(), &file);
+    assert!(!second.show_formula_help());
+    assert!(second.analysis_keep_results_default());
+}

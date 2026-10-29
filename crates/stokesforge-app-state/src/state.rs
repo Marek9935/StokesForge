@@ -902,8 +902,17 @@ pub enum Action {
         /// Framed spec to copy.
         spec: Box<PlotSpec>,
     },
-    /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]).
+    /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]); remembered from one
+    /// session to the next (#148).
     SetPngExportScale(f32),
+    /// Shows or hides the formula syntax help icon (#148).
+    SetShowFormulaHelp(bool),
+    /// New graphs write their numbers with a decimal comma (R9, #148); the
+    /// graphs that exist keep their own setting.
+    SetNewGraphDecimalComma(bool),
+    /// The default of "Keep in Results" for the analyses (M5, #148); the choice
+    /// of an operation already run is remembered apart.
+    SetAnalysisKeepResults(bool),
     /// Remembers the size and position of a kind of dialog when it is
     /// closed (S-F8, #228). Application preference: no command, no
     /// history, no `.stf`.
@@ -2729,9 +2738,6 @@ pub struct AppState {
     /// [`Action::CopyGraphFigure`] and picked up by the window (#149).
     figure_clipboard: Option<Vec<FigureBytes>>,
     copied_objects: Vec<(NodeId, NodeId, bool)>,
-    /// Scale of PNG exports (issue #34), one of
-    /// [`PNG_EXPORT_SCALES`]. Session preference, not part of the project.
-    png_export_scale: f32,
     object_manager_open: bool,
     object_manager_preferences: Preferences,
     /// Last message meant for the user.
@@ -2818,9 +2824,6 @@ pub struct AppState {
     metadata_view: Option<NodeId>,
     /// Form of the analysis window, if it is open (#181).
     analysis: Option<crate::analysis::AnalysisForm>,
-    /// "Keep in Results": the last choice of the session (M5), reused at
-    /// the next opening.
-    analysis_keep_results: bool,
     /// For each calculation with a very low R², the fingerprint of that R² at the last
     /// snapshot: the box (#288) opens only when it changes.
     low_r2_seen: std::collections::BTreeMap<NodeId, Vec<(usize, u64)>>,
@@ -2927,7 +2930,6 @@ impl AppState {
         preferences: Preferences,
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
-        let keep_results_default = preferences.analysis_keep_results();
         let analysis_recent = preferences.analysis_recent().to_vec();
         // Never deduced from `path`: a file that exists is not a loaded
         // project (#315). `main` sets the mark through [`AppState::mark_loaded`].
@@ -2960,7 +2962,6 @@ impl AppState {
             copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
             path,
-            png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
             object_manager_open: preferences.object_manager_open(),
             object_manager_preferences: preferences,
             status: None,
@@ -2988,7 +2989,6 @@ impl AppState {
             projects_to_open: Vec::new(),
             metadata_view: None,
             analysis: None,
-            analysis_keep_results: keep_results_default,
             low_r2_seen: std::collections::BTreeMap::new(),
             analysis_recent,
             pending_calculation_delete: None,
@@ -4893,7 +4893,10 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.snapshot.tree.root(),
                 name: None,
-                spec: PlotSpec::empty(""),
+                spec: PlotSpec {
+                    decimal_comma: self.new_graph_decimal_comma(),
+                    ..PlotSpec::empty("")
+                },
             }),
             Action::AddWorkbook => self.add_workbook(),
             Action::AddFolder { parent } => self.add_folder(parent),
@@ -5461,8 +5464,41 @@ impl AppState {
                 }
             }
             Action::SetPngExportScale(scale) => {
-                if PNG_EXPORT_SCALES.contains(&scale) {
-                    self.png_export_scale = scale;
+                if let Err(error) = self.object_manager_preferences.save_png_export_scale(scale) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetShowFormulaHelp(show) => {
+                if let Err(error) = self.object_manager_preferences.save_show_formula_help(show) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetNewGraphDecimalComma(comma) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_new_graph_decimal_comma(comma)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetAnalysisKeepResults(keep) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_analysis_keep_results(keep)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
                 }
             }
             Action::RememberDialogGeometry { kind, geometry } => {
@@ -7139,6 +7175,16 @@ impl AppState {
         self.object_manager_preferences.analysis_low_r2_dialog()
     }
 
+    /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
+    pub fn new_graph_decimal_comma(&self) -> bool {
+        self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// Is the formula syntax help icon shown next to the formula fields (#148)?
+    pub fn show_formula_help(&self) -> bool {
+        self.object_manager_preferences.show_formula_help()
+    }
+
     /// The header rows `(Metadata, x')` of new workbooks.
     pub fn workbook_header_defaults(&self) -> (bool, bool) {
         self.object_manager_preferences.workbook_header_rows()
@@ -7155,7 +7201,7 @@ impl AppState {
 
     /// The scale-up of PNG exports.
     pub fn png_export_scale(&self) -> f32 {
-        self.png_export_scale
+        self.object_manager_preferences.png_export_scale()
     }
 
     /// See [`Action::ExportGraph`]. Measures and composes like the screen:
@@ -7180,7 +7226,7 @@ impl AppState {
     fn write_graph_export(&mut self, path: &std::path::Path, spec: &PlotSpec) {
         let Some(format) = stokesforge_render_svg::ExportFormat::from_path(
             path,
-            self.png_export_scale,
+            self.png_export_scale(),
             self.svg_text_mode(),
         ) else {
             self.fail(tr!(
@@ -7236,7 +7282,7 @@ impl AppState {
                 CopyFormat::Png => (
                     "PNG",
                     ExportFormat::Png {
-                        scale: self.png_export_scale,
+                        scale: self.png_export_scale(),
                     },
                 ),
                 CopyFormat::Pdf => ("PDF", ExportFormat::Pdf),
@@ -9463,8 +9509,11 @@ impl AppState {
             layer.push_series_batch(series);
             panels.push(layer);
         }
+        // The new-graph default of the Preferences rides in the spec of the
+        // creation itself: one command, one history step.
         let spec = PlotSpec {
             panels: Panels::new(panels),
+            decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {
@@ -9698,6 +9747,7 @@ impl AppState {
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
+            decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {

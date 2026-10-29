@@ -350,6 +350,26 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "preferences-display-object-manager",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+            click(h, "Display");
+            click(h, "Object Manager");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "preferences-display-new",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+            click(h, "Display");
+            click(h, "New");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
         name: "files-recover-projects",
         setup: |h| {
             empty_workspace(h);

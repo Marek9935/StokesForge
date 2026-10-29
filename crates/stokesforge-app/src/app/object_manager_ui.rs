@@ -501,6 +501,17 @@ fn object_visibility(
     }
 }
 
+/// The name of a family in the "Expand by Default" lists (menu and Preferences).
+pub(super) fn object_manager_group_label(group: ObjectManagerGroup) -> String {
+    match group {
+        ObjectManagerGroup::Graph => tr!("window-kind-graph"),
+        ObjectManagerGroup::Layers => tr!("object-manager-expand-layers"),
+        ObjectManagerGroup::Plots => tr!("object-manager-expand-plots"),
+        ObjectManagerGroup::Axes => tr!("object-manager-axes"),
+        ObjectManagerGroup::Objects => tr!("object-manager-objects"),
+    }
+}
+
 /// The Object Manager settings menu, **flat** (#152): it is the right-click
 /// menu on the panel background, without a "Settings ▸" wrapper. The
 /// checkboxes keep the menu open (#114). The settings touch neither the
@@ -534,13 +545,7 @@ pub(super) fn object_manager_settings_contents(
             .config(config.clone())
             .ui(ui, |ui| {
                 for group in ObjectManagerGroup::ALL {
-                    let label = match group {
-                        ObjectManagerGroup::Graph => tr!("window-kind-graph"),
-                        ObjectManagerGroup::Layers => tr!("object-manager-expand-layers"),
-                        ObjectManagerGroup::Plots => tr!("object-manager-expand-plots"),
-                        ObjectManagerGroup::Axes => tr!("object-manager-axes"),
-                        ObjectManagerGroup::Objects => tr!("object-manager-objects"),
-                    };
+                    let label = object_manager_group_label(group);
                     let mut open = settings.group_open(group);
                     if ui.checkbox(&mut open, label).changed() {
                         actions.push(Action::SetObjectManagerGroupOpen { group, open });

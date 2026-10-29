@@ -33,12 +33,27 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Preferences window (#148): the rubrics (General, Display, Export) are now
+  vertical tabs at the left, and Display has the sub-tabs Interface, Object
+  Manager and New. Display › Object Manager sets the same lists and
+  expand-by-default groups as the panel's menu; Export sets SVG Text and PNG
+  Resolution, as Graph › Export does.
+- PNG Resolution (#148) is now remembered from one session to the next (it came
+  back to ×4).
+- Analysis windows (#148): validating a window no longer changes the default of
+  Values (Show / Keep in Results) for every analysis. Each analysis remembers its
+  own last choice; one never run starts on the new default in Preferences ›
+  General › Analysis.
 - Linux archive (#389): it is now built on Ubuntu 22.04 and checked in CI, so it
   runs on glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
   RHEL, AlmaLinux and Rocky Linux 9 are not supported.
 
 ### Added
 
+- Preferences (#148): **Show formula syntax help** (Display › Interface) hides the
+  help icon of the formula fields, and **Decimal comma on tick labels** (Display ›
+  New) makes new graphs write 1,5; existing graphs and graphs made by scripts do
+  not change.
 - Version display (#382): **Help ▸ About StokesForge** shows the version, the
   license and the project page, with a **Copy** button for a line to paste in a
   bug report; `stokesforge-app --version` and `stokesforge-cli --version`
