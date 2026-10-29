@@ -96,7 +96,8 @@ applies it after they close. The drop events are tested without a window. On Win
 gives no pointer position during a drag from Explorer, so `begin_file_drop`
 reads the real cursor with `GetCursorPos` (converted to window points,
 #383) and `claim_file_drop` tests that position instead of egui's pointer;
-Windows is to be validated by hand. The real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
+confirmed by the user on Windows on 2026-10-29 (drop on a workbook, outline
+following the cursor, detached workbook). The real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
 the detached OS windows and the other cases of the protocol below remain to be
 validated manually.
 

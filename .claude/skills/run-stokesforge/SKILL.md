@@ -29,6 +29,6 @@ Traps (lost clicks, capture lag, focus, killing the right process) and troublesh
 
 Images for the user manual (#365) are not taken with this driver: `scripts/manual-screenshots.sh` renders them headless and reproducibly (`docs/tests.md`, "Manual screenshots"); this skill stays for exploring and checking the real app.
 
-Limits to state in the report: X11 under Xwayland only — no native Wayland, no `rfd` file chooser, no drag, no detached OS window. For those, ask the user for a screenshot. A file drop on Windows (cursor read with `GetCursorPos`, #383) is only validated by hand.
+Limits to state in the report: X11 under Xwayland only — no native Wayland, no `rfd` file chooser, no drag, no detached OS window. For those, ask the user for a screenshot. A file drop on Windows (cursor read with `GetCursorPos`, #383) can only be checked by hand (confirmed by the user on 2026-10-29).
 
 Done when the capture showing the expected state was read, the app and Xwayland are stopped, and the report says what was seen and what this path cannot show.
