@@ -242,7 +242,7 @@ yet another thing.
 identifier**; the letters that the cell shows and that one types are only
 a display, reread on every frame: inserting, deleting or moving columns
 (including the outputs of an analysis) never changes what the formula reads,
-the displayed letter follows the column (`a*2` is written `A*2`). If a column read is no
+the displayed letter follows the column (`a*2` is written `A*2`). The syntax is only `+ - * /`, unary minus (and plus), parentheses, numbers and column letters: there are **no functions** (`sin`, `sum`, ...) and no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
 longer in the sheet, the cell shows `#REF` and paints a red frame with the
 tooltip "Column deleted. Replace #REF with a column letter". Three
 inputs are **refused**: a letter that designates no column of the
