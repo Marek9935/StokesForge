@@ -949,6 +949,7 @@ pub(super) fn series_editor(
     series: &mut stokesforge_plot::SeriesSpec,
     env: &mut PickerEnv,
     locked: bool,
+    auto_bar_width: f64,
 ) -> bool {
     form(ui, "plot_series_editor", |form| {
         let mut commit = false;
@@ -986,6 +987,49 @@ pub(super) fn series_editor(
                 }),
             ),
         });
+        // Bins and width (#359): only for the type they concern; in "whole
+        // group" scope they are copied to the members of that type.
+        match series.plot_type {
+            PlotType::Histogram => {
+                commit |= form.row(tr!("plot-series-bins"), |ui| {
+                    let mut bins = series.histogram_bins.get();
+                    let changed = number_field(
+                        ui,
+                        "series_histogram_bins",
+                        &mut bins,
+                        &quantities::HISTOGRAM_BINS,
+                    )
+                    .changed;
+                    match stokesforge_plot::BinCount::new(bins) {
+                        Some(count) if changed => {
+                            series.histogram_bins = count;
+                            true
+                        }
+                        _ => false,
+                    }
+                });
+            }
+            PlotType::Bar => {
+                let hint = tr!(
+                    "common-auto-value",
+                    value = crate::number_field::format_value(
+                        auto_bar_width,
+                        quantities::BAR_WIDTH.decimals
+                    )
+                );
+                commit |= form.row(tr!("plot-series-bar-width"), |ui| {
+                    auto_number_field(
+                        ui,
+                        "series_bar_width",
+                        &mut series.bar_width,
+                        &quantities::BAR_WIDTH,
+                        &hint,
+                    )
+                    .changed
+                });
+            }
+            _ => {}
+        }
         // "Show series" is the checkbox of the series list (curve_settings.rs).
         commit |= per_series(form, locked, |form| {
             form.checkbox(
@@ -2298,6 +2342,256 @@ mod tests {
         assert_eq!(width(&harness.model()), 4.0);
         harness.state.dispatch(Action::Undo);
         assert_eq!(harness.model(), original, "a single Undo");
+    }
+
+    // -- Bins and bar width (#359) -----------------------------------------
+
+    /// The graph of the tests below: one series of type `plot_type`.
+    fn typed_harness(plot_type: PlotType) -> Harness {
+        let mut harness = harness(|spec| first_panel(spec).series[0].plot_type = plot_type);
+        harness.open(PlotSettingsTab::Series, None);
+        harness
+    }
+
+    /// The "Auto (...)" text of the bar width, if painted.
+    fn auto_width_text(painted: &[Text]) -> Option<&Text> {
+        painted.iter().find(|t| t.text.starts_with("Auto ("))
+    }
+
+    /// Types `typed` in the field showing `value`, then Enter.
+    fn type_in(harness: &mut Harness, context: &egui::Context, value: &str, typed: &str) {
+        focus_field(context, &mut harness.state, value);
+        one_frame(
+            context,
+            &mut harness.state,
+            vec![egui::Event::Text(typed.into())],
+        );
+        one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// Bins (Histogram only) and Width (Bar only): a Line series has neither.
+    #[test]
+    fn bins_and_width_follow_the_plot_type() {
+        let context = test_support::context();
+        let bins = tr!("plot-series-bins");
+        let width = tr!("plot-series-bar-width");
+        for (plot_type, has_bins, has_width) in [
+            (PlotType::Line, false, false),
+            (PlotType::Bar, false, true),
+            (PlotType::Histogram, true, false),
+        ] {
+            let mut harness = typed_harness(plot_type.clone());
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert_eq!(is_painted(&painted, &bins), has_bins, "{plot_type:?}: Bins");
+            assert_eq!(
+                is_painted(&painted, &width),
+                has_width,
+                "{plot_type:?}: Width"
+            );
+        }
+    }
+
+    /// Drawing the series page of a Bar or Histogram series writes nothing:
+    /// neither Width (still Auto, `None`) nor Bins, in the draft, the model or
+    /// the history. (The "Series" tab is not in `PlotSettingsTab::ALL`: the
+    /// test of the tabs does not draw it.)
+    #[test]
+    fn the_bins_and_width_fields_write_nothing_when_only_drawn() {
+        for plot_type in [PlotType::Bar, PlotType::Histogram] {
+            let mut harness = typed_harness(plot_type.clone());
+            let history = harness.state.undo_label();
+            let original = harness.model();
+            let context = test_support::context();
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            if plot_type == PlotType::Bar {
+                assert!(auto_width_text(&painted).is_some(), "Auto (...) painted");
+            }
+            assert_eq!(harness.draft(), original, "{plot_type:?}: draft");
+            assert_eq!(harness.model(), original, "{plot_type:?}: model");
+            assert_eq!(
+                harness.state.undo_label(),
+                history,
+                "{plot_type:?}: history"
+            );
+        }
+    }
+
+    /// Typing 25 + Enter sets the bins in the draft and the model, in a single
+    /// history entry.
+    #[test]
+    fn typed_bins_reach_the_model_in_one_history_entry() {
+        let mut harness = typed_harness(PlotType::Histogram);
+        let context = test_support::context();
+        let original = harness.model();
+        let default = original.panels[0].series[0]
+            .histogram_bins
+            .get()
+            .to_string();
+        type_in(&mut harness, &context, &default, "25");
+        let bins = |spec: &PlotSpec| spec.panels[0].series[0].histogram_bins.get();
+        assert_eq!(bins(&harness.draft()), 25);
+        assert_eq!(bins(&harness.model()), 25);
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "a single Undo");
+    }
+
+    /// 2.5 is refused (red frame, nothing written); 0 and 65537 are clamped
+    /// to the bounds (orange frame).
+    #[test]
+    fn bins_refuse_a_fraction_and_clamp_to_the_bounds() {
+        let frames = |context: &egui::Context, harness: &mut Harness, color| {
+            let shapes = image(context, Vec::new(), |ui| {
+                plot_settings_window(ui.ctx(), &mut harness.state)
+            });
+            shapes
+                .iter()
+                .filter(|p| matches!(&p.shape, egui::Shape::Rect(r) if r.stroke.color == color))
+                .count()
+        };
+        // A fresh context per case: the field keeps its text in it.
+        let context = test_support::context();
+        let mut harness = typed_harness(PlotType::Histogram);
+        let original = harness.model();
+        let default = original.panels[0].series[0]
+            .histogram_bins
+            .get()
+            .to_string();
+        type_in(&mut harness, &context, &default, "2.5");
+        assert_eq!(harness.model(), original, "2.5 writes nothing");
+        assert_eq!(
+            frames(&context, &mut harness, crate::theme::field_refused_color()),
+            1
+        );
+
+        let context = test_support::context();
+        let mut harness = typed_harness(PlotType::Histogram);
+        type_in(&mut harness, &context, &default, "0");
+        let bins = |harness: &Harness| harness.model().panels[0].series[0].histogram_bins.get();
+        assert_eq!(bins(&harness), 1);
+        assert_eq!(
+            frames(&context, &mut harness, crate::theme::field_clamped_color()),
+            1
+        );
+
+        let context = test_support::context();
+        let mut harness = typed_harness(PlotType::Histogram);
+        type_in(&mut harness, &context, &default, "65537");
+        assert_eq!(bins(&harness), stokesforge_plot::MAX_HISTOGRAM_BINS);
+        assert_eq!(
+            frames(&context, &mut harness, crate::theme::field_clamped_color()),
+            1
+        );
+    }
+
+    /// Width: starts Auto (`None`, gray "Auto (...)"), a typed value fixes it,
+    /// `auto` and an emptied field give it back; one history entry each.
+    #[test]
+    fn the_bar_width_goes_from_auto_to_a_value_and_back() {
+        let mut harness = typed_harness(PlotType::Bar);
+        let context = test_support::context();
+        let width = |spec: &PlotSpec| spec.panels[0].series[0].bar_width;
+        assert_eq!(width(&harness.model()), None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let auto = auto_width_text(&painted).expect("Auto (...) painted");
+
+        // Auto -> 0.5.
+        focus_field(&context, &mut harness.state, &auto.text);
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![egui::Event::Text("0.5".into())],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        assert_eq!(width(&harness.draft()), Some(0.5));
+        assert_eq!(width(&harness.model()), Some(0.5));
+
+        // The word `auto` -> Auto.
+        type_in(&mut harness, &context, "0.5", "auto");
+        assert_eq!(width(&harness.model()), None, "`auto`");
+
+        // 0.5 again, then an emptied field -> Auto.
+        let auto = auto_width_text(&paint_window(&context, &mut harness.state, Vec::new()))
+            .expect("Auto (...) painted")
+            .text
+            .clone();
+        type_in(&mut harness, &context, &auto, "0.5");
+        assert_eq!(width(&harness.model()), Some(0.5));
+        focus_field(&context, &mut harness.state, "0.5");
+        one_frame(
+            &context,
+            &mut harness.state,
+            vec![key(egui::Key::Backspace)],
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        assert_eq!(width(&harness.model()), None, "emptied field");
+
+        // Four commits, four history entries: four Undo give the start back.
+        harness.state.close_plot_settings();
+        for _ in 0..4 {
+            harness.state.dispatch(Action::Undo);
+        }
+        assert_eq!(width(&harness.model()), None);
+        assert!(harness.state.undo_label().is_none(), "history exhausted");
+    }
+
+    /// "Whole group": Bins reach the Histogram members only, Width the Bar
+    /// members only; the plot type of the members stays what it was.
+    #[test]
+    fn bins_and_width_are_copied_to_the_members_of_the_matching_type() {
+        let make = |first: PlotType| {
+            harness(|spec| {
+                let panel = first_panel(spec);
+                let mut model = panel.series[0].clone();
+                panel.series.clear();
+                let mut series = Vec::new();
+                for plot_type in [first.clone(), first, PlotType::Line] {
+                    model.plot_type = plot_type;
+                    series.push(model.clone());
+                }
+                // Third member: the other kind, to prove it is skipped.
+                series[2].plot_type = if series[0].plot_type == PlotType::Bar {
+                    PlotType::Histogram
+                } else {
+                    PlotType::Bar
+                };
+                panel.push_series_batch(series);
+            })
+        };
+        let context = test_support::context();
+
+        let mut histogram = make(PlotType::Histogram);
+        histogram.open(PlotSettingsTab::Series, None);
+        histogram.state.plot_edit_mut().unwrap().selected_series = 0;
+        let default = histogram.model().panels[0].series[1]
+            .histogram_bins
+            .get()
+            .to_string();
+        type_in(&mut histogram, &context, &default, "25");
+        let after = histogram.model();
+        let series = &after.panels[0].series;
+        assert_eq!(series[0].histogram_bins.get(), 25);
+        assert_eq!(series[1].histogram_bins.get(), 25, "Histogram member");
+        assert_eq!(
+            series[2].histogram_bins.get().to_string(),
+            default,
+            "Bar member untouched"
+        );
+        assert_eq!(series[2].plot_type, PlotType::Bar, "type stays per series");
+
+        let mut bar = make(PlotType::Bar);
+        bar.open(PlotSettingsTab::Series, None);
+        bar.state.plot_edit_mut().unwrap().selected_series = 0;
+        let painted = paint_window(&context, &mut bar.state, Vec::new());
+        let auto = auto_width_text(&painted).expect("Auto (...)").text.clone();
+        type_in(&mut bar, &context, &auto, "0.5");
+        let after = bar.model();
+        let series = &after.panels[0].series;
+        assert_eq!(series[0].bar_width, Some(0.5));
+        assert_eq!(series[1].bar_width, Some(0.5), "Bar member");
+        assert_eq!(series[2].bar_width, None, "Histogram member untouched");
     }
 
     /// S-F7: the first Escape gives the field its value back (the dialog stays open),

@@ -345,6 +345,7 @@ import-step-columns-title = Columns
 
 # Values shared by several lists.
 common-auto = Auto
+common-auto-value = Auto ({ $value })
 import-option-none = None
 import-option-comma = Comma
 import-option-dot = Dot
@@ -812,6 +813,8 @@ plot-series-name =
     .hint = Empty: uses the plotted column's name as is
 plot-series-plot-type = Plot type
 plot-series-type-unknown = Unknown type (from a newer version)
+plot-series-bins = Bins
+plot-series-bar-width = Width (X units)
 plot-series-show = Show series
 plot-series-show-in-legend = Show in legend
 plot-series-line-section = Line

@@ -613,6 +613,12 @@ fn witness_each_r5_feature_changes_the_figure() {
                     stokesforge_plot::BinCount::new(7).expect("7 bins");
             }
         }),
+        ("bar width", |spec| {
+            // Batches are 1 apart: the deduced width is 0.8.
+            if let Some(panel) = spec.panels.get_mut(4) {
+                panel.series[0].bar_width = Some(0.2);
+            }
+        }),
         ("free text", |spec| {
             // At the top of spectrum A (λ = 520 nm, absorbance ≈ 0.9), within the
             // framing of the spectra panel.

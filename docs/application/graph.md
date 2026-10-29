@@ -585,7 +585,16 @@ in `stokesforge-plot` (read before writing, as requested):
   series: `SeriesSpec::name`,
   `plot_type` (`PlotType`, all variants except `Unknown`, see
   below), `visible`, `show_in_legend`, `line` (`LineSpec::color`, `style`,
-  `width`) and `symbol` (`SymbolSpec::shape`, `size`, `color`);
+  `width`) and `symbol` (`SymbolSpec::shape`, `size`, `color`); under the plot
+  type, **Bins** (`histogram_bins`, whole number 1 to `MAX_HISTOGRAM_BINS`,
+  written through `BinCount::new`) for a Histogram series only, and **Width
+  (X units)** (`bar_width`) for a Bar series only (#359). Width follows S-C4:
+  an emptied field or the word `auto` gives `None`, shown in gray as
+  "Auto (<width>)" with the value of `stokesforge_core::resolve::bar_width`;
+  a finite value above 0.000001 fixes it. In "whole group" scope both are
+  copied to the members of the matching type (`propagate_style`); the plot
+  type stays per series. Both go through the draft and `commit_plot_edit`
+  (one history entry per validated entry);
 - **Legend**: `LegendSpec::visible`, `position`.
 
 **`PlotType::Unknown` never appears in the dropdown menu**, but a
@@ -600,9 +609,6 @@ knows only the name and raw bytes (C5, level 2,
 
 **What is not done**, explicitly out of scope for this work package:
 
-- **no bar width and no number of histogram bins**:
-  `SeriesSpec::bar_width`/`histogram_bins` exist in `stokesforge-plot` but
-  have no widget here, left for a later iteration;
 - **no adding/removing of a series or panel from the window**:
   that remains the role of the "Plot" submenu and of the drag and drop already
   described above;

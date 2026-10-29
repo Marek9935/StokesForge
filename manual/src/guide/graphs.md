@@ -149,7 +149,9 @@ Use **Save Color** to keep a color in the project or for yourself. Right-click a
 
 ### Error bars and histograms
 
-- **Histogram** counts the values of one column and draws the counts as bars.
+- **Histogram** counts the values of one column and draws the counts as bars. In **Series Properties**, the **Bins** field sets the number of bars, from 1 to 65536.
+- **Bar** draws one bar per point. The **Width (X units)** field sets the width of the bars in the units of the X axis. It shows **Auto** with the computed width in gray until you type a value; empty the field, or type `auto`, to go back to it.
+- When the series is in a group and the scope is **Whole group**, **Bins** and **Width (X units)** are copied to the members that have the matching type.
 - **Line + Error Bars** draws a whisker above and below each point. The error values must come from columns that you give with a script, using the `x_error` and `y_error` options of `pyst.plot`. See [The pyst API](../scripting/api.md). The plot menus do not set them.
 
 ### Series groups

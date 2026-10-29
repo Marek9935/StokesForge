@@ -126,6 +126,19 @@ pub const MINOR_TICK_COUNT: Quantity = Quantity::whole(4.0)
 /// One tick out of n is labeled (#344): 1 labels them all.
 pub const LABEL_EVERY: Quantity = Quantity::whole(1.0).between(1.0, 99.0);
 
+/// Number of bins of a histogram (#359): a whole number from 1 to
+/// `MAX_HISTOGRAM_BINS`, read from the plot crate (the cap of `BinCount`).
+pub const HISTOGRAM_BINS: Quantity =
+    Quantity::whole(10.0).between(1.0, stokesforge_plot::MAX_HISTOGRAM_BINS as f64);
+
+/// Width of the bars, in X units (#359): strictly positive, so the smallest
+/// accepted value is 0.000001 (six decimals shown; typing 0 gives that
+/// value in an orange frame, never a zero-width bar). Auto by default: the
+/// width deduced from the data (`stokesforge_core::resolve::bar_width`).
+pub const BAR_WIDTH: Quantity = Quantity::real(0.1, 1.0, 6)
+    .between(0.000_001, 1.0e9)
+    .with_auto(AutoKind::Field);
+
 /// Length of a tick mark, in figure pixels (#344, "Advanced"): 0 to 50 (the
 /// rendering cap, `MAX_TICK_LENGTH`), integer (tick marks are drawn on whole
 /// pixels), Auto by default.
