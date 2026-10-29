@@ -113,7 +113,7 @@ See [Plot columns from a workbook](../guide/graphs.md#plot-columns-from-a-workbo
 
 ### 8. Write the title of the X axis
 
-Double-click the numbers of the X axis, under the graph. The **Graph Properties** window opens on the **Axes** tab, on the axis **X (bottom)**.
+Double-click the numbers of the X axis, under the graph, or the line of the axis (the bottom edge of the plot). The **Graph Properties** window opens on the **Axes** tab, on the axis **X (bottom)**.
 
 In the section **Axis title**:
 

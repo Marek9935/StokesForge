@@ -31,6 +31,8 @@ Always compiled; `cargo test --workspace` covers it (`docs/rendering.md` § Typs
 
 A continuous gesture (dragging free text, editing in place, moving a title or the legend) never edits the model each frame: the preview sits on the view (`GraphView::set_annotation_preview`, `set_text_preview`, counted in `view_generation`), and the app sends **one** action at the end — one history entry. `hold_preview` keeps it until the model catches up. App side: `app::graph_window::annotation_interactions`, editors in `app/graph_text_edit.rs` (`commit_annotation_editor`). Pan is Ctrl + drag or middle-click drag, decided on press (`decide_nav`), never a plain drag (#318).
 
+Hit-testing (`hit.rs`, #385): an axis is its tick band **and** its line (a strip of `AXIS_LINE_TOLERANCE_POINTS` screen points inside the plot area edge; callers pass `4 / display_scale` figure pixels to `component_at_with_tolerance`). Never hard-code figure pixels for a tolerance; the axis beats the curve on that strip.
+
 ## Errors
 
 `RenderError` lives in `stokesforge-render` (#255); `stokesforge-render-egui` re-exports it. Never redefine it in a backend: `stokesforge-app-state/src/errors.rs` reads it without egui.

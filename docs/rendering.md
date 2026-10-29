@@ -472,7 +472,19 @@ Since Plotters sticks the secondary axis to the plot area, each layer axis is
 plotted in an "axis only" area (`area.shrink`) that takes the edges of the
 plot area along the axis direction and is placed at its band.
 `AxisArea::offset` is the distance from the band to the plot area, which
-`hit::axis_component_at` counts. Known limit: a data right axis
+`hit::axis_component_at` counts.
+
+**Axis line as a target (#385).** The edge of the plot area also picks the axis
+(`Axis { panel, side }`, like the tick band): a strip inward from the edge,
+`AXIS_LINE_TOLERANCE_POINTS` (4) **screen points** wide, so the caller passes
+`4 / display_scale` figure pixels to `hit::component_at_with_tolerance`
+(`GraphView::component_at` does; HiDPI and enlarged figures keep the same
+strip). Clamped to a quarter of the plot area; none for a band with
+`offset > 0` or an edge with no axis area (`size == 0`); nearest edge wins in a
+corner. All axis gestures go through `component_at`, so they work there too.
+The axis beats the curve on the strip (double-click: shape, then axis, then
+curve; right-click looks for a curve only on the plot area); shapes, texts and
+annotations keep their priority. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
 the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
 

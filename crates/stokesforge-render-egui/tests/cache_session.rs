@@ -30,6 +30,22 @@ impl Fixture {
     }
 
     fn with_title(title: &str) -> Self {
+        Self::with_panel(title, |_| {})
+    }
+
+    /// The curve starts exactly at the corner of the plot area (both axes
+    /// start at 0, as does the data), so it lies on the axis lines.
+    fn curve_on_the_edges() -> Self {
+        Self::with_panel("Edges", |panel| {
+            for (axis, high) in [(&mut panel.bottom, 31.0), (&mut panel.left, 46.5)] {
+                axis.auto_range = false;
+                axis.range_min = Some(0.0);
+                axis.range_max = Some(high);
+            }
+        })
+    }
+
+    fn with_panel(title: &str, tweak: impl FnOnce(&mut PanelSpec)) -> Self {
         let mut project = Project::new("Cache").expect("project");
         let root = project.root();
         let book = project.add_empty_workbook(root, None).expect("workbook");
@@ -47,6 +63,7 @@ impl Fixture {
         let mut series = SeriesSpec::new_xy(x, column);
         series.line = LineSpec::from_palette(0);
         panel.series.push(series);
+        tweak(&mut panel);
         let spec = PlotSpec {
             title: title.into(),
             ..PlotSpec::empty("")
@@ -1217,6 +1234,89 @@ fn double_clicking_an_axis_or_a_curve_opens_its_properties() {
     let expected = view.series_at(curve, &spec).expect("targeted series");
     let signals = double_click(&context, &mut view, &fixture, rect, curve);
     assert_eq!(signals, vec![GraphEvent::OpenSeriesProperties(expected)]);
+}
+
+/// #385: the line of an axis (strip inside the plot area) opens the axis
+/// properties like its numbers, and it beats a curve lying on the edge; the
+/// framing is kept (no zoom reset).
+#[test]
+fn double_clicking_the_axis_line_opens_the_axis_even_under_a_curve() {
+    use stokesforge_render::{AxisSide, PlotComponent};
+    use stokesforge_render_egui::GraphEvent;
+    let fixture = Fixture::curve_on_the_edges();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let spec = match fixture
+        .snapshot()
+        .tree
+        .node(fixture.graph)
+        .expect("graph")
+        .kind()
+    {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => panic!("not a graph"),
+    };
+    // The bottom edge itself, where no curve passes.
+    let plain = Fixture::new();
+    let context = new_context();
+    let mut view = GraphView::new();
+    frame_with(&context, &mut view, &plain, rect, vec![], 0.0);
+    let drawn = &view.last_drawn().expect("drawn").panels[0];
+    let edge = view.display_rect().expect("display").min
+        + egui::vec2(
+            drawn.pixel_origin.0 as f32 + drawn.pixel_size.0 as f32 / 2.0,
+            drawn.pixel_origin.1 as f32 + drawn.pixel_size.1 as f32 - 1.0,
+        );
+    assert_eq!(
+        view.component_at(edge),
+        Some(PlotComponent::Axis {
+            panel: 0,
+            side: AxisSide::Bottom
+        })
+    );
+    let signals = double_click(&context, &mut view, &plain, rect, edge);
+    assert!(
+        matches!(
+            signals.as_slice(),
+            [GraphEvent::OpenAxisProperties {
+                side: AxisSide::Bottom,
+                ..
+            }]
+        ),
+        "{signals:?}"
+    );
+    assert_eq!(view.view().generation(), 0, "the framing is kept");
+
+    let context = new_context();
+    let mut view = GraphView::new();
+    frame_with(&context, &mut view, &fixture, rect, vec![], 0.0);
+    let display = view.display_rect().expect("display");
+    // A point of the bottom axis line that is also on the curve (the curve
+    // starts at the corner of the plot area).
+    let on_curve = (0..1200)
+        .flat_map(|x| (0..800).map(move |y| (x, y)))
+        .map(|(x, y)| display.min + egui::vec2(x as f32 * 0.5, y as f32 * 0.5))
+        .find(|pos| {
+            matches!(
+                view.component_at(*pos),
+                Some(PlotComponent::Axis {
+                    side: AxisSide::Bottom,
+                    ..
+                })
+            ) && view.series_at(*pos, &spec).is_some()
+        })
+        .expect("a point of the axis line lying on the curve");
+    let signals = double_click(&context, &mut view, &fixture, rect, on_curve);
+    assert!(
+        matches!(
+            signals.as_slice(),
+            [GraphEvent::OpenAxisProperties {
+                side: AxisSide::Bottom,
+                ..
+            }]
+        ),
+        "the axis beats the curve: {signals:?}"
+    );
+    assert_eq!(view.view().generation(), 0, "the framing is kept");
 }
 
 // -- #318: Ctrl + drag pans everywhere, including over an object --

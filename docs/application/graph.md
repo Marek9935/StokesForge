@@ -439,7 +439,9 @@ color setting goes through this picker, with the use that matches it.
   plot area: Add Text, Insert Object, Export, Properties…. The component
   under the pointer is found by `stokesforge_render::hit::component_at`, on the
   geometry actually allocated by Plotters (plot area, tick
-  areas, title band), not on a reconstruction. The right-click
+  areas, title band), not on a reconstruction. The axis line (a 4-point strip
+  inside the edge of the plot area, #385) picks the axis like its tick
+  band, before a curve. The right-click
   **without** a drag opens the menu; the secondary drag stays the rubber-band
   zoom. Same path in floating and detached windows
   (`graph_view_contents`);
