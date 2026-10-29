@@ -81,7 +81,9 @@ Each line is observed by a command or a page; none is declared
    mirror passes it on to GitHub).
 4. The tag triggers, on GitHub only (the mirror passes it on):
    - the blocking checks, Linux and Windows;
-   - `release-linux`, `release-manual` and `dist-windows`: archive
+   - `release-linux` (which also installs and uninstalls the archive with its
+     `install.sh`, per user and `--system`, #387), `release-manual` and
+     `dist-windows`: archive
      `StokesForge-1.0.0-linux-x86_64.tar.gz`, manual
      `StokesForge-1.0.0-manual.tar.gz` (mdBook site, #362) and installer
      `StokesForge-1.0.0-windows-setup.exe`, uploaded to the GitLab package

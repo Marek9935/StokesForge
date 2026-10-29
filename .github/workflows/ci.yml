@@ -48,6 +48,7 @@ jobs:
       # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").
       - run: python3 scripts/french-guard.py
       - run: scripts/release-notes-test.sh
+      - run: scripts/install-linux-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
@@ -192,7 +193,7 @@ jobs:
           cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
       # The distribution opens the window: virtual screen and software rendering.
       - name: Runtime dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev libxkbcommon-x11-0 xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev libxkbcommon-x11-0 xvfb desktop-file-utils
       - run: scripts/python-vendor.sh
       # On failure, the first errors and the end of the log are put in an
       # annotation (readable through the API without signing in).
@@ -205,6 +206,24 @@ jobs:
           fi
           exit "$code"
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
+      # #387: the installer of the real archive, per user then with sudo.
+      - name: Installer of the archive
+        run: |
+          set -euo pipefail
+          archive="$(ls "$PWD"/dist/StokesForge-*-linux-x86_64.tar.gz)"
+          scripts/install-linux-test.sh --archive "$archive"
+          work="$(mktemp -d)"
+          tar -xzf "$archive" -C "$work"
+          cd "$work"/StokesForge-*/
+          sudo ./install.sh --system
+          test -x /usr/local/bin/stokesforge
+          /usr/local/bin/stokesforge --version
+          test -f /usr/local/share/applications/stokesforge.desktop
+          desktop-file-validate /usr/local/share/applications/stokesforge.desktop
+          sudo ./install.sh --system --uninstall
+          test ! -e /usr/local/bin/stokesforge
+          test ! -e /opt/stokesforge/current
+          test ! -e /usr/local/share/mime/packages/stokesforge.xml
       - name: Archive to GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}

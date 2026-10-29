@@ -21,7 +21,7 @@ The installer is not signed yet, so Windows names the publisher as unknown. Clic
 3. Ask the program to use another graphics interface, with the variable `WGPU_BACKEND`. The values are `vulkan`, `dx12`, `metal`, `opengl` and `webgpu`. For example, on Linux:
 
    ```sh
-   WGPU_BACKEND=opengl ~/StokesForge-<version>/stokesforge-app
+   WGPU_BACKEND=opengl stokesforge
    ```
 
    On Windows, in PowerShell, start the program from its folder:
@@ -42,7 +42,7 @@ If a value does not work, try another. If none works, report the problem (see [R
 **What to do.** Start the program on X11 with `STOKESFORGE_X11=1`:
 
 ```sh
-STOKESFORGE_X11=1 ~/StokesForge-<version>/stokesforge-app
+STOKESFORGE_X11=1 stokesforge
 ```
 
 On a Wayland session this runs it through XWayland.
@@ -296,7 +296,7 @@ To report a mistake in the software or in this manual, open an issue on the
 
 Search the existing issues first: your problem may be known. Then write a new issue with:
 
-- **The version** of StokesForge. Open **Help ▸ About StokesForge** and click **Copy** to get a line to paste, or run `stokesforge-app --version`. If the application does not start, the version is in the name of the package you installed, for example `StokesForge-1.0.0-linux-x86_64.tar.gz`.
+- **The version** of StokesForge. Open **Help ▸ About StokesForge** and click **Copy** to get a line to paste, or run `stokesforge --version`. If the application does not start, the version is in the name of the package you installed, for example `StokesForge-1.0.0-linux-x86_64.tar.gz`.
 - **Your system**: Windows or Linux and its version. On Linux, say whether you use Wayland or X11. For a display problem, name your graphics card and its driver.
 - **The steps** to reproduce the problem, one action per line, starting from a new project.
 - **What you expected** and **what happened**. Copy the exact text of any message. The status bar keeps the last 50.

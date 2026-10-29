@@ -70,6 +70,7 @@ fmt:
     - python3 scripts/french-guard-test.py
     - python3 scripts/french-guard.py
     - scripts/release-notes-test.sh
+    - scripts/install-linux-test.sh
     - scripts/versions-aligned.sh
     - scripts/release-tag-test.sh
 

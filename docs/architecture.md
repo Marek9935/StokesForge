@@ -159,7 +159,10 @@ The `scripts/*.sh` at the root assemble and rerun the distributions
 (`dist/`) in a clean environment.
 
 **Release (#333).** `scripts/release-linux.sh` packages `dist/stokesforge-app`
-(already proven by `app-dist.sh`) as `StokesForge-<version>-linux-x86_64.tar.gz`;
+(already proven by `app-dist.sh`) as `StokesForge-<version>-linux-x86_64.tar.gz`,
+adding `scripts/install-linux.sh` as `install.sh` (per-user or `--system`
+installer, #387; its version comes from `stokesforge-app --version`, and it
+never removes the `recovery` folder that lives in the same data directory);
 `scripts/release-notes.sh` checks that a `vX.Y.Z` tag matches the versions of the
 crates (alignment by `scripts/versions-aligned.sh`, also run on every push by `fmt`: crates, internal dependencies, `Cargo.lock`, format witness; refusal of a tag outside `main` or not increasing by `scripts/release-tag-on-main.sh` and `scripts/release-tag-increasing.sh`) and a section of `CHANGELOG.md`, and prints the notes;
 `scripts/release-upload.sh linux|windows` uploads the archive or the installer to
