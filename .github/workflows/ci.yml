@@ -50,10 +50,23 @@ jobs:
       - run: scripts/release-notes-test.sh
       - run: scripts/install-linux-test.sh
       - run: scripts/glibc-floor-test.sh
+      - run: scripts/linux-packages-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
+
+  # #390: the RPM and DEB packages. nfpm (pinned, checksum verified) packs a fake
+  # distribution; rpm and dpkg-deb then read the packages back. The real packages
+  # are built and installed in containers at the tag (`release-linux`,
+  # `test-linux-packages`).
+  linux-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/nfpm-install.sh
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
+      - run: scripts/linux-packages-test.sh --nfpm
 
   # #362: the user manual (manual/) must build. mdBook is the prebuilt binary
   # of the version pinned in scripts/manual-tools.env (no `cargo install`).
@@ -213,6 +226,19 @@ jobs:
       # #389: no file of the archive may need a glibc above the floor.
       - run: scripts/glibc-floor.sh dist/stokesforge-app
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
+      # #390: RPM and DEB from the same assembled folder (install.sh left out).
+      # While the packages are not published (switch at 0 in
+      # scripts/linux-packages.env), a failure shows but does not block the
+      # release of the archive and of the Windows installer.
+      - name: Publication switch
+        id: packages
+        run: |
+          source scripts/linux-packages.env
+          echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
+      - run: scripts/nfpm-install.sh
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
+      - run: scripts/release-linux-packages.sh "${GITHUB_REF_NAME}"
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
       # #387: the installer of the real archive, per user then with sudo.
       - name: Installer of the archive
         run: |
@@ -235,6 +261,86 @@ jobs:
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-upload.sh linux "$GITHUB_REF_NAME"
+      # The packages are tested in containers (`test-linux-packages`) and only
+      # then uploaded (`upload-linux-packages`).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/StokesForge-*-linux-x86_64.rpm
+            dist/StokesForge-*-linux-x86_64.deb
+            dist/StokesForge-*-linux-x86_64.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  # #390: the real packages on the distributions they are for: install with the
+  # package dependencies only, version, menu entry, .stf type, window under a
+  # virtual screen, removal, clash with install.sh --system, rpmlint / lintian
+  # (scripts/linux-packages-install-test.sh). Fedora is pinned to a release.
+  test-linux-packages:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-linux]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:42
+            format: rpm
+          - image: debian:12
+            format: deb
+          - image: ubuntu:22.04
+            format: deb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+      # Same rule as in `release-linux`: blocking only once published.
+      - name: Publication switch
+        id: packages
+        run: |
+          source scripts/linux-packages.env
+          echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
+      - name: Install and remove in ${{ matrix.image }}
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
+        run: |
+          set -euo pipefail
+          package="$(ls "$PWD"/dist/StokesForge-*-linux-x86_64.${{ matrix.format }})"
+          archive="$(ls "$PWD"/dist/StokesForge-*-linux-x86_64.tar.gz)"
+          docker run --rm -v "$PWD/scripts:/scripts:ro" -v "$PWD/dist:/dist:ro" ${{ matrix.image }} \
+            /scripts/linux-packages-install-test.sh "/dist/$(basename "$package")" "/dist/$(basename "$archive")"
+
+  # #390: upload of the packages to the GitLab registry, after their tests and
+  # only when the publication switch of scripts/linux-packages.env is 1. The
+  # job always runs on a tag and the gating is on the steps: a job skipped by
+  # its own `if` would make `publier` (which needs it) skip too.
+  upload-linux-packages:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test-linux-packages]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publication switch
+        id: switch
+        run: |
+          source scripts/linux-packages.env
+          echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        if: steps.switch.outputs.publish == '1'
+        with:
+          name: linux-packages
+          path: dist
+      - name: Packages to GitLab
+        if: steps.switch.outputs.publish == '1'
+        env:
+          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+        run: |
+          scripts/release-upload.sh rpm "$GITHUB_REF_NAME"
+          scripts/release-upload.sh deb "$GITHUB_REF_NAME"
 
   # #362: manual of the tag. Same tag guards as `release-linux`; builds the
   # manual with the version in its title and uploads its archive to the GitLab
@@ -351,13 +457,14 @@ jobs:
         run: scripts/release-upload.sh windows "$GITHUB_REF_NAME"
 
   # #333: GitLab release. On a tag vX.Y.Z or vX.Y.Z-rcN, when the blocking
-  # checks (Linux and Windows) and the three package uploads are done. A -rcN is
+  # checks (Linux and Windows) and the package uploads are done (the RPM and DEB
+  # ones only when the switch of scripts/linux-packages.env is 1, #390). A -rcN is
   # a trial: the release is created then deleted (see
   # scripts/release-publish.sh), the tag stays. Does not depend on any GitLab
   # runner.
   publier:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, manual, release-linux, release-manual, dist-windows]
+    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, manual, linux-packages, release-linux, upload-linux-packages, release-manual, dist-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: read

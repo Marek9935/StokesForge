@@ -1,0 +1,20 @@
+# Lintian tags suppressed for the StokesForge DEB (#390), used by
+# scripts/linux-packages-install-test.sh (lintian --fail-on error). One tag per
+# line; each one is a deliberate property of the package.
+# Program, Python and extensions live together in /opt, self-contained.
+dir-or-file-in-opt
+embedded-library
+# Shipped as built by scripts/app-dist.sh, not stripped by dh_strip.
+unstripped-binary-or-object
+# The bytecode is kept on purpose (same gain as in the archive).
+package-installs-python-pycache-dir
+package-installs-python-bytecode
+# Bundled libraries find each other through the executable's rpath.
+binary-or-shlib-defines-rpath
+custom-library-search-path
+# No Debian-style changelog, man page or maintainer built from a source package.
+no-changelog
+no-manual-page
+binary-without-manpage
+changelog-file-missing-in-native-package
+no-copyright-file

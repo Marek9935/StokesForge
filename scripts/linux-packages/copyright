@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: StokesForge
+Source: https://gitlab.com/askrzypczak/stokesforge
+
+Files: *
+Copyright: 2026 the StokesForge authors (see the git history)
+License: GPL-3.0+
+
+License: GPL-3.0+
+ StokesForge is free software under the GNU General Public License, version 3
+ or (at your option) any later version. On Debian systems, the full text is in
+ /usr/share/common-licenses/GPL-3.
+ .
+ The program bundles Python and Rust libraries under their own licences: the
+ full notices are installed with the program in /opt/stokesforge (LICENSE,
+ THIRD-PARTY-LICENSES.txt and the licenses folder).
