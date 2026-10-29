@@ -80,6 +80,7 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- Drop target (#386): while you drag files or columns, the border of the one window that will receive them turns light blue (no more green line inside the workbook, which overlapped the scrollbar); over the workspace only the main window is outlined.
 - Repository in English (#377): docs, skills and scripts are translated, and
   renamed accordingly: `scripts/ci-status.sh`, `versions-aligned.sh`,
   `release-publish.sh`, `release-upload.sh`, `release-tag-increasing.sh`,

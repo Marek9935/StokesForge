@@ -19,7 +19,6 @@ use stokesforge_session::Snapshot;
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::number_field::number_field;
-use crate::theme;
 use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
@@ -59,9 +58,10 @@ const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// entry point that both use, see the head doc of the latter — no
 /// separate drop code to maintain for the detached case.
 ///
-/// A hover with an active [`ColumnDragPayload`] draws a sober outline
-/// around the graph (`theme::drop_stroke`, the same stroke as the drop of an
-/// external file); a release over it pushes
+/// A hover with an active [`ColumnDragPayload`] records this window as the
+/// drop target (`file_drop::set_drop_target`): the window paints its own
+/// border in `theme::drop_target_stroke`, the same as for an external file
+/// (#386), nothing inside the content. A release over it pushes
 /// [`stokesforge_app_state::state::drop_payload_action`] into `actions`, converted into
 /// [`Action::AddSeriesToGraph`]. Releasing anywhere other than over a graph
 /// pushes nothing: `dnd_release_payload` answers only if the pointer is
@@ -102,12 +102,7 @@ pub(super) fn graph_drop_target(
     }
     graph_contents(ui, state, actions, graph_views, graph_id);
     if hovering {
-        ui.painter().rect_stroke(
-            tab_rect,
-            4.0,
-            theme::drop_stroke(),
-            egui::StrokeKind::Inside,
-        );
+        super::file_drop::set_drop_target(ui.ctx(), ui.layer_id());
     }
 }
 
@@ -1698,14 +1693,18 @@ pub(super) mod tests {
                 if drag {
                     egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
                 }
-                let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
-                content_ui.set_clip_rect(contents);
-                graph_drop_target(
-                    &mut content_ui,
-                    &state,
-                    &mut actions,
-                    &mut graph_views,
-                    graph,
+                // Through the real window frame: the drop border is the
+                // window's, not a stroke inside the content (#386).
+                show_floating_window(
+                    ui.ctx(),
+                    egui::Id::new("drop_bench_window"),
+                    contents,
+                    ui.ctx().content_rect(),
+                    false,
+                    |ui| {
+                        graph_drop_target(ui, &state, &mut actions, &mut graph_views, graph);
+                    },
+                    |_, _| {},
                 );
             });
             output.textures_delta.clear();
@@ -1714,8 +1713,19 @@ pub(super) mod tests {
         let outline = |output: &egui::FullOutput| {
             output.shapes.iter().any(|painted| {
                 matches!(&painted.shape,
-                    egui::Shape::Rect(rect) if rect.rect == contents && rect.stroke == theme::drop_stroke())
+                    egui::Shape::Rect(rect) if rect.rect == contents && rect.stroke == crate::theme::drop_target_stroke())
             })
+        };
+        // No drop-coloured stroke anywhere else (nothing inside the content).
+        let strokes_count = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter(|painted| {
+                    matches!(&painted.shape,
+                    egui::Shape::Rect(rect) if rect.stroke == crate::theme::drop_target_stroke())
+                })
+                .count()
         };
         let release = |pos| egui::Event::PointerButton {
             pos,
@@ -1725,14 +1735,17 @@ pub(super) mod tests {
         };
 
         let inside = egui::pos2(380.0, 322.0);
+        // Warm-up: the window's layer answers the pointer from the second frame.
+        paint(vec![egui::Event::PointerMoved(inside)], false);
         let (output, actions) = paint(vec![egui::Event::PointerMoved(inside)], false);
         assert!(!outline(&output), "no outline without a drag in progress");
         assert!(actions.is_empty());
         let (output, actions) = paint(vec![egui::Event::PointerMoved(inside)], true);
         assert!(
             outline(&output),
-            "hovering with a payload outlines the graph"
+            "hovering with a payload outlines the graph window's border"
         );
+        assert_eq!(strokes_count(&output), 1, "a single drop stroke");
         assert!(actions.is_empty(), "hovering alone adds nothing");
         let (_, actions) = paint(vec![release(inside)], false);
         assert_eq!(

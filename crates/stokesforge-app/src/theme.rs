@@ -216,13 +216,14 @@ pub fn list_row_hover_fill() -> Color32 {
     Color32::from_gray(0xEC)
 }
 
-/// **Single** "drop here" stroke (#170, point 2): the accent green,
-/// for a system file dragged over the window
-/// (`app/file_drop.rs`) as for columns or rows dragged to a
-/// graph (`app/graph_window.rs`). A single look says "the drop is possible
-/// here"; the nature of the gesture (external or internal) does not change its color.
-pub fn drop_stroke() -> egui::Stroke {
-    egui::Stroke::new(2.5, ACCENT)
+/// **Single** "drop here" stroke (#170, point 2; #386): a light blue, painted
+/// on the **border of the window** that is the drop target (never inside its
+/// content), for a system file dragged over the window (`app/file_drop.rs`)
+/// as for columns or rows dragged to a graph (`app/graph_window.rs`). One look
+/// says "the drop is possible here"; the nature of the gesture does not change
+/// it. Not red: red is reserved for errors.
+pub fn drop_target_stroke() -> egui::Stroke {
+    egui::Stroke::new(2.5, Color32::from_rgb(70, 150, 230))
 }
 
 /// Import preview: recognized header line (name, sub-header, unit),
@@ -529,15 +530,21 @@ mod tests {
         assert_eq!(content, egui::vec2(50.0, 40.0 + SPACE_SECTION));
     }
 
-    /// The drop stroke (#170, point 2) is the accent green, for an external
-    /// file as for columns: not the blue from before.
+    /// The drop stroke (#386) is a light blue: blue dominant, neither the
+    /// accent green nor one of the error reds.
     #[test]
-    fn the_drop_stroke_is_the_accent_green() {
-        let stroke = drop_stroke();
-        assert_eq!(stroke.color, ACCENT);
+    fn the_drop_target_stroke_is_a_light_blue() {
+        let stroke = drop_target_stroke();
+        let color = stroke.color;
         assert!(
-            stroke.color.g() > stroke.color.b() && stroke.color.g() > stroke.color.r(),
-            "green dominant"
+            color.b() > color.r() && color.b() > color.g(),
+            "blue dominant"
+        );
+        assert_ne!(color, ACCENT);
+        assert_ne!(color, field_refused_color());
+        assert_ne!(
+            color,
+            r_squared_color(stokesforge_app_state::r_squared::RSquaredLevel::Red, false)
         );
     }
 

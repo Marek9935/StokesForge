@@ -282,6 +282,16 @@ impl Workspace<'_> {
             self.activate_clicked_tab(ui.ctx(), tab);
         }
         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
+        // The maximized window has no frame: the drop target (#386) lights up
+        // the maximized area itself.
+        if super::file_drop::is_drop_target(ui.ctx(), ui.layer_id()) {
+            ui.painter().rect_stroke(
+                ui.max_rect(),
+                0.0,
+                crate::theme::drop_target_stroke(),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
 
     fn show_floating(&mut self, ui: &mut egui::Ui, active_tab: Option<Tab>) {
@@ -785,6 +795,64 @@ mod tests {
             );
             session.shutdown().unwrap();
         }
+    }
+
+    /// #386: a file hovering a maximized workbook lights up the area it fills
+    /// (it has no frame), and the application's outline stays off.
+    #[test]
+    fn a_file_over_a_maximized_workbook_lights_up_its_area() {
+        let mut project = stokesforge_core::Project::new("Maximized").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        project.add_worksheet(book, None).unwrap();
+        let session = stokesforge_session::Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let tab = Tab::Book(book);
+        let mut app = StokesForgeApp::new(state);
+        app.floating_tabs = vec![tab];
+        app.maximized_tab = Some(tab);
+        let context = super::super::test_support::context();
+        egui_extras::install_image_loaders(&context);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        let mut drops = Vec::new();
+        for _ in 0..4 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![egui::Event::PointerMoved(egui::pos2(700.0, 450.0))],
+                ..Default::default()
+            };
+            input.hovered_files = vec![egui::HoveredFile::default()];
+            let mut output = context.run_ui(input, |ui| {
+                super::super::file_drop::begin_file_drop(ui.ctx());
+                app.show_workspace(
+                    ui,
+                    Some(tab),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                );
+                super::super::file_drop::finish_file_drop(ui.ctx());
+            });
+            output.textures_delta.clear();
+            drops = output
+                .shapes
+                .iter()
+                .filter_map(|p| match &p.shape {
+                    egui::Shape::Rect(r) if r.stroke == crate::theme::drop_target_stroke() => {
+                        Some(r.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+        }
+        assert_eq!(drops.len(), 1, "one drop stroke: {drops:?}");
+        assert_ne!(
+            drops[0],
+            screen.shrink(2.0),
+            "the maximized area, not the application's outline"
+        );
+        assert!(screen.contains_rect(drops[0]));
     }
 
     /// #337: the width of a column that was never set is the default one,

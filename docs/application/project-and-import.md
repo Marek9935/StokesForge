@@ -65,10 +65,14 @@ keeps it. This gesture has no extra shortcut; it stays reachable from the menu.
 ### File drag and drop
 
 Dropping files on the main window emits `Action::DropFiles`. The hover shows
-through the application's **single** drop stroke, `theme::drop_stroke` (accent
-green, S-X5), the same one as the graph hovered by columns or rows. The
-workbook floating under the cursor claims the drop by painting itself
-(`app::file_drop::claim_file_drop`): it receives one sheet per file, otherwise
+through the application's **single** drop stroke, `theme::drop_target_stroke`
+(light blue, S-X5, #386), the same one as the graph hovered by columns or rows,
+painted on the **border of the one target window**. The workbook under the cursor
+claims the drop (`app::file_drop::claim_file_drop`) and records its layer in the
+frame's marker (`file_drop::set_drop_target`): its window frame, or the
+maximized area, or the detached viewport, paints the stroke in place of the
+active outline. Without a claim, `finish_file_drop` outlines the application.
+The claimed workbook it receives one sheet per file, otherwise
 a new workbook is created. `.stf` files are never imported: `AppState` queues
 them (`take_projects_to_open`) and `app.rs` launches a second process
 (`file_drop::open_project_in_new_window`)
@@ -97,7 +101,7 @@ gives no pointer position during a drag from Explorer, so `begin_file_drop`
 reads the real cursor with `GetCursorPos` (converted to window points,
 #383) and `claim_file_drop` tests that position instead of egui's pointer;
 confirmed by the user on Windows on 2026-10-29 (drop on a workbook, outline
-following the cursor, detached workbook). The real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
+following the cursor, detached workbook; before #386, which moved the outline onto the target window's border). The real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
 the detached OS windows and the other cases of the protocol below remain to be
 validated manually.
 

@@ -32,7 +32,7 @@ The shortcut is <kbd>Ctrl</kbd>+<kbd>"</kbd>. On an AZERTY keyboard, press <kbd>
 
 ### By dropping files
 
-Drag files from your file manager onto the main window.
+Drag files from your file manager onto the main window. The border of the window that receives the files turns light blue. Only one window is lit at a time.
 
 - StokesForge picks a template for each file. It uses the saved template that recognizes the file (see [Let a template pick itself](#let-a-template-pick-itself)). Otherwise it uses the template of the last import in this session. Otherwise it uses the default settings.
 - The wizard does not open. The files are imported straight away.
@@ -41,8 +41,8 @@ Drag files from your file manager onto the main window.
 
 Where the data goes depends on where you drop:
 
-- On an open workbook: one new sheet per file, in that workbook.
-- Anywhere else (a graph, a note, a matrix, the Project Manager): a new workbook.
+- On an open workbook (its own border is lit): one new sheet per file, in that workbook.
+- Anywhere else (a graph, a note, a matrix, the Project Manager; the outline of the main window is lit): a new workbook.
 
 A drop always creates new sheets. It never replaces or extends a sheet.
 

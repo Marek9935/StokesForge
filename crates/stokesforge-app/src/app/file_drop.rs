@@ -39,6 +39,30 @@ fn file_drop_slot_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new("stokesforge_file_drop").with(ctx.viewport_id())
 }
 
+fn file_drop_target_id(ctx: &egui::Context) -> egui::Id {
+    file_drop_slot_id(ctx).with("target")
+}
+
+/// Records `layer` as the window that is the drop target of this frame (#386):
+/// that window lights up its own border. A single one per viewport and per
+/// frame ([`begin_file_drop`] resets it); used for a file over a workbook
+/// ([`claim_file_drop`]) and for columns over a graph (`graph_drop_target`).
+pub(super) fn set_drop_target(ctx: &egui::Context, layer: egui::LayerId) {
+    let id = file_drop_target_id(ctx);
+    ctx.data_mut(|data| data.insert_temp(id, layer));
+}
+
+/// The window layer recorded by [`set_drop_target`] this frame, if any.
+pub(super) fn drop_target(ctx: &egui::Context) -> Option<egui::LayerId> {
+    let id = file_drop_target_id(ctx);
+    ctx.data(|data| data.get_temp::<egui::LayerId>(id))
+}
+
+/// Whether `layer` is this frame's drop target.
+pub(super) fn is_drop_target(ctx: &egui::Context, layer: egui::LayerId) -> bool {
+    drop_target(ctx) == Some(layer)
+}
+
 fn file_drop_cursor_id(ctx: &egui::Context) -> egui::Id {
     file_drop_slot_id(ctx).with("cursor")
 }
@@ -90,10 +114,9 @@ fn keeps_repainting(hovering: bool, cursor: Option<egui::Pos2>) -> bool {
     hovering && cursor.is_some()
 }
 
-/// Opens the frame's drop slot and paints the visual feedback: an outline
-/// around the application while a file hovers over the window (destination
-/// "new workbook"; a hovered workbook highlights itself, see
-/// [`claim_file_drop`]).
+/// Opens the frame's drop slot and forgets the previous frame's drop target.
+/// Nothing is painted here: the target window paints its own border (#386),
+/// or [`finish_file_drop`] outlines the application.
 pub(super) fn begin_file_drop(ctx: &egui::Context) {
     let active = ctx.input(|i| !i.raw.hovered_files.is_empty() || !i.raw.dropped_files.is_empty());
     let cursor = if active {
@@ -128,21 +151,10 @@ fn begin_file_drop_with(ctx: &egui::Context, cursor: Option<egui::Pos2>) {
     if keeps_repainting(hovering, cursor) {
         ctx.request_repaint();
     }
-    if hovering {
-        let rect = ctx.content_rect().shrink(2.0);
-        ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Tooltip,
-            egui::Id::new("stokesforge_file_drop_outline"),
-        ))
-        .rect_stroke(
-            rect,
-            0.0,
-            crate::theme::drop_stroke(),
-            egui::StrokeKind::Inside,
-        );
-    }
     let cursor_id = file_drop_cursor_id(ctx);
+    let target_id = file_drop_target_id(ctx);
     ctx.data_mut(|data| {
+        data.remove::<egui::LayerId>(target_id);
         match cursor {
             Some(pos) => {
                 data.insert_temp(cursor_id, pos);
@@ -159,8 +171,8 @@ fn begin_file_drop_with(ctx: &egui::Context, cursor: Option<egui::Pos2>) {
     });
 }
 
-/// Called by the workbook while it paints: highlights its area when a file
-/// hovers over it, and claims the frame's drop if it happened under the cursor
+/// Called by the workbook while it paints: records its window as the drop
+/// target when a file hovers over it, and claims the frame's drop if it happened under the cursor
 /// (`rect_contains_pointer` accounts for window stacking: only the top window
 /// answers).
 pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
@@ -177,12 +189,10 @@ pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
         return;
     }
     if ui.ctx().input(|input| !input.raw.hovered_files.is_empty()) {
-        ui.painter().rect_stroke(
-            rect,
-            0.0,
-            crate::theme::drop_stroke(),
-            egui::StrokeKind::Inside,
-        );
+        // First claim wins: the top workbook is the one lit.
+        if drop_target(ui.ctx()).is_none() {
+            set_drop_target(ui.ctx(), ui.layer_id());
+        }
     }
     ui.ctx().data_mut(|data| {
         if let Some(slot) = data.get_temp::<FileDropSlot>(slot_id) {
@@ -208,8 +218,22 @@ fn cursor_over(ui: &egui::Ui, rect: egui::Rect, pos: egui::Pos2) -> bool {
     rect.is_positive() && rect.contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
 }
 
-/// Turns the frame's drop into an [`Action::DropFiles`].
+/// Turns the frame's drop into an [`Action::DropFiles`]. While a file hovers
+/// and no window claimed it (destination "new workbook"), outlines the
+/// application: one highlighted window at a time (#386).
 pub(super) fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
+    if ctx.input(|i| !i.raw.hovered_files.is_empty()) && drop_target(ctx).is_none() {
+        ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::new("stokesforge_file_drop_outline"),
+        ))
+        .rect_stroke(
+            ctx.content_rect().shrink(2.0),
+            0.0,
+            crate::theme::drop_target_stroke(),
+            egui::StrokeKind::Inside,
+        );
+    }
     let slot_id = file_drop_slot_id(ctx);
     let slot = ctx.data_mut(|data| {
         let slot = data.get_temp::<FileDropSlot>(slot_id);
@@ -343,64 +367,126 @@ mod tests {
         );
     }
 
-    /// A file hover is visible: an outline around the window (destination
-    /// "new workbook"), a second one around the hovered workbook, **with the
-    /// same stroke** as the graph hovered by columns (`theme::drop_stroke`,
-    /// #170 point 2). Without a hover, no outline.
-    #[test]
-    fn a_file_hover_outlines_the_window_and_the_hovered_workbook() {
-        let book = NodeId::from_raw(42);
-        let context = egui::Context::default();
-        let strokes = |pointer: egui::Pos2, hovered: bool| -> Vec<(f32, [u8; 3])> {
-            let mut found = Vec::new();
-            for _ in 0..3 {
-                let image = Image {
-                    pointer,
-                    dropped: Vec::new(),
-                    hovered,
-                };
-                let mut output = context.run_ui(input(&image), |ui| {
-                    let ctx = ui.ctx().clone();
-                    begin_file_drop(&ctx);
-                    workbook(&ctx, "fake_workbook", egui::pos2(100.0, 100.0), book);
-                    finish_file_drop(&ctx);
-                });
-                output.textures_delta.clear();
-                found = output
+    const FRAMED_AT: egui::Pos2 = egui::pos2(100.0, 100.0);
+
+    fn framed_rect() -> egui::Rect {
+        egui::Rect::from_min_size(FRAMED_AT, egui::vec2(300.0, 300.0))
+    }
+
+    /// A workbook inside a real framed window (`show_floating_window`): the
+    /// frame is where the drop border is painted.
+    fn framed_workbook(ctx: &egui::Context, book: NodeId, active: bool) {
+        super::super::window_chrome::show_floating_window(
+            ctx,
+            egui::Id::new("framed_workbook"),
+            framed_rect(),
+            ctx.content_rect(),
+            active,
+            |ui| claim_file_drop(ui, book),
+            |_, _| {},
+        );
+    }
+
+    /// Rectangles stroked in the drop colour, and those stroked in the
+    /// selection colour, after a few warm-up frames.
+    fn framed_strokes(
+        context: &egui::Context,
+        pointer: egui::Pos2,
+        hovered: bool,
+        active: bool,
+    ) -> (Vec<egui::Rect>, Vec<egui::Rect>) {
+        let mut found = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            let image = Image {
+                pointer,
+                dropped: Vec::new(),
+                hovered,
+            };
+            let mut selection = egui::Color32::TRANSPARENT;
+            let mut output = context.run_ui(input(&image), |ui| {
+                let ctx = ui.ctx().clone();
+                selection = ui.visuals().selection.stroke.color;
+                begin_file_drop(&ctx);
+                framed_workbook(&ctx, NodeId::from_raw(42), active);
+                finish_file_drop(&ctx);
+            });
+            output.textures_delta.clear();
+            let rects = |color: egui::Color32| -> Vec<egui::Rect> {
+                output
                     .shapes
                     .iter()
                     .filter_map(|painted| match &painted.shape {
-                        egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
-                            // Without the alpha: the fake workbook's window opens with a fade.
-                            let [r, g, b, _] = rect.stroke.color.to_array();
-                            Some((rect.stroke.width, [r, g, b]))
+                        egui::Shape::Rect(rect)
+                            if rect.stroke.width > 0.0 && rect.stroke.color == color =>
+                        {
+                            Some(rect.rect)
                         }
                         _ => None,
                     })
-                    .collect();
-            }
-            found
-        };
-        let stroke = crate::theme::drop_stroke();
-        let [r, g, b, _] = stroke.color.to_array();
-        let expected = (stroke.width, [r, g, b]);
-        assert!(
-            strokes(egui::pos2(200.0, 200.0), false).is_empty(),
-            "without a hover, nothing"
-        );
-        assert_eq!(
-            strokes(egui::pos2(700.0, 500.0), true),
-            vec![expected],
-            "the window alone, exactly the drop stroke"
-        );
-        // The hovered workbook opens with a fade: its tint is not full yet, so
-        // the width and the green dominance are checked.
-        let both = strokes(egui::pos2(200.0, 200.0), true);
-        assert_eq!(both.len(), 2, "the window and the hovered workbook");
-        for (width, [r, g, b]) in both {
-            assert_eq!(width, stroke.width, "same width as the graph");
-            assert!(g > r && g > b, "accent green, not the earlier blue");
+                    .collect()
+            };
+            found = (
+                rects(crate::theme::drop_target_stroke().color),
+                rects(selection),
+            );
         }
+        found
+    }
+
+    /// Hovering the workspace away from the workbooks (destination "new
+    /// workbook"): the application's outline alone, in the drop colour.
+    /// Without a hover, no drop-coloured stroke.
+    #[test]
+    fn a_file_over_the_workspace_outlines_the_application_alone() {
+        let context = egui::Context::default();
+        let away = egui::pos2(700.0, 500.0);
+        let (drop, _) = framed_strokes(&context, away, true, false);
+        assert_eq!(
+            drop,
+            vec![context.content_rect().shrink(2.0)],
+            "the main outline, once"
+        );
+        let (drop, _) = framed_strokes(&egui::Context::default(), away, false, false);
+        assert!(drop.is_empty(), "without a hover, nothing");
+    }
+
+    /// Hovering a framed workbook: its own border alone lights up (one window
+    /// at a time), neither the application's outline nor a stroke inside the
+    /// content (#386).
+    #[test]
+    fn a_file_over_a_workbook_lights_up_its_window_border_alone() {
+        let context = egui::Context::default();
+        let (drop, _) = framed_strokes(&context, egui::pos2(200.0, 200.0), true, false);
+        assert_eq!(drop, vec![framed_rect()]);
+        let (drop, _) = framed_strokes(
+            &egui::Context::default(),
+            egui::pos2(200.0, 200.0),
+            false,
+            false,
+        );
+        assert!(drop.is_empty(), "without a hover, nothing");
+    }
+
+    /// An active and targeted window: the drop border replaces the active
+    /// outline instead of being drawn over it.
+    #[test]
+    fn the_drop_border_replaces_the_active_outline() {
+        let context = egui::Context::default();
+        let (drop, selection) = framed_strokes(&context, egui::pos2(200.0, 200.0), true, true);
+        assert_eq!(drop, vec![framed_rect()]);
+        assert!(selection.is_empty(), "no active outline under the drop one");
+    }
+
+    /// The target is forgotten from one frame to the next: the workbook
+    /// hovered at frame N is back to its normal border at N+1 when the file
+    /// moves to the workspace, and the application's outline returns.
+    #[test]
+    fn the_drop_target_does_not_outlive_its_frame() {
+        let context = egui::Context::default();
+        let (drop, _) = framed_strokes(&context, egui::pos2(200.0, 200.0), true, false);
+        assert_eq!(drop, vec![framed_rect()]);
+        let (drop, _) = framed_strokes(&context, egui::pos2(700.0, 500.0), true, false);
+        assert_eq!(drop, vec![context.content_rect().shrink(2.0)]);
     }
 
     /// Two stacked workbooks: the drop goes to the one on top, the only one to
@@ -615,26 +701,35 @@ mod tests {
 
     #[test]
     fn a_hover_outlines_the_book_under_the_real_cursor() {
-        let book = NodeId::from_raw(42);
-        let books = [("b", ORIGIN, book)];
         let context = egui::Context::default();
         let stale = egui::pos2(700.0, 500.0);
         let cursor = Some(egui::pos2(200.0, 200.0));
-        let hover = Image {
-            pointer: stale,
-            dropped: Vec::new(),
-            hovered: true,
-        };
-        let mut count = 0;
+        let mut drop = Vec::new();
         for _ in 0..3 {
-            let (_, output) = frame_with(&context, &hover, cursor, &books, true);
-            count = output
+            let image = Image {
+                pointer: stale,
+                dropped: Vec::new(),
+                hovered: true,
+            };
+            let mut output = context.run_ui(input(&image), |ui| {
+                let ctx = ui.ctx().clone();
+                begin_file_drop_with(&ctx, cursor);
+                framed_workbook(&ctx, NodeId::from_raw(42), false);
+                finish_file_drop(&ctx);
+            });
+            output.textures_delta.clear();
+            drop = output
                 .shapes
                 .iter()
-                .filter(|p| matches!(&p.shape, egui::Shape::Rect(r) if r.stroke.width > 0.0))
-                .count();
+                .filter_map(|p| match &p.shape {
+                    egui::Shape::Rect(r) if r.stroke == crate::theme::drop_target_stroke() => {
+                        Some(r.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
         }
-        assert_eq!(count, 2, "the window and the workbook");
+        assert_eq!(drop, vec![framed_rect()], "the workbook's window alone");
     }
 
     #[test]

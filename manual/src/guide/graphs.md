@@ -60,7 +60,7 @@ You can add series to a graph that is already open in three ways.
 
 1. In a workbook, select whole columns.
 2. Point at the left or right edge of the selection, below the row of letters. The cursor becomes a hand.
-3. Drag the edge and drop it on the graph. A thin outline shows that the graph accepts the drop.
+3. Drag the edge and drop it on the graph. The border of the graph window turns light blue to show that the graph accepts the drop.
 
 Press <kbd>Esc</kbd> during the drag to cancel. The new series take the plot type of the last series in the layer. In an empty layer they are lines. They go into the active layer (see [The active layer](#the-active-layer)).
 
