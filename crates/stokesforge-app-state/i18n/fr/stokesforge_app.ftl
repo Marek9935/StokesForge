@@ -346,6 +346,7 @@ import-step-columns-title = Colonnes
 
 # Valeurs partagées par plusieurs listes.
 common-auto = Auto
+common-auto-value = Auto ({ $value })
 import-option-none = Aucun
 import-option-comma = Virgule
 import-option-dot = Point
@@ -811,6 +812,8 @@ plot-series-name =
     .hint = Vide : reprend tel quel le nom de la colonne tracée
 plot-series-plot-type = Type de tracé
 plot-series-type-unknown = Type inconnu (d'une version plus récente)
+plot-series-bins = Classes
+plot-series-bar-width = Largeur (unités X)
 plot-series-show = Afficher la série
 plot-series-show-in-legend = Afficher dans la légende
 plot-series-line-section = Trait

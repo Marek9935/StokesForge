@@ -67,6 +67,11 @@ without a message, see `docs/persistence.md`).
   help icon of the formula fields, and **Decimal comma on tick labels** (Display ›
   New) makes new graphs write 1,5; existing graphs and graphs made by scripts do
   not change.
+- Histogram and bar series (#359): **Series Properties** has a **Bins** field
+  (1 to 65536) for a Histogram series and a **Width (X units)** field for a Bar
+  series, Auto by default (gray "Auto (computed width)"; empty the field or type
+  `auto` to go back). In "Whole group" scope both are copied to the members of
+  the matching type.
 - Version display (#382): **Help ▸ About StokesForge** shows the version, the
   license and the project page, with a **Copy** button for a line to paste in a
   bug report; `stokesforge-app --version` and `stokesforge-cli --version`

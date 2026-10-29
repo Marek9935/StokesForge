@@ -107,7 +107,7 @@ pub(super) fn curve_settings_page(
                 .id_salt("curve_settings_editor")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    commit |= series_page(ui, panel, layer, selected, env, actions);
+                    commit |= series_page(ui, panel, layer, tree, selected, env, actions);
                 });
         });
     });
@@ -132,6 +132,17 @@ fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index
         }
         if edited.symbol.size != before.symbol.size {
             other.symbol.size = edited.symbol.size;
+        }
+        // Bins and bar width (#359) only reach the members they concern.
+        if edited.histogram_bins != before.histogram_bins
+            && other.plot_type == stokesforge_plot::PlotType::Histogram
+        {
+            other.histogram_bins = edited.histogram_bins;
+        }
+        if edited.bar_width != before.bar_width
+            && other.plot_type == stokesforge_plot::PlotType::Bar
+        {
+            other.bar_width = edited.bar_width;
         }
     }
 }
@@ -378,6 +389,7 @@ fn series_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     layer: usize,
+    tree: &Tree,
     index: &mut usize,
     env: &mut PickerEnv,
     actions: &mut Vec<Action>,
@@ -401,7 +413,18 @@ fn series_page(
     }
 
     let before = panel.series[*index].clone();
-    commit |= series_editor(ui, &mut panel.series[*index], env, whole_group);
+    // The width "Auto (...)" shows is the one the rendering would deduce.
+    let auto_bar_width = {
+        let resolved = stokesforge_core::resolve::resolve_series(tree, &panel.series[*index]);
+        stokesforge_core::resolve::bar_width(resolved.x.as_ref().map(|x| x.as_slice()), None)
+    };
+    commit |= series_editor(
+        ui,
+        &mut panel.series[*index],
+        env,
+        whole_group,
+        auto_bar_width,
+    );
     if let (true, Some(group)) = (whole_group, group) {
         propagate_style(panel, group, &before, *index);
     }

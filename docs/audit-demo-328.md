@@ -17,7 +17,7 @@ The numbers in brackets refer to the gaps numbered below.
 | `Graph1` (:66) | curve, axis labels, color and width | ✓ Graph › Plot (menu/drag), Graph Properties › Axes / Series |
 | `Panels` (:90) | 2×2 grid of 4 cells (`PanelSpec::at(l,c)`) | **✗ [1]** |
 | | one series per cell, type Line/Scatter/Histogram/Bar | ✓ per cell, but only in 1×1 |
-| | Histogram 20 bins (:92) | **✗ [2]** |
+| | Histogram 20 bins (:92) | ✓ Series › Bins (#359) |
 | `Axes` (:144) | log scale, grid | ✓ Graph Properties › Axes (`plot_settings.rs`) |
 | | series on the right Y axis of the same panel (`SeriesAxis::Right`, :165) | **✗ [3]** |
 | | title of the right axis | ✓ Axes › Right tab (`PlotAxis::Right`, state.rs:2213) |
@@ -26,7 +26,7 @@ The numbers in brackets refer to the gaps numbered below.
 | `PlotTypes` (:197) | 5 cells in a 2×3 grid | **✗ [1]** |
 | | the 5 plot types | ✓ type list (plot_settings.rs:771-776) |
 | | ErrorBar with `y_error` (:205) | **✗ [4]** |
-| | Histogram 30 bins | **✗ [2]** |
+| | Histogram 30 bins | ✓ Series › Bins (#359) |
 | | cell title (:258) | ✓ `panel.title` (plot_settings.rs:379) |
 | `Annotations` (:265) | text with a Typst formula | ✓ Graph › Add Text, or the Text tool |
 | | rectangle, ellipse, line, arrow | ✓ Tools bar (`shape_tools.rs`), drag on the plot area |
@@ -47,9 +47,8 @@ missing feature.
    ("no adding/removing of a series or panel from the window").
    A work package in its own right. It is not a duplicate of #168, which covers
    only the X3/Y3 layers and following.
-2. **Number of bins of a histogram: B.** `SeriesSpec::histogram_bins` has
-   no widget. `graph.md:592` acknowledges it as "left for a later iteration".
-   Small work package: one more field in Series.
+2. **Number of bins of a histogram: done (#359).** Series › Bins, and
+   Series › Width (X units) for the bars.
 3. **Series on the right Y axis of the same panel: B.** `SeriesAxis::Right`
    is assigned only by the demo, `pyst` and persistence. The only neighboring
    widget is the Axes › Right tab, which sets the axis without placing a series
@@ -79,7 +78,7 @@ missing feature.
 - **S1 (A, small)**: complete `gestures.md` and the tooltips: New Layer,
   shapes, groups and color gradient, Typst in Add Text. Check: redo `Annotations`,
   `Groups` and `Rows` by following the documentation.
-- **S2 (B, small)**: "Bins" widget (`histogram_bins`) in Series. It
+- **S2 (B, small, done #359)**: "Bins" widget (`histogram_bins`) in Series. It
   covers `Panels` and `PlotTypes`.
 - **S3 (B, medium)**: designate the error column of an ErrorBar series. To
   decide between a column role (`yEr`, like X2/Y2) and a field in Series.
