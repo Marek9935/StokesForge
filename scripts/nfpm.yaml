@@ -12,7 +12,7 @@ version_schema: none
 release: "1"
 section: science
 priority: optional
-maintainer: StokesForge <askrzypczak@users.noreply.gitlab.com>
+maintainer: StokesForge <34926298-askrzypczak@users.noreply.gitlab.com>
 description: |
   Analysis and plotting of scientific data.
   Self-contained: the program carries its own Python.

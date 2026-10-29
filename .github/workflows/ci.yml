@@ -227,8 +227,18 @@ jobs:
       - run: scripts/glibc-floor.sh dist/stokesforge-app
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
       # #390: RPM and DEB from the same assembled folder (install.sh left out).
+      # While the packages are not published (switch at 0 in
+      # scripts/linux-packages.env), a failure shows but does not block the
+      # release of the archive and of the Windows installer.
+      - name: Publication switch
+        id: packages
+        run: |
+          source scripts/linux-packages.env
+          echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
       - run: scripts/nfpm-install.sh
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
       - run: scripts/release-linux-packages.sh "${GITHUB_REF_NAME}"
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
       # #387: the installer of the real archive, per user then with sudo.
       - name: Installer of the archive
         run: |
@@ -287,7 +297,14 @@ jobs:
         with:
           name: linux-packages
           path: dist
+      # Same rule as in `release-linux`: blocking only once published.
+      - name: Publication switch
+        id: packages
+        run: |
+          source scripts/linux-packages.env
+          echo "publish=${PUBLISH_LINUX_PACKAGES}" >> "$GITHUB_OUTPUT"
       - name: Install and remove in ${{ matrix.image }}
+        continue-on-error: ${{ steps.packages.outputs.publish != '1' }}
         run: |
           set -euo pipefail
           package="$(ls "$PWD"/dist/StokesForge-*-linux-x86_64.${{ matrix.format }})"
