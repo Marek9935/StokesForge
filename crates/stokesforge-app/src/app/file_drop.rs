@@ -7,6 +7,9 @@
 //! ([`open_project_in_new_window`]); imported files join the recent list
 //! ([`remember_recent_imports`]).
 //!
+//! Position source: egui's pointer, except on Windows where winit gives none
+//! during an OLE drag, so the real cursor is read there (#383).
+//!
 //! Moved out of `app.rs` as is (#121).
 
 use eframe::egui;
@@ -36,11 +39,80 @@ fn file_drop_slot_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new("stokesforge_file_drop").with(ctx.viewport_id())
 }
 
+fn file_drop_cursor_id(ctx: &egui::Context) -> egui::Id {
+    file_drop_slot_id(ctx).with("cursor")
+}
+
+/// Window position (points) of a cursor given in physical screen pixels:
+/// `cursor_px / pixels_per_point - inner_rect.min`. `None` without the
+/// window's inner rectangle.
+fn cursor_in_window(
+    cursor_px: egui::Pos2,
+    inner_rect: Option<egui::Rect>,
+    pixels_per_point: f32,
+) -> Option<egui::Pos2> {
+    let inner = inner_rect?;
+    Some(egui::pos2(
+        cursor_px.x / pixels_per_point - inner.min.x,
+        cursor_px.y / pixels_per_point - inner.min.y,
+    ))
+}
+
+/// Real cursor in physical screen pixels (Windows only: winit sends no
+/// position during a drag from Explorer).
+#[cfg(windows)]
+fn screen_cursor_px() -> Option<egui::Pos2> {
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetCursorPos(point: *mut Point) -> i32;
+    }
+    let mut point = Point { x: 0, y: 0 };
+    // SAFETY: `point` is a valid, writable POINT for the duration of the call.
+    let ok = unsafe { GetCursorPos(&mut point) };
+    (ok != 0).then(|| egui::pos2(point.x as f32, point.y as f32))
+}
+
+#[cfg(not(windows))]
+fn screen_cursor_px() -> Option<egui::Pos2> {
+    None
+}
+
+/// During a hover with an overridden cursor, winit sends no event while the
+/// cursor moves (OLE drag): repaint on our own to follow it. (egui's own
+/// hover repaint is decided from the frame's input and masks this request in
+/// a headless test, hence a pure decision.)
+fn keeps_repainting(hovering: bool, cursor: Option<egui::Pos2>) -> bool {
+    hovering && cursor.is_some()
+}
+
 /// Opens the frame's drop slot and paints the visual feedback: an outline
 /// around the application while a file hovers over the window (destination
 /// "new workbook"; a hovered workbook highlights itself, see
 /// [`claim_file_drop`]).
 pub(super) fn begin_file_drop(ctx: &egui::Context) {
+    let active = ctx.input(|i| !i.raw.hovered_files.is_empty() || !i.raw.dropped_files.is_empty());
+    let cursor = if active {
+        screen_cursor_px().and_then(|px| {
+            cursor_in_window(
+                px,
+                ctx.input(|i| i.viewport().inner_rect),
+                ctx.pixels_per_point(),
+            )
+        })
+    } else {
+        None
+    };
+    begin_file_drop_with(ctx, cursor);
+}
+
+/// [`begin_file_drop`] with the cursor in window points (`None`: use egui's
+/// pointer).
+fn begin_file_drop_with(ctx: &egui::Context, cursor: Option<egui::Pos2>) {
     let slot_id = file_drop_slot_id(ctx);
     let (paths, hovering) = ctx.input(|input| {
         (
@@ -53,6 +125,9 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
             !input.raw.hovered_files.is_empty(),
         )
     });
+    if keeps_repainting(hovering, cursor) {
+        ctx.request_repaint();
+    }
     if hovering {
         let rect = ctx.content_rect().shrink(2.0);
         ctx.layer_painter(egui::LayerId::new(
@@ -66,7 +141,16 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
             egui::StrokeKind::Inside,
         );
     }
+    let cursor_id = file_drop_cursor_id(ctx);
     ctx.data_mut(|data| {
+        match cursor {
+            Some(pos) => {
+                data.insert_temp(cursor_id, pos);
+            }
+            None => {
+                data.remove::<egui::Pos2>(cursor_id);
+            }
+        }
         if paths.is_empty() {
             data.remove::<FileDropSlot>(slot_id);
         } else {
@@ -82,7 +166,14 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
 pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
     let slot_id = file_drop_slot_id(ui.ctx());
     let rect = ui.max_rect();
-    if !ui.rect_contains_pointer(rect) {
+    let cursor = ui
+        .ctx()
+        .data(|data| data.get_temp::<egui::Pos2>(file_drop_cursor_id(ui.ctx())));
+    let inside = match cursor {
+        Some(pos) => cursor_over(ui, rect, pos),
+        None => ui.rect_contains_pointer(rect),
+    };
+    if !inside {
         return;
     }
     if ui.ctx().input(|input| !input.raw.hovered_files.is_empty()) {
@@ -106,6 +197,15 @@ pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
             }
         }
     });
+}
+
+/// Same test as `Ui::rect_contains_pointer`, for an explicit position.
+fn cursor_over(ui: &egui::Ui, rect: egui::Rect, pos: egui::Pos2) -> bool {
+    let mut rect = ui.clip_rect().intersect(rect);
+    if let Some(to_global) = ui.ctx().layer_transform_to_global(ui.layer_id()) {
+        rect = to_global * rect;
+    }
+    rect.is_positive() && rect.contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
 }
 
 /// Turns the frame's drop into an [`Action::DropFiles`].
@@ -406,5 +506,160 @@ mod tests {
             },
         );
         output.textures_delta.clear();
+    }
+
+    /// Frame helper with a cursor override (#383): the pointer of `image` is
+    /// egui's, `cursor` is what Windows' `GetCursorPos` would give.
+    fn frame_with(
+        context: &egui::Context,
+        image: &Image,
+        cursor: Option<egui::Pos2>,
+        books: &[(&str, egui::Pos2, NodeId)],
+        move_pointer: bool,
+    ) -> (Option<Action>, egui::FullOutput) {
+        let mut raw = input(image);
+        if !move_pointer {
+            raw.events.clear();
+        }
+        let mut result = None;
+        let mut output = context.run_ui(raw, |ui| {
+            let ctx = ui.ctx().clone();
+            begin_file_drop_with(&ctx, cursor);
+            for (name, at, book) in books {
+                workbook(&ctx, name, *at, *book);
+            }
+            result = finish_file_drop(&ctx);
+        });
+        output.textures_delta.clear();
+        (result, output)
+    }
+
+    fn one_file(pointer: egui::Pos2) -> Image {
+        Image {
+            pointer,
+            dropped: vec![dropped_file("measurement.csv")],
+            hovered: false,
+        }
+    }
+
+    fn idle(pointer: egui::Pos2) -> Image {
+        Image {
+            pointer,
+            dropped: Vec::new(),
+            hovered: false,
+        }
+    }
+
+    fn target(action: Option<Action>) -> Option<NodeId> {
+        match action {
+            Some(Action::DropFiles { target_book, .. }) => target_book,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Warm-up (the areas are known from the second frame) then a drop.
+    fn drop_with(
+        pointer: egui::Pos2,
+        cursor: Option<egui::Pos2>,
+        books: &[(&str, egui::Pos2, NodeId)],
+        move_pointer: bool,
+    ) -> Option<NodeId> {
+        let context = egui::Context::default();
+        for _ in 0..2 {
+            frame_with(&context, &idle(pointer), None, books, true);
+        }
+        target(frame_with(&context, &one_file(pointer), cursor, books, move_pointer).0)
+    }
+
+    const ORIGIN: egui::Pos2 = egui::pos2(100.0, 100.0);
+
+    #[test]
+    fn the_real_cursor_wins_over_a_stale_pointer() {
+        let book = NodeId::from_raw(42);
+        let books = [("b", ORIGIN, book)];
+        let stale = egui::pos2(700.0, 500.0);
+        let on_book = Some(egui::pos2(200.0, 200.0));
+        assert_eq!(drop_with(stale, on_book, &books, true), Some(book));
+        // Not even one PointerMoved reached egui.
+        assert_eq!(drop_with(stale, on_book, &books, false), Some(book));
+        // The override also wins when egui's pointer is on the book.
+        assert_eq!(
+            drop_with(
+                egui::pos2(200.0, 200.0),
+                Some(egui::pos2(700.0, 500.0)),
+                &books,
+                true
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_real_cursor_respects_stacking() {
+        let below = NodeId::from_raw(1);
+        let above = NodeId::from_raw(2);
+        let books = [
+            ("below", ORIGIN, below),
+            ("above", egui::pos2(200.0, 200.0), above),
+        ];
+        assert_eq!(
+            drop_with(
+                egui::pos2(700.0, 500.0),
+                Some(egui::pos2(250.0, 250.0)),
+                &books,
+                true
+            ),
+            Some(above)
+        );
+    }
+
+    #[test]
+    fn a_hover_outlines_the_book_under_the_real_cursor() {
+        let book = NodeId::from_raw(42);
+        let books = [("b", ORIGIN, book)];
+        let context = egui::Context::default();
+        let stale = egui::pos2(700.0, 500.0);
+        let cursor = Some(egui::pos2(200.0, 200.0));
+        let hover = Image {
+            pointer: stale,
+            dropped: Vec::new(),
+            hovered: true,
+        };
+        let mut count = 0;
+        for _ in 0..3 {
+            let (_, output) = frame_with(&context, &hover, cursor, &books, true);
+            count = output
+                .shapes
+                .iter()
+                .filter(|p| matches!(&p.shape, egui::Shape::Rect(r) if r.stroke.width > 0.0))
+                .count();
+        }
+        assert_eq!(count, 2, "the window and the workbook");
+    }
+
+    #[test]
+    fn the_cursor_is_converted_to_window_points() {
+        let inner = Some(egui::Rect::from_min_size(
+            egui::pos2(100.0, 50.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        let px = egui::pos2(300.0, 240.0);
+        assert_eq!(
+            cursor_in_window(px, inner, 1.5),
+            Some(egui::pos2(100.0, 110.0))
+        );
+        assert_eq!(
+            cursor_in_window(px, inner, 1.0),
+            Some(egui::pos2(200.0, 190.0))
+        );
+        assert_eq!(cursor_in_window(px, None, 1.0), None);
+    }
+
+    #[test]
+    fn a_hover_with_a_real_cursor_keeps_repainting() {
+        let cursor = Some(egui::pos2(5.0, 5.0));
+        assert!(keeps_repainting(true, cursor));
+        assert!(!keeps_repainting(true, None));
+        assert!(!keeps_repainting(false, cursor));
     }
 }

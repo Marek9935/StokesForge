@@ -92,8 +92,11 @@ Project Manager, a new workbook. Drops are isolated per viewport and their
 actions go back to the main session. A drop is refused as long as the graph
 properties are open, to keep their history macro independent of the import; if
 they open while the thread is reading, `poll_import` keeps the result and
-applies it after they close. The drop events are tested without a window. The
-real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
+applies it after they close. The drop events are tested without a window. On Windows winit
+gives no pointer position during a drag from Explorer, so `begin_file_drop`
+reads the real cursor with `GetCursorPos` (converted to window points,
+#383) and `claim_file_drop` tests that position instead of egui's pointer;
+Windows is to be validated by hand. The real drop from Files on native Wayland was confirmed by the user on 2026-10-02;
 the detached OS windows and the other cases of the protocol below remain to be
 validated manually.
 
