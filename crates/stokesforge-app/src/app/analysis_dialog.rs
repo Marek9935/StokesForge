@@ -28,8 +28,15 @@ use stokesforge_app_state::r_squared::{level_of_value, RSquaredLevel};
 use stokesforge_app_state::state::{Action, AppState, CalculationDelete};
 use stokesforge_app_state::tr;
 
-/// Width of the settings column.
-const FORM_WIDTH: f32 = 330.0;
+/// Width of the settings column. It holds the widest form (Peak
+/// Decomposition: the labels column, then "Range" with its two fields, #384);
+/// a form that still exceeds it widens its column, and the preview takes only
+/// what remains (see `analysis_window`).
+const FORM_WIDTH: f32 = 400.0;
+/// Test seam of #384: the content rect of the window and the rect given to the
+/// preview, in ctx data under `id.with(LAYOUT_PROBE)`.
+#[cfg(test)]
+const LAYOUT_PROBE: &str = "layout-probe";
 /// Height reserved for the computed values below the preview.
 const VALUES_HEIGHT: f32 = 130.0;
 
@@ -246,6 +253,8 @@ pub(super) fn analysis_window(
         |_| {},
         |ui| {
             let full = ui.available_size();
+            #[cfg(test)]
+            let content_rect = ui.max_rect();
             ui.horizontal_top(|ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(FORM_WIDTH, full.y),
@@ -258,8 +267,13 @@ pub(super) fn analysis_window(
                     },
                 );
                 ui.separator();
-                ui.allocate_ui_with_layout(
-                    egui::vec2((full.x - FORM_WIDTH - 24.0).max(200.0), full.y),
+                // The width that really remains after the form, which can be
+                // wider than `FORM_WIDTH` (#384): not a width computed as if it
+                // had exactly that size, which pushed the preview out of the
+                // window.
+                let preview_width = ui.available_width().max(200.0);
+                let _preview = ui.allocate_ui_with_layout(
+                    egui::vec2(preview_width, full.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         // The preview gestures: the analysis decides its own; only
@@ -309,6 +323,13 @@ pub(super) fn analysis_window(
                         values_panel(ui, &result, &tree, series_shown.as_ref());
                     },
                 );
+                #[cfg(test)]
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        id.with(LAYOUT_PROBE),
+                        (content_rect, _preview.response.rect),
+                    );
+                });
             });
         },
     );
@@ -531,6 +552,56 @@ mod tests {
             analysis_window(ui.ctx(), state, &mut actions);
         });
         (output, actions)
+    }
+
+    /// #384: the preview stays inside the window for every analysis, and the
+    /// settings of Peak Decomposition (the widest form) fit their column:
+    /// "Keep in Results" is painted on one line, the last tick is complete.
+    #[test]
+    fn the_preview_stays_inside_the_window_and_the_widest_form_fits() {
+        for preset in [
+            Preset::Peaks,
+            Preset::Fit(Model::Linear),
+            Preset::Integrate,
+            Preset::Correct,
+            Preset::DirectDeconvolution,
+        ] {
+            let ctx = context();
+            let (session, mut state, sheet, ids) = bench();
+            state.dispatch(Action::OpenAnalysis {
+                preset: preset.clone(),
+                sheet,
+                columns: vec![ids[0], ids[1]],
+            });
+            frame(&ctx, &mut state);
+            let (output, _) = frame(&ctx, &mut state);
+            let (content, preview): (egui::Rect, egui::Rect) = ctx
+                .data(|data| {
+                    data.get_temp(egui::Id::new("stokesforge_analysis").with(LAYOUT_PROBE))
+                })
+                .expect("the dialog records its layout");
+            assert!(
+                preview.right() <= content.right() + 0.5,
+                "{preset:?}: preview right edge {} beyond the window content {}",
+                preview.right(),
+                content.right()
+            );
+            if matches!(preset, Preset::Peaks) {
+                let keep = tr!("analysis-output-keep");
+                let rows = output
+                    .shapes
+                    .iter()
+                    .find_map(|painted| match &painted.shape {
+                        egui::Shape::Text(shape) if shape.galley.job.text == keep => {
+                            Some(shape.galley.rows.len())
+                        }
+                        _ => None,
+                    })
+                    .expect("\"Keep in Results\" is painted");
+                assert_eq!(rows, 1, "\"Keep in Results\" wrapped onto several lines");
+            }
+            session.shutdown().unwrap();
+        }
     }
 
     #[test]

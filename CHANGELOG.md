@@ -24,6 +24,13 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Peak Decomposition window (#384): the preview no longer overflows the window
+  (the last tick read "70" instead of "700") and "Keep in Results" no longer
+  wraps; the settings column is wider and the preview takes the width that
+  remains.
+
 ### Changed
 
 - Linux archive (#389): it is now built on Ubuntu 22.04 and checked in CI, so it
