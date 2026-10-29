@@ -848,8 +848,7 @@ mod tests {
         }
         assert_eq!(drops.len(), 1, "one drop stroke: {drops:?}");
         assert_ne!(
-            drops[0],
-            screen.shrink(2.0),
+            drops[0], screen,
             "the maximized area, not the application's outline"
         );
         assert!(screen.contains_rect(drops[0]));

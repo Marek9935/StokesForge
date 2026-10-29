@@ -228,7 +228,7 @@ pub(super) fn finish_file_drop(ctx: &egui::Context) -> Option<Action> {
             egui::Id::new("stokesforge_file_drop_outline"),
         ))
         .rect_stroke(
-            ctx.content_rect().shrink(2.0),
+            ctx.content_rect(),
             0.0,
             crate::theme::drop_target_stroke(),
             egui::StrokeKind::Inside,
@@ -441,11 +441,7 @@ mod tests {
         let context = egui::Context::default();
         let away = egui::pos2(700.0, 500.0);
         let (drop, _) = framed_strokes(&context, away, true, false);
-        assert_eq!(
-            drop,
-            vec![context.content_rect().shrink(2.0)],
-            "the main outline, once"
-        );
+        assert_eq!(drop, vec![context.content_rect()], "the main outline, once");
         let (drop, _) = framed_strokes(&egui::Context::default(), away, false, false);
         assert!(drop.is_empty(), "without a hover, nothing");
     }
@@ -486,7 +482,7 @@ mod tests {
         let (drop, _) = framed_strokes(&context, egui::pos2(200.0, 200.0), true, false);
         assert_eq!(drop, vec![framed_rect()]);
         let (drop, _) = framed_strokes(&context, egui::pos2(700.0, 500.0), true, false);
-        assert_eq!(drop, vec![context.content_rect().shrink(2.0)]);
+        assert_eq!(drop, vec![context.content_rect()]);
     }
 
     /// Two stacked workbooks: the drop goes to the one on top, the only one to
