@@ -1,7 +1,7 @@
 # Introduction
 
 StokesForge is a desktop application for analysing and plotting scientific
-data, in the spirit of OriginLab: workbooks, graphs, fits and peak analysis,
+data: workbooks, graphs, fits and peak analysis,
 with Python scripting through `pyst`.
 
 Download it from the
