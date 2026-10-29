@@ -373,6 +373,13 @@ pub fn icon_button(
         .on_hover_text(tooltip)
 }
 
+/// The folder of the icon files, for the test that keeps the manual's copies
+/// identical (`app::manual_pages`, #367): only this module names it.
+#[cfg(test)]
+pub(crate) fn source_folder() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/icons")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
