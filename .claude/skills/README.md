@@ -29,5 +29,6 @@ request  ──► stokesforge-feature ──► command / rendering / import / 
 ## Keeping them true
 
 - A change that installs a new rule updates the skills concerned in the same commit (`CLAUDE.md`, « Conventions »); a skill that notes a deviation says it must be fixed, never that it exists.
+- A user-visible feature updates the manual `manual/src/` in the same commit (`CLAUDE.md`, « Conventions »); `stokesforge-feature` and `stokesforge-verification` carry the step.
 - A skill cites a path where the code lives now. References such as "`x.md` § Title" are checked by `crates/stokesforge-arch-guard/tests/skill_references.rs`, which also refuses an unlinked `references/` file.
 - A new skill earns its place when a domain has traps that raise no error; otherwise `.claude/rules.md` is enough. Format and description rules: `skill-manager`.

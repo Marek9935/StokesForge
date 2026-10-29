@@ -57,6 +57,7 @@ Texts: `stokesforge-ui-texts`. Commands, rendering, import, Python: their own sk
 
 - `AppState` logic: `crates/stokesforge-app-state/tests/shell.rs`; a painted gesture: the surface module's `tests`. Placement and witnesses: `stokesforge-verification`.
 - Tests cover geometry, not appearance: a visual change is **looked at** (`run-stokesforge`), before and after, also with `STOKESFORGE_LANG=en-XA`.
+- Manual: a user-visible feature is described in `manual/src/` in the same commit (rule in `CLAUDE.md`, « Conventions »); a changed interface regenerates its screenshot.
 - `//!` of the module carries the *why*; the `docs/` page describes the code as it is. A new rule goes to `.claude/conventions.md` or `docs/`, in the same commit.
 
 Finish with `stokesforge-verification`. Done when every touched topic sheet is ticked, the place in the menus is stated in the report, and verification is green.

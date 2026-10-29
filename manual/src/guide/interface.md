@@ -76,7 +76,7 @@ Its display can be adjusted in **View ▸ Object Manager**:
 
 - **Show Axes** lists the axes of each layer. They are not listed by default.
 - **Show Objects** lists the free texts and shapes. They are listed by default.
-- **Expand by Default** sets whether new groups start open. Groups you have already opened or closed keep their state.
+- **Expand by Default** sets whether new groups start open. It has one check box per kind of group: **Graph**, **Layers**, **Plot groups**, **Axes** and **Objects**. Groups you have already opened or closed keep their state.
 - **Reset Settings** restores the defaults.
 
 You can also right-click the empty background of the Object Manager to reach the same settings.
