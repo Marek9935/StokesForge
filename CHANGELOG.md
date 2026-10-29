@@ -24,6 +24,12 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Changed
+
+- Linux archive (#389): it is now built on Ubuntu 22.04 and checked in CI, so it
+  runs on glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later).
+  RHEL, AlmaLinux and Rocky Linux 9 are not supported.
+
 ### Added
 
 - Version display (#382): **Help ▸ About StokesForge** shows the version, the

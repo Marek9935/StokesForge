@@ -49,6 +49,7 @@ jobs:
       - run: python3 scripts/french-guard.py
       - run: scripts/release-notes-test.sh
       - run: scripts/install-linux-test.sh
+      - run: scripts/glibc-floor-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
@@ -166,7 +167,11 @@ jobs:
   release-linux:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [fmt, licenses, clippy, test, test-python]
-    runs-on: ubuntu-latest
+    # #389: the archive needs a glibc at least as recent as the machine that
+    # builds it, so this job (and only this one) builds on the floor machine,
+    # Ubuntu 22.04 = glibc 2.35 (scripts/glibc-floor.env). The day GitHub
+    # retires this runner, change the runner and the floor together.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     steps:
@@ -205,6 +210,8 @@ jobs:
             echo "::error title=app-dist::$( (grep -m6 -E 'ERROR|^error|panicked|FAILED' dist.log; echo ...; tail -n 14 dist.log) | tr '\n' '|' | cut -c1-1500)"
           fi
           exit "$code"
+      # #389: no file of the archive may need a glibc above the floor.
+      - run: scripts/glibc-floor.sh dist/stokesforge-app
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
       # #387: the installer of the real archive, per user then with sudo.
       - name: Installer of the archive

@@ -158,6 +158,8 @@ or in plain text), detailed in [`rendering.md`](rendering.md#typst-r8).
 The `scripts/*.sh` at the root assemble and rerun the distributions
 (`dist/`) in a clean environment.
 
+**Glibc floor (#389).** The Linux archive needs a glibc at least as recent as its build machine: `release-linux` builds on the `ubuntu-22.04` runner (glibc 2.35) and `scripts/glibc-floor.sh` checks every ELF file of `dist/stokesforge-app` against the floor of `scripts/glibc-floor.env`.
+
 **Release (#333).** `scripts/release-linux.sh` packages `dist/stokesforge-app`
 (already proven by `app-dist.sh`) as `StokesForge-<version>-linux-x86_64.tar.gz`,
 adding `scripts/install-linux.sh` as `install.sh` (per-user or `--system`
