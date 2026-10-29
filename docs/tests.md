@@ -611,7 +611,7 @@ Windows jobs of GitHub do not appear there; their failure is read on GitHub
 ### GitHub results visible in GitLab
 
 `.github/workflows/gitlab-status.yml` triggers when `CI` is finished,
-even on failure or after cancelation. `scripts/gitlab-status.py` publishes the six
+even on failure or after cancelation. `scripts/gitlab-status.py` publishes the
 statuses `github-actions/<job>` on the tested SHA, in the same GitLab
 pipeline, with a link to the GitHub logs of each job. The results
 arrive after the whole CI has ended; the logs and artifacts

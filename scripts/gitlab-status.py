@@ -22,7 +22,7 @@ import zipfile
 REPOSITORY = "Marek9935/StokesForge"
 GITHUB = f"https://api.github.com/repos/{REPOSITORY}"
 GITLAB = "https://gitlab.com/api/v4/projects/86104040"
-JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual")
+JOBS = ("fmt", "licenses", "clippy", "test", "robustness", "test-python", "manual", "linux-packages")
 # GitLab caps the description of an external status.
 DESCRIPTION_MAX = 255
 LOG_MAX = 20_000_000
