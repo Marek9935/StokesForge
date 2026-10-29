@@ -90,9 +90,9 @@ One row makes one series, named "Row 1", "Row 2" and so on. If you send rows to 
 ## Remove series
 
 1. Click the curve in the figure, or its row in the Object Manager.
-2. Press <kbd>Delete</kbd>, or right-click and choose **Delete**.
+2. Press <kbd>Del</kbd>, or right-click and choose **Delete**.
 
-To remove a whole group, select the group in the Object Manager and press <kbd>Delete</kbd>. This deletes the group and all its series. To keep the series and only dissolve the group, choose **Ungroup** instead.
+To remove a whole group, select the group in the Object Manager and press <kbd>Del</kbd>. This deletes the group and all its series. To keep the series and only dissolve the group, choose **Ungroup** instead.
 
 To hide a series without deleting it, clear its visibility box in the Object Manager, or right-click it and choose **Hide**. A hidden series is left out of the legend and of the automatic axis limits.
 
@@ -104,7 +104,7 @@ The settings of a graph are in the **Graph Properties** window. It has these tab
 
 You can open them in several ways:
 
-- Double-click an axis, a curve or a shape on the figure.
+- Double-click an axis, a curve or a shape on the figure. For an axis, double-click its numbers (the tick labels), just outside the plot area. A double-click on the plot area itself resets the zoom.
 - Right-click a part of the figure and choose **Properties…**. The window opens on the page for that part.
 - Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…** and **Theme…**.
 - Double-click a row in the Object Manager.
@@ -289,7 +289,7 @@ You can place free text on the figure, for example to label a peak. The text is 
 2. Type the text. It accepts the same formulas as the titles. Press <kbd>Enter</kbd> or click elsewhere to confirm.
 3. To change it later, double-click the text, or right-click it and choose **Edit Text**.
 
-While you edit, a small bar above the text gives the color, the **Font size (pt)** and the **Rotation (°)**. When the text is selected, it has an outline. Drag the text to move it. Press <kbd>Delete</kbd> to remove it.
+While you edit, a small bar above the text gives the color, the **Font size (pt)** and the **Rotation (°)**. When the text is selected, it has an outline. Drag the text to move it. Press <kbd>Del</kbd> to remove it.
 
 ## Shapes
 
@@ -299,7 +299,7 @@ After you draw a shape, the tool goes back to **Pointer** and the shape is selec
 
 - Drag the shape to move it.
 - Drag a handle to resize it. Hold <kbd>Shift</kbd> to keep the proportions.
-- Press <kbd>Delete</kbd> to remove it.
+- Press <kbd>Del</kbd> to remove it.
 - Right-click it for **Bring to Front** and **Send to Back**.
 
 The toolbar shows the format of the selected shape: **Line color**, **Fill color** (or **No fill**) and **Line width (pt)**.

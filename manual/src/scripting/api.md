@@ -545,7 +545,7 @@ pyst.set_values(y, normalised)
 pyst.set_column_meta(x, role="x", unit="nm")
 pyst.set_column_meta(y, role="y", long_name="Normalised absorbance")
 
-pyst.plot(y, x, name="Normalised", plot_type="line",
+pyst.plot(y, x, name="Normalised plot", plot_type="line",
           x_title="Wavelength (nm)", y_title="Normalised absorbance")
 ```
 

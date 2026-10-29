@@ -19,7 +19,7 @@ The file does **not** contain:
 
 - **The undo history.** A project you reopen starts with an empty history. Save only when you are sure of your changes.
 - **The zoom of a graph.** It is part of the view, not of the project. Use **Reset Zoom** or the zoom you set before an export.
-- **Your preferences** (language, colors saved for all projects, export settings, toolbar layout). They belong to the application and are shared by all projects.
+- **Your preferences** (language, colors saved for all projects, export settings). They belong to the application and are shared by all projects.
 - **Detached windows.** A window you detached is saved as an ordinary open window.
 
 ## Save and open
