@@ -98,7 +98,9 @@ pub use outcome::ScriptOutcome;
 #[cfg(feature = "python")]
 pub use selftest::{run_selftest, SelfTestReport, SelfTestStep};
 #[cfg(feature = "python")]
-pub use surface::{BrokenReferenceError, Handle, InvalidValueError, UnknownPathError};
+pub use surface::{
+    BrokenReferenceError, Handle, InvalidValueError, UnknownPathError, PYST_API_VERSION,
+};
 
 /// Tells whether this binary embeds the script thread (feature `python`).
 ///

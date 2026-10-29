@@ -149,7 +149,7 @@ specification in the archive is historical. Batches #66 to #68 add navigation,
 cell reading, project manipulation and native graphs through undoable commands.
 No call depends on an active sheet or a window: the surface works with any
 session, including a session without an interface. The authoritative list
-(names, signatures, keys, values) is "Frozen API V1" below; the table below
+(names, signatures, keys, values) is "Frozen API V1" below (versioned by `pyst.__api_version__`); the table below
 describes its effects.
 
 | Call | Result / effect |
@@ -591,8 +591,9 @@ channel.
 
 This is the **reference list** of the `pyst` surface: names,
 signatures, exceptions, option keys, keys of the returned dictionaries
-and their enumerated values. A script written against it must keep
-working; the tables of the neighboring sections **comment on** it (effects,
+and their enumerated values. The API is **alpha** (`0.x`, see "API version"
+below): the list is guarded, but no promise is made that a script keeps
+working until API `1.0`. The tables of the neighboring sections **comment on** it (effects,
 examples) but do not replace it. Docstrings and error messages stay
 outside the list (S8: both in English; docstrings since #376).
 
@@ -604,6 +605,29 @@ An addition is an evolution of the API, not a detail; a removal or a rename
 breaks scripts. The test `crates/stokesforge-script/tests/frozen_api.rs`
 reads the blocks below (it keeps no copy of them) and fails on any
 difference with the module actually built, saying which one.
+
+### API version (#356)
+
+`pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.1"`).
+It is independent of the software version.
+
+- **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
+  (`0.1` to `0.2`); there is no stability promise. `1.0` stabilizes the API.
+- **From `1.0`**: a pure addition raises the minor; any modified or removed line
+  (adding an optional parameter changes the signature line) raises the major
+  and resets the minor to 0. The API major may not exceed the major of the crates.
+- **Snapshot**: each version has a frozen copy of the list,
+  `crates/stokesforge-script/tests/api-witnesses/vX.Y.txt` (one line
+  `<kind> <name><TAB><entry>` per entry, sorted with `LC_ALL=C`; print it with
+  `scripts/versions-aligned.sh --pyst-snapshot`). A surface change brings, in
+  the same commit, the doc update, the new constant and the new snapshot.
+- **Chain of checks**: the built module equals the doc (`frozen_api.rs`, which
+  also checks `__api_version__` against the constant); the doc equals the
+  snapshot of the constant's version, and the version follows the previous
+  snapshot and the rules above, with no bump without a change
+  (`scripts/versions-aligned.sh`, `fmt` job); the snapshot of a version already
+  in a tag `v*` is identical to its content at that tag (the job fetches the tags).
 
 Format (read by the test): one ```` ```pyst-api <genre> <nom> ```` block per
 list, one entry per line.

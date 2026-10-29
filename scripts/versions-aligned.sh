@@ -16,11 +16,51 @@
 # stokesforge-persistence requires the witness tests/witnesses/vN/project.stf (#353).
 # Cargo.lock must hold each workspace crate at the same version (#351):
 # refused (code 1) if the lock file is missing or behind (`cargo update --workspace`).
+# The pyst API version (PYST_API_VERSION "X.Y" in stokesforge-script/src/surface.rs,
+# #356) requires the frozen snapshot crates/stokesforge-script/tests/api-witnesses/vX.Y.txt
+# (the `pyst-api` blocks of docs/python-and-scripting.md, one line
+# `<kind> <name><TAB><entry>`, sorted LC_ALL=C; print it with
+# `scripts/versions-aligned.sh --pyst-snapshot`). The doc must equal this snapshot,
+# the version must follow the previous snapshot (0.x: next minor, surface must change;
+# from 1.0: same major = minor+1 and pure addition, major+1 = minor 0 and a change),
+# the API major may not exceed the crates' major, and a snapshot present in a tag
+# `v*` must be unchanged in the working tree (skipped, with a note, without tags).
 # Called by the `fmt` job (GitHub and GitLab) and by scripts/release-notes.sh.
 # STOKESFORGE_REPO_ROOT (tests) replaces the repository root.
 set -euo pipefail
 
 REPO_ROOT="${STOKESFORGE_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# The `pyst-api` blocks of the doc as `<kind> <name><TAB><entry>` lines, in the
+# order of the doc. Same reading as crates/stokesforge-script/tests/frozen_api.rs
+# (header "```pyst-api kind name", trim_end, blank lines skipped, closing "```").
+# Code 3 and a message on stderr if a block is malformed or not closed.
+pyst_doc_lines() { # pyst_doc_lines <doc>
+    awk '
+        { sub(/\r$/, "") }
+        open {
+            l = $0; sub(/[[:space:]]+$/, "", l)
+            if (l == "```") { open = 0; next }
+            if (l ~ /^[[:space:]]*$/) next
+            printf "%s %s\t%s\n", kind, name, l
+            next
+        }
+        index($0, "```pyst-api ") == 1 {
+            n = split(substr($0, 13), w, " ")
+            if (n != 2) { printf "bad block header: %s\n", $0 > "/dev/stderr"; bad = 1; next }
+            kind = w[1]; name = w[2]; open = 1
+        }
+        END {
+            if (open) { print "pyst-api block not closed" > "/dev/stderr"; exit 3 }
+            if (bad) exit 3
+        }' "$1"
+}
+
+PYST_DOC="$REPO_ROOT/docs/python-and-scripting.md"
+if [ "${1:-}" = "--pyst-snapshot" ]; then
+    pyst_doc_lines "$PYST_DOC" | LC_ALL=C sort
+    exit 0
+fi
 WANTED="${1:-}"
 
 names=()
@@ -139,6 +179,132 @@ else
         echo "[versions] ERROR: FORMAT_VERSION = $fv without witness $witness (invariant 12, docs/persistence.md)" >&2
         bad=1
     fi
+fi
+
+# pyst API version (#356): constant, frozen snapshot, bump rules, tags.
+PYST_SURFACE="$REPO_ROOT/crates/stokesforge-script/src/surface.rs"
+PYST_DIR="$REPO_ROOT/crates/stokesforge-script/tests/api-witnesses"
+PYST_REL="crates/stokesforge-script/tests/api-witnesses"
+pv_lines=""
+[ ! -e "$PYST_SURFACE" ] || pv_lines="$(grep -E '^[[:space:]]*pub(\([a-z]+\))?[[:space:]]+const[[:space:]]+PYST_API_VERSION[[:space:]]*:[[:space:]]*&(.static)?[[:space:]]*str[[:space:]]*=[[:space:]]*"[^"]*"[[:space:]]*;' "$PYST_SURFACE" || true)"
+if [ "$(printf '%s' "$pv_lines" | grep -c .)" != 1 ]; then
+    echo "[versions] ERROR: pyst API: PYST_API_VERSION not found (or found several times) in $PYST_SURFACE" >&2
+    bad=1
+else
+    pv="$(printf '%s' "$pv_lines" | sed 's/^[^"]*"\([^"]*\)".*$/\1/')"
+    if ! printf '%s' "$pv" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+        echo "[versions] ERROR: pyst API: PYST_API_VERSION \"$pv\" is not of the form \"MAJOR.MINOR\"" >&2
+        bad=1
+    else
+        pv_major="${pv%%.*}"
+        pv_minor="${pv##*.}"
+        snap="$PYST_DIR/v$pv.txt"
+        doc_err=0
+        doc_errfile="$(mktemp)"
+        doc_now="$(pyst_doc_lines "$PYST_DOC" 2>"$doc_errfile" | LC_ALL=C sort)" || doc_err=1
+        if [ -s "$doc_errfile" ] || [ "$doc_err" = 1 ]; then
+            echo "[versions] ERROR: pyst API: $(cat "$doc_errfile") ($PYST_DOC)" >&2
+            doc_err=1
+            bad=1
+        fi
+        rm -f "$doc_errfile"
+        if [ ! -f "$snap" ]; then
+            echo "[versions] ERROR: pyst API $pv without snapshot $snap (create it: scripts/versions-aligned.sh --pyst-snapshot > …)" >&2
+            bad=1
+        elif [ "$doc_err" = 0 ]; then
+            snap_now="$(LC_ALL=C sort "$snap")"
+            if [ "$doc_now" != "$snap_now" ]; then
+                echo "[versions] ERROR: pyst API $pv: the doc differs from the frozen snapshot v$pv.txt; a surface change needs a new API version and a new snapshot (+ doc only, - snapshot only):" >&2
+                diff <(printf '%s\n' "$snap_now") <(printf '%s\n' "$doc_now") | sed -n 's/^< /  - /p; s/^> /  + /p' >&2 || true
+                bad=1
+            else
+                # Previous snapshot (numeric order) and the bump rules.
+                prev=""
+                newer=""
+                for f in "$PYST_DIR"/v*.txt; do
+                    [ -e "$f" ] || continue
+                    v="$(basename "$f" .txt)"; v="${v#v}"
+                    printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || continue
+                    [ "$v" != "$pv" ] || continue
+                    vM="${v%%.*}"; vm="${v##*.}"
+                    if [ "$vM" -gt "$pv_major" ] || { [ "$vM" = "$pv_major" ] && [ "$vm" -gt "$pv_minor" ]; }; then
+                        newer="$v"
+                    elif [ -z "$prev" ] || [ "$vM" -gt "${prev%%.*}" ] || { [ "$vM" = "${prev%%.*}" ] && [ "$vm" -gt "${prev##*.}" ]; }; then
+                        prev="$v"
+                    fi
+                done
+                if [ -n "$newer" ]; then
+                    echo "[versions] ERROR: pyst API: snapshot v$newer.txt is newer than PYST_API_VERSION $pv" >&2
+                    bad=1
+                elif [ -n "$prev" ]; then
+                    pM="${prev%%.*}"; pm="${prev##*.}"
+                    old_now="$(LC_ALL=C sort "$PYST_DIR/v$prev.txt")"
+                    same=0
+                    [ "$old_now" != "$snap_now" ] || same=1
+                    why=""
+                    if [ "$pM" = 0 ] && [ "$pv_major" = 0 ]; then
+                        # alpha: any change, next minor.
+                        [ "$pv_minor" = "$((pm + 1))" ] || why="alpha (0.x): expected 0.$((pm + 1)) after $prev, not $pv"
+                        [ -n "$why" ] || [ "$same" = 0 ] || why="version bump $prev -> $pv without surface change"
+                    elif [ "$pM" = 0 ] && [ "$pv" = "1.0" ]; then
+                        :   # stabilization, the surface may be unchanged.
+                    elif [ "$pM" = 0 ]; then
+                        why="after the alpha $prev the next version is 0.$((pm + 1)) or 1.0 (stabilization), not $pv"
+                    elif [ "$pv_major" = "$pM" ]; then
+                        if [ "$pv_minor" != "$((pm + 1))" ]; then
+                            why="expected $pM.$((pm + 1)) after $prev, not $pv"
+                        elif [ "$same" = 1 ]; then
+                            why="version bump $prev -> $pv without surface change"
+                        elif [ -n "$(comm -23 <(printf '%s\n' "$old_now") <(printf '%s\n' "$snap_now"))" ]; then
+                            why="a line was modified or removed since $prev: that needs a new major ($((pM + 1)).0), not $pv"
+                        fi
+                    elif [ "$pv_major" = "$((pM + 1))" ]; then
+                        if [ "$pv_minor" != 0 ]; then
+                            why="a new major starts at minor 0: expected $pv_major.0, not $pv"
+                        elif [ "$same" = 1 ]; then
+                            why="major bump $prev -> $pv without surface change"
+                        fi
+                    else
+                        why="$pv does not follow $prev"
+                    fi
+                    if [ -n "$why" ]; then
+                        echo "[versions] ERROR: pyst API $pv: $why" >&2
+                        bad=1
+                    fi
+                fi
+            fi
+        fi
+        # The API major may not exceed the software major.
+        sw_major="${reference%%.*}"
+        if [ -n "$sw_major" ] && [ "$pv_major" -gt "$sw_major" ] 2>/dev/null; then
+            echo "[versions] ERROR: pyst API $pv: API major $pv_major > software major $sw_major ($reference)" >&2
+            bad=1
+        fi
+    fi
+fi
+
+# Released snapshots are frozen: the one of a tag `v*` must be unchanged.
+if [ -e "$REPO_ROOT/.git" ] && command -v git >/dev/null 2>&1; then
+    tags="$(git -C "$REPO_ROOT" tag -l 'v*' 2>/dev/null || true)"
+else
+    tags=""
+fi
+if [ -z "$tags" ]; then
+    echo "[versions] note: no git tag v* here, frozen snapshots of released API versions not checked" >&2
+else
+    while IFS= read -r tag; do
+        files="$(git -C "$REPO_ROOT" ls-tree -r --name-only "$tag" -- "$PYST_REL/" 2>/dev/null | grep -E "^$PYST_REL/v[0-9]+\.[0-9]+\.txt\$" || true)"
+        [ -n "$files" ] || continue
+        while IFS= read -r f; do
+            if [ ! -f "$REPO_ROOT/$f" ]; then
+                echo "[versions] ERROR: pyst API: $f is in tag $tag but missing here (a released snapshot is frozen)" >&2
+                bad=1
+            elif ! git -C "$REPO_ROOT" show "$tag:$f" | cmp -s - "$REPO_ROOT/$f"; then
+                echo "[versions] ERROR: pyst API: $f differs from its content at tag $tag (a released snapshot is frozen: a surface change brings a new version and a new snapshot)" >&2
+                bad=1
+            fi
+        done <<< "$files"
+    done <<< "$tags"
 fi
 
 # Cargo.lock: the entry of each workspace crate has the reference version.

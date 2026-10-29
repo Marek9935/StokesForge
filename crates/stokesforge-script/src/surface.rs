@@ -856,6 +856,13 @@ Known limits of this surface:
     ten million points will run to completion).
 ";
 
+/// Version of the `pyst` API, `"MAJOR.MINOR"` (`pyst.__api_version__`, #356).
+///
+/// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
+/// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
+/// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
+pub const PYST_API_VERSION: &str = "0.1";
+
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///
 /// The module is **stateless**: the functions find the session through
@@ -866,6 +873,7 @@ Known limits of this surface:
 pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     let module = PyModule::new(py, "pyst")?;
     module.add("__doc__", MODULE_DOC)?;
+    module.add("__api_version__", PYST_API_VERSION)?;
     module.add_class::<Handle>()?;
     module.add_function(wrap_pyfunction!(resolve, &module)?)?;
     module.add_function(wrap_pyfunction!(root, &module)?)?;
