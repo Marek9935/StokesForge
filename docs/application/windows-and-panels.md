@@ -5,8 +5,7 @@ Continuation of the contents page [`README.md`](README.md). Contents: confined f
 ### Confined floating windows
 
 The Project Manager, the Object Manager and the Python console are fixed
-panels on the left, on the right and at the bottom (#100). Their visibility is
-controlled by View; no header carries a Close button. The order of the
+panels on the left, on the right and at the bottom (#100). No menu hides them (View holds only the Object Manager settings) and no header carries a Close button; they collapse or detach. The order of the
 panels makes up the egui layout (the first one placed is the outermost);
 it is decided in `StokesForgeApp::ui`, and nowhere else: menu bar
 (`Panel::top`, `app/menus.rs`), toolbars (`toolbar.rs`), status bar
@@ -266,10 +265,9 @@ horizontal bar. The three bands are 16 points thick, like their icons,
 centered with no extra panel margin. The expanded panel stays resizable
 (width of PM/OM, height of the console). The collapse bands have distinct
 egui identifiers: their size does not overwrite the expanded dimension.
-Collapsing leaves the panel visible; View hides or shows it again. Hiding
-also keeps the collapse and the detachment. The visibility of the
-OM remains a preference; those of the PM and of the console are local to the
-application, like their collapse. The internal floating mode of the OM is removed.
+Collapsing leaves the panel visible; no menu hides it. The opening of the
+OM is a preference; the collapse of the PM and of the console is local to the
+application. The internal floating mode of the OM is removed.
 
 Detach opens a real system window without native decoration, with the
 same custom frame and a single Reattach button. Its title allows dragging,

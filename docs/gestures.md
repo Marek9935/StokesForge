@@ -41,7 +41,7 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 | Drag | free text, shape, title or legend, Pointer tool | moves the object (a width handle resizes it) |
 | Drag | plot area, Zoom tool | zoom rectangle (beyond 4 px) |
 | Drag | plot area, shape tool | draws the shape; a click without movement places the default size |
-| Double-click | free text, title, legend entry | in-place editing |
+| Double-click | free text, title, legend entry (one series name) | in-place editing; the legend frame between entries does nothing |
 | Double-click | curve, shape, axis | opens its settings |
 | Double-click | empty area, margins | reframes (resets the zoom) |
 | Wheel | — | — (the wheel alone does not zoom, #62) |
@@ -234,3 +234,17 @@ never changed for real.
   tab, strip, add button; title bar icons, detaching;
   PM Shift + click; number fields (wheel); color picker; import
   preview.
+
+**Re-read against the code (#381, 2026-10-29), not replayed in the application**:
+the double-click of a legend entry edits that series name in place
+(`render-egui/lib.rs` `GraphEvent::EditLegendEntry`, handled in
+`app/graph_window.rs`); a double-click on the legend text target itself returns
+without an event. The Object Manager rows match the code: click and
+right-click select, double-click and Enter open the properties
+(`app/object_manager_ui.rs`), arrows move the selection and Shift+arrows and
+Alt+Down are swallowed (`app/list_row.rs` `read_navigation`), the background
+right-click opens the settings. Not confirmed: an actual drag-and-drop
+reorder of OM rows with the mouse (read only through the unit tests), the
+Ctrl + wheel of the grid, and the right-click menu of the import preview row
+number (the code attaches a context menu to the row number, `app/import_wizard.rs`,
+but its content was not read).

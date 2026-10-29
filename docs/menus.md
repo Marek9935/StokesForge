@@ -25,7 +25,7 @@ in the figure or in the Object Manager; Graph › Selection wraps it.
 An empty section disappears with its separators.
 
 1. **Main action** of the target: Show Data, Edit Text, Open / Close of a window…
-2. **Create / insert**: Add Text, Insert Object ▸, Add Column, Add Worksheet, Plot ▸.
+2. **Create / insert**: Add Text, Insert Object ▸, Add Column, Add Sheet, Plot ▸.
 3. **Clipboard**, a single group: Cut, Copy and variants, Paste and variants.
 4. **Organize**: Rename, Duplicate, Move Up / Down, Bring to Front…, Hide (graph objects), Move ▸ (columns), Type ▸, Role ▸.
 5. **Delete**: Clear, Delete…
@@ -105,7 +105,7 @@ copies the figure only with no selection, #149).
 | Node | the menu of the figure's object (`object_node_menu`); layer and group "Axes": no more Closed Frame (#344: removed from the interface, `Action::SetClosedFrame` no longer has a menu entry) |
 | Background | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 check boxes) ─ Reset Settings |
 
-View contains only "Object Manager ▸" (no more Panels nor Toolbars: panels and bars are not hidden through a menu; the settings of the Project Manager and of the console will be added there); it wraps the same content (`object_manager_settings_contents`).
+View contains only "Object Manager ▸" (no Panels nor Toolbars: panels and bars are not hidden through a menu; toolbars are fixed, panels collapse or detach; settings of the Project Manager and of the console may be added there later); it wraps the same content (`object_manager_settings_contents`).
 The check boxes keep the menu open (#114).
 
 ### Project Manager
@@ -124,7 +124,7 @@ Selection ▸ remains only in Edit.
 | Cell, row, header field | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (Formula field holding a formula, #236; also Workbook › Columns) · Clear · Delete and Shift Up |
 | Column header | Plot ▸ · Add Column ─ clipboard ─ Move ▸ · Type ▸ · Role ▸ · Reset Width (default width of the selection, disabled with no stored width, #330) ─ Clear · Delete (removes the columns; a single Undo restores them); Move ▸ = Move to First · Move Left · Move Right · Move to Last, disabled with their reason when the gesture would change nothing (#319); same entries in Workbook › Columns |
 | Empty grid, blank area | Add Column |
-| Sheet tab, empty strip | Add Worksheet ─ Rename · Duplicate · Reset Column Widths (the whole sheet, disabled with no stored width, #330) ─ Delete |
+| Sheet tab, empty strip | Add Sheet ─ Rename · Duplicate · Reset Column Widths (the whole sheet, disabled with no stored width, #330) ─ Delete |
 
 ### Columns and curves: Analysis (#181, #210)
 

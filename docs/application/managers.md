@@ -145,7 +145,7 @@ replacing the clipboard. Pasting a transport that is too large is refused.
 
 ## Object Manager (#81–85)
 
-View › Object Manager › Show opens the tree of the
+The Object Manager panel shows the tree of the
 active graph: graph › layers (`PlotSpec::panels`) › plot group ›
 series, as well as the rare objects, free texts and graphic objects
 (rectangle, ellipse, line, arrow), when there are any. The **linked

@@ -17,9 +17,9 @@ through `Ui::close`, whose request egui propagates to the parent menus.
 |---|---|
 | File | New → New Project, Add Workbook, Add Graph, Add Folder (#326, at the root) ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete of the Project Manager objects |
-| Workbook (active workbook) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (this workbook only) |
+| Workbook (active workbook) | Sheet → Add Sheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (this workbook only) |
 | Graph (active graph) | Show Data ; Add Text ; Selection → the menu of the selected object (disabled without selection) ; Reset Text Positions ; Top / Right Mirror Axis (checkboxes, ordinary active layer, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
-| View | Object Manager → the background settings (Show Axes, Show Objects, Expand by Default, Reset Settings) ; no more Panels or Toolbars (#214) |
+| View | Object Manager → the background settings (Show Axes, Show Objects, Expand by Default, Reset Settings) ; no Panels or Toolbars entries: toolbars are fixed, panels collapse or detach (#214) |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
 The grammar of sections, separators and submenus is in
@@ -33,8 +33,8 @@ Right-clicks: the Project Manager reuses `object_menu` flat (a window:
 Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete; a folder: Add Folder ─
 Paste ─ Rename ─ Delete, the renaming being edited in place; Add Folder creates in
 this folder, expands it and opens the name of the new folder for editing, #326). A sheet tab
-offers Add Worksheet ─ Rename · Duplicate ─ Delete, the empty strip Add
-Worksheet. The column letters: Plot ▸ · Add Column ─ clipboard ─
+offers Add Sheet ─ Rename · Duplicate ─ Delete, the empty strip Add
+Sheet. The column letters: Plot ▸ · Add Column ─ clipboard ─
 Type ▸ · Role ▸ ─ Clear · Delete (the columns themselves, `AppState::delete_columns`), at the first level (`column_properties_menu`),
 the empty grid Add Column; the cells, rows and header fields a single
 clipboard group then Clear · Delete, without Undo/Redo.
@@ -65,9 +65,8 @@ content and place are frozen in the software, in the
 no floating or vertical bar, no narrow-window logic. Hard-coded
 layout (`ToolbarId::row`): row 0 = File (new project, workbook, graph, folder, open…), Edit (Undo/Redo, #238: history label and shortcut in the tooltip, disabled = "Nothing to undo/redo"), Tools; row 1 = Text, wide,
 alone on its row. The Object Manager bar is removed (#109): the panel
-is controlled by View and its header. Each bar is
-hidden through the View menu; only this **visibility** is a preference
-(`preferences.json`), never data of the `.stf`. An old `placement` field
+is collapsed or detached from its header. No bar is hidden
+through a menu. An old `placement` field
 is ignored on reading. The `//!` of the module says why the panel is an
 `egui::Panel::top` (neither a raw `Window` nor `show_window_in_layer`).
 
@@ -93,7 +92,7 @@ is ignored on reading. The `//!` of the module says why the panel is an
   the tooltip `toolbar-tools.disabled` (the bar does not change shape).
   After a separator, it carries the **format of the selected object** (#64,
   merged into it by #93; `object_format_contents`), disabled without a selected
-  object. It is still hidden through the View menu.
+  object.
 - `Text` bar (text format, #63), **always displayed** (#108) on its
   own row: without a foreground graph its buttons are disabled, with
   the tooltip `toolbar-tools.disabled` (like `Tools`, #93). Font, size, color, bold,
@@ -144,8 +143,7 @@ is ignored on reading. The `//!` of the module says why the panel is an
   choice made on another zone. A passage carrying a local color gives
   a neutral swatch. While editing, the selector draft lasts only
   until the gesture is confirmed, which sets a single tag on the passage.
-- Visibility: no more menu to hide a bar (View carries only the panel settings, #214); the state stays in `preferences.json`. Placement and visibility
-  are in `preferences.json` (field `toolbars`), not in the `.stf`; reading
+- Visibility: no menu hides a bar (View carries only the Object Manager settings, #214). The `toolbars` field of `preferences.json` (never the `.stf`) is still read; reading
   ignores what it does not understand. `StokesForgeApp::new` does not read the
   file (the tests), `main` calls `load_toolbar_layout`.
 - The bars are painted only in the main window, not in the detached
