@@ -1036,6 +1036,27 @@ distribution.
 
 `crates/stokesforge-app/src/demo/tests.rs` (module of the **binary**: `cargo test -p stokesforge-app --bin stokesforge-app`). Each test has its witness, checked by mutation (seed changed, title given to a graph, column deleted under a graph, amplitude of the Gaussian set changed, `recalculate` removed from `session_for_project`): unique window names across the whole project, no graph title (#103), each graph resolved without a broken reference and drawn, logarithmic axes on strictly positive data (invariant 10), each analysis set finds its known parameters through `core::compute` (`Expected`, tolerance), the eight families of `OperationKind::ALL` covered (including smoothing, `Smooth` set), noise with a fixed seed pinned, formula columns computed from startup, `.stf` round trip through the session (clean report, same specs), all `PlotType` (without `Unknown`).
 
+## Generated manual pages (#364)
+
+Two pages of the manual's Reference part are generated, never edited by hand:
+`manual/src/reference/shortcuts.md` (from the help table `HELP` of
+`app/shortcuts.rs`, keys spelled with Ctrl in `<kbd>`) and
+`manual/src/reference/interface-texts.md` (English and French labels of menus,
+context menus, window and dialog titles, tabs and toolbars, read from the `en` and
+`fr` catalogs). The generator is the test module
+`crates/stokesforge-app/src/app/manual_pages.rs`. The ordinary test
+`the_generated_manual_pages_are_up_to_date` rebuilds both pages and fails when a
+committed page differs, naming the command to run; `the_generated_pages_cover_the_help_and_the_menus`
+checks that every `HELP` row and the main menu entries are in them. After changing a
+shortcut or a menu, window or tab label:
+
+```sh
+UPDATE_MANUAL_PAGES=1 cargo test -p stokesforge-app --lib manual_pages
+```
+
+and commit the regenerated pages with the change. The French column is exempt from
+`scripts/french-guard.py` by the `<!-- lang: fr columns: French -->` marker above the table.
+
 ## Manual screenshots (#365)
 
 The images of the user manual (`manual/src/images/*.png`) are not taken by hand:

@@ -203,7 +203,7 @@ It has three tabs:
 
 ## Keyboard shortcuts
 
-Choose **Help ▸ Keyboard Shortcuts…** to list the shortcuts of the application. The main ones:
+Choose **Help ▸ Keyboard Shortcuts…** to list the shortcuts of the application; the full list is on the [Shortcuts](../reference/shortcuts.md) page. The main ones:
 
 | Action | Shortcut |
 |---|---|

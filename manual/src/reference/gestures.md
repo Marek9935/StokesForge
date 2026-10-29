@@ -1,6 +1,6 @@
 # Mouse gestures
 
-This page lists what each mouse gesture does, place by place. It covers the mouse and the touchpad only. Keys are not listed here.
+This page lists what each mouse gesture does, place by place. It covers the mouse and the touchpad only. Keys are listed on the [Shortcuts](shortcuts.md) page.
 
 On macOS, read <kbd>Cmd</kbd> wherever the table says <kbd>Ctrl</kbd>.
 

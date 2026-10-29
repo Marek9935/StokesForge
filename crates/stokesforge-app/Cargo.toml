@@ -72,6 +72,8 @@ i18n-embed-fl = "0.10.1"
 # build an `AppState` (#250, #263). Never in a normal build.
 stokesforge-app-state = { path = "../stokesforge-app-state", features = ["test-support"] }
 tempfile = "3"
+# Parses the `en` and `fr` catalogs for the generated manual pages (#364); already in the tree through stokesforge-app-state.
+fluent-syntax = "0.12"
 # The configuration folder that `tests/preferences_isolation.rs` redirects.
 directories = "5"
 # Prototype of the Preferences window (app/preferences_proto.rs): drives the UI

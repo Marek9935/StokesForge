@@ -5132,6 +5132,7 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_kittest",
+ "fluent-syntax",
  "i18n-embed-fl",
  "image",
  "serde",

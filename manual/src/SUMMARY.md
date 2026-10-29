@@ -23,8 +23,8 @@
 
 # Reference
 
-- [Shortcuts]()
-- [Interface texts]()
+- [Shortcuts](reference/shortcuts.md)
+- [Interface texts](reference/interface-texts.md)
 - [Mouse gestures](reference/gestures.md)
 - [Project files (.stf)](reference/project-files.md)
 - [Glossary](reference/glossary.md)

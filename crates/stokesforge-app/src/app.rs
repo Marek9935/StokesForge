@@ -156,6 +156,8 @@ mod inplace_edit;
 mod keyboard_shortcuts_window;
 mod list_row;
 #[cfg(test)]
+mod manual_pages;
+#[cfg(test)]
 mod manual_screenshots;
 mod menu_sections;
 mod menus;

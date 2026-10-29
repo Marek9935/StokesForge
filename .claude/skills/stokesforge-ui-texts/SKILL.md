@@ -16,8 +16,9 @@ Any task that adds, changes or removes a text the user sees: menu, context menu,
 3. **Where and when a text appears** (greying reason, dialog footer, clamped input, empty state, confirmation) is fixed by `docs/interface-standard.md` § Rule index; menu wording by `docs/menus.md` § Rules (bare verbs, `Properties…` direct, no icon in a menu).
 4. **Write the key** in `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl`, then the same key with the same arguments in `fr/` in the same commit; use it through `tr!`, never a literal. Mechanics (attributes `.hint` / `.disabled`, plurals, history labels, pseudo-language, guards): [references/fluent-mechanics.md](references/fluent-mechanics.md).
 5. **Errors** of the crates below are raw English `Display`; the app phrases them through `errors::<family>::error_message` and `error-*` keys: `.claude/conventions.md` § Errors: raw English below, catalog sentence in the application.
-6. **A new rule or term** goes into the glossary in the same commit.
-7. **Look at it**: capture with `STOKESFORGE_LANG=en-XA` (`run-stokesforge`) — a text without `[[ ]]` escaped the catalogue, a missing `]]` is truncated.
+6. **A changed menu, entry, window or tab label** (or shortcut) is followed by `UPDATE_MANUAL_PAGES=1 cargo test -p stokesforge-app --lib manual_pages`: the regenerated manual pages (`manual/src/reference/{shortcuts,interface-texts}.md`) are committed with it (#364).
+7. **A new rule or term** goes into the glossary in the same commit.
+8. **Look at it**: capture with `STOKESFORGE_LANG=en-XA` (`run-stokesforge`) — a text without `[[ ]]` escaped the catalogue, a missing `]]` is truncated.
 
 A crate below `stokesforge-app-state` never holds a sentence for the user (renderer, core): it takes the texts as data (`SeriesLabel`) or from a struct the application supplies (`stokesforge_render::FigureTexts`, built by `figure_texts::figure_texts()`), with a fixed English default for script and CLI exports (#369).
 

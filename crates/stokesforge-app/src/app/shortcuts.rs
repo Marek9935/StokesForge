@@ -248,13 +248,21 @@ pub(super) struct HelpEntry {
 impl HelpEntry {
     /// The keys of the row, as they are displayed.
     pub(super) fn keys_text(&self, ctx: &egui::Context) -> String {
+        self.keys_text_with(|shortcut| ctx.format_shortcut(shortcut))
+    }
+
+    /// Same as [`keys_text`](Self::keys_text) with another spelling of a
+    /// shortcut: the manual pages (#364) spell them the same way on every
+    /// host (Ctrl, never the Cmd symbol).
+    pub(super) fn keys_text_with(
+        &self,
+        format: impl Fn(&egui::KeyboardShortcut) -> String,
+    ) -> String {
         match &self.keys {
-            HelpKeys::Shortcut(shortcut) => ctx.format_shortcut(shortcut),
-            HelpKeys::Either(a, b) => tr!(
-                "help-keys-either",
-                first = ctx.format_shortcut(a),
-                second = ctx.format_shortcut(b)
-            ),
+            HelpKeys::Shortcut(shortcut) => format(shortcut),
+            HelpKeys::Either(a, b) => {
+                tr!("help-keys-either", first = format(a), second = format(b))
+            }
             HelpKeys::Text(text) => text(),
         }
     }
