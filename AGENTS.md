@@ -27,7 +27,7 @@ confirmation on the usual choices covered by the request.
   implement in the repository; see the context rule of the skill
   `stokesforge-bug-report`.
 - The repository license is pure GPL-3.0-or-later (#348, exception removed;
-  a CLA must precede any external contribution). Keep the third-party notices and update them with
+  before the first external contribution is merged, decide whether a CLA is needed, #361). Keep the third-party notices and update them with
   dependencies or the runtime; `scripts/licenses-dist.sh` ships them and the
   CI job `licenses` checks the policy with `cargo deny check licenses`.
   The supplements in `vendor/crate-license-notices/` are tied to the Cargo

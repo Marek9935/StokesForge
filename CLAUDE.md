@@ -64,7 +64,7 @@ sequences: [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Conventions
 
-- License (#129): pure GPL-3.0-or-later (#348: the extension exception of 1.0.0 is removed; an additional permission is granted only in writing, case by case, and requires a license CLA for contributors' code). Preserve the licenses of third-party components; a changed dependency or runtime updates the notices and passes `cargo deny check licenses`. Distributions use `scripts/licenses-dist.sh`. External contributions carry the DCO of `CONTRIBUTING.md`; **merge no external contribution before the license CLA** (#348).
+- License (#129): pure GPL-3.0-or-later (#348: the extension exception of 1.0.0 is removed; an additional permission is granted only in writing, case by case, and needs the rights on all the code concerned). Preserve the licenses of third-party components; a changed dependency or runtime updates the notices and passes `cargo deny check licenses`. Distributions use `scripts/licenses-dist.sh`. External contributions carry the DCO of `CONTRIBUTING.md`; **before merging the first external contribution, decide whether a license CLA or an additional permission is needed** (#361, closed without a CLA; conclusion in `docs/license-and-extensions.md`).
 - Rust notices: `scripts/licenses-rust.sh` adds the missing upstream copyrights of `vendor/crate-license-notices/`. Their fingerprint ties the report to the exact `Cargo.lock`; any change to the lock requires revalidating these supplements before generating the notices.
 - `rustfmt` + `clippy -D warnings` are mandatory (GitHub CI `.github/workflows/ci.yml`).
 - CI: `.github/workflows/ci.yml` (Linux and Windows, hosted runners) mirrors

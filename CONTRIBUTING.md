@@ -34,13 +34,12 @@ Signed-off-by: First Last <address@example.org>
 ```
 
 The sign-off confirms your right to offer the contribution under its
-license; it does not transfer your copyright. No CLA is in place yet. The
-project wants to be able to grant an additional permission later (for example
-for a proprietary connector): a contribution accepted before a license CLA
-(the contributor keeps their copyright and grants the right to redistribute
-under other terms) would prevent this without the agreement of its author.
-The CLA is tracked in #348 and must exist before the first external
-contribution is merged.
+license; it does not transfer your copyright. No CLA is in place. Your
+contribution stays under GPL-3.0-or-later, which is enough to distribute the
+software and to sell support. Without a CLA, the project cannot relicense your
+code or grant an additional permission on it (for example for a proprietary
+connector) without your agreement. Whether to require a license CLA is decided
+before the first external contribution is merged (#361).
 
 ## Checks
 

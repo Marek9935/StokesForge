@@ -58,7 +58,7 @@ the license page. The `licenses` CI job checks the policy and generates
 the notices.
 
 External contributions follow [`CONTRIBUTING.md`](CONTRIBUTING.md)
-and the [DCO 1.1](DCO) until a CLA exists (#348). This license applies to `main`;
+and the [DCO 1.1](DCO) (no CLA; see #361). This license applies to `main`;
 the old Python/Qt implementation (`legacy-python` tag) keeps its own status.
 Version 1.0.0 carried an extension exception for `pyst`; it was not
 kept after 1.0.0.

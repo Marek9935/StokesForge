@@ -22,10 +22,19 @@ versions are under pure GPL.
 A use that the GPL does not cover, for example a proprietary connector from an
 instrument maker, is handled by an additional permission or a separate license,
 granted in writing on request. It assumes that the author holds or can grant
-the rights on all the code concerned, so a **license CLA** (the contributor
-keeps their copyright and allows redistribution under other conditions) before
-any external contribution is merged. Its drafting and that of the permission go
-through a lawyer.
+the rights on all the code concerned. Without a **license CLA** (the contributor
+keeps their copyright and allows redistribution under other conditions), that
+holds only for code written by the author. Pure GPL is enough to distribute and
+to sell support, maintenance or custom development. An instrument maker's
+proprietary connector should be a separate program talking to StokesForge
+through an out-of-process protocol (local socket, stdin/stdout, files) or a
+`pyst` script for internal use; an in-process Rust plugin is ruled out (no
+stable Rust ABI, and the case most likely to be a derivative work). That
+protocol is designed when an instrument maker asks for it. A proprietary
+`pyst` script distributed to third parties is the one unclear case. The CLA was
+not adopted (#361); whether to require one, or an additional permission, is
+decided before the first external contribution is merged. Drafting a CLA or a
+permission goes through a lawyer.
 
 ## Cargo metadata
 
@@ -115,6 +124,6 @@ notices file is not a source archive.
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md): every external contribution
 must be proposed under GPL-3.0-or-later and carry the `Signed-off-by` of the
 [DCO 1.1](../DCO). Authors keep their rights. The DCO does not give the
-right to grant an additional permission or to relicense: that requires
-a license CLA, to be put in place **before** the first merged external
-contribution (#348).
+right to grant an additional permission or to relicense: that would require
+a license CLA or the contributor's agreement. Decide this **before** the first
+merged external contribution (#361).
