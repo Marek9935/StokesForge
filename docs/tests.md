@@ -466,8 +466,11 @@ Linux runner is registered; Windows is not affected by this choice.
 | `robustness` | no | `cargo test -p stokesforge-robustness -- --ignored` |
 | `test-python` | yes, automatic | vendors CPython + numpy, then `scripts/python-test.sh` |
 | `release-linux` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` (on an `-rcN`, `publier` creates the release then deletes it; no release remains) | checks the tag (`scripts/release-tag-on-main.sh`, `scripts/release-tag-increasing.sh`, `scripts/release-notes.sh`), assembles and tests `scripts/app-dist.sh`, uploads the archive to the GitLab package registry, without a GitHub release (#333) |
+| `manual` | yes | `scripts/manual-build.sh`: the mdBook manual (`manual/`) builds (#362); mdBook version pinned in `scripts/manual-tools.env` |
+| `release-manual` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` | same tag guards as `release-linux`; builds the manual with the version in its title and uploads `StokesForge-X.Y.Z-manual.tar.gz` to the GitLab package registry (`scripts/release-upload.sh manual`, #362) |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-upload.sh windows`) |
-| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the two package uploads | GitLab release with the notes of the CHANGELOG (#333); an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md) |
+| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the three package uploads | GitLab release with the notes of the CHANGELOG (#333), linking the installer, the Linux archive and the manual; an `-rcN` creates then deletes the release (trial); procedure and criteria: [`v1-criteria.md`](v1-criteria.md) |
+| `pages` (GitLab, instance runners) | only in a pipeline started by `publier` (`scripts/release-publish.sh`, variable `STOKESFORGE_PUBLISH_MANUAL=1`) on a **final** tag `vX.Y.Z`, never an `-rcN`, never in the pipeline started at push | unpacks `StokesForge-X.Y.Z-manual.tar.gz` from the GitLab package registry into `public/` (GitLab Pages, `https://askrzypczak.gitlab.io/stokesforge/`); only the latest manual is served (#362). If the pipeline cannot be created, the token's role is not allowed to run pipelines on the protected tags `v*`: raise it to Maintainer |
 
 The Linux jobs run on the pushed branches `main`, `feature/**`,
 `v[0-9]*`, `release/**` and on the tags `v*`. `release-linux` and `publier`
@@ -486,7 +489,12 @@ in CI; only the protection of the `v*` tags of GitLab holds it.
 - `main` protected, no force-push, on GitLab and on GitHub;
 - `v*` tags protected (creation reserved to the Maintainer role) on GitLab;
 - `main` default branch on GitLab: this is what makes "Closes #N"
-  work.
+  work;
+- GitLab, Settings, CI/CD, Runners: instance runners enabled on the project, for
+  the `pages` job only (all the other jobs are gated by `STOKESFORGE_CI_LINUX`
+  or run on GitHub); GitLab may ask to validate the account first (#362);
+- GitLab, Deploy, Pages: "Use unique domain" unchecked, so that the URL is
+  `https://askrzypczak.gitlab.io/stokesforge/`; Pages visibility "Everyone".
 
 **What a green pipeline does not prove**, and it is written at the top of the CI file:
 `fmt`, `clippy` and `test` **never** enable the `python` feature. Everything that

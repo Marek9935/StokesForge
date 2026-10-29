@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Uploads the package of a tag (Linux archive or Windows installer) to the
-# GitLab generic package registry (#333), from where
+# Uploads the package of a tag (Linux archive, Windows installer or user
+# manual) to the GitLab generic package registry (#333), from where
 # `scripts/release-publish.sh` links it to the GitLab release. Runs in the
-# GitHub `release-linux` and `dist-windows` jobs, after their assembly.
+# GitHub `release-linux`, `release-manual` and `dist-windows` jobs, after their
+# assembly.
 #
-# Usage: scripts/release-upload.sh linux|windows vX.Y.Z (or vX.Y.Z-rcN)
+# Usage: scripts/release-upload.sh linux|windows|manual vX.Y.Z (or vX.Y.Z-rcN)
 # Environment: GITLAB_RELEASE_TOKEN (GitHub secret: GitLab project token,
 # Developer role, `api` scope). STOKESFORGE_RELEASE_DRYRUN=1 prints the URL
 # without sending anything (local trial, token not required).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLATEFORME="${1:?usage: release-upload.sh linux|windows vX.Y.Z}"
-TAG="${2:?usage: release-upload.sh linux|windows vX.Y.Z}"
+PLATEFORME="${1:?usage: release-upload.sh linux|windows|manual vX.Y.Z}"
+TAG="${2:?usage: release-upload.sh linux|windows|manual vX.Y.Z}"
 VERSION="${TAG#v}"
 PROJECT_ID=86104040
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}"
@@ -20,7 +21,8 @@ API="${CI_API_V4_URL:-https://gitlab.com/api/v4}"
 case "$PLATEFORME" in
     linux) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-linux-x86_64.tar.gz"; PRODUCTEUR=release-linux.sh ;;
     windows) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-windows-setup.exe"; PRODUCTEUR=app-dist-windows.sh ;;
-    *) echo "[release] ERROR: unknown platform \"$PLATEFORME\" (linux or windows)" >&2; exit 1 ;;
+    manual) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-manual.tar.gz"; PRODUCTEUR=manual-build.sh ;;
+    *) echo "[release] ERROR: unknown platform \"$PLATEFORME\" (linux, windows or manual)" >&2; exit 1 ;;
 esac
 URL="${API}/projects/${PROJECT_ID}/packages/generic/stokesforge/${VERSION}/$(basename "$ARCHIVE")"
 

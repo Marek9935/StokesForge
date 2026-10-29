@@ -76,3 +76,4 @@ htmlcov/
 /.agents/skills/hooks-manager
 /.agents/skills/rules-manager
 /.agents/skills/skill-manager
+/manual/book/

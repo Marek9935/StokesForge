@@ -4,8 +4,8 @@
 # the GitLab side for lack of a Linux runner. The GitLab file is the reference:
 # any change to its commands is repeated here. The Windows jobs
 # (`dist-windows`, `test-python-windows`) and the release jobs (`release-linux`,
-# `publier`) live only here, on hosted runners (#333): GitLab has no runner
-# any more.
+# `release-manual`, `publier`) live only here, on hosted runners (#333):
+# GitLab runs only the `pages` job, started by `publier` (#362).
 #
 # As on the GitLab side, `fmt`, `clippy` and `test` never enable the `python`
 # feature: only `test-python` exercises the PyO3 bridge.
@@ -48,6 +48,19 @@ jobs:
       - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
+
+  # #362: the user manual (manual/) must build. mdBook is the prebuilt binary
+  # of the version pinned in scripts/manual-tools.env (no `cargo install`).
+  manual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: mdBook
+        run: |
+          source scripts/manual-tools.env
+          curl -fsSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: scripts/manual-build.sh
 
   # #129: policy and notices, without compiling the workspace.
   licenses:
@@ -193,6 +206,34 @@ jobs:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-upload.sh linux "$GITHUB_REF_NAME"
 
+  # #362: manual of the tag. Same tag guards as `release-linux`; builds the
+  # manual with the version in its title and uploads its archive to the GitLab
+  # package registry, where `publier` links it to the release.
+  release-manual:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, manual]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tagged commit is on main or on a release branch
+        run: scripts/release-tag-on-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: The tag is above the existing tags
+        run: scripts/release-tag-increasing.sh "$GITHUB_REF_NAME"
+      - name: mdBook
+        run: |
+          source scripts/manual-tools.env
+          curl -fsSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: scripts/manual-build.sh "$GITHUB_REF_NAME"
+      - name: Manual to GitLab
+        env:
+          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+        run: scripts/release-upload.sh manual "$GITHUB_REF_NAME"
+
   # #333: Windows on a hosted runner (clean machine, parallel to Linux).
   # Blocking: `publier` waits for them. On failure, the first errors and the
   # end of the log are put in an annotation (readable through the API without
@@ -280,13 +321,13 @@ jobs:
         run: scripts/release-upload.sh windows "$GITHUB_REF_NAME"
 
   # #333: GitLab release. On a tag vX.Y.Z or vX.Y.Z-rcN, when the blocking
-  # checks (Linux and Windows) and the two package uploads are done. A -rcN is
+  # checks (Linux and Windows) and the three package uploads are done. A -rcN is
   # a trial: the release is created then deleted (see
   # scripts/release-publish.sh), the tag stays. Does not depend on any GitLab
   # runner.
   publier:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, release-linux, dist-windows]
+    needs: [fmt, licenses, clippy, test, test-python, robustness, test-python-windows, manual, release-linux, release-manual, dist-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: read

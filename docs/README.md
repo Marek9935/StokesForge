@@ -39,6 +39,7 @@ page that contradicts the code is wrong.
 | write or run a test, understand the CI | [`tests.md`](tests.md) |
 | measure the smoothness of the interface (frame time, running in release) | [`performance-measurement.md`](performance-measurement.md) |
 | license, contributions, extension interfaces and third-party notices | [`license-and-extensions.md`](license-and-extensions.md) |
+| use the application, as a user (the user manual: `manual/`, published at <https://askrzypczak.gitlab.io/stokesforge/>) | [`../manual/`](../manual/src/SUMMARY.md) |
 | know what V1 requires, or release a version | [`v1-criteria.md`](v1-criteria.md) |
 
 `.claude/rules.md` completes this table on the **context loading** side: which
