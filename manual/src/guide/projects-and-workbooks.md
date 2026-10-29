@@ -49,7 +49,7 @@ By default, StokesForge writes a recovery copy of your project every 5 minutes w
 
 If StokesForge does not close properly (a crash, a power cut), the next start offers the copies that are newer than the saved file in a **Recover Projects** window. For each copy:
 
-<img src="../images/files-recover-projects.png" alt="The Recover Projects window with two recovery copies, each with Open, Ignore and Delete." width="564">
+<img src="../images/files-recover-projects.png" alt="The Recover Projects window with two recovery copies, each with Open, Ignore and Delete." width="560">
 
 - **Open** opens the recovery copy. The list stays open for the others. Save the project to keep it.
 - **Ignore** keeps the copy. It is offered again at the next start.
@@ -109,6 +109,8 @@ When there are more tabs than fit, **<** and **>** buttons appear at the left of
 
 The same commands are in **Workbook ▸ Sheet**.
 
+<img src="../images/workbooks-workbook-menu.png" alt="The Workbook menu of the menu bar: Sheet and Columns (submenus), Plot (greyed out), and the check boxes Show Metadata Row (checked) and Show x' Row." width="156">
+
 A sheet name cannot be empty and must be unique inside the workbook. A workbook always keeps at least one sheet: **Delete** is greyed out on the last one.
 
 Deleting a sheet can be undone. If a graph plotted columns of that sheet, the status bar names it.
@@ -119,7 +121,7 @@ Deleting a sheet can be undone. If a graph plotted columns of that sheet, the st
 
 Each column has a letter (A, B, … Z, AA, AB…), a type and a role. The header above the data has four rows to describe the column.
 
-<img src="../images/workbooks-sheet.png" alt="The Spectrum sheet of Book1: the header rows (Long Name, Units, Comments, F(x)=, Metadata), the column letters with their roles, and the sheet tabs at the bottom." width="570">
+<img src="../images/workbooks-sheet.png" alt="The Spectrum sheet of Book1: the header rows (Long Name, Units, Comments, F(x)=, Metadata), the column letters with their roles, and the sheet tabs at the bottom." width="558">
 
 ### The column header
 
@@ -156,7 +158,7 @@ Pressing <kbd>Tab</kbd> in the last column of a row adds a new column and moves 
 - <kbd>Ctrl</kbd>+click adds or removes a column. <kbd>Shift</kbd>+click selects a range.
 - Click the **#** cell at the top left, or press <kbd>Ctrl</kbd>+<kbd>A</kbd>, to select the whole sheet. Click it again to clear the selection.
 
-<img src="../images/workbooks-column-menu.png" alt="The right-click menu of a column letter (here B(Y)): Plot, Add Column, Analysis, clipboard commands, Move, Type, Role, Reset Width, Clear and Delete." width="570">
+<img src="../images/workbooks-column-menu.png" alt="The right-click menu of a column letter (here B(Y)): Plot, Add Column, Analysis, clipboard commands, Move, Type, Role, Reset Width, Clear and Delete." width="558">
 
 *Right-click a column letter to open this menu. The other column commands below are in it.*
 

@@ -1,168 +1,133 @@
 [
   {
     "image": "interface-main-window.png",
-    "kind": "auto",
     "page": "guide/interface.md",
     "shows": "The whole application on the demo project: menus, toolbars, Project Manager, Book1 and Graph1 in the workspace, Object Manager, console bar and status bar."
   },
   {
     "image": "interface-project-manager.png",
-    "kind": "auto",
     "page": "guide/interface.md",
     "shows": "The Project Manager panel: the demo project tree with workbooks, graphs and folders."
   },
   {
     "image": "interface-object-manager.png",
-    "kind": "auto",
     "page": "guide/interface.md",
     "shows": "The Object Manager panel for Graph1: its layer, series and curve with their check boxes."
   },
   {
     "image": "workbooks-sheet.png",
-    "kind": "auto",
     "page": "guide/projects-and-workbooks.md",
     "shows": "The Spectrum sheet of Book1 with the header rows (Long Name, Units, Comments, F(x)=, Metadata), the column letters and roles, and the sheet tabs."
   },
   {
     "image": "workbooks-column-menu.png",
-    "kind": "auto",
     "page": "guide/projects-and-workbooks.md",
     "shows": "The context menu of a column header (right-click on B(Y)): Plot, Add Column, Analysis, clipboard, Move, Type, Role, Reset Width, Clear, Delete."
   },
   {
     "image": "import-wizard-format.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 2 Format: delimiter, decimal separator, thousands separator, comments, blocks and encoding, with the file preview."
   },
   {
     "image": "import-wizard-header.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 3 Header and Data End: header and sub-header lines, the Long Name and Units roles, and the colored line roles of the preview."
   },
   {
     "image": "import-wizard-columns.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 4 Columns: name, long name, units, read-as, type and role of each column found in the file."
   },
   {
     "image": "graphs-properties-series.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Series Properties window of Graph1: series list, group, name, plot type, line and symbol settings."
   },
   {
     "image": "graphs-properties-axes.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Graph Properties window on its Axes tab, X (bottom) axis: title, scale, range and display settings."
   },
   {
     "image": "graphs-formula-title.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Annotations demo graph: text annotations written with formulas (subscripts, Greek letters), a rectangle, an ellipse and an arrow."
   },
   {
     "image": "analysis-integration.png",
-    "kind": "auto",
     "page": "guide/analysis.md",
     "shows": "The Integrate analysis window on Graph1 with one range from 470 to 570 nm, its shaded preview and the computed area."
   },
   {
     "image": "analysis-fit.png",
-    "kind": "auto",
     "page": "guide/analysis.md",
-    "shows": "The Fitting analysis window on Graph1: Gaussian model fitted on the main peak (470 to 570 nm), parameters, residuals and R squared."
+    "shows": "The Fitting analysis window on Graph1: Gaussian model fitted on the main peak (490 to 550 nm), parameters, residuals and R squared."
   },
   {
     "image": "preferences-general.png",
-    "kind": "auto",
     "page": "guide/interface.md",
     "shows": "The Preferences window, General tab: language, maximum file size and cells, automatic recovery copy."
   },
   {
     "image": "preferences-export.png",
-    "kind": "auto",
     "page": "guide/export.md",
     "shows": "The Preferences window, Export tab: the formats offered together by Copy Graph, in order."
   },
   {
     "image": "files-recover-projects.png",
-    "kind": "auto",
     "page": "guide/projects-and-workbooks.md",
     "shows": "The Recover Projects window listing two recovery copies with Open, Ignore and Delete."
   },
   {
     "image": "graphs-graph-menu.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Graph menu open, with Graph1 in the foreground."
   },
   {
     "image": "graphs-axes-log-scale.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Graph Properties window, Axes tab, X (bottom) axis with Log scale ticked."
   },
   {
     "image": "analysis-baseline.png",
-    "kind": "auto",
     "page": "guide/analysis.md",
     "shows": "The Correction analysis window on Graph1: polynomial baseline on two background zones."
   },
   {
     "image": "import-wizard-files.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 1 Files and Template."
   },
   {
     "image": "import-wizard-metadata.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 5 Metadata."
   },
   {
     "image": "import-wizard-destination.png",
-    "kind": "auto",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 6 Destination."
   },
   {
     "image": "interface-object-manager-series.png",
-    "kind": "auto",
     "page": "guide/graphs.md",
     "shows": "The Object Manager for Graph1 with the series selected."
   },
   {
-    "image": "import-file-chooser.png",
-    "kind": "manual",
-    "page": "guide/import.md",
-    "shows": "The system file chooser opened by File > Import.",
-    "how": "Launch the application, press Ctrl+3 (File > Import) and, on the Files step of the wizard, press the button that adds files. Capture the chooser the desktop shows, with a few instrument files listed."
+    "image": "analysis-peaks.png",
+    "page": "guide/analysis.md",
+    "shows": "The Peak Decomposition window on Graph1: Gaussian peaks with a constant background detected on the spectrum, the preview with the fitted curve and the values of each peak."
   },
   {
-    "image": "import-drag-and-drop.png",
-    "kind": "manual",
-    "page": "guide/import.md",
-    "shows": "A data file dragged from the file manager onto the StokesForge window.",
-    "how": "Open the file manager next to StokesForge, start dragging a .csv file over the workspace and capture the screen while the file is still held over the window."
-  },
-  {
-    "image": "interface-detached-window.png",
-    "kind": "manual",
-    "page": "guide/interface.md",
-    "shows": "A graph detached into its own operating system window.",
-    "how": "Open a graph, press its Detach button (arrow out of a square, in the title bar) and capture the desktop with the detached window beside the main window."
+    "image": "workbooks-workbook-menu.png",
+    "page": "guide/projects-and-workbooks.md",
+    "shows": "The Workbook menu of the menu bar, opened on Book1."
   },
   {
     "image": "scripting-console.png",
-    "kind": "manual",
+    "feature": "python",
     "page": "scripting/console.md",
-    "shows": "The Python Script console with a script and its output.",
-    "how": "Run a build with the python feature (scripts/python-test.sh shows how to set PYO3_CONFIG_FILE), open the Python Script bar at the bottom, run the example script and capture the console. The bench build has no Python, where the console only says it is not available."
+    "shows": "The Python Script console after running a short script that finds the maximum of the Spectrum sheet: the script in the text box, the Run and Stop buttons and the output area. Rendered only by a build with the python feature."
   }
 ]

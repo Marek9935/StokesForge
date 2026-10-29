@@ -259,7 +259,7 @@ The whole interface changes at once and the choice is remembered. You can also s
 
 Choose **File ▸ Preferences…** to open the **Preferences** window. It sets the application, not the project. The settings apply as soon as you change them. Close the window when you are done.
 
-<img src="../images/preferences-general.png" alt="The General tab of Preferences: language, maximum file size and cells, automatic recovery copy." width="484">
+<img src="../images/preferences-general.png" alt="The General tab of Preferences: language, maximum file size and cells, automatic recovery copy." width="480">
 
 It has three tabs:
 

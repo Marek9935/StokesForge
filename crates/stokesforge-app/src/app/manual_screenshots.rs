@@ -23,9 +23,10 @@
 //!   every click, and the frames are run until the layout settles.
 //! - A PNG is rewritten only if its decoded pixels differ from the file on
 //!   disk, so an unchanged screen leaves the repository untouched.
-//! - What cannot be rendered here (system file chooser, OS drag and drop, a
-//!   detached OS window, the Python console) is `"kind": "manual"` in the
-//!   manifest, with the way to take it by hand.
+//! - Only what the bench can render is illustrated: nothing that depends on
+//!   the operating system (system file chooser, OS drag and drop, detached OS
+//!   window) has a screenshot. The Python console needs the `python` feature
+//!   (`"feature": "python"` in the manifest).
 
 use std::path::{Path, PathBuf};
 
@@ -106,9 +107,10 @@ fn panel_rect(h: &Harness<'static, Bench>, id: &str) -> egui::Rect {
         .outer_rect
 }
 
-/// The rectangle of the topmost workspace window (a floating workbook or graph).
+/// The rectangle of the topmost workspace window (a floating workbook or graph):
+/// its frame, without the resize border and the shadow around it.
 fn workspace_window_rect(h: &Harness<'static, Bench>) -> egui::Rect {
-    layer_rect(h, egui::Order::Middle)
+    layer_rect(h, egui::Order::Middle).shrink(super::window_chrome::RESIZE_BORDER)
 }
 
 /// The workbook window and the context menu open over it.
@@ -146,14 +148,38 @@ fn menu_rect(h: &Harness<'static, Bench>) -> egui::Rect {
         .into_iter()
         .reduce(|all, menu| all.union(menu))
         .expect("an open menu")
-        .shrink(4.0)
 }
 
-/// The rectangle of the topmost dialog (modal windows live above the workspace).
+/// The rectangle of the topmost dialog (modal windows live above the workspace):
+/// exactly the window frame, stroke included. The area around it holds the
+/// soft shadow and the resize border, where the application shows through.
 fn dialog_rect(h: &Harness<'static, Bench>) -> egui::Rect {
-    // The area is the frame plus 5 pt of soft shadow: keep the frame and a
-    // thin uniform margin (the workspace behind a dialog is never empty: panels).
-    layer_rect(h, egui::Order::Foreground).shrink(4.0)
+    layer_rect(h, egui::Order::Foreground).shrink(super::window_chrome::RESIZE_BORDER)
+}
+
+/// Makes the open dialog `extra` points taller, so that its whole content fits
+/// without its inner scroll bar, and settles the layout.
+fn grow_dialog(h: &mut Harness<'static, Bench>, extra: f32) {
+    let id = layer_id(h, egui::Order::Foreground);
+    let size = dialog_rect(h).size() + egui::vec2(0.0, extra);
+    super::dialogs::set_dialog_size(&h.ctx, id, size);
+    settle(h);
+}
+
+fn layer_id(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Id {
+    let screen = h.ctx.content_rect();
+    h.ctx.memory(|memory| {
+        let found: Vec<egui::Id> = memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == order)
+            .filter(|layer| memory.area_rect(layer.id).is_some_and(|r| r != screen))
+            .map(|layer| layer.id)
+            .collect();
+        assert_eq!(found.len(), 1, "expected one visible {order:?} window");
+        found[0]
+    })
 }
 
 fn layer_rect(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Rect {
@@ -268,6 +294,7 @@ const SHOTS: &[Shot] = &[
                     axis: Some(PlotAxis::Bottom),
                 },
             );
+            grow_dialog(h, 255.0);
         },
         crop: Crop::Rect(dialog_rect),
     },
@@ -282,7 +309,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "analysis-integration",
         setup: |h| {
-            open_analysis(h, Preset::Integrate);
+            open_analysis(h, Preset::Integrate, 0.0, 0.0);
             // One range around the main peak.
             if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
                 form.setup.integrate.ranges = vec![(470.0, 570.0)];
@@ -294,11 +321,11 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "analysis-fit",
         setup: |h| {
-            open_analysis(h, Preset::Fit(Model::Gaussian));
+            open_analysis(h, Preset::Fit(Model::Gaussian), 180.0, 50.0);
             click(h, "Auto");
             // Fitted on the main peak only.
             if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
-                form.setup.fit.range = Some((470.0, 570.0));
+                form.setup.fit.range = Some((490.0, 550.0));
             }
             settle(h);
         },
@@ -309,6 +336,7 @@ const SHOTS: &[Shot] = &[
         setup: |h| {
             empty_workspace(h);
             act(h, Action::OpenPreferences);
+            grow_dialog(h, 100.0);
         },
         crop: Crop::Rect(dialog_rect),
     },
@@ -368,6 +396,7 @@ const SHOTS: &[Shot] = &[
                     axis: Some(PlotAxis::Bottom),
                 },
             );
+            grow_dialog(h, 255.0);
             click(h, "Log scale");
         },
         crop: Crop::Rect(dialog_rect),
@@ -375,7 +404,7 @@ const SHOTS: &[Shot] = &[
     Shot {
         name: "analysis-baseline",
         setup: |h| {
-            open_analysis(h, Preset::BaselinePolynomial);
+            open_analysis(h, Preset::BaselinePolynomial, 0.0, 0.0);
             // Two zones with only background, on each side of the peaks.
             if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
                 form.setup.baseline.zones = vec![(400.0, 440.0), (650.0, 700.0)];
@@ -425,7 +454,69 @@ const SHOTS: &[Shot] = &[
         },
         crop: Crop::Rect(object_manager_rect),
     },
+    Shot {
+        name: "analysis-peaks",
+        setup: |h| {
+            open_analysis(h, Preset::Peaks, 320.0, 120.0);
+            settle(h);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "workbooks-workbook-menu",
+        setup: |h| {
+            show_book_alone(h);
+            // The menu follows the active window: bring the workbook forward.
+            let book = Tab::Book(h.state().ids.book1);
+            h.state_mut().app.open_tab(book);
+            settle(h);
+            press_label(h, "Workbook", egui::PointerButton::Primary);
+        },
+        crop: Crop::Rect(menu_rect),
+    },
+    // The Python console needs the embedded interpreter: only with the
+    // `python` feature (scripts/manual-screenshots.sh runs both builds).
+    #[cfg(feature = "python")]
+    Shot {
+        name: "scripting-console",
+        setup: |h| {
+            empty_workspace(h);
+            h.state_mut().app.script_collapsed = false;
+            let script = SCRIPT_EXAMPLE.to_string();
+            h.state_mut().app.state.set_script_source(script);
+            act(h, Action::RunScript);
+            // The script runs on its own thread: wait for its output.
+            for _ in 0..400 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                h.step();
+                let state = &h.state().app.state;
+                if !state.script_running() && state.script_output().is_some() {
+                    break;
+                }
+            }
+            settle(h);
+        },
+        crop: Crop::Rect(script_console_rect),
+    },
 ];
+
+/// The script shown in the console shot; it is really run.
+#[cfg(feature = "python")]
+const SCRIPT_EXAMPLE: &str = "\
+import numpy as np
+
+x = pyst.column(pyst.resolve(\"[Book1]Spectrum!A\"))
+y = pyst.column(pyst.resolve(\"[Book1]Spectrum!B\"))
+peak = int(np.argmax(y))
+print(\"Maximum:\", round(float(y[peak]), 3), \"at\", float(x[peak]), \"nm\")
+";
+
+/// The script console panel at the bottom of the window, 1000 points wide.
+#[cfg(feature = "python")]
+fn script_console_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let panel = panel_rect(h, "stokesforge_script");
+    egui::Rect::from_min_size(panel.min, egui::vec2(1000.0, panel.height()))
+}
 
 /// No floating window behind a dialog: its crop shows plain background.
 fn empty_workspace(h: &mut Harness<'static, Bench>) {
@@ -529,7 +620,14 @@ fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
 }
 
 /// The analysis window open on the series of `Graph1`.
-fn open_analysis(h: &mut Harness<'static, Bench>, preset: Preset) {
+///
+/// `values` is the height (points) of the list of values under the preview, so
+/// that it shows every value without its scroll bar (`0`: the application's
+/// own height, enough for a short list); `grow` makes the window taller by as
+/// much, to keep the preview and to show the whole settings column.
+fn open_analysis(h: &mut Harness<'static, Bench>, preset: Preset, values: f32, grow: f32) {
+    super::analysis_dialog::VALUES_HEIGHT_OVERRIDE
+        .store(values as u32, std::sync::atomic::Ordering::Relaxed);
     empty_workspace(h);
     let graph = h.state().ids.graph1;
     let tree = &h.state().app.state.snapshot().tree;
@@ -546,6 +644,10 @@ fn open_analysis(h: &mut Harness<'static, Bench>, preset: Preset) {
             spec: Box::new(spec),
         },
     );
+    // Tall enough for the whole settings column and the values.
+    if grow > 0.0 {
+        grow_dialog(h, grow);
+    }
 }
 
 /// Puts a floating window at `pos`, of `size` (coordinates of the workspace,
@@ -605,7 +707,7 @@ struct Ids {
 }
 
 impl Bench {
-    fn new() -> Self {
+    fn new(spectrum_noise: f64) -> Self {
         let mut project = demo::demo_project().expect("demo project");
         // The demo leaves the long names and units of the "Spectrum" sheet
         // empty: fill them before the session owns the project (invariant 1).
@@ -629,6 +731,28 @@ impl Bench {
             meta.unit = unit.into();
             project.set_column_meta(column, meta).expect("column meta");
         }
+        if spectrum_noise > 0.0 {
+            // A fixed, reproducible scatter (a measured spectrum is never exact).
+            let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+            let mut uniform = move || {
+                // xorshift64*: the same sequence on every run.
+                state ^= state >> 12;
+                state ^= state << 25;
+                state ^= state >> 27;
+                (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1_u64 << 53) as f64
+            };
+            let noisy: Vec<f64> = (0..121_u32)
+                .map(|i| {
+                    let x = 400.0 + f64::from(i) * 2.5;
+                    let (a, b) = ((x - 520.0) / 38.0, (x - 610.0) / 22.0);
+                    let gauss: f64 = (0..12).map(|_| uniform()).sum::<f64>() - 6.0;
+                    0.85 * (-a * a).exp() + 0.32 * (-b * b).exp() + 0.04 + gauss * spectrum_noise
+                })
+                .collect();
+            project
+                .set_values(columns[1], 0, stokesforge_core::ValueBlock::Float(noisy))
+                .expect("noisy spectrum");
+        }
         let node = |name: &str| {
             project
                 .tree()
@@ -641,12 +765,18 @@ impl Bench {
         // The formula columns of the demo carry only their formula until a
         // full recalculation (invariant 11).
         session.handle().recalculate(&[]).expect("recalculation");
-        let state = AppState::new_with_preferences(
+        #[cfg_attr(not(feature = "python"), allow(unused_mut))]
+        let mut state = AppState::new_with_preferences(
             session.handle(),
             "Demo.stf".to_string(),
             Preferences::load_from(None),
         )
         .expect("state");
+        #[cfg(feature = "python")]
+        state.set_python(
+            stokesforge_python::interpreter::EmbeddedPython::locate()
+                .expect("embedded Python (STOKESFORGE_PYTHON_HOME, see scripts/python-test.sh)"),
+        );
         let mut app = StokesForgeApp::new(state);
         app.open_tab(Tab::Book(book1));
         app.open_tab(Tab::Graph(graph1));
@@ -672,7 +802,7 @@ fn capture_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// A harness on the real application, settled.
-fn harness() -> Harness<'static, Bench> {
+fn harness(spectrum_noise: f64) -> Harness<'static, Bench> {
     use eframe::App as _;
     let mut harness = Harness::builder()
         .with_size(WINDOW)
@@ -683,7 +813,7 @@ fn harness() -> Harness<'static, Bench> {
                 bench.app.logic(&ui.ctx().clone(), &mut bench.frame);
                 bench.app.ui(ui, &mut bench.frame);
             },
-            Bench::new(),
+            Bench::new(spectrum_noise),
         );
     harness
         .ctx
@@ -724,7 +854,14 @@ fn drop_focus(harness: &mut Harness<'static, Bench>) {
 
 /// The final image of a shot: setup, settle, render, crop.
 fn render_shot(shot: &Shot) -> image::RgbaImage {
-    let mut harness = harness();
+    // The fits need a measured-looking spectrum: the exact demo curve gives a
+    // perfect fit, 17-digit values and residuals that only show a neighbour's tail.
+    let noise = if matches!(shot.name, "analysis-peaks" | "analysis-fit") {
+        0.006
+    } else {
+        0.0
+    };
+    let mut harness = harness(noise);
     (shot.setup)(&mut harness);
     pointer_away(&mut harness);
     drop_focus(&mut harness);
@@ -803,10 +940,10 @@ fn render_manual_screenshots() {
 }
 
 /// The manifest `manual/screenshots.json` and [`SHOTS`] describe the same
-/// images: every `auto` entry is a shot, every shot has an entry, every file
-/// of the manifest that the bench produces exists, and every entry names the
-/// page it illustrates. Images taken by hand (`manual`) may be missing: they
-/// are listed in the message of the run.
+/// images, in the same order: every shot has an entry, every entry names the
+/// page it illustrates and its image exists. An entry with `"feature":
+/// "python"` is rendered only by a build with that feature: it is a shot only
+/// then (its image must exist anyway).
 #[test]
 fn the_manifest_and_the_shots_agree() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../manual");
@@ -818,40 +955,27 @@ fn the_manifest_and_the_shots_agree() {
             .unwrap_or_else(|| panic!("{entry}: `{key}` is missing"))
             .to_string()
     };
-    let mut auto = Vec::new();
-    let mut missing_by_hand = Vec::new();
+    let mut listed = Vec::new();
     for entry in &entries {
         let image = field(entry, "image");
-        let kind = field(entry, "kind");
         assert!(!field(entry, "shows").is_empty(), "{image}: empty `shows`");
         let page = field(entry, "page");
         assert!(
             root.join("src").join(&page).exists(),
             "{image}: no page {page}"
         );
-        match kind.as_str() {
-            "auto" => {
-                assert!(
-                    root.join("src/images").join(&image).exists(),
-                    "{image} is produced by scripts/manual-screenshots.sh and is missing"
-                );
-                auto.push(image.trim_end_matches(".png").to_string());
-            }
-            "manual" => {
-                assert!(!field(entry, "how").is_empty(), "{image}: empty `how`");
-                if !root.join("src/images").join(&image).exists() {
-                    missing_by_hand.push(image);
-                }
-            }
-            other => panic!("{image}: unknown kind {other}"),
+        assert!(
+            root.join("src/images").join(&image).exists(),
+            "{image} is produced by scripts/manual-screenshots.sh and is missing"
+        );
+        let needs_python = entry["feature"].as_str() == Some("python");
+        if cfg!(feature = "python") || !needs_python {
+            listed.push(image.trim_end_matches(".png").to_string());
         }
     }
     let shots: Vec<String> = SHOTS.iter().map(|shot| shot.name.to_string()).collect();
     assert_eq!(
-        auto, shots,
-        "`auto` entries and SHOTS differ (names and order)"
+        listed, shots,
+        "the manifest and SHOTS differ (names and order)"
     );
-    if !missing_by_hand.is_empty() {
-        eprintln!("images to take by hand (see `how`): {missing_by_hand:?}");
-    }
 }

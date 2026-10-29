@@ -39,6 +39,8 @@ When the script ends:
 
 A new console contains a short example that reads the first column of **Book1**. Replace it with your own script.
 
+<img src="../images/scripting-console.png" alt="The Python Script console after a run. The text box holds a script that reads columns A and B of the Spectrum sheet of Book1 with pyst.column and prints the maximum. Under the Run and Stop buttons, the Standard output part shows: Maximum: 0.89 at 520.0 nm." width="1000">
+
 ### Type several lines
 
 The text box accepts any number of lines. Press <kbd>Enter</kbd> for a new line. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs the script instead of adding a line. Indent with spaces, as in any Python file.

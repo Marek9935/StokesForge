@@ -109,7 +109,7 @@ You can open them in several ways:
 - Use the **Graph** menu, then **Properties**. It lists **Graph Properties…**, **Plot Area…**, **Axes…**, **Series…**, **Legend…** and **Theme…**.
 - Double-click a row in the Object Manager.
 
-<img src="../images/graphs-graph-menu.png" alt="The Graph menu: Show Data, Add Text, New Layer, the mirror axes, Reset Zoom, Export and Properties." width="131">
+<img src="../images/graphs-graph-menu.png" alt="The Graph menu: Show Data, Add Text, New Layer, the mirror axes, Reset Zoom, Export and Properties." width="139">
 
 While the window is open, your changes show on the graph at once. Click **OK** to keep them as a single undo step. Click **Cancel**, or press <kbd>Esc</kbd>, to go back to how the graph was. The rest of the application is locked while the window is open.
 
@@ -129,7 +129,7 @@ A new graph has no background color: the figure is transparent when exported, an
 
 Double-click a curve, or choose **Graph ▸ Properties ▸ Series…**.
 
-<img src="../images/graphs-properties-series.png" alt="The Series Properties window of Graph1: the list of series on the left, group, name, plot type, line and symbol settings on the right." width="644">
+<img src="../images/graphs-properties-series.png" alt="The Series Properties window of Graph1: the list of series on the left, group, name, plot type, line and symbol settings on the right." width="640">
 
 The settings of the selected series:
 
@@ -174,7 +174,7 @@ Name, plot type, visibility and colors always stay per series. With the whole gr
 
 Open the **Axes** tab and pick the axis at the top of the page: **X (bottom)**, **Y (left)**, and the others when the layer uses them. Or double-click an axis on the figure.
 
-<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, X (bottom) axis: title, scale, range and display settings." width="484">
+<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, X (bottom) axis: title, scale, range and display settings." width="480">
 
 ### Axis title
 
@@ -197,7 +197,7 @@ In the **Scale** section:
 
 While the range is automatic, the two fields show the range StokesForge computed.
 
-<img src="../images/graphs-axes-log-scale.png" alt="The X (bottom) axis with Log scale ticked." width="484">
+<img src="../images/graphs-axes-log-scale.png" alt="The X (bottom) axis with Log scale ticked." width="480">
 
 ### Display and ticks
 
@@ -236,7 +236,7 @@ If a formula is not valid, the field shows a message after you leave it. The gra
 
 ### Examples
 
-<img src="../images/graphs-formula-title.png" alt="The Annotations example graph: text written with formulas (subscripts, Greek letters), a rectangle, an ellipse and an arrow." width="770">
+<img src="../images/graphs-formula-title.png" alt="The Annotations example graph: text written with formulas (subscripts, Greek letters), a rectangle, an ellipse and an arrow." width="758">
 
 | You type | You get |
 |---|---|

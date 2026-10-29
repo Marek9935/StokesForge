@@ -33,6 +33,25 @@ const FORM_WIDTH: f32 = 330.0;
 /// Height reserved for the computed values below the preview.
 const VALUES_HEIGHT: f32 = 130.0;
 
+/// Test seam of the manual screenshot bench (#367): the height of the values
+/// list, in points, so that a shot can show every value without the list's
+/// scroll bar. `0` keeps [`VALUES_HEIGHT`].
+#[cfg(test)]
+pub(super) static VALUES_HEIGHT_OVERRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// Height of the values list: [`VALUES_HEIGHT`] (a test can override it).
+fn values_height() -> f32 {
+    #[cfg(test)]
+    {
+        let over = VALUES_HEIGHT_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+        if over > 0 {
+            return over as f32;
+        }
+    }
+    VALUES_HEIGHT
+}
+
 /// A value and its standard error, through the common formatter (#222):
 /// `12.346 ± 0.052`.
 pub(super) fn format_value(value: f64, error: Option<f64>) -> String {
@@ -127,7 +146,7 @@ fn values_panel(
     // RAW-SCROLL(#347): values list of fixed height (VALUES_HEIGHT)
     egui::ScrollArea::vertical()
         .id_salt("stokesforge_analysis_values")
-        .max_height(VALUES_HEIGHT)
+        .max_height(values_height())
         .auto_shrink([false, true])
         .show(ui, |ui| {
             for warning in &outcome.warnings {
@@ -277,7 +296,8 @@ pub(super) fn analysis_window(
                             });
                             rows.note(tr!("analysis-preview-navigation"));
                         });
-                        let plot_height = (ui.available_height() - VALUES_HEIGHT - 8.0).max(160.0);
+                        let plot_height =
+                            (ui.available_height() - values_height() - 8.0).max(160.0);
                         let result = ui
                             .allocate_ui_with_layout(
                                 egui::vec2(ui.available_width(), plot_height),

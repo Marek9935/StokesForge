@@ -710,6 +710,26 @@ fn dialog_kind(id: egui::Id) -> String {
     format!("{:016x}", id.value())
 }
 
+/// Sets the size of the open modal dialog `id`, keeping it centred on the
+/// screen. Used by the manual screenshot bench (#367) to show a dialog whose
+/// content would otherwise need its inner scroll bar.
+#[cfg(test)]
+pub(super) fn set_dialog_size(ctx: &egui::Context, id: egui::Id, size: egui::Vec2) {
+    let screen = ctx.content_rect();
+    // Keep the resize border inside the screen: the bench crops the frame exactly.
+    let size =
+        size.min(screen.size() - egui::Vec2::splat(2.0 * super::window_chrome::RESIZE_BORDER));
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            id.with("geometry"),
+            DialogGeometry {
+                pos: screen.center() - size / 2.0,
+                size,
+            },
+        );
+    });
+}
+
 /// The remembered geometries, copied from the preferences into egui's memory.
 #[derive(Clone, Default)]
 struct RememberedGeometries(BTreeMap<String, SavedGeometry>);
