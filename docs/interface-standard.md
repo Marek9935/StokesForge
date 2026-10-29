@@ -564,6 +564,12 @@ of their nature (`InteractiveSize`: default, class, free;
   other number, no number, too far; justified, comment, string and test code
   pass). Free sizes today: the analysis, the import
   wizard, the `preferences_proto` bench.
+- **Analysis window, two columns** (#384): the settings column is `FORM_WIDTH`
+  wide (400 pt, sized for Peak Decomposition, the widest form) and the preview
+  takes the width that **really remains** after the column, never a width
+  computed as if the column had exactly `FORM_WIDTH`. Witness:
+  `analysis_dialog::tests::the_preview_stays_inside_the_window_and_the_widest_form_fits`
+  (preview inside the window for five analyses; "Keep in Results" on one line).
 - **`the_window_catalog_and_the_code_agree`**: every literal
   `"stokesforge_…"` passed as an argument of a `modal_*` function (before its
   closures) appears in backticks in `docs/windows.md`, and every
