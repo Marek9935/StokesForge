@@ -167,10 +167,27 @@ installer, #387; its version comes from `stokesforge-app --version`, and it
 never removes the `recovery` folder that lives in the same data directory);
 `scripts/release-notes.sh` checks that a `vX.Y.Z` tag matches the versions of the
 crates (alignment by `scripts/versions-aligned.sh`, also run on every push by `fmt`: crates, internal dependencies, `Cargo.lock`, format witness; refusal of a tag outside `main` or not increasing by `scripts/release-tag-on-main.sh` and `scripts/release-tag-increasing.sh`) and a section of `CHANGELOG.md`, and prints the notes;
-`scripts/release-upload.sh linux|windows` uploads the archive or the installer to
+`scripts/release-upload.sh linux|rpm|deb|windows` uploads the archive or the installer to
 the GitLab package registry; `scripts/release-publish.sh` creates the GitLab
 release, which links the two. Linux and Windows are built on GitHub
 (hosted runners), and everything is published on GitLab (the release is created by the GitHub `publier` job): [`v1-criteria.md`](v1-criteria.md).
+
+**Linux packages (#390).** `scripts/release-linux-packages.sh` packs the same assembled
+folder (without `install.sh`) into `StokesForge-<version>-linux-x86_64.rpm` and
+`.deb` with one configuration, `scripts/nfpm.yaml`, run by nfpm (pinned with its
+checksum in `scripts/linux-packages.env`; installed by `scripts/nfpm-install.sh`;
+a build tool, not shipped, not a Cargo dependency). Layout: the whole folder in
+`/opt/stokesforge/` (owned by the package, which is what `install.sh --system`
+looks at to refuse a clash), `/usr/bin/stokesforge` link, and the menu entry, MIME
+type and icons written by `install.sh --stage-integration` (the single writer of
+that text). An `-rcN` tag gives the version `X.Y.Z~rcN` inside the packages. The
+graphics libraries are loaded at run time, so the dependencies are declared by
+hand (sonames for the RPM, packages for the DEB). A `preinst` refuses an
+installation over a `install.sh --system` one (`/opt/stokesforge/current`).
+`PUBLISH_LINUX_PACKAGES` in `scripts/linux-packages.env` is the single publication
+switch: at 0 (until the icon, #388) the packages are built and tested at every
+tag but neither uploaded nor linked to the release; the manual and `CHANGELOG.md`
+change in the commit that sets it to 1. Tests: `docs/tests.md`.
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) is the counterpart of `app-dist.sh`: it

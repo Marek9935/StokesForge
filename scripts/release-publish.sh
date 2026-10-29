@@ -4,7 +4,9 @@
 # (`release-linux`) and to the user manual (`release-manual`), which these
 # GitHub jobs (.github/workflows/ci.yml) upload to the GitLab package registry.
 # Runs in the GitHub `publier` job, which `needs` all three: the packages are
-# already there.
+# already there. The RPM and DEB packages (#390) are linked too, but only when
+# PUBLISH_LINUX_PACKAGES=1 in scripts/linux-packages.env (the publication
+# switch, flipped once the icon #388 is in the distribution).
 #
 # Usage: scripts/release-publish.sh vX.Y.Z | vX.Y.Z-rcN
 # Environment: GITLAB_RELEASE_TOKEN (GitHub secret: GitLab project token,
@@ -33,6 +35,8 @@ VERSION="${TAG#v}"
 ESSAI=0
 [[ "$TAG" == *-rc* ]] && ESSAI=1
 
+# shellcheck source=linux-packages.env
+source "$REPO_ROOT/scripts/linux-packages.env"
 PROJECT_ID=86104040
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}"
 PAQUETS="${API}/projects/${PROJECT_ID}/packages/generic/stokesforge/${VERSION}"
@@ -46,6 +50,8 @@ fi
 SETUP="StokesForge-${VERSION}-windows-setup.exe"
 LINUX="StokesForge-${VERSION}-linux-x86_64.tar.gz"
 MANUEL="StokesForge-${VERSION}-manual.tar.gz"
+RPM="StokesForge-${VERSION}-linux-x86_64.rpm"
+DEB="StokesForge-${VERSION}-linux-x86_64.deb"
 # Pipeline that publishes the manual (final tag only, see above). JSON: the
 # documented form of `variables` for this endpoint.
 PIPELINE="{\"ref\":\"${TAG}\",\"variables\":[{\"key\":\"STOKESFORGE_PUBLISH_MANUAL\",\"value\":\"1\"}]}"
@@ -64,6 +70,18 @@ args=(
     --data-urlencode "assets[links][][url]=${PAQUETS}/${MANUEL}"
     --data-urlencode "assets[links][][link_type]=package"
 )
+pkgfiles=("$LINUX" "$SETUP" "$MANUEL")
+if [ "$PUBLISH_LINUX_PACKAGES" = 1 ]; then
+    args+=(
+        --data-urlencode "assets[links][][name]=Linux RPM package (${RPM})"
+        --data-urlencode "assets[links][][url]=${PAQUETS}/${RPM}"
+        --data-urlencode "assets[links][][link_type]=package"
+        --data-urlencode "assets[links][][name]=Linux DEB package (${DEB})"
+        --data-urlencode "assets[links][][url]=${PAQUETS}/${DEB}"
+        --data-urlencode "assets[links][][link_type]=package"
+    )
+    pkgfiles+=("$RPM" "$DEB")
+fi
 
 if [ "${STOKESFORGE_RELEASE_DRYRUN:-}" = 1 ]; then
     printf '%s\n' "${args[@]}"
@@ -82,9 +100,9 @@ gitlab() {
     printf 'header = "PRIVATE-TOKEN: %s"\n' "$GITLAB_RELEASE_TOKEN" | curl --fail-with-body --silent --show-error -K - "$@"
 }
 
-# The three package jobs are finished (`needs`); a short wait covers a possible
+# The package jobs are finished (`needs`); a short wait covers a possible
 # indexing delay, without publishing a dead link.
-for fichier in "$LINUX" "$SETUP" "$MANUEL"; do
+for fichier in "${pkgfiles[@]}"; do
     essais=10
     until gitlab --output /dev/null --range 0-0 "${PAQUETS}/${fichier}" 2> /dev/null; do
         essais=$((essais - 1))

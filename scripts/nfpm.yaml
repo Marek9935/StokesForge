@@ -1,0 +1,76 @@
+# nfpm configuration of the RPM and DEB packages (#390), one for both formats.
+# Run by scripts/release-linux-packages.sh, which sets NFPM_PKG_VERSION (env,
+# expanded by nfpm), fills the placeholders and appends the icon entries.
+#   NFPM_PKG_VERSION  X.Y.Z or X.Y.Z~rcN (already in the form of both formats)
+#   @STAGE@           the staging tree (opt/stokesforge/, usr/share/…), substituted
+#   @SCRIPTS@         scripts/linux-packages (preinst, copyright), substituted
+name: stokesforge
+arch: amd64
+platform: linux
+version: ${NFPM_PKG_VERSION}
+version_schema: none
+release: "1"
+section: science
+priority: optional
+maintainer: StokesForge <askrzypczak@users.noreply.gitlab.com>
+description: |
+  Analysis and plotting of scientific data.
+  Self-contained: the program carries its own Python.
+homepage: https://gitlab.com/askrzypczak/stokesforge
+license: GPL-3.0-or-later
+
+# The graphics libraries are loaded at run time (dlopen), so no scan finds
+# them: declared by hand, by soname for the RPM and by package for the DEB.
+depends:
+  - libvulkan.so.1()(64bit)
+  - libwayland-client.so.0()(64bit)
+  - libwayland-egl.so.1()(64bit)
+  - libxkbcommon.so.0()(64bit)
+  - libxkbcommon-x11.so.0()(64bit)
+  - libX11.so.6()(64bit)
+  - libX11-xcb.so.1()(64bit)
+  - libxcb.so.1()(64bit)
+  - libXcursor.so.1()(64bit)
+  - libXi.so.6()(64bit)
+  - libEGL.so.1()(64bit)
+recommends:
+  - mesa-vulkan-drivers
+overrides:
+  deb:
+    depends:
+      - libvulkan1
+      - libwayland-client0
+      - libwayland-egl1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libx11-6
+      - libx11-xcb1
+      - libxcb1
+      - libxcursor1
+      - libxi6
+      - libegl1
+
+rpm:
+  compression: xz
+deb:
+  compression: xz
+
+scripts:
+  preinstall: @SCRIPTS@/preinst.sh
+
+contents:
+  # The whole program folder, owned by the package (install.sh relies on
+  # `rpm -qf` / `dpkg -S` of /opt/stokesforge to refuse a clash).
+  - src: @STAGE@/opt/stokesforge
+    dst: /opt/stokesforge
+    type: tree
+  - src: /opt/stokesforge/stokesforge-app
+    dst: /usr/bin/stokesforge
+    type: symlink
+  - src: @STAGE@/usr/share/applications/stokesforge.desktop
+    dst: /usr/share/applications/stokesforge.desktop
+  - src: @STAGE@/usr/share/mime/packages/stokesforge.xml
+    dst: /usr/share/mime/packages/stokesforge.xml
+  - src: @SCRIPTS@/copyright
+    dst: /usr/share/doc/stokesforge/copyright
+    packager: deb

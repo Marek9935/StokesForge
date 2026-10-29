@@ -1,0 +1,27 @@
+# rpmlint configuration for the StokesForge RPM (#390), used by
+# scripts/linux-packages-install-test.sh: the package must have no error
+# outside these filters. Each one is a deliberate property of the package.
+Filters = [
+    # The program is self-contained and lives in /opt (Python, libpython and
+    # extensions beside the executable).
+    "dir-or-file-in-opt",
+    "binary-in-opt",
+    # Shipped as built by scripts/app-dist.sh, not by an rpm build.
+    "unstripped-binary-or-object",
+    "no-buildhost-in-.*",
+    "shared-library-without-dependency-information",
+    # Bundled libraries (numpy, Python): on purpose, the notices ship with them.
+    "binary-or-shlib-defines-rpath",
+    "invalid-rpath",
+    # The bytecode is kept on purpose (same gain as in the archive).
+    "python-bytecode-.*",
+    "python-doc-in-package",
+    # Not signed (decided on #390), no changelog, no man page.
+    "no-signature",
+    "no-changelogname-tag",
+    "no-manual-page-for-binary",
+    "no-documentation",
+    "devel-file-in-non-devel-package",
+    "hidden-file-or-dir",
+    "zero-length",
+]

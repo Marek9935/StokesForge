@@ -20,6 +20,13 @@
 #
 # Test-only: STOKESFORGE_INSTALL_ROOT=<dir> with --system replaces the root `/`
 # by <dir> (Exec and links included) and lifts the root requirement.
+#
+# Packaging-only (not in `usage`): the RPM and DEB packages (#390) reuse this
+# script as the single writer of the menu entry, MIME type and icons:
+#   install.sh --stage-integration <share dir> <exec path> <version dir>
+# writes <share dir>/{applications,mime/packages,icons} for a program that will
+# live at <exec path>, with the icons found in <version dir>/share/icons. It
+# changes nothing else: no root, no package manager, no cache refresh, no copy.
 set -euo pipefail
 
 VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+$'
@@ -301,7 +308,29 @@ do_uninstall_all() {
     say "uninstalled; projects and ~/.config/stokesforge are untouched"
 }
 
+# Packaging mode (see the header): the integration files only, under $1.
+stage_integration() { # stage_integration <share dir> <exec path> <version dir>
+    [ $# = 3 ] || { usage >&2; exit 2; }
+    SHARE="${1%/}"
+    case "$2" in
+        *[\"\`\$\\]* | *$'\n'*) die "paths with quotes, backquotes, dollars or backslashes are not supported" ;;
+    esac
+    local icon=0
+    mkdir -p "$SHARE/applications" "$SHARE/mime/packages"
+    if has_icon "$3"; then
+        icon=1
+        install_icons "$3"
+    fi
+    write_mime
+    write_desktop "$SHARE/applications/stokesforge.desktop" "StokesForge" "$2" "$icon"
+}
+
 main() {
+    if [ "${1:-}" = --stage-integration ]; then
+        shift
+        stage_integration "$@"
+        return 0
+    fi
     SYSTEM=0 KEEP=0 YES=0 UNINSTALL=0 UNVER="" TMP_PATH=""
     while [ $# -gt 0 ]; do
         case "$1" in

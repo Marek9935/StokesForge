@@ -5,24 +5,27 @@
 # GitHub `release-linux`, `release-manual` and `dist-windows` jobs, after their
 # assembly.
 #
-# Usage: scripts/release-upload.sh linux|windows|manual vX.Y.Z (or vX.Y.Z-rcN)
+# Usage: scripts/release-upload.sh linux|rpm|deb|windows|manual vX.Y.Z (or vX.Y.Z-rcN)
+# (`rpm` and `deb`: the Linux packages of scripts/release-linux-packages.sh, #390.)
 # Environment: GITLAB_RELEASE_TOKEN (GitHub secret: GitLab project token,
 # Developer role, `api` scope). STOKESFORGE_RELEASE_DRYRUN=1 prints the URL
 # without sending anything (local trial, token not required).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLATEFORME="${1:?usage: release-upload.sh linux|windows|manual vX.Y.Z}"
-TAG="${2:?usage: release-upload.sh linux|windows|manual vX.Y.Z}"
+PLATEFORME="${1:?usage: release-upload.sh linux|rpm|deb|windows|manual vX.Y.Z}"
+TAG="${2:?usage: release-upload.sh linux|rpm|deb|windows|manual vX.Y.Z}"
 VERSION="${TAG#v}"
 PROJECT_ID=86104040
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}"
 
 case "$PLATEFORME" in
     linux) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-linux-x86_64.tar.gz"; PRODUCTEUR=release-linux.sh ;;
+    rpm) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-linux-x86_64.rpm"; PRODUCTEUR=release-linux-packages.sh ;;
+    deb) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-linux-x86_64.deb"; PRODUCTEUR=release-linux-packages.sh ;;
     windows) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-windows-setup.exe"; PRODUCTEUR=app-dist-windows.sh ;;
     manual) ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-manual.tar.gz"; PRODUCTEUR=manual-build.sh ;;
-    *) echo "[release] ERROR: unknown platform \"$PLATEFORME\" (linux, windows or manual)" >&2; exit 1 ;;
+    *) echo "[release] ERROR: unknown platform \"$PLATEFORME\" (linux, rpm, deb, windows or manual)" >&2; exit 1 ;;
 esac
 URL="${API}/projects/${PROJECT_ID}/packages/generic/stokesforge/${VERSION}/$(basename "$ARCHIVE")"
 

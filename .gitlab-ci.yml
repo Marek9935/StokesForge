@@ -72,6 +72,7 @@ fmt:
     - scripts/release-notes-test.sh
     - scripts/install-linux-test.sh
     - scripts/glibc-floor-test.sh
+    - scripts/linux-packages-test.sh
     - scripts/versions-aligned.sh
     - scripts/release-tag-test.sh
 
