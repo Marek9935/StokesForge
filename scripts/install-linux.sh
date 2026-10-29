@@ -189,7 +189,9 @@ remove_versioned() { # remove_versioned <version>: its command and entry (not it
 do_install() {
     local src exe_out v
     src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-    [ -f "$src/stokesforge-app" ] && [ -x "$src/stokesforge-app" ] || die "$src/stokesforge-app is missing or not executable: broken archive"
+    if [ ! -f "$src/stokesforge-app" ] || [ ! -x "$src/stokesforge-app" ]; then
+        die "$src/stokesforge-app is missing or not executable: broken archive"
+    fi
     exe_out="$("$src/stokesforge-app" --version 2>/dev/null)" || die "'stokesforge-app --version' failed: broken archive"
     v="${exe_out#stokesforge-app }"
     [[ "$exe_out" == "stokesforge-app "* && "$v" =~ $VERSION_RE ]] || die "unexpected answer of 'stokesforge-app --version': $exe_out"

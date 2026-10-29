@@ -6,8 +6,8 @@
 # Usage: scripts/install-linux-test.sh                    fake archives
 #        scripts/install-linux-test.sh --archive <tar.gz> real archive (the tag job)
 # SC2016: `bash -c '...' _ args` expands its arguments inside, on purpose.
-# SC2329: the helpers are called through `t` / `tn`.
-# shellcheck disable=SC2016,SC2329
+# SC2329 (SC2317 before shellcheck 0.11): the helpers are called through `t` / `tn`.
+# shellcheck disable=SC2016,SC2317,SC2329
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
