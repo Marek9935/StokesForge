@@ -16,6 +16,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 <!-- lang: fr columns: French -->
 | English | French |
 |---|---|
+| About StokesForge | À propos de StokesForge |
 | Add Folder | Ajouter un dossier |
 | Add Graph | Ajouter un graphique |
 | Add Text | Ajouter un texte |

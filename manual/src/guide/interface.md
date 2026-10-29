@@ -31,7 +31,7 @@ The title bar of the application window shows the name of the project. A dot aft
 | **Analysis** | Baselines, fits, peaks and other calculations (see [Analysis](analysis.md)) |
 | **View** | Display settings of the Object Manager |
 | **Window** | **Maximize Window**, **Detach Project Manager** |
-| **Help** | **Keyboard Shortcuts…** |
+| **Help** | **Keyboard Shortcuts…**, **About StokesForge** |
 
 A menu entry that cannot be used now is greyed out. Hover over it to read the reason.
 

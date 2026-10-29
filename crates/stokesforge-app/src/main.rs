@@ -1,8 +1,9 @@
 //! Binary of the test bench: starts the session actor, builds the state and
 //! opens the window.
 //!
-//! Usage: `stokesforge-app [path]`. If `path` exists, the project is loaded
-//! from that file (and marked saved); otherwise an empty project is built and
+//! Usage: `stokesforge-app [path]`, or `stokesforge-app --version` (`-V`),
+//! which prints `stokesforge-app X.Y.Z` and exits (#382). If `path` exists, the
+//! project is loaded from that file (and marked saved); otherwise an empty project is built and
 //! `path` simply becomes the target of a future save.
 //!
 //! Without argument (#333): at the **very first launch**, the demo is written
@@ -48,6 +49,13 @@ print(\"length:\", len(v), \"first:\", v[0])\n";
 fn main() -> anyhow::Result<()> {
     #[cfg(all(windows, not(debug_assertions)))]
     console_windows::attach_parent();
+    // Before anything else: asking for the version opens no window and, above
+    // all, does not write the first-launch demo (#382).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(line) = startup::version_request(&args) {
+        println!("{line}");
+        return Ok(());
+    }
     let requested = std::env::args().nth(1).map(PathBuf::from);
     let mut preferences = Preferences::load();
     let demo_forced = std::env::var_os("STOKESFORGE_DEMO").is_some_and(|value| value == "1");

@@ -27,7 +27,7 @@ use stokesforge_import::{choose_recipe, FilesLayout, ImportRecipe, RecipeStore};
 const USAGE: &str = "usage:
   stokesforge-cli import [--recipe NAME] [--layout per-file|side-by-side|shared-x] [--out project.stf] FILE...
   stokesforge-cli recipes
-  stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst";
+  stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst\n  stokesforge-cli --version";
 
 /// The warning (English, stderr) about what a read discarded, `None`
 /// for a clean file (#309).
@@ -65,6 +65,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         }
         Some("import") => import(&args[1..], out),
         Some("run") => run_script(&args[1..], out),
+        Some("--version" | "-V") => writeln!(out, "stokesforge-cli {}", env!("CARGO_PKG_VERSION"))
+            .map_err(|err| err.to_string()),
         Some("--help" | "help") => writeln!(out, "{USAGE}").map_err(|err| err.to_string()),
         Some(other) => Err(format!("unknown command \"{other}\"\n{USAGE}")),
     }

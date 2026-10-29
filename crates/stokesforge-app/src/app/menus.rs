@@ -949,8 +949,8 @@ fn toggle_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
     ctx.request_repaint();
 }
 
-/// Help menu (#231, S-K5): the help generated from the code, today the
-/// keyboard shortcuts. A single entry, direct.
+/// Help menu (#231, S-K5): the help generated from the code (keyboard
+/// shortcuts) and About StokesForge (#382). Direct entries.
 fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
     ui.menu_button(tr!("menu-help"), |ui| {
         let mut sections = MenuSections::new();
@@ -961,6 +961,14 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
                 .clicked()
             {
                 actions.push(Action::OpenKeyboardShortcuts);
+                ui.close();
+            }
+            if ui
+                .button(tr!("action-about"))
+                .on_hover_text(tr!("action-about", "hint"))
+                .clicked()
+            {
+                actions.push(Action::OpenAbout);
                 ui.close();
             }
         });
@@ -2495,6 +2503,18 @@ mod tests {
             click_at(&mut app, &ctx, tab, pos),
             vec![Action::OpenKeyboardShortcuts]
         );
+        session.shutdown().unwrap();
+    }
+
+    /// Help › About StokesForge (#382): the entry exists and requests the window.
+    #[test]
+    fn the_help_menu_opens_the_about_window() {
+        let (session, mut app, graph) = bench();
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = open_menu(&mut app, tab, &tr!("menu-help"));
+        let entry = active(&menu, &tr!("action-about"));
+        let pos = entry.center;
+        assert_eq!(click_at(&mut app, &ctx, tab, pos), vec![Action::OpenAbout]);
         session.shutdown().unwrap();
     }
 

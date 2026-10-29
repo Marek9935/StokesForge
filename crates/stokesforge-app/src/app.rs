@@ -129,6 +129,7 @@
 //! without which, egui redrawing only on an input event, the end of the
 //! script would appear only at the next mouse movement.
 
+mod about_window;
 mod analysis_dialog;
 mod analysis_forms;
 mod analysis_handles;
@@ -192,6 +193,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use about_window::about_window;
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
 use column_use::{column_use_window, full_copy_window};
 use file_drop::{
@@ -1196,6 +1198,7 @@ impl StokesForgeApp {
         status_history_window(ctx, &self.state, actions);
         low_r2_list_window(ctx, &self.state, actions);
         keyboard_shortcuts_window(ctx, &self.state, actions);
+        about_window(ctx, &self.state, actions);
         if let Some(language) = preferences_window(ctx, &self.state, actions) {
             self.choose_language(language);
         }

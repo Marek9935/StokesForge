@@ -25,6 +25,10 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Version display (#382): **Help ▸ About StokesForge** shows the version, the
+  license and the project page, with a **Copy** button for a line to paste in a
+  bug report; `stokesforge-app --version` and `stokesforge-cli --version`
+  (`-V`) print it.
 - User manual skeleton (#362): `manual/`, built with mdBook, attached to each
   release and published on GitLab Pages for final versions. Chapters are
   still to be written.

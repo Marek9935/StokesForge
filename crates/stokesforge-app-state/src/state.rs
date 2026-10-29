@@ -548,6 +548,12 @@ pub enum Action {
     OpenKeyboardShortcuts,
     /// Closes the keyboard shortcuts window.
     CloseKeyboardShortcuts,
+    /// Opens Help > About StokesForge (#382).
+    OpenAbout,
+    /// Closes the About window.
+    CloseAbout,
+    /// About window, Copy: offers the version line to the clipboard (#382).
+    CopyVersionLine,
     /// Ouvre File › Preferences (#148).
     OpenPreferences,
     /// Closes the preferences window.
@@ -2740,6 +2746,8 @@ pub struct AppState {
     /// state, which does not overwrite `alert`.
     low_r2_list_open: bool,
     keyboard_shortcuts_open: bool,
+    /// The About window is open (#382).
+    about_open: bool,
     /// The preferences window is open (#148).
     preferences_open: bool,
     /// Error raised while a modal dialog is open (S-M7, #228):
@@ -2961,6 +2969,7 @@ impl AppState {
             low_r2_groups: Vec::new(),
             low_r2_list_open: false,
             keyboard_shortcuts_open: false,
+            about_open: false,
             preferences_open: false,
             dialog_error: None,
             editing: None,
@@ -5011,6 +5020,13 @@ impl AppState {
             Action::StopRecalc => self.stop_recalc(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
             Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
+            Action::OpenAbout => self.about_open = true,
+            Action::CloseAbout => self.about_open = false,
+            Action::CopyVersionLine => {
+                // Same transport as the copy of objects: the shell publishes it.
+                self.object_clipboard_output = Some(crate::startup::version_line());
+                self.notice(tr!("status-version-copied"));
+            }
             Action::OpenPreferences => self.preferences_open = true,
             Action::ClosePreferences => self.preferences_open = false,
             Action::OpenAnalysis {
@@ -6761,6 +6777,11 @@ impl AppState {
     /// Is the keyboard shortcuts window open?
     pub fn keyboard_shortcuts_open(&self) -> bool {
         self.keyboard_shortcuts_open
+    }
+
+    /// Is the About window open?
+    pub fn about_open(&self) -> bool {
+        self.about_open
     }
 
     /// Window title: project name, "•" while it is not saved (S-R15):
