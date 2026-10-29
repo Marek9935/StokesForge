@@ -115,7 +115,7 @@ mechanics.
 | S-X2 | `curseurs` | Open then closed hand for dragging, resize arrow on a handle, finger on a clickable element that is not a button. |
 | S-X3 | `fenetre-preferences` | **Planned (#148).** Application settings go in Edit › Preferences…; menus keep the frequent display toggles. |
 | S-X4 | `registre-d-actions` | **Planned (#110).** One table per action (label, logo, shortcut, disabling and its reason) read by menus, bars and right-click. |
-| S-X5 | `trait-de-depot-unique` | A single "drop here" stroke (`theme::drop_stroke`, accent green): external file on the window or the workbook, columns and rows on a graph. |
+| S-X5 | `trait-de-depot-unique` | A single "drop here" stroke (`theme::drop_target_stroke`, light blue) on the border of the one window that is the drop target: external file on a workbook or on the application, columns and rows on a graph. |
 | S-P1 | `indicateur-apres-0-5-s` | Beyond ≈ 0.5 s: spinning indicator + word at the place of the result; progress bar if the steps are known. |
 | S-P2 | `stop-au-dela-de-3-s` | Stop button for any work of more than a few seconds. |
 | S-P3 | `etat-vide-explicite` | An empty state is a centered greyed-out sentence that says what is missing and the gesture to create it. |
@@ -729,7 +729,7 @@ History: #227, #237 (width "a few digits"), #241 (Results panel).
 - **Cursors** (S-X2): open then closed hand for dragging, resize
   arrow on a handle, finger on a clickable element that is
   not a button.
-- **Single drop stroke** (S-X5, #170): hovering a window or a workbook with a file from the system, a graph with columns or rows, shows the same stroke, `theme::drop_stroke` (accent green). Tests: `file_drop::tests`, `graph_window::tests`, `theme::tests`.
+- **Single drop stroke** (S-X5, #170): hovering a workbook or the workspace with a file from the system, a graph with columns or rows, lights up the **border of the target window** with the same light blue stroke, `theme::drop_target_stroke` (never red, which is for errors; nothing is painted inside the content, #386). One window at a time: over a workbook only its border, over the workspace (destination "new workbook") only the application's outline; a maximized target gets the stroke around the area it fills. The stroke replaces the active outline. Tests: `file_drop::tests`, `graph_window::tests`, `window_detach::tests`, `window_stack::tests`, `theme::tests`.
 - **Arrows and Enter in the managers** (S-K9, #170): the Project Manager and the Object Manager can be walked by keyboard when they have the focus (a click in them gives it). ↑ and ↓ select the neighboring **visible** row (the children of a collapsed folder or section are skipped), bounded at both ends; they open nothing and write nothing to the history. Enter opens: a window opens (like the double-click), a folder expands or collapses, a series or an object of the Object Manager opens its Properties. The row that carries the cursor has the focus outline of `selection.stroke` (`list_row::paint_focus_outline`). Shift+↑/↓ and Alt+↓ are consumed without effect; Ctrl+↑/↓ of the Object Manager keeps "move the series". The keys are consumed before the grid of a workbook, which reads the arrows without consuming them. Keys: `KEY_ARROW_UP`, `KEY_ARROW_DOWN`, `KEY_ENTER` of `app/shortcuts.rs`, help lines `help-select-neighbour` and `help-open-entry`.
 - **No tool selector in a window** (S-K7, #299). The object first:
   one clicks or drags the object itself (a curve, a handle, a

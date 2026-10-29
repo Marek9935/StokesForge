@@ -261,7 +261,15 @@ pub(super) fn show_window_in_layer<R>(
             );
             content.set_clip_rect(content_rect.intersect(ui.clip_rect()));
             let inner = add_contents(&mut content);
-            if is_active {
+            // The drop target's border replaces the active outline (#386).
+            if super::file_drop::is_drop_target(ui.ctx(), ui.layer_id()) {
+                ui.painter().rect_stroke(
+                    window_rect,
+                    style.visuals.window_corner_radius,
+                    crate::theme::drop_target_stroke(),
+                    egui::StrokeKind::Inside,
+                );
+            } else if is_active {
                 paint_active_window_outline(
                     ui.painter(),
                     window_rect,

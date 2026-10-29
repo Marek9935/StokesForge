@@ -1211,7 +1211,19 @@ impl DetachedTabViewport {
         // same layer as `CentralPanel`, painted after it thus
         // on top; a single detached viewport here, no other
         // window whose order would be contested.
-        if is_active {
+        // The drop target's border replaces the active outline (#386): the
+        // marker is the layer of the content (`CentralPanel`), read after it.
+        if super::file_drop::is_drop_target(ui.ctx(), egui::LayerId::background()) {
+            let content_rect = ui.ctx().input(|input| input.content_rect());
+            ui.ctx()
+                .layer_painter(egui::LayerId::background())
+                .rect_stroke(
+                    content_rect,
+                    egui::CornerRadius::ZERO,
+                    crate::theme::drop_target_stroke(),
+                    egui::StrokeKind::Inside,
+                );
+        } else if is_active {
             let content_rect = ui.ctx().input(|input| input.content_rect());
             paint_active_window_outline(
                 &ui.ctx().layer_painter(egui::LayerId::background()),
@@ -1771,6 +1783,77 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// A file hovering a detached workbook: its viewport's border lights up in
+    /// the drop colour, replacing the active outline, and nothing else is
+    /// outlined (#386).
+    #[test]
+    fn a_file_over_a_detached_workbook_lights_up_the_viewport_border() {
+        let (session, _graph) = plotted_graph();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let book = app.state.books()[0].0;
+        let tab = Tab::Book(book);
+        app.detach_tab(tab);
+        let viewport = egui::ViewportId::from_hash_of(tab);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        crate::theme::install(&context);
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800., 600.),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport]
+            .viewport_ui_cb
+            .clone()
+            .unwrap();
+        output.textures_delta.clear();
+        let size = egui::vec2(700., 500.);
+        let content_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let selection = egui::Style::default().visuals.selection.stroke.color;
+        let drop_color = crate::theme::drop_target_stroke().color;
+        let mut strokes = Vec::new();
+        for _ in 0..3 {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport;
+            input.focused = true;
+            input.viewports.insert(
+                viewport,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(content_rect);
+            input.hovered_files = vec![egui::HoveredFile::default()];
+            input
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(350., 300.)));
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            strokes = output
+                .shapes
+                .iter()
+                .filter_map(|p| match &p.shape {
+                    egui::Shape::Rect(r) if r.stroke.width > 0.0 => Some((r.stroke.color, r.rect)),
+                    _ => None,
+                })
+                .collect();
+        }
+        let drops: Vec<_> = strokes.iter().filter(|(c, _)| *c == drop_color).collect();
+        assert_eq!(drops.len(), 1, "one drop stroke: {strokes:?}");
+        assert_eq!(drops[0].1, content_rect);
+        assert!(
+            !strokes.iter().any(|(c, _)| *c == selection),
+            "no active outline under it: {strokes:?}"
+        );
     }
 
     #[test]

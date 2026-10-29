@@ -146,7 +146,7 @@ height raised for the duration of the row), so the checkbox there measures 24 pt
 The separator of the step trail of the import wizard is the muted `CaretRight`
 icon, without a tooltip (decorative, no gesture). Every state or chrome color
 comes from `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
-`list_row_selected_fill`, `list_row_hover_fill`, `drop_stroke`…)
+`list_row_selected_fill`, `list_row_hover_fill`, `drop_target_stroke`…)
 or from the `Visuals` it sets (`error_fg_color`, `warn_fg_color`,
 `selection`): no `Color32::from_…` and no named tint outside `theme.rs` and
 `color_picker.rs` (`no_hardcoded_color_outside_the_theme`). Notes
