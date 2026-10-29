@@ -1,4 +1,5 @@
-//! Two pages of the user manual generated from the code (#364).
+//! Two pages of the user manual generated from the code (#364), and the
+//! copies of the interface icons the manual shows inline (#367).
 //!
 //! `manual/src/reference/shortcuts.md` comes from the in-app help table
 //! [`HELP`](super::shortcuts::HELP) (private to this crate, hence a test here)
@@ -15,6 +16,17 @@
 //!
 //! then commit the pages with the change. Never edit them by hand.
 //!
+//! The manual shows an icon inline with
+//! `<img class="icon" src="../images/icons/FILE.svg" alt="">`. The files of
+//! `manual/src/images/icons/` are byte-identical copies of
+//! `crates/stokesforge-app/assets/icons/FILE` (plus the `LICENSE` of the icons,
+//! which the MIT license requires next to the copies). The test
+//! `the_manual_icons_are_copies_of_the_application_icons` scans
+//! `manual/src/**/*.md` for `images/icons/<file>` and fails when a referenced
+//! icon is missing from the assets, missing or different in the manual, when a
+//! copy is no longer referenced, or when `LICENSE` differs. The same command
+//! (`UPDATE_MANUAL_PAGES=1`) copies and removes files to fix it.
+//!
 //! The catalogs are read with `fluent-syntax` rather than through `tr!`: the
 //! French column needs the whole `fr` catalog by key, not the keys the code
 //! knows at compile time, and reading the files keeps the global language
@@ -22,7 +34,8 @@
 //! functions that call `tr!`) need the global language set to English, under
 //! [`LANGUAGE_LOCK`].
 
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use fluent_syntax::ast::{Entry, PatternElement};
@@ -101,7 +114,10 @@ fn shortcuts_page() -> String {
 /// with a placeable (variable, selector, reference) has no readable fixed
 /// text and is left out.
 fn plain_messages(source: &str) -> Vec<(String, String)> {
-    let resource = match fluent_syntax::parser::parse(source) {
+    // A Windows checkout (core.autocrlf) gives CRLF catalogs: without this,
+    // the `\r` would end up in multi-line texts and differ from Linux.
+    let source = source.replace("\r\n", "\n");
+    let resource = match fluent_syntax::parser::parse(source.as_str()) {
         Ok(resource) => resource,
         Err((resource, _)) => resource,
     };
@@ -196,7 +212,10 @@ fn manual_file(name: &str) -> PathBuf {
 /// when `UPDATE_MANUAL_PAGES=1`. Returns an error message when it is stale.
 fn check(name: &str, generated: &str) -> Result<(), String> {
     let path = manual_file(name);
-    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    // Same line endings on every platform (CRLF on a Windows checkout).
+    let committed = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     if committed == generated {
         return Ok(());
     }
@@ -235,5 +254,126 @@ fn the_generated_pages_cover_the_help_and_the_menus() {
     let (page, _) = interface_texts_page();
     for expected in ["| Save As… | Enregistrer sous… |", "| Preferences | "] {
         assert!(page.contains(expected), "missing {expected}");
+    }
+}
+
+// --- Icon copies (#367) ----------------------------------------------------
+
+fn manual_src() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../manual/src")
+}
+
+fn app_icons() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/icons")
+}
+
+fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            markdown_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "md") {
+            out.push(path);
+        }
+    }
+}
+
+/// The icon file names that the pages of the manual point to
+/// (`images/icons/<file>`).
+fn referenced_icons() -> BTreeSet<String> {
+    let mut pages = Vec::new();
+    markdown_files(&manual_src(), &mut pages);
+    let marker = "images/icons/";
+    let mut names = BTreeSet::new();
+    for page in pages {
+        let text = std::fs::read_to_string(&page).unwrap_or_default();
+        for part in text.split(marker).skip(1) {
+            let name: String = part
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                .collect();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+        }
+    }
+    names
+}
+
+/// Makes `copy` identical to `original` (or reports that it is not), as
+/// [`check`] does for a page.
+fn sync_copy(original: &Path, copy: &Path, label: &str, errors: &mut Vec<String>) {
+    let wanted = std::fs::read(original).ok();
+    let Some(wanted) = wanted else {
+        errors.push(format!(
+            "a page of the manual points to images/icons/{label}, which does not exist in crates/stokesforge-app/assets/icons/. Reference an existing icon."
+        ));
+        return;
+    };
+    if std::fs::read(copy).ok().as_deref() == Some(wanted.as_slice()) {
+        return;
+    }
+    if std::env::var("UPDATE_MANUAL_PAGES").as_deref() == Ok("1") {
+        let written = std::fs::create_dir_all(copy.parent().unwrap_or(Path::new(".")))
+            .and_then(|()| std::fs::write(copy, &wanted));
+        if let Err(err) = written {
+            errors.push(format!("cannot write {label}: {err}"));
+        }
+        return;
+    }
+    errors.push(format!(
+        "manual/src/images/icons/{label} is missing or differs from crates/stokesforge-app/assets/icons/{label}. Regenerate it with:\n    {COMMAND}\nthen commit the copy."
+    ));
+}
+
+fn check_icon_copies() -> Result<(), String> {
+    let copies = manual_src().join("images/icons");
+    let referenced = referenced_icons();
+    let mut errors = Vec::new();
+    for name in &referenced {
+        sync_copy(
+            &app_icons().join(name),
+            &copies.join(name),
+            name,
+            &mut errors,
+        );
+    }
+    sync_copy(
+        &app_icons().join("LICENSE"),
+        &copies.join("LICENSE"),
+        "LICENSE",
+        &mut errors,
+    );
+    if let Ok(entries) = std::fs::read_dir(&copies) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "LICENSE" || referenced.contains(&name) {
+                continue;
+            }
+            if std::env::var("UPDATE_MANUAL_PAGES").as_deref() == Ok("1") {
+                if let Err(err) = std::fs::remove_file(entry.path()) {
+                    errors.push(format!("cannot remove {name}: {err}"));
+                }
+            } else {
+                errors.push(format!(
+                    "manual/src/images/icons/{name} is no longer used by any page of the manual. Remove it with:\n    {COMMAND}\nthen commit the removal."
+                ));
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+#[test]
+fn the_manual_icons_are_copies_of_the_application_icons() {
+    if let Err(message) = check_icon_copies() {
+        panic!("{message}");
     }
 }

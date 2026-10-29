@@ -146,7 +146,7 @@ Rows of the Project Manager cannot be dragged.
 |---|---|---|
 | Drag | The title bar | Moves the window. Dropping it outside the main window detaches it. |
 | Drag | An edge or a corner | Resizes the window. |
-| Click | An icon of the title bar | Minimizes, detaches, reattaches, maximizes or closes the window, depending on the icon. |
+| Click | An icon of the title bar (<img class="icon" src="../images/icons/caret-down.neutral.svg" alt=""> <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt=""> <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> <img class="icon" src="../images/icons/corners-out.neutral.svg" alt=""> <img class="icon" src="../images/icons/x.neutral.svg" alt="">) | Minimizes, detaches, reattaches, maximizes or closes the window, depending on the icon. |
 | Click | A window behind the others | Brings it to the front. The click also acts on what it targets. |
 | Click | Outside a modal dialog | Nothing. The outline of the dialog blinks. |
 

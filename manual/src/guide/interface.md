@@ -41,16 +41,88 @@ The **Workbook** menu is covered in [Projects and workbooks](projects-and-workbo
 
 ### Toolbars
 
-The toolbars sit under the menu bar. Their content and place are fixed: you cannot move or hide them. Hover over a button to see its name, its shortcut and a short description.
+The toolbars sit under the menu bar. Their content and place are fixed: you cannot move or hide them. Hover over a button to see its name, its shortcut and a short description. A button that cannot be used now is greyed out; hover over it to read the reason.
 
-- **File**: new project, new workbook, new graph, new folder, import, open, save, save as, export.
-- **Edit**: undo and redo. The tooltip names the action that will be undone or redone.
-- **Tools**: follows the window in the foreground. For a graph it offers the **Pointer**, **Zoom**, **Text**, **Rectangle**, **Ellipse**, **Line** and **Arrow** tools, **Reset Zoom** and **Graph Properties…**, then the format of the selected object. For a workbook it offers **Add Sheet**, **Add Column** and the plot buttons.
-- **Text format**: font, size, color, bold, italic, subscript, superscript and math for the text of a graph. Its buttons are greyed out until a text is selected or being edited.
+#### File toolbar
+
+| Icon | Button | What it does |
+|---|---|---|
+| <img class="icon" src="../images/icons/file-plus.neutral.svg" alt=""> | **New Project** | Creates an empty project in this window |
+| <img class="icon" src="../images/icons/table.workbook.svg" alt=""> | **Add Workbook** | Adds a workbook with X and Y columns |
+| <img class="icon" src="../images/icons/chart-line.graph.svg" alt=""> | **Add Graph** | Adds an empty graph with one plot area |
+| <img class="icon" src="../images/icons/folder-simple.folder.svg" alt=""> | **Add Folder** | Adds an empty folder, then lets you name it |
+| <img class="icon" src="../images/icons/download-simple.neutral.svg" alt=""> | **Import…** | Reads instrument files into sheets |
+| <img class="icon" src="../images/icons/folder-open.neutral.svg" alt=""> | **Open…** | Opens a project |
+| <img class="icon" src="../images/icons/floppy-disk.neutral.svg" alt=""> | **Save** | Saves the project |
+| <img class="icon" src="../images/icons/floppy-disk-back.neutral.svg" alt=""> | **Save As…** | Saves the project under another name |
+| <img class="icon" src="../images/icons/export.neutral.svg" alt=""> | **Export Graph…** | Exports the graph in SVG, PDF or PNG, at the current zoom. Available when a graph is in the foreground |
+
+#### Edit toolbar
+
+| Icon | Button | What it does |
+|---|---|---|
+| <img class="icon" src="../images/icons/arrow-counter-clockwise.neutral.svg" alt=""> | **Undo** | Undoes the last change. The tooltip names it, for example **Undo Edit Cells in Column A** |
+| <img class="icon" src="../images/icons/arrow-clockwise.neutral.svg" alt=""> | **Redo** | Does it again. The tooltip names the change |
+
+#### Tools toolbar
+
+This toolbar follows the window in the foreground. With a graph in the foreground:
+
+| Icon | Button | What it does |
+|---|---|---|
+| <img class="icon" src="../images/icons/cursor.neutral.svg" alt=""> | **Pointer** | Moves and resizes texts and objects |
+| <img class="icon" src="../images/icons/text-t.neutral.svg" alt=""> | **Text** | Click in the plot area to add a text |
+| <img class="icon" src="../images/icons/rectangle.neutral.svg" alt=""> | **Rectangle** | Drag in the plot area to draw a rectangle |
+| <img class="icon" src="../images/icons/circle.neutral.svg" alt=""> | **Ellipse** | Drag in the plot area to draw an ellipse |
+| <img class="icon" src="../images/icons/line-segment.neutral.svg" alt=""> | **Line** | Drag in the plot area to draw a line |
+| <img class="icon" src="../images/icons/arrow-up-right.neutral.svg" alt=""> | **Arrow** | Drag in the plot area to draw an arrow; the head is where you release |
+| <img class="icon" src="../images/icons/magnifying-glass-plus.neutral.svg" alt=""> | **Zoom** | Drag a rectangle to zoom in on it |
+| <img class="icon" src="../images/icons/arrows-out.neutral.svg" alt=""> | **Reset Zoom** | Returns to the original axis ranges |
+| <img class="icon" src="../images/icons/sliders-horizontal.neutral.svg" alt=""> | **Graph Properties…** | Edits the title and background |
+
+At the right of these, three controls format the selected object, and stay greyed out until you select one: <img class="icon" src="../images/icons/pen-nib-modify.neutral.svg" alt=""> **Line color**, <img class="icon" src="../images/icons/paint-bucket-modify.neutral.svg" alt=""> **Fill color** (for a rectangle or an ellipse) and the field **Line width (pt)**.
+
+With a workbook in the foreground:
+
+| Icon | Button | What it does |
+|---|---|---|
+| <img class="icon" src="../images/icons/rows-plus-bottom.neutral.svg" alt=""> | **Add Sheet** | Adds a sheet to the workbook |
+| <img class="icon" src="../images/icons/columns-plus-right.neutral.svg" alt=""> | **Add Column** | Adds a column to the sheet |
+| <img class="icon" src="../images/icons/chart-line.neutral.svg" alt=""> | **Line** | Plots the selected columns in a new graph |
+| <img class="icon" src="../images/icons/chart-scatter.neutral.svg" alt=""> | **Scatter** | Plots the selected columns in a new graph |
+| <img class="icon" src="../images/icons/chart-bar.neutral.svg" alt=""> | **Bar** | Plots the selected columns in a new graph |
+
+The three plot buttons are greyed out until you select columns in the sheet.
+
+#### Text format toolbar
+
+Its buttons format the text of a graph. They are greyed out until a text is selected or being edited.
+
+| Icon | Button | What it does |
+|---|---|---|
+| | **Font** | Sets the font of the whole text box (a list) |
+| | **Size** | Sets the size, in points, of the selected text (a list) |
+| <img class="icon" src="../images/icons/text-a-underline-modify.neutral.svg" alt=""> | **Text color** | Sets the color of the text |
+| <img class="icon" src="../images/icons/text-align-left.neutral.svg" alt=""> | **Left** | Aligns the text to the left of its box |
+| <img class="icon" src="../images/icons/text-align-center.neutral.svg" alt=""> | **Center** | Centers the text in its box |
+| <img class="icon" src="../images/icons/text-align-right.neutral.svg" alt=""> | **Right** | Aligns the text to the right of its box |
+| <img class="icon" src="../images/icons/text-b.neutral.svg" alt=""> | **Bold** | Makes the selected text bold; press again to remove it |
+| <img class="icon" src="../images/icons/text-italic.neutral.svg" alt=""> | **Italic** | Makes the selected text italic; press again to remove it |
+| <img class="icon" src="../images/icons/text-subscript.neutral.svg" alt=""> | **Subscript** | Lowers the selected text |
+| <img class="icon" src="../images/icons/text-superscript.neutral.svg" alt=""> | **Superscript** | Raises the selected text |
+| <img class="icon" src="../images/icons/function.neutral.svg" alt=""> | **Math** | Writes the selected text as math |
 
 ### Project Manager
 
-The **Project Manager** shows the folders and windows of your project: workbooks, graphs, matrices and notes. It does not go inside a workbook or a graph.
+The **Project Manager** shows the folders and windows of your project: workbooks, graphs, matrices and notes. Each kind has its own icon, which you meet again in other lists:
+
+| Icon | Kind |
+|---|---|
+| <img class="icon" src="../images/icons/folder-simple.folder.svg" alt=""> | Folder |
+| <img class="icon" src="../images/icons/table.workbook.svg" alt=""> | Workbook |
+| <img class="icon" src="../images/icons/chart-line.graph.svg" alt=""> | Graph |
+| <img class="icon" src="../images/icons/grid-nine.matrix.svg" alt=""> | Matrix |
+| <img class="icon" src="../images/icons/note.note.svg" alt=""> | Note |
 
 <img src="../images/interface-project-manager.png" alt="The Project Manager on the demo project: workbooks, graphs and folders. Closed windows are dimmed." width="260">
 
@@ -100,8 +172,8 @@ When some calculations fit the data poorly, a badge such as **⚠ 3 low R²** ap
 Workbooks, graphs and notes open as windows inside the workspace. Each window has a title bar:
 
 - Drag the title bar to move the window. Drag an edge or a corner to resize it.
-- The arrow at the left of the title collapses the window to its title bar, and shows it again.
-- The icons at the right maximize the window, detach it, or close it.
+- The arrow at the left of the title (<img class="icon" src="../images/icons/caret-down.neutral.svg" alt=""> **Hide the graph contents** or **Hide the workbook contents**) collapses the window to its title bar. The same arrow, pointing right (<img class="icon" src="../images/icons/caret-right.neutral.svg" alt="">), shows it again.
+- The icons at the right maximize the window (<img class="icon" src="../images/icons/corners-out.neutral.svg" alt=""> **Maximize the window**), detach it (<img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt=""> **Detach into a separate window**), or close it (<img class="icon" src="../images/icons/x.neutral.svg" alt=""> **Close the window**).
 - A new window opens slightly offset from the previous one.
 
 Closing a window does not delete anything. The workbook, graph or note stays in the project, and you reopen it from the Project Manager.
@@ -112,7 +184,7 @@ The workspace has a fixed size. If the main window is smaller, the workspace scr
 
 ### Maximize and restore
 
-Click the maximize icon in a window's title bar, or choose **Window ▸ Maximize Window**, to make the active window fill the workspace. The panels stay visible.
+Click <img class="icon" src="../images/icons/corners-out.neutral.svg" alt=""> **Maximize the window** in a window's title bar, or choose **Window ▸ Maximize Window**, to make the active window fill the workspace. The panels stay visible.
 
 To go back, choose **Window ▸ Restore “…”** (it shows the name of the window).
 
@@ -124,13 +196,13 @@ You can drag the inner edge of a panel to change its width (side panels) or its 
 
 ### Collapse a panel
 
-Click the arrow icon (**Collapse the panel**) to reduce a panel to a thin band. Click it again (**Expand the panel**) to open it. A collapsed panel keeps its content and keeps working: a script that is running goes on.
+Click the arrow icon (<img class="icon" src="../images/icons/caret-left.neutral.svg" alt=""> <img class="icon" src="../images/icons/caret-right.neutral.svg" alt=""> <img class="icon" src="../images/icons/caret-down.neutral.svg" alt=""> **Collapse the panel**) to reduce a panel to a thin band. The arrow points toward the edge where the panel goes. Click the arrow again (**Expand the panel**) to open it. A collapsed panel keeps its content and keeps working: a script that is running goes on.
 
 ### Detach a panel into its own window
 
-Click the detach icon (**Detach into a separate window**) in the header of a panel to move it to its own window. Use this to put the Project Manager or the Object Manager on a second screen. The panel must be expanded to show this icon.
+Click <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt=""> **Detach into a separate window** in the header of a panel to move it to its own window. Use this to put the Project Manager or the Object Manager on a second screen. The panel must be expanded to show this icon.
 
-The detached window can be moved and resized like any other window of your system. It has one button, **Reattach to the main window**. Closing the window also reattaches the panel.
+The detached window can be moved and resized like any other window of your system. It has one button, <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> **Reattach to the main window**. Closing the window also reattaches the panel.
 
 You can detach the Project Manager from the menu too: **Window ▸ Detach Project Manager**, then **Window ▸ Reattach Project Manager**.
 
@@ -138,9 +210,9 @@ A detached panel stays up to date with the project and works as before. The Obje
 
 ## Detach a workbook, graph or note
 
-Click the detach icon in a window's title bar (**Detach into a separate window**) to move that window out of the main window into its own window. This is useful for a graph on a second screen while you edit data on the first.
+Click <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt=""> **Detach into a separate window** in the window's title bar to move that window out of the main window into its own window. This is useful for a graph on a second screen while you edit data on the first.
 
-The detached window has the same content and the same menus as before. Use its **Reattach to the main window** icon to put it back. If you close it, the window is closed like any other and you reopen it from the Project Manager.
+The detached window has the same content and the same menus as before. Use its <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> **Reattach to the main window** icon to put it back. If you close it, the window is closed like any other and you reopen it from the Project Manager.
 
 You can detach several windows at the same time.
 

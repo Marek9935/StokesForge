@@ -1057,6 +1057,18 @@ UPDATE_MANUAL_PAGES=1 cargo test -p stokesforge-app --lib manual_pages
 and commit the regenerated pages with the change. The French column is exempt from
 `scripts/french-guard.py` by the `<!-- lang: fr columns: French -->` marker above the table.
 
+The same module keeps the **inline icons** of the manual (#367). A page shows an
+icon with `<img class="icon" src="../images/icons/FILE.svg" alt="">` before the bold
+label of the button. The files of `manual/src/images/icons/` are byte-identical copies
+of `crates/stokesforge-app/assets/icons/FILE`, plus a copy of the icons' `LICENSE` (the
+MIT license asks for the notice with copies). The test
+`the_manual_icons_are_copies_of_the_application_icons` scans `manual/src/**/*.md` for
+`images/icons/<file>` and fails when a referenced icon does not exist in the assets, or
+is missing or different in the manual, when a copy is no longer referenced, or when
+`LICENSE` differs. The command above also copies and removes the files. The style of
+`img.icon` (size, background on the dark themes) is `manual/icons.css`, loaded by
+`additional-css` in `manual/book.toml`.
+
 ## Manual screenshots (#365)
 
 The images of the user manual (`manual/src/images/*.png`) are not taken by hand:

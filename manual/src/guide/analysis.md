@@ -46,7 +46,7 @@ The preview updates as you change a setting. Long computations run in the backgr
 
 ### Input
 
-The **Input** block shows the curve being analysed. When you selected several columns or curves, the window works on a batch. The arrows **Previous series** and **Next series** move through the batch, and the text **Series 2 of 5** shows where you are. The settings apply to all series of the batch. The preview shows one series at a time.
+The **Input** block shows the curve being analysed. When you selected several columns or curves, the window works on a batch. The arrows <img class="icon" src="../images/icons/caret-left.neutral.svg" alt=""> **Previous series** and <img class="icon" src="../images/icons/caret-right.neutral.svg" alt=""> **Next series** move through the batch, and the text **Series 2 of 5** shows where you are. The settings apply to all series of the batch. The preview shows one series at a time.
 
 When the window belongs to a category with several methods, the block **Analysis type** lets you switch between them: **Correction**, **Reference** and **Smoothing** for Data Manipulation, or **Peak Decomposition**, **Reconvolution** and **Direct Deconvolution** for Peaks and Deconvolution. The settings of each method are kept when you switch.
 
@@ -198,7 +198,7 @@ The curve is sorted by increasing X first, so the area of a positive signal is p
 
 Settings:
 
-- **Range**: use **Add Range** or drag across the preview to add an X range. Each range has two bounds, separated by **to**. Leave a bound empty to take the end of the data. Without any range, the whole curve is integrated. A range that holds no point is refused.
+- **Range**: use **Add Range** or drag across the preview to add an X range. Each range has two bounds, separated by **to**, and a <img class="icon" src="../images/icons/trash.danger.svg" alt=""> **Remove** button. Leave a bound empty to take the end of the data. Without any range, the whole curve is integrated. A range that holds no point is refused.
 - **Area down to zero** or **Area above the line between the bounds**. The first integrates down to Y = 0. The second subtracts the straight line that joins the curve at the two bounds, which gives the area of a peak above its local baseline.
 - **Write the cumulative integral**: writes a column with the running integral.
 - **Write the normalized integral**: writes the curve divided by the total area.
@@ -284,7 +284,7 @@ Settings:
 - **Keep positions within ±**: keeps each peak centre within the given distance of its starting position.
 - **Range**: fits only an X range.
 
-To place peaks yourself, switch to the **Point** tool and click the preview. Each peak appears in the list as **Peak 1 at**, with its position, and a button to remove it. If you place none, StokesForge detects them: it keeps the local maxima that stand out by at least **Minimum prominence (%)** of the data range, up to **Maximum peaks**. The defaults are 5% and 6 peaks; the maximum is 100. If detection finds nothing, the window asks you to place a peak or lower the prominence.
+To place peaks yourself, switch to the **Point** tool and click the preview. Each peak appears in the list as **Peak 1 at**, with its position, and a <img class="icon" src="../images/icons/trash.danger.svg" alt=""> **Remove** button. If you place none, StokesForge detects them: it keeps the local maxima that stand out by at least **Minimum prominence (%)** of the data range, up to **Maximum peaks**. The defaults are 5% and 6 peaks; the maximum is 100. If detection finds nothing, the window asks you to place a peak or lower the prominence.
 
 The values are listed for each peak: **Peak 1: height**, **center**, **FWHM**, **area** and **area (%)**. For a Voigt peak, the Gaussian and Lorentzian widths are given too. The background appears as **Background: offset** and **Background: slope**. The fit statistics are the same as for a fit.
 
@@ -367,7 +367,7 @@ Deleting a column that an analysis uses opens a confirmation, **Column in use**,
 
 ### Out-of-date results
 
-When a source column changes and **Recalculate automatically** is off, the result columns are marked out of date: the header is tinted, with a warning icon, and the column is grayed out. Its tooltip gives the reason: the source data changed, a source column was deleted, or the last recalculation failed. Use **Recalculate** on the column, or **Analysis ▸ Recalculate Out of Date** for all of them at once.
+When a source column changes and **Recalculate automatically** is off, the result columns are marked out of date: the header is tinted, with a warning icon (<img class="icon" src="../images/icons/warning.neutral.svg" alt="">), and the column is grayed out. Its tooltip gives the reason: the source data changed, a source column was deleted, or the last recalculation failed. Use **Recalculate** on the column, or **Analysis ▸ Recalculate Out of Date** for all of them at once.
 
 ### Undo
 
@@ -375,7 +375,7 @@ Creating, editing and deleting an analysis are steps of the history. <kbd>Ctrl</
 
 ## The Results pane
 
-When an analysis was created with **Keep in Results**, or when original data were replaced, a **Results** pane appears under the sheet. It is collapsed by default, as a banner with the count, for example **Results (3)**. Use the arrow to show or hide it.
+When an analysis was created with **Keep in Results**, or when original data were replaced, a **Results** pane appears under the sheet. It is collapsed by default, as a banner with the count, for example **Results (3)**. Use the arrow (<img class="icon" src="../images/icons/caret-right.neutral.svg" alt=""> **Show the results**, <img class="icon" src="../images/icons/caret-down.neutral.svg" alt=""> **Hide the results**) to show or hide it.
 
 When open, the pane has a list of analyses on the left and the detail on the right. The detail has one row per series and one column per value. The buttons **This sheet** and **Workbook** choose whether the list shows the current sheet or the whole workbook.
 

@@ -153,7 +153,7 @@ The window **New analysis: Integrate** opens. It shows the curve, with the setti
 
 Under the preview, **Area 1** shows the area of the peak. It is close to 21.5. Click **Create**.
 
-A **Results** pane appears under the sheet, collapsed to a banner, **Results (1)**. Click its arrow to read the value again.
+A **Results** pane appears under the sheet, collapsed to a banner, **Results (1)**. Click its arrow (<img class="icon" src="../images/icons/caret-right.neutral.svg" alt=""> **Show the results**) to read the value again.
 
 The analysis is saved with the project. You can reopen it later with **Edit Calculation…**. See [Integration](../guide/analysis.md#integration) and [The Results pane](../guide/analysis.md#the-results-pane).
 
