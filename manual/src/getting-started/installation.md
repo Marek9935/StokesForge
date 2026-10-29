@@ -6,7 +6,7 @@ This page tells you what you need to run StokesForge, where to download it, and 
 
 | | Windows | Linux |
 |---|---|---|
-| System | 64-bit Windows | 64-bit Linux on an x86-64 processor, with a graphical desktop |
+| System | 64-bit Windows | 64-bit Linux on an x86-64 processor, with a graphical desktop and glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, or later) |
 | Display server | The Windows desktop | Wayland or X11 |
 | Graphics | A graphics driver with DirectX 12 or Vulkan | A graphics driver with Vulkan |
 | Python | Included | Included |
@@ -90,7 +90,7 @@ You can delete the unpacked folder once the installer has finished: the program 
 
 The folder of the program holds `stokesforge-app`, the Python it uses (in `lib/python`), the notices of the licences of the software it contains, and a check program, `stokesforge-selftest`. Keep these files together.
 
-The archive is built on a recent Ubuntu. A much older distribution may fail to start the program because its system libraries are too old.
+The archive is built on Ubuntu 22.04. It runs on Ubuntu 22.04, Debian 12 and any later distribution whose glibc (the system C library) is 2.35 or newer, for example Fedora 36 and later. Older distributions, such as RHEL, AlmaLinux and Rocky Linux 9, are not supported: the program does not start there. To see your version, run `ldd --version`.
 
 ### Open `.stf` files
 

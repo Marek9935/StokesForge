@@ -37,6 +37,11 @@ Each line is observed by a command or a page; none is declared
 
 ### Distribution
 
+- [x] Glibc floor (#389): the Linux archive is built on the `ubuntu-22.04`
+  runner and `scripts/glibc-floor.sh dist/stokesforge-app` refuses any ELF file
+  (program, Python, numpy extensions) that needs a `GLIBC_*` symbol above 2.35
+  (Ubuntu 22.04, Debian 12; RHEL 9 is not covered). The floor lives in
+  `scripts/glibc-floor.env`. Not yet tried by hand on a floor machine.
 - [x] `scripts/app-dist.sh` exits 0 on Linux: the window opens and closes,
   `stokesforge-selftest` passes, from the package. CI does this under a virtual
   display (xvfb) at the tag; before the tag, also try it by hand on a real
