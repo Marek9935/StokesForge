@@ -261,9 +261,9 @@ The whole interface changes at once and the choice is remembered. You can also s
 
 Choose **File ▸ Preferences…** to open the **Preferences** window. It sets the application, not the project. The settings apply as soon as you change them. Close the window when you are done.
 
-<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display and Export at the left, the General page on the right." width="480">
+<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display, Export and Folders at the left, the General page on the right." width="480">
 
-The rubrics are listed at the left of the window:
+The rubrics (**General**, **Display**, **Export** and **Folders**) are listed at the left of the window:
 
 - **General**
   - **Language**.
@@ -277,8 +277,26 @@ The rubrics are listed at the left of the window:
 - **Export**
   - **SVG Text** and **PNG Resolution**: the same choices as in **Graph ▸ Export** (see [Export](export.md)). The resolution is remembered for the next sessions.
   - **Copy Graph**: the formats (SVG, PNG, PDF) offered together when you copy a graph to another application, and their order. Drag a row to reorder.
+- **Folders**
+  - **Configuration folder**: where StokesForge keeps your settings, saved colors and import templates. **Open Folder** shows it in your file manager (and creates it if it does not exist yet), and the list names the files it holds. Your projects are not stored there.
+  - **Recovery copies**: the folder of the recovery copies, which is outside the configuration folder.
+  - **Default folders**: **Open and Save**, **Import files** and **Export graphs**. Type a path and press <kbd>Enter</kbd>, or click **Browse…**. Leave a field empty to keep the old behavior.
 
 <img src="../images/preferences-display-object-manager.png" alt="The Display rubric of Preferences, Object Manager tab: the lists and the groups expanded by default." width="480">
+
+#### Default folders
+
+A file window starts in the default folder of its kind the first time you use it in a session. After that it starts in the last folder you used for that kind. The next time you start StokesForge, it starts again from the default.
+
+- **Open and Save** serves **File ▸ Open…** and **File ▸ Save As…**. **Save As** of a project that already has a file starts in that file's own folder.
+- **Import files** serves the wizard's **Add Files…** and the export and import of templates. Without a default, it starts in the folder of the last file you imported.
+- **Export graphs** serves **Graph ▸ Export ▸ Export Graph…**.
+
+Only the file windows count. Dropping a file or opening one from a list of recent files does not change the last folder. If you change a default during a session, the last folder of that kind is forgotten and the next window opens in the new default.
+
+If a folder no longer exists, StokesForge uses the last folder instead, without a message. The page shows **Folder not found** under the field so that you can fix it.
+
+<img src="../images/preferences-folders.png" alt="The Folders rubric of Preferences: the configuration folder with its files, the recovery copies folder and the three default folders." width="480">
 
 ## Keyboard shortcuts
 

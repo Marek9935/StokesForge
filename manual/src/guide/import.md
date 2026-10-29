@@ -106,7 +106,7 @@ These entries change the same settings you find in the steps below.
 
 ### Choose files
 
-Click **Add Files…** and pick one or more files. You can also drop files into the window. **Recent Files…** lists the files you imported lately.
+Click **Add Files…** and pick one or more files. The window starts in the default import folder (**File ▸ Preferences… ▸ Folders**) the first time, then in the last folder you used; without a default, in the folder of the last file you imported. You can also drop files into the window. **Recent Files…** lists the files you imported lately.
 
 ### Choose a template
 

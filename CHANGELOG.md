@@ -50,6 +50,13 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Default folders (#148): **File ▸ Preferences… ▸ Folders** shows the configuration
+  folder (with **Open Folder** and its files) and the folder of the recovery copies,
+  and sets a default folder for **Open and Save**, **Import files** and **Export
+  graphs**, typed or picked with **Browse…**. A file dialog starts in that folder the
+  first time you use it in a session, then in the last folder you used; an empty field
+  keeps the old behavior, and a folder that no longer exists is skipped (the page says
+  "Folder not found"). Save As of a saved project starts in the project's own folder.
 - Panels (#148): StokesForge now remembers, for the Project Manager, the Object
   Manager and the Script Console, whether each is collapsed or detached and the
   size and position of its window. At launch, a detached panel comes back in its

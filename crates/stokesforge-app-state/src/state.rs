@@ -905,6 +905,16 @@ pub enum Action {
     /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]); remembered from one
     /// session to the next (#148).
     SetPngExportScale(f32),
+    /// Sets the default folder of a kind of file dialog (#148); empty: the last
+    /// folder used. Forgets the session's last folder of that kind. Application
+    /// preference: no command, no history, no `.stf`.
+    SetDefaultFolder {
+        kind: crate::default_folders::FolderKind,
+        folder: String,
+    },
+    /// Opens a folder in the system's file manager (#148). Handled by the window
+    /// layer, which creates the folder if it is missing; the state does nothing.
+    OpenFolder(PathBuf),
     /// Shows or hides the formula syntax help icon (#148).
     SetShowFormulaHelp(bool),
     /// Remembers the layout of the three fixed panels: collapsed, detached, size
@@ -2744,6 +2754,9 @@ pub struct AppState {
     copied_objects: Vec<(NodeId, NodeId, bool)>,
     object_manager_open: bool,
     object_manager_preferences: Preferences,
+    /// Last folder of each kind a file dialog was answered in, this session only
+    /// (#148).
+    folder_memory: crate::default_folders::FolderMemory,
     /// Last message meant for the user.
     status: Option<StatusMessage>,
     /// The last 50 status bar messages (S-M6).
@@ -2968,6 +2981,7 @@ impl AppState {
             path,
             object_manager_open: preferences.object_manager_open(),
             object_manager_preferences: preferences,
+            folder_memory: crate::default_folders::FolderMemory::default(),
             status: None,
             status_log: std::collections::VecDeque::new(),
             status_history_open: false,
@@ -5483,6 +5497,8 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetDefaultFolder { kind, folder } => self.set_default_folder(kind, &folder),
+            Action::OpenFolder(_) => {}
             Action::SetShowFormulaHelp(show) => {
                 if let Err(error) = self.object_manager_preferences.save_show_formula_help(show) {
                     self.fail(tr!(
@@ -7190,6 +7206,125 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// The default folder of a kind of file dialog, as written in the preferences
+    /// (`None`: the last folder used, #148).
+    pub fn default_folder(&self, kind: crate::default_folders::FolderKind) -> Option<&str> {
+        self.object_manager_preferences.default_folder(kind)
+    }
+
+    /// The configuration folder (preferences, saved colors, import templates);
+    /// `None` without a preferences file.
+    pub fn config_folder(&self) -> Option<PathBuf> {
+        self.object_manager_preferences
+            .config_folder()
+            .map(Path::to_path_buf)
+    }
+
+    /// The folder of the recovery copies, which lives outside the configuration
+    /// folder; `None` where the machine's real data must not be touched (tests).
+    pub fn recovery_folder(&self) -> Option<PathBuf> {
+        self.recovery_dir.clone()
+    }
+
+    /// Where the picker of `request` starts, as plain paths: the file dialog's
+    /// thread looks them up on the disk ([`crate::file_picker::FilePicker::start`]).
+    /// Order: the session's last folder of its kind, the default of Preferences,
+    /// then, for Import, the folder of the most recent imported file. Save As of a
+    /// project that already has a file starts in that file's own folder.
+    pub fn folder_candidates(
+        &self,
+        request: &crate::file_picker::PickRequest,
+    ) -> crate::default_folders::FolderCandidates {
+        use crate::default_folders::FolderKind;
+        use crate::file_picker::PickRequest;
+        let kind = request.folder_kind();
+        let default = self
+            .object_manager_preferences
+            .default_folder(kind)
+            .map(PathBuf::from);
+        let mut session_last = self.folder_memory.last(kind).map(Path::to_path_buf);
+        match request {
+            PickRequest::SaveProjectAs { .. } if !self.path.is_empty() => {
+                session_last = Path::new(&self.path).parent().map(Path::to_path_buf);
+            }
+            // Choosing a default is not using one: start in the current default.
+            PickRequest::ChooseDefaultFolder { .. } => session_last = None,
+            _ => {}
+        }
+        let fallback = (kind == FolderKind::Import)
+            .then(|| {
+                self.import_state
+                    .as_ref()
+                    .and_then(|import| import.recent.last_dir())
+                    .map(Path::to_path_buf)
+            })
+            .flatten();
+        crate::default_folders::FolderCandidates {
+            session_last,
+            default,
+            fallback,
+        }
+    }
+
+    /// A file dialog was answered: the folder of the chosen file becomes the
+    /// session's last folder of its kind. A cancelled dialog never gets here, and
+    /// neither do a drop or a recent file (only file dialogs feed the memory).
+    pub fn remember_picked_folder(
+        &mut self,
+        request: &crate::file_picker::PickRequest,
+        picked: &[PathBuf],
+    ) {
+        if !request.feeds_the_folder_memory() {
+            return;
+        }
+        if let Some(folder) = picked
+            .first()
+            .and_then(|file| file.parent())
+            .filter(|folder| !folder.as_os_str().is_empty())
+        {
+            self.folder_memory.record(request.folder_kind(), folder);
+        }
+    }
+
+    /// The answer of Browse… in Preferences › Folders. The folder is stored as
+    /// text: a name that is not valid UTF-8 changes nothing and says so.
+    pub fn apply_default_folder_pick(
+        &mut self,
+        kind: crate::default_folders::FolderKind,
+        folder: &Path,
+    ) {
+        match folder.to_str() {
+            Some(text) => self.set_default_folder(kind, text),
+            None => self.fail(tr!("error-folder-not-utf8")),
+        }
+    }
+
+    fn set_default_folder(&mut self, kind: crate::default_folders::FolderKind, folder: &str) {
+        let wanted = (!folder.is_empty()).then_some(folder);
+        if self.object_manager_preferences.default_folder(kind) == wanted {
+            return;
+        }
+        // The next dialog of this kind opens in the new default.
+        self.folder_memory.forget(kind);
+        if let Err(error) = self
+            .object_manager_preferences
+            .save_default_folder(kind, wanted)
+        {
+            self.fail(tr!(
+                "error-preferences-not-saved",
+                cause = errors::io::error_message(&error)
+            ));
+        }
+    }
+
+    /// The window layer could not open a folder in the file manager.
+    pub fn report_folder_open_error(&mut self, error: &std::io::Error) {
+        self.fail(tr!(
+            "error-folder-open",
+            cause = errors::io::error_message(error)
+        ));
     }
 
     /// The remembered layout of the three fixed panels (#148).

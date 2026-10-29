@@ -85,6 +85,11 @@
     "shows": "The Preferences window, Display rubric, New tab: the header rows of new workbooks and the decimal comma of new graphs."
   },
   {
+    "image": "preferences-folders.png",
+    "page": "guide/interface.md",
+    "shows": "The Preferences window, Folders rubric: the configuration folder with its files, the recovery copies and the default folders of the file dialogs."
+  },
+  {
     "image": "files-recover-projects.png",
     "page": "guide/projects-and-workbooks.md",
     "shows": "The Recover Projects window listing two recovery copies with Open, Ignore and Delete."

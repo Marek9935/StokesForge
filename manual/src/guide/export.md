@@ -6,7 +6,7 @@ This page shows how to get a graph out of StokesForge: as a file (SVG, PDF or PN
 
 1. Bring the graph window to the front.
 2. Choose **Graph ▸ Export ▸ Export Graph…**, or press <kbd>Ctrl</kbd>+<kbd>E</kbd> (<kbd>Cmd</kbd>+<kbd>E</kbd> on macOS). You can also right-click the plot area and use **Export ▸ Export Graph…**, or use the export button of the toolbar.
-3. In the dialog **Export Graph**, pick a folder and a file name. The dialog offers the filters **SVG**, **PDF** and **PNG**.
+3. In the dialog **Export Graph**, pick a folder and a file name. The dialog starts in the default folder set in **File ▸ Preferences… ▸ Folders**, then in the last folder you exported to. The dialog offers the filters **SVG**, **PDF** and **PNG**.
 4. Confirm. The status bar shows "Graph exported to" followed by the path.
 
 The format comes from the **extension** of the file name: `.svg`, `.pdf` or `.png`. Any other extension is refused with a message that lists the three valid ones. If you type a name with no extension, StokesForge adds `.svg` and asks before replacing a file of that name.

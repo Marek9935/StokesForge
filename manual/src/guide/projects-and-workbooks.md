@@ -22,7 +22,7 @@ A project that is still empty is replaced without a question.
 
 ### Open a project
 
-Choose **File ▸ Open…** or press <kbd>Ctrl</kbd>+<kbd>O</kbd>, then pick a `.stf` file. The project replaces the current one, after the same question about unsaved changes.
+Choose **File ▸ Open…** or press <kbd>Ctrl</kbd>+<kbd>O</kbd>, then pick a `.stf` file. The window starts in the default folder set in **File ▸ Preferences… ▸ Folders** the first time, then in the last folder you used. The project replaces the current one, after the same question about unsaved changes.
 
 You can also drop a `.stf` file on the StokesForge window. It opens in a new StokesForge window and leaves your current project as it is.
 

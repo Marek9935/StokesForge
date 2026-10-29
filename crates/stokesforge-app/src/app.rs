@@ -264,6 +264,9 @@ pub struct StokesForgeApp {
     state: AppState,
     /// Native file picker in progress, on a separate thread (#192).
     file_picker: FilePicker,
+    /// Opens a folder in the system's file manager (Preferences › Folders);
+    /// replaced in the tests, which must not start a real program.
+    folder_opener: fn(&std::path::Path) -> std::io::Result<()>,
     /// Last title sent to the window (S-R15): `Title` is resent only on change.
     window_title: String,
     /// The toolbars: layout, visibility and drag in progress
@@ -488,6 +491,7 @@ impl StokesForgeApp {
         Self {
             state,
             file_picker: FilePicker::default(),
+            folder_opener: open_folder_in_file_manager,
             window_title,
             toolbars: ToolbarState::default(),
             om_detached: false,
@@ -714,6 +718,8 @@ impl StokesForgeApp {
             return;
         };
         let first = paths.first().cloned();
+        // Only file dialogs feed the "last folder" (not a drop, not a recent file).
+        self.state.remember_picked_folder(&request, &paths);
         match request {
             PickRequest::OpenProject => {
                 if let Some(path) = first {
@@ -745,7 +751,12 @@ impl StokesForgeApp {
                     self.state.import_import_recipe(&path);
                 }
             }
-            PickRequest::AddImportFiles { .. } => self.state.add_import_paths(paths),
+            PickRequest::AddImportFiles => self.state.add_import_paths(paths),
+            PickRequest::ChooseDefaultFolder { kind } => {
+                if let Some(path) = first {
+                    self.state.apply_default_folder_pick(kind, &path);
+                }
+            }
         }
     }
 
@@ -889,6 +900,30 @@ impl StokesForgeApp {
             ctx.request_repaint_after(delay - elapsed);
         }
     }
+}
+
+/// Opens `folder` in the system's file manager, creating it first if it does not
+/// exist yet (the configuration folder is only created by the first write). The
+/// program is started and left alone; a thread waits for it so that it does not
+/// stay a zombie.
+fn open_folder_in_file_manager(folder: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let program = "xdg-open";
+    let mut child = std::process::Command::new(program)
+        .arg(folder)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 impl eframe::App for StokesForgeApp {
@@ -1350,8 +1385,16 @@ impl StokesForgeApp {
             };
             if let Action::PickFile(request) = action {
                 let wake = ctx.clone();
+                // Plain paths: the picker's thread looks them up on the disk.
+                let candidates = self.state.folder_candidates(&request);
                 self.file_picker
-                    .start(request, move || wake.request_repaint());
+                    .start(request, candidates, move || wake.request_repaint());
+                continue;
+            }
+            if let Action::OpenFolder(folder) = action {
+                if let Err(error) = (self.folder_opener)(&folder) {
+                    self.state.report_folder_open_error(&error);
+                }
                 continue;
             }
             let action = self.prepare_new_project_action(ctx, action);

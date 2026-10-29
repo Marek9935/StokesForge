@@ -1,14 +1,18 @@
 //! File › Preferences (#148): the application preferences window.
 //!
 //! Layout (decisions of 2026-10-29): the **rubrics are vertical tabs on the
-//! left** ([`TabStripSide::Left`]) — General, Display, Export — and a rubric
+//! left** ([`TabStripSide::Left`]) — General, Display, Export, Folders — and a rubric
 //! with many settings has **horizontal sub-tabs** at the top (Display:
 //! Interface · Object Manager · New). Pages are short, without scrolling where
 //! possible. **General** holds the language, the file caps, autosave and the
 //! analysis defaults; **Display** the formula help icon, the Object Manager
 //! lists and the settings of *new* workbooks and graphs; **Export** the text of
 //! SVG exports, the PNG resolution and the Copy Graph formats (the order is
-//! changed by dragging, `reorder_list.rs`, each format is ticked). The menus keep
+//! changed by dragging, `reorder_list.rs`, each format is ticked); **Folders**
+//! shows where StokesForge keeps its own files (configuration folder, with Open
+//! Folder and its content; recovery copies) and sets the default folders of the
+//! file dialogs: Open and Save, Import, Export (`default_folders.rs` in
+//! `stokesforge-app-state` holds the rule). The menus keep
 //! their own entries, which set the same preferences.
 //!
 //! The settings apply **right away** (like the Language menu): the
@@ -27,6 +31,8 @@ use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
 use crate::theme;
+use stokesforge_app_state::default_folders::FolderKind;
+use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry, ObjectManagerGroup};
 use stokesforge_app_state::quantities;
@@ -41,6 +47,7 @@ enum Page {
     General,
     Display,
     Export,
+    Folders,
 }
 
 /// The sub-tabs of the Display rubric.
@@ -83,6 +90,7 @@ pub(super) fn preferences_window(
                 (Page::General, tr!("preferences-general")),
                 (Page::Display, tr!("preferences-display")),
                 (Page::Export, tr!("preferences-export")),
+                (Page::Folders, tr!("preferences-folders")),
             ];
             ui.horizontal_top(|ui| {
                 tab_strip(
@@ -98,6 +106,7 @@ pub(super) fn preferences_window(
                     Page::General => chosen = general_page(ui, state, actions),
                     Page::Display => display_page(ui, state, actions, &mut display_tab),
                     Page::Export => export_page(ui, state, actions),
+                    Page::Folders => folders_page(ui, state, actions),
                 });
             });
         },
@@ -443,6 +452,212 @@ fn export_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     }
 }
 
+/// How often what the page shows about the disk is looked at again.
+const FOLDERS_REFRESH: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// What the last look at a folder said, for the text it was about.
+#[derive(Clone)]
+struct FolderProbe {
+    text: String,
+    /// Written by the probing thread.
+    answer: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
+    /// The last answer received: kept while the next look is under way, so the
+    /// note does not flicker.
+    shown: Option<bool>,
+    at: std::time::Instant,
+}
+
+/// Does the folder `text` exist? `None` while the first look is under way, and
+/// for an empty text. The disk is looked at on a **thread**, never on the
+/// interface thread: the folder may sit on a network drive that does not answer.
+fn folder_exists(ctx: &egui::Context, id: egui::Id, text: &str) -> Option<bool> {
+    if text.is_empty() {
+        return None;
+    }
+    let mut probe: Option<FolderProbe> = ctx.data(|data| data.get_temp(id));
+    if let Some(probe) = probe.as_mut() {
+        if let Some(answer) = *probe.answer.lock().unwrap_or_else(|err| err.into_inner()) {
+            probe.shown = Some(answer);
+        }
+    }
+    let stale = probe
+        .as_ref()
+        .is_none_or(|probe| probe.text != text || probe.at.elapsed() >= FOLDERS_REFRESH);
+    if stale {
+        let shown = probe
+            .as_ref()
+            .filter(|probe| probe.text == text)
+            .and_then(|probe| probe.shown);
+        let answer = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (worker, folder, wake) = (answer.clone(), text.to_owned(), ctx.clone());
+        std::thread::spawn(move || {
+            let exists = std::path::Path::new(&folder).is_dir();
+            *worker.lock().unwrap_or_else(|err| err.into_inner()) = Some(exists);
+            wake.request_repaint();
+        });
+        probe = Some(FolderProbe {
+            text: text.to_owned(),
+            answer,
+            shown,
+            at: std::time::Instant::now(),
+        });
+    }
+    let probe = probe?;
+    let shown = probe.shown;
+    ctx.data_mut(|data| data.insert_temp(id, probe));
+    ctx.request_repaint_after(FOLDERS_REFRESH);
+    shown
+}
+
+/// The names of the files of the configuration folder, sorted, looked at again
+/// every few seconds (a local folder of a few small files).
+fn config_files(ctx: &egui::Context, folder: &std::path::Path) -> Vec<String> {
+    let id = egui::Id::new(("preferences_config_files", folder));
+    let cached: Option<(std::time::Instant, Vec<String>)> = ctx.data(|data| data.get_temp(id));
+    if let Some((at, names)) = cached {
+        if at.elapsed() < FOLDERS_REFRESH {
+            return names;
+        }
+    }
+    let mut names: Vec<String> = std::fs::read_dir(folder)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    ctx.data_mut(|data| data.insert_temp(id, (std::time::Instant::now(), names.clone())));
+    ctx.request_repaint_after(FOLDERS_REFRESH);
+    names
+}
+
+/// What a known file of the configuration folder holds.
+fn config_file_description(name: &str) -> Option<String> {
+    Some(match name {
+        "preferences.json" => tr!("preferences-folders-file-preferences"),
+        "couleurs.json" => tr!("preferences-folders-file-colors"),
+        "import_recipes.json" => tr!("preferences-folders-file-templates"),
+        "import_recent.json" => tr!("preferences-folders-file-recent"),
+        "demo.stf" => tr!("preferences-folders-file-demo"),
+        _ => return None,
+    })
+}
+
+/// Folders: where StokesForge keeps its own files, and the default folders of the
+/// file dialogs (#148). A default is typed (written on Enter or when the field
+/// loses the focus) or picked with Browse…; empty means "the last folder used".
+fn folders_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+    let ctx = ui.ctx().clone();
+    form(ui, "preferences_folders", |rows| {
+        rows.section(tr!("preferences-folders-config"));
+        rows.note(tr!("preferences-folders-config-note"));
+        let config = state.config_folder();
+        rows.row(tr!("preferences-folders-location"), |ui| match &config {
+            Some(folder) => {
+                ui.add(egui::Label::new(folder.display().to_string()).selectable(true));
+            }
+            None => {
+                ui.weak(tr!("preferences-folders-unavailable"));
+            }
+        });
+        if let Some(folder) = &config {
+            rows.field(|ui| {
+                if ui
+                    .button(tr!("preferences-folders-open"))
+                    .on_hover_text(tr!("preferences-folders-open", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::OpenFolder(folder.clone()));
+                }
+            });
+            let names = config_files(&ctx, folder);
+            rows.row(tr!("preferences-folders-files"), |ui| {
+                ui.vertical(|ui| {
+                    if names.is_empty() {
+                        ui.weak(tr!("preferences-folders-empty"));
+                    }
+                    for name in &names {
+                        match config_file_description(name) {
+                            Some(what) => ui.label(format!("{name} · {what}")),
+                            None => ui.label(name),
+                        };
+                    }
+                });
+            });
+        }
+        rows.row(tr!("preferences-folders-recovery"), |ui| {
+            match state.recovery_folder() {
+                Some(folder) => {
+                    ui.add(egui::Label::new(folder.display().to_string()).selectable(true));
+                }
+                None => {
+                    ui.weak(tr!("preferences-folders-unavailable"));
+                }
+            }
+        });
+        rows.note(tr!("preferences-folders-recovery-note"));
+
+        rows.section(tr!("preferences-folders-default"));
+        rows.note(tr!("preferences-folders-default-note"));
+        for (kind, label) in [
+            (FolderKind::Projects, tr!("preferences-folders-projects")),
+            (FolderKind::Import, tr!("preferences-folders-import")),
+            (FolderKind::Export, tr!("preferences-folders-export")),
+        ] {
+            let saved = state.default_folder(kind).unwrap_or("").to_owned();
+            let mut missing = false;
+            rows.row(label, |ui| {
+                missing = default_folder_field(ui, &ctx, kind, &saved, actions);
+            });
+            if missing {
+                rows.note(tr!("preferences-folders-not-found"));
+            }
+        }
+    });
+}
+
+/// The field and Browse… of one default folder; returns `true` if the folder
+/// written in it is known not to exist.
+fn default_folder_field(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    kind: FolderKind,
+    saved: &str,
+    actions: &mut Vec<Action>,
+) -> bool {
+    let buffer_id = egui::Id::new(("preferences_folder_buffer", kind));
+    let mut text: String = ctx
+        .data(|data| data.get_temp(buffer_id))
+        .unwrap_or_else(|| saved.to_owned());
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id_salt(("preferences_folder_field", kind))
+            .desired_width(220.0),
+    );
+    if response.has_focus() {
+        ctx.data_mut(|data| data.insert_temp(buffer_id, text.clone()));
+    } else {
+        ctx.data_mut(|data| data.remove::<String>(buffer_id));
+        if response.lost_focus() && text != saved {
+            actions.push(Action::SetDefaultFolder {
+                kind,
+                folder: text.clone(),
+            });
+        }
+    }
+    if ui
+        .button(tr!("preferences-folders-browse"))
+        .on_hover_text(tr!("preferences-folders-browse", "hint"))
+        .clicked()
+    {
+        actions.push(Action::PickFile(PickRequest::ChooseDefaultFolder { kind }));
+    }
+    folder_exists(ctx, buffer_id.with("probe"), saved) == Some(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,20 +717,27 @@ mod tests {
     struct Bench {
         _session: stokesforge_session::Session,
         state: AppState,
+        /// Every action the window pushed, in order.
+        seen: Vec<Action>,
     }
 
     fn bench() -> egui_kittest::Harness<'static, Bench> {
+        bench_with(stokesforge_app_state::preferences::Preferences::load_from(
+            None,
+        ))
+    }
+
+    fn bench_with(
+        preferences: stokesforge_app_state::preferences::Preferences,
+    ) -> egui_kittest::Harness<'static, Bench> {
         let session = stokesforge_session::Session::spawn(
             stokesforge_core::Project::new("Prefs").unwrap(),
             None,
         )
         .unwrap();
-        let mut state = AppState::new_with_preferences(
-            session.handle(),
-            "test.stf".to_string(),
-            stokesforge_app_state::preferences::Preferences::load_from(None),
-        )
-        .unwrap();
+        let mut state =
+            AppState::new_with_preferences(session.handle(), "test.stf".to_string(), preferences)
+                .unwrap();
         state.dispatch(Action::OpenPreferences);
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(760.0, 600.0))
@@ -524,12 +746,14 @@ mod tests {
                     let mut actions = Vec::new();
                     preferences_window(ui.ctx(), &bench.state, &mut actions);
                     for action in actions {
+                        bench.seen.push(action.clone());
                         bench.state.dispatch(action);
                     }
                 },
                 Bench {
                     _session: session,
                     state,
+                    seen: Vec::new(),
                 },
             );
         harness
@@ -764,5 +988,285 @@ mod tests {
             .click();
         harness.run();
         assert!(harness.state().state.new_graph_decimal_comma());
+    }
+
+    // -- Folders rubric (#148, lot C) --
+
+    /// A bench whose preferences file lives in a fresh folder holding two of the
+    /// application's files.
+    fn folders_bench() -> (tempfile::TempDir, egui_kittest::Harness<'static, Bench>) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(&file, "{}").unwrap();
+        std::fs::write(dir.path().join("couleurs.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        let harness = bench_with(stokesforge_app_state::preferences::Preferences::load_from(
+            Some(file),
+        ));
+        (dir, harness)
+    }
+
+    fn go_to_folders(harness: &mut egui_kittest::Harness<'static, Bench>) {
+        harness.get_by_label(&tr!("preferences-folders")).click();
+        harness.run();
+    }
+
+    /// The rubric shows the configuration folder (the one of the preferences file),
+    /// its files with what they hold, the recovery row and the three default
+    /// folders.
+    #[test]
+    fn the_folders_rubric_shows_the_configuration_folder_its_files_and_the_three_rows() {
+        let (dir, mut harness) = folders_bench();
+        go_to_folders(&mut harness);
+        harness.get_by_label(&dir.path().display().to_string());
+        harness.get_by_label(&tr!("preferences-folders-open"));
+        harness.get_by_label(&format!(
+            "preferences.json · {}",
+            tr!("preferences-folders-file-preferences")
+        ));
+        harness.get_by_label(&format!(
+            "couleurs.json · {}",
+            tr!("preferences-folders-file-colors")
+        ));
+        harness.get_by_label("notes.txt");
+        harness.get_by_label(&tr!("preferences-folders-recovery"));
+        harness.get_by_label(&tr!("preferences-folders-projects"));
+        harness.get_by_label(&tr!("preferences-folders-import"));
+        harness.get_by_label(&tr!("preferences-folders-export"));
+        assert_eq!(
+            harness
+                .query_all_by_label(&tr!("preferences-folders-browse"))
+                .count(),
+            3,
+            "one Browse… per default folder"
+        );
+    }
+
+    /// Open Folder asks the shell to open the configuration folder.
+    #[test]
+    fn open_folder_asks_for_the_configuration_folder() {
+        let (dir, mut harness) = folders_bench();
+        go_to_folders(&mut harness);
+        harness
+            .get_by_label(&tr!("preferences-folders-open"))
+            .click();
+        harness.run();
+        assert!(harness
+            .state()
+            .seen
+            .contains(&Action::OpenFolder(dir.path().to_path_buf())));
+    }
+
+    /// Browse… asks for a folder picker of its own kind.
+    #[test]
+    fn browse_asks_for_a_folder_of_its_kind() {
+        let (_dir, mut harness) = folders_bench();
+        go_to_folders(&mut harness);
+        let label = tr!("preferences-folders-browse");
+        let browse: Vec<_> = harness.query_all_by_label(&label).collect();
+        browse[1].click();
+        harness.run();
+        assert!(harness.state().seen.contains(&Action::PickFile(
+            PickRequest::ChooseDefaultFolder {
+                kind: FolderKind::Import
+            }
+        )));
+    }
+
+    /// Typing in a field writes the default when the field loses the focus (Enter).
+    #[test]
+    fn a_typed_default_folder_is_written_on_enter() {
+        use egui::accesskit::Role;
+        let (_dir, mut harness) = folders_bench();
+        go_to_folders(&mut harness);
+        let fields: Vec<_> = harness.query_all_by_role(Role::TextInput).collect();
+        assert_eq!(fields.len(), 3);
+        fields[2].focus();
+        harness.run();
+        harness
+            .query_all_by_role(Role::TextInput)
+            .nth(2)
+            .unwrap()
+            .type_text("/figures");
+        harness.run();
+        assert_eq!(
+            harness.state().state.default_folder(FolderKind::Export),
+            None,
+            "not written while typing"
+        );
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        assert_eq!(
+            harness.state().state.default_folder(FolderKind::Export),
+            Some("/figures")
+        );
+        assert_eq!(
+            harness.state().state.default_folder(FolderKind::Projects),
+            None
+        );
+    }
+
+    /// A default that is not a folder gets the note "Folder not found"; one that is
+    /// does not. The disk is looked at on a thread: the frames are repeated until
+    /// it has answered.
+    #[test]
+    fn a_missing_default_folder_gets_a_note_and_an_existing_one_does_not() {
+        let (dir, mut harness) = folders_bench();
+        go_to_folders(&mut harness);
+        let note = tr!("preferences-folders-not-found");
+        harness
+            .state_mut()
+            .state
+            .dispatch(Action::SetDefaultFolder {
+                kind: FolderKind::Import,
+                folder: dir.path().join("absent").display().to_string(),
+            });
+        harness
+            .state_mut()
+            .state
+            .dispatch(Action::SetDefaultFolder {
+                kind: FolderKind::Export,
+                folder: dir.path().display().to_string(),
+            });
+        let mut found = false;
+        for _ in 0..200 {
+            harness.run();
+            if harness.query_by_label(&note).is_some() {
+                found = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(found, "the note never appeared");
+        assert_eq!(
+            harness.query_all_by_label(&note).count(),
+            1,
+            "witness: only the missing folder has it"
+        );
+    }
+
+    // -- The shell side: answers of the pickers, Open Folder --
+
+    fn app_on_file(
+        file: &std::path::Path,
+    ) -> (stokesforge_session::Session, crate::app::StokesForgeApp) {
+        let session = stokesforge_session::Session::spawn(
+            stokesforge_core::Project::new("Folders").unwrap(),
+            None,
+        )
+        .unwrap();
+        let state = AppState::new_with_preferences(
+            session.handle(),
+            String::new(),
+            stokesforge_app_state::preferences::Preferences::load_from(Some(file.to_path_buf())),
+        )
+        .unwrap();
+        (session, crate::app::StokesForgeApp::new(state))
+    }
+
+    /// Polls the (fake) picker until it has answered.
+    fn answer(
+        app: &mut crate::app::StokesForgeApp,
+        request: PickRequest,
+        picked: Option<Vec<std::path::PathBuf>>,
+    ) {
+        app.file_picker.start_fake(request, picked);
+        let ctx = egui::Context::default();
+        for _ in 0..500 {
+            let mut actions = Vec::new();
+            app.poll_file_picker(&ctx, &mut actions);
+            if !app.file_picker.is_open() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the fake picker never answered");
+    }
+
+    /// A chosen file feeds the memory of its kind; a cancelled dialog changes
+    /// nothing; choosing a default folder sets it (and feeds nothing).
+    #[test]
+    fn the_answers_of_the_pickers_feed_the_memory_cancel_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut app) = app_on_file(&dir.path().join("preferences.json"));
+        let open_candidates = |app: &crate::app::StokesForgeApp| {
+            app.state.folder_candidates(&PickRequest::OpenProject)
+        };
+        answer(&mut app, PickRequest::OpenProject, None);
+        assert_eq!(open_candidates(&app).session_last, None, "cancelled");
+        answer(
+            &mut app,
+            PickRequest::OpenProject,
+            Some(vec![std::path::PathBuf::from("/work/a.stf")]),
+        );
+        assert_eq!(
+            open_candidates(&app).session_last,
+            Some(std::path::PathBuf::from("/work"))
+        );
+        answer(&mut app, PickRequest::OpenProject, None);
+        assert_eq!(
+            open_candidates(&app).session_last,
+            Some(std::path::PathBuf::from("/work")),
+            "a later cancel keeps it"
+        );
+        answer(
+            &mut app,
+            PickRequest::ChooseDefaultFolder {
+                kind: FolderKind::Export,
+            },
+            Some(vec![std::path::PathBuf::from("/figs")]),
+        );
+        assert_eq!(app.state.default_folder(FolderKind::Export), Some("/figs"));
+        assert_eq!(open_candidates(&app).session_last, Some("/work".into()));
+        session.shutdown().unwrap();
+    }
+
+    thread_local! {
+        static OPENED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn record_open(folder: &std::path::Path) -> std::io::Result<()> {
+        OPENED.with(|opened| opened.borrow_mut().push(folder.to_path_buf()));
+        Ok(())
+    }
+
+    fn refuse_open(_: &std::path::Path) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "no",
+        ))
+    }
+
+    /// `Action::OpenFolder` goes to the shell's opener; its failure is told in the
+    /// status bar.
+    #[test]
+    fn open_folder_goes_to_the_opener_and_a_failure_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut app) = app_on_file(&dir.path().join("preferences.json"));
+        let ctx = egui::Context::default();
+        app.folder_opener = record_open;
+        app.dispatch_actions(&ctx, vec![Action::OpenFolder(dir.path().to_path_buf())]);
+        OPENED.with(|opened| assert_eq!(*opened.borrow(), [dir.path().to_path_buf()]));
+        assert!(app.state.status().is_none_or(|status| !status.is_error()));
+        app.folder_opener = refuse_open;
+        app.dispatch_actions(&ctx, vec![Action::OpenFolder(dir.path().to_path_buf())]);
+        let status = app.state.status().expect("a message");
+        assert!(status.is_error());
+        assert!(status
+            .text
+            .contains(&stokesforge_app_state::errors::io::error_message(
+                &std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no")
+            )));
+        session.shutdown().unwrap();
+    }
+
+    /// The real opener creates a missing folder first (no program is started
+    /// when the folder cannot be created).
+    #[test]
+    fn the_real_opener_creates_the_folder_and_fails_cleanly_when_it_cannot() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("file");
+        std::fs::write(&blocked, "x").unwrap();
+        assert!(crate::app::open_folder_in_file_manager(&blocked.join("inside")).is_err());
     }
 }

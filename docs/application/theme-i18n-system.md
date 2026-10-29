@@ -106,8 +106,9 @@ existing project passed as an argument keeps the question.
 **Configuration folder** (#332): the `STOKESFORGE_CONFIG_DIR` variable,
 if set and non-empty, designates the folder as is (no suffix);
 otherwise the system folder (`directories::ProjectDirs`, `…\StokesForge\config`
-on Windows). `preferences.json`, `couleurs.json`, `import_recipes.json` and
-`import_recent.json` live there; the backup copies in
+on Windows). `preferences.json`, `couleurs.json`, `import_recipes.json`,
+`import_recent.json` and `demo.stf` live there (Preferences › Folders shows the folder
+with Open Folder, which creates it if it is missing, and lists its files, #148); the backup copies in
 `<STOKESFORGE_CONFIG_DIR>/recovery`, otherwise `recovery/` of the data folder.
 Useful for a portable installation, and this is how tests
 isolate themselves from the real profile (`docs/tests.md`, "Rule (#250)"). Rule and functions:
@@ -163,8 +164,26 @@ share the same routing. Open (Ctrl+O) shows an `rfd::FileDialog`;
 Save As (Ctrl+Shift+S) asks for a destination; Save
 (Ctrl+S) uses the current destination.
 
+**Default folders (#148).** Preferences › Folders sets where the pickers start, per
+kind: Projects (Open, Save As), Import (instrument files and import templates,
+`.json`), Export (graph exports); `PickRequest::folder_kind` is exhaustive.
+`stokesforge-app-state/src/default_folders.rs` holds the rule: the default serves at the
+first use of the session, then the session's last folder of that kind
+(`FolderMemory`, never saved, fed by file dialogs only: not a drop, not the recent list,
+not a cancelled dialog); changing a default forgets that kind's memory; a Save As of a
+project that already has a file starts in the file's own folder; Import falls back to the
+folder of the most recent imported file. Empty means "the last folder used". The
+order is session, default, fallback, `None` (`resolve`, which never returns an empty
+path). **The disk is looked at on the picker's thread** (`FilePicker::start`:
+`is_dir`, then `set_directory`): a folder on a sleeping network drive must not freeze the
+interface thread. Preferences stores the text as typed (`folder_projects`,
+`folder_import`, `folder_export`, read leniently, `""` is none; no `~` expansion). A
+Browse… answer that is not valid UTF-8 changes nothing and says so
+(`error-folder-not-utf8`). The page's "Folder not found" note comes from a probing thread
+too.
+
 **Separate thread (#192).** All the pickers (Open, Save As, graph export,
-import wizard) go through `Action::PickFile(PickRequest)` and
+import wizard, Browse… of the default folders) go through `Action::PickFile(PickRequest)` and
 `file_picker.rs` (in `stokesforge-app-state`): `rfd` runs on a dedicated thread, the answer comes back through a
 channel polled at every frame (`StokesForgeApp::poll_file_picker`). Before, the
 synchronous call on the egui thread froze the application when the picker closed

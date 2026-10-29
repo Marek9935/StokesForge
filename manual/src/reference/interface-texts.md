@@ -25,6 +25,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Axes | Axes |
 | Axes… | Axes… |
 | Bring to Front | Amener devant |
+| Choose Default Folder | Choisir le dossier par défaut |
 | Choose Files to Import | Choisir les fichiers à importer |
 | Clear | Effacer |
 | Column in use | Colonne utilisée |

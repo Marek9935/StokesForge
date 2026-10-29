@@ -4,7 +4,9 @@
 //! each kind of dialog (S-F8, #228).
 //!
 //! The layout of the three fixed panels (#148) is kept here too, see
-//! [`crate::panel_layout`].
+//! [`crate::panel_layout`], and the default folders of the file dialogs
+//! (`folder_projects`, `folder_import`, `folder_export`, see
+//! [`crate::default_folders`]).
 //!
 //! Same storage as the user's colors ([`crate::user_colors`]) and the import
 //! templates: a JSON file — `preferences.json` — in the StokesForge
@@ -22,6 +24,7 @@ use std::path::{Path, PathBuf};
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_render_svg::SvgTextMode;
 
+use crate::default_folders::FolderKind;
 use crate::panel_layout::PanelLayout;
 use crate::state::{DEFAULT_PNG_EXPORT_SCALE, PNG_EXPORT_SCALES};
 
@@ -281,6 +284,14 @@ struct PreferencesFile {
     /// [`PanelLayout::from_json`].
     #[serde(default)]
     panels: Option<serde_json::Value>,
+    /// Default folders of the file dialogs (#148), by [`FolderKind`]. A value of the
+    /// wrong type or an empty string: none (the last folder used).
+    #[serde(default, deserialize_with = "lenient")]
+    folder_projects: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    folder_import: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    folder_export: Option<String>,
 }
 
 /// Name of the demo file in the configuration folder (#333).
@@ -334,6 +345,7 @@ pub struct Preferences {
     new_graph_decimal_comma: bool,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
+    default_folders: [Option<String>; 3],
     path: Option<PathBuf>,
 }
 
@@ -401,6 +413,11 @@ impl Preferences {
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
+            default_folders: [
+                file.folder_projects.filter(|folder| !folder.is_empty()),
+                file.folder_import.filter(|folder| !folder.is_empty()),
+                file.folder_export.filter(|folder| !folder.is_empty()),
+            ],
             path,
         }
     }
@@ -474,6 +491,31 @@ impl Preferences {
         self.save_field("svg_text", name.into())
     }
 
+    /// The default folder of a kind of file dialog, as written; `None` if empty
+    /// (the last folder used, #148).
+    pub fn default_folder(&self, kind: FolderKind) -> Option<&str> {
+        self.default_folders[folder_index(kind)].as_deref()
+    }
+
+    /// Remembers the default folder of a kind (`None` or empty: none), keeping the
+    /// other preferences. The text is stored as it is (no `~` expansion, no
+    /// normalization): what the user typed or picked is what is read back.
+    pub fn save_default_folder(
+        &mut self,
+        kind: FolderKind,
+        folder: Option<&str>,
+    ) -> std::io::Result<()> {
+        let folder = folder.filter(|folder| !folder.is_empty());
+        self.default_folders[folder_index(kind)] = folder.map(str::to_owned);
+        self.save_field(kind.preferences_key(), folder.unwrap_or("").into())
+    }
+
+    /// The folder holding the preferences file: the application's configuration
+    /// folder (`None` without a preferences file).
+    pub fn config_folder(&self) -> Option<&Path> {
+        self.path.as_deref().and_then(Path::parent)
+    }
+
     /// The remembered layout of the Project Manager, the Object Manager and the
     /// Script Console (collapsed, detached, size and position of the window).
     pub fn panel_layout(&self) -> PanelLayout {
@@ -487,6 +529,11 @@ impl Preferences {
             return Ok(());
         }
         self.panels = layout;
+        // No preferences file at all (a test, a bench): nothing to write, and an
+        // error on every collapse would say nothing useful.
+        if self.path.is_none() {
+            return Ok(());
+        }
         self.save_field("panels", layout.to_json())
     }
 
@@ -817,6 +864,14 @@ fn read_dialogs(value: Option<serde_json::Value>) -> BTreeMap<String, DialogGeom
         })
         .take(MAX_DIALOG_GEOMETRIES)
         .collect()
+}
+
+fn folder_index(kind: FolderKind) -> usize {
+    match kind {
+        FolderKind::Projects => 0,
+        FolderKind::Import => 1,
+        FolderKind::Export => 2,
+    }
 }
 
 /// The per-operation "Keep in Results" choices read from the file: an entry with
@@ -1264,6 +1319,69 @@ mod tests {
         let preferences = Preferences::load_from(Some(path));
         assert_eq!(preferences.panel_layout(), PanelLayout::default());
         assert_eq!(preferences.language(), Some("fr"));
+    }
+
+    // -- Default folders (#148, lot C) --
+
+    use crate::default_folders::FolderKind;
+
+    /// A value of the wrong type or an empty string is "no default"; it spares its
+    /// neighbours.
+    #[test]
+    fn lenient_reads_of_the_default_folders_keep_the_neighbours() {
+        let (_dir, path) = written(
+            r#"{"folder_import":42,"folder_export":"","folder_projects":"/p","language":"fr"}"#,
+        );
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.default_folder(FolderKind::Import), None);
+        assert_eq!(preferences.default_folder(FolderKind::Export), None);
+        assert_eq!(preferences.default_folder(FolderKind::Projects), Some("/p"));
+        assert_eq!(preferences.language(), Some("fr"));
+    }
+
+    /// A Windows path is written and read back byte for byte, the foreign fields
+    /// kept; clearing writes an empty text that reads as "none".
+    #[test]
+    fn a_default_folder_round_trips_byte_for_byte_and_keeps_foreign_fields() {
+        let (_dir, path) = written(r#"{"language":"fr","future":{"a":1}}"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences
+            .save_default_folder(FolderKind::Import, Some(r"C:\Data\x"))
+            .unwrap();
+        preferences
+            .save_default_folder(FolderKind::Projects, Some("~/projets"))
+            .unwrap();
+        let reread = Preferences::load_from(Some(path.clone()));
+        assert_eq!(
+            reread.default_folder(FolderKind::Import),
+            Some(r"C:\Data\x")
+        );
+        assert_eq!(
+            reread.default_folder(FolderKind::Projects),
+            Some("~/projets")
+        );
+        assert_eq!(reread.language(), Some("fr"));
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"future\""));
+        let mut cleared = reread;
+        cleared
+            .save_default_folder(FolderKind::Import, None)
+            .unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path)).default_folder(FolderKind::Import),
+            None
+        );
+    }
+
+    #[test]
+    fn the_configuration_folder_is_the_parent_of_the_preferences_file() {
+        let (dir, path) = written("{}");
+        assert_eq!(
+            Preferences::load_from(Some(path)).config_folder(),
+            Some(dir.path())
+        );
+        assert_eq!(Preferences::load_from(None).config_folder(), None);
     }
 }
 

@@ -23,7 +23,7 @@
 //! by its name ([`book_named`], [`sheet_named`]) rather than
 //! relying on an implicit selection.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use stokesforge_app_state::history_text::history_text;
@@ -13278,4 +13278,276 @@ fn the_panel_layout_is_kept_across_states_and_a_failed_write_is_reported() {
         broken.status().is_some_and(|status| status.is_error()),
         "an unwritable file is reported"
     );
+}
+
+// -- Default folders of the file dialogs (#148, lot C) --
+
+fn folder_state(dir: &Path) -> (Session, AppState) {
+    let (session, _state, _sheet, _columns) = kinetics(dir);
+    let file = dir.join("preferences.json");
+    let state = state_on_preferences(&session, dir, &file);
+    (session, state)
+}
+
+fn some(path: &str) -> Option<PathBuf> {
+    Some(PathBuf::from(path))
+}
+
+/// The default serves while the session has nothing; a file dialog's answer then
+/// takes over for its kind only, and a cancelled dialog changes nothing.
+#[test]
+fn the_default_folder_serves_first_then_the_last_folder_of_the_session() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Projects,
+        folder: "/data/projects".to_owned(),
+    });
+    let open = PickRequest::OpenProject;
+    let candidates = state.folder_candidates(&open);
+    assert_eq!(candidates.default, some("/data/projects"));
+    assert_eq!(
+        candidates.session_last, None,
+        "nothing used yet: the default"
+    );
+    assert_eq!(
+        candidates.resolve(|folder| folder == Path::new("/data/projects")),
+        some("/data/projects")
+    );
+
+    // A file chosen in /work: the session's folder takes over.
+    state.remember_picked_folder(&open, &[PathBuf::from("/work/a.stf")]);
+    let candidates = state.folder_candidates(&open);
+    assert_eq!(candidates.session_last, some("/work"));
+    assert_eq!(candidates.resolve(|_| true), some("/work"));
+    // A missing session folder falls back to the default, silently.
+    assert_eq!(
+        candidates.resolve(|folder| folder == Path::new("/data/projects")),
+        some("/data/projects")
+    );
+}
+
+/// Save As of a project already saved starts in the file's own folder; the folder
+/// it was saved in is then the Open folder; an export leaves Import alone.
+#[test]
+fn the_folders_follow_their_kind_and_save_as_uses_the_files_own_folder() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.set_path("/x/p.stf".to_owned());
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Projects,
+        folder: "/data/projects".to_owned(),
+    });
+    let save_as = PickRequest::SaveProjectAs {
+        suggested: "p.stf".to_owned(),
+    };
+    let candidates = state.folder_candidates(&save_as);
+    assert_eq!(candidates.session_last, some("/x"), "the file's own folder");
+
+    // Saved as /y/q.stf: the next Open starts in /y.
+    state.remember_picked_folder(&save_as, &[PathBuf::from("/y/q.stf")]);
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::OpenProject)
+            .session_last,
+        some("/y")
+    );
+
+    // An export is another kind: Import is untouched.
+    let export = PickRequest::ExportGraph {
+        spec: Box::new(stokesforge_plot::PlotSpec::default()),
+        file_name: "g.svg".to_owned(),
+    };
+    state.remember_picked_folder(&export, &[PathBuf::from("/figures/g.svg")]);
+    assert_eq!(
+        state.folder_candidates(&export).session_last,
+        some("/figures")
+    );
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::AddImportFiles)
+            .session_last,
+        None,
+        "witness: Import never fed"
+    );
+}
+
+/// Import with no default starts where the last imported file was; the recipe
+/// dialogs follow the Import kind too.
+#[test]
+fn the_import_dialogs_fall_back_to_the_folder_of_the_last_imported_file() {
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::AddImportFiles)
+            .fallback,
+        None
+    );
+    state.open_import(None::<NodeId>);
+    state
+        .import_state_mut()
+        .unwrap()
+        .recent
+        .record(&[PathBuf::from("/lab/run1/a.csv")]);
+    for request in [
+        PickRequest::AddImportFiles,
+        PickRequest::ImportImportRecipe,
+        PickRequest::ExportImportRecipe {
+            file_name: "t.json".to_owned(),
+        },
+    ] {
+        assert_eq!(
+            state.folder_candidates(&request).fallback,
+            some("/lab/run1"),
+            "{request:?}"
+        );
+    }
+    assert_eq!(
+        state.folder_candidates(&PickRequest::OpenProject).fallback,
+        None,
+        "the fallback is Import's"
+    );
+}
+
+/// Changing a default during the session forgets the session's folder of that
+/// kind (and only that kind); the same value changes nothing.
+#[test]
+fn changing_a_default_forgets_the_session_memory_of_its_kind() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.remember_picked_folder(&PickRequest::OpenProject, &[PathBuf::from("/work/a.stf")]);
+    state.remember_picked_folder(&PickRequest::AddImportFiles, &[PathBuf::from("/lab/a.csv")]);
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Projects,
+        folder: "/new".to_owned(),
+    });
+    let candidates = state.folder_candidates(&PickRequest::OpenProject);
+    assert_eq!(candidates.session_last, None);
+    assert_eq!(candidates.default, some("/new"));
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::AddImportFiles)
+            .session_last,
+        some("/lab"),
+        "the other kind keeps its memory"
+    );
+    // Same value again: nothing forgotten.
+    state.remember_picked_folder(&PickRequest::OpenProject, &[PathBuf::from("/work/b.stf")]);
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Projects,
+        folder: "/new".to_owned(),
+    });
+    assert_eq!(
+        state
+            .folder_candidates(&PickRequest::OpenProject)
+            .session_last,
+        some("/work")
+    );
+}
+
+/// Choosing a default is not using one: it starts in the current default and does
+/// not feed the session's memory; an empty text clears the default.
+#[test]
+fn choosing_a_default_starts_in_the_current_one_and_feeds_no_memory() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    use stokesforge_app_state::file_picker::PickRequest;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Export,
+        folder: "/figs".to_owned(),
+    });
+    state.remember_picked_folder(
+        &PickRequest::ExportGraph {
+            spec: Box::new(stokesforge_plot::PlotSpec::default()),
+            file_name: "g.svg".to_owned(),
+        },
+        &[PathBuf::from("/elsewhere/g.svg")],
+    );
+    let choose = PickRequest::ChooseDefaultFolder {
+        kind: FolderKind::Export,
+    };
+    let candidates = state.folder_candidates(&choose);
+    assert_eq!(candidates.session_last, None);
+    assert_eq!(candidates.default, some("/figs"));
+    state.remember_picked_folder(&choose, &[PathBuf::from("/chosen/folder")]);
+    assert_eq!(state.default_folder(FolderKind::Export), Some("/figs"));
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Export,
+        folder: String::new(),
+    });
+    assert_eq!(state.default_folder(FolderKind::Export), None);
+}
+
+/// The defaults are text kept as typed (no `~` expansion, a Windows path
+/// byte for byte) and remembered by a new state on the same file.
+#[test]
+fn the_default_folders_are_remembered_as_typed() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state) = folder_state(dir.path());
+    let file = dir.path().join("preferences.json");
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Import,
+        folder: r"C:\Data\x".to_owned(),
+    });
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Projects,
+        folder: "~/projets".to_owned(),
+    });
+    let next = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(next.default_folder(FolderKind::Import), Some(r"C:\Data\x"));
+    assert_eq!(next.default_folder(FolderKind::Projects), Some("~/projets"));
+    assert_eq!(next.default_folder(FolderKind::Export), None);
+}
+
+/// A name that is not valid UTF-8 cannot be stored: the setting is unchanged
+/// and the notice says so.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_is_not_valid_text_changes_nothing_and_says_so() {
+    use std::os::unix::ffi::OsStrExt;
+    use stokesforge_app_state::default_folders::FolderKind;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = folder_state(dir.path());
+    state.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Import,
+        folder: "/ok".to_owned(),
+    });
+    let odd = Path::new(std::ffi::OsStr::from_bytes(b"/data/\xff\xfe"));
+    state.apply_default_folder_pick(FolderKind::Import, odd);
+    assert_eq!(state.default_folder(FolderKind::Import), Some("/ok"));
+    let status = state.status().expect("a notice");
+    assert!(status.is_error());
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("error-folder-not-utf8")
+    );
+    // A valid name is applied.
+    state.apply_default_folder_pick(FolderKind::Import, Path::new("/fine"));
+    assert_eq!(state.default_folder(FolderKind::Import), Some("/fine"));
+}
+
+/// The configuration folder is the one of the preferences file; an unwritable
+/// preferences file reports the default folder not saved.
+#[test]
+fn the_configuration_folder_is_that_of_the_preferences_file() {
+    use stokesforge_app_state::default_folders::FolderKind;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, state) = folder_state(dir.path());
+    assert_eq!(state.config_folder().as_deref(), Some(dir.path()));
+    let mut broken = state_on_preferences(&session, dir.path(), dir.path());
+    broken.dispatch(Action::SetDefaultFolder {
+        kind: FolderKind::Export,
+        folder: "/f".to_owned(),
+    });
+    assert!(broken.status().is_some_and(|status| status.is_error()));
 }
