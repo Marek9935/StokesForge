@@ -6,6 +6,9 @@
 #        scripts/linux-packages-test.sh --nfpm   real nfpm on a fake distribution,
 #            then rpm and dpkg-deb on the packages (job `linux-packages`)
 # The container tests of the real packages are in the CI job `test-linux-packages`.
+# SC2016: `bash -c '...' _ args` expands its arguments inside, on purpose.
+# SC2329: the helpers are called through `t` / `tn`.
+# shellcheck disable=SC2016,SC2329
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -71,6 +71,7 @@ else
         pm_install xvfb xauth mesa-vulkan-drivers >/dev/null
     fi
     cfg="$(mktemp -d)"
+    # shellcheck disable=SC2016 # expanded by the inner shell, under xvfb-run
     xvfb-run -a sh -c 'env -i PATH=/usr/bin:/bin HOME=/tmp DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" STOKESFORGE_CONFIG_DIR="$1" STOKESFORGE_APP_AUTOQUIT_MS=1500 /usr/bin/stokesforge' _ "$cfg" \
         || die "the window did not open and close (exit code $?)"
     rm -rf "$cfg"

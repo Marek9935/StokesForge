@@ -33,6 +33,8 @@ pkg_version() {
 }
 
 if [ "${STOKESFORGE_PKG_SOURCE_ONLY:-}" = 1 ]; then
+    # Sourced by the test: `return`; run directly: `exit`.
+    # shellcheck disable=SC2317
     return 0 2> /dev/null || exit 0
 fi
 
@@ -50,7 +52,7 @@ PKG_VERSION="$(pkg_version "$VERSION")" || err "unexpected version \"$VERSION\" 
 for needed in stokesforge-app stokesforge-selftest lib/python; do
     [ -e "$DIST/$needed" ] || err "$DIST/$needed missing, run scripts/app-dist.sh"
 done
-ls "$DIST" | grep -qi licen || err "no license notice in $DIST"
+compgen -G "$DIST/*[Ll][Ii][Cc][Ee][Nn]*" > /dev/null || err "no license notice in $DIST"
 has_icon=0
 for f in "$DIST"/share/icons/hicolor/*/apps/stokesforge.png "$DIST"/share/icons/hicolor/*/apps/stokesforge.svg; do
     [ -f "$f" ] && has_icon=1

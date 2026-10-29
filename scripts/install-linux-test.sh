@@ -5,6 +5,9 @@
 #
 # Usage: scripts/install-linux-test.sh                    fake archives
 #        scripts/install-linux-test.sh --archive <tar.gz> real archive (the tag job)
+# SC2016: `bash -c '...' _ args` expands its arguments inside, on purpose.
+# SC2329: the helpers are called through `t` / `tn`.
+# shellcheck disable=SC2016,SC2329
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -352,7 +355,13 @@ t "unknown option: usage" grep -q 'Usage' "$tmp/out"
 t "--help exits 0" env HOME="$H" PATH="$MINBIN" "$BASH_BIN" "$A123/install.sh" --help
 
 if command -v shellcheck >/dev/null 2>&1; then
-    t "shellcheck: installer" shellcheck "$INSTALLER"
-    t "shellcheck: this test" shellcheck "${BASH_SOURCE[0]}"
+    # Not through `t`: the findings are the useful part of a failure.
+    for f in "$INSTALLER" "${BASH_SOURCE[0]}"; do
+        count=$((count + 1))
+        if ! shellcheck "$f" >&2; then
+            echo "FAILED: shellcheck: $f" >&2
+            fail=1
+        fi
+    done
 fi
 finish

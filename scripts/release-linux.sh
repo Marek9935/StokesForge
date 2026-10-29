@@ -25,7 +25,7 @@ for needed in stokesforge-app stokesforge-selftest lib/python; do
         exit 1
     fi
 done
-if ! ls "$DIST" | grep -qi licen; then
+if ! compgen -G "$DIST/*[Ll][Ii][Cc][Ee][Nn]*" > /dev/null; then
     echo "[release] ERROR: no license notice in $DIST" >&2
     exit 1
 fi
