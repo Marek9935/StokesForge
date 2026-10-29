@@ -38,7 +38,11 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
+      # Full history and tags: versions-aligned.sh compares the pyst API
+      # snapshots with those of the released tags (#356).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: python3 scripts/gitlab-status-test.py
       - run: python3 scripts/french-guard-test.py
       # Hits: translate to English or mark deliberate French (docs/tests.md, "French guard").

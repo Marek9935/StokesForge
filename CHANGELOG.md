@@ -5,8 +5,9 @@ Versions follow the numbering `MAJOR.MINOR.PATCH`; the V1 criteria are in
 [`docs/v1-criteria.md`](docs/v1-criteria.md).
 
 What counts as compatibility from V1 on: the `.stf` file format (a V1 file can
-be read back and migrated up to V3, invariant 12) and the `pyst` API
-(["V1 frozen API"](docs/python-and-scripting.md)). The rest of the code has no
+be read back and migrated up to V3, invariant 12). The `pyst` API is alpha
+(`pyst.__api_version__` is `0.x`) and promises nothing until `1.0`
+([API version](docs/python-and-scripting.md)). The rest of the code has no
 compatibility promise.
 
 One section per version, titled `## [X.Y.Z] - date`. The release job
@@ -29,6 +30,12 @@ without a message, see `docs/persistence.md`).
   license and the project page, with a **Copy** button for a line to paste in a
   bug report; `stokesforge-app --version` and `stokesforge-cli --version`
   (`-V`) print it.
+
+- `pyst.__api_version__` (#356): the `pyst` API now has its own version,
+  `"0.1"`, and is marked alpha (the V1 promise that scripts keep working is
+  withdrawn until API `1.0`). CI refuses a surface change without a bump and
+  a frozen snapshot `tests/api-witnesses/vX.Y.txt`.
+
 - User manual skeleton (#362): `manual/`, built with mdBook, attached to each
   release and published on GitLab Pages for final versions. Chapters are
   still to be written.

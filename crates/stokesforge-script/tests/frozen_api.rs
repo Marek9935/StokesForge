@@ -671,3 +671,15 @@ fn the_enumerated_values_are_those_of_the_frozen_list() {
     }
     require_no_gap(gaps);
 }
+
+/// `pyst.__api_version__` is the constant that `scripts/versions-aligned.sh`
+/// checks against the frozen snapshot (#356).
+#[test]
+fn the_api_version_of_the_module_is_the_constant() {
+    let bench = bench();
+    let output = output(&bench, "print('VERSION|' + pyst.__api_version__)\n");
+    assert_eq!(
+        one(&output, "VERSION"),
+        stokesforge_script::PYST_API_VERSION
+    );
+}

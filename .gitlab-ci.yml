@@ -55,6 +55,8 @@ fmt:
   stage: check
   extends: .linux-job
   image: rust:1
+  variables:
+    GIT_DEPTH: "0"   # tags for scripts/versions-aligned.sh (#356)
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
     paths:

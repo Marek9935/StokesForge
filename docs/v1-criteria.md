@@ -9,7 +9,7 @@ observe it; the content of the version is in [`CHANGELOG.md`](../CHANGELOG.md).
 | Promise | Held by |
 |---|---|
 | A `.stf` file written by V1 can be read back and migrated up to V3; a file of a newer **format** (higher format number) is refused with a clear message | [`persistence.md`](persistence.md) § Version rule: every V1 file can be read back up to V3, [`invariants.md`](invariants.md) no. 12, witness file `crates/stokesforge-persistence/tests/witnesses/v1/` |
-| A `pyst` script written against V1 keeps working | [`python-and-scripting.md`](python-and-scripting.md) § Frozen API V1 (#331), test `crates/stokesforge-script/tests/frozen_api.rs` |
+| The `pyst` surface is listed, versioned (`pyst.__api_version__`, alpha `0.x`: no promise that a V1 script keeps working until API `1.0`) and guarded | [`python-and-scripting.md`](python-and-scripting.md) § Frozen API V1 (#331) and § API version (#356), test `crates/stokesforge-script/tests/frozen_api.rs`, `scripts/versions-aligned.sh` |
 | The application and its embedded Python install and start on Linux x86_64 and Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § Where the binaries are) |
 
 The rest of the code has **no** compatibility promise from one major
@@ -183,9 +183,11 @@ is never opened in advance: `vN` is created from `main` on the day of need,
   or the distribution scripts have changed; always on the explicit order of the
   user. A tag is put only on `main` or on `release/N.x`: CI
   refuses it otherwise.
-- **Compatibility**: internal code has no promise; the two public surfaces
-  follow the numbers above: `.stf` files (invariant 12) and the
-  `pyst` API, which change in a breaking way only at an `X` version.
+- **Compatibility**: internal code has no promise; the only public surface
+  with a promise is the `.stf` files (invariant 12), which change in a
+  breaking way only at an `X` version. The `pyst` API is alpha (`0.x`) and
+  promises nothing until it is stabilized at `1.0` (own number
+  `pyst.__api_version__`, see `docs/python-and-scripting.md` § API version).
 - **Who decides `Z`, `Y` or `X`**: the user, when asking for the tag;
   the dedicated version commit carries it.
 - From V1 on, **the rule "no backward compatibility of the format during
