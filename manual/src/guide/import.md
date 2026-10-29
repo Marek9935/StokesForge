@@ -283,7 +283,7 @@ Choose the **Destination**:
 
 | Choice | Result |
 |---|---|
-| **Active workbook (one sheet per file)** | The data goes into the workbook in front. Greyed out if no workbook is open. |
+| **Active workbook (one sheet per file)** | The data goes into the workbook in front. Greyed out if no workbook is open; it then reads **Active workbook (none)**. |
 | **New workbook per file** | Each file gets its own new workbook. |
 | **New workbook for all files** | One new workbook holds all the files. |
 

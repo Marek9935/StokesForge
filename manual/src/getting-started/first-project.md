@@ -63,7 +63,7 @@ See [The Import Wizard at a glance](../guide/import.md#the-wizard-at-a-glance).
 
 You are now in the third step, **Header and Data End**.
 
-Tick **Names in first line**. The first line of the file gives the column names, so it must not be read as data. Check in the preview that the first line is no longer shown as a data line.
+Tick **Names in first line**. The first line of the file gives the column names, so it must not be read as data. In the preview, the first line now carries the **S** marker (column names). It is no longer counted as a data line.
 
 See [Names in first line](../guide/import.md#names-in-first-line) and [The live preview](../guide/import.md#the-live-preview).
 
@@ -113,7 +113,7 @@ See [Plot columns from a workbook](../guide/graphs.md#plot-columns-from-a-workbo
 
 ### 8. Write the title of the X axis
 
-Double-click the X axis, the horizontal line at the bottom of the graph. The **Graph Properties** window opens on the **Axes** tab, on the axis **X (bottom)**.
+Double-click the numbers of the X axis, under the graph. The **Graph Properties** window opens on the **Axes** tab, on the axis **X (bottom)**.
 
 In the section **Axis title**:
 

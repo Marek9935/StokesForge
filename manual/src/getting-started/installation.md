@@ -130,8 +130,8 @@ StokesForge keeps your preferences, your saved import templates, your saved colo
 
 | System | Configuration folder |
 |---|---|
-| Linux | `~/.config/StokesForge` |
-| Windows | The `StokesForge` folder in your `%APPDATA%` folder |
+| Linux | `~/.config/stokesforge` |
+| Windows | `%APPDATA%\StokesForge\config` |
 
 To keep all of this in a folder of your choice, for example on a USB drive, set the variable `STOKESFORGE_CONFIG_DIR` to that folder before you start the program. The recovery copies are then in its `recovery` subfolder.
 

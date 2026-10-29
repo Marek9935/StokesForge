@@ -33,6 +33,8 @@ The pan is decided when you press the button: if you release <kbd>Ctrl</kbd> dur
 
 ## Axes
 
+An axis is the strip of ticks and numbers just outside the plot area.
+
 | Gesture | Where | What it does |
 |---|---|---|
 | <kbd>Ctrl</kbd>+wheel | An axis | Zooms this scale only. |
