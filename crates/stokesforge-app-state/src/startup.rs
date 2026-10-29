@@ -27,6 +27,38 @@ use std::path::{Path, PathBuf};
 
 use crate::preferences::Preferences;
 
+/// Home of the project, shown in Help > About StokesForge (#382).
+pub const REPOSITORY_URL: &str = "https://gitlab.com/askrzypczak/stokesforge";
+
+/// License of the application, from the workspace manifest (#382).
+pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
+
+/// Version of the application, `X.Y.Z` (#382).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The line a bug report cites (#382): version, system, architecture, e.g.
+/// `StokesForge 1.0.1 (Linux x86_64)`. The text of the About window's Copy
+/// button.
+pub fn version_line() -> String {
+    let os = match std::env::consts::OS {
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "macos" => "macOS",
+        other => other,
+    };
+    format!("StokesForge {VERSION} ({os} {})", std::env::consts::ARCH)
+}
+
+/// `--version` / `-V` (#382): the line to print instead of opening a window,
+/// when the **first** argument asks for it. Decided before the preferences are
+/// read, so that asking for the version never writes the first-launch demo.
+pub fn version_request(args: &[String]) -> Option<String> {
+    match args.first().map(String::as_str) {
+        Some("--version" | "-V") => Some(format!("stokesforge-app {VERSION}")),
+        _ => None,
+    }
+}
+
 /// What to build at startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupSource {
@@ -102,6 +134,34 @@ pub fn plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| arg.to_string()).collect()
+    }
+
+    #[test]
+    fn the_version_flags_give_the_version_line() {
+        let expected = Some(format!("stokesforge-app {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(version_request(&args(&["--version"])), expected);
+        assert_eq!(version_request(&args(&["-V"])), expected);
+    }
+
+    #[test]
+    fn anything_else_is_not_a_version_request() {
+        assert_eq!(version_request(&args(&[])), None);
+        assert_eq!(version_request(&args(&["project.stf"])), None);
+        assert_eq!(version_request(&args(&["x", "--version"])), None);
+    }
+
+    #[test]
+    fn the_copy_line_names_version_and_system() {
+        let line = version_line();
+        assert!(line.starts_with(&format!("StokesForge {} (", env!("CARGO_PKG_VERSION"))));
+        assert!(line.contains(std::env::consts::ARCH), "{line}");
+        assert!(line.ends_with(')'), "{line}");
+        #[cfg(target_os = "linux")]
+        assert!(line.contains("Linux"), "{line}");
+    }
 
     fn preferences(done: bool) -> (tempfile::TempDir, Preferences) {
         let dir = tempfile::tempdir().unwrap();

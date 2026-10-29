@@ -296,7 +296,7 @@ To report a mistake in the software or in this manual, open an issue on the
 
 Search the existing issues first: your problem may be known. Then write a new issue with:
 
-- **The version** of StokesForge. It is in the name of the package you installed, for example `StokesForge-1.0.0-linux-x86_64.tar.gz`.
+- **The version** of StokesForge. Open **Help ▸ About StokesForge** and click **Copy** to get a line to paste, or run `stokesforge-app --version`. If the application does not start, the version is in the name of the package you installed, for example `StokesForge-1.0.0-linux-x86_64.tar.gz`.
 - **Your system**: Windows or Linux and its version. On Linux, say whether you use Wayland or X11. For a display problem, name your graphics card and its driver.
 - **The steps** to reproduce the problem, one action per line, starting from a new project.
 - **What you expected** and **what happened**. Copy the exact text of any message. The status bar keeps the last 50.

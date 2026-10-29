@@ -61,6 +61,8 @@ const CALLS: &[&str] = &[
     "on_hover_text",
     "on_disabled_hover_text",
     "heading",
+    "hyperlink",
+    "hyperlink_to",
     "hint_text",
     "selected_text",
     "with_title",

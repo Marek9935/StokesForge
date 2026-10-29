@@ -13110,3 +13110,28 @@ mod autosave {
         state.poll_autosave(t0 + PERIOD);
     }
 }
+
+// -- Issue #382: Help > About StokesForge --
+
+/// The About window opens and closes through its two actions; Copy hands the
+/// version line to the shell and says so in the status bar.
+#[test]
+fn the_about_window_opens_closes_and_copies_the_version_line() {
+    let dir = tempfile::tempdir().expect("temporary folder");
+    let (_session, mut state, _graph) = demo_with_graph(dir.path());
+    assert!(!state.about_open());
+    state.dispatch(Action::OpenAbout);
+    assert!(state.about_open());
+    state.dispatch(Action::CloseAbout);
+    assert!(!state.about_open());
+
+    state.dispatch(Action::CopyVersionLine);
+    let line = state.take_object_clipboard_text().expect("a line to copy");
+    assert_eq!(line, stokesforge_app_state::startup::version_line());
+    let status = state.status().expect("a message");
+    assert!(!status.is_error());
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("status-version-copied")
+    );
+}
