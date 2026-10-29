@@ -112,6 +112,12 @@ Each line is observed by a command or a page; none is declared
      Maintainer.
 5. Observe: the GitLab release exists, the installer and the archive can be
    downloaded from it.
+6. Go through the issues waiting for a tag (`glab issue list --label attente-tag`):
+   their code is merged but only runs at a tag. Read the jobs they name on GitHub
+   (they are not in `scripts/ci-status.sh`); close each issue whose proof is now
+   done and drop its label, otherwise note what failed in it. The non-blocking
+   jobs (`test-linux-packages` while the packages are unpublished, #390) need it
+   most: their failure does not stop the release.
 
 **Variant for a following version `X.Y.Z`** (`1.0.1`, `1.1.0`, `2.0.0`): the
 steps are the same, with what changes:
