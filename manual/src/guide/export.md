@@ -104,7 +104,7 @@ The SVG on the clipboard always keeps its text as text (the **Text** choice). Th
 2. In the section **Copy Graph**, tick the formats to offer. At least one format must stay ticked.
 3. Drag a row to change the order. The order tells the receiving program which format you prefer, but the program has the last word.
 
-<img src="../images/preferences-export.png" alt="The Export tab of Preferences: the formats offered together by Copy Graph, in order." width="484">
+<img src="../images/preferences-export.png" alt="The Export tab of Preferences: the formats offered together by Copy Graph, in order." width="480">
 
 The change applies right away.
 

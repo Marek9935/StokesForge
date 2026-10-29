@@ -38,7 +38,7 @@ The right-click menus have an **Analysis** submenu with one entry per category: 
 
 The window title is **New analysis: ** followed by the category. The settings are on the left, in three blocks (**Input**, the method settings and **Output**). The preview of the curve with the result drawn on it is on the right, with the computed values underneath.
 
-<img src="../images/analysis-baseline.png" alt="The Data Manipulation window on Graph1 with a polynomial baseline: two background zones marked on the preview, the corrected curve and the baseline drawn on it." width="1004">
+<img src="../images/analysis-baseline.png" alt="The Data Manipulation window on Graph1 with a polynomial baseline: two background zones marked on the preview, the corrected curve and the baseline drawn on it." width="1000">
 
 The preview updates as you change a setting. Long computations run in the background. While one runs, the old result stays visible and the text **Calculating…** appears.
 
@@ -194,7 +194,7 @@ To go back, use <kbd>Ctrl</kbd>+<kbd>Z</kbd> right after the replacement, or lat
 
 The curve is sorted by increasing X first, so the area of a positive signal is positive whatever the direction of the recording.
 
-<img src="../images/analysis-integration.png" alt="The Integrate window on Graph1: one range from 470 to 570 nm, its shaded preview and the computed area." width="1004">
+<img src="../images/analysis-integration.png" alt="The Integrate window on Graph1: one range from 470 to 570 nm, its shaded preview and the computed area." width="1000">
 
 Settings:
 
@@ -209,7 +209,7 @@ The values shown are **Area 1**, **Area 1: from**, **Area 1: to** and so on for 
 
 **Analysis ▸ Fitting** fits a model to the curve by least squares. Pick a model from the menu, or from the **Model** list in the window.
 
-<img src="../images/analysis-fit.png" alt="The Fitting window on Graph1: a Gaussian model fitted on the main peak (470 to 570 nm), with its parameters, the residuals and R squared." width="1004">
+<img src="../images/analysis-fit.png" alt="The Fitting window on Graph1: a Gaussian model fitted on the main peak (490 to 550 nm), with its parameters, the residuals and R squared." width="1000">
 
 | Model | Formula | Parameters |
 |---|---|---|
@@ -289,6 +289,8 @@ To place peaks yourself, switch to the **Point** tool and click the preview. Eac
 The values are listed for each peak: **Peak 1: height**, **center**, **FWHM**, **area** and **area (%)**. For a Voigt peak, the Gaussian and Lorentzian widths are given too. The background appears as **Background: offset** and **Background: slope**. The fit statistics are the same as for a fit.
 
 The output block lets you add **Write one column per peak** (the peaks and the background) and **Write the sum of the peaks**. **Write the residuals** is in the method settings.
+
+<img src="../images/analysis-peaks.png" alt="The New analysis: Peaks and Deconvolution window on Graph1, with Peak Decomposition chosen: Gaussian peaks with a Constant background detected on the spectrum. The preview shows the two fitted peaks (centred near 520 and 610 nm), their sum and the Residuals; the list gives Peak 1 and Peak 2 with height, center, FWHM, area and area (%), the background offset, Points used, R², Reduced χ² and Degrees of freedom." width="1000">
 
 ### Reconvolution
 

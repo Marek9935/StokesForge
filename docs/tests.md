@@ -1083,13 +1083,19 @@ the CI.
   `PREDICTABLE`, fixed demo, temporary configuration folder, pointer sent away, no
   hover or caret). A PNG is rewritten only if its decoded pixels differ from the file
   on disk, so a second run changes no image; `git status` then lists what really changed.
-- **Manifest**: `manual/screenshots.json` has one entry per image (`image`, `kind`
-  `auto` or `manual`, `page`, `shows`, and `how` for the manual ones). The ordinary test
-  `the_manifest_and_the_shots_agree` keeps the `auto` entries equal to `SHOTS` and checks
-  that their files exist; a `manual` image may be missing (listed by the test).
-- **Taken by hand** (`kind: manual`): what the bench cannot render: the system file
-  chooser, a file dragged from the file manager, a detached OS window, the Python console
-  (the test build has no `python` feature).
+- **Manifest**: `manual/screenshots.json` has one entry per image (`image`, `page`,
+  `shows`, and `"feature": "python"` for the console). The ordinary test
+  `the_manifest_and_the_shots_agree` keeps the entries equal to `SHOTS` and checks
+  that their files exist.
+- **Not illustrated**: what depends on the operating system (system file chooser, file
+  dragged from the file manager, detached OS window) has no screenshot.
+- **Python console**: `scripting-console` needs the embedded interpreter. The script runs
+  the bench a second time with the `python` feature (environment of `scripts/python-test.sh`);
+  without the vendored interpreter it skips that shot and says so.
+- **Dialogs**: a crop is exactly the window frame (`dialog_rect`). A dialog whose content
+  scrolls is made taller with `grow_dialog`; the analysis values list has a test seam
+  (`VALUES_HEIGHT_OVERRIDE`). Fit and peaks shots add a fixed pseudo-random scatter to the
+  spectrum (an exact curve gives 17-digit values).
 - **Adding an image**: one entry in `SHOTS` (setup through `Action`s and labelled widgets,
   never pixel coordinates), one entry in the manifest, then the script, then look at the PNG.
 

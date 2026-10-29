@@ -102,7 +102,7 @@ These entries change the same settings you find in the steps below.
 
 ## Step 1: files and template
 
-<img src="../images/import-wizard-files.png" alt="Step 1 of the Import Wizard, Files and Template: the template list and its buttons, the file list, and the preview of the file on the right." width="1004">
+<img src="../images/import-wizard-files.png" alt="Step 1 of the Import Wizard, Files and Template: the template list and its buttons, the file list, and the preview of the file on the right." width="1000">
 
 ### Choose files
 
@@ -123,7 +123,7 @@ When you change a setting, the template name shows "(modified)", and a note says
 
 ## Step 2: format
 
-<img src="../images/import-wizard-format.png" alt="Step 2 of the Import Wizard, Format: delimiter, numbers, comment lines, blocks, encoding and skipped lines, with the file preview." width="1004">
+<img src="../images/import-wizard-format.png" alt="Step 2 of the Import Wizard, Format: delimiter, numbers, comment lines, blocks, encoding and skipped lines, with the file preview." width="1000">
 
 ### Delimiter
 
@@ -185,7 +185,7 @@ With **Auto**, a file that is almost UTF-8 is read as UTF-8, and each invalid by
 
 ## Step 3: header and data end
 
-<img src="../images/import-wizard-header.png" alt="Step 3 of the Import Wizard, Header and Data End: header and subheader lines, the Long Name and Units roles, and the coloured line roles in the preview." width="1004">
+<img src="../images/import-wizard-header.png" alt="Step 3 of the Import Wizard, Header and Data End: header and subheader lines, the Long Name and Units roles, and the coloured line roles in the preview." width="1000">
 
 ### Header
 
@@ -248,7 +248,7 @@ This section is greyed out while **Names in first line** is checked. Your choice
 
 ## Step 4: columns
 
-<img src="../images/import-wizard-columns.png" alt="Step 4 of the Import Wizard, Columns: name, long name, units, read as, type and role of each column found in the file." width="1004">
+<img src="../images/import-wizard-columns.png" alt="Step 4 of the Import Wizard, Columns: name, long name, units, read as, type and role of each column found in the file." width="1000">
 
 This step shows the result, column by column: what StokesForge read from the header, how it reads the values (**Read As**), what it found (**Type**, **Numeric** or **Mixed**), the **Role** of the column and a few sample values.
 
@@ -264,7 +264,7 @@ If the table is empty, the step says "Choose a file in step 1". Add a file first
 
 ## Step 5: metadata
 
-<img src="../images/import-wizard-metadata.png" alt="Step 5 of the Import Wizard, Metadata: Keep header and Keep footer, and the list of keys found in the file." width="1004">
+<img src="../images/import-wizard-metadata.png" alt="Step 5 of the Import Wizard, Metadata: Keep header and Keep footer, and the list of keys found in the file." width="1000">
 
 A file often starts with information about the measurement: the date, the instrument, the sample. StokesForge can keep it as metadata of each imported column.
 
@@ -275,7 +275,7 @@ The **File metadata** list shows every key and section found in the file. Unchec
 
 ## Step 6: destination
 
-<img src="../images/import-wizard-destination.png" alt="Step 6 of the Import Wizard, Destination: where the data goes, saving a template and the Auto-select criteria." width="1004">
+<img src="../images/import-wizard-destination.png" alt="Step 6 of the Import Wizard, Destination: where the data goes, saving a template and the Auto-select criteria." width="1000">
 
 ### Where the data goes
 
