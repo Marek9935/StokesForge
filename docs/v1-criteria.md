@@ -81,12 +81,19 @@ Each line is observed by a command or a page; none is declared
    mirror passes it on to GitHub).
 4. The tag triggers, on GitHub only (the mirror passes it on):
    - the blocking checks, Linux and Windows;
-   - `release-linux` and `dist-windows`: archive
-     `StokesForge-1.0.0-linux-x86_64.tar.gz` and installer
+   - `release-linux`, `release-manual` and `dist-windows`: archive
+     `StokesForge-1.0.0-linux-x86_64.tar.gz`, manual
+     `StokesForge-1.0.0-manual.tar.gz` (mdBook site, #362) and installer
      `StokesForge-1.0.0-windows-setup.exe`, uploaded to the GitLab package
      registry (no GitHub release: GitHub is only a mirror);
    - `publier`, when all of that is done: GitLab release (notes taken from the
-     CHANGELOG, links to the two packages). No GitLab runner is used for this.
+     CHANGELOG, links to the three packages). No GitLab runner is used for this;
+   - the `pages` job of GitLab, on a final tag only (not an `-rcN`): at the end
+     of `publier`, `scripts/release-publish.sh` starts a GitLab pipeline on the
+     tag, which publishes the manual of the release on GitLab Pages
+     (`https://askrzypczak.gitlab.io/stokesforge/`). The token's role must be
+     allowed to run pipelines on the protected tags `v*`, else raise it to
+     Maintainer.
 5. Observe: the GitLab release exists, the installer and the archive can be
    downloaded from it.
 

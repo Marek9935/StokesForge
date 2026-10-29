@@ -82,12 +82,12 @@ class ReportTest(unittest.TestCase):
     def test_success_and_tolerated_rerun_keep_links_sha_and_pipeline(self):
         self.jobs[4]["steps"] = [{"conclusion": "failure"}]
         self.report()
-        self.assertEqual(len(self.posts), 6)
+        self.assertEqual(len(self.posts), 7)
         for post in self.posts:
             self.assertEqual(post["pipeline_id"], 99)
             self.assertIn("Attempt 2", post["description"])
             self.assertRegex(post["target_url"], r"/actions/runs/42/job/\d+$")
-        self.assertEqual([p["state"] for p in self.posts], ["success"] * 4 + ["skipped", "success"])
+        self.assertEqual([p["state"] for p in self.posts], ["success"] * 4 + ["skipped", "success", "success"])
         self.assertIn("Non-blocking failure", self.posts[4]["description"])
 
     def test_failure_timeout_and_cancellation_do_not_turn_green(self):
@@ -101,7 +101,7 @@ class ReportTest(unittest.TestCase):
         self.event["workflow_run"]["conclusion"] = "cancelled"
         self.posts.clear()
         self.report()
-        self.assertEqual([p["state"] for p in self.posts], ["canceled"] * 6)
+        self.assertEqual([p["state"] for p in self.posts], ["canceled"] * 7)
 
     def test_failure_publishes_step_and_first_error_of_the_log(self):
         self.jobs[2]["conclusion"] = "failure"
@@ -176,7 +176,7 @@ class ReportTest(unittest.TestCase):
             with patch.object(status, "fetch_job_log", return_value="error: x"):
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     status.report(self.event, "github", "secret-sentinelle")
-        self.assertEqual(len(self.posts), 6)
+        self.assertEqual(len(self.posts), 7)
 
     def test_licenses_uploaded_as_gitlab_package_only_if_the_job_succeeds(self):
         self.report()
@@ -189,7 +189,7 @@ class ReportTest(unittest.TestCase):
         self.licenses = None  # artefact introuvable
         self.report()
         self.assertEqual(self.uploads, [])
-        self.assertEqual(len(self.posts), 18)  # statuses always go through
+        self.assertEqual(len(self.posts), 21)  # statuses always go through
 
     def test_rejected_license_upload_does_not_break_the_report(self):
         with patch.object(status, "request_json", side_effect=self.api):
@@ -197,7 +197,7 @@ class ReportTest(unittest.TestCase):
                 with patch.object(status, "upload_package", side_effect=RuntimeError("API : erreur HTTP 403")):
                     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                         status.report(self.event, "github", "secret-sentinelle")
-        self.assertEqual(len(self.posts), 6)
+        self.assertEqual(len(self.posts), 7)
 
     def test_zip_artifact_extracted_without_sending_the_token_elsewhere(self):
         buffer = io.BytesIO()

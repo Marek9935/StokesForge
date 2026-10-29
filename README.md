@@ -16,6 +16,8 @@ workspace at the root.
 - **`docs/`** — the code documentation, with [`docs/README.md`](docs/README.md)
   as the entry point. `docs/archive/` keeps the earlier design documents
   (specifications, roadmaps, reports): history, not reference.
+- **`manual/`** — the user manual (mdBook), published at
+  <https://askrzypczak.gitlab.io/stokesforge/> with each final release.
 - **`scripts/`** — vendoring of CPython, PyO3 configuration, assembly of the
   distributions in `dist/`.
 - **`vendor/`** — the frozen CPython interpreter (not versioned) and the

@@ -23,6 +23,12 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Added
+
+- User manual skeleton (#362): `manual/`, built with mdBook, attached to each
+  release and published on GitLab Pages for final versions. Chapters are
+  still to be written.
+
 ### Removed
 
 - No built-in import templates (#378): the five templates the program carried
