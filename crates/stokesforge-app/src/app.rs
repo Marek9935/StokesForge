@@ -1469,7 +1469,7 @@ impl StokesForgeApp {
         // The history and the gestures that change the rank of the series or the
         // composition of a group (#197, including its deletion: several
         // series leave at once) make the selection follow by content.
-        let history_selections: Vec<_> = if matches!(
+        let mut history_selections: Vec<_> = if matches!(
             action,
             Action::Undo
                 | Action::Redo
@@ -1505,7 +1505,18 @@ impl StokesForgeApp {
         } else {
             Vec::new()
         };
+        // Layers added or deleted (#357): the views address layers by index
+        // (framing, active layer, selection), so they follow the move.
+        let layer_changes: Vec<LayerChange> = self.layer_changes_before(&action);
+        let added_cell = match &action {
+            Action::AddCell { graph, .. } => Some(*graph),
+            _ => None,
+        };
         let selection_change = match &action {
+            Action::RemovePlotObject {
+                target: stokesforge_app_state::object_manager::VisibilityTarget::Panel(_),
+                ..
+            } => None,
             Action::RemovePlotObject { graph, target } => Some((*graph, *target)),
             Action::RemoveAnnotation { graph, target } => Some((
                 *graph,
@@ -1569,6 +1580,20 @@ impl StokesForgeApp {
                 self.update_selection_after_action(graph, removed);
             }
         }
+        let mut moved_layers = Vec::new();
+        if self.state.revision() != revision_before {
+            moved_layers = self.follow_layer_changes(layer_changes);
+            if let Some(graph) = added_cell {
+                // The new cell is the last layer, and becomes the active one.
+                if let Some(spec) =
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+                {
+                    let last = spec.panels.len().saturating_sub(1);
+                    self.with_graph_view(graph, |view| view.set_active_panel(last, &spec));
+                }
+            }
+        }
+        history_selections.retain(|(graph, _, _)| !moved_layers.contains(graph));
         if self.state.revision() != revision_before {
             for (graph, target, previous) in history_selections {
                 if let Some(next) =
@@ -1635,6 +1660,81 @@ impl StokesForgeApp {
             }
         }
         false
+    }
+
+    /// What a layer-changing action may move, read before it runs (#357): the
+    /// graph, its spec, the selection, and the exact move when the action knows
+    /// it (a deletion); history leaves it to be found by comparing the specs.
+    fn layer_changes_before(&self, action: &Action) -> Vec<LayerChange> {
+        use stokesforge_app_state::object_manager::VisibilityTarget as T;
+        let graphs: Vec<NodeId> = match action {
+            Action::RemovePlotObject {
+                graph,
+                target: T::Panel(_),
+            } => vec![*graph],
+            Action::Undo | Action::Redo => self
+                .graph_views
+                .keys()
+                .copied()
+                .chain(self.detached_tabs.keys().filter_map(|tab| match tab {
+                    Tab::Graph(graph) => Some(*graph),
+                    _ => None,
+                }))
+                .collect(),
+            _ => Vec::new(),
+        };
+        graphs
+            .into_iter()
+            .filter_map(|graph| {
+                let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
+                let exact = match action {
+                    Action::RemovePlotObject {
+                        target: T::Panel(panel),
+                        ..
+                    } => Some(stokesforge_core::compose::remap_after_removal(
+                        spec.panels.len(),
+                        &stokesforge_core::compose::layers_removed_with(&spec, *panel),
+                    )),
+                    _ => None,
+                };
+                let selected = self
+                    .read_graph_view(graph, selected_manager_target)
+                    .flatten();
+                Some(LayerChange {
+                    graph,
+                    previous: spec,
+                    exact,
+                    selected,
+                })
+            })
+            .collect()
+    }
+
+    /// Applies the move of the layers to the views of the graphs that changed
+    /// (#357); returns those graphs. The selection is kept when its layer is.
+    fn follow_layer_changes(&mut self, changes: Vec<LayerChange>) -> Vec<NodeId> {
+        let mut moved = Vec::new();
+        for change in changes {
+            let Some(next) =
+                stokesforge_core::compose::current_plot_spec(self.state.tree(), change.graph)
+            else {
+                continue;
+            };
+            let map = change.exact.or_else(|| {
+                (change.previous.panels.len() != next.panels.len())
+                    .then(|| stokesforge_core::compose::remap_between(&change.previous, &next))
+            });
+            let Some(map) = map else {
+                continue;
+            };
+            let selected = change.selected.and_then(|target| target.remap_panel(&map));
+            self.with_graph_view(change.graph, |view| {
+                view.remap_layers(&map);
+                select_manager_target(view, selected, &next);
+            });
+            moved.push(change.graph);
+        }
+        moved
     }
 
     /// The deletion makes the selection follow only if the command acted.
@@ -1710,6 +1810,16 @@ fn suggested_file_name(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| format!("{}.stf", stokesforge_session::NEW_PROJECT_NAME))
+}
+
+/// A graph whose layers an action may move (#357), see
+/// [`StokesForgeApp::layer_changes_before`].
+struct LayerChange {
+    graph: NodeId,
+    previous: stokesforge_plot::PlotSpec,
+    /// New index of each previous layer, when the action knows it.
+    exact: Option<Vec<Option<usize>>>,
+    selected: Option<stokesforge_app_state::object_manager::VisibilityTarget>,
 }
 
 #[cfg(test)]

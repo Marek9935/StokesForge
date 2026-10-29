@@ -612,9 +612,9 @@ knows only the name and raw bytes (C5, level 2,
 
 **What is not done**, explicitly out of scope for this work package:
 
-- **no adding/removing of a series or panel from the window**:
+- **no adding/removing of a series from the window**:
   that remains the role of the "Plot" submenu and of the drag and drop already
-  described above;
+  described above (cells of the grid have their own gestures, below);
 - **zoom/pan are not part of it, and must never be**:
   `stokesforge_render_egui::ViewState` lives on `GraphView`, outside the `PlotSpec`
   (`docs/invariants.md`, `.claude/rules.md`): this window has and will have
@@ -630,3 +630,37 @@ the syntax of the `#RRGGBB[AA]` colors (`stokesforge_plot::parse_hex`, of which
 (`stokesforge_core::series_label`, called by the legend **and** by the list of
 series of the graph properties through `series_list_label`). The RGB/HSL
 transformations remain specific to the picker.
+
+## Grid of cells (#357)
+
+A graph is a grid of **cells** (`PanelSpec::row`/`column`); a cell holds an
+ordinary layer and its overlay layers. Two gestures add a cell, one deletes it;
+all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
+`PlotEditKind::AddCell` and `RemoveCell`.
+
+- **Graph > New Layer Beside > Right / Below** (`Action::AddCell`, empty
+  `columns`), on the **active layer**'s cell. Greyed out when the grid would pass
+  `compose::MAX_GRID_CELLS` (256, the size the renderer lays out as declared).
+- **Columns dropped on the right or bottom band** of the figure
+  (`graph_window::edge_drop_side`, band `EDGE_BAND_WIDTH`, painted during the
+  drag with `theme::drop_edge_band_*`): the new cell goes beside the cell
+  **nearest the pointer** (`GraphView::nearest_cell`); bottom-right corner =
+  Right. The series are planned like a drop on the graph
+  (`AppState::add_columns_to_spec`, plot type of the reference layer); the Y2-Y4
+  role layers go on the **new** cell. Without a Y column: `error-add-no-y`, no cell.
+  Detached windows go through the same `graph_drop_target`.
+- **Object Manager > layer > Delete** (and the Delete key after choosing the
+  node) removes the cell and its overlay layers; on an overlay layer, that layer
+  only. The last cell is refused (entry greyed, `error-last-layer`).
+
+`compose::insert_cell`: Right shifts only the row of the reference cell (cells
+at a greater column move +1, with their overlays), Below only its column; the new
+layer is appended last, so existing indices do not move. `compose::remove_cell`
+closes the gap in the row, drops a row left empty, and resets the graph
+`title_anchor` when layer 0 goes (it is in the frame of the first layer).
+
+**Indices that follow a removal** (and its undo): `ViewState::remap_panels`
+(framings), `GraphView::remap_layers` (active layer, selection, gestures in
+progress), driven by `StokesForgeApp::follow_layer_changes` with the exact map of a
+deletion (`compose::remap_after_removal`) or, for Undo/Redo, the content match
+`compose::remap_between`. The new cell becomes the active layer.

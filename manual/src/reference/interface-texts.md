@@ -24,6 +24,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Analysis | Analyse |
 | Axes | Axes |
 | Axes… | Axes… |
+| Below | En dessous |
 | Bring to Front | Amener devant |
 | Choose Default Folder | Choisir le dossier par défaut |
 | Choose Files to Import | Choisir les fichiers à importer |
@@ -89,6 +90,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Move Up | Déplacer vers le haut |
 | New | Nouveau |
 | New Layer | Nouveau calque |
+| New Layer Beside | Calque à côté |
 | New Project | Nouveau projet |
 | Object Manager | Gestionnaire d’objets |
 | Object Properties | Propriétés de l'objet |
@@ -133,6 +135,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Reset Width | Réinitialiser la largeur |
 | Reset Zoom | Réinitialiser le zoom |
 | Restore Original Data | Restaurer les données originales |
+| Right | À droite |
 | Right Mirror Axis | Axe miroir de droite |
 | Right Y (Linked X) | Y à droite (X lié) |
 | Save | Enregistrer |

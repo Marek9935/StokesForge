@@ -164,6 +164,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | General | Général | Tab: title and background | Graph, Graphe | G (Q23) |
 | Plot Area | Zone de tracé | Rectangle bounded by the axes | Zone de dessin, Plot | G |
 | Layer | Calque | Plot area with its axes; a graph contains one or more | Panel, Panneau, Couche | O (Q22) |
+| New Layer Beside | Calque à côté | Graph menu submenu: **Right** / **À droite**, **Below** / **En dessous**; adds a layer in a new cell of the graph's grid (#357). "Cell" / "Case" stays off the interface | Cell, Case, Panel | O |
 | Title | Titre | Text at the top of the graph | Intitulé | G |
 | Axis (pl. Axes) | Axe | Graduated line carrying a quantity | — | G |
 | X (bottom) / Y (left) / Secondary Y (right) | X (bas) / Y (gauche) / Y secondaire (droite) | The three axes of an area | Y2, Axe de droite | G |

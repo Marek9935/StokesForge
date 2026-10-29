@@ -270,9 +270,13 @@ pub enum PlotEditKind {
     /// Closed or reopened frame of a layer: top and right mirrored, dashes
     /// copied (#344).
     ClosedFrame,
+    /// A cell added beside another one (#357).
+    AddCell,
+    /// A cell, or an overlay layer, deleted (#357).
+    RemoveCell,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -285,6 +289,8 @@ impl PlotEditKind {
         Self::RemoveGroup,
         Self::ReorderGroup,
         Self::ClosedFrame,
+        Self::AddCell,
+        Self::RemoveCell,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -302,6 +308,8 @@ impl std::fmt::Display for PlotEditKind {
             Self::RemoveGroup => "Delete Group",
             Self::ReorderGroup => "Reorder Group",
             Self::ClosedFrame => "Change Closed Frame",
+            Self::AddCell => "Add Cell",
+            Self::RemoveCell => "Delete Layer",
         })
     }
 }

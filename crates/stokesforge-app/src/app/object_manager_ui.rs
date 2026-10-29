@@ -427,12 +427,17 @@ pub(super) fn object_node_menu(
             }
         },
     );
-    sections.section(ui, deletable, |ui| {
+    // A layer always offers Delete (#357); it is greyed for the last cell,
+    // with the reason.
+    let is_layer = matches!(target, T::Panel(_));
+    sections.section(ui, deletable || is_layer, |ui| {
         if ui
-            .add(
+            .add_enabled(
+                deletable,
                 egui::Button::new(tr!("action-delete-content"))
                     .shortcut_text(shortcut_text_delete()),
             )
+            .on_disabled_hover_text(tr!("error-last-layer"))
             .clicked()
         {
             actions.push(Action::RemovePlotObject { graph, target });
@@ -649,6 +654,20 @@ pub(super) fn object_manager_contents(
         paint.graph(ui, model, actions, &mut requests, &mut selected);
     });
     object_dnd::end_of_frame(ui.ctx(), model.graph, spec, paint.hover.take(), actions);
+    // The layer node last chosen (#357), the target of Delete.
+    let layer_flag = ui.id().with(("om_layer_chosen", model.graph));
+    for request in &requests {
+        if let ObjectManagerRequest::Select(chosen) = request {
+            match chosen {
+                T::Panel(layer) => ui.data_mut(|data| {
+                    data.insert_temp(layer_flag, *layer);
+                }),
+                _ => ui.data_mut(|data| {
+                    data.remove_temp::<usize>(layer_flag);
+                }),
+            }
+        }
+    }
     if ui.memory(|m| m.focused()) == Some(focus) {
         // ↑ ↓: the neighboring visible selectable row; Enter: its properties,
         // like the double-click (#170, point 6). Ctrl+↑ / Ctrl+↓ (move a
@@ -667,6 +686,21 @@ pub(super) fn object_manager_contents(
                 }
             }
             None => {}
+        }
+        // Delete on a layer node (#357): the node last chosen in the tree, while
+        // no object of the figure is selected.
+        if selected.is_some() {
+            ui.data_mut(|data| data.remove_temp::<usize>(layer_flag));
+        } else if let Some(layer) = ui.data(|data| data.get_temp::<usize>(layer_flag)) {
+            if T::Panel(layer).removable(spec)
+                && ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE))
+            {
+                actions.push(Action::RemovePlotObject {
+                    graph: model.graph,
+                    target: T::Panel(layer),
+                });
+                ui.data_mut(|data| data.remove_temp::<usize>(layer_flag));
+            }
         }
         if let Some(target) = selected {
             if target.removable(spec)

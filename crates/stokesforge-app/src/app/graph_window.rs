@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use eframe::egui;
+use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::{
     AxisSide, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
@@ -84,14 +85,39 @@ pub(super) fn graph_drop_target(
     let hovering = pointer_in_tab
         && (egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx())
             || egui::DragAndDrop::has_payload_of_type::<RowDragPayload>(ui.ctx()));
+    // Columns dropped on the right or bottom edge of the figure make a new
+    // cell beside the one nearest the pointer (#357).
+    let figure = graph_views
+        .get(&graph_id)
+        .and_then(GraphView::display_rect)
+        .unwrap_or(tab_rect);
+    let pointer = ui.input(|input| input.pointer.latest_pos());
+    let columns_over =
+        pointer_in_tab && egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx());
+    let edge = pointer
+        .filter(|_| columns_over)
+        .and_then(|pos| edge_drop_side(pos, figure, EDGE_BAND_WIDTH));
     if pointer_in_tab && ui.input(|input| input.pointer.any_released()) {
         // Targeted layer: the active layer of the graph (#161).
         // `has_payload_of_type` before `take_payload`: the latter empties the
         // payload even when its type does not match (rows used to get lost).
         if egui::DragAndDrop::has_payload_of_type::<ColumnDragPayload>(ui.ctx()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<ColumnDragPayload>(ui.ctx()) {
-                let panel = published_active_panel(ui.ctx(), graph_id);
-                actions.push(drop_payload_action(&payload, graph_id, panel));
+                let beside = edge.zip(pointer).and_then(|(side, pos)| {
+                    let cell = graph_views.get(&graph_id)?.nearest_cell(pos)?;
+                    Some((side, cell))
+                });
+                if let Some((side, panel)) = beside {
+                    actions.push(Action::AddCell {
+                        graph: graph_id,
+                        panel,
+                        side,
+                        columns: payload.columns.clone(),
+                    });
+                } else {
+                    let panel = published_active_panel(ui.ctx(), graph_id);
+                    actions.push(drop_payload_action(&payload, graph_id, panel));
+                }
             }
         } else if let Some(payload) = egui::DragAndDrop::take_payload::<RowDragPayload>(ui.ctx()) {
             // Rows (#166): the state decides the axis, and asks the question
@@ -103,6 +129,58 @@ pub(super) fn graph_drop_target(
     graph_contents(ui, state, actions, graph_views, graph_id);
     if hovering {
         super::file_drop::set_drop_target(ui.ctx(), ui.layer_id());
+    }
+    if columns_over {
+        paint_edge_bands(ui, figure, edge);
+    }
+}
+
+/// Width, in points, of the right and bottom bands of a figure where dropped
+/// columns create a new cell (#357).
+const EDGE_BAND_WIDTH: f32 = 36.0;
+
+/// Which edge band of `figure` the pointer is in (#357): the right band gives
+/// [`CellSide::Right`], the bottom band [`CellSide::Below`], and the
+/// bottom-right corner, in both, gives `Right`. `None` elsewhere. Pure, so it is
+/// tested without a window.
+fn edge_drop_side(pointer: egui::Pos2, figure: egui::Rect, band: f32) -> Option<CellSide> {
+    if !figure.contains(pointer) {
+        return None;
+    }
+    if pointer.x >= figure.max.x - band {
+        Some(CellSide::Right)
+    } else if pointer.y >= figure.max.y - band {
+        Some(CellSide::Below)
+    } else {
+        None
+    }
+}
+
+/// The two bands, outlined while columns are dragged over the graph, the one
+/// under the pointer filled (theme strokes, nothing in the exported figure).
+fn paint_edge_bands(ui: &egui::Ui, figure: egui::Rect, active: Option<CellSide>) {
+    let right = egui::Rect::from_min_max(
+        egui::pos2(figure.max.x - EDGE_BAND_WIDTH, figure.min.y),
+        figure.max,
+    );
+    let below = egui::Rect::from_min_max(
+        egui::pos2(figure.min.x, figure.max.y - EDGE_BAND_WIDTH),
+        egui::pos2(figure.max.x - EDGE_BAND_WIDTH, figure.max.y),
+    );
+    let painter = ui.painter();
+    for (band, side) in [(right, CellSide::Right), (below, CellSide::Below)] {
+        let fill = if active == Some(side) {
+            crate::theme::drop_edge_band_fill()
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        painter.rect(
+            band,
+            0.0,
+            fill,
+            crate::theme::drop_edge_band_stroke(),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 
@@ -472,7 +550,7 @@ pub(super) fn published_active_panel(ctx: &egui::Context, graph: NodeId) -> usiz
         .unwrap_or(0)
 }
 
-fn active_panel_id(graph: NodeId) -> egui::Id {
+pub(super) fn active_panel_id(graph: NodeId) -> egui::Id {
     egui::Id::new(("stokesforge_active_panel", graph))
 }
 
@@ -1589,6 +1667,33 @@ pub(super) mod tests {
         }
     }
 
+    /// #357: the right band gives a cell to the right, the bottom band a cell
+    /// below, the bottom-right corner (in both) the right; the interior and
+    /// the outside of the figure give nothing.
+    #[test]
+    fn the_edge_bands_of_the_figure_decide_where_the_new_cell_goes() {
+        use stokesforge_core::compose::CellSide;
+        let figure = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(500.0, 350.0));
+        let band = 36.0;
+        let side = |x: f32, y: f32| edge_drop_side(egui::pos2(x, y), figure, band);
+        assert_eq!(side(300.0, 200.0), None, "interior");
+        assert_eq!(side(480.0, 200.0), Some(CellSide::Right));
+        assert_eq!(
+            side(480.0, 60.0),
+            Some(CellSide::Right),
+            "top of the right band"
+        );
+        assert_eq!(side(300.0, 340.0), Some(CellSide::Below));
+        assert_eq!(side(490.0, 340.0), Some(CellSide::Right), "corner: right");
+        assert_eq!(side(300.0, 20.0), None, "outside");
+        assert_eq!(side(520.0, 200.0), None, "outside");
+        assert_eq!(
+            edge_drop_side(egui::pos2(480.0, 200.0), figure, 0.0),
+            None,
+            "a band of width 0 catches nothing"
+        );
+    }
+
     /// #161: the numbered marker activates a layer, the column drop
     /// targets it, a layer that disappears falls back to the first.
     #[test]
@@ -1761,6 +1866,36 @@ pub(super) mod tests {
         paint(vec![egui::Event::PointerMoved(outside)], true);
         let (_, actions) = paint(vec![release(outside)], false);
         assert!(actions.is_empty(), "released outside the graph, nothing");
+
+        // #357: released on the right edge band, the columns make a cell
+        // beside the one nearest the pointer; on the bottom band, below it.
+        let right_edge = egui::pos2(contents.max.x - 8.0, 300.0);
+        paint(vec![egui::Event::PointerMoved(right_edge)], true);
+        let (_, actions) = paint(vec![release(right_edge)], false);
+        assert_eq!(
+            actions,
+            vec![Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Right,
+                columns: payload.columns.clone(),
+            }],
+            "a release on the right band adds a cell to the right"
+        );
+        // The figure is centred in the window, its bottom is at about y = 560.
+        let bottom_edge = egui::pos2(300.0, 550.0);
+        paint(vec![egui::Event::PointerMoved(bottom_edge)], true);
+        let (_, actions) = paint(vec![release(bottom_edge)], false);
+        assert_eq!(
+            actions,
+            vec![Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Below,
+                columns: payload.columns.clone(),
+            }],
+            "a release on the bottom band adds a cell below"
+        );
 
         // Rows (#166): the drop produces the rows action. Regression:
         // `take_payload::<ColumnDragPayload>` emptied the rows payload before

@@ -36,6 +36,7 @@ Source: `render-egui/lib.rs` (navigation, objects), `render-egui/shape_tools.rs`
 |---|---|---|
 | Click | curve, free text, shape, title, legend | selects the object (only the Pointer tool selects a curve) |
 | Click | empty area | deselects; activates the clicked layer; Text tool: places a text |
+| Drop of columns | right or bottom band of the figure | new cell beside the nearest one (right; bottom-right corner: right), with the series (#357) |
 | Drag | plot area, Pointer or Text tool | — (nothing: no more pan on a plain drag, #318) |
 | Drag | an axis | — (nothing; panning a scale is done with Ctrl or middle click) |
 | Drag | free text, shape, title or legend, Pointer tool | moves the object (a width handle resizes it) |
@@ -107,6 +108,7 @@ Sources: `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Gesture | On | Effect |
 |---|---|---|
 | Click | row (OM) | selects the object (and activates it, for a layer) |
+| Delete | layer node (OM) | deletes the cell and its overlay layers (an overlay layer alone); the last cell is refused (#357) |
 | Click | row (PM) | window: selects and opens; folder: selects and expands it if closed, without collapsing it if open (#170) |
 | Ctrl + click | row (PM) | toggles the row in the selection |
 | Shift + click | row (PM) | range anchor → target in tree order, collapsed folders included: the folder and its windows enter the selection and the action (Delete, Open, Close; Copy refuses a folder) (Ctrl + Shift: adds the range) |

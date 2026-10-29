@@ -334,6 +334,10 @@ impl VisibilityTarget {
         }
     }
     pub fn removable(self, spec: &PlotSpec) -> bool {
+        if let Self::Panel(panel) = self {
+            // A cell with its overlays, or an overlay alone (#357); never the last cell.
+            return stokesforge_core::compose::can_remove_layer(spec, panel);
+        }
         self.exists(spec)
             && matches!(
                 self,
@@ -347,6 +351,51 @@ impl VisibilityTarget {
                             | TextTarget::AxisTitle { .. }
                     )
             )
+    }
+}
+
+impl VisibilityTarget {
+    /// The same target after layers were deleted or came back (#357):
+    /// `map[old]` is the new index of layer `old`. `None` if the target sat on
+    /// a layer that is gone. The graph itself has no layer: unchanged.
+    pub fn remap_panel(self, map: &[Option<usize>]) -> Option<Self> {
+        use VisibilityTarget as T;
+        let to = |panel: usize| map.get(panel).copied().flatten();
+        Some(match self {
+            T::Graph => T::Graph,
+            T::Panel(p) => T::Panel(to(p)?),
+            T::Group(p) => T::Group(to(p)?),
+            T::Axes(p) => T::Axes(to(p)?),
+            T::SeriesGroup(g) => T::SeriesGroup(SeriesGroupRef {
+                panel: to(g.panel)?,
+                ..g
+            }),
+            T::Series(s) => T::Series(SeriesRef {
+                panel: to(s.panel)?,
+                ..s
+            }),
+            T::Annotation(a) => T::Annotation(AnnotationRef {
+                panel: to(a.panel)?,
+                ..a
+            }),
+            T::Shape(s) => T::Shape(ShapeRef {
+                panel: to(s.panel)?,
+                ..s
+            }),
+            T::Axis(a) => T::Axis(AxisRef {
+                panel: to(a.panel)?,
+                ..a
+            }),
+            T::Text(t) => T::Text(match t {
+                TextTarget::Title => TextTarget::Title,
+                TextTarget::PanelTitle { panel } => TextTarget::PanelTitle { panel: to(panel)? },
+                TextTarget::AxisTitle { panel, side } => TextTarget::AxisTitle {
+                    panel: to(panel)?,
+                    side,
+                },
+                TextTarget::Legend { panel } => TextTarget::Legend { panel: to(panel)? },
+            }),
+        })
     }
 }
 
@@ -713,6 +762,45 @@ pub fn object_tree_of_spec(
 mod tests {
     use stokesforge_core::NodeId;
     use stokesforge_plot::{PlotSpec, SeriesRef, SeriesSpec};
+
+    /// #357: a layer node is removable when another cell remains, or when it is
+    /// an overlay; the last cell is not. Targets follow the layers that move.
+    #[test]
+    fn a_layer_is_removable_unless_it_is_the_last_cell_and_targets_follow_a_removal() {
+        use crate::object_manager::VisibilityTarget as T;
+        use stokesforge_plot::{OverlaySpec, PanelSpec, Panels};
+        let one = PlotSpec::default();
+        assert!(!T::Panel(0).removable(&one), "the last cell");
+        assert!(!T::Panel(5).removable(&one), "no such layer");
+
+        let base = PanelSpec::at(0, 0);
+        let with_overlay = PlotSpec {
+            panels: Panels::new(vec![
+                base.clone(),
+                PanelSpec::overlay_on(&base, OverlaySpec::TOP_X),
+            ]),
+            ..PlotSpec::default()
+        };
+        assert!(!T::Panel(0).removable(&with_overlay), "still one cell");
+        assert!(T::Panel(1).removable(&with_overlay), "an overlay");
+
+        let two = PlotSpec {
+            panels: Panels::new(vec![PanelSpec::at(0, 0), PanelSpec::at(0, 1)]),
+            ..PlotSpec::default()
+        };
+        assert!(T::Panel(0).removable(&two));
+        assert!(T::Panel(1).removable(&two));
+
+        // Layer 0 and its overlay (1) are removed from [0, 1, 2]: layer 2 becomes 0.
+        let map = [None, None, Some(0)];
+        let series = SeriesRef::new(2, 3);
+        assert_eq!(
+            T::Series(series).remap_panel(&map),
+            Some(T::Series(SeriesRef::new(0, 3)))
+        );
+        assert_eq!(T::Series(SeriesRef::new(1, 0)).remap_panel(&map), None);
+        assert_eq!(T::Graph.remap_panel(&map), Some(T::Graph));
+    }
 
     /// #171: an overlaid layer lists only the axes it displays, named where
     /// they are displayed; the checkbox of its "Axes" group controls only

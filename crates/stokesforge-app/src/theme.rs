@@ -226,6 +226,18 @@ pub fn drop_target_stroke() -> egui::Stroke {
     egui::Stroke::new(2.5, Color32::from_rgb(70, 150, 230))
 }
 
+/// Edge bands of a graph while columns are dragged over it (#357): dropping
+/// there creates a new cell beside the nearest one. The stroke outlines the
+/// band; the fill marks the band under the pointer.
+pub fn drop_edge_band_stroke() -> egui::Stroke {
+    egui::Stroke::new(1.0, Color32::from_rgb(70, 150, 230))
+}
+
+/// Fill of the edge band under the pointer, see [`drop_edge_band_stroke`].
+pub fn drop_edge_band_fill() -> Color32 {
+    Color32::from_rgba_unmultiplied(70, 150, 230, 60)
+}
+
 /// Import preview: recognized header line (name, sub-header, unit),
 /// in the spirit of the color code of OriginLab's ASCII wizard.
 pub fn import_header_line_color() -> Color32 {

@@ -130,6 +130,8 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::RemoveGroup => tr!("history-plot-remove-group"),
             PlotEditKind::ReorderGroup => tr!("history-plot-reorder-group"),
             PlotEditKind::ClosedFrame => tr!("history-plot-closed-frame"),
+            PlotEditKind::AddCell => tr!("history-plot-add-cell"),
+            PlotEditKind::RemoveCell => tr!("history-plot-remove-cell"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::ReplaceAnalysisData(kind) => tr!(

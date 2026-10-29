@@ -351,6 +351,14 @@ These actions use the active layer: dropping columns, **Send to**, **Add Text** 
 
 Zoom and pan act on all the layers that share a plot area, so the ticks stay aligned.
 
+## Several layers side by side
+
+A graph can show several plot areas in a grid. To add one, choose **Graph ▸ New Layer Beside** and pick **Right** or **Below**: an empty layer appears next to the active layer and becomes active.
+
+You can also drag columns from a worksheet onto the right or bottom edge of the graph. While you drag, the two edges are outlined. Drop on the right edge to put the series in a new layer to the right of the nearest layer, or on the bottom edge to put it below. In the bottom-right corner, the new layer goes to the right.
+
+To delete a layer, right-click its node in the Object Manager and choose **Delete**. The layer disappears with the layers overlaid on it, and its neighbours close the gap. The last layer cannot be deleted. Deleting an overlay layer removes only that layer. **Undo** brings it back in one step.
+
 ## The Object Manager
 
 The Object Manager lists the content of the active graph as a tree: layers, series groups, series, axes and free objects. Set it up from the **View ▸ Object Manager** menu.

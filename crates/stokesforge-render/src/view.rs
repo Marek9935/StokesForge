@@ -127,6 +127,21 @@ impl ViewState {
         self.generation += 1;
     }
 
+    /// Moves the framings to the new index of their layer after layers were
+    /// removed (#357): `map[old]` is the new index, `None` if the layer is
+    /// gone (its framing goes with it). Advances the generation.
+    pub fn remap_panels(&mut self, map: &[Option<usize>]) {
+        if self.framings.is_empty() {
+            return;
+        }
+        self.framings = self
+            .framings
+            .drain()
+            .filter_map(|(old, framing)| Some((map.get(old).copied().flatten()?, framing)))
+            .collect();
+        self.generation += 1;
+    }
+
     /// Clears all explicit framings: back to framing on the data for all
     /// panels. No effect — and hence no cache invalidation — if none was
     /// set.
@@ -316,6 +331,20 @@ mod tests {
         assert_eq!(view.generation(), 1);
         view.set_framing(0, Framing::xy((0.0, 2.0), (0.0, 1.0)));
         assert_eq!(view.generation(), 2);
+    }
+
+    #[test]
+    fn framings_follow_their_layer_when_layers_are_removed() {
+        let mut view = ViewState::new();
+        let zoom = Framing::xy((0.0, 1.0), (0.0, 1.0));
+        view.set_framing(1, zoom);
+        view.set_framing(0, Framing::xy((5.0, 6.0), (5.0, 6.0)));
+        let before = view.generation();
+        // Layer 0 deleted: layer 1 becomes 0, its zoom with it.
+        view.remap_panels(&[None, Some(0)]);
+        assert_eq!(view.framing(0), Some(zoom));
+        assert_eq!(view.framing(1), None, "nothing left on the old index");
+        assert!(view.generation() > before);
     }
 
     #[test]
