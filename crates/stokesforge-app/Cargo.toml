@@ -77,6 +77,9 @@ directories = "5"
 # Prototype of the Preferences window (app/preferences_proto.rs): drives the UI
 # through AccessKit and freezes captures. No production dependency.
 egui_kittest = { version = "0.36.2", features = ["snapshot", "wgpu"] }
+# Cropping and PNG encoding (best compression) of the manual screenshots
+# (app/manual_screenshots.rs, #365). Already in the tree through egui_kittest.
+image = { version = "0.25", default-features = false, features = ["png"] }
 # Exercises the parser of the Wayland patch in the ordinary tests of the workspace.
 url = "2"
 

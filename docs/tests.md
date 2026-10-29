@@ -1035,6 +1035,30 @@ distribution.
 
 `crates/stokesforge-app/src/demo/tests.rs` (module of the **binary**: `cargo test -p stokesforge-app --bin stokesforge-app`). Each test has its witness, checked by mutation (seed changed, title given to a graph, column deleted under a graph, amplitude of the Gaussian set changed, `recalculate` removed from `session_for_project`): unique window names across the whole project, no graph title (#103), each graph resolved without a broken reference and drawn, logarithmic axes on strictly positive data (invariant 10), each analysis set finds its known parameters through `core::compute` (`Expected`, tolerance), the eight families of `OperationKind::ALL` covered (including smoothing, `Smooth` set), noise with a fixed seed pinned, formula columns computed from startup, `.stf` round trip through the session (clean report, same specs), all `PlotType` (without `Unknown`).
 
+## Manual screenshots (#365)
+
+The images of the user manual (`manual/src/images/*.png`) are not taken by hand:
+`scripts/manual-screenshots.sh` renders the real application headless on the demo
+project (`egui_kittest` + wgpu, English, light palette, 1440 x 780 points at 2x)
+through the ignored test `render_manual_screenshots`
+(`crates/stokesforge-app/src/app/manual_screenshots.rs`, table `SHOTS`). It is local
+only: it needs a GPU adapter (or a software one such as lavapipe), so it is not in
+the CI.
+
+- **Reproducible**: the same code gives the same pixels (kittest renderer options
+  `PREDICTABLE`, fixed demo, temporary configuration folder, pointer sent away, no
+  hover or caret). A PNG is rewritten only if its decoded pixels differ from the file
+  on disk, so a second run changes no image; `git status` then lists what really changed.
+- **Manifest**: `manual/screenshots.json` has one entry per image (`image`, `kind`
+  `auto` or `manual`, `page`, `shows`, and `how` for the manual ones). The ordinary test
+  `the_manifest_and_the_shots_agree` keeps the `auto` entries equal to `SHOTS` and checks
+  that their files exist; a `manual` image may be missing (listed by the test).
+- **Taken by hand** (`kind: manual`): what the bench cannot render: the system file
+  chooser, a file dragged from the file manager, a detached OS window, the Python console
+  (the test build has no `python` feature).
+- **Adding an image**: one entry in `SHOTS` (setup through `Action`s and labelled widgets,
+  never pixel coordinates), one entry in the manifest, then the script, then look at the PNG.
+
 ## Analyzing rows (#253)
 
 One layer, one file, one witness tested by mutation:

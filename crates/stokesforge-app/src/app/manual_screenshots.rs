@@ -1,0 +1,857 @@
+//! The images of the user manual, produced by a script (#365).
+//!
+//! # Why this exists
+//!
+//! The manual (`manual/src/`) shows the application. Screenshots taken by
+//! hand go stale at the first change of the interface and differ from one
+//! machine to the next. This bench renders the **real** application, headless
+//! (`egui_kittest`, wgpu, `RendererOptions::PREDICTABLE`), on the demo project,
+//! in English, with the light palette, at a fixed size and scale: the same
+//! code gives the same pixels. Run it with `scripts/manual-screenshots.sh`.
+//!
+//! # Rules
+//!
+//! - One entry of [`SHOTS`] per image: a name (the PNG is
+//!   `manual/src/images/<name>.png`), a setup that drives the application
+//!   through `Action`s and labelled widgets (never by pixel coordinates) and
+//!   what to crop. `manual/screenshots.json` lists every image, and a normal
+//!   test keeps it equal to [`SHOTS`].
+//! - Nothing here touches the user's profile: the configuration folder is a
+//!   temporary one, and the `test-support` feature of the dev-dependency
+//!   already isolates preferences and recovery copies.
+//! - No mouse cursor, no tooltip, no caret: the pointer is sent away after
+//!   every click, and the frames are run until the layout settles.
+//! - A PNG is rewritten only if its decoded pixels differ from the file on
+//!   disk, so an unchanged screen leaves the repository untouched.
+//! - What cannot be rendered here (system file chooser, OS drag and drop, a
+//!   detached OS window, the Python console) is `"kind": "manual"` in the
+//!   manifest, with the way to take it by hand.
+
+use std::path::{Path, PathBuf};
+
+use eframe::egui;
+use egui_kittest::kittest::Queryable;
+use egui_kittest::Harness;
+use stokesforge_analysis::model::Model;
+use stokesforge_app_state::analysis::Preset;
+use stokesforge_app_state::i18n::{self, Language};
+use stokesforge_app_state::object_manager::VisibilityTarget;
+use stokesforge_app_state::preferences::Preferences;
+use stokesforge_app_state::state::{Action, AppState, ImportStep, PlotAxis, PlotSettingsTab};
+use stokesforge_core::{NodeId, NodeKind};
+use stokesforge_plot::SeriesRef;
+use stokesforge_session::Session;
+
+use super::{StokesForgeApp, Tab};
+
+/// The demo project, as `main.rs` builds it. Its files are included here
+/// because the demo is a module of the binary, not of the library (the
+/// binary-only `tests` of the demo are left out).
+#[allow(dead_code)]
+#[path = "../demo"]
+mod demo {
+    pub(super) mod analysis;
+    pub(super) mod assemble;
+    pub(super) mod graphs;
+    pub(super) mod noise;
+    pub(super) mod workbooks;
+
+    pub(super) use assemble::demo_project;
+    use assemble::set_x_role;
+}
+
+/// Logical size of the window, and scale: 2x gives crisp text on HiDPI
+/// screens and stays readable when the page scales the image down.
+const WINDOW: egui::Vec2 = egui::vec2(1440.0, 780.0);
+const SCALE: f32 = 2.0;
+/// Margin (logical points) kept around a cropped window or panel.
+const MARGIN: f32 = 0.0;
+
+/// What a shot keeps of the rendered window.
+#[derive(Clone, Copy)]
+enum Crop {
+    /// The whole window.
+    Whole,
+    /// The rectangle (logical points) that the function finds, plus a margin.
+    Rect(fn(&Harness<'static, Bench>) -> egui::Rect),
+}
+
+/// One image of the manual.
+struct Shot {
+    /// File name without extension, prefixed by the page it illustrates.
+    name: &'static str,
+    /// Brings the application to the state to show.
+    setup: fn(&mut Harness<'static, Bench>),
+    crop: Crop,
+}
+
+/// Rectangle (logical points) of the Project Manager panel.
+fn project_manager_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    // Down to the last row of the tree, not to the bottom of the panel.
+    let panel = panel_rect(h, "stokesforge_pm");
+    let last_row = h.get_by_label("Rows").rect();
+    egui::Rect::from_min_max(panel.min, egui::pos2(panel.max.x, last_row.bottom() + 4.0))
+}
+
+/// Rectangle (logical points) of the Object Manager panel.
+fn object_manager_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    // The tree of Graph1 has four rows: the rest of the panel is empty.
+    let panel = panel_rect(h, "stokesforge_object_manager");
+    egui::Rect::from_min_size(panel.min, egui::vec2(panel.width(), 200.0))
+}
+
+fn panel_rect(h: &Harness<'static, Bench>, id: &str) -> egui::Rect {
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id))
+        .unwrap_or_else(|| panic!("panel {id} is not placed"))
+        .outer_rect
+}
+
+/// The rectangle of the topmost workspace window (a floating workbook or graph).
+fn workspace_window_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    layer_rect(h, egui::Order::Middle)
+}
+
+/// The workbook window and the context menu open over it.
+fn book_with_menu_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let screen = h.ctx.content_rect();
+    let menus: Vec<egui::Rect> = h.ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == egui::Order::Foreground)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| *rect != screen)
+            .collect()
+    });
+    menus
+        .into_iter()
+        .fold(workspace_window_rect(h), |all, menu| all.union(menu))
+}
+
+/// The open menu (and its submenus): the popups above everything else.
+fn menu_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    let screen = h.ctx.content_rect();
+    let menus: Vec<egui::Rect> = h.ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == egui::Order::Foreground)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| *rect != screen)
+            .collect()
+    });
+    menus
+        .into_iter()
+        .reduce(|all, menu| all.union(menu))
+        .expect("an open menu")
+        .shrink(4.0)
+}
+
+/// The rectangle of the topmost dialog (modal windows live above the workspace).
+fn dialog_rect(h: &Harness<'static, Bench>) -> egui::Rect {
+    // The area is the frame plus 5 pt of soft shadow: keep the frame and a
+    // thin uniform margin (the workspace behind a dialog is never empty: panels).
+    layer_rect(h, egui::Order::Foreground).shrink(4.0)
+}
+
+fn layer_rect(h: &Harness<'static, Bench>, order: egui::Order) -> egui::Rect {
+    let screen = h.ctx.content_rect();
+    h.ctx.memory(|memory| {
+        // Closed windows keep their layer in memory: only the visible ones
+        // count. The backdrop of a modal dialog covers the whole screen: it
+        // is not the dialog.
+        let found: Vec<egui::Rect> = memory
+            .areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == order)
+            .filter_map(|layer| memory.area_rect(layer.id))
+            .filter(|rect| *rect != screen)
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "expected one visible {order:?} window: {found:?}"
+        );
+        found[0]
+    })
+}
+
+/// Every image rendered by the bench, in the order of the manifest.
+const SHOTS: &[Shot] = &[
+    Shot {
+        name: "interface-main-window",
+        setup: |h| {
+            let (book, graph) = (h.state().ids.book1, h.state().ids.graph1);
+            select_spectrum_sheet(h);
+            place(
+                h,
+                Tab::Book(book),
+                egui::pos2(4.0, 4.0),
+                egui::vec2(380.0, 600.0),
+            );
+            place(
+                h,
+                Tab::Graph(graph),
+                egui::pos2(388.0, 4.0),
+                egui::vec2(440.0, 600.0),
+            );
+        },
+        crop: Crop::Whole,
+    },
+    Shot {
+        name: "interface-project-manager",
+        setup: |_| {},
+        crop: Crop::Rect(project_manager_rect),
+    },
+    Shot {
+        name: "interface-object-manager",
+        setup: |_| {},
+        crop: Crop::Rect(object_manager_rect),
+    },
+    Shot {
+        name: "workbooks-sheet",
+        setup: show_book_alone,
+        crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
+        name: "workbooks-column-menu",
+        setup: |h| {
+            show_book_alone(h);
+            press_label(h, "B(Y)", egui::PointerButton::Secondary);
+            settle(h);
+        },
+        crop: Crop::Rect(book_with_menu_rect),
+    },
+    Shot {
+        name: "import-wizard-format",
+        setup: |h| open_wizard_clean(h, ImportStep::Format),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "import-wizard-header",
+        setup: |h| open_wizard_clean(h, ImportStep::Header),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "import-wizard-columns",
+        setup: |h| open_wizard_clean(h, ImportStep::Columns),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "graphs-properties-series",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            act(
+                h,
+                Action::OpenObjectProperties {
+                    graph,
+                    target: VisibilityTarget::Series(SeriesRef { panel: 0, index: 0 }),
+                },
+            );
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "graphs-properties-axes",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Axes,
+                    axis: Some(PlotAxis::Bottom),
+                },
+            );
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "graphs-formula-title",
+        setup: |h| {
+            let graph = node_named(h, "Annotations");
+            show_only(h, Tab::Graph(graph), egui::vec2(760.0, 560.0));
+        },
+        crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
+        name: "analysis-integration",
+        setup: |h| {
+            open_analysis(h, Preset::Integrate);
+            // One range around the main peak.
+            if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
+                form.setup.integrate.ranges = vec![(470.0, 570.0)];
+            }
+            settle(h);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "analysis-fit",
+        setup: |h| {
+            open_analysis(h, Preset::Fit(Model::Gaussian));
+            click(h, "Auto");
+            // Fitted on the main peak only.
+            if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
+                form.setup.fit.range = Some((470.0, 570.0));
+            }
+            settle(h);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "preferences-general",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "preferences-export",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+            click(h, "Export");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "files-recover-projects",
+        setup: |h| {
+            empty_workspace(h);
+            let dir = h.state().scratch.path().join("recovery");
+            std::fs::create_dir_all(&dir).expect("recovery folder");
+            for (name, at) in [
+                ("measurements-1.stf", 1_792_598_400),
+                ("Untitled-2.stf", 1_792_512_000),
+            ] {
+                let path = dir.join(name);
+                std::fs::write(&path, b"x").expect("copy");
+                let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(at);
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .and_then(|file| file.set_modified(time))
+                    .expect("date of the copy");
+            }
+            let state = &mut h.state_mut().app.state;
+            state.set_recovery_dir(Some(dir));
+            state.scan_recovery();
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "graphs-graph-menu",
+        setup: |h| {
+            let graph = h.state().ids.graph1;
+            show_only(h, Tab::Graph(graph), egui::vec2(440.0, 600.0));
+            press_label(h, "Graph", egui::PointerButton::Primary);
+        },
+        crop: Crop::Rect(menu_rect),
+    },
+    Shot {
+        name: "graphs-axes-log-scale",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Axes,
+                    axis: Some(PlotAxis::Bottom),
+                },
+            );
+            click(h, "Log scale");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "analysis-baseline",
+        setup: |h| {
+            open_analysis(h, Preset::BaselinePolynomial);
+            // Two zones with only background, on each side of the peaks.
+            if let Some(form) = h.state_mut().app.state.analysis_form_mut() {
+                form.setup.baseline.zones = vec![(400.0, 440.0), (650.0, 700.0)];
+            }
+            settle(h);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "import-wizard-files",
+        setup: |h| open_wizard_clean(h, ImportStep::Files),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "import-wizard-metadata",
+        setup: |h| open_wizard_clean(h, ImportStep::Metadata),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "import-wizard-destination",
+        setup: |h| open_wizard_clean(h, ImportStep::Destination),
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "interface-object-manager-series",
+        setup: |h| {
+            // The legend and the Object Manager both carry the name: the
+            // Object Manager row is the last one.
+            let row = h
+                .get_all_by_label_contains("Sample")
+                .last()
+                .expect("series row")
+                .rect()
+                .center();
+            h.event(egui::Event::PointerMoved(row));
+            h.step();
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos: row,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                h.step();
+            }
+            settle(h);
+        },
+        crop: Crop::Rect(object_manager_rect),
+    },
+];
+
+/// No floating window behind a dialog: its crop shows plain background.
+fn empty_workspace(h: &mut Harness<'static, Bench>) {
+    h.state_mut().app.floating_tabs.clear();
+    settle(h);
+}
+
+/// Dispatches an action, as a menu entry would.
+fn act(h: &mut Harness<'static, Bench>, action: Action) {
+    h.state_mut().app.state.dispatch(action);
+    settle(h);
+}
+
+/// Presses and releases `button` on the centre of the node with this label.
+///
+/// A click in the grid gives the keyboard focus to the grid's anchor
+/// (`grid::claim_grid_focus`), whose AccessKit node only exists from the next
+/// frame: for that one frame `accesskit_consumer` panics ("Focused ID is not
+/// in the node list") after egui has finished the pass. The panic is caught
+/// and the following frames, where the node exists, are consistent. Real
+/// pointer events are used (the position comes from the labelled node, never
+/// from a constant).
+fn press_label(h: &mut Harness<'static, Bench>, label: &str, button: egui::PointerButton) {
+    use std::panic::{catch_unwind, set_hook, take_hook, AssertUnwindSafe};
+    let pos = h.get_by_label(label).rect().center();
+    h.event(egui::Event::PointerMoved(pos));
+    h.step();
+    let previous_hook = take_hook();
+    set_hook(Box::new(|_| {}));
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = catch_unwind(AssertUnwindSafe(|| h.step()));
+    }
+    set_hook(previous_hook);
+    settle(h);
+}
+
+/// Clicks the widget with this label, then sends the pointer away.
+fn click(h: &mut Harness<'static, Bench>, label: &str) {
+    h.get_by_label(label).click();
+    settle(h);
+}
+
+/// The node of the demo with this (unique) name.
+fn node_named(h: &Harness<'static, Bench>, name: &str) -> NodeId {
+    let tree = &h.state().app.state.snapshot().tree;
+    tree.walk_all()
+        .into_iter()
+        .find(|id| tree.node(*id).is_some_and(|node| node.name() == name))
+        .unwrap_or_else(|| panic!("{name} is not in the demo"))
+}
+
+/// Only this window in the workspace, at the top left.
+fn show_only(h: &mut Harness<'static, Bench>, tab: Tab, size: egui::Vec2) {
+    h.state_mut().app.floating_tabs.clear();
+    h.state_mut().app.open_tab(tab);
+    place(h, tab, egui::pos2(4.0, 4.0), size);
+}
+
+/// A small instrument file in the scratch folder, and the import wizard open
+/// on it at `step` (the file chooser is bypassed: the paths are given).
+fn open_wizard_clean(h: &mut Harness<'static, Bench>, step: ImportStep) {
+    empty_workspace(h);
+    open_wizard(h, step);
+}
+
+fn open_wizard(h: &mut Harness<'static, Bench>, step: ImportStep) {
+    let file = h.state().scratch.path().join("spectrum.csv");
+    let mut text =
+        String::from("Instrument: Demo spectrometer\nSample: S-12\nWavelength;Absorbance\nnm;AU\n");
+    for i in 0..12 {
+        let wavelength = 400 + 25 * i;
+        let absorbance = 0.05 + 0.8 * (-((f64::from(wavelength) - 520.0) / 60.0).powi(2)).exp();
+        text.push_str(&format!("{wavelength};{absorbance:.3}\n").replace('.', ","));
+    }
+    std::fs::write(&file, text).expect("csv");
+    let book = h.state().ids.book1;
+    let state = &mut h.state_mut().app.state;
+    state.open_import(Some(book));
+    state.set_import_paths(vec![file]);
+    if let Some(import) = state.import_state_mut() {
+        import.recipe.separator = stokesforge_import::Separator::Semicolon;
+        import.recipe.decimal = stokesforge_import::DecimalStyle::Comma;
+    }
+    state.auto_detect_import_header();
+    if let Some(import) = state.import_state_mut() {
+        // Sub-header: line 1 holds the long names, line 2 the units.
+        let roles = &mut import.recipe.subheader_roles;
+        roles.long_name = Some(stokesforge_import::SubheaderLineRange::single(1));
+        roles.unit = Some(stokesforge_import::SubheaderLineRange::single(2));
+    }
+    settle(h);
+    if let Some(import) = h.state_mut().app.state.import_state_mut() {
+        import.step = step;
+    }
+}
+
+/// The analysis window open on the series of `Graph1`.
+fn open_analysis(h: &mut Harness<'static, Bench>, preset: Preset) {
+    empty_workspace(h);
+    let graph = h.state().ids.graph1;
+    let tree = &h.state().app.state.snapshot().tree;
+    let spec = match tree.node(graph).map(|node| node.kind()) {
+        Some(NodeKind::Graph { spec, .. }) => spec.clone(),
+        _ => panic!("Graph1 is not a graph"),
+    };
+    act(
+        h,
+        Action::OpenGraphAnalysis {
+            preset,
+            graph,
+            series: vec![SeriesRef { panel: 0, index: 0 }],
+            spec: Box::new(spec),
+        },
+    );
+}
+
+/// Puts a floating window at `pos`, of `size` (coordinates of the workspace,
+/// logical points). Takes effect at the next frame.
+fn place(h: &mut Harness<'static, Bench>, tab: Tab, pos: egui::Pos2, size: egui::Vec2) {
+    let app = &mut h.state_mut().app;
+    app.window_positions.insert(tab, pos);
+    app.window_sizes.insert(tab, size);
+}
+
+/// The "Spectrum" sheet of `Book1`: the data that `Graph1` plots.
+fn select_spectrum_sheet(h: &mut Harness<'static, Bench>) {
+    let sheet = node_named(h, "Spectrum");
+    act(h, Action::SelectSheet(sheet));
+    // Wide enough for the values (a width is not a command: no status message).
+    let columns: Vec<NodeId> = h
+        .state()
+        .app
+        .state
+        .snapshot()
+        .tree
+        .children(sheet)
+        .expect("sheet")
+        .to_vec();
+    for column in &columns[..2] {
+        let column = *column;
+        h.state_mut().app.state.dispatch(Action::SetColumnWidth {
+            column,
+            width: 96.0,
+        });
+    }
+    settle(h);
+}
+
+/// Workbook `Book1` alone, large, in front.
+fn show_book_alone(h: &mut Harness<'static, Bench>) {
+    select_spectrum_sheet(h);
+    let book = Tab::Book(h.state().ids.book1);
+    h.state_mut().app.floating_tabs.retain(|tab| *tab == book);
+    place(h, book, egui::pos2(4.0, 4.0), egui::vec2(560.0, 440.0));
+}
+
+/// The application and what keeps it alive.
+struct Bench {
+    app: StokesForgeApp,
+    frame: eframe::Frame,
+    _session: Session,
+    ids: Ids,
+    /// The recovery folder and the files of the import shots.
+    scratch: tempfile::TempDir,
+}
+
+/// The nodes of the demo that the shots open.
+struct Ids {
+    book1: NodeId,
+    graph1: NodeId,
+}
+
+impl Bench {
+    fn new() -> Self {
+        let mut project = demo::demo_project().expect("demo project");
+        // The demo leaves the long names and units of the "Spectrum" sheet
+        // empty: fill them before the session owns the project (invariant 1).
+        let spectrum = project
+            .tree()
+            .iter()
+            .find_map(|(id, node)| (node.name() == "Spectrum").then_some(id))
+            .expect("Spectrum sheet");
+        let columns = project.tree().children(spectrum).expect("sheet").to_vec();
+        for (column, name, unit) in [
+            (columns[0], "Wavelength", "nm"),
+            (columns[1], "Absorbance", "AU"),
+        ] {
+            let mut meta = project
+                .tree()
+                .node(column)
+                .and_then(|node| node.as_column())
+                .map(|column| column.meta().clone())
+                .unwrap_or_default();
+            meta.long_name = name.into();
+            meta.unit = unit.into();
+            project.set_column_meta(column, meta).expect("column meta");
+        }
+        let node = |name: &str| {
+            project
+                .tree()
+                .iter()
+                .find_map(|(id, node)| (node.name() == name).then_some(id))
+                .unwrap_or_else(|| panic!("{name} is not in the demo"))
+        };
+        let (book1, graph1) = (node("Book1"), node("Graph1"));
+        let session = Session::spawn(project, None).expect("session");
+        // The formula columns of the demo carry only their formula until a
+        // full recalculation (invariant 11).
+        session.handle().recalculate(&[]).expect("recalculation");
+        let state = AppState::new_with_preferences(
+            session.handle(),
+            "Demo.stf".to_string(),
+            Preferences::load_from(None),
+        )
+        .expect("state");
+        let mut app = StokesForgeApp::new(state);
+        app.open_tab(Tab::Book(book1));
+        app.open_tab(Tab::Graph(graph1));
+        Self {
+            app,
+            frame: eframe::Frame::_new_kittest(),
+            _session: session,
+            ids: Ids { book1, graph1 },
+            scratch: tempfile::tempdir().expect("temporary folder"),
+        }
+    }
+}
+
+/// Folder of the generated images: `manual/src/images/`.
+fn images_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../manual/src/images")
+}
+
+/// Only one capture engine at a time (see `preferences_proto::tests`).
+fn capture_lock() -> std::sync::MutexGuard<'static, ()> {
+    static CAPTURES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    CAPTURES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A harness on the real application, settled.
+fn harness() -> Harness<'static, Bench> {
+    use eframe::App as _;
+    let mut harness = Harness::builder()
+        .with_size(WINDOW)
+        .with_pixels_per_point(SCALE)
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            |ui, bench: &mut Bench| {
+                bench.app.logic(&ui.ctx().clone(), &mut bench.frame);
+                bench.app.ui(ui, &mut bench.frame);
+            },
+            Bench::new(),
+        );
+    harness
+        .ctx
+        .set_fonts(stokesforge_render_egui::font_definitions());
+    egui_extras::install_image_loaders(&harness.ctx);
+    crate::theme::install(&harness.ctx);
+    settle(&mut harness);
+    harness
+}
+
+/// Runs frames until the layout, the animations and the loaders are quiet.
+fn settle(harness: &mut Harness<'static, Bench>) {
+    harness.run_steps(3);
+    harness.try_run_realtime().ok();
+    // Background jobs (file previews, analysis previews) answer in real time.
+    for _ in 0..12 {
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        harness.step();
+    }
+}
+
+/// Sends the pointer away, so that no cursor, hover or tooltip is painted.
+fn pointer_away(harness: &mut Harness<'static, Bench>) {
+    harness.event(egui::Event::PointerGone);
+    settle(harness);
+}
+
+/// Takes the keyboard focus away from every widget: no focus ring, no
+/// selected text in a field that a window focused when it opened.
+fn drop_focus(harness: &mut Harness<'static, Bench>) {
+    harness.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    settle(harness);
+}
+
+/// The final image of a shot: setup, settle, render, crop.
+fn render_shot(shot: &Shot) -> image::RgbaImage {
+    let mut harness = harness();
+    (shot.setup)(&mut harness);
+    pointer_away(&mut harness);
+    drop_focus(&mut harness);
+    let full = harness.render().expect("render");
+    match shot.crop {
+        Crop::Whole => full,
+        Crop::Rect(find) => {
+            let rect = find(&harness).expand(MARGIN);
+            let px = |v: f32| (v * SCALE).round().max(0.0) as u32;
+            let (x, y) = (px(rect.min.x), px(rect.min.y));
+            let w = px(rect.width()).min(full.width().saturating_sub(x));
+            let h = px(rect.height()).min(full.height().saturating_sub(y));
+            image::imageops::crop_imm(&full, x, y, w, h).to_image()
+        }
+    }
+}
+
+/// Writes `image` as `<name>.png` unless the file already holds the same
+/// pixels. Returns whether the file changed.
+fn write_if_different(name: &str, image: &image::RgbaImage) -> bool {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ImageEncoder as _;
+    let path = images_dir().join(format!("{name}.png"));
+    if let Ok(existing) = image::open(&path) {
+        if existing.to_rgba8() == *image {
+            return false;
+        }
+    }
+    std::fs::create_dir_all(images_dir()).expect("images folder");
+    let file = std::fs::File::create(&path).expect("create png");
+    PngEncoder::new_with_quality(
+        std::io::BufWriter::new(file),
+        CompressionType::Best,
+        FilterType::Adaptive,
+    )
+    .write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
+    )
+    .expect("write png");
+    true
+}
+
+/// Renders every shot (or the ones whose name contains `STOKESFORGE_SHOT`)
+/// into `manual/src/images/`. Run by `scripts/manual-screenshots.sh`.
+#[test]
+#[ignore = "needs a GPU adapter (or lavapipe); run by scripts/manual-screenshots.sh"]
+fn render_manual_screenshots() {
+    let _lock = capture_lock();
+    // Nothing of the user's profile is read or written.
+    let profile = tempfile::tempdir().expect("temporary profile");
+    std::env::set_var(
+        stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+        profile.path(),
+    );
+    std::env::set_var("XDG_CONFIG_HOME", profile.path());
+    std::env::set_var(i18n::LANGUAGE_VARIABLE, "en");
+    i18n::set_language(Language::English);
+    let only = std::env::var("STOKESFORGE_SHOT").ok();
+    for shot in SHOTS {
+        if only.as_deref().is_some_and(|f| !shot.name.contains(f)) {
+            continue;
+        }
+        let image = render_shot(shot);
+        let changed = write_if_different(shot.name, &image);
+        eprintln!(
+            "{} {}x{} {}",
+            shot.name,
+            image.width(),
+            image.height(),
+            if changed { "written" } else { "unchanged" }
+        );
+    }
+}
+
+/// The manifest `manual/screenshots.json` and [`SHOTS`] describe the same
+/// images: every `auto` entry is a shot, every shot has an entry, every file
+/// of the manifest that the bench produces exists, and every entry names the
+/// page it illustrates. Images taken by hand (`manual`) may be missing: they
+/// are listed in the message of the run.
+#[test]
+fn the_manifest_and_the_shots_agree() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../manual");
+    let text = std::fs::read_to_string(root.join("screenshots.json")).expect("manifest");
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&text).expect("valid JSON");
+    let field = |entry: &serde_json::Value, key: &str| {
+        entry[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{entry}: `{key}` is missing"))
+            .to_string()
+    };
+    let mut auto = Vec::new();
+    let mut missing_by_hand = Vec::new();
+    for entry in &entries {
+        let image = field(entry, "image");
+        let kind = field(entry, "kind");
+        assert!(!field(entry, "shows").is_empty(), "{image}: empty `shows`");
+        let page = field(entry, "page");
+        assert!(
+            root.join("src").join(&page).exists(),
+            "{image}: no page {page}"
+        );
+        match kind.as_str() {
+            "auto" => {
+                assert!(
+                    root.join("src/images").join(&image).exists(),
+                    "{image} is produced by scripts/manual-screenshots.sh and is missing"
+                );
+                auto.push(image.trim_end_matches(".png").to_string());
+            }
+            "manual" => {
+                assert!(!field(entry, "how").is_empty(), "{image}: empty `how`");
+                if !root.join("src/images").join(&image).exists() {
+                    missing_by_hand.push(image);
+                }
+            }
+            other => panic!("{image}: unknown kind {other}"),
+        }
+    }
+    let shots: Vec<String> = SHOTS.iter().map(|shot| shot.name.to_string()).collect();
+    assert_eq!(
+        auto, shots,
+        "`auto` entries and SHOTS differ (names and order)"
+    );
+    if !missing_by_hand.is_empty() {
+        eprintln!("images to take by hand (see `how`): {missing_by_hand:?}");
+    }
+}
