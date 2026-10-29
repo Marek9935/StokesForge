@@ -9,6 +9,7 @@ src = "src"
 create-missing = false
 
 [output.html]
+additional-css = ["icons.css"]
 git-repository-url = "https://gitlab.com/askrzypczak/stokesforge"
 edit-url-template = "https://gitlab.com/askrzypczak/stokesforge/-/edit/main/manual/{path}"
 

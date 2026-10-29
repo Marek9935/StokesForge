@@ -1,0 +1,15 @@
+/* Icons shown inline in the text (#367): the same pictures as the buttons of the application. */
+img.icon {
+    height: 1.15em;
+    width: auto;
+    vertical-align: -0.2em;
+}
+
+/* The icons have dark strokes: on the dark themes they sit on a light, rounded patch. */
+.coal img.icon,
+.navy img.icon,
+.ayu img.icon {
+    background: #f4f4f4;
+    border-radius: 3px;
+    padding: 1px;
+}

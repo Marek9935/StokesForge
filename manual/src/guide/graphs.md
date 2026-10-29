@@ -230,7 +230,7 @@ Drag the legend to move it anywhere on the figure. Right-click it and choose **R
 
 The title of the graph, the title of a layer, the axis titles and the series names accept formulas. You write them in Typst markup. Text between dollar signs is math. Everything else is plain text.
 
-Next to each of these fields, a small help icon shows the most common forms when you hover over it.
+Next to each of these fields, a small help icon (<img class="icon" src="../images/icons/question.neutral.svg" alt="">) shows the most common forms when you hover over it.
 
 If a formula is not valid, the field shows a message after you leave it. The graph shows your text as typed until you fix it.
 

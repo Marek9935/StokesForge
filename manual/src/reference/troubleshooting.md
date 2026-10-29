@@ -122,7 +122,7 @@ For the full list of import problems, see [Common problems](../guide/import.md#c
 - Put upright text in double quotes: `$"cm"^(-1)$`, not `$cm^-1$`.
 - Put several characters of an exponent or an index in parentheses: `^(-1)`.
 - Write `\$`, `\_`, `\*` and `\#` to show the character itself in plain text.
-- Hover over the small help icon next to the field to see the common forms.
+- Hover over the small help icon (<img class="icon" src="../images/icons/question.neutral.svg" alt="">) next to the field to see the common forms.
 
 See [Titles and formulas](../guide/graphs.md#titles-and-formulas).
 

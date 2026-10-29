@@ -85,7 +85,7 @@ The preview lists the lines of the file. Each line is coloured by its role, and 
 
 The preview updates as you change a setting. A line under the preview tells you how many data lines it shows, out of how many the file has.
 
-If you add several files, each one appears in the list of step 1 with its number of rows, or with the reason it cannot be read. Select a file with its radio button to preview it. Click the cross to remove it.
+If you add several files, each one appears in the list of step 1 with its number of rows, or with the reason it cannot be read. Select a file with its radio button to preview it. Click <img class="icon" src="../images/icons/x.neutral.svg" alt=""> **Remove** to remove it.
 
 ### Set the import from the preview
 
