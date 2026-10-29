@@ -27,6 +27,8 @@ StokesForge is an egui desktop app with no port and no API. Drive it with `drive
 
 Traps (lost clicks, capture lag, focus, killing the right process) and troubleshooting: [references/pitfalls.md](references/pitfalls.md).
 
+Images for the user manual (#365) are not taken with this driver: `scripts/manual-screenshots.sh` renders them headless and reproducibly (`docs/tests.md`, "Manual screenshots"); this skill stays for exploring and checking the real app.
+
 Limits to state in the report: X11 under Xwayland only — no native Wayland, no `rfd` file chooser, no drag, no detached OS window. For those, ask the user for a screenshot.
 
 Done when the capture showing the expected state was read, the app and Xwayland are stopped, and the report says what was seen and what this path cannot show.

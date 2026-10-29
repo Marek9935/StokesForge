@@ -5133,6 +5133,7 @@ dependencies = [
  "egui_extras",
  "egui_kittest",
  "i18n-embed-fl",
+ "image",
  "serde",
  "serde_json",
  "stokesforge-analysis",
