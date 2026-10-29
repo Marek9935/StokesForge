@@ -264,7 +264,7 @@ fn manual_src() -> PathBuf {
 }
 
 fn app_icons() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/icons")
+    crate::icons::source_folder()
 }
 
 fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -309,7 +309,8 @@ fn sync_copy(original: &Path, copy: &Path, label: &str, errors: &mut Vec<String>
     let wanted = std::fs::read(original).ok();
     let Some(wanted) = wanted else {
         errors.push(format!(
-            "a page of the manual points to images/icons/{label}, which does not exist in crates/stokesforge-app/assets/icons/. Reference an existing icon."
+            "a page of the manual points to images/icons/{label}, which does not exist in {}. Reference an existing icon.",
+            app_icons().display()
         ));
         return;
     };
@@ -325,7 +326,8 @@ fn sync_copy(original: &Path, copy: &Path, label: &str, errors: &mut Vec<String>
         return;
     }
     errors.push(format!(
-        "manual/src/images/icons/{label} is missing or differs from crates/stokesforge-app/assets/icons/{label}. Regenerate it with:\n    {COMMAND}\nthen commit the copy."
+        "manual/src/images/icons/{label} is missing or differs from {}. Regenerate it with:\n    {COMMAND}\nthen commit the copy.",
+        original.display()
     ));
 }
 
