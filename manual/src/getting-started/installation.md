@@ -63,50 +63,78 @@ Uninstalling removes the program. It does not remove your projects.
 
 ## Install on Linux
 
-The Linux package is an archive. There is nothing to install with a package manager.
+The Linux package is an archive with an installer script inside. There is no package for your package manager.
 
 1. Download `StokesForge-<version>-linux-x86_64.tar.gz`.
-2. Open a terminal and unpack the archive where you want to keep the program, for example in your home folder:
+2. Open a terminal, unpack the archive and run the installer:
 
    ```sh
-   tar -xzf StokesForge-<version>-linux-x86_64.tar.gz -C ~
+   tar -xzf StokesForge-<version>-linux-x86_64.tar.gz
+   cd StokesForge-<version>
+   ./install.sh
    ```
 
-   This creates the folder `StokesForge-<version>`.
-3. Start the application:
+3. Start the application from the application menu (**StokesForge**, in the Science category), or from a terminal:
 
    ```sh
-   ~/StokesForge-<version>/stokesforge-app
+   stokesforge
    ```
 
-The folder holds the program `stokesforge-app`, the Python it uses (in `lib/python`), the notices of the licences of the software it contains, and a check program, `stokesforge-selftest`. Keep these files together: the program looks for its Python in the `lib` folder next to it. You can move the whole folder, but not the program alone.
+By default the installer works for your user only and asks for no administrator rights. It puts:
 
-The archive does not create a menu entry. To get one, create the file `~/.local/share/applications/stokesforge.desktop` with this content. Replace `<user>` and `<version>`:
+- the program in `~/.local/share/stokesforge/<version>/` (or under `$XDG_DATA_HOME` if you set that variable), with a link named `current` to the installed version;
+- the command `stokesforge` in `~/.local/bin`. If that folder is not in your `PATH`, the installer says so; the menu entry works anyway;
+- the menu entry **StokesForge**, and the file type of `.stf` projects, under `~/.local/share`.
 
-```ini
-[Desktop Entry]
-Type=Application
-Name=StokesForge
-Exec=/home/<user>/StokesForge-<version>/stokesforge-app %f
-Categories=Science;
-Terminal=false
-```
+You can delete the unpacked folder once the installer has finished: the program has been copied.
+
+The folder of the program holds `stokesforge-app`, the Python it uses (in `lib/python`), the notices of the licences of the software it contains, and a check program, `stokesforge-selftest`. Keep these files together.
 
 The archive is built on a recent Ubuntu. A much older distribution may fail to start the program because its system libraries are too old.
+
+### Open `.stf` files
+
+The installer makes StokesForge appear in the **Open with** list for `.stf` files. It does not take over the files if another program is already their default. To make it the default, right-click a `.stf` file in your file manager, choose **Open with**, pick StokesForge and choose to always use it.
+
+### Install for all users
+
+To install StokesForge for every user of the computer, run the installer with `sudo`:
+
+```sh
+sudo ./install.sh --system
+```
+
+The program goes to `/opt/stokesforge/<version>/`, the command to `/usr/local/bin/stokesforge`, and the menu entry to `/usr/local/share`. The installer refuses to run if a package of your distribution already owns `/opt/stokesforge`. It never starts `sudo` by itself.
 
 ### Wayland and X11
 
 StokesForge uses Wayland when your session offers it, and X11 otherwise. If the window does not behave well on Wayland, start the program on X11 with the variable `STOKESFORGE_X11`:
 
 ```sh
-STOKESFORGE_X11=1 ~/StokesForge-<version>/stokesforge-app
+STOKESFORGE_X11=1 stokesforge
 ```
 
 See [Troubleshooting](../reference/troubleshooting.md) for other start-up problems.
 
 ### Uninstall on Linux
 
-Delete the `StokesForge-<version>` folder, and the `.desktop` file if you made one. Your projects and your preferences are not in that folder.
+Run the installer again with `--uninstall`. The installed copy can do it, from any folder:
+
+```sh
+~/.local/share/stokesforge/current/install.sh --uninstall
+```
+
+This removes the program, the command, the menu entry and the file type. For an installation for all users, use `sudo /opt/stokesforge/current/install.sh --system --uninstall`.
+
+Uninstalling never removes your projects, your preferences (`~/.config/stokesforge`) or the recovery copies. The recovery copies are in a `recovery` folder inside `~/.local/share/stokesforge/`; the installer leaves that folder in place.
+
+To remove one kept version only (see below), give its number:
+
+```sh
+~/.local/share/stokesforge/current/install.sh --uninstall 1.0.0
+```
+
+The current version cannot be removed this way: use `--uninstall` alone.
 
 ## First start
 
@@ -117,10 +145,10 @@ To start a project of your own, choose **File ▸ New ▸ New Project**. The wal
 To open a project directly, give its path after the program name:
 
 ```sh
-stokesforge-app experiment-12.stf
+stokesforge experiment-12.stf
 ```
 
-On Windows, the program is `stokesforge-app.exe` in the installation folder. See [Open from the command line](../reference/project-files.md#open-from-the-command-line).
+On Linux the command is `stokesforge`. On Windows, the program is `stokesforge-app.exe` in the installation folder. See [Open from the command line](../reference/project-files.md#open-from-the-command-line).
 
 The interface is in English at first. To change this, see [Change the interface language](../guide/interface.md#change-the-interface-language).
 
@@ -140,9 +168,26 @@ To keep all of this in a folder of your choice, for example on a USB drive, set 
 1. Read the notes of the new version on the [releases page](https://gitlab.com/askrzypczak/stokesforge/-/releases).
 2. Save your projects, then close StokesForge.
 3. On Windows, run the new installer. It replaces the old version.
-   On Linux, unpack the new archive in a new folder, start it, then delete the old folder.
+   On Linux, unpack the new archive and run its `./install.sh`. It installs the new version, makes `stokesforge` and the menu entry open it, and removes the version it replaces.
 
 Your preferences are kept.
+
+### Keep the previous version on Linux
+
+Some versions change the Python interface of the scripts, and a script written for the old version may stop working. To keep the old version beside the new one, update with `--keep-previous`:
+
+```sh
+./install.sh --keep-previous
+```
+
+The old version keeps its folder. It gets its own command, `stokesforge-<old version>`, and its own menu entry, **StokesForge <old version>**. `stokesforge` and the entry **StokesForge** open the newest version. A later update without `--keep-previous` removes only the version that was current; the versions you kept stay until you remove them with `--uninstall <version>`.
+
+Two limits apply to kept versions:
+
+- All versions share the same preferences (`~/.config/stokesforge`) and the same recovery copies.
+- A version may refuse a project saved by a newer one (see below). Do not save an important project with the new version if you still need to open it with the old one.
+
+If you run the installer of a version older than the newest one installed, it says so and asks for confirmation. If you accept, it installs the older version beside the newest one, in the same way as a kept version, and `stokesforge` still opens the newest. Without a terminal, add `--yes` to answer yes in advance.
 
 A project saved by an older version always opens in a newer version. The reverse is not true: a project you saved with a new version may be refused by an older one. Keep a copy of important projects before you update. See [Compatibility between versions](../reference/project-files.md#compatibility-between-versions).
 

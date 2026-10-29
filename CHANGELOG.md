@@ -36,6 +36,13 @@ without a message, see `docs/persistence.md`).
   withdrawn until API `1.0`). CI refuses a surface change without a bump and
   a frozen snapshot `tests/api-witnesses/vX.Y.txt`.
 
+- Linux installer (#387): the archive contains `install.sh`. `./install.sh`
+  installs for the current user (program in `~/.local/share/stokesforge/`,
+  command `stokesforge`, menu entry, `.stf` in **Open with**), `--system` for
+  all users in `/opt/stokesforge` (with `sudo`), `--keep-previous` keeps the
+  previous version beside the new one, `--uninstall [X.Y.Z]` removes it. It
+  never touches projects, preferences or recovery copies.
+
 - User manual skeleton (#362): `manual/`, built with mdBook, attached to each
   release and published on GitLab Pages for final versions. Chapters are
   still to be written.

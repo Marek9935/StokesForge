@@ -3,7 +3,7 @@
 # `scripts/app-dist.sh`, into a publishable archive (#333):
 #   dist/StokesForge-<version>-linux-x86_64.tar.gz
 # containing a folder `StokesForge-<version>/` (executables, lib/python,
-# license notices).
+# license notices, `install.sh` from scripts/install-linux.sh, #387).
 #
 # Usage: scripts/release-linux.sh vX.Y.Z   (the tag, or STOKESFORGE_VERSION=X.Y.Z)
 # Rebuilds nothing: run scripts/python-vendor.sh first, then
@@ -30,7 +30,14 @@ if ! ls "$DIST" | grep -qi licen; then
     exit 1
 fi
 
+# The installer sits in the archive, next to the program it installs (#387).
+install -m 755 "$REPO_ROOT/scripts/install-linux.sh" "$DIST/install.sh"
+
 ARCHIVE="$REPO_ROOT/dist/StokesForge-${VERSION}-linux-x86_64.tar.gz"
 tar -C "$DIST/.." --transform "s|^stokesforge-app|StokesForge-${VERSION}|" \
     -czf "$ARCHIVE" stokesforge-app
+if ! tar -tzf "$ARCHIVE" | grep -qx "StokesForge-${VERSION}/install.sh"; then
+    echo "[release] ERROR: install.sh missing from $ARCHIVE" >&2
+    exit 1
+fi
 echo "[release] $ARCHIVE"
