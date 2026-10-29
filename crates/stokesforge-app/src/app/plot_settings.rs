@@ -32,8 +32,11 @@ use super::dialogs::{
 };
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
-use super::hover_help::hover_help;
+use super::hover_help::{help_text, hover_help};
 use super::tab_strip::{tab_strip, TabStripSide};
+
+/// Key, in the egui context, of "the formula help icon is hidden" (#148).
+const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
 
 /// Properties window of a graph: a floating dialog (same family
 /// as `import_window`), opened by the right-click on a component of the
@@ -69,6 +72,14 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
     let Some(settings) = state.plot_settings() else {
         return;
     };
+    // The preference of the formula help icon, read by `formula_help` (the fields
+    // are painted far from the state).
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            egui::Id::new(FORMULA_HELP_HIDDEN),
+            !state.show_formula_help(),
+        );
+    });
     // Cloned before borrowing `state` mutably for the draft: a cloned
     // `Arc<Tree>` is a reference counter, not a copy.
     let tree = state.tree().clone();
@@ -528,7 +539,22 @@ fn theme_editor(
 /// gives the reference page. An icon at the end of the field rather than a
 /// collapsible memo below: the link with the field is visible, and the help no longer takes
 /// height in the window (see [`super::hover_help`]).
+///
+/// The Preferences can hide it (Display › Interface, #148): the window then
+/// leaves [`FORMULA_HELP_HIDDEN`] in the context for the fields it paints.
+/// Hidden, the icon disappears; if it also carried the field's own `hint`, that
+/// hint stays reachable as a plain "?".
 fn formula_help(ui: &mut egui::Ui, hint: &str) {
+    let hidden = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(egui::Id::new(FORMULA_HELP_HIDDEN)))
+        .unwrap_or(false);
+    if hidden {
+        if !hint.is_empty() {
+            help_text(ui, hint);
+        }
+        return;
+    }
     hover_help(ui, |ui| {
         if !hint.is_empty() {
             ui.label(hint);
@@ -1168,7 +1194,7 @@ mod tests {
     use super::{
         column_metadata_window, form, formula_field, formula_help, formula_memo_rows,
         legend_position_label, line_style_label, plot_settings_window, plot_type_label,
-        symbol_shape_label, theme_editor, TickDirection,
+        symbol_shape_label, theme_editor, TickDirection, FORMULA_HELP_HIDDEN,
     };
     use crate::color_picker::PickerEnv;
     use stokesforge_app_state::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
@@ -2849,6 +2875,52 @@ mod tests {
         let before = ui.cursor().min;
         formula_help(ui, "");
         egui::Rect::from_min_max(before, ui.min_rect().max)
+    }
+
+    /// W6 (#148): width taken by the formula help next to a field, in a given
+    /// state of the preference and with a given `hint` of the field.
+    fn formula_help_width(hidden: bool, hint: &str) -> f32 {
+        let context = test_support::context();
+        context.data_mut(|data| {
+            data.insert_temp(egui::Id::new(FORMULA_HELP_HIDDEN), hidden);
+        });
+        let mut width = 0.0;
+        image(&context, Vec::new(), |ui| {
+            ui.horizontal(|ui| {
+                let before = ui.cursor().min.x;
+                formula_help(ui, hint);
+                width = ui.cursor().min.x - before;
+            });
+        });
+        width
+    }
+
+    /// W6: hidden, the formula syntax icon disappears; if it also carried the
+    /// field's own hint, a plain "?" keeps it reachable.
+    #[test]
+    fn the_formula_help_icon_disappears_when_the_preference_is_off() {
+        assert!(formula_help_width(false, "") > 0.0, "shown: the icon");
+        assert_eq!(formula_help_width(true, ""), 0.0, "hidden: nothing");
+        assert!(
+            formula_help_width(true, "Hint of the field") > 0.0,
+            "hidden but the field has a hint: a plain \"?\""
+        );
+    }
+
+    /// The window hands the preference to the fields it paints.
+    #[test]
+    fn the_window_publishes_the_formula_help_preference() {
+        let context = test_support::context();
+        let mut h = harness(|_| {});
+        h.open(PlotSettingsTab::Graph, None);
+        let hidden = |context: &egui::Context| {
+            context.data(|data| data.get_temp::<bool>(egui::Id::new(FORMULA_HELP_HIDDEN)))
+        };
+        paint_window(&context, &mut h.state, Vec::new());
+        assert_eq!(hidden(&context), Some(false));
+        h.state.dispatch(Action::SetShowFormulaHelp(false));
+        paint_window(&context, &mut h.state, Vec::new());
+        assert_eq!(hidden(&context), Some(true));
     }
 
     // -- The choice labels ----------------------------------------------------

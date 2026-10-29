@@ -80,6 +80,9 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Refresh | Actualiser | Reread the source file of a column | Rafraîchir, Recharger | G |
 | Properties | Propriétés | Settings of a specific object | Options, Paramètres | O |
 | Preferences† | Préférences | Application settings | Options, Paramètres | G |
+| Folders | Dossiers | Rubric of Preferences: the configuration folder and the default folders of the file dialogs | Chemins, Répertoires | #148 |
+| Open Folder | Ouvrir le dossier | Opens a folder in the system's file manager | Explorer, Parcourir | #148 |
+| Browse… | Parcourir… | Picks a folder in a file dialog, next to a field that also accepts the typed path | Choisir…, Sélectionner | #148 |
 | Expand by Default | Déplier par défaut | Initial collapse state of new Object Manager groups; does not change groups already seen | Tout déplier | #139 |
 | Objects | Objets | Section of the texts and shapes of the graph or of a layer in the Object Manager | Éléments | #139 |
 | Setting | Réglage | Value chosen by the user | Option, Paramètre | G |

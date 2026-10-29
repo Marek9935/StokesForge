@@ -3,7 +3,7 @@
 # Traduction du catalogue de référence `en` : mêmes clés, mêmes arguments, selon
 # la colonne française de `docs/ui-texts.md` (infinitif pour les
 # consignes, minuscule après la première lettre, « … » en un caractère,
-# espace insécable avant « : », « ; », « ? » et dans les guillemets « »).
+# espace insécable avant « : », « ; », « ? » et dans les guillemets « »).
 # Toute clé ajoutée à `en` s'ajoute ici dans le même commit : le test de
 # complétude est bloquant.
 
@@ -1623,6 +1623,8 @@ error-plot-settings-cancel = Impossible d'annuler les propriétés du graphe : 
 error-plot-settings-undo-group = Les modifications des propriétés du graphe ne pourront pas être annulées en une fois : { $cause }
 error-plot-settings-block-detached = Les propriétés du graphe sont ouvertes. Les valider ou les annuler avant de modifier une fenêtre détachée
 error-preferences-not-saved = Impossible d'enregistrer les préférences : { $cause }
+error-folder-not-utf8 = Ce dossier ne peut pas servir de dossier par défaut : son nom n'est pas du texte valide. Choisir un autre dossier
+error-folder-open = Impossible d'ouvrir le dossier : { $cause }
 error-colors-session-only = Les couleurs enregistrées ne seront gardées que pour cette session : { $cause }
 error-script-vanished = Le moteur de script s'est arrêté. Relancer le script
 error-save-script-running = Attendre la fin du script avant d'enregistrer
@@ -1777,6 +1779,46 @@ preferences-title = Préférences
 preferences-general = Général
 preferences-export = Export
 preferences-display = Affichage
+preferences-display-interface = Interface
+preferences-display-object-manager = Gestionnaire d'objets
+preferences-display-new = Nouveaux
+preferences-show-formula-help = Afficher l'aide de syntaxe des formules
+    .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
+preferences-om-listed = Listés dans le panneau
+preferences-new-graphs = Nouveaux graphiques
+preferences-new-graphs-note = Point de départ des graphiques que vous créez. Chaque graphique garde ensuite son propre réglage, dans ses Propriétés du graphique ; les graphiques existants ne changent pas.
+preferences-new-graph-decimal-comma = Virgule décimale sur les graduations
+    .hint = Les nouveaux graphiques écrivent 1,5 au lieu de 1.5 sur tous les axes, à l'écran et dans les exports. Les graphiques existants et ceux créés par des scripts gardent leur réglage.
+preferences-analysis-values = Valeurs
+preferences-analysis-values-note = Ce que propose la fenêtre d'une analyse la première fois que vous l'utilisez. Chaque analyse retient ensuite son dernier choix.
+preferences-export-graph = Exporter le graphique
+preferences-export-graph-note = Réglable aussi depuis Graphique › Exporter. Copier le graphique utilise la même résolution PNG.
+preferences-png-scale-option = ×{ $scale }
+preferences-folders = Dossiers
+preferences-folders-config = Dossier de configuration
+preferences-folders-config-note = Là où StokesForge garde vos réglages, vos couleurs enregistrées et vos modèles d'import. Vos projets n'y sont pas rangés.
+preferences-folders-location = Emplacement
+preferences-folders-open = Ouvrir le dossier
+    .hint = Ouvre le dossier de configuration dans le gestionnaire de fichiers, et le crée s'il n'existe pas encore
+preferences-folders-files = Fichiers
+preferences-folders-file-preferences = Préférences
+preferences-folders-file-colors = Couleurs enregistrées
+preferences-folders-file-templates = Modèles d'import
+preferences-folders-file-recent = Fichiers importés récemment
+preferences-folders-file-demo = Projet de démonstration
+preferences-folders-empty = Aucun fichier pour l'instant
+preferences-folders-recovery = Copies de secours
+preferences-folders-recovery-note = Rangées hors du dossier de configuration.
+preferences-folders-unavailable = Indisponible
+preferences-folders-default = Dossiers par défaut
+preferences-folders-default-note = Une fenêtre de choix de fichier s'ouvre dans le dossier réglé ici la première fois que vous l'utilisez pendant une session, puis dans le dernier dossier utilisé. Laisser un champ vide pour toujours reprendre le dernier dossier utilisé.
+preferences-folders-projects = Ouvrir et enregistrer
+preferences-folders-import = Importer des fichiers
+preferences-folders-export = Exporter des graphiques
+preferences-folders-browse = Parcourir…
+    .hint = Choisit le dossier dans une fenêtre de choix de fichier
+preferences-folders-not-found = Dossier introuvable
+preferences-folders-pick-title = Choisir le dossier par défaut
 preferences-files = Fichiers
 preferences-max-file-size = Taille maximale d'un fichier (Mo)
 preferences-max-cells = Nombre maximal de cellules (millions)

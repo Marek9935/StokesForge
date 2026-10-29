@@ -204,6 +204,8 @@ Click <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt="
 
 The detached window can be moved and resized like any other window of your system. It has one button, <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> **Reattach to the main window**. Closing the window also reattaches the panel.
 
+StokesForge remembers your panels for the next launch: which ones are collapsed, which ones are detached, and the size and position of the detached windows. A detached panel comes back in its window only if your computer has the same number of screens as when you closed StokesForge. Otherwise it comes back attached to the main window, so that a window is never left on a screen that is gone. On Wayland, an application cannot choose where a window opens: the detached window comes back with its size and your system places it.
+
 You can detach the Project Manager from the menu too: **Window ▸ Detach Project Manager**, then **Window ▸ Reattach Project Manager**.
 
 A detached panel stays up to date with the project and works as before. The Object Manager follows the graph in the foreground, also when that graph is itself detached.
@@ -259,19 +261,42 @@ The whole interface changes at once and the choice is remembered. You can also s
 
 Choose **File ▸ Preferences…** to open the **Preferences** window. It sets the application, not the project. The settings apply as soon as you change them. Close the window when you are done.
 
-<img src="../images/preferences-general.png" alt="The General tab of Preferences: language, maximum file size and cells, automatic recovery copy." width="480">
+<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display, Export and Folders at the left, the General page on the right." width="480">
 
-It has three tabs:
+The rubrics (**General**, **Display**, **Export** and **Folders**) are listed at the left of the window:
 
 - **General**
   - **Language**.
   - **Maximum file size (MB)** and **Maximum cells (millions)**: the largest project StokesForge agrees to open. A bigger file is refused before it is read, which protects your computer from a file you received. Raise a limit here if you must open a large project.
   - **Save a recovery copy automatically** and **Copy every (min)**: see [Recovery copies](projects-and-workbooks.md#recovery-copies).
-  - **Warn when R² is low**: opens a dialog after a calculation when R² is below 0.6.
-- **Display**
-  - **Show Metadata Row** and **Show x' Row**: which header rows are shown when a **new** workbook opens. Each workbook can then change its own (see [Header rows](projects-and-workbooks.md#header-rows)).
+  - **Analysis**: **Values** sets whether an analysis window starts on **Show** or on **Keep in Results** the first time you use that analysis (see [Analysis](analysis.md)). **Warn when R² is low** opens a dialog after a calculation when R² is below 0.6.
+- **Display** has three tabs across the top:
+  - **Interface**: **Show formula syntax help** shows or hides the small help icon next to the text fields that accept a formula. It is shown by default. If the field has its own hint, a plain **?** icon stays.
+  - **Object Manager**: the same settings as **View ▸ Object Manager** (see [Object Manager](#object-manager)): **Show Axes**, **Show Objects**, the groups to expand by default and **Reset Settings**.
+  - **New**: what a **new** workbook or graph starts with. **Show Metadata Row** and **Show x' Row** set the header rows of new workbooks (see [Header rows](projects-and-workbooks.md#header-rows)). **Decimal comma on tick labels** makes new graphs write 1,5 instead of 1.5. Each graph can then change its own, and graphs that already exist do not change.
 - **Export**
+  - **SVG Text** and **PNG Resolution**: the same choices as in **Graph ▸ Export** (see [Export](export.md)). The resolution is remembered for the next sessions.
   - **Copy Graph**: the formats (SVG, PNG, PDF) offered together when you copy a graph to another application, and their order. Drag a row to reorder.
+- **Folders**
+  - **Configuration folder**: where StokesForge keeps your settings, saved colors and import templates. **Open Folder** shows it in your file manager (and creates it if it does not exist yet), and the list names the files it holds. Your projects are not stored there.
+  - **Recovery copies**: the folder of the recovery copies, which is outside the configuration folder.
+  - **Default folders**: **Open and Save**, **Import files** and **Export graphs**. Type a path and press <kbd>Enter</kbd>, or click **Browse…**. Leave a field empty to keep the old behavior.
+
+<img src="../images/preferences-display-object-manager.png" alt="The Display rubric of Preferences, Object Manager tab: the lists and the groups expanded by default." width="480">
+
+#### Default folders
+
+A file window starts in the default folder of its kind the first time you use it in a session. After that it starts in the last folder you used for that kind. The next time you start StokesForge, it starts again from the default.
+
+- **Open and Save** serves **File ▸ Open…** and **File ▸ Save As…**. **Save As** of a project that already has a file starts in that file's own folder.
+- **Import files** serves the wizard's **Add Files…** and the export and import of templates. Without a default, it starts in the folder of the last file you imported.
+- **Export graphs** serves **Graph ▸ Export ▸ Export Graph…**.
+
+Only the file windows count. Dropping a file or opening one from a list of recent files does not change the last folder. If you change a default during a session, the last folder of that kind is forgotten and the next window opens in the new default.
+
+If a folder no longer exists, StokesForge uses the last folder instead, without a message. The page shows **Folder not found** under the field so that you can fix it.
+
+<img src="../images/preferences-folders.png" alt="The Folders rubric of Preferences: the configuration folder with its files, the recovery copies folder and the three default folders." width="480">
 
 ## Keyboard shortcuts
 

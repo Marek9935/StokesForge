@@ -6,7 +6,7 @@ This page shows how to get a graph out of StokesForge: as a file (SVG, PDF or PN
 
 1. Bring the graph window to the front.
 2. Choose **Graph ▸ Export ▸ Export Graph…**, or press <kbd>Ctrl</kbd>+<kbd>E</kbd> (<kbd>Cmd</kbd>+<kbd>E</kbd> on macOS). You can also right-click the plot area and use **Export ▸ Export Graph…**, or use the export button of the toolbar.
-3. In the dialog **Export Graph**, pick a folder and a file name. The dialog offers the filters **SVG**, **PDF** and **PNG**.
+3. In the dialog **Export Graph**, pick a folder and a file name. The dialog starts in the default folder set in **File ▸ Preferences… ▸ Folders**, then in the last folder you exported to. The dialog offers the filters **SVG**, **PDF** and **PNG**.
 4. Confirm. The status bar shows "Graph exported to" followed by the path.
 
 The format comes from the **extension** of the file name: `.svg`, `.pdf` or `.png`. Any other extension is refused with a message that lists the three valid ones. If you type a name with no extension, StokesForge adds `.svg` and asks before replacing a file of that name.
@@ -29,7 +29,7 @@ If the graph has no background color (the "no color" choice), the file has a tra
 
 SVG is a vector format. It stays sharp at any size and opens in vector editors such as Inkscape or Illustrator.
 
-Text in an SVG can be written in two ways. Choose it in **Graph ▸ Export ▸ SVG Text**:
+Text in an SVG can be written in two ways. Choose it in **Graph ▸ Export ▸ SVG Text**, or in **File ▸ Preferences… ▸ Export**:
 
 | Choice | What it does | Use it when |
 |---|---|---|
@@ -44,7 +44,9 @@ The PDF is a vector page with selectable text. The fonts StokesForge needs are e
 
 ### PNG
 
-PNG is a bitmap. Choose its size in **Graph ▸ Export ▸ PNG Resolution**:
+PNG is a bitmap. Choose its size in **Graph ▸ Export ▸ PNG Resolution**, or in **File ▸ Preferences… ▸ Export** (**×1**, **×2** or **×4**). StokesForge remembers it for the next sessions.
+
+The sizes are:
 
 | Choice | Size of the image |
 |---|---|
@@ -96,7 +98,7 @@ StokesForge puts several versions of the same figure on the clipboard at once: *
 
 Programs differ, so try your own. If a program pastes a version you do not want, change the offered formats as described below, or export a file instead.
 
-The SVG on the clipboard always keeps its text as text (the **Text** choice). The PNG uses the resolution chosen in **Graph ▸ Export ▸ PNG Resolution**.
+The SVG on the clipboard always keeps its text as text (the **Text** choice). The PNG uses the resolution chosen in **Graph ▸ Export ▸ PNG Resolution** (or in **Preferences ▸ Export**).
 
 ### Choose the formats and their order
 
@@ -104,7 +106,7 @@ The SVG on the clipboard always keeps its text as text (the **Text** choice). Th
 2. In the section **Copy Graph**, tick the formats to offer. At least one format must stay ticked.
 3. Drag a row to change the order. The order tells the receiving program which format you prefer, but the program has the last word.
 
-<img src="../images/preferences-export.png" alt="The Export tab of Preferences: the formats offered together by Copy Graph, in order." width="480">
+<img src="../images/preferences-export.png" alt="The Export rubric of Preferences: SVG text, PNG resolution and the formats offered together by Copy Graph, in order." width="480">
 
 The change applies right away.
 

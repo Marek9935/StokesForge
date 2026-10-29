@@ -103,6 +103,7 @@ subfolders included, and look for their functions by name (#116): see
 | `app/window_stack.rs` | stack of floating windows: `open_tab` (the only place that decides to open or focus), egui order and layers, hiding, collapsing, maximizing, `show_workspace` |
 | `app/test_support.rs` | (compiled in test only) test helpers shared by the surfaces: `context`, `image`/`frame_of`, `touche`, `click`, `painted`, `textes`/`text_exact`, `distinct`, `xy_columns` (#128) |
 | `app/window_detach.rs` | detaching into OS windows: `show_detached_project_manager`, `show_detached_object_manager`, `show_detached_script_console`, `detach_tab`/`reattach_tab`, `show_detached_tabs` and the publication of the snapshot that wakes the viewports (#104, `snapshot_stamp` is its fingerprint), `sync_window_views` (window state sent to the session, #16) |
+| `app/panel_memory.rs` | the layout of the three fixed panels between two launches (#148): startup restore (`apply_startup_panels`), change detection (`sync_panel_layout`), live geometry of the detached windows (`LiveWindow`), flush at exit |
 
 A new large surface is written in its own module, on this model; `app.rs`
 gains only the call. Since #124, `ui()` describes the steps of the frame:

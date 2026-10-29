@@ -350,6 +350,67 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "preferences-display-object-manager",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+            click(h, "Display");
+            click(h, "Object Manager");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "preferences-display-new",
+        setup: |h| {
+            empty_workspace(h);
+            act(h, Action::OpenPreferences);
+            click(h, "Display");
+            click(h, "New");
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "preferences-folders",
+        setup: |h| {
+            empty_workspace(h);
+            // A configuration folder at a fixed, readable place, holding the files
+            // the application keeps there (the image must not change from run to run).
+            let config = std::env::temp_dir()
+                .join("stokesforge-manual")
+                .join("StokesForge");
+            let _ = std::fs::remove_dir_all(&config);
+            std::fs::create_dir_all(&config).expect("configuration folder");
+            for name in [
+                "preferences.json",
+                "couleurs.json",
+                "import_recipes.json",
+                "import_recent.json",
+                "demo.stf",
+            ] {
+                std::fs::write(config.join(name), "{}").expect("file");
+            }
+            let handle = h.state()._session.handle();
+            let mut state = AppState::new_with_preferences(
+                handle,
+                "Demo.stf".to_string(),
+                Preferences::load_from(Some(config.join("preferences.json"))),
+            )
+            .expect("state");
+            // Outside the configuration folder, as in the real application.
+            state.set_recovery_dir(Some(
+                std::env::temp_dir()
+                    .join("stokesforge-manual")
+                    .join("data")
+                    .join("recovery"),
+            ));
+            h.state_mut().app.state = state;
+            act(h, Action::OpenPreferences);
+            click(h, "Folders");
+            grow_dialog(h, 100.0);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
         name: "files-recover-projects",
         setup: |h| {
             empty_workspace(h);

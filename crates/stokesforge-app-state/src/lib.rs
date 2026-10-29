@@ -33,6 +33,7 @@
 pub mod analysis;
 pub mod analysis_recent;
 pub mod column_move;
+pub mod default_folders;
 pub mod errors;
 pub mod figure_texts;
 pub mod file_picker;
@@ -41,6 +42,7 @@ pub mod i18n;
 pub mod object_drag;
 pub mod object_format;
 pub mod object_manager;
+pub mod panel_layout;
 pub mod preferences;
 pub mod quantities;
 pub mod r_squared;

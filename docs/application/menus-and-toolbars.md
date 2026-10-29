@@ -143,7 +143,7 @@ is ignored on reading. The `//!` of the module says why the panel is an
   choice made on another zone. A passage carrying a local color gives
   a neutral swatch. While editing, the selector draft lasts only
   until the gesture is confirmed, which sets a single tag on the passage.
-- Visibility: no menu hides a bar (View carries only the Object Manager settings, #214). The `toolbars` field of `preferences.json` (never the `.stf`) is still read; reading
+- Visibility: the bars are always shown (#148 dropped the Preferences setting too); no menu hides a bar (View carries only the Object Manager settings, #214). The `toolbars` field of `preferences.json` (never the `.stf`) is still read; reading
   ignores what it does not understand. `StokesForgeApp::new` does not read the
   file (the tests), `main` calls `load_toolbar_layout`.
 - The bars are painted only in the main window, not in the detached

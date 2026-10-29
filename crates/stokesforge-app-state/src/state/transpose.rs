@@ -112,11 +112,8 @@ impl AppState {
             self.fail(tr!("status-analysis-no-series"));
             return;
         };
-        self.analysis = Some(AnalysisForm::new(
-            preset,
-            series,
-            self.analysis_keep_results,
-        ));
+        let keep = self.keep_results_for(preset.kind());
+        self.analysis = Some(AnalysisForm::new(preset, series, keep));
         self.analysis_rows_macro = true;
     }
 

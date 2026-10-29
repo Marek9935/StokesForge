@@ -22,7 +22,7 @@ A project that is still empty is replaced without a question.
 
 ### Open a project
 
-Choose **File ▸ Open…** or press <kbd>Ctrl</kbd>+<kbd>O</kbd>, then pick a `.stf` file. The project replaces the current one, after the same question about unsaved changes.
+Choose **File ▸ Open…** or press <kbd>Ctrl</kbd>+<kbd>O</kbd>, then pick a `.stf` file. The window starts in the default folder set in **File ▸ Preferences… ▸ Folders** the first time, then in the last folder you used. The project replaces the current one, after the same question about unsaved changes.
 
 You can also drop a `.stf` file on the StokesForge window. It opens in a new StokesForge window and leaves your current project as it is.
 
@@ -144,7 +144,7 @@ Two more rows can be shown above these four:
 - **Metadata**: a summary of the information read from the imported file. Click it to list the keys (**File Metadata**).
 - **x'**: a number attached to each column, for example the time of a measurement. It is used to plot rows.
 
-Choose **Workbook ▸ Show Metadata Row** or **Workbook ▸ Show x' Row** to show or hide them in the active workbook. These choices apply to this workbook until you close StokesForge. The setting for new workbooks is in **File ▸ Preferences… ▸ Display**.
+Choose **Workbook ▸ Show Metadata Row** or **Workbook ▸ Show x' Row** to show or hide them in the active workbook. These choices apply to this workbook until you close StokesForge. The setting for new workbooks is in **File ▸ Preferences… ▸ Display ▸ New**.
 
 ### Add a column
 

@@ -290,12 +290,15 @@ the name of the graph (`state::export_file_name`); the format follows the extens
 `AppState` writes the file (`stokesforge-render-svg`, Typst text included) and says so
 in the status bar. No command: the model is not touched. The
 PNG resolution (×1, ×2, ×4; ×4 by default, i.e. 1920 × 1440 px) is set in
-"Graph" → "Export" → "PNG Resolution" (`Action::SetPngExportScale`,
-session preference). The text of exported SVGs (#162) is set in
+"Graph" → "Export" → "PNG Resolution" or in Preferences › Export
+(`Action::SetPngExportScale`, kept from one launch to the next:
+`preferences.json`, `png_export_scale`, read leniently, a value outside the
+list gives ×4). The text of exported SVGs (#162) is set in
 "Graph" → "Export" → "SVG Text": **Text** (default; selectable
 `<text>`, font named but not embedded) or **Outlines**; the choice is
 kept from one launch to the next (`preferences.json`, `Action::SetSvgTextMode`,
-no command, no history, no `.stf`) and applies to SVG only.
+no command, no history, no `.stf`) and applies to SVG only; Preferences ›
+Export sets the same two preferences.
 
 **Copying the graph to another application** (issue #149): "Graph"
 → "Export" → "Copy Graph" menu, or **Ctrl+C** when a graph window is active in the

@@ -100,11 +100,21 @@ impl AppState {
             self.fail(tr!("status-analysis-no-series"));
             return;
         }
-        self.analysis = Some(AnalysisForm::new(
-            preset,
-            series,
-            self.analysis_keep_results,
-        ));
+        let keep = self.keep_results_for(preset.kind());
+        self.analysis = Some(AnalysisForm::new(preset, series, keep));
+    }
+
+    /// "Keep in Results" an analysis window of `kind` opens with: the last
+    /// choice validated for this operation, else the Preferences default (M5).
+    pub(super) fn keep_results_for(&self, kind: OperationKind) -> bool {
+        self.object_manager_preferences
+            .analysis_keep_results_for(kind)
+    }
+
+    /// The Preferences default of "Keep in Results" (General › Analysis).
+    pub fn analysis_keep_results_default(&self) -> bool {
+        self.object_manager_preferences
+            .analysis_keep_results_default()
     }
 
     /// The graph designates its own X/Y: no sheet pairing here.
@@ -155,7 +165,8 @@ impl AppState {
             self.fail(tr!("status-analysis-no-series"));
             return;
         };
-        let mut form = AnalysisForm::new(preset, series, self.analysis_keep_results);
+        let keep = self.keep_results_for(preset.kind());
+        let mut form = AnalysisForm::new(preset, series, keep);
         form.graph = Some(graph);
         form.add_to_graph = true;
         form.graph_source = Some((spec, sources.to_vec()));
@@ -360,13 +371,13 @@ impl AppState {
         // The failure goes into the footer of the window (S-M7, #228): it
         // stays open.
         if !self.last_action_failed() {
-            self.analysis_keep_results = form.keep_results;
             self.remember_analysis(&form);
-            // The last choice becomes the default of the next sessions (#200).
+            // The choice is remembered for this operation only: the Preferences
+            // default is not changed by validating a window (#148, M5).
             // An unreadable preferences file must not undo a successful calculation.
             let _ = self
                 .object_manager_preferences
-                .save_analysis_keep_results(form.keep_results);
+                .save_analysis_keep_results_for(form.kind, form.keep_results);
             self.analysis = None;
             self.end_row_macro();
             // A "Show" calculation does not keep its values: recalculation will

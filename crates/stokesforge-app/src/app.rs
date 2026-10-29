@@ -164,6 +164,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod panel_memory;
 #[cfg(test)]
 mod panel_tests;
 mod plot_settings;
@@ -263,6 +264,9 @@ pub struct StokesForgeApp {
     state: AppState,
     /// Native file picker in progress, on a separate thread (#192).
     file_picker: FilePicker,
+    /// Opens a folder in the system's file manager (Preferences › Folders);
+    /// replaced in the tests, which must not start a real program.
+    folder_opener: fn(&std::path::Path) -> std::io::Result<()>,
     /// Last title sent to the window (S-R15): `Title` is resent only on change.
     window_title: String,
     /// The toolbars: layout, visibility and drag in progress
@@ -321,10 +325,16 @@ pub struct StokesForgeApp {
     /// [`StokesForgeApp::project_manager_panel`] is simply not painted.
     pm_detached: bool,
     /// True when the script console is collapsed to its title bar alone
-    /// (issue #79). Collapsed at startup, and not remembered: it is not a
-    /// preference but a state of the session; launching a script expands it,
+    /// (issue #79). Collapsed at the first launch, then remembered with the
+    /// other panels (#148, `panel_memory.rs`); launching a script expands it,
     /// so that the output is seen.
     script_collapsed: bool,
+    /// Memory of the layout of the three panels between two launches (#148):
+    /// live geometry of the detached windows, where they open, what was last
+    /// handed to the preferences. The collapsed and detached flags above stay
+    /// the single source; `panel_memory.rs` reads them and sends
+    /// `Action::RememberPanelLayout` on every change.
+    panel_memory: panel_memory::PanelMemory,
     /// What the detached OS window of the Project Manager paints, resynchronized
     /// from `self.state` at every frame by
     /// [`StokesForgeApp::show_detached_project_manager`] — see its top doc.
@@ -481,6 +491,7 @@ impl StokesForgeApp {
         Self {
             state,
             file_picker: FilePicker::default(),
+            folder_opener: open_folder_in_file_manager,
             window_title,
             toolbars: ToolbarState::default(),
             om_detached: false,
@@ -501,6 +512,7 @@ impl StokesForgeApp {
             maximized_tab,
             pm_detached: false,
             script_collapsed: true,
+            panel_memory: panel_memory::PanelMemory::default(),
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
@@ -706,6 +718,8 @@ impl StokesForgeApp {
             return;
         };
         let first = paths.first().cloned();
+        // Only file dialogs feed the "last folder" (not a drop, not a recent file).
+        self.state.remember_picked_folder(&request, &paths);
         match request {
             PickRequest::OpenProject => {
                 if let Some(path) = first {
@@ -737,7 +751,12 @@ impl StokesForgeApp {
                     self.state.import_import_recipe(&path);
                 }
             }
-            PickRequest::AddImportFiles { .. } => self.state.add_import_paths(paths),
+            PickRequest::AddImportFiles => self.state.add_import_paths(paths),
+            PickRequest::ChooseDefaultFolder { kind } => {
+                if let Some(path) = first {
+                    self.state.apply_default_folder_pick(kind, &path);
+                }
+            }
         }
     }
 
@@ -883,6 +902,30 @@ impl StokesForgeApp {
     }
 }
 
+/// Opens `folder` in the system's file manager, creating it first if it does not
+/// exist yet (the configuration folder is only created by the first write). The
+/// program is started and left alone; a thread waits for it so that it does not
+/// stay a zombie.
+fn open_folder_in_file_manager(folder: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let program = "xdg-open";
+    let mut child = std::process::Command::new(program)
+        .arg(folder)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 impl eframe::App for StokesForgeApp {
     /// A window close (cross, Alt+F4, File › Quit) goes through the
     /// question "Discard Changes · Cancel · Save" (S-F3, #229): held back here
@@ -901,10 +944,17 @@ impl eframe::App for StokesForgeApp {
         }
     }
 
+    /// The sizes and positions the detached panels reported since the last
+    /// change of their state (#148).
+    fn on_exit(&mut self) {
+        self.flush_panel_layout();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` is an `Arc`: the clone avoids the read borrow of the painted Ui.
         let ctx = ui.ctx().clone();
         self.sync_window_title_and_status(&ctx);
+        self.prepare_panel_windows();
         let published_stamp = snapshot_stamp(self.state.snapshot());
         let mut actions = Vec::new();
         // These queues are applied only after the floating stack is painted.
@@ -969,6 +1019,8 @@ impl eframe::App for StokesForgeApp {
         }
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
+        self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
+        self.sync_panel_layout(&mut actions);
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
@@ -1333,8 +1385,16 @@ impl StokesForgeApp {
             };
             if let Action::PickFile(request) = action {
                 let wake = ctx.clone();
+                // Plain paths: the picker's thread looks them up on the disk.
+                let candidates = self.state.folder_candidates(&request);
                 self.file_picker
-                    .start(request, move || wake.request_repaint());
+                    .start(request, candidates, move || wake.request_repaint());
+                continue;
+            }
+            if let Action::OpenFolder(folder) = action {
+                if let Err(error) = (self.folder_opener)(&folder) {
+                    self.state.report_folder_open_error(&error);
+                }
                 continue;
             }
             let action = self.prepare_new_project_action(ctx, action);

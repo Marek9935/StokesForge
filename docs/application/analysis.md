@@ -99,8 +99,11 @@ The mathematical processing interface is split as follows:
   graph shows the curve; `AppState::graphs_plotting`) creates the calculation **and**
   plots its columns (except residuals, `PanelSpec::push_series_batch` via
   `AddSeriesToGraph`) in a single macro `MacroKind::AnalysisToGraph`;
-  Show / Keep in Results remembers the last choice from one session to the next
-  (`preferences.json`, `analysis_keep_results`); the header of a column not up to
+  Show / Keep in Results is remembered **per operation** from one session to the next
+  (`preferences.json`, `analysis_keep_by_operation`, keyed by `OperationKind::key`,
+  read entry by entry); an operation never run takes the default of Preferences ›
+  General › Analysis (`analysis_keep_results`, `Action::SetAnalysisKeepResults`).
+  Validating a window never changes that default; the header of a column not up to
   date carries the `Icon::Stale` icon (Phosphor `warning`, neutral role) to the left of
   its tinted letter.
 - Analysis from a curve (#210): the right-click of the figure and of the

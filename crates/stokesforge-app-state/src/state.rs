@@ -902,8 +902,31 @@ pub enum Action {
         /// Framed spec to copy.
         spec: Box<PlotSpec>,
     },
-    /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]).
+    /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]); remembered from one
+    /// session to the next (#148).
     SetPngExportScale(f32),
+    /// Sets the default folder of a kind of file dialog (#148); empty: the last
+    /// folder used. Forgets the session's last folder of that kind. Application
+    /// preference: no command, no history, no `.stf`.
+    SetDefaultFolder {
+        kind: crate::default_folders::FolderKind,
+        folder: String,
+    },
+    /// Opens a folder in the system's file manager (#148). Handled by the window
+    /// layer, which creates the folder if it is missing; the state does nothing.
+    OpenFolder(PathBuf),
+    /// Shows or hides the formula syntax help icon (#148).
+    SetShowFormulaHelp(bool),
+    /// Remembers the layout of the three fixed panels: collapsed, detached, size
+    /// and position of their window (#148). Application preference: no command,
+    /// no history, no `.stf`.
+    RememberPanelLayout(crate::panel_layout::PanelLayout),
+    /// New graphs write their numbers with a decimal comma (R9, #148); the
+    /// graphs that exist keep their own setting.
+    SetNewGraphDecimalComma(bool),
+    /// The default of "Keep in Results" for the analyses (M5, #148); the choice
+    /// of an operation already run is remembered apart.
+    SetAnalysisKeepResults(bool),
     /// Remembers the size and position of a kind of dialog when it is
     /// closed (S-F8, #228). Application preference: no command, no
     /// history, no `.stf`.
@@ -2729,11 +2752,11 @@ pub struct AppState {
     /// [`Action::CopyGraphFigure`] and picked up by the window (#149).
     figure_clipboard: Option<Vec<FigureBytes>>,
     copied_objects: Vec<(NodeId, NodeId, bool)>,
-    /// Scale of PNG exports (issue #34), one of
-    /// [`PNG_EXPORT_SCALES`]. Session preference, not part of the project.
-    png_export_scale: f32,
     object_manager_open: bool,
     object_manager_preferences: Preferences,
+    /// Last folder of each kind a file dialog was answered in, this session only
+    /// (#148).
+    folder_memory: crate::default_folders::FolderMemory,
     /// Last message meant for the user.
     status: Option<StatusMessage>,
     /// The last 50 status bar messages (S-M6).
@@ -2818,9 +2841,6 @@ pub struct AppState {
     metadata_view: Option<NodeId>,
     /// Form of the analysis window, if it is open (#181).
     analysis: Option<crate::analysis::AnalysisForm>,
-    /// "Keep in Results": the last choice of the session (M5), reused at
-    /// the next opening.
-    analysis_keep_results: bool,
     /// For each calculation with a very low R², the fingerprint of that R² at the last
     /// snapshot: the box (#288) opens only when it changes.
     low_r2_seen: std::collections::BTreeMap<NodeId, Vec<(usize, u64)>>,
@@ -2927,7 +2947,6 @@ impl AppState {
         preferences: Preferences,
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
-        let keep_results_default = preferences.analysis_keep_results();
         let analysis_recent = preferences.analysis_recent().to_vec();
         // Never deduced from `path`: a file that exists is not a loaded
         // project (#315). `main` sets the mark through [`AppState::mark_loaded`].
@@ -2960,9 +2979,9 @@ impl AppState {
             copied_objects: Vec::new(),
             selected_sheets: std::collections::HashMap::new(),
             path,
-            png_export_scale: DEFAULT_PNG_EXPORT_SCALE,
             object_manager_open: preferences.object_manager_open(),
             object_manager_preferences: preferences,
+            folder_memory: crate::default_folders::FolderMemory::default(),
             status: None,
             status_log: std::collections::VecDeque::new(),
             status_history_open: false,
@@ -2988,7 +3007,6 @@ impl AppState {
             projects_to_open: Vec::new(),
             metadata_view: None,
             analysis: None,
-            analysis_keep_results: keep_results_default,
             low_r2_seen: std::collections::BTreeMap::new(),
             analysis_recent,
             pending_calculation_delete: None,
@@ -4893,7 +4911,10 @@ impl AppState {
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.snapshot.tree.root(),
                 name: None,
-                spec: PlotSpec::empty(""),
+                spec: PlotSpec {
+                    decimal_comma: self.new_graph_decimal_comma(),
+                    ..PlotSpec::empty("")
+                },
             }),
             Action::AddWorkbook => self.add_workbook(),
             Action::AddFolder { parent } => self.add_folder(parent),
@@ -5461,8 +5482,51 @@ impl AppState {
                 }
             }
             Action::SetPngExportScale(scale) => {
-                if PNG_EXPORT_SCALES.contains(&scale) {
-                    self.png_export_scale = scale;
+                if let Err(error) = self.object_manager_preferences.save_png_export_scale(scale) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::RememberPanelLayout(layout) => {
+                if let Err(error) = self.object_manager_preferences.save_panel_layout(layout) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetDefaultFolder { kind, folder } => self.set_default_folder(kind, &folder),
+            Action::OpenFolder(_) => {}
+            Action::SetShowFormulaHelp(show) => {
+                if let Err(error) = self.object_manager_preferences.save_show_formula_help(show) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetNewGraphDecimalComma(comma) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_new_graph_decimal_comma(comma)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
+            Action::SetAnalysisKeepResults(keep) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_analysis_keep_results(keep)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
                 }
             }
             Action::RememberDialogGeometry { kind, geometry } => {
@@ -7139,6 +7203,140 @@ impl AppState {
         self.object_manager_preferences.analysis_low_r2_dialog()
     }
 
+    /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
+    pub fn new_graph_decimal_comma(&self) -> bool {
+        self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// The default folder of a kind of file dialog, as written in the preferences
+    /// (`None`: the last folder used, #148).
+    pub fn default_folder(&self, kind: crate::default_folders::FolderKind) -> Option<&str> {
+        self.object_manager_preferences.default_folder(kind)
+    }
+
+    /// The configuration folder (preferences, saved colors, import templates);
+    /// `None` without a preferences file.
+    pub fn config_folder(&self) -> Option<PathBuf> {
+        self.object_manager_preferences
+            .config_folder()
+            .map(Path::to_path_buf)
+    }
+
+    /// The folder of the recovery copies, which lives outside the configuration
+    /// folder; `None` where the machine's real data must not be touched (tests).
+    pub fn recovery_folder(&self) -> Option<PathBuf> {
+        self.recovery_dir.clone()
+    }
+
+    /// Where the picker of `request` starts, as plain paths: the file dialog's
+    /// thread looks them up on the disk ([`crate::file_picker::FilePicker::start`]).
+    /// Order: the session's last folder of its kind, the default of Preferences,
+    /// then, for Import, the folder of the most recent imported file. Save As of a
+    /// project that already has a file starts in that file's own folder.
+    pub fn folder_candidates(
+        &self,
+        request: &crate::file_picker::PickRequest,
+    ) -> crate::default_folders::FolderCandidates {
+        use crate::default_folders::FolderKind;
+        use crate::file_picker::PickRequest;
+        let kind = request.folder_kind();
+        let default = self
+            .object_manager_preferences
+            .default_folder(kind)
+            .map(PathBuf::from);
+        let mut session_last = self.folder_memory.last(kind).map(Path::to_path_buf);
+        match request {
+            PickRequest::SaveProjectAs { .. } if !self.path.is_empty() => {
+                session_last = Path::new(&self.path).parent().map(Path::to_path_buf);
+            }
+            // Choosing a default is not using one: start in the current default.
+            PickRequest::ChooseDefaultFolder { .. } => session_last = None,
+            _ => {}
+        }
+        let fallback = (kind == FolderKind::Import)
+            .then(|| {
+                self.import_state
+                    .as_ref()
+                    .and_then(|import| import.recent.last_dir())
+                    .map(Path::to_path_buf)
+            })
+            .flatten();
+        crate::default_folders::FolderCandidates {
+            session_last,
+            default,
+            fallback,
+        }
+    }
+
+    /// A file dialog was answered: the folder of the chosen file becomes the
+    /// session's last folder of its kind. A cancelled dialog never gets here, and
+    /// neither do a drop or a recent file (only file dialogs feed the memory).
+    pub fn remember_picked_folder(
+        &mut self,
+        request: &crate::file_picker::PickRequest,
+        picked: &[PathBuf],
+    ) {
+        if !request.feeds_the_folder_memory() {
+            return;
+        }
+        if let Some(folder) = picked
+            .first()
+            .and_then(|file| file.parent())
+            .filter(|folder| !folder.as_os_str().is_empty())
+        {
+            self.folder_memory.record(request.folder_kind(), folder);
+        }
+    }
+
+    /// The answer of Browse… in Preferences › Folders. The folder is stored as
+    /// text: a name that is not valid UTF-8 changes nothing and says so.
+    pub fn apply_default_folder_pick(
+        &mut self,
+        kind: crate::default_folders::FolderKind,
+        folder: &Path,
+    ) {
+        match folder.to_str() {
+            Some(text) => self.set_default_folder(kind, text),
+            None => self.fail(tr!("error-folder-not-utf8")),
+        }
+    }
+
+    fn set_default_folder(&mut self, kind: crate::default_folders::FolderKind, folder: &str) {
+        let wanted = (!folder.is_empty()).then_some(folder);
+        if self.object_manager_preferences.default_folder(kind) == wanted {
+            return;
+        }
+        // The next dialog of this kind opens in the new default.
+        self.folder_memory.forget(kind);
+        if let Err(error) = self
+            .object_manager_preferences
+            .save_default_folder(kind, wanted)
+        {
+            self.fail(tr!(
+                "error-preferences-not-saved",
+                cause = errors::io::error_message(&error)
+            ));
+        }
+    }
+
+    /// The window layer could not open a folder in the file manager.
+    pub fn report_folder_open_error(&mut self, error: &std::io::Error) {
+        self.fail(tr!(
+            "error-folder-open",
+            cause = errors::io::error_message(error)
+        ));
+    }
+
+    /// The remembered layout of the three fixed panels (#148).
+    pub fn panel_layout(&self) -> crate::panel_layout::PanelLayout {
+        self.object_manager_preferences.panel_layout()
+    }
+
+    /// Is the formula syntax help icon shown next to the formula fields (#148)?
+    pub fn show_formula_help(&self) -> bool {
+        self.object_manager_preferences.show_formula_help()
+    }
+
     /// The header rows `(Metadata, x')` of new workbooks.
     pub fn workbook_header_defaults(&self) -> (bool, bool) {
         self.object_manager_preferences.workbook_header_rows()
@@ -7155,7 +7353,7 @@ impl AppState {
 
     /// The scale-up of PNG exports.
     pub fn png_export_scale(&self) -> f32 {
-        self.png_export_scale
+        self.object_manager_preferences.png_export_scale()
     }
 
     /// See [`Action::ExportGraph`]. Measures and composes like the screen:
@@ -7180,7 +7378,7 @@ impl AppState {
     fn write_graph_export(&mut self, path: &std::path::Path, spec: &PlotSpec) {
         let Some(format) = stokesforge_render_svg::ExportFormat::from_path(
             path,
-            self.png_export_scale,
+            self.png_export_scale(),
             self.svg_text_mode(),
         ) else {
             self.fail(tr!(
@@ -7236,7 +7434,7 @@ impl AppState {
                 CopyFormat::Png => (
                     "PNG",
                     ExportFormat::Png {
-                        scale: self.png_export_scale,
+                        scale: self.png_export_scale(),
                     },
                 ),
                 CopyFormat::Pdf => ("PDF", ExportFormat::Pdf),
@@ -9463,8 +9661,11 @@ impl AppState {
             layer.push_series_batch(series);
             panels.push(layer);
         }
+        // The new-graph default of the Preferences rides in the spec of the
+        // creation itself: one command, one history step.
         let spec = PlotSpec {
             panels: Panels::new(panels),
+            decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {
@@ -9698,6 +9899,7 @@ impl AppState {
         panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
+            decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {

@@ -50,6 +50,11 @@ pub(crate) enum TabStripSide {
     Top,
     /// Strip below the content (a workbook's sheets).
     Bottom,
+    /// Vertical strip at the left of the content (the rubrics of the
+    /// Preferences window, #148): tabs stacked, the mark on the right edge of
+    /// the active one, a vertical rule between the strip and the content. It
+    /// has neither arrows nor scrolling: the rubrics are few.
+    Left,
 }
 
 /// Memory from one frame to the next of the sheet tab strip: what is needed
@@ -127,6 +132,9 @@ pub(super) fn tab_strip_with<
     ops: Option<&TabOps<K>>,
     mut on_event: impl FnMut(TabEvent<K>),
 ) -> TabStripOutput {
+    if side == TabStripSide::Left {
+        return tab_strip_vertical(ui, tabs, selected, on_select);
+    }
     let config = TabStripConfig {
         side,
         tabs,
@@ -201,6 +209,7 @@ pub(super) fn tab_strip_with<
     let rule_y = match side {
         TabStripSide::Top => band.bottom() - 0.5,
         TabStripSide::Bottom => band.top() + 0.5,
+        TabStripSide::Left => unreachable!("the vertical strip returned above"),
     };
     ui.painter().set(
         rule,
@@ -229,6 +238,59 @@ pub(super) fn tab_strip_with<
         arrows,
         fully_visible: content.fully_visible,
     }
+}
+
+/// The vertical strip ([`TabStripSide::Left`]): one column of flat tabs of the
+/// same width, the active one marked on its right edge, a vertical rule
+/// along the column. No gestures on the tabs (rename, add), no overflow.
+fn tab_strip_vertical<K: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    tabs: &[(K, String)],
+    selected: K,
+    mut on_select: impl FnMut(K),
+) -> TabStripOutput {
+    let mut picked = None;
+    // One width for every tab, that of the widest bold label.
+    let width = tabs
+        .iter()
+        .map(|(_, name)| tab_label_width(ui, name))
+        .fold(0.0, f32::max);
+    let rule = ui.painter().add(egui::Shape::Noop);
+    let column = ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        for (id, name) in tabs {
+            let response = tab_strip_label(ui, name, *id == selected, TabStripSide::Left, width);
+            if response.clicked() {
+                picked = Some(*id);
+            }
+        }
+    });
+    let column = column.response.rect;
+    ui.painter().set(
+        rule,
+        egui::Shape::vline(
+            column.right() - 0.5,
+            column.y_range(),
+            egui::Stroke::new(1.0, theme::tab_rule_color()),
+        ),
+    );
+    if let Some(id) = picked {
+        on_select(id);
+    }
+    TabStripOutput::default()
+}
+
+/// Width of a tab's label when bold, the reserved one (see [`tab_strip_label`]).
+fn tab_label_width(ui: &egui::Ui, name: &str) -> f32 {
+    egui::WidgetText::from(theme::bold(name).size(12.0))
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+        .size()
+        .x
 }
 
 // Data and requests of a frame, without Ui or an id of its own: the
@@ -451,7 +513,7 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     if renaming {
         tab_strip_rename(ui, id, name, config.tabs, requests)
     } else {
-        let response = tab_strip_label(ui, name, config.selected == id, config.side);
+        let response = tab_strip_label(ui, name, config.selected == id, config.side, 0.0);
         response.context_menu(|ui| tab_strip_tab_menu(ui, id, config, requests));
         if response.clicked() {
             requests.select = Some(id);
@@ -465,12 +527,14 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
 
 /// A flat tab (#169): label without a frame, written in the accent color if
 /// active, with a mark on the content side — accent for the active one, grey
-/// for the hovered one.
+/// for the hovered one. `min_text_width`: width to reserve at least for the
+/// label (the vertical strip gives its tabs one width), 0 otherwise.
 fn tab_strip_label(
     ui: &mut egui::Ui,
     name: &str,
     selected: bool,
     side: TabStripSide,
+    min_text_width: f32,
 ) -> egui::Response {
     // The width is that of the **bold** label for every tab: changing the
     // weight on selection then shifts no neighbor.
@@ -482,7 +546,10 @@ fn tab_strip_label(
             egui::TextStyle::Button,
         )
     };
-    let reserved = galley_of(ui, theme::bold(name)).size().x;
+    let reserved = galley_of(ui, theme::bold(name))
+        .size()
+        .x
+        .max(min_text_width);
     let size = egui::vec2(reserved + 2.0 * TAB_PADDING_X, TAB_STRIP_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let response = super::cursors::clickable(response);
@@ -508,6 +575,10 @@ fn tab_strip_label(
                     rect.min,
                     egui::pos2(rect.right(), rect.top() + TAB_MARK),
                 ),
+                TabStripSide::Left => egui::Rect::from_min_max(
+                    egui::pos2(rect.right() - TAB_MARK, rect.top()),
+                    rect.max,
+                ),
             };
             ui.painter().rect_filled(mark_rect, 0.0, color);
         }
@@ -526,7 +597,15 @@ fn tab_strip_label(
                 egui::RichText::new(name)
             },
         );
-        let text_pos = rect.center() - galley.size() / 2.0;
+        let text_pos = if side == TabStripSide::Left {
+            // Rubrics are read as a list: aligned on the left.
+            egui::pos2(
+                rect.left() + TAB_PADDING_X,
+                rect.center().y - galley.size().y / 2.0,
+            )
+        } else {
+            rect.center() - galley.size() / 2.0
+        };
         ui.painter().galley(text_pos, galley, text_color);
         if response.has_focus() {
             ui.painter().rect_stroke(
@@ -790,7 +869,7 @@ mod tests {
     /// selection background; a grey rule runs under (or over) the whole strip.
     #[test]
     fn the_active_tab_is_underlined_on_the_content_side() {
-        for side in [TabStripSide::Top, TabStripSide::Bottom] {
+        for side in [TabStripSide::Top, TabStripSide::Bottom, TabStripSide::Left] {
             let context = context();
             let tabs: Vec<(u32, String)> = vec![(0, "Graph".into()), (1, "Axes".into())];
             let run = || {
@@ -834,7 +913,15 @@ mod tests {
             let marks = rects(theme::accent());
             assert_eq!(marks.len(), 1, "{side:?}: a single mark, the active one's");
             let mark = marks[0];
-            assert_eq!(mark.height(), TAB_MARK);
+            let vertical = side == TabStripSide::Left;
+            assert_eq!(
+                if vertical {
+                    mark.width()
+                } else {
+                    mark.height()
+                },
+                TAB_MARK
+            );
             let (active, active_color) = text("Axes");
             let (inactive, inactive_color) = text("Graph");
             assert_eq!(active_color, theme::accent());
@@ -848,12 +935,22 @@ mod tests {
             assert!(bold("Axes"), "{side:?}: the active tab is bold");
             assert!(!bold("Graph"), "{side:?}: witness, the inactive one is not");
             assert_ne!(inactive_color, theme::accent(), "{side:?}: witness");
-            assert!(mark.x_range().contains(active.center().x), "{side:?}");
-            assert!(!mark.x_range().contains(inactive.center().x), "{side:?}");
+            if vertical {
+                // Stacked tabs: the mark faces the active label only.
+                assert!(mark.y_range().contains(active.center().y), "{side:?}");
+                assert!(!mark.y_range().contains(inactive.center().y), "{side:?}");
+            } else {
+                assert!(mark.x_range().contains(active.center().x), "{side:?}");
+                assert!(!mark.x_range().contains(inactive.center().x), "{side:?}");
+            }
             match side {
                 TabStripSide::Top => assert!(mark.top() >= active.bottom(), "{mark:?} {active:?}"),
                 TabStripSide::Bottom => {
                     assert!(mark.bottom() <= active.top(), "{mark:?} {active:?}")
+                }
+                // On the right edge: the mark is beyond the label.
+                TabStripSide::Left => {
+                    assert!(mark.left() >= active.right(), "{mark:?} {active:?}")
                 }
             }
             let button_fill = context.global_style().visuals.selection.bg_fill;
@@ -873,13 +970,23 @@ mod tests {
                     _ => None,
                 })
                 .expect("the strip rule is painted");
-            assert!(
-                rule[1].x - rule[0].x >= 390.0,
-                "the rule runs along the strip"
-            );
+            if vertical {
+                assert_eq!(rule[0].x, rule[1].x, "the rule is vertical");
+                assert!(
+                    rule[1].y - rule[0].y >= 2.0 * TAB_STRIP_HEIGHT,
+                    "the rule runs along the whole column"
+                );
+            } else {
+                assert!(
+                    rule[1].x - rule[0].x >= 390.0,
+                    "the rule runs along the strip"
+                );
+            }
             match side {
                 TabStripSide::Top => assert!(rule[0].y >= mark.top()),
                 TabStripSide::Bottom => assert!(rule[0].y <= mark.bottom()),
+                // The rule lies against the mark, on the content side.
+                TabStripSide::Left => assert!(rule[0].x >= mark.left()),
             }
         }
     }

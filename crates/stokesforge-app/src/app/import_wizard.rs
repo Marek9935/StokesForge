@@ -545,11 +545,10 @@ fn import_file_choices(rows: &mut Form<'_>, state: &mut AppState, actions: &mut 
             .on_hover_text(tr!("import-files-add", "hint"))
             .clicked()
         {
-            // The folder of the last imported file.
-            let directory = state
-                .import_state()
-                .and_then(|import| import.recent.last_dir().map(std::path::Path::to_path_buf));
-            actions.push(Action::PickFile(PickRequest::AddImportFiles { directory }));
+            // Where the dialog starts (the session's last import folder, the default
+            // of Preferences, the folder of the last imported file) is decided by
+            // `AppState::folder_candidates`.
+            actions.push(Action::PickFile(PickRequest::AddImportFiles));
         }
         ui.weak(tr!("import-files-drop"));
     });
