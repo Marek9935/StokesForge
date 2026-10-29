@@ -28,6 +28,16 @@ use stokesforge_plot::TextTarget;
 /// [`AXIS_DESC_SIZE`], line spacing included.
 pub const AXIS_TITLE_BAND: f64 = AXIS_DESC_SIZE * 1.5;
 
+/// Width, **in points on screen**, of the strip inward from the edge of the
+/// plot area that picks the axis line (#385). The caller converts it into
+/// figure pixels (`4 / display_scale`) so that it stays the same on screen
+/// whatever the display density or the enlargement of the figure.
+pub const AXIS_LINE_TOLERANCE_POINTS: f64 = 4.0;
+
+/// Fraction of the size of the plot area that the strip never exceeds, so
+/// that a tiny plot keeps an interior.
+const AXIS_LINE_MAX_FRACTION: f64 = 0.25;
+
 /// An axis of a panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AxisSide {
@@ -72,6 +82,19 @@ pub enum PlotComponent {
 /// [`DrawnPanel::pixel_origin`]), or `None` if it only points at the
 /// background (margins, space between panels).
 pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
+    component_at_with_tolerance(plot, x, y, AXIS_LINE_TOLERANCE_POINTS)
+}
+
+/// Same as [`component_at`], with the width of the axis-line strip given in
+/// **figure pixels** (#385): the caller passes
+/// `AXIS_LINE_TOLERANCE_POINTS / display_scale`. It is clamped to a quarter
+/// of the plot area; a negative or non-finite value means no strip.
+pub fn component_at_with_tolerance(
+    plot: &DrawnPlot,
+    x: f64,
+    y: f64,
+    line_tolerance: f64,
+) -> Option<PlotComponent> {
     // The last drawn is on top: search from the last to the first.
     for (panel, drawn) in plot.panels.iter().enumerate().rev() {
         if let Some(annotation) = drawn.annotations.iter().rev().find(|a| a.contains(x, y)) {
@@ -136,6 +159,13 @@ pub fn component_at(plot: &DrawnPlot, x: f64, y: f64) -> Option<PlotComponent> {
         .enumerate()
         .find_map(|(index, panel)| axis_component_at(index, panel, x, y))
         .or_else(|| {
+            // Then the axis lines: a strip inside the plot area (#385).
+            plot.panels
+                .iter()
+                .enumerate()
+                .find_map(|(index, panel)| axis_line_at(index, panel, x, y, line_tolerance))
+        })
+        .or_else(|| {
             plot.panels.iter().enumerate().find_map(|(index, panel)| {
                 let left = panel.pixel_origin.0 as f64;
                 let top = panel.pixel_origin.1 as f64;
@@ -178,6 +208,59 @@ fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option
             (aligned && depth > offset && depth <= offset + area.size as f64)
                 .then(|| axis_part(index, side, depth - offset, area))
         })
+}
+
+/// The axis whose **line** (edge of the plot area) is within `tolerance`
+/// figure pixels inward of `(x, y)` (#385). No strip for an edge without an
+/// axis area (`size == 0`) nor for a stacked band (`offset > 0`, #168). In a
+/// corner the nearest edge wins, a tie going to the first candidate.
+fn axis_line_at(
+    index: usize,
+    panel: &DrawnPanel,
+    x: f64,
+    y: f64,
+    tolerance: f64,
+) -> Option<PlotComponent> {
+    let left = panel.pixel_origin.0 as f64;
+    let top = panel.pixel_origin.1 as f64;
+    let width = panel.pixel_size.0 as f64;
+    let height = panel.pixel_size.1 as f64;
+    let (right, bottom) = (left + width, top + height);
+    let within_x = (left..=right).contains(&x);
+    let within_y = (top..=bottom).contains(&y);
+    let areas = &panel.axis_areas;
+    let right_side = if panel.overlay.is_some() {
+        AxisSide::Left
+    } else {
+        AxisSide::Right
+    };
+    let tolerance = if tolerance.is_finite() {
+        tolerance.max(0.0)
+    } else {
+        0.0
+    };
+    let horizontal = tolerance.min(height * AXIS_LINE_MAX_FRACTION);
+    let vertical = tolerance.min(width * AXIS_LINE_MAX_FRACTION);
+    // Distance to the edge, inward, and the strip width of that edge.
+    let candidates = [
+        (
+            AxisSide::Bottom,
+            within_x,
+            bottom - y,
+            horizontal,
+            areas.bottom,
+        ),
+        (AxisSide::Bottom, within_x, y - top, horizontal, areas.top),
+        (AxisSide::Left, within_y, x - left, vertical, areas.left),
+        (right_side, within_y, right - x, vertical, areas.right),
+    ];
+    candidates
+        .into_iter()
+        .filter(|(_, aligned, inward, strip, area)| {
+            *aligned && area.size > 0 && area.offset == 0 && (0.0..=*strip).contains(inward)
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(side, ..)| PlotComponent::Axis { panel: index, side })
 }
 
 /// Axis or axis title, depending on the click depth in the area.
@@ -464,5 +547,155 @@ mod tests {
         let mut plot = figure();
         plot.title_height = 0;
         assert_eq!(component_at(&plot, 240.0, 20.0), None);
+    }
+
+    fn axis(panel: usize, side: AxisSide) -> Option<PlotComponent> {
+        Some(PlotComponent::Axis { panel, side })
+    }
+
+    /// #385: the line of an axis (edge of the plot area) picks the axis,
+    /// within a strip inward from the edge.
+    #[test]
+    fn the_axis_line_is_a_strip_inward_from_the_edge() {
+        let plot = figure();
+        let area = Some(PlotComponent::PlotArea { panel: 0 });
+        assert_eq!(
+            component_at(&plot, 240.0, 280.0),
+            axis(0, AxisSide::Bottom),
+            "the edge pixel"
+        );
+        assert_eq!(component_at(&plot, 240.0, 277.0), axis(0, AxisSide::Bottom));
+        assert_eq!(component_at(&plot, 83.0, 150.0), axis(0, AxisSide::Left));
+        assert_eq!(component_at(&plot, 80.0, 150.0), axis(0, AxisSide::Left));
+        assert_eq!(component_at(&plot, 240.0, 276.0), axis(0, AxisSide::Bottom));
+        assert_eq!(component_at(&plot, 240.0, 275.5), area, "beyond the strip");
+        assert_eq!(component_at(&plot, 240.0, 274.0), area);
+        assert_eq!(component_at(&plot, 85.0, 150.0), area);
+    }
+
+    /// #385: no strip for an edge without an axis area, nor for a hidden axis.
+    #[test]
+    fn no_strip_without_an_axis_area() {
+        let mut plot = figure();
+        let area = Some(PlotComponent::PlotArea { panel: 0 });
+        // No top / right axis in the fixture.
+        assert_eq!(component_at(&plot, 240.0, 62.0), area);
+        assert_eq!(component_at(&plot, 438.0, 150.0), area);
+        // Hidden bottom axis: its area has no size.
+        plot.panels[0].axis_areas.bottom = AxisArea::default();
+        assert_eq!(component_at(&plot, 240.0, 277.0), area);
+    }
+
+    /// #385: in a corner, the nearest edge wins.
+    #[test]
+    fn the_nearest_edge_wins_in_a_corner() {
+        let plot = figure();
+        assert_eq!(component_at(&plot, 81.0, 277.0), axis(0, AxisSide::Left));
+        assert_eq!(component_at(&plot, 83.0, 279.0), axis(0, AxisSide::Bottom));
+        // Equidistant: the first candidate (bottom).
+        assert_eq!(component_at(&plot, 82.0, 278.0), axis(0, AxisSide::Bottom));
+        // Corner outside the plot area: nothing.
+        assert_eq!(component_at(&plot, 79.0, 281.0), None);
+    }
+
+    /// #385: the overlaid layer keeps its spec sides on its own edges.
+    #[test]
+    fn an_overlay_strip_maps_to_its_spec_sides() {
+        let mut plot = figure();
+        let mut second = plot.panels[0].clone();
+        second.index = 1;
+        second.overlay = Some(stokesforge_plot::OverlaySpec::SECOND_AXES);
+        let shown = AxisArea {
+            size: 30,
+            titled: false,
+            offset: 0,
+        };
+        second.axis_areas = AxisAreas {
+            bottom: AxisArea::default(),
+            left: AxisArea::default(),
+            top: shown,
+            right: shown,
+        };
+        plot.panels.push(second);
+        assert_eq!(component_at(&plot, 240.0, 62.0), axis(1, AxisSide::Bottom));
+        assert_eq!(component_at(&plot, 438.0, 150.0), axis(1, AxisSide::Left));
+        // The first layer keeps its own edges.
+        assert_eq!(component_at(&plot, 240.0, 278.0), axis(0, AxisSide::Bottom));
+    }
+
+    /// #385 / #168: a stacked band (offset > 0) has no strip, and the strip
+    /// of the nearest layer never goes to the stacked one.
+    #[test]
+    fn a_stacked_band_has_no_strip() {
+        let mut plot = figure();
+        let mut second = plot.panels[0].clone();
+        second.index = 1;
+        second.overlay = Some(stokesforge_plot::OverlaySpec::SECOND_AXES);
+        plot.panels[0].axis_areas.top = AxisArea {
+            size: 8,
+            titled: false,
+            offset: 0,
+        };
+        second.axis_areas.top = AxisArea {
+            size: 8,
+            titled: false,
+            offset: 8,
+        };
+        second.axis_areas.bottom = AxisArea::default();
+        second.axis_areas.left = AxisArea::default();
+        plot.panels.push(second);
+        assert_eq!(component_at(&plot, 240.0, 62.0), axis(0, AxisSide::Bottom));
+        // Only the stacked layer has a top axis: no strip at all.
+        plot.panels[0].axis_areas.top = AxisArea::default();
+        assert_eq!(
+            component_at(&plot, 240.0, 62.0),
+            Some(PlotComponent::PlotArea { panel: 0 })
+        );
+    }
+
+    /// #385: the strip never eats a tiny plot, and a degenerate one does not
+    /// panic (invariant 10).
+    #[test]
+    fn a_tiny_plot_keeps_an_interior() {
+        let mut plot = figure();
+        plot.panels[0].pixel_size = (8, 8);
+        plot.panels[0].axis_areas.top = AxisArea {
+            size: 10,
+            titled: false,
+            offset: 0,
+        };
+        // Clamped to 2 px: the centre (4 px from every edge) stays interior.
+        assert_eq!(
+            component_at(&plot, 84.0, 64.0),
+            Some(PlotComponent::PlotArea { panel: 0 })
+        );
+        assert_eq!(component_at(&plot, 84.0, 66.0), axis(0, AxisSide::Bottom));
+        plot.panels[0].pixel_size = (0, 0);
+        let _ = component_at(&plot, 80.0, 60.0);
+        let _ = component_at_with_tolerance(&plot, 80.0, 60.0, f64::NAN);
+    }
+
+    /// #385: the tolerance is in figure pixels given by the caller: a figure
+    /// shown at 2x gets half the strip, so it stays 4 points on screen.
+    #[test]
+    fn the_tolerance_is_given_by_the_caller() {
+        let plot = figure();
+        let area = Some(PlotComponent::PlotArea { panel: 0 });
+        let at = |y, tolerance| component_at_with_tolerance(&plot, 240.0, y, tolerance);
+        assert_eq!(
+            at(277.0, AXIS_LINE_TOLERANCE_POINTS),
+            axis(0, AxisSide::Bottom)
+        );
+        assert_eq!(at(277.0, AXIS_LINE_TOLERANCE_POINTS / 2.0), area);
+        assert_eq!(
+            at(279.0, AXIS_LINE_TOLERANCE_POINTS / 2.0),
+            axis(0, AxisSide::Bottom)
+        );
+        assert_eq!(
+            at(272.0, AXIS_LINE_TOLERANCE_POINTS * 2.0),
+            axis(0, AxisSide::Bottom)
+        );
+        assert_eq!(at(280.0, 0.0), axis(0, AxisSide::Bottom), "edge pixel");
+        assert_eq!(at(279.0, 0.0), area);
     }
 }

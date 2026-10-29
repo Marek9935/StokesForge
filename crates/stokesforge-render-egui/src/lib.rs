@@ -129,7 +129,8 @@ pub use stokesforge_render::{
 // (see `stokesforge_render::interact`, generic over the backend), this crate
 // only consumes it with egui types.
 pub use stokesforge_render::{
-    component_at, nearest_on_curve, AxisSide, Gesture, PanelTransform, PlotComponent,
+    component_at_with_tolerance, nearest_on_curve, AxisSide, Gesture, PanelTransform,
+    PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
 };
 pub use typst_screen::{formula_label, FormulaTexture, TypstScreen};
 // Typst on the text model side (compilation, escaping): the interface needs
@@ -1285,7 +1286,9 @@ impl GraphView {
     /// imperceptible one-frame lag as [`Self::panel_at`].
     pub fn component_at(&self, pos: Pos2) -> Option<PlotComponent> {
         let pos = self.figure_position(pos)?;
-        component_at(self.last.as_ref()?, pos.x as f64, pos.y as f64)
+        // The axis-line strip keeps the same width on screen (#385).
+        let tolerance = AXIS_LINE_TOLERANCE_POINTS / self.display_scale().unwrap_or(1.0) as f64;
+        component_at_with_tolerance(self.last.as_ref()?, pos.x as f64, pos.y as f64, tolerance)
     }
 
     /// The point designated by the cursor at the last painted frame, if
@@ -1674,14 +1677,16 @@ impl GraphView {
                 _ => {
                     let shape = pointer.and_then(|pos| self.shape_at(pos));
                     let series = pointer.and_then(|pos| self.series_at(pos, spec));
+                    // The axis beats the curve (#385): on its line a curve
+                    // glued to the edge must not take the gesture.
                     if let Some(shape) = shape {
                         self.events.push(GraphEvent::OpenShapeProperties(shape));
-                    } else if let Some(series) = series {
-                        self.selected_series = Some(series);
-                        self.events.push(GraphEvent::OpenSeriesProperties(series));
                     } else if let Some(PlotComponent::Axis { panel, side }) = component {
                         self.events
                             .push(GraphEvent::OpenAxisProperties { panel, side });
+                    } else if let Some(series) = series {
+                        self.selected_series = Some(series);
+                        self.events.push(GraphEvent::OpenSeriesProperties(series));
                     } else {
                         self.view.reset();
                     }

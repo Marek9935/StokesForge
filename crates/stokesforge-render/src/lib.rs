@@ -120,7 +120,9 @@ impl std::error::Error for RenderError {}
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
-pub use hit::{component_at, AxisSide, PlotComponent};
+pub use hit::{
+    component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
+};
 pub use interact::{
     axis_frame, fit_range, nearest_on_curve, snap_to_curve, snap_to_curve_zone, Gesture,
     PanelTransform, SnapZone,

@@ -33,7 +33,7 @@ The pan is decided when you press the button: if you release <kbd>Ctrl</kbd> dur
 
 ## Axes
 
-An axis is the strip of ticks and numbers just outside the plot area.
+An axis is the strip of ticks and numbers just outside the plot area, together with its line (the edge of the plot area). The gestures below work on both. On the line, the axis takes the gesture even if a curve runs along the edge.
 
 | Gesture | Where | What it does |
 |---|---|---|

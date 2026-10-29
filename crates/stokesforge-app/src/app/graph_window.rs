@@ -1375,7 +1375,9 @@ pub(super) mod tests {
     /// The row in the grid differs here from the layer index.
     #[test]
     fn axis_gestures_open_the_right_layer() {
-        for context_menu in [false, true] {
+        // `line`: the pointer is on the axis line, 2 points inside the edge
+        // of the plot area (#385), instead of on its numbers.
+        for (context_menu, line) in [(false, false), (true, false), (false, true), (true, true)] {
             let (session, graph) = plotted_graph();
             let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
             let mut spec =
@@ -1406,9 +1408,10 @@ pub(super) mod tests {
             let drawn = &view.last_drawn().unwrap().panels[1];
             let figure = view.response().unwrap().rect;
             let scale = figure.width() / DEFAULT_FIGURE_SIZE.0 as f32;
+            let dx = if line { 2.0 } else { -5.0 * scale };
             let pos = figure.min
                 + egui::vec2(
-                    (drawn.pixel_origin.0 as f32 - 5.0) * scale,
+                    drawn.pixel_origin.0 as f32 * scale + dx,
                     (drawn.pixel_origin.1 as f32 + drawn.pixel_size.1 as f32 / 2.0) * scale,
                 );
             assert_eq!(

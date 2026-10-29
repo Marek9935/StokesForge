@@ -402,6 +402,26 @@ fn a_pixel_picks_the_graph_component_underneath() {
         component_at(&drawn, cx, cy),
         Some(PlotComponent::PlotArea { panel: 0 })
     );
+    // #385: the axis lines, inside the edge of the plot area.
+    assert_eq!(
+        component_at(&drawn, cx, oy + h - 1.0),
+        Some(PlotComponent::Axis {
+            panel: 0,
+            side: AxisSide::Bottom
+        })
+    );
+    assert_eq!(
+        component_at(&drawn, ox + 1.0, cy),
+        Some(PlotComponent::Axis {
+            panel: 0,
+            side: AxisSide::Left
+        })
+    );
+    assert_eq!(
+        component_at(&drawn, cx, oy + h - 10.0),
+        Some(PlotComponent::PlotArea { panel: 0 }),
+        "away from the edge"
+    );
     assert_eq!(
         component_at(&drawn, cx, oy + h + 4.0),
         Some(PlotComponent::Axis {
