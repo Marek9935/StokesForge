@@ -98,7 +98,8 @@ pages:
     - apk add --no-cache curl tar
     - VERSION="${CI_COMMIT_TAG#v}"
     - NOM="StokesForge-${VERSION}-manual"
-    - curl --fail --silent --show-error --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --output "${NOM}.tar.gz" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/stokesforge/${VERSION}/${NOM}.tar.gz"
+    # Quoted: the `: ` of the header would make YAML read a mapping.
+    - 'curl --fail --silent --show-error --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --output "${NOM}.tar.gz" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/stokesforge/${VERSION}/${NOM}.tar.gz"'
     - tar -xzf "${NOM}.tar.gz"
     - mv "${NOM}" public
   artifacts:
