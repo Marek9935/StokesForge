@@ -69,7 +69,7 @@ through View, collapse distinct from hiding, no internal floating. The
 `panel_header` frame (`app/window_chrome.rs`) shares the icon cells of
 content windows with a compact font. The horizontal order of the buttons
 depends on the side: collapse toward the workspace, detach toward the outside.
-The expanded console keeps Collapse then Detach side by side on the left (#142).
+The expanded console keeps Collapse then Detach side by side on the left (#142). The collapsed and detached state of the three panels and the size and position of their window are remembered between launches (#148: `app/panel_memory.rs`, pure rules in `stokesforge-app-state/src/panel_layout.rs`); a viewport builder takes the saved size or position only when the window opens, never a per-frame value.
 Collapsed: thickness `ICON_SIZE` with no extra margin, only Expand is
 visible, with no target or room reserved for Detach; title centered in the remaining
 space (vertical for PM/OM). Attached and expanded: Detach and Collapse;

@@ -50,6 +50,12 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Panels (#148): StokesForge now remembers, for the Project Manager, the Object
+  Manager and the Script Console, whether each is collapsed or detached and the
+  size and position of its window. At launch, a detached panel comes back in its
+  window only if the computer has the same number of screens as when it was
+  saved, otherwise it comes back attached. On Wayland the position cannot be
+  read or set: the window comes back at its size and the system places it.
 - Preferences (#148): **Show formula syntax help** (Display › Interface) hides the
   help icon of the formula fields, and **Decimal comma on tick labels** (Display ›
   New) makes new graphs write 1,5; existing graphs and graphs made by scripts do

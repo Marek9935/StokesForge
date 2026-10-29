@@ -41,6 +41,7 @@ pub mod i18n;
 pub mod object_drag;
 pub mod object_format;
 pub mod object_manager;
+pub mod panel_layout;
 pub mod preferences;
 pub mod quantities;
 pub mod r_squared;

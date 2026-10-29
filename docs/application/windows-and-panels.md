@@ -266,8 +266,30 @@ centered with no extra panel margin. The expanded panel stays resizable
 (width of PM/OM, height of the console). The collapse bands have distinct
 egui identifiers: their size does not overwrite the expanded dimension.
 Collapsing leaves the panel visible; no menu hides it. The opening of the
-OM is a preference; the collapse of the PM and of the console is local to the
-application. The internal floating mode of the OM is removed.
+OM is a preference; the collapse of the three panels is remembered too (see
+below). The internal floating mode of the OM is removed.
+
+**Remembered layout (#148).** The collapsed state of the three panels, whether
+each is detached, and the size and position of its window outlive the session
+(`preferences.json` › `panels`, never the `.stf`, nothing visible in
+Preferences). `app/panel_memory.rs` does the shell's part, the pure rules are
+`stokesforge_app_state::panel_layout` (`startup_panels`). At startup
+(`StokesForgeApp::apply_startup_panels`, once, before the first frame) the collapsed
+state is always restored; a detached panel is re-detached only if the machine has
+the **same number of screens** as at the save, at the saved size and, where the
+system can place a window (X11, Windows, macOS), at the saved position. Wayland
+(winit) can neither read nor set a position: the key is then absent and the
+window opens at its size, the compositor placing it. A different or unknown
+number of screens, or an unusable size, re-attaches the panel (the collapsed state is
+kept). While running, `sync_panel_layout` compares the collapsed and detached flags
+after each frame and sends `Action::RememberPanelLayout` on any change, whatever
+gesture caused it (header buttons, OS close, a script run expanding the console);
+the detached windows report their live geometry (`LiveWindow`), flushed at exit
+(`eframe::App::on_exit`). The builders of the viewports take the saved size and
+position only when the window opens (constant while it stays detached: a value
+renewed on each frame would fight the user's drag), and a manual Detach reuses
+them. Not touched: the meaning of `object_manager_open`, the console expanding on
+run, the viewport identifiers, the OS close re-attaching.
 
 Detach opens a real system window without native decoration, with the
 same custom frame and a single Reattach button. Its title allows dragging,

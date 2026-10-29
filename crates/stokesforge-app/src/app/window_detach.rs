@@ -30,8 +30,10 @@
 //! requested by the application — the same caveat already documented in
 //! `docs/application/theme-i18n-system.md` for `rfd`; this task explicitly asks for
 //! no position (it lets the compositor place the window), so it does not
-//! suffer from it directly, but the limit is worth knowing before one day
-//! adding a remembered position.
+//! suffer from it directly. Since #148 the size and position of the three
+//! panels' windows are remembered (`panel_memory.rs`): the position is kept only
+//! where winit can read it, and the viewport builders take the saved values
+//! only when the window opens (`panel_viewport`).
 //!
 //! **`show_viewport_deferred`, not `_immediate`**: observed
 //! interactively (Fedora/GNOME/Wayland, Mutter), the window detached through
@@ -154,6 +156,7 @@ use stokesforge_core::NodeId;
 use stokesforge_render_egui::GraphView;
 use stokesforge_session::{Snapshot, WindowGeometry};
 
+use stokesforge_app_state::panel_layout::{DetachAt, PanelKind};
 use stokesforge_app_state::state::{Action, AppState, ProjectTreeNode};
 use stokesforge_app_state::tr;
 
@@ -398,6 +401,27 @@ pub(super) struct DetachedTabRequests {
     pub(super) close: bool,
 }
 
+/// The builder of the OS window of a detached panel: undecorated, `default_size`
+/// unless the saved layout says where it opens (#148). The builder is the same on
+/// every frame of the detached session: egui sends a size or position command
+/// when the builder changes, which would fight the user's drag.
+pub(super) fn panel_viewport(
+    title: String,
+    default_size: [f32; 2],
+    min_size: [f32; 2],
+    init: Option<DetachAt>,
+) -> egui::ViewportBuilder {
+    let builder = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_decorations(false)
+        .with_inner_size(init.map_or(default_size, |at| at.size))
+        .with_min_inner_size(min_size);
+    match init.and_then(|at| at.position) {
+        Some(position) => builder.with_position(position),
+        None => builder,
+    }
+}
+
 impl StokesForgeApp {
     pub(super) fn drain_object_manager(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         let Some(view) = &self.om_view else {
@@ -443,40 +467,40 @@ impl StokesForgeApp {
         let requests = Arc::clone(&view.requests);
         let root = ctx.clone();
         let id = egui::ViewportId::from_hash_of("stokesforge_object_manager_window");
-        ctx.show_viewport_deferred(
-            id,
-            egui::ViewportBuilder::default()
-                .with_title(tr!("action-object-manager"))
-                .with_decorations(false)
-                .with_inner_size([330.0, 480.0])
-                .with_min_inner_size([220.0, 140.0]),
-            move |ui, _class| {
-                let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
-                let mut actions = Vec::new();
-                let mut gestures = Vec::new();
-                let reattach = detached_panel_contents(ui, &tr!("action-object-manager"), |ui| {
-                    gestures = object_manager_contents(
-                        ui,
-                        &model.tree,
-                        model.model.as_ref(),
-                        model.spec.as_ref(),
-                        model.settings,
-                        &mut actions,
-                    );
-                });
-                if reattach || !actions.is_empty() || !gestures.is_empty() {
-                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
-                    requests.reattach |= reattach;
-                    requests.actions.append(&mut actions);
-                    if let Some(graph) = model.graph {
-                        requests
-                            .gestures
-                            .extend(gestures.into_iter().map(|gesture| (graph, gesture)));
-                    }
-                    root.request_repaint_of(egui::ViewportId::ROOT);
-                }
-            },
+        let live = self.live_window(PanelKind::Object);
+        let builder = panel_viewport(
+            tr!("action-object-manager"),
+            [330.0, 480.0],
+            [220.0, 140.0],
+            self.detach_init(PanelKind::Object),
         );
+        ctx.show_viewport_deferred(id, builder, move |ui, _class| {
+            live.report(ui.ctx());
+            let model = model.lock().unwrap_or_else(|err| err.into_inner()).clone();
+            let mut actions = Vec::new();
+            let mut gestures = Vec::new();
+            let reattach = detached_panel_contents(ui, &tr!("action-object-manager"), |ui| {
+                gestures = object_manager_contents(
+                    ui,
+                    &model.tree,
+                    model.model.as_ref(),
+                    model.spec.as_ref(),
+                    model.settings,
+                    &mut actions,
+                );
+            });
+            if reattach || !actions.is_empty() || !gestures.is_empty() {
+                let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                requests.reattach |= reattach;
+                requests.actions.append(&mut actions);
+                if let Some(graph) = model.graph {
+                    requests
+                        .gestures
+                        .extend(gestures.into_iter().map(|gesture| (graph, gesture)));
+                }
+                root.request_repaint_of(egui::ViewportId::ROOT);
+            }
+        });
         if changed {
             ctx.request_repaint_of(id);
         }
@@ -536,40 +560,39 @@ impl StokesForgeApp {
         let requests = Arc::clone(&view.requests);
         let root = ctx.clone();
         let id = egui::ViewportId::from_hash_of("stokesforge_script_window");
-        ctx.show_viewport_deferred(
-            id,
-            egui::ViewportBuilder::default()
-                .with_title(tr!("script-title"))
-                .with_decorations(false)
-                .with_inner_size([700.0, 440.0])
-                .with_min_inner_size([300.0, 220.0]),
-            move |ui, _class| {
-                let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
-                let source = model.source.clone();
-                let mut actions = Vec::new();
-                let ctx = ui.ctx().clone();
-                if ctx.input_mut(|input| {
-                    input.consume_shortcut(&super::shortcuts::SHORTCUT_RUN_SCRIPT)
-                }) {
-                    actions.push(Action::RunScript);
-                }
-                let reattach = detached_panel_contents(ui, &tr!("script-title"), |ui| {
-                    if !model.available {
-                        ui.weak(tr!("script-unavailable"));
-                    }
-                    script_model_contents(ui, &ctx, &mut model, &mut actions);
-                });
-                if source != model.source || reattach || !actions.is_empty() {
-                    let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
-                    if source != model.source {
-                        requests.source = Some(model.source.clone());
-                    }
-                    requests.reattach |= reattach;
-                    requests.actions.append(&mut actions);
-                    root.request_repaint_of(egui::ViewportId::ROOT);
-                }
-            },
+        let live = self.live_window(PanelKind::Script);
+        let builder = panel_viewport(
+            tr!("script-title"),
+            [700.0, 440.0],
+            [300.0, 220.0],
+            self.detach_init(PanelKind::Script),
         );
+        ctx.show_viewport_deferred(id, builder, move |ui, _class| {
+            live.report(ui.ctx());
+            let mut model = model.lock().unwrap_or_else(|err| err.into_inner());
+            let source = model.source.clone();
+            let mut actions = Vec::new();
+            let ctx = ui.ctx().clone();
+            if ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::SHORTCUT_RUN_SCRIPT))
+            {
+                actions.push(Action::RunScript);
+            }
+            let reattach = detached_panel_contents(ui, &tr!("script-title"), |ui| {
+                if !model.available {
+                    ui.weak(tr!("script-unavailable"));
+                }
+                script_model_contents(ui, &ctx, &mut model, &mut actions);
+            });
+            if source != model.source || reattach || !actions.is_empty() {
+                let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
+                if source != model.source {
+                    requests.source = Some(model.source.clone());
+                }
+                requests.reattach |= reattach;
+                requests.actions.append(&mut actions);
+                root.request_repaint_of(egui::ViewportId::ROOT);
+            }
+        });
         if changed {
             ctx.request_repaint_of(id);
         }
@@ -671,14 +694,18 @@ impl StokesForgeApp {
         let view_model = Arc::clone(&self.pm_view_model);
         let requests = Arc::clone(&self.pm_requests);
         let root_context = ctx.clone();
+        let live = self.live_window(PanelKind::Project);
+        let builder = panel_viewport(
+            tr!("window-title-project-manager"),
+            [PROJECT_MANAGER_WIDTH + 40.0, 480.0],
+            [220.0, 140.0],
+            self.detach_init(PanelKind::Project),
+        );
         ctx.show_viewport_deferred(
             egui::ViewportId::from_hash_of("stokesforge_project_manager_window"),
-            egui::ViewportBuilder::default()
-                .with_title(tr!("window-title-project-manager"))
-                .with_inner_size([PROJECT_MANAGER_WIDTH + 40.0, 480.0])
-                .with_decorations(false)
-                .with_min_inner_size([220.0, 140.0]),
+            builder,
             move |ui, _class| {
+                live.report(ui.ctx());
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
                 let mut closed = Vec::new();

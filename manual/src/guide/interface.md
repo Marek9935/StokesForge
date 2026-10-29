@@ -204,6 +204,8 @@ Click <img class="icon" src="../images/icons/arrow-square-out.neutral.svg" alt="
 
 The detached window can be moved and resized like any other window of your system. It has one button, <img class="icon" src="../images/icons/arrow-square-in.neutral.svg" alt=""> **Reattach to the main window**. Closing the window also reattaches the panel.
 
+StokesForge remembers your panels for the next launch: which ones are collapsed, which ones are detached, and the size and position of the detached windows. A detached panel comes back in its window only if your computer has the same number of screens as when you closed StokesForge. Otherwise it comes back attached to the main window, so that a window is never left on a screen that is gone. On Wayland, an application cannot choose where a window opens: the detached window comes back with its size and your system places it.
+
 You can detach the Project Manager from the menu too: **Window ▸ Detach Project Manager**, then **Window ▸ Reattach Project Manager**.
 
 A detached panel stays up to date with the project and works as before. The Object Manager follows the graph in the foreground, also when that graph is itself detached.

@@ -13240,3 +13240,42 @@ fn the_formula_help_and_the_analysis_default_are_remembered() {
     assert!(!second.show_formula_help());
     assert!(second.analysis_keep_results_default());
 }
+
+// -- Layout of the fixed panels (#148, lot B) --
+
+/// `Action::RememberPanelLayout` writes the layout, outside the project and the
+/// history; a new state on the same file finds it; a file that cannot be
+/// written is reported.
+#[test]
+fn the_panel_layout_is_kept_across_states_and_a_failed_write_is_reported() {
+    use stokesforge_app_state::panel_layout::{PanelKind, PanelLayout};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, _state, _sheet, _columns) = kinetics(dir.path());
+    let file = dir.path().join("preferences.json");
+    let mut state = state_on_preferences(&session, dir.path(), &file);
+    assert_eq!(state.panel_layout(), PanelLayout::default());
+    let mut layout = PanelLayout {
+        monitors: Some(2),
+        ..PanelLayout::default()
+    };
+    layout.panel_mut(PanelKind::Object).detached = true;
+    layout.panel_mut(PanelKind::Object).size = Some([330.0, 480.0]);
+    layout.panel_mut(PanelKind::Object).position = Some([1500.0, 40.0]);
+    layout.panel_mut(PanelKind::Script).collapsed = false;
+    let revision = state.revision();
+    let undoable = state.can_undo();
+    state.dispatch(Action::RememberPanelLayout(layout));
+    assert_eq!(state.revision(), revision, "neither command nor history");
+    assert_eq!(state.can_undo(), undoable);
+    assert_eq!(
+        state_on_preferences(&session, dir.path(), &file).panel_layout(),
+        layout
+    );
+
+    let mut broken = state_on_preferences(&session, dir.path(), dir.path());
+    broken.dispatch(Action::RememberPanelLayout(layout));
+    assert!(
+        broken.status().is_some_and(|status| status.is_error()),
+        "an unwritable file is reported"
+    );
+}

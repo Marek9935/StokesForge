@@ -164,6 +164,7 @@ mod menu_sections;
 mod menus;
 mod object_dnd;
 mod object_manager_ui;
+mod panel_memory;
 #[cfg(test)]
 mod panel_tests;
 mod plot_settings;
@@ -321,10 +322,16 @@ pub struct StokesForgeApp {
     /// [`StokesForgeApp::project_manager_panel`] is simply not painted.
     pm_detached: bool,
     /// True when the script console is collapsed to its title bar alone
-    /// (issue #79). Collapsed at startup, and not remembered: it is not a
-    /// preference but a state of the session; launching a script expands it,
+    /// (issue #79). Collapsed at the first launch, then remembered with the
+    /// other panels (#148, `panel_memory.rs`); launching a script expands it,
     /// so that the output is seen.
     script_collapsed: bool,
+    /// Memory of the layout of the three panels between two launches (#148):
+    /// live geometry of the detached windows, where they open, what was last
+    /// handed to the preferences. The collapsed and detached flags above stay
+    /// the single source; `panel_memory.rs` reads them and sends
+    /// `Action::RememberPanelLayout` on every change.
+    panel_memory: panel_memory::PanelMemory,
     /// What the detached OS window of the Project Manager paints, resynchronized
     /// from `self.state` at every frame by
     /// [`StokesForgeApp::show_detached_project_manager`] — see its top doc.
@@ -501,6 +508,7 @@ impl StokesForgeApp {
             maximized_tab,
             pm_detached: false,
             script_collapsed: true,
+            panel_memory: panel_memory::PanelMemory::default(),
             pm_view_model: Arc::new(Mutex::new(ProjectManagerViewModel::default())),
             pm_requests: Arc::new(Mutex::new(DetachedProjectManagerRequests::default())),
             detached_tabs: HashMap::new(),
@@ -901,10 +909,17 @@ impl eframe::App for StokesForgeApp {
         }
     }
 
+    /// The sizes and positions the detached panels reported since the last
+    /// change of their state (#148).
+    fn on_exit(&mut self) {
+        self.flush_panel_layout();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` is an `Arc`: the clone avoids the read borrow of the painted Ui.
         let ctx = ui.ctx().clone();
         self.sync_window_title_and_status(&ctx);
+        self.prepare_panel_windows();
         let published_stamp = snapshot_stamp(self.state.snapshot());
         let mut actions = Vec::new();
         // These queues are applied only after the floating stack is painted.
@@ -969,6 +984,8 @@ impl eframe::App for StokesForgeApp {
         }
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
+        self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
+        self.sync_panel_layout(&mut actions);
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);

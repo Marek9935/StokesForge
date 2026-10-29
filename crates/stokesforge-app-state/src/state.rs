@@ -907,6 +907,10 @@ pub enum Action {
     SetPngExportScale(f32),
     /// Shows or hides the formula syntax help icon (#148).
     SetShowFormulaHelp(bool),
+    /// Remembers the layout of the three fixed panels: collapsed, detached, size
+    /// and position of their window (#148). Application preference: no command,
+    /// no history, no `.stf`.
+    RememberPanelLayout(crate::panel_layout::PanelLayout),
     /// New graphs write their numbers with a decimal comma (R9, #148); the
     /// graphs that exist keep their own setting.
     SetNewGraphDecimalComma(bool),
@@ -5471,6 +5475,14 @@ impl AppState {
                     ));
                 }
             }
+            Action::RememberPanelLayout(layout) => {
+                if let Err(error) = self.object_manager_preferences.save_panel_layout(layout) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetShowFormulaHelp(show) => {
                 if let Err(error) = self.object_manager_preferences.save_show_formula_help(show) {
                     self.fail(tr!(
@@ -7178,6 +7190,11 @@ impl AppState {
     /// Do **new** graphs write their numbers with a decimal comma (R9, #148)?
     pub fn new_graph_decimal_comma(&self) -> bool {
         self.object_manager_preferences.new_graph_decimal_comma()
+    }
+
+    /// The remembered layout of the three fixed panels (#148).
+    pub fn panel_layout(&self) -> crate::panel_layout::PanelLayout {
+        self.object_manager_preferences.panel_layout()
     }
 
     /// Is the formula syntax help icon shown next to the formula fields (#148)?

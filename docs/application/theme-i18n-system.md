@@ -65,6 +65,7 @@ at compile time) is at the top of `stokesforge-app-state/src/i18n.rs`.
 | `crates/stokesforge-app-state/i18n.toml`, `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, catalog folder; `fl!` reads the `i18n.toml` of the **calling** crate, so both set `domain = "stokesforge_app"` and the app's one points to the `app-state` catalog |
 | `stokesforge-app-state/src/i18n.rs` | loader, current language, `tr!` macro; `src/i18n/pseudo.rs`: the pseudo-language |
 | `stokesforge-app-state/src/preferences.rs` | `preferences.json`, same configuration folder as `couleurs.json` |
+| `stokesforge-app-state/src/panel_layout.rs` | the layout of the three fixed panels kept in `preferences.json` › `panels` (collapsed, detached, window size and position, screen count) and the pure startup decision (#148) |
 | `stokesforge-import/src/config_dir.rs` | the single rule for the configuration folder (`STOKESFORGE_CONFIG_DIR`, #332) |
 | `stokesforge-app-state/src/history_text.rs` | the history labels (`HistoryLabel`) as sentences, `history-*` keys (#46) |
 | `stokesforge-app/tests/labels.rs` | the `no_hardcoded_label` guard (absolute: no exemption), which reads the sources of both crates, and the dead keys |

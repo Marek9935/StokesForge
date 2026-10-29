@@ -123,6 +123,8 @@ fn main() -> anyhow::Result<()> {
             stokesforge_app::theme::install(&cc.egui_ctx);
             let mut app = StokesForgeApp::new(state);
             app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
+            // The remembered layout of the panels, once, before the first frame (#148).
+            app.apply_startup_panels(cc.winit_window().map(|w| w.available_monitors().count()));
             Ok(Box::new(app))
         }),
     );

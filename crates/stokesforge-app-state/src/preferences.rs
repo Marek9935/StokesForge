@@ -3,6 +3,9 @@
 //! settings of the Object Manager (#82, #139), and the size and position of
 //! each kind of dialog (S-F8, #228).
 //!
+//! The layout of the three fixed panels (#148) is kept here too, see
+//! [`crate::panel_layout`].
+//!
 //! Same storage as the user's colors ([`crate::user_colors`]) and the import
 //! templates: a JSON file — `preferences.json` — in the StokesForge
 //! configuration folder. Never a panic if it is missing, unreadable or
@@ -19,6 +22,7 @@ use std::path::{Path, PathBuf};
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_render_svg::SvgTextMode;
 
+use crate::panel_layout::PanelLayout;
 use crate::state::{DEFAULT_PNG_EXPORT_SCALE, PNG_EXPORT_SCALES};
 
 /// Groups families whose initial collapsed state can be set (#139).
@@ -273,6 +277,10 @@ struct PreferencesFile {
     /// [`OperationKind::key`]. Kept raw: an unreadable entry is dropped alone.
     #[serde(default)]
     analysis_keep_by_operation: Option<serde_json::Value>,
+    /// Layout of the three fixed panels (#148), read entry by entry by
+    /// [`PanelLayout::from_json`].
+    #[serde(default)]
+    panels: Option<serde_json::Value>,
 }
 
 /// Name of the demo file in the configuration folder (#333).
@@ -325,6 +333,7 @@ pub struct Preferences {
     show_formula_help: bool,
     new_graph_decimal_comma: bool,
     analysis_keep_by_operation: BTreeMap<String, bool>,
+    panels: PanelLayout,
     path: Option<PathBuf>,
 }
 
@@ -391,6 +400,7 @@ impl Preferences {
             show_formula_help: file.show_formula_help.unwrap_or(true),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
+            panels: PanelLayout::from_json(file.panels.as_ref()),
             path,
         }
     }
@@ -462,6 +472,22 @@ impl Preferences {
             SvgTextMode::Outlines => "outlines",
         };
         self.save_field("svg_text", name.into())
+    }
+
+    /// The remembered layout of the Project Manager, the Object Manager and the
+    /// Script Console (collapsed, detached, size and position of the window).
+    pub fn panel_layout(&self) -> PanelLayout {
+        self.panels
+    }
+
+    /// Remembers the layout of the panels without replacing the other preferences.
+    /// Nothing is written if it did not change.
+    pub fn save_panel_layout(&mut self, layout: PanelLayout) -> std::io::Result<()> {
+        if self.panels == layout {
+            return Ok(());
+        }
+        self.panels = layout;
+        self.save_field("panels", layout.to_json())
     }
 
     /// Magnification of PNG exports, one of [`PNG_EXPORT_SCALES`]; ×4 by default.
@@ -1181,6 +1207,63 @@ mod tests {
         assert!(reread.analysis_keep_results_default());
         assert!(!reread.analysis_keep_results_for(OperationKind::Fit));
         assert!(reread.analysis_keep_results_for(OperationKind::Peaks));
+    }
+
+    // -- Layout of the fixed panels (#148, lot B) --
+
+    use crate::panel_layout::{PanelKind, PanelPrefs};
+
+    #[test]
+    fn a_missing_panels_key_gives_the_default_layout() {
+        let (_dir, path) = written(r#"{"language":"fr"}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.panel_layout(), PanelLayout::default());
+        assert_eq!(
+            Preferences::load_from(None).panel_layout(),
+            PanelLayout::default()
+        );
+    }
+
+    /// Saving the layout keeps the other fields (language, dialogs...) and is read
+    /// back; an unchanged layout writes nothing.
+    #[test]
+    fn saving_the_panel_layout_keeps_the_other_fields() {
+        let (_dir, path) = written(
+            r#"{"language":"fr","dialogs":{"import":{"x":1.0,"y":2.0,"width":300.0,"height":200.0}}}"#,
+        );
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        let mut layout = PanelLayout {
+            monitors: Some(2),
+            ..PanelLayout::default()
+        };
+        layout.panel_mut(PanelKind::Object).detached = true;
+        layout.panel_mut(PanelKind::Object).size = Some([330.0, 480.0]);
+        layout.panel_mut(PanelKind::Project).collapsed = true;
+        preferences.save_panel_layout(layout).unwrap();
+        let reread = Preferences::load_from(Some(path.clone()));
+        assert_eq!(reread.panel_layout(), layout);
+        assert_eq!(reread.language(), Some("fr"));
+        assert!(reread.dialog_geometries().contains_key("import"));
+        // Nothing to write: a missing folder is not an error then.
+        let mut nowhere = Preferences::load_from(None);
+        nowhere.panels = layout;
+        nowhere.save_panel_layout(layout).unwrap();
+    }
+
+    /// A garbled block does not spoil the rest of the file.
+    #[test]
+    fn a_garbled_panels_block_falls_back_to_its_defaults() {
+        let (_dir, path) = written(
+            r#"{"language":"fr","panels":{"monitors":2,"project":{"collapsed":true},"object":{"detached":"yes"},"script":"x"}}"#,
+        );
+        let layout = Preferences::load_from(Some(path.clone())).panel_layout();
+        assert!(layout.project.collapsed);
+        assert!(!layout.object.detached);
+        assert_eq!(layout.script, PanelPrefs::default_for(PanelKind::Script));
+        let (_dir, path) = written(r#"{"language":"fr","panels":[1]}"#);
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(preferences.panel_layout(), PanelLayout::default());
+        assert_eq!(preferences.language(), Some("fr"));
     }
 }
 
