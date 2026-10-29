@@ -273,6 +273,177 @@ pub fn free_role_layer(spec: &PlotSpec, panel: usize) -> Option<u8> {
     })
 }
 
+/// Largest grid (rows x columns) of cells: the one the renderer lays out
+/// as declared (`stokesforge_render::pipeline::MAX_CELLS`; core cannot depend
+/// on the renderer). Beyond it the renderer falls back to declaration
+/// order, so adding a cell past it is refused.
+pub const MAX_GRID_CELLS: usize = 256;
+
+/// Where a new cell goes relative to a reference cell (#357).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellSide {
+    /// In the same row, one column to the right.
+    Right,
+    /// In the same column, one row below.
+    Below,
+}
+
+/// Adds an empty cell beside the cell of layer `panel` (#357) and returns the
+/// index of its layer (always the last one: existing indices do not move).
+///
+/// **Right**: only the row of the reference cell shifts, the cells to its
+/// right (column greater) move one column further, with their overlay layers.
+/// **Below**: same on the column. Other rows and columns are untouched.
+/// `None`, with the spec unchanged, if `panel` does not exist, if a position
+/// would overflow (rows and columns are free `usize`s once read from a file)
+/// or if the grid would exceed [`MAX_GRID_CELLS`].
+pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<usize> {
+    let base = spec.panels.get(overlay_base(spec, panel))?;
+    let (row, column) = (base.row, base.column);
+    let (new_row, new_column) = match side {
+        CellSide::Right => (row, column.checked_add(1)?),
+        CellSide::Below => (row.checked_add(1)?, column),
+    };
+    let shifts = |candidate: &PanelSpec| match side {
+        CellSide::Right => candidate.row == row && candidate.column > column,
+        CellSide::Below => candidate.column == column && candidate.row > row,
+    };
+    // Checks everything before touching the spec.
+    let mut rows = new_row.checked_add(1)?;
+    let mut columns = new_column.checked_add(1)?;
+    for candidate in spec.panels.iter() {
+        let (r, c) = if shifts(candidate) {
+            match side {
+                CellSide::Right => (candidate.row, candidate.column.checked_add(1)?),
+                CellSide::Below => (candidate.row.checked_add(1)?, candidate.column),
+            }
+        } else {
+            (candidate.row, candidate.column)
+        };
+        rows = rows.max(r.checked_add(1)?);
+        columns = columns.max(c.checked_add(1)?);
+    }
+    if rows.checked_mul(columns)? > MAX_GRID_CELLS {
+        return None;
+    }
+    for candidate in spec.panels.iter_mut().filter(|candidate| shifts(candidate)) {
+        match side {
+            CellSide::Right => candidate.column += 1,
+            CellSide::Below => candidate.row += 1,
+        }
+    }
+    spec.panels.push(PanelSpec::at(new_row, new_column));
+    Some(spec.panels.len() - 1)
+}
+
+/// The layers that deleting layer `panel` removes (#357): an overlay layer
+/// alone; an ordinary layer (a cell) with all the overlay layers of its cell.
+/// Empty if `panel` does not exist.
+pub fn layers_removed_with(spec: &PlotSpec, panel: usize) -> Vec<usize> {
+    let Some(target) = spec.panels.get(panel) else {
+        return Vec::new();
+    };
+    if target.overlay.is_some() {
+        return vec![panel];
+    }
+    let cell = (target.row, target.column);
+    spec.panels
+        .iter()
+        .enumerate()
+        .filter(|(index, candidate)| {
+            *index == panel
+                || (candidate.overlay.is_some() && (candidate.row, candidate.column) == cell)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Can layer `panel` be deleted (#357)? An overlay layer always; an ordinary
+/// layer only if another cell remains (a graph keeps at least one).
+pub fn can_remove_layer(spec: &PlotSpec, panel: usize) -> bool {
+    match spec.panels.get(panel) {
+        None => false,
+        Some(target) if target.overlay.is_some() => true,
+        Some(_) => spec.panels.iter().filter(|p| p.overlay.is_none()).count() >= 2,
+    }
+}
+
+/// Deletes layer `panel` (#357, see [`layers_removed_with`]). Deleting a cell
+/// closes the gap in its row (the cells to its right move back one column)
+/// and a row left empty disappears (the rows below move up). The graph title
+/// position is in the frame of the first layer, so it is forgotten when that
+/// layer goes. `false`, with the spec unchanged, if [`can_remove_layer`] says no.
+pub fn remove_cell(spec: &mut PlotSpec, panel: usize) -> bool {
+    if !can_remove_layer(spec, panel) {
+        return false;
+    }
+    let removed = layers_removed_with(spec, panel);
+    let Some(target) = spec.panels.get(panel) else {
+        return false;
+    };
+    let is_cell = target.overlay.is_none();
+    let (row, column) = (target.row, target.column);
+    if !spec.panels.remove_indices(&removed) {
+        return false;
+    }
+    if removed.contains(&0) {
+        spec.title_anchor = None;
+    }
+    if is_cell {
+        for candidate in spec.panels.iter_mut() {
+            if candidate.row == row && candidate.column > column {
+                candidate.column -= 1;
+            }
+        }
+        if !spec.panels.iter().any(|candidate| candidate.row == row) {
+            for candidate in spec.panels.iter_mut() {
+                if candidate.row > row {
+                    candidate.row -= 1;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Where each layer of a spec went after `removed` (sorted or not) layers
+/// were deleted: `None` for a deleted layer, the new index otherwise.
+pub fn remap_after_removal(len: usize, removed: &[usize]) -> Vec<Option<usize>> {
+    let mut next = 0;
+    (0..len)
+        .map(|index| {
+            if removed.contains(&index) {
+                None
+            } else {
+                next += 1;
+                Some(next - 1)
+            }
+        })
+        .collect()
+}
+
+/// Where each layer of `previous` is in `next` when layers were added or
+/// removed by history (undo, redo): layers match in order, by content (their
+/// position in the grid aside). `None` for a layer that is gone.
+pub fn remap_between(previous: &PlotSpec, next: &PlotSpec) -> Vec<Option<usize>> {
+    let same = |a: &PanelSpec, b: &PanelSpec| {
+        let mut b = b.clone();
+        b.row = a.row;
+        b.column = a.column;
+        *a == b
+    };
+    let mut from = 0;
+    previous
+        .panels
+        .iter()
+        .map(|old| {
+            let found = (from..next.panels.len()).find(|j| same(old, &next.panels[*j]))?;
+            from = found + 1;
+            Some(found)
+        })
+        .collect()
+}
+
 /// The current [`PlotSpec`] of `graph`, or `None` if it is not a graph of
 /// this project.
 pub fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> {
@@ -634,5 +805,192 @@ mod tests {
         assert_eq!(current_plot_spec(tree, graph), Some(spec));
         assert_eq!(current_plot_spec(tree, sheet), None, "a sheet");
         assert_eq!(current_plot_spec(tree, NodeId::from_raw(987_654)), None);
+    }
+
+    /// Position (row, column) and overlay flag of every layer, in order.
+    fn grid(spec: &PlotSpec) -> Vec<(usize, usize, bool)> {
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column, p.overlay.is_some()))
+            .collect()
+    }
+
+    fn spec_of(cells: &[(usize, usize)]) -> PlotSpec {
+        PlotSpec {
+            panels: Panels::new(cells.iter().map(|(r, c)| PanelSpec::at(*r, *c))),
+            ..PlotSpec::default()
+        }
+    }
+
+    #[test]
+    fn insert_right_in_a_single_cell_graph_appends_cell_zero_one() {
+        let mut spec = PlotSpec::default();
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Right), Some(1));
+        assert_eq!(grid(&spec), [(0, 0, false), (0, 1, false)]);
+    }
+
+    #[test]
+    fn insert_right_shifts_the_cells_to_the_right_with_their_overlays_only() {
+        let base = PanelSpec::at(0, 1);
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![
+                PanelSpec::at(0, 0),
+                base.clone(),
+                PanelSpec::overlay_on(&base, OverlaySpec::TOP_X),
+                PanelSpec::overlay_on(&base, OverlaySpec::SECOND_AXES),
+                PanelSpec::at(1, 1),
+            ]),
+            ..PlotSpec::default()
+        };
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Right), Some(5));
+        assert_eq!(
+            grid(&spec),
+            [
+                (0, 0, false),
+                (0, 2, false),
+                (0, 2, true),
+                (0, 2, true),
+                (1, 1, false), // other row: untouched
+                (0, 1, false), // the new cell
+            ]
+        );
+        assert_eq!(overlay_base(&spec, 2), 1, "overlays still cover their base");
+        assert_eq!(overlay_base(&spec, 3), 1);
+    }
+
+    #[test]
+    fn insert_below_shifts_only_the_column_of_the_reference_cell() {
+        let mut spec = spec_of(&[(0, 0), (0, 1), (1, 0), (1, 1)]);
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Below), Some(4));
+        assert_eq!(
+            grid(&spec),
+            [
+                (0, 0, false),
+                (0, 1, false),
+                (2, 0, false),
+                (1, 1, false),
+                (1, 0, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn insert_right_in_a_grid_touches_one_row_only() {
+        let mut spec = spec_of(&[(0, 0), (0, 1), (1, 0), (1, 1)]);
+        assert_eq!(insert_cell(&mut spec, 2, CellSide::Right), Some(4));
+        assert_eq!(
+            grid(&spec),
+            [
+                (0, 0, false),
+                (0, 1, false),
+                (1, 0, false),
+                (1, 2, false),
+                (1, 1, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn insert_from_an_overlay_uses_the_cell_of_its_base() {
+        let base = PanelSpec::at(0, 0);
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![
+                base.clone(),
+                PanelSpec::overlay_on(&base, OverlaySpec::TOP_X),
+            ]),
+            ..PlotSpec::default()
+        };
+        assert_eq!(insert_cell(&mut spec, 1, CellSide::Right), Some(2));
+        assert_eq!(grid(&spec)[2], (0, 1, false));
+    }
+
+    #[test]
+    fn insert_refuses_overflow_and_a_grid_beyond_the_cap_without_touching_the_spec() {
+        let mut spec = spec_of(&[(0, usize::MAX)]);
+        let before = spec.clone();
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Right), None);
+        assert_eq!(
+            insert_cell(&mut spec, 0, CellSide::Below),
+            None,
+            "grid too big"
+        );
+        assert_eq!(spec, before);
+        let mut spec = spec_of(&[(usize::MAX, 0)]);
+        assert_eq!(insert_cell(&mut spec, 0, CellSide::Below), None);
+
+        let mut full = spec_of(&[(0, 0), (0, MAX_GRID_CELLS - 1)]);
+        let before = full.clone();
+        assert_eq!(insert_cell(&mut full, 0, CellSide::Right), None, "cap");
+        assert_eq!(full, before);
+        assert_eq!(
+            insert_cell(&mut full, 9, CellSide::Right),
+            None,
+            "no such layer"
+        );
+    }
+
+    #[test]
+    fn remove_a_cell_takes_its_overlays_closes_the_gap_and_keeps_the_order() {
+        let first = PanelSpec::at(0, 0);
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![
+                PanelSpec::at(0, 1),
+                first.clone(),
+                PanelSpec::overlay_on(&first, OverlaySpec::TOP_X),
+                PanelSpec::overlay_on(&first, OverlaySpec::SECOND_AXES),
+                PanelSpec::at(1, 0),
+            ]),
+            ..PlotSpec::default()
+        };
+        // Removes the cell (0, 0): 3 layers.
+        assert!(remove_cell(&mut spec, 1));
+        assert_eq!(grid(&spec), [(0, 0, false), (1, 0, false)]);
+    }
+
+    #[test]
+    fn remove_the_only_cell_of_a_row_moves_the_rows_below_up() {
+        let mut spec = spec_of(&[(0, 0), (1, 0), (2, 0)]);
+        assert!(remove_cell(&mut spec, 1));
+        assert_eq!(grid(&spec), [(0, 0, false), (1, 0, false)]);
+    }
+
+    #[test]
+    fn remove_the_only_cell_is_refused_and_an_overlay_alone_leaves_its_base() {
+        let mut one = PlotSpec::default();
+        assert!(!remove_cell(&mut one, 0));
+        assert_eq!(one, PlotSpec::default());
+
+        let mut spec = spec_with_layers();
+        let before = spec.clone();
+        assert!(!remove_cell(&mut spec, 9));
+        assert!(remove_cell(&mut spec, 1));
+        assert_eq!(spec.panels.len(), 3);
+        assert_eq!(spec.panels[0], before.panels[0], "base untouched");
+        assert_eq!(spec.panels[1], before.panels[2], "the other overlay stays");
+    }
+
+    #[test]
+    fn remove_the_first_cell_forgets_the_title_position() {
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        spec.title_anchor = Some(stokesforge_plot::TextAnchor::new(0.5, 0.5));
+        assert!(remove_cell(&mut spec, 1));
+        assert!(spec.title_anchor.is_some(), "another cell: kept");
+        let mut spec = spec_of(&[(0, 0), (0, 1)]);
+        spec.title_anchor = Some(stokesforge_plot::TextAnchor::new(0.5, 0.5));
+        assert!(remove_cell(&mut spec, 0));
+        assert_eq!(spec.title_anchor, None);
+    }
+
+    #[test]
+    fn remaps_follow_a_removal() {
+        assert_eq!(
+            remap_after_removal(4, &[1, 2]),
+            [Some(0), None, None, Some(1)]
+        );
+        let mut before = spec_of(&[(0, 0), (0, 1)]);
+        before.panels.get_mut(1).unwrap().title_visible = false;
+        let after = spec_of(&[(0, 0)]);
+        assert_eq!(remap_between(&before, &after), [Some(0), None]);
+        assert_eq!(remap_between(&after, &before), [Some(0)]);
     }
 }

@@ -13135,3 +13135,189 @@ fn the_about_window_opens_closes_and_copies_the_version_line() {
         stokesforge_app_state::tr!("status-version-copied")
     );
 }
+
+// -- Grid of cells (#357) --
+
+/// A graph of one cell built through the real gesture, plus the X, Y, X2, Y2
+/// columns of its sheet.
+fn cell_bench(dir: &Path) -> (Session, AppState, NodeId, Vec<NodeId>) {
+    let mut project = Project::new("Cells").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("column")
+    };
+    let c: Vec<NodeId> = ["X", "Y", "X2", "Y2"].map(&mut add).to_vec();
+    let (session, mut state) = start(project, &dir.join("cells.stf"));
+    for (column, role) in
+        c.iter()
+            .copied()
+            .zip([ColumnRole::X, ColumnRole::Y, ColumnRole::X2, ColumnRole::Y2])
+    {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![c[0], c[1]],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph created");
+    (session, state, graph, c)
+}
+
+/// #357: the menu gesture adds one empty cell in a single undo step.
+#[test]
+fn add_cell_is_one_history_entry_and_undo_restores_the_spec() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.panels.len(), 2);
+    assert_eq!((after.panels[1].row, after.panels[1].column), (0, 1));
+    assert!(after.panels[1].series.is_empty());
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::AddCell
+        ))
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), after);
+}
+
+/// #357: columns dropped on the edge band go in the new cell, Y2 on its role
+/// layer; without a Y column nothing is created.
+#[test]
+fn add_cell_with_columns_puts_the_series_in_the_new_cell_and_refuses_without_y() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, c) = cell_bench(dir.path());
+    let before = graph_spec(&state, graph);
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Below,
+        columns: vec![c[0]],
+    });
+    assert_eq!(graph_spec(&state, graph), before, "X only: nothing created");
+    assert_eq!(
+        state.status().expect("a message").text,
+        stokesforge_app_state::tr!("error-add-no-y")
+    );
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Below,
+        columns: c.clone(),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.panels.len(), 3, "cell + its Y2 layer");
+    assert_eq!((after.panels[1].row, after.panels[1].column), (1, 0));
+    assert_eq!(after.panels[1].series.len(), 1);
+    assert_eq!(after.panels[1].series[0].y, c[1]);
+    assert_eq!((after.panels[2].row, after.panels[2].column), (1, 0));
+    assert!(after.panels[2].overlay.is_some());
+    assert_eq!(after.panels[2].series[0].y, c[3]);
+    assert_eq!(
+        after.panels[0].series.len(),
+        1,
+        "the first cell is untouched"
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "a single step");
+}
+
+/// #357: deleting a layer node removes the cell with its overlays in one
+/// step; the last cell is refused with a message and no history entry.
+#[test]
+fn removing_a_cell_is_one_step_and_the_last_cell_is_refused() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, c) = cell_bench(dir.path());
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Panel(0),
+    });
+    assert_eq!(graph_spec(&state, graph).panels.len(), 1);
+    assert_eq!(state.snapshot().revision, revision, "no command sent");
+    assert_eq!(
+        state.status().expect("a message").text,
+        stokesforge_app_state::tr!("error-last-layer")
+    );
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: c.clone(),
+    });
+    let two_cells = graph_spec(&state, graph);
+    assert_eq!(two_cells.panels.len(), 3);
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Panel(1),
+    });
+    let one = graph_spec(&state, graph);
+    assert_eq!(one.panels.len(), 1, "cell and its role layer gone");
+    assert_eq!((one.panels[0].row, one.panels[0].column), (0, 0));
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::RemoveCell
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        graph_spec(&state, graph),
+        two_cells,
+        "one Undo restores both"
+    );
+}
+
+/// #357: deleting an overlay layer takes that layer only.
+#[test]
+fn removing_an_overlay_layer_leaves_its_cell() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 0,
+        x_top: true,
+        y_right: false,
+    });
+    assert_eq!(graph_spec(&state, graph).panels.len(), 2);
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Panel(1),
+    });
+    assert_eq!(graph_spec(&state, graph).panels.len(), 1);
+}

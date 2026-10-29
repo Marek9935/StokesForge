@@ -39,6 +39,12 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Grid of layers (#357): **Graph ▸ New Layer Beside ▸ Right / Below** adds a
+  layer next to the active one, columns dropped on the right or bottom edge of a
+  graph create a layer beside the nearest one, and **Delete** in the Object
+  Manager removes a layer (with its overlay layers) or an overlay layer alone.
+  One undo step each.
+
 - Version display (#382): **Help ▸ About StokesForge** shows the version, the
   license and the project page, with a **Copy** button for a line to paste in a
   bug report; `stokesforge-app --version` and `stokesforge-cli --version`

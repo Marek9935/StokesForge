@@ -50,8 +50,9 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, free_role_layer, overlay_base, overlays_full, panel_plot_type,
-    role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns, OVERLAY_ROLES,
+    current_plot_spec, free_role_layer, insert_cell, overlay_base, overlays_full, panel_plot_type,
+    remove_cell, role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns,
+    CellSide, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -722,6 +723,21 @@ pub enum Action {
         x_top: bool,
         /// Y axis of the new layer on the right, with its own scale.
         y_right: bool,
+    },
+    /// Adds an empty cell (a new layer in the grid of the graph) beside the cell
+    /// of layer `panel` (#357): to its right or below it. The cells of the
+    /// same row (or column) after it move one step. With `columns` (a drop
+    /// on the edge of the figure), the series they plan go in the new cell,
+    /// their Y2-Y4 on its role layers. A single undo step.
+    AddCell {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer (ordinary or overlaid) whose cell is the reference.
+        panel: usize,
+        /// Where the new cell goes.
+        side: CellSide,
+        /// Dragged columns; empty for the menu.
+        columns: Vec<NodeId>,
     },
     /// Opens or closes the panel; a user preference, outside history.
     SetObjectManagerOpen(bool),
@@ -5088,6 +5104,12 @@ impl AppState {
                 x_top,
                 y_right,
             } => self.add_layer(graph, panel, x_top, y_right),
+            Action::AddCell {
+                graph,
+                panel,
+                side,
+                columns,
+            } => self.add_cell(graph, panel, side, columns),
             Action::AddRowsToGraph {
                 graph,
                 panel,
@@ -5237,7 +5259,8 @@ impl AppState {
                             target.set_text(spec, String::new())
                         })
                     }
-                    T::Graph | T::Panel(_) | T::Group(_) | T::Axis(_) | T::Axes(_) => {}
+                    T::Panel(panel) => self.remove_layer(graph, panel),
+                    T::Graph | T::Group(_) | T::Axis(_) | T::Axes(_) => {}
                 }
             }
             Action::OpenObjectProperties { graph, target } => {
@@ -9493,27 +9516,45 @@ impl AppState {
         columns: Vec<NodeId>,
         plot_type: Option<PlotType>,
     ) {
-        let Some(&first) = columns.first() else {
+        if columns.is_empty() {
             return;
-        };
-        let Some(sheet) = self.snapshot.tree.node(first).and_then(Node::parent) else {
-            self.fail(tr!("error-column-gone"));
-            return;
-        };
+        }
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
             return;
         };
+        match self.add_columns_to_spec(&mut spec, panel, &columns, plot_type) {
+            Ok(()) => self.execute(Command::SetPlotSpec { graph, spec }),
+            Err(message) => self.fail(message),
+        }
+    }
+
+    /// The body of [`Self::add_series_to_graph`], on a spec: plans the series
+    /// of `columns` and pushes them on layer `panel` (those of the roles
+    /// Y2-Y4 on the role layers of its cell, created if need be). `Err` carries
+    /// the sentence to show; `spec` is then partly edited and must be dropped.
+    fn add_columns_to_spec(
+        &self,
+        spec: &mut PlotSpec,
+        panel: usize,
+        columns: &[NodeId],
+        plot_type: Option<PlotType>,
+    ) -> Result<(), String> {
+        let Some(&first) = columns.first() else {
+            return Ok(());
+        };
+        let Some(sheet) = self.snapshot.tree.node(first).and_then(Node::parent) else {
+            return Err(tr!("error-column-gone"));
+        };
         let Some(target) = spec.panels.get_mut(panel) else {
-            self.fail(tr!("error-layer-gone"));
-            return;
+            return Err(tr!("error-layer-gone"));
         };
         let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
         // The layer of each role Y2, Y3, Y4: the one of that number that
         // already covers the target layer, to be created otherwise (#167, #168).
-        let base = overlay_base(&spec, panel);
+        let base = overlay_base(spec, panel);
         let existing: [Option<usize>; OVERLAY_ROLES] = std::array::from_fn(|slot| {
-            role_layer_of(&spec, base, OverlaySpec::FIRST_ROLE_LAYER + slot as u8)
+            role_layer_of(spec, base, OverlaySpec::FIRST_ROLE_LAYER + slot as u8)
         });
         let overlay_starts: [usize; OVERLAY_ROLES] = std::array::from_fn(|slot| {
             existing[slot]
@@ -9521,19 +9562,18 @@ impl AppState {
                 .map_or(0, |layer| layer.series.len())
         });
         let Some(target) = spec.panels.get(panel) else {
-            return;
+            return Ok(());
         };
         let planned = series_from_columns(
             &self.snapshot.tree,
             sheet,
-            &columns,
+            columns,
             &plot_type,
             target.series.len(),
             overlay_starts,
         );
         if planned.is_empty() {
-            self.fail(tr!("error-add-no-y"));
-            return;
+            return Err(tr!("error-add-no-y"));
         }
         if let Some(target) = spec.panels.get_mut(panel) {
             target.push_series_batch(planned.primary);
@@ -9546,7 +9586,7 @@ impl AppState {
                 Some(index) => index,
                 None => {
                     let Some(base_panel) = spec.panels.get(base).cloned() else {
-                        return;
+                        return Ok(());
                     };
                     spec.panels.push(PanelSpec::overlay_on(
                         &base_panel,
@@ -9559,7 +9599,73 @@ impl AppState {
                 layer.push_series_batch(series);
             }
         }
-        self.execute(Command::SetPlotSpec { graph, spec });
+        Ok(())
+    }
+
+    /// [`Action::AddCell`]: a new cell beside the cell of layer `panel`; with
+    /// `columns`, the series they plan go in it (the plot type is that of the
+    /// reference layer, like a drop on the graph). One `EditPlotSpec`, one undo
+    /// step; nothing sent, and a message, if the grid is full, the layer is gone
+    /// or the columns have no Y.
+    fn add_cell(&mut self, graph: NodeId, panel: usize, side: CellSide, columns: Vec<NodeId>) {
+        let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
+            self.fail(tr!("error-graph-gone"));
+            return;
+        };
+        let Some(reference) = spec.panels.get(panel) else {
+            self.fail(tr!("error-layer-gone"));
+            return;
+        };
+        let plot_type = panel_plot_type(reference);
+        let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
+            self.fail(tr!("error-layer-grid-full"));
+            return;
+        };
+        if !columns.is_empty() {
+            if let Err(message) =
+                self.add_columns_to_spec(&mut spec, new_cell, &columns, Some(plot_type))
+            {
+                self.fail(message);
+                return;
+            }
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::AddCell,
+        });
+    }
+
+    /// [`Action::RemovePlotObject`] of a layer: see
+    /// [`stokesforge_core::compose::remove_cell`]. Refused with a message for
+    /// the last cell. Pending drops and the open properties window forget
+    /// the layers that moved.
+    fn remove_layer(&mut self, graph: NodeId, panel: usize) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        if !remove_cell(&mut spec, panel) {
+            if spec.panels.get(panel).is_some() {
+                self.fail(tr!("error-last-layer"));
+            }
+            return;
+        }
+        if self
+            .pending_row_drop
+            .as_ref()
+            .is_some_and(|pending| pending.graph == graph)
+        {
+            self.pending_row_drop = None;
+        }
+        if let Some(edit) = self.plot_edit.as_mut().filter(|edit| edit.graph == graph) {
+            edit.selected_panel = 0;
+            edit.selected_series = 0;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::RemoveCell,
+        });
     }
 
     /// Adds an overlaid layer to the base layer of `panel`; see

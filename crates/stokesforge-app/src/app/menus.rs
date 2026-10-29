@@ -27,7 +27,7 @@
 //! No egui scope depends on the Rust split.
 
 use eframe::egui;
-use stokesforge_core::compose::overlays_full;
+use stokesforge_core::compose::{insert_cell, overlays_full, CellSide};
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
 use stokesforge_render_svg::SvgTextMode;
@@ -532,6 +532,42 @@ impl StokesForgeApp {
                 })
                 .response
                 .on_hover_text(tr!("menu-new-layer", "hint"));
+                // A new cell in the grid of the graph, next to the active layer's (#357).
+                ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
+                    let panel = published_active_panel(ctx, graph);
+                    for (label, hint, side) in [
+                        (
+                            tr!("action-new-layer-beside-right"),
+                            tr!("action-new-layer-beside-right", "hint"),
+                            CellSide::Right,
+                        ),
+                        (
+                            tr!("action-new-layer-beside-below"),
+                            tr!("action-new-layer-beside-below", "hint"),
+                            CellSide::Below,
+                        ),
+                    ] {
+                        let room = spec.as_ref().is_some_and(|spec| {
+                            insert_cell(&mut spec.clone(), panel, side).is_some()
+                        });
+                        if ui
+                            .add_enabled(room, egui::Button::new(label))
+                            .on_hover_text(hint)
+                            .on_disabled_hover_text(tr!("menu-new-layer-beside", "disabled"))
+                            .clicked()
+                        {
+                            actions.push(Action::AddCell {
+                                graph,
+                                panel,
+                                side,
+                                columns: Vec::new(),
+                            });
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(tr!("menu-new-layer-beside", "hint"));
             });
             // The menu of the selected object is that of the right-click and of
             // the Object Manager; with no selection, the entry is greyed out.
@@ -2163,6 +2199,51 @@ mod tests {
         // Witness: with no active graph, the Graph menu does not exist.
         let book = app.state.books()[0].0;
         assert!(!titles(&mut app, Some(Tab::Book(book))).contains(&tr!("menu-graph")));
+        session.shutdown().unwrap();
+    }
+
+    /// #357: "New Layer Beside" acts on the active layer: it sends `AddCell`
+    /// with that layer and the chosen side, and is greyed out when the grid is
+    /// full.
+    #[test]
+    fn new_layer_beside_adds_a_cell_next_to_the_active_layer() {
+        use stokesforge_core::compose::CellSide;
+        let (session, mut app, graph) = bench();
+        app.state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+        let tab = Some(Tab::Graph(graph));
+        for (label, side) in [
+            (tr!("action-new-layer-beside-right"), CellSide::Right),
+            (tr!("action-new-layer-beside-below"), CellSide::Below),
+        ] {
+            let ctx = context();
+            ctx.data_mut(|data| {
+                data.insert_temp(super::super::graph_window::active_panel_id(graph), 1usize)
+            });
+            let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
+            let pos = active(&entries(&output), &tr!("menu-graph")).center;
+            click_at(&mut app, &ctx, tab, pos);
+            let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+            let pos = active(&menu, &tr!("menu-new-layer-beside")).center;
+            assert!(click_at(&mut app, &ctx, tab, pos).is_empty());
+            let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+            let entry = active(&menu, &label);
+            assert!(entry.enabled);
+            assert_eq!(
+                click_at(&mut app, &ctx, tab, entry.center),
+                vec![Action::AddCell {
+                    graph,
+                    panel: 1,
+                    side,
+                    columns: Vec::new(),
+                }],
+                "the active layer (2), not the first"
+            );
+        }
         session.shutdown().unwrap();
     }
 

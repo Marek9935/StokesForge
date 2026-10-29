@@ -15,7 +15,7 @@ The numbers in brackets refer to the gaps numbered below.
 | Graph | Element | Interface gesture |
 |---|---|---|
 | `Graph1` (:66) | curve, axis labels, color and width | ✓ Graph › Plot (menu/drag), Graph Properties › Axes / Series |
-| `Panels` (:90) | 2×2 grid of 4 cells (`PanelSpec::at(l,c)`) | **✗ [1]** |
+| `Panels` (:90) | 2×2 grid of 4 cells (`PanelSpec::at(l,c)`) | ✓ Graph › New Layer Beside / columns dropped on the edge (#357) |
 | | one series per cell, type Line/Scatter/Histogram/Bar | ✓ per cell, but only in 1×1 |
 | | Histogram 20 bins (:92) | **✗ [2]** |
 | `Axes` (:144) | log scale, grid | ✓ Graph Properties › Axes (`plot_settings.rs`) |
@@ -23,7 +23,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | title of the right axis | ✓ Axes › Right tab (`PlotAxis::Right`, state.rs:2213) |
 | | layer with secondary axes (:181) | ✓ Graph › New Layer (menus.rs:456-505), or X2/Y2 columns (`ColumnRole`, column.rs:205) |
 | | titles and units of the layer axes | ✓ Axes tab (Top and Right) |
-| `PlotTypes` (:197) | 5 cells in a 2×3 grid | **✗ [1]** |
+| `PlotTypes` (:197) | 5 cells in a 2×3 grid | ✓ Graph › New Layer Beside / columns dropped on the edge (#357) |
 | | the 5 plot types | ✓ type list (plot_settings.rs:771-776) |
 | | ErrorBar with `y_error` (:205) | **✗ [4]** |
 | | Histogram 30 bins | **✗ [2]** |
@@ -85,7 +85,7 @@ missing feature.
   decide between a column role (`yEr`, like X2/Y2) and a field in Series.
 - **S4 (B, to arbitrate)**: assign a series to the right Y axis of the panel, or
   declare that the layer is enough and rewrite the `Axes` demo with a layer.
-- **S5 (B, big, decision first)**: grid of several cells (adding,
+- **S5 (done, #357)**: grid of several cells (adding,
   removing, row/column placement). Depends on the product choice "multi-panel
   figures in V1". Before the code, a decision form: gesture
   (Graph menu, drag, Object Manager), number of cells, independence of axes.

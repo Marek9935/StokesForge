@@ -18,7 +18,7 @@ through `Ui::close`, whose request egui propagates to the parent menus.
 | File | New → New Project, Add Workbook, Add Graph, Add Folder (#326, at the root) ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete of the Project Manager objects |
 | Workbook (active workbook) | Sheet → Add Sheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (this workbook only) |
-| Graph (active graph) | Show Data ; Add Text ; Selection → the menu of the selected object (disabled without selection) ; Reset Text Positions ; Top / Right Mirror Axis (checkboxes, ordinary active layer, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
+| Graph (active graph) | Show Data ; Add Text ; New Layer → Top X, Right Y, Top X Right Y ; New Layer Beside → Right, Below (new cell of the grid, #357) ; Selection → the menu of the selected object (disabled without selection) ; Reset Text Positions ; Top / Right Mirror Axis (checkboxes, ordinary active layer, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
 | View | Object Manager → the background settings (Show Axes, Show Objects, Expand by Default, Reset Settings) ; no Panels or Toolbars entries: toolbars are fixed, panels collapse or detach (#214) |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 

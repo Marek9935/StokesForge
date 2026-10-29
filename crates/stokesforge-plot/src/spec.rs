@@ -44,6 +44,23 @@ impl Panels {
         self.0.push(panel);
     }
 
+    /// Removes the panels whose index is in `indices` (unknown or repeated
+    /// indices are ignored). Refused, and nothing changed, if it would remove
+    /// them all: the list stays non-empty. Returns whether it removed.
+    pub fn remove_indices(&mut self, indices: &[usize]) -> bool {
+        let keep = |index: usize| !indices.contains(&index);
+        if !(0..self.0.len()).any(keep) || !(0..self.0.len()).any(|i| !keep(i)) {
+            return false;
+        }
+        let mut index = 0;
+        self.0.retain(|_| {
+            let kept = keep(index);
+            index += 1;
+            kept
+        });
+        true
+    }
+
     /// Mutable access to the panel `index`.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut PanelSpec> {
         self.0.get_mut(index)

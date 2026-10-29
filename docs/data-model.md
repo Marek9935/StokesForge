@@ -306,7 +306,7 @@ rollback, `.stf`). It is not a node.
 ```text
 PlotSpec
 ├── title, background
-└── panels : PanelSpec           (row/column grid, at least one panel)
+└── panels : PanelSpec           (row/column grid, at least one panel; cells added and deleted from the interface, #357)
     ├── title
     ├── bottom / left / right / top → AxisSpec  (scale, limits, grid)
     ├── legend : LegendSpec

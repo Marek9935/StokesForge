@@ -703,6 +703,31 @@ impl GraphView {
         }
     }
 
+    /// Follows a change of the layers' indices (#357: a cell or a layer was
+    /// deleted, or its deletion undone): `map[old]` is the new index of layer
+    /// `old`, `None` if it is gone. The framings and the active layer move with
+    /// their layer (the first one if the active layer is gone); the selection and
+    /// the gestures in progress, which address layers by index, are dropped.
+    pub fn remap_layers(&mut self, map: &[Option<usize>]) {
+        self.view.remap_panels(map);
+        self.active_panel = map.get(self.active_panel).copied().flatten().unwrap_or(0);
+        self.selected_annotation = None;
+        self.selected_shape = None;
+        self.selected_series = None;
+        self.selected_group = None;
+        self.selected_text = None;
+        self.seen_selection = (None, None, None, None);
+        self.nav_drag = None;
+        self.drag_box = None;
+        self.hover = None;
+        self.annotation_drag = None;
+        self.annotation_preview = None;
+        self.text_drag = None;
+        self.text_preview = None;
+        self.shape_drag = None;
+        self.shape_preview = None;
+    }
+
     /// The layer of the selected object, if there is one.
     fn selection_panel(&self, spec: &PlotSpec) -> Option<usize> {
         if let Some(series) = self.selected_series {
@@ -1141,6 +1166,23 @@ impl GraphView {
             + egui::vec2(drawn.pixel_origin.0 as f32, drawn.pixel_origin.1 as f32) * scale;
         let size = egui::vec2(drawn.pixel_size.0 as f32, drawn.pixel_size.1 as f32) * scale;
         Some(Rect::from_min_size(min, size))
+    }
+
+    /// The ordinary layer (a cell) whose plot area is nearest to the egui pixel
+    /// `pos`, in the **last** drawn figure (#357): where a drop on the edge of
+    /// the figure puts its new cell beside. `None` before the first draw.
+    pub fn nearest_cell(&self, pos: Pos2) -> Option<usize> {
+        let drawn = self.last.as_ref()?;
+        drawn
+            .panels
+            .iter()
+            .filter(|panel| panel.overlay.is_none())
+            .filter_map(|panel| {
+                let rect = self.plot_rect_screen(panel.index)?;
+                Some((panel.index, rect.distance_to_pos(pos)))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index)
     }
 
     fn panel_screen(&self, panel: usize) -> Option<(PanelTransform, Rect, f32)> {
@@ -2247,6 +2289,41 @@ mod tests {
     use super::*;
     use stokesforge_plot::{PanelSpec, Panels};
     use stokesforge_render::view::Framing;
+
+    /// #357: after layer 0 is deleted, the zoom of layer 1 stays on that layer
+    /// (now 0), is never applied to another one, and the active layer follows.
+    #[test]
+    fn remapping_layers_moves_the_zoom_and_the_active_layer_with_their_layer() {
+        let spec = PlotSpec {
+            panels: Panels::new(vec![
+                PanelSpec::at(0, 0),
+                PanelSpec::at(0, 1),
+                PanelSpec::at(0, 2),
+            ]),
+            ..PlotSpec::default()
+        };
+        let mut view = GraphView::new();
+        let zoom = Framing::xy((1.0, 2.0), (3.0, 4.0));
+        view.view.set_framing(2, zoom);
+        view.set_active_panel(2, &spec);
+
+        view.remap_layers(&[None, Some(0), Some(1)]);
+        assert_eq!(view.view.framing(1), Some(zoom));
+        assert_eq!(view.view.framing(2), None);
+        let two = PlotSpec {
+            panels: Panels::new(vec![PanelSpec::at(0, 0), PanelSpec::at(0, 1)]),
+            ..PlotSpec::default()
+        };
+        assert_eq!(
+            view.active_panel(&two),
+            1,
+            "the active layer moved with its layer"
+        );
+
+        // The active layer deleted: back to the first.
+        view.remap_layers(&[Some(0), None]);
+        assert_eq!(view.active_panel(&two), 0);
+    }
 
     /// Issue #37: the input field is centered on the rendered text, at its
     /// body size (proportional to the size and to the display scale), and at

@@ -102,7 +102,7 @@ copies the figure only with no selection, #149).
 
 | Target | Menu |
 |---|---|
-| Node | the menu of the figure's object (`object_node_menu`); layer and group "Axes": no more Closed Frame (#344: removed from the interface, `Action::SetClosedFrame` no longer has a menu entry) |
+| Node | the menu of the figure's object (`object_node_menu`); layer node: Delete removes the cell and its overlay layers, greyed for the last cell (#357); layer and group "Axes": no more Closed Frame (#344: removed from the interface, `Action::SetClosedFrame` no longer has a menu entry) |
 | Background | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 check boxes) ─ Reset Settings |
 
 View contains only "Object Manager ▸" (no Panels nor Toolbars: panels and bars are not hidden through a menu; toolbars are fixed, panels collapse or detach; settings of the Project Manager and of the console may be added there later); it wraps the same content (`object_manager_settings_contents`).
