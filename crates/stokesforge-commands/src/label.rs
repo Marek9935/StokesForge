@@ -308,7 +308,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::RemoveGroup => "Delete Group",
             Self::ReorderGroup => "Reorder Group",
             Self::ClosedFrame => "Change Closed Frame",
-            Self::AddCell => "Add Cell",
+            Self::AddCell => "Add Layer Beside",
             Self::RemoveCell => "Delete Layer",
         })
     }
