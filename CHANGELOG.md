@@ -33,6 +33,17 @@ without a message, see `docs/persistence.md`).
   is a function, a lone name stays a column. The Fit gains `round`, `mod` and
   `root`, accepts `pi()` and no longer cares about the case of function names.
 
+- Column formulas (#402): functions that give one value for a whole column,
+  usable in a row-by-row formula: `at(B, 340)` (linear interpolation at an X,
+  empty outside the data), `max`, `min`, `mean`, `sum`, `std` (n - 1) and
+  `integral(B)` (same area as the Integration tool), each with an optional X
+  range (`max(B, 330, 350)`, bounds in any order, or columns read row by
+  row). Example: `B / at(B, 340)` normalizes a spectrum. The X is the column
+  paired with B by the rule of the plot; without one the cells show `---` and
+  the **F(x)=** cell is framed in red. `max(B)` is the column, `max(B, C)` stays
+  row by row, three values are a range. The first argument must be a column
+  letter (`max(B*2)` is refused).
+
 - Graph size (#394): the size of a graph is the size of its **plot area**, one
   width per grid column and one height per row, in points, set in Graph
   Properties > General > Size (in the unit chosen in Preferences, centimetres by

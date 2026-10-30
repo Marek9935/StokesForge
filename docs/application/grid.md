@@ -242,9 +242,9 @@ yet another thing.
 identifier**; the letters that the cell shows and that one types are only
 a display, reread on every frame: inserting, deleting or moving columns
 (including the outputs of an analysis) never changes what the formula reads,
-the displayed letter follows the column (`a*2` is written `A*2`). The syntax is `+ - * / ^`, unary minus (and plus), comparisons, parentheses, numbers, column letters and row-wise functions of the table shared with the Fit (`sqrt`, `round`, `if`, `pi()`..., #401; a name followed by `(` is a function, a lone name a column): there is no function of a whole column and no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
+the displayed letter follows the column (`a*2` is written `A*2`). The syntax is `+ - * / ^`, unary minus (and plus), comparisons, parentheses, numbers, column letters and row-wise functions of the table shared with the Fit (`sqrt`, `round`, `if`, `pi()`..., #401; a name followed by `(` is a function, a lone name a column), and the functions of a whole column (#402: `at`, `max`, `min`, `mean`, `sum`, `std`, `integral`, with an optional X range): there is no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
 longer in the sheet, the cell shows `#REF` and paints a red frame with the
-tooltip "Column deleted. Replace #REF with a column letter". Three
+tooltip "Column deleted. Replace #REF with a column letter". The same frame (`AppState::formula_issue`) says that a column function has no X column paired with the column it reads (cells `---`), or that every cell of the result is empty because the functions found no point. Three
 inputs are **refused**: a letter that designates no column of the
 sheet, the column itself, and a modified `#REF`. Enter or Tab on a refused
 text leave the field open (red frame, tooltip that says why); a click

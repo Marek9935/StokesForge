@@ -9,6 +9,7 @@ Read from `stokesforge-explain` before answering. Pages route; the code decides.
 | grid, typing, selection, copy/paste, context menus, shortcuts, windows, theme, console | `docs/application/README.md` (table by need) | `stokesforge-app-state/src/state.rs`, `stokesforge-app/src/app/` |
 | mouse gestures, double-clicks, drags | `docs/gestures.md` § The model | the surface module in `src/app/` |
 | column types, missing values, mixed columns, header fields | `docs/data-model.md` | `stokesforge-core` |
+| what an `F(x)=` formula can do (functions, `at(B, 340)`, `max/mean/std(B)`, `integral(B)`, X ranges, normalizing a spectrum) | `manual/src/guide/projects-and-workbooks.md` § Formula syntax, "Values of a whole column" | `stokesforge-core/src/formula.rs`, `stokesforge-analysis/src/column_values.rs` |
 | undo, macros, what Ctrl+Z brings back | `docs/commands-and-history.md` § A command is a value | `stokesforge-commands/src/command.rs` |
 | saving, file format, compatibility | `docs/persistence.md` § Version rule: every V1 file can be read back up to V3 | `stokesforge-persistence` |
 | plotting, axes, legend, SVG/PDF/PNG export, formulas | `docs/rendering.md` | `stokesforge-render` |
@@ -40,7 +41,7 @@ A « oui » is checked by an `rg` in the crate or by the test that exercises it;
 **Three ideas that explain almost everything**:
 
 1. **One writer.** One component (« l'acteur ») holds the project; every other one has a frozen photo it reads at will. To change anything, it sends a request. Python analogy: one thread owns the object, the others get a read copy — where it breaks: the photo is not copied each time, it is shared and never modified.
-2. **Every change is an undoable command.** Typing a value, renaming a sheet, adding a graph: each is a « commande » that also knows how to undo itself — why Ctrl+Z works the same everywhere. Exceptions: view state (zoom, window positions), loading a project, formula values recomputed by the actor as a consequence of a command (targeted: only formulas whose inputs changed are recomputed, like an `lru_cache` keyed on the version numbers of the columns read).
+2. **Every change is an undoable command.** Typing a value, renaming a sheet, adding a graph: each is a « commande » that also knows how to undo itself — why Ctrl+Z works the same everywhere. Exceptions: view state (zoom, window positions), loading a project, formula values recomputed by the actor as a consequence of a command (targeted: only formulas whose inputs changed are recomputed, like an `lru_cache` keyed on the version numbers of the columns read; the inputs include the X column that `at(B, 340)` or `integral(B)` pairs with B, which the formula text does not name, #402).
 3. **Drawing is written once.** A curve on screen and the same curve exported to PDF go through the **same** code; only the last step (« poser un pixel » vs « écrire une balise SVG ») differs — what you export is what you see.
 
 **The invariants** (`docs/invariants.md`) are the rules no change may break. What matters is the « what holds it » of each: a rule held by the compiler or a test needs no thought; a rule held only by review gets lost.
