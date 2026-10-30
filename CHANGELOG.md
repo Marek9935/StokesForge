@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Column formulas (#401): the `^` operator, comparisons (`<`, `<=`, `>`, `>=`,
+  `==`, `!=`, true = 1) and row-wise functions in **F(x)=** (`sqrt`, `root`,
+  `exp`, `ln`, `log`, `log2`, `logx`, `abs`, `sign`, trigonometry, `round`,
+  `floor`, `ceil`, `mod`, `min`, `max`, `if`, `pi()`). A name followed by `(`
+  is a function, a lone name stays a column. The Fit gains `round`, `mod` and
+  `root`, accepts `pi()` and no longer cares about the case of function names.
+
 - Error bars (#360): the first Y Error (X Error) column to the right of a Y
   column, before the next Y column, is paired with it at plot time, and the
   **Y error** / **X error** fields of Series Properties change or remove it

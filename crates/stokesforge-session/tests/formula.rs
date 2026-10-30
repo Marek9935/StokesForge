@@ -199,6 +199,31 @@ fn a_dependency_cycle_degrades_to_nan_without_hanging() {
     }
 }
 
+/// A loop that goes through functions is a cycle like any other (#401): the
+/// columns a function reads are dependencies (invariant 11).
+#[test]
+fn a_cycle_through_functions_degrades_without_hanging() {
+    let (project, _a, b, c) = fixture();
+    let session = Session::spawn(project, None).expect("actor thread started");
+    let handle = session.handle();
+
+    handle
+        .execute(set_formula(&handle, b, "sqrt(C)"))
+        .expect("set B = sqrt(C)");
+    handle
+        .execute(set_formula(&handle, c, "abs(B)"))
+        .expect("set C = abs(B), which closes the cycle");
+
+    let snapshot = handle.snapshot().expect("snapshot");
+    for &column in &[b, c] {
+        let node = snapshot.tree.node(column).expect("column");
+        let col = node.as_column().expect("the node is a column");
+        for row in 0..col.len() {
+            assert_eq!(col.cell(row), MixedCell::Text("---".to_string()));
+        }
+    }
+}
+
 /// Setting a formula on a column that already held values (user data, not yet
 /// a calculated column) overwrites these values by the immediate recalculation
 /// (`setting_a_formula_recalculates_immediately` above already checks this) —

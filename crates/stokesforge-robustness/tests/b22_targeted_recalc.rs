@@ -78,8 +78,23 @@ use tempfile::TempDir;
 /// text. The step converts them to identifiers (`Tree::formula_from_letters`)
 /// as the interface does; a refusal (letter outside the worksheet,
 /// self-reference) gives a step without a command, counted as "rejected".
-const FORMULAS: [&str; 13] = [
-    "A*2", "B+1", "A+B", "C-A", "D/2", "A*", "F+1", "1+2", "A+B*C", "E", "(A+B)/D", "G-1", "B*B",
+const FORMULAS: [&str; 15] = [
+    "A*2",
+    "B+1",
+    "A+B",
+    "C-A",
+    "D/2",
+    "A*",
+    "F+1",
+    "1+2",
+    "A+B*C",
+    "E",
+    "(A+B)/D",
+    "G-1",
+    "B*B",
+    // Row-wise functions and conditions (#401): they read their columns.
+    "sqrt(A)+B^2",
+    "if(A>B,A,B)",
 ];
 
 #[derive(Debug, Clone)]

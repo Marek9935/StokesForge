@@ -1,22 +1,28 @@
 //! Parser for **free model** expressions (#188, M13 a B): `y = …` typed
 //! by the user, with `x`, free parameters and functions.
 //!
-//! Choice: the parser lives here and not in `stokesforge-core::formula` (which
-//! only does `+ - * /` on columns) — this crate stays free of workspace
-//! dependencies. The two grammars stay separate; sharing them would require
-//! moving a common parser below `core`, to be decided if the column
-//! formula ever learns functions.
+//! Choice: the parser lives here and not in `stokesforge-core::formula` (the
+//! column formulas, which read columns, not parameters) — this crate stays
+//! free of workspace dependencies. The two **grammars** stay separate, but
+//! the **function table** is shared ([`crate::functions`], #401): a function
+//! added there is available in both. Names of functions are case-insensitive
+//! here too (`EXP(x)`); parameters stay case-sensitive. `if` and the
+//! comparisons of the column formula are not in the Fit.
 //!
 //! Grammar (increasing precedence): `+ -`; `* /`; unary `-`; `^`
 //! (right-associative, `-2^2 = -4`); call `f(a, b)`, number, name,
-//! parentheses. The names `x`, `pi`, `e` are reserved; any other name outside
-//! a call is a **parameter**, in the order of its first appearance.
+//! parentheses. The names `x`, `pi`, `e` are reserved (`pi()` also works);
+//! any other name outside a call is a **parameter**, in the order of its
+//! first appearance.
 //! Implicit multiplication (`2x`) does not exist.
 //!
 //! Logarithms (#287): `log(x)` and `log10(x)` in base 10, `ln(x)` natural,
 //! `log2(x)`, `logx(x, b)` in base `b`; x < 0, `b ≤ 0` or `b = 1` give NaN.
 
 use std::fmt;
+
+use crate::functions::Func;
+pub use crate::functions::{erf, erfc};
 
 /// A syntax error, with the position (in characters, from 0).
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -62,180 +68,6 @@ impl fmt::Display for ExprErrorKind {
                 found,
             } => write!(f, "'{name}' takes {expected} argument(s), {found} given"),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Func {
-    Exp,
-    Ln,
-    Log10,
-    Log2,
-    Sqrt,
-    Abs,
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Sinh,
-    Cosh,
-    Tanh,
-    Erf,
-    Erfc,
-    Sign,
-    Floor,
-    Ceil,
-    Pow,
-    Min,
-    Max,
-    Atan2,
-    Logx,
-}
-
-impl Func {
-    fn from_name(name: &str) -> Option<(Func, usize)> {
-        Some(match name {
-            "exp" => (Func::Exp, 1),
-            "ln" => (Func::Ln, 1),
-            // `log` is in base 10 (chemists' usage, #287); `logx(x, b)`
-            // takes the base as second argument.
-            "log" | "log10" => (Func::Log10, 1),
-            "logx" => (Func::Logx, 2),
-            "log2" => (Func::Log2, 1),
-            "sqrt" => (Func::Sqrt, 1),
-            "abs" => (Func::Abs, 1),
-            "sin" => (Func::Sin, 1),
-            "cos" => (Func::Cos, 1),
-            "tan" => (Func::Tan, 1),
-            "asin" => (Func::Asin, 1),
-            "acos" => (Func::Acos, 1),
-            "atan" => (Func::Atan, 1),
-            "sinh" => (Func::Sinh, 1),
-            "cosh" => (Func::Cosh, 1),
-            "tanh" => (Func::Tanh, 1),
-            "erf" => (Func::Erf, 1),
-            "erfc" => (Func::Erfc, 1),
-            "sign" => (Func::Sign, 1),
-            "floor" => (Func::Floor, 1),
-            "ceil" => (Func::Ceil, 1),
-            "pow" => (Func::Pow, 2),
-            "min" => (Func::Min, 2),
-            "max" => (Func::Max, 2),
-            "atan2" => (Func::Atan2, 2),
-            _ => return None,
-        })
-    }
-
-    fn apply(self, a: f64, b: f64) -> f64 {
-        match self {
-            Func::Exp => libm::exp(a),
-            Func::Ln => libm::log(a),
-            Func::Log10 => libm::log10(a),
-            Func::Log2 => libm::log2(a),
-            Func::Sqrt => a.sqrt(),
-            Func::Abs => a.abs(),
-            Func::Sin => libm::sin(a),
-            Func::Cos => libm::cos(a),
-            Func::Tan => libm::tan(a),
-            Func::Asin => libm::asin(a),
-            Func::Acos => libm::acos(a),
-            Func::Atan => libm::atan(a),
-            Func::Sinh => libm::sinh(a),
-            Func::Cosh => libm::cosh(a),
-            Func::Tanh => libm::tanh(a),
-            Func::Erf => erf(a),
-            Func::Erfc => erfc(a),
-            // `f64::min`/`max` ignore a NaN and `sign` would read it as 0:
-            // a NaN operand must stay NaN (contract "invalid domain").
-            Func::Sign => {
-                if a.is_nan() {
-                    f64::NAN
-                } else if a > 0.0 {
-                    1.0
-                } else if a < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
-            }
-            Func::Floor => a.floor(),
-            Func::Ceil => a.ceil(),
-            Func::Pow => libm::pow(a, b),
-            Func::Min if a.is_nan() || b.is_nan() => f64::NAN,
-            Func::Max if a.is_nan() || b.is_nan() => f64::NAN,
-            Func::Min => a.min(b),
-            Func::Max => a.max(b),
-            Func::Atan2 => libm::atan2(a, b),
-            // Base ≤ 0 or = 1: NaN (ln b = 0 would give ±inf or 0/0); x ≤ 0:
-            // `ln` already gives NaN (−inf for 0, which we keep like `ln`).
-            Func::Logx if b.is_nan() || b <= 0.0 || b == 1.0 => f64::NAN,
-            Func::Logx => libm::log(a) / libm::log(b),
-        }
-    }
-}
-
-/// Complementary error function, precise in the tail: `1 − erf(x)` would lose
-/// all its digits from `x ≈ 6` (`erfc(6) ≈ 2e-17`).
-pub fn erfc(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    if x < 0.0 {
-        return 2.0 - erfc(-x);
-    }
-    if x < 2.5 {
-        return 1.0 - erf(x);
-    }
-    if x > 27.0 {
-        return 0.0;
-    }
-    // Same continued fraction as `erf`, without subtracting it from 1.
-    let mut f = 0.0;
-    for k in (1..=60).rev() {
-        f = (k as f64 / 2.0) / (x + f);
-    }
-    libm::exp(-x * x) / (std::f64::consts::PI.sqrt() * (x + f))
-}
-
-/// Error function (Abramowitz & Stegun 7.1.26 refined by a series for
-/// small arguments): absolute error < 1e-12 on ℝ.
-pub fn erf(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    let ax = x.abs();
-    let v = if ax < 3.0 {
-        // Maclaurin series: erf(x) = 2/√π Σ (-1)^n x^(2n+1) / (n! (2n+1)).
-        let mut term = ax;
-        let mut sum = ax;
-        let x2 = ax * ax;
-        let mut n = 0.0_f64;
-        loop {
-            n += 1.0;
-            term *= -x2 / n;
-            let add = term / (2.0 * n + 1.0);
-            sum += add;
-            if add.abs() < 1e-17 * sum.abs() || n > 200.0 {
-                break;
-            }
-        }
-        sum * 2.0 / std::f64::consts::PI.sqrt()
-    } else if ax > 6.0 {
-        1.0
-    } else {
-        // Continued fraction of erfc for large arguments.
-        let mut f = 0.0;
-        for k in (1..=60).rev() {
-            f = (k as f64 / 2.0) / (ax + f);
-        }
-        1.0 - libm::exp(-ax * ax) / (std::f64::consts::PI.sqrt() * (ax + f))
-    };
-    if x < 0.0 {
-        -v
-    } else {
-        v
     }
 }
 
@@ -454,7 +286,7 @@ impl Parser {
                 let name_pos = self.toks[self.pos].1;
                 self.pos += 1;
                 if let Some(Tok::LParen) = self.peek() {
-                    let Some((func, arity)) = Func::from_name(&name) else {
+                    let Some(func) = Func::from_name(&name) else {
                         return Err(ExprError {
                             kind: ExprErrorKind::UnknownFunction(name),
                             position: name_pos,
@@ -477,11 +309,11 @@ impl Parser {
                             }
                         }
                     }
-                    if args.len() != arity {
+                    if !func.arity().contains(&args.len()) {
                         return Err(ExprError {
                             kind: ExprErrorKind::WrongArgumentCount {
                                 name,
-                                expected: arity,
+                                expected: func.arity()[0],
                                 found: args.len(),
                             },
                             position: name_pos,
@@ -571,9 +403,18 @@ fn eval_node(n: &Node, x: f64, p: &[f64]) -> f64 {
             }
         }
         Node::Call(f, args) => {
-            let a = eval_node(&args[0], x, p);
-            let b = args.get(1).map_or(0.0, |n| eval_node(n, x, p));
-            f.apply(a, b)
+            // The arity is checked at parse: a few arguments at most. A
+            // stack buffer avoids an allocation per point in a fit loop.
+            let mut buf = [0.0_f64; 4];
+            if args.len() <= buf.len() {
+                for (slot, arg) in buf.iter_mut().zip(args) {
+                    *slot = eval_node(arg, x, p);
+                }
+                f.apply(&buf[..args.len()])
+            } else {
+                let values: Vec<f64> = args.iter().map(|a| eval_node(a, x, p)).collect();
+                f.apply(&values)
+            }
         }
     }
 }
@@ -679,37 +520,37 @@ mod tests {
     #[test]
     fn sign_min_max_nan_in_first_and_second_position() {
         let nan = f64::NAN;
-        assert!(Func::Sign.apply(nan, 0.0).is_nan());
+        assert!(Func::Sign.apply(&[nan, 0.0]).is_nan());
         for f in [Func::Min, Func::Max] {
-            assert!(f.apply(nan, 1.0).is_nan());
-            assert!(f.apply(1.0, nan).is_nan());
-            assert!(f.apply(nan, nan).is_nan());
-            assert!(f.apply(nan, f64::INFINITY).is_nan());
-            assert!(f.apply(f64::NEG_INFINITY, nan).is_nan());
+            assert!(f.apply(&[nan, 1.0]).is_nan());
+            assert!(f.apply(&[1.0, nan]).is_nan());
+            assert!(f.apply(&[nan, nan]).is_nan());
+            assert!(f.apply(&[nan, f64::INFINITY]).is_nan());
+            assert!(f.apply(&[f64::NEG_INFINITY, nan]).is_nan());
         }
     }
 
     #[test]
     fn sign_min_max_infinities_zeros_and_equals() {
         let (inf, ninf) = (f64::INFINITY, f64::NEG_INFINITY);
-        assert_eq!(Func::Sign.apply(inf, 0.0), 1.0);
-        assert_eq!(Func::Sign.apply(ninf, 0.0), -1.0);
-        assert_eq!(Func::Sign.apply(0.0, 0.0), 0.0);
-        assert_eq!(Func::Sign.apply(-0.0, 0.0), 0.0);
-        assert_eq!(Func::Sign.apply(1e-300, 0.0), 1.0);
-        assert_eq!(Func::Sign.apply(-1e-300, 0.0), -1.0);
-        assert_eq!(Func::Max.apply(inf, 3.0), inf);
-        assert_eq!(Func::Max.apply(3.0, inf), inf);
-        assert_eq!(Func::Max.apply(ninf, 3.0), 3.0);
-        assert_eq!(Func::Max.apply(ninf, ninf), ninf);
-        assert_eq!(Func::Min.apply(ninf, 3.0), ninf);
-        assert_eq!(Func::Min.apply(3.0, ninf), ninf);
-        assert_eq!(Func::Min.apply(inf, 3.0), 3.0);
-        assert_eq!(Func::Min.apply(inf, inf), inf);
-        assert_eq!(Func::Min.apply(2.0, 2.0), 2.0);
-        assert_eq!(Func::Max.apply(2.0, 2.0), 2.0);
-        assert_eq!(Func::Min.apply(0.0, -0.0), 0.0);
-        assert_eq!(Func::Max.apply(-0.0, 0.0), 0.0);
+        assert_eq!(Func::Sign.apply(&[inf, 0.0]), 1.0);
+        assert_eq!(Func::Sign.apply(&[ninf, 0.0]), -1.0);
+        assert_eq!(Func::Sign.apply(&[0.0, 0.0]), 0.0);
+        assert_eq!(Func::Sign.apply(&[-0.0, 0.0]), 0.0);
+        assert_eq!(Func::Sign.apply(&[1e-300, 0.0]), 1.0);
+        assert_eq!(Func::Sign.apply(&[-1e-300, 0.0]), -1.0);
+        assert_eq!(Func::Max.apply(&[inf, 3.0]), inf);
+        assert_eq!(Func::Max.apply(&[3.0, inf]), inf);
+        assert_eq!(Func::Max.apply(&[ninf, 3.0]), 3.0);
+        assert_eq!(Func::Max.apply(&[ninf, ninf]), ninf);
+        assert_eq!(Func::Min.apply(&[ninf, 3.0]), ninf);
+        assert_eq!(Func::Min.apply(&[3.0, ninf]), ninf);
+        assert_eq!(Func::Min.apply(&[inf, 3.0]), 3.0);
+        assert_eq!(Func::Min.apply(&[inf, inf]), inf);
+        assert_eq!(Func::Min.apply(&[2.0, 2.0]), 2.0);
+        assert_eq!(Func::Max.apply(&[2.0, 2.0]), 2.0);
+        assert_eq!(Func::Min.apply(&[0.0, -0.0]), 0.0);
+        assert_eq!(Func::Max.apply(&[-0.0, 0.0]), 0.0);
         // Via the parser.
         assert_eq!(ev("max(1/x, 3)", 0.0, &[]), inf);
         assert_eq!(ev("sign(-1/x)", 0.0, &[]), -1.0);
@@ -1247,17 +1088,21 @@ mod tests {
         assert_eq!(arity("log10()"), ("log10".into(), 1, 0, 0));
         // The position is that of the name, not of the parenthesis.
         assert_eq!(arity("1 + logx(8)"), ("logx".into(), 2, 1, 4));
-        // Names are case-sensitive: `LOG`, `Ln`, `LogX` are unknown.
+        // Function names are case-insensitive (shared table, #401).
         for name in ["LOG", "Ln", "LN", "LogX", "Log10", "LOG2"] {
-            assert_eq!(
-                Expr::parse(&format!("{name}(2)")).unwrap_err(),
-                ExprError {
-                    kind: ExprErrorKind::UnknownFunction(name.into()),
-                    position: 0
-                },
-                "{name}"
-            );
+            let upper = Expr::parse(&format!("{name}(8, 2)"));
+            let lower = Expr::parse(&format!("{}(8, 2)", name.to_lowercase()));
+            assert_eq!(upper.is_ok(), lower.is_ok(), "{name}");
         }
+        assert!((ev("LOGX(8, 2)", 0.0, &[]) - 3.0).abs() < 1e-12);
+        assert_eq!(
+            Expr::parse("LOGY(2)").unwrap_err().kind,
+            ExprErrorKind::UnknownFunction("LOGY".into())
+        );
+        // `pi()` is accepted next to the bare constant; parameters stay
+        // case-sensitive.
+        assert_eq!(ev("pi()", 0.0, &[]), ev("pi", 0.0, &[]));
+        assert_eq!(Expr::parse("Pi + PI").unwrap().params(), ["Pi", "PI"]);
         // Without parenthesis, `log` / `ln` are ordinary parameters.
         assert_eq!(Expr::parse("log + ln").unwrap().params(), ["log", "ln"]);
     }

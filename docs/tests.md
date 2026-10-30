@@ -171,7 +171,11 @@ This kind of optimization has only one failure mode, and it is
 stays wrong without any error. The tests below are made for that
 case, and everything that reuses the mechanism must rely on them (recomputed
 analyses #184, references between sheets #186,
-new formula functions).
+new formula functions). A **row-wise** function (`sqrt`, `round`, `if`, #401)
+adds no input to the fingerprint: it reads only the columns it names, which are
+already in it (`referenced_columns` walks every node; `b22` draws such
+formulas). A function that reads something else (a whole column, another
+sheet, the row number) does.
 
 ### What holds it today
 

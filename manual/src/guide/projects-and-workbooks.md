@@ -279,10 +279,28 @@ For example, to fill column C with the sum of A and B, double-click the **F(x)=*
 
 - Columns are written with their letters: `A`, `B`, `AA`. Capitals or lowercase both work.
 - Numbers: `2`, `0.5`, `1e-3`.
-- Operators: `+`, `-`, `*`, `/`, and a minus sign in front of a value (`-A`).
-- Parentheses: `(A+B)/2`. `*` and `/` are done before `+` and `-`.
+- Operators: `+`, `-`, `*`, `/`, `^` (power), and a minus sign in front of a value (`-A`).
+- Parentheses: `(A+B)/2`. `^` is done first, then `*` and `/`, then `+` and `-`. `^` reads from the right (`2^3^2` is 512) and binds tighter than a minus sign (`-2^2` is -4).
+- Comparisons: `<`, `<=`, `>`, `>=`, `==`, `!=`. They give 1 when true and 0 when false, and are done last.
+- Functions work on one row at a time. Write the name, then the values in parentheses, separated by commas: `sqrt(A)`, `round(B, 2)`.
 
-There are no functions (such as `sin` or `sum`) and no `^` operator in a column formula. Do not start the formula with `=`.
+Do not start the formula with `=`.
+
+A name followed by `(` is a function, in capitals or lowercase (`EXP(B)` is `exp(B)`). A name on its own is a column (`b/2` is column B divided by 2). The number π is written `pi()`. There is no implicit multiplication: write `A*(B/C)`, not `A(B/C)`.
+
+| Family | Functions |
+|---|---|
+| Powers, logarithms | `sqrt(x)`, `root(x, n)` (`root(-8, 3)` is -2), `exp(x)`, `ln(x)`, `log(x)` (base 10, same as `log10(x)`), `log2(x)`, `logx(x, b)` (base `b`), `pow(x, y)` |
+| Absolute value, sign | `abs(x)`, `sign(x)` |
+| Trigonometry | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh`, `pi()` |
+| Rounding | `round(x, n)` (half away from zero, `n` may be negative: `round(1234, -2)` is 1200), `floor(x)`, `ceil(x)`, `mod(a, b)` (sign of `b`: `mod(-7, 3)` is 2) |
+| Two values | `min(a, b)`, `max(a, b)` |
+| Conditions | `if(condition, a, b)`: `a` when the condition is true (not 0), otherwise `b` |
+| Others | `erf(x)`, `erfc(x)` |
+
+Examples: `-log(B)` (absorbance from a transmittance), `sqrt(A)`, `if(B<0, 0, B)`, `A*pi()`.
+
+In `if`, only the chosen value is read: an empty cell in the other one does not matter.
 
 A formula reads columns of its own sheet only.
 
@@ -291,6 +309,7 @@ If you need functions of the data, you can use a script (see [The pyst API](../s
 ### How a formula works
 
 - The formula is calculated row by row. An empty cell in a source gives an empty cell in the result.
+- A result that has no value (`ln(-1)`, `sqrt(-1)`, `mod(a, 0)`, `root` of a negative number with an even `n`) is an empty cell, shown as a failed calculation. Dividing by zero is not an error: `1/0` is infinity.
 - The values of the column are read-only. To change them, edit the formula.
 - The formula keeps its columns even if you add, delete or move others. The letters in the **F(x)=** row follow the columns.
 - If a column the formula reads is deleted, the formula shows `#REF` in red. Replace `#REF` with a column letter.
@@ -302,7 +321,11 @@ StokesForge refuses a formula, and leaves the field open, when:
 
 - a letter names no column in the sheet;
 - the formula uses the column that holds it;
-- the text still contains `#REF`.
+- the text still contains `#REF`;
+- a name followed by `(` is not a function;
+- a function gets the wrong number of values;
+- a column letter is followed by `(` (`A(B/C)`): write `A*(B/C)`;
+- `pi` is written alone and the sheet has no column PI: write `pi()`.
 
 Two formulas that read each other in a loop are reported as an error. A formula with a syntax error is kept and the column has no values until you fix it.
 

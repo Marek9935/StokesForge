@@ -49,7 +49,9 @@
 //! column rewrites nothing. A calculation that read one more piece of data —
 //! a column's name, its unit, another sheet, a `row()` function — without
 //! adding it here would be wrongly "clean": the displayed value would stay
-//! wrong without an error. What to test then: `docs/tests.md`,
+//! wrong without an error. (Row-wise functions such as `sqrt(A)` or
+//! `if(A>B,A,B)`, #401, read only the columns they name: nothing to add.) What
+//! to test then: `docs/tests.md`,
 //! "Targeted recalculation".
 //!
 //! ## The oracle
