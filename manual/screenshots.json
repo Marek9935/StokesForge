@@ -70,6 +70,11 @@
     "shows": "The Annotations demo graph: text annotations written with formulas (subscripts, Greek letters), a rectangle, an ellipse and an arrow."
   },
   {
+    "image": "graphs-layer-badges.png",
+    "page": "guide/graphs.md",
+    "shows": "Graph1 with two cells side by side: the numbered layer badges 1 and 2 sit at the top left of their own cells, badge 1 highlighted as the active layer."
+  },
+  {
     "image": "analysis-integration.png",
     "page": "guide/analysis.md",
     "shows": "The Integrate analysis window on Graph1 with one range from 470 to 570 nm, its shaded preview and the computed area."

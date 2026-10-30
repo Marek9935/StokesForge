@@ -370,7 +370,9 @@ On an overlay layer, the **Top** and **Right** tabs of **Graph Properties ▸ Ax
 
 ### The active layer
 
-Additions go to the **active layer**. A small numbered badge for each layer sits at the top left of the graph window. Click a badge to make that layer active. The layer also becomes active when you click or right-click in its plot area, or select one of its objects.
+Additions go to the **active layer**. A small numbered badge for each layer sits at the top left of the layer's own cell, above its plot area. Overlay layers of the same cell have their badges side by side. A layer that cannot be drawn, for instance because its cell is too small, keeps its badge at the top left of the window. Click a badge to make that layer active. The layer also becomes active when you click or right-click in its plot area, or select one of its objects.
+
+<img src="../images/graphs-layer-badges.png" alt="A graph with two cells side by side: badges 1 and 2 at the top left of their own cells." width="560">
 
 These actions use the active layer: dropping columns, **Send to**, **Add Text** and **New Layer**.
 
