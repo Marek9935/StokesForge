@@ -242,9 +242,9 @@ yet another thing.
 identifier**; the letters that the cell shows and that one types are only
 a display, reread on every frame: inserting, deleting or moving columns
 (including the outputs of an analysis) never changes what the formula reads,
-the displayed letter follows the column (`a*2` is written `A*2`). The syntax is `+ - * / ^`, unary minus (and plus), comparisons, parentheses, numbers, column letters and row-wise functions of the table shared with the Fit (`sqrt`, `round`, `if`, `pi()`..., #401; a name followed by `(` is a function, a lone name a column): there is no function of a whole column and no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
+the displayed letter follows the column (`a*2` is written `A*2`). The syntax is `+ - * / ^`, unary minus (and plus), comparisons, parentheses, numbers, column letters and row-wise functions of the table shared with the Fit (`sqrt`, `round`, `if`, `pi()`..., #401; a name followed by `(` is a function, a lone name a column), and the functions of a whole column (#402: `at`, `max`, `min`, `mean`, `sum`, `std`, `integral`, with an optional X range): there is no reference to another sheet (`stokesforge-core/src/formula.rs`). If a column read is no
 longer in the sheet, the cell shows `#REF` and paints a red frame with the
-tooltip "Column deleted. Replace #REF with a column letter". Three
+tooltip "Column deleted. Replace #REF with a column letter". The same frame (`AppState::formula_issue`) says that a column function has no X column paired with the column it reads (cells `---`), or that every cell of the result is empty because the functions found no point. Three
 inputs are **refused**: a letter that designates no column of the
 sheet, the column itself, and a modified `#REF`. Enter or Tab on a refused
 text leave the field open (red frame, tooltip that says why); a click
@@ -292,9 +292,12 @@ While the `F(x)=` cell is edited (`header_field_widget`, `HeaderField::Formula`)
 a "?" icon sits at its right (`app::column_formula_help`), shown only when the
 preference `show_column_formula_help` is on. The text field gives up the icon's
 width (`reserved_width`) so that a narrow column does not clip it. The icon
-senses only the hover (`hover_help`): it never takes the keyboard focus, and
-hovering it keeps the cell open; a click on it is a click outside the field,
-which validates the cell like any other (`FocusLoss::Ends`, S-T4). The list is
+never takes the keyboard focus; a **press** on it (the press already ends the
+cell edit, which removes the icon before the release) validates the cell like
+any other (`FocusLoss::Ends`, S-T4) and sends `Action::OpenFormulaFunctions`: the
+read-only modal window **Formula Functions** (`formula_functions_window.rs`,
+#402, `docs/windows.md`) shows the functions one family at a time, families as
+vertical tabs at the left. Its state (open, chosen family) is in `AppState`. The list is
 `stokesforge_app_state::formula_help::groups()`, read from `Callee::all()`.
 
 ### The header-side gutter: uniform, and also selectable

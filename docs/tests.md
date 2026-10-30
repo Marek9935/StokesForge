@@ -174,8 +174,17 @@ analyses #184, references between sheets #186,
 new formula functions). A **row-wise** function (`sqrt`, `round`, `if`, #401)
 adds no input to the fingerprint: it reads only the columns it names, which are
 already in it (`referenced_columns` walks every node; `b22` draws such
-formulas). A function that reads something else (a whole column, another
-sheet, the row number) does.
+formulas). A function that reads something else (another sheet, the row
+number) does. A whole-column function (#402) reads the columns it names **and**
+the X paired with them (`at`, `integral`, range forms): that X is in the
+fingerprint (identifier and version) and in the dependency order; the
+named cases are in `recalc_targeted.rs` (`moving_the_paired_x_recalculates_at`,
+`a_role_change_pairing_another_x_recalculates_at`,
+`editing_the_unnamed_x_recalculates_at`,
+`an_x_computed_by_a_formula_is_recalculated_first`,
+`an_x_reading_a_column_it_is_the_x_of_is_a_cycle`,
+`an_unrelated_command_rewrites_no_column_function`) and `b22` draws the column
+functions with a `SetRole` step.
 
 ### What holds it today
 
@@ -216,6 +225,10 @@ tests see it.
 | memo not cleared by `Load` | `loading_forgets_the_memo_of_the_replaced_project` alone — the draw does not manufacture a coincidence between projects |
 | memo not cleared by `NewProject` | `a_new_project_forgets_the_memo_of_the_old_one` alone (a paste as first request: otherwise the purge of an ordinary pass is enough) |
 | insertion of a column without moving the counter beyond its version (`Project::insert_node`) | `a_column_added_with_its_version_does_not_make_that_number_serve_again`, the unit test of `core`, `b14` — not `b22`, whose draw does not land on the number |
+| version of the paired X removed from the fingerprint (#402) | `editing_the_unnamed_x_recalculates_at`, `an_x_computed_by_a_formula_is_recalculated_first`, `b22` |
+| paired X removed from the fingerprint altogether (#402) | `moving_the_paired_x_recalculates_at`, `a_role_change_pairing_another_x_recalculates_at`, `editing_the_unnamed_x_recalculates_at`, `an_x_computed_by_a_formula_is_recalculated_first`, `a_column_without_x_shows_dashes_until_one_appears` |
+| identifier of the paired X removed, version kept (#402) | **nobody, by construction**: a version names one content in the whole project, so a different X has a different version. The identifier stays for readability |
+| paired X missing from the dependency order and from the cycles (#402) | `an_x_computed_by_a_formula_is_recalculated_first`, `an_x_reading_a_column_it_is_the_x_of_is_a_cycle` — not `b22` (a chain through a formula X is too rare in the draw) |
 | recalculate everything (the "targeted" is no longer targeted) | the "targeted" cases and their witnesses, `b22` (property 3) |
 | presence in the memo instead of fingerprint equality | fifteen named cases, `b22` |
 | self-reference | refused on input (`Tree::formula_from_letters`: `SelfReference`, test of `core`); a fabricated file that carries it ends up in the cycle, never in `evaluate_formula` |

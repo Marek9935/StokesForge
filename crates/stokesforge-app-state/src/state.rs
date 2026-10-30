@@ -188,7 +188,10 @@ pub enum Action {
     /// the last sheet of a workbook.
     DeleteSheet(NodeId),
     /// Renames a Project Manager object after in-place editing.
-    RenameObject { id: NodeId, name: String },
+    RenameObject {
+        id: NodeId,
+        name: String,
+    },
     /// Commits all the names typed during a single rename gesture.
     RenameObjects(Vec<(NodeId, String)>),
     /// Copies the selection to the system transport.
@@ -196,9 +199,14 @@ pub enum Action {
     /// Duplicates the selection in its original folders.
     DuplicateObjects(Vec<NodeId>),
     /// Pastes the system transport into a folder.
-    PasteObjects { parent: NodeId, text: String },
+    PasteObjects {
+        parent: NodeId,
+        text: String,
+    },
     /// Reveals the embedded workbooks referenced by this graph.
-    ShowGraphData { graph: NodeId },
+    ShowGraphData {
+        graph: NodeId,
+    },
     /// Reveals the workbook of the columns of a single curve (curve menu,
     /// #152): no ambiguous choice among the curves of a graph.
     ShowSeriesData {
@@ -209,7 +217,10 @@ pub enum Action {
     /// back (S-F3, #229); the message names the graphs that used its data.
     DeleteObjects(Vec<NodeId>),
     /// Moves the selection in a single undoable gesture.
-    MoveObjects { ids: Vec<NodeId>, parent: NodeId },
+    MoveObjects {
+        ids: Vec<NodeId>,
+        parent: NodeId,
+    },
     /// Commits the input of a cell: the text as typed, to be converted
     /// according to the column type.
     CommitCell {
@@ -548,6 +559,13 @@ pub enum Action {
     StopRecalc,
     /// Ouvre Help › Keyboard Shortcuts (#231, S-K5).
     OpenKeyboardShortcuts,
+    /// Opens the **Formula Functions** window from the "?" of the F(x)= cell
+    /// (#402): the functions of a formula, one family at a time. Opens on the
+    /// first family.
+    OpenFormulaFunctions,
+    /// Shows another family (index into `formula_help::groups()`).
+    SelectFormulaFunctionsFamily(usize),
+    CloseFormulaFunctions,
     /// Closes the keyboard shortcuts window.
     CloseKeyboardShortcuts,
     /// Opens Help > About StokesForge (#382).
@@ -1035,7 +1053,10 @@ pub enum Action {
     /// Sets the header rows (Metadata, x') that **new** workbooks show.
     /// Application preference: no command, no history, no
     /// `.stf`; open workbooks keep their own setting.
-    SetWorkbookHeaderDefaults { metadata: bool, x_prime: bool },
+    SetWorkbookHeaderDefaults {
+        metadata: bool,
+        x_prime: bool,
+    },
     /// Allows or turns off the "Very low R²" box (#288). Application
     /// preference, like [`Action::SetWorkbookHeaderDefaults`]; the setting
     /// of each calculation (`Calculation::low_r2_dialog`) turns it off too.
@@ -2874,6 +2895,9 @@ pub struct AppState {
     /// state, which does not overwrite `alert`.
     low_r2_list_open: bool,
     keyboard_shortcuts_open: bool,
+    /// The Formula Functions window is open, and the family it shows (#402).
+    formula_functions_open: bool,
+    formula_functions_family: usize,
     /// The About window is open (#382).
     about_open: bool,
     /// The preferences window is open (#148).
@@ -3103,6 +3127,8 @@ impl AppState {
             low_r2_groups: Vec::new(),
             low_r2_list_open: false,
             keyboard_shortcuts_open: false,
+            formula_functions_open: false,
+            formula_functions_family: 0,
             about_open: false,
             preferences_open: false,
             dialog_error: None,
@@ -4466,13 +4492,25 @@ impl AppState {
     }
 
     /// The sentence saying why the formula of `column` no longer computes,
-    /// when it reads a deleted column (`#REF`, #321): the grid
+    /// when it reads a deleted column (`#REF`, #321), when a column function
+    /// finds no X paired with the column it reads, or when every cell of the
+    /// result is empty because the functions found no point (#402): the grid
     /// paints it as a frame on the Formula cell.
     pub fn formula_issue(&self, column: NodeId) -> Option<String> {
-        self.snapshot
-            .tree
-            .formula_has_deleted_reference(column)
-            .then(|| errors::formula::error_message(&stokesforge_core::FormulaError::DeletedColumn))
+        use stokesforge_core::FormulaError;
+        let tree = &self.snapshot.tree;
+        // In order of precedence: a lost column hides the rest; a missing X
+        // shows `---` everywhere; no point is the whole result empty (#402).
+        let error = if tree.formula_has_deleted_reference(column) {
+            FormulaError::DeletedColumn
+        } else if tree.formula_lacks_paired_x(column) {
+            FormulaError::NoPairedX
+        } else if tree.formula_found_no_point(column) {
+            FormulaError::NoPoint
+        } else {
+            return None;
+        };
+        Some(errors::formula::error_message(&error))
     }
 
     /// Entry in progress in a column header field, if there is one.
@@ -5189,6 +5227,17 @@ impl AppState {
             Action::StopRecalc => self.stop_recalc(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
             Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
+            Action::OpenFormulaFunctions => {
+                self.formula_functions_open = true;
+                self.formula_functions_family = 0;
+            }
+            Action::SelectFormulaFunctionsFamily(family) => {
+                // An index out of the list (a stale click) is ignored.
+                if family < crate::formula_help::groups().len() {
+                    self.formula_functions_family = family;
+                }
+            }
+            Action::CloseFormulaFunctions => self.formula_functions_open = false,
             Action::OpenAbout => self.about_open = true,
             Action::CloseAbout => self.about_open = false,
             Action::CopyVersionLine => {
@@ -7003,6 +7052,17 @@ impl AppState {
     /// Is the keyboard shortcuts window open?
     pub fn keyboard_shortcuts_open(&self) -> bool {
         self.keyboard_shortcuts_open
+    }
+
+    /// Is the Formula Functions window open (#402)?
+    pub fn formula_functions_open(&self) -> bool {
+        self.formula_functions_open
+    }
+
+    /// The family the Formula Functions window shows (index into
+    /// `formula_help::groups()`).
+    pub fn formula_functions_family(&self) -> usize {
+        self.formula_functions_family
     }
 
     /// Is the About window open?

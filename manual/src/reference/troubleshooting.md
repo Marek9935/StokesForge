@@ -208,6 +208,9 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "Function … takes … arguments (found …). Use … instead" | Another function does what you meant: `logx(B, 2)` for a base, `atan2(y, x)` for two values, `root(x, n)` for the n-th root. |
 | "… is a column, not a function. To multiply, write …*(...)" | Add the `*` sign between the column and the parenthesis: `A*(B/C)`. |
 | "For the number π, write pi() (a lone pi would be column PI)" | Write `pi()` with parentheses. |
+| "Function … reads a whole column. Give it a column letter, not a calculation (B, not B*2)" | The first value of `at`, `max(B)`, `mean(B)`, `integral(B)`… (and the third of `at(B, x, D)`) is a column letter. Calculate the expression in another column first. |
+| "The column this formula reads has no X column. Put a column with the role X to its left" | `at`, `integral` and the range forms (`max(B, 330, 350)`) read the X paired with the column. Change the role of a column to X, or move it to the left of the one the formula reads. The cells show `---` until then. |
+| "The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds" | Every cell of the result is empty. Check the bounds, the X values and the data of the column. |
 
 See [Analysis](../guide/analysis.md) and [Columns computed by a formula](../guide/projects-and-workbooks.md#columns-computed-by-a-formula).
 

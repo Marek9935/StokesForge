@@ -6,7 +6,10 @@
 //! dependency. An invalid domain gives `NaN`, never a panic. Names are looked
 //! up **without regard to case** (`EXP` = `exp`); the arity is a **set** of
 //! allowed counts ([`Func::arity`]), so that a function can later accept
-//! `max(b)` and `max(b, x1, x2)` (#402). `if` and the comparisons are not here:
+//! `max(b)` and `max(b, x1, x2)` (#402): the column forms are not in this
+//! table (they read a whole column, see [`crate::column_values`] and the
+//! `ColumnFunc` callees of the formula); `Func::Min`/`Max` stay the
+//! two-argument, row-wise functions. `if` and the comparisons are not here:
 //! they need the row status and live in the formula only.
 //!
 //! [`Func::ALL`] lists every function once (aliases such as `log10` are not

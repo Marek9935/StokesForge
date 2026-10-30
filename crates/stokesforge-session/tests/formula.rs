@@ -446,3 +446,210 @@ fn a_formula_with_no_column_reference_stays_numeric() {
     assert_eq!(column.column_type(), ColumnType::Numeric);
     assert_eq!(read_floats(&snapshot, c), vec![42.0, 42.0, 42.0]);
 }
+
+// -- column functions (#402) ---------------------------------------------------
+
+/// A sheet `A` (role X), `B`, an empty `C` for the formula under test, then
+/// `D` and `E` (empty, to hold bounds). Returns `[a, b, c, d, e]`.
+fn spectrum(x: &[f64], y: &[f64]) -> (Project, [NodeId; 5]) {
+    let mut project = Project::new("Demo").expect("valid project");
+    let root = project.root();
+    project
+        .add_workbook(root, Some("Book1"))
+        .expect("workbook created");
+    let sheet = project
+        .resolve_path("[Book1]Sheet1")
+        .expect("sheet resolved");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(x))
+        .expect("column A");
+    project
+        .set_column_meta(
+            a,
+            ColumnMeta {
+                role: stokesforge_core::ColumnRole::X,
+                ..Default::default()
+            },
+        )
+        .expect("A is X");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(y))
+        .expect("column B");
+    let c = project
+        .add_column(sheet, None, Some("C"), Column::new(ColumnType::Numeric))
+        .expect("column C");
+    let nan = vec![f64::NAN; x.len()];
+    let d = project
+        .add_column(sheet, None, Some("D"), Column::from_f64(&nan))
+        .expect("column D");
+    let e = project
+        .add_column(sheet, None, Some("E"), Column::from_f64(&nan))
+        .expect("column E");
+    (project, [a, b, c, d, e])
+}
+
+fn cell_numbers(snapshot: &Snapshot, column: NodeId) -> Vec<Option<f64>> {
+    let column = snapshot
+        .tree
+        .node(column)
+        .and_then(|node| node.as_column())
+        .expect("column present");
+    (0..column.len())
+        .map(|row| match column.get(row) {
+            Cell::Float(value) if !value.is_nan() => Some(value),
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_dashes(snapshot: &Snapshot, column: NodeId) -> bool {
+    let column = snapshot
+        .tree
+        .node(column)
+        .and_then(|node| node.as_column())
+        .expect("column present");
+    !column.is_empty()
+        && (0..column.len()).all(|row| matches!(column.get(row), Cell::Text(Some(t)) if t == "---"))
+}
+
+/// Normalizing a spectrum at 340: `B / at(B, 340)` is 1 on the 340 row.
+#[test]
+fn normalizing_at_a_wavelength_gives_one_there() {
+    let (project, [_a, _b, c, _d, _e]) = spectrum(&[339.0, 340.0, 341.0], &[1.0, 2.0, 4.0]);
+    let session = Session::spawn(project, None).expect("actor started");
+    let handle = session.handle();
+    handle
+        .execute(set_formula(&handle, c, "B / at(B, 340)"))
+        .expect("formula");
+    let snapshot = handle.snapshot().expect("snapshot");
+    assert_eq!(
+        cell_numbers(&snapshot, c),
+        vec![Some(0.5), Some(1.0), Some(2.0)]
+    );
+}
+
+/// `integral(B)` is the Integration tool's area on the same series, duplicate
+/// X included (X 0, 1, 1, 3 gives 5; merging the duplicates would give 4.5).
+#[test]
+fn integral_equals_the_integration_tool() {
+    use stokesforge_analysis::integrate::{IntegrateSpec, Under};
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{compute, SeriesRef};
+
+    let (project, [a, b, c, _d, _e]) = spectrum(&[0.0, 1.0, 1.0, 3.0], &[0.0, 2.0, 4.0, 0.0]);
+    let session = Session::spawn(project, None).expect("actor started");
+    let handle = session.handle();
+    handle
+        .execute(set_formula(&handle, c, "integral(B)"))
+        .expect("formula");
+    let snapshot = handle.snapshot().expect("snapshot");
+    let operation = Operation::Integrate {
+        spec: IntegrateSpec {
+            ranges: vec![],
+            under: Under::Zero,
+            cumulative: false,
+            normalize: false,
+        },
+    };
+    let series = [SeriesRef {
+        x: Some(a),
+        y: b,
+        sigma: None,
+    }];
+    let computed = compute(&snapshot.tree, &operation, &series, None).expect("tool");
+    let tool = computed.results[0]
+        .values
+        .iter()
+        .find(|v| v.key == "area.total")
+        .expect("total")
+        .value;
+    assert_eq!(tool, 5.0);
+    assert_eq!(cell_numbers(&snapshot, c), vec![Some(tool); 4]);
+}
+
+/// `at(B, x, D)` reads the X in `D`, whatever is paired with `B`.
+#[test]
+fn at_with_a_third_argument_reads_that_column() {
+    let (project, [_a, _b, c, d, _e]) = spectrum(&[1.0, 2.0, 3.0], &[10.0, 20.0, 30.0]);
+    let session = Session::spawn(project, None).expect("actor started");
+    let handle = session.handle();
+    // D = 0, 10, 20: at x = 15 B is between rows 1 and 2.
+    handle
+        .execute(Command::SetCells {
+            column: d,
+            start: 0,
+            values: ValueBlock::Float(vec![0.0, 10.0, 20.0]),
+            expected_version: None,
+        })
+        .expect("fill D");
+    handle
+        .execute(set_formula(&handle, c, "at(B, 15, D)"))
+        .expect("formula");
+    let snapshot = handle.snapshot().expect("snapshot");
+    assert_eq!(cell_numbers(&snapshot, c), vec![Some(25.0); 3]);
+}
+
+/// A column without a paired X: the formula is kept, the cells show `---`, and
+/// it computes as soon as an X appears (the role of A set to X).
+#[test]
+fn a_column_without_x_shows_dashes_until_one_appears() {
+    let (project, _a, _b, c) = fixture();
+    let session = Session::spawn(project, None).expect("actor started");
+    let handle = session.handle();
+    handle
+        .execute(set_formula(&handle, c, "at(B, 2)"))
+        .expect("formula entered");
+    let snapshot = handle.snapshot().expect("snapshot");
+    assert!(is_dashes(&snapshot, c), "no X to the left of B");
+    assert!(snapshot.tree.formula_lacks_paired_x(c));
+    assert_eq!(
+        snapshot.tree.formula_letters(c).as_deref(),
+        Some("at(B, 2)"),
+        "the formula is kept"
+    );
+    // A becomes an X: B is paired with it.
+    let a = snapshot
+        .tree
+        .children(snapshot.tree.parent(c).unwrap().unwrap())
+        .unwrap()[0];
+    handle
+        .execute(Command::SetColumnMeta {
+            column: a,
+            meta: ColumnMeta {
+                role: stokesforge_core::ColumnRole::X,
+                ..Default::default()
+            },
+        })
+        .expect("A is X");
+    let snapshot = handle.snapshot().expect("snapshot");
+    assert!(!snapshot.tree.formula_lacks_paired_x(c));
+    assert_eq!(cell_numbers(&snapshot, c), vec![Some(20.0); 3]);
+}
+
+/// Bounds read from columns, row by row: `max(B, D, E)` is the max of B for X
+/// between D and E of that row.
+#[test]
+fn bounds_in_columns_are_read_row_by_row() {
+    let (project, [_a, _b, c, d, e]) = spectrum(&[1.0, 2.0, 3.0, 4.0], &[5.0, 9.0, 7.0, 6.0]);
+    let session = Session::spawn(project, None).expect("actor started");
+    let handle = session.handle();
+    for (column, values) in [(d, vec![1.0, 3.0, 3.0, 8.0]), (e, vec![2.0, 4.0, 1.0, 9.0])] {
+        handle
+            .execute(Command::SetCells {
+                column,
+                start: 0,
+                values: ValueBlock::Float(values),
+                expected_version: None,
+            })
+            .expect("bounds");
+    }
+    handle
+        .execute(set_formula(&handle, c, "max(B, D, E)"))
+        .expect("formula");
+    let snapshot = handle.snapshot().expect("snapshot");
+    // [1,2] -> 9; [3,4] -> 7; [3,1] reversed -> 9; [8,9] no point -> empty.
+    assert_eq!(
+        cell_numbers(&snapshot, c),
+        vec![Some(9.0), Some(7.0), Some(9.0), None]
+    );
+}

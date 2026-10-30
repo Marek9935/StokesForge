@@ -201,7 +201,13 @@ snapshot while a recalculation is running. Only `Execute` is interruptible;
 
 The rule not to break: **any data that enters the computation of a formula
 enters its fingerprint**. A computation that read one more piece of data
-without adding it there would display a wrong value without an error. The tests
+without adding it there would display a wrong value without an error. A hidden
+input counts: `at(B, 340)`, `integral(B)` and the range forms read the X column
+paired with `B` by the rule of the plot (#402), which the text does not name.
+The formula's **inputs** are the columns it names plus those X
+(`compose::paired_x_columns`): one set for the dependency order, the fingerprint
+(`Outcome::Evaluated::paired_x`: identifier and version of the X), the loops
+through a calculation and the evaluation. The tests
 to write when the mechanism is extended (new formula function, cross-sheet
 reference #186, recalculated analyses #184):
 [`tests.md`](tests.md), "Targeted recalculation".

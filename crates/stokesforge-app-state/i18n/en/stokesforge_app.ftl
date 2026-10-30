@@ -693,6 +693,9 @@ error-formula-wrong-argument-count-suggestion = Function { $name } takes { $coun
     } (found { $found }). Use { $suggestion } instead
 error-formula-not-a-function = { $letter } is a column, not a function. To multiply, write { $letter }*(...)
 error-formula-pi-needs-parentheses = For the number π, write pi() (a lone pi would be column PI)
+error-formula-column-expected = Function { $name } reads a whole column. Give it a column letter, not a calculation (B, not B*2)
+error-formula-no-paired-x = The column this formula reads has no X column. Put a column with the role X to its left
+error-formula-no-point = The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists
@@ -1054,7 +1057,12 @@ column-units = Units
 column-comments = Comments
 workbook-header-formula = F(x)=
 # Help of the F(x)= cell (#404): the functions a column formula can call
-formula-help-title = Functions of a formula
+formula-help-title = Formula Functions
+formula-help-icon = Formula Functions
+    .hint = Opens the list of the functions you can use in a formula
+formula-help-column-function = Function
+formula-help-column-example = Example
+formula-help-column-meaning = What it does
 formula-help-note = Names are not case-sensitive. A column is written by its letter.
 formula-help-family-operators = Operators
 formula-help-op-arithmetic = Add, subtract, multiply, divide
@@ -1065,6 +1073,7 @@ formula-help-family-trigonometry = Trigonometry
 formula-help-family-error = Error function
 formula-help-family-rounding = Sign and rounding
 formula-help-family-choice = Choice and comparison
+formula-help-family-column = Column values
 formula-help-family-constants = Constants
 formula-help-exp = e to the power x
 formula-help-ln = Natural logarithm
@@ -1096,6 +1105,13 @@ formula-help-min = The smaller of x and y
 formula-help-max = The larger of x and y
 formula-help-if = a if the condition c holds, otherwise b
 formula-help-pi = The number π
+formula-help-at = Value of column B at X = x, by linear interpolation between the two neighboring points. Empty outside the X data. x can be a column; at(B, x, D) reads the X values in column D.
+formula-help-max-column = Largest value of column B. Add two X values to keep only the points between them: max(B, x1, x2).
+formula-help-min-column = Smallest value of column B. Add two X values to keep only the points between them: min(B, x1, x2).
+formula-help-mean = Mean of column B. Add two X values to keep only the points between them: mean(B, x1, x2).
+formula-help-sum = Sum of column B. Add two X values to keep only the points between them: sum(B, x1, x2).
+formula-help-std = Sample standard deviation (divided by n − 1) of column B, which needs two values. Add two X values to keep only the points between them: std(B, x1, x2).
+formula-help-integral = Area under column B by the trapezoid method, the same result as the Integration tool without a baseline. Add two X values to integrate between them: integral(B, x1, x2).
 common-metadata = Metadata
 workbook-metadata-hide = Hide Metadata Row
 workbook-metadata-summary =

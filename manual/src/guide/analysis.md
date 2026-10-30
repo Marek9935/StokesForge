@@ -205,6 +205,8 @@ Settings:
 
 The values shown are **Area 1**, **Area 1: from**, **Area 1: to** and so on for each range, then **Total area**. The area carries the product of the units of X and Y when both columns have a unit. The edges of a range are interpolated on the curve.
 
+To use the area inside a column formula, for instance to normalize a spectrum to its area, write `integral(B)` (or `integral(B, 300, 400)` for a range) in the **F(x)=** row: it gives the same result as this tool with the area down to zero. See [Values of a whole column](projects-and-workbooks.md#values-of-a-whole-column).
+
 ## Fitting
 
 **Analysis ▸ Fitting** fits a model to the curve by least squares. Pick a model from the menu, or from the **Model** list in the window.

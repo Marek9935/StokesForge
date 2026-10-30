@@ -275,9 +275,9 @@ A column can compute its values from other columns of the same sheet. Type the f
 
 For example, to fill column C with the sum of A and B, double-click the **F(x)=** cell of column C, type `A+B` and press <kbd>Enter</kbd>.
 
-While you type, a small **?** icon sits at the right of the cell. Hover it to see the operators and functions you can use, grouped by family, each with an example.
+While you type, a small **?** icon sits at the right of the cell. Click it to open the **Formula Functions** window: the operators and functions you can use, one family at a time (pick the family in the tabs at the left), each with its signature, an example and what it does. Press <kbd>Esc</kbd> or **Close** to leave it.
 
-<img src="../images/workbooks-formula-help.png" alt="The F(x)= cell of column B being edited: the bubble of its ? icon lists the functions by family, each with its signature, an example and a description." width="800">
+<img src="../images/workbooks-formula-help.png" alt="The Formula Functions window on the Column values family: the families as tabs at the left, a table of Function, Example and What it does at the right." width="900">
 
 If you misspell a function name, the message proposes the nearest one (`sqr(A)` gives "Did you mean sqrt?"), and a wrong number of values names the function to write instead (`log(B, 2)` gives "Use logx instead"). You can hide the icon in **Preferences ▸ Display ▸ Interface** (**Show F(x)= help**).
 
@@ -288,7 +288,7 @@ If you misspell a function name, the message proposes the nearest one (`sqr(A)` 
 - Operators: `+`, `-`, `*`, `/`, `^` (power), and a minus sign in front of a value (`-A`).
 - Parentheses: `(A+B)/2`. `^` is done first, then `*` and `/`, then `+` and `-`. `^` reads from the right (`2^3^2` is 512) and binds tighter than a minus sign (`-2^2` is -4).
 - Comparisons: `<`, `<=`, `>`, `>=`, `==`, `!=`. They give 1 when true and 0 when false, and are done last.
-- Functions work on one row at a time. Write the name, then the values in parentheses, separated by commas: `sqrt(A)`, `round(B, 2)`.
+- Most functions work on one row at a time. Write the name, then the values in parentheses, separated by commas: `sqrt(A)`, `round(B, 2)`. A few give one value for a whole column: see [Values of a whole column](#values-of-a-whole-column).
 
 Do not start the formula with `=`.
 
@@ -300,7 +300,8 @@ A name followed by `(` is a function, in capitals or lowercase (`EXP(B)` is `exp
 | Absolute value, sign | `abs(x)`, `sign(x)` |
 | Trigonometry | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh`, `pi()` |
 | Rounding | `round(x, n)` (half away from zero, `n` may be negative: `round(1234, -2)` is 1200), `floor(x)`, `ceil(x)`, `mod(a, b)` (sign of `b`: `mod(-7, 3)` is 2) |
-| Two values | `min(a, b)`, `max(a, b)` |
+| Two values | `min(a, b)`, `max(a, b)` (row by row; with one column or three values, see below) |
+| Whole column | `at(B, x)`, `max(B)`, `min(B)`, `mean(B)`, `sum(B)`, `std(B)`, `integral(B)`, and their range forms: see below |
 | Conditions | `if(condition, a, b)`: `a` when the condition is true (not 0), otherwise `b` |
 | Others | `erf(x)`, `erfc(x)` |
 
@@ -308,13 +309,37 @@ Examples: `-log(B)` (absorbance from a transmittance), `sqrt(A)`, `if(B<0, 0, B)
 
 In `if`, only the chosen value is read: an empty cell in the other one does not matter.
 
+### Values of a whole column
+
+Some functions read a whole column and give **one value**, the same on every row, which you can use in a formula that works row by row. The classic use is normalizing a spectrum:
+
+| Formula | Result |
+|---|---|
+| `B / at(B, 340)` | B divided by its value at X = 340 (1 on the 340 row) |
+| `B / max(B, 330, 350)` | B divided by its peak between 330 and 350 |
+| `B / integral(B)` | B divided by its area |
+| `B - mean(B)` | B centered on its mean |
+| `(B - mean(B)) / std(B)` | B centered and scaled |
+
+- `at(B, x)` is the value of B at X = `x`, by straight-line interpolation between the two neighboring points. Outside the X values the cell is empty (no extrapolation). `x` can be a column: `at(B, A)` reads `x` row by row. `at(B, x, D)` reads the X values in column D.
+- `max(B)`, `min(B)`, `mean(B)`, `sum(B)` and `std(B)` are computed over the whole column. `std` is the sample standard deviation (divided by n − 1) and needs two values.
+- `integral(B)` is the area under B by the trapezoid method, the same result as [Integration](analysis.md#integration) without a baseline.
+- **Range**: add two X values, in any order, to keep only the points between them: `max(B, 330, 350)`, `mean(B, 400, 500)`, `integral(B, 300, 400)`. The bounds can be columns: `max(B, D, E)` takes, on each row, the points whose X is between D and E of that row. Three values are always a range (`max(B, D, E)` is not the maximum of three columns); `max(B, C)` stays the row-by-row maximum of two columns, and `max(max(B, D), E)` the maximum of three.
+- The first value of these functions is a **column letter**, not a calculation: `max(B*2)` is refused. Compute the new column first, then read it.
+
+The X is the column of role X nearest to the **left** of B, the same rule as the graph. `at`, `integral` and the range forms need it; `max(B)` and the other whole-column statistics do not. If B has no X, the formula is kept, its cells show `---` and its **F(x)=** cell is framed in red with the reason; it computes as soon as an X appears (change a column role, or move the X to the left of B). Rows whose X is empty or text are ignored. Empty cells, text and infinite values in B are ignored too.
+
+When there is no point to compute from (an empty column, an empty range, a value outside the X values), the cell is empty, for `sum` and `integral` as well (never 0). If the whole result column is empty for that reason, the **F(x)=** cell is framed in red.
+
+The value is computed once for the whole column, not once per row, so `B / max(B)` stays fast on long columns. It is recalculated when B, its X, or the bounds change, and also when you change the role of a column or move one so that B has another X.
+
 A formula reads columns of its own sheet only.
 
 If you need functions of the data, you can use a script (see [The pyst API](../scripting/api.md)), or use the [Analysis](analysis.md) tools.
 
 ### How a formula works
 
-- The formula is calculated row by row. An empty cell in a source gives an empty cell in the result.
+- The formula is calculated row by row (the whole-column functions above are computed once, then used on every row). An empty cell in a source gives an empty cell in the result.
 - A result that has no value (`ln(-1)`, `sqrt(-1)`, `mod(a, 0)`, `root` of a negative number with an even `n`) is an empty cell, shown as a failed calculation. Dividing by zero is not an error: `1/0` is infinity.
 - The values of the column are read-only. To change them, edit the formula.
 - The formula keeps its columns even if you add, delete or move others. The letters in the **F(x)=** row follow the columns.
@@ -331,6 +356,7 @@ StokesForge refuses a formula, and leaves the field open, when:
 - a name followed by `(` is not a function;
 - a function gets the wrong number of values;
 - a column letter is followed by `(` (`A(B/C)`): write `A*(B/C)`;
+- the column of a whole-column function is an expression: `max(B*2)`, `at(B, 1, A+1)`;
 - `pi` is written alone and the sheet has no column PI: write `pi()`.
 
 Two formulas that read each other in a loop are reported as an error. A formula with a syntax error is kept and the column has no values until you fix it.

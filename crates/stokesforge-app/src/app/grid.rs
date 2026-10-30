@@ -1332,7 +1332,7 @@ fn header_field_widget(
                     let width =
                         ui.available_width() - super::column_formula_help::reserved_width(ui);
                     let shown = paint(ui, width.max(0.0));
-                    super::column_formula_help::icon(ui);
+                    super::column_formula_help::icon(ui, actions);
                     shown
                 })
                 .inner
@@ -5272,27 +5272,26 @@ mod tests {
         }
     }
 
+    /// A press on the icon asks for the Formula Functions window (#402); the
+    /// pointer merely resting on it asks for nothing.
     #[test]
-    fn hovering_the_help_icon_lists_the_functions_and_keeps_the_cell_open() {
+    fn pressing_the_help_icon_opens_the_formula_functions_window() {
         let (mut bench, icon) = help_icon(HeaderField::Formula, true);
         let icon = icon.expect("the icon");
-        bench.image(vec![egui::Event::PointerMoved(icon)]);
-        for _ in 0..30 {
+        for _ in 0..3 {
             bench.image(vec![egui::Event::PointerMoved(icon)]);
         }
-        let texts = bench.texts();
         assert!(
-            texts.contains(&tr!("formula-help-title")),
-            "the bubble is open: {texts:?}"
+            !bench.seen.contains(&Action::OpenFormulaFunctions),
+            "hovering opens nothing"
         );
-        assert!(
-            texts.contains(&"logx(x, b)".to_string()),
-            "one signature per function of the shared table: {texts:?}"
-        );
-        assert!(
-            bench.state.header_editing().is_some(),
-            "hovering does not end the edit"
-        );
+        bench.image(vec![egui::Event::PointerButton {
+            pos: icon,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(bench.seen.contains(&Action::OpenFormulaFunctions));
     }
 
     #[test]

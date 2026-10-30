@@ -64,8 +64,9 @@ use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::Operation;
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
-    compute, AuxRef, Calculation, CalculationDraft, Cell, Column, ColumnMeta, ColumnType,
-    ColumnValues, MixedCell, NodeCopy, NodeId, OutputDraft, Project, SeriesRef, Tree, ValueBlock,
+    compute, AuxRef, Calculation, CalculationDraft, Cell, Column, ColumnMeta, ColumnRole,
+    ColumnType, ColumnValues, MixedCell, NodeCopy, NodeId, OutputDraft, Project, SeriesRef, Tree,
+    ValueBlock,
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 use tempfile::TempDir;
@@ -78,7 +79,7 @@ use tempfile::TempDir;
 /// text. The step converts them to identifiers (`Tree::formula_from_letters`)
 /// as the interface does; a refusal (letter outside the worksheet,
 /// self-reference) gives a step without a command, counted as "rejected".
-const FORMULAS: [&str; 15] = [
+const FORMULAS: [&str; 20] = [
     "A*2",
     "B+1",
     "A+B",
@@ -95,6 +96,14 @@ const FORMULAS: [&str; 15] = [
     // Row-wise functions and conditions (#401): they read their columns.
     "sqrt(A)+B^2",
     "if(A>B,A,B)",
+    // Column functions (#402): they also read the X paired with their column
+    // (nearest X to the left, by role) — a hidden input, which `SetRole` and
+    // `MoveColumn` change without touching any named column.
+    "B/max(B)",
+    "at(B, 2)",
+    "integral(A)",
+    "mean(B, 1, 3)",
+    "max(B, C, D)",
 ];
 
 #[derive(Debug, Clone)]
@@ -199,6 +208,13 @@ enum Step {
     RemoveCalculation {
         rank: usize,
         with_columns: bool,
+    },
+    /// Changes the role of a column (X, Y, X2, Y2), formula and the rest
+    /// unchanged: re-pairs the Y columns with another X (#402).
+    SetRole {
+        sheet: usize,
+        column: usize,
+        role_index: usize,
     },
     /// "Recalculate Out of Date": reruns the stale calculations.
     RecalculateOutOfDate,
@@ -325,6 +341,13 @@ fn step() -> impl Strategy<Value = Step> {
         ),
         1 => (0usize..4, any::<bool>())
             .prop_map(|(rank, with_columns)| Step::RemoveCalculation { rank, with_columns }),
+        3 => (0usize..4, 0usize..8, 0usize..4).prop_map(|(sheet, column, role_index)| {
+            Step::SetRole {
+                sheet,
+                column,
+                role_index,
+            }
+        }),
         2 => Just(Step::RecalculateOutOfDate),
         4 => Just(Step::Undo),
         2 => Just(Step::Redo),
@@ -359,6 +382,7 @@ const STEP_NAMES: &[&str] = &[
     "DeleteWorksheet",
     "AddCalculation",
     "RemoveCalculation",
+    "SetRole",
     "RecalculateOutOfDate",
     "Undo",
     "Redo",
@@ -393,6 +417,7 @@ fn step_name(step: &Step) -> &'static str {
         Step::DeleteWorksheet { .. } => "DeleteWorksheet",
         Step::AddCalculation { .. } => "AddCalculation",
         Step::RemoveCalculation { .. } => "RemoveCalculation",
+        Step::SetRole { .. } => "SetRole",
         Step::RecalculateOutOfDate => "RecalculateOutOfDate",
         Step::Undo => "Undo",
         Step::Redo => "Redo",
@@ -439,13 +464,30 @@ fn initial_project() -> Project {
         (s2, &[], Some("1+2")),
     ];
     let mut with_formula = Vec::new();
+    let mut first_columns = Vec::new();
     for (sheet, values, formula_text) in columns_spec {
         let id = project
             .add_column(sheet, None, None, Column::from_f64(values))
             .expect("column");
+        if first_columns.len() < 2 && (first_columns.is_empty() || sheet != s1) {
+            first_columns.push(id);
+        }
         if let Some(text) = formula_text {
             with_formula.push((id, text));
         }
+    }
+    // The first column of each worksheet is an X (#402): the column functions
+    // that read an X have one to pair with from the start.
+    for id in first_columns {
+        project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    role: ColumnRole::X,
+                    ..Default::default()
+                },
+            )
+            .expect("role X");
     }
     // Formulas are entered in letters once the columns of their worksheet are
     // in place (#321): letters to identifiers.
@@ -692,6 +734,15 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
                 // its bounds, otherwise three moves out of four were.
                 index: index % (columns_of(tree, Some(new_parent)).len() + 1),
             }),
+        Step::SetRole {
+            sheet: f,
+            column: c,
+            role_index,
+        } => column_at(f, c).and_then(|column| {
+            let mut meta = tree.node(column)?.as_column()?.meta().clone();
+            meta.role = [ColumnRole::X, ColumnRole::Y, ColumnRole::X2, ColumnRole::Y2][role_index];
+            Some(Command::SetColumnMeta { column, meta })
+        }),
         Step::ChangeType {
             sheet: f,
             column: c,

@@ -661,6 +661,12 @@ pub mod formula {
                 tr!("error-formula-not-a-function", letter = letter.as_str())
             }
             FormulaError::PiNeedsParentheses => tr!("error-formula-pi-needs-parentheses"),
+            FormulaError::ColumnExpected { name } => {
+                let name: &str = name;
+                tr!("error-formula-column-expected", name = name)
+            }
+            FormulaError::NoPairedX => tr!("error-formula-no-paired-x"),
+            FormulaError::NoPoint => tr!("error-formula-no-point"),
         }
     }
 
@@ -698,8 +704,11 @@ pub mod formula {
                 },
                 FormulaError::NotAFunction("A".into()),
                 FormulaError::PiNeedsParentheses,
+                FormulaError::ColumnExpected { name: "max" },
+                FormulaError::NoPairedX,
+                FormulaError::NoPoint,
             ];
-            let mut seen = [false; 10];
+            let mut seen = [false; 13];
             let mut suggested = [false; 2];
             for sample in &samples {
                 let index = match sample {
@@ -719,6 +728,9 @@ pub mod formula {
                     }
                     FormulaError::NotAFunction(_) => 8,
                     FormulaError::PiNeedsParentheses => 9,
+                    FormulaError::ColumnExpected { .. } => 10,
+                    FormulaError::NoPairedX => 11,
+                    FormulaError::NoPoint => 12,
                 };
                 seen[index] = true;
             }

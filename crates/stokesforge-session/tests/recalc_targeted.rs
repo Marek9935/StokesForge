@@ -1162,3 +1162,260 @@ fn a_too_deep_formula_follows_the_sheet_and_catches_up_its_readers() {
         assert_eq!(numbers(&s, f.d)[..3], some(&[3.0, 5.0, 7.0]), "{mode:?}");
     }
 }
+
+// -- the paired X is an input (#402) ---------------------------------------------
+
+/// `column` gets role `role`, the rest of its metadata unchanged.
+fn set_role(handle: &SessionHandle, column: NodeId, role: stokesforge_core::ColumnRole) -> Command {
+    let mut meta = take_snapshot(handle)
+        .tree
+        .node(column)
+        .and_then(|node| node.as_column())
+        .expect("column present")
+        .meta()
+        .clone();
+    meta.role = role;
+    Command::SetColumnMeta { column, meta }
+}
+
+/// `set_formula` that keeps a role (the formula column of an X).
+fn set_formula_with_role(
+    handle: &SessionHandle,
+    column: NodeId,
+    text: &str,
+    role: stokesforge_core::ColumnRole,
+) -> Command {
+    match set_formula(handle, column, text) {
+        Command::SetColumnMeta { column, mut meta } => {
+            meta.role = role;
+            Command::SetColumnMeta { column, meta }
+        }
+        other => other,
+    }
+}
+
+/// Fixture + `A` an X column: `A` X [1,2,3], `B` [10,20,30], `C`, `D`.
+fn start_with_x(mode: FormulaRecalc) -> (Session, SessionHandle, SheetFixture) {
+    let (session, handle, f) = start(mode);
+    handle
+        .execute(set_role(&handle, f.a, stokesforge_core::ColumnRole::X))
+        .expect("A is X");
+    (session, handle, f)
+}
+
+/// Moving an X in front of `B` pairs `B` with it: `at(B, 2)` follows, which
+/// neither `A` nor `B` nor the formula text announce. Witness of the id in the
+/// fingerprint: without it, the move recalculates nothing.
+#[test]
+fn moving_the_paired_x_recalculates_at() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start_with_x(mode);
+        // D: a second X, to the right of B for now.
+        handle
+            .execute(enter(f.d, 0, &[0.0, 1.0, 2.0]))
+            .expect("fill D");
+        handle
+            .execute(set_role(&handle, f.d, stokesforge_core::ColumnRole::X))
+            .expect("D is X");
+        handle
+            .execute(set_formula(&handle, f.c, "at(B, 2)"))
+            .expect("C = at(B, 2)");
+        let s = take_snapshot(&handle);
+        assert_eq!(
+            numbers(&s, f.c),
+            some(&[20.0; 3]),
+            "{mode:?}: B pairs with A"
+        );
+
+        handle
+            .execute(Command::Move {
+                id: f.d,
+                new_parent: f.sheet,
+                index: 1,
+            })
+            .expect("D moves between A and B");
+        let s = take_snapshot(&handle);
+        assert_eq!(
+            numbers(&s, f.c),
+            some(&[30.0; 3]),
+            "{mode:?}: B pairs with D"
+        );
+        handle.undo().expect("undo the move");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c), some(&[20.0; 3]), "{mode:?}: back to A");
+    }
+}
+
+/// A role change that pairs `B` with another X recalculates `at(B, 2)`.
+#[test]
+fn a_role_change_pairing_another_x_recalculates_at() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start_with_x(mode);
+        // Layout A(X) B C D: put D (values 0,1,2) in front of B, as an ordinate.
+        handle
+            .execute(enter(f.d, 0, &[0.0, 1.0, 2.0]))
+            .expect("fill D");
+        handle
+            .execute(Command::Move {
+                id: f.d,
+                new_parent: f.sheet,
+                index: 1,
+            })
+            .expect("D in front of B");
+        handle
+            .execute(set_formula(&handle, f.c, "at(C, 2)"))
+            .expect("C = at(B, 2)");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[20.0; 3]),
+            "{mode:?}: D is an ordinate, B pairs with A"
+        );
+        handle
+            .execute(set_role(&handle, f.d, stokesforge_core::ColumnRole::X))
+            .expect("D is X");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[30.0; 3]),
+            "{mode:?}: D is now the nearest X"
+        );
+    }
+}
+
+/// Editing a value of the X that no formula names recalculates `at()`. Witness
+/// of the version of the X in the fingerprint.
+#[test]
+fn editing_the_unnamed_x_recalculates_at() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start_with_x(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "at(B, 2)"))
+            .expect("C = at(B, 2)");
+        assert_eq!(numbers(&take_snapshot(&handle), f.c), some(&[20.0; 3]));
+        handle
+            .execute(enter(f.a, 1, &[2.5]))
+            .expect("A row 2 becomes 2.5");
+        // X 1, 2.5, 3: at 2 is between (1, 10) and (2.5, 20).
+        let s = take_snapshot(&handle);
+        let expected = 10.0 + (20.0 - 10.0) * (2.0 - 1.0) / (2.5 - 1.0);
+        let got = numbers(&s, f.c);
+        assert!(
+            got.iter()
+                .all(|v| v.is_some_and(|v| (v - expected).abs() < 1e-12)),
+            "{mode:?}: {got:?}"
+        );
+    }
+}
+
+/// An unrelated command rewrites no column function, the full recalculation
+/// does (witness).
+#[test]
+fn an_unrelated_command_rewrites_no_column_function() {
+    let versions = |mode| {
+        let (_session, handle, f) = start_with_x(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "B / at(B, 2) + max(B, 1, 2)"))
+            .expect("formula");
+        let before = take_snapshot(&handle);
+        handle.execute(unrelated(&before, 0)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        (version(&before, f.c), version(&after, f.c))
+    };
+    let (before, after) = versions(FormulaRecalc::Targeted);
+    assert_eq!(before, after);
+    let (before, after) = versions(FormulaRecalc::Full);
+    assert_ne!(before, after, "witness");
+}
+
+/// The X is itself a formula column: it is recalculated first, even though the
+/// column that reads it has the smaller identifier (the order of
+/// identifiers would be the wrong order).
+#[test]
+fn an_x_computed_by_a_formula_is_recalculated_first() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        // Layout after the move: A, D(X = A*10), B, C(at) — C has a smaller
+        // identifier than D, and D comes before B (letters A, B, C, D).
+        handle
+            .execute(Command::Move {
+                id: f.d,
+                new_parent: f.sheet,
+                index: 1,
+            })
+            .expect("D in front of B");
+        handle
+            .execute(set_formula_with_role(
+                &handle,
+                f.d,
+                "A*10",
+                stokesforge_core::ColumnRole::X,
+            ))
+            .expect("D = A*10, an X");
+        handle
+            .execute(set_formula(&handle, f.c, "at(C, 20)"))
+            .expect("C = at(B, 20)");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[20.0; 3]),
+            "{mode:?}"
+        );
+        // A grows: D = 10, 20, 30 -> 100, 20, 30; C must see the new D at once.
+        handle
+            .execute(enter(f.a, 0, &[100.0]))
+            .expect("A row 1 becomes 100");
+        let s = take_snapshot(&handle);
+        // X = 1000, 20, 30 (unsorted) with B = 10, 20, 30: at 20 is exactly 20.
+        assert_eq!(numbers(&s, f.d), some(&[1000.0, 20.0, 30.0]), "{mode:?}");
+        handle
+            .execute(enter(f.a, 1, &[3.0]))
+            .expect("A row 2 becomes 3");
+        let s = take_snapshot(&handle);
+        // X = 1000, 30, 30 with B = 10, 20, 30: the equal X merge (mean 25).
+        assert_eq!(numbers(&s, f.d), some(&[1000.0, 30.0, 30.0]), "{mode:?}");
+        assert_eq!(
+            numbers(&s, f.c),
+            vec![None; 3],
+            "{mode:?}: 20 is out of [30, 1000]"
+        );
+        handle
+            .execute(set_formula(&handle, f.c, "at(C, 30)"))
+            .expect("C = at(B, 30)");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[25.0; 3]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// An X formula that reads `at(C, ..)` where it is C's own X: a loop through
+/// the hidden input. Blocked, not an endless loop.
+#[test]
+fn an_x_reading_a_column_it_is_the_x_of_is_a_cycle() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = start(mode);
+        // Layout A, D(X, formula), B, C: D is B's X and reads at(B, 2); the
+        // letters are now A, B(=D), C(=B), D(=C).
+        handle
+            .execute(Command::Move {
+                id: f.d,
+                new_parent: f.sheet,
+                index: 1,
+            })
+            .expect("D in front of B");
+        handle
+            .execute(set_formula_with_role(
+                &handle,
+                f.d,
+                "at(C, 2)",
+                stokesforge_core::ColumnRole::X,
+            ))
+            .expect("D = at(B, 2), an X");
+        let s = take_snapshot(&handle);
+        assert!(all_not_calculated(&s, f.d), "{mode:?}: blocked");
+        // And the readers of the blocked column are blocked too.
+        handle
+            .execute(set_formula(&handle, f.c, "B+1"))
+            .expect("C = D+1");
+        assert!(all_not_calculated(&take_snapshot(&handle), f.c), "{mode:?}");
+    }
+}
