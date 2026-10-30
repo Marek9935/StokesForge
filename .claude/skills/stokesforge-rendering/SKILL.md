@@ -24,6 +24,7 @@ stokesforge-render-egui   stokesforge-render-svg
 3. **Leave the cache key alone** — `(revision, rect, pixels_per_point, view_generation)`: feathering never enters it (invariant 6); a selection enters neither the key nor the pipeline; zoom and pan stay in `ViewState`, never in the `PlotSpec`.
 4. **No `f64` rule in `stokesforge-render-egui`**: framing, zoom, pan, nearest point live in `stokesforge-render` (`view`, `interact`); egui keeps only the `Pos2` adapter. A screen painted outside `GraphView` (analysis preview) paints in the app but takes all geometry from `stokesforge-render`.
 5. **Choose a figure text's style in the pipeline**: `rich_style` (Typst) for titles, axis titles and legend entries, `literal_style` for text taken from a column; graduations never go through Typst.
+5b. **Number of ticks** (#397): `scale::tick_count` once per axis in `draw_panel`, passed to every label, tick mark, minor tick, decimals and "Label every" call. Never `DEFAULT_LABELS` or a recomputed count at a call site (`docs/rendering.md`, "Tick count follows the axis length").
 6. **Add the feature's witness** to `stokesforge-render-egui/tests/agreement.rs`: a variant of the graph that changes the feature must give a different figure. Read the existing witnesses of `agreement.rs` and `stokesforge-render/tests/measurement.rs` first (`docs/tests.md` § The witness, without which an equality test proves nothing).
 
 Panel drawing order, overlaid layers, Typst paths, preview-then-one-write gestures and the test map: [references/render-details.md](references/render-details.md).

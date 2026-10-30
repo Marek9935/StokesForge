@@ -235,6 +235,8 @@ The **Display** section has these options:
 
 The **Ticks** section sets the **Tick direction** (**Outward**, **Inward** or **Both sides**) and **Label every**. The last field writes only one tick label out of the number you give. Open **Advanced** for tick lengths, tick width and tick color.
 
+The number of tick labels follows the length of the axis: a short axis, for example a narrow plot area, writes fewer numbers so they never touch. **Label every** applies on top of that.
+
 **Axis color** sets the line, the ticks and the tick labels. Gridlines use the same color, faded.
 
 ### Mirror axes

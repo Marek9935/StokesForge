@@ -67,13 +67,84 @@ pub fn inverse(scale: AxisScale, t: f64) -> f64 {
 /// Number of ticks Plotters aims for by default on an axis.
 pub const DEFAULT_LABELS: usize = 11;
 
-/// How many ticks to ask for: one per decade on a logarithmic scale
-/// ([`decade_label_count`]), Plotters' default otherwise.
-pub fn label_count(scale: AxisScale, range: (f64, f64)) -> usize {
+/// The most ticks an axis can ask for: one per decade on a logarithmic scale
+/// ([`decade_label_count`]), Plotters' default otherwise. This is only the
+/// upper bound of [`tick_count`], which is what every caller must use: the
+/// count of a drawn axis depends on its length in pixels (#397).
+pub fn max_label_count(scale: AxisScale, range: (f64, f64)) -> usize {
     match scale {
         AxisScale::Linear => DEFAULT_LABELS,
         AxisScale::Log => decade_label_count(range),
     }
+}
+
+/// Pixels an axis gives to one tick (#397). A horizontal axis is calibrated
+/// so that the plot area of a default one-cell graph (480 x 360 pt) still
+/// asks for the maximum count of ticks ([`DEFAULT_LABELS`]) on both axes.
+pub const TICK_SPACING_X: f64 = 29.0;
+/// As [`TICK_SPACING_X`] for a vertical axis, whose labels are one text height
+/// tall and so can be packed closer.
+pub const TICK_SPACING_Y: f64 = 20.0;
+/// Free space kept between two neighbouring labels, in pixels.
+pub const MIN_LABEL_GAP: f64 = 6.0;
+
+/// The direction of an axis, which decides what a label measures along it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisDirection {
+    /// Labels side by side: their width counts.
+    Horizontal,
+    /// Labels one above the other: their height counts.
+    Vertical,
+}
+
+/// How many ticks to ask Plotters for on an axis of `length` pixels (#397),
+/// the **single** count shared by the labels, the tick marks, the minor ticks,
+/// the decimals and the "Label every" origin of that axis.
+///
+/// Starts from the density (one tick per [`TICK_SPACING_X`] or
+/// [`TICK_SPACING_Y`] pixels, never above [`max_label_count`]), then removes
+/// ticks as long as two neighbouring labels, measured by `extent` (their size
+/// along the axis, in pixels) and kept [`MIN_LABEL_GAP`] apart, would touch.
+/// A degenerate interval or length leaves the upper bound.
+pub fn tick_count(
+    scale: AxisScale,
+    range: (f64, f64),
+    length: f64,
+    direction: AxisDirection,
+    decimal_comma: bool,
+    extent: &dyn Fn(&str) -> f64,
+) -> usize {
+    let cap = max_label_count(scale, range);
+    let span = range.1 - range.0;
+    if !length.is_finite() || length <= 0.0 || !span.is_finite() || span == 0.0 {
+        return cap;
+    }
+    let spacing = match direction {
+        AxisDirection::Horizontal => TICK_SPACING_X,
+        AxisDirection::Vertical => TICK_SPACING_Y,
+    };
+    let mut count = cap.min(((length / spacing).floor() as usize).max(2));
+    while count > 2 {
+        let format = TickFormat::new(scale, range, count).with_decimal_comma(decimal_comma);
+        let mut marks: Vec<(f64, f64)> = linear_key_points(range, count)
+            .into_iter()
+            .map(|t| {
+                (
+                    ((t - range.0) / span * length).abs(),
+                    extent(&format.format(t)),
+                )
+            })
+            .collect();
+        marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let fits = marks
+            .windows(2)
+            .all(|pair| pair[1].0 - pair[0].0 >= (pair[0].1 + pair[1].1) / 2.0 + MIN_LABEL_GAP);
+        if fits {
+            break;
+        }
+        count -= 1;
+    }
+    count
 }
 
 /// The ticks Plotters will place on a linear interval.
@@ -98,7 +169,12 @@ pub fn linear_key_points(range: (f64, f64), labels: usize) -> Vec<f64> {
 /// exceeds a decade, the interleaved decades. Empty below a decade of step
 /// (narrow interval: no "round" mark to place), or if the interval is not
 /// finite or is zero.
-pub fn minor_key_points(scale: AxisScale, range: (f64, f64), count: Option<u8>) -> Vec<f64> {
+pub fn minor_key_points(
+    scale: AxisScale,
+    range: (f64, f64),
+    count: Option<u8>,
+    labels: usize,
+) -> Vec<f64> {
     let (low, high) = if range.0 <= range.1 {
         range
     } else {
@@ -107,7 +183,7 @@ pub fn minor_key_points(scale: AxisScale, range: (f64, f64), count: Option<u8>) 
     if !low.is_finite() || !high.is_finite() || high <= low {
         return Vec::new();
     }
-    let majors = linear_key_points(range, label_count(scale, range));
+    let majors = linear_key_points(range, labels);
     let [first, second, ..] = majors[..] else {
         return Vec::new();
     };
@@ -198,9 +274,9 @@ pub struct TickFormat {
 
 impl TickFormat {
     /// The format of the axis of this interval (in the transformed space).
-    pub fn new(scale: AxisScale, range: (f64, f64)) -> Self {
+    pub fn new(scale: AxisScale, range: (f64, f64), labels: usize) -> Self {
         let decimals = match scale {
-            AxisScale::Linear => decimals_for(&linear_key_points(range, label_count(scale, range))),
+            AxisScale::Linear => decimals_for(&linear_key_points(range, labels)),
             AxisScale::Log => 0,
         };
         Self {
@@ -215,8 +291,8 @@ impl TickFormat {
 
     /// Writes only one number in `every` (#344): the first of the major
     /// ticks of `range`, then one every `every`. 0 and 1 write them all.
-    pub fn with_label_every(mut self, every: u8, range: (f64, f64)) -> Self {
-        let majors = linear_key_points(range, label_count(self.scale, range));
+    pub fn with_label_every(mut self, every: u8, range: (f64, f64), labels: usize) -> Self {
+        let majors = linear_key_points(range, labels);
         if let [first, second, ..] = majors[..] {
             self.every = u32::from(every.max(1));
             self.origin = first;
@@ -257,16 +333,25 @@ impl TickFormat {
 ///
 /// `range` is in data space, in display order (an inverted axis is given
 /// `(top, bottom)`). The step comes from [`linear_key_points`] with
-/// [`label_count`] in the transformed space, the format from [`TickFormat`]:
-/// the same path as the pipeline, hence the same ticks as a graph with the
-/// same framing. Empty if a bound has no image on the scale ([`forward`]).
-pub fn axis_ticks(scale: AxisScale, range: (f64, f64), decimal_comma: bool) -> Vec<(f64, String)> {
+/// [`tick_count`] in the transformed space (`length` pixels long, `extent`
+/// measuring a label along the axis), the format from [`TickFormat`]: the same
+/// path as the pipeline, hence the same ticks as a graph with the same
+/// framing. Empty if a bound has no image on the scale ([`forward`]).
+pub fn axis_ticks(
+    scale: AxisScale,
+    range: (f64, f64),
+    decimal_comma: bool,
+    length: f64,
+    direction: AxisDirection,
+    extent: &dyn Fn(&str) -> f64,
+) -> Vec<(f64, String)> {
     let (Some(low), Some(high)) = (forward(scale, range.0), forward(scale, range.1)) else {
         return Vec::new();
     };
     let transformed = (low, high);
-    let format = TickFormat::new(scale, transformed).with_decimal_comma(decimal_comma);
-    linear_key_points(transformed, label_count(scale, transformed))
+    let count = tick_count(scale, transformed, length, direction, decimal_comma, extent);
+    let format = TickFormat::new(scale, transformed, count).with_decimal_comma(decimal_comma);
+    linear_key_points(transformed, count)
         .into_iter()
         .map(|t| (inverse(scale, t), format.format(t)))
         .collect()
@@ -280,9 +365,10 @@ pub fn axis_ticks(scale: AxisScale, range: (f64, f64), decimal_comma: bool) -> V
 /// "round" step and a position of the first tick such that the resulting
 /// interval contains `wanted`, has as many ticks as `base` and places them
 /// at the same fractions of the axis. Each candidate is checked against the
-/// ticks Plotters will actually place: we do not guess its algorithm. `None`
+/// ticks Plotters will actually place: we do not guess its algorithm. `labels`
+/// is the tick count of the covered axis ([`tick_count`]). `None`
 /// if nothing fits (the caller then keeps `wanted`).
-pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)> {
+pub fn aligned_range(base: (f64, f64), wanted: (f64, f64), labels: usize) -> Option<(f64, f64)> {
     let inverted = base.0 > base.1;
     if (wanted.0 > wanted.1) != inverted {
         return None;
@@ -296,7 +382,7 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)>
     if ![b0, b1, d0, d1].iter().all(|v| v.is_finite()) || b1 <= b0 || d1 <= d0 {
         return None;
     }
-    let base_points = linear_key_points((b0, b1), DEFAULT_LABELS);
+    let base_points = linear_key_points((b0, b1), labels);
     if base_points.len() < 2 {
         return None;
     }
@@ -330,7 +416,7 @@ pub fn aligned_range(base: (f64, f64), wanted: (f64, f64)) -> Option<(f64, f64)>
             let j = ((lowest + highest) / 2.0).round().clamp(lo_j, hi_j);
             let low = (j - first_offset) * step;
             let high = low + span;
-            let points = linear_key_points((low, high), DEFAULT_LABELS);
+            let points = linear_key_points((low, high), labels);
             let aligned = points.len() == fractions.len()
                 && points
                     .iter()
@@ -432,23 +518,29 @@ mod tests {
     #[test]
     fn one_number_in_n_is_written_starting_with_the_first() {
         let range = (0.0, 10.0);
-        let all = TickFormat::new(AxisScale::Linear, range);
-        let thin = all.with_label_every(3, range);
+        let all = TickFormat::new(AxisScale::Linear, range, DEFAULT_LABELS);
+        let thin = all.with_label_every(3, range, DEFAULT_LABELS);
         let shown: Vec<f64> = linear_key_points(range, DEFAULT_LABELS)
             .into_iter()
             .filter(|&t| !thin.format(t).is_empty())
             .collect();
         assert_eq!(shown, vec![0.0, 3.0, 6.0, 9.0]);
-        assert_eq!(all.with_label_every(1, range).format(1.0), "1");
-        assert_eq!(all.with_label_every(0, range).format(1.0), "1");
+        assert_eq!(
+            all.with_label_every(1, range, DEFAULT_LABELS).format(1.0),
+            "1"
+        );
+        assert_eq!(
+            all.with_label_every(0, range, DEFAULT_LABELS).format(1.0),
+            "1"
+        );
     }
 
     #[test]
     fn a_number_of_minor_ticks_forces_the_subdivisions() {
-        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(1));
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(1), DEFAULT_LABELS);
         assert_eq!(minor.len(), 10, "one in the middle of each step");
         assert!((minor[0] - 0.5).abs() < 1e-9);
-        let nine = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(9));
+        let nine = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(9), DEFAULT_LABELS);
         assert_eq!(nine.len(), 90);
     }
 
@@ -458,7 +550,7 @@ mod tests {
 
     #[test]
     fn linear_minor_ticks_cut_the_step_in_five() {
-        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), None, DEFAULT_LABELS);
         assert_eq!(minor.len(), 40);
         assert!(approx(&minor[..4], &[0.2, 0.4, 0.6, 0.8]));
         let majors = linear_key_points((0.0, 10.0), DEFAULT_LABELS);
@@ -471,14 +563,14 @@ mod tests {
     fn a_step_with_mantissa_two_is_cut_in_four() {
         let majors = linear_key_points((0.0, 1.6), DEFAULT_LABELS);
         assert!((majors[1] - majors[0] - 0.2).abs() < 1e-9, "{majors:?}");
-        let minor = minor_key_points(AxisScale::Linear, (0.0, 1.6), None);
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 1.6), None, DEFAULT_LABELS);
         assert_eq!(minor.len(), 24);
         assert!(approx(&minor[..3], &[0.05, 0.1, 0.15]));
     }
 
     #[test]
     fn minor_ticks_extend_to_the_bounds() {
-        let minor = minor_key_points(AxisScale::Linear, (-0.5, 10.5), None);
+        let minor = minor_key_points(AxisScale::Linear, (-0.5, 10.5), None, DEFAULT_LABELS);
         assert!(minor.iter().any(|m| (m + 0.4).abs() < 1e-9));
         assert!(minor.iter().any(|m| (m - 10.4).abs() < 1e-9));
         assert!(minor.iter().all(|m| (-0.5..=10.5).contains(m)));
@@ -486,8 +578,8 @@ mod tests {
 
     #[test]
     fn an_inverted_axis_has_the_same_minor_ticks() {
-        let mut direct = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
-        let mut inverse = minor_key_points(AxisScale::Linear, (10.0, 0.0), None);
+        let mut direct = minor_key_points(AxisScale::Linear, (0.0, 10.0), None, DEFAULT_LABELS);
+        let mut inverse = minor_key_points(AxisScale::Linear, (10.0, 0.0), None, DEFAULT_LABELS);
         direct.sort_by(f64::total_cmp);
         inverse.sort_by(f64::total_cmp);
         assert!(approx(&direct, &inverse));
@@ -495,7 +587,7 @@ mod tests {
 
     #[test]
     fn logarithmic_minor_ticks_are_the_multiples_from_two_to_nine() {
-        let minor = minor_key_points(AxisScale::Log, (0.0, 3.0), None);
+        let minor = minor_key_points(AxisScale::Log, (0.0, 3.0), None, 4);
         assert_eq!(minor.len(), 24);
         assert!((minor[0] - 2f64.log10()).abs() < 1e-9);
         assert!((minor[7] - 9f64.log10()).abs() < 1e-9);
@@ -504,9 +596,9 @@ mod tests {
 
     #[test]
     fn beyond_a_decade_of_step_the_minor_ticks_are_the_interleaved_decades() {
-        let majors = linear_key_points((0.0, 20.0), label_count(AxisScale::Log, (0.0, 20.0)));
+        let majors = linear_key_points((0.0, 20.0), max_label_count(AxisScale::Log, (0.0, 20.0)));
         assert!(majors[1] - majors[0] >= 1.5, "{majors:?}");
-        let minor = minor_key_points(AxisScale::Log, (0.0, 20.0), None);
+        let minor = minor_key_points(AxisScale::Log, (0.0, 20.0), None, DEFAULT_LABELS);
         assert!(!minor.is_empty());
         assert!(minor.iter().all(|m| (m - m.round()).abs() < 1e-9));
         assert!(minor
@@ -516,8 +608,10 @@ mod tests {
 
     #[test]
     fn a_degenerate_interval_has_no_minor_ticks() {
-        assert!(minor_key_points(AxisScale::Linear, (5.0, 5.0), None).is_empty());
-        assert!(minor_key_points(AxisScale::Linear, (f64::NAN, 1.0), None).is_empty());
+        assert!(minor_key_points(AxisScale::Linear, (5.0, 5.0), None, DEFAULT_LABELS).is_empty());
+        assert!(
+            minor_key_points(AxisScale::Linear, (f64::NAN, 1.0), None, DEFAULT_LABELS).is_empty()
+        );
     }
     use super::*;
 
@@ -582,7 +676,7 @@ mod tests {
     }
 
     fn ticks(range: (f64, f64)) -> Vec<String> {
-        let format = TickFormat::new(AxisScale::Linear, range);
+        let format = TickFormat::new(AxisScale::Linear, range, DEFAULT_LABELS);
         linear_key_points(range, DEFAULT_LABELS)
             .into_iter()
             .map(|t| format.format(t))
@@ -618,7 +712,7 @@ mod tests {
     fn an_aligned_axis_places_its_ticks_opposite() {
         let base = (-40.0, 840.0);
         let wanted = (-6.0, 126.0);
-        let range = aligned_range(base, wanted).expect("an aligned framing");
+        let range = aligned_range(base, wanted, DEFAULT_LABELS).expect("an aligned framing");
         assert!(range.0 <= wanted.0 && range.1 >= wanted.1, "{range:?}");
         let fractions = |r: (f64, f64)| -> Vec<f64> {
             linear_key_points(r, DEFAULT_LABELS)
@@ -635,27 +729,38 @@ mod tests {
 
     #[test]
     fn alignment_respects_the_axis_direction() {
-        let inverted = aligned_range((840.0, -40.0), (126.0, -6.0)).expect("aligned");
+        let inverted =
+            aligned_range((840.0, -40.0), (126.0, -6.0), DEFAULT_LABELS).expect("aligned");
         assert!(inverted.0 > inverted.1);
-        assert_eq!(aligned_range((-40.0, 840.0), (126.0, -6.0)), None);
+        assert_eq!(
+            aligned_range((-40.0, 840.0), (126.0, -6.0), DEFAULT_LABELS),
+            None
+        );
     }
 
     #[test]
     fn the_comma_replaces_the_point_in_ticks() {
-        let linear_format = TickFormat::new(AxisScale::Linear, (0.0, 1.0));
+        let linear_format = TickFormat::new(AxisScale::Linear, (0.0, 1.0), DEFAULT_LABELS);
         let comma_format = linear_format.with_decimal_comma(true);
         assert_eq!(linear_format.format(0.5), "0.5");
         assert_eq!(comma_format.format(0.5), "0,5");
         // A log scale also writes its decimal powers with the comma.
-        let log = TickFormat::new(AxisScale::Log, (-2.0, 2.0)).with_decimal_comma(true);
+        let log = TickFormat::new(AxisScale::Log, (-2.0, 2.0), 5).with_decimal_comma(true);
         assert_eq!(log.format(-1.0), "0,1");
     }
 
     #[test]
     fn the_ticks_of_a_linear_axis_are_the_pipeline_ones() {
         let range = (0.0, 10.0);
-        let ticks = axis_ticks(AxisScale::Linear, range, false);
-        let expected = linear_key_points(range, label_count(AxisScale::Linear, range));
+        let ticks = axis_ticks(
+            AxisScale::Linear,
+            range,
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64,
+        );
+        let expected = linear_key_points(range, DEFAULT_LABELS);
         assert!(expected.len() > 2, "{expected:?}");
         assert_eq!(ticks.iter().map(|t| t.0).collect::<Vec<_>>(), expected);
         assert_eq!(ticks.first().map(|t| t.1.as_str()), Some("0"));
@@ -665,10 +770,17 @@ mod tests {
     #[test]
     fn an_inverted_axis_has_the_same_ticks() {
         let sorted = |range| {
-            let mut values: Vec<f64> = axis_ticks(AxisScale::Linear, range, false)
-                .iter()
-                .map(|t| t.0)
-                .collect();
+            let mut values: Vec<f64> = axis_ticks(
+                AxisScale::Linear,
+                range,
+                false,
+                2000.0,
+                AxisDirection::Horizontal,
+                &|s| 7.0 * s.len() as f64,
+            )
+            .iter()
+            .map(|t| t.0)
+            .collect();
             values.sort_by(f64::total_cmp);
             values
         };
@@ -679,7 +791,14 @@ mod tests {
 
     #[test]
     fn logarithmic_ticks_are_the_decades() {
-        let ticks = axis_ticks(AxisScale::Log, (1.0, 1000.0), false);
+        let ticks = axis_ticks(
+            AxisScale::Log,
+            (1.0, 1000.0),
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64,
+        );
         let data: Vec<f64> = ticks.iter().map(|t| t.0.round()).collect();
         assert_eq!(data, vec![1.0, 10.0, 100.0, 1000.0]);
         let labels: Vec<&str> = ticks.iter().map(|t| t.1.as_str()).collect();
@@ -689,8 +808,22 @@ mod tests {
     #[test]
     fn the_decimal_comma_follows_the_setting() {
         let range = (0.0, 1.0);
-        let dotted = axis_ticks(AxisScale::Linear, range, false);
-        let comma = axis_ticks(AxisScale::Linear, range, true);
+        let dotted = axis_ticks(
+            AxisScale::Linear,
+            range,
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64,
+        );
+        let comma = axis_ticks(
+            AxisScale::Linear,
+            range,
+            true,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64,
+        );
         assert!(dotted.iter().any(|t| t.1 == "0.5"), "{dotted:?}");
         assert!(comma.iter().any(|t| t.1 == "0,5"), "{comma:?}");
         assert!(comma.iter().all(|t| !t.1.contains('.')), "{comma:?}");
@@ -698,8 +831,204 @@ mod tests {
 
     #[test]
     fn a_bound_without_image_gives_no_ticks() {
-        assert!(axis_ticks(AxisScale::Log, (0.0, 100.0), false).is_empty());
-        assert!(axis_ticks(AxisScale::Log, (-5.0, 100.0), false).is_empty());
-        assert!(axis_ticks(AxisScale::Linear, (0.0, f64::NAN), false).is_empty());
+        assert!(axis_ticks(
+            AxisScale::Log,
+            (0.0, 100.0),
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64
+        )
+        .is_empty());
+        assert!(axis_ticks(
+            AxisScale::Log,
+            (-5.0, 100.0),
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64
+        )
+        .is_empty());
+        assert!(axis_ticks(
+            AxisScale::Linear,
+            (0.0, f64::NAN),
+            false,
+            2000.0,
+            AxisDirection::Horizontal,
+            &|s| 7.0 * s.len() as f64
+        )
+        .is_empty());
+    }
+
+    /// Width of a label for these tests: 7 px a character.
+    fn wide(text: &str) -> f64 {
+        7.0 * text.chars().count() as f64
+    }
+
+    /// Height of a label for these tests.
+    fn tall(_: &str) -> f64 {
+        14.0
+    }
+
+    /// The labels of `count` ticks of `range`, as `(pixel, size along the axis)`.
+    fn placed(
+        scale: AxisScale,
+        range: (f64, f64),
+        count: usize,
+        length: f64,
+        extent: &dyn Fn(&str) -> f64,
+    ) -> Vec<(f64, f64)> {
+        let format = TickFormat::new(scale, range, count);
+        let mut marks: Vec<(f64, f64)> = linear_key_points(range, count)
+            .into_iter()
+            .map(|t| {
+                (
+                    (t - range.0) / (range.1 - range.0) * length,
+                    extent(&format.format(t)),
+                )
+            })
+            .collect();
+        marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+        marks
+    }
+
+    fn assert_apart(marks: &[(f64, f64)]) {
+        for pair in marks.windows(2) {
+            assert!(
+                pair[1].0 - pair[0].0 >= (pair[0].1 + pair[1].1) / 2.0 + MIN_LABEL_GAP,
+                "{marks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_narrow_horizontal_axis_asks_for_fewer_ticks_that_do_not_touch() {
+        let range = (-67.5, 317.5);
+        let count = tick_count(
+            AxisScale::Linear,
+            range,
+            120.0,
+            AxisDirection::Horizontal,
+            false,
+            &wide,
+        );
+        assert!(count < DEFAULT_LABELS, "{count}");
+        assert_apart(&placed(AxisScale::Linear, range, count, 120.0, &wide));
+    }
+
+    #[test]
+    fn the_default_one_cell_graph_keeps_its_eleven_ticks() {
+        // The frame of a default graph (`FALLBACK_FRAME`: 392 x 284).
+        for range in [(0.0, 10.0), (-67.5, 317.5), (0.0, 1.0), (-5.0, 105.0)] {
+            let x = tick_count(
+                AxisScale::Linear,
+                range,
+                392.0,
+                AxisDirection::Horizontal,
+                false,
+                &wide,
+            );
+            let y = tick_count(
+                AxisScale::Linear,
+                range,
+                284.0,
+                AxisDirection::Vertical,
+                false,
+                &tall,
+            );
+            assert_eq!((x, y), (DEFAULT_LABELS, DEFAULT_LABELS), "{range:?}");
+        }
+        // And the legacy page (480 x 360 with a title): its plot area is shorter.
+        let legacy = tick_count(
+            AxisScale::Linear,
+            (0.0, 10.0),
+            240.0,
+            AxisDirection::Vertical,
+            false,
+            &tall,
+        );
+        assert_eq!(legacy, DEFAULT_LABELS);
+    }
+
+    #[test]
+    fn long_labels_take_ticks_away_after_the_density() {
+        // "1234.55" is 49 px wide: with eleven ticks on a 392 px axis (39 px
+        // each) the numbers touch although the density alone allows them.
+        let range = (1234.5, 1234.9);
+        let count = tick_count(
+            AxisScale::Linear,
+            range,
+            392.0,
+            AxisDirection::Horizontal,
+            false,
+            &wide,
+        );
+        assert!(count < DEFAULT_LABELS, "{count}");
+        assert_apart(&placed(AxisScale::Linear, range, count, 392.0, &wide));
+    }
+
+    #[test]
+    fn a_short_vertical_axis_uses_the_text_height() {
+        let range = (0.0, 100.0);
+        let count = tick_count(
+            AxisScale::Linear,
+            range,
+            90.0,
+            AxisDirection::Vertical,
+            false,
+            &tall,
+        );
+        assert!(count < DEFAULT_LABELS, "{count}");
+        assert_apart(&placed(AxisScale::Linear, range, count, 90.0, &tall));
+    }
+
+    #[test]
+    fn a_dense_logarithmic_axis_labels_fewer_decades() {
+        let range = (-6.0, 6.0);
+        assert_eq!(max_label_count(AxisScale::Log, range), 11);
+        let count = tick_count(
+            AxisScale::Log,
+            range,
+            150.0,
+            AxisDirection::Horizontal,
+            false,
+            &wide,
+        );
+        assert!(count < 11, "{count}");
+        assert_apart(&placed(AxisScale::Log, range, count, 150.0, &wide));
+        // A long axis keeps one tick per decade, as before.
+        let few = (0.0, 3.0);
+        assert_eq!(
+            tick_count(
+                AxisScale::Log,
+                few,
+                392.0,
+                AxisDirection::Horizontal,
+                false,
+                &wide
+            ),
+            4
+        );
+    }
+
+    #[test]
+    fn a_degenerate_axis_keeps_the_upper_bound() {
+        for (range, length) in [
+            ((1.0, 1.0), 200.0),
+            ((0.0, 10.0), 0.0),
+            ((0.0, f64::NAN), 200.0),
+        ] {
+            assert_eq!(
+                tick_count(
+                    AxisScale::Linear,
+                    range,
+                    length,
+                    AxisDirection::Horizontal,
+                    false,
+                    &wide
+                ),
+                DEFAULT_LABELS
+            );
+        }
     }
 }

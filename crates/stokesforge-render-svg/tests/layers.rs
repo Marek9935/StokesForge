@@ -210,16 +210,18 @@ fn export_three() -> String {
 #[test]
 fn the_ticks_of_overlaid_layers_stack_up() {
     let svg = export_three();
-    for tick in ["\n850\n", "\n8500\n", "\n85000\n", "\n3000\n"] {
+    for tick in ["\n800\n", "\n8000\n", "\n80000\n", "\n3000\n"] {
         assert!(svg.contains(tick), "{tick:?} missing: {svg}");
     }
-    // The X3 and X4 ticks are above those of X2 (smaller y).
+    // The axes are 231 px long here: the density rule (#397) keeps a tick
+    // every 100, 1000, 10000 rather than every 50. The X3 and X4 ticks are
+    // above those of X2 (smaller y).
     let ordinate = |text: &str| -> f64 {
         let end = svg.find(&format!("\n{text}\n")).expect("tick");
         let tag = &svg[svg[..end].rfind("<text").expect("tag")..end];
         let y = tag.split("y=\"").nth(1).expect("y");
         y.split('"').next().unwrap().parse().expect("number")
     };
-    assert!(ordinate("8500") < ordinate("850"));
-    assert!(ordinate("85000") < ordinate("8500"));
+    assert!(ordinate("8000") < ordinate("800"));
+    assert!(ordinate("80000") < ordinate("8000"));
 }
