@@ -776,7 +776,7 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   changes (a cell added or removed, Undo and Redo, the Size fields, a handle drag
   in progress, an axis or a title that makes the image grow, `pyst`), a floating
   window grows or shrinks by the difference at the scale it had, top-left fixed,
-  to the right and down, clamped to the **visible** part of the workspace (the scroll area's viewport, never the virtual canvas, so the title bar and buttons stay reachable; beyond it the window stops and the figure is contained; `followed_floating_size`); a
+  to the right and down, clamped to the **visible** part of the workspace (the scroll area's viewport, never the virtual canvas, so the title bar and buttons stay reachable; beyond it the window stops and the figure is contained, and the window follows the CONTAINED figure on the other side too (no blank band; `FigureFollow::resize`, with the scale from before the clamp kept so Undo restores it); `floating_room`, `viewport_room`); a
   detached OS window does the same through `ViewportCommand::InnerSize`, clamped
   to the monitor (`follow_figure_in_viewport`). A maximized window does not
   resize (the figure is contained; it keeps its record so that restoring resizes

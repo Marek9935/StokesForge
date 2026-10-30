@@ -135,10 +135,10 @@ use super::window_chrome::{
     FLOATING_WINDOW_ORDER, MIN_CONTENT_WINDOW_SIZE, WINDOW_HEADER_HEIGHT,
 };
 use super::window_placement::{
-    clamp_to_workspace, floating_window_display_size, floating_window_geometry_to_persist,
-    followed_floating_size, geometry_rect, workspace_scroll_to_reveal, workspace_to_screen,
-    FigureFollow, BOOK_WINDOW_WIDTH, CASCADE_STEP, CASCADE_WRAP, FLOATING_WINDOW_SIZE,
-    GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
+    clamp_to_workspace, floating_room, floating_window_display_size,
+    floating_window_geometry_to_persist, geometry_rect, workspace_scroll_to_reveal,
+    workspace_to_screen, FigureFollow, BOOK_WINDOW_WIDTH, CASCADE_STEP, CASCADE_WRAP,
+    FLOATING_WINDOW_SIZE, GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
 };
 use super::StokesForgeApp;
 
@@ -316,17 +316,22 @@ impl Workspace<'_> {
             .graph_views
             .get(&graph)
             .and_then(GraphView::display_scale);
-        let Some(delta) = FigureFollow::observe(self.figure_follow, graph, size, scale) else {
+        let Some(step) = FigureFollow::observe(self.figure_follow, graph, size, scale) else {
             return;
         };
         let Some(visible) = visible else {
+            return;
+        };
+        let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
             return;
         };
         if let (Some(&position), Some(window)) = (
             self.window_positions.get(&tab),
             self.window_sizes.get_mut(&tab),
         ) {
-            *window = followed_floating_size(position, *window, delta, visible);
+            let chrome = (*window - area).max(egui::Vec2::ZERO);
+            let room = floating_room(position, visible);
+            *window = FigureFollow::resize(self.figure_follow, graph, step, *window, chrome, room);
             ctx.request_repaint();
         }
     }
@@ -1525,6 +1530,50 @@ mod tests {
         );
         assert!(bench.size().x > 700.0, "it did grow up to the edge");
         assert_eq!(bench.app.window_positions[&bench.tab], position);
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394 (T2): with three cells in a narrow workspace the window stops at the
+    /// visible edge AND follows the contained figure on the height, so the
+    /// figure fills it with no blank band; Undo twice brings back the display
+    /// scale it had before the clamp.
+    #[test]
+    fn a_contained_figure_fills_its_window_and_undo_restores_the_scale() {
+        let position = egui::pos2(40.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(560.0, 460.0));
+        bench.screen = egui::vec2(1000.0, 700.0);
+        bench.settle();
+        let (scale, height) = (bench.scale(), bench.size().y);
+        for _ in 0..2 {
+            bench.app.state.dispatch(Action::AddCell {
+                graph: bench.graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Right,
+                columns: Vec::new(),
+            });
+            bench.settle();
+        }
+        let area = crate::app::graph_window::published_figure_area(&bench.context, bench.graph)
+            .expect("area");
+        let shown = bench.app.graph_views[&bench.graph]
+            .display_rect()
+            .expect("painted");
+        assert!(bench.size().y < height, "the window got shorter");
+        assert!(
+            (shown.height() - area.y).abs() < 1.5 && (shown.width() - area.x).abs() < 1.5,
+            "blank band: figure {:?} in {area:?}",
+            shown.size()
+        );
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
+        for _ in 0..2 {
+            bench.app.state.dispatch(Action::Undo);
+            bench.settle();
+        }
+        assert!(
+            (bench.scale() - scale).abs() < 0.01 * scale,
+            "scale {} back to {scale}",
+            bench.scale()
+        );
         bench.session.shutdown().unwrap();
     }
 

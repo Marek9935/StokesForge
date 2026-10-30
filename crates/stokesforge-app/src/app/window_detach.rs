@@ -180,7 +180,7 @@ use super::window_chrome::{
     WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
 };
 use super::window_placement::{
-    floating_window_display_size, followed_viewport_size, FigureFollow, GRAPH_WINDOW_SIZE,
+    floating_window_display_size, viewport_room, FigureFollow, GRAPH_WINDOW_SIZE,
 };
 use super::window_stack::toggle_collapse_to;
 use super::workbook::book_contents;
@@ -338,7 +338,7 @@ fn follow_figure_in_viewport(
     let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
         return;
     };
-    let Some(delta) = FigureFollow::observe(follows, graph, size, scale) else {
+    let Some(step) = FigureFollow::observe(follows, graph, size, scale) else {
         return;
     };
     let (inner, maximized, monitor) = ctx.input(|input| {
@@ -352,9 +352,12 @@ fn follow_figure_in_viewport(
     let Some(inner) = inner.filter(|_| !maximized) else {
         return;
     };
-    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(followed_viewport_size(
-        inner, delta, monitor,
-    )));
+    let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
+        return;
+    };
+    let chrome = (inner - area).max(egui::Vec2::ZERO);
+    let target = FigureFollow::resize(follows, graph, step, inner, chrome, viewport_room(monitor));
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target));
 }
 
 /// A content tab detached into a separate OS window — see the top doc
