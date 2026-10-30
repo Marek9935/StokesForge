@@ -210,14 +210,18 @@ impl FigureFollow {
 }
 
 /// The logical size of a floating window of top-left `position` after it grew
-/// by `delta`: never below the minimum of a content window, never beyond the
-/// workspace (right and down).
+/// by `delta`: never below the minimum of a content window, never beyond
+/// `limit` (right and down), the far corner, in workspace coordinates, of what
+/// is visible: the scroll area's viewport, never past the virtual canvas. The
+/// window stops there so that its title bar and buttons stay reachable, and the
+/// figure is then contained in it.
 pub(super) fn followed_floating_size(
     position: egui::Pos2,
     size: egui::Vec2,
     delta: egui::Vec2,
+    limit: egui::Vec2,
 ) -> egui::Vec2 {
-    let room = (WORKSPACE_SIZE - position.to_vec2()).max(MIN_CONTENT_WINDOW_SIZE);
+    let room = (limit.min(WORKSPACE_SIZE) - position.to_vec2()).max(MIN_CONTENT_WINDOW_SIZE);
     (size + delta).max(MIN_CONTENT_WINDOW_SIZE).min(room)
 }
 
@@ -461,17 +465,28 @@ mod tests {
         let size = egui::vec2(560.0, 460.0);
         let position = egui::pos2(100.0, 50.0);
         assert_eq!(
-            followed_floating_size(position, size, egui::vec2(720.0, 0.0)),
+            followed_floating_size(position, size, egui::vec2(720.0, 0.0), WORKSPACE_SIZE),
             egui::vec2(1280.0, 460.0)
         );
         // Not past the right edge of the workspace: 1920 - 100.
         assert_eq!(
-            followed_floating_size(position, size, egui::vec2(5000.0, 5000.0)),
+            followed_floating_size(position, size, egui::vec2(5000.0, 5000.0), WORKSPACE_SIZE),
             WORKSPACE_SIZE - position.to_vec2()
+        );
+        // Not past the visible part either: the viewport shows 1000 x 600 from
+        // the scroll offset (50, 0).
+        assert_eq!(
+            followed_floating_size(
+                position,
+                size,
+                egui::vec2(5000.0, 5000.0),
+                egui::vec2(1050.0, 600.0)
+            ),
+            egui::vec2(950.0, 550.0)
         );
         // Never below the minimum.
         assert_eq!(
-            followed_floating_size(position, size, egui::vec2(-5000.0, -5000.0)),
+            followed_floating_size(position, size, egui::vec2(-5000.0, -5000.0), WORKSPACE_SIZE),
             MIN_CONTENT_WINDOW_SIZE
         );
     }

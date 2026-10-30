@@ -286,7 +286,7 @@ impl Workspace<'_> {
         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
         // A maximized window does not resize (the figure is contained), but it
         // keeps the record up to date so that restoring it resizes nothing.
-        self.follow_figure(ui.ctx(), tab, false);
+        self.follow_figure(ui.ctx(), tab, None);
         // The maximized window has no frame: the drop target (#386) lights up
         // the maximized area itself.
         if super::file_drop::is_drop_target(ui.ctx(), ui.layer_id()) {
@@ -302,10 +302,10 @@ impl Workspace<'_> {
     /// The window follows the figure (#394): when the logical size of the figure
     /// a graph window painted changed since the last frame, a floating window
     /// grows or shrinks by the difference at its display scale, top-left fixed,
-    /// right and down, clamped to the workspace (`resize`; a maximized window
-    /// only records). The first frame of a graph, after opening or loading,
+    /// right and down, clamped to the visible part of the workspace (`visible`, the
+    /// far corner; `None`: a maximized window only records). The first frame of a graph, after opening or loading,
     /// resizes nothing.
-    fn follow_figure(&mut self, ctx: &egui::Context, tab: Tab, resize: bool) {
+    fn follow_figure(&mut self, ctx: &egui::Context, tab: Tab, visible: Option<egui::Vec2>) {
         let Tab::Graph(graph) = tab else {
             return;
         };
@@ -319,14 +319,14 @@ impl Workspace<'_> {
         let Some(delta) = FigureFollow::observe(self.figure_follow, graph, size, scale) else {
             return;
         };
-        if !resize {
+        let Some(visible) = visible else {
             return;
-        }
+        };
         if let (Some(&position), Some(window)) = (
             self.window_positions.get(&tab),
             self.window_sizes.get_mut(&tab),
         ) {
-            *window = followed_floating_size(position, *window, delta);
+            *window = followed_floating_size(position, *window, delta, visible);
             ctx.request_repaint();
         }
     }
@@ -555,7 +555,10 @@ impl Workspace<'_> {
             return;
         }
         if !was_collapsed {
-            self.follow_figure(ui.ctx(), tab, true);
+            // Far corner of the visible part of the workspace, in its own
+            // coordinates: the window never grows past it.
+            let visible = *self.workspace_scroll + viewport_rect.size();
+            self.follow_figure(ui.ctx(), tab, Some(visible));
         }
         if window_pointer_pressed(
             ui.ctx(),
@@ -1320,6 +1323,7 @@ mod tests {
         session: stokesforge_session::Session,
         tab: Tab,
         graph: NodeId,
+        screen: egui::Vec2,
     }
 
     impl FollowBench {
@@ -1339,6 +1343,7 @@ mod tests {
                 session,
                 tab,
                 graph,
+                screen: egui::vec2(1920.0, 1080.0),
             };
             bench.settle();
             bench
@@ -1346,15 +1351,16 @@ mod tests {
 
         fn frame(&mut self) {
             let Self {
-                app, context, tab, ..
+                app,
+                context,
+                tab,
+                screen,
+                ..
             } = self;
             context
                 .run_ui(
                     egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1920.0, 1080.0),
-                        )),
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, *screen)),
                         ..Default::default()
                     },
                     |ui| {
@@ -1431,6 +1437,26 @@ mod tests {
             (bench.size() - before).length() < 0.01,
             "back to {before:?}"
         );
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
+
+        // Redo, then a handle commit (what a drag releases): the top-left stays
+        // where it was, whatever the figure does.
+        bench.app.state.dispatch(Action::Redo);
+        bench.settle();
+        assert_eq!(
+            bench.app.window_positions[&bench.tab], position,
+            "after Redo"
+        );
+        bench.app.state.dispatch(Action::SetFrameSizes {
+            graph: bench.graph,
+            column: Some((0, 380.0)),
+            row: Some((0, 330.0)),
+        });
+        bench.settle();
+        assert_eq!(
+            bench.app.window_positions[&bench.tab], position,
+            "after a drag"
+        );
         bench.session.shutdown().unwrap();
     }
 
@@ -1471,7 +1497,34 @@ mod tests {
             columns: Vec::new(),
         });
         bench.settle();
-        assert_eq!(bench.size().x, WORKSPACE_SIZE.x - position.x);
+        assert!(position.x + bench.size().x <= WORKSPACE_SIZE.x);
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394 (T2): in a workspace narrower than its canvas the window stops at the
+    /// right edge of the VISIBLE part, title bar and buttons included, and the
+    /// figure is contained in it; the top-left does not move.
+    #[test]
+    fn the_window_stops_at_the_visible_edge_of_a_narrow_workspace() {
+        let position = egui::pos2(40.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(700.0, 400.0));
+        bench.screen = egui::vec2(1000.0, 700.0);
+        bench.settle();
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        bench.settle();
+        let visible = bench.screen.x;
+        assert!(
+            position.x + bench.size().x <= visible,
+            "window right edge {} past the visible edge {visible}",
+            position.x + bench.size().x
+        );
+        assert!(bench.size().x > 700.0, "it did grow up to the edge");
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
         bench.session.shutdown().unwrap();
     }
 
@@ -1524,6 +1577,7 @@ mod tests {
             session,
             tab,
             graph,
+            screen: egui::vec2(1920.0, 1080.0),
         };
         bench.settle();
         assert_eq!(bench.size(), egui::vec2(700.0, 560.0));
