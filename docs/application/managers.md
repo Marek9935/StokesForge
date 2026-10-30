@@ -183,7 +183,10 @@ no effect on an overlaid layer. An **overlaid layer** (#171)
 lists only the axes it displays (`object_manager::axis_sides`): its X axis
 named "Top Axis" if `x_top`, its Y axis named "Right Axis" if `y_right`,
 each controlling the `AxisSpec` `bottom` / `left` that carries it; its dead
-`right` / `top` rows do not exist. The group is **collapsed by
+`right` / `top` rows do not exist. Which layer holds which side of the cell (the
+mirror "blocked" by an overlay, the name where the axis is drawn) is the rule of
+`stokesforge_app_state::cell_sides`, the same one that greys the tabs of Graph
+Properties › Axes (#396). The group is **collapsed by
 default** (#138): a click on its arrow expands the axis rows, without touching
 the model. The checkboxes of the graph and of the
 layer count only the **listed children** (#173), gathered in `Shown`:

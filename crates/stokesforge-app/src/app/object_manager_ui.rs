@@ -472,11 +472,9 @@ fn visibility_reason(
     target: stokesforge_app_state::object_manager::VisibilityTarget,
     spec: &stokesforge_plot::PlotSpec,
 ) -> String {
-    if target.is_blocked_mirror(spec) {
-        tr!("disabled-axis-blocked")
-    } else {
-        tr!("disabled-visibility-empty")
-    }
+    target
+        .blocked_reason(spec)
+        .unwrap_or_else(|| tr!("disabled-visibility-empty"))
 }
 
 fn object_visibility(

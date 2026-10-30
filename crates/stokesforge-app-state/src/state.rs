@@ -72,6 +72,7 @@ use stokesforge_python::interpreter::EmbeddedPython;
 use stokesforge_script::{ScriptEngine, ScriptError, ScriptOutcome};
 use stokesforge_session::{RecalcEnd, SessionHandle, SessionResult, Snapshot};
 
+use crate::cell_sides;
 use crate::errors;
 use crate::history_text::history_text;
 use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
@@ -2245,20 +2246,47 @@ impl PlotSettingsTab {
     }
 }
 
-/// An editable axis of the (first) panel of a graph.
+/// A side of the cell of a layer, as Graph Properties › Axes names it (#396):
+/// the axis is named **where it is drawn**. For an overlaid layer, the X axis
+/// is `Top` and the Y axis `Right`; which field of the layer a side edits, and
+/// whether another layer holds it, is [`crate::cell_sides`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotAxis {
-    /// Bottom axis (X).
+    /// Bottom of the cell: the X axis of an ordinary layer.
     Bottom,
-    /// Left axis (main Y).
+    /// Left of the cell: the main Y axis of an ordinary layer.
     Left,
-    /// Right axis (secondary Y).
+    /// Right of the cell: the secondary Y axis of an ordinary layer, or the Y
+    /// axis of an overlaid layer.
     Right,
-    /// Top axis (secondary X): the mirror axis of the bottom one (#176).
+    /// Top of the cell: the mirror axis of an ordinary layer (#176), or the X
+    /// axis of an overlaid layer.
     Top,
 }
 
 impl PlotAxis {
+    /// The side of the cell, as the layer model names it.
+    pub fn side(self) -> stokesforge_plot::AxisSide {
+        use stokesforge_plot::AxisSide;
+        match self {
+            PlotAxis::Bottom => AxisSide::Bottom,
+            PlotAxis::Left => AxisSide::Left,
+            PlotAxis::Right => AxisSide::Right,
+            PlotAxis::Top => AxisSide::Top,
+        }
+    }
+
+    /// The tab of a side of the cell.
+    pub fn from_side(side: stokesforge_plot::AxisSide) -> Self {
+        use stokesforge_plot::AxisSide;
+        match side {
+            AxisSide::Bottom => PlotAxis::Bottom,
+            AxisSide::Left => PlotAxis::Left,
+            AxisSide::Right => PlotAxis::Right,
+            AxisSide::Top => PlotAxis::Top,
+        }
+    }
+
     /// Label of the axis.
     pub fn label(self) -> String {
         match self {
@@ -5320,25 +5348,21 @@ impl AppState {
                     T::Text(TextTarget::Legend { panel }) => {
                         (PlotSettingsTab::Legend, None, panel, None)
                     }
+                    // The address is a field of the layer; the tab is named
+                    // where the axis is drawn (#396).
                     T::Text(TextTarget::AxisTitle { panel, side }) => (
                         PlotSettingsTab::Axes,
-                        Some(match side {
-                            stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
-                            stokesforge_plot::AxisSide::Top => PlotAxis::Top,
-                            stokesforge_plot::AxisSide::Left => PlotAxis::Left,
-                            stokesforge_plot::AxisSide::Right => PlotAxis::Right,
-                        }),
+                        Some(PlotAxis::from_side(cell_sides::place_of(
+                            &spec, panel, side,
+                        ))),
                         panel,
                         None,
                     ),
                     T::Axis(axis) => (
                         PlotSettingsTab::Axes,
-                        Some(match axis.side {
-                            stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
-                            stokesforge_plot::AxisSide::Top => PlotAxis::Top,
-                            stokesforge_plot::AxisSide::Left => PlotAxis::Left,
-                            stokesforge_plot::AxisSide::Right => PlotAxis::Right,
-                        }),
+                        Some(PlotAxis::from_side(cell_sides::place_of(
+                            &spec, axis.panel, axis.side,
+                        ))),
                         axis.panel,
                         None,
                     ),
@@ -9697,6 +9721,7 @@ impl AppState {
         }
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
+        // A fresh layer shows no mirror, so there is nothing to switch off.
         let spec = PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
@@ -9811,6 +9836,8 @@ impl AppState {
                 layer.push_series_batch(series);
             }
         }
+        // A new overlay axis takes the cell's mirror in the same command (#396).
+        cell_sides::switch_off_mirrors_under_overlays(spec);
         Ok(())
     }
 
@@ -9904,6 +9931,9 @@ impl AppState {
             _ => OverlaySpec::new(x_top, y_right),
         };
         spec.panels.push(PanelSpec::overlay_on(&base_panel, axes));
+        // The new axis takes the mirror of the cell on its side, in the same
+        // command: one Undo gives both back (#396).
+        cell_sides::switch_off_mirrors_under_overlays(&mut spec);
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
@@ -9985,6 +10015,7 @@ impl AppState {
             &plot_type,
             row_series_name,
         ));
+        cell_sides::switch_off_mirrors_under_overlays(&mut spec);
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 

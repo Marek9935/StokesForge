@@ -299,6 +299,52 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "graphs-properties-overlay-axes",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            // An overlay layer with its own X and Y axes, then its Top tab.
+            act(
+                h,
+                Action::AddLayer {
+                    graph,
+                    panel: 0,
+                    x_top: true,
+                    y_right: true,
+                },
+            );
+            // It plots the demo curve of Layer 1 against a titled top axis with
+            // a typed range.
+            if let Some(mut spec) = h.state().app.state.plot_spec(graph) {
+                if let Some(series) = spec.panels.first().and_then(|p| p.series.first()).cloned() {
+                    let layer = spec.panels.get_mut(1).expect("the overlay layer");
+                    layer.series.push(series);
+                    layer.bottom.label = "Wavelength".to_owned();
+                    layer.bottom.unit = "nm".to_owned();
+                    // The bounds shown come from a painted graph, which this
+                    // shot does not have: typed bounds show real numbers.
+                    layer.bottom.auto_range = false;
+                    layer.bottom.range_min = Some(400.0);
+                    layer.bottom.range_max = Some(700.0);
+                }
+                act(h, Action::SetPlotSpec { graph, spec });
+            }
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Axes,
+                    axis: Some(PlotAxis::Top),
+                },
+            );
+            if let Some(edit) = h.state_mut().app.state.plot_edit_mut() {
+                edit.selected_panel = 1;
+            }
+            grow_dialog(h, 255.0);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
         name: "graphs-formula-title",
         setup: |h| {
             let graph = node_named(h, "Annotations");

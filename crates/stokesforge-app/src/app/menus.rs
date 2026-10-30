@@ -625,7 +625,9 @@ impl StokesForgeApp {
                         )
                         .on_hover_text(hint)
                         .on_disabled_hover_text(if ordinary {
-                            tr!("disabled-axis-blocked")
+                            spec.as_ref()
+                                .and_then(|spec| target.blocked_reason(spec))
+                                .unwrap_or_else(|| tr!("disabled-axis-blocked"))
                         } else {
                             tr!("disabled-axis-on-overlay")
                         })

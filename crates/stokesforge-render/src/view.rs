@@ -205,7 +205,7 @@ impl ViewState {
         let Some(panel) = panels.get(panel_index) else {
             return;
         };
-        let horizontal = side == AxisSide::Bottom;
+        let horizontal = matches!(side, AxisSide::Bottom | AxisSide::Top);
         let center = (
             panel.pixel_origin.0 as f64 + panel.pixel_size.0 as f64 / 2.0,
             panel.pixel_origin.1 as f64 + panel.pixel_size.1 as f64 / 2.0,
@@ -230,7 +230,7 @@ impl ViewState {
         };
         let mut framing = Framing::default();
         match side {
-            AxisSide::Bottom => {
+            AxisSide::Bottom | AxisSide::Top => {
                 framing.x = PanelTransform::of(panel)
                     .and_then(|t| t.apply(&gesture))
                     .map(|(x, _)| x);

@@ -176,6 +176,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Gridlines | Quadrillage | Lines that extend the ticks | Grille | G (Q12) |
 | Scale | Échelle | Law of distribution of values on the axis | Mode | O |
 | Linear / Log scale | Linéaire / Échelle log | The two current scales (Log10) | Logarithmique | O |
+| Own scale | Échelle propre | Box on the Top and Right tabs of an overlaid layer: it has its own scale on that side; unticked, it follows the layer it covers (#396) | Independent scale, Échelle indépendante | G |
 | Reciprocal† | Inverse | 1/x scale (spectra in wavenumber) | Réciproque | O |
 | Range | Plage | Interval of values shown on the axis | Bornes, Étendue | O |
 | Auto range | Plage auto | Range computed from the data; **no checkbox** since #344: « De » and « À » follow the data as long as nothing has been typed, and the « Auto » button of the row brings them back to it | Bornes automatiques | O |

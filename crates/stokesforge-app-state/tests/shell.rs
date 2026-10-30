@@ -7157,6 +7157,172 @@ fn dropping_rows_on_a_graph_with_x_asks_which_axis() {
     assert_eq!(spec.panels[0].series[1].row, Some(2));
 }
 
+/// #396: a new overlay axis at the top takes the mirror that the cell displays
+/// there, in the same undo step: one Undo gives both back. Here through the
+/// "Create Axis" answer of a row drop.
+#[test]
+fn a_new_overlay_axis_switches_the_displayed_mirror_off_in_the_same_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, sheet, _) = kinetics(dir.path());
+    let graph = graph_with_x(&mut state, sheet);
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.panels.get_mut(0).unwrap().top.mirror = true;
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+    assert!(
+        before.panels[0].top.mirror,
+        "precondition: mirror displayed"
+    );
+    state.select_row(sheet, 2);
+    let payload = state.row_drag_payload(sheet).expect("loads");
+
+    state.dispatch(drop_rows_action(&payload, graph, 0));
+    state.dispatch(Action::ConfirmRowDrop(Some(RowAxis::New)));
+    let spec = state.plot_spec(graph).unwrap();
+    assert_eq!(spec.panels.len(), 2);
+    assert!(!spec.panels[0].top.mirror, "the overlay axis wins");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
+}
+
+/// #396: the Y2 columns dropped on an existing graph create their overlay
+/// layer; the mirror it takes goes off in the same undo step. (A new graph has
+/// no mirror to take.)
+#[test]
+fn dropping_a_y2_takes_the_displayed_mirror_in_the_same_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mut project = Project::new("Y2Mirror").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("column")
+    };
+    let c: Vec<NodeId> = ["X", "Y", "X2", "Y2"].map(&mut add).to_vec();
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    for (column, role) in
+        c.iter()
+            .copied()
+            .zip([ColumnRole::X, ColumnRole::Y, ColumnRole::X2, ColumnRole::Y2])
+    {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![c[0], c[1]],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph created");
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.panels.get_mut(0).unwrap().top.mirror = true;
+    spec.panels.get_mut(0).unwrap().right.mirror = true;
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![c[2], c[3]],
+        plot_type: None,
+    });
+    let spec = state.plot_spec(graph).expect("spec");
+    assert_eq!(spec.panels.len(), 2, "the Y2 layer");
+    assert!(!spec.panels[0].top.mirror && !spec.panels[0].right.mirror);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
+}
+
+/// #396: same rule for "New Layer": the mirror goes off only on a side the new
+/// layer really draws (a linked scale draws nothing).
+#[test]
+fn add_layer_takes_the_mirror_only_where_it_draws_an_axis() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph created");
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.panels.get_mut(0).unwrap().top.mirror = true;
+    spec.panels.get_mut(0).unwrap().right.mirror = true;
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+
+    // X on top only: the top mirror goes, the right one stays.
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 0,
+        x_top: true,
+        y_right: false,
+    });
+    let spec = state.plot_spec(graph).expect("spec");
+    assert!(!spec.panels[0].top.mirror && spec.panels[0].right.mirror);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "one Undo");
+
+    // Linked scales: no axis drawn, the mirrors stay.
+    state.dispatch(Action::AddLayer {
+        graph,
+        panel: 0,
+        x_top: false,
+        y_right: false,
+    });
+    let spec = state.plot_spec(graph).expect("spec");
+    assert!(spec.panels[0].top.mirror && spec.panels[0].right.mirror);
+}
+
+/// #396: the address of an axis is a field of its layer; Graph Properties
+/// opens on the side where the axis is drawn.
+#[test]
+fn opening_the_properties_of_an_overlay_axis_selects_the_side_it_is_drawn_on() {
+    use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget as T};
+    use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels, PlotSpec};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (project, graph, _) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("sides.stf"));
+    let base = PanelSpec::at(0, 0);
+    let spec = PlotSpec::empty("Sides").with_panels(Panels::new(vec![
+        base.clone(),
+        PanelSpec::overlay_on(&base, OverlaySpec::new(true, true)),
+    ]));
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    for (panel, side, opened) in [
+        (1, AxisSide::Bottom, PlotAxis::Top),
+        (1, AxisSide::Left, PlotAxis::Right),
+        (0, AxisSide::Bottom, PlotAxis::Bottom),
+        (0, AxisSide::Left, PlotAxis::Left),
+    ] {
+        state.dispatch(Action::OpenObjectProperties {
+            graph,
+            target: T::Axis(AxisRef { panel, side }),
+        });
+        let settings = state.plot_settings().expect("window open");
+        assert_eq!(settings.axis, opened, "layer {panel}, field {side:?}");
+        assert_eq!(state.plot_edit().unwrap().selected_panel, panel);
+    }
+}
+
 /// A row outside the sheet is ignored; a sheet without x' refuses with
 /// a message, writing nothing.
 #[test]

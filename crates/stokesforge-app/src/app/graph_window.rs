@@ -20,6 +20,7 @@ use stokesforge_session::Snapshot;
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::number_field::number_field;
+use stokesforge_app_state::cell_sides;
 use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
@@ -684,7 +685,18 @@ fn graph_context_menu(
         let target = match (annotation, shape) {
             (Some(annotation), _) => PlotTarget::Annotation(annotation),
             (None, Some(shape)) => PlotTarget::Object(shape),
-            (None, None) => plot_target(component),
+            (None, None) => plot_target(
+                component,
+                &|panel, side| match spec.as_ref() {
+                    Some(spec) => PlotAxis::from_side(cell_sides::place_of(spec, panel, side)),
+                    None => PlotAxis::from_side(side),
+                },
+                &|rank| {
+                    view.last_drawn()
+                        .and_then(|last| last.panels.get(rank))
+                        .map_or(rank, |drawn| drawn.index)
+                },
+            ),
         };
         let object = if let Some(annotation) = annotation {
             Some(VisibilityTarget::Annotation(annotation))
@@ -1072,28 +1084,41 @@ fn axis_target(view: &GraphView, panel: usize, side: AxisSide) -> Option<Visibil
     let drawn = view.last_drawn()?.panels.get(panel)?;
     Some(VisibilityTarget::Axis(AxisRef {
         panel: drawn.index,
-        side: match side {
-            AxisSide::Bottom => stokesforge_plot::AxisSide::Bottom,
-            AxisSide::Left => stokesforge_plot::AxisSide::Left,
-            AxisSide::Right => stokesforge_plot::AxisSide::Right,
-        },
+        side: field_of(side),
     }))
+}
+
+/// The field of the layer that a hit-test side designates (#396): on an
+/// overlaid layer the rendering reports the field it draws (its X axis as
+/// `Bottom` at the top, its Y axis as `Left` on the right).
+fn field_of(side: AxisSide) -> stokesforge_plot::AxisSide {
+    match side {
+        AxisSide::Bottom => stokesforge_plot::AxisSide::Bottom,
+        AxisSide::Left => stokesforge_plot::AxisSide::Left,
+        AxisSide::Right => stokesforge_plot::AxisSide::Right,
+        AxisSide::Top => stokesforge_plot::AxisSide::Top,
+    }
 }
 
 /// Label and tab of the component. The address of the axes is kept apart
 /// by `axis_target`, to open the properties of the targeted layer.
-fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
-    let axis = |side| match side {
-        AxisSide::Bottom => PlotAxis::Bottom,
-        AxisSide::Left => PlotAxis::Left,
-        AxisSide::Right => PlotAxis::Right,
-    };
+/// `place` names an axis where it is drawn: it takes a layer of the spec (not
+/// its rank among the drawn layers) and the field of that layer.
+fn plot_target(
+    component: Option<PlotComponent>,
+    place: &dyn Fn(usize, stokesforge_plot::AxisSide) -> PlotAxis,
+    drawn_index: &dyn Fn(usize) -> usize,
+) -> PlotTarget {
     match component {
         None => PlotTarget::Background,
         Some(PlotComponent::Title) => PlotTarget::Title,
         Some(PlotComponent::PlotArea { .. }) => PlotTarget::PlotArea,
-        Some(PlotComponent::Axis { side, .. }) => PlotTarget::Axis(axis(side)),
-        Some(PlotComponent::AxisTitle { side, .. }) => PlotTarget::AxisTitle(axis(side)),
+        Some(PlotComponent::Axis { panel, side }) => {
+            PlotTarget::Axis(place(drawn_index(panel), field_of(side)))
+        }
+        Some(PlotComponent::AxisTitle { panel, side }) => {
+            PlotTarget::AxisTitle(place(drawn_index(panel), field_of(side)))
+        }
         // The context menu reads the free text through `GraphView::annotation_at`,
         // which gives its address in the spec; this fallback is not used.
         Some(PlotComponent::Annotation { .. }) => PlotTarget::PlotArea,
@@ -1103,13 +1128,7 @@ fn plot_target(component: Option<PlotComponent>) -> PlotTarget {
         // component, as before they could be designated in their own right.
         Some(PlotComponent::Text(target)) => match target {
             TextTarget::Title | TextTarget::PanelTitle { .. } => PlotTarget::Title,
-            TextTarget::AxisTitle { side, .. } => PlotTarget::AxisTitle(match side {
-                stokesforge_plot::AxisSide::Bottom => PlotAxis::Bottom,
-                stokesforge_plot::AxisSide::Left => PlotAxis::Left,
-                stokesforge_plot::AxisSide::Right | stokesforge_plot::AxisSide::Top => {
-                    PlotAxis::Right
-                }
-            }),
+            TextTarget::AxisTitle { panel, side } => PlotTarget::AxisTitle(place(panel, side)),
             TextTarget::Legend { .. } => PlotTarget::Legend,
         },
         Some(PlotComponent::LegendEntry { .. }) => PlotTarget::Legend,
@@ -1552,32 +1571,39 @@ pub(super) mod tests {
     #[test]
     fn plot_target_maps_each_component_to_its_properties() {
         use stokesforge_render_egui::TextTarget as T;
-        assert_eq!(plot_target(None), PlotTarget::Background);
-        assert_eq!(plot_target(Some(PlotComponent::Title)), PlotTarget::Title);
+        // An ordinary layer: a side is named by its own field.
+        let named = |component| {
+            plot_target(component, &|_, side| PlotAxis::from_side(side), &|rank| {
+                rank
+            })
+        };
+        assert_eq!(named(None), PlotTarget::Background);
+        assert_eq!(named(Some(PlotComponent::Title)), PlotTarget::Title);
         assert_eq!(
-            plot_target(Some(PlotComponent::PlotArea { panel: 0 })),
+            named(Some(PlotComponent::PlotArea { panel: 0 })),
             PlotTarget::PlotArea
         );
         for (side, axis) in [
             (AxisSide::Bottom, PlotAxis::Bottom),
             (AxisSide::Left, PlotAxis::Left),
             (AxisSide::Right, PlotAxis::Right),
+            (AxisSide::Top, PlotAxis::Top),
         ] {
             assert_eq!(
-                plot_target(Some(PlotComponent::Axis { panel: 0, side })),
+                named(Some(PlotComponent::Axis { panel: 0, side })),
                 PlotTarget::Axis(axis)
             );
             assert_eq!(
-                plot_target(Some(PlotComponent::AxisTitle { panel: 0, side })),
+                named(Some(PlotComponent::AxisTitle { panel: 0, side })),
                 PlotTarget::AxisTitle(axis)
             );
         }
         assert_eq!(
-            plot_target(Some(PlotComponent::Text(T::Title))),
+            named(Some(PlotComponent::Text(T::Title))),
             PlotTarget::Title
         );
         assert_eq!(
-            plot_target(Some(PlotComponent::Text(T::PanelTitle { panel: 0 }))),
+            named(Some(PlotComponent::Text(T::PanelTitle { panel: 0 }))),
             PlotTarget::Title
         );
         for (side, axis) in [
@@ -1586,20 +1612,61 @@ pub(super) mod tests {
             (stokesforge_plot::AxisSide::Right, PlotAxis::Right),
         ] {
             assert_eq!(
-                plot_target(Some(PlotComponent::Text(T::AxisTitle { panel: 0, side }))),
+                named(Some(PlotComponent::Text(T::AxisTitle { panel: 0, side }))),
                 PlotTarget::AxisTitle(axis)
             );
         }
         assert_eq!(
-            plot_target(Some(PlotComponent::Text(T::Legend { panel: 0 }))),
+            named(Some(PlotComponent::Text(T::Legend { panel: 0 }))),
             PlotTarget::Legend
         );
         assert_eq!(
-            plot_target(Some(PlotComponent::LegendEntry {
+            named(Some(PlotComponent::LegendEntry {
                 panel: 0,
                 series: 0
             })),
             PlotTarget::Legend
+        );
+    }
+
+    /// #396: on an overlaid layer the rendering reports the field it draws; the
+    /// menu header and the page that opens name the axis where it is drawn.
+    #[test]
+    fn an_overlaid_layer_axis_is_named_where_it_is_drawn() {
+        use stokesforge_plot::{OverlaySpec, Panels};
+        let base = PanelSpec::at(0, 0);
+        let overlay = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+        let spec = PlotSpec::empty("Figure").with_panels(Panels::new(vec![base, overlay]));
+        let named = |component| {
+            plot_target(
+                component,
+                &|panel, side| PlotAxis::from_side(cell_sides::place_of(&spec, panel, side)),
+                &|rank| rank,
+            )
+        };
+        let axis = |panel, side| PlotComponent::Axis { panel, side };
+        assert_eq!(
+            named(Some(axis(1, AxisSide::Bottom))),
+            PlotTarget::Axis(PlotAxis::Top)
+        );
+        assert_eq!(
+            named(Some(axis(1, AxisSide::Left))),
+            PlotTarget::Axis(PlotAxis::Right)
+        );
+        assert_eq!(
+            named(Some(axis(0, AxisSide::Bottom))),
+            PlotTarget::Axis(PlotAxis::Bottom)
+        );
+        assert_eq!(
+            PlotTarget::Axis(PlotAxis::Top).label(),
+            tr!("plot-target-axis", side = "top")
+        );
+        assert_eq!(
+            named(Some(PlotComponent::AxisTitle {
+                panel: 1,
+                side: AxisSide::Left
+            })),
+            PlotTarget::AxisTitle(PlotAxis::Right)
         );
     }
 
@@ -2647,18 +2714,23 @@ pub(super) mod tests {
             requests: Vec::new(),
         };
         let mut axis = stokesforge_app_state::state::PlotAxis::Bottom;
-        let mut decimal_comma = false;
+        let mut spec = PlotSpec::empty("Figure")
+            .with_panels(stokesforge_plot::Panels::new(vec![panel.clone()]));
         let events = pointer.map(egui::Event::PointerMoved).into_iter().collect();
-        super::super::test_support::image(context, events, |ui| {
+        let shapes = super::super::test_support::image(context, events, |ui| {
             super::super::plot_settings::axes_settings_page(
                 ui,
-                panel,
+                &mut spec,
+                0,
                 &mut axis,
                 published_axis_bounds(ui.ctx(), graph, 0),
-                &mut decimal_comma,
                 &mut env,
             );
-        })
+        });
+        if let Some(edited) = spec.panels.first() {
+            *panel = edited.clone();
+        }
+        shapes
     }
 
     /// #170, point 1 (#344): under Auto, the bound fields show the
