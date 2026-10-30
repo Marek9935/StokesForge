@@ -54,6 +54,19 @@
 //! to test then: `docs/tests.md`,
 //! "Targeted recalculation".
 //!
+//! **The paired X is a hidden input (#402).** `at(B, 340)`, `integral(B)` and
+//! `max(B, 330, 350)` read, besides `B`, the X column that the plot pairs with
+//! `B` (`stokesforge_core::compose::x_for`: the nearest X to its left, by role).
+//! Its name is not in the text, and it changes when a role changes or a column
+//! moves. The formula's **inputs** are therefore the columns it names **plus**
+//! those X (`paired_x_columns`): one set, used for the dependency order (an X
+//! computed by a formula is recalculated first; a loop through an X is a
+//! cycle), for the fingerprint (`Outcome::Evaluated::paired_x`: the identifier
+//! of the X and its version, `None` when `B` has none — the formula then
+//! shows `---`, and computes the day an X appears), for the loops through a
+//! calculation (`calculations_in_a_cycle`) and for the evaluation. The length
+//! of the result (#194) still follows the columns named only.
+//!
 //! ## The oracle
 //!
 //! The full recalculation has not disappeared: it is [`FormulaRecalc::Full`],
@@ -111,10 +124,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::AnalysisError;
+use stokesforge_core::compose::paired_x_columns;
 use stokesforge_core::{
-    compute, evaluate_formula, topological_order, AuxRef, Calculation, ColumnFormula, ColumnType,
-    ColumnValues, ComputeError, Formula, FormulaError, NodeId, NumericStatus, Project, SeriesRef,
-    Staleness, ValueBlock,
+    compute, evaluate_formula_with_x, topological_order, AuxRef, Calculation, ColumnFormula,
+    ColumnType, ColumnValues, ComputeError, Formula, FormulaError, NodeId, NumericStatus, Project,
+    SeriesRef, Staleness, ValueBlock,
 };
 
 /// How the actor recalculates formula columns after every request that may
@@ -422,6 +436,18 @@ impl Recalculator {
             }
         }
 
+        // The X paired with the columns each formula reads the X of (#402),
+        // from the roles and the order of the sheet: structure that a pass does
+        // not change. A hidden input, next to the columns the formula names.
+        let pairing: BTreeMap<NodeId, BTreeMap<NodeId, NodeId>> = parsed
+            .iter()
+            .map(|(&id, (_, formula))| {
+                let mut paired = paired_x_columns(project.tree(), formula);
+                paired.retain(|y, _| columns.contains(y));
+                (id, paired)
+            })
+            .collect();
+
         // Dependency graph between formula columns only: a reference to an
         // ordinary column is not an edge to order, it is already available (see
         // the docs of `stokesforge_core::topological_order`).
@@ -430,7 +456,11 @@ impl Recalculator {
         // `parsed` holds only columns of this sheet: a reference to another
         // sheet is never an edge.
         for (&id, (_, formula)) in &parsed {
-            for dep_id in formula.referenced_columns() {
+            let inputs = formula
+                .referenced_columns()
+                .into_iter()
+                .chain(pairing[&id].values().copied());
+            for dep_id in inputs {
                 if parsed.contains_key(&dep_id) {
                     if let Some(deps) = edges.get_mut(&id) {
                         deps.insert(dep_id);
@@ -497,11 +527,24 @@ impl Recalculator {
                 .filter_map(|(column_id, _)| column_len(project, *column_id))
                 .max()
                 .unwrap_or(ordinary_len);
+            // The X paired with each column whose X is read (#402), with its
+            // version: it is not named in the formula, so nothing else would
+            // tell that it changed.
+            let paired = &pairing[&id];
+            let paired_x: Vec<(NodeId, Option<NodeId>, Option<u64>)> = formula
+                .columns_needing_x()
+                .into_iter()
+                .map(|column_id| {
+                    let x = paired.get(&column_id).copied();
+                    let version = x.and_then(|x| column_version(project, x));
+                    (column_id, x, version)
+                })
+                .collect();
             let fingerprint = Fingerprint::new(
                 project,
                 id,
                 source.clone(),
-                Outcome::Evaluated { sources },
+                Outcome::Evaluated { sources, paired_x },
                 target_len,
             );
             if !self.is_stale(id, &fingerprint) {
@@ -528,7 +571,7 @@ impl Recalculator {
                 continue;
             }
             let values: Vec<_> = values.into_iter().flatten().collect();
-            let evaluation = evaluate_formula(formula, &values, target_len);
+            let evaluation = evaluate_formula_with_x(formula, &values, paired, target_len);
             // A column read that is no longer in the sheet (`#REF`) leaves
             // **empty** cells, not `---`: no calculation failed, the formula
             // has nothing left to read. Empty statuses = no row marked
@@ -600,7 +643,15 @@ enum Outcome {
     /// Membership of the sheet is read by the calculation: it therefore enters
     /// the fingerprint, and a column that comes back (undo) triggers a
     /// recalculation.
-    Evaluated { sources: Vec<(NodeId, Option<u64>)> },
+    ///
+    /// `paired_x` (#402): for each column whose X the formula reads (`at`,
+    /// `integral`, a range), the identifier of its paired X and the version of
+    /// that X — `None` and `None` while it has none. A hidden input: a role
+    /// change or a move changes the identifier, an edit of the X its version.
+    Evaluated {
+        sources: Vec<(NodeId, Option<u64>)>,
+        paired_x: Vec<(NodeId, Option<NodeId>, Option<u64>)>,
+    },
 }
 
 /// Current length of `column`, `None` if it is not (or no longer) a column of
@@ -1076,11 +1127,13 @@ fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
                 .and_then(|n| n.as_column())
                 .and_then(|c| c.meta().formula.clone());
             if let Some(Ok(formula)) = source.as_ref().map(ColumnFormula::compile) {
-                // The columns of **this sheet** only, like `recalc_sheet`.
+                // The columns of **this sheet** only, like `recalc_sheet`, and
+                // the X paired with the columns whose X it reads (#402).
                 deps.extend(
                     formula
                         .referenced_columns()
                         .into_iter()
+                        .chain(paired_x_columns(tree, &formula).into_values())
                         .filter(|column| columns.contains(column)),
                 );
             }
