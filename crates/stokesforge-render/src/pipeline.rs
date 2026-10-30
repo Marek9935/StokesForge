@@ -1394,6 +1394,10 @@ struct BaseFrame<DB: DrawingBackend> {
     y_range: (f64, f64),
     x_scale: AxisScale,
     y_scale: AxisScale,
+    /// Tick counts of the covered axes (#397): a superimposed layer aligns its
+    /// ticks on them.
+    x_count: usize,
+    y_count: usize,
 }
 
 /// Draws a panel in its cell.
@@ -1481,7 +1485,7 @@ fn draw_panel<DB: DrawingBackend>(
                 &spec.bottom,
                 x_scale,
                 own,
-                base.map(|b| (b.x_scale, b.x_range)),
+                base.map(|b| (b.x_scale, b.x_range, b.x_count)),
             )
         }
     };
@@ -1498,7 +1502,7 @@ fn draw_panel<DB: DrawingBackend>(
                 &spec.left,
                 y_scale,
                 own,
-                base.map(|b| (b.y_scale, b.y_range)),
+                base.map(|b| (b.y_scale, b.y_range, b.y_count)),
             )
         }
     };
@@ -1601,6 +1605,53 @@ fn draw_panel<DB: DrawingBackend>(
         .top_x_label_area_size(top_label_area)
         .y_label_area_size(y_label_area)
         .right_y_label_area_size(right_label_area);
+    // The length of the axes in pixels (#397), before any range matters: the
+    // plot area only depends on the margins and the fixed label bands. The
+    // tick count of each axis is chosen once, here, and given to everything
+    // that places or writes a tick.
+    let (axis_width, axis_height) = builder
+        .build_cartesian_2d(0.0..1.0, 0.0..1.0)?
+        .plotting_area()
+        .dim_in_pixel();
+    let label_style = text_style(LABEL_SIZE, opaque(ink));
+    let label_width = |text: &str| -> f64 {
+        area.estimate_text_size(text, &label_style)
+            .map_or(0.0, |size| f64::from(size.0))
+    };
+    let label_height = |text: &str| -> f64 {
+        area.estimate_text_size(text, &label_style)
+            .map_or(0.0, |size| f64::from(size.1))
+    };
+    let count_of = |scale: AxisScale, range: (f64, f64), horizontal: bool| -> usize {
+        if horizontal {
+            scale::tick_count(
+                scale,
+                range,
+                f64::from(axis_width),
+                scale::AxisDirection::Horizontal,
+                decimal_comma,
+                &label_width,
+            )
+        } else {
+            scale::tick_count(
+                scale,
+                range,
+                f64::from(axis_height),
+                scale::AxisDirection::Vertical,
+                decimal_comma,
+                &label_height,
+            )
+        }
+    };
+    let x_count = match base {
+        Some(base) if !x_own => base.x_count,
+        _ => count_of(x_scale, x_range, true),
+    };
+    let y_count = match base {
+        Some(base) if !y_own => base.y_count,
+        _ => count_of(y_scale, y_range, false),
+    };
+    let y2_count = y2_range.map_or(y_count, |range| count_of(y2_scale, range, false));
     let chart = builder.build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
 
     // The secondary axis is **always** attached, even unused: it takes from
@@ -1657,20 +1708,19 @@ fn draw_panel<DB: DrawingBackend>(
         let plotting = chart.plotting_area();
         (plotting.get_base_pixel(), plotting.dim_in_pixel())
     };
-    let ticks_of = |scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
-        scale::linear_key_points(range, scale::label_count(scale, range))
-    };
-    let x_ticks_px: Vec<i32> = ticks_of(x_scale, x_range)
+    let ticks_of =
+        |range: (f64, f64), count: usize| -> Vec<f64> { scale::linear_key_points(range, count) };
+    let x_ticks_px: Vec<i32> = ticks_of(x_range, x_count)
         .into_iter()
         .map(|v| chart.plotting_area().map_coordinate(&(v, y_range.0)).0)
         .collect();
-    let y_ticks_px: Vec<i32> = ticks_of(y_scale, y_range)
+    let y_ticks_px: Vec<i32> = ticks_of(y_range, y_count)
         .into_iter()
         .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
         .collect();
     // The top and right axes are projected by the secondary frame, whose
     // rounding sometimes differs by a pixel from that of the main frame.
-    let x2_ticks_px: Vec<i32> = ticks_of(x_scale, x_range)
+    let x2_ticks_px: Vec<i32> = ticks_of(x_range, x_count)
         .into_iter()
         .map(|v| {
             chart
@@ -1679,42 +1729,35 @@ fn draw_panel<DB: DrawingBackend>(
                 .0
         })
         .collect();
-    let y2_ticks_px: Vec<i32> = ticks_of(
-        if y2_range.is_some() {
-            y2_scale
-        } else {
-            y_scale
-        },
-        y2_range.unwrap_or(y_range),
-    )
-    .into_iter()
-    .map(|v| {
-        chart
-            .secondary_plotting_area()
-            .map_coordinate(&(x_range.0, v))
-            .1
-    })
-    .collect();
+    let y2_ticks_px: Vec<i32> = ticks_of(y2_range.unwrap_or(y_range), y2_count)
+        .into_iter()
+        .map(|v| {
+            chart
+                .secondary_plotting_area()
+                .map_coordinate(&(x_range.0, v))
+                .1
+        })
+        .collect();
 
     // The minor ticks (#344): positions computed as values, then projected
     // like the major ticks (never interpolated between the pixels of those:
     // rounding, inverted axis, log scale).
-    let minor_of = |axis: &AxisSpec, scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
+    let minor_of = |axis: &AxisSpec, scale: AxisScale, range: (f64, f64), count: usize| {
         if axis.minor_ticks {
-            scale::minor_key_points(scale, range, axis.minor_tick_count)
+            scale::minor_key_points(scale, range, axis.minor_tick_count, count)
         } else {
             Vec::new()
         }
     };
-    let x_minor_px: Vec<i32> = minor_of(&spec.bottom, x_scale, x_range)
+    let x_minor_px: Vec<i32> = minor_of(&spec.bottom, x_scale, x_range, x_count)
         .into_iter()
         .map(|v| chart.plotting_area().map_coordinate(&(v, y_range.0)).0)
         .collect();
-    let y_minor_px: Vec<i32> = minor_of(&spec.left, y_scale, y_range)
+    let y_minor_px: Vec<i32> = minor_of(&spec.left, y_scale, y_range, y_count)
         .into_iter()
         .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
         .collect();
-    let x2_minor_px: Vec<i32> = minor_of(&spec.top, x_scale, x_range)
+    let x2_minor_px: Vec<i32> = minor_of(&spec.top, x_scale, x_range, x_count)
         .into_iter()
         .map(|v| {
             chart
@@ -1731,6 +1774,7 @@ fn draw_panel<DB: DrawingBackend>(
             y_scale
         },
         y2_range.unwrap_or(y_range),
+        y2_count,
     )
     .into_iter()
     .map(|v| {
@@ -1762,15 +1806,17 @@ fn draw_panel<DB: DrawingBackend>(
             axis.display_label()
         }
     };
-    let tick_x = scale::TickFormat::new(x_scale, x_range).with_decimal_comma(decimal_comma);
-    let tick_y = scale::TickFormat::new(y_scale, y_range).with_decimal_comma(decimal_comma);
+    let tick_x =
+        scale::TickFormat::new(x_scale, x_range, x_count).with_decimal_comma(decimal_comma);
+    let tick_y =
+        scale::TickFormat::new(y_scale, y_range, y_count).with_decimal_comma(decimal_comma);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
     // The numbers of an axis: none (#176, the tick marks stay), all, or one in n
     // (#344).
     let shown_x = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
         if axis.tick_labels {
-            let format = tick_x.with_label_every(axis.label_every, x_range);
+            let format = tick_x.with_label_every(axis.label_every, x_range, x_count);
             Box::new(move |value| format.format(*value))
         } else {
             Box::new(|_| String::new())
@@ -1778,7 +1824,7 @@ fn draw_panel<DB: DrawingBackend>(
     };
     let shown_y = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
         if axis.tick_labels {
-            let format = tick_y.with_label_every(axis.label_every, y_range);
+            let format = tick_y.with_label_every(axis.label_every, y_range, y_count);
             Box::new(move |value| format.format(*value))
         } else {
             Box::new(|_| String::new())
@@ -1814,7 +1860,7 @@ fn draw_panel<DB: DrawingBackend>(
                 mesh.set_all_tick_mark_size(0);
             }
             mesh.x_label_formatter(&*labels_bottom)
-                .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+                .x_labels(pass.count(x_count));
             mesh.draw()?;
         }
         if custom && spec.bottom.visible {
@@ -1861,7 +1907,7 @@ fn draw_panel<DB: DrawingBackend>(
                 mesh.set_all_tick_mark_size(0);
             }
             mesh.y_label_formatter(&*labels_left)
-                .y_labels(pass.count(scale::label_count(y_scale, y_range)));
+                .y_labels(pass.count(y_count));
             mesh.draw()?;
         }
         if custom && spec.left.visible {
@@ -1887,9 +1933,9 @@ fn draw_panel<DB: DrawingBackend>(
     }
 
     if let Some(range) = y2_range {
-        let tick_y2 = scale::TickFormat::new(y2_scale, range)
+        let tick_y2 = scale::TickFormat::new(y2_scale, range, y2_count)
             .with_decimal_comma(decimal_comma)
-            .with_label_every(spec.right.label_every, range);
+            .with_label_every(spec.right.label_every, range, y2_count);
         let format_y2 = |value: &f64| {
             if spec.right.tick_labels {
                 tick_y2.format(*value)
@@ -1919,10 +1965,10 @@ fn draw_panel<DB: DrawingBackend>(
                 mesh.set_all_tick_mark_size(0);
             }
             mesh.y_label_formatter(&format_y2)
-                .y_labels(pass.count(scale::label_count(y2_scale, range)));
+                .y_labels(pass.count(y2_count));
             if mirror_top {
                 mesh.x_label_formatter(&*labels_top)
-                    .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+                    .x_labels(pass.count(x_count));
             }
             mesh.draw()?;
         }
@@ -1988,13 +2034,13 @@ fn draw_panel<DB: DrawingBackend>(
             }
             if mirror_top {
                 mesh.x_label_formatter(&*labels_top)
-                    .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+                    .x_labels(pass.count(x_count));
             } else {
                 mesh.x_labels(0);
             }
             if mirror_right {
                 mesh.y_label_formatter(&*labels_right)
-                    .y_labels(pass.count(scale::label_count(y_scale, y_range)));
+                    .y_labels(pass.count(y_count));
             } else {
                 mesh.y_labels(0);
             }
@@ -2075,7 +2121,7 @@ fn draw_panel<DB: DrawingBackend>(
                     .axis_style(rgba(colors_x.ticks))
                     .x_desc(plotters_desc(&spec.bottom, bottom_anchor))
                     .x_label_formatter(&format_x)
-                    .x_labels(scale::label_count(x_scale, x_range))
+                    .x_labels(x_count)
                     .y_labels(0);
                 mesh.draw()?;
             }
@@ -2101,7 +2147,7 @@ fn draw_panel<DB: DrawingBackend>(
                     .axis_style(rgba(colors_y.ticks))
                     .y_desc(plotters_desc(&spec.left, left_anchor))
                     .y_label_formatter(&format_y)
-                    .y_labels(scale::label_count(y_scale, y_range))
+                    .y_labels(y_count)
                     .x_labels(0);
                 mesh.draw()?;
             }
@@ -2565,6 +2611,8 @@ fn draw_panel<DB: DrawingBackend>(
         y_range,
         x_scale,
         y_scale,
+        x_count,
+        y_count,
     };
     Ok((drawn, projection, frame))
 }
@@ -2932,15 +2980,15 @@ fn join_to_base(
     spec: &AxisSpec,
     scale: AxisScale,
     own: (f64, f64),
-    base: Option<(AxisScale, (f64, f64))>,
+    base: Option<(AxisScale, (f64, f64), usize)>,
 ) -> (f64, f64) {
     match base {
-        Some((base_scale, base_range))
+        Some((base_scale, base_range, base_count))
             if scale == AxisScale::Linear
                 && base_scale == AxisScale::Linear
                 && !spec.has_explicit_range() =>
         {
-            scale::aligned_range(base_range, own).unwrap_or(own)
+            scale::aligned_range(base_range, own, base_count).unwrap_or(own)
         }
         _ => own,
     }

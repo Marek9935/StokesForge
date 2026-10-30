@@ -53,7 +53,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use stokesforge_core::{Computed, Tree};
 use stokesforge_plot::{AxisScale, AxisSpec};
-use stokesforge_render::scale::axis_ticks;
+use stokesforge_render::scale::{axis_ticks, AxisDirection};
 use stokesforge_render::{
     axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, Gesture, PanelTransform,
 };
@@ -606,7 +606,32 @@ pub(super) fn preview(
 
     // Ticks: the step and the format of the graph (`axis_ticks`), the decimal
     // point as before.
-    for (x, label) in axis_ticks(scales.0, frame.0, false) {
+    // The count follows the length of the axis and the measured labels, like
+    // a graph (#397).
+    let measure = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), text_color)
+            .size()
+    };
+    let along_x = |text: &str| f64::from(measure(text).x);
+    let along_y = |text: &str| f64::from(measure(text).y);
+    let x_ticks = axis_ticks(
+        scales.0,
+        frame.0,
+        false,
+        f64::from(plot_rect.width()),
+        AxisDirection::Horizontal,
+        &along_x,
+    );
+    let y_ticks = axis_ticks(
+        scales.1,
+        frame.1,
+        false,
+        f64::from(plot_rect.height()),
+        AxisDirection::Vertical,
+        &along_y,
+    );
+    for (x, label) in x_ticks {
         if let Some(p) = to_screen(&transform, x, frame.1 .0) {
             painter.text(
                 egui::pos2(p.x, plot_rect.bottom() + 2.0),
@@ -617,7 +642,7 @@ pub(super) fn preview(
             );
         }
     }
-    for (y, label) in axis_ticks(scales.1, frame.1, false) {
+    for (y, label) in y_ticks {
         if let Some(p) = to_screen(&transform, frame.0 .0, y) {
             painter.text(
                 egui::pos2(plot_rect.left() - 3.0, p.y),
