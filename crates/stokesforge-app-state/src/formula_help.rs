@@ -15,7 +15,7 @@
 //! that the parser refuses cannot ship.
 
 use stokesforge_analysis::functions::Func;
-use stokesforge_core::Callee;
+use stokesforge_core::{Callee, ColumnFunc};
 
 use crate::tr;
 
@@ -28,18 +28,20 @@ enum Family {
     Error,
     Rounding,
     Choice,
+    ColumnValues,
     Constants,
 }
 
 impl Family {
     /// The display order.
-    const ALL: [Family; 7] = [
+    const ALL: [Family; 8] = [
         Family::Operators,
         Family::Powers,
         Family::Trigonometry,
         Family::Error,
         Family::Rounding,
         Family::Choice,
+        Family::ColumnValues,
         Family::Constants,
     ];
 
@@ -51,6 +53,7 @@ impl Family {
             Family::Error => tr!("formula-help-family-error"),
             Family::Rounding => tr!("formula-help-family-rounding"),
             Family::Choice => tr!("formula-help-family-choice"),
+            Family::ColumnValues => tr!("formula-help-family-column"),
             Family::Constants => tr!("formula-help-family-constants"),
         }
     }
@@ -100,7 +103,7 @@ fn row(
 
 /// The help entry of a callee. Exhaustive: no `_`.
 fn entry(callee: Callee) -> Entry {
-    use Family::{Choice, Constants, Error, Powers, Rounding, Trigonometry};
+    use Family::{Choice, ColumnValues, Constants, Error, Powers, Rounding, Trigonometry};
     match callee {
         Callee::If => row(
             Choice,
@@ -108,6 +111,50 @@ fn entry(callee: Callee) -> Entry {
             "if(B > 0, B, 0)",
             tr!("formula-help-if"),
         ),
+        Callee::Column(func) => match func {
+            ColumnFunc::At => row(
+                ColumnValues,
+                "at(B, x)",
+                "B / at(B, 340)",
+                tr!("formula-help-at"),
+            ),
+            ColumnFunc::Max => row(
+                ColumnValues,
+                "max(B)",
+                "B / max(B, 330, 350)",
+                tr!("formula-help-max-column"),
+            ),
+            ColumnFunc::Min => row(
+                ColumnValues,
+                "min(B)",
+                "B - min(B)",
+                tr!("formula-help-min-column"),
+            ),
+            ColumnFunc::Mean => row(
+                ColumnValues,
+                "mean(B)",
+                "B - mean(B)",
+                tr!("formula-help-mean"),
+            ),
+            ColumnFunc::Sum => row(
+                ColumnValues,
+                "sum(B)",
+                "B / sum(B)",
+                tr!("formula-help-sum"),
+            ),
+            ColumnFunc::Std => row(
+                ColumnValues,
+                "std(B)",
+                "(B - mean(B)) / std(B)",
+                tr!("formula-help-std"),
+            ),
+            ColumnFunc::Integral => row(
+                ColumnValues,
+                "integral(B)",
+                "B / integral(B)",
+                tr!("formula-help-integral"),
+            ),
+        },
         Callee::Table(func) => match func {
             Func::Exp => row(Powers, "exp(x)", "exp(-B)", tr!("formula-help-exp")),
             Func::Ln => row(Powers, "ln(x)", "ln(B)", tr!("formula-help-ln")),

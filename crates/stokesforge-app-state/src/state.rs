@@ -4440,13 +4440,25 @@ impl AppState {
     }
 
     /// The sentence saying why the formula of `column` no longer computes,
-    /// when it reads a deleted column (`#REF`, #321): the grid
+    /// when it reads a deleted column (`#REF`, #321), when a column function
+    /// finds no X paired with the column it reads, or when every cell of the
+    /// result is empty because the functions found no point (#402): the grid
     /// paints it as a frame on the Formula cell.
     pub fn formula_issue(&self, column: NodeId) -> Option<String> {
-        self.snapshot
-            .tree
-            .formula_has_deleted_reference(column)
-            .then(|| errors::formula::error_message(&stokesforge_core::FormulaError::DeletedColumn))
+        use stokesforge_core::FormulaError;
+        let tree = &self.snapshot.tree;
+        // In order of precedence: a lost column hides the rest; a missing X
+        // shows `---` everywhere; no point is the whole result empty (#402).
+        let error = if tree.formula_has_deleted_reference(column) {
+            FormulaError::DeletedColumn
+        } else if tree.formula_lacks_paired_x(column) {
+            FormulaError::NoPairedX
+        } else if tree.formula_found_no_point(column) {
+            FormulaError::NoPoint
+        } else {
+            return None;
+        };
+        Some(errors::formula::error_message(&error))
     }
 
     /// Entry in progress in a column header field, if there is one.

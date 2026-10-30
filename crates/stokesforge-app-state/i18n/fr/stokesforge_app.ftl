@@ -691,6 +691,9 @@ error-formula-wrong-argument-count-suggestion = La fonction { $name } attend { $
     } (reçu : { $found }). Écrire plutôt { $suggestion }
 error-formula-not-a-function = { $letter } est une colonne, pas une fonction. Pour multiplier, écrire { $letter }*(...)
 error-formula-pi-needs-parentheses = Pour le nombre π, écrire pi() (un pi seul serait la colonne PI)
+error-formula-column-expected = La fonction { $name } lit une colonne entière. Lui donner une lettre de colonne, pas un calcul (B, pas B*2)
+error-formula-no-paired-x = La colonne lue par cette formule n'a pas de colonne X. Placer à sa gauche une colonne de rôle X
+error-formula-no-point = La formule n'a trouvé aucun point à calculer : la colonne ou la plage est vide, ou la valeur demandée est hors des X. Vérifier les bornes
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus
@@ -1054,6 +1057,7 @@ formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur
 formula-help-family-rounding = Signe et arrondis
 formula-help-family-choice = Choix et comparaison
+formula-help-family-column = Valeurs d'une colonne
 formula-help-family-constants = Constantes
 formula-help-exp = e puissance x
 formula-help-ln = Logarithme népérien
@@ -1085,6 +1089,13 @@ formula-help-min = Le plus petit de x et y
 formula-help-max = Le plus grand de x et y
 formula-help-if = a si la condition c est vraie, sinon b
 formula-help-pi = Le nombre π
+formula-help-at = Valeur de la colonne B pour X = x, par interpolation linéaire (vide hors des X)
+formula-help-max-column = Plus grande valeur de la colonne B, ou entre les valeurs de X x1 et x2
+formula-help-min-column = Plus petite valeur de la colonne B, ou entre les valeurs de X x1 et x2
+formula-help-mean = Moyenne de la colonne B, ou entre les valeurs de X x1 et x2
+formula-help-sum = Somme de la colonne B, ou entre les valeurs de X x1 et x2
+formula-help-std = Écart-type (n − 1) de la colonne B, ou entre les valeurs de X x1 et x2
+formula-help-integral = Aire sous la colonne B (trapèzes, comme l'outil Intégration), ou entre x1 et x2
 common-metadata = Métadonnées
 workbook-metadata-hide = Masquer la ligne Métadonnées
 workbook-metadata-summary =
