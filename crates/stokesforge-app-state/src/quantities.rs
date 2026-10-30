@@ -51,6 +51,9 @@ pub struct Quantity {
     pub presets: &'static [f64],
     /// What the quantity does with `auto` and an emptied field.
     pub auto: AutoKind,
+    /// The field is wide enough for six significant digits ("705.556",
+    /// "2000"): a size shown in a unit with decimals.
+    pub wide: bool,
 }
 
 impl Quantity {
@@ -65,6 +68,7 @@ impl Quantity {
             integer: false,
             presets: &[],
             auto: AutoKind::None,
+            wide: false,
         }
     }
 
@@ -79,6 +83,7 @@ impl Quantity {
             integer: true,
             presets: &[],
             auto: AutoKind::None,
+            wide: false,
         }
     }
 
@@ -97,6 +102,7 @@ impl Quantity {
             && self.max < 1000.0
             && self.presets.is_empty()
             && self.auto == AutoKind::None
+            && !self.wide
     }
 
     /// The same quantity bounded to `min..=max`.
@@ -107,6 +113,11 @@ impl Quantity {
     /// The same quantity, with the given Auto.
     pub const fn with_auto(self, auto: AutoKind) -> Self {
         Self { auto, ..self }
+    }
+
+    /// The same quantity, with a field wide enough for six significant digits.
+    pub const fn wide(self) -> Self {
+        Self { wide: true, ..self }
     }
 
     /// The same quantity with its offered values.
@@ -277,8 +288,10 @@ pub fn cell_size(
         stokesforge_core::compose::CellAxis::Column => stokesforge_plot::MIN_CELL.0,
         stokesforge_core::compose::CellAxis::Row => stokesforge_plot::MIN_CELL.1,
     };
-    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals()).between(
-        unit.from_points(f64::from(min_pt)),
-        unit.from_points(stokesforge_plot::MAX_CELL_SIZE),
-    )
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(
+            unit.from_points(f64::from(min_pt)),
+            unit.from_points(stokesforge_plot::MAX_CELL_SIZE),
+        )
+        .wide()
 }

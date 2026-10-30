@@ -242,6 +242,8 @@ fn number_field_core<T: Number>(
             crate::theme::FIELD_WIDTH_DIGITS
         } else if quantity.is_compact_signed() {
             crate::theme::FIELD_WIDTH_SIGNED_DIGITS
+        } else if quantity.wide {
+            crate::theme::FIELD_WIDTH_VALUE
         } else {
             FIELD_WIDTH
         },
@@ -564,6 +566,23 @@ pub fn format_value(value: f64, decimals: usize) -> String {
 mod tests {
     use super::*;
     use stokesforge_app_state::quantities;
+
+    /// #394: the size of a graph, in any unit, gets the field wide enough for
+    /// six significant digits (705.556 mm, 2000 pt), never the short one.
+    #[test]
+    fn a_graph_size_field_is_wide_in_every_unit() {
+        use stokesforge_app_state::length_unit::LengthUnit;
+        use stokesforge_core::compose::CellAxis;
+        for unit in LengthUnit::ALL {
+            for axis in [CellAxis::Column, CellAxis::Row] {
+                let quantity = quantities::cell_size(unit, axis);
+                assert!(quantity.wide && !quantity.is_compact() && !quantity.is_compact_signed());
+                let widest = format_grid(quantity.max);
+                assert!(widest.len() <= 7, "{unit:?}: {widest}");
+            }
+        }
+        const { assert!(crate::theme::FIELD_WIDTH_VALUE > FIELD_WIDTH) };
+    }
 
     fn key_event(key: egui::Key) -> egui::Event {
         key_event_with(key, egui::Modifiers::NONE)

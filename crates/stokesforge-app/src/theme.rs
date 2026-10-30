@@ -94,6 +94,10 @@ pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
 /// list (rotation, "-180.5", #246).
 pub const FIELD_WIDTH_SIGNED_DIGITS: f32 = 54.0;
 
+/// Width of a field that shows **six significant digits** ("705.556",
+/// "16.9333"): the size of a graph in any unit (~104 px).
+pub const FIELD_WIDTH_VALUE: f32 = 104.0;
+
 /// Width of a **short** field (S-L2, #227): a number, a bound, a
 /// character (~80 px). This is the width of the "number" building block.
 pub const FIELD_WIDTH_SHORT: f32 = 80.0;
