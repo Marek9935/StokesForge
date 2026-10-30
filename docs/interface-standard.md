@@ -102,6 +102,7 @@ mechanics.
 | S-L6 | `trois-niveaux-de-texte` | Three text levels named in `theme.rs`: section heading, table header, secondary text; never `bold(…).small()` written in place. |
 | S-L7 | `hauteur-de-ligne-unique` | A list or tree row has a single height, `LIST_ROW_HEIGHT`, composed or not. |
 | S-L8 | `bloc-avance-replie` | Settings that are almost never touched, all Auto by default, go in a collapsible "Advanced" block, closed by default, at the bottom of their section; never a common setting nor one without Auto. |
+| S-L9 | `onglets-secondaires-a-gauche` | One level of tabs: the strip is on top. Two levels: the primary tabs are horizontal on top, the secondary tabs vertical at the left of the content; the secondary strip stays fixed, only the content scrolls. |
 | S-K1 | `registre-des-touches` | All keys are in the registry of `app/shortcuts.rs`; no `consume_key` elsewhere. |
 | S-K2 | `suppr-immediat-annulable` | Del deletes the selection right away, undoable, everywhere (the grid empties first). |
 | S-K3 | `double-clic-par-sorte` | Double-click: text or name → in-place editing; object → Properties; empty background of a graph → view reset; Project Manager → activates the window, never closes it, and collapses a folder. |
@@ -667,6 +668,14 @@ History: #226.
   label column (like "Tick direction"), the title not being
   selectable; its fields stay aligned on the
   grid; the open/closed state is kept only for the session.
+- **Tab orientation** (S-L9, #393): a window with a single level of tabs puts
+  its strip on top (`TabStripSide::Top`). A window with two levels puts the
+  **primary** tabs horizontally on top and the **secondary** tabs vertically at
+  the left of the content (`TabStripSide::Left`), the content on their right.
+  The secondary strip does not scroll away: only the page content scrolls
+  (`theme::page_scroll_area` inside the column at the right of the strip).
+  Examples: Preferences (rubrics on top, Display sub-tabs at the left), Graph
+  Properties › Axes (Bottom, Left, Right, Top at the left, under the main tabs).
 - **Three text levels** (S-L6, #170): `theme::section_heading` (section
   heading, bold), `theme::table_header` (column header of a table, bold
   in small size), `theme::secondary_text` (dimmed, small size). Guard

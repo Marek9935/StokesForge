@@ -13,7 +13,8 @@ Each interface element has **one** building block; it is not redone by hand.
 - A typed number: `number_field` and the table of quantities (`quantities`),
   never a `DragValue` nor a `Slider`.
 - A form: `form` / `choice` (`app/form.rs`); tabs:
-  `tab_strip`; a list: `list_row`; an empty state: `empty_state`; a field
+  `tab_strip` (one level on top; two levels: primary on top, secondary
+  vertical at the left, S-L9); a list: `list_row`; an empty state: `empty_state`; a field
   help: `hover_help`; a long job: `busy`.
 - A color: `theme.rs` only (and the `color_field` picker). A spacing:
   `theme::SPACE_ITEM` / `SPACE_SECTION`, never a literal number.

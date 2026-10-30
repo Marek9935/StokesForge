@@ -179,9 +179,9 @@ Name, plot type, visibility and colors always stay per series. With the whole gr
 
 ## Axes
 
-Open the **Axes** tab and pick the axis at the top of the page: **Bottom**, **Left**, and the others (**Right**, **Top**) when the layer uses them. Or double-click an axis on the figure.
+Open the **Axes** tab and pick the axis in the list at the left of the page: **Bottom**, **Left**, and the others (**Right**, **Top**) when the layer uses them. Or double-click an axis on the figure.
 
-<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, Bottom axis: title, scale, range and display settings." width="480">
+<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, Bottom axis: the axes listed at the left, then title, scale, range and display settings." width="480">
 
 ### Axis title
 
@@ -204,7 +204,7 @@ In the **Scale** section:
 
 While the range is automatic, the two fields show the range StokesForge computed.
 
-<img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked." width="480">
+<img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked, the axes listed at the left." width="480">
 
 ### Display and ticks
 

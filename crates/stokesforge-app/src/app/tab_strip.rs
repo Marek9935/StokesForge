@@ -13,7 +13,8 @@
 //! one is written in the accent color and carries a mark **on the content
 //! side** ([`TabStripSide`]) — under the label for a strip placed at the top
 //! (properties pages), above it for a strip placed at the bottom (a
-//! workbook's sheets); a grey rule separates the strip from the content.
+//! workbook's sheets), on its right for a vertical strip at the left (the
+//! secondary tabs of a two-level window, S-L9, #393); a grey rule separates the strip from the content.
 //! Previously, the active tab was a button with the `selection.bg_fill`
 //! background, the same as the selected entry of the Project Manager: three
 //! roles, one look. Ruled out: option B, rectangular tabs in the Origin/Excel
@@ -50,10 +51,12 @@ pub(crate) enum TabStripSide {
     Top,
     /// Strip below the content (a workbook's sheets).
     Bottom,
-    /// Vertical strip at the left of the content (the rubrics of the
-    /// Preferences window, #148): tabs stacked, the mark on the right edge of
+    /// Vertical strip at the left of the content: the secondary tabs of a
+    /// two-level window (S-L9, #393: the axes of Graph Properties, the Display
+    /// sub-tabs of Preferences). Tabs stacked, the mark on the right edge of
     /// the active one, a vertical rule between the strip and the content. It
-    /// has neither arrows nor scrolling: the rubrics are few.
+    /// has neither arrows nor scrolling: such tabs are few. The caller keeps it
+    /// fixed and scrolls only the content.
     Left,
 }
 
@@ -598,7 +601,7 @@ fn tab_strip_label(
             },
         );
         let text_pos = if side == TabStripSide::Left {
-            // Rubrics are read as a list: aligned on the left.
+            // Vertical tabs are read as a list: aligned on the left.
             egui::pos2(
                 rect.left() + TAB_PADDING_X,
                 rect.center().y - galley.size().y / 2.0,
