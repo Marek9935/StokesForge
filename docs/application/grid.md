@@ -433,7 +433,9 @@ detached workbook, both through `book_contents`):
   the focus, they read it themselves (`tab_pressed`), validate, give the focus back
   and let the grid take it again.
 - **Shortcut guard**: `focus_free` (no focus, or that of this
-  grid). The rest of the application, which tested `focused().is_some()` to
+  grid) **and** no modal shown (`dialogs::modal_shown`, #406: egui drops
+  the focus on Esc at the start of the pass, so `focus_free` alone let the
+  grid take the Esc that closes a dialog painted after it). The rest of the application, which tested `focused().is_some()` to
   know whether one is typing in a field (Enter in a dialog, Del on an
   annotation), goes through `keyboard_focus_outside_grid`.
 

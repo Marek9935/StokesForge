@@ -11,6 +11,7 @@ Read when creating or changing a content window, dialog, wizard, confirmation or
 - Fixed panels: `.claude/conventions.md` § Object Manager, fixed panels, menus ; `docs/application/windows-and-panels.md` § Collapsible and detached panels (#100).
 - Failure of a dialog gesture: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog).
 - History macro of an editing dialog: `docs/commands-and-history.md` § Macros.
+- Workspace keyboard under a modal: a new key consumer of the main window checks `dialogs::modal_shown` (#406), see `.claude/conventions.md` § Application.
 - Screenshot to compare: `docs/windows.md` § Taking a screenshot.
 
 ## Check

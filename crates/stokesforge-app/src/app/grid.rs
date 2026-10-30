@@ -2216,10 +2216,18 @@ fn grid_keyboard(
     // `egui_wants_keyboard_input` did not tell it from a text field) covers this
     // dialog, the import and any future dialog at once; `import_state` stays for
     // the case of an open import with no focused field.
+    //
+    // #406: same theft for Esc, typing, arrows and Ctrl+A under **any** modal
+    // window. egui drops the focus on Esc at the start of the pass, so
+    // `focus_free` is always true on that frame and the grid, painted before the
+    // dialogs, took the Esc that closes them. `dialogs::modal_shown` (a modal
+    // painted this frame or the previous one) closes this hole for all of them;
+    // the one-frame lag after a close is intended.
     if state.editing().is_none()
         && state.header_editing().is_none()
         && state.import_state().is_none()
         && focus_free
+        && !super::dialogs::modal_shown(ui.ctx())
     {
         // #143: F2 belongs only to the focused grid. The other shortcuts keep their
         // fallback without focus, but F2 must stay available for the managers. Reuse
@@ -2899,6 +2907,86 @@ mod tests {
         /// Size of the simulated window (700 x 420 by default); changing it enlarges
         /// the workbook in the next frame.
         size: egui::Vec2,
+        /// A modal window painted after the workbook, in the same frame, as in
+        /// `StokesForgeApp::ui` (#406).
+        modal: Option<TestModal>,
+        /// How many frames the modal answered Cancel / Close.
+        cancels: usize,
+    }
+
+    /// The natures of modal window the bench can paint under the workbook.
+    #[derive(Clone, Copy, Debug)]
+    enum TestModal {
+        /// The real Formula Functions window (a read-only modal).
+        FormulaFunctions,
+        Settings,
+        Draft,
+        Wizard,
+        LiveSettings,
+        ReadOnly,
+        Confirm,
+    }
+
+    impl TestModal {
+        /// Paints the window; true when it answered Cancel (or Close).
+        fn paint(self, ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) -> bool {
+            use super::super::dialogs::{
+                modal_confirm, modal_dialog, modal_dialog_with, modal_live_settings,
+                modal_read_only, modal_wizard, ConfirmOutcome, DialogFooter, DialogNature,
+                DialogOutcome, InteractiveSize, PlainSize,
+            };
+            let id = egui::Id::new("grid_test_modal");
+            let mut text = String::from("abc");
+            let field = |ui: &mut egui::Ui| {
+                ui.text_edit_singleline(&mut text);
+            };
+            let footer = DialogFooter::always("Go", "Go hint");
+            let size = InteractiveSize::Free(egui::vec2(300.0, 200.0));
+            let outcome = match self {
+                Self::FormulaFunctions => {
+                    super::super::formula_functions_window::formula_functions_window(
+                        ctx, state, actions,
+                    );
+                    return false;
+                }
+                Self::Settings => modal_dialog(ctx, id, "Modal", size, field),
+                Self::Draft => modal_dialog_with(
+                    ctx,
+                    id,
+                    "Modal",
+                    DialogNature::Draft(size),
+                    footer,
+                    |_| {},
+                    field,
+                ),
+                Self::Wizard => modal_wizard(ctx, id, "Modal", size, footer, |_| {}, field),
+                Self::LiveSettings => modal_live_settings(ctx, id, "Modal", size, field),
+                Self::ReadOnly => modal_read_only(
+                    ctx,
+                    id,
+                    "Modal",
+                    PlainSize::Content(egui::vec2(300.0, 200.0)),
+                    |ui| {
+                        ui.label("content");
+                    },
+                ),
+                Self::Confirm => {
+                    let outcome = modal_confirm(
+                        ctx,
+                        id,
+                        "Modal",
+                        PlainSize::Content(egui::vec2(300.0, 200.0)),
+                        "Delete",
+                        "Delete hint",
+                        |ui| {
+                            ui.label("content");
+                        },
+                    );
+                    return outcome == ConfirmOutcome::Cancel;
+                }
+            };
+            outcome == DialogOutcome::Cancel
+        }
     }
 
     impl Bench {
@@ -2959,6 +3047,8 @@ mod tests {
                 widths_sent: 0,
                 seen: Vec::new(),
                 size: egui::vec2(700.0, 420.0),
+                modal: None,
+                cancels: 0,
             };
             for _ in 0..3 {
                 bench.image(Vec::new());
@@ -2969,11 +3059,17 @@ mod tests {
         fn image(&mut self, events: Vec<egui::Event>) {
             self.actions.clear();
             let (state, actions, book) = (&mut self.state, &mut self.actions, self.book);
+            let modal = self.modal;
             let mut neighbor = false;
+            let mut cancelled = false;
             let output = frame_of(&self.context, self.size, events, |ui| {
                 neighbor = ui.button("before").has_focus();
                 book_contents(ui, state, actions, book);
+                if let Some(modal) = modal {
+                    cancelled |= modal.paint(ui.ctx(), state, actions);
+                }
             });
+            self.cancels += usize::from(cancelled);
             self.neighbor_focused = neighbor;
             self.last_frame = Some(output);
             self.seen.extend(self.actions.iter().cloned());
@@ -4224,6 +4320,91 @@ mod tests {
             .actions
             .contains(&Action::SelectAll { sheet: bench.sheet }));
         bench.image(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(bench.state.selection(bench.sheet).is_none());
+    }
+
+    /// #406: a modal window painted after the workbook gets the Esc, the typing
+    /// and the other keys: the grid behind stands aside. Here the real Formula
+    /// Functions window. Witness: remove `!modal_shown` from the grid guard.
+    #[test]
+    fn escape_closes_the_formula_functions_window_over_a_workbook() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.state.dispatch(Action::OpenFormulaFunctions);
+        bench.modal = Some(TestModal::FormulaFunctions);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        bench.seen.clear();
+        bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(bench.seen.contains(&Action::CloseFormulaFunctions));
+        assert!(
+            bench.state.selection(bench.sheet).is_some(),
+            "the grid behind keeps its selection"
+        );
+    }
+
+    /// #406: typing under a modal does not start a cell edit behind it.
+    #[test]
+    fn typing_under_a_modal_does_not_edit_the_cell_behind() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.state.dispatch(Action::OpenFormulaFunctions);
+        bench.modal = Some(TestModal::FormulaFunctions);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        bench.image(vec![egui::Event::Text("7".to_string())]);
+        bench.image(Vec::new());
+        assert!(bench.state.editing().is_none());
+    }
+
+    /// #406, S-F7: Esc closes every nature of modal window over a workbook the
+    /// grid had focused: twice when the window put the focus in a field (the
+    /// first Esc leaves the field), once otherwise.
+    #[test]
+    fn escape_cancels_every_modal_nature_over_a_focused_workbook() {
+        for (modal, escapes) in [
+            (TestModal::Settings, 2),
+            (TestModal::Draft, 2),
+            (TestModal::Wizard, 2),
+            (TestModal::LiveSettings, 2),
+            (TestModal::ReadOnly, 1),
+            (TestModal::Confirm, 1),
+        ] {
+            let mut bench = Bench::new();
+            bench.click_on("101");
+            bench.modal = Some(modal);
+            for _ in 0..4 {
+                bench.image(Vec::new());
+            }
+            for pressed in 1..=escapes {
+                assert_eq!(
+                    bench.cancels, 0,
+                    "{modal:?}: not cancelled before Esc {pressed}"
+                );
+                bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
+            }
+            assert!(bench.cancels >= 1, "{modal:?}: Esc x{escapes} cancels");
+            assert!(
+                bench.state.selection(bench.sheet).is_some(),
+                "{modal:?}: the grid keeps its selection"
+            );
+        }
+    }
+
+    /// #406: the grid answers again once the modal has been gone for two
+    /// frames (the one-frame lag after a close is intended, no more).
+    /// Witness: make `modal_shown` ignore the frame number.
+    #[test]
+    fn escape_deselects_again_two_frames_after_the_modal_closed() {
+        let mut bench = Bench::new();
+        bench.click_on("101");
+        bench.modal = Some(TestModal::ReadOnly);
+        bench.image(Vec::new());
+        bench.image(Vec::new());
+        bench.modal = None;
+        bench.image(Vec::new());
+        bench.image(Vec::new());
         bench.press_key(egui::Key::Escape, egui::Modifiers::NONE);
         assert!(bench.state.selection(bench.sheet).is_none());
     }

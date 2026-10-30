@@ -806,6 +806,31 @@ fn any_gesture(ctx: &egui::Context) -> bool {
 }
 
 /// The common body of modal dialogs.
+/// Memory key of the "a modal was painted" mark of one viewport.
+fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new(("stokesforge_modal_shown", ctx.viewport_id()))
+}
+
+/// Records that a modal window is painted in this viewport, in this frame.
+fn mark_modal_shown(ctx: &egui::Context) {
+    // Ids read before the lock: `viewport_id` locks the context too.
+    let (frame, mark) = (ctx.cumulative_frame_nr(), modal_mark_id(ctx));
+    ctx.data_mut(|data| data.insert_temp(mark, frame));
+}
+
+/// Whether a modal window is open in this viewport (#406): painted in this frame
+/// or in the previous one. The workspace (grids, Project Manager) is painted
+/// **before** the dialogs, so it can only read the mark of the previous frame;
+/// the one-frame lag after a close is intended. Every workspace key consumer
+/// (Esc, Del, F2, Enter, typing, arrows, clipboard) stands aside while this is
+/// true, otherwise it takes the key from the modal. The frame number is used,
+/// not the pass number: focus setup re-runs passes within one frame.
+pub(super) fn modal_shown(ctx: &egui::Context) -> bool {
+    let (frame, mark) = (ctx.cumulative_frame_nr(), modal_mark_id(ctx));
+    ctx.data(|data| data.get_temp::<u64>(mark))
+        .is_some_and(|shown| shown + 1 >= frame)
+}
+
 fn modal_frame(
     ctx: &egui::Context,
     id: egui::Id,
@@ -815,6 +840,7 @@ fn modal_frame(
     extra_buttons: impl FnOnce(&mut egui::Ui),
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> FrameOutcome {
+    mark_modal_shown(ctx);
     let screen = ctx.input(|input| input.content_rect());
     let geometry_id = id.with("geometry");
     let flash_id = id.with("flash_start");

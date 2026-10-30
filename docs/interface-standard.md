@@ -539,7 +539,12 @@ How it is held (`app/dialogs.rs`, all through the same `modal_frame` body):
   footer.
 - **Esc** (S-F7): the one that leaves a text field of the dialog does not cancel it
   (the focus of the previous frame is authoritative: egui gives it back from the start of
-  the pass); the "number" building block consumes its own.
+  the pass); the "number" building block consumes its own. While a modal is shown
+  (`dialogs::modal_shown`: painted this frame or the previous one, per viewport),
+  no workspace keyboard acts under it: the grid (Esc, typing, arrows, Ctrl+A,
+  clipboard) and the Project Manager (Del, F2, Enter, arrows, clipboard) stand
+  aside (#406). The workspace is painted before the dialogs, hence the intended
+  one-frame lag after a close.
 - **Size and position** (S-F8): on closing, `sync_dialogs` returns
   `Action::RememberDialogGeometry` (kind = dialog identifier),
   `preferences.json` › `dialogs`, 32 kinds at most; restored on opening,
