@@ -461,9 +461,41 @@ fn a_fit_takes_the_y_error_column_right_of_the_y_as_its_sigma() {
     open(&mut s, Preset::Fit(Model::Linear));
     let form = s.state.analysis_form_mut().unwrap();
     assert_eq!(form.series[0].sigma, Some(error));
-    assert_eq!(form.effective_series()[0].sigma, None, "weighting is off");
-    form.setup.fit.weighted = true;
+    assert!(form.setup.fit.weighted, "ticked by default with an error");
     assert_eq!(form.effective_series()[0].sigma, Some(error));
+    form.setup.fit.weighted = false;
+    assert_eq!(form.effective_series()[0].sigma, None, "the untick is kept");
+}
+
+/// #360: without an error column the box starts unticked.
+#[test]
+fn a_fit_without_an_error_column_starts_unweighted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    open(&mut s, Preset::Fit(Model::Linear));
+    assert!(!s.state.analysis_form().unwrap().setup.fit.weighted);
+}
+
+/// #360: editing an unweighted calculation on a paired series keeps it
+/// unweighted (the stored choice wins over the default).
+#[test]
+fn editing_an_unweighted_fit_on_a_paired_series_stays_unweighted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    let error = *s.state.tree().children(s.sheet).unwrap().last().unwrap();
+    s.state.dispatch(Action::SetColumnRole {
+        column: error,
+        role: ColumnRole::YError,
+    });
+    open(&mut s, Preset::Fit(Model::Linear));
+    s.state.analysis_form_mut().unwrap().setup.fit.weighted = false;
+    s.state.dispatch(Action::ApplyAnalysis);
+    let id = only_calculation(&s);
+    s.state.dispatch(Action::EditCalculation(id));
+    let form = s.state.analysis_form().unwrap();
+    assert_eq!(form.series[0].sigma, None);
+    assert!(!form.setup.fit.weighted);
 }
 
 #[test]

@@ -32,7 +32,8 @@ without a message, see `docs/persistence.md`).
   ("None"; per series, not copied to a group). The bars are now drawn on every
   plot type (Line, Scatter, Line + Symbol, Bar, Error Bars), not only on Error
   Bars. `pyst.plot` pairs the same way unless `x_error=` / `y_error=` is given
-  (`None` goes without). In the demo, the Uncertainty column now follows Decay.
+  (`None` goes without). A new fit on a series with an error column starts with
+  "Weight by the error column" ticked. In the demo, the Uncertainty column now follows Decay.
 
 - Series Properties (#358): a **Y axis: Left / Right** field attaches a series to
   the right axis of its layer (Right shows the axis; "Whole group" copies it to

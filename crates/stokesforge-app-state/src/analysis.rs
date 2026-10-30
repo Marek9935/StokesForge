@@ -308,7 +308,8 @@ pub struct FitSetup {
     /// Fitted X range; `None`: the whole series.
     pub range: Option<(f64, f64)>,
     pub residuals: bool,
-    /// Weight by the error column of each series (`1/σ`).
+    /// Weight by the error column of each series (`1/σ`). Starts ticked when
+    /// a series has an error column ([`AnalysisForm::new`], #360).
     pub weighted: bool,
 }
 
@@ -685,6 +686,10 @@ impl AnalysisForm {
             tool: PreviewTool::default(),
             average: DEFAULT_AVERAGE,
         };
+        // A fit on a series that has an error column starts weighted (#360);
+        // the user can untick it, and `from_calculation` restores the stored
+        // choice when editing.
+        form.setup.fit.weighted = form.series.iter().any(|s| s.sigma.is_some());
         form.apply_default_auto();
         form.tool = form.natural_tool();
         form

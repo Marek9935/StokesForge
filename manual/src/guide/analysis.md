@@ -254,7 +254,7 @@ You can use `+ - * / ^`, parentheses and these functions: `exp`, `ln`, `log` (ba
 ### Range, weights and residuals
 
 - **Range**: fits only the X range you give. Leave both bounds empty to fit all the data.
-- **Weight by the error column**: shown when the series has an error column, for example the Y Error column to the right of its Y column (see [How columns become series](graphs.md#how-columns-become-series)). The error is used as the standard deviation of each point. A missing, zero or negative error makes the fit stop with a message; fix it or turn weighting off.
+- **Weight by the error column**: shown when the series has an error column, for example the Y Error column to the right of its Y column (see [How columns become series](graphs.md#how-columns-become-series)). It is ticked when you open the fit on a series that has an error column; untick it to fit without weights. The error is used as the standard deviation of each point. A missing, zero or negative error makes the fit stop with a message; fix it or turn weighting off.
 - **Write the residuals**: writes the `data − fit` column.
 
 ### Goodness of fit
