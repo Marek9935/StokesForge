@@ -20,6 +20,11 @@ impl Fixture {
     /// A graph with stored frames of 300 x 200 pt (explicit) or, with `legacy`,
     /// none (an old file).
     fn new(legacy: bool) -> Self {
+        Self::placed(legacy, None, None)
+    }
+
+    /// Same, with the position of the first frame stored (#405).
+    fn placed(legacy: bool, left: Option<f64>, top: Option<f64>) -> Self {
         let mut project = Project::new("Handles").expect("project");
         let root = project.root();
         let book = project.add_empty_workbook(root, None).expect("workbook");
@@ -40,6 +45,8 @@ impl Fixture {
         if !legacy {
             spec.frame_widths = vec![300.0];
             spec.frame_heights = vec![200.0];
+            spec.figure_left = left;
+            spec.figure_top = top;
         }
         let graph = project.add_graph(root, None, spec).expect("graph");
         Self {
@@ -387,4 +394,138 @@ fn a_drag_that_comes_back_signals_nothing() {
         .expect("layout")
         .size;
     assert_eq!(after, size);
+}
+
+/// Pulling the left edge of the figure outwards gives the frame more room on
+/// the left: one signal on release, Left = start + distance, nothing before.
+#[test]
+fn pulling_the_left_edge_signals_the_new_left_on_release_only() {
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let revision = fixture.snapshot().revision;
+    let size = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout")
+        .size;
+    let from = Pos2::new(2.0, size.1 as f32 / 2.0);
+    let (_, hover) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from)],
+        0.05,
+    );
+    assert_eq!(hover, egui::CursorIcon::ResizeHorizontal);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(-40.0, 0.0),
+    );
+    // 76 pt of left axis and margin + 40.
+    assert_eq!(
+        signals,
+        [GraphEvent::FramePlaced {
+            left: Some(116.0),
+            top: None
+        }]
+    );
+    assert_eq!(fixture.snapshot().revision, revision, "the model moved");
+    let after = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout");
+    assert_eq!(after.size, (size.0 + 40, size.1), "the preview is held");
+    assert_eq!(after.frame_rect(0, 0).map(|r| r.0), Some(116));
+}
+
+/// The top edge, and the corner (both at once, one signal); pulling inwards
+/// below what the axes need stops at the minimum.
+#[test]
+fn pulling_the_top_edge_and_the_corner_signal_once() {
+    let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
+    let (context, mut view) = ready(&fixture);
+    let size = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout")
+        .size;
+    let from = Pos2::new(size.0 as f32 / 2.0, 2.0);
+    let (_, hover) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from)],
+        0.05,
+    );
+    assert_eq!(hover, egui::CursorIcon::ResizeVertical);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(0.0, 30.0),
+    );
+    assert_eq!(
+        signals,
+        [GraphEvent::FramePlaced {
+            left: None,
+            top: Some(90.0)
+        }]
+    );
+
+    let fixture = Fixture::placed(false, Some(150.0), Some(120.0));
+    let (context, mut view) = ready(&fixture);
+    let corner = Pos2::new(2.0, 2.0);
+    let (_, cursor) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(corner)],
+        0.05,
+    );
+    assert_eq!(cursor, egui::CursorIcon::ResizeNwSe);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        corner,
+        corner + egui::vec2(500.0, 500.0),
+    );
+    // The axes need 76 on the left and 12 on top: the values stop there.
+    assert_eq!(
+        signals,
+        [GraphEvent::FramePlaced {
+            left: Some(76.0),
+            top: Some(12.0)
+        }]
+    );
+    assert_eq!(view.placing_edges(), (false, false), "the gesture is over");
+}
+
+/// A click on the left axis line is no handle.
+#[test]
+fn the_left_axis_line_is_not_the_left_edge() {
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let panel = view.last_drawn().expect("drawn").panels[0].clone();
+    let on_axis = Pos2::new(
+        panel.pixel_origin.0 as f32 + 1.0,
+        panel.pixel_origin.1 as f32 + 80.0,
+    );
+    let (_, cursor) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(on_axis)],
+        0.05,
+    );
+    assert_eq!(cursor, egui::CursorIcon::Default);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        on_axis,
+        on_axis + egui::vec2(-30.0, 0.0),
+    );
+    assert!(signals.is_empty(), "{signals:?}");
 }

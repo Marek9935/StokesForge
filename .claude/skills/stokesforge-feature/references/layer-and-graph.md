@@ -8,6 +8,7 @@ Read when the feature touches a graph (continuous gesture, free text, adding ser
 - Action that needs the view state (zoom): `docs/application/graph.md` § Graph properties (`GraphView::framed_spec`, `Action::ExportGraph`).
 - Continuous gesture, in-place text editing: `docs/application/graph.md` § Graph properties (`annotation_interactions`) ; `docs/rendering.md` § Text and scale colors: automatic ink.
 - Layer by index, active layer, adding series: `.claude/conventions.md` § Interface: wiring not to forget (detached window, layer, dialog) ; `docs/application/graph.md` § Dragging a column selection to a graph.
+- Figure size, plot area size and position (#394, #405): `docs/application/graph.md` § Graph size ; `docs/rendering.md` § Figure size, frames and bands ; a gesture that grows the figure on its left or top edge keeps the plot area still by moving the window (`FigureFollow::anchor_shift`, shell only).
 - New graph without a title: `.claude/conventions.md` § New graphs and detached windows.
 - Composing series from columns: `.claude/conventions.md` § New graphs and detached windows (point "Graph composition (#257)").
 

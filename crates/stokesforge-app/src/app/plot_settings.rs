@@ -22,14 +22,16 @@ use crate::icons::ICON_SIZE;
 use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
-use stokesforge_app_state::frame_sizes::set_size_in_draft;
+use stokesforge_app_state::frame_sizes::{
+    set_fixed_in_draft, set_offset_in_draft, set_size_in_draft,
+};
 use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
 use stokesforge_app_state::tr;
-use stokesforge_core::compose::FrameAxis;
+use stokesforge_core::compose::{FigureOffset, FrameAxis};
 use stokesforge_plot::FALLBACK_FRAME;
 use stokesforge_render_egui::FigureLayout;
 
@@ -422,8 +424,66 @@ fn graph_settings_page(
             Some(tr!("plot-stale-warning", "hint")),
         );
         commit |= size_section(form, spec, layout, unit);
+        // S-L8 (#405): the figure size has an Auto default ("Grows with the
+        // axes"), almost never changed: it lives in the closed Advanced block.
+        commit |= form
+            .collapsible("plot_graph_advanced", tr!("common-advanced"), |form| {
+                figure_size_row(form, spec, layout)
+            })
+            .unwrap_or(false);
         commit
     })
+}
+
+/// What a legacy draft is drawn with, to give it its frames when Fixed, Left or
+/// Top is set on it (see [`set_size_in_draft`]).
+fn drawn_frames(spec: &PlotSpec, layout: Option<&FigureLayout>) -> (Vec<f64>, Vec<f64>) {
+    let pick = |stored: Option<Vec<f64>>, painted: Option<&Vec<f64>>, count, fallback| {
+        stored.unwrap_or_else(|| {
+            painted
+                .filter(|sizes| sizes.len() == count)
+                .cloned()
+                .unwrap_or_else(|| vec![fallback; count])
+        })
+    };
+    (
+        pick(
+            spec.sanitized_frame_widths(),
+            layout.map(|layout| &layout.frame_widths),
+            spec.columns(),
+            FALLBACK_FRAME.0,
+        ),
+        pick(
+            spec.sanitized_frame_heights(),
+            layout.map(|layout| &layout.frame_heights),
+            spec.rows(),
+            FALLBACK_FRAME.1,
+        ),
+    )
+}
+
+/// General › Advanced › Figure size (#405): "Grows with the axes" (default) or
+/// "Fixed" (room for four axes from the start). A legacy draft is given its
+/// frames in the same edit.
+fn figure_size_row(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    layout: Option<&FigureLayout>,
+) -> bool {
+    let options = [
+        ChoiceOption::new(false, tr!("plot-figure-size-grows")),
+        ChoiceOption::new(true, tr!("plot-figure-size-fixed")),
+    ];
+    let mut fixed = spec.fixed_figure;
+    let changed = form.row(tr!("plot-figure-size"), |ui| {
+        choice(ui, "plot_figure_size", &mut fixed, &options)
+    });
+    form.note(tr!("plot-figure-size", "hint"));
+    if !changed {
+        return false;
+    }
+    let (widths, heights) = drawn_frames(spec, layout);
+    set_fixed_in_draft(spec, (&widths, &heights), fixed)
 }
 
 /// General › Size (#394): the width of the plot area (the frame) of each grid
@@ -498,6 +558,7 @@ fn size_section(
             }
         }
     }
+    commit |= offset_rows(form, spec, layout, unit, (&drawn_widths, &drawn_heights));
     // The graph the frames make once the axes and the title are added around
     // them, as the last painted figure lays them out.
     let frames = (
@@ -517,6 +578,77 @@ fn size_section(
         false
     });
     form.note(tr!("plot-size-note"));
+    commit
+}
+
+/// Left and Top (#405): the distance from the left and top edges of the image
+/// to the first plot area, Auto when empty. A value smaller than the axes (and
+/// the title, for Top) need is raised to that minimum, and the field says why.
+/// The image grows past the reserve of a Fixed figure: the note below says so.
+fn offset_rows(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+    drawn: (&[f64], &[f64]),
+) -> bool {
+    let symbol = unit.symbol();
+    let mut commit = false;
+    for (which, label, minimum, stored) in [
+        (
+            FigureOffset::Left,
+            tr!("plot-size-left", unit = symbol),
+            layout.map_or(0.0, |layout| f64::from(layout.min_left)),
+            spec.sanitized_figure_left(),
+        ),
+        (
+            FigureOffset::Top,
+            tr!("plot-size-top", unit = symbol),
+            layout.map_or(0.0, |layout| f64::from(layout.min_top)),
+            spec.sanitized_figure_top(),
+        ),
+    ] {
+        let quantity = quantities::figure_offset(unit, minimum);
+        let too_small = stored.is_some_and(|points| points < minimum);
+        let mut shown = stored.map(|points| unit.from_points(points.max(minimum)));
+        let changed = form.row(label, |ui| {
+            let response = auto_number_field(
+                ui,
+                ("graph_offset", matches!(which, FigureOffset::Top)),
+                &mut shown,
+                &quantity,
+                &tr!("common-auto"),
+            );
+            if too_small {
+                let minimum_text = format_value(unit.from_points(minimum), unit.decimals());
+                let why = match which {
+                    FigureOffset::Left => {
+                        tr!(
+                            "plot-size-left-raised",
+                            minimum = minimum_text,
+                            unit = symbol
+                        )
+                    }
+                    FigureOffset::Top => {
+                        tr!(
+                            "plot-size-top-raised",
+                            minimum = minimum_text,
+                            unit = symbol
+                        )
+                    }
+                };
+                response.response.clone().on_hover_text(why);
+            }
+            response.changed
+        });
+        if changed {
+            commit |=
+                set_offset_in_draft(spec, drawn, which, shown.map(|value| unit.to_points(value)));
+        }
+    }
+    if layout.is_some_and(|layout| spec.fixed_figure && layout.fixed_overflow) {
+        form.note(tr!("status-figure-grew"));
+    }
     commit
 }
 
@@ -912,69 +1044,65 @@ fn advanced_ticks_block(
     reason: String,
     env: &mut PickerEnv,
 ) -> bool {
-    form.collapsible(
-        "plot_axis_advanced_ticks",
-        tr!("plot-axes-advanced"),
-        |form| {
-            let major = enabled && axis.ticks;
-            let minor = enabled && axis.minor_ticks;
-            let major_reason = if enabled {
-                tr!("disabled-ticks-off")
-            } else {
-                reason.clone()
-            };
-            let minor_reason = if enabled {
-                tr!("disabled-minor-ticks-off")
-            } else {
-                reason.clone()
-            };
-            let mut commit = auto_value_row(
-                form,
-                tr!("plot-axes-tick-length"),
-                "axis_tick_length",
-                &mut axis.tick_length,
-                &quantities::TICK_LENGTH,
-                major,
-                major_reason.clone(),
-            );
-            commit |= auto_value_row(
-                form,
-                tr!("plot-axes-minor-tick-length"),
-                "axis_minor_tick_length",
-                &mut axis.minor_tick_length,
-                &quantities::TICK_LENGTH,
-                minor,
-                minor_reason,
-            );
-            let any = major || minor;
-            let any_reason = if enabled {
-                tr!("disabled-ticks-off")
-            } else {
-                reason
-            };
-            commit |= auto_value_row(
-                form,
-                tr!("plot-axes-tick-width"),
-                "axis_tick_width",
-                &mut axis.tick_width,
-                &quantities::TICK_WIDTH,
-                any,
-                any_reason,
-            );
-            commit |= form
-                .enabled(any, |form| {
-                    form.color(
-                        &tr!("plot-axes-tick-mark-color"),
-                        &mut axis.tick_mark_color,
-                        ColorUsage::Text,
-                        Some(&tr!("plot-axes-tick-mark-color", "auto")),
-                        env,
-                    )
-                })
-                .inner;
-            commit
-        },
-    )
+    form.collapsible("plot_axis_advanced_ticks", tr!("common-advanced"), |form| {
+        let major = enabled && axis.ticks;
+        let minor = enabled && axis.minor_ticks;
+        let major_reason = if enabled {
+            tr!("disabled-ticks-off")
+        } else {
+            reason.clone()
+        };
+        let minor_reason = if enabled {
+            tr!("disabled-minor-ticks-off")
+        } else {
+            reason.clone()
+        };
+        let mut commit = auto_value_row(
+            form,
+            tr!("plot-axes-tick-length"),
+            "axis_tick_length",
+            &mut axis.tick_length,
+            &quantities::TICK_LENGTH,
+            major,
+            major_reason.clone(),
+        );
+        commit |= auto_value_row(
+            form,
+            tr!("plot-axes-minor-tick-length"),
+            "axis_minor_tick_length",
+            &mut axis.minor_tick_length,
+            &quantities::TICK_LENGTH,
+            minor,
+            minor_reason,
+        );
+        let any = major || minor;
+        let any_reason = if enabled {
+            tr!("disabled-ticks-off")
+        } else {
+            reason
+        };
+        commit |= auto_value_row(
+            form,
+            tr!("plot-axes-tick-width"),
+            "axis_tick_width",
+            &mut axis.tick_width,
+            &quantities::TICK_WIDTH,
+            any,
+            any_reason,
+        );
+        commit |= form
+            .enabled(any, |form| {
+                form.color(
+                    &tr!("plot-axes-tick-mark-color"),
+                    &mut axis.tick_mark_color,
+                    ColorUsage::Text,
+                    Some(&tr!("plot-axes-tick-mark-color", "auto")),
+                    env,
+                )
+            })
+            .inner;
+        commit
+    })
     .unwrap_or(false)
 }
 
@@ -2137,7 +2265,7 @@ mod tests {
         );
         assert!(is_painted(&painted, &tr!("plot-axes-ticks-section")));
         assert!(is_painted(&painted, &tr!("plot-axes-show-minor-ticks")));
-        assert!(is_painted(&painted, &tr!("plot-axes-advanced")));
+        assert!(is_painted(&painted, &tr!("common-advanced")));
         let advanced_labels = [
             tr!("plot-axes-tick-length"),
             tr!("plot-axes-minor-tick-length"),
@@ -2154,7 +2282,7 @@ mod tests {
                     &mut harness.state,
                     &tr!("plot-axes-show-gridlines"),
                 ),
-                &tr!("plot-axes-advanced"),
+                &tr!("common-advanced"),
             )
             .center;
             click(&context, pos, egui::PointerButton::Primary, |ui| {
@@ -2194,13 +2322,13 @@ mod tests {
                     &mut harness.state,
                     &tr!("plot-axes-show-gridlines"),
                 ),
-                &tr!("plot-axes-advanced"),
+                &tr!("common-advanced"),
             )
             .center;
             let width = context.fonts_mut(|fonts| {
                 fonts
                     .layout_no_wrap(
-                        tr!("plot-axes-advanced"),
+                        tr!("common-advanced"),
                         egui::FontId::proportional(14.0),
                         egui::Color32::WHITE,
                     )
@@ -2307,6 +2435,80 @@ mod tests {
         );
     }
 
+    /// #405: the figure size lives in the Advanced block of General, closed by
+    /// default (S-L8); opening it changes nothing, and choosing Fixed commits
+    /// the draft in one entry, a graph from an old file being given its frames
+    /// in the same edit.
+    #[test]
+    fn the_figure_size_choice_is_in_a_folded_advanced_block_and_commits_the_draft() {
+        let context = test_support::context();
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Graph, None);
+        assert!(harness.model().frame_widths.is_empty(), "an old graph");
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("common-advanced")));
+        for hidden in [
+            tr!("plot-figure-size"),
+            tr!("plot-figure-size-grows"),
+            tr!("plot-figure-size-fixed"),
+        ] {
+            assert!(!is_painted(&painted, &hidden), "{hidden:?}: closed");
+        }
+        let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
+        let pos = text_exact(&painted, &tr!("common-advanced")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
+        assert!(is_painted(&painted, &tr!("plot-figure-size")));
+        assert!(is_painted(&painted, &tr!("plot-figure-size-grows")));
+        assert_eq!(harness.model(), harness.draft(), "opening changes nothing");
+        assert!(!harness.model().fixed_figure);
+
+        let history = harness.state.undo_label();
+        let pos = text_exact(&painted, &tr!("plot-figure-size-fixed")).center;
+        click(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let model = harness.model();
+        assert!(model.fixed_figure, "committed with the click");
+        assert_eq!(model.frame_widths, [392.0], "the old graph's frames fixed");
+        harness.state.close_plot_settings();
+        assert_ne!(harness.state.undo_label(), history, "an undoable entry");
+    }
+
+    /// #405: General › Size has Left and Top next to the plot area size; they
+    /// store points, a value below what the axes need is raised to it, and Auto
+    /// is what the field shows when empty.
+    #[test]
+    fn left_and_top_store_points_and_are_raised_to_the_minimum() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.frame_widths = vec![392.0];
+            spec.frame_heights = vec![284.0];
+            spec.figure_top = Some(200.0);
+        });
+        harness.open(PlotSettingsTab::Graph, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size-left", unit = "cm"),
+            tr!("plot-size-top", unit = "cm"),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        assert_eq!(harness.model().figure_left, None, "Auto by default");
+
+        // 5 cm = 141.7 pt, above the 76 pt of the left axis.
+        type_into(&context, &mut harness, &tr!("common-auto"), "5");
+        let model = harness.model();
+        let left = model.figure_left.expect("stored");
+        assert!((left - 141.732_283).abs() < 1e-5, "{model:?}");
+        // 1 cm = 28 pt is below the 76 pt the axis needs: raised to it.
+        type_into(&context, &mut harness, "5", "1");
+        let left = harness.model().figure_left.expect("stored");
+        assert!((left - 76.0).abs() < 0.01, "{left}");
+    }
+
     /// #344: under Auto, From and To show the computed bounds; typing in one
     /// freezes both (the other is taken from the computation), in **one** history
     /// entry, and the direction follows the order: From > To inverts the axis.
@@ -2392,7 +2594,7 @@ mod tests {
             &mut harness.state,
             &tr!("plot-axes-show-gridlines"),
         );
-        let pos = text_exact(&open, &tr!("plot-axes-advanced")).center;
+        let pos = text_exact(&open, &tr!("common-advanced")).center;
         click(&context, pos, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), &mut harness.state)
         });

@@ -81,3 +81,48 @@ fn a_graph_without_stored_frames_keeps_the_legacy_page() {
         (480, 360)
     );
 }
+
+/// #405: a Fixed figure with Left and Top is exported at the size of its
+/// layout, in every format: the reserve of four axes (152 x 128 around the
+/// frame) and Left = 150 in place of the 76 of the left axis.
+#[test]
+fn a_fixed_figure_with_left_and_top_is_exported_at_its_layout_size() {
+    let mut sample = sample::minimal().expect("minimal graph");
+    sample.spec.title.clear();
+    sample.spec.frame_widths = vec![600.0];
+    sample.spec.frame_heights = vec![200.0];
+    sample.spec.fixed_figure = true;
+    sample.spec.figure_left = Some(150.0);
+    sample.spec.figure_top = Some(90.0);
+    let plot = resolve_spec(sample.project.tree(), &sample.spec);
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+
+    let size = figure_size(&sample.spec, &measurer, &choice);
+    // Left 150 + 600 + 76 (right reserve); Top 90 + 200 + 64 (bottom reserve).
+    assert_eq!(size, (826, 354));
+
+    let svg = export_bytes(
+        &plot,
+        size,
+        &measurer,
+        &choice,
+        ExportFormat::Svg {
+            text: SvgTextMode::Text,
+        },
+    )
+    .expect("SVG");
+    let svg = String::from_utf8(svg).expect("utf-8");
+    assert!(svg.contains("width=\"826\"") && svg.contains("height=\"354\""));
+    let pdf = export_bytes(&plot, size, &measurer, &choice, ExportFormat::Pdf).expect("PDF");
+    assert_eq!(media_box(&pdf), vec![0.0, 0.0, 826.0, 354.0]);
+    let png = export_bytes(
+        &plot,
+        size,
+        &measurer,
+        &choice,
+        ExportFormat::Png { scale: 1.0 },
+    )
+    .expect("PNG");
+    assert_eq!(png_size(&png), (826, 354));
+}

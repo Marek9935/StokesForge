@@ -771,6 +771,20 @@ pub enum Action {
         /// Grid row and its new frame height, in points.
         row: Option<(usize, f64)>,
     },
+    /// Sets Left and/or Top of the graph, in points (#405): the distance from
+    /// the left (top) edge of the image to the first plot area, what a drag of
+    /// the left or top edge of the figure commits. A graph without stored
+    /// frames is first given the ones it is drawn with. A single undo step
+    /// ([`PlotEditKind::PlaceFigure`]); nothing sent if the values are already
+    /// those or one of them is refused.
+    SetFigureOffsets {
+        /// Target graph.
+        graph: NodeId,
+        /// New Left.
+        left: Option<f64>,
+        /// New Top.
+        top: Option<f64>,
+    },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
     SetLengthUnit(crate::length_unit::LengthUnit),
@@ -5021,6 +5035,9 @@ impl AppState {
                     .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
                 self.set_frame_sizes(graph, column.into_iter().chain(row))
             }
+            Action::SetFigureOffsets { graph, left, top } => {
+                self.set_figure_offsets(graph, left, top)
+            }
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -7008,6 +7025,7 @@ impl AppState {
     /// Sends a command to the actor and reports the result.
     fn execute(&mut self, command: Command) {
         let command = self.with_fixed_frames(command);
+        let grows_past_reserve = self.fixed_figure_grows(&command);
         // The label is computed on the tree from **before**: afterwards, a
         // deleted column has no name.
         let label = command.label(&self.snapshot.tree);
@@ -7017,10 +7035,42 @@ impl AppState {
             Ok(revision) => {
                 self.applied_revision = self.applied_revision.max(revision);
                 self.notice(history_text(&label));
+                if grows_past_reserve {
+                    self.warn(tr!("status-figure-grew"));
+                }
                 self.settle_recalc();
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
+    }
+
+    /// True if `command` replaces the spec of a graph with a "Fixed" figure
+    /// size whose image now grows beyond the reserve (#405, F1/F2): an axis
+    /// beyond the one per side, a title, a Left or Top too small. The status
+    /// bar says so at the moment of the change. Measured only for a Fixed
+    /// figure (measuring a title builds the Typst engine).
+    fn fixed_figure_grows(&self, command: &Command) -> bool {
+        let (Command::SetPlotSpec { graph, spec } | Command::EditPlotSpec { graph, spec, .. }) =
+            command
+        else {
+            return false;
+        };
+        if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
+            return false;
+        }
+        let Some(after) = crate::frame_sizes::figure_layout(spec) else {
+            return false;
+        };
+        if !after.fixed_overflow {
+            return false;
+        }
+        let Some(before) = self
+            .plot_spec(*graph)
+            .and_then(|before| crate::frame_sizes::figure_layout(&before))
+        else {
+            return true;
+        };
+        after.size.0 >= before.size.0 && after.size.1 >= before.size.1 && after.size != before.size
     }
 
     /// The one door of the graph frames (#394, G7): a command that replaces
@@ -10021,6 +10071,29 @@ impl AppState {
             graph,
             spec,
             kind: PlotEditKind::ResizeCell,
+        });
+    }
+
+    /// [`Action::SetFigureOffsets`]: Left and Top applied to one spec and
+    /// committed as one step.
+    fn set_figure_offsets(&mut self, graph: NodeId, left: Option<f64>, top: Option<f64>) {
+        use stokesforge_core::compose::{set_figure_offset, FigureOffset};
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        crate::frame_sizes::fix_new(&mut spec);
+        for (which, value) in [(FigureOffset::Left, left), (FigureOffset::Top, top)] {
+            if value.is_some() && !set_figure_offset(&mut spec, which, value) {
+                return;
+            }
+        }
+        if self.plot_spec(graph).is_some_and(|before| before == spec) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::PlaceFigure,
         });
     }
 

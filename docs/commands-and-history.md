@@ -236,7 +236,13 @@ legacy graph (no stored frame) is given the frames it is drawn with **in that
 same command**, never in a separate step and never at load: any
 `SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
-legacy file as it was. The Graph Properties size fields edit the draft of the
+legacy file as it was. Dragging the left or top edge of the figure (#405) sends
+`Action::SetFigureOffsets` = one `EditPlotSpec` with `PlotEditKind::PlaceFigure`
+("Position Plot Area"), legacy graphs fixed in the same command. "Figure size",
+Left and Top typed in Graph Properties are part of the window's draft and macro.
+`AppState::execute` also compares the layouts before and after a `SetPlotSpec` /
+`EditPlotSpec` of a Fixed figure and puts `status-figure-grew` in the status bar
+when the image grew past the reserve (F1/F2). The Graph Properties size fields edit the draft of the
 window, hence the window's single `GraphProperties` macro.
 Opening the panel, choosing a content or opening its properties belongs to
 the view state; validated changes are undoable.

@@ -434,3 +434,207 @@ fn size_with_frames_adds_the_difference_to_the_bands_of_the_figure() {
     let (wider, _) = layout.size_with_frames(&[300.0, 200.0], &layout.frame_heights);
     assert!((wider - w - 100.0).abs() < 1e-9);
 }
+
+// ---- "Figure size = Fixed", Left and Top (#405) ----
+
+fn fixed(mut spec: PlotSpec) -> PlotSpec {
+    spec.fixed_figure = true;
+    spec
+}
+
+/// A layer superimposed on the first one, with a right axis and a top axis.
+fn with_overlay(spec: PlotSpec, layer: u8) -> PlotSpec {
+    let mut panels: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+    let base = panels.first().expect("panel").clone();
+    panels.push(PanelSpec::overlay_on(
+        &base,
+        OverlaySpec {
+            x_top: true,
+            y_right: true,
+            layer,
+        },
+    ));
+    spec.with_panels(Panels::new(panels))
+}
+
+/// The four bands of one axis per side are reserved: the image is the frame
+/// plus 2 x 76 and 2 x 64.
+#[test]
+fn a_fixed_figure_reserves_one_axis_on_each_side() {
+    let spec = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    let layout = layout_of(&spec);
+    assert_eq!(layout.size, (300 + 152, 200 + 128));
+    assert_eq!(layout.frame_rect(0, 0), Some((76, 64, 300, 200)));
+    assert!(!layout.fixed_overflow);
+}
+
+/// Adding a right axis, a top mirror and an overlay changes neither the size
+/// nor the frame: they fill the reserve.
+#[test]
+fn a_fixed_figure_keeps_its_size_and_frame_when_axes_come_in_the_reserve() {
+    let bare = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    let bare_layout = layout_of(&bare);
+    let mut spec = with_overlay(bare.clone(), 2);
+    {
+        let panel = spec.panels.get_mut(0).expect("panel");
+        panel.right.visible = true;
+        panel.top.visible = true;
+    }
+    let layout = layout_of(&spec);
+    assert_eq!(layout.size, bare_layout.size);
+    assert_eq!(layout.frame_rect(0, 0), bare_layout.frame_rect(0, 0));
+    assert!(!layout.fixed_overflow);
+    let plot = draw_at(&spec, layout.size);
+    let (bare_plot, _) = (draw_at(&bare, bare_layout.size), 0);
+    assert_eq!(frames(&plot)[0], frames(&bare_plot)[0]);
+}
+
+/// Without the option the same additions widen the image (the default of #394
+/// is untouched).
+#[test]
+fn without_the_option_the_same_additions_still_grow_the_image() {
+    let bare = framed(grid("", 1, 1), &[300.0], &[200.0]);
+    let bare_layout = layout_of(&bare);
+    let layout = layout_of(&with_overlay(bare, 2));
+    assert!(layout.size.0 > bare_layout.size.0);
+    assert!(layout.size.1 > bare_layout.size.1);
+    assert!(!layout.fixed_overflow);
+}
+
+/// A legacy graph (nothing stored) ignores the option: still 480 x 360.
+#[test]
+fn a_legacy_graph_ignores_the_fixed_figure_and_the_position() {
+    let mut spec = fixed(grid("Title", 1, 2));
+    spec.figure_left = Some(150.0);
+    spec.figure_top = Some(150.0);
+    let layout = layout_of(&spec);
+    assert_eq!(layout.size, (480, 360));
+    assert!(!layout.is_explicit() && !layout.fixed_overflow);
+    assert_eq!(layout_of(&grid("Title", 1, 2)), layout);
+}
+
+/// Two layers on the right ask for 128 > the 64 reserved: the image grows
+/// anyway, the frame does not move, and the figure says so.
+#[test]
+fn a_fixed_figure_grows_past_the_reserve_without_moving_the_frame() {
+    let bare = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    let bare_layout = layout_of(&bare);
+    let one = with_overlay(bare.clone(), 2);
+    let two = with_overlay(one.clone(), 3);
+    assert!(!layout_of(&one).fixed_overflow);
+    let layout = layout_of(&two);
+    assert!(layout.fixed_overflow);
+    // One more band on the right (64) and on top (52): the frame keeps its
+    // size and its left edge, and sits one band lower in the taller image.
+    assert_eq!(
+        layout.size,
+        (bare_layout.size.0 + 64, bare_layout.size.1 + 52)
+    );
+    let (bx, by, bw, bh) = bare_layout.frame_rect(0, 0).expect("frame");
+    assert_eq!(layout.frame_rect(0, 0), Some((bx, by + 52, bw, bh)));
+}
+
+/// A title is not part of the reserve (F2): showing it grows the image, the
+/// frame keeps its size, and the figure says so.
+#[test]
+fn a_title_grows_a_fixed_figure_and_is_reported() {
+    let bare = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    let bare_layout = layout_of(&bare);
+    let mut spec = bare.clone();
+    spec.title = "A title".into();
+    let layout = layout_of(&spec);
+    assert!(layout.title_band > 0 && layout.fixed_overflow);
+    assert_eq!(layout.size.1, bare_layout.size.1 + layout.title_band);
+    assert_eq!(layout.size.0, bare_layout.size.0);
+    let (x, y, w, h) = layout.frame_rect(0, 0).expect("frame");
+    assert_eq!((x, w, h), (76, 300, 200));
+    assert_eq!(y, 64 + layout.title_band);
+}
+
+/// A column of two cells: the frames still line up in Fixed mode.
+#[test]
+fn the_frames_of_a_fixed_column_still_line_up() {
+    let spec = fixed(framed(grid("", 2, 1), &[300.0], &[150.0, 150.0]));
+    let (layout, plot) = drawn(&spec);
+    let f = frames(&plot);
+    assert_eq!(f[0].0 .0, f[1].0 .0);
+    assert_eq!(f[0].1, f[1].1.clone());
+    assert_eq!(layout.frame_rect(0, 0).map(|r| r.0), Some(76));
+}
+
+/// Left and Top place the first frame, in Fixed mode and in Auto.
+#[test]
+fn left_and_top_place_the_first_frame_and_grow_the_image() {
+    for fixed_mode in [false, true] {
+        let mut auto = framed(grid("", 1, 1), &[300.0], &[200.0]);
+        auto.fixed_figure = fixed_mode;
+        let auto_layout = layout_of(&auto);
+        let mut spec = auto.clone();
+        spec.figure_left = Some(150.0);
+        spec.figure_top = Some(110.0);
+        let (layout, plot) = drawn(&spec);
+        let (x, y, w, h) = layout.frame_rect(0, 0).expect("frame");
+        assert_eq!((x, y, w, h), (150, 110, 300, 200), "fixed = {fixed_mode}");
+        let auto_frame = auto_layout.frame_rect(0, 0).expect("frame");
+        assert_eq!(
+            layout.size.0 as i32 - auto_layout.size.0 as i32,
+            150 - auto_frame.0 as i32
+        );
+        assert_eq!(
+            layout.size.1 as i32 - auto_layout.size.1 as i32,
+            110 - auto_frame.1 as i32
+        );
+        assert_eq!(frames(&plot)[0], ((150, 110), (300, 200)));
+    }
+}
+
+/// Top is measured from the top of the image, graph title included.
+#[test]
+fn top_includes_the_graph_title_band() {
+    let mut spec = fixed(framed(grid("A title", 1, 1), &[300.0], &[200.0]));
+    spec.figure_top = Some(130.0);
+    let (layout, plot) = drawn(&spec);
+    assert!(layout.title_band > 0 && layout.title_band < 66);
+    assert_eq!(layout.frame_rect(0, 0).map(|r| r.1), Some(130));
+    assert_eq!(frames(&plot)[0].0 .1, 130, "the drawing agrees");
+    assert!(!layout.fixed_overflow, "the title fits above the frame");
+}
+
+/// A value smaller than the axes need is raised to the minimum, which the
+/// layout reports.
+#[test]
+fn a_small_left_or_top_is_raised_to_what_the_axes_and_title_need() {
+    let mut spec = framed(grid("A title", 1, 1), &[300.0], &[200.0]);
+    spec.figure_left = Some(5.0);
+    spec.figure_top = Some(5.0);
+    let layout = layout_of(&spec);
+    assert_eq!(layout.min_left, 76);
+    assert_eq!(layout.min_top, layout.title_band + 12);
+    let (x, y, _, _) = layout.frame_rect(0, 0).expect("frame");
+    assert_eq!((x, y), (76, layout.title_band + 12));
+    spec.fixed_figure = true;
+    let layout = layout_of(&spec);
+    assert_eq!(layout.frame_rect(0, 0).map(|r| r.0), Some(76));
+    assert!(
+        layout.fixed_overflow,
+        "Top = 5 is below what the title needs"
+    );
+    // Left alone: the left axis needs 76, so 5 grows the image.
+    let mut left_only = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    left_only.figure_left = Some(5.0);
+    assert!(layout_of(&left_only).fixed_overflow);
+    left_only.figure_left = Some(80.0);
+    assert!(!layout_of(&left_only).fixed_overflow);
+}
+
+/// Hostile values read as Auto or are clamped, and never panic.
+#[test]
+fn hostile_left_and_top_draw_without_panicking() {
+    for value in [f64::NAN, f64::INFINITY, -4.0, 1e12] {
+        let mut spec = fixed(framed(grid("T", 2, 2), &[100.0, 100.0], &[80.0, 80.0]));
+        spec.figure_left = Some(value);
+        spec.figure_top = Some(value);
+        let (layout, _) = drawn(&spec);
+        assert!(layout.size.0 < 30_000 && layout.size.1 < 30_000);
+    }
+}

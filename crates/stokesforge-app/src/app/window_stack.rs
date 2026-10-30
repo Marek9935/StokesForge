@@ -325,6 +325,19 @@ impl Workspace<'_> {
         let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
             return;
         };
+        // Pulling the left or top edge of the figure (#405): the window grows
+        // towards that side (its corner moves), so the plot area stays put on
+        // screen. Never past the top-left corner of the workspace.
+        let (left, top) = self
+            .graph_views
+            .get(&graph)
+            .map_or((false, false), GraphView::placing_edges);
+        if left || top {
+            if let Some(position) = self.window_positions.get_mut(&tab) {
+                let shift = FigureFollow::anchor_shift(step, left, top);
+                *position = (*position + shift).max(egui::Pos2::ZERO);
+            }
+        }
         if let (Some(&position), Some(window)) = (
             self.window_positions.get(&tab),
             self.window_sizes.get_mut(&tab),

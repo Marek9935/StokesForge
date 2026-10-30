@@ -667,7 +667,8 @@ History: #226.
 - **No collapsible section** in a form; too long → tabs (S-L5).
   A single exception, the **"Advanced"** block (S-L8, #344, `Form::collapsible`):
   closed by default, at the bottom of its section, for settings that are all Auto by
-  default (length, thickness and color of the tick marks); its arrow
+  default (length, thickness and color of the tick marks; **Figure size** of
+  Graph Properties › General, #405); its arrow
   and its title form a single clickable area, without dead space, in the
   label column (like "Tick direction"), the title not being
   selectable; its fields stay aligned on the

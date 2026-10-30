@@ -14229,3 +14229,94 @@ fn removing_an_overlay_layer_leaves_its_cell() {
     });
     assert_eq!(graph_spec(&state, graph).panels.len(), 1);
 }
+
+/// #405: a drag of the left or top edge of the figure commits Left and Top as
+/// ONE undo step; a legacy graph is given its frames in the same command; a
+/// refused or unchanged value commits nothing.
+#[test]
+fn placing_the_figure_is_one_undo_step_and_fixes_a_legacy_graph() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
+    let drawn = layout_of(&legacy);
+
+    state.dispatch(Action::SetFigureOffsets {
+        graph,
+        left: Some(150.0),
+        top: Some(90.0),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(
+        (after.figure_left, after.figure_top),
+        (Some(150.0), Some(90.0))
+    );
+    assert_eq!(after.frame_widths, drawn.frame_widths, "same plot area");
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::PlaceFigure
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), after);
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFigureOffsets {
+        graph,
+        left: Some(150.0),
+        top: Some(90.0),
+    });
+    state.dispatch(Action::SetFigureOffsets {
+        graph,
+        left: Some(10.0),
+        top: Some(f64::NAN),
+    });
+    assert_eq!(state.snapshot().revision, revision, "unchanged or refused");
+}
+
+/// #405: switching the figure to Fixed (the properties window commits its
+/// draft) is one undo step, fixes a legacy graph's frames in the same command,
+/// and a title that then makes the image grow past the reserve is said in the
+/// status bar.
+#[test]
+fn fixing_the_figure_size_is_one_step_and_a_title_past_the_reserve_is_reported() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.title.clear();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
+
+    let mut fixed = legacy.clone();
+    fixed.fixed_figure = true;
+    state.dispatch(Action::SetPlotSpec {
+        graph,
+        spec: fixed.clone(),
+    });
+    let after = graph_spec(&state, graph);
+    assert!(after.fixed_figure && !after.frame_widths.is_empty());
+    assert!(layout_of(&after).size.0 >= 152 + 300);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
+    state.dispatch(Action::Redo);
+
+    // No message while everything fits in the reserve.
+    assert!(state
+        .status()
+        .is_none_or(|status| status.level != StatusLevel::Warning));
+    let mut titled = graph_spec(&state, graph);
+    titled.title = "A title".to_owned();
+    state.dispatch(Action::SetPlotSpec {
+        graph,
+        spec: titled,
+    });
+    let status = state.status().expect("a message");
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(status.text.contains("Fixed"), "{}", status.text);
+}

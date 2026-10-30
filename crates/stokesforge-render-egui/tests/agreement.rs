@@ -1034,3 +1034,31 @@ fn a_stored_frame_is_drawn_at_its_size_by_both_backends() {
     assert_eq!(drawn.panels[0].cell_origin, (0, 0));
     assert_eq!(drawn.panels[0].pixel_size, (700, 310));
 }
+
+/// #405: a Fixed figure with a graph title and a Top places the frame where
+/// the layout says on both backends, primitive by primitive. The title band
+/// (measured through Typst) sits inside Top.
+#[test]
+fn the_backends_agree_on_a_fixed_figure_with_a_title_and_top() {
+    let mut fixture = minimal();
+    fixture.spec.title = "Fixed figure".to_owned();
+    fixture.spec.frame_widths = vec![500.0];
+    fixture.spec.frame_heights = vec![250.0];
+    fixture.spec.fixed_figure = true;
+    fixture.spec.figure_left = Some(120.0);
+    fixture.spec.figure_top = Some(110.0);
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("layout");
+    assert!(layout.title_band > 0 && layout.title_band < 110 - 12);
+    assert_eq!(layout.frame_rect(0, 0), Some((120, 110, 500, 250)));
+    let (_, drawn) = agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        layout.size,
+        "fixed figure",
+    );
+    assert_eq!(drawn.panels[0].pixel_origin, (120, 110));
+    assert_eq!(drawn.panels[0].pixel_size, (500, 250));
+}

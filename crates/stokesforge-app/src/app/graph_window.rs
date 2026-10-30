@@ -1066,6 +1066,9 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
                 actions.push(Action::SetFrameSizes { graph, column, row });
             }
+            stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
+                actions.push(Action::SetFigureOffsets { graph, left, top });
+            }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {
                     graph,
