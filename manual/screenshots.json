@@ -47,7 +47,7 @@
   {
     "image": "graphs-properties-axes.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its Axes tab, X (bottom) axis: title, scale, range and display settings."
+    "shows": "The Graph Properties window on its Axes tab, Bottom axis: the axes as vertical tabs at the left, then title, scale, range and display settings."
   },
   {
     "image": "graphs-formula-title.png",
@@ -67,7 +67,7 @@
   {
     "image": "preferences-general.png",
     "page": "guide/interface.md",
-    "shows": "The Preferences window, General page with the rubrics at the left: language, maximum file size and cells, automatic recovery copy, analysis defaults."
+    "shows": "The Preferences window, General page with the rubrics across the top: language, maximum file size and cells, automatic recovery copy, analysis defaults."
   },
   {
     "image": "preferences-export.png",
@@ -77,12 +77,12 @@
   {
     "image": "preferences-display-object-manager.png",
     "page": "guide/interface.md",
-    "shows": "The Preferences window, Display rubric, Object Manager tab: the lists and the groups expanded by default."
+    "shows": "The Preferences window, Display rubric, Object Manager tab (vertical sub-tabs at the left): the lists and the groups expanded by default."
   },
   {
     "image": "preferences-display-new.png",
     "page": "guide/projects-and-workbooks.md",
-    "shows": "The Preferences window, Display rubric, New tab: the header rows of new workbooks and the decimal comma of new graphs."
+    "shows": "The Preferences window, Display rubric, New tab (vertical sub-tabs at the left): the header rows of new workbooks and the decimal comma of new graphs."
   },
   {
     "image": "preferences-folders.png",
@@ -102,7 +102,7 @@
   {
     "image": "graphs-axes-log-scale.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window, Axes tab, X (bottom) axis with Log scale ticked."
+    "shows": "The Graph Properties window, Axes tab, Bottom axis with Log scale ticked, the axes as vertical tabs at the left."
   },
   {
     "image": "analysis-baseline.png",

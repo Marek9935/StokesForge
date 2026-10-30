@@ -18,7 +18,7 @@ Read when painting a scroll bar, tabs, a selectable list or tree, a section titl
 
 - [ ] a scrolling page uses `theme::page_scroll_area()` (end margin, #347); a raw `ScrollArea::vertical()`/`::both()` carries `// RAW-SCROLL(#347): <why>`
 - [ ] no local `ScrollStyle`; a bar's room read by `theme::scroll_bar_allocated_width`
-- [ ] tabs by `tab_strip`; lists and trees by `list_row` / `ListRowBackground`; composed rows at `LIST_ROW_HEIGHT` (`with_list_row_height`)
+- [ ] tabs by `tab_strip` (two levels: primary `Top`, secondary `Left` and fixed, S-L9); lists and trees by `list_row` / `ListRowBackground`; composed rows at `LIST_ROW_HEIGHT` (`with_list_row_height`)
 - [ ] keyboard-walked list (S-K9): `list_row::read_navigation` and `neighbour` on visible rows, focus by `paint_focus_outline`
 - [ ] bold by `theme::bold`; title by `theme::section_title` (no `separator()` just before); `theme::table_header`, `theme::secondary_text`; never `bold(…).small()`
 - [ ] no hard-coded colour outside `theme.rs` and `color_picker.rs`; form by `app/form.rs`, spacing by `theme::SPACE_*`

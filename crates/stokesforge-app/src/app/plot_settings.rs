@@ -279,6 +279,19 @@ fn plot_settings_contents(
                     &mut gradient_actions,
                 );
             }
+        } else if chosen_tab == PlotSettingsTab::Axes {
+            // Two levels (S-L9, #393): the vertical axis strip stays fixed and
+            // only the page of the axis scrolls, so no common scrolling.
+            if let Some(panel) = spec.panels.get_mut(edit.selected_panel) {
+                commit |= axes_settings_page(
+                    ui,
+                    panel,
+                    &mut chosen_axis,
+                    published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
+                    &mut spec.decimal_comma,
+                    &mut env,
+                );
+            }
         } else {
             crate::theme::page_scroll_area()
                 .auto_shrink([false, false])
@@ -292,19 +305,8 @@ fn plot_settings_contents(
                         };
                         commit |= plot_area_settings_page(ui, panel);
                     }
-                    PlotSettingsTab::Axes => {
-                        let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
-                            return;
-                        };
-                        commit |= axes_settings_page(
-                            ui,
-                            panel,
-                            &mut chosen_axis,
-                            published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
-                            &mut spec.decimal_comma,
-                            &mut env,
-                        );
-                    }
+                    // The axes have their own fixed strip: see above.
+                    PlotSettingsTab::Axes => {}
                     // The series have their window: see above.
                     PlotSettingsTab::Series => {}
                     PlotSettingsTab::Theme => {
@@ -404,7 +406,8 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     })
 }
 
-/// Axes page: local choice of the axis, then the shared editor.
+/// Axes page: a vertical strip at the left chooses the axis (fixed), the shared
+/// editor is at its right and alone scrolls (S-L9, #393).
 pub(super) fn axes_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -420,54 +423,70 @@ pub(super) fn axes_settings_page(
     } else if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
         axes.push(PlotAxis::Right);
     }
-    // #169: the axes are a set of tabs (one page per axis), so the
-    // common strip, not a row of selectable buttons; its rule
-    // replaces the former separator.
+    // #169: the axes are a set of tabs (one page per axis), so the common
+    // strip. #393 (S-L9): they are the secondary level under the Graph
+    // Properties tabs, so a vertical strip at the left of the page; it stays
+    // fixed and only the page of the axis scrolls.
     let tabs: Vec<(PlotAxis, String)> = axes.into_iter().map(|axis| (axis, axis.label())).collect();
-    let mut picked = None;
-    tab_strip(
-        ui,
-        TabStripSide::Top,
-        &tabs,
-        *chosen_axis,
-        |axis| picked = Some(axis),
-        None,
-        || {},
-    );
-    if let Some(axis) = picked {
-        *chosen_axis = axis;
-    }
-    ui.add_space(ui.spacing().item_spacing.y);
-    // The top is always a mirror; the right is one as long as no series is
-    // attached to it (otherwise it is a real axis, full editor).
-    let mirror = panel.overlay.is_none()
-        && (*chosen_axis == PlotAxis::Top
-            || (*chosen_axis == PlotAxis::Right && !panel.uses_right_axis()));
-    let axis = match *chosen_axis {
-        PlotAxis::Bottom => &mut panel.bottom,
-        PlotAxis::Left => &mut panel.left,
-        PlotAxis::Right => &mut panel.right,
-        PlotAxis::Top => &mut panel.top,
-    };
-    let computed = bounds.and_then(|bounds| match *chosen_axis {
-        PlotAxis::Bottom => bounds.bottom,
-        PlotAxis::Left => bounds.left,
-        _ => bounds.right,
-    });
-    form(ui, "plot_axis_page", |form| {
-        let mut commit = if mirror {
-            mirror_axis_editor(form, axis, env)
-        } else {
-            axis_editor(form, axis, computed, env)
-        };
-        // Setting of the whole graph (#223), put under the axes display.
-        commit |= form.checkbox(
-            decimal_comma,
-            tr!("plot-axes-decimal-comma"),
-            Some(tr!("plot-axes-decimal-comma", "hint")),
+    // The row takes the whole height left: `ui.horizontal` would hand the
+    // scroll area about one row.
+    let size = ui.available_size();
+    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        let mut picked = None;
+        tab_strip(
+            ui,
+            TabStripSide::Left,
+            &tabs,
+            *chosen_axis,
+            |axis| picked = Some(axis),
+            None,
+            || {},
         );
-        commit
+        if let Some(axis) = picked {
+            *chosen_axis = axis;
+        }
+        ui.vertical(|ui| {
+            // The top is always a mirror; the right is one as long as no
+            // series is attached to it (otherwise it is a real axis, full
+            // editor).
+            let mirror = panel.overlay.is_none()
+                && (*chosen_axis == PlotAxis::Top
+                    || (*chosen_axis == PlotAxis::Right && !panel.uses_right_axis()));
+            let axis = match *chosen_axis {
+                PlotAxis::Bottom => &mut panel.bottom,
+                PlotAxis::Left => &mut panel.left,
+                PlotAxis::Right => &mut panel.right,
+                PlotAxis::Top => &mut panel.top,
+            };
+            let computed = bounds.and_then(|bounds| match *chosen_axis {
+                PlotAxis::Bottom => bounds.bottom,
+                PlotAxis::Left => bounds.left,
+                _ => bounds.right,
+            });
+            crate::theme::page_scroll_area()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    form(ui, "plot_axis_page", |form| {
+                        let mut commit = if mirror {
+                            mirror_axis_editor(form, axis, env)
+                        } else {
+                            axis_editor(form, axis, computed, env)
+                        };
+                        // Setting of the whole graph (#223), put under the
+                        // axes display.
+                        commit |= form.checkbox(
+                            decimal_comma,
+                            tr!("plot-axes-decimal-comma"),
+                            Some(tr!("plot-axes-decimal-comma", "hint")),
+                        );
+                        commit
+                    })
+                })
+                .inner
+        })
+        .inner
     })
+    .inner
 }
 
 /// "Theme" tab: background, text color and axes color, set
@@ -1664,6 +1683,71 @@ mod tests {
         harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Right));
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &PlotAxis::Right.label()));
+    }
+
+    /// S-L9 (#393): the axes are the secondary tabs, a column at the left of
+    /// the page (below the Graph Properties tabs), in the order Bottom, Left,
+    /// Right, Top.
+    #[test]
+    fn the_axis_tabs_are_a_column_at_the_left_of_the_page() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, None);
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let at = |axis: PlotAxis| text_exact(&painted, &axis.label()).center;
+        let (bottom, left, right, top) = (
+            at(PlotAxis::Bottom),
+            at(PlotAxis::Left),
+            at(PlotAxis::Right),
+            at(PlotAxis::Top),
+        );
+        assert!(left.y > bottom.y + 10.0, "stacked");
+        assert!(right.y > left.y + 10.0, "stacked");
+        assert!(top.y > right.y + 10.0, "stacked");
+        let tabs_right = [bottom, left, right, top]
+            .iter()
+            .map(|c| c.x)
+            .fold(0.0, f32::max);
+        let graph = text_exact(&painted, &PlotSettingsTab::Graph.label()).center;
+        assert!(graph.y < bottom.y, "the axes are under the main tabs");
+        let scale = text_exact(&painted, &tr!("plot-axes-scale-section")).center;
+        assert!(scale.x > tabs_right, "page on the right of the tabs");
+    }
+
+    /// S-L9 (#393): the axis strip stays fixed, only the page scrolls.
+    #[test]
+    fn the_axis_strip_does_not_scroll_with_the_page() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        let before = paint_window(&context, &mut harness.state, Vec::new());
+        let tab = text_exact(&before, &PlotAxis::Bottom.label()).center;
+        let first_row = tr!("plot-axes-scale-section");
+        assert!(is_painted(&before, &first_row));
+        let after = scroll_down(
+            &context,
+            &mut harness.state,
+            &tr!("plot-axes-show-gridlines"),
+        );
+        assert_eq!(text_exact(&after, &PlotAxis::Bottom.label()).center, tab);
+        assert!(!is_painted(&after, &first_row), "the page moved");
+    }
+
+    /// The axes page fills the height of the window: its scroll area is not
+    /// squeezed to one row by the row that holds the strip.
+    #[test]
+    fn the_axes_page_fills_the_height_of_the_window() {
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        let scale = text_exact(&painted, &tr!("plot-axes-scale-section"))
+            .center
+            .y;
+        let grid = text_exact(&painted, &tr!("plot-axes-show-gridlines"))
+            .center
+            .y;
+        assert!(grid > scale + 80.0, "several rows are laid out");
     }
 
     /// #176: the tab of a mirror axis offers neither title nor color, only

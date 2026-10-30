@@ -1,10 +1,10 @@
 //! File › Preferences (#148): the application preferences window.
 //!
-//! Layout (decisions of 2026-10-29): the **rubrics are vertical tabs on the
-//! left** ([`TabStripSide::Left`]) — General, Display, Export, Folders — and a rubric
-//! with many settings has **horizontal sub-tabs** at the top (Display:
-//! Interface · Object Manager · New). Pages are short, without scrolling where
-//! possible. **General** holds the language, the file caps, autosave and the
+//! Layout (#393, which replaces the decision of 2026-10-29; rule S-L9): the
+//! **rubrics are horizontal tabs on top** ([`TabStripSide::Top`]) — General,
+//! Display, Export, Folders — and a rubric with many settings has **vertical
+//! sub-tabs at the left** of its content (Display: Interface · Object Manager ·
+//! New). Pages are short, without scrolling where possible. **General** holds the language, the file caps, autosave and the
 //! analysis defaults; **Display** the formula help icon, the Object Manager
 //! lists and the settings of *new* workbooks and graphs; **Export** the text of
 //! SVG exports, the PNG resolution and the Copy Graph formats (the order is
@@ -80,8 +80,9 @@ pub(super) fn preferences_window(
         .unwrap_or_default();
     let outcome = modal_live_settings(
         ctx,
-        // A new identifier since the rubrics moved to the left: the size
-        // remembered (S-F8) for the old, narrow window must not pin the layout.
+        // A new identifier since the rubrics moved to the left (#148, kept
+        // when they moved back on top, #393): a size remembered (S-F8) for an
+        // older layout must not pin this one.
         egui::Id::new("stokesforge_preferences_rubrics"),
         &tr!("preferences-title"),
         InteractiveSize::Class(SizeClass::Large),
@@ -92,23 +93,22 @@ pub(super) fn preferences_window(
                 (Page::Export, tr!("preferences-export")),
                 (Page::Folders, tr!("preferences-folders")),
             ];
-            ui.horizontal_top(|ui| {
-                tab_strip(
-                    ui,
-                    TabStripSide::Left,
-                    &tabs,
-                    page,
-                    |picked| page = picked,
-                    None,
-                    || {},
-                );
-                ui.vertical(|ui| match page {
-                    Page::General => chosen = general_page(ui, state, actions),
-                    Page::Display => display_page(ui, state, actions, &mut display_tab),
-                    Page::Export => export_page(ui, state, actions),
-                    Page::Folders => folders_page(ui, state, actions),
-                });
-            });
+            tab_strip(
+                ui,
+                TabStripSide::Top,
+                &tabs,
+                page,
+                |picked| page = picked,
+                None,
+                || {},
+            );
+            ui.add_space(theme::SPACE_ITEM);
+            match page {
+                Page::General => chosen = general_page(ui, state, actions),
+                Page::Display => display_page(ui, state, actions, &mut display_tab),
+                Page::Export => export_page(ui, state, actions),
+                Page::Folders => folders_page(ui, state, actions),
+            }
         },
     );
     ctx.data_mut(|data| {
@@ -241,7 +241,8 @@ fn general_page(
     chosen
 }
 
-/// Display: Interface · Object Manager · New, as horizontal sub-tabs.
+/// Display: Interface · Object Manager · New, as vertical sub-tabs at the left
+/// of their content (S-L9, #393).
 fn display_page(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -257,21 +258,24 @@ fn display_page(
         (DisplayTab::New, tr!("preferences-display-new")),
     ];
     let current = *tab;
-    tab_strip(
-        ui,
-        TabStripSide::Top,
-        &tabs,
-        current,
-        |picked| *tab = picked,
-        None,
-        || {},
-    );
-    ui.add_space(theme::SPACE_ITEM);
-    match current {
-        DisplayTab::Interface => interface_tab(ui, state, actions),
-        DisplayTab::ObjectManager => object_manager_tab(ui, state, actions),
-        DisplayTab::New => new_tab(ui, state, actions),
-    }
+    // The row takes the whole height left (`ui.horizontal` would give about one).
+    let size = ui.available_size();
+    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        tab_strip(
+            ui,
+            TabStripSide::Left,
+            &tabs,
+            current,
+            |picked| *tab = picked,
+            None,
+            || {},
+        );
+        ui.vertical(|ui| match current {
+            DisplayTab::Interface => interface_tab(ui, state, actions),
+            DisplayTab::ObjectManager => object_manager_tab(ui, state, actions),
+            DisplayTab::New => new_tab(ui, state, actions),
+        });
+    });
 }
 
 /// Display › Interface: the formula syntax help icon of the text fields.
@@ -892,20 +896,48 @@ mod tests {
         harness.run();
     }
 
-    /// The rubrics are a vertical strip at the left of the content (not a
-    /// horizontal strip above it): the three labels share one column, and the
-    /// content starts to their right.
+    /// The rubrics are a horizontal strip above the content (S-L9, #393): the
+    /// labels share one row, and the content starts below them.
     #[test]
-    fn the_rubrics_are_a_column_at_the_left_of_the_content() {
+    fn the_rubrics_are_a_strip_above_the_content() {
         let harness = bench();
         let general = harness.get_by_label(&tr!("preferences-general")).rect();
         let display = harness.get_by_label(&tr!("preferences-display")).rect();
         let export = harness.get_by_label(&tr!("preferences-export")).rect();
-        assert!(display.top() >= general.bottom(), "stacked");
-        assert!(export.top() >= display.bottom(), "stacked");
-        assert!((general.left() - display.left()).abs() < 1.0, "one column");
+        assert!((general.top() - display.top()).abs() < 1.0, "one row");
+        assert!((general.top() - export.top()).abs() < 1.0, "one row");
+        assert!(display.left() >= general.right(), "side by side");
         let language = harness.get_by_label(&tr!("menu-language")).rect();
-        assert!(language.left() >= general.right(), "content on the right");
+        assert!(language.top() >= general.bottom(), "content below");
+    }
+
+    /// The Display sub-tabs are the secondary level (S-L9, #393): a column at
+    /// the left of their content, under the rubrics strip.
+    #[test]
+    fn the_display_sub_tabs_are_a_column_at_the_left_of_their_content() {
+        let mut harness = bench();
+        harness.get_by_label(&tr!("preferences-display")).click();
+        harness.run();
+        let rubric = harness.get_by_label(&tr!("preferences-display")).rect();
+        let interface = harness
+            .get_by_label(&tr!("preferences-display-interface"))
+            .rect();
+        let manager = harness
+            .get_by_label(&tr!("preferences-display-object-manager"))
+            .rect();
+        let new = harness.get_by_label(&tr!("preferences-display-new")).rect();
+        assert!(manager.top() >= interface.bottom(), "stacked");
+        assert!(new.top() >= manager.bottom(), "stacked");
+        assert!(
+            (interface.left() - manager.left()).abs() < 1.0,
+            "one column"
+        );
+        assert!((interface.left() - new.left()).abs() < 1.0, "one column");
+        assert!(interface.top() >= rubric.bottom(), "under the rubrics");
+        let help = harness
+            .get_by_label(&tr!("preferences-show-formula-help"))
+            .rect();
+        assert!(help.left() >= interface.right(), "content on the right");
     }
 
     /// Display › Object Manager: the lists and the expansion defaults are the

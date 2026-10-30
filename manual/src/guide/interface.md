@@ -261,16 +261,16 @@ The whole interface changes at once and the choice is remembered. You can also s
 
 Choose **File ▸ Preferences…** to open the **Preferences** window. It sets the application, not the project. The settings apply as soon as you change them. Close the window when you are done.
 
-<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display, Export and Folders at the left, the General page on the right." width="480">
+<img src="../images/preferences-general.png" alt="The Preferences window: the rubrics General, Display, Export and Folders across the top, the General page below." width="480">
 
-The rubrics (**General**, **Display**, **Export** and **Folders**) are listed at the left of the window:
+The rubrics (**General**, **Display**, **Export** and **Folders**) are listed across the top of the window:
 
 - **General**
   - **Language**.
   - **Maximum file size (MB)** and **Maximum cells (millions)**: the largest project StokesForge agrees to open. A bigger file is refused before it is read, which protects your computer from a file you received. Raise a limit here if you must open a large project.
   - **Save a recovery copy automatically** and **Copy every (min)**: see [Recovery copies](projects-and-workbooks.md#recovery-copies).
   - **Analysis**: **Values** sets whether an analysis window starts on **Show** or on **Keep in Results** the first time you use that analysis (see [Analysis](analysis.md)). **Warn when R² is low** opens a dialog after a calculation when R² is below 0.6.
-- **Display** has three tabs across the top:
+- **Display** has three tabs listed at the left of its page:
   - **Interface**: **Show formula syntax help** shows or hides the small help icon next to the text fields that accept a formula. It is shown by default. If the field has its own hint, a plain **?** icon stays.
   - **Object Manager**: the same settings as **View ▸ Object Manager** (see [Object Manager](#object-manager)): **Show Axes**, **Show Objects**, the groups to expand by default and **Reset Settings**.
   - **New**: what a **new** workbook or graph starts with. **Show Metadata Row** and **Show x' Row** set the header rows of new workbooks (see [Header rows](projects-and-workbooks.md#header-rows)). **Decimal comma on tick labels** makes new graphs write 1,5 instead of 1.5. Each graph can then change its own, and graphs that already exist do not change.
