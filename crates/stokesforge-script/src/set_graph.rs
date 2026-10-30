@@ -10,13 +10,18 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use stokesforge_core::compose::{self, FigureOffset, FrameAxis};
 use stokesforge_core::NodeId;
-use stokesforge_plot::{AxisScale, AxisSpec, LegendPosition, PlotSpec, SeriesAxis};
+use stokesforge_plot::{
+    AxisScale, AxisSpec, LegendPosition, LengthUnit, PlotSpec, SeriesAxis, MAX_FRAME_SIZE,
+    MIN_FRAME_SIZE,
+};
 use stokesforge_session::Snapshot;
 
 use crate::bridge::{self, HostError};
 use crate::engine::{self, ScriptContext};
 use crate::graph::{axis_range, invalid, update_axis};
+use crate::graph_size::parse_unit;
 use crate::surface::{to_py_error, Handle};
 
 /// The keys `set_graph` accepts, in one place: option parsing, the
@@ -53,7 +58,24 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     // The targeted panel's legend.
     "legend_visible",
     "legend_position",
+    // The size (#399): plot area of the panel's column / row, Left / Top of the
+    // first plot area (None = Auto), Figure size = Fixed. In `unit`.
+    "plot_width",
+    "plot_height",
+    "plot_left",
+    "plot_top",
+    "fixed_size",
 ];
+
+/// A length in `unit` at most as precise as this once in points: the
+/// comparison against the bounds tolerates the rounding of the conversion.
+const LENGTH_TOLERANCE: f64 = 1e-9;
+
+/// A number with at most two decimals, no trailing zero: `1.27`, `70.56`, `36`.
+fn short_number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
 
 /// What is asked to change on an axis; `None` = leave it alone.
 #[derive(Default)]
@@ -111,10 +133,27 @@ struct Changes {
     y: AxisChange,
     legend_visible: Option<bool>,
     legend_position: Option<LegendPosition>,
+    /// Sizes in points (already converted and checked). Left / Top: the inner
+    /// `None` is Auto.
+    plot_width: Option<f64>,
+    plot_height: Option<f64>,
+    plot_left: Option<Option<f64>>,
+    plot_top: Option<Option<f64>>,
+    fixed_size: Option<bool>,
 }
 
 impl Changes {
-    fn parse(options: &Bound<'_, PyDict>) -> PyResult<Self> {
+    /// True if a key needs the plot areas to be stored: a graph from an old
+    /// file is given the ones it is drawn with first.
+    fn sets_size(&self) -> bool {
+        self.plot_width.is_some()
+            || self.plot_height.is_some()
+            || self.plot_left.is_some()
+            || self.plot_top.is_some()
+            || self.fixed_size.is_some()
+    }
+
+    fn parse(options: &Bound<'_, PyDict>, unit: LengthUnit) -> PyResult<Self> {
         let mut changes = Self::default();
         for (key, value) in options.iter() {
             let key: String = key.extract()?;
@@ -150,7 +189,41 @@ impl Changes {
                     .filter(|v| v.is_finite())
                     .ok_or_else(|| invalid(format!("{key} must be a finite number")))
             };
+            // A length in `unit`, refused (never brought back) outside
+            // `[low, high]` points; the message gives the range in `unit`.
+            let length = |low: f64, high: f64| {
+                let number = value
+                    .extract::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .ok_or_else(|| invalid(format!("{key} must be a finite number")))?;
+                let points = unit.to_points(number);
+                if points < low - LENGTH_TOLERANCE || points > high + LENGTH_TOLERANCE {
+                    return Err(invalid(format!(
+                        "{key} must be between {} and {} {}",
+                        short_number(unit.from_points(low)),
+                        short_number(unit.from_points(high)),
+                        unit.symbol()
+                    )));
+                }
+                Ok(points.clamp(low, high))
+            };
+            // Left / Top: a length from the image edge, or `None` = Auto.
+            let offset = || {
+                if value.is_none() {
+                    Ok(None)
+                } else {
+                    length(0.0, MAX_FRAME_SIZE).map(Some)
+                }
+            };
             match key.as_str() {
+                "plot_width" => changes.plot_width = Some(length(MIN_FRAME_SIZE, MAX_FRAME_SIZE)?),
+                "plot_height" => {
+                    changes.plot_height = Some(length(MIN_FRAME_SIZE, MAX_FRAME_SIZE)?)
+                }
+                "plot_left" => changes.plot_left = Some(offset()?),
+                "plot_top" => changes.plot_top = Some(offset()?),
+                "fixed_size" => changes.fixed_size = Some(boolean()?),
                 "title" => changes.title = Some(string()?),
                 "title_visible" => changes.title_visible = Some(boolean()?),
                 "title_color" => changes.title_color = Some(color()?),
@@ -201,8 +274,15 @@ impl Changes {
         Ok(changes)
     }
 
-    /// Applies the changes to the spec; `layer` is the rank of the targeted panel.
-    fn apply(&self, spec: &mut PlotSpec, layer: usize, side: SeriesAxis) -> Result<(), HostError> {
+    /// Applies the changes to the spec; `layer` is the rank of the targeted
+    /// panel, `cell` its `(row, column)`.
+    fn apply(
+        &self,
+        spec: &mut PlotSpec,
+        layer: usize,
+        cell: (usize, usize),
+        side: SeriesAxis,
+    ) -> Result<(), HostError> {
         if let Some(title) = &self.title {
             spec.title.clone_from(title);
         }
@@ -236,6 +316,43 @@ impl Changes {
         if let Some(position) = self.legend_position {
             panel.legend.position = position;
         }
+        // The size, through the setters of the interface (#399). They only
+        // refuse a graph that stores no plot area and could not be given any
+        // (more cells than the layout stores): never a silent no-op.
+        let stored = |done: bool| {
+            if done {
+                Ok(())
+            } else {
+                Err(HostError::InvalidValue(
+                    "the plot areas of this graph cannot be set: it has too many cells".to_owned(),
+                ))
+            }
+        };
+        if let Some(width) = self.plot_width {
+            stored(compose::set_frame_size(
+                spec,
+                FrameAxis::Column,
+                cell.1,
+                width,
+            ))?;
+        }
+        if let Some(height) = self.plot_height {
+            stored(compose::set_frame_size(
+                spec,
+                FrameAxis::Row,
+                cell.0,
+                height,
+            ))?;
+        }
+        if let Some(left) = self.plot_left {
+            stored(compose::set_figure_offset(spec, FigureOffset::Left, left))?;
+        }
+        if let Some(top) = self.plot_top {
+            stored(compose::set_figure_offset(spec, FigureOffset::Top, top))?;
+        }
+        if let Some(fixed) = self.fixed_size {
+            stored(compose::set_fixed_figure(spec, fixed))?;
+        }
         Ok(())
     }
 }
@@ -257,8 +374,15 @@ fn set_graph_native(
             ))
         })?;
         let mut spec = before.clone();
-        changes.apply(&mut spec, layer, side)?;
-        let changed = spec != before;
+        // A size key on a graph from an old file: it is given the plot areas
+        // it is drawn with first (G7), and a call that then changes nothing
+        // writes nothing, the graph staying as it was.
+        if changes.sets_size() {
+            bridge::fix_frames(Some(&before), &mut spec);
+        }
+        let reference = spec.clone();
+        changes.apply(&mut spec, layer, panel, side)?;
+        let changed = spec != reference;
         Ok::<_, HostError>((spec, changed))
     };
     let session = context.session();
@@ -294,16 +418,28 @@ fn set_graph_native(
 /// automatic), `x_inverted`/`y_inverted`, `x_grid`/`y_grid`,
 /// `x_visible`/`y_visible`. Titles: Typst markup, as in `plot`.
 ///
-/// An unknown key, a value of the wrong type or refused bounds raise
+/// The size, in `unit` (`'cm'` by default, `'mm'`, `'pt'` or `'in'`; never the
+/// unit of the Preferences): `plot_width` (plot area of the column of `panel`)
+/// and `plot_height` (of its row), each between 1.27 cm and 70.56 cm (36 to
+/// 2000 pt), `plot_left` and `plot_top` (distance from the image edge to the
+/// first plot area, `None` = Auto, 0 to 70.56 cm; a value below what the axes
+/// need is kept and drawn raised to it) and `fixed_size` (Figure size =
+/// Fixed). The image size itself is not settable: it follows the plot areas
+/// (read it with `pyst.graph_size`). A value out of range is refused, never
+/// brought back. A graph from an old file is given the plot areas it is drawn
+/// with in the same history entry.
+///
+/// An unknown key or unit, a value of the wrong type or refused bounds raise
 /// `InvalidValueError` without writing anything; `BrokenReferenceError` for a
 /// stale handle.
 #[pyfunction]
-#[pyo3(signature = (graph, *, panel=(0, 0), axis="left", **options))]
+#[pyo3(signature = (graph, *, panel=(0, 0), axis="left", unit="cm", **options))]
 pub(crate) fn set_graph(
     py: Python<'_>,
     graph: &Handle,
     panel: (usize, usize),
     axis: &str,
+    unit: &str,
     options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<()> {
     let context = engine::current_context()?;
@@ -313,8 +449,9 @@ pub(crate) fn set_graph(
         "right" => SeriesAxis::Right,
         _ => return Err(invalid("unknown axis: use left or right")),
     };
+    let unit = parse_unit(unit)?;
     let changes = match options {
-        Some(options) => Changes::parse(options)?,
+        Some(options) => Changes::parse(options, unit)?,
         None => Changes::default(),
     };
     let (id, epoch) = (graph.id, graph.epoch);

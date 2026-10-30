@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
+  (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =
+  Auto) and `fixed_size`, with a `unit="cm"|"mm"|"pt"|"in"` keyword (centimetres
+  by default, never the Preferences unit); values out of range are refused. The
+  new `pyst.graph_size(graph, unit="cm")` reads the image size, the plot areas,
+  Left / Top and Fixed. `pyst.__api_version__` is now `0.2`.
+
 - Column formulas (#401): the `^` operator, comparisons (`<`, `<=`, `>`, `>=`,
   `==`, `!=`, true = 1) and row-wise functions in **F(x)=** (`sqrt`, `root`,
   `exp`, `ln`, `log`, `log2`, `logx`, `abs`, `sign`, trigonometry, `round`,

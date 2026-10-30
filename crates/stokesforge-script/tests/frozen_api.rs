@@ -399,6 +399,7 @@ r = pyst.info(a)
 print('info|' + keys(r))
 print('info.column|' + keys(r['column']))
 two = pyst.plot([a, b], None)
+print('graph_size|' + keys(pyst.graph_size(pyst.plot(b, a))))
 print('series.item|' + keys(pyst.series(two)[0]))
 print('series_groups.item|' + keys(pyst.series_groups(two)[0]))
 r = pyst.analysis.baseline(b, a, method='line', points=[(1, 1), (3, 3)], keep_baseline=True)
@@ -498,6 +499,11 @@ const INPUTS: &[Input] = &[
     Input {
         name: "legend_position",
         body: "pyst.set_graph(g, legend_position=v)",
+        refusal: true,
+    },
+    Input {
+        name: "length_unit",
+        body: "pyst.graph_size(g, unit=v)",
         refusal: true,
     },
     Input {

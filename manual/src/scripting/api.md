@@ -333,7 +333,7 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 
 ### Change graph properties
 
-`pyst.set_graph(graph, *, panel=(0, 0), axis="left", **options)` changes properties of an existing graph. All the options of one call form a single history entry. If you give a wrong value, nothing is changed.
+`pyst.set_graph(graph, *, panel=(0, 0), axis="left", unit="cm", **options)` changes properties of an existing graph. All the options of one call form a single history entry. If you give a wrong value, nothing is changed.
 
 `panel` is the (row, column) of the panel, `(0, 0)` for a graph with a single panel. The Y options apply to the Y axis named by `axis`.
 
@@ -349,10 +349,36 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `x_grid`, `y_grid`, `x_visible`, `y_visible` | `True` or `False` |
 | `legend_visible` | `True` or `False` |
 | `legend_position` | `"top_left"`, `"top_right"`, `"bottom_left"`, `"bottom_right"` |
+| `plot_width`, `plot_height` | Size of the plot area of the column (width) and of the row (height) of `panel`, in `unit`. From 1.27 cm to 70.56 cm (36 to 2000 pt). |
+| `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, in `unit`, from 0 to 70.56 cm. `None` means automatic. |
+| `fixed_size` | `True` or `False`: the Fixed figure size of Graph Properties |
+
+The size options are numbers in `unit`: `"cm"` (the default), `"mm"`, `"pt"` or `"in"`. A script never uses the unit chosen in Preferences, so it gives the same figure on every computer. A value outside the range is refused, not corrected. The size of the whole image cannot be set: it follows the plot areas and the axes, titles and legend around them.
 
 ```python
 pyst.set_graph(g, title="Absorption spectrum", x_from=300, x_to=800,
                legend_position="top_right")
+
+# A plot area of 8 cm by 5 cm, then 100 mm wide.
+pyst.set_graph(g, plot_width=8, plot_height=5)
+pyst.set_graph(g, plot_width=100, unit="mm")
+```
+
+### Read the graph size
+
+`pyst.graph_size(graph, *, unit="cm")` returns a dictionary and changes nothing:
+
+| Key | Value |
+|---|---|
+| `width`, `height` | Size of the whole image |
+| `plot_widths`, `plot_heights` | Plot area of each grid column (widths) and row (heights), as lists |
+| `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, or `None` for automatic |
+| `fixed_size` | `True` if the figure size is Fixed |
+
+```python
+size = pyst.graph_size(g, unit="mm")
+print(size["width"], size["height"])
+print(size["plot_widths"][0])
 ```
 
 ### Add shapes
