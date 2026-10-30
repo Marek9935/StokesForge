@@ -765,13 +765,13 @@ plot-stale-warning = Avertir si des données ne sont pas à jour
     .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports
 
 plot-size = Taille
-plot-size-width = Largeur ({ $unit })
-plot-size-height = Hauteur ({ $unit })
-plot-size-column-width = Largeur de la colonne { $n } ({ $unit })
-plot-size-row-height = Hauteur de la ligne { $n } ({ $unit })
+plot-size-width = Largeur de la zone de tracé ({ $unit })
+plot-size-height = Hauteur de la zone de tracé ({ $unit })
+plot-size-column-width = Largeur de la zone de tracé, colonne { $n } ({ $unit })
+plot-size-row-height = Hauteur de la zone de tracé, ligne { $n } ({ $unit })
 plot-size-total = Taille du graphique ({ $unit })
 plot-size-total-value = { $width } × { $height }
-plot-size-note = Le titre, s'il est affiché, ajoute sa hauteur au-dessus des lignes. Les autres colonnes et lignes gardent leur taille quand l'une change : le graphique s'agrandit ou se réduit.
+plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit le graphique, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille.
 
 # Onglet Zone de tracé
 
@@ -1228,7 +1228,7 @@ history-plot-reorder-group = Réordonner le groupe
 history-plot-closed-frame = Modifier le cadre fermé
 history-plot-add-cell = Ajouter un calque à côté
 history-plot-remove-cell = Supprimer le calque
-history-plot-resize-cell = Redimensionner le graphique
+history-plot-resize-cell = Redimensionner la zone de tracé
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

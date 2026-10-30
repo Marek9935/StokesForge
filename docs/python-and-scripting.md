@@ -196,7 +196,7 @@ the path of the open file; `pyst.save_as` changes it, and the application adopts
 it at the end of the run). Without a host that sets it (CLI), the project has no
 path before the first `save_as`.
 `export_graph` reads the graph spec in a snapshot and writes with
-`stokesforge-render-svg` (size from the cells of the graph, `figure_size` (#394), fonts and Typst of the application, SVG text
+`stokesforge-render-svg` (size from the frames and bands of the graph, `figure_size` (#394), fonts and Typst of the application, SVG text
 left as text); `stokesforge-script` therefore depends on `render-svg`, which
 pulls in neither egui nor winit.
 

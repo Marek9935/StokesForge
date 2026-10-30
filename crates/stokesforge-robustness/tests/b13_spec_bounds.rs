@@ -393,16 +393,16 @@ fn b13_histogram_bins_from_disk_is_bounded() {
     );
 }
 
-// -- cell sizes (#394) ------------------------------------------------------
+// -- frame sizes (#394) ------------------------------------------------------
 
 /// A hostile file can store anything as the width of a column or the height of
 /// a row: NaN, negative, absurdly large, far more entries than the grid has
 /// cells. The record crosses the disk as written, and the spec reads it back
 /// within bounds (the drawing of such a figure is `render/tests/figure_layout.rs`):
-/// no cell below the minimum or above the maximum, and a figure that cannot ask
+/// no frame below the minimum or above the maximum, and a figure that cannot ask
 /// for the moon (a PNG ×4 of it would not fit anywhere).
 #[test]
-fn b13_hostile_cell_sizes_cross_the_disk_and_read_back_bounded() {
+fn b13_hostile_frame_sizes_cross_the_disk_and_read_back_bounded() {
     let dir = TempDir::new().expect("temporary directory");
     let path = dir.path().join("hostile.stf");
     let mut project = Project::new("Hostile").expect("valid project");
@@ -415,8 +415,8 @@ fn b13_hostile_cell_sizes_cross_the_disk_and_read_back_bounded() {
         .take(1000)
         .collect();
     let spec = PlotSpec {
-        column_widths: hostile.clone(),
-        row_heights: vec![2000.0; 16],
+        frame_widths: hostile.clone(),
+        frame_heights: vec![2000.0; 16],
         ..PlotSpec::empty("T").with_panels(Panels::new(panels))
     };
     let root = project.root();
@@ -429,9 +429,9 @@ fn b13_hostile_cell_sizes_cross_the_disk_and_read_back_bounded() {
     else {
         panic!("a graph expected");
     };
-    assert_eq!(spec.column_widths.len(), 1000, "kept as written");
-    let widths = spec.cell_widths().expect("stored");
-    let heights = spec.cell_heights().expect("stored");
+    assert_eq!(spec.frame_widths.len(), 1000, "kept as written");
+    let widths = spec.sanitized_frame_widths().expect("stored");
+    let heights = spec.sanitized_frame_heights().expect("stored");
     assert_eq!((widths.len(), heights.len()), (16, 16));
     let extent = stokesforge_plot::MAX_FIGURE_EXTENT;
     assert!(widths.iter().sum::<f64>() <= extent + 1e-6);

@@ -153,7 +153,7 @@ or from the `Visuals` it sets (`error_fg_color`, `warn_fg_color`,
 and matrices stay bounded to the common rectangle. In a
 graph (`graph_view_contents`,
 `crates/stokesforge-app/src/app/graph_window.rs`), the figure keeps the ratio of
-figure (`GraphView::figure_layout`: the sum of the cell sizes plus the title band, #394; 480×360 for a new graph) but is scaled
+figure (`GraphView::figure_layout`: the frames plus the axis and title bands, #394; 480×360 for a new graph) but is scaled
 "contain" in the available space — maximized by taking the limiting
 dimension, width or height, both when enlarging and when shrinking
 (F11). No clipping or scrolling for the graph: the whole figure always stays

@@ -731,37 +731,51 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
 `compose::insert_cell` (#394): Right inserts a **whole grid column** after the
 reference cell's (every cell at a greater column moves +1, whatever its row, with
 its overlays; the other rows get a hole where the new cell is), Below a whole row;
-the new column (row) takes the width (height) of the reference cell, so the new
-cell is exactly the reference one (4/3 stays 4/3) and the figure grows. The new
-layer is appended last, so existing indices do not move. `compose::remove_cell`
-removes the column (row) a deleted cell leaves empty, with its size, so the figure
-shrinks by it; a column (row) that still holds a cell stays, with a hole. It
-resets the graph `title_anchor` when layer 0 goes (it is in the frame of the
-first layer).
+the new column (row) takes the **frame** width (height) of the reference cell, so
+the new plot area is exactly the reference's (4/3 stays 4/3) and the figure grows
+by that frame plus the new cell's bands. The new layer is appended last, so
+existing indices do not move. `compose::remove_cell` removes the column (row) a
+deleted cell leaves empty, with its frame, so the figure shrinks by that column's
+outer width; a column (row) that still holds a cell stays, with a hole. It resets
+the graph `title_anchor` when layer 0 goes (it is in the frame of the first
+layer).
 
 ### Graph size (#394)
 
-The figure is the sum of the **width of each grid column** and the **height of each
-grid row** (`PlotSpec::column_widths` / `row_heights`, points) plus the title band;
-see `docs/rendering.md`, "Figure size and cells".
+A graph stores the **plot area** (the frame) of each grid column and row
+(`PlotSpec::frame_widths` / `frame_heights`, points); the margins, the axis bands
+and the title band are added around it. Adding an axis or a title grows the
+image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands".
 
-- **Graph Properties > General > Size**: one field per column width and per row
-  height ("Width", "Column 2 width"…), in the unit of Preferences > General >
-  Length unit (cm by default, mm, pt, in; `length_unit::LengthUnit`, the file
-  keeps points), and the read-only "Graph size". The fields edit the draft of the
-  window like the others (one undo step for the window); a graph from an old
-  file is first made explicit (`cell_sizes::set_size_in_draft`), so the other
-  cells keep the size they were drawn with.
-- **`Action::SetCellSize { graph, axis, index, size }`** (`PlotEditKind::
-  ResizeCell`, "Resize Graph", one `EditPlotSpec`, one undo step) is the path of a
-  drag handle on a cell boundary (phase 2): it materializes a legacy graph, clamps
-  the size to `[MIN_CELL, MAX_CELL_SIZE]` and sends nothing if the size is
-  unchanged or outside the grid. Add Layer Beside and Delete materialize the same
-  way before they edit.
-- A new graph is 480 × 360 pt (`PlotSpec::new_graph`), titled or not (a title
-  adds its band above, `pyst.plot` included); the Beside / Below layers keep their
-  reference layer's size, the figure grows. `pyst` has no size setter yet.
-- The window follows the figure and the drag handles are phase 2 of #394.
+- **Graph Properties > General > Size**: one field per column ("Plot area width
+  (cm)", "Plot area width, column 2 (cm)"…) and per row ("Plot area height…"),
+  in the unit of Preferences > General > Length unit (cm by default, mm, pt, in;
+  `length_unit::LengthUnit`, the file keeps points), and the read-only "Graph
+  size" (the frames plus the bands the figure has now,
+  `FigureLayout::size_with_frames`). The fields edit the draft of the window like
+  the others (one undo step for the window); a graph from an old file is first
+  given the frames it is drawn with (`frame_sizes::set_size_in_draft`, from the
+  published `FigureLayout::frame_widths`), so the other plot areas keep their
+  size. The fields are `quantities::frame_size` (36 to 2000 pt, wide enough for
+  six digits).
+- **`Action::SetFrameSize { graph, axis: FrameAxis, index, size }`**
+  (`PlotEditKind::ResizeCell`, "Resize Plot Area", one `EditPlotSpec`, one undo
+  step) is the path of the drag handle (next phase): it fixes a legacy graph,
+  clamps the size to `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and sends nothing if the
+  size is unchanged or outside the grid.
+- **Legacy graphs (G7).** Opening one changes nothing and writes nothing. Its
+  first edit, whatever it is (a field, a title, an axis, a layer, a curve), fixes
+  the frames it was drawn with in the very command of the edit
+  (`AppState::with_fixed_frames`, `frame_sizes::fix_from`); where the cells of a
+  column or row had different frames, the largest is kept. Add Layer and Delete
+  fix them before they edit the grid.
+- A new graph is created legacy and fixed at once (`frame_sizes::fix_new`), so
+  its figure is exactly 480 × 360 pt, explicit; a title added later grows the
+  figure by its band (`pyst.plot` included). Beside / Below layers have the frame
+  of their reference layer. `pyst` has no size setter yet.
+- The window following the figure and the drag handles on the outer boundary of
+  the cell (`DrawnPanel::cell_origin` / `cell_size`, `Action::SetFrameSize`) are
+  the next phase of #394.
 
 **Indices that follow a removal** (and its undo): `ViewState::remap_panels`
 (framings), `GraphView::remap_layers` (active layer, selection, gestures in

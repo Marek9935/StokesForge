@@ -939,18 +939,18 @@ fn the_custom_ticks_agree_and_change_the_figure() {
     }
 }
 
-// -- #394: the size of the figure comes from its cells --
+// -- #394: the size of the figure comes from its frames --
 
 /// The screen and the export lay out the same figure at the same size, from
-/// stored cell sizes and a title whose band is measured through Typst (every
+/// stored frame sizes and a title whose band is measured through Typst (every
 /// title goes through it): both read `pipeline::figure_layout`.
 #[test]
-fn the_screen_and_the_export_size_the_figure_the_same_from_its_cells() {
+fn the_screen_and_the_export_size_the_figure_the_same_from_its_frames() {
     use plotters::drawing::IntoDrawingArea;
     let mut fixture = minimal();
     fixture.spec.title = "Sized figure".to_owned();
-    fixture.spec.column_widths = vec![700.3];
-    fixture.spec.row_heights = vec![310.4];
+    fixture.spec.frame_widths = vec![700.3];
+    fixture.spec.frame_heights = vec![310.4];
 
     let measurer = TextMeasurer::default();
     let choice = stokesforge_render_svg::FontChoice::default();
@@ -983,23 +983,25 @@ fn the_screen_and_the_export_size_the_figure_the_same_from_its_cells() {
         "one layout per backend"
     );
     assert!(svg_layout.title_band > 0);
-    assert_eq!(svg_layout.size, (700, 310 + svg_layout.title_band));
+    // 700.3 + 88 and 310.4 + 76 (margins and axis bands around the frame).
+    assert_eq!(svg_layout.size, (788, 386 + svg_layout.title_band));
 }
 
 /// Drawn at the size of its layout, a figure without a title has exactly the
-/// stored cell, on both backends, primitive by primitive.
+/// stored frame as plot area, on both backends, primitive by primitive.
 #[test]
-fn a_stored_cell_is_drawn_at_its_size_by_both_backends() {
+fn a_stored_frame_is_drawn_at_its_size_by_both_backends() {
     let mut fixture = minimal();
     fixture.spec.title.clear();
-    fixture.spec.column_widths = vec![700.3];
-    fixture.spec.row_heights = vec![310.4];
+    fixture.spec.frame_widths = vec![700.3];
+    fixture.spec.frame_heights = vec![310.4];
     let (_, drawn) = agree(
         fixture.project.tree(),
         &fixture.spec,
-        (700, 310),
-        "stored cell",
+        (788, 386),
+        "stored frame",
     );
-    assert_eq!(drawn.panels[0].cell_size, (700, 310));
+    assert_eq!(drawn.panels[0].cell_size, (788, 386));
     assert_eq!(drawn.panels[0].cell_origin, (0, 0));
+    assert_eq!(drawn.panels[0].pixel_size, (700, 310));
 }

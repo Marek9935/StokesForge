@@ -572,14 +572,11 @@ mod tests {
     #[test]
     fn a_graph_size_field_is_wide_in_every_unit() {
         use stokesforge_app_state::length_unit::LengthUnit;
-        use stokesforge_core::compose::CellAxis;
         for unit in LengthUnit::ALL {
-            for axis in [CellAxis::Column, CellAxis::Row] {
-                let quantity = quantities::cell_size(unit, axis);
-                assert!(quantity.wide && !quantity.is_compact() && !quantity.is_compact_signed());
-                let widest = format_grid(quantity.max);
-                assert!(widest.len() <= 7, "{unit:?}: {widest}");
-            }
+            let quantity = quantities::frame_size(unit);
+            assert!(quantity.wide && !quantity.is_compact() && !quantity.is_compact_signed());
+            let widest = format_grid(quantity.max);
+            assert!(widest.len() <= 7, "{unit:?}: {widest}");
         }
         const { assert!(crate::theme::FIELD_WIDTH_VALUE > FIELD_WIDTH) };
     }

@@ -82,22 +82,31 @@ pub use stokesforge_render::{FigureTexts, FontChoice};
 /// still takes `size` as a parameter.
 pub const DEFAULT_SIZE: (u32, u32) = pipeline::DEFAULT_FIGURE_SIZE;
 
-/// The layout of the figure of `spec` (#394), the title measured with the
-/// export's own measurement, Typst included (invariant 4): the page of an
-/// export is sized by this, on a throwaway backend, before the figure is drawn.
-/// Screen and export agree because both read [`pipeline::figure_layout`].
-pub fn figure_layout(
+/// Runs `run` on a throwaway backend that measures text the way the export
+/// does, Typst included (invariant 4). Typst is only built when a title is
+/// there to measure.
+fn with_probe<R, E>(
     spec: &PlotSpec,
     measurer: &TextMeasurer,
     choice: &stokesforge_render::FontChoice,
-) -> Result<pipeline::FigureLayout, SvgError> {
+    run: impl for<'b> FnOnce(
+        &plotters::drawing::DrawingArea<MeasuredSvgBackend<'b>, plotters::coord::Shift>,
+    ) -> Result<R, E>,
+) -> Result<R, SvgError>
+where
+    SvgError: From<E>,
+{
     use plotters::drawing::IntoDrawingArea;
     let mut buffer = String::new();
-    if !spec.title_visible || spec.title.is_empty() {
-        // No title to measure: no Typst to build.
+    let titled = (spec.title_visible && !spec.title.is_empty())
+        || spec
+            .panels
+            .iter()
+            .any(|panel| panel.title_visible && !panel.title.is_empty());
+    if !titled {
         let probe =
             MeasuredSvgBackend::with_string(&mut buffer, (1, 1), measurer).into_drawing_area();
-        return Ok(pipeline::figure_layout(spec, &probe)?);
+        return Ok(run(&probe)?);
     }
     let cache = stokesforge_render::formula::FormulaCache::new();
     let mode = SvgTextMode::Text;
@@ -106,7 +115,62 @@ pub fn figure_layout(
         .with_typst(&typst)
         .with_font(choice, mode)
         .into_drawing_area();
-    Ok(pipeline::figure_layout(spec, &probe)?)
+    Ok(run(&probe)?)
+}
+
+/// The layout of the figure of `spec` (#394), the titles measured with the
+/// export's own measurement, Typst included (invariant 4): the page of an
+/// export is sized by this, on a throwaway backend, before the figure is drawn.
+/// Screen and export agree because both read [`pipeline::figure_layout`].
+pub fn figure_layout(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<pipeline::FigureLayout, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::figure_layout(spec, probe)
+    })
+}
+
+/// The frame sizes a legacy graph (no stored frame) is drawn with, in points
+/// (see [`pipeline::legacy_frames`]), measured like the export: what the
+/// application and `pyst` store before they replace a legacy spec (#394, G7).
+/// `None` for a graph that already stores its frames.
+pub fn legacy_frames(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<Option<pipeline::FrameSizes>, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::legacy_frames(spec, probe)
+    })
+}
+
+/// Gives a legacy `target` (no stored frame) the frames `reference` is drawn
+/// with (#394, G7): called before a legacy spec is replaced, `reference` being
+/// the spec as it is now, so that the plot areas stay exactly what they were
+/// and only what the edit changes moves. Nothing happens, and `false` comes
+/// back, if `target` already stores frames, if `reference` has none to give (it
+/// stores its own) or if the two do not have the same grid (a cell added or
+/// deleted: the caller fixes the frames before editing the grid). A graph
+/// created legacy fixes itself: `reference` is a copy of `target`.
+pub fn fix_legacy_frames(
+    reference: &PlotSpec,
+    target: &mut PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<bool, SvgError> {
+    if !(target.frame_widths.is_empty() && target.frame_heights.is_empty())
+        || (target.rows(), target.columns()) != (reference.rows(), reference.columns())
+    {
+        return Ok(false);
+    }
+    let Some((widths, heights)) = legacy_frames(reference, measurer, choice)? else {
+        return Ok(false);
+    };
+    target.frame_widths = widths;
+    target.frame_heights = heights;
+    Ok(true)
 }
 
 /// [`figure_layout`]'s size, or the legacy default if the measurement fails

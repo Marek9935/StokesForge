@@ -111,8 +111,8 @@ pub use series::{
 };
 pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
 pub use spec::{
-    Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE, MAX_CELL_SIZE,
-    MAX_FIGURE_EXTENT, MIN_CELL, TRANSPARENT,
+    Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE, FALLBACK_FRAME,
+    MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
 };
 pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,

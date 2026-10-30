@@ -33,12 +33,12 @@
 pub mod analysis;
 pub mod analysis_recent;
 pub mod cell_sides;
-pub mod cell_sizes;
 pub mod column_move;
 pub mod default_folders;
 pub mod errors;
 pub mod figure_texts;
 pub mod file_picker;
+pub mod frame_sizes;
 pub mod history_text;
 pub mod i18n;
 pub mod length_unit;

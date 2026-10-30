@@ -766,13 +766,13 @@ plot-stale-warning = Warn about out-of-date data
     .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports
 
 plot-size = Size
-plot-size-width = Width ({ $unit })
-plot-size-height = Height ({ $unit })
-plot-size-column-width = Column { $n } width ({ $unit })
-plot-size-row-height = Row { $n } height ({ $unit })
+plot-size-width = Plot area width ({ $unit })
+plot-size-height = Plot area height ({ $unit })
+plot-size-column-width = Plot area width, column { $n } ({ $unit })
+plot-size-row-height = Plot area height, row { $n } ({ $unit })
 plot-size-total = Graph size ({ $unit })
 plot-size-total-value = { $width } × { $height }
-plot-size-note = The title, if shown, adds its height above the rows. The other columns and rows keep their size when one changes: the graph grows or shrinks.
+plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size.
 
 # Plot Area tab
 
@@ -1229,7 +1229,7 @@ history-plot-reorder-group = Reorder Group
 history-plot-closed-frame = Change Closed Frame
 history-plot-add-cell = Add Layer Beside
 history-plot-remove-cell = Delete Layer
-history-plot-resize-cell = Resize Graph
+history-plot-resize-cell = Resize Plot Area
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel

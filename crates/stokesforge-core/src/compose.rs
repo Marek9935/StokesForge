@@ -341,11 +341,11 @@ pub enum CellSide {
 /// A **whole grid column** (Right) or **row** (Below) is inserted (#394): every
 /// layer on the far side of the reference shifts one column (row) further,
 /// whatever its row (column), with its overlay layers; the other rows (columns)
-/// get a hole where the new cell is. The new column (row) takes the width
-/// (height) of the reference cell, so the new cell is exactly the reference and
-/// the figure grows by that size. A graph without stored sizes (legacy, empty
-/// vectors) stays so: core does not measure, the application materializes the
-/// sizes before editing.
+/// get a hole where the new cell is. The new column (row) takes the frame width
+/// (height) of the reference cell, so the new plot area is exactly the
+/// reference's and the figure grows by the new cell's bands and frame. A graph
+/// without stored frames (legacy, empty vectors) stays so: core does not
+/// measure, the application materializes the frames before editing.
 /// `None`, with the spec unchanged, if `panel` does not exist, if a position
 /// would overflow (rows and columns are free `usize`s once read from a file)
 /// or if the grid would exceed [`MAX_GRID_CELLS`].
@@ -379,8 +379,8 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
         return None;
     }
     // The sizes, read before the positions move.
-    let widths = spec.cell_widths();
-    let heights = spec.cell_heights();
+    let widths = spec.sanitized_frame_widths();
+    let heights = spec.sanitized_frame_heights();
     for candidate in spec.panels.iter_mut().filter(|candidate| shifts(candidate)) {
         match side {
             CellSide::Right => candidate.column += 1,
@@ -391,13 +391,13 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
         CellSide::Right => {
             if let Some(mut widths) = widths {
                 widths.insert(new_column, widths[column]);
-                spec.column_widths = widths;
+                spec.frame_widths = widths;
             }
         }
         CellSide::Below => {
             if let Some(mut heights) = heights {
                 heights.insert(new_row, heights[row]);
-                spec.row_heights = heights;
+                spec.frame_heights = heights;
             }
         }
     }
@@ -405,36 +405,39 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
     Some(spec.panels.len() - 1)
 }
 
-/// Which dimension of the grid a size belongs to (#394).
+/// Which dimension of the grid a frame size belongs to (#394).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CellAxis {
-    /// The width of a grid column.
+pub enum FrameAxis {
+    /// The width of the frame of a grid column.
     Column,
-    /// The height of a grid row.
+    /// The height of the frame of a grid row.
     Row,
 }
 
-/// Sets the width of grid column `index` or the height of grid row `index` to
-/// `size` points, brought into `[MIN_CELL, MAX_CELL_SIZE]` (#394). The other
-/// columns and rows keep their size, so the figure grows or shrinks by the
-/// difference. `false`, with the spec unchanged, if the size is not finite, the
-/// index is outside the grid or the graph is legacy (no stored sizes: the
-/// application materializes them first, core does not measure).
-pub fn set_cell_size(spec: &mut PlotSpec, axis: CellAxis, index: usize, size: f64) -> bool {
+/// Sets the frame width of grid column `index` or the frame height of grid row
+/// `index` to `size` points, brought into `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`
+/// (#394). The other columns and rows keep their frame, so the figure grows or
+/// shrinks by the difference. `false`, with the spec unchanged, if the size is
+/// not finite, the index is outside the grid or the graph is legacy (no stored
+/// frames: the application materializes them first, core does not measure).
+pub fn set_frame_size(spec: &mut PlotSpec, axis: FrameAxis, index: usize, size: f64) -> bool {
     if !size.is_finite() {
         return false;
     }
-    let (sizes, min) = match axis {
-        CellAxis::Column => (spec.cell_widths(), stokesforge_plot::MIN_CELL.0),
-        CellAxis::Row => (spec.cell_heights(), stokesforge_plot::MIN_CELL.1),
+    let sizes = match axis {
+        FrameAxis::Column => spec.sanitized_frame_widths(),
+        FrameAxis::Row => spec.sanitized_frame_heights(),
     };
     let Some(mut sizes) = sizes.filter(|sizes| index < sizes.len()) else {
         return false;
     };
-    sizes[index] = size.clamp(f64::from(min), stokesforge_plot::MAX_CELL_SIZE);
+    sizes[index] = size.clamp(
+        stokesforge_plot::MIN_FRAME_SIZE,
+        stokesforge_plot::MAX_FRAME_SIZE,
+    );
     match axis {
-        CellAxis::Column => spec.column_widths = sizes,
-        CellAxis::Row => spec.row_heights = sizes,
+        FrameAxis::Column => spec.frame_widths = sizes,
+        FrameAxis::Row => spec.frame_heights = sizes,
     }
     true
 }
@@ -488,8 +491,8 @@ pub fn remove_cell(spec: &mut PlotSpec, panel: usize) -> bool {
     };
     let is_cell = target.overlay.is_none();
     let (row, column) = (target.row, target.column);
-    let widths = spec.cell_widths();
-    let heights = spec.cell_heights();
+    let widths = spec.sanitized_frame_widths();
+    let heights = spec.sanitized_frame_heights();
     if !spec.panels.remove_indices(&removed) {
         return false;
     }
@@ -511,7 +514,7 @@ pub fn remove_cell(spec: &mut PlotSpec, panel: usize) -> bool {
                 if column < widths.len() {
                     widths.remove(column);
                 }
-                spec.column_widths = widths;
+                spec.frame_widths = widths;
             }
         }
         if !spec.panels.iter().any(|candidate| candidate.row == row) {
@@ -524,7 +527,7 @@ pub fn remove_cell(spec: &mut PlotSpec, panel: usize) -> bool {
                 if row < heights.len() {
                     heights.remove(row);
                 }
-                spec.row_heights = heights;
+                spec.frame_heights = heights;
             }
         }
     }
@@ -1192,8 +1195,8 @@ mod tests {
 
     fn sized(cells: &[(usize, usize)], widths: &[f64], heights: &[f64]) -> PlotSpec {
         PlotSpec {
-            column_widths: widths.to_vec(),
-            row_heights: heights.to_vec(),
+            frame_widths: widths.to_vec(),
+            frame_heights: heights.to_vec(),
             ..spec_of(cells)
         }
     }
@@ -1202,9 +1205,9 @@ mod tests {
     fn insert_right_inserts_the_reference_width_next_to_the_reference_column() {
         let mut spec = sized(&[(0, 0), (0, 1)], &[300.0, 200.0], &[250.0]);
         assert_eq!(insert_cell(&mut spec, 0, CellSide::Right), Some(2));
-        assert_eq!(spec.column_widths, [300.0, 300.0, 200.0]);
+        assert_eq!(spec.frame_widths, [300.0, 300.0, 200.0]);
         assert_eq!(
-            spec.row_heights,
+            spec.frame_heights,
             [250.0],
             "a column leaves the heights alone"
         );
@@ -1214,36 +1217,36 @@ mod tests {
     fn insert_below_inserts_the_reference_height_and_keeps_the_widths() {
         let mut spec = sized(&[(0, 0), (1, 0)], &[400.0], &[250.0, 100.0]);
         assert_eq!(insert_cell(&mut spec, 0, CellSide::Below), Some(2));
-        assert_eq!(spec.row_heights, [250.0, 250.0, 100.0]);
-        assert_eq!(spec.column_widths, [400.0]);
+        assert_eq!(spec.frame_heights, [250.0, 250.0, 100.0]);
+        assert_eq!(spec.frame_widths, [400.0]);
     }
 
     #[test]
-    fn a_new_cell_beside_a_4_by_3_cell_is_exactly_4_by_3() {
-        let mut spec = PlotSpec::new_graph();
+    fn a_new_cell_has_the_frame_of_its_reference() {
+        let mut spec = sized(&[(0, 0)], &[392.0], &[294.0]);
         insert_cell(&mut spec, 0, CellSide::Right);
-        assert_eq!(spec.cell_widths(), Some(vec![480.0, 480.0]));
-        assert_eq!(spec.cell_heights(), Some(vec![360.0]));
+        assert_eq!(spec.sanitized_frame_widths(), Some(vec![392.0, 392.0]));
+        assert_eq!(spec.sanitized_frame_heights(), Some(vec![294.0]));
     }
 
     #[test]
     fn inserting_in_a_legacy_graph_leaves_the_sizes_unstored() {
         let mut spec = spec_of(&[(0, 0)]);
         insert_cell(&mut spec, 0, CellSide::Right);
-        assert!(spec.column_widths.is_empty() && spec.row_heights.is_empty());
+        assert!(spec.frame_widths.is_empty() && spec.frame_heights.is_empty());
     }
 
     #[test]
     fn removing_the_last_cell_of_a_column_or_row_removes_its_size() {
         let mut spec = sized(&[(0, 0), (0, 1), (0, 2)], &[100.0, 200.0, 300.0], &[250.0]);
         assert!(remove_cell(&mut spec, 1));
-        assert_eq!(spec.column_widths, [100.0, 300.0], "figure shrinks by 200");
-        assert_eq!(spec.row_heights, [250.0]);
+        assert_eq!(spec.frame_widths, [100.0, 300.0], "figure shrinks by 200");
+        assert_eq!(spec.frame_heights, [250.0]);
 
         let mut spec = sized(&[(0, 0), (1, 0)], &[400.0], &[250.0, 100.0]);
         assert!(remove_cell(&mut spec, 0));
-        assert_eq!(spec.row_heights, [100.0]);
-        assert_eq!(spec.column_widths, [400.0]);
+        assert_eq!(spec.frame_heights, [100.0]);
+        assert_eq!(spec.frame_widths, [400.0]);
     }
 
     #[test]
@@ -1254,29 +1257,29 @@ mod tests {
             &[50.0, 60.0],
         );
         assert!(remove_cell(&mut spec, 3));
-        assert_eq!(spec.column_widths, [100.0, 200.0]);
-        assert_eq!(spec.row_heights, [50.0, 60.0]);
+        assert_eq!(spec.frame_widths, [100.0, 200.0]);
+        assert_eq!(spec.frame_heights, [50.0, 60.0]);
     }
 
     #[test]
-    fn set_cell_size_clamps_and_touches_one_entry() {
+    fn set_frame_size_clamps_and_touches_one_entry() {
         let mut spec = sized(&[(0, 0), (0, 1)], &[300.0, 200.0], &[250.0]);
-        assert!(set_cell_size(&mut spec, CellAxis::Column, 1, 123.5));
-        assert_eq!(spec.column_widths, [300.0, 123.5]);
-        assert!(set_cell_size(&mut spec, CellAxis::Row, 0, 1e9));
-        assert_eq!(spec.row_heights, [stokesforge_plot::MAX_CELL_SIZE]);
-        assert!(set_cell_size(&mut spec, CellAxis::Row, 0, 1.0));
-        assert_eq!(spec.row_heights, [f64::from(stokesforge_plot::MIN_CELL.1)]);
+        assert!(set_frame_size(&mut spec, FrameAxis::Column, 1, 123.5));
+        assert_eq!(spec.frame_widths, [300.0, 123.5]);
+        assert!(set_frame_size(&mut spec, FrameAxis::Row, 0, 1e9));
+        assert_eq!(spec.frame_heights, [stokesforge_plot::MAX_FRAME_SIZE]);
+        assert!(set_frame_size(&mut spec, FrameAxis::Row, 0, 1.0));
+        assert_eq!(spec.frame_heights, [stokesforge_plot::MIN_FRAME_SIZE]);
     }
 
     #[test]
-    fn set_cell_size_refuses_a_legacy_graph_a_bad_index_and_a_bad_size() {
+    fn set_frame_size_refuses_a_legacy_graph_a_bad_index_and_a_bad_size() {
         let mut legacy = spec_of(&[(0, 0)]);
-        assert!(!set_cell_size(&mut legacy, CellAxis::Column, 0, 300.0));
+        assert!(!set_frame_size(&mut legacy, FrameAxis::Column, 0, 300.0));
         let mut spec = sized(&[(0, 0)], &[300.0], &[250.0]);
         let before = spec.clone();
-        assert!(!set_cell_size(&mut spec, CellAxis::Column, 1, 300.0));
-        assert!(!set_cell_size(&mut spec, CellAxis::Row, 0, f64::NAN));
+        assert!(!set_frame_size(&mut spec, FrameAxis::Column, 1, 300.0));
+        assert!(!set_frame_size(&mut spec, FrameAxis::Row, 0, f64::NAN));
         assert_eq!(spec, before);
     }
 }

@@ -1,4 +1,4 @@
-//! #394: the page of an export is the figure's own size
+//! #394: the page of an export is the figure's own size (frames plus bands)
 //! (`stokesforge_render_svg::figure_size`), whatever the format: the SVG
 //! `width`/`height`, the PDF `MediaBox`, the PNG pixels at the scale.
 
@@ -27,17 +27,19 @@ fn png_size(png: &[u8]) -> (u32, u32) {
 }
 
 #[test]
-fn every_export_format_uses_the_size_of_the_cells() {
+fn every_export_format_uses_the_size_of_the_frames_plus_their_bands() {
     let mut sample = sample::minimal().expect("minimal graph");
     sample.spec.title.clear();
-    sample.spec.column_widths = vec![600.0];
-    sample.spec.row_heights = vec![200.0];
+    sample.spec.frame_widths = vec![600.0];
+    sample.spec.frame_heights = vec![200.0];
     let plot = resolve_spec(sample.project.tree(), &sample.spec);
     let measurer = TextMeasurer::default();
     let choice = FontChoice::default();
 
     let size = figure_size(&sample.spec, &measurer, &choice);
-    assert_eq!(size, (600, 200), "not the 480 x 360 default");
+    // The frame is 600 x 200; two margins and the left axis (24 + 64) beside
+    // it, two margins and the bottom axis (24 + 52) below.
+    assert_eq!(size, (688, 276), "not the 480 x 360 default");
 
     let svg = export_bytes(
         &plot,
@@ -50,10 +52,10 @@ fn every_export_format_uses_the_size_of_the_cells() {
     )
     .expect("SVG");
     let svg = String::from_utf8(svg).expect("utf-8");
-    assert!(svg.contains("width=\"600\"") && svg.contains("height=\"200\""));
+    assert!(svg.contains("width=\"688\"") && svg.contains("height=\"276\""));
 
     let pdf = export_bytes(&plot, size, &measurer, &choice, ExportFormat::Pdf).expect("PDF");
-    assert_eq!(media_box(&pdf), vec![0.0, 0.0, 600.0, 200.0]);
+    assert_eq!(media_box(&pdf), vec![0.0, 0.0, 688.0, 276.0]);
 
     let png = export_bytes(
         &plot,
@@ -63,11 +65,11 @@ fn every_export_format_uses_the_size_of_the_cells() {
         ExportFormat::Png { scale: 2.0 },
     )
     .expect("PNG");
-    assert_eq!(png_size(&png), (1200, 400));
+    assert_eq!(png_size(&png), (1376, 552));
 }
 
 #[test]
-fn a_graph_without_stored_sizes_keeps_the_legacy_page() {
+fn a_graph_without_stored_frames_keeps_the_legacy_page() {
     let mut sample = sample::minimal().expect("minimal graph");
     sample.spec.title.clear();
     assert_eq!(

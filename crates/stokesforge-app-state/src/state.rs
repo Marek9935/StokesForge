@@ -740,19 +740,20 @@ pub enum Action {
         /// Dragged columns; empty for the menu.
         columns: Vec<NodeId>,
     },
-    /// Sets the width of grid column `index` or the height of grid row
-    /// `index` of the graph, in points (#394). The one path of the size fields
-    /// of Graph Properties and of a drag handle on a cell boundary: the
-    /// other columns and rows keep their size, the figure grows or shrinks
-    /// by the difference. A graph without stored sizes is first given them, so
-    /// the cells keep the size they were drawn with. A single undo step
+    /// Sets the frame (plot area) width of grid column `index` or the frame
+    /// height of grid row `index` of the graph, in points (#394). The one path
+    /// of the size fields of Graph Properties and of a drag handle on the outer
+    /// edge of a cell: the other columns and rows keep their frame, the axis
+    /// bands and the title band are added around, so the figure grows or
+    /// shrinks by the difference. A graph without stored frames is first given
+    /// the ones it is drawn with. A single undo step
     /// ([`PlotEditKind::ResizeCell`]); nothing sent if the size is already
     /// that one or the index is outside the grid.
-    SetCellSize {
+    SetFrameSize {
         /// Target graph.
         graph: NodeId,
-        /// Column width or row height.
-        axis: stokesforge_core::compose::CellAxis,
+        /// Frame width of a column or frame height of a row.
+        axis: stokesforge_core::compose::FrameAxis,
         /// Grid column or row.
         index: usize,
         /// The new size, in points; brought into the bounds.
@@ -4989,15 +4990,15 @@ impl AppState {
                 name: None,
                 spec: PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
-                    ..PlotSpec::new_graph()
+                    ..PlotSpec::empty("")
                 },
             }),
-            Action::SetCellSize {
+            Action::SetFrameSize {
                 graph,
                 axis,
                 index,
                 size,
-            } => self.set_cell_size(graph, axis, index, size),
+            } => self.set_frame_size(graph, axis, index, size),
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -6973,6 +6974,7 @@ impl AppState {
 
     /// Sends a command to the actor and reports the result.
     fn execute(&mut self, command: Command) {
+        let command = self.with_fixed_frames(command);
         // The label is computed on the tree from **before**: afterwards, a
         // deleted column has no name.
         let label = command.label(&self.snapshot.tree);
@@ -6985,6 +6987,43 @@ impl AppState {
                 self.settle_recalc();
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
+        }
+    }
+
+    /// The one door of the graph frames (#394, G7): a command that replaces
+    /// the spec of a graph from an old file (nothing stored) carries the frames
+    /// the graph is drawn with *now*, so that the edit — a title, an axis, a
+    /// layer — changes the figure around the plot areas and never the plot
+    /// areas. A graph created legacy fixes itself, so a new graph is exactly
+    /// 480 x 360 pt and explicit. Nothing is written at load and nothing is
+    /// added to the history: the frames ride in the very command of the edit.
+    fn with_fixed_frames(&self, command: Command) -> Command {
+        match command {
+            Command::SetPlotSpec { graph, mut spec } => {
+                if let Some(current) = self.plot_spec(graph) {
+                    crate::frame_sizes::fix_from(&current, &mut spec);
+                }
+                Command::SetPlotSpec { graph, spec }
+            }
+            Command::EditPlotSpec {
+                graph,
+                mut spec,
+                kind,
+            } => {
+                if let Some(current) = self.plot_spec(graph) {
+                    crate::frame_sizes::fix_from(&current, &mut spec);
+                }
+                Command::EditPlotSpec { graph, spec, kind }
+            }
+            Command::AddGraph {
+                parent,
+                name,
+                mut spec,
+            } => {
+                crate::frame_sizes::fix_new(&mut spec);
+                Command::AddGraph { parent, name, spec }
+            }
+            other => other,
         }
     }
 
@@ -9767,7 +9806,7 @@ impl AppState {
         let spec = PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
-            ..PlotSpec::new_graph()
+            ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {
             parent,
@@ -9898,7 +9937,9 @@ impl AppState {
             return;
         };
         let plot_type = panel_plot_type(reference);
-        self.materialize_cell_sizes(&mut spec);
+        // The new cell keeps the frame of its reference: the frames are fixed
+        // before the grid changes.
+        crate::frame_sizes::fix_new(&mut spec);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
@@ -9918,41 +9959,19 @@ impl AppState {
         });
     }
 
-    /// Gives a legacy graph (no stored cell size) the sizes it is drawn with
-    /// (#394): the widths and heights `figure_layout` computes, measured like the
-    /// screen and the exports. Run on the clone of the spec before any size
-    /// edit (add or delete a cell, field, handle) so that the existing cells keep
-    /// their exact size; the layout is read from the legacy spec, so the title
-    /// band, which is inside the 480 x 360 pt there, is not counted twice. A
-    /// graph that already has both vectors is left alone.
-    fn materialize_cell_sizes(&self, spec: &mut PlotSpec) {
-        if !crate::cell_sizes::is_legacy(spec) {
-            return;
-        }
-        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
-        let Ok(layout) = stokesforge_render_svg::figure_layout(
-            spec,
-            &measurer,
-            &stokesforge_render_svg::FontChoice::default(),
-        ) else {
-            return;
-        };
-        crate::cell_sizes::materialize_with(spec, &layout.column_widths(), &layout.row_heights());
-    }
-
-    /// [`Action::SetCellSize`].
-    fn set_cell_size(
+    /// [`Action::SetFrameSize`].
+    fn set_frame_size(
         &mut self,
         graph: NodeId,
-        axis: stokesforge_core::compose::CellAxis,
+        axis: stokesforge_core::compose::FrameAxis,
         index: usize,
         size: f64,
     ) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        self.materialize_cell_sizes(&mut spec);
-        if !stokesforge_core::compose::set_cell_size(&mut spec, axis, index, size) {
+        crate::frame_sizes::fix_new(&mut spec);
+        if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
             return;
         }
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
@@ -9973,7 +9992,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
-        self.materialize_cell_sizes(&mut spec);
+        crate::frame_sizes::fix_new(&mut spec);
         if !remove_cell(&mut spec, panel) {
             if spec.panels.get(panel).is_some() {
                 self.fail(tr!("error-last-layer"));
@@ -10139,7 +10158,7 @@ impl AppState {
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
-            ..PlotSpec::new_graph()
+            ..PlotSpec::default()
         };
         self.execute(Command::AddGraph {
             parent,

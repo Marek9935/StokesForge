@@ -26,13 +26,17 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
-- Graph size (#394): each grid column has a width and each row a height, in
-  points, set in Graph Properties > General > Size (in the unit chosen in
-  Preferences, centimetres by default). The figure is their sum plus the title
-  band, and the screen, the exports and the copy of the figure all use it. A new
-  graph is 480 x 360 pt; a layer added Beside or Below keeps the size of its
-  reference layer and the figure grows. New additive `.stf` fields on the graph
-  (`column_widths`, `row_heights`; absent = the old 480 x 360 pt shared
+- Graph size (#394): the size of a graph is the size of its **plot area**, one
+  width per grid column and one height per row, in points, set in Graph
+  Properties > General > Size (in the unit chosen in Preferences, centimetres by
+  default). The axes, their numbers and the title are added around it, so adding
+  or removing one grows or shrinks the image, never the plot area; the plot
+  areas of a column and of a row line up. A new graph is 480 x 360 pt; a layer
+  added Beside or Below has a plot area of the same size as its reference layer
+  and the figure grows. The screen, the exports and the copy of the figure all
+  use the same size. A graph from an older file is drawn as before; its first
+  edit fixes the plot areas it was drawn with. New additive `.stf` fields on the
+  graph (`frame_widths`, `frame_heights`; absent = the old 480 x 360 pt shared
   equally): an older version that saves the file again loses them without a
   message.
 - Error bars (#360): the first Y Error (X Error) column to the right of a Y

@@ -119,6 +119,11 @@ fn exact_spec_stable_export_and_style_witness() {
     panel.bottom.range_min = Some(1.);
     panel.bottom.range_max = Some(10.);
     panel.left.label = "$I$".into();
+    // A graph created by a script is explicit (#394): the frames of the
+    // 480 x 360 pt figure, the title band inside.
+    let legacy = layout_of(&expected);
+    expected.frame_widths = legacy.frame_widths;
+    expected.frame_heights = legacy.frame_heights;
     assert_eq!(graph_spec(&b), expected);
     let snapshot = b.session.snapshot().unwrap();
     let measurer = stokesforge_render::TextMeasurer::default();
@@ -752,4 +757,54 @@ fn plot_pairs_the_error_column_like_the_window_unless_told_otherwise() {
     );
     assert_eq!(series[2].y_error, Some(b.x), "an explicit handle wins");
     assert_eq!(series[0].x_error, None);
+}
+
+fn layout_of(spec: &PlotSpec) -> stokesforge_render::pipeline::FigureLayout {
+    stokesforge_render_svg::figure_layout(
+        spec,
+        &stokesforge_render_svg::SvgTextMeasurer::default(),
+        &stokesforge_render_svg::FontChoice::default(),
+    )
+    .expect("layout")
+}
+
+/// #394: a graph created by a script is explicit from the start, and its
+/// figure is exactly 480 x 360 pt, like one created by the application.
+#[test]
+fn a_python_graph_is_created_explicit_and_480_by_360() {
+    let b = bench();
+    run(&b, &format!("{HANDLES}pyst.plot(y, x, name='Graph1')"));
+    let spec = graph_spec(&b);
+    assert_eq!(spec.frame_widths.len(), 1);
+    assert_eq!(spec.frame_heights.len(), 1);
+    assert_eq!(layout_of(&spec).size, (480, 360));
+}
+
+/// #394 (G7): a script that edits a graph from an old file (nothing stored)
+/// fixes the frames it is drawn with, in the very command of the edit: removing
+/// the title leaves the plot area as it was and shrinks the figure.
+#[test]
+fn a_script_edit_of_a_legacy_graph_fixes_its_frames() {
+    let b = bench();
+    run(&b, &format!("{HANDLES}pyst.plot(y, x, name='Graph1')"));
+    let snap = b.session.snapshot().unwrap();
+    let graph = snap.tree.resolve("[Graph1]").unwrap();
+    let mut legacy = graph_spec(&b);
+    legacy.title = "Old".to_owned();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    b.session
+        .execute(stokesforge_commands::Command::SetPlotSpec {
+            graph,
+            spec: legacy.clone(),
+        })
+        .unwrap();
+    let drawn = layout_of(&legacy);
+    assert!(!drawn.is_explicit() && drawn.title_band > 0);
+
+    run(&b, "pyst.set_graph(pyst.resolve('[Graph1]'), title='')");
+    let spec = graph_spec(&b);
+    assert_eq!(spec.frame_widths, drawn.frame_widths);
+    assert_eq!(spec.frame_heights, drawn.frame_heights);
+    assert_eq!(layout_of(&spec).size, (480, 360 - drawn.title_band));
 }

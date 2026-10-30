@@ -10834,6 +10834,11 @@ fn object_manager_deletes_a_curve_without_touching_the_data() {
     });
     let mut after = before.clone();
     after.panels.get_mut(0).unwrap().series.remove(0);
+    // The graph is legacy (nothing stored): the edit fixes the frames it is
+    // drawn with (#394, G7); Undo gives the legacy spec back.
+    let drawn = layout_of(&before);
+    after.frame_widths = drawn.frame_widths;
+    after.frame_heights = drawn.frame_heights;
     assert_eq!(graph_spec(&state, graph), after);
     let model = object_tree(state.tree(), graph, None).unwrap();
     assert_eq!(model.layers[0].series.len(), 1);
@@ -13938,17 +13943,36 @@ fn layout_of(spec: &stokesforge_plot::PlotSpec) -> stokesforge_render::pipeline:
     .expect("layout")
 }
 
-/// #394: a new graph is created with explicit sizes (480 x 360 pt, no title),
-/// and a cell added beside it is exactly as big: the figure grows, 4/3 each.
+/// Puts a spec into the model as an old file would have it, **without** the
+/// application's door (which fixes the frames of a legacy spec): the session
+/// handle executes the command as it stands.
+fn put_legacy_spec(
+    session: &Session,
+    state: &mut AppState,
+    graph: NodeId,
+    spec: stokesforge_plot::PlotSpec,
+) {
+    assert!(spec.frame_widths.is_empty() && spec.frame_heights.is_empty());
+    session
+        .handle()
+        .execute(stokesforge_commands::Command::SetPlotSpec { graph, spec })
+        .expect("legacy spec set");
+    state.refresh();
+}
+
+/// #394: a new graph is created with explicit frames, chosen so that its
+/// figure is exactly 480 x 360 pt, and a cell added beside it has the same
+/// frame: the figure grows by one cell, 4/3 each.
 #[test]
-fn a_new_graph_is_480_by_360_and_a_cell_beside_it_is_as_big() {
+fn a_new_graph_is_480_by_360_and_a_cell_beside_it_has_the_same_frame() {
     use stokesforge_core::compose::CellSide;
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     let spec = graph_spec(&state, graph);
-    assert_eq!(spec.column_widths, [480.0]);
-    assert_eq!(spec.row_heights, [360.0]);
+    assert_eq!(spec.frame_widths.len(), 1, "explicit from the start");
+    assert_eq!(spec.frame_heights.len(), 1);
     assert_eq!(layout_of(&spec).size, (480, 360));
+    let frame = layout_of(&spec).frame_rect(0, 0).expect("frame");
 
     state.dispatch(Action::AddCell {
         graph,
@@ -13957,8 +13981,14 @@ fn a_new_graph_is_480_by_360_and_a_cell_beside_it_is_as_big() {
         columns: Vec::new(),
     });
     let wider = graph_spec(&state, graph);
-    assert_eq!(wider.column_widths, [480.0, 480.0]);
-    assert_eq!(layout_of(&wider).size, (960, 360));
+    assert_eq!(wider.frame_widths, [spec.frame_widths[0]; 2]);
+    let layout = layout_of(&wider);
+    assert_eq!(layout.size, (960, 360));
+    assert_eq!(
+        layout.frame_rect(0, 1).map(|r| (r.2, r.3)),
+        Some((frame.2, frame.3)),
+        "the new frame is the reference's"
+    );
 
     state.dispatch(Action::AddCell {
         graph,
@@ -13969,26 +13999,64 @@ fn a_new_graph_is_480_by_360_and_a_cell_beside_it_is_as_big() {
     assert_eq!(layout_of(&graph_spec(&state, graph)).size, (960, 720));
 }
 
-/// #394: a graph from an old file (no stored size, title band inside the
-/// 480 x 360) keeps the exact size of its cell when a cell is added: the sizes
-/// are materialized first. The witness is the figure as the old file drew it.
+/// #394 (G7): a graph from an old file (nothing stored, the bands and the title
+/// inside the 480 x 360) is fixed by its first edit, whatever the edit: removing
+/// the title keeps the plot area exactly where and as large as it was, and the
+/// figure shrinks by the band. Opening it wrote nothing.
 #[test]
-fn adding_a_cell_to_a_legacy_graph_keeps_the_size_of_the_existing_cell() {
-    use stokesforge_core::compose::CellSide;
+fn editing_a_legacy_graph_fixes_its_frames_and_removing_the_title_shrinks_the_image() {
     let dir = tempfile::tempdir().expect("temporary directory");
-    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
     let mut legacy = graph_spec(&state, graph);
     legacy.title = "Legacy".to_owned();
-    legacy.column_widths.clear();
-    legacy.row_heights.clear();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
+    let revision = state.snapshot().revision;
+    let drawn = layout_of(&legacy);
+    assert_eq!(drawn.size, (480, 360));
+    assert!(drawn.title_band > 0 && !drawn.is_explicit());
+    assert_eq!(
+        graph_spec(&state, graph).frame_widths,
+        Vec::<f64>::new(),
+        "reading it fixes nothing"
+    );
+    assert_eq!(state.snapshot().revision, revision);
+
+    let mut untitled = legacy.clone();
+    untitled.title.clear();
     state.dispatch(Action::SetPlotSpec {
         graph,
-        spec: legacy.clone(),
+        spec: untitled,
     });
+    let after_spec = graph_spec(&state, graph);
+    assert_eq!(after_spec.frame_widths, drawn.frame_widths, "frame fixed");
+    assert_eq!(after_spec.frame_heights, drawn.frame_heights);
+    let after = layout_of(&after_spec);
+    assert_eq!(after.size, (480, 360 - drawn.title_band));
+    assert_eq!(
+        after.frame_rect(0, 0).map(|r| (r.2, r.3)),
+        Some((drawn.frame_widths[0] as u32, drawn.frame_heights[0] as u32)),
+        "the plot area is the legacy one"
+    );
+    // One edit, one undo step: the graph is legacy again.
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy);
+}
+
+/// #394: adding a cell to a legacy graph keeps the exact plot area of the
+/// existing cell and gives the new one the same.
+#[test]
+fn adding_a_cell_to_a_legacy_graph_keeps_the_frame_of_the_existing_cell() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.title = "Legacy".to_owned();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
     let before = layout_of(&legacy);
-    assert_eq!(before.size, (480, 360));
-    assert!(before.title_band > 0);
-    let cell = before.cell_rect(0, 0).expect("cell");
 
     state.dispatch(Action::AddCell {
         graph,
@@ -13996,25 +14064,20 @@ fn adding_a_cell_to_a_legacy_graph_keeps_the_size_of_the_existing_cell() {
         side: CellSide::Right,
         columns: Vec::new(),
     });
-    let after = layout_of(&graph_spec(&state, graph));
-    assert_eq!(
-        after.cell_rect(0, 0),
-        Some(cell),
-        "the existing cell is unchanged"
-    );
-    assert_eq!(
-        after.cell_rect(0, 1).map(|r| (r.2, r.3)),
-        Some((cell.2, cell.3))
-    );
-    assert_eq!(after.size, (960, 360), "the figure grows by one cell");
+    let spec = graph_spec(&state, graph);
+    assert_eq!(spec.frame_widths[0], before.frame_widths[0]);
+    assert_eq!(spec.frame_widths[1], before.frame_widths[0], "same frame");
+    assert_eq!(spec.frame_heights, before.frame_heights);
+    let after = layout_of(&spec);
+    assert_eq!(after.size.1, 360, "same height, the title band is inside");
+    assert_eq!(after.size.0, 480 * 2, "one more cell wide");
 }
 
-/// #394: a size set through `Action::SetCellSize` is one undo step, redo
-/// restores it, the other cells keep their size, and a legacy graph is
-/// materialized by the same step.
+/// #394: a frame size set through `Action::SetFrameSize` is one undo step,
+/// redo restores it, the other frames keep their size.
 #[test]
-fn setting_a_cell_size_is_one_undo_step_and_the_other_cells_keep_theirs() {
-    use stokesforge_core::compose::{CellAxis, CellSide};
+fn setting_a_frame_size_is_one_undo_step_and_the_other_frames_keep_theirs() {
+    use stokesforge_core::compose::{CellSide, FrameAxis};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
     state.dispatch(Action::AddCell {
@@ -14026,15 +14089,15 @@ fn setting_a_cell_size_is_one_undo_step_and_the_other_cells_keep_theirs() {
     let before = graph_spec(&state, graph);
     let revision = state.snapshot().revision;
 
-    state.dispatch(Action::SetCellSize {
+    state.dispatch(Action::SetFrameSize {
         graph,
-        axis: CellAxis::Column,
+        axis: FrameAxis::Column,
         index: 1,
         size: 300.0,
     });
     let after = graph_spec(&state, graph);
-    assert_eq!(after.column_widths, [480.0, 300.0]);
-    assert_eq!(after.row_heights, before.row_heights);
+    assert_eq!(after.frame_widths, [before.frame_widths[0], 300.0]);
+    assert_eq!(after.frame_heights, before.frame_heights);
     assert_eq!(
         state.snapshot().history.undo_label,
         Some(HistoryLabel::EditPlotSpec(
@@ -14048,15 +14111,15 @@ fn setting_a_cell_size_is_one_undo_step_and_the_other_cells_keep_theirs() {
 
     // Same size, or outside the grid: nothing is sent.
     let revision_now = state.snapshot().revision;
-    state.dispatch(Action::SetCellSize {
+    state.dispatch(Action::SetFrameSize {
         graph,
-        axis: CellAxis::Column,
+        axis: FrameAxis::Column,
         index: 1,
         size: 300.0,
     });
-    state.dispatch(Action::SetCellSize {
+    state.dispatch(Action::SetFrameSize {
         graph,
-        axis: CellAxis::Row,
+        axis: FrameAxis::Row,
         index: 7,
         size: 100.0,
     });
@@ -14064,35 +14127,37 @@ fn setting_a_cell_size_is_one_undo_step_and_the_other_cells_keep_theirs() {
     assert_ne!(revision, revision_now);
 }
 
-/// #394: deleting a cell that empties its column removes that column and its
-/// width; undo brings both back in one step.
+/// #394: deleting a cell that empties its column removes that column; the
+/// figure shrinks by the column's outer width, and undo brings both back in
+/// one step.
 #[test]
-fn deleting_the_last_cell_of_a_column_shrinks_the_figure_by_its_width() {
+fn deleting_the_last_cell_of_a_column_shrinks_the_figure_by_its_outer_width() {
     use stokesforge_app_state::object_manager::VisibilityTarget as T;
-    use stokesforge_core::compose::{CellAxis, CellSide};
+    use stokesforge_core::compose::{CellSide, FrameAxis};
     let dir = tempfile::tempdir().expect("temporary directory");
     let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let one = graph_spec(&state, graph);
     state.dispatch(Action::AddCell {
         graph,
         panel: 0,
         side: CellSide::Right,
         columns: Vec::new(),
     });
-    state.dispatch(Action::SetCellSize {
+    state.dispatch(Action::SetFrameSize {
         graph,
-        axis: CellAxis::Column,
+        axis: FrameAxis::Column,
         index: 1,
         size: 300.0,
     });
     let two = graph_spec(&state, graph);
-    assert_eq!(layout_of(&two).size, (780, 360));
+    // The new column: its frame (300) and the bands of the reference.
+    assert_eq!(layout_of(&two).size, (480 + 300 + 24 + 64, 360));
     state.dispatch(Action::RemovePlotObject {
         graph,
         target: T::Panel(1),
     });
-    let one = graph_spec(&state, graph);
-    assert_eq!(one.column_widths, [480.0]);
-    assert_eq!(layout_of(&one).size, (480, 360));
+    assert_eq!(graph_spec(&state, graph).frame_widths, one.frame_widths);
+    assert_eq!(layout_of(&graph_spec(&state, graph)).size, (480, 360));
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), two);
 }

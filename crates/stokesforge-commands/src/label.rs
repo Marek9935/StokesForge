@@ -274,7 +274,7 @@ pub enum PlotEditKind {
     AddCell,
     /// A cell, or an overlay layer, deleted (#357).
     RemoveCell,
-    /// The width of a grid column or the height of a grid row of the graph
+    /// The plot area (frame) width of a grid column or height of a grid row
     /// set, by a field or a handle (#394).
     ResizeCell,
 }
@@ -314,7 +314,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::ClosedFrame => "Change Closed Frame",
             Self::AddCell => "Add Layer Beside",
             Self::RemoveCell => "Delete Layer",
-            Self::ResizeCell => "Resize Graph",
+            Self::ResizeCell => "Resize Plot Area",
         })
     }
 }

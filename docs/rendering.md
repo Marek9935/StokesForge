@@ -902,46 +902,68 @@ see "Enlarging a graph without blurring the text" below.
   `formula.rs` (`simple_labels_all_have_the_same_height`) the routing
   by role and the strut (#32).
 
-### Figure size and cells (#394)
+### Figure size, frames and bands (#394)
 
-The size of a figure is **data**, not a constant: `PlotSpec::column_widths` and
-`row_heights` (points; 1 pt = 1 SVG unit = 1 PDF point = 1 PNG pixel at ×1), one
-entry per grid column and row. The figure is their sum plus the **title band**.
+What a graph stores is the **plot area**, the *frame*: `PlotSpec::frame_widths`
+(one per grid column) and `frame_heights` (one per grid row), in points (1 pt =
+1 SVG unit = 1 PDF point = 1 PNG pixel at ×1). The margins, the axis bands and
+the title bands are added **around** the frame, so adding or removing an axis or
+the graph title grows or shrinks the *image*, never the frame.
 
-- `PlotSpec::cell_widths()` / `cell_heights()` read them **sanitized**: a
-  missing, non-finite or non-positive entry is 480 (width) or 360 (height), each
-  entry is clamped to `[stokesforge_plot::MIN_CELL, MAX_CELL_SIZE]` (48 × 36 pt
-  to 2000 pt), a sum beyond `MAX_FIGURE_EXTENT` (20000 pt) is scaled down.
-  `MIN_CELL` has a single copy, in `stokesforge-plot`: a stored cell is never
-  smaller than the renderer's omission threshold.
+- `PlotSpec::sanitized_frame_widths()` / `sanitized_frame_heights()` read them
+  **sanitized**: a missing, non-finite or non-positive entry reads
+  `FALLBACK_FRAME` (392 × 284 pt), each entry is clamped to
+  `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` (36 to 2000 pt), a sum beyond
+  `MAX_FIGURE_EXTENT` (20000 pt) is scaled down. `MIN_CELL` (48 × 36) stays as
+  the omission threshold of *legacy* and fallback grids only: a stored frame
+  plus its margins is never below it.
 - **Empty vectors are legacy, for good** (invariant 12): 480 × 360 pt shared
-  equally between the cells, **title band inside**. Do not change that meaning.
-  A grid beyond `MAX_CELLS` also reads the legacy split.
-- **`pipeline::figure_layout(spec, probe)` is the one place** where sizes, title
-  band and page meet: width first (sum of the widths), then the band measured at
-  that width (the title box is a fraction of the figure's width), then the height.
-  It returns `FigureLayout { size, title_band, column_breaks, row_breaks }`;
-  breakpoints are **rounded prefix sums** (never each size rounded alone, or the
-  rounding drifts and screen ≠ export). `probe` is any drawing area of the backend
-  that will draw the figure: only its text measurement matters, Typst titles
-  included (invariant 4).
-- Everyone reads it: `draw` (`draw_on_with_texts` cuts the cells with the same
-  `fit_breaks`; an area whose size differs from the layout's is cut in
-  proportion), `GraphView::figure_layout` (screen, memoized by graph, revision,
-  pixels per point and preview generation; published per graph by
-  `graph_view_contents` for the menus, the size fields and the window), the
-  exports through `render_svg::figure_layout` / `figure_size` (a throwaway
-  backend sizes the page before the figure is drawn), the figure copy, the
-  `pyst` export, the PNG resolution labels and the "contain" ratio of the window.
-- `DrawnPanel::cell_origin` / `cell_size` publish the rectangle of the cell in
-  backend pixels (an overlay shares its base layer's cell). Resize handles and
-  layer badges are built from them; they are screen markers and never enter the
-  pipeline.
-- The app gives a **legacy graph** explicit sizes before any size edit
-  (`stokesforge_app_state::cell_sizes`), measured with the same `figure_layout`,
-  so the existing cells keep their exact size. New graphs are created with
-  explicit sizes (`PlotSpec::new_graph`: 480 × 360 pt, no title; a title added
-  later makes the figure taller).
+  equally between the cells, axis bands and title band **inside**, the label
+  areas capped at a third of the cell. That path is `main`'s algorithm, byte for
+  byte (the goldens guard it). A grid beyond `MAX_CELLS` also reads it.
+- **`pipeline::figure_layout(spec, probe)` is the one place** where frames,
+  bands and page meet; `ExplicitGrid::build` does the arithmetic and
+  `draw_on_with_texts` reads the same structure to cut the cells. Per cell, the
+  bands are `MARGIN` plus what its plan asks (`CellPlan::gutters`: left
+  `Y_LABEL_AREA`, right `right_wanted`, top `top_wanted` plus the measured panel
+  title, bottom `X_LABEL_AREA`; **no cap**). The plan reads only the `PanelSpec`s
+  (`cell_plans`), so no data tree is needed. **Frames are aligned**: column `j`
+  takes the largest left and right bands of its cells, row `i` the largest top
+  (title included) and bottom bands; outer width = `left + frame + right`. A cell
+  that asks for less keeps the difference empty (`Padding`, applied after its
+  panel title), an empty cell takes its column's and row's bands. Order: widths,
+  figure width, graph and panel title bands measured at that width (the title
+  box is a fraction of it), heights, figure height = title band + Σ(top + frame +
+  bottom). Plotters receives the outer cell, so the plot area it carves equals
+  the frame (±1 px of prefix-sum rounding). It returns `FigureLayout { size,
+  title_band, column_breaks, row_breaks, column_gutters, row_gutters,
+  frame_widths, frame_heights }`; breakpoints are **rounded prefix sums** of the
+  outer sizes (never each rounded alone, or screen ≠ export). `FigureLayout::
+  cell_rect` is the outer cell, `frame_rect` the frame, `size_with_frames` the
+  size a draft would give. `probe` is any drawing area of the backend that will
+  draw the figure: only its text measurement matters, Typst titles included
+  (invariant 4). Overlay layers: union of the plans, as before.
+- Everyone reads it: `draw`, `GraphView::figure_layout` (screen, memoized by
+  graph, revision, pixels per point and preview generation; published per graph
+  by `graph_view_contents` for the menus, the size fields and the window), the
+  exports through `render_svg::figure_layout` / `figure_size`, the figure copy,
+  the `pyst` export, the PNG resolution labels and the "contain" ratio.
+- `DrawnPanel::cell_origin` / `cell_size` publish the **outer** cell in backend
+  pixels (an overlay shares its base layer's cell): the future drag handles sit
+  on its boundary, after the tick numbers and the axis title. They are screen
+  markers and never enter the pipeline. `pixel_origin` / `pixel_size` stay the
+  frame.
+- **A legacy graph is fixed before it is replaced (G7).**
+  `pipeline::legacy_frames` computes the frames a legacy graph is drawn with (the
+  largest per column and row when the cells of one column differ) and
+  `render_svg::fix_legacy_frames(reference, target)` writes them into the new
+  spec, the reference being the spec as it is *now*. The application
+  (`AppState::execute`: `SetPlotSpec`, `EditPlotSpec`, `AddGraph`; Add Layer and
+  Delete before they edit the grid) and `pyst` (`bridge::set_graph_spec`,
+  `plot`) call it, so the edit moves the bands and never the plot areas; nothing
+  is written at load, nothing is added to the history. A new graph is created
+  legacy and fixed at once: its figure is exactly 480 × 360 pt, explicit
+  (frame 392 × 284 pt without a title).
 
 ### Enlarging a graph without blurring the text
 

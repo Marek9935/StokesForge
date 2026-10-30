@@ -425,13 +425,13 @@ fn an_enlarged_graph_paints_its_formulas_at_the_displayed_size() {
     assert_eq!(view.formula_count(), formulas, "a text was recompiled");
 }
 
-// -- #394: the logical figure is its cells, not the window --
+// -- #394: the logical figure is its frames and bands, not the window --
 
-/// The figure is laid out at the size its cells and title give it (cached
+/// The figure is laid out at the size its frames, bands and title give it (cached
 /// under that logical rectangle), a window resize only scales the cached
-/// shapes, and a change of a cell size is a new revision, hence a miss.
+/// shapes, and a change of a frame size is a new revision, hence a miss.
 #[test]
-fn the_figure_is_its_cells_and_a_window_resize_is_a_cache_hit() {
+fn the_figure_is_its_frames_and_a_window_resize_is_a_cache_hit() {
     let fixture = Fixture::with_title("Sized");
     let context = new_context();
     let mut view = GraphView::new();
@@ -446,8 +446,8 @@ fn the_figure_is_its_cells_and_a_window_resize_is_a_cache_hit() {
             stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
             _ => panic!("not a graph"),
         };
-        spec.column_widths = widths;
-        spec.row_heights = heights;
+        spec.frame_widths = widths;
+        spec.frame_heights = heights;
         fixture
             .handle()
             .execute(Command::SetPlotSpec {
@@ -487,20 +487,20 @@ fn the_figure_is_its_cells_and_a_window_resize_is_a_cache_hit() {
         band
     };
     assert!(band > 0, "the title takes a band");
-    assert_eq!(logical(&view), egui::vec2(600.0, 200.0 + band as f32));
+    assert_eq!(logical(&view), egui::vec2(688.0, 276.0 + band as f32));
 
     assert!(
         paint(&mut view, egui::vec2(900.0, 500.0)),
         "a window resize scales the cached shapes"
     );
-    assert_eq!(logical(&view), egui::vec2(600.0, 200.0 + band as f32));
+    assert_eq!(logical(&view), egui::vec2(688.0, 276.0 + band as f32));
 
     set_sizes(vec![600.0], vec![250.0]);
     assert!(
         !paint(&mut view, egui::vec2(900.0, 500.0)),
         "a new size: a miss"
     );
-    assert_eq!(logical(&view), egui::vec2(600.0, 250.0 + band as f32));
+    assert_eq!(logical(&view), egui::vec2(688.0, 326.0 + band as f32));
 }
 
 // -- Issue #35: dragging and double-clicking a free text --
