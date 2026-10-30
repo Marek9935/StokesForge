@@ -25,6 +25,7 @@
 //! the children **shown** in the tree (#173,
 //! [`VisibilityTarget::contents_shown`]).
 
+use crate::cell_sides::{displayed_place, side_use};
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
     AnnotationRef, AxisSide, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSlot,
@@ -64,29 +65,14 @@ impl AxisRef {
     /// when no series is attached to it. Its checkbox then controls
     /// `AxisSpec::mirror`, not `visible`.
     fn is_mirror(self, spec: &PlotSpec) -> bool {
-        spec.panels.get(self.panel).is_some_and(|panel| {
-            panel.overlay.is_none()
-                && match self.side {
-                    AxisSide::Top => true,
-                    AxisSide::Right => !panel.uses_right_axis(),
-                    _ => false,
-                }
-        })
+        side_use(spec, self.panel, self.side).mirror
     }
     /// A mirror that the figure ignores: an overlaid layer of the same cell
     /// already has its own axis on that side (#176). Its checkbox is disabled.
+    /// The question "who holds this side of the cell" is answered by
+    /// [`crate::cell_sides`], the same as for the tabs of Graph Properties.
     fn blocked(self, spec: &PlotSpec) -> bool {
-        let Some(panel) = spec.panels.get(self.panel) else {
-            return false;
-        };
-        self.is_mirror(spec)
-            && spec.panels.iter().any(|other| {
-                (other.row, other.column) == (panel.row, panel.column)
-                    && other.overlay.is_some_and(|overlay| match self.side {
-                        AxisSide::Top => overlay.x_top && other.bottom.visible,
-                        _ => overlay.y_right && other.left.visible,
-                    })
-            })
+        side_use(spec, self.panel, self.side).held_by.is_some()
     }
     /// The checkbox value: the mirror or the axis's visibility.
     fn shown(self, spec: &PlotSpec) -> Option<bool> {
@@ -571,17 +557,15 @@ pub struct ObjectTree {
 /// layer is at the top, its Y axis on the right (#171).
 fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
     let place = if panel.overlay.is_some() {
-        match side {
-            AxisSide::Left => "right",
-            _ => "top",
-        }
+        displayed_place(side)
     } else {
-        match side {
-            AxisSide::Bottom => "bottom",
-            AxisSide::Left => "left",
-            AxisSide::Right => "right",
-            AxisSide::Top => "top",
-        }
+        side
+    };
+    let place = match place {
+        AxisSide::Bottom => "bottom",
+        AxisSide::Left => "left",
+        AxisSide::Right => "right",
+        AxisSide::Top => "top",
     };
     crate::tr!("plot-target-axis", side = place)
 }

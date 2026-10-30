@@ -117,6 +117,20 @@ pub(crate) fn tab_strip<
     )
 }
 
+/// The vertical strip ([`TabStripSide::Left`]) in which some tabs are
+/// **unavailable** (S-G1, S-G2): `reason` gives, for a tab, the sentence that
+/// greys it out and says why and what to do (the `.disabled` bubble of the tab
+/// itself); `None` leaves it selectable. A greyed tab never selects.
+pub(super) fn tab_strip_left_with_reasons<K: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    tabs: &[(K, String)],
+    selected: K,
+    reason: &dyn Fn(&K) -> Option<String>,
+    on_select: impl FnMut(K),
+) -> TabStripOutput {
+    tab_strip_vertical(ui, tabs, selected, reason, on_select)
+}
+
 /// [`tab_strip`] with, optionally, the gestures on a sheet: double-click
 /// (in-place rename, validated by Enter or by leaving the field, abandoned by
 /// Escape), context menu Rename / Duplicate / Delete. Requests go up through
@@ -136,7 +150,7 @@ pub(super) fn tab_strip_with<
     mut on_event: impl FnMut(TabEvent<K>),
 ) -> TabStripOutput {
     if side == TabStripSide::Left {
-        return tab_strip_vertical(ui, tabs, selected, on_select);
+        return tab_strip_vertical(ui, tabs, selected, &|_| None, on_select);
     }
     let config = TabStripConfig {
         side,
@@ -250,6 +264,7 @@ fn tab_strip_vertical<K: Copy + PartialEq>(
     ui: &mut egui::Ui,
     tabs: &[(K, String)],
     selected: K,
+    reason: &dyn Fn(&K) -> Option<String>,
     mut on_select: impl FnMut(K),
 ) -> TabStripOutput {
     let mut picked = None;
@@ -262,9 +277,21 @@ fn tab_strip_vertical<K: Copy + PartialEq>(
     let column = ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         for (id, name) in tabs {
-            let response = tab_strip_label(ui, name, *id == selected, TabStripSide::Left, width);
-            if response.clicked() {
-                picked = Some(*id);
+            match reason(id) {
+                Some(reason) => {
+                    ui.add_enabled_ui(false, |ui| {
+                        tab_strip_label(ui, name, *id == selected, TabStripSide::Left, width)
+                    })
+                    .inner
+                    .on_disabled_hover_text(reason);
+                }
+                None => {
+                    let response =
+                        tab_strip_label(ui, name, *id == selected, TabStripSide::Left, width);
+                    if response.clicked() {
+                        picked = Some(*id);
+                    }
+                }
             }
         }
     });
@@ -560,7 +587,7 @@ fn tab_strip_label(
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
     });
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
+        let hovered = response.hovered() && ui.is_enabled();
         let mark = if selected {
             Some(theme::accent())
         } else if hovered {

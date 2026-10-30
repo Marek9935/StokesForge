@@ -1461,16 +1461,14 @@ fn draw_panel<DB: DrawingBackend>(
     // The axes of a superimposed layer: each in an "axis only" area that
     // takes the edges of the plot area along the axis direction and sits in
     // its band (Plotters sticks the secondary axis to the plot area; an axis
-    // further out asks for another, #168). Same style for both axes: that of
-    // the X axis, or of the Y axis if it is the only one displayed.
+    // further out asks for another, #168). Each axis keeps its own colors
+    // (#396): the top one those of the layer's X axis (`bottom`), the right
+    // one those of its Y axis (`left`).
     if let Some(o) = overlay {
         let show_x = o.x_top && spec.bottom.visible && top_area > 0;
         let show_y = o.y_right && spec.left.visible && right_area > 0;
-        let colors = AxisColors::of(
-            if show_x { &spec.bottom } else { &spec.left },
-            ink,
-            figure_width,
-        );
+        let colors_x = AxisColors::of(&spec.bottom, ink, figure_width);
+        let colors_y = AxisColors::of(&spec.left, ink, figure_width);
         let stub = 4;
         if show_x {
             let y0 = top_label_area.saturating_sub(top_offset + top_area);
@@ -1486,9 +1484,9 @@ fn draw_panel<DB: DrawingBackend>(
                     .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
                     .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
                 let mut mesh = axis.configure_secondary_axes();
-                mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-                    .axis_desc_style(colors.title_style.clone())
-                    .axis_style(rgba(colors.ticks))
+                mesh.label_style(text_style(LABEL_SIZE, colors_x.ticks))
+                    .axis_desc_style(colors_x.title_style.clone())
+                    .axis_style(rgba(colors_x.ticks))
                     .x_desc(plotters_desc(&spec.bottom, bottom_anchor))
                     .x_label_formatter(&format_x)
                     .x_labels(scale::label_count(x_scale, x_range))
@@ -1512,9 +1510,9 @@ fn draw_panel<DB: DrawingBackend>(
                     .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
                     .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
                 let mut mesh = axis.configure_secondary_axes();
-                mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-                    .axis_desc_style(colors.title_style.clone())
-                    .axis_style(rgba(colors.ticks))
+                mesh.label_style(text_style(LABEL_SIZE, colors_y.ticks))
+                    .axis_desc_style(colors_y.title_style.clone())
+                    .axis_style(rgba(colors_y.ticks))
                     .y_desc(plotters_desc(&spec.left, left_anchor))
                     .y_label_formatter(&format_y)
                     .y_labels(scale::label_count(y_scale, y_range))

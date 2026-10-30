@@ -179,7 +179,9 @@ Name, plot type, visibility and colors always stay per series. With the whole gr
 
 ## Axes
 
-Open the **Axes** tab and pick the axis in the list at the left of the page: **Bottom**, **Left**, and the others (**Right**, **Top**) when the layer uses them. Or double-click an axis on the figure.
+Open the **Axes** tab and pick the side in the list at the left of the page: **Bottom**, **Left**, **Right** or **Top**. Or double-click an axis on the figure. Every layer shows the four sides, and each axis is named where it is drawn.
+
+A side that another layer of the same plot area already uses is grayed out. Hover it to see which layer uses it and what to do. An [overlay layer](#overlay-layers) draws its X axis at the top and its Y axis on the right, so its settings are on **Top** and **Right**; **Bottom** and **Left** belong to the layer it covers.
 
 <img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, Bottom axis: the axes listed at the left, then title, scale, range and display settings." width="480">
 
@@ -223,7 +225,7 @@ The **Ticks** section sets the **Tick direction** (**Outward**, **Inward** or **
 
 ### Mirror axes
 
-To repeat a scale on the opposite side of the plot, choose **Graph ▸ Top Mirror Axis** or **Graph ▸ Right Mirror Axis**. A mirror axis repeats the scale of the opposite axis and has no title. You can also tick **Show mirror axis** in the **Axes** tab.
+To repeat a scale on the opposite side of the plot, choose **Graph ▸ Top Mirror Axis** or **Graph ▸ Right Mirror Axis**. A mirror axis repeats the scale of the opposite axis and has no title. You can also tick **Show mirror axis** in the **Axes** tab. A mirror axis and an overlay axis cannot share a side: while a mirror is shown, the same side is grayed out for an overlay layer, and the other way round. Adding an overlay axis on a side that shows a mirror turns the mirror off; **Undo** brings both back.
 
 ## Legend
 
@@ -347,6 +349,8 @@ Choose **Graph ▸ New Layer** and pick one:
 - **Top X, Right Y**: both new axes.
 
 A graph can hold up to three overlay layers. After that, **New Layer** is disabled.
+
+On an overlay layer, the **Top** and **Right** tabs of **Graph Properties ▸ Axes** each have an **Own scale** box. Ticked, the layer has its own scale on that side. Unticked, the layer follows the layer it covers, and the scale fields and **Show axis** are grayed out. **Show axis** only hides the axis: the curves stay where they are.
 
 ### The active layer
 

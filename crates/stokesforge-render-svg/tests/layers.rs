@@ -9,6 +9,11 @@ use stokesforge_render::TextMeasurer;
 use stokesforge_render_svg::render_to_string;
 
 fn export(overlay: Option<OverlaySpec>) -> String {
+    export_with(overlay, |_| {})
+}
+
+/// Like [`export`], with a hook on the overlaid layer before it is drawn.
+fn export_with(overlay: Option<OverlaySpec>, tune: impl Fn(&mut PanelSpec)) -> String {
     let mut project = Project::new("Layers").expect("project");
     let root = project.root();
     let book = project.add_empty_workbook(root, None).expect("workbook");
@@ -34,6 +39,7 @@ fn export(overlay: Option<OverlaySpec>) -> String {
     if let Some(overlay) = overlay {
         let mut top = PanelSpec::overlay_on(&base, overlay);
         top.series.push(SeriesSpec::new_xy(x2, y2));
+        tune(&mut top);
         panels.push(top);
     }
     let spec = PlotSpec::empty("").with_panels(Panels::new(panels));
@@ -54,6 +60,35 @@ fn the_overlaid_layer_plots_its_ticks_at_the_top() {
     assert!(!without.contains("\n800\n"), "witness: no 800 tick");
     let with = export(Some(OverlaySpec::new(true, true)));
     assert!(with.contains("\n800\n"), "X2 tick missing: {with}");
+}
+
+/// #396: each axis of an overlaid layer keeps its own colors, the top axis
+/// those of the layer's X axis (`bottom`) and the right axis those of its Y
+/// axis (`left`); the right axis no longer borrows the top one's.
+#[test]
+fn each_axis_of_an_overlaid_layer_keeps_its_own_colors() {
+    let tuned = |bottom: &str, left: &str| {
+        export_with(Some(OverlaySpec::new(true, true)), |layer| {
+            layer.bottom.tick_color = bottom.to_owned();
+            layer.left.tick_color = left.to_owned();
+        })
+    };
+    let svg = tuned("#ff0000", "#00aa00");
+    // The green ink exists only because the right axis reads `left`; the
+    // single-axis exports below tie each ink to its own field.
+    let (red, green) = ("fill=\"#FF0000\"", "fill=\"#00AA00\"");
+    assert!(svg.contains(red), "top axis ink missing: {svg}");
+    assert!(svg.contains(green), "right axis ink missing: {svg}");
+    let only_x = export_with(Some(OverlaySpec::new(true, false)), |layer| {
+        layer.bottom.tick_color = "#ff0000".to_owned();
+        layer.left.tick_color = "#00aa00".to_owned();
+    });
+    assert!(only_x.contains(red) && !only_x.contains(green));
+    let only_y = export_with(Some(OverlaySpec::new(false, true)), |layer| {
+        layer.bottom.tick_color = "#ff0000".to_owned();
+        layer.left.tick_color = "#00aa00".to_owned();
+    });
+    assert!(only_y.contains(green) && !only_y.contains(red));
 }
 
 /// #166: a "row" series is plotted against the columns' x' — the

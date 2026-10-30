@@ -229,6 +229,46 @@ on an axis and its context menu open the Axes tab of the targeted layer,
 with the same `Action::OpenObjectProperties` as the Object Manager. The address
 is that of the layer in the grid, independent of the rank of the plotted panels.
 
+**Axes tab: four sides (#396).** The strip at the left always lists Bottom,
+Left, Right, Top, on an ordinary layer as on an overlaid one: an axis is named
+**where it is drawn**. Which `PanelSpec` field a side edits, and whether another
+layer holds the side, is one rule, `stokesforge_app_state::cell_sides`
+(`side_use`, `sides`, `place_of`, `usable_place`), shared with the Object
+Manager (`AxisRef::is_mirror` / `blocked` ask it; its visible behavior did not
+change). An address in the spec is a **field** (`AxisRef`, `TextTarget`, hit
+test of the figure); every opener turns it into a side with `place_of`
+(`Action::OpenObjectProperties`, `graph_window::plot_target` for the header of the
+context menu).
+- Ordinary layer: each side edits its own field; Top is always a mirror, Right
+  a mirror while no series is attached to it (a real axis otherwise).
+- Overlaid layer (with an ordinary layer to cover): **Top** edits its X axis
+  (`bottom`), **Right** its Y axis (`left`); **Bottom** and **Left** belong to the
+  covered layer and are greyed out. Its `top` and `right` fields are never drawn
+  and never edited. These two tabs carry the layer's **Own scale** box
+  (`OverlaySpec::x_top` / `y_right`) beside **Show axis** (`AxisSpec::visible`):
+  unticked, the scale fields and Show axis are greyed (tooltip
+  `disabled-axis-own-scale-off`) because the layer follows the covered layer.
+  Hiding the axis never moves the curves: the scale is kept.
+- A side is **taken** when another layer draws there: the Top / Right of the
+  ordinary layer while an overlay draws its axis (`x_top && bottom.visible`,
+  `y_right && left.visible`) on a mirror; the overlay's Top / Right while the
+  ordinary layer displays its mirror; the overlay's Bottom / Left always. Two
+  overlays never take a side from each other (their axes stack outward, #168).
+  The tab is greyed with a `disabled-axis-side-*` bubble that says who holds the
+  side and what to do (S-G1, S-G2). A real right axis is never taken.
+- The chosen tab falls back, when greyed, to the other side of the same axis
+  (Bottom/Top, Left/Right), then to the first available tab
+  (`usable_place`, applied by `axes_settings_page` on every frame).
+- Conflict: creating an overlay axis at the top or on the right while the
+  mirror is displayed (Graph › New Layer, drop of rows with "Create Axis",
+  Y2/Y3/Y4 plotting) switches the mirror off **in the same command**
+  (`switch_off_mirrors_under_overlays`): one Undo gives both back. An old file
+  with both keeps the overlay drawn and the mirror blocked; the model is not
+  changed on load, and the mirror tab is available again once the overlay hides
+  its axis.
+- Each axis of an overlay keeps its own colors on the figure: the top axis those of
+  `bottom`, the right axis those of `left` (`pipeline.rs`).
+
 **Titles, axis titles and legend** (issue #53): they are targeted like a free
 text. Double-click on a title or an axis title → in-place editor
 (`app::graph_text_edit::text_editor_ui`, one field; Enter or a click elsewhere confirms, Esc
@@ -365,8 +405,9 @@ select a graph in the foreground with nothing selected in it, Ctrl+C, then
 
 **Tabs** (`state::PlotSettingsTab`, `plot-tab-*` keys, in English):
 "General" (title and its color, background), "Plot Area" (layer title,
-grid lines), "Axes" (one axis at a time, chosen at the top of the page: axis
-title (quantity and units), scale, display, axis color),
+grid lines), "Axes" (one side of the cell at a time, chosen in the vertical
+strip at the left of the page: axis title (quantity and units), scale, display,
+axis color; see "Axes tab: four sides" below),
 "Legend" and "Theme". The series no longer have a tab (#179): they have their
 own window, **Series Properties**, described below. The texts of the whole window are `plot-*` keys
 of the `en` catalog (tooltip in a `.hint` attribute), following the glossary
@@ -523,9 +564,8 @@ in `stokesforge-plot` (read before writing, as requested):
 - **Graph**: `PlotSpec::title`, `background`;
 - **Plot area** (`PlotSpec::panels`[0] only, see below):
   `PanelSpec::title`, grid of the bottom and left axes;
-- **Axes**: for the bottom axis, the left one, and the right one if
-  `PanelSpec::uses_right_axis()` (the top axis, hidden by default and with no
-  UI in this bench to enable it, has no section): `AxisSpec::label`,
+- **Axes**: the four sides of the cell, Bottom, Left, Right, Top, on every
+  layer (#396, "Axes tab: four sides" below): `AxisSpec::label`,
   `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, the
   "From" / "to" limits (#344: **neither an "Inverted axis" box nor an "Auto range" box**;
   "From" and "to" are always editable, show the computed limits as long as

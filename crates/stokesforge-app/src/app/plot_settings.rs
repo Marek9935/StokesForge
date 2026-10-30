@@ -12,7 +12,8 @@
 use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
-    AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape, TickDirection,
+    AxisSide, AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape,
+    TickDirection,
 };
 
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
@@ -20,6 +21,7 @@ use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
 use crate::number_field::{auto_number_field, number_field};
 use crate::theme::{table_header, FieldWidth};
+use stokesforge_app_state::cell_sides::{self, PLACES};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
@@ -33,7 +35,7 @@ use super::dialogs::{
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::{help_text, hover_help};
-use super::tab_strip::{tab_strip, TabStripSide};
+use super::tab_strip::{tab_strip, tab_strip_left_with_reasons, TabStripSide};
 
 /// Key, in the egui context, of "the formula help icon is hidden" (#148).
 const FORMULA_HELP_HIDDEN: &str = "stokesforge_formula_help_hidden";
@@ -282,16 +284,14 @@ fn plot_settings_contents(
         } else if chosen_tab == PlotSettingsTab::Axes {
             // Two levels (S-L9, #393): the vertical axis strip stays fixed and
             // only the page of the axis scrolls, so no common scrolling.
-            if let Some(panel) = spec.panels.get_mut(edit.selected_panel) {
-                commit |= axes_settings_page(
-                    ui,
-                    panel,
-                    &mut chosen_axis,
-                    published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
-                    &mut spec.decimal_comma,
-                    &mut env,
-                );
-            }
+            commit |= axes_settings_page(
+                ui,
+                spec,
+                edit.selected_panel,
+                &mut chosen_axis,
+                published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
+                &mut env,
+            );
         } else {
             crate::theme::page_scroll_area()
                 .auto_shrink([false, false])
@@ -406,71 +406,95 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
     })
 }
 
-/// Axes page: a vertical strip at the left chooses the axis (fixed), the shared
-/// editor is at its right and alone scrolls (S-L9, #393).
+/// Axes page: a vertical strip at the left chooses the side of the cell
+/// (fixed), the shared editor is at its right and alone scrolls (S-L9, #393).
+///
+/// Always the four sides, Bottom, Left, Right, Top, on every layer (#396): an
+/// axis is named where it is drawn, and a side that another layer holds is
+/// greyed out with the reason in its own bubble. What each side edits is the
+/// rule of [`cell_sides`] (the Object Manager asks it too). `chosen_axis` is
+/// moved to a usable side when the chosen one is taken.
 pub(super) fn axes_settings_page(
     ui: &mut egui::Ui,
-    panel: &mut PanelSpec,
+    spec: &mut PlotSpec,
+    panel_index: usize,
     chosen_axis: &mut PlotAxis,
     bounds: Option<PanelBounds>,
-    decimal_comma: &mut bool,
     env: &mut PickerEnv,
 ) -> bool {
-    let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
-    if panel.overlay.is_none() {
-        // Top and right: the mirror axes (#176), always offered.
-        axes.extend([PlotAxis::Right, PlotAxis::Top]);
-    } else if panel.uses_right_axis() || *chosen_axis == PlotAxis::Right {
-        axes.push(PlotAxis::Right);
-    }
+    let sides = cell_sides::sides(spec, panel_index);
+    *chosen_axis = PlotAxis::from_side(cell_sides::usable_place(
+        spec,
+        panel_index,
+        chosen_axis.side(),
+    ));
     // #169: the axes are a set of tabs (one page per axis), so the common
     // strip. #393 (S-L9): they are the secondary level under the Graph
     // Properties tabs, so a vertical strip at the left of the page; it stays
     // fixed and only the page of the axis scrolls.
-    let tabs: Vec<(PlotAxis, String)> = axes.into_iter().map(|axis| (axis, axis.label())).collect();
+    let tabs: Vec<(PlotAxis, String)> = PLACES
+        .into_iter()
+        .map(|place| {
+            let axis = PlotAxis::from_side(place);
+            (axis, axis.label())
+        })
+        .collect();
+    let side_of = |axis: &PlotAxis| sides.iter().find(|side| side.place == axis.side()).copied();
     // The row takes the whole height left: `ui.horizontal` would hand the
     // scroll area about one row.
     let size = ui.available_size();
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
         let mut picked = None;
-        tab_strip(
+        tab_strip_left_with_reasons(
             ui,
-            TabStripSide::Left,
             &tabs,
             *chosen_axis,
+            &|axis| side_of(axis).and_then(|side| side.reason()),
             |axis| picked = Some(axis),
-            None,
-            || {},
         );
         if let Some(axis) = picked {
             *chosen_axis = axis;
         }
+        let Some(side) = side_of(chosen_axis).filter(|side| side.available()) else {
+            return false;
+        };
+        let Some(field) = side.field else {
+            return false;
+        };
         ui.vertical(|ui| {
-            // The top is always a mirror; the right is one as long as no
-            // series is attached to it (otherwise it is a real axis, full
-            // editor).
-            let mirror = panel.overlay.is_none()
-                && (*chosen_axis == PlotAxis::Top
-                    || (*chosen_axis == PlotAxis::Right && !panel.uses_right_axis()));
-            let axis = match *chosen_axis {
-                PlotAxis::Bottom => &mut panel.bottom,
-                PlotAxis::Left => &mut panel.left,
-                PlotAxis::Right => &mut panel.right,
-                PlotAxis::Top => &mut panel.top,
-            };
-            let computed = bounds.and_then(|bounds| match *chosen_axis {
-                PlotAxis::Bottom => bounds.bottom,
-                PlotAxis::Left => bounds.left,
+            let computed = bounds.and_then(|bounds| match field {
+                AxisSide::Bottom => bounds.bottom,
+                AxisSide::Left => bounds.left,
                 _ => bounds.right,
             });
+            let Some(panel) = spec.panels.get_mut(panel_index) else {
+                return false;
+            };
+            let decimal_comma = &mut spec.decimal_comma;
             crate::theme::page_scroll_area()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     form(ui, "plot_axis_page", |form| {
-                        let mut commit = if mirror {
-                            mirror_axis_editor(form, axis, env)
+                        let mut commit = if side.mirror {
+                            mirror_axis_editor(form, panel.axis_mut(field), env)
+                        } else if side.own_scale {
+                            // An overlaid layer's top / right: the axis
+                            // fields plus the "Own scale" of the layer.
+                            let own = panel.overlay.as_mut().map(|overlay| {
+                                if field == AxisSide::Bottom {
+                                    &mut overlay.x_top
+                                } else {
+                                    &mut overlay.y_right
+                                }
+                            });
+                            let axis = if field == AxisSide::Bottom {
+                                &mut panel.bottom
+                            } else {
+                                &mut panel.left
+                            };
+                            axis_editor(form, axis, computed, own, env)
                         } else {
-                            axis_editor(form, axis, computed, env)
+                            axis_editor(form, panel.axis_mut(field), computed, None, env)
                         };
                         // Setting of the whole graph (#223), put under the
                         // axes display.
@@ -858,6 +882,7 @@ fn axis_editor(
     form: &mut Form<'_>,
     axis: &mut AxisSpec,
     computed: Option<(f64, f64)>,
+    own_scale: Option<&mut bool>,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
@@ -883,72 +908,101 @@ fn axis_editor(
     );
 
     form.section(tr!("plot-axes-scale-section"));
-    let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
-    if form.checkbox(
-        &mut log_scale,
-        tr!("plot-axes-log-scale"),
-        Some(tr!("plot-axes-log-scale", "hint")),
-    ) {
-        axis.scale = if log_scale {
-            stokesforge_plot::AxisScale::Log
-        } else {
-            stokesforge_plot::AxisScale::Linear
-        };
-        commit = true;
+    // An overlaid layer's top / right tab (#396): its scale is its own only
+    // when ticked, otherwise it follows the layer it covers and the fields
+    // below are dead.
+    let mut scale_enabled = true;
+    if let Some(own) = own_scale {
+        commit |= form.checkbox(
+            own,
+            tr!("plot-axes-own-scale"),
+            Some(tr!("plot-axes-own-scale", "hint")),
+        );
+        scale_enabled = *own;
     }
-    // From and To: always editable (#344). Under Auto, they show the computed
-    // bounds, in display order; typing in one freezes both bounds
-    // (the other is taken from the computation) and the direction follows the order: From > To = inverted
-    // axis. The "Auto" button gives the bounds back to the data, direction kept.
-    let auto = axis.auto_range;
-    let (mut min, mut max) = if auto {
-        computed
-            .map(|(low, high)| {
-                if axis.inverted {
-                    (high, low)
-                } else {
-                    (low, high)
-                }
-            })
-            .or(axis.range_min.zip(axis.range_max))
-            .unwrap_or((0.0, 0.0))
-    } else {
-        (axis.range_min.unwrap_or(0.0), axis.range_max.unwrap_or(0.0))
-    };
-    let mut changed = false;
-    let mut auto_asked = false;
-    // "From … to …" on a single row; the order is free, unlike the
-    // analysis ranges (S-N11).
-    form.row(tr!("plot-axes-from"), |ui| {
-        let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
-        ui.label(tr!("analysis-field-to"));
-        let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
-        changed |= first.changed || second.changed;
-        auto_asked |= first.auto || second.auto;
-        if ui
-            .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
-            .on_hover_text(tr!("plot-axes-from-auto", "hint"))
-            .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
-            .clicked()
-        {
-            auto_asked = true;
+    let scale_rows = form.enabled(scale_enabled, |form| {
+        let mut commit = false;
+        let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
+        if form.checkbox(
+            &mut log_scale,
+            tr!("plot-axes-log-scale"),
+            Some(tr!("plot-axes-log-scale", "hint")),
+        ) {
+            axis.scale = if log_scale {
+                stokesforge_plot::AxisScale::Log
+            } else {
+                stokesforge_plot::AxisScale::Linear
+            };
+            commit = true;
         }
+        // From and To: always editable (#344). Under Auto, they show the computed
+        // bounds, in display order; typing in one freezes both bounds
+        // (the other is taken from the computation) and the direction follows the order: From > To = inverted
+        // axis. The "Auto" button gives the bounds back to the data, direction kept.
+        let auto = axis.auto_range;
+        let (mut min, mut max) = if auto {
+            computed
+                .map(|(low, high)| {
+                    if axis.inverted {
+                        (high, low)
+                    } else {
+                        (low, high)
+                    }
+                })
+                .or(axis.range_min.zip(axis.range_max))
+                .unwrap_or((0.0, 0.0))
+        } else {
+            (axis.range_min.unwrap_or(0.0), axis.range_max.unwrap_or(0.0))
+        };
+        let mut changed = false;
+        let mut auto_asked = false;
+        // "From … to …" on a single row; the order is free, unlike the
+        // analysis ranges (S-N11).
+        form.row(tr!("plot-axes-from"), |ui| {
+            let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
+            ui.label(tr!("analysis-field-to"));
+            let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
+            changed |= first.changed || second.changed;
+            auto_asked |= first.auto || second.auto;
+            if ui
+                .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
+                .on_hover_text(tr!("plot-axes-from-auto", "hint"))
+                .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
+                .clicked()
+            {
+                auto_asked = true;
+            }
+        });
+        if auto_asked {
+            axis.auto_range = true;
+            // The stored bounds take the axis direction again.
+            *axis = axis.orient();
+            commit = true;
+        } else if changed {
+            axis.auto_range = false;
+            axis.range_min = Some(min);
+            axis.range_max = Some(max);
+            axis.inverted = min > max;
+            commit = true;
+        }
+        commit
     });
-    if auto_asked {
-        axis.auto_range = true;
-        // The stored bounds take the axis direction again.
-        *axis = axis.orient();
-        commit = true;
-    } else if changed {
-        axis.auto_range = false;
-        axis.range_min = Some(min);
-        axis.range_max = Some(max);
-        axis.inverted = min > max;
-        commit = true;
+    if !scale_enabled {
+        scale_rows
+            .response
+            .on_disabled_hover_text(tr!("disabled-axis-own-scale-off"));
     }
+    commit |= scale_rows.inner;
 
     form.section(tr!("plot-axes-display-section"));
-    commit |= form.checkbox(&mut axis.visible, tr!("plot-axes-show-axis"), None);
+    commit |= form.field(|ui| {
+        ui.add_enabled(
+            scale_enabled,
+            egui::Checkbox::new(&mut axis.visible, tr!("plot-axes-show-axis")),
+        )
+        .on_disabled_hover_text(tr!("disabled-axis-own-scale-off"))
+        .changed()
+    });
     commit |= form.checkbox(
         &mut axis.tick_labels,
         tr!("plot-axes-show-tick-labels"),
@@ -1712,6 +1766,156 @@ mod tests {
         assert!(graph.y < bottom.y, "the axes are under the main tabs");
         let scale = text_exact(&painted, &tr!("plot-axes-scale-section")).center;
         assert!(scale.x > tabs_right, "page on the right of the tabs");
+    }
+
+    /// A graph with the ordinary layer 1 and an overlaid layer 2 (#396) whose
+    /// axes are `overlay`; the properties show layer `selected`.
+    fn open_with_overlay(
+        overlay: stokesforge_plot::OverlaySpec,
+        selected: usize,
+        axis: Option<PlotAxis>,
+        adjust: impl FnOnce(&mut PlotSpec),
+    ) -> Harness {
+        let mut harness = harness(|spec| {
+            let base = spec.panels.first().unwrap().clone();
+            spec.panels.push(PanelSpec::overlay_on(&base, overlay));
+            adjust(spec);
+        });
+        harness.open(PlotSettingsTab::Axes, axis);
+        harness.state.plot_edit_mut().unwrap().selected_panel = selected;
+        harness
+    }
+
+    /// Hovers the text `label` of the window and returns the texts painted
+    /// with the bubble.
+    fn hover_label(context: &egui::Context, state: &mut AppState, label: &str) -> Vec<Text> {
+        context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let painted = paint_window(context, state, Vec::new());
+        let pos = text_exact(&painted, label).center;
+        paint_window(context, state, vec![egui::Event::PointerMoved(pos)]);
+        paint_window(context, state, vec![egui::Event::PointerMoved(pos)])
+    }
+
+    /// #396: an overlaid layer shows the four tabs; Bottom and Left belong to
+    /// the layer it covers, so they are greyed out, say why in their bubble,
+    /// and a click on them does not leave the chosen side.
+    #[test]
+    fn the_tabs_of_an_overlaid_layer_are_four_and_the_covered_sides_are_greyed() {
+        let overlay = stokesforge_plot::OverlaySpec::new(true, true);
+        let mut harness = open_with_overlay(overlay, 1, Some(PlotAxis::Right), |_| {});
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for axis in [
+            PlotAxis::Bottom,
+            PlotAxis::Left,
+            PlotAxis::Right,
+            PlotAxis::Top,
+        ] {
+            assert!(is_painted(&painted, &axis.label()), "{axis:?}");
+        }
+        let reason = tr!(
+            "disabled-axis-side-base-x",
+            layer = 1,
+            tab = PlotAxis::Top.label()
+        );
+        assert!(!is_painted(&painted, &reason), "witness: no bubble yet");
+        let hovered = hover_label(&context, &mut harness.state, &PlotAxis::Bottom.label());
+        assert!(is_painted(&hovered, &reason), "{reason:?}");
+        click_label(&context, &mut harness.state, &PlotAxis::Bottom.label());
+        assert_eq!(
+            harness.state.plot_settings().unwrap().axis,
+            PlotAxis::Right,
+            "a greyed tab does not select"
+        );
+        click_label(&context, &mut harness.state, &PlotAxis::Top.label());
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Top);
+    }
+
+    /// #396: the Bottom tab being greyed on an overlaid layer, the page opens
+    /// on the other side of the same axis, the Top tab.
+    #[test]
+    fn a_greyed_chosen_tab_falls_back_to_the_other_side_of_the_axis() {
+        let overlay = stokesforge_plot::OverlaySpec::new(true, true);
+        let mut harness = open_with_overlay(overlay, 1, Some(PlotAxis::Left), |_| {});
+        let context = test_support::context();
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Right);
+        harness.open(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Top);
+    }
+
+    /// #396: the Top tab of an overlaid layer edits its X axis (the `bottom`
+    /// field), never the `top` one; "Show axis" hides it and the layer keeps
+    /// its own scale, hence its curves.
+    #[test]
+    fn the_top_tab_of_an_overlaid_layer_edits_its_x_axis() {
+        let overlay = stokesforge_plot::OverlaySpec::new(true, true);
+        let mut harness = open_with_overlay(overlay, 1, Some(PlotAxis::Top), |_| {});
+        let context = test_support::context();
+        let before = harness.draft();
+        click_label(&context, &mut harness.state, &tr!("plot-axes-show-axis"));
+        let after = harness.draft();
+        let layer = after.panels.get(1).unwrap();
+        assert!(!layer.bottom.visible, "the X axis is hidden");
+        assert_eq!(layer.top, before.panels.get(1).unwrap().top);
+        assert_eq!(layer.overlay, Some(overlay), "its scale is kept");
+        assert_eq!(harness.model(), after, "committed");
+    }
+
+    /// #396: "Own scale" is the layer's `x_top`; unticked, the scale fields and
+    /// "Show axis" are greyed with the way out in their bubble.
+    #[test]
+    fn own_scale_unticked_greys_the_scale_fields_and_says_how_to_tick_it() {
+        let overlay = stokesforge_plot::OverlaySpec::new(true, true);
+        let mut harness = open_with_overlay(overlay, 1, Some(PlotAxis::Top), |_| {});
+        let context = test_support::context();
+        click_label(&context, &mut harness.state, &tr!("plot-axes-own-scale"));
+        let layer = harness.draft().panels.get(1).unwrap().clone();
+        assert_eq!(layer.overlay.map(|o| o.x_top), Some(false));
+        assert_eq!(harness.model().panels.get(1), Some(&layer), "committed");
+        let reason = tr!("disabled-axis-own-scale-off");
+        let hovered = hover_label(&context, &mut harness.state, &tr!("plot-axes-show-axis"));
+        assert!(is_painted(&hovered, &reason), "{reason:?}");
+        // Greyed: a click on Show axis changes nothing.
+        let before = harness.draft();
+        click_label(&context, &mut harness.state, &tr!("plot-axes-show-axis"));
+        assert_eq!(harness.draft(), before);
+    }
+
+    /// #396: the Top of the ordinary layer is greyed while an overlaid layer
+    /// draws its X axis there; hiding that axis gives the tab back.
+    #[test]
+    fn the_top_of_the_covered_layer_is_greyed_while_an_overlay_draws_there() {
+        let overlay = stokesforge_plot::OverlaySpec::new(true, false);
+        let mut harness = open_with_overlay(overlay, 0, Some(PlotAxis::Top), |_| {});
+        let context = test_support::context();
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert_eq!(
+            harness.state.plot_settings().unwrap().axis,
+            PlotAxis::Bottom,
+            "Top is taken: the other side of the axis"
+        );
+        let reason = tr!(
+            "disabled-axis-side-overlay-x",
+            layer = 2,
+            tab = PlotAxis::Top.label()
+        );
+        let hovered = hover_label(&context, &mut harness.state, &PlotAxis::Top.label());
+        assert!(is_painted(&hovered, &reason), "{reason:?}");
+        // The overlay hides its axis: the Top tab is selectable again.
+        harness
+            .state
+            .plot_edit_mut()
+            .unwrap()
+            .spec
+            .panels
+            .get_mut(1)
+            .unwrap()
+            .bottom
+            .visible = false;
+        click_label(&context, &mut harness.state, &PlotAxis::Top.label());
+        assert_eq!(harness.state.plot_settings().unwrap().axis, PlotAxis::Top);
     }
 
     /// S-L9 (#393): the axis strip stays fixed, only the page scrolls.
@@ -3287,7 +3491,7 @@ mod tests {
         let mut commit = true;
         let painted = texts(&image(context, Vec::new(), |ui| {
             commit = form(ui, "trial", |form| {
-                super::axis_editor(form, axis, computed, &mut env)
+                super::axis_editor(form, axis, computed, None, &mut env)
             });
         }));
         (commit, painted)
