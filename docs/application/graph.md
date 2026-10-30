@@ -760,9 +760,28 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   six digits).
 - **`Action::SetFrameSize { graph, axis: FrameAxis, index, size }`**
   (`PlotEditKind::ResizeCell`, "Resize Plot Area", one `EditPlotSpec`, one undo
-  step) is the path of the drag handle (next phase): it fixes a legacy graph,
+  step) is the path of the Size fields and (with `SetFrameSizes`) of the drag handles: it fixes a legacy graph,
   clamps the size to `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and sends nothing if the
-  size is unchanged or outside the grid.
+  size is unchanged or outside the grid. `Action::SetFrameSizes { graph, column,
+  row }` commits a column and/or a row in one step (a corner drag); all or
+  nothing.
+- **Drag handles (#394).** The outer boundary of a cell (right and bottom ones;
+  `hit::cell_edge_at`, `docs/rendering.md`) is pulled with the Pointer tool:
+  live preview in `GraphView`, at release `GraphEvent::FrameResized` becomes
+  `Action::SetFrameSizes` (`graph_window.rs`). Dragging by Δ changes the stored
+  frame by Δ.
+- **The window follows the figure.** `FigureFollow` (`window_placement.rs`, shell
+  only, invariant 2) records the figure size each graph window published
+  (`published_figure_size`) and the display scale of its view. When the size
+  changes (a cell added or removed, Undo and Redo, the Size fields, a handle drag
+  in progress, an axis or a title that makes the image grow, `pyst`), a floating
+  window grows or shrinks by the difference at the scale it had, top-left fixed,
+  to the right and down, clamped to the workspace (`followed_floating_size`); a
+  detached OS window does the same through `ViewportCommand::InnerSize`, clamped
+  to the monitor (`follow_figure_in_viewport`). A maximized window does not
+  resize (the figure is contained; it keeps its record so that restoring resizes
+  nothing). The first frame of a graph after opening or loading a project has
+  no previous value: no resize (`figure_follow` is cleared with the windows).
 - **Legacy graphs (G7).** Opening one changes nothing and writes nothing. Its
   first edit, whatever it is (a field, a title, an axis, a layer, a curve), fixes
   the frames it was drawn with in the very command of the edit
@@ -773,9 +792,6 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   its figure is exactly 480 × 360 pt, explicit; a title added later grows the
   figure by its band (`pyst.plot` included). Beside / Below layers have the frame
   of their reference layer. `pyst` has no size setter yet.
-- The window following the figure and the drag handles on the outer boundary of
-  the cell (`DrawnPanel::cell_origin` / `cell_size`, `Action::SetFrameSize`) are
-  the next phase of #394.
 
 **Indices that follow a removal** (and its undo): `ViewState::remap_panels`
 (framings), `GraphView::remap_layers` (active layer, selection, gestures in

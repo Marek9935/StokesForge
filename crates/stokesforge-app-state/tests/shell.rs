@@ -14127,6 +14127,51 @@ fn setting_a_frame_size_is_one_undo_step_and_the_other_frames_keep_theirs() {
     assert_ne!(revision, revision_now);
 }
 
+/// #394: pulling a corner handle commits both sizes as ONE undo step; a legacy
+/// graph is given the frames it was drawn with, only the pulled ones move; a
+/// refused size (outside the grid) commits nothing, not even the other one.
+#[test]
+fn pulling_a_corner_is_one_undo_step_and_fixes_a_legacy_graph() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.title = "Legacy".to_owned();
+    legacy.frame_widths.clear();
+    legacy.frame_heights.clear();
+    put_legacy_spec(&session, &mut state, graph, legacy.clone());
+    let drawn = layout_of(&legacy);
+
+    state.dispatch(Action::SetFrameSizes {
+        graph,
+        column: Some((0, 300.0)),
+        row: Some((0, 200.0)),
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(
+        (after.frame_widths.clone(), after.frame_heights.clone()),
+        (vec![300.0], vec![200.0])
+    );
+    assert_ne!(drawn.frame_widths, after.frame_widths);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeCell
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), legacy, "one Undo is enough");
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), after);
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFrameSizes {
+        graph,
+        column: Some((0, 250.0)),
+        row: Some((9, 200.0)),
+    });
+    assert_eq!(state.snapshot().revision, revision, "all or nothing");
+}
+
 /// #394: deleting a cell that empties its column removes that column; the
 /// figure shrinks by the column's outer width, and undo brings both back in
 /// one step.

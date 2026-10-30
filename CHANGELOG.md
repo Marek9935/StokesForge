@@ -38,7 +38,9 @@ without a message, see `docs/persistence.md`).
   edit fixes the plot areas it was drawn with. New additive `.stf` fields on the
   graph (`frame_widths`, `frame_heights`; absent = the old 480 x 360 pt shared
   equally): an older version that saves the file again loses them without a
-  message.
+  message. The outer right and bottom boundaries of a layer are drag handles that
+  resize its column or row (one undo step), and the graph window grows or
+  shrinks with the graph at the same display scale.
 - Error bars (#360): the first Y Error (X Error) column to the right of a Y
   column, before the next Y column, is paired with it at plot time, and the
   **Y error** / **X error** fields of Series Properties change or remove it

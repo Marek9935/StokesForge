@@ -489,6 +489,23 @@ annotations keep their priority. Known limit: a data right axis
 (`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
 the whole area. Test: `geometry.rs`, `layers.rs`, `hit.rs`.
 
+**Cell handles (#394).** `hit::cell_edge_at(plot, x, y, tolerance)` returns the
+`CellEdge { column, row }` under a pixel: the **outer** boundary of a cell
+(`DrawnPanel::cell_origin` + `cell_size`, beyond the tick labels and the axis
+title, never the axis line). Every cell's right boundary is the handle of its
+grid column and its bottom boundary the handle of its row, so the boundary two
+cells share belongs to the left column / the upper row and the figure's right and
+bottom edges to the last column and row; left and top edges have none. The strip
+is `CELL_EDGE_TOLERANCE_POINTS` (4) screen points either side
+(`GraphView::cell_edge_at` passes `4 / display_scale`), bounded by
+`CELL_EDGE_MAX_TOLERANCE` (half the 12 px margin) so that it never reaches an axis
+line. `GraphView` pulls it on the preview pattern (`FramePreview`, applied to the
+spec clone by `figure_layout` and the cache build, so the figure and the window
+that follows it see the new layout live; model untouched; the distance is
+measured in screen points over the display scale of the press because the figure
+grows under the pointer); at release, one `GraphEvent::FrameResized`, then
+`Action::SetFrameSizes` (one undo step). Never in the exports.
+
 **Shared legend (#172).** The legend of an ordinary layer lists its
 curves first, then, layer by layer in the order of `PlotSpec::panels`, those of the
 overlaid layers that cover it (`overlays_of` in `draw_on`, prepared

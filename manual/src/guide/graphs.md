@@ -135,6 +135,10 @@ What you set is the size of the **plot area**, the rectangle bounded by the axes
 
 A new graph is 480 × 360 points (about 17 × 12.7 cm) in all. Adding an axis, or a title, makes the graph bigger around the plot area: the plot area keeps its size, and the whole graph is shown scaled to fit its window. Removing one makes the graph smaller. A plot area can be from 36 points (about 1.3 cm) to 2000 points (about 70 cm) wide or high. Changing one size does not change the others: the graph grows or shrinks by the difference. The plot areas of one column are as wide as each other and line up, and so do those of one row, even when one layer has more axes than its neighbor. Setting the plot area of two graphs to the same numbers lets you place them one over the other at the same scale. The size is part of the file, and the change is one step of the window's single **Undo**.
 
+You can also resize by dragging. Point at the outer edge of a layer, beyond its numbers and its axis title, on the right or at the bottom: the pointer becomes a double arrow. Drag, and the plot area of that column or row grows or shrinks by the distance you drag, the graph with it, and the graph window follows. The edge two layers share resizes the left (or upper) one; the right edge of the graph resizes the last column, the bottom edge the last row, so a graph with one layer can be resized too; the bottom right corner does both. One drag is one step of **Undo**. A click on the axis line still selects the axis.
+
+When the graph gets bigger or smaller, whether by dragging, by the **Size** fields, by adding or deleting a layer, by adding an axis or by **Undo**, its window grows or shrinks by the same amount on screen, to the right and downward (at most to the edge of the workspace; a detached window stops at the edge of the screen). A maximized window does not change size: the graph is scaled to fit it.
+
 A graph saved by an older version has no sizes of its own. It keeps its familiar look, and its first change, of any kind, fixes the plot areas it had: from then on an axis or a title you add grows the graph instead of squeezing the plot area.
 
 ## Change a series

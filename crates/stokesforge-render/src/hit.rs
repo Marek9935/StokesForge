@@ -38,6 +38,66 @@ pub const AXIS_LINE_TOLERANCE_POINTS: f64 = 4.0;
 /// that a tiny plot keeps an interior.
 const AXIS_LINE_MAX_FRACTION: f64 = 0.25;
 
+/// Width, **in points on screen**, of the strip either side of the outer
+/// boundary of a cell that picks its resize handle (#394). Converted into
+/// figure pixels by the caller, like [`AXIS_LINE_TOLERANCE_POINTS`].
+pub const CELL_EDGE_TOLERANCE_POINTS: f64 = 4.0;
+
+/// The strip of a cell handle never exceeds this many figure pixels, so that
+/// it stays inside the margin the pipeline leaves outside the axis bands
+/// ([`crate::pipeline::MARGIN`], 12 px) and never reaches an axis line or a
+/// tick label, whatever the zoom of the display.
+pub const CELL_EDGE_MAX_TOLERANCE: f64 = crate::pipeline::MARGIN as f64 / 2.0;
+
+/// The resize handle under a pixel (#394): the outer boundary of a cell, beyond
+/// the tick labels and the axis title, never the axis line. Dragging it by a
+/// distance changes the **frame** (plot area) of the column and/or the row by
+/// that distance. The boundary a cell shares with its right neighbour is the
+/// handle of the left column, the one it shares with the cell below is the
+/// handle of the upper row; the right edge of the figure is that of the last
+/// column and its bottom edge that of the last row. Left and top edges have
+/// none. Near the corner of a cell both are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CellEdge {
+    /// Grid column whose frame width the vertical boundary changes.
+    pub column: Option<usize>,
+    /// Grid row whose frame height the horizontal boundary changes.
+    pub row: Option<usize>,
+}
+
+/// The cell handle at pixel `(x, y)` (backend coordinate space), within
+/// `tolerance` figure pixels (bounded by [`CELL_EDGE_MAX_TOLERANCE`]) of the
+/// outer boundary of a cell ([`DrawnPanel::cell_origin`]/[`DrawnPanel::cell_size`]).
+/// `None` elsewhere, in particular inside a frame and on an axis line.
+pub fn cell_edge_at(plot: &DrawnPlot, x: f64, y: f64, tolerance: f64) -> Option<CellEdge> {
+    let tolerance = if tolerance.is_finite() {
+        tolerance.clamp(0.0, CELL_EDGE_MAX_TOLERANCE)
+    } else {
+        0.0
+    };
+    let mut edge = CellEdge {
+        column: None,
+        row: None,
+    };
+    for panel in &plot.panels {
+        let left = panel.cell_origin.0 as f64;
+        let top = panel.cell_origin.1 as f64;
+        let right = left + panel.cell_size.0 as f64;
+        let bottom = top + panel.cell_size.1 as f64;
+        let near_right = (x - right).abs() <= tolerance;
+        let near_bottom = (y - bottom).abs() <= tolerance;
+        let within_x = x >= left && x <= right + tolerance;
+        let within_y = y >= top && y <= bottom + tolerance;
+        if near_right && within_y && edge.column.is_none() {
+            edge.column = Some(panel.column);
+        }
+        if near_bottom && within_x && edge.row.is_none() {
+            edge.row = Some(panel.row);
+        }
+    }
+    (edge.column.is_some() || edge.row.is_some()).then_some(edge)
+}
+
 /// An axis of a panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AxisSide {
@@ -699,5 +759,118 @@ mod tests {
         );
         assert_eq!(at(280.0, 0.0), axis(0, AxisSide::Bottom), "edge pixel");
         assert_eq!(at(279.0, 0.0), area);
+    }
+
+    /// #394: the handle sits on the outer boundary of the cell (480 wide, from
+    /// y = 40 to 360 in the fixture), not on the axis line of the plot area.
+    #[test]
+    fn the_cell_handle_is_on_the_outer_boundary_never_on_the_axis_line() {
+        let plot = figure();
+        let tol = CELL_EDGE_TOLERANCE_POINTS;
+        let column = |c| {
+            Some(CellEdge {
+                column: Some(c),
+                row: None,
+            })
+        };
+        // Inside the frame, and on its axis lines: no handle.
+        assert_eq!(cell_edge_at(&plot, 240.0, 150.0, tol), None);
+        assert_eq!(cell_edge_at(&plot, 438.0, 150.0, tol), None, "frame edge");
+        assert_eq!(
+            cell_edge_at(&plot, 240.0, 279.0, tol),
+            None,
+            "bottom axis line"
+        );
+        assert_eq!(
+            cell_edge_at(&plot, 82.0, 150.0, tol),
+            None,
+            "left axis line"
+        );
+        // Tick labels and the axis title are inside the cell: no handle.
+        assert_eq!(cell_edge_at(&plot, 240.0, 300.0, tol), None);
+        // Left and top boundaries are inactive.
+        assert_eq!(cell_edge_at(&plot, 0.0, 150.0, tol), None);
+        assert_eq!(cell_edge_at(&plot, 240.0, 40.0, tol), None);
+        // Outer boundary, either side within the tolerance.
+        assert_eq!(cell_edge_at(&plot, 480.0, 150.0, tol), column(0));
+        assert_eq!(cell_edge_at(&plot, 476.0, 150.0, tol), column(0));
+        assert_eq!(cell_edge_at(&plot, 484.0, 150.0, tol), column(0));
+        assert_eq!(cell_edge_at(&plot, 470.0, 150.0, tol), None);
+        assert_eq!(
+            cell_edge_at(&plot, 240.0, 358.0, tol),
+            Some(CellEdge {
+                column: None,
+                row: Some(0)
+            })
+        );
+        // Corner: both at once.
+        assert_eq!(
+            cell_edge_at(&plot, 479.0, 361.0, tol),
+            Some(CellEdge {
+                column: Some(0),
+                row: Some(0)
+            })
+        );
+    }
+
+    /// #394: the strip is bounded so that it never reaches an axis line, and a
+    /// hostile tolerance does not panic.
+    #[test]
+    fn the_cell_handle_strip_is_bounded() {
+        let plot = figure();
+        assert_eq!(
+            cell_edge_at(&plot, 470.0, 150.0, 1000.0),
+            None,
+            "bounded by half the margin"
+        );
+        assert!(cell_edge_at(&plot, 476.0, 150.0, 1000.0).is_some());
+        assert_eq!(cell_edge_at(&plot, 479.0, 150.0, f64::NAN), None);
+        assert!(cell_edge_at(&plot, 480.0, 150.0, f64::NAN).is_some());
+    }
+
+    /// #394: the boundary two cells share is the handle of the left column and
+    /// of the upper row; an overlay shares its base cell.
+    #[test]
+    fn a_shared_boundary_belongs_to_the_left_column_and_the_upper_row() {
+        let mut plot = figure();
+        plot.panels[0].cell_size = (240, 160);
+        let mut right = plot.panels[0].clone();
+        right.index = 1;
+        right.column = 1;
+        right.cell_origin = (240, 40);
+        let mut below = plot.panels[0].clone();
+        below.index = 2;
+        below.row = 1;
+        below.cell_origin = (0, 200);
+        plot.panels.extend([right, below]);
+        let tol = CELL_EDGE_TOLERANCE_POINTS;
+        assert_eq!(
+            cell_edge_at(&plot, 240.0, 100.0, tol),
+            Some(CellEdge {
+                column: Some(0),
+                row: None
+            })
+        );
+        assert_eq!(
+            cell_edge_at(&plot, 100.0, 200.0, tol),
+            Some(CellEdge {
+                column: None,
+                row: Some(0)
+            })
+        );
+        assert_eq!(
+            cell_edge_at(&plot, 480.0, 100.0, tol),
+            Some(CellEdge {
+                column: Some(1),
+                row: None
+            })
+        );
+        assert_eq!(
+            cell_edge_at(&plot, 100.0, 360.0, tol),
+            Some(CellEdge {
+                column: None,
+                row: Some(1)
+            })
+        );
     }
 }

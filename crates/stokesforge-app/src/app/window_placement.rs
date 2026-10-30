@@ -7,8 +7,13 @@
 //! and sizes are in **logical** workspace coordinates; the conversion to
 //! screen coordinates happens only at paint time (`workspace_to_screen`).
 
+use std::collections::HashMap;
+
 use eframe::egui;
+use stokesforge_core::NodeId;
 use stokesforge_session::WindowGeometry;
+
+use super::window_chrome::MIN_CONTENT_WINDOW_SIZE;
 
 /// Default size of floating windows that do not show a graph — see the
 /// module's top doc, § Confined floating windows. Trimmed to the available
@@ -151,6 +156,83 @@ pub(super) fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
     let size = rect.size().min(WORKSPACE_SIZE);
     let max_min = (WORKSPACE_SIZE - size).to_pos2();
     egui::Rect::from_min_size(rect.min.clamp(egui::Pos2::ZERO, max_min), size)
+}
+
+/// What a graph window remembers of the figure it last painted (#394), so that
+/// the window follows the figure: when the figure's logical size changes (a cell
+/// added or removed, an undo, a size field, a handle drag, an axis or a title
+/// that makes the image grow around a fixed plot area, `pyst`), the window grows
+/// or shrinks by the difference at the display scale it had, top-left fixed.
+/// Window geometry stays in the shell (invariant 2): app-state never sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FigureFollow {
+    /// Size of the figure in points the last time it was recorded.
+    size: (u32, u32),
+    /// Screen points per figure point: the "display scale" the window keeps.
+    scale: f32,
+}
+
+impl FigureFollow {
+    /// Records the figure `graph` paints this frame (`size` in points, `scale`
+    /// the display scale of its view) and returns how far the window must grow
+    /// (negative: shrink), in screen points, if the figure's size changed since
+    /// the previous record. The scale used is the one from before the change, so
+    /// that the figure keeps its display scale. Nothing is returned the first
+    /// time a graph is seen: opening or loading a project never resizes a window.
+    pub(super) fn observe(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        graph: NodeId,
+        size: (u32, u32),
+        scale: Option<f32>,
+    ) -> Option<egui::Vec2> {
+        let scale = scale.filter(|scale| scale.is_finite() && *scale > 0.0);
+        let Some(follow) = follows.get_mut(&graph) else {
+            follows.insert(
+                graph,
+                FigureFollow {
+                    size,
+                    scale: scale.unwrap_or(1.0),
+                },
+            );
+            return None;
+        };
+        if follow.size == size {
+            follow.scale = scale.unwrap_or(follow.scale);
+            return None;
+        }
+        let delta = egui::vec2(
+            (i64::from(size.0) - i64::from(follow.size.0)) as f32,
+            (i64::from(size.1) - i64::from(follow.size.1)) as f32,
+        ) * follow.scale;
+        follow.size = size;
+        Some(delta)
+    }
+}
+
+/// The logical size of a floating window of top-left `position` after it grew
+/// by `delta`: never below the minimum of a content window, never beyond the
+/// workspace (right and down).
+pub(super) fn followed_floating_size(
+    position: egui::Pos2,
+    size: egui::Vec2,
+    delta: egui::Vec2,
+) -> egui::Vec2 {
+    let room = (WORKSPACE_SIZE - position.to_vec2()).max(MIN_CONTENT_WINDOW_SIZE);
+    (size + delta).max(MIN_CONTENT_WINDOW_SIZE).min(room)
+}
+
+/// The inner size of a detached OS window after it grew by `delta`: never below
+/// the minimum of a content window, never beyond the monitor when it is known.
+pub(super) fn followed_viewport_size(
+    size: egui::Vec2,
+    delta: egui::Vec2,
+    monitor: Option<egui::Vec2>,
+) -> egui::Vec2 {
+    let grown = (size + delta).max(MIN_CONTENT_WINDOW_SIZE);
+    match monitor {
+        Some(monitor) => grown.min(monitor.max(MIN_CONTENT_WINDOW_SIZE)),
+        None => grown,
+    }
 }
 
 #[cfg(test)]
@@ -339,5 +421,83 @@ mod tests {
         ] {
             assert_eq!(clamp_to_workspace(legal), legal);
         }
+    }
+
+    fn graph() -> NodeId {
+        NodeId::from_raw(7)
+    }
+
+    #[test]
+    fn the_first_record_of_a_graph_never_resizes() {
+        let mut follows = HashMap::new();
+        assert_eq!(
+            FigureFollow::observe(&mut follows, graph(), (960, 360), Some(1.5)),
+            None
+        );
+        assert_eq!(
+            FigureFollow::observe(&mut follows, graph(), (960, 360), Some(1.5)),
+            None,
+            "same size"
+        );
+    }
+
+    /// The difference is taken at the scale from before the change: a figure
+    /// that grows by 480 points at scale 1.5 asks for 720 screen points.
+    #[test]
+    fn a_change_of_size_moves_the_window_by_the_difference_at_the_display_scale() {
+        let mut follows = HashMap::new();
+        FigureFollow::observe(&mut follows, graph(), (480, 360), Some(1.5));
+        // The frame the figure changes is painted contained in the old window:
+        // its fresh scale (1.0 here) must not be used.
+        let grow = FigureFollow::observe(&mut follows, graph(), (960, 360), Some(0.75));
+        assert_eq!(grow, Some(egui::vec2(720.0, 0.0)));
+        // Undo: the figure shrinks back, the window with it.
+        let shrink = FigureFollow::observe(&mut follows, graph(), (480, 360), Some(1.5));
+        assert_eq!(shrink, Some(egui::vec2(-720.0, 0.0)));
+    }
+
+    #[test]
+    fn a_floating_window_grows_right_and_down_but_stays_in_the_workspace() {
+        let size = egui::vec2(560.0, 460.0);
+        let position = egui::pos2(100.0, 50.0);
+        assert_eq!(
+            followed_floating_size(position, size, egui::vec2(720.0, 0.0)),
+            egui::vec2(1280.0, 460.0)
+        );
+        // Not past the right edge of the workspace: 1920 - 100.
+        assert_eq!(
+            followed_floating_size(position, size, egui::vec2(5000.0, 5000.0)),
+            WORKSPACE_SIZE - position.to_vec2()
+        );
+        // Never below the minimum.
+        assert_eq!(
+            followed_floating_size(position, size, egui::vec2(-5000.0, -5000.0)),
+            MIN_CONTENT_WINDOW_SIZE
+        );
+    }
+
+    #[test]
+    fn a_detached_window_is_clamped_to_its_monitor() {
+        let size = egui::vec2(560.0, 460.0);
+        assert_eq!(
+            followed_viewport_size(
+                size,
+                egui::vec2(700.0, 0.0),
+                Some(egui::vec2(1280.0, 800.0))
+            ),
+            egui::vec2(1260.0, 460.0)
+        );
+        assert_eq!(
+            followed_viewport_size(
+                size,
+                egui::vec2(2000.0, 0.0),
+                Some(egui::vec2(1280.0, 800.0))
+            ),
+            egui::vec2(1280.0, 460.0)
+        );
+        assert_eq!(
+            followed_viewport_size(size, egui::vec2(2000.0, 0.0), None),
+            egui::vec2(2560.0, 460.0)
+        );
     }
 }

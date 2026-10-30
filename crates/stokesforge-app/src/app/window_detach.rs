@@ -148,7 +148,7 @@
 //! All use `detached_panel_contents`: home-made frame without native
 //! decoration, Reattach only, OS close converted into a reattach.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
@@ -179,7 +179,9 @@ use super::window_chrome::{
     show_window_contents_bounded, window_header, HeaderPlacement, PanelPlacement,
     WindowHeaderActions, MIN_CONTENT_WINDOW_SIZE, WINDOW_CONTENT_MARGIN, WINDOW_HEADER_HEIGHT,
 };
-use super::window_placement::{floating_window_display_size, GRAPH_WINDOW_SIZE};
+use super::window_placement::{
+    floating_window_display_size, followed_viewport_size, FigureFollow, GRAPH_WINDOW_SIZE,
+};
 use super::window_stack::toggle_collapse_to;
 use super::workbook::book_contents;
 use super::StokesForgeApp;
@@ -323,6 +325,38 @@ fn detached_panel_contents(
     reattach
 }
 
+/// The detached window follows the figure (#394), like a floating one: when the
+/// figure's logical size changed since the last frame, the inner size of the OS
+/// window grows or shrinks by the difference at the display scale, clamped to
+/// the monitor. A maximized window only records the figure.
+fn follow_figure_in_viewport(
+    ctx: &egui::Context,
+    follows: &mut HashMap<NodeId, FigureFollow>,
+    graph: NodeId,
+    scale: Option<f32>,
+) {
+    let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
+        return;
+    };
+    let Some(delta) = FigureFollow::observe(follows, graph, size, scale) else {
+        return;
+    };
+    let (inner, maximized, monitor) = ctx.input(|input| {
+        let viewport = input.viewport();
+        (
+            viewport.inner_rect.map(|rect| rect.size()),
+            viewport.maximized.unwrap_or(false),
+            viewport.monitor_size,
+        )
+    });
+    let Some(inner) = inner.filter(|_| !maximized) else {
+        return;
+    };
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(followed_viewport_size(
+        inner, delta, monitor,
+    )));
+}
+
 /// A content tab detached into a separate OS window — see the top doc
 /// of the module, § generic detaching. Same pattern as the Project Manager
 /// (`pm_view_model`/`pm_requests`), repeated once per tab rather than once
@@ -382,6 +416,10 @@ pub(super) struct DetachedTabViewModel {
     /// expanded since).
     pub(super) expanded_size: Option<egui::Vec2>,
     pub(super) focused: bool,
+    /// `Tab::Graph`: the figure last painted, from which the OS window follows
+    /// the figure when its size changes (#394), see
+    /// [`FigureFollow`](super::window_placement::FigureFollow).
+    pub(super) figure_follow: HashMap<NodeId, FigureFollow>,
 }
 
 /// What a detached window writes, so that [`StokesForgeApp::ui`](eframe::App::ui) (the only one to
@@ -798,6 +836,9 @@ impl StokesForgeApp {
         };
         self.window_positions.remove(&tab);
         self.window_sizes.remove(&tab);
+        if let Tab::Graph(graph) = tab {
+            self.figure_follow.remove(&graph);
+        }
         let view_state = match tab {
             Tab::Book(_) | Tab::Note(_) => self.state.fork_for_detached_view().ok(),
             _ => None,
@@ -810,6 +851,7 @@ impl StokesForgeApp {
             collapsed: self.collapsed_tabs.contains(&tab),
             focused: false,
             expanded_size: None,
+            figure_follow: HashMap::new(),
         };
         self.detached_tabs.insert(
             tab,
@@ -841,6 +883,9 @@ impl StokesForgeApp {
                 self.graph_views.insert(id, view);
             }
             toggle_collapse_to(&mut self.collapsed_tabs, tab, model.collapsed);
+        }
+        if let Tab::Graph(graph) = tab {
+            self.figure_follow.remove(&graph);
         }
         if !self.floating_tabs.contains(&tab) {
             self.push_floating_tab(tab);
@@ -1167,6 +1212,13 @@ impl DetachedTabViewport {
                         // Ctrl+C in this viewport: the figure of **this** graph (#149).
                         request_figure_copy(ui.ctx(), view, tree, id, &mut requests.actions);
                         graph_view_contents(ui, view, &snapshot, id, &mut requests.actions);
+                        follow_figure_in_viewport(
+                            ui.ctx(),
+                            &mut model.figure_follow,
+                            id,
+                            model.graph_view.as_ref().and_then(GraphView::display_scale),
+                        );
+                        let view = model.graph_view.get_or_insert_with(GraphView::default);
                         if before != selected_manager_target(view) {
                             root_context.request_repaint_of(egui::ViewportId::ROOT);
                         }
@@ -2327,6 +2379,136 @@ mod tests {
                 .unwrap_or_else(|err| err.into_inner());
             assert!(!model.collapsed, "the expand must be applied to the model");
         }
+    }
+
+    /// #394: a detached graph window follows its figure through the viewport's
+    /// inner size, at the display scale it had, clamped to the monitor; a
+    /// maximized OS window is left alone.
+    #[test]
+    fn a_detached_graph_window_follows_its_figure() {
+        let (session, graph) = plotted_graph();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        egui_extras::install_image_loaders(&context);
+        let root_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        app.detach_tab(Tab::Graph(graph));
+        let tab = Tab::Graph(graph);
+        let viewport_id = egui::ViewportId::from_hash_of(tab);
+        let mut output = context.run_ui(root_input.clone(), |ui| {
+            app.show_detached_tabs(ui.ctx());
+        });
+        let callback = output.viewport_output[&viewport_id]
+            .viewport_ui_cb
+            .clone()
+            .expect("a viewport callback");
+        output.textures_delta.clear();
+
+        let inner = std::cell::Cell::new(egui::Rect::from_min_size(
+            egui::pos2(100.0, 80.0),
+            GRAPH_WINDOW_SIZE,
+        ));
+        let monitor = std::cell::Cell::new(Some(egui::vec2(3000.0, 2000.0)));
+        let maximized = std::cell::Cell::new(false);
+        let paint = || -> Option<egui::Vec2> {
+            let mut input = root_input.clone();
+            input.viewport_id = viewport_id;
+            input.viewports.insert(
+                viewport_id,
+                egui::ViewportInfo {
+                    parent: Some(egui::ViewportId::ROOT),
+                    outer_rect: Some(inner.get()),
+                    inner_rect: Some(inner.get()),
+                    monitor_size: monitor.get(),
+                    maximized: Some(maximized.get()),
+                    ..Default::default()
+                },
+            );
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                inner.get().size(),
+            ));
+            let mut output = context.run_ui(input, |ui| callback(ui));
+            output.textures_delta.clear();
+            output.viewport_output[&viewport_id]
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    egui::ViewportCommand::InnerSize(size) => Some(*size),
+                    _ => None,
+                })
+        };
+        let publish = |app: &mut StokesForgeApp| {
+            let mut output = context.run_ui(root_input.clone(), |ui| {
+                app.show_detached_tabs(ui.ctx());
+            });
+            output.textures_delta.clear();
+        };
+        let figure = || super::super::graph_window::published_figure_size(&context, graph);
+        let scale = |app: &StokesForgeApp| {
+            app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .graph_view
+                .as_ref()
+                .and_then(GraphView::display_scale)
+                .expect("painted")
+        };
+        for _ in 0..3 {
+            assert_eq!(paint(), None, "the first frames resize nothing");
+        }
+        let (before, scale_before) = (figure().expect("published"), scale(&app));
+
+        let add_cell = |app: &mut StokesForgeApp| {
+            app.state.dispatch(Action::AddCell {
+                graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Right,
+                columns: Vec::new(),
+            })
+        };
+        add_cell(&mut app);
+        publish(&mut app);
+        let command = paint().expect("the viewport follows the figure");
+        let grown = figure().expect("published").0 - before.0;
+        assert!(grown > 0);
+        assert!(
+            (command.x - (inner.get().width() + grown as f32 * scale_before)).abs() < 0.01,
+            "{command:?} for +{grown} at scale {scale_before}"
+        );
+        assert_eq!(command.y, inner.get().height(), "same height");
+        assert_eq!(paint(), None, "once");
+
+        // The OS applied it; a new change is clamped to the monitor.
+        inner.set(egui::Rect::from_min_size(inner.get().min, command));
+        for _ in 0..2 {
+            paint();
+        }
+        monitor.set(Some(command + egui::vec2(10.0, 0.0)));
+        add_cell(&mut app);
+        publish(&mut app);
+        let clamped = paint().expect("clamped growth");
+        assert_eq!(clamped.x, command.x + 10.0, "stops at the monitor");
+
+        // Maximized by the OS: nothing is sent.
+        inner.set(egui::Rect::from_min_size(inner.get().min, clamped));
+        for _ in 0..2 {
+            paint();
+        }
+        maximized.set(true);
+        app.state.dispatch(Action::Undo);
+        publish(&mut app);
+        assert_eq!(paint(), None, "a maximized window does not resize");
+        session.shutdown().unwrap();
     }
 
     // B1/B3 continued, then B7 (`retours-2026-09-23-bugs.md`):

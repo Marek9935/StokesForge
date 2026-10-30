@@ -121,7 +121,8 @@ pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{
-    component_at, component_at_with_tolerance, AxisSide, PlotComponent, AXIS_LINE_TOLERANCE_POINTS,
+    cell_edge_at, component_at, component_at_with_tolerance, AxisSide, CellEdge, PlotComponent,
+    AXIS_LINE_TOLERANCE_POINTS, CELL_EDGE_MAX_TOLERANCE, CELL_EDGE_TOLERANCE_POINTS,
 };
 pub use interact::{
     axis_frame, fit_range, nearest_on_curve, snap_to_curve, snap_to_curve_zone, Gesture,

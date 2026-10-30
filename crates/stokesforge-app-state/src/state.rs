@@ -759,6 +759,18 @@ pub enum Action {
         /// The new size, in points; brought into the bounds.
         size: f64,
     },
+    /// Sets the frame width of a column and/or the frame height of a row in
+    /// one go, as one undo step (#394): what a drag of a handle on the outer
+    /// edge of a cell commits, which may pull a corner (both axes). Same rules
+    /// as [`Action::SetFrameSize`].
+    SetFrameSizes {
+        /// Target graph.
+        graph: NodeId,
+        /// Grid column and its new frame width, in points.
+        column: Option<(usize, f64)>,
+        /// Grid row and its new frame height, in points.
+        row: Option<(usize, f64)>,
+    },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
     SetLengthUnit(crate::length_unit::LengthUnit),
@@ -4998,7 +5010,15 @@ impl AppState {
                 axis,
                 index,
                 size,
-            } => self.set_frame_size(graph, axis, index, size),
+            } => self.set_frame_sizes(graph, [(axis, index, size)]),
+            Action::SetFrameSizes { graph, column, row } => {
+                let column = column.map(|(index, size)| {
+                    (stokesforge_core::compose::FrameAxis::Column, index, size)
+                });
+                let row = row
+                    .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
+                self.set_frame_sizes(graph, column.into_iter().chain(row))
+            }
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -9959,20 +9979,22 @@ impl AppState {
         });
     }
 
-    /// [`Action::SetFrameSize`].
-    fn set_frame_size(
+    /// [`Action::SetFrameSize`] and [`Action::SetFrameSizes`]: every size is
+    /// applied to one spec and committed as one step; nothing is sent if one of
+    /// them is refused or if the result is the spec as it is.
+    fn set_frame_sizes(
         &mut self,
         graph: NodeId,
-        axis: stokesforge_core::compose::FrameAxis,
-        index: usize,
-        size: f64,
+        sizes: impl IntoIterator<Item = (stokesforge_core::compose::FrameAxis, usize, f64)>,
     ) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
         crate::frame_sizes::fix_new(&mut spec);
-        if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
-            return;
+        for (axis, index, size) in sizes {
+            if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
+                return;
+            }
         }
         if self.plot_spec(graph).is_some_and(|before| before == spec) {
             return;
