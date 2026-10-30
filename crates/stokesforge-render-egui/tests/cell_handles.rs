@@ -529,3 +529,93 @@ fn the_left_axis_line_is_not_the_left_edge() {
     );
     assert!(signals.is_empty(), "{signals:?}");
 }
+
+/// #405: a graph from an old file stores no frame, yet its left edge is pulled
+/// from the plot area it is drawn with (76 pt), not from zero: pulling out by
+/// 40 gives 116, pushing in below what the axes need changes nothing and sends
+/// no signal (no stray history step).
+#[test]
+fn a_legacy_graph_edge_starts_from_its_drawn_plot_area() {
+    let fixture = Fixture::new(true);
+    let (context, mut view) = ready(&fixture);
+    let from = Pos2::new(2.0, 200.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(-40.0, 0.0),
+    );
+    assert_eq!(
+        signals,
+        [GraphEvent::FramePlaced {
+            left: Some(116.0),
+            top: None
+        }]
+    );
+
+    let fixture = Fixture::new(true);
+    let (context, mut view) = ready(&fixture);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(60.0, 0.0),
+    );
+    assert!(signals.is_empty(), "{signals:?}");
+}
+
+/// #405: the handle can be taken from the margin just outside the figure (the
+/// window leaves room around it), where the window's own border never reaches.
+#[test]
+fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let size = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout")
+        .size;
+    // 3 points left of the figure: inside the strip, outside the figure.
+    let from = Pos2::new(-3.0, size.1 as f32 / 2.0);
+    let (_, cursor) = frame(
+        &context,
+        &mut view,
+        &fixture,
+        vec![egui::Event::PointerMoved(from)],
+        0.05,
+    );
+    assert_eq!(cursor, egui::CursorIcon::ResizeHorizontal);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(-40.0, 0.0),
+    );
+    assert_eq!(
+        signals,
+        [GraphEvent::FramePlaced {
+            left: Some(116.0),
+            top: None
+        }]
+    );
+    // Same on the right outer edge, 3 points beyond the figure.
+    let fixture = Fixture::new(false);
+    let (context, mut view) = ready(&fixture);
+    let from = Pos2::new(size.0 as f32 + 3.0, 100.0);
+    let signals = drag(
+        &context,
+        &mut view,
+        &fixture,
+        from,
+        from + egui::vec2(30.0, 0.0),
+    );
+    assert_eq!(
+        signals,
+        [GraphEvent::FrameResized {
+            column: Some((0, 330.0)),
+            row: None
+        }]
+    );
+}

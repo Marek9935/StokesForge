@@ -14320,3 +14320,76 @@ fn fixing_the_figure_size_is_one_step_and_a_title_past_the_reserve_is_reported()
     assert_eq!(status.level, StatusLevel::Warning);
     assert!(status.text.contains("Fixed"), "{}", status.text);
 }
+
+/// #405: a title added in the Graph Properties window grows a Fixed figure
+/// past its reserve, and the warning is still in the status bar once the
+/// window is closed (the macro's "Edit Graph Properties" notice must not hide
+/// it), including when the title is committed in several steps; a plain edit
+/// afterwards says its own name again.
+#[test]
+fn the_warning_of_a_fixed_figure_that_grew_survives_the_window_closing() {
+    use stokesforge_app_state::state::PlotSettingsTab;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut fixed = graph_spec(&state, graph);
+    fixed.title.clear();
+    fixed.fixed_figure = true;
+    state.dispatch(Action::SetPlotSpec { graph, spec: fixed });
+
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    state.plot_edit_mut().expect("draft").spec.title = "T".to_string();
+    state.commit_plot_edit();
+    state.plot_edit_mut().expect("draft").spec.title = "Test".to_string();
+    state.commit_plot_edit();
+    state.close_plot_settings();
+    let status = state.status().expect("a message");
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(status.text.contains("Fixed"), "{}", status.text);
+
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    state.plot_edit_mut().expect("draft").spec.background = "#102030".to_string();
+    state.close_plot_settings();
+    assert_ne!(
+        state.status().expect("a message").level,
+        StatusLevel::Warning
+    );
+}
+
+/// #405: Undo and Redo of a "Position Plot Area" step say so (the shell then
+/// moves the graph window back with the figure's left and top edge); any other
+/// step does not.
+#[test]
+fn undoing_a_figure_placement_is_flagged_for_the_window() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::SetFigureOffsets {
+        graph,
+        left: Some(150.0),
+        top: None,
+    });
+    assert_eq!(
+        state.placement_step_revision(),
+        None,
+        "doing it is not undoing it"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+    state.dispatch(Action::Redo);
+    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+    let mut titled = graph_spec(&state, graph);
+    titled.title = "T".to_owned();
+    state.dispatch(Action::SetPlotSpec {
+        graph,
+        spec: titled,
+    });
+    state.dispatch(Action::Undo);
+    assert_ne!(state.placement_step_revision(), Some(state.revision()));
+}

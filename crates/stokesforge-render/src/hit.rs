@@ -113,7 +113,9 @@ pub struct FigureEdge {
 
 /// The figure edge at pixel `(x, y)` (backend coordinate space), within
 /// `tolerance` figure pixels (bounded by [`CELL_EDGE_MAX_TOLERANCE`], so it
-/// never reaches the axis line the margin keeps away). `None` elsewhere and
+/// never reaches the axis line the margin keeps away), **on either side of the
+/// edge**: the strip straddles it, so the margin the window leaves around the
+/// figure is grabbable too. `None` elsewhere and
 /// for a figure with no drawn panel.
 pub fn figure_edge_at(plot: &DrawnPlot, x: f64, y: f64, tolerance: f64) -> Option<FigureEdge> {
     if plot.panels.is_empty() {
@@ -125,8 +127,8 @@ pub fn figure_edge_at(plot: &DrawnPlot, x: f64, y: f64, tolerance: f64) -> Optio
         0.0
     };
     let edge = FigureEdge {
-        left: (0.0..=tolerance).contains(&x),
-        top: (0.0..=tolerance).contains(&y),
+        left: (-tolerance..=tolerance).contains(&x),
+        top: (-tolerance..=tolerance).contains(&y),
     };
     (edge.left || edge.top).then_some(edge)
 }
@@ -856,6 +858,11 @@ mod tests {
         assert_eq!(figure_edge_at(&plot, 0.0, 150.0, tol), edge(true, false));
         assert_eq!(figure_edge_at(&plot, 4.0, 150.0, tol), edge(true, false));
         assert_eq!(figure_edge_at(&plot, 5.0, 150.0, tol), None);
+        // The strip straddles the edge: the margin outside the figure is a
+        // handle too, as far as the tolerance.
+        assert_eq!(figure_edge_at(&plot, -4.0, 150.0, tol), edge(true, false));
+        assert_eq!(figure_edge_at(&plot, 240.0, -3.0, tol), edge(false, true));
+        assert_eq!(figure_edge_at(&plot, -5.0, 150.0, tol), None);
         assert_eq!(figure_edge_at(&plot, 240.0, 0.0, tol), edge(false, true));
         assert_eq!(figure_edge_at(&plot, 1.0, 2.0, tol), edge(true, true));
         // The axis line (x = 82) and the frame are not figure edges.

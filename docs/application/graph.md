@@ -786,9 +786,15 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   given its frames in the same edit). Dragging the **left or top edge of the
   figure** (Pointer tool) sets Left / Top: `GraphEvent::FramePlaced` becomes
   `Action::SetFigureOffsets` (`PlotEditKind::PlaceFigure`, one undo step) and,
-  while the gesture lasts, `GraphView::placing_edges` makes the floating window
+  while the gesture lasts (and for the Undo / Redo of its step,
+  `AppState::placement_step_revision`), `GraphView::placing_edges` makes the floating window
   grow to the left / upward (`FigureFollow::anchor_shift` moves its corner) so the
-  plot area stays still on screen.
+  plot area stays still on screen. The handles of the figure's four outer edges
+  straddle the edge by `FIGURE_GRAB_MARGIN` and the figure's interaction area and
+  clip rectangle reach into the window's frame margin (`graph_window.rs`), so they
+  win over nothing: the window's resize zones lie outside its frame. The status
+  warning of a Fixed figure that grew in the window is given again when the
+  window closes (`figure_grew_in_window`), the macro's own notice would hide it.
 - **The window follows the figure.** `FigureFollow` (`window_placement.rs`, shell
   only, invariant 2) records the figure size each graph window published
   (`published_figure_size`) and the display scale of its view. When the size

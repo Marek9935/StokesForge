@@ -2895,6 +2895,16 @@ pub struct AppState {
     /// its gestures apply live (preview) but form only one
     /// history entry, set on confirmation; cancelling rejects it.
     plot_macro_open: bool,
+    /// A change made in the properties window grew a Fixed figure past its
+    /// reserve (#405): the window's history macro ends with its own notice
+    /// ("Edit Graph Properties"), which would hide the warning, so the warning
+    /// is given again when the window closes.
+    figure_grew_in_window: bool,
+    /// Revision a snapshot had right after an Undo or Redo of a
+    /// [`PlotEditKind::PlaceFigure`] step (#405): the figure's left and top
+    /// edge moved back or forth, and the shell keeps the plot area still on
+    /// screen by moving the window with them, as it did during the drag.
+    placement_step: Option<stokesforge_session::Revision>,
     /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
@@ -3101,6 +3111,8 @@ impl AppState {
             plot_edit: None,
             plot_settings: None,
             plot_macro_open: false,
+            figure_grew_in_window: false,
+            placement_step: None,
             user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
@@ -4705,6 +4717,7 @@ impl AppState {
     fn abort_plot_macro(&mut self) {
         if self.plot_macro_open {
             self.plot_macro_open = false;
+            self.figure_grew_in_window = false;
             if let Err(err) = self.handle.abort_macro() {
                 self.fail(tr!(
                     "error-plot-settings-cancel",
@@ -4746,6 +4759,11 @@ impl AppState {
         }
         self.plot_macro_open = false;
         self.end_grouped_macro();
+        // The macro's notice replaced the warning of the change that grew the
+        // figure: say it again (#405).
+        if std::mem::take(&mut self.figure_grew_in_window) {
+            self.warn(tr!("status-figure-grew"));
+        }
     }
 
     /// Commits the current draft ([`Action::SetPlotSpec`]) — but
@@ -7037,6 +7055,7 @@ impl AppState {
                 self.notice(history_text(&label));
                 if grows_past_reserve {
                     self.warn(tr!("status-figure-grew"));
+                    self.figure_grew_in_window |= self.plot_macro_open;
                 }
                 self.settle_recalc();
             }
@@ -7224,26 +7243,46 @@ impl AppState {
         let label = self.snapshot.history.undo_label.clone();
         match self.handle.undo() {
             Ok(Some(_)) => {
-                self.notice(match label {
-                    Some(label) => tr!("history-undone", label = history_text(&label)),
+                self.notice(match &label {
+                    Some(label) => tr!("history-undone", label = history_text(label)),
                     None => tr!("history-undone-last"),
                 });
                 self.refresh();
+                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
+    /// Remembers that the step just undone or redone placed the figure
+    /// ([`AppState::placement_step_revision`]).
+    fn note_placement_step(&mut self, label: Option<&HistoryLabel>) {
+        self.placement_step = matches!(
+            label,
+            Some(HistoryLabel::EditPlotSpec(PlotEditKind::PlaceFigure))
+        )
+        .then_some(self.snapshot.revision);
+    }
+
+    /// The revision a snapshot had right after an Undo or Redo of a
+    /// "Position Plot Area" step (#405), until something else happens: the
+    /// window of the graph then follows the left / top edge of the figure as it
+    /// does while the edge is dragged.
+    pub fn placement_step_revision(&self) -> Option<stokesforge_session::Revision> {
+        self.placement_step
+    }
+
     fn redo(&mut self) {
         let label = self.snapshot.history.redo_label.clone();
         match self.handle.redo() {
             Ok(Some(_)) => {
-                self.notice(match label {
-                    Some(label) => tr!("history-redone", label = history_text(&label)),
+                self.notice(match &label {
+                    Some(label) => tr!("history-redone", label = history_text(label)),
                     None => tr!("history-redone-last"),
                 });
                 self.refresh();
+                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),

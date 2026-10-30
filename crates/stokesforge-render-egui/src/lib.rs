@@ -342,6 +342,11 @@ fn moved_value(preview: Option<f64>, start: Option<f64>) -> bool {
     }
 }
 
+/// How far outside the figure, in screen points, its edge handles can be
+/// grabbed (#405): the strip straddles the edge. The host must leave at least
+/// that much room around the figure and let its clip rectangle reach it.
+pub const FIGURE_GRAB_MARGIN: f32 = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS as f32;
+
 /// A cell-handle drag in progress (#394).
 #[derive(Debug, Clone)]
 struct FrameDrag {
@@ -1629,7 +1634,15 @@ impl GraphView {
     ) -> Result<bool, RenderError> {
         let spec = graph_spec(&snapshot.tree, graph)?;
         let context = ui.ctx().clone();
-        let response = ui.interact(display_rect, self.id, egui::Sense::click_and_drag());
+        // The strip of the figure's edge handles straddles the edge (#405):
+        // the interaction area reaches that far outside the figure, into the
+        // margin the window leaves around it, so the outer edges are grabbed
+        // before the window's own border is.
+        let response = ui.interact(
+            display_rect.expand(FIGURE_GRAB_MARGIN),
+            self.id,
+            egui::Sense::click_and_drag(),
+        );
         self.display_rect = Some(display_rect);
         self.response = Some(response.clone());
 
@@ -2223,15 +2236,22 @@ impl GraphView {
             let row = cell_edge
                 .and_then(|edge| edge.row)
                 .and_then(|index| Some((index, *base.1.get(index)?)));
-            // Where the first frame is now, measured from the image edge.
-            let first = layout.frame_rect(0, 0);
-            let placeable = !base.0.is_empty() && !base.1.is_empty();
+            // Where the first frame is now, measured from the image edge: read
+            // from what was drawn, so that a legacy graph (whose layout stores
+            // no frame) starts from the plot area it is drawn with.
+            let first = self.last.as_ref().and_then(|plot| {
+                plot.panels
+                    .iter()
+                    .find(|panel| panel.row == 0 && panel.column == 0)
+                    .map(|panel| panel.pixel_origin)
+            });
+            let placeable = !base.0.is_empty() && !base.1.is_empty() && first.is_some();
             let left = figure_edge
                 .filter(|edge| edge.left && placeable)
-                .map(|_| first.map_or(f64::from(layout.min_left), |f| f64::from(f.0)));
+                .and_then(|_| first.map(|origin| f64::from(origin.0)));
             let top = figure_edge
                 .filter(|edge| edge.top && placeable)
-                .map(|_| first.map_or(f64::from(layout.min_top), |f| f64::from(f.1)));
+                .and_then(|_| first.map(|origin| f64::from(origin.1)));
             let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0) else {
                 return false;
             };
