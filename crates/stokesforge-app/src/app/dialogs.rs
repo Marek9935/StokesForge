@@ -805,7 +805,6 @@ fn any_gesture(ctx: &egui::Context) -> bool {
     })
 }
 
-/// The common body of modal dialogs.
 /// Memory key of the "a modal was painted" mark of one viewport.
 fn modal_mark_id(ctx: &egui::Context) -> egui::Id {
     egui::Id::new(("stokesforge_modal_shown", ctx.viewport_id()))
@@ -831,6 +830,7 @@ pub(super) fn modal_shown(ctx: &egui::Context) -> bool {
         .is_some_and(|shown| shown + 1 >= frame)
 }
 
+/// The common body of modal dialogs.
 fn modal_frame(
     ctx: &egui::Context,
     id: egui::Id,
