@@ -597,7 +597,8 @@ pub(super) fn active_panel_id(graph: NodeId) -> egui::Id {
 }
 
 /// Layer marker (#161), Origin style: a small number per
-/// layer in the corner of the window, the active layer's highlighted;
+/// layer at the top left of its own cell (#395; side by side for the overlays of
+/// one cell, in the corner of the window for a layer not drawn), the active layer's highlighted;
 /// clicking a number activates the layer. Interface marker painted over the
 /// figure: never in the export nor in the figure copy.
 fn layer_badges(
@@ -612,13 +613,29 @@ fn layer_badges(
         .data_mut(|data| data.insert_temp(active_panel_id(graph), active));
     let side = 18.0;
     let gap = 3.0;
+    // Badges already placed per anchor (the cell's outer corner, or the window
+    // corner for a layer not drawn): overlays of one cell go side by side.
+    let mut placed: Vec<(egui::Pos2, usize)> = Vec::new();
     for index in 0..spec.panels.len() {
+        let anchor = view
+            .cell_rect_screen(index)
+            .map_or(outer.left_top(), |cell| cell.left_top());
+        let slot = match placed.iter_mut().find(|(pos, _)| *pos == anchor) {
+            Some((_, count)) => {
+                *count += 1;
+                *count - 1
+            }
+            None => {
+                placed.push((anchor, 1));
+                0
+            }
+        };
         let rect = egui::Rect::from_min_size(
-            outer.left_top() + egui::vec2(4.0 + index as f32 * (side + gap), 4.0),
+            anchor + egui::vec2(4.0 + slot as f32 * (side + gap), 4.0),
             egui::vec2(side, side),
         );
         if !outer.contains_rect(rect) {
-            break;
+            continue;
         }
         let number = index + 1;
         let response = ui
@@ -1778,6 +1795,151 @@ pub(super) mod tests {
         }
     }
 
+    /// Paints the graph `spec` in a 900x700 window and returns the view and the
+    /// AccessKit bounds of the layer badges by number (#395).
+    fn painted_badges(
+        spec: PlotSpec,
+    ) -> (GraphView, std::collections::BTreeMap<usize, egui::Rect>) {
+        let mut project = Project::new("Badges").unwrap();
+        let root = project.root();
+        let graph = project.add_graph(root, None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let snapshot = session.handle().snapshot().unwrap();
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut view = GraphView::new();
+        let mut bounds = std::collections::BTreeMap::new();
+        for _ in 0..2 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| graph_view_contents(ui, &mut view, &snapshot, graph, &mut Vec::new()),
+            );
+            output.textures_delta.clear();
+            bounds.clear();
+            let nodes = output
+                .platform_output
+                .accesskit_update
+                .expect("accessibility tree")
+                .nodes;
+            for (_, node) in nodes {
+                if node.role() != egui::accesskit::Role::Button {
+                    continue;
+                }
+                let label = node.label().unwrap_or_default().to_owned();
+                for n in 1..=3 {
+                    if label == tr!("plot-layer-badge-accessible", n = n.to_string()) {
+                        let b = node.bounds().expect("badge rectangle");
+                        bounds.insert(
+                            n - 1,
+                            egui::Rect::from_min_max(
+                                egui::pos2(b.x0 as f32, b.y0 as f32),
+                                egui::pos2(b.x1 as f32, b.y1 as f32),
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        (view, bounds)
+    }
+
+    /// #395: with two cells side by side, each badge sits in its own cell, at
+    /// its top left, not in the window corner.
+    #[test]
+    fn each_layer_badge_sits_at_the_top_left_of_its_cell() {
+        use stokesforge_plot::Panels;
+        let spec = PlotSpec::empty("Figure")
+            .with_panels(Panels::new(vec![PanelSpec::at(0, 0), PanelSpec::at(0, 1)]));
+        let (view, badges) = painted_badges(spec);
+        for index in 0..2 {
+            let cell = view.cell_rect_screen(index).expect("drawn");
+            let badge = badges[&index];
+            assert!(cell.contains_rect(badge), "badge {index} inside its cell");
+            assert!(
+                (badge.min - cell.left_top()).length() < 8.0,
+                "badge {index} in the corner of its cell"
+            );
+        }
+        let second = view.cell_rect_screen(1).unwrap();
+        assert!(
+            !second.contains(badges[&0].center()),
+            "badge 1 not in cell 2"
+        );
+    }
+
+    /// #395: overlays of one cell share its corner, side by side in layer order;
+    /// a layer that is not drawn keeps the window corner.
+    #[test]
+    fn overlay_badges_sit_side_by_side_in_their_cell() {
+        use stokesforge_plot::{OverlaySpec, Panels};
+        let base = PanelSpec::at(0, 0);
+        let overlay = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+        let (view, badges) =
+            painted_badges(PlotSpec::empty("Figure").with_panels(Panels::new(vec![base, overlay])));
+        let cell = view.cell_rect_screen(0).unwrap();
+        assert_eq!(view.cell_rect_screen(1), Some(cell), "same cell");
+        assert_eq!(badges[&0].min.y, badges[&1].min.y);
+        assert!(badges[&1].min.x > badges[&0].max.x - 0.5, "side by side");
+        assert!(cell.contains_rect(badges[&0]) && cell.contains_rect(badges[&1]));
+    }
+
+    /// #395: a layer with no drawn cell (no figure painted yet) keeps its badge at
+    /// the corner of the window, one slot per layer as before.
+    #[test]
+    fn an_undrawn_layer_badge_stays_at_the_window_corner() {
+        use stokesforge_plot::Panels;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let spec = PlotSpec::empty("Figure")
+            .with_panels(Panels::new(vec![PanelSpec::at(0, 0), PanelSpec::at(0, 1)]));
+        let mut view = GraphView::new();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 200.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                layer_badges(
+                    ui,
+                    &mut view,
+                    &spec,
+                    NodeId::from_raw(2),
+                    ui.available_rect_before_wrap(),
+                );
+            },
+        );
+        output.textures_delta.clear();
+        let mut xs: Vec<(f64, f64)> = output
+            .platform_output
+            .accesskit_update
+            .unwrap()
+            .nodes
+            .into_iter()
+            .filter(|(_, n)| n.role() == egui::accesskit::Role::Button)
+            .map(|(_, n)| {
+                let b = n.bounds().unwrap();
+                (b.x0, b.y0)
+            })
+            .collect();
+        xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(xs.len(), 2);
+        assert!(xs[0].0 < 10.0 && xs[0].1 < 10.0, "badge 1 at the corner");
+        assert!(
+            xs[1].0 > 20.0 && xs[1].0 < 35.0 && xs[1].1 < 10.0,
+            "badge 2 beside it"
+        );
+    }
+
     /// #357: the right band gives a cell to the right, the bottom band a cell
     /// below, the bottom-right corner (in both) the right; the interior and
     /// the outside of the figure give nothing.
@@ -1817,7 +1979,6 @@ pub(super) mod tests {
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let mut view = GraphView::new();
-        let origin = std::cell::Cell::new(egui::Pos2::ZERO);
         let paint = |view: &mut GraphView, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1828,7 +1989,6 @@ pub(super) mod tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                origin.set(ui.available_rect_before_wrap().min);
                 graph_view_contents(ui, view, state.snapshot(), graph, &mut Vec::new());
             });
             output.textures_delta.clear();
@@ -1837,7 +1997,8 @@ pub(super) mod tests {
         paint(&mut view, Vec::new());
         assert_eq!(view.active_panel(&spec), 0, "new graph: the first");
 
-        let badge = origin.get() + egui::vec2(4.0 + 21.0 + 9.0, 4.0 + 9.0);
+        let cell = view.cell_rect_screen(1).expect("layer 2 is drawn");
+        let badge = cell.left_top() + egui::vec2(4.0 + 9.0, 4.0 + 9.0);
         let click = |pressed| egui::Event::PointerButton {
             pos: badge,
             button: egui::PointerButton::Primary,

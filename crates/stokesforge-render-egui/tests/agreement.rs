@@ -379,6 +379,35 @@ fn the_two_backends_place_the_axes_at_the_same_place() {
     assert_eq!(drawn.panels.len(), 1);
 }
 
+/// #397: the number of ticks follows the length of the axis, on screen and
+/// in the export alike. Witness: the wide cell writes more numbers.
+#[test]
+fn the_two_backends_agree_on_the_ticks_of_a_narrow_cell() {
+    let fixture = minimal();
+    let numbers = |frame: f64| {
+        let mut spec = fixture.spec.clone();
+        spec.frame_widths = vec![frame];
+        spec.frame_heights = vec![240.0];
+        // Two margins and the left axis beside the frame, the bands below.
+        let size = (frame as u32 + 88, 240 + 76);
+        let (primitives, _) = agree(
+            fixture.project.tree(),
+            &spec,
+            size,
+            &format!("{frame} px cell"),
+        );
+        primitives
+            .iter()
+            .filter(|p| matches!(p, Primitive::Text(t) if t.parse::<f64>().is_ok()))
+            .count()
+    };
+    let (narrow, wide) = (numbers(120.0), numbers(392.0));
+    assert!(
+        narrow < wide,
+        "{narrow} numbers on the narrow cell, {wide} on the wide one"
+    );
+}
+
 #[test]
 fn the_agreement_holds_at_several_figure_sizes() {
     // A single size could come out right by chance — two margins that cancel

@@ -593,7 +593,30 @@ is checked against the ticks Plotters will really put down. With no solution,
 a logarithmic scale or an explicit extent (zoom included): independent
 framing. Linear ticks are written without decimals when they
 are all integers, with the same number of decimals otherwise
-(`scale::TickFormat`, #175); all axes go through a formatter. The corners where two plotted axes
+(`scale::TickFormat`, #175); all axes go through a formatter.
+
+**Tick count follows the axis length (#397).** `scale::tick_count` is the **only**
+source of the number of ticks asked of Plotters. `draw_panel` computes it **once
+per axis** (x, y, y2) from the plot area's pixel length (a throwaway
+`build_cartesian_2d` on the same builder, before any range is known) and hands it to
+everything that places or writes a tick: the labels of every mesh (bottom, left,
+secondary, mirrors, overlay axes), the home-made tick marks, the minor ticks
+(`minor_key_points`), the decimals and the "Label every" origin
+(`TickFormat::new` / `with_label_every`), `aligned_range` (the covered layer's
+count, kept in `BaseFrame`) and the analysis preview (`axis_ticks`). A caller that
+rebuilt its own count would put the marks and the numbers at different places:
+there is no count-less entry point left (`max_label_count` is only the upper bound).
+The rule: one tick per `TICK_SPACING_X` (29 px, horizontal) or `TICK_SPACING_Y`
+(20 px, vertical), at most `max_label_count` (11, or one per decade on a log
+axis); then, while two neighbouring labels, **measured through the backend**
+(`estimate_text_size`: width on a horizontal axis, height on a vertical one) and
+kept `MIN_LABEL_GAP` (6 px) apart, would touch, one tick fewer (never below 2).
+The spacings are calibrated so that a default one-cell graph (frame
+392 x 284 px) keeps its 11 ticks on both axes: raising one changes every
+default figure. "Label every" applies on top, and the safety net ignores it
+(it measures all the labels). An overlaid layer on a cell keeps the covered axis'
+count for the axis it shares. Tests: `scale::tests`, `stokesforge-render-svg/tests/tick_density.rs`,
+`the_two_backends_agree_on_the_ticks_of_a_narrow_cell`. The corners where two plotted axes
 meet are filled (1 px L-shaped segment per corner, `draw_panel`, test
 `the_axes_meet_at_the_corners`).
 
