@@ -70,7 +70,7 @@ fn family_table(ui: &mut egui::Ui, group: &HelpGroup) {
     theme::page_scroll_area().show(ui, |ui| {
         egui::Grid::new("formula_functions_table")
             .num_columns(3)
-            .spacing(egui::vec2(10.0, 6.0))
+            .spacing(egui::vec2(20.0, 6.0))
             .striped(true)
             .show(ui, |ui| {
                 ui.label(theme::bold(tr!("formula-help-column-function")));
