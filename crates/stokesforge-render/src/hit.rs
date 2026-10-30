@@ -47,6 +47,9 @@ pub enum AxisSide {
     Left,
     /// Secondary ordinate, on the right.
     Right,
+    /// The top mirror axis of an ordinary layer (#396). An overlaid layer's
+    /// X axis, drawn at the top, is still reported as `Bottom`.
+    Top,
 }
 
 /// A component of a graph, picked by a pixel.
@@ -188,16 +191,16 @@ fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option
     let within_x = (left..=right).contains(&x);
     let within_y = (top..=bottom).contains(&y);
     let areas = &panel.axis_areas;
-    let right_side = if panel.overlay.is_some() {
-        AxisSide::Left
+    let (top_side, right_side) = if panel.overlay.is_some() {
+        (AxisSide::Bottom, AxisSide::Left)
     } else {
-        AxisSide::Right
+        (AxisSide::Top, AxisSide::Right)
     };
     // Distance to the edge of the plot area, outward, in each candidate
     // area.
     let candidates = [
         (AxisSide::Bottom, within_x, y - bottom, areas.bottom),
-        (AxisSide::Bottom, within_x, top - y, areas.top),
+        (top_side, within_x, top - y, areas.top),
         (AxisSide::Left, within_y, left - x, areas.left),
         (right_side, within_y, x - right, areas.right),
     ];
@@ -229,10 +232,10 @@ fn axis_line_at(
     let within_x = (left..=right).contains(&x);
     let within_y = (top..=bottom).contains(&y);
     let areas = &panel.axis_areas;
-    let right_side = if panel.overlay.is_some() {
-        AxisSide::Left
+    let (top_side, right_side) = if panel.overlay.is_some() {
+        (AxisSide::Bottom, AxisSide::Left)
     } else {
-        AxisSide::Right
+        (AxisSide::Top, AxisSide::Right)
     };
     let tolerance = if tolerance.is_finite() {
         tolerance.max(0.0)
@@ -250,7 +253,7 @@ fn axis_line_at(
             horizontal,
             areas.bottom,
         ),
-        (AxisSide::Bottom, within_x, y - top, horizontal, areas.top),
+        (top_side, within_x, y - top, horizontal, areas.top),
         (AxisSide::Left, within_y, x - left, vertical, areas.left),
         (right_side, within_y, right - x, vertical, areas.right),
     ];
@@ -396,14 +399,11 @@ mod tests {
         plot.panels.push(second);
         // The plot area starts at y = 60: 0-8 px above for the
         // first layer, 8-16 px for the second.
-        let axis = |panel| {
-            Some(PlotComponent::Axis {
-                panel,
-                side: AxisSide::Bottom,
-            })
-        };
-        assert_eq!(component_at(&plot, 240.0, 56.0), axis(0));
-        assert_eq!(component_at(&plot, 240.0, 48.0), axis(1));
+        let axis = |panel, side| Some(PlotComponent::Axis { panel, side });
+        // The ordinary layer reports its top mirror as `Top` (#396); the
+        // overlaid one reports the field it draws there, `Bottom`.
+        assert_eq!(component_at(&plot, 240.0, 56.0), axis(0, AxisSide::Top));
+        assert_eq!(component_at(&plot, 240.0, 48.0), axis(1, AxisSide::Bottom));
     }
 
     #[test]
@@ -644,7 +644,7 @@ mod tests {
         second.axis_areas.bottom = AxisArea::default();
         second.axis_areas.left = AxisArea::default();
         plot.panels.push(second);
-        assert_eq!(component_at(&plot, 240.0, 62.0), axis(0, AxisSide::Bottom));
+        assert_eq!(component_at(&plot, 240.0, 62.0), axis(0, AxisSide::Top));
         // Only the stacked layer has a top axis: no strip at all.
         plot.panels[0].axis_areas.top = AxisArea::default();
         assert_eq!(

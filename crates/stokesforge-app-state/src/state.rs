@@ -9721,12 +9721,12 @@ impl AppState {
         }
         // The new-graph default of the Preferences rides in the spec of the
         // creation itself: one command, one history step.
-        let mut spec = PlotSpec {
+        // A fresh layer shows no mirror, so there is nothing to switch off.
+        let spec = PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
             ..PlotSpec::default()
         };
-        cell_sides::switch_off_mirrors_under_overlays(&mut spec);
         self.execute(Command::AddGraph {
             parent,
             name: None,

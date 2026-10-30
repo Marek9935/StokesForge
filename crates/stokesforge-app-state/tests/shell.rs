@@ -7186,6 +7186,64 @@ fn a_new_overlay_axis_switches_the_displayed_mirror_off_in_the_same_undo_step() 
     assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
 }
 
+/// #396: the Y2 columns dropped on an existing graph create their overlay
+/// layer; the mirror it takes goes off in the same undo step. (A new graph has
+/// no mirror to take.)
+#[test]
+fn dropping_a_y2_takes_the_displayed_mirror_in_the_same_undo_step() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mut project = Project::new("Y2Mirror").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("column")
+    };
+    let c: Vec<NodeId> = ["X", "Y", "X2", "Y2"].map(&mut add).to_vec();
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    for (column, role) in
+        c.iter()
+            .copied()
+            .zip([ColumnRole::X, ColumnRole::Y, ColumnRole::X2, ColumnRole::Y2])
+    {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![c[0], c[1]],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph created");
+    let mut spec = state.plot_spec(graph).expect("spec");
+    spec.panels.get_mut(0).unwrap().top.mirror = true;
+    spec.panels.get_mut(0).unwrap().right.mirror = true;
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+    let before = state.plot_spec(graph).expect("spec");
+
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![c[2], c[3]],
+        plot_type: None,
+    });
+    let spec = state.plot_spec(graph).expect("spec");
+    assert_eq!(spec.panels.len(), 2, "the Y2 layer");
+    assert!(!spec.panels[0].top.mirror && !spec.panels[0].right.mirror);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.plot_spec(graph).unwrap(), before, "both come back");
+}
+
 /// #396: same rule for "New Layer": the mirror goes off only on a side the new
 /// layer really draws (a linked scale draws nothing).
 #[test]

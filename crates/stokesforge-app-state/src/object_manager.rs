@@ -25,7 +25,7 @@
 //! the children **shown** in the tree (#173,
 //! [`VisibilityTarget::contents_shown`]).
 
-use crate::cell_sides::{displayed_place, side_use};
+use crate::cell_sides::{displayed_place, place_of, side_use, SideUse};
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
     AnnotationRef, AxisSide, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSlot,
@@ -65,14 +65,19 @@ impl AxisRef {
     /// when no series is attached to it. Its checkbox then controls
     /// `AxisSpec::mirror`, not `visible`.
     fn is_mirror(self, spec: &PlotSpec) -> bool {
-        side_use(spec, self.panel, self.side).mirror
+        self.side_use(spec).mirror
+    }
+    /// What the side of the cell where this field is drawn means for its layer
+    /// ([`crate::cell_sides`]): the address is a field, the rule works on sides.
+    fn side_use(self, spec: &PlotSpec) -> SideUse {
+        side_use(spec, self.panel, place_of(spec, self.panel, self.side))
     }
     /// A mirror that the figure ignores: an overlaid layer of the same cell
     /// already has its own axis on that side (#176). Its checkbox is disabled.
     /// The question "who holds this side of the cell" is answered by
     /// [`crate::cell_sides`], the same as for the tabs of Graph Properties.
     fn blocked(self, spec: &PlotSpec) -> bool {
-        side_use(spec, self.panel, self.side).held_by.is_some()
+        self.side_use(spec).held_by.is_some()
     }
     /// The checkbox value: the mirror or the axis's visibility.
     fn shown(self, spec: &PlotSpec) -> Option<bool> {
@@ -242,10 +247,13 @@ impl VisibilityTarget {
             | Self::Axes(_) => None,
         }
     }
-    /// True for the mirror axis that a layer above already draws (#176): the
-    /// reason for its disabled checkbox (#226).
-    pub fn is_blocked_mirror(self, spec: &PlotSpec) -> bool {
-        matches!(self, Self::Axis(axis) if axis.blocked(spec))
+    /// Why an axis checkbox is disabled because another layer holds its side
+    /// (#396): who holds it and what to do, from [`crate::cell_sides`].
+    pub fn blocked_reason(self, spec: &PlotSpec) -> Option<String> {
+        match self {
+            Self::Axis(axis) => axis.side_use(spec).reason(),
+            _ => None,
+        }
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
         self.visibility_shown(spec, Shown::BASE)
@@ -789,6 +797,44 @@ mod tests {
     /// #171: an overlaid layer lists only the axes it displays, named where
     /// they are displayed; the checkbox of its "Axes" group controls only
     /// those.
+    /// #396: an overlay's hidden axis row is greyed, with the reason, while the
+    /// ordinary layer displays its mirror on that side; the other way round the
+    /// mirror row is greyed while the overlay draws its axis. Hiding the one
+    /// that is displayed frees the other.
+    #[test]
+    fn a_displayed_mirror_and_an_overlay_axis_grey_each_other() {
+        use crate::object_manager::{AxisRef, VisibilityTarget as T};
+        use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
+        let mut base = PanelSpec::at(0, 0);
+        base.top.mirror = true;
+        let mut overlay = PanelSpec::overlay_on(&base, OverlaySpec::new(true, false));
+        overlay.bottom.visible = false;
+        let mut spec = PlotSpec {
+            panels: Panels::new(vec![base, overlay]),
+            ..PlotSpec::default()
+        };
+        let overlay_x = T::Axis(AxisRef {
+            panel: 1,
+            side: AxisSide::Bottom,
+        });
+        let mirror = T::Axis(AxisRef {
+            panel: 0,
+            side: AxisSide::Top,
+        });
+        assert!(!overlay_x.visibility(&spec).enabled, "mirror displayed");
+        assert!(overlay_x.blocked_reason(&spec).is_some());
+        assert!(mirror.visibility(&spec).enabled);
+        // The overlay axis is drawn: the mirror row is the greyed one.
+        spec.panels.get_mut(1).unwrap().bottom.visible = true;
+        assert!(overlay_x.visibility(&spec).enabled);
+        assert!(!mirror.visibility(&spec).enabled);
+        assert!(mirror.blocked_reason(&spec).is_some());
+        // Mirror off and axis hidden: both free.
+        spec.panels.get_mut(1).unwrap().bottom.visible = false;
+        spec.panels.get_mut(0).unwrap().top.mirror = false;
+        assert!(overlay_x.visibility(&spec).enabled && mirror.visibility(&spec).enabled);
+    }
+
     #[test]
     fn an_overlaid_layer_lists_its_axes_where_they_are_displayed() {
         use crate::object_manager::{axis_label, axis_sides, VisibilityTarget as T};

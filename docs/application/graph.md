@@ -266,6 +266,14 @@ context menu).
   with both keeps the overlay drawn and the mirror blocked; the model is not
   changed on load, and the mirror tab is available again once the overlay hides
   its axis.
+- The hit test reports the field it drew: `hit::AxisSide::Top` for the top mirror
+  of an ordinary layer (so a click on it opens the Top tab), `Bottom` / `Left` for
+  an overlay's X / Y axis, which `place_of` turns into Top / Right.
+- In the Object Manager and the Graph menu, a mirror row is greyed while an overlay
+  draws its axis there, and an overlay's axis row is greyed while the mirror is
+  displayed; both use `VisibilityTarget::blocked_reason` (the tab bubble's text).
+  The Graph menu mirror toggles already went through the same `visibility`, so they
+  cannot turn a mirror on under a displayed overlay axis.
 - Each axis of an overlay keeps its own colors on the figure: the top axis those of
   `bottom`, the right axis those of `left` (`pipeline.rs`).
 

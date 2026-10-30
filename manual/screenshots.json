@@ -50,6 +50,11 @@
     "shows": "The Graph Properties window on its Axes tab, Bottom axis: the axes as vertical tabs at the left, then title, scale, range and display settings."
   },
   {
+    "image": "graphs-properties-overlay-axes.png",
+    "page": "guide/graphs.md",
+    "shows": "The Graph Properties window on its Axes tab for an overlay layer (Layer 2): Top tab selected with Own scale and Show axis, Bottom and Left grayed out."
+  },
+  {
     "image": "graphs-formula-title.png",
     "page": "guide/graphs.md",
     "shows": "The Annotations demo graph: text annotations written with formulas (subscripts, Greek letters), a rectangle, an ellipse and an arrow."

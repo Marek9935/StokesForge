@@ -352,6 +352,8 @@ A graph can hold up to three overlay layers. After that, **New Layer** is disabl
 
 On an overlay layer, the **Top** and **Right** tabs of **Graph Properties ▸ Axes** each have an **Own scale** box. Ticked, the layer has its own scale on that side. Unticked, the layer follows the layer it covers, and the scale fields and **Show axis** are grayed out. **Show axis** only hides the axis: the curves stay where they are.
 
+<img src="../images/graphs-properties-overlay-axes.png" alt="The Graph Properties window on its Axes tab for an overlay layer: the Top tab is selected, with Own scale and Show axis; Bottom and Left are grayed out." width="480">
+
 ### The active layer
 
 Additions go to the **active layer**. A small numbered badge for each layer sits at the top left of the graph window. Click a badge to make that layer active. The layer also becomes active when you click or right-click in its plot area, or select one of its objects.

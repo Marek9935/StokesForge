@@ -299,6 +299,36 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(dialog_rect),
     },
     Shot {
+        name: "graphs-properties-overlay-axes",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            // An overlay layer with its own X and Y axes, then its Top tab.
+            act(
+                h,
+                Action::AddLayer {
+                    graph,
+                    panel: 0,
+                    x_top: true,
+                    y_right: true,
+                },
+            );
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Axes,
+                    axis: Some(PlotAxis::Top),
+                },
+            );
+            if let Some(edit) = h.state_mut().app.state.plot_edit_mut() {
+                edit.selected_panel = 1;
+            }
+            grow_dialog(h, 255.0);
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
         name: "graphs-formula-title",
         setup: |h| {
             let graph = node_named(h, "Annotations");

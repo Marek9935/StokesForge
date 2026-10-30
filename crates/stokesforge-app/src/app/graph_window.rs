@@ -1096,6 +1096,7 @@ fn field_of(side: AxisSide) -> stokesforge_plot::AxisSide {
         AxisSide::Bottom => stokesforge_plot::AxisSide::Bottom,
         AxisSide::Left => stokesforge_plot::AxisSide::Left,
         AxisSide::Right => stokesforge_plot::AxisSide::Right,
+        AxisSide::Top => stokesforge_plot::AxisSide::Top,
     }
 }
 
@@ -1586,6 +1587,7 @@ pub(super) mod tests {
             (AxisSide::Bottom, PlotAxis::Bottom),
             (AxisSide::Left, PlotAxis::Left),
             (AxisSide::Right, PlotAxis::Right),
+            (AxisSide::Top, PlotAxis::Top),
         ] {
             assert_eq!(
                 named(Some(PlotComponent::Axis { panel: 0, side })),
