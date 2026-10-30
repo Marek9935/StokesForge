@@ -957,6 +957,15 @@ hidden graph or panel title no longer reserves its band. Axes
 keep their tick area when only their title is hidden. This
 rule lives in the shared pipeline, so it applies in SVG, PDF and PNG too.
 
+**Error bars on every type** (#360): `series::prepare` builds the whiskers
+(`Geometry::Curve` and `Geometry::Bars`, `whiskers`) from the resolved
+`x_error` / `y_error` columns alone, whatever the `PlotType`: Line, Scatter,
+Line + Symbol, Bar and Error Bars all carry them, and a series without an error
+column carries none. A Histogram ignores them (its bars are counts, not
+measured points). `pipeline::paint_whiskers` draws them for curves and bars;
+the Y extent of the framing includes them. The `ErrorBar` type keeps its
+meaning (line and markers); it no longer is the only one that shows whiskers.
+
 `DrawnPanel::series_geometry` keeps the pixels of the series after decimation,
 projection onto the left or right axis and clipping (line runs, whiskers,
 markers, bars and free end of each bar). `series_selection` designates

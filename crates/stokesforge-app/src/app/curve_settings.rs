@@ -418,6 +418,14 @@ fn series_page(
         let resolved = stokesforge_core::resolve::resolve_series(tree, &panel.series[*index]);
         stokesforge_core::resolve::bar_width(resolved.x.as_ref().map(|x| x.as_slice()), None)
     };
+    let error_columns = {
+        let series = &panel.series[*index];
+        stokesforge_app_state::analysis::error_candidates(
+            tree,
+            series.y,
+            [series.x_error, series.y_error],
+        )
+    };
     commit |= series_editor(
         ui,
         &mut panel.series[*index],
@@ -425,6 +433,7 @@ fn series_page(
         whole_group,
         auto_bar_width,
         panel.overlay.is_some(),
+        &error_columns,
     );
     // The Y axis (#358) goes through the panel, which makes the right axis
     // visible; in "whole group" scope every member gets it.

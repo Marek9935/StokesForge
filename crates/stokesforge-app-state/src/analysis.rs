@@ -1830,6 +1830,39 @@ pub fn aux_candidates(tree: &Tree, series: &[SeriesRef]) -> Vec<(NodeId, String)
     out
 }
 
+/// The columns the "Y error" / "X error" fields of the series properties
+/// offer for the series on `y` (#360): the other columns of its
+/// worksheet, in sheet order, each with its label ("long name (B)"). The
+/// columns of `current` (the ones the series already uses) stay offered even
+/// when they sit in another worksheet, so the field can show them. Empty if
+/// `y` is not a column of a worksheet.
+pub fn error_candidates(
+    tree: &Tree,
+    y: NodeId,
+    current: [Option<NodeId>; 2],
+) -> Vec<(NodeId, String)> {
+    let Some(sheet) = tree.node(y).and_then(|n| n.parent()) else {
+        return Vec::new();
+    };
+    let is_column = |id: NodeId| tree.node(id).is_some_and(|n| n.as_column().is_some());
+    let mut columns: Vec<NodeId> = tree
+        .children(sheet)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .filter(|column| *column != y && is_column(*column))
+        .collect();
+    for id in current.into_iter().flatten() {
+        if !columns.contains(&id) && is_column(id) {
+            columns.push(id);
+        }
+    }
+    columns
+        .into_iter()
+        .map(|column| (column, series_label_of(tree, column)))
+        .collect()
+}
+
 fn series_label_of(tree: &Tree, column: NodeId) -> String {
     series_label(
         tree,

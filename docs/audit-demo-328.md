@@ -25,7 +25,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | titles and units of the layer axes | ✓ Axes tab (Top and Right) |
 | `PlotTypes` (:197) | 5 cells in a 2×3 grid | ✓ Graph › New Layer Beside / columns dropped on the edge (#357) |
 | | the 5 plot types | ✓ type list (plot_settings.rs:771-776) |
-| | ErrorBar with `y_error` (:205) | **✗ [4]** |
+| | ErrorBar with `y_error` (:205) | ✓ Y Error column right of the Y (pairing at plot time), or Series › Y error (#360) |
 | | Histogram 30 bins | ✓ Series › Bins (#359) |
 | | cell title (:258) | ✓ `panel.title` (plot_settings.rs:379) |
 | `Annotations` (:265) | text with a Typst formula | ✓ Graph › Add Text, or the Text tool |
@@ -57,7 +57,9 @@ missing feature.
    or X2/Y2 columns), but it is a different structure: the demo puts two series
    in the same panel, a layer is a separate panel. To decide: is the layer
    enough, or do we want a "series axis" choice?
-4. **Error bars (`y_error`): B.** The ErrorBar type can be chosen, but no
+4. **Error bars (`y_error`): done (#360).** The Y Error column to the right of a Y
+   column is paired at plot time, and Series › Y error / X error changes or
+   removes it; the bars are drawn on every plot type. Original finding: the ErrorBar type can be chosen, but no
    column can be designated as error: no error column role
    (`ColumnRole` has only X, Y, X2…Y4 and their variants), no widget. Only
    `analysis.rs` reads `y_error` (as `sigma`). Without an error, the ErrorBar
@@ -81,7 +83,7 @@ missing feature.
   `Groups` and `Rows` by following the documentation.
 - **S2 (B, small, done #359)**: "Bins" widget (`histogram_bins`) in Series. It
   covers `Panels` and `PlotTypes`.
-- **S3 (B, medium)**: designate the error column of an ErrorBar series. To
+- **S3 (B, medium, done #360)**: designate the error column of an ErrorBar series. To
   decide between a column role (`yEr`, like X2/Y2) and a field in Series.
 - **S4 (B, done #358)**: assign a series to the right Y axis of the panel, or
   declare that the layer is enough and rewrite the `Axes` demo with a layer.

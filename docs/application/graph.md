@@ -24,8 +24,19 @@ therefore creates no graph: a right-click on a range of purely X columns, for
 example, does nothing rather than opening an empty graph. Each series takes the
 palette color of its rank (`SeriesSpec::from_palette`).
 
+**Error columns** (#360): the first column with the Y Error role
+(`ColumnRole::YError`) to the **right** of a Y column (Y2, Y3, Y4 too), before
+the next ordinate column (any of Y, Y2, Y3, Y4), fills `SeriesSpec::y_error`;
+the same for X Error and `x_error`. An unselected error column counts too, like
+X; an error column to the left of its Y pairs with nothing. The bars are drawn
+on **every** plot type that has points (Line, Scatter, Line + Symbol, Bar,
+Error Bars) as soon as the series carries an error column; a Histogram has no
+point to put a whisker on and ignores it. Two Y columns in a row each need
+their own error column right after them.
+
 This rule lives in `stokesforge_core::compose::series_from_columns` (#257:
-`pyst.plot` and the appendix of an analysis apply it too, `x_for`);
+`pyst.plot` and the appendix of an analysis apply it too, `x_for` and
+`errors_for`);
 `AppState::plot_columns` (`stokesforge-app-state/src/state.rs`) only emits the
 command and the failure messages, and the context menu only chooses the plot
 type and pushes `Action::PlotColumns`. A second
@@ -603,7 +614,17 @@ in `stokesforge-plot` (read before writing, as requested):
   to Left hides nothing). In "whole group" scope the axis is copied to every
   member. Grayed out, with its reason, on an overlaid layer (the rendering
   ignores Right there, `pipeline.rs`). Known limit: the data cursor skips
-  series on the right axis (`render/src/interact.rs`);
+  series on the right axis (`render/src/interact.rs`); then **Y error** and
+  **X error** (#360, `SeriesSpec::y_error` / `x_error`): "None" first, then the
+  other columns of the Y column's worksheet
+  (`stokesforge_app_state::analysis::error_candidates`, plus the column
+  already in use if it sits elsewhere). Choosing one, or None, goes through the
+  draft like any field (one history entry). **Per series, never copied to the
+  group**: an error column is data, not style, so "whole group" scope does not
+  apply. Not shown for a "row" series (#166) nor for a Histogram. Deleting a
+  column that serves as error breaks the whole series (`MissingRole::YError`),
+  exactly like deleting its X column does (invariant 10: the series degrades,
+  it does not crash);
 - **Legend**: `LegendSpec::visible`, `position`.
 
 **`PlotType::Unknown` never appears in the dropdown menu**, but a

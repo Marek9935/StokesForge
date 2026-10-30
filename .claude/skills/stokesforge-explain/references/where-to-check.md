@@ -30,6 +30,7 @@ A « oui » is checked by an `rg` in the crate or by the test that exercises it;
 - Greek letter, subscript, superscript in a title, axis label or series name: Typst syntax between dollars — `$lambda$`, `$x_2$`, `$x^2$`, `$"cm"^(-1)$`; `\$` for a real dollar. The « ? » icon beside these fields recalls it. A column name reused in the legend is shown as is.
 - Ctrl+Z while typing in a cell undoes the last project change, not the last keystroke — spreadsheet behaviour, assumed.
 - A series whose column was deleted stays, grey, annotated in the legend: missing data degrades the display, never removes the graph (invariant 10).
+- Error bars: the first column with the Y Error (X Error) role to the right of a Y column, before the next Y, is paired with it at plot time (`compose::errors_for`); the series fields « Y error » / « X error » change or remove it; the bars are drawn on every plot type (histogram excepted), `pyst.plot` pairs the same way (`y_error=None` goes without).
 - A cap (name length, cell count, number of bins…) is an arbitrated, documented limit (`docs/archive/rustrewrite/questions-ouvertes.md` §11), not a failure.
 
 ## Plain-language map (to build an explanation)

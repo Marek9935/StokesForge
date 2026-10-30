@@ -369,7 +369,7 @@ serves to identify its window, not to title the figure (#103).
 | `x_scale`, `y_scale` | `linear` or `log` |
 | `x_from`/`x_to`, `y_from`/`y_to` | both bounds together, finite and different, positive on a log axis; `from > to` draws the axis reversed; automatic range otherwise on a new graph |
 | `axis` | `left` or `right` for the series and its Y options; makes the right axis visible |
-| `x_error`, `y_error` | handles of the error columns |
+| `x_error`, `y_error` | handles of the error columns; without them, each `y` takes the first X Error / Y Error column to its right, before the next Y (`compose::errors_for`, #360); `None` goes without |
 | `histogram_bins` | integer from 1 to 65,536 |
 
 The automatic label comes from the column and stays literal text: metadata
@@ -451,7 +451,12 @@ by its role, otherwise the row index), a shared column or a list of the
 same length as `y`. `label` is a string for
 one series, a list (one name per series) for a batch; `group_name` names the
 group (refused for a single series); `x_error`/`y_error` serve only a
-single series. Automatic colors follow the palette, series after series (`SeriesSpec::from_palette`, at the series' rank in the panel).
+single series. Without them, **each** series is paired by role like in the
+window (#360): the first column with the role `x_error` / `y_error` to the right
+of its `y`, before the next ordinate column; `x_error=None` / `y_error=None`
+(explicit, in `**options`: the key is present with the value `None`) disables
+the pairing. This changes what `plot` does with the same call, without changing
+the list of the API below. Automatic colors follow the palette, series after series (`SeriesSpec::from_palette`, at the series' rank in the panel).
 `color` follows the same rule as `label` (#207): a list gives one color per series (`InvalidValueError` if its length is not that of the batch); a single string applies to **all** series of the batch; for a gradient, see `apply_gradient`.
 
 | Call | Effect |

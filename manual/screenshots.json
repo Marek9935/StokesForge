@@ -42,7 +42,7 @@
   {
     "image": "graphs-properties-series.png",
     "page": "guide/graphs.md",
-    "shows": "The Series Properties window of Graph1: series list, group, name, plot type, line and symbol settings."
+    "shows": "The Series Properties window of Graph1: series list, group, name, plot type, Y axis, Y error and X error, line and symbol settings."
   },
   {
     "image": "graphs-properties-axes.png",

@@ -328,7 +328,8 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
 
     let time = titled_column(project, sheet, &t, ("Time", "s"), ColumnRole::X)?;
     let decay = titled_column(project, sheet, &decay, ("Decay", "mV"), ColumnRole::Y)?;
-    let growth = titled_column(project, sheet, &growth, ("Growth", "mV"), ColumnRole::Y)?;
+    // Right after Decay: the pairing at plot time (#360) gives the Y column
+    // its Y Error, so plotting "Decay" draws its error bars.
     let error = titled_column(
         project,
         sheet,
@@ -336,6 +337,7 @@ fn measures(project: &mut Project, folder: NodeId) -> anyhow::Result<Measures> {
         ("Uncertainty", "mV"),
         ColumnRole::YError,
     )?;
+    let growth = titled_column(project, sheet, &growth, ("Growth", "mV"), ColumnRole::Y)?;
     let noise_col = titled_column(
         project,
         sheet,

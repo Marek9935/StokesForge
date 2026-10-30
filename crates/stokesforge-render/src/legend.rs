@@ -231,7 +231,7 @@ fn key<DB: DrawingBackend>(
         area,
         entry.spec,
         entry.broken,
-        matches!(entry.geometry, Geometry::Bars(_)),
+        matches!(entry.geometry, Geometry::Bars { .. }),
         (left, middle),
         ink,
     )

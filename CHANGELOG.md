@@ -26,6 +26,14 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Error bars (#360): the first Y Error (X Error) column to the right of a Y
+  column, before the next Y column, is paired with it at plot time, and the
+  **Y error** / **X error** fields of Series Properties change or remove it
+  ("None"; per series, not copied to a group). The bars are now drawn on every
+  plot type (Line, Scatter, Line + Symbol, Bar, Error Bars), not only on Error
+  Bars. `pyst.plot` pairs the same way unless `x_error=` / `y_error=` is given
+  (`None` goes without). In the demo, the Uncertainty column now follows Decay.
+
 - Series Properties (#358): a **Y axis: Left / Right** field attaches a series to
   the right axis of its layer (Right shows the axis; "Whole group" copies it to
   the members). It is grayed out on a layer drawn on top.

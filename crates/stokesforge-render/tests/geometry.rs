@@ -683,6 +683,44 @@ fn whiskers_are_not_segments_of_the_line() {
     }
 }
 
+/// #360: the error column, not the plot type, makes the whiskers appear:
+/// a line, a scatter, a line with symbols and bars all carry them, and
+/// the same series without an error column carries none.
+#[test]
+fn every_plot_type_draws_whiskers_as_soon_as_the_series_has_an_error_column() {
+    use stokesforge_plot::PlotType;
+    for plot_type in [
+        PlotType::Line,
+        PlotType::Scatter,
+        PlotType::LineScatter,
+        PlotType::Bar,
+    ] {
+        let columns = [
+            ("X", vec![1.0, 2.0, 3.0]),
+            ("Y", vec![10.0, 20.0, 15.0]),
+            ("E", vec![1.0, 2.0, 1.0]),
+        ];
+        let with = |error: bool| {
+            let plot_type = plot_type.clone();
+            geometry(&columns, move |ids| {
+                let mut series = SeriesSpec::new_xy(ids[0], ids[1]);
+                series.y_error = error.then_some(ids[2]);
+                series.plot_type = plot_type.clone();
+                one_panel(series, |_| {})
+            })
+        };
+        assert_eq!(
+            with(true).panels[0].series_geometry[0].whiskers.len(),
+            3,
+            "{plot_type:?}"
+        );
+        assert!(
+            with(false).panels[0].series_geometry[0].whiskers.is_empty(),
+            "{plot_type:?}"
+        );
+    }
+}
+
 /// The handle ink is the automatic ink of the figure's background:
 /// dark on the default background (transparent, judged against white), white
 /// on a dark background.

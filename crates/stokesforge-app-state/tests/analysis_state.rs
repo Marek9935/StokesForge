@@ -446,6 +446,26 @@ fn an_operation_never_run_takes_the_preferences_default() {
     );
 }
 
+/// #360: the Y Error column to the right of the Y, unselected, is the sigma of
+/// the series (the pairing of the graphs), and ticking the weighting uses it.
+#[test]
+fn a_fit_takes_the_y_error_column_right_of_the_y_as_its_sigma() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    let error = *s.state.tree().children(s.sheet).unwrap().last().unwrap();
+    s.state.dispatch(Action::SetColumnRole {
+        column: error,
+        role: ColumnRole::YError,
+    });
+    open(&mut s, Preset::Fit(Model::Linear));
+    let form = s.state.analysis_form_mut().unwrap();
+    assert_eq!(form.series[0].sigma, Some(error));
+    assert_eq!(form.effective_series()[0].sigma, None, "weighting is off");
+    form.setup.fit.weighted = true;
+    assert_eq!(form.effective_series()[0].sigma, Some(error));
+}
+
 #[test]
 fn analysis_from_a_graph_keeps_x_sigma_styles_layer_group_and_undo() {
     use stokesforge_plot::{LineStyle, PanelSpec, PlotSpec, SeriesSpec};
