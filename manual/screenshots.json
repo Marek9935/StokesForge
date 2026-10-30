@@ -25,6 +25,11 @@
     "shows": "The context menu of a column header (right-click on B(Y)): Plot, Add Column, Analysis, clipboard, Move, Type, Role, Reset Width, Clear, Delete."
   },
   {
+    "image": "workbooks-formula-help.png",
+    "page": "guide/projects-and-workbooks.md",
+    "shows": "The F(x)= cell of column B being edited, with the pointer on its ? icon: the bubble lists the functions by family, with their signature, an example and a description."
+  },
+  {
     "image": "import-wizard-format.png",
     "page": "guide/import.md",
     "shows": "Import Wizard, step 2 Format: delimiter, decimal separator, thousands separator, comments, blocks and encoding, with the file preview."

@@ -1299,6 +1299,7 @@ fn header_field_widget(
             // modified `#REF`) is decided in `app-state`: the grid paints it and keeps
             // the field open (#321).
             let refusal = state.header_edit_refusal();
+            let help = field == HeaderField::Formula && state.show_column_formula_help();
             let Some(edit) = state.header_editing_mut() else {
                 return;
             };
@@ -1309,16 +1310,35 @@ fn header_field_widget(
             };
             // The shared in-place edit contract (#224); it consumes Enter, Tab and Escape,
             // which the shortcut block further down must not see again (#38).
-            let shown = inplace_edit::show(
-                ui,
-                ui.id().with("header_edit"),
-                egui::TextEdit::singleline(&mut edit.buffer)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY),
-                opening,
-                inplace_edit::FocusLoss::Ends,
-                refusal.as_deref(),
-            );
+            // The "?" of the F(x)= cell (#404, S-T6): only while it is edited, at the
+            // right of the field, which gives up the width of the icon so that a
+            // narrow column does not clip it. The icon senses only the hover, so it
+            // never takes the focus whose loss ends the edit.
+            let id = ui.id().with("header_edit");
+            let mut paint = |ui: &mut egui::Ui, width: f32| {
+                inplace_edit::show(
+                    ui,
+                    id,
+                    egui::TextEdit::singleline(&mut edit.buffer)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(width),
+                    opening,
+                    inplace_edit::FocusLoss::Ends,
+                    refusal.as_deref(),
+                )
+            };
+            let shown = if help {
+                ui.horizontal(|ui| {
+                    let width =
+                        ui.available_width() - super::column_formula_help::reserved_width(ui);
+                    let shown = paint(ui, width.max(0.0));
+                    super::column_formula_help::icon(ui);
+                    shown
+                })
+                .inner
+            } else {
+                paint(ui, f32::INFINITY)
+            };
             match shown.end {
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
@@ -2860,6 +2880,8 @@ mod tests {
     /// rows, values 101..104, 201..204, 301..304.
     struct Bench {
         _session: Session,
+        /// The preferences file of the bench: no test writes the user's.
+        _preferences_dir: tempfile::TempDir,
         context: egui::Context,
         state: AppState,
         actions: Vec<Action>,
@@ -2901,7 +2923,16 @@ mod tests {
                 })
                 .collect();
             let session = Session::spawn(project, None).unwrap();
-            let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+            let preferences_dir = tempfile::tempdir().unwrap();
+            let preferences = stokesforge_app_state::preferences::Preferences::load_from(Some(
+                preferences_dir.path().join("preferences.json"),
+            ));
+            let state = AppState::new_with_preferences(
+                session.handle(),
+                "test.stf".to_string(),
+                preferences,
+            )
+            .unwrap();
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             theme::install(&context);
@@ -2916,6 +2947,7 @@ mod tests {
             );
             let mut bench = Bench {
                 _session: session,
+                _preferences_dir: preferences_dir,
                 context,
                 state,
                 actions: Vec::new(),
@@ -5149,5 +5181,130 @@ mod tests {
         assert!(bench
             .state
             .is_column_selected(bench.sheet, bench.columns[0]));
+    }
+
+    // --- "?" help of the F(x)= cell (#404) ---------------------------------
+
+    /// The centers of the images (icons) published through accesskit in the
+    /// last frame.
+    fn image_centers(bench: &Bench) -> Vec<egui::Pos2> {
+        let update = bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accesskit enabled");
+        update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Image)
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                Some(egui::pos2(
+                    ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                    ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                ))
+            })
+            .collect()
+    }
+
+    /// The icons painted while `field` of the first column is edited, with the
+    /// column-formula help preference at `help`.
+    fn icons_while_editing(field: HeaderField, help: bool) -> (Bench, Vec<egui::Pos2>) {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        bench
+            .context
+            .all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        bench.state.dispatch(Action::SetShowColumnFormulaHelp(help));
+        let column = bench.columns[0];
+        bench.state.begin_header_edit(column, field);
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.header_editing().is_some());
+        let icons = image_centers(&bench);
+        (bench, icons)
+    }
+
+    /// The "?" icon of the F(x)= cell is the one image that appears with the
+    /// preference on, only for the Formula field.
+    fn help_icon(field: HeaderField, help: bool) -> (Bench, Option<egui::Pos2>) {
+        let (bench, with) = icons_while_editing(field, help);
+        let (_, without) = icons_while_editing(field, false);
+        let icon = with.into_iter().find(|center| {
+            !without
+                .iter()
+                .any(|other| (*other - *center).length() < 1.0)
+        });
+        (bench, icon)
+    }
+
+    #[test]
+    fn the_formula_cell_shows_the_help_icon_only_while_edited_and_when_the_preference_is_on() {
+        let (_, icon) = help_icon(HeaderField::Formula, true);
+        assert!(icon.is_some(), "edited F(x)= cell: the icon");
+        // Preference off: nothing more than without it.
+        let (_, off) = icons_while_editing(HeaderField::Formula, false);
+        let (_, on) = icons_while_editing(HeaderField::Formula, true);
+        assert_eq!(on.len(), off.len() + 1);
+        // Not edited: no icon either way.
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let idle = image_centers(&bench).len();
+        assert_eq!(idle, off.len(), "the edited cell without help adds nothing");
+    }
+
+    #[test]
+    fn the_other_header_fields_have_no_formula_help_icon() {
+        for field in [
+            HeaderField::LongName,
+            HeaderField::Unit,
+            HeaderField::Comment,
+        ] {
+            let (_, icon) = help_icon(field, true);
+            assert!(icon.is_none(), "{field:?}");
+        }
+    }
+
+    #[test]
+    fn hovering_the_help_icon_lists_the_functions_and_keeps_the_cell_open() {
+        let (mut bench, icon) = help_icon(HeaderField::Formula, true);
+        let icon = icon.expect("the icon");
+        bench.image(vec![egui::Event::PointerMoved(icon)]);
+        for _ in 0..30 {
+            bench.image(vec![egui::Event::PointerMoved(icon)]);
+        }
+        let texts = bench.texts();
+        assert!(
+            texts.contains(&tr!("formula-help-title")),
+            "the bubble is open: {texts:?}"
+        );
+        assert!(
+            texts.contains(&"logx(x, b)".to_string()),
+            "one signature per function of the shared table: {texts:?}"
+        );
+        assert!(
+            bench.state.header_editing().is_some(),
+            "hovering does not end the edit"
+        );
+    }
+
+    #[test]
+    fn the_help_icon_takes_its_width_from_the_field_not_from_the_cell() {
+        let (bench, icon) = help_icon(HeaderField::Formula, true);
+        let icon = icon.expect("the icon");
+        // The icon stays inside the first column: right of its text, left of
+        // the second column's first cell.
+        let second = bench.center_of("201").expect("cell of the second column");
+        assert!(
+            icon.x < second.x - 20.0,
+            "icon {icon:?}, next cell {second:?}"
+        );
     }
 }

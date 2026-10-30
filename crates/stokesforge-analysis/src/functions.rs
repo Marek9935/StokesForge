@@ -9,6 +9,12 @@
 //! `max(b)` and `max(b, x1, x2)` (#402). `if` and the comparisons are not here:
 //! they need the row status and live in the formula only.
 //!
+//! [`Func::ALL`] lists every function once (aliases such as `log10` are not
+//! entries): the column-formula help of the application is built from it
+//! (#404), so a function added here shows up there. [`Func::alternative`]
+//! names the function to write instead when the argument count is wrong
+//! (`log(B, 2)` -> `logx`), plain data for the error message.
+//!
 //! The transcendental functions go through `libm`, never through the
 //! platform `f64` methods (`clippy.toml`, #332).
 
@@ -47,6 +53,52 @@ pub enum Func {
 }
 
 impl Func {
+    /// Every function of the table, once each, in help order (family by
+    /// family). A test keeps it complete.
+    pub const ALL: [Func; 29] = [
+        Func::Exp,
+        Func::Ln,
+        Func::Log10,
+        Func::Log2,
+        Func::Logx,
+        Func::Sqrt,
+        Func::Root,
+        Func::Pow,
+        Func::Abs,
+        Func::Sign,
+        Func::Sin,
+        Func::Cos,
+        Func::Tan,
+        Func::Asin,
+        Func::Acos,
+        Func::Atan,
+        Func::Atan2,
+        Func::Sinh,
+        Func::Cosh,
+        Func::Tanh,
+        Func::Erf,
+        Func::Erfc,
+        Func::Floor,
+        Func::Ceil,
+        Func::Round,
+        Func::Mod,
+        Func::Min,
+        Func::Max,
+        Func::Pi,
+    ];
+
+    /// The function to write instead when `self` is called with `found`
+    /// arguments it does not accept: `log`/2 -> `logx`, `atan`/2 -> `atan2`,
+    /// `sqrt`/2 -> `root`. `None` for any other case.
+    pub fn alternative(self, found: usize) -> Option<Func> {
+        match (self, found) {
+            (Func::Log10, 2) => Some(Func::Logx),
+            (Func::Atan, 2) => Some(Func::Atan2),
+            (Func::Sqrt, 2) => Some(Func::Root),
+            _ => None,
+        }
+    }
+
     /// The function called `name`, case-insensitive; `None` if unknown.
     pub fn from_name(name: &str) -> Option<Func> {
         Some(match name.to_ascii_lowercase().as_str() {
@@ -322,6 +374,62 @@ mod tests {
 
     fn call(name: &str, args: &[f64]) -> f64 {
         Func::from_name(name).expect(name).apply(args)
+    }
+
+    /// Position of each variant: an exhaustive `match`, so that a new
+    /// variant does not compile until it is counted here (and so listed in
+    /// [`Func::ALL`]).
+    fn index(f: Func) -> usize {
+        match f {
+            Func::Exp => 0,
+            Func::Ln => 1,
+            Func::Log10 => 2,
+            Func::Log2 => 3,
+            Func::Logx => 4,
+            Func::Sqrt => 5,
+            Func::Root => 6,
+            Func::Abs => 7,
+            Func::Sin => 8,
+            Func::Cos => 9,
+            Func::Tan => 10,
+            Func::Asin => 11,
+            Func::Acos => 12,
+            Func::Atan => 13,
+            Func::Atan2 => 14,
+            Func::Sinh => 15,
+            Func::Cosh => 16,
+            Func::Tanh => 17,
+            Func::Erf => 18,
+            Func::Erfc => 19,
+            Func::Sign => 20,
+            Func::Floor => 21,
+            Func::Ceil => 22,
+            Func::Round => 23,
+            Func::Mod => 24,
+            Func::Pow => 25,
+            Func::Min => 26,
+            Func::Max => 27,
+            Func::Pi => 28,
+        }
+    }
+
+    #[test]
+    fn all_lists_every_function_once_and_each_name_round_trips() {
+        let mut seen = [0usize; 29];
+        for f in Func::ALL {
+            seen[index(f)] += 1;
+            assert_eq!(Func::from_name(f.name()), Some(f), "{}", f.name());
+        }
+        assert!(seen.iter().all(|&n| n == 1), "{seen:?}");
+    }
+
+    #[test]
+    fn the_alternative_is_plain_data_for_three_known_mistakes() {
+        assert_eq!(Func::Log10.alternative(2), Some(Func::Logx));
+        assert_eq!(Func::Atan.alternative(2), Some(Func::Atan2));
+        assert_eq!(Func::Sqrt.alternative(2), Some(Func::Root));
+        assert_eq!(Func::Exp.alternative(2), None);
+        assert_eq!(Func::Sqrt.alternative(3), None);
     }
 
     #[test]

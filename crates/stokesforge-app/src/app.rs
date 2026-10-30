@@ -136,6 +136,7 @@ mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
 mod busy;
+mod column_formula_help;
 mod column_use;
 mod confirmations;
 mod contents;

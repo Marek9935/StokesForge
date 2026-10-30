@@ -228,7 +228,7 @@ graph-series-broken-reference-named = { $name } — référence rompue
 graph-legend-more = { $count ->
     [one] … et { $count } autre
    *[other] … et { $count } autres
-}
+    }
 status-row-no-x-prime = Aucune colonne de cette feuille n'a de valeur x' : rien à tracer
 row-drop-title = Tracer les lignes
 row-drop-confirm = Ce graphique a déjà un axe X. Tracer les lignes contre un nouvel axe X, ou contre l'axe présent ?
@@ -666,7 +666,29 @@ error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre
 error-formula-cycle = Des formules se renvoient l'une à l'autre en boucle. Retirer l'une des références
 error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)
 error-formula-unknown-function = Fonction { $name } inconnue. Vérifier son orthographe
-error-formula-wrong-argument-count = Nombre d'arguments incorrect pour { $name } : { $expected } attendu, { $found } reçu
+error-formula-unknown-function-suggestion = Fonction { $name } inconnue. Vouliez-vous écrire { $suggestion } ?
+# Nombres d'arguments acceptés par une fonction (#404) : `count` est le nombre
+# de valeurs acceptées, `first` et `last` la plus petite et la plus grande,
+# `second` celle qui suit la première (trois valeurs : « 1, 2 ou 3 »). Un terme
+# Fluent n'accepte pas de variables : la phrase est écrite dans les deux messages.
+error-formula-wrong-argument-count = La fonction { $name } attend { $count ->
+        [1] { $first ->
+            [0] aucun argument
+            [1] 1 argument
+           *[other] { $first } arguments
+        }
+        [2] { $first } ou { $last } arguments
+       *[other] { $first }, { $second } ou { $last } arguments
+    } (reçu : { $found })
+error-formula-wrong-argument-count-suggestion = La fonction { $name } attend { $count ->
+        [1] { $first ->
+            [0] aucun argument
+            [1] 1 argument
+           *[other] { $first } arguments
+        }
+        [2] { $first } ou { $last } arguments
+       *[other] { $first }, { $second } ou { $last } arguments
+    } (reçu : { $found }). Écrire plutôt { $suggestion }
 error-formula-not-a-function = { $letter } est une colonne, pas une fonction. Pour multiplier, écrire { $letter }*(...)
 error-formula-pi-needs-parentheses = Pour le nombre π, écrire pi() (un pi seul serait la colonne PI)
 
@@ -1011,6 +1033,49 @@ column-long-name = Nom long
 column-units = Unités
 column-comments = Commentaires
 workbook-header-formula = F(x)=
+# Aide de la case F(x)= (#404) : les fonctions qu'une formule de colonne peut appeler
+formula-help-title = Fonctions d'une formule
+formula-help-note = Les noms ne distinguent pas majuscules et minuscules. Une colonne s'écrit par sa lettre.
+formula-help-family-operators = Opérateurs
+formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
+formula-help-op-power = Puissance
+formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
+formula-help-family-powers = Puissances et logarithmes
+formula-help-family-trigonometry = Trigonométrie
+formula-help-family-error = Fonction d'erreur
+formula-help-family-rounding = Signe et arrondis
+formula-help-family-choice = Choix et comparaison
+formula-help-family-constants = Constantes
+formula-help-exp = e puissance x
+formula-help-ln = Logarithme népérien
+formula-help-log = Logarithme décimal
+formula-help-log2 = Logarithme en base 2
+formula-help-logx = Logarithme de x en base b
+formula-help-sqrt = Racine carrée
+formula-help-root = Racine n-ième de x
+formula-help-pow = x puissance y
+formula-help-abs = Valeur absolue
+formula-help-sign = Signe : -1, 0 ou 1
+formula-help-floor = Plus grand entier non supérieur à x
+formula-help-ceil = Plus petit entier non inférieur à x
+formula-help-round = x arrondi à n décimales
+formula-help-mod = Reste de la division de x par y
+formula-help-sin = Sinus, x en radians
+formula-help-cos = Cosinus, x en radians
+formula-help-tan = Tangente, x en radians
+formula-help-asin = Arc sinus, en radians
+formula-help-acos = Arc cosinus, en radians
+formula-help-atan = Arc tangente, en radians
+formula-help-atan2 = Angle du point (x, y), en radians
+formula-help-sinh = Sinus hyperbolique
+formula-help-cosh = Cosinus hyperbolique
+formula-help-tanh = Tangente hyperbolique
+formula-help-erf = Fonction d'erreur
+formula-help-erfc = Fonction d'erreur complémentaire
+formula-help-min = Le plus petit de x et y
+formula-help-max = Le plus grand de x et y
+formula-help-if = a si la condition c est vraie, sinon b
+formula-help-pi = Le nombre π
 common-metadata = Métadonnées
 workbook-metadata-hide = Masquer la ligne Métadonnées
 workbook-metadata-summary =
@@ -1668,7 +1733,7 @@ error-import-running = Un import est déjà en cours
 status-import-progress = Import en cours… { $done } sur { $total } { $total ->
     [one] fichier
    *[other] fichiers
-}
+    }
 error-import-start = Impossible de lancer l'import : { $cause }
 error-import-stopped = L'import s'est arrêté avant la fin
 error-refresh-no-imported-column = Cette feuille n'a aucune colonne importée d'un fichier
@@ -1678,7 +1743,7 @@ error-refresh-close-group = l'actualisation n'a pas pu être regroupée en une s
 status-refresh-done = { $count ->
     [one] { $count } colonne actualisée depuis son fichier
    *[other] { $count } colonnes actualisées depuis leurs fichiers
-}
+    }
 error-refresh-partial = { $count ->
     [one] { $count } colonne actualisée depuis son fichier
    *[other] { $count } colonnes actualisées depuis leurs fichiers
@@ -1745,7 +1810,7 @@ error-template-import-invalid = Le modèle { $path } n'est pas valide : { $deta
 status-import-dropped = { $count ->
     [one] { $count } fichier importé avec le modèle « { $models } »
    *[other] { $count } fichiers importés avec le modèle « { $models } »
-}
+    }
 
 # Champs : valeur ramenée à une borne fixe (#219).
 field-clamped-min = Ramené au minimum, { $limit }
@@ -1827,6 +1892,8 @@ preferences-display-object-manager = Gestionnaire d'objets
 preferences-display-new = Nouveaux
 preferences-show-formula-help = Afficher l'aide de syntaxe des formules
     .hint = Affiche l'icône « ? » à côté des champs de texte qui acceptent une formule (titres, étiquettes, unités). Masquée, les champs gardent leur propre rappel.
+preferences-show-column-formula-help = Afficher l'aide de F(x)=
+    .hint = Affiche l'icône « ? », qui liste les fonctions, pendant la saisie de la case F(x)= d'une colonne.
 preferences-om-listed = Listés dans le panneau
 preferences-new-graphs = Nouveaux graphiques
 preferences-new-graphs-note = Point de départ des graphiques que vous créez. Chaque graphique garde ensuite son propre réglage, dans ses Propriétés du graphique ; les graphiques existants ne changent pas.

@@ -934,6 +934,8 @@ pub enum Action {
     OpenFolder(PathBuf),
     /// Shows or hides the formula syntax help icon (#148).
     SetShowFormulaHelp(bool),
+    /// The "?" icon of the `F(x)=` cell while it is edited (#404).
+    SetShowColumnFormulaHelp(bool),
     /// Remembers the layout of the three fixed panels: collapsed, detached, size
     /// and position of their window (#148). Application preference: no command,
     /// no history, no `.stf`.
@@ -5565,6 +5567,17 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetShowColumnFormulaHelp(show) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_show_column_formula_help(show)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetNewGraphDecimalComma(comma) => {
                 if let Err(error) = self
                     .object_manager_preferences
@@ -7393,6 +7406,11 @@ impl AppState {
     /// Is the formula syntax help icon shown next to the formula fields (#148)?
     pub fn show_formula_help(&self) -> bool {
         self.object_manager_preferences.show_formula_help()
+    }
+
+    /// Is the "?" icon of the `F(x)=` cell shown while it is edited (#404)?
+    pub fn show_column_formula_help(&self) -> bool {
+        self.object_manager_preferences.show_column_formula_help()
     }
 
     /// The header rows `(Metadata, x')` of new workbooks.

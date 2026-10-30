@@ -222,6 +222,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Bring to Front / Send to Back | Amener devant / Envoyer derrière | Stacking order of the objects | Premier plan, Arrière-plan (réservé au fond) | O (#76) |
 | Formula | Formule | Computation of a column (`F(x)=`), as in Excel and Origin | Équation, Expression | #322 |
 | Math | Maths | Text typeset by Typst, between `$…$` ("math mode") | Formula, Équation, LaTeX | #322 |
+| Function family | Famille de fonctions | Heading of a group in the help of the `F(x)=` cell: Operators, Powers and logarithms, Trigonometry, Error function, Sign and rounding, Choice and comparison, Constants (#404) | Catégorie, Type | #404 |
 | Model expression | Expression de modèle | What the user writes for a custom fit | Formula, Équation | #322 |
 | Zoom / Reset Zoom | Zoom / Réinitialiser le zoom | Framing of the view; return to the original ranges | Rescale, Recadrer | G |
 | Pan† | Panoramique | Move the framing | Déplacement | G |

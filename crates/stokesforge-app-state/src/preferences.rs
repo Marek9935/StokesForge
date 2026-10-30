@@ -272,6 +272,10 @@ struct PreferencesFile {
     /// unreadable: shown.
     #[serde(default, deserialize_with = "lenient")]
     show_formula_help: Option<bool>,
+    /// The "?" icon of the `F(x)=` cell of the workbook grid, shown while it is
+    /// edited (#404); missing or unreadable: shown.
+    #[serde(default, deserialize_with = "lenient")]
+    show_column_formula_help: Option<bool>,
     /// Decimal comma on the axes of **new** graphs (R9, #148); missing or
     /// unreadable: decimal point.
     #[serde(default, deserialize_with = "lenient")]
@@ -342,6 +346,7 @@ pub struct Preferences {
     first_run_done: bool,
     png_export_scale: f32,
     show_formula_help: bool,
+    show_column_formula_help: bool,
     new_graph_decimal_comma: bool,
     analysis_keep_by_operation: BTreeMap<String, bool>,
     panels: PanelLayout,
@@ -410,6 +415,7 @@ impl Preferences {
                 .filter(|scale| PNG_EXPORT_SCALES.contains(scale))
                 .unwrap_or(DEFAULT_PNG_EXPORT_SCALE),
             show_formula_help: file.show_formula_help.unwrap_or(true),
+            show_column_formula_help: file.show_column_formula_help.unwrap_or(true),
             new_graph_decimal_comma: file.new_graph_decimal_comma.unwrap_or(false),
             analysis_keep_by_operation: read_keep_by_operation(file.analysis_keep_by_operation),
             panels: PanelLayout::from_json(file.panels.as_ref()),
@@ -561,6 +567,18 @@ impl Preferences {
     pub fn save_show_formula_help(&mut self, show: bool) -> std::io::Result<()> {
         self.show_formula_help = show;
         self.save_field("show_formula_help", show.into())
+    }
+
+    /// Is the "?" icon of the `F(x)=` cell shown while it is edited (#404)?
+    /// Yes by default.
+    pub fn show_column_formula_help(&self) -> bool {
+        self.show_column_formula_help
+    }
+
+    /// Remembers the choice without replacing the other preferences.
+    pub fn save_show_column_formula_help(&mut self, show: bool) -> std::io::Result<()> {
+        self.show_column_formula_help = show;
+        self.save_field("show_column_formula_help", show.into())
     }
 
     /// Do **new** graphs write their numbers with a decimal comma? No by default.
@@ -1192,11 +1210,12 @@ mod tests {
     #[test]
     fn lenient_reads_of_the_window_settings_keep_the_neighbours() {
         let (_dir, path) = written(
-            r#"{"png_export_scale":"x2","show_formula_help":"no","new_graph_decimal_comma":3,"language":"fr"}"#,
+            r#"{"png_export_scale":"x2","show_formula_help":"no","show_column_formula_help":7,"new_graph_decimal_comma":3,"language":"fr"}"#,
         );
         let preferences = Preferences::load_from(Some(path));
         assert_eq!(preferences.png_export_scale(), 4.0);
         assert!(preferences.show_formula_help());
+        assert!(preferences.show_column_formula_help(), "unreadable: shown");
         assert!(!preferences.new_graph_decimal_comma());
         assert_eq!(preferences.language(), Some("fr"));
         let (_dir, path) = written(r#"{"png_export_scale":3.0,"language":"fr"}"#);
@@ -1212,10 +1231,12 @@ mod tests {
         let mut preferences = Preferences::load_from(Some(path.clone()));
         preferences.save_png_export_scale(2.0).unwrap();
         preferences.save_show_formula_help(false).unwrap();
+        preferences.save_show_column_formula_help(false).unwrap();
         preferences.save_new_graph_decimal_comma(true).unwrap();
         let reread = Preferences::load_from(Some(path.clone()));
         assert_eq!(reread.png_export_scale(), 2.0);
         assert!(!reread.show_formula_help());
+        assert!(!reread.show_column_formula_help());
         assert!(reread.new_graph_decimal_comma());
         assert_eq!(reread.language(), Some("fr"));
         let text = std::fs::read_to_string(path).unwrap();

@@ -46,6 +46,14 @@ without a message, see `docs/persistence.md`).
   the right axis of its layer (Right shows the axis; "Whole group" copies it to
   the members). It is grayed out on a layer drawn on top.
 
+- Help for the **F(x)=** cell (#404): a **?** icon at the right of the cell while
+  it is edited lists the functions by family with an example each (preference
+  **Show F(x)= help** in Preferences > Display > Interface). A misspelled function
+  name proposes the nearest one, and a wrong argument count says what the
+  function takes in words ("takes 1 or 2 arguments", "takes no arguments") and
+  names the function to write instead (`log(B, 2)`: `logx`; `atan(A, B)`:
+  `atan2`; `sqrt(A, 2)`: `root`).
+
 ### Fixed
 
 - Peak Decomposition window (#384): the preview no longer overflows the window
