@@ -318,8 +318,11 @@ then call `set_values`.
 `display_format` and `formula`. Values are strings, except `formula=None`, which
 removes the formula; the roles are those of `info`.
 The formula is written **in column letters** of the column's sheet
-(`formula="A * 2"`, case is normalized) and is read the same way; a letter that
-designates no column of the sheet, the column itself or `#REF` raise
+(`formula="A * 2"`; a column letter is normalized to capitals) and is read the
+same way. The grammar is that of the interface (`^`, functions such as
+`sqrt(A)` or `round(B, 2)`, comparisons and `if`, #401: manual, "Formula
+syntax"). A letter that designates no column of the sheet, the column itself,
+`#REF`, an unknown function or a wrong argument count raise
 `InvalidValueError` without writing anything (#321). The script never handles
 identifiers: the stored text of the formula is not rewritten by another field
 (changing `unit` of a column whose formula displays `#REF` succeeds).

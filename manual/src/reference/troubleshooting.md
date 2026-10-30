@@ -202,6 +202,10 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "This column is computed by a formula. Edit the formula to change its values" | Change the **F(x)=** cell, or use **Remove Formula, Keep Data**. |
 | "Column … does not exist in this sheet" | A formula names a letter that is not in the sheet. |
 | "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between two formulas. |
+| "Unknown function …. Check its spelling" | A name followed by `(` is not one of the functions listed in [Formula syntax](../guide/projects-and-workbooks.md#formula-syntax). |
+| "Wrong number of arguments for …: expected …, found …" | Give the function the number of values it expects, separated by commas. |
+| "… is a column, not a function. To multiply, write …*(...)" | Add the `*` sign between the column and the parenthesis: `A*(B/C)`. |
+| "For the number π, write pi() (a lone pi would be column PI)" | Write `pi()` with parentheses. |
 
 See [Analysis](../guide/analysis.md) and [Columns computed by a formula](../guide/projects-and-workbooks.md#columns-computed-by-a-formula).
 

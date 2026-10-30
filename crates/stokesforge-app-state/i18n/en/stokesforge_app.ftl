@@ -666,6 +666,10 @@ error-formula-self-reference = A formula cannot refer to its own column ({ $lett
 error-formula-deleted-column = Column deleted. Replace #REF with a column letter
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
 error-formula-too-deep = The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)
+error-formula-unknown-function = Unknown function { $name }. Check its spelling
+error-formula-wrong-argument-count = Wrong number of arguments for { $name }: expected { $expected }, found { $found }
+error-formula-not-a-function = { $letter } is a column, not a function. To multiply, write { $letter }*(...)
+error-formula-pi-needs-parentheses = For the number π, write pi() (a lone pi would be column PI)
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists

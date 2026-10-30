@@ -23,6 +23,7 @@ pub mod deconv;
 pub mod error;
 pub mod expr;
 pub mod fit;
+pub mod functions;
 pub mod integrate;
 pub mod linalg;
 pub mod model;

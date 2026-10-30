@@ -665,6 +665,10 @@ error-formula-self-reference = Une formule ne peut pas faire référence à sa p
 error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne
 error-formula-cycle = Des formules se renvoient l'une à l'autre en boucle. Retirer l'une des références
 error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)
+error-formula-unknown-function = Fonction { $name } inconnue. Vérifier son orthographe
+error-formula-wrong-argument-count = Nombre d'arguments incorrect pour { $name } : { $expected } attendu, { $found } reçu
+error-formula-not-a-function = { $letter } est une colonne, pas une fonction. Pour multiplier, écrire { $letter }*(...)
+error-formula-pi-needs-parentheses = Pour le nombre π, écrire pi() (un pi seul serait la colonne PI)
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus

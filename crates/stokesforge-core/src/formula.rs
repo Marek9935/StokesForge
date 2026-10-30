@@ -1,8 +1,22 @@
 //! Columns computed by formula (v1, simple arithmetic within a sheet).
 //!
-//! Scope: `+ - * /`, parentheses, numeric literals, column
-//! references. No functions (`sin`, `sum`, ...), no cross-sheet
-//! reference — out of scope for this version.
+//! Scope: `+ - * /` and `^`, parentheses, numeric literals, column
+//! references, **row-wise functions** (`sqrt(A)`, `round(B, 2)`, `pi()`, ...
+//! the table shared with the Fit, `stokesforge_analysis::functions`, #401),
+//! comparisons (`< <= > >= == !=`, true = 1, false = 0) and
+//! `if(cond, a, b)`. No cross-sheet reference, no function that reads a whole
+//! column — out of scope for this version.
+//!
+//! Precedence, lowest first: comparisons; `+ -`; `* /`; unary sign; `^`
+//! (right-associative, `-2^2 = -4`, `2^3^2 = 512`); call, number, column,
+//! parentheses. **A name followed by `(` is a function** (case-insensitive,
+//! `EXP(B)` = `exp(B)`); **a lone name is a column**, lowercase included
+//! (`b/2` = column B / 2). π is `pi()`. No implicit multiplication:
+//! `A(B/C)` is refused, write `A*(B/C)`.
+//!
+//! A function call adds nothing to a formula's inputs: only the columns it
+//! names count (invariant 11, [`Formula::referenced_columns`] walks every
+//! node).
 //!
 //! # A formula names columns, not letters (#321)
 //!
@@ -49,6 +63,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use stokesforge_id::NodeId;
 
+use stokesforge_analysis::functions::Func;
+
 use crate::column::{ColumnValues, NumericStatus};
 
 /// What a formula displays in place of a column it can no longer find
@@ -85,6 +101,23 @@ pub enum FormulaError {
     /// parser, evaluation and `Drop` recurse until the process is
     /// aborted (#289).
     TooDeep,
+    /// A name followed by `(` is not a function of the table (refusal by
+    /// [`ColumnFormula::from_letters`]; a saved text fragment degrades to
+    /// [`FormulaError::Parse`] instead, invariant 10).
+    UnknownFunction(String),
+    /// A function called with a count of arguments it does not accept
+    /// (`expected` lists the accepted counts, ascending). Refused at input.
+    WrongArgumentCount {
+        name: String,
+        expected: Vec<usize>,
+        found: usize,
+    },
+    /// A column letter followed by `(` (`A(B/C)`): there is no implicit
+    /// multiplication. Refused at input.
+    NotAFunction(String),
+    /// `pi` alone in a sheet without a `PI` column: the number π is `pi()`.
+    /// Refused at input.
+    PiNeedsParentheses,
 }
 
 impl std::fmt::Display for FormulaError {
@@ -105,11 +138,38 @@ impl std::fmt::Display for FormulaError {
             }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
             FormulaError::TooDeep => write!(f, "formula nested too deeply"),
+            FormulaError::UnknownFunction(name) => write!(f, "unknown function {name}"),
+            FormulaError::WrongArgumentCount {
+                name,
+                expected,
+                found,
+            } => write!(
+                f,
+                "function {name} takes {} argument(s), {found} given",
+                counts_text(expected)
+            ),
+            FormulaError::NotAFunction(letter) => write!(
+                f,
+                "{letter} is not a function: to multiply, write {letter}*(...)"
+            ),
+            FormulaError::PiNeedsParentheses => {
+                write!(f, "pi alone is a column: for the number pi, write pi()")
+            }
         }
     }
 }
 
 impl std::error::Error for FormulaError {}
+
+/// `1`, `1 or 2`, `1, 2 or 3`.
+pub fn counts_text(counts: &[usize]) -> String {
+    let words: Vec<String> = counts.iter().map(usize::to_string).collect();
+    match words.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
+}
 
 // -- column letters: same bijective base-26 convention as
 // `Project::spreadsheet_name` (A, B, ..., Z, AA, AB, ...), duplicated here
@@ -157,8 +217,90 @@ enum Token {
     Minus,
     Star,
     Slash,
+    Caret,
+    Comma,
+    Cmp(CmpOp),
+    Func(Callee),
     LParen,
     RParen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CmpOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+impl CmpOp {
+    /// Truth value as the formula sees it: 1 or 0.
+    fn test(self, a: f64, b: f64) -> bool {
+        match self {
+            CmpOp::Lt => a < b,
+            CmpOp::Le => a <= b,
+            CmpOp::Gt => a > b,
+            CmpOp::Ge => a >= b,
+            CmpOp::Eq => a == b,
+            CmpOp::Ne => a != b,
+        }
+    }
+}
+
+/// What a name followed by `(` can call: a function of the shared table, or
+/// `if` (which needs the row status, so it is not in the table).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Callee {
+    Table(Func),
+    If,
+}
+
+impl Callee {
+    /// Case-insensitive.
+    fn from_name(name: &str) -> Option<Callee> {
+        if name.eq_ignore_ascii_case("if") {
+            Some(Callee::If)
+        } else {
+            Func::from_name(name).map(Callee::Table)
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Callee::If => "if",
+            Callee::Table(f) => f.name(),
+        }
+    }
+
+    fn arity(self) -> &'static [usize] {
+        match self {
+            Callee::If => &[3],
+            Callee::Table(f) => f.arity(),
+        }
+    }
+}
+
+/// End (exclusive) of the **call name** that starts at `start`, if it is
+/// followed by `(` (spaces allowed): letters, then digits (`log10`, `atan2`).
+/// A name with no `(` after it is **not** a call: only its letter run is a
+/// column (`A2` stays `A` then `2`, a syntax error). Shared by
+/// [`tokenize_text`] and [`ColumnFormula::from_letters`]: both must split the
+/// same way.
+fn call_name_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut end = start;
+    while end < chars.len() && chars[end].is_ascii_alphabetic() {
+        end += 1;
+    }
+    while end < chars.len() && chars[end].is_ascii_digit() {
+        end += 1;
+    }
+    let mut next = end;
+    while next < chars.len() && chars[next].is_whitespace() {
+        next += 1;
+    }
+    (end > start && chars.get(next) == Some(&'(')).then_some(end)
 }
 
 /// End (exclusive) of the numeric literal that starts at `start`: digits and
@@ -227,6 +369,49 @@ fn tokenize_text(source: &str, tokens: &mut Vec<Token>) -> Result<(), FormulaErr
                 tokens.push(Token::Slash);
                 i += 1;
             }
+            '^' => {
+                tokens.push(Token::Caret);
+                i += 1;
+            }
+            ',' => {
+                tokens.push(Token::Comma);
+                i += 1;
+            }
+            '<' | '>' | '=' | '!' => {
+                let with_equal = chars.get(i + 1) == Some(&'=');
+                let op = match (c, with_equal) {
+                    ('<', false) => CmpOp::Lt,
+                    ('<', true) => CmpOp::Le,
+                    ('>', false) => CmpOp::Gt,
+                    ('>', true) => CmpOp::Ge,
+                    ('=', true) => CmpOp::Eq,
+                    ('!', true) => CmpOp::Ne,
+                    // A lone `=` or `!`: not an operator.
+                    _ => {
+                        return Err(FormulaError::Parse(format!("unexpected character: {c}")));
+                    }
+                };
+                tokens.push(Token::Cmp(op));
+                i += if with_equal { 2 } else { 1 };
+            }
+            c if c.is_ascii_alphabetic() => {
+                // Only a known function followed by `(` is read; any other
+                // letter (crafted file) stays an unexpected character, never
+                // a column (invariant 10).
+                let callee = call_name_end(&chars, i).and_then(|end| {
+                    let name: String = chars[i..end].iter().collect();
+                    Callee::from_name(&name).map(|callee| (callee, end))
+                });
+                match callee {
+                    Some((callee, end)) => {
+                        tokens.push(Token::Func(callee));
+                        i = end;
+                    }
+                    None => {
+                        return Err(FormulaError::Parse(format!("unexpected character: {c}")));
+                    }
+                }
+            }
             '(' => {
                 tokens.push(Token::LParen);
                 i += 1;
@@ -265,11 +450,15 @@ enum Expr {
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
+    Pow(Box<Expr>, Box<Expr>),
+    Cmp(CmpOp, Box<Expr>, Box<Expr>),
+    Call(Func, Vec<Expr>),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 /// Depth cap of the tree, in "cost": one nesting level
-/// (parenthesis, sign) costs [`NEST_COST`], one term of a chain `a+b+c…` or
-/// `a*b*c…` costs 1. The parser, `eval_expr`/`combine`, `referenced_columns` and
+/// (parenthesis, sign, call, `^`) costs [`NEST_COST`], one term of a chain
+/// `a+b+c…` or `a*b*c…`, and one comma of an argument list, costs 1. The parser, `eval_expr`/`combine`, `referenced_columns` and
 /// the `Drop` of the tree recurse by that much: bounded here, none can exceed
 /// the stack of a 2 MiB thread, even in debug (`docs/archive/rustrewrite/
 /// questions-ouvertes.md` §11, #289). Allows 100 nestings or about 1,000 terms (1,001 pass).
@@ -313,6 +502,22 @@ impl<'a> Parser<'a> {
         let out = f(self)?;
         self.depth -= NEST_COST;
         Ok(out)
+    }
+
+    /// `cmp := expr (('<' | '<=' | '>' | '>=' | '==' | '!=') expr)*`
+    /// (left-associative; true = 1, false = 0).
+    fn parse_cmp(&mut self) -> Result<Expr, FormulaError> {
+        let base = self.depth;
+        let mut node = self.parse_expr()?;
+        while let Some(Token::Cmp(op)) = self.peek() {
+            let op = *op;
+            self.pos += 1;
+            self.charge(1)?;
+            let rhs = self.parse_expr()?;
+            node = Expr::Cmp(op, Box::new(node), Box::new(rhs));
+        }
+        self.depth = base;
+        Ok(node)
     }
 
     /// `expr := term (('+' | '-') term)*`
@@ -365,7 +570,7 @@ impl<'a> Parser<'a> {
         Ok(node)
     }
 
-    /// `factor := ('+' | '-') factor | primary`
+    /// `factor := ('+' | '-') factor | power`
     fn parse_factor(&mut self) -> Result<Expr, FormulaError> {
         match self.peek() {
             Some(Token::Minus) => {
@@ -377,11 +582,53 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 self.nested(Self::parse_factor)
             }
-            _ => self.parse_primary(),
+            _ => self.parse_power(),
         }
     }
 
-    /// `primary := number | column | '(' expr ')'`
+    /// `power := primary ('^' factor)?` — right-associative, and above the
+    /// unary sign on its left (`-2^2 = -4`), below it on its right (`2^-3`).
+    fn parse_power(&mut self) -> Result<Expr, FormulaError> {
+        let base = self.parse_primary()?;
+        if let Some(Token::Caret) = self.peek() {
+            self.pos += 1;
+            let exponent = self.nested(Self::parse_factor)?;
+            return Ok(Expr::Pow(Box::new(base), Box::new(exponent)));
+        }
+        Ok(base)
+    }
+
+    /// `args := (cmp (',' cmp)*)?`, up to the closing parenthesis (consumed).
+    fn parse_args(&mut self) -> Result<Vec<Expr>, FormulaError> {
+        let base = self.depth;
+        let mut args = Vec::new();
+        if let Some(Token::RParen) = self.peek() {
+            self.pos += 1;
+            return Ok(args);
+        }
+        loop {
+            args.push(self.parse_cmp()?);
+            match self.peek() {
+                Some(Token::Comma) => {
+                    self.pos += 1;
+                    self.charge(1)?;
+                }
+                Some(Token::RParen) => {
+                    self.pos += 1;
+                    break;
+                }
+                _ => {
+                    return Err(FormulaError::Parse(
+                        "missing closing parenthesis".to_string(),
+                    ))
+                }
+            }
+        }
+        self.depth = base;
+        Ok(args)
+    }
+
+    /// `primary := number | column | name '(' args ')' | '(' cmp ')'`
     fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
         match self.tokens.get(self.pos) {
             Some(Token::Number(value)) => {
@@ -394,7 +641,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::LParen) => {
                 self.pos += 1;
-                let inner = self.nested(Self::parse_expr)?;
+                let inner = self.nested(Self::parse_cmp)?;
                 match self.tokens.get(self.pos) {
                     Some(Token::RParen) => {
                         self.pos += 1;
@@ -403,6 +650,37 @@ impl<'a> Parser<'a> {
                     _ => Err(FormulaError::Parse(
                         "missing closing parenthesis".to_string(),
                     )),
+                }
+            }
+            Some(Token::Func(callee)) => {
+                let callee = *callee;
+                self.pos += 1;
+                // The tokenizer only emits a function before its `(`.
+                if self.peek() != Some(&Token::LParen) {
+                    return Err(FormulaError::Parse(
+                        "missing opening parenthesis".to_string(),
+                    ));
+                }
+                self.pos += 1;
+                let args = self.nested(Self::parse_args)?;
+                if !callee.arity().contains(&args.len()) {
+                    return Err(FormulaError::WrongArgumentCount {
+                        name: callee.name().to_string(),
+                        expected: callee.arity().to_vec(),
+                        found: args.len(),
+                    });
+                }
+                match callee {
+                    // The arity (3) was just checked.
+                    Callee::If => match <[Expr; 3]>::try_from(args) {
+                        Ok([cond, then, otherwise]) => Ok(Expr::If(
+                            Box::new(cond),
+                            Box::new(then),
+                            Box::new(otherwise),
+                        )),
+                        Err(_) => Err(FormulaError::Parse("if takes three arguments".to_string())),
+                    },
+                    Callee::Table(func) => Ok(Expr::Call(func, args)),
                 }
             }
             Some(other) => Err(FormulaError::Parse(format!("unexpected token: {other:?}"))),
@@ -451,6 +729,13 @@ impl ColumnFormula {
     /// children) and becomes its identifier; `own` is the column that will carry
     /// the formula.
     ///
+    /// A name followed by `(` is a function and is kept as typed (the shared
+    /// table, case-insensitive); refused if unknown
+    /// ([`FormulaError::UnknownFunction`]), if it is a column letter
+    /// ([`FormulaError::NotAFunction`]) or if the argument count is wrong
+    /// ([`FormulaError::WrongArgumentCount`]); a lone `pi` with no `PI` column
+    /// is [`FormulaError::PiNeedsParentheses`].
+    ///
     /// Refusals (nothing is built): a letter that names no
     /// column ([`FormulaError::UnknownColumn`]), the column `own`
     /// ([`FormulaError::SelfReference`]), `#REF` ([`FormulaError::DeletedColumn`]:
@@ -485,6 +770,23 @@ impl ColumnFormula {
                 i = end;
             } else if c.is_ascii_alphabetic() {
                 let start = i;
+                // A name followed by `(` is a function, not a column.
+                if let Some(end) = call_name_end(&chars, start) {
+                    let name: String = chars[start..end].iter().collect();
+                    if Callee::from_name(&name).is_none() {
+                        let letters = name.to_ascii_uppercase();
+                        let names_a_column = letters_to_index(&letters)
+                            .is_some_and(|index| index < sheet_columns.len());
+                        return Err(if names_a_column {
+                            FormulaError::NotAFunction(letters)
+                        } else {
+                            FormulaError::UnknownFunction(name)
+                        });
+                    }
+                    buffer.push_str(&name);
+                    i = end;
+                    continue;
+                }
                 while i < chars.len() && chars[i].is_ascii_alphabetic() {
                     i += 1;
                 }
@@ -495,7 +797,12 @@ impl ColumnFormula {
                 let Some(&id) =
                     letters_to_index(&letters).and_then(|index| sheet_columns.get(index))
                 else {
-                    return Err(FormulaError::UnknownColumn(letters));
+                    // `pi` is the number only with parentheses.
+                    return Err(if letters == "PI" {
+                        FormulaError::PiNeedsParentheses
+                    } else {
+                        FormulaError::UnknownColumn(letters)
+                    });
                 };
                 if id == own {
                     return Err(FormulaError::SelfReference(letters));
@@ -512,7 +819,13 @@ impl ColumnFormula {
         if !buffer.is_empty() {
             parts.push(FormulaPart::Text(buffer));
         }
-        Ok(Self { parts })
+        let formula = Self { parts };
+        // A wrong argument count is refused here; any other syntax error is
+        // stored and returned by `compile`, as before.
+        if let Err(error @ FormulaError::WrongArgumentCount { .. }) = formula.compile() {
+            return Err(error);
+        }
+        Ok(formula)
     }
 
     /// The text to display: each column read is written by its **current
@@ -582,7 +895,7 @@ impl ColumnFormula {
             return Err(FormulaError::Parse("empty formula".to_string()));
         }
         let mut parser = Parser::new(&tokens);
-        let expr = parser.parse_expr()?;
+        let expr = parser.parse_cmp()?;
         if parser.pos != tokens.len() {
             return Err(FormulaError::Parse(
                 "unexpected tokens after the formula".to_string(),
@@ -614,7 +927,18 @@ impl Formula {
                     out.insert(*id);
                 }
                 Expr::Neg(inner) => walk(inner, out),
-                Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) => {
+                Expr::Add(a, b)
+                | Expr::Sub(a, b)
+                | Expr::Mul(a, b)
+                | Expr::Div(a, b)
+                | Expr::Pow(a, b)
+                | Expr::Cmp(_, a, b) => {
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::Call(_, args) => args.iter().for_each(|arg| walk(arg, out)),
+                Expr::If(c, a, b) => {
+                    walk(c, out);
                     walk(a, out);
                     walk(b, out);
                 }
@@ -741,6 +1065,67 @@ fn eval_expr(
         Expr::Sub(a, b) => combine(a, b, row, columns, |x, y| x - y),
         Expr::Mul(a, b) => combine(a, b, row, columns, |x, y| x * y),
         Expr::Div(a, b) => combine(a, b, row, columns, |x, y| x / y),
+        Expr::Pow(a, b) => {
+            let (value, status) = combine(a, b, row, columns, |x, y| Func::Pow.apply(&[x, y]));
+            domain_checked(nan_unless_ok(value, status), status)
+        }
+        Expr::Cmp(op, a, b) => {
+            let (value, status) = combine(a, b, row, columns, |x, y| {
+                if x.is_nan() || y.is_nan() {
+                    f64::NAN
+                } else if op.test(x, y) {
+                    1.0
+                } else {
+                    0.0
+                }
+            });
+            (nan_unless_ok(value, status), status)
+        }
+        Expr::Call(func, args) => {
+            let mut status = NumericStatus::Ok;
+            let values: Vec<f64> = args
+                .iter()
+                .map(|arg| {
+                    let (value, arg_status) = eval_expr(arg, row, columns);
+                    status = status.combine(arg_status);
+                    value
+                })
+                .collect();
+            domain_checked(nan_unless_ok(func.apply(&values), status), status)
+        }
+        // Only the chosen branch is evaluated, status included: an empty cell
+        // in the other branch does not matter.
+        Expr::If(cond, then, otherwise) => {
+            let (c, c_status) = eval_expr(cond, row, columns);
+            if c.is_nan() {
+                (f64::NAN, c_status)
+            } else if c != 0.0 {
+                eval_expr(then, row, columns)
+            } else {
+                eval_expr(otherwise, row, columns)
+            }
+        }
+    }
+}
+
+/// A function of an empty or failed operand is empty (`pow(NaN, 0)` would be
+/// 1 for `libm`).
+fn nan_unless_ok(value: f64, status: NumericStatus) -> f64 {
+    if status == NumericStatus::Ok {
+        value
+    } else {
+        f64::NAN
+    }
+}
+
+/// A `NaN` out of operands that were all fine is an invalid domain
+/// (`ln(-1)`, `sqrt(-1)`, `(-8)^(1/3)`): the row failed, it is not merely
+/// empty.
+fn domain_checked(value: f64, status: NumericStatus) -> (f64, NumericStatus) {
+    if value.is_nan() && status == NumericStatus::Ok {
+        (value, NumericStatus::Failed)
+    } else {
+        (value, status)
     }
 }
 
@@ -1740,5 +2125,322 @@ mod tests {
         let error = parse(&chain("+", 1002)).unwrap_err();
         assert_eq!(error, FormulaError::TooDeep);
         assert_eq!(error.to_string(), "formula nested too deeply");
+    }
+
+    // -- functions, `^`, comparisons, `if` (#401) --
+
+    /// A mixed column of numbers, `None` = empty cell.
+    fn opt_column(values: &[Option<f64>]) -> ColumnValues {
+        let cells: Vec<Option<Result<f64, &str>>> = values.iter().map(|v| v.map(Ok)).collect();
+        mixed_column(&cells)
+    }
+
+    /// Enters `src`, evaluates it on `columns` over `len` rows.
+    fn run(src: &str, columns: &[ColumnValues], len: usize) -> FormulaEvaluation {
+        let formula = parse(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+        evaluate(&formula, &sheet_values(columns), len)
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-12
+    }
+
+    #[test]
+    fn power_is_right_associative() {
+        assert_eq!(run("2^3^2", &[], 1).values, vec![512.0]);
+        assert_eq!(run("2^-1", &[], 1).values, vec![0.5]);
+    }
+
+    #[test]
+    fn power_binds_tighter_than_the_unary_sign() {
+        assert_eq!(run("-2^2", &[], 1).values, vec![-4.0]);
+        assert_eq!(run("2*3^2", &[], 1).values, vec![18.0]);
+    }
+
+    #[test]
+    fn a_function_reads_its_columns() {
+        let formula = parse("sqrt(A)").unwrap();
+        assert_eq!(formula.referenced_columns(), BTreeSet::from([col(0)]));
+        let result = run("sqrt(A)", &[float_column(&[16.0, 2.25])], 2);
+        assert_eq!(result.values, vec![4.0, 1.5]);
+        assert_eq!(result.statuses, vec![NumericStatus::Ok; 2]);
+        // Every node walks: power, comparison, `if`, several arguments.
+        assert_eq!(
+            parse("A^B").unwrap().referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
+        assert_eq!(
+            parse("A<B").unwrap().referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
+        assert_eq!(
+            parse("if(A>0,B,C)").unwrap().referenced_columns(),
+            BTreeSet::from([col(0), col(1), col(2)])
+        );
+        assert_eq!(
+            parse("max(A, B)").unwrap().referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
+    }
+
+    #[test]
+    fn root_keeps_the_real_odd_root_and_refuses_the_even_one() {
+        let result = run("root(A,3)", &[float_column(&[-8.0])], 1);
+        assert_eq!(result.values, vec![-2.0]);
+        let result = run("root(-8,2)", &[], 1);
+        assert!(result.values[0].is_nan());
+        assert_eq!(result.statuses, vec![NumericStatus::Failed]);
+    }
+
+    #[test]
+    fn an_invalid_domain_is_nan_and_failed() {
+        let result = run("ln(A)", &[float_column(&[-1.0, 1.0])], 2);
+        assert!(result.values[0].is_nan());
+        assert_eq!(result.statuses[0], NumericStatus::Failed);
+        assert_eq!(result.values[1], 0.0);
+        assert_eq!(result.statuses[1], NumericStatus::Ok);
+        let result = run("(-8)^(1/3)", &[], 1);
+        assert_eq!(result.statuses, vec![NumericStatus::Failed]);
+    }
+
+    #[test]
+    fn an_empty_operand_gives_a_missing_result() {
+        let result = run("sqrt(A)", &[opt_column(&[None, Some(4.0)])], 2);
+        assert!(result.values[0].is_nan());
+        assert_eq!(
+            result.statuses,
+            vec![NumericStatus::Missing, NumericStatus::Ok]
+        );
+        // `pow(NaN, 0)` is 1 for libm: an empty operand must still win.
+        let result = run("A^0", &[opt_column(&[None])], 1);
+        assert!(result.values[0].is_nan());
+        assert_eq!(result.statuses, vec![NumericStatus::Missing]);
+    }
+
+    #[test]
+    fn comparisons_give_one_or_zero_and_nan_stays_nan() {
+        let a = opt_column(&[Some(-1.0), Some(0.0), Some(2.0), None]);
+        let result = run("A<0", std::slice::from_ref(&a), 4);
+        assert_eq!(result.values[..3], [1.0, 0.0, 0.0]);
+        assert!(result.values[3].is_nan());
+        assert_eq!(result.statuses[3], NumericStatus::Missing);
+        for (src, want) in [
+            ("A<=0", [1.0, 1.0, 0.0]),
+            ("A>0", [0.0, 0.0, 1.0]),
+            ("A>=0", [0.0, 1.0, 1.0]),
+            ("A==0", [0.0, 1.0, 0.0]),
+            ("A!=0", [1.0, 0.0, 1.0]),
+        ] {
+            assert_eq!(run(src, std::slice::from_ref(&a), 3).values, want, "{src}");
+        }
+        // A NaN that is not an empty cell (0/0) stays NaN in a comparison.
+        assert!(run("0/0<1", &[], 1).values[0].is_nan());
+        assert!(run("0/0==0/0", &[], 1).values[0].is_nan());
+        // Comparisons are the loosest operator.
+        assert_eq!(run("1+1==2", &[], 1).values, vec![1.0]);
+    }
+
+    #[test]
+    fn if_picks_a_branch_and_keeps_an_empty_cell() {
+        let a = opt_column(&[Some(-1.0), Some(2.0), None]);
+        let result = run("if(A<0,0,A)", std::slice::from_ref(&a), 3);
+        assert_eq!(result.values[..2], [0.0, 2.0]);
+        assert!(result.values[2].is_nan());
+        assert_eq!(result.statuses[2], NumericStatus::Missing);
+    }
+
+    #[test]
+    fn if_reads_the_status_of_the_chosen_branch_only() {
+        // A > 0 is true: C is empty but not chosen.
+        let columns = [
+            float_column(&[1.0]),
+            float_column(&[5.0]),
+            opt_column(&[None]),
+        ];
+        let result = run("if(A>0,B,C)", &columns, 1);
+        assert_eq!(result.values, vec![5.0]);
+        assert_eq!(result.statuses, vec![NumericStatus::Ok]);
+        // And the other way round: the empty branch is chosen.
+        let result = run("if(A<0,B,C)", &columns, 1);
+        assert_eq!(result.statuses, vec![NumericStatus::Missing]);
+    }
+
+    #[test]
+    fn round_follows_excel() {
+        let a = [float_column(&[7.14159])];
+        assert_eq!(run("round(A,2)", &a, 1).values, vec![7.14]);
+        assert_eq!(run("round(-2.5,0)", &[], 1).values, vec![-3.0]);
+        assert_eq!(run("round(1234,-2)", &[], 1).values, vec![1200.0]);
+        assert_eq!(run("mod(-7,3)", &[], 1).values, vec![2.0]);
+    }
+
+    #[test]
+    fn minus_log_gives_the_absorbance() {
+        let result = run("-log(A)", &[float_column(&[0.1])], 1);
+        assert!(close(result.values[0], 1.0));
+    }
+
+    #[test]
+    fn pi_is_a_call() {
+        assert!(close(run("pi()", &[], 1).values[0], std::f64::consts::PI));
+        assert!(close(run("pi ( )", &[], 1).values[0], std::f64::consts::PI));
+        let result = run("A*pi()", &[float_column(&[2.0])], 1);
+        assert!(close(result.values[0], 2.0 * std::f64::consts::PI));
+    }
+
+    #[test]
+    fn a_lone_pi_is_refused_unless_a_pi_column_exists() {
+        let short = [col(0), col(1)];
+        assert_eq!(
+            ColumnFormula::from_letters("pi", &short, OWN),
+            Err(FormulaError::PiNeedsParentheses)
+        );
+        assert_eq!(
+            ColumnFormula::from_letters("2*PI", &short, OWN),
+            Err(FormulaError::PiNeedsParentheses)
+        );
+        // With 425 columns, `pi` is the column PI (index 424) as before.
+        let wide: Vec<NodeId> = (0..425).map(col).collect();
+        let formula = ColumnFormula::from_letters("pi", &wide, OWN).unwrap();
+        assert_eq!(formula.parts(), [FormulaPart::Column(col(424))]);
+    }
+
+    #[test]
+    fn a_name_followed_by_a_parenthesis_is_a_function_otherwise_a_column() {
+        // Not a function: a column letter before `(`.
+        assert_eq!(
+            ColumnFormula::from_letters("A(B/C)", &sheet(), OWN),
+            Err(FormulaError::NotAFunction("A".into()))
+        );
+        // A function named like no column is accepted, case-insensitive.
+        let sqrt = ColumnFormula::from_letters("sqrt(A)", &sheet(), OWN).unwrap();
+        assert_eq!(sqrt.parts().len(), 3);
+        assert_eq!(
+            run("EXP(A)", &[float_column(&[1.0])], 1).values,
+            run("exp(A)", &[float_column(&[1.0])], 1).values
+        );
+        // A lone lowercase name is a column, unchanged.
+        let half = ColumnFormula::from_letters("i*0.5", &sheet(), OWN).unwrap();
+        assert_eq!(half.parts()[0], FormulaPart::Column(col(8)));
+        let b = ColumnFormula::from_letters("b/2", &sheet(), OWN).unwrap();
+        assert_eq!(b.parts()[0], FormulaPart::Column(col(1)));
+        // `A2` is still `A` then `2`: a syntax error, not an unknown column.
+        let a2 = ColumnFormula::from_letters("A2", &sheet(), OWN).unwrap();
+        assert!(matches!(a2.compile(), Err(FormulaError::Parse(_))));
+        // The exponent of a number is not a call.
+        assert!(parse("1e-3*A").is_ok());
+    }
+
+    #[test]
+    fn names_with_digits_are_accepted_at_input() {
+        for src in ["log10(A)", "log2(A)", "atan2(A, B)"] {
+            assert!(
+                ColumnFormula::from_letters(src, &sheet(), OWN).is_ok(),
+                "{src}"
+            );
+        }
+        let thousand = [float_column(&[1000.0])];
+        assert!(close(run("log10(A)", &thousand, 1).values[0], 3.0));
+        let eight = [float_column(&[8.0])];
+        assert!(close(run("log2(A)", &eight, 1).values[0], 3.0));
+    }
+
+    #[test]
+    fn an_unknown_function_or_a_wrong_count_is_refused_at_input() {
+        assert_eq!(
+            ColumnFormula::from_letters("foo(A)", &sheet(), OWN),
+            Err(FormulaError::UnknownFunction("foo".into()))
+        );
+        assert_eq!(
+            ColumnFormula::from_letters("sqrt(A, B)", &sheet(), OWN),
+            Err(FormulaError::WrongArgumentCount {
+                name: "sqrt".into(),
+                expected: vec![1],
+                found: 2
+            })
+        );
+        assert_eq!(
+            ColumnFormula::from_letters("if(A, B)", &sheet(), OWN),
+            Err(FormulaError::WrongArgumentCount {
+                name: "if".into(),
+                expected: vec![3],
+                found: 2
+            })
+        );
+        assert_eq!(
+            ColumnFormula::from_letters("pi(A)", &sheet(), OWN),
+            Err(FormulaError::WrongArgumentCount {
+                name: "pi".into(),
+                expected: vec![0],
+                found: 1
+            })
+        );
+    }
+
+    #[test]
+    fn counts_are_put_into_words() {
+        assert_eq!(counts_text(&[1]), "1");
+        assert_eq!(counts_text(&[1, 2]), "1 or 2");
+        assert_eq!(counts_text(&[1, 2, 3]), "1, 2 or 3");
+    }
+
+    #[test]
+    fn a_saved_function_text_compiles_and_a_lone_name_stays_a_syntax_error() {
+        let formula = ColumnFormula::from_parts(vec![
+            FormulaPart::Text("sqrt(".into()),
+            FormulaPart::Column(col(0)),
+            FormulaPart::Text(")".into()),
+        ]);
+        let compiled = formula.compile().unwrap();
+        assert_eq!(compiled.referenced_columns(), BTreeSet::from([col(0)]));
+        // A name that is not a function, saved in a text fragment: syntax
+        // error at compute (invariant 10), never a column or a panic.
+        for text in ["foo(", "sqrtx", "pi", "A"] {
+            let crafted = ColumnFormula::from_parts(vec![
+                FormulaPart::Text(text.into()),
+                FormulaPart::Column(col(0)),
+                FormulaPart::Text(")".into()),
+            ]);
+            assert!(
+                matches!(crafted.compile(), Err(FormulaError::Parse(_))),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn functions_keep_their_columns_as_dependencies() {
+        // `referenced_columns` is what the orchestrator builds its edges from.
+        let b = parse("sqrt(C)").unwrap().referenced_columns();
+        let c = parse("abs(B)").unwrap().referenced_columns();
+        assert_eq!(b, BTreeSet::from([col(2)]));
+        assert_eq!(c, BTreeSet::from([col(1)]));
+    }
+
+    #[test]
+    fn calls_and_argument_lists_count_towards_the_depth_cap() {
+        let nested = |n: usize| format!("{}A{}", "sqrt(".repeat(n), ")".repeat(n));
+        assert!(on_2_mib_stack(move || parse(&nested(100)).is_ok()));
+        assert!(too_deep(nested(101)));
+        assert!(too_deep(nested(100_000)));
+        // One comma costs 1: 1 001 arguments are 1 000 commas plus the call.
+        assert!(too_deep(format!("max({}A)", "A,".repeat(1000))));
+        // `^` chain: 100 exponents pass, 101 do not.
+        assert!(on_2_mib_stack(
+            || parse(&format!("{}A", "A^".repeat(100))).is_ok()
+        ));
+        assert!(too_deep(format!("{}A", "A^".repeat(101))));
+        assert!(too_deep(format!("{}A", "A^".repeat(100_000))));
+        // A call at the limit evaluates without overflowing the stack.
+        let value = on_2_mib_stack(move || {
+            let formula = parse(&nested(100)).unwrap();
+            let columns = [(col(0), float_column(&[16.0]))];
+            let value = evaluate(&formula, &columns, 1).values[0];
+            drop(formula);
+            value
+        });
+        assert!(close(value, 1.0));
+        // Comparison chains are bounded too.
+        assert!(too_deep(format!("{}A", "A<".repeat(100_000))));
     }
 }

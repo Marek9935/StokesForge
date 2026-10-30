@@ -611,6 +611,33 @@ pub mod formula {
             FormulaError::DeletedColumn => tr!("error-formula-deleted-column"),
             FormulaError::Cycle => tr!("error-formula-cycle"),
             FormulaError::TooDeep => tr!("error-formula-too-deep"),
+            FormulaError::UnknownFunction(name) => {
+                tr!("error-formula-unknown-function", name = name.as_str())
+            }
+            FormulaError::WrongArgumentCount {
+                name,
+                expected,
+                found,
+            } => {
+                // Digits and slashes, so that the sentence needs no "or" of
+                // its own language: `1/2`.
+                let expected = expected
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let found = *found as i64;
+                tr!(
+                    "error-formula-wrong-argument-count",
+                    name = name.as_str(),
+                    expected = expected.as_str(),
+                    found = found
+                )
+            }
+            FormulaError::NotAFunction(letter) => {
+                tr!("error-formula-not-a-function", letter = letter.as_str())
+            }
+            FormulaError::PiNeedsParentheses => tr!("error-formula-pi-needs-parentheses"),
         }
     }
 
@@ -626,8 +653,16 @@ pub mod formula {
                 FormulaError::DeletedColumn,
                 FormulaError::Cycle,
                 FormulaError::TooDeep,
+                FormulaError::UnknownFunction("foo".into()),
+                FormulaError::WrongArgumentCount {
+                    name: "sqrt".into(),
+                    expected: vec![1],
+                    found: 2,
+                },
+                FormulaError::NotAFunction("A".into()),
+                FormulaError::PiNeedsParentheses,
             ];
-            let mut seen = [false; 6];
+            let mut seen = [false; 10];
             for sample in &samples {
                 let index = match sample {
                     FormulaError::Parse(_) => 0,
@@ -636,6 +671,10 @@ pub mod formula {
                     FormulaError::DeletedColumn => 3,
                     FormulaError::Cycle => 4,
                     FormulaError::TooDeep => 5,
+                    FormulaError::UnknownFunction(_) => 6,
+                    FormulaError::WrongArgumentCount { .. } => 7,
+                    FormulaError::NotAFunction(_) => 8,
+                    FormulaError::PiNeedsParentheses => 9,
                 };
                 seen[index] = true;
             }
@@ -669,6 +708,42 @@ pub mod formula {
                 // lang: fr
                 "error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne"
             ));
+        }
+
+        #[test]
+        fn the_function_errors_say_what_to_write() {
+            // Compared in English: the language does not depend on the environment.
+            crate::i18n::set_language(crate::i18n::Language::English);
+            assert_eq!(
+                error_message(&FormulaError::UnknownFunction("foo".into())),
+                "Unknown function foo. Check its spelling"
+            );
+            assert_eq!(
+                error_message(&FormulaError::WrongArgumentCount {
+                    name: "if".into(),
+                    expected: vec![3],
+                    found: 2
+                }),
+                "Wrong number of arguments for if: expected 3, found 2"
+            );
+            assert_eq!(
+                error_message(&FormulaError::NotAFunction("A".into())),
+                "A is a column, not a function. To multiply, write A*(...)"
+            );
+            assert_eq!(
+                error_message(&FormulaError::PiNeedsParentheses),
+                "For the number π, write pi() (a lone pi would be column PI)"
+            );
+            // The French catalog carries the same keys.
+            let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
+            for key in [
+                "error-formula-unknown-function",
+                "error-formula-wrong-argument-count",
+                "error-formula-not-a-function",
+                "error-formula-pi-needs-parentheses",
+            ] {
+                assert!(fr.contains(&format!("{key} = ")), "{key}");
+            }
         }
 
         #[test]
