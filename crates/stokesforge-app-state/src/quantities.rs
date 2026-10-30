@@ -288,3 +288,16 @@ pub fn frame_size(unit: crate::length_unit::LengthUnit) -> Quantity {
         )
         .wide()
 }
+
+/// Left or Top of the first plot area, from the edge of the image, in `unit`
+/// (#405): Auto when empty, and never below `minimum_points`, what the axes and
+/// the title need (a smaller value is raised to it). The unit is in the label.
+pub fn figure_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) -> Quantity {
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(
+            unit.from_points(minimum_points.clamp(0.0, stokesforge_plot::MAX_FRAME_SIZE)),
+            unit.from_points(stokesforge_plot::MAX_FRAME_SIZE),
+        )
+        .wide()
+        .with_auto(AutoKind::Field)
+}

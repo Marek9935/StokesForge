@@ -277,9 +277,12 @@ pub enum PlotEditKind {
     /// The plot area (frame) width of a grid column or height of a grid row
     /// set, by a field or a handle (#394).
     ResizeCell,
+    /// The first plot area placed from the left or top edge of the image
+    /// (Left, Top) by dragging an edge of the figure (#405).
+    PlaceFigure,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -295,6 +298,7 @@ impl PlotEditKind {
         Self::AddCell,
         Self::RemoveCell,
         Self::ResizeCell,
+        Self::PlaceFigure,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -315,6 +319,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::AddCell => "Add Layer Beside",
             Self::RemoveCell => "Delete Layer",
             Self::ResizeCell => "Resize Plot Area",
+            Self::PlaceFigure => "Position Plot Area",
         })
     }
 }

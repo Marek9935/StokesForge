@@ -396,7 +396,10 @@ pub(super) fn graph_view_contents(
         egui::vec2(fig_w as f32 * scale, fig_h as f32 * scale),
     );
     let mut figure_ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
-    figure_ui.set_clip_rect(ui.clip_rect().intersect(outer));
+    // The grab margin of the figure's edges reaches into the frame margin of
+    // the window (#405): the clip rectangle must let it through.
+    let grab = stokesforge_render_egui::FIGURE_GRAB_MARGIN;
+    figure_ui.set_clip_rect(ui.clip_rect().expand(grab).intersect(outer.expand(grab)));
     // A transparent background ("None" color, or partial opacity) shows on
     // white: without it, the figure would take the color of the window,
     // which is not that of the export. This white is painted **only here**,
@@ -1065,6 +1068,9 @@ fn annotation_interactions(
             }
             stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
                 actions.push(Action::SetFrameSizes { graph, column, row });
+            }
+            stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
+                actions.push(Action::SetFigureOffsets { graph, left, top });
             }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {

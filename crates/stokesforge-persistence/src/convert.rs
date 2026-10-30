@@ -775,6 +775,9 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         decimal_comma: spec.decimal_comma,
         frame_widths: spec.frame_widths.clone(),
         frame_heights: spec.frame_heights.clone(),
+        fixed_figure: spec.fixed_figure,
+        figure_left: spec.figure_left,
+        figure_top: spec.figure_top,
     }
 }
 
@@ -800,6 +803,9 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         decimal_comma: record.decimal_comma,
         frame_widths: record.frame_widths,
         frame_heights: record.frame_heights,
+        fixed_figure: record.fixed_figure,
+        figure_left: record.figure_left,
+        figure_top: record.figure_top,
     })
 }
 

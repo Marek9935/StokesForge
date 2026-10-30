@@ -11,7 +11,9 @@
 //! `stokesforge_render_svg::fix_legacy_frames`, measured as the screen and the
 //! exports measure.
 
-use stokesforge_core::compose::{set_frame_size, FrameAxis};
+use stokesforge_core::compose::{
+    set_figure_offset, set_fixed_figure, set_frame_size, FigureOffset, FrameAxis,
+};
 use stokesforge_plot::PlotSpec;
 
 /// True if the graph stores no frame at all (an old file).
@@ -72,6 +74,43 @@ pub fn set_size_in_draft(
     true
 }
 
+/// Gives a legacy draft the `drawn` frames (a no-op for a graph that stores
+/// them): what Fixed, Left and Top need before they mean anything (#405).
+fn materialize(spec: &mut PlotSpec, drawn: (&[f64], &[f64])) {
+    if is_legacy(spec) {
+        spec.frame_widths = drawn.0.to_vec();
+        spec.frame_heights = drawn.1.to_vec();
+    }
+}
+
+/// Sets "Figure size = Fixed" in a draft: a legacy draft is given the `drawn`
+/// frames first, so that the same command fixes them (#405).
+pub fn set_fixed_in_draft(spec: &mut PlotSpec, drawn: (&[f64], &[f64]), fixed: bool) -> bool {
+    let mut candidate = spec.clone();
+    materialize(&mut candidate, drawn);
+    if !set_fixed_figure(&mut candidate, fixed) {
+        return false;
+    }
+    *spec = candidate;
+    true
+}
+
+/// Sets Left or Top (`None`: Auto) in a draft, like [`set_fixed_in_draft`].
+pub fn set_offset_in_draft(
+    spec: &mut PlotSpec,
+    drawn: (&[f64], &[f64]),
+    which: FigureOffset,
+    value: Option<f64>,
+) -> bool {
+    let mut candidate = spec.clone();
+    materialize(&mut candidate, drawn);
+    if !set_figure_offset(&mut candidate, which, value) {
+        return false;
+    }
+    *spec = candidate;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +134,30 @@ mod tests {
         );
         assert_eq!(spec.frame_heights, [200.0]);
         assert!(!is_legacy(&spec));
+    }
+
+    #[test]
+    fn fixed_left_and_top_give_a_legacy_draft_its_drawn_frames() {
+        let mut spec = PlotSpec::default();
+        assert!(set_fixed_in_draft(&mut spec, (&[392.0], &[284.0]), true));
+        assert!(spec.fixed_figure && !is_legacy(&spec));
+        let mut spec = PlotSpec::default();
+        assert!(set_offset_in_draft(
+            &mut spec,
+            (&[392.0], &[284.0]),
+            FigureOffset::Left,
+            Some(120.0)
+        ));
+        assert_eq!(spec.figure_left, Some(120.0));
+        assert_eq!(spec.frame_widths, [392.0]);
+        let mut refused = PlotSpec::default();
+        assert!(!set_offset_in_draft(
+            &mut refused,
+            (&[392.0], &[284.0]),
+            FigureOffset::Top,
+            Some(f64::NAN)
+        ));
+        assert!(is_legacy(&refused), "a refusal leaves the draft untouched");
     }
 
     #[test]

@@ -22,7 +22,7 @@ Stop at the links the command really touches; detail and traps of each link: [re
 
 Object copy (#105–107) and definitive analysis corrections (#212) reuse existing commands: `.claude/conventions.md` § Copying objects and figures ; `.claude/conventions.md` § Analysis (#181).
 
-A size or layout edit of a graph (#394) is an `EditPlotSpec` (`PlotEditKind::ResizeCell`, `AddCell`, `RemoveCell`): a graph without stored frames is given the ones it is drawn with **inside the same command** (`AppState::with_fixed_frames`, `stokesforge_app_state::frame_sizes`; `bridge::set_graph_spec` for `pyst`), never at load and never as a step of its own, so one Undo returns to the legacy file.
+A size or layout edit of a graph (#394) is an `EditPlotSpec` (`PlotEditKind::ResizeCell`, `AddCell`, `RemoveCell`, `PlaceFigure` for Left / Top, #405): a graph without stored frames is given the ones it is drawn with **inside the same command** (`AppState::with_fixed_frames`, `stokesforge_app_state::frame_sizes`; `bridge::set_graph_spec` for `pyst`), never at load and never as a step of its own, so one Undo returns to the legacy file.
 
 ## Tests
 

@@ -352,6 +352,7 @@ import-step-columns-title = Columns
 
 # Values shared by several lists.
 common-auto = Auto
+common-advanced = Advanced
 common-auto-value = Auto ({ $value })
 import-option-none = None
 import-option-comma = Comma
@@ -801,7 +802,16 @@ plot-size-column-width = Plot area width, column { $n } ({ $unit })
 plot-size-row-height = Plot area height, row { $n } ({ $unit })
 plot-size-total = Graph size ({ $unit })
 plot-size-total-value = { $width } × { $height }
+plot-size-left = Plot area, from the left edge ({ $unit })
+plot-size-top = Plot area, from the top edge ({ $unit })
+plot-size-left-raised = The axes need at least { $minimum } ({ $unit }) on the left: the value was raised to it
+plot-size-top-raised = The axes and the title need at least { $minimum } ({ $unit }) at the top: the value was raised to it
 plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size.
+
+plot-figure-size = Figure size
+    .hint = Grows with the axes: an added axis or title makes the image larger. Fixed: room for four axes is kept from the start, so adding an axis leaves the image and the plot area as they are
+plot-figure-size-grows = Grows with the axes
+plot-figure-size-fixed = Fixed
 
 # Plot Area tab
 
@@ -844,7 +854,7 @@ plot-axes-minor-tick-count = Minor ticks per interval
     .auto = Auto
     .hint = Number of small ticks between two main ticks. Leave empty for Auto. Ignored on a log scale, which always shows 2 to 9
 plot-axes-ticks-section = Ticks
-plot-axes-advanced = Advanced
+
 plot-axes-tick-length = Major tick length (px)
 plot-axes-minor-tick-length = Minor tick length (px)
 plot-axes-tick-width = Tick width (pt)
@@ -1315,6 +1325,7 @@ history-plot-closed-frame = Change Closed Frame
 history-plot-add-cell = Add Layer Beside
 history-plot-remove-cell = Delete Layer
 history-plot-resize-cell = Resize Plot Area
+history-plot-place-figure = Position Plot Area
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -2052,6 +2063,7 @@ busy-stop = Stop
     .hint = Stops the work in progress
 status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
+status-figure-grew = The image grew beyond the room kept by the Fixed figure size. The plot area kept its size
 status-recalc-stopped = Recalculation stopped. The change was undone
 
 analysis-baseline-constant = Constant…

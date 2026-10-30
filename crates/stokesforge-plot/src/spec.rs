@@ -233,6 +233,21 @@ pub struct PlotSpec {
     /// (#394); the graph title band and the axis bands are added around.
     /// Empty = legacy. Read through [`PlotSpec::sanitized_frame_heights`].
     pub frame_heights: Vec<f64>,
+    /// "Figure size = Fixed" (#405): the figure reserves the bands of four
+    /// axes (one per side) from the start, so that adding or removing an axis
+    /// leaves the image and the frame exactly as they are. An axis beyond the
+    /// reserve, or a title, still grows the image (the frame never moves).
+    /// Only meaningful with stored frames; a legacy graph ignores it.
+    pub fixed_figure: bool,
+    /// Distance from the left edge of the image to the frame of the first
+    /// column, in points (#405); `None` = Auto (what the axes need, or the
+    /// reserve of one axis when [`PlotSpec::fixed_figure`]). Read through
+    /// [`PlotSpec::sanitized_figure_left`].
+    pub figure_left: Option<f64>,
+    /// Distance from the top edge of the image (graph title band included) to
+    /// the frame of the first row, in points (#405); `None` = Auto. Read
+    /// through [`PlotSpec::sanitized_figure_top`].
+    pub figure_top: Option<f64>,
 }
 
 /// A stored size made usable: a missing, non-finite or non-positive entry
@@ -258,6 +273,13 @@ fn sanitized_sizes(stored: &[f64], count: usize, fallback: f64) -> Vec<f64> {
     sizes
 }
 
+/// A stored offset of the frame made usable (#405).
+fn sanitized_offset(stored: Option<f64>) -> Option<f64> {
+    stored
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| v.min(MAX_FRAME_SIZE))
+}
+
 impl PlotSpec {
     /// The width of the frame of each grid column in points, sanitized, or
     /// `None` if the graph is legacy (no stored width). Always
@@ -275,6 +297,19 @@ impl PlotSpec {
     pub fn sanitized_frame_heights(&self) -> Option<Vec<f64>> {
         (!self.frame_heights.is_empty())
             .then(|| sanitized_sizes(&self.frame_heights, self.rows(), FALLBACK_FRAME.1))
+    }
+
+    /// [`PlotSpec::figure_left`] made usable: finite, brought into
+    /// `[0, MAX_FRAME_SIZE]`; a non-finite or negative value reads `None`
+    /// (Auto).
+    pub fn sanitized_figure_left(&self) -> Option<f64> {
+        sanitized_offset(self.figure_left)
+    }
+
+    /// [`PlotSpec::figure_top`] made usable (see
+    /// [`PlotSpec::sanitized_figure_left`]).
+    pub fn sanitized_figure_top(&self) -> Option<f64> {
+        sanitized_offset(self.figure_top)
     }
 
     /// An empty but valid graph: one panel, no series.
@@ -400,6 +435,9 @@ impl Default for PlotSpec {
             decimal_comma: false,
             frame_widths: Vec::new(),
             frame_heights: Vec::new(),
+            fixed_figure: false,
+            figure_left: None,
+            figure_top: None,
         }
     }
 }
@@ -491,6 +529,20 @@ mod tests {
         assert_eq!(spec.sanitized_frame_heights(), Some(vec![FALLBACK_FRAME.1]));
         spec.frame_heights = vec![5.0];
         assert_eq!(spec.sanitized_frame_heights(), Some(vec![MIN_FRAME_SIZE]));
+    }
+
+    #[test]
+    fn a_stored_offset_is_sanitized() {
+        let mut spec = PlotSpec::default();
+        assert_eq!(spec.sanitized_figure_left(), None);
+        spec.figure_left = Some(150.0);
+        assert_eq!(spec.sanitized_figure_left(), Some(150.0));
+        spec.figure_top = Some(1e12);
+        assert_eq!(spec.sanitized_figure_top(), Some(MAX_FRAME_SIZE));
+        for bad in [f64::NAN, f64::INFINITY, -3.0] {
+            spec.figure_left = Some(bad);
+            assert_eq!(spec.sanitized_figure_left(), None, "{bad}");
+        }
     }
 
     #[test]

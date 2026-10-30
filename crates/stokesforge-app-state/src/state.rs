@@ -789,6 +789,20 @@ pub enum Action {
         /// Grid row and its new frame height, in points.
         row: Option<(usize, f64)>,
     },
+    /// Sets Left and/or Top of the graph, in points (#405): the distance from
+    /// the left (top) edge of the image to the first plot area, what a drag of
+    /// the left or top edge of the figure commits. A graph without stored
+    /// frames is first given the ones it is drawn with. A single undo step
+    /// ([`PlotEditKind::PlaceFigure`]); nothing sent if the values are already
+    /// those or one of them is refused.
+    SetFigureOffsets {
+        /// Target graph.
+        graph: NodeId,
+        /// New Left.
+        left: Option<f64>,
+        /// New Top.
+        top: Option<f64>,
+    },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
     SetLengthUnit(crate::length_unit::LengthUnit),
@@ -2905,6 +2919,16 @@ pub struct AppState {
     /// its gestures apply live (preview) but form only one
     /// history entry, set on confirmation; cancelling rejects it.
     plot_macro_open: bool,
+    /// A change made in the properties window grew a Fixed figure past its
+    /// reserve (#405): the window's history macro ends with its own notice
+    /// ("Edit Graph Properties"), which would hide the warning, so the warning
+    /// is given again when the window closes.
+    figure_grew_in_window: bool,
+    /// Revision a snapshot had right after an Undo or Redo of a
+    /// [`PlotEditKind::PlaceFigure`] step (#405): the figure's left and top
+    /// edge moved back or forth, and the shell keeps the plot area still on
+    /// screen by moving the window with them, as it did during the drag.
+    placement_step: Option<stokesforge_session::Revision>,
     /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
@@ -3113,6 +3137,8 @@ impl AppState {
             plot_edit: None,
             plot_settings: None,
             plot_macro_open: false,
+            figure_grew_in_window: false,
+            placement_step: None,
             user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
@@ -4729,6 +4755,7 @@ impl AppState {
     fn abort_plot_macro(&mut self) {
         if self.plot_macro_open {
             self.plot_macro_open = false;
+            self.figure_grew_in_window = false;
             if let Err(err) = self.handle.abort_macro() {
                 self.fail(tr!(
                     "error-plot-settings-cancel",
@@ -4770,6 +4797,11 @@ impl AppState {
         }
         self.plot_macro_open = false;
         self.end_grouped_macro();
+        // The macro's notice replaced the warning of the change that grew the
+        // figure: say it again (#405).
+        if std::mem::take(&mut self.figure_grew_in_window) {
+            self.warn(tr!("status-figure-grew"));
+        }
     }
 
     /// Commits the current draft ([`Action::SetPlotSpec`]) — but
@@ -5058,6 +5090,9 @@ impl AppState {
                 let row = row
                     .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
                 self.set_frame_sizes(graph, column.into_iter().chain(row))
+            }
+            Action::SetFigureOffsets { graph, left, top } => {
+                self.set_figure_offsets(graph, left, top)
             }
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
@@ -7068,6 +7103,7 @@ impl AppState {
     /// Sends a command to the actor and reports the result.
     fn execute(&mut self, command: Command) {
         let command = self.with_fixed_frames(command);
+        let grows_past_reserve = self.fixed_figure_grows(&command);
         // The label is computed on the tree from **before**: afterwards, a
         // deleted column has no name.
         let label = command.label(&self.snapshot.tree);
@@ -7077,10 +7113,43 @@ impl AppState {
             Ok(revision) => {
                 self.applied_revision = self.applied_revision.max(revision);
                 self.notice(history_text(&label));
+                if grows_past_reserve {
+                    self.warn(tr!("status-figure-grew"));
+                    self.figure_grew_in_window |= self.plot_macro_open;
+                }
                 self.settle_recalc();
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
+    }
+
+    /// True if `command` replaces the spec of a graph with a "Fixed" figure
+    /// size whose image now grows beyond the reserve (#405, F1/F2): an axis
+    /// beyond the one per side, a title, a Left or Top too small. The status
+    /// bar says so at the moment of the change. Measured only for a Fixed
+    /// figure (measuring a title builds the Typst engine).
+    fn fixed_figure_grows(&self, command: &Command) -> bool {
+        let (Command::SetPlotSpec { graph, spec } | Command::EditPlotSpec { graph, spec, .. }) =
+            command
+        else {
+            return false;
+        };
+        if !spec.fixed_figure || crate::frame_sizes::is_legacy(spec) {
+            return false;
+        }
+        let Some(after) = crate::frame_sizes::figure_layout(spec) else {
+            return false;
+        };
+        if !after.fixed_overflow {
+            return false;
+        }
+        let Some(before) = self
+            .plot_spec(*graph)
+            .and_then(|before| crate::frame_sizes::figure_layout(&before))
+        else {
+            return true;
+        };
+        after.size.0 >= before.size.0 && after.size.1 >= before.size.1 && after.size != before.size
     }
 
     /// The one door of the graph frames (#394, G7): a command that replaces
@@ -7234,26 +7303,46 @@ impl AppState {
         let label = self.snapshot.history.undo_label.clone();
         match self.handle.undo() {
             Ok(Some(_)) => {
-                self.notice(match label {
-                    Some(label) => tr!("history-undone", label = history_text(&label)),
+                self.notice(match &label {
+                    Some(label) => tr!("history-undone", label = history_text(label)),
                     None => tr!("history-undone-last"),
                 });
                 self.refresh();
+                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
 
+    /// Remembers that the step just undone or redone placed the figure
+    /// ([`AppState::placement_step_revision`]).
+    fn note_placement_step(&mut self, label: Option<&HistoryLabel>) {
+        self.placement_step = matches!(
+            label,
+            Some(HistoryLabel::EditPlotSpec(PlotEditKind::PlaceFigure))
+        )
+        .then_some(self.snapshot.revision);
+    }
+
+    /// The revision a snapshot had right after an Undo or Redo of a
+    /// "Position Plot Area" step (#405), until something else happens: the
+    /// window of the graph then follows the left / top edge of the figure as it
+    /// does while the edge is dragged.
+    pub fn placement_step_revision(&self) -> Option<stokesforge_session::Revision> {
+        self.placement_step
+    }
+
     fn redo(&mut self) {
         let label = self.snapshot.history.redo_label.clone();
         match self.handle.redo() {
             Ok(Some(_)) => {
-                self.notice(match label {
-                    Some(label) => tr!("history-redone", label = history_text(&label)),
+                self.notice(match &label {
+                    Some(label) => tr!("history-redone", label = history_text(label)),
                     None => tr!("history-redone-last"),
                 });
                 self.refresh();
+                self.note_placement_step(label.as_ref());
             }
             Ok(None) => self.warn(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
@@ -10081,6 +10170,29 @@ impl AppState {
             graph,
             spec,
             kind: PlotEditKind::ResizeCell,
+        });
+    }
+
+    /// [`Action::SetFigureOffsets`]: Left and Top applied to one spec and
+    /// committed as one step.
+    fn set_figure_offsets(&mut self, graph: NodeId, left: Option<f64>, top: Option<f64>) {
+        use stokesforge_core::compose::{set_figure_offset, FigureOffset};
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        crate::frame_sizes::fix_new(&mut spec);
+        for (which, value) in [(FigureOffset::Left, left), (FigureOffset::Top, top)] {
+            if value.is_some() && !set_figure_offset(&mut spec, which, value) {
+                return;
+            }
+        }
+        if self.plot_spec(graph).is_some_and(|before| before == spec) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::PlaceFigure,
         });
     }
 

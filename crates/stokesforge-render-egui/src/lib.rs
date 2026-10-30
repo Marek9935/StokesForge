@@ -184,6 +184,16 @@ pub enum GraphEvent {
         /// Grid row and its new frame height, for a horizontal boundary.
         row: Option<(usize, f64)>,
     },
+    /// The left or top edge of the figure was pulled then released (#405): the
+    /// new distance in points from the edge of the image to the first frame
+    /// (Left / Top), to commit as **one** change of the model. The preview stays
+    /// displayed until the model changes ([`GraphView::hold_preview`]).
+    FramePlaced {
+        /// New Left, for the left edge.
+        left: Option<f64>,
+        /// New Top, for the top edge.
+        top: Option<f64>,
+    },
     /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
     /// Double click on a legend entry: rename the series of layer `panel`
@@ -273,6 +283,9 @@ impl GraphTool {
 struct FramePreview {
     column: Option<(usize, f64)>,
     row: Option<(usize, f64)>,
+    /// Left and Top the figure edges are being pulled to (#405).
+    left: Option<f64>,
+    top: Option<f64>,
     base: (Vec<f64>, Vec<f64>),
 }
 
@@ -302,6 +315,12 @@ impl FramePreview {
         }
         spec.frame_widths = widths;
         spec.frame_heights = heights;
+        if let Some(left) = self.left {
+            spec.figure_left = Some(left);
+        }
+        if let Some(top) = self.top {
+            spec.figure_top = Some(top);
+        }
     }
 }
 
@@ -314,6 +333,20 @@ fn moved(preview: Option<(usize, f64)>, start: Option<(usize, f64)>) -> bool {
     }
 }
 
+/// True if a previewed Left or Top differs from the starting one by half a
+/// point or more (#405).
+fn moved_value(preview: Option<f64>, start: Option<f64>) -> bool {
+    match (preview, start) {
+        (Some(now), Some(before)) => (now - before).abs() >= 0.5,
+        _ => false,
+    }
+}
+
+/// How far outside the figure, in screen points, its edge handles can be
+/// grabbed (#405): the strip straddles the edge. The host must leave at least
+/// that much room around the figure and let its clip rectangle reach it.
+pub const FIGURE_GRAB_MARGIN: f32 = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS as f32;
+
 /// A cell-handle drag in progress (#394).
 #[derive(Debug, Clone)]
 struct FrameDrag {
@@ -321,6 +354,10 @@ struct FrameDrag {
     column: Option<(usize, f64)>,
     /// Row and frame height at the start of the gesture.
     row: Option<(usize, f64)>,
+    /// Left and Top at the start of the gesture, when the left or top edge of
+    /// the figure is pulled (#405).
+    left: Option<f64>,
+    top: Option<f64>,
     /// Press point, in screen coordinates, and the display scale at that
     /// moment: the distance is measured in screen points and divided by that
     /// scale, because the figure (and the window that follows it) grows under
@@ -1466,6 +1503,28 @@ impl GraphView {
         stokesforge_render::cell_edge_at(self.last.as_ref()?, pos.x as f64, pos.y as f64, tolerance)
     }
 
+    /// The figure edge (left, top) under the screen position `pos` (#405).
+    pub fn figure_edge_at(&self, pos: Pos2) -> Option<stokesforge_render::FigureEdge> {
+        let pos = self.figure_position(pos)?;
+        let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
+            / self.display_scale().unwrap_or(1.0) as f64;
+        stokesforge_render::figure_edge_at(
+            self.last.as_ref()?,
+            pos.x as f64,
+            pos.y as f64,
+            tolerance,
+        )
+    }
+
+    /// True while the left edge or the top edge of the figure is being pulled
+    /// (#405), as `(left, top)`: the window that follows the figure then grows
+    /// towards that side, so the frame stays put on screen.
+    pub fn placing_edges(&self) -> (bool, bool) {
+        self.frame_drag.as_ref().map_or((false, false), |drag| {
+            (drag.left.is_some(), drag.top.is_some())
+        })
+    }
+
     /// The point designated by the cursor at the last painted frame, if
     /// there is one within [`HIT_RADIUS`] pixels — task R7.2.
     pub fn hovered_point(&self) -> Option<&PointHit> {
@@ -1575,7 +1634,15 @@ impl GraphView {
     ) -> Result<bool, RenderError> {
         let spec = graph_spec(&snapshot.tree, graph)?;
         let context = ui.ctx().clone();
-        let response = ui.interact(display_rect, self.id, egui::Sense::click_and_drag());
+        // The strip of the figure's edge handles straddles the edge (#405):
+        // the interaction area reaches that far outside the figure, into the
+        // margin the window leaves around it, so the outer edges are grabbed
+        // before the window's own border is.
+        let response = ui.interact(
+            display_rect.expand(FIGURE_GRAB_MARGIN),
+            self.id,
+            egui::Sense::click_and_drag(),
+        );
         self.display_rect = Some(display_rect);
         self.response = Some(response.clone());
 
@@ -2053,31 +2120,48 @@ impl GraphView {
         }
     }
 
-    /// The resize cursor over a cell handle, and during its drag (#394).
+    /// The resize cursor over a cell handle or a figure edge, and during its
+    /// drag (#394, #405).
     fn frame_handle_cursor(&self, response: &Response, context: &egui::Context) {
-        let edge = match &self.frame_drag {
-            Some(drag) => Some(stokesforge_render::CellEdge {
-                column: drag.column.map(|(index, _)| index),
-                row: drag.row.map(|(index, _)| index),
-            }),
-            None if response.hovered() => response
-                .hover_pos()
-                .and_then(|pos| self.cell_edge_at(pos))
-                .filter(|edge| self.edge_is_editable(edge)),
-            None => None,
-        };
-        let icon = match edge {
-            Some(stokesforge_render::CellEdge {
-                column: Some(_),
-                row: Some(_),
-            }) => egui::CursorIcon::ResizeNwSe,
-            Some(stokesforge_render::CellEdge {
-                column: Some(_), ..
-            }) => egui::CursorIcon::ResizeHorizontal,
-            Some(_) => egui::CursorIcon::ResizeVertical,
-            None => return,
+        let (mut horizontal, mut vertical) = (false, false);
+        match &self.frame_drag {
+            Some(drag) => {
+                horizontal = drag.column.is_some() || drag.left.is_some();
+                vertical = drag.row.is_some() || drag.top.is_some();
+            }
+            None if response.hovered() => {
+                if let Some(pos) = response.hover_pos() {
+                    if let Some(edge) = self.cell_edge_at(pos).filter(|e| self.edge_is_editable(e))
+                    {
+                        horizontal |= edge.column.is_some();
+                        vertical |= edge.row.is_some();
+                    }
+                    if let Some(edge) = self
+                        .figure_edge_at(pos)
+                        .filter(|_| self.figure_is_placeable())
+                    {
+                        horizontal |= edge.left;
+                        vertical |= edge.top;
+                    }
+                }
+            }
+            None => {}
+        }
+        let icon = match (horizontal, vertical) {
+            (true, true) => egui::CursorIcon::ResizeNwSe,
+            (true, false) => egui::CursorIcon::ResizeHorizontal,
+            (false, true) => egui::CursorIcon::ResizeVertical,
+            (false, false) => return,
         };
         context.set_cursor_icon(icon);
+    }
+
+    /// True if the layout the figure was drawn with has frames to place (a
+    /// compact fallback grid has none).
+    fn figure_is_placeable(&self) -> bool {
+        self.figure_memo.as_ref().is_some_and(|(_, layout)| {
+            !layout.frame_widths.is_empty() && !layout.frame_heights.is_empty()
+        })
     }
 
     /// True if the layout the figure was drawn with has a frame for the column
@@ -2105,12 +2189,22 @@ impl GraphView {
             };
             match self.frame_preview.clone() {
                 Some(preview)
-                    if moved(preview.column, drag.column) || moved(preview.row, drag.row) =>
+                    if moved(preview.column, drag.column)
+                        || moved(preview.row, drag.row)
+                        || moved_value(preview.left, drag.left)
+                        || moved_value(preview.top, drag.top) =>
                 {
-                    self.events.push(GraphEvent::FrameResized {
-                        column: preview.column,
-                        row: preview.row,
-                    });
+                    if preview.column.is_some() || preview.row.is_some() {
+                        self.events.push(GraphEvent::FrameResized {
+                            column: preview.column,
+                            row: preview.row,
+                        });
+                    } else {
+                        self.events.push(GraphEvent::FramePlaced {
+                            left: preview.left,
+                            top: preview.top,
+                        });
+                    }
                     self.hold_preview();
                 }
                 _ => self.set_frame_preview(None),
@@ -2127,28 +2221,48 @@ impl GraphView {
             let origin = context
                 .input(|input| input.pointer.press_origin())
                 .unwrap_or(pos - response.drag_delta());
-            let Some(edge) = self.cell_edge_at(origin) else {
+            let cell_edge = self.cell_edge_at(origin);
+            let figure_edge = self.figure_edge_at(origin);
+            if cell_edge.is_none() && figure_edge.is_none() {
                 return false;
-            };
+            }
             let Some((_, layout)) = &self.figure_memo else {
                 return false;
             };
             let base = (layout.frame_widths.clone(), layout.frame_heights.clone());
-            let column = edge
-                .column
+            let column = cell_edge
+                .and_then(|edge| edge.column)
                 .and_then(|index| Some((index, *base.0.get(index)?)));
-            let row = edge
-                .row
+            let row = cell_edge
+                .and_then(|edge| edge.row)
                 .and_then(|index| Some((index, *base.1.get(index)?)));
+            // Where the first frame is now, measured from the image edge: read
+            // from what was drawn, so that a legacy graph (whose layout stores
+            // no frame) starts from the plot area it is drawn with.
+            let first = self.last.as_ref().and_then(|plot| {
+                plot.panels
+                    .iter()
+                    .find(|panel| panel.row == 0 && panel.column == 0)
+                    .map(|panel| panel.pixel_origin)
+            });
+            let placeable = !base.0.is_empty() && !base.1.is_empty() && first.is_some();
+            let left = figure_edge
+                .filter(|edge| edge.left && placeable)
+                .and_then(|_| first.map(|origin| f64::from(origin.0)));
+            let top = figure_edge
+                .filter(|edge| edge.top && placeable)
+                .and_then(|_| first.map(|origin| f64::from(origin.1)));
             let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0) else {
                 return false;
             };
-            if column.is_none() && row.is_none() {
+            if column.is_none() && row.is_none() && left.is_none() && top.is_none() {
                 return false;
             }
             self.frame_drag = Some(FrameDrag {
                 column,
                 row,
+                left,
+                top,
                 press: origin,
                 scale,
                 base,
@@ -2164,6 +2278,17 @@ impl GraphView {
                 stokesforge_plot::MAX_FRAME_SIZE,
             )
         };
+        // Pulling the left or top edge of the image outwards (towards smaller
+        // coordinates) gives the frame more room on that side, and the other
+        // way round.
+        let (min_left, min_top) = self.figure_memo.as_ref().map_or((0.0, 0.0), |(_, layout)| {
+            (f64::from(layout.min_left), f64::from(layout.min_top))
+        });
+        let offset = |start: f64, moved: f32, minimum: f64| {
+            (start - f64::from(moved))
+                .round()
+                .clamp(minimum, stokesforge_plot::MAX_FRAME_SIZE)
+        };
         self.set_frame_preview(Some(FramePreview {
             column: drag
                 .column
@@ -2171,6 +2296,8 @@ impl GraphView {
             row: drag
                 .row
                 .map(|(index, start)| (index, bounds(start + f64::from(delta.y)))),
+            left: drag.left.map(|start| offset(start, delta.x, min_left)),
+            top: drag.top.map(|start| offset(start, delta.y, min_top)),
             base: drag.base,
         }));
         true

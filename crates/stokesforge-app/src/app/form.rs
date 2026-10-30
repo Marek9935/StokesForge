@@ -205,6 +205,7 @@ impl Form<'_> {
             false,
         );
         let title = title.into();
+        let accessible_title = title.clone();
         // Arrow and title are a single clickable area, in the labels column
         // like "Tick direction": no dead space between them, and
         // the title is not selectable (S-L8).
@@ -222,6 +223,9 @@ impl Form<'_> {
                     galley.size().y.max(ui.spacing().interact_size.y),
                 );
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &accessible_title)
+                });
                 let icon_rect = egui::Rect::from_center_size(
                     egui::pos2(rect.left() + icon / 2.0, rect.center().y),
                     egui::vec2(icon, icon),

@@ -239,6 +239,20 @@ opens and re-saves the file drops the two fields without a message: the figure
 goes back to 480 × 360 pt. Witness `tests/witnesses/v1/project.stf` regenerated
 with non-default frames; `schema.rs` keeps the old-record test.
 
+## Fixed figure and plot area position: additive fields (#405)
+
+`PlotSpecRecord` gained `fixed_figure` (`bool`), `figure_left` and `figure_top`
+(`Option<f64>`, points), all `#[serde(default)]`: "Figure size = Fixed" and the
+distance from the left and top edge of the image to the first plot area. A file
+without them reads **Grows with the axes** and **Auto** (what #394 did), so
+**`FORMAT_VERSION` did not move**. They only mean something with stored frames
+(a legacy graph ignores them; setting one fixes the frames in the same command).
+Written as the spec holds them; `PlotSpec::sanitized_figure_left()` /
+`sanitized_figure_top()` read them (non-finite or negative = Auto, clamped to
+`[0, MAX_FRAME_SIZE]`). An older version that opens and re-saves the file drops
+them without a message. Witness `tests/witnesses/v1/project.stf` regenerated
+with non-default values; `schema.rs` keeps the old-record test.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

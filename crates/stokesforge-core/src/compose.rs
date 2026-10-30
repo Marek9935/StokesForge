@@ -460,6 +460,46 @@ pub fn set_frame_size(spec: &mut PlotSpec, axis: FrameAxis, index: usize, size: 
     true
 }
 
+/// Which offset of the first frame from the edge of the image (#405).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FigureOffset {
+    /// Left edge of the image to the frame of the first column.
+    Left,
+    /// Top edge of the image (graph title included) to the frame of the first
+    /// row.
+    Top,
+}
+
+/// Sets Left or Top of the figure to `value` points (`None`: Auto), brought
+/// into `[0, MAX_FRAME_SIZE]` (#405). `false`, with the spec unchanged, if the
+/// value is not finite or negative, or the graph is legacy (no stored frames:
+/// the application materializes them first, core does not measure).
+pub fn set_figure_offset(spec: &mut PlotSpec, which: FigureOffset, value: Option<f64>) -> bool {
+    if spec.frame_widths.is_empty() && spec.frame_heights.is_empty() {
+        return false;
+    }
+    let value = match value {
+        Some(v) if !v.is_finite() || v < 0.0 => return false,
+        Some(v) => Some(v.min(stokesforge_plot::MAX_FRAME_SIZE)),
+        None => None,
+    };
+    match which {
+        FigureOffset::Left => spec.figure_left = value,
+        FigureOffset::Top => spec.figure_top = value,
+    }
+    true
+}
+
+/// Sets "Figure size = Fixed" (#405). `false`, with the spec unchanged, if the
+/// graph is legacy (the application materializes the frames first).
+pub fn set_fixed_figure(spec: &mut PlotSpec, fixed: bool) -> bool {
+    if spec.frame_widths.is_empty() && spec.frame_heights.is_empty() {
+        return false;
+    }
+    spec.fixed_figure = fixed;
+    true
+}
+
 /// The layers that deleting layer `panel` removes (#357): an overlay layer
 /// alone; an ordinary layer (a cell) with all the overlay layers of its cell.
 /// Empty if `panel` does not exist.
@@ -1387,5 +1427,34 @@ mod tests {
         assert!(!set_frame_size(&mut spec, FrameAxis::Column, 1, 300.0));
         assert!(!set_frame_size(&mut spec, FrameAxis::Row, 0, f64::NAN));
         assert_eq!(spec, before);
+    }
+
+    #[test]
+    fn figure_offsets_are_clamped_cleared_and_refuse_nan_negative_and_legacy() {
+        let mut spec = sized(&[(0, 0)], &[300.0], &[250.0]);
+        assert!(set_figure_offset(
+            &mut spec,
+            FigureOffset::Left,
+            Some(150.0)
+        ));
+        assert!(set_figure_offset(&mut spec, FigureOffset::Top, Some(1e9)));
+        assert_eq!(spec.figure_left, Some(150.0));
+        assert_eq!(spec.figure_top, Some(stokesforge_plot::MAX_FRAME_SIZE));
+        assert!(set_figure_offset(&mut spec, FigureOffset::Left, None));
+        assert_eq!(spec.figure_left, None);
+        let before = spec.clone();
+        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+            assert!(!set_figure_offset(&mut spec, FigureOffset::Left, Some(bad)));
+        }
+        assert_eq!(spec, before);
+        let mut legacy = spec_of(&[(0, 0)]);
+        assert!(!set_figure_offset(
+            &mut legacy,
+            FigureOffset::Top,
+            Some(10.0)
+        ));
+        assert!(!set_fixed_figure(&mut legacy, true));
+        assert!(!legacy.fixed_figure && legacy.figure_top.is_none());
+        assert!(set_fixed_figure(&mut spec, true) && spec.fixed_figure);
     }
 }

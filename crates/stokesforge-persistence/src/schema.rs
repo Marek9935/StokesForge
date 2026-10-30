@@ -721,6 +721,18 @@ pub(crate) struct PlotSpecRecord {
     /// absent = legacy (360 pt shared equally, bands and title inside).
     #[serde(default)]
     pub(crate) frame_heights: Vec<f64>,
+    /// "Figure size = Fixed" (#405): absent from an older file, hence the
+    /// figure grows with its axes.
+    #[serde(default)]
+    pub(crate) fixed_figure: bool,
+    /// Distance from the left edge of the image to the first frame, in points
+    /// (#405): absent = Auto.
+    #[serde(default)]
+    pub(crate) figure_left: Option<f64>,
+    /// Distance from the top edge of the image to the first frame, in points
+    /// (#405): absent = Auto.
+    #[serde(default)]
+    pub(crate) figure_top: Option<f64>,
 }
 
 /// [`stokesforge_plot::TextFont`], flat.
@@ -759,6 +771,9 @@ impl Default for PlotSpecRecord {
             decimal_comma: false,
             frame_widths: Vec::new(),
             frame_heights: Vec::new(),
+            fixed_figure: false,
+            figure_left: None,
+            figure_top: None,
         }
     }
 }
@@ -1345,6 +1360,10 @@ mod tests {
         // #394: an old graph records no frame size = legacy 480 x 360 pt.
         assert!(reloaded.frame_widths.is_empty());
         assert!(reloaded.frame_heights.is_empty());
+        // #405: nor the fixed figure or the position of the frame = Auto.
+        assert!(!reloaded.fixed_figure);
+        assert_eq!(reloaded.figure_left, None);
+        assert_eq!(reloaded.figure_top, None);
     }
 }
 
