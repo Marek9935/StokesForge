@@ -1121,3 +1121,110 @@ fn loading_relays_the_dropped_correction_traces() {
         .correction_traces()
         .is_empty());
 }
+
+/// A loop that goes through a calculation and a formula that reads another
+/// sheet (#403): the calculation reads F, F reads the calculation's output in
+/// the other sheet. It would never stabilize: the calculation is flagged
+/// `Manual` and left as it is, in both modes. Mutant: the formula edges of
+/// `calculations_in_a_cycle` keep to the own sheet -> no loop is seen.
+#[test]
+fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
+    use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
+    for mode in modes() {
+        let (_session, handle, m) = start(mode);
+        let book = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .parent(m.sheet)
+            .unwrap()
+            .unwrap();
+        handle
+            .execute(Command::AddWorksheet {
+                book,
+                name: Some("Sheet3".to_string()),
+            })
+            .unwrap();
+        let sheet3 = *handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .children(book)
+            .unwrap()
+            .last()
+            .unwrap();
+        let add = |name: &str, values: &[f64]| {
+            handle
+                .execute(Command::AddColumn {
+                    sheet: sheet3,
+                    index: None,
+                    name: Some(name.to_string()),
+                    column: Column::from_f64(values),
+                })
+                .unwrap();
+            *handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .children(sheet3)
+                .unwrap()
+                .last()
+                .unwrap()
+        };
+        add("P", &[1.0, 2.0, 3.0, 4.0]);
+        let f = add("F", &[]);
+        let formula = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .formula_from_letters(f, "max(Sheet1!B)")
+            .unwrap();
+        handle
+            .execute(Command::SetColumnMeta {
+                column: f,
+                meta: ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let calc = add_fit_on(&handle, m.x, f, true);
+        let snapshot = handle.snapshot().unwrap();
+        assert_eq!(snapshot.tree.calculation(calc).unwrap().stale, None);
+        let output = snapshot.tree.calculation(calc).unwrap().outputs[0]
+            .column
+            .unwrap();
+        let output_sheet = snapshot.tree.parent(output).unwrap().unwrap();
+
+        // F now reads the calculation's output, in whichever sheet it lives.
+        let loops = ColumnFormula::from_parts_with_remote(
+            vec![
+                FormulaPart::Text("max(".to_string()),
+                FormulaPart::Column(output),
+                FormulaPart::Text(")".to_string()),
+            ],
+            std::collections::BTreeMap::from([(
+                1,
+                RemoteRef {
+                    sheet: output_sheet,
+                    prefixed: true,
+                },
+            )]),
+        );
+        handle
+            .execute(Command::SetColumnMeta {
+                column: f,
+                meta: ColumnMeta {
+                    formula: Some(loops),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let snapshot = handle.snapshot().unwrap();
+        assert_eq!(
+            snapshot.tree.calculation(calc).unwrap().stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+    }
+}

@@ -124,11 +124,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::AnalysisError;
-use stokesforge_core::compose::paired_x_columns;
 use stokesforge_core::{
     compute, evaluate_formula_with_x, topological_order, AuxRef, Calculation, ColumnFormula,
-    ColumnType, ColumnValues, ComputeError, Formula, FormulaError, NodeId, NumericStatus, Project,
-    SeriesRef, Staleness, ValueBlock,
+    ColumnType, ColumnValues, ComputeError, Formula, FormulaError, FormulaInputs, NodeId,
+    NumericStatus, Project, SeriesRef, Staleness, ValueBlock,
 };
 
 /// How the actor recalculates formula columns after every request that may
@@ -292,19 +291,11 @@ impl Recalculator {
     }
 
     fn run_formulas(&mut self, project: &mut Project) {
-        let sheets: Vec<NodeId> = project
-            .tree()
-            .iter()
-            .filter(|(_, node)| node.kind().is_worksheet())
-            .map(|(id, _)| id)
-            .collect();
         let mut seen = HashSet::new();
-        for sheet in sheets {
-            if self.should_stop() {
-                // Interrupted pass: `seen` is incomplete, do not prune.
-                return;
-            }
-            self.recalc_sheet(project, sheet, &mut seen);
+        self.recalc_project(project, &mut seen);
+        if self.interrupted {
+            // Interrupted pass: `seen` may be incomplete, do not prune.
+            return;
         }
         // A deleted column, or one that lost its formula, leaves the memo:
         // hygiene, so that the memo stays bounded by the formula columns
@@ -342,14 +333,15 @@ impl Recalculator {
         }
     }
 
-    /// Recalculates the formula columns of a single sheet that need it, in the
-    /// order of their dependencies (topological sort,
+    /// Recalculates the formula columns of the **whole project** that need it,
+    /// in the order of their dependencies (topological sort,
     /// [`stokesforge_core::topological_order`]) — a formula column that
     /// references another reads its **already recalculated** value, never the
-    /// one from before this pass. A dependency cycle (direct or transitive) is
-    /// detected without looping: each column that takes part gets an entirely
-    /// `NaN` block rather than a value that would make no sense to choose
-    /// anyway.
+    /// one from before this pass, whichever sheet or workbook the other one is
+    /// in (#403). A dependency cycle (direct or transitive, across sheets
+    /// too) is detected without looping: each column that takes part gets an
+    /// entirely `NaN` block rather than a value that would make no sense to
+    /// choose anyway.
     ///
     /// Propagation is automatic: recalculating B writes B, so changes its
     /// version, and C = B + 1, which comes after B in the order, sees its
@@ -357,57 +349,88 @@ impl Recalculator {
     /// (unreadable, then types, then cycles, then the topological order) means
     /// that no column is written after a column that reads it took its
     /// fingerprint: an immediate second pass rewrites nothing.
-    fn recalc_sheet(&mut self, project: &mut Project, sheet: NodeId, seen: &mut HashSet<NodeId>) {
-        let Ok(columns) = project.tree().children(sheet).map(<[NodeId]>::to_vec) else {
-            return;
-        };
-        // Length of a result (#194): that of the longest of the columns the
-        // formula reads (calculated below, column by column). Failing that —
-        // unreadable formula, caught in a cycle, or without any resolved
-        // reference — that of the longest **ordinary** column of the sheet.
-        // Never a length that counts the formula columns themselves: before
-        // #194, `Tree::row_count` counted them, and a formula column once
-        // lengthened sustained itself at that length (undoing the lengthening
-        // of a source no longer shortened it). Ordinary columns are never
-        // written by the pass: this length is fixed during the whole pass.
-        let ordinary_len = columns
-            .iter()
-            .filter_map(|&id| project.tree().node(id).and_then(|node| node.as_column()))
-            .filter(|column| column.meta().formula.is_none())
-            .map(stokesforge_core::Column::len)
-            .max()
-            .unwrap_or(0);
+    fn recalc_project(&mut self, project: &mut Project, seen: &mut HashSet<NodeId>) {
+        // The sheets and their columns. Length of a result (#194): that of the
+        // longest of the columns the formula reads **in its own sheet**
+        // (calculated below, column by column; a remote column does not count,
+        // #403). Failing that — unreadable formula, caught in a cycle, or
+        // without any resolved reference — that of the longest **ordinary**
+        // column of its sheet. Never a length that counts the formula columns
+        // themselves: before #194, `Tree::row_count` counted them, and a
+        // formula column once lengthened sustained itself at that length
+        // (undoing the lengthening of a source no longer shortened it).
+        // Ordinary columns are never written by the pass: this length is fixed
+        // during the whole pass.
+        let mut sheets: BTreeMap<NodeId, SheetColumns> = BTreeMap::new();
+        for (sheet, node) in project.tree().iter() {
+            if !node.kind().is_worksheet() {
+                continue;
+            }
+            let columns = node.children().to_vec();
+            let ordinary_len = columns
+                .iter()
+                .filter_map(|&id| project.tree().node(id).and_then(|node| node.as_column()))
+                .filter(|column| column.meta().formula.is_none())
+                .map(stokesforge_core::Column::len)
+                .max()
+                .unwrap_or(0);
+            sheets.insert(
+                sheet,
+                SheetColumns {
+                    columns,
+                    ordinary_len,
+                },
+            );
+        }
 
         // Formulas parsed in advance: a *parse* error is already a final
         // result (`NaN` block), it takes no part in the dependency graph — a
         // column that referenced it finds it immediately available (as `NaN`),
         // not "pending".
-        let mut parsed: BTreeMap<NodeId, (ColumnFormula, Formula)> = BTreeMap::new();
-        for &id in &columns {
-            let Some(source) = project
-                .tree()
-                .node(id)
-                .and_then(|node| node.as_column())
-                .and_then(|column| column.meta().formula.clone())
-            else {
-                continue;
-            };
-            seen.insert(id);
-            match source.compile() {
-                Ok(formula) => {
-                    parsed.insert(id, (source, formula));
-                }
-                Err(_error) => {
-                    let fingerprint =
-                        Fingerprint::new(project, id, source, Outcome::Unparsable, ordinary_len);
-                    if self.is_stale(id, &fingerprint) {
-                        write_formula_column(
-                            project,
+        let mut parsed: BTreeMap<NodeId, Parsed> = BTreeMap::new();
+        for (&sheet, info) in &sheets {
+            if self.should_stop() {
+                // Interrupted pass: `seen` is incomplete, do not prune.
+                return;
+            }
+            for &id in &info.columns {
+                let Some(source) = project
+                    .tree()
+                    .node(id)
+                    .and_then(|node| node.as_column())
+                    .and_then(|column| column.meta().formula.clone())
+                else {
+                    continue;
+                };
+                seen.insert(id);
+                match source.compile() {
+                    Ok(formula) => {
+                        // What it reads, and where: structure that a pass does
+                        // not change (#403).
+                        let inputs = project.tree().formula_inputs(id, &source, &formula);
+                        parsed.insert(
                             id,
-                            vec![f64::NAN; ordinary_len],
-                            &vec![NumericStatus::Missing; ordinary_len],
+                            Parsed {
+                                sheet,
+                                source,
+                                formula,
+                                inputs,
+                            },
                         );
-                        self.record(project, id, fingerprint);
+                    }
+                    Err(_error) => {
+                        let len = info.ordinary_len;
+                        let fingerprint =
+                            Fingerprint::new(project, id, source, Outcome::Unparsable, len);
+                        if self.is_stale(id, &fingerprint) {
+                            write_formula_column(
+                                project,
+                                id,
+                                vec![f64::NAN; len],
+                                &vec![NumericStatus::Missing; len],
+                            );
+                            self.record(project, id, fingerprint);
+                        }
                     }
                 }
             }
@@ -423,8 +446,8 @@ impl Recalculator {
         // through the memo here: comparing the types reads no data, and a type
         // change changes the column's version, hence its fingerprint — it will
         // be rewritten below.
-        for (&id, (_, formula)) in &parsed {
-            if let Some(desired) = desired_formula_column_type(formula, &columns, project) {
+        for (&id, entry) in &parsed {
+            if let Some(desired) = desired_formula_column_type(&entry.formula, &entry.inputs) {
                 let current = project
                     .tree()
                     .node(id)
@@ -436,31 +459,16 @@ impl Recalculator {
             }
         }
 
-        // The X paired with the columns each formula reads the X of (#402),
-        // from the roles and the order of the sheet: structure that a pass does
-        // not change. A hidden input, next to the columns the formula names.
-        let pairing: BTreeMap<NodeId, BTreeMap<NodeId, NodeId>> = parsed
-            .iter()
-            .map(|(&id, (_, formula))| {
-                let mut paired = paired_x_columns(project.tree(), formula);
-                paired.retain(|y, _| columns.contains(y));
-                (id, paired)
-            })
-            .collect();
-
-        // Dependency graph between formula columns only: a reference to an
-        // ordinary column is not an edge to order, it is already available (see
-        // the docs of `stokesforge_core::topological_order`).
+        // Dependency graph between formula columns only, over the whole
+        // project: a reference to an ordinary column is not an edge to order,
+        // it is already available (see the docs of
+        // `stokesforge_core::topological_order`). The inputs are the columns
+        // the formula names **where they must be** and the X paired with them
+        // (#402): a column that left its sheet is no edge.
         let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
             parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
-        // `parsed` holds only columns of this sheet: a reference to another
-        // sheet is never an edge.
-        for (&id, (_, formula)) in &parsed {
-            let inputs = formula
-                .referenced_columns()
-                .into_iter()
-                .chain(pairing[&id].values().copied());
-            for dep_id in inputs {
+        for (&id, entry) in &parsed {
+            for dep_id in entry.inputs.dependencies() {
                 if parsed.contains_key(&dep_id) {
                     if let Some(deps) = edges.get_mut(&id) {
                         deps.insert(dep_id);
@@ -471,7 +479,7 @@ impl Recalculator {
         let (order, blocked) = topological_order(&edges);
 
         for id in blocked {
-            let Some((source, _)) = parsed.get(&id) else {
+            let Some(entry) = parsed.get(&id) else {
                 continue;
             };
             // A `NaN` block depends only on the length and the type of the
@@ -481,14 +489,15 @@ impl Recalculator {
             // each other on every pass, each changing the other's version.
             // Nor their length: in a cycle, it would be defined by itself; it
             // is that of the ordinary columns.
+            let len = sheets[&entry.sheet].ordinary_len;
             let fingerprint =
-                Fingerprint::new(project, id, source.clone(), Outcome::Blocked, ordinary_len);
+                Fingerprint::new(project, id, entry.source.clone(), Outcome::Blocked, len);
             if self.is_stale(id, &fingerprint) {
                 write_formula_column(
                     project,
                     id,
-                    vec![f64::NAN; ordinary_len],
-                    &vec![NumericStatus::Missing; ordinary_len],
+                    vec![f64::NAN; len],
+                    &vec![NumericStatus::Missing; len],
                 );
                 self.record(project, id, fingerprint);
             }
@@ -497,40 +506,51 @@ impl Recalculator {
             if self.should_stop() {
                 return;
             }
-            let Some((source, formula)) = parsed.get(&id) else {
+            let Some(entry) = parsed.get(&id) else {
                 continue;
             };
+            let Parsed {
+                sheet,
+                source,
+                formula,
+                inputs,
+            } = entry;
+            let ordinary_len = sheets[sheet].ordinary_len;
+            let remote = source.remote_sheets();
             // Read here, not before the loop: the formula columns already
             // processed in this loop (those `id` depends on, necessarily
             // earlier in `order`) may have been rewritten, hence changed
             // version — this is what propagates the recalculation along a
-            // chain. Each identifier is resolved among the columns of the
-            // **sheet** only (never in the whole tree): `None` means "outside
-            // the sheet", and enters the fingerprint.
+            // chain. Each identifier is resolved in the **sheet it must be
+            // in** (never in the whole tree): `None` means "not there", and
+            // enters the fingerprint.
             let sources: Vec<(NodeId, Option<u64>)> = formula
                 .referenced_columns()
                 .into_iter()
                 .map(|column_id| {
-                    let version = columns
-                        .contains(&column_id)
+                    let present = inputs
+                        .named
+                        .iter()
+                        .any(|input| input.column == column_id && input.present);
+                    let version = present
                         .then(|| column_version(project, column_id))
                         .flatten();
                     (column_id, version)
                 })
                 .collect();
-            // The longest of the columns read, also read after the formula
-            // columns `id` depends on; their length follows their version,
-            // already in the fingerprint.
+            // The longest of the columns read in the own sheet, also read
+            // after the formula columns `id` depends on; their length follows
+            // their version, already in the fingerprint.
             let target_len = sources
                 .iter()
-                .filter(|(_, version)| version.is_some())
+                .filter(|(column_id, version)| version.is_some() && !remote.contains_key(column_id))
                 .filter_map(|(column_id, _)| column_len(project, *column_id))
                 .max()
                 .unwrap_or(ordinary_len);
             // The X paired with each column whose X is read (#402), with its
             // version: it is not named in the formula, so nothing else would
             // tell that it changed.
-            let paired = &pairing[&id];
+            let paired = &inputs.paired_x;
             let paired_x: Vec<(NodeId, Option<NodeId>, Option<u64>)> = formula
                 .columns_needing_x()
                 .into_iter()
@@ -550,7 +570,26 @@ impl Recalculator {
             if !self.is_stale(id, &fingerprint) {
                 continue;
             }
-            let values: Vec<_> = columns
+            // The columns the evaluation may read: those of the own sheet
+            // (except one that the formula reads in another sheet), the remote
+            // columns that are in their sheet, and the paired X. A column
+            // absent from the list is a `#REF` (`DeletedColumn`).
+            let mut wanted: Vec<NodeId> = sheets[sheet]
+                .columns
+                .iter()
+                .copied()
+                .filter(|column_id| !remote.contains_key(column_id))
+                .collect();
+            wanted.extend(
+                inputs
+                    .named
+                    .iter()
+                    .filter(|input| input.present && remote.contains_key(&input.column))
+                    .map(|input| input.column),
+            );
+            let listed: HashSet<NodeId> = wanted.iter().copied().collect();
+            wanted.extend(paired.values().filter(|x| !listed.contains(x)).copied());
+            let values: Vec<_> = wanted
                 .iter()
                 .map(|&column_id| {
                     project
@@ -560,19 +599,18 @@ impl Recalculator {
                         .map(|column| (column_id, column.values().clone()))
                 })
                 .collect();
-            // A column of `columns` vanished between reading `columns` and
-            // now: cannot happen (this function never touches the tree's
-            // structure), a defensive guard rather than a panic if the
-            // assumption were ever wrong (invariant 10). Nothing is written,
-            // so nothing is noted: the memo forgets it, and the next pass will
-            // retry.
+            // A column of `wanted` vanished between reading it and now: cannot
+            // happen (this function never touches the tree's structure), a
+            // defensive guard rather than a panic if the assumption were ever
+            // wrong (invariant 10). Nothing is written, so nothing is noted:
+            // the memo forgets it, and the next pass will retry.
             if values.iter().any(Option::is_none) {
                 self.memo.remove(&id);
                 continue;
             }
             let values: Vec<_> = values.into_iter().flatten().collect();
             let evaluation = evaluate_formula_with_x(formula, &values, paired, target_len);
-            // A column read that is no longer in the sheet (`#REF`) leaves
+            // A column read that is no longer where it must be (`#REF`) leaves
             // **empty** cells, not `---`: no calculation failed, the formula
             // has nothing left to read. Empty statuses = no row marked
             // (`write_formula_column`).
@@ -584,6 +622,21 @@ impl Recalculator {
             self.record(project, id, fingerprint);
         }
     }
+}
+
+/// The columns of a sheet, and the length of its ordinary ones (see
+/// [`Recalculator::recalc_project`]).
+struct SheetColumns {
+    columns: Vec<NodeId>,
+    ordinary_len: usize,
+}
+
+/// A formula column that parses, with its sheet and what it reads.
+struct Parsed {
+    sheet: NodeId,
+    source: ColumnFormula,
+    formula: Formula,
+    inputs: FormulaInputs,
 }
 
 /// What the actor saw at the last calculation of a formula column: **all** the
@@ -676,7 +729,7 @@ fn column_version(project: &Project, column: NodeId) -> Option<u64> {
 
 /// Type that the result column of `formula` should carry, from the columns it
 /// references, or `None` when it cannot be decided (reference outside the
-/// sheet, or to a column that vanished) — in that case, the caller leaves the
+/// sheet it must be read in, or to a column that vanished) — in that case, the caller leaves the
 /// column's type unchanged rather than choosing at random.
 ///
 /// `Mixed` as soon as the formula references at least one column — not only if
@@ -688,20 +741,18 @@ fn column_version(project: &Project, column: NodeId) -> Option<u64> {
 /// cell rather than a result marked as not calculated. Only a formula without
 /// any reference (a pure constant, which can never be missing nor fail) stays
 /// `Numeric`.
-fn desired_formula_column_type(
-    formula: &Formula,
-    columns: &[NodeId],
-    project: &Project,
-) -> Option<ColumnType> {
+fn desired_formula_column_type(formula: &Formula, inputs: &FormulaInputs) -> Option<ColumnType> {
     let mut any_reference = false;
     for column_id in formula.referenced_columns() {
-        if !columns.contains(&column_id) {
+        // Every column named must be in the sheet it is read in (the own sheet,
+        // or the remote one, #403).
+        let input = inputs
+            .named
+            .iter()
+            .find(|input| input.column == column_id)?;
+        if !input.present {
             return None;
         }
-        project
-            .tree()
-            .node(column_id)
-            .and_then(|node| node.as_column())?;
         any_reference = true;
     }
     Some(if any_reference {
@@ -1126,16 +1177,14 @@ fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
                 .node(id)
                 .and_then(|n| n.as_column())
                 .and_then(|c| c.meta().formula.clone());
-            if let Some(Ok(formula)) = source.as_ref().map(ColumnFormula::compile) {
-                // The columns of **this sheet** only, like `recalc_sheet`, and
-                // the X paired with the columns whose X it reads (#402).
-                deps.extend(
-                    formula
-                        .referenced_columns()
-                        .into_iter()
-                        .chain(paired_x_columns(tree, &formula).into_values())
-                        .filter(|column| columns.contains(column)),
-                );
+            if let Some((source, Ok(formula))) = source
+                .as_ref()
+                .map(|source| (source, ColumnFormula::compile(source)))
+            {
+                // The columns the formula reads where they must be, in any
+                // sheet (#403), and the X paired with the columns whose X it
+                // reads (#402).
+                deps.extend(tree.formula_inputs(id, source, &formula).dependencies());
             }
         }
     }
