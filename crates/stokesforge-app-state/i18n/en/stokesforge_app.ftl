@@ -1090,13 +1090,20 @@ formula-help-min = The smaller of x and y
 formula-help-max = The larger of x and y
 formula-help-if = a if the condition c holds, otherwise b
 formula-help-pi = The number π
-formula-help-at = Value of column B at X = x, by linear interpolation (empty outside the X data)
-formula-help-max-column = Largest value of column B, or between the X values x1 and x2
-formula-help-min-column = Smallest value of column B, or between the X values x1 and x2
-formula-help-mean = Mean of column B, or between the X values x1 and x2
-formula-help-sum = Sum of column B, or between the X values x1 and x2
-formula-help-std = Standard deviation (n − 1) of column B, or between the X values x1 and x2
-formula-help-integral = Area under column B (trapezoids, as the Integration tool), or between x1 and x2
+formula-help-at = Value of B at X = x
+formula-help-at-detail = Value of column B at X = x, by linear interpolation between the two neighboring points. Empty outside the X data. x can be a column; at(B, x, D) reads the X values in column D.
+formula-help-max-column = Largest value of B
+formula-help-max-column-detail = Largest value of column B. Add two X values to keep only the points between them: max(B, x1, x2).
+formula-help-min-column = Smallest value of B
+formula-help-min-column-detail = Smallest value of column B. Add two X values to keep only the points between them: min(B, x1, x2).
+formula-help-mean = Mean of B
+formula-help-mean-detail = Mean of column B. Add two X values to keep only the points between them: mean(B, x1, x2).
+formula-help-sum = Sum of B
+formula-help-sum-detail = Sum of column B. Add two X values to keep only the points between them: sum(B, x1, x2).
+formula-help-std = Standard deviation of B
+formula-help-std-detail = Sample standard deviation (divided by n − 1) of column B, which needs two values. Add two X values to keep only the points between them: std(B, x1, x2).
+formula-help-integral = Area under B
+formula-help-integral-detail = Area under column B by the trapezoid method, the same result as the Integration tool without a baseline. Add two X values to integrate between them: integral(B, x1, x2).
 common-metadata = Metadata
 workbook-metadata-hide = Hide Metadata Row
 workbook-metadata-summary =

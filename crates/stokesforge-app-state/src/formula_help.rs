@@ -70,6 +70,9 @@ pub struct HelpRow {
     pub example: &'static str,
     /// What it computes, in the interface language.
     pub description: String,
+    /// The full explanation, shown by a "?" at the end of the row: only the
+    /// "Column values" rows have one (their description is a few words).
+    pub detail: Option<String>,
 }
 
 /// A family and its rows.
@@ -85,6 +88,7 @@ struct Entry {
     signature: &'static str,
     example: &'static str,
     description: String,
+    detail: Option<String>,
 }
 
 fn row(
@@ -98,12 +102,27 @@ fn row(
         signature,
         example,
         description,
+        detail: None,
+    }
+}
+
+/// A row of the "Column values" family: a short description and, behind a "?",
+/// the full explanation.
+fn column_row(
+    signature: &'static str,
+    example: &'static str,
+    description: String,
+    detail: String,
+) -> Entry {
+    Entry {
+        detail: Some(detail),
+        ..row(Family::ColumnValues, signature, example, description)
     }
 }
 
 /// The help entry of a callee. Exhaustive: no `_`.
 fn entry(callee: Callee) -> Entry {
-    use Family::{Choice, ColumnValues, Constants, Error, Powers, Rounding, Trigonometry};
+    use Family::{Choice, Constants, Error, Powers, Rounding, Trigonometry};
     match callee {
         Callee::If => row(
             Choice,
@@ -112,47 +131,47 @@ fn entry(callee: Callee) -> Entry {
             tr!("formula-help-if"),
         ),
         Callee::Column(func) => match func {
-            ColumnFunc::At => row(
-                ColumnValues,
+            ColumnFunc::At => column_row(
                 "at(B, x)",
                 "B / at(B, 340)",
                 tr!("formula-help-at"),
+                tr!("formula-help-at-detail"),
             ),
-            ColumnFunc::Max => row(
-                ColumnValues,
+            ColumnFunc::Max => column_row(
                 "max(B)",
                 "B / max(B, 330, 350)",
                 tr!("formula-help-max-column"),
+                tr!("formula-help-max-column-detail"),
             ),
-            ColumnFunc::Min => row(
-                ColumnValues,
+            ColumnFunc::Min => column_row(
                 "min(B)",
                 "B - min(B)",
                 tr!("formula-help-min-column"),
+                tr!("formula-help-min-column-detail"),
             ),
-            ColumnFunc::Mean => row(
-                ColumnValues,
+            ColumnFunc::Mean => column_row(
                 "mean(B)",
                 "B - mean(B)",
                 tr!("formula-help-mean"),
+                tr!("formula-help-mean-detail"),
             ),
-            ColumnFunc::Sum => row(
-                ColumnValues,
+            ColumnFunc::Sum => column_row(
                 "sum(B)",
                 "B / sum(B)",
                 tr!("formula-help-sum"),
+                tr!("formula-help-sum-detail"),
             ),
-            ColumnFunc::Std => row(
-                ColumnValues,
+            ColumnFunc::Std => column_row(
                 "std(B)",
                 "(B - mean(B)) / std(B)",
                 tr!("formula-help-std"),
+                tr!("formula-help-std-detail"),
             ),
-            ColumnFunc::Integral => row(
-                ColumnValues,
+            ColumnFunc::Integral => column_row(
                 "integral(B)",
                 "B / integral(B)",
                 tr!("formula-help-integral"),
+                tr!("formula-help-integral-detail"),
             ),
         },
         Callee::Table(func) => match func {
@@ -207,6 +226,7 @@ fn operator_rows() -> Vec<HelpRow> {
         signature,
         example,
         description,
+        detail: None,
     };
     vec![
         operator("+ - * /", "(B + C) / 2", tr!("formula-help-op-arithmetic")),
@@ -241,6 +261,7 @@ pub fn groups() -> Vec<HelpGroup> {
                         signature: entry.signature,
                         example: entry.example,
                         description: entry.description.clone(),
+                        detail: entry.detail.clone(),
                     }),
             );
             (!rows.is_empty()).then(|| HelpGroup {
@@ -317,6 +338,33 @@ mod tests {
                 row.example
             );
         }
+    }
+
+    /// A "Column values" row says little and explains behind its "?": every one
+    /// has a detail, in both languages, and no other family has one.
+    #[test]
+    fn every_column_values_row_has_a_detail() {
+        for language in [
+            crate::i18n::Language::English,
+            crate::i18n::Language::French,
+        ] {
+            crate::i18n::set_language(language);
+            let rows = all_rows();
+            let column_rows: Vec<&HelpRow> = rows
+                .iter()
+                .filter(|row| matches!(row.callee, Some(Callee::Column(_))))
+                .collect();
+            assert_eq!(column_rows.len(), ColumnFunc::ALL.len());
+            for row in column_rows {
+                let detail = row.detail.as_deref().unwrap_or_default();
+                assert!(detail.len() > row.description.len(), "{}", row.signature);
+            }
+            assert!(rows
+                .iter()
+                .filter(|row| !matches!(row.callee, Some(Callee::Column(_))))
+                .all(|row| row.detail.is_none()));
+        }
+        crate::i18n::set_language(crate::i18n::Language::English);
     }
 
     #[test]

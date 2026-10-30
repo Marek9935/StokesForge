@@ -87,7 +87,13 @@ fn paint_line(ui: &mut egui::Ui, line: Option<&Line<'_>>) {
         Some(Line::Function(row)) => {
             ui.monospace(row.signature);
             ui.monospace(row.example);
-            ui.label(&row.description);
+            // A row with a detail ends with a "?" that explains it in full.
+            ui.horizontal(|ui| {
+                ui.label(&row.description);
+                if let Some(detail) = &row.detail {
+                    super::hover_help::help_text_in_bubble(ui, detail.as_str());
+                }
+            });
         }
         None => {
             for _ in 0..3 {
@@ -129,6 +135,7 @@ mod tests {
             signature: "f()",
             example: "f()",
             description: String::new(),
+            detail: None,
         };
         HelpGroup {
             title: String::new(),

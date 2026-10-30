@@ -1089,13 +1089,20 @@ formula-help-min = Le plus petit de x et y
 formula-help-max = Le plus grand de x et y
 formula-help-if = a si la condition c est vraie, sinon b
 formula-help-pi = Le nombre π
-formula-help-at = Valeur de la colonne B pour X = x, par interpolation linéaire (vide hors des X)
-formula-help-max-column = Plus grande valeur de la colonne B, ou entre les valeurs de X x1 et x2
-formula-help-min-column = Plus petite valeur de la colonne B, ou entre les valeurs de X x1 et x2
-formula-help-mean = Moyenne de la colonne B, ou entre les valeurs de X x1 et x2
-formula-help-sum = Somme de la colonne B, ou entre les valeurs de X x1 et x2
-formula-help-std = Écart-type (n − 1) de la colonne B, ou entre les valeurs de X x1 et x2
-formula-help-integral = Aire sous la colonne B (trapèzes, comme l'outil Intégration), ou entre x1 et x2
+formula-help-at = Valeur de B pour X = x
+formula-help-at-detail = Valeur de la colonne B pour X = x, par interpolation linéaire entre les deux points voisins. Vide hors des X. x peut être une colonne ; at(B, x, D) lit les X dans la colonne D.
+formula-help-max-column = Plus grande valeur de B
+formula-help-max-column-detail = Plus grande valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : max(B, x1, x2).
+formula-help-min-column = Plus petite valeur de B
+formula-help-min-column-detail = Plus petite valeur de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : min(B, x1, x2).
+formula-help-mean = Moyenne de B
+formula-help-mean-detail = Moyenne de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : mean(B, x1, x2).
+formula-help-sum = Somme de B
+formula-help-sum-detail = Somme de la colonne B. Ajouter deux valeurs de X pour ne garder que les points entre elles : sum(B, x1, x2).
+formula-help-std = Écart-type de B
+formula-help-std-detail = Écart-type d'échantillon (divisé par n − 1) de la colonne B, qui demande deux valeurs. Ajouter deux valeurs de X pour ne garder que les points entre elles : std(B, x1, x2).
+formula-help-integral = Aire sous B
+formula-help-integral-detail = Aire sous la colonne B par la méthode des trapèzes, même résultat que l'outil Intégration sans ligne de base. Ajouter deux valeurs de X pour intégrer entre elles : integral(B, x1, x2).
 common-metadata = Métadonnées
 workbook-metadata-hide = Masquer la ligne Métadonnées
 workbook-metadata-summary =

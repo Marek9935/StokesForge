@@ -30,6 +30,23 @@ pub(crate) fn hover_help(
     .on_hover_ui(contents)
 }
 
+/// The "?" of a row **inside** another hover bubble (the `F(x)=` help, #402).
+/// It senses the click (which does nothing): egui keeps a tooltip open while
+/// the pointer moves over an interactive widget of it, so the outer bubble
+/// stays when the pointer goes from its icon to this one.
+pub(crate) fn help_text_in_bubble(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    let text = text.into();
+    ui.add(
+        icon_image(Icon::Help, IconRole::Neutral)
+            .tint(theme::help_icon_tint())
+            .sense(egui::Sense::click()),
+    )
+    .on_hover_ui(|ui| {
+        ui.set_max_width(360.0);
+        ui.label(text);
+    })
+}
+
 /// A field's reminder in one sentence (#225, S-M1): the "?" icon whose bubble
 /// is only `text`.
 pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
