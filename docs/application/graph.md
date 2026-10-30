@@ -163,7 +163,10 @@ the first one). It changes on a click, a right-click or the start of a drag in
 the plot area of a layer, on the selection of an object of the layer (figure or
 Object Manager, `follow_selection`), on a click on the node of the layer, of its
 group or of its axes in the Object Manager, and on the **numbered marker** painted
-at the top left of the window (`layer_badges`, never in the export or
+at the top left of the layer's own **cell** (`layer_badges`, #395: the outer cell
+rectangle drawn by the render, `GraphView::cell_rect_screen`, so it follows live
+handle previews and the contained scale; overlays of one cell side by side in
+layer order; a layer not drawn keeps the window corner; never in the export or
 the copy). The window publishes the active layer in egui's memory
 (`published_active_panel`) for the menus that do not have the view. These follow the
 active layer: the drop of columns, "Send to" and Graph › Add Text; the

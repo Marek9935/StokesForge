@@ -1273,6 +1273,24 @@ impl GraphView {
         Some(Rect::from_min_size(min, size))
     }
 
+    /// The outer rectangle of the cell layer `panel` lives in, on screen (#395):
+    /// the rectangle the layer badges and the cell handles are built from.
+    /// Layers of the same cell (overlays) share it; `None` for a layer not
+    /// drawn in the last figure.
+    pub fn cell_rect_screen(&self, panel: usize) -> Option<Rect> {
+        let drawn = self
+            .last
+            .as_ref()?
+            .panels
+            .iter()
+            .find(|p| p.index == panel)?;
+        let (display, scale) = (self.display_rect?, self.display_scale()?);
+        let min = display.min
+            + egui::vec2(drawn.cell_origin.0 as f32, drawn.cell_origin.1 as f32) * scale;
+        let size = egui::vec2(drawn.cell_size.0 as f32, drawn.cell_size.1 as f32) * scale;
+        Some(Rect::from_min_size(min, size))
+    }
+
     /// The ordinary layer (a cell) whose plot area is nearest to the egui pixel
     /// `pos`, in the **last** drawn figure (#357): where a drop on the edge of
     /// the figure puts its new cell beside. `None` before the first draw.

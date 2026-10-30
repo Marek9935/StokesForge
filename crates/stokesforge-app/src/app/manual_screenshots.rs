@@ -405,6 +405,25 @@ const SHOTS: &[Shot] = &[
         crop: Crop::Rect(workspace_window_rect),
     },
     Shot {
+        name: "graphs-layer-badges",
+        setup: |h| {
+            let graph = h.state().ids.graph1;
+            // Two cells side by side: badge 1 and badge 2 sit at the top left
+            // of their own cell.
+            act(
+                h,
+                Action::AddCell {
+                    graph,
+                    panel: 0,
+                    side: CellSide::Right,
+                    columns: Vec::new(),
+                },
+            );
+            show_only(h, Tab::Graph(graph), egui::vec2(760.0, 460.0));
+        },
+        crop: Crop::Rect(workspace_window_rect),
+    },
+    Shot {
         name: "analysis-integration",
         setup: |h| {
             open_analysis(h, Preset::Integrate, 0.0, 0.0);
