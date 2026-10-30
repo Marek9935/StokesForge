@@ -54,6 +54,12 @@
 //! sheet is not an error: [`ColumnValues::number_at`] already returns
 //! `NaN` beyond its length, exactly the behavior wanted here.
 //!
+//! The refusals at input carry the help of the message (#404): an unknown
+//! function name comes with the nearest callee name ([`Callee::nearest`]) and a
+//! wrong argument count with the function to write instead
+//! ([`Callee::alternative`]). Both are computed at refusal, never stored.
+//! [`Callee`] is public: the help of the `F(x)=` cell lists [`Callee::all`].
+//!
 //! A **mixed**-type column is not "non-numeric": it is
 //! accepted, and its text or empty cells are `NaN` row by row, like
 //! an ordinary missing value. Only an entirely text column is
@@ -104,13 +110,25 @@ pub enum FormulaError {
     /// A name followed by `(` is not a function of the table (refusal by
     /// [`ColumnFormula::from_letters`]; a saved text fragment degrades to
     /// [`FormulaError::Parse`] instead, invariant 10).
-    UnknownFunction(String),
+    /// `suggestion` is the nearest callee name, if there is one (#404);
+    /// it is never stored.
+    UnknownFunction {
+        name: String,
+        suggestion: Option<String>,
+    },
     /// A function called with a count of arguments it does not accept
     /// (`expected` lists the accepted counts, ascending). Refused at input.
+    /// `suggestion` is the function to write instead (`log(B, 2)` ->
+    /// `logx`), if there is one (#404).
+    ///
+    /// All static data on purpose: the error is the return value of the
+    /// recursive parser, and a bigger variant eats the stack that the depth
+    /// cap (#289) is measured against (tests on a 2 MiB stack).
     WrongArgumentCount {
-        name: String,
-        expected: Vec<usize>,
+        name: &'static str,
+        expected: &'static [usize],
         found: usize,
+        suggestion: Option<&'static str>,
     },
     /// A column letter followed by `(` (`A(B/C)`): there is no implicit
     /// multiplication. Refused at input.
@@ -138,16 +156,29 @@ impl std::fmt::Display for FormulaError {
             }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
             FormulaError::TooDeep => write!(f, "formula nested too deeply"),
-            FormulaError::UnknownFunction(name) => write!(f, "unknown function {name}"),
+            FormulaError::UnknownFunction { name, suggestion } => {
+                write!(f, "unknown function {name}")?;
+                match suggestion {
+                    Some(nearest) => write!(f, " (did you mean {nearest}?)"),
+                    None => Ok(()),
+                }
+            }
             FormulaError::WrongArgumentCount {
                 name,
                 expected,
                 found,
-            } => write!(
-                f,
-                "function {name} takes {} argument(s), {found} given",
-                counts_text(expected)
-            ),
+                suggestion,
+            } => {
+                write!(
+                    f,
+                    "function {name} takes {} argument(s), {found} given",
+                    counts_text(expected)
+                )?;
+                match suggestion {
+                    Some(other) => write!(f, " (use {other})"),
+                    None => Ok(()),
+                }
+            }
             FormulaError::NotAFunction(letter) => write!(
                 f,
                 "{letter} is not a function: to multiply, write {letter}*(...)"
@@ -251,15 +282,53 @@ impl CmpOp {
 
 /// What a name followed by `(` can call: a function of the shared table, or
 /// `if` (which needs the row status, so it is not in the table).
+///
+/// Public so that the help of the `F(x)=` cell (#404) reads the **callees**,
+/// not the table alone: the functions of later lots (`at`, `integral`...)
+/// join [`Callee::all`] and show up in the help.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Callee {
+pub enum Callee {
     Table(Func),
     If,
 }
 
 impl Callee {
+    /// Every callee once, in help order: the table, then `if`.
+    pub fn all() -> impl Iterator<Item = Callee> {
+        Func::ALL
+            .into_iter()
+            .map(Callee::Table)
+            .chain(std::iter::once(Callee::If))
+    }
+
+    /// The callee whose name is nearest to `name` (case-insensitive), for
+    /// "did you mean": edit distance 1, or 2 when `name` has 5 letters or
+    /// more. A tie goes to the first in [`Callee::all`] order, so the answer
+    /// is deterministic.
+    pub fn nearest(name: &str) -> Option<Callee> {
+        let typed = name.to_ascii_lowercase();
+        let limit = if typed.chars().count() >= 5 { 2 } else { 1 };
+        let mut best: Option<(usize, Callee)> = None;
+        for callee in Callee::all() {
+            let distance = edit_distance(&typed, callee.name());
+            if distance <= limit && best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, callee));
+            }
+        }
+        best.map(|(_, callee)| callee)
+    }
+
+    /// The callee to write instead when `self` gets `found` arguments it
+    /// does not accept (`log`/2 -> `logx`).
+    pub fn alternative(self, found: usize) -> Option<Callee> {
+        match self {
+            Callee::Table(f) => f.alternative(found).map(Callee::Table),
+            Callee::If => None,
+        }
+    }
+
     /// Case-insensitive.
-    fn from_name(name: &str) -> Option<Callee> {
+    pub fn from_name(name: &str) -> Option<Callee> {
         if name.eq_ignore_ascii_case("if") {
             Some(Callee::If)
         } else {
@@ -267,19 +336,39 @@ impl Callee {
         }
     }
 
-    fn name(self) -> &'static str {
+    /// The canonical (lowercase) name.
+    pub fn name(self) -> &'static str {
         match self {
             Callee::If => "if",
             Callee::Table(f) => f.name(),
         }
     }
 
-    fn arity(self) -> &'static [usize] {
+    /// The allowed argument counts (a set, ascending).
+    pub fn arity(self) -> &'static [usize] {
         match self {
             Callee::If => &[3],
             Callee::Table(f) => f.arity(),
         }
     }
+}
+
+/// Levenshtein distance between two ASCII names.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(above + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
 }
 
 /// End (exclusive) of the **call name** that starts at `start`, if it is
@@ -665,9 +754,10 @@ impl<'a> Parser<'a> {
                 let args = self.nested(Self::parse_args)?;
                 if !callee.arity().contains(&args.len()) {
                     return Err(FormulaError::WrongArgumentCount {
-                        name: callee.name().to_string(),
-                        expected: callee.arity().to_vec(),
+                        name: callee.name(),
+                        expected: callee.arity(),
                         found: args.len(),
+                        suggestion: callee.alternative(args.len()).map(Callee::name),
                     });
                 }
                 match callee {
@@ -780,7 +870,11 @@ impl ColumnFormula {
                         return Err(if names_a_column {
                             FormulaError::NotAFunction(letters)
                         } else {
-                            FormulaError::UnknownFunction(name)
+                            FormulaError::UnknownFunction {
+                                suggestion: Callee::nearest(&name)
+                                    .map(|nearest| nearest.name().to_string()),
+                                name,
+                            }
                         });
                     }
                     buffer.push_str(&name);
@@ -2349,32 +2443,79 @@ mod tests {
     fn an_unknown_function_or_a_wrong_count_is_refused_at_input() {
         assert_eq!(
             ColumnFormula::from_letters("foo(A)", &sheet(), OWN),
-            Err(FormulaError::UnknownFunction("foo".into()))
-        );
-        assert_eq!(
-            ColumnFormula::from_letters("sqrt(A, B)", &sheet(), OWN),
-            Err(FormulaError::WrongArgumentCount {
-                name: "sqrt".into(),
-                expected: vec![1],
-                found: 2
+            Err(FormulaError::UnknownFunction {
+                name: "foo".into(),
+                suggestion: None
             })
+        );
+        let count = |name, expected, found, suggestion| {
+            Err(FormulaError::WrongArgumentCount {
+                name,
+                expected,
+                found,
+                suggestion,
+            })
+        };
+        assert_eq!(
+            ColumnFormula::from_letters("exp(A, B)", &sheet(), OWN),
+            count("exp", &[1][..], 2, None)
         );
         assert_eq!(
             ColumnFormula::from_letters("if(A, B)", &sheet(), OWN),
-            Err(FormulaError::WrongArgumentCount {
-                name: "if".into(),
-                expected: vec![3],
-                found: 2
-            })
+            count("if", &[3][..], 2, None)
         );
         assert_eq!(
             ColumnFormula::from_letters("pi(A)", &sheet(), OWN),
-            Err(FormulaError::WrongArgumentCount {
-                name: "pi".into(),
-                expected: vec![0],
-                found: 1
-            })
+            count("pi", &[0][..], 1, None)
         );
+    }
+
+    #[test]
+    fn a_wrong_count_names_the_function_to_write_instead() {
+        let count = |text: &str| match ColumnFormula::from_letters(text, &sheet(), OWN) {
+            Err(FormulaError::WrongArgumentCount { suggestion, .. }) => suggestion,
+            other => panic!("{text}: {other:?}"),
+        };
+        assert_eq!(count("log(A, 2)"), Some("logx"));
+        assert_eq!(count("atan(A, B)"), Some("atan2"));
+        assert_eq!(count("sqrt(A, 2)"), Some("root"));
+        assert_eq!(count("exp(A, 2)"), None);
+    }
+
+    #[test]
+    fn an_unknown_function_suggests_the_nearest_name() {
+        let suggestion = |text: &str| match ColumnFormula::from_letters(text, &sheet(), OWN) {
+            Err(FormulaError::UnknownFunction { suggestion, .. }) => suggestion,
+            other => panic!("{text}: {other:?}"),
+        };
+        assert_eq!(suggestion("sqr(A)").as_deref(), Some("sqrt"));
+        assert_eq!(suggestion("SQR(A)").as_deref(), Some("sqrt"));
+        assert_eq!(suggestion("iff(A, 1, 2)").as_deref(), Some("if"));
+        assert_eq!(suggestion("foo(A)"), None);
+        // Distance 2 only from 5 letters: `sqroot` (6) finds `sqrt` and
+        // `root` at distance 2, `sqt` (3) finds nothing within 1.
+        assert_eq!(suggestion("sqroot(A)").as_deref(), Some("sqrt"));
+        assert_eq!(suggestion("sqq(A)"), None);
+        // A tie goes to the first in table order: `cosx` is 1 from `cos`
+        // and from `cosh`.
+        assert_eq!(suggestion("cosx(A)").as_deref(), Some("cos"));
+        // The message carries it, in raw English.
+        assert_eq!(
+            ColumnFormula::from_letters("sqr(A)", &sheet(), OWN)
+                .unwrap_err()
+                .to_string(),
+            "unknown function sqr (did you mean sqrt?)"
+        );
+    }
+
+    #[test]
+    fn every_callee_is_listed_once_and_found_by_its_name() {
+        let names: Vec<&str> = Callee::all().map(Callee::name).collect();
+        assert_eq!(names.len(), Func::ALL.len() + 1);
+        assert!(names.contains(&"if"));
+        for callee in Callee::all() {
+            assert_eq!(Callee::from_name(callee.name()), Some(callee));
+        }
     }
 
     #[test]

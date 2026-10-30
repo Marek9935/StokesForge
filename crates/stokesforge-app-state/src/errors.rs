@@ -611,28 +611,51 @@ pub mod formula {
             FormulaError::DeletedColumn => tr!("error-formula-deleted-column"),
             FormulaError::Cycle => tr!("error-formula-cycle"),
             FormulaError::TooDeep => tr!("error-formula-too-deep"),
-            FormulaError::UnknownFunction(name) => {
-                tr!("error-formula-unknown-function", name = name.as_str())
-            }
+            FormulaError::UnknownFunction { name, suggestion } => match suggestion {
+                Some(nearest) => tr!(
+                    "error-formula-unknown-function-suggestion",
+                    name = name.as_str(),
+                    suggestion = nearest.as_str()
+                ),
+                None => tr!("error-formula-unknown-function", name = name.as_str()),
+            },
             FormulaError::WrongArgumentCount {
                 name,
                 expected,
                 found,
+                suggestion,
             } => {
-                // Digits and slashes, so that the sentence needs no "or" of
-                // its own language: `1/2`.
-                let expected = expected
-                    .iter()
-                    .map(usize::to_string)
-                    .collect::<Vec<_>>()
-                    .join("/");
+                // Numbers only: the catalog picks the sentence (and its "or")
+                // by the number of accepted counts, in each language. Up to
+                // three counts are spelled out (`second` is the one after the
+                // first); no function accepts more.
+                let count = expected.len() as i64;
+                let first = expected.first().copied().unwrap_or(0) as i64;
+                let second = expected.get(1).copied().unwrap_or(0) as i64;
+                let last = expected.last().copied().unwrap_or(0) as i64;
                 let found = *found as i64;
-                tr!(
-                    "error-formula-wrong-argument-count",
-                    name = name.as_str(),
-                    expected = expected.as_str(),
-                    found = found
-                )
+                let name: &str = name;
+                match *suggestion {
+                    Some(other) => tr!(
+                        "error-formula-wrong-argument-count-suggestion",
+                        name = name,
+                        count = count,
+                        first = first,
+                        second = second,
+                        last = last,
+                        found = found,
+                        suggestion = other
+                    ),
+                    None => tr!(
+                        "error-formula-wrong-argument-count",
+                        name = name,
+                        count = count,
+                        first = first,
+                        second = second,
+                        last = last,
+                        found = found
+                    ),
+                }
             }
             FormulaError::NotAFunction(letter) => {
                 tr!("error-formula-not-a-function", letter = letter.as_str())
@@ -653,16 +676,31 @@ pub mod formula {
                 FormulaError::DeletedColumn,
                 FormulaError::Cycle,
                 FormulaError::TooDeep,
-                FormulaError::UnknownFunction("foo".into()),
+                FormulaError::UnknownFunction {
+                    name: "foo".into(),
+                    suggestion: None,
+                },
+                FormulaError::UnknownFunction {
+                    name: "sqr".into(),
+                    suggestion: Some("sqrt".into()),
+                },
                 FormulaError::WrongArgumentCount {
-                    name: "sqrt".into(),
-                    expected: vec![1],
+                    name: "exp",
+                    expected: &[1],
                     found: 2,
+                    suggestion: None,
+                },
+                FormulaError::WrongArgumentCount {
+                    name: "log",
+                    expected: &[1],
+                    found: 2,
+                    suggestion: Some("logx"),
                 },
                 FormulaError::NotAFunction("A".into()),
                 FormulaError::PiNeedsParentheses,
             ];
             let mut seen = [false; 10];
+            let mut suggested = [false; 2];
             for sample in &samples {
                 let index = match sample {
                     FormulaError::Parse(_) => 0,
@@ -671,14 +709,21 @@ pub mod formula {
                     FormulaError::DeletedColumn => 3,
                     FormulaError::Cycle => 4,
                     FormulaError::TooDeep => 5,
-                    FormulaError::UnknownFunction(_) => 6,
-                    FormulaError::WrongArgumentCount { .. } => 7,
+                    FormulaError::UnknownFunction { suggestion, .. } => {
+                        suggested[0] |= suggestion.is_some();
+                        6
+                    }
+                    FormulaError::WrongArgumentCount { suggestion, .. } => {
+                        suggested[1] |= suggestion.is_some();
+                        7
+                    }
                     FormulaError::NotAFunction(_) => 8,
                     FormulaError::PiNeedsParentheses => 9,
                 };
                 seen[index] = true;
             }
             assert!(seen.iter().all(|&s| s), "a variant has no example");
+            assert!(suggested.iter().all(|&s| s), "a suggestion has no example");
             samples
         }
 
@@ -710,22 +755,91 @@ pub mod formula {
             ));
         }
 
+        fn wrong_count(
+            name: &'static str,
+            expected: &'static [usize],
+            found: usize,
+            suggestion: Option<&'static str>,
+        ) -> String {
+            error_message(&FormulaError::WrongArgumentCount {
+                name,
+                expected,
+                found,
+                suggestion,
+            })
+        }
+
         #[test]
         fn the_function_errors_say_what_to_write() {
             // Compared in English: the language does not depend on the environment.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
-                error_message(&FormulaError::UnknownFunction("foo".into())),
+                error_message(&FormulaError::UnknownFunction {
+                    name: "foo".into(),
+                    suggestion: None
+                }),
                 "Unknown function foo. Check its spelling"
             );
             assert_eq!(
-                error_message(&FormulaError::WrongArgumentCount {
-                    name: "if".into(),
-                    expected: vec![3],
-                    found: 2
+                error_message(&FormulaError::UnknownFunction {
+                    name: "sqr".into(),
+                    suggestion: Some("sqrt".into())
                 }),
-                "Wrong number of arguments for if: expected 3, found 2"
+                "Unknown function sqr. Did you mean sqrt?"
             );
+            assert_eq!(
+                wrong_count("if", &[3], 2, None),
+                "Function if takes 3 arguments (found 2)"
+            );
+            assert_eq!(
+                wrong_count("pi", &[0], 1, None),
+                "Function pi takes no arguments (found 1)"
+            );
+            assert_eq!(
+                wrong_count("abs", &[1], 2, None),
+                "Function abs takes 1 argument (found 2)"
+            );
+            assert_eq!(
+                wrong_count("f", &[1, 2], 3, None),
+                "Function f takes 1 or 2 arguments (found 3)"
+            );
+            assert_eq!(
+                wrong_count("f", &[1, 2, 3], 4, None),
+                "Function f takes 1, 2 or 3 arguments (found 4)"
+            );
+            assert_eq!(
+                wrong_count("log", &[1], 2, Some("logx")),
+                "Function log takes 1 argument (found 2). Use logx instead"
+            );
+            // The same sentences in French: the singular of the CLDR rule
+            // covers 0 as well, which the catalog must not turn into "0 argument".
+            crate::i18n::set_language(crate::i18n::Language::French);
+            assert_eq!(
+                wrong_count("pi", &[0], 1, None),
+                // lang: fr
+                "La fonction pi attend aucun argument (reçu\u{a0}: 1)"
+            );
+            assert_eq!(
+                wrong_count("if", &[3], 2, None),
+                // lang: fr
+                "La fonction if attend 3 arguments (reçu\u{a0}: 2)"
+            );
+            assert_eq!(
+                wrong_count("f", &[1, 2], 3, None),
+                // lang: fr
+                "La fonction f attend 1 ou 2 arguments (reçu\u{a0}: 3)"
+            );
+            assert_eq!(
+                wrong_count("f", &[1, 2, 3], 4, None),
+                // lang: fr
+                "La fonction f attend 1, 2 ou 3 arguments (reçu\u{a0}: 4)"
+            );
+            assert_eq!(
+                wrong_count("abs", &[1], 2, None),
+                // lang: fr
+                "La fonction abs attend 1 argument (reçu\u{a0}: 2)"
+            );
+            crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&FormulaError::NotAFunction("A".into())),
                 "A is a column, not a function. To multiply, write A*(...)"
@@ -738,7 +852,9 @@ pub mod formula {
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             for key in [
                 "error-formula-unknown-function",
+                "error-formula-unknown-function-suggestion",
                 "error-formula-wrong-argument-count",
+                "error-formula-wrong-argument-count-suggestion",
                 "error-formula-not-a-function",
                 "error-formula-pi-needs-parentheses",
             ] {

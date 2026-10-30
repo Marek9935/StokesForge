@@ -62,7 +62,7 @@ mechanics.
 | S-T3 | `erreur-typst-dans-le-champ` | The Typst error of a rich text is painted, once the field is left, as a red frame and tooltip; the text is applied as is. |
 | S-T4 | `edition-sur-place-un-contrat` | A single in-place editing contract: everything selected, Enter and a click elsewhere validate, Esc cancels, Tab validates and moves to the next. |
 | S-T5 | `exemple-de-champ-vide` | The example text of an empty field is the value taken if empty or a syntax example, never an instruction. |
-| S-T6 | `champ-formule-icone-aide` | A formula field has only the "?" icon as help. |
+| S-T6 | `champ-formule-icone-aide` | A formula field has only the "?" icon as help. The `F(x)=` cell of the workbook grid has it only while it is edited (#404). |
 | S-M1 | `aide-trois-niveaux` | Three help levels: plain text (2 lines), "?" icon for the reminder of a field, bare tooltip only for buttons, icons, tabs, menus. |
 | S-M2 | `pas-de-bulle-nue-sur-un-champ` | A bare tooltip on a form field is forbidden. |
 | S-M3 | `bulle-de-bouton` | Icon-only button: name, effect, shortcut; text button: effect and shortcut without repeating the label. |
@@ -451,7 +451,11 @@ History: #224.
   button, effect and shortcut without repeating the label.
 - **Example text of an empty field** (S-T5): the value taken if empty ("Auto",
   "Group 2") or a syntax example ("a*exp(-x/b)"), never an
-  instruction. Formula field (S-T6): the "?" icon alone.
+  instruction. Formula field (S-T6): the "?" icon alone. The `F(x)=` cell of
+  the grid has no empty-field text: its "?" (`app/column_formula_help.rs`,
+  shown only while the cell is edited, own preference "Show F(x)= help", #404)
+  lists the callable functions by family; the icon only senses the hover, so it
+  never takes the focus whose loss ends the edit.
 - **Status bar** (#230): normal information, warning in the warning
   tint, error in red with an icon (S-M4). An information message fades
   after ≈ 8 s; warning and error stay until the next action

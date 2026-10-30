@@ -13444,10 +13444,13 @@ fn the_formula_help_and_the_analysis_default_are_remembered() {
     let file = dir.path().join("preferences.json");
     let mut first = state_on_preferences(&session, dir.path(), &file);
     assert!(first.show_formula_help(), "shown by default");
+    assert!(first.show_column_formula_help(), "shown by default");
     first.dispatch(Action::SetShowFormulaHelp(false));
+    first.dispatch(Action::SetShowColumnFormulaHelp(false));
     first.dispatch(Action::SetAnalysisKeepResults(true));
     let second = state_on_preferences(&session, dir.path(), &file);
     assert!(!second.show_formula_help());
+    assert!(!second.show_column_formula_help());
     assert!(second.analysis_keep_results_default());
 }
 

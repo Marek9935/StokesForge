@@ -38,6 +38,7 @@ pub mod default_folders;
 pub mod errors;
 pub mod figure_texts;
 pub mod file_picker;
+pub mod formula_help;
 pub mod history_text;
 pub mod i18n;
 pub mod object_drag;

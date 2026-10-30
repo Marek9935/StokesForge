@@ -667,7 +667,29 @@ error-formula-deleted-column = Column deleted. Replace #REF with a column letter
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
 error-formula-too-deep = The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)
 error-formula-unknown-function = Unknown function { $name }. Check its spelling
-error-formula-wrong-argument-count = Wrong number of arguments for { $name }: expected { $expected }, found { $found }
+error-formula-unknown-function-suggestion = Unknown function { $name }. Did you mean { $suggestion }?
+# The accepted argument counts of a function (#404): `count` is how many
+# counts it accepts, `first` and `last` the smallest and the largest, `second`
+# the one after the first (three counts: "1, 2 or 3"). A Fluent term cannot
+# take variables, so the sentence is written in both messages.
+error-formula-wrong-argument-count = Function { $name } takes { $count ->
+        [1] { $first ->
+            [0] no arguments
+            [1] 1 argument
+           *[other] { $first } arguments
+        }
+        [2] { $first } or { $last } arguments
+       *[other] { $first }, { $second } or { $last } arguments
+    } (found { $found })
+error-formula-wrong-argument-count-suggestion = Function { $name } takes { $count ->
+        [1] { $first ->
+            [0] no arguments
+            [1] 1 argument
+           *[other] { $first } arguments
+        }
+        [2] { $first } or { $last } arguments
+       *[other] { $first }, { $second } or { $last } arguments
+    } (found { $found }). Use { $suggestion } instead
 error-formula-not-a-function = { $letter } is a column, not a function. To multiply, write { $letter }*(...)
 error-formula-pi-needs-parentheses = For the number π, write pi() (a lone pi would be column PI)
 
@@ -1012,6 +1034,45 @@ column-long-name = Long Name
 column-units = Units
 column-comments = Comments
 workbook-header-formula = F(x)=
+# Help of the F(x)= cell (#404): the functions a column formula can call
+formula-help-title = Functions of a formula
+formula-help-note = Names are not case-sensitive. A column is written by its letter.
+formula-help-family-powers = Powers and logarithms
+formula-help-family-trigonometry = Trigonometry
+formula-help-family-error = Error function
+formula-help-family-rounding = Sign and rounding
+formula-help-family-choice = Choice and comparison
+formula-help-family-constants = Constants
+formula-help-exp = e to the power x
+formula-help-ln = Natural logarithm
+formula-help-log = Base-10 logarithm
+formula-help-log2 = Base-2 logarithm
+formula-help-logx = Logarithm of x in base b
+formula-help-sqrt = Square root
+formula-help-root = n-th root of x
+formula-help-pow = x to the power y
+formula-help-abs = Absolute value
+formula-help-sign = Sign: -1, 0 or 1
+formula-help-floor = Largest integer not above x
+formula-help-ceil = Smallest integer not below x
+formula-help-round = x rounded to n decimals
+formula-help-mod = Remainder of x divided by y
+formula-help-sin = Sine, x in radians
+formula-help-cos = Cosine, x in radians
+formula-help-tan = Tangent, x in radians
+formula-help-asin = Inverse sine, in radians
+formula-help-acos = Inverse cosine, in radians
+formula-help-atan = Inverse tangent, in radians
+formula-help-atan2 = Angle of the point (x, y), in radians
+formula-help-sinh = Hyperbolic sine
+formula-help-cosh = Hyperbolic cosine
+formula-help-tanh = Hyperbolic tangent
+formula-help-erf = Error function
+formula-help-erfc = Complementary error function
+formula-help-min = The smaller of x and y
+formula-help-max = The larger of x and y
+formula-help-if = a if the condition c holds, otherwise b
+formula-help-pi = The number π
 common-metadata = Metadata
 workbook-metadata-hide = Hide Metadata Row
 workbook-metadata-summary =
@@ -1340,7 +1401,7 @@ error-analysis-expr-unbalanced = Unbalanced parentheses (position { $position })
 error-analysis-expr-bad-number = Malformed number at position { $position }
 error-analysis-expr-too-deep = Expression nested too deeply (position { $position })
 error-analysis-expr-unknown-function = Unknown function { $name } at position { $position }
-error-analysis-expr-wrong-arguments = { $name } takes { $expected } argument(s), { $found } given (position { $position })
+error-analysis-expr-wrong-arguments = Function { $name } takes { $expected } argument(s), { $found } given (position { $position })
 
 ## Analysis — status messages and what is missing (#181)
 status-analysis-no-series = Select at least one Y column to analyze
@@ -1669,7 +1730,7 @@ error-import-running = An import is already running
 status-import-progress = Importing… { $done } of { $total } { $total ->
     [one] file
    *[other] files
-}
+    }
 error-import-start = Could not start the import: { $cause }
 error-import-stopped = The import stopped before the end
 error-refresh-no-imported-column = This sheet has no column imported from a file
@@ -1679,7 +1740,7 @@ error-refresh-close-group = the refresh could not be completed as a single undo 
 status-refresh-done = { $count ->
     [one] { $count } column refreshed from its file
    *[other] { $count } columns refreshed from their files
-}
+    }
 error-refresh-partial = { $count ->
     [one] { $count } column refreshed from its file
    *[other] { $count } columns refreshed from their files
@@ -1746,7 +1807,7 @@ error-template-import-invalid = The template { $path } is not valid: { $detail }
 status-import-dropped = { $count ->
     [one] { $count } file imported with template “{ $models }”
    *[other] { $count } files imported with template “{ $models }”
-}
+    }
 
 # Fields: value clamped to a fixed bound (#219).
 field-clamped-min = Set to the minimum, { $limit }
@@ -1828,6 +1889,8 @@ preferences-display-object-manager = Object Manager
 preferences-display-new = New
 preferences-show-formula-help = Show formula syntax help
     .hint = Shows the "?" icon next to the text fields that accept a formula (titles, labels, units). Hidden, the fields keep their own reminder.
+preferences-show-column-formula-help = Show F(x)= help
+    .hint = Shows the "?" icon, which lists the functions, while the F(x)= cell of a column is edited.
 preferences-om-listed = Listed in the panel
 preferences-new-graphs = New graphs
 preferences-new-graphs-note = Starting point of the graphs you create. Each graph then keeps its own setting, in its Graph Properties; graphs that already exist are not changed.

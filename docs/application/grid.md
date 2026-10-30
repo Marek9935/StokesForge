@@ -286,6 +286,17 @@ not crossing the boundary: a drag that starts in the gutter and crosses
 a cell or the row of letters sets a simple selection again rather than
 silently extending with no effect, and conversely.
 
+### The "?" help of the F(x)= cell (#404)
+
+While the `F(x)=` cell is edited (`header_field_widget`, `HeaderField::Formula`),
+a "?" icon sits at its right (`app::column_formula_help`), shown only when the
+preference `show_column_formula_help` is on. The text field gives up the icon's
+width (`reserved_width`) so that a narrow column does not clip it. The icon
+senses only the hover (`hover_help`): it never takes the keyboard focus, and
+hovering it keeps the cell open; a click on it is a click outside the field,
+which validates the cell like any other (`FocusLoss::Ends`, S-T4). The list is
+`stokesforge_app_state::formula_help::groups()`, read from `Callee::all()`.
+
 ### The header-side gutter: uniform, and also selectable
 
 On the stacked header side (`app::grid::row_number_header_widget`), the gutter carried

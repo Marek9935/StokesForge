@@ -203,7 +203,9 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "Column … does not exist in this sheet" | A formula names a letter that is not in the sheet. |
 | "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between two formulas. |
 | "Unknown function …. Check its spelling" | A name followed by `(` is not one of the functions listed in [Formula syntax](../guide/projects-and-workbooks.md#formula-syntax). |
-| "Wrong number of arguments for …: expected …, found …" | Give the function the number of values it expects, separated by commas. |
+| "Unknown function …. Did you mean …?" | The name is close to a function: write that one. |
+| "Function … takes … arguments (found …)" | Give the function the number of values it takes, separated by commas (`pi()` takes none). |
+| "Function … takes … arguments (found …). Use … instead" | Another function does what you meant: `logx(B, 2)` for a base, `atan2(y, x)` for two values, `root(x, n)` for the n-th root. |
 | "… is a column, not a function. To multiply, write …*(...)" | Add the `*` sign between the column and the parenthesis: `A*(B/C)`. |
 | "For the number π, write pi() (a lone pi would be column PI)" | Write `pi()` with parentheses. |
 

@@ -278,19 +278,30 @@ fn display_page(
     });
 }
 
-/// Display › Interface: the formula syntax help icon of the text fields.
+/// Display › Interface: the formula syntax help icon of the text fields, and the
+/// "?" of the `F(x)=` cell (#404).
 fn interface_tab(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
     let mut help = state.show_formula_help();
     let before = help;
+    let mut column_help = state.show_column_formula_help();
+    let column_before = column_help;
     form(ui, "preferences_display_interface", |rows| {
         rows.checkbox(
             &mut help,
             tr!("preferences-show-formula-help"),
             Some(tr!("preferences-show-formula-help", "hint")),
         );
+        rows.checkbox(
+            &mut column_help,
+            tr!("preferences-show-column-formula-help"),
+            Some(tr!("preferences-show-column-formula-help", "hint")),
+        );
     });
     if help != before {
         actions.push(Action::SetShowFormulaHelp(help));
+    }
+    if column_help != column_before {
+        actions.push(Action::SetShowColumnFormulaHelp(column_help));
     }
 }
 
@@ -1012,6 +1023,17 @@ mod tests {
             .click();
         harness.run();
         assert!(!harness.state().state.show_formula_help());
+        // The "?" of the F(x)= cell (#404) has its own box, on by default.
+        assert!(harness.state().state.show_column_formula_help());
+        harness
+            .get_by_label(&tr!("preferences-show-column-formula-help"))
+            .click();
+        harness.run();
+        assert!(!harness.state().state.show_column_formula_help());
+        assert!(
+            !harness.state().state.show_formula_help(),
+            "the other preference is untouched"
+        );
 
         go_to_display(&mut harness, &tr!("preferences-display-new"));
         assert!(!harness.state().state.new_graph_decimal_comma());

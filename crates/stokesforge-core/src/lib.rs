@@ -82,7 +82,7 @@ pub use compose::PlannedSeries;
 pub use copy::NodeCopy;
 pub use error::{CoreError, CoreResult};
 pub use formula::{
-    evaluate as evaluate_formula, topological_order, ColumnFormula, Formula, FormulaError,
+    evaluate as evaluate_formula, topological_order, Callee, ColumnFormula, Formula, FormulaError,
     FormulaEvaluation, FormulaPart, REF_TOKEN,
 };
 pub use id::{IdAllocator, NodeId};
