@@ -119,13 +119,23 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data** |
+| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size** |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position** |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
+
+### Graph size
+
+A graph is as big as its layers. In **General**, the **Size** section sets the width of each column of layers and the height of each row, in the unit chosen in **File ▸ Preferences… ▸ General ▸ Length unit** (centimeters by default; millimeters, points or inches). A graph with one layer has **Width** and **Height**; with several, **Column 1 width**, **Column 2 width**, **Row 1 height** and so on. **Graph size** shows the total, which you cannot type in: it is the sum of the widths by the sum of the heights, plus the room the title takes above the graph when it is shown.
+
+<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Column 1 width, Column 2 width, Height and Graph size." width="480">
+
+A new graph is 480 × 360 points (about 17 × 12.7 cm). A cell can be from 36 points (about 1.3 cm) to 2000 points (about 70 cm) high or wide. Changing one size does not change the others: the graph grows or shrinks by the difference. Setting the sizes of two graphs to the same numbers lets you place them one over the other at the same scale. The size is part of the file, and the change is one step of the window's single **Undo**.
+
+A graph saved by an older version has no sizes of its own. It keeps its familiar 480 × 360 points, and the first size you change gives every layer the size it had.
 
 ## Change a series
 
@@ -364,11 +374,11 @@ Zoom and pan act on all the layers that share a plot area, so the ticks stay ali
 
 ## Several layers side by side
 
-A graph can show several plot areas in a grid. To add one, choose **Graph ▸ New Layer Beside** and pick **Right** or **Below**: an empty layer appears next to the active layer and becomes active.
+A graph can show several plot areas in a grid. To add one, choose **Graph ▸ New Layer Beside** and pick **Right** or **Below**: an empty layer appears next to the active layer and becomes active. It is as big as the layer it sits next to, so a 4:3 layer gets a 4:3 neighbor, and the graph grows to make room. On a grid of several rows, **Right** adds a whole column (the other rows get an empty space there) and **Below** a whole row.
 
 You can also drag columns from a worksheet onto the right or bottom edge of the graph. While you drag, the two edges are outlined. Drop on the right edge to put the series in a new layer to the right of the nearest layer, or on the bottom edge to put it below. In the bottom-right corner, the new layer goes to the right.
 
-To delete a layer, right-click its node in the Object Manager and choose **Delete**. The layer disappears with the layers overlaid on it, and its neighbours close the gap. The last layer cannot be deleted. Deleting an overlay layer removes only that layer. **Undo** brings it back in one step.
+To delete a layer, right-click its node in the Object Manager and choose **Delete**. The layer disappears with the layers overlaid on it. If it was alone in its column or row, that column or row goes away with its size and the graph shrinks by it; otherwise it leaves an empty space. The last layer cannot be deleted. Deleting an overlay layer removes only that layer. **Undo** brings it back in one step.
 
 ## The Object Manager
 

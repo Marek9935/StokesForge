@@ -938,3 +938,68 @@ fn the_custom_ticks_agree_and_change_the_figure() {
         changes.push(pixels);
     }
 }
+
+// -- #394: the size of the figure comes from its cells --
+
+/// The screen and the export lay out the same figure at the same size, from
+/// stored cell sizes and a title whose band is measured through Typst (every
+/// title goes through it): both read `pipeline::figure_layout`.
+#[test]
+fn the_screen_and_the_export_size_the_figure_the_same_from_its_cells() {
+    use plotters::drawing::IntoDrawingArea;
+    let mut fixture = minimal();
+    fixture.spec.title = "Sized figure".to_owned();
+    fixture.spec.column_widths = vec![700.3];
+    fixture.spec.row_heights = vec![310.4];
+
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let svg_layout =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("SVG");
+
+    let ctx = egui::Context::default();
+    ctx.set_fonts(stokesforge_render::font_definitions());
+    let cache = stokesforge_render::formula::FormulaCache::new();
+    let mut egui_layout = None;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text = stokesforge_render_egui::ScreenText::new(&ctx, &measurer);
+        let typst =
+            stokesforge_render_egui::TypstScreen::new(&ctx, &cache, &choice).expect("fonts");
+        let mut shapes = Vec::new();
+        let probe = stokesforge_render_egui::EguiBackend::in_rect(
+            &mut shapes,
+            Rect::from_min_size(Pos2::ZERO, egui::vec2(1.0, 1.0)),
+            &text,
+        )
+        .with_typst(typst)
+        .into_drawing_area();
+        egui_layout = Some(pipeline::figure_layout(&fixture.spec, &probe).expect("egui"));
+    });
+    output.textures_delta.clear();
+
+    assert_eq!(
+        egui_layout,
+        Some(svg_layout.clone()),
+        "one layout per backend"
+    );
+    assert!(svg_layout.title_band > 0);
+    assert_eq!(svg_layout.size, (700, 310 + svg_layout.title_band));
+}
+
+/// Drawn at the size of its layout, a figure without a title has exactly the
+/// stored cell, on both backends, primitive by primitive.
+#[test]
+fn a_stored_cell_is_drawn_at_its_size_by_both_backends() {
+    let mut fixture = minimal();
+    fixture.spec.title.clear();
+    fixture.spec.column_widths = vec![700.3];
+    fixture.spec.row_heights = vec![310.4];
+    let (_, drawn) = agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        (700, 310),
+        "stored cell",
+    );
+    assert_eq!(drawn.panels[0].cell_size, (700, 310));
+    assert_eq!(drawn.panels[0].cell_origin, (0, 0));
+}

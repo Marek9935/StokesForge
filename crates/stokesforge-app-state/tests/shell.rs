@@ -13928,6 +13928,175 @@ fn removing_a_cell_is_one_step_and_the_last_cell_is_refused() {
     );
 }
 
+/// The layout of a spec as the exports measure it.
+fn layout_of(spec: &stokesforge_plot::PlotSpec) -> stokesforge_render::pipeline::FigureLayout {
+    stokesforge_render_svg::figure_layout(
+        spec,
+        &stokesforge_render_svg::SvgTextMeasurer::default(),
+        &stokesforge_render_svg::FontChoice::default(),
+    )
+    .expect("layout")
+}
+
+/// #394: a new graph is created with explicit sizes (480 x 360 pt, no title),
+/// and a cell added beside it is exactly as big: the figure grows, 4/3 each.
+#[test]
+fn a_new_graph_is_480_by_360_and_a_cell_beside_it_is_as_big() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let spec = graph_spec(&state, graph);
+    assert_eq!(spec.column_widths, [480.0]);
+    assert_eq!(spec.row_heights, [360.0]);
+    assert_eq!(layout_of(&spec).size, (480, 360));
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let wider = graph_spec(&state, graph);
+    assert_eq!(wider.column_widths, [480.0, 480.0]);
+    assert_eq!(layout_of(&wider).size, (960, 360));
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Below,
+        columns: Vec::new(),
+    });
+    assert_eq!(layout_of(&graph_spec(&state, graph)).size, (960, 720));
+}
+
+/// #394: a graph from an old file (no stored size, title band inside the
+/// 480 x 360) keeps the exact size of its cell when a cell is added: the sizes
+/// are materialized first. The witness is the figure as the old file drew it.
+#[test]
+fn adding_a_cell_to_a_legacy_graph_keeps_the_size_of_the_existing_cell() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    let mut legacy = graph_spec(&state, graph);
+    legacy.title = "Legacy".to_owned();
+    legacy.column_widths.clear();
+    legacy.row_heights.clear();
+    state.dispatch(Action::SetPlotSpec {
+        graph,
+        spec: legacy.clone(),
+    });
+    let before = layout_of(&legacy);
+    assert_eq!(before.size, (480, 360));
+    assert!(before.title_band > 0);
+    let cell = before.cell_rect(0, 0).expect("cell");
+
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let after = layout_of(&graph_spec(&state, graph));
+    assert_eq!(
+        after.cell_rect(0, 0),
+        Some(cell),
+        "the existing cell is unchanged"
+    );
+    assert_eq!(
+        after.cell_rect(0, 1).map(|r| (r.2, r.3)),
+        Some((cell.2, cell.3))
+    );
+    assert_eq!(after.size, (960, 360), "the figure grows by one cell");
+}
+
+/// #394: a size set through `Action::SetCellSize` is one undo step, redo
+/// restores it, the other cells keep their size, and a legacy graph is
+/// materialized by the same step.
+#[test]
+fn setting_a_cell_size_is_one_undo_step_and_the_other_cells_keep_theirs() {
+    use stokesforge_core::compose::{CellAxis, CellSide};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let before = graph_spec(&state, graph);
+    let revision = state.snapshot().revision;
+
+    state.dispatch(Action::SetCellSize {
+        graph,
+        axis: CellAxis::Column,
+        index: 1,
+        size: 300.0,
+    });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.column_widths, [480.0, 300.0]);
+    assert_eq!(after.row_heights, before.row_heights);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(
+            stokesforge_commands::PlotEditKind::ResizeCell
+        ))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), after);
+
+    // Same size, or outside the grid: nothing is sent.
+    let revision_now = state.snapshot().revision;
+    state.dispatch(Action::SetCellSize {
+        graph,
+        axis: CellAxis::Column,
+        index: 1,
+        size: 300.0,
+    });
+    state.dispatch(Action::SetCellSize {
+        graph,
+        axis: CellAxis::Row,
+        index: 7,
+        size: 100.0,
+    });
+    assert_eq!(state.snapshot().revision, revision_now);
+    assert_ne!(revision, revision_now);
+}
+
+/// #394: deleting a cell that empties its column removes that column and its
+/// width; undo brings both back in one step.
+#[test]
+fn deleting_the_last_cell_of_a_column_shrinks_the_figure_by_its_width() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    use stokesforge_core::compose::{CellAxis, CellSide};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    state.dispatch(Action::SetCellSize {
+        graph,
+        axis: CellAxis::Column,
+        index: 1,
+        size: 300.0,
+    });
+    let two = graph_spec(&state, graph);
+    assert_eq!(layout_of(&two).size, (780, 360));
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Panel(1),
+    });
+    let one = graph_spec(&state, graph);
+    assert_eq!(one.column_widths, [480.0]);
+    assert_eq!(layout_of(&one).size, (480, 360));
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), two);
+}
+
 /// #357: deleting an overlay layer takes that layer only.
 #[test]
 fn removing_an_overlay_layer_leaves_its_cell() {

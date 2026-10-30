@@ -18,6 +18,8 @@ pub(crate) fn panel(index: usize, row: usize, column: usize) -> DrawnPanel {
         y2_range: None,
         pixel_origin: (0, 0),
         pixel_size: (100, 100),
+        cell_origin: (0, 0),
+        cell_size: (100, 100),
         x_scale: AxisScale::Linear,
         y_scale: AxisScale::Linear,
         y2_scale: AxisScale::Linear,

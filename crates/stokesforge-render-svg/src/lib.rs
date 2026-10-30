@@ -75,14 +75,49 @@ pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
 pub use stokesforge_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
 pub use stokesforge_render::{FigureTexts, FontChoice};
 
-/// Default size of an exported figure, in SVG units.
-///
-/// Reuses [`pipeline::DEFAULT_FIGURE_SIZE`] rather than its own value:
-/// the export must produce the same figure as the default screen. Every
-/// exporting function of this module takes `size` as a parameter — that is
-/// already the extension point for a configurable size, just not yet wired
-/// to a UI.
+/// Size of the figure of a graph that records no cell size and has no title,
+/// in SVG units: [`pipeline::DEFAULT_FIGURE_SIZE`]. **Not the size to export
+/// with** since #394: the figure's size comes from its cells, use
+/// [`figure_layout`] / [`figure_size`]. Every exporting function of this module
+/// still takes `size` as a parameter.
 pub const DEFAULT_SIZE: (u32, u32) = pipeline::DEFAULT_FIGURE_SIZE;
+
+/// The layout of the figure of `spec` (#394), the title measured with the
+/// export's own measurement, Typst included (invariant 4): the page of an
+/// export is sized by this, on a throwaway backend, before the figure is drawn.
+/// Screen and export agree because both read [`pipeline::figure_layout`].
+pub fn figure_layout(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<pipeline::FigureLayout, SvgError> {
+    use plotters::drawing::IntoDrawingArea;
+    let mut buffer = String::new();
+    if !spec.title_visible || spec.title.is_empty() {
+        // No title to measure: no Typst to build.
+        let probe =
+            MeasuredSvgBackend::with_string(&mut buffer, (1, 1), measurer).into_drawing_area();
+        return Ok(pipeline::figure_layout(spec, &probe)?);
+    }
+    let cache = stokesforge_render::formula::FormulaCache::new();
+    let mode = SvgTextMode::Text;
+    let typst = typst_export::TypstExport::new(&cache, choice, mode).map_err(SvgError::Typst)?;
+    let probe = MeasuredSvgBackend::with_string(&mut buffer, (1, 1), measurer)
+        .with_typst(&typst)
+        .with_font(choice, mode)
+        .into_drawing_area();
+    Ok(pipeline::figure_layout(spec, &probe)?)
+}
+
+/// [`figure_layout`]'s size, or the legacy default if the measurement fails
+/// (it practically cannot).
+pub fn figure_size(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> (u32, u32) {
+    figure_layout(spec, measurer, choice).map_or(DEFAULT_SIZE, |layout| layout.size)
+}
 
 /// What can go wrong during an export.
 #[derive(Debug, thiserror::Error)]

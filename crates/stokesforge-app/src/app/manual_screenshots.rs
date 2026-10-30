@@ -39,6 +39,7 @@ use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::object_manager::VisibilityTarget;
 use stokesforge_app_state::preferences::Preferences;
 use stokesforge_app_state::state::{Action, AppState, ImportStep, PlotAxis, PlotSettingsTab};
+use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, NodeKind};
 use stokesforge_plot::SeriesRef;
 use stokesforge_session::Session;
@@ -278,6 +279,34 @@ const SHOTS: &[Shot] = &[
                     target: VisibilityTarget::Series(SeriesRef { panel: 0, index: 0 }),
                 },
             );
+        },
+        crop: Crop::Rect(dialog_rect),
+    },
+    Shot {
+        name: "graphs-properties-general",
+        setup: |h| {
+            empty_workspace(h);
+            let graph = h.state().ids.graph1;
+            // Two layers side by side: the Size section lists two column
+            // widths and one row height.
+            act(
+                h,
+                Action::AddCell {
+                    graph,
+                    panel: 0,
+                    side: CellSide::Right,
+                    columns: Vec::new(),
+                },
+            );
+            act(
+                h,
+                Action::OpenPlotSettings {
+                    graph,
+                    tab: PlotSettingsTab::Graph,
+                    axis: None,
+                },
+            );
+            grow_dialog(h, 120.0);
         },
         crop: Crop::Rect(dialog_rect),
     },

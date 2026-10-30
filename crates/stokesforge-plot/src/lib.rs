@@ -110,7 +110,10 @@ pub use series::{
     BinCount, PlotType, SeriesAxis, SeriesSpec, DEFAULT_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS,
 };
 pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
-pub use spec::{Panels, PlotSpec, SeriesGroupRef, SeriesRef, TRANSPARENT};
+pub use spec::{
+    Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE, MAX_CELL_SIZE,
+    MAX_FIGURE_EXTENT, MIN_CELL, TRANSPARENT,
+};
 pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,
 };

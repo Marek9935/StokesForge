@@ -26,6 +26,15 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Graph size (#394): each grid column has a width and each row a height, in
+  points, set in Graph Properties > General > Size (in the unit chosen in
+  Preferences, centimetres by default). The figure is their sum plus the title
+  band, and the screen, the exports and the copy of the figure all use it. A new
+  graph is 480 x 360 pt; a layer added Beside or Below keeps the size of its
+  reference layer and the figure grows. New additive `.stf` fields on the graph
+  (`column_widths`, `row_heights`; absent = the old 480 x 360 pt shared
+  equally): an older version that saves the file again loses them without a
+  message.
 - Error bars (#360): the first Y Error (X Error) column to the right of a Y
   column, before the next Y column, is paired with it at plot time, and the
   **Y error** / **X error** fields of Series Properties change or remove it

@@ -166,6 +166,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Layer | Calque | Plot area with its axes; a graph contains one or more | Panel, Panneau, Couche | O (Q22) |
 | New Layer Beside | Calque à côté | Graph menu submenu: **Right** / **À droite**, **Below** / **En dessous**; adds a layer in a new cell of the graph's grid (#357). "Cell" / "Case" stays off the interface | Cell, Case, Panel | O |
 | Title | Titre | Text at the top of the graph | Intitulé | G |
+| Size (graph) | Taille | Section of Graph Properties › General: the width of each column of layers, the height of each row (#394). « Cell » / « Case » stays off the interface; the unit is in the label (« Width (cm) » / « Largeur (cm) ») | Dimensions, Cell size | O |
+| Length unit | Unité de longueur | Preference: Centimeters (default), Millimeters, Points, Inches; the file keeps points (#394) | Unit of measure | O |
 | Axis (pl. Axes) | Axe | Graduated line carrying a quantity | — | G |
 | Bottom / Left / Right / Top | Bas / Gauche / Droite / Haut | The four axes of an area, named by their place (#358); composed texts are phrased by a selector, never by gluing: « Axe du bas », « Titre de l'axe de gauche » | X (bottom), Y2, Secondary Y, Axe X (bas) | G |
 | Y axis | Axe Y | Series field: the vertical axis the series is drawn against, Left or Right (#358); grayed out on an overlaid layer | Axe secondaire | G |

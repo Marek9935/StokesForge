@@ -117,22 +117,7 @@ pub const FONT_FAMILY: &str = "sans-serif";
 /// many is impossible; the fallback is described in [`grid_of`].
 pub const MAX_CELLS: usize = 256;
 
-/// Dimensions below which a cell is no longer a plot area.
-///
-/// A panel smaller than this has room for neither its ticks nor its frame;
-/// it is counted as omitted rather than drawn as a mess.
-pub const MIN_CELL: (u32, u32) = (48, 36);
-
-/// Default size of a StokesForge figure, in pixels — `(width, height)`.
-///
-/// Deliberate choice, not yet a setting. 4/3, as aimed — but provisional
-/// (values to revisit). Any future configurability (per graph, per export)
-/// goes through this single point rather than through a constant copied into
-/// each backend — `stokesforge-render-svg` (`DEFAULT_SIZE`, export) uses it
-/// as the fixed page size; `stokesforge-app` (screen view, F11) only uses it
-/// for its 4/3 ratio, the figure being scaled "contain" into the window's
-/// available space (`graph_view_contents`).
-pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
+pub use stokesforge_plot::{DEFAULT_FIGURE_SIZE, MIN_CELL};
 
 /// What a panel ended up drawing — enough to write a test without rereading
 /// pixels.
@@ -167,6 +152,12 @@ pub struct DrawnPanel {
     pub pixel_origin: (i32, i32),
     /// Dimensions of the plot area, in backend pixels.
     pub pixel_size: (u32, u32),
+    /// Top-left corner of the **cell** of the grid this layer lives in (#394),
+    /// in backend pixels. Several layers of the same cell share it; the cell
+    /// is what the resize handles and the layer badges are built from.
+    pub cell_origin: (i32, i32),
+    /// Dimensions of the cell, in backend pixels.
+    pub cell_size: (u32, u32),
     /// Scale of the abscissa axis, as it was applied.
     pub x_scale: AxisScale,
     /// Scale of the left ordinate.
@@ -469,7 +460,11 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // its area, #163).
     let canvas = root.use_screen_coord();
     let layout = grid_of(spec, plot.panels.len());
-    let cells = area.split_evenly((layout.rows, layout.columns));
+    let (area_width, area_height) = area.dim_in_pixel();
+    let (widths, heights) = declared_sizes(spec);
+    let column_breaks = fit_breaks(widths.as_deref(), layout.columns, area_width);
+    let row_breaks = fit_breaks(heights.as_deref(), layout.rows, area_height);
+    let cells = grid_cells(&area, &column_breaks, &row_breaks);
 
     // The tick areas of each cell: the union of what its layers ask for, so
     // that superimposed layers (#167) share an identical plot area. `bases`
@@ -578,6 +573,184 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
 
     root.present()?;
     Ok(drawn)
+}
+
+/// The stored cell sizes of a graph whose grid is the declared one: widths,
+/// heights (`None` = legacy, shared equally). A grid abandoned for
+/// [`MAX_CELLS`] reads the legacy split, whatever is stored.
+fn declared_sizes(spec: &PlotSpec) -> (Option<Vec<f64>>, Option<Vec<f64>>) {
+    if declared_grid(spec) {
+        (spec.cell_widths(), spec.cell_heights())
+    } else {
+        (None, None)
+    }
+}
+
+/// True if the grid the panels declare is small enough to be used as is
+/// ([`MAX_CELLS`]).
+fn declared_grid(spec: &PlotSpec) -> bool {
+    spec.rows()
+        .checked_mul(spec.columns())
+        .is_some_and(|cells| cells <= MAX_CELLS)
+}
+
+/// The `count + 1` breakpoints (first `0`, last `total`) that cut `total`
+/// pixels along one axis of the grid.
+///
+/// With `sizes` (points, one per column or row) they are the **rounded prefix
+/// sums**, scaled to `total`: rounding each size alone would drift, and the
+/// screen and the export would no longer agree to the pixel. Scaling is the
+/// identity when `total` is the figure's own size (the sum rounded), which is
+/// how [`figure_layout`] and [`draw_on_with_texts`] stay the same arithmetic;
+/// it only does something for a backend whose size differs from the layout's
+/// (tests, legacy callers). Without `sizes` (legacy) the cut is Plotters'
+/// `split_evenly`.
+fn fit_breaks(sizes: Option<&[f64]>, count: usize, total: u32) -> Vec<u32> {
+    let count = count.max(1);
+    let Some(sizes) = sizes.filter(|s| s.len() == count) else {
+        let n = count as u32;
+        return (0..=count as u32)
+            .map(|i| i * (total / n) + i.min(total % n))
+            .collect();
+    };
+    let sum: f64 = sizes.iter().sum();
+    let mut acc = 0.0;
+    let mut breaks = vec![0];
+    for size in sizes {
+        acc += size;
+        let at = (acc * f64::from(total) / sum).round();
+        breaks.push((at as u32).min(total));
+    }
+    if let Some(last) = breaks.last_mut() {
+        *last = total;
+    }
+    breaks
+}
+
+/// The cells of a grid, row by row, cut from `area` at the given breakpoints.
+fn grid_cells<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    column_breaks: &[u32],
+    row_breaks: &[u32],
+) -> Vec<DrawingArea<DB, Shift>> {
+    let mut cells = Vec::new();
+    for rows in row_breaks.windows(2) {
+        for columns in column_breaks.windows(2) {
+            cells.push(area.clone().shrink(
+                (columns[0] as i32, rows[0] as i32),
+                (columns[1] - columns[0], rows[1] - rows[0]),
+            ));
+        }
+    }
+    cells
+}
+
+/// The size of a figure and where its cells are: **the single place** where
+/// the sizes of the cells, the title band and the page meet (#394). The screen
+/// (`paint_scaled`), the three exports, the figure copy, the `pyst` export, the
+/// PNG resolution labels and the "contain" ratio of the window all read it, so
+/// the figure has the same size everywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FigureLayout {
+    /// Width and height of the figure in points (= SVG units = PDF points =
+    /// PNG pixels at x1).
+    pub size: (u32, u32),
+    /// Height of the title band, inside `size`; `0` without a visible title.
+    pub title_band: u32,
+    /// Column breakpoints, from `0` to `size.0`: `columns + 1` of them.
+    pub column_breaks: Vec<u32>,
+    /// Row breakpoints under the title band, from `0` to `size.1 -
+    /// title_band`: `rows + 1` of them.
+    pub row_breaks: Vec<u32>,
+}
+
+impl FigureLayout {
+    /// The width of each grid column, in points (what the application stores
+    /// to make a legacy graph explicit, #394).
+    pub fn column_widths(&self) -> Vec<f64> {
+        self.column_breaks
+            .windows(2)
+            .map(|pair| f64::from(pair[1] - pair[0]))
+            .collect()
+    }
+
+    /// The height of each grid row, in points, title band excluded.
+    pub fn row_heights(&self) -> Vec<f64> {
+        self.row_breaks
+            .windows(2)
+            .map(|pair| f64::from(pair[1] - pair[0]))
+            .collect()
+    }
+
+    /// The rectangle of grid cell `(row, column)` in figure coordinates:
+    /// `(x, y, width, height)`, the title band included in `y`.
+    pub fn cell_rect(&self, row: usize, column: usize) -> Option<(u32, u32, u32, u32)> {
+        let (x0, x1) = (
+            *self.column_breaks.get(column)?,
+            *self.column_breaks.get(column + 1)?,
+        );
+        let (y0, y1) = (*self.row_breaks.get(row)?, *self.row_breaks.get(row + 1)?);
+        Some((x0, y0 + self.title_band, x1 - x0, y1 - y0))
+    }
+}
+
+/// [`figure_layout`] for a caller that measures text its own way: `band_at`
+/// gives the title band for a figure of the given width (it measures the
+/// title there, the width of its box being a fraction of the figure's).
+pub fn figure_layout_with<E>(
+    spec: &PlotSpec,
+    band_at: impl FnOnce(u32) -> Result<u32, E>,
+) -> Result<FigureLayout, E> {
+    let grid = grid_of(spec, spec.panels.len());
+    let (widths, heights) = declared_sizes(spec);
+    // Width first: the band depends on it.
+    let width = match &widths {
+        Some(sizes) => sizes.iter().sum::<f64>().round() as u32,
+        None => DEFAULT_FIGURE_SIZE.0,
+    };
+    let band = band_at(width)?;
+    let (height, area_height) = match &heights {
+        Some(sizes) => {
+            let inner = sizes.iter().sum::<f64>().round() as u32;
+            (inner.saturating_add(band), inner)
+        }
+        None => (
+            DEFAULT_FIGURE_SIZE.1,
+            DEFAULT_FIGURE_SIZE.1.saturating_sub(band),
+        ),
+    };
+    Ok(FigureLayout {
+        size: (width, height),
+        title_band: band,
+        column_breaks: fit_breaks(widths.as_deref(), grid.columns, width),
+        row_breaks: fit_breaks(heights.as_deref(), grid.rows, area_height),
+    })
+}
+
+/// The layout of the figure of `spec`, the title measured on `probe`: any
+/// drawing area of the backend that will draw it (its size does not matter,
+/// only its text measurement does, Typst included — invariant 4).
+pub fn figure_layout<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+) -> Result<FigureLayout, DrawingAreaErrorKind<DB::ErrorType>> {
+    figure_layout_with(spec, |width| title_band(spec, probe, width))
+}
+
+/// Height of the band the graph title takes in a figure `width` wide (0
+/// without a visible title). Same measure and same formula as
+/// `DrawingArea::titled` and [`reserve_title_band`].
+fn title_band<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+    width: u32,
+) -> Result<u32, DrawingAreaErrorKind<DB::ErrorType>> {
+    if !spec.title_visible || spec.title.is_empty() {
+        return Ok(0);
+    }
+    let style = font_style(&spec.title_font, TITLE_SIZE, (0, 0, 0, 255), width);
+    let (_, text_height) = probe.estimate_text_size(&spec.title, &style)?;
+    Ok(text_height + (text_height / 2).min(5) * 2)
 }
 
 /// The area under the band a title would occupy, **without** writing the
@@ -1567,6 +1740,8 @@ fn draw_panel<DB: DrawingBackend>(
         y2_range: y2_range.map(|range| data_range(y2_scale, range)),
         pixel_origin: origin,
         pixel_size: size,
+        cell_origin: cell.get_base_pixel(),
+        cell_size: cell.dim_in_pixel(),
         x_scale,
         y_scale,
         y2_scale,

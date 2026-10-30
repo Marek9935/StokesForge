@@ -773,6 +773,8 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         title_font: font_to_record(&spec.title_font),
         stale_warning: spec.stale_warning,
         decimal_comma: spec.decimal_comma,
+        column_widths: spec.column_widths.clone(),
+        row_heights: spec.row_heights.clone(),
     }
 }
 
@@ -796,6 +798,8 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         title_font: record_to_font(record.title_font),
         stale_warning: record.stale_warning,
         decimal_comma: record.decimal_comma,
+        column_widths: record.column_widths,
+        row_heights: record.row_heights,
     })
 }
 

@@ -34,6 +34,7 @@ use crate::theme;
 use stokesforge_app_state::default_folders::FolderKind;
 use stokesforge_app_state::file_picker::PickRequest;
 use stokesforge_app_state::i18n::{self, Language};
+use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry, ObjectManagerGroup};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{Action, AppState, PNG_EXPORT_SCALES};
@@ -140,6 +141,8 @@ fn general_page(
     let keep_before = keep_results;
     let mut low_r2 = state.analysis_low_r2_dialog();
     let before = low_r2;
+    let mut length_unit = state.length_unit();
+    let length_unit_before = length_unit;
     let mut max_file_mb = state.max_file_mb();
     let max_file_before = max_file_mb;
     let mut max_cells_m = state.max_cells_m();
@@ -159,6 +162,21 @@ fn general_page(
                 chosen = Some(language);
             }
         });
+        // The unit of the size of a graph (#394); the file keeps points.
+        rows.row(tr!("preferences-length-unit"), |ui| {
+            choice(
+                ui,
+                "preferences_length_unit",
+                &mut length_unit,
+                &[
+                    ChoiceOption::new(LengthUnit::Cm, tr!("preferences-length-unit-cm")),
+                    ChoiceOption::new(LengthUnit::Mm, tr!("preferences-length-unit-mm")),
+                    ChoiceOption::new(LengthUnit::Pt, tr!("preferences-length-unit-pt")),
+                    ChoiceOption::new(LengthUnit::In, tr!("preferences-length-unit-in")),
+                ],
+            );
+        });
+        rows.note(tr!("preferences-length-unit-note"));
         // Cap on the size of a file at opening (A2, #316).
         rows.section(tr!("preferences-files"));
         rows.row(tr!("preferences-max-file-size"), |ui| {
@@ -225,6 +243,9 @@ fn general_page(
     }
     if low_r2 != before {
         actions.push(Action::SetAnalysisLowR2Dialog(low_r2));
+    }
+    if length_unit != length_unit_before {
+        actions.push(Action::SetLengthUnit(length_unit));
     }
     if max_file_mb != max_file_before {
         actions.push(Action::SetMaxFileMb(max_file_mb));
@@ -993,6 +1014,26 @@ mod tests {
             harness.state().state.svg_text_mode(),
             stokesforge_render_svg::SvgTextMode::Outlines
         );
+    }
+
+    /// General: the length unit of the size of graphs (#394) is centimetres, and
+    /// a click chooses another one.
+    #[test]
+    fn the_general_rubric_sets_the_length_unit() {
+        use stokesforge_app_state::length_unit::LengthUnit;
+        let mut harness = bench();
+        assert_eq!(harness.state().state.length_unit(), LengthUnit::Cm);
+        harness.get_by_label(&tr!("preferences-length-unit-note"));
+        // Four options: a drop-down list, opened on the current one.
+        harness
+            .get_by_value(&tr!("preferences-length-unit-cm"))
+            .click();
+        harness.run();
+        harness
+            .get_by_label(&tr!("preferences-length-unit-mm"))
+            .click();
+        harness.run();
+        assert_eq!(harness.state().state.length_unit(), LengthUnit::Mm);
     }
 
     /// General › Analysis: the default "Values" choice (M5) and, in Display,

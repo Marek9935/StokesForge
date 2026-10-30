@@ -740,6 +740,27 @@ pub enum Action {
         /// Dragged columns; empty for the menu.
         columns: Vec<NodeId>,
     },
+    /// Sets the width of grid column `index` or the height of grid row
+    /// `index` of the graph, in points (#394). The one path of the size fields
+    /// of Graph Properties and of a drag handle on a cell boundary: the
+    /// other columns and rows keep their size, the figure grows or shrinks
+    /// by the difference. A graph without stored sizes is first given them, so
+    /// the cells keep the size they were drawn with. A single undo step
+    /// ([`PlotEditKind::ResizeCell`]); nothing sent if the size is already
+    /// that one or the index is outside the grid.
+    SetCellSize {
+        /// Target graph.
+        graph: NodeId,
+        /// Column width or row height.
+        axis: stokesforge_core::compose::CellAxis,
+        /// Grid column or row.
+        index: usize,
+        /// The new size, in points; brought into the bounds.
+        size: f64,
+    },
+    /// Sets the unit in which the sizes of a graph are shown and typed (#394).
+    /// Application preference: no command, no history, no `.stf`.
+    SetLengthUnit(crate::length_unit::LengthUnit),
     /// Opens or closes the panel; a user preference, outside history.
     SetObjectManagerOpen(bool),
     /// Lists or hides the scales (axes) in the Object Manager (#111).
@@ -4968,9 +4989,23 @@ impl AppState {
                 name: None,
                 spec: PlotSpec {
                     decimal_comma: self.new_graph_decimal_comma(),
-                    ..PlotSpec::empty("")
+                    ..PlotSpec::new_graph()
                 },
             }),
+            Action::SetCellSize {
+                graph,
+                axis,
+                index,
+                size,
+            } => self.set_cell_size(graph, axis, index, size),
+            Action::SetLengthUnit(unit) => {
+                if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::AddWorkbook => self.add_workbook(),
             Action::AddFolder { parent } => self.add_folder(parent),
             Action::SelectSheet(id) => self.select_sheet(id),
@@ -7405,6 +7440,11 @@ impl AppState {
         self.object_manager_preferences.copy_formats()
     }
 
+    /// The unit in which the sizes of a graph are shown and typed (#394).
+    pub fn length_unit(&self) -> crate::length_unit::LengthUnit {
+        self.object_manager_preferences.length_unit()
+    }
+
     pub fn svg_text_mode(&self) -> stokesforge_render_svg::SvgTextMode {
         self.object_manager_preferences.svg_text_mode()
     }
@@ -7415,7 +7455,7 @@ impl AppState {
     }
 
     /// See [`Action::ExportGraph`]. Measures and composes like the screen:
-    /// same logical size (`DEFAULT_SIZE`, the one where
+    /// same logical size (`stokesforge_render_svg::figure_size`, the one where
     /// `GraphView::paint_scaled` lays out the figure), same fonts.
     ///
     /// The native picker asks before overwriting the typed name; the extension
@@ -7447,12 +7487,13 @@ impl AppState {
         };
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let choice = stokesforge_render_svg::FontChoice::default();
         match stokesforge_render_svg::export_to_file_with_texts(
             path,
             &plot,
-            stokesforge_render_svg::DEFAULT_SIZE,
+            stokesforge_render_svg::figure_size(spec, &measurer, &choice),
             &measurer,
-            &stokesforge_render_svg::FontChoice::default(),
+            &choice,
             format,
             &crate::figure_texts::figure_texts(),
         ) {
@@ -7499,11 +7540,12 @@ impl AppState {
             })
             .collect();
         let formats: Vec<ExportFormat> = wanted.iter().map(|(_, format)| *format).collect();
+        let choice = stokesforge_render_svg::FontChoice::default();
         let results = match stokesforge_render_svg::export_bytes_many_with_texts(
             &plot,
-            stokesforge_render_svg::DEFAULT_SIZE,
+            stokesforge_render_svg::figure_size(spec, &measurer, &choice),
             &measurer,
-            &stokesforge_render_svg::FontChoice::default(),
+            &choice,
             &formats,
             &crate::figure_texts::figure_texts(),
         ) {
@@ -9725,7 +9767,7 @@ impl AppState {
         let spec = PlotSpec {
             panels: Panels::new(panels),
             decimal_comma: self.new_graph_decimal_comma(),
-            ..PlotSpec::default()
+            ..PlotSpec::new_graph()
         };
         self.execute(Command::AddGraph {
             parent,
@@ -9856,6 +9898,7 @@ impl AppState {
             return;
         };
         let plot_type = panel_plot_type(reference);
+        self.materialize_cell_sizes(&mut spec);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
@@ -9875,6 +9918,53 @@ impl AppState {
         });
     }
 
+    /// Gives a legacy graph (no stored cell size) the sizes it is drawn with
+    /// (#394): the widths and heights `figure_layout` computes, measured like the
+    /// screen and the exports. Run on the clone of the spec before any size
+    /// edit (add or delete a cell, field, handle) so that the existing cells keep
+    /// their exact size; the layout is read from the legacy spec, so the title
+    /// band, which is inside the 480 x 360 pt there, is not counted twice. A
+    /// graph that already has both vectors is left alone.
+    fn materialize_cell_sizes(&self, spec: &mut PlotSpec) {
+        if !crate::cell_sizes::is_legacy(spec) {
+            return;
+        }
+        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let Ok(layout) = stokesforge_render_svg::figure_layout(
+            spec,
+            &measurer,
+            &stokesforge_render_svg::FontChoice::default(),
+        ) else {
+            return;
+        };
+        crate::cell_sizes::materialize_with(spec, &layout.column_widths(), &layout.row_heights());
+    }
+
+    /// [`Action::SetCellSize`].
+    fn set_cell_size(
+        &mut self,
+        graph: NodeId,
+        axis: stokesforge_core::compose::CellAxis,
+        index: usize,
+        size: f64,
+    ) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        self.materialize_cell_sizes(&mut spec);
+        if !stokesforge_core::compose::set_cell_size(&mut spec, axis, index, size) {
+            return;
+        }
+        if self.plot_spec(graph).is_some_and(|before| before == spec) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::ResizeCell,
+        });
+    }
+
     /// [`Action::RemovePlotObject`] of a layer: see
     /// [`stokesforge_core::compose::remove_cell`]. Refused with a message for
     /// the last cell. Pending drops and the open properties window forget
@@ -9883,6 +9973,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
+        self.materialize_cell_sizes(&mut spec);
         if !remove_cell(&mut spec, panel) {
             if spec.panels.get(panel).is_some() {
                 self.fail(tr!("error-last-layer"));
@@ -10048,7 +10139,7 @@ impl AppState {
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
             decimal_comma: self.new_graph_decimal_comma(),
-            ..PlotSpec::default()
+            ..PlotSpec::new_graph()
         };
         self.execute(Command::AddGraph {
             parent,

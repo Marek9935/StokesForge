@@ -19,14 +19,18 @@ use stokesforge_plot::{
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
-use crate::number_field::{auto_number_field, number_field};
+use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
+use stokesforge_app_state::cell_sizes::set_size_in_draft;
+use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
 use stokesforge_app_state::tr;
+use stokesforge_core::compose::CellAxis;
+use stokesforge_render_egui::{FigureLayout, DEFAULT_FIGURE_SIZE};
 
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{
@@ -222,6 +226,8 @@ fn plot_settings_contents(
     }
 
     let mut commit = false;
+    let unit = state.length_unit();
+    let layout = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
     let mut gradient_actions: Vec<Action> = Vec::new();
     // Saved colors, read before borrowing the draft; the
     // picker requests (save, remove) are translated into actions
@@ -297,7 +303,7 @@ fn plot_settings_contents(
                 .auto_shrink([false, false])
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {
-                        commit |= graph_settings_page(ui, spec, &mut env);
+                        commit |= graph_settings_page(ui, spec, &mut env, layout.as_ref(), unit);
                     }
                     PlotSettingsTab::PlotArea => {
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
@@ -348,7 +354,13 @@ fn plot_settings_contents(
 }
 
 /// Graph page: title and background, as a two-column form (#227).
-fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
+fn graph_settings_page(
+    ui: &mut egui::Ui,
+    spec: &mut PlotSpec,
+    env: &mut PickerEnv,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
     form(ui, "plot_graph_page", |form| {
         let mut commit = false;
         commit |= formula_field(
@@ -377,8 +389,98 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
+        commit |= size_section(form, spec, layout, unit);
         commit
     })
+}
+
+/// General › Size (#394): the width of each grid column and the height of each
+/// grid row, in the unit of the Preferences, and the size of the graph they add
+/// up to (read-only: the title band is added on top). Edits go into the draft
+/// like every other field of the window, in the one undo step of the window; a
+/// graph from an old file is first given the sizes it is drawn with, so only the
+/// edited cell changes.
+fn size_section(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    // What each cell is drawn with: the stored size, else the legacy equal
+    // split as the last painted figure laid it out.
+    let legacy = |count: usize, total: u32| vec![f64::from(total) / count as f64; count];
+    let drawn_widths = spec.cell_widths().unwrap_or_else(|| {
+        layout.map_or_else(
+            || legacy(spec.columns(), DEFAULT_FIGURE_SIZE.0),
+            FigureLayout::column_widths,
+        )
+    });
+    let drawn_heights = spec.cell_heights().unwrap_or_else(|| {
+        layout.map_or_else(
+            || legacy(spec.rows(), DEFAULT_FIGURE_SIZE.1),
+            FigureLayout::row_heights,
+        )
+    });
+    if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
+        // A grid beyond the cell cap (abandoned by the renderer): no field.
+        return false;
+    }
+    let band = layout.map_or(0, |layout| layout.title_band);
+    let symbol = unit.symbol();
+    form.section(tr!("plot-size"));
+    let mut commit = false;
+    for (axis, sizes) in [
+        (CellAxis::Column, &drawn_widths),
+        (CellAxis::Row, &drawn_heights),
+    ] {
+        let quantity = quantities::cell_size(unit, axis);
+        for (index, &points) in sizes.iter().enumerate() {
+            let number = index + 1;
+            let label = match (axis, sizes.len() == 1) {
+                (CellAxis::Column, true) => tr!("plot-size-width", unit = symbol),
+                (CellAxis::Column, false) => {
+                    tr!("plot-size-column-width", n = number, unit = symbol)
+                }
+                (CellAxis::Row, true) => tr!("plot-size-height", unit = symbol),
+                (CellAxis::Row, false) => tr!("plot-size-row-height", n = number, unit = symbol),
+            };
+            let mut shown = unit.from_points(points);
+            let id = ("graph_size", matches!(axis, CellAxis::Row), index);
+            let changed = form.row(label, |ui| {
+                number_field(ui, id, &mut shown, &quantity).changed
+            });
+            if changed {
+                commit |= set_size_in_draft(
+                    spec,
+                    (&drawn_widths, &drawn_heights),
+                    axis,
+                    index,
+                    unit.to_points(shown),
+                );
+            }
+        }
+    }
+    let total_width: f64 = spec
+        .cell_widths()
+        .unwrap_or_else(|| drawn_widths.clone())
+        .iter()
+        .sum();
+    let total_height: f64 = spec
+        .cell_heights()
+        .unwrap_or_else(|| drawn_heights.clone())
+        .iter()
+        .sum::<f64>()
+        + f64::from(band);
+    form.row(tr!("plot-size-total", unit = symbol), |ui| {
+        ui.label(tr!(
+            "plot-size-total-value",
+            width = format_value(unit.from_points(total_width.round()), unit.decimals()),
+            height = format_value(unit.from_points(total_height.round()), unit.decimals())
+        ));
+        false
+    });
+    form.note(tr!("plot-size-note"));
+    commit
 }
 
 /// Layer page: title and gridlines.
@@ -2109,6 +2211,60 @@ mod tests {
         );
         one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]);
         one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// #394: General › Size shows the width, the height and the size of the graph
+    /// in the unit of the Preferences (centimetres: 480 x 360 pt are 16.93 x
+    /// 12.7), and typing a width stores points and leaves the height alone, in
+    /// the one step of the window.
+    #[test]
+    fn the_size_fields_show_the_unit_and_store_points() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.column_widths = vec![480.0];
+            spec.row_heights = vec![360.0];
+        });
+        harness.open(PlotSettingsTab::Graph, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size"),
+            tr!("plot-size-width", unit = "cm"),
+            tr!("plot-size-height", unit = "cm"),
+            tr!("plot-size-total", unit = "cm"),
+            "16.93 × 12.7".to_owned(),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        let history = harness.state.undo_label();
+
+        type_into(&context, &mut harness, "16.9333", "10");
+        let model = harness.model();
+        assert!(
+            (model.column_widths[0] - 283.464_566_9).abs() < 1e-6,
+            "{model:?}"
+        );
+        assert_eq!(model.row_heights, [360.0]);
+        // The window is one history entry, closed with it.
+        harness.state.close_plot_settings();
+        assert_ne!(harness.state.undo_label(), history, "an undoable entry");
+    }
+
+    /// #394: editing one size of a graph from an old file (no stored size)
+    /// first gives it the sizes it is drawn with, so the other axis keeps its
+    /// size.
+    #[test]
+    fn editing_a_size_of_a_legacy_graph_keeps_the_other_axis() {
+        let context = test_support::context();
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Graph, None);
+        assert!(harness.model().column_widths.is_empty());
+        type_into(&context, &mut harness, "12.7", "5");
+        let model = harness.model();
+        assert_eq!(model.column_widths, [480.0], "drawn width stored as it was");
+        assert!(
+            (model.row_heights[0] - 141.732_283).abs() < 1e-5,
+            "{model:?}"
+        );
     }
 
     /// #344: under Auto, From and To show the computed bounds; typing in one

@@ -45,6 +45,11 @@
     "shows": "The Series Properties window of Graph1: series list, group, name, plot type, Y axis, Y error and X error, line and symbol settings."
   },
   {
+    "image": "graphs-properties-general.png",
+    "page": "guide/graphs.md",
+    "shows": "The Graph Properties window on its General tab for a graph with two layers side by side: title, colors, and the Size section with one width per column, the height of the row and the size of the graph in centimeters."
+  },
+  {
     "image": "graphs-properties-axes.png",
     "page": "guide/graphs.md",
     "shows": "The Graph Properties window on its Axes tab, Bottom axis: the axes as vertical tabs at the left, then title, scale, range and display settings."

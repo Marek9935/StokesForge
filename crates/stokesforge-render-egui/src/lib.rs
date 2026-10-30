@@ -88,6 +88,7 @@ use std::sync::Arc;
 use egui::{
     Color32, Galley, Id, Painter, PointerButton, Pos2, Rect, Response, Shape, Stroke, StrokeKind,
 };
+use plotters::drawing::IntoDrawingArea;
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::resolve::{resolve_spec, ResolvedPlot};
 use stokesforge_core::{NodeId, Tree};
@@ -108,8 +109,8 @@ pub use feathering::Feathering;
 // `stokesforge-render` to read what the figure drew: this crate is already
 // its screen rendering facade.
 pub use stokesforge_render::pipeline::{
-    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, AXIS_DESC_SIZE,
-    DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
+    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, FigureLayout,
+    AXIS_DESC_SIZE, DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
 };
 // The address and model of a free text: the application handles them with
 // the signals of the view ([`GraphEvent`]).
@@ -491,6 +492,10 @@ pub struct PointHit {
     pub distance: f32,
 }
 
+/// Key of the memoized figure layout: graph, revision, pixels per point (bits),
+/// preview generation.
+type FigureMemoKey = (NodeId, Revision, u32, u64);
+
 /// A displayed graph: its cache, its view state, and what it takes to repaint it.
 ///
 /// One `GraphView` per view, not one per graph: two windows on the same
@@ -515,6 +520,8 @@ pub struct GraphView {
     /// formulas (issue #31) included: see [`scaled`].
     scaled: scaled::ScaledShapes,
     last: Option<DrawnPlot>,
+    /// The memoized [`GraphView::figure_layout`], with its key.
+    figure_memo: Option<(FigureMemoKey, FigureLayout)>,
     measurer: TextMeasurer,
     view: ViewState,
     id: Id,
@@ -651,6 +658,7 @@ impl GraphView {
             font_choice,
             scaled: scaled::ScaledShapes::default(),
             last: None,
+            figure_memo: None,
             measurer: TextMeasurer::default(),
             view: ViewState::new(),
             id: Id::new((
@@ -1357,9 +1365,61 @@ impl GraphView {
         self.paint_with_layout(ui, rect, rect, snapshot, graph)
     }
 
-    /// Always lays out the figure at `DEFAULT_FIGURE_SIZE`, then applies a
-    /// uniform transformation to its shapes. The density of the ticks, the
-    /// placement of the legends and the text measurements therefore do not
+    /// The layout of the figure of `graph` ([`pipeline::figure_layout`], #394):
+    /// the size the screen paints, the exports write and the window keeps the
+    /// ratio of. Measured with the screen's text (Typst titles included) and
+    /// memoized by (graph, revision, pixels per point, preview generation): a
+    /// window resize or a zoom does not measure again; a title edit or a cell
+    /// size edit does.
+    pub fn figure_layout(
+        &mut self,
+        context: &egui::Context,
+        snapshot: &Snapshot,
+        graph: NodeId,
+    ) -> Result<FigureLayout, RenderError> {
+        let key = (
+            graph,
+            snapshot.revision,
+            context.pixels_per_point().to_bits(),
+            self.preview_generation,
+        );
+        if let Some((cached, layout)) = &self.figure_memo {
+            if *cached == key {
+                return Ok(layout.clone());
+            }
+        }
+        let mut spec = graph_spec(&snapshot.tree, graph)?;
+        if let Some((target, width)) = self.text_width_preview {
+            if let Some(mut font) = target.font(&spec) {
+                font.width = Some(width);
+                target.set_font(&mut spec, font);
+            }
+        }
+        let text = ScreenText::new(context, &self.measurer);
+        let mut shapes = Vec::new();
+        let probe_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1.0, 1.0));
+        let backend = EguiBackend::in_rect(&mut shapes, probe_rect, &text);
+        let layout = match &self.typst_fonts {
+            Some(fonts) => {
+                let typst = TypstScreen::with_fonts(
+                    context,
+                    &self.formulas,
+                    &self.font_choice,
+                    fonts.clone(),
+                );
+                let probe = backend.with_typst(typst).into_drawing_area();
+                pipeline::figure_layout(&spec, &probe)
+            }
+            None => pipeline::figure_layout(&spec, &backend.into_drawing_area()),
+        }
+        .map_err(|error| RenderError::Drawing(error.to_string()))?;
+        self.figure_memo = Some((key, layout.clone()));
+        Ok(layout)
+    }
+
+    /// Lays out the figure at its own size ([`GraphView::figure_layout`]), then
+    /// applies a uniform transformation to its shapes. The density of the ticks,
+    /// the placement of the legends and the text measurements therefore do not
     /// change with the window size; only their displayed size changes.
     pub fn paint_scaled(
         &mut self,
@@ -1368,7 +1428,7 @@ impl GraphView {
         snapshot: &Snapshot,
         graph: NodeId,
     ) -> Result<bool, RenderError> {
-        let (width, height) = DEFAULT_FIGURE_SIZE;
+        let (width, height) = self.figure_layout(ui.ctx(), snapshot, graph)?.size;
         let logical_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(width as f32, height as f32));
         if display_rect.width() <= 0.0 || display_rect.height() <= 0.0 {
             self.hover = None;

@@ -425,7 +425,7 @@ pub(crate) fn save(context: &ScriptContext, path: Option<&Path>) -> Result<(), H
 pub(crate) const DEFAULT_PNG_SCALE: f32 = 4.0;
 
 /// `pyst.export_graph`: the same rendering as the application's export (size
-/// `DEFAULT_SIZE`, default fonts, Typst), the format coming from the extension.
+/// of the figure, default fonts, Typst), the format coming from the extension.
 /// The text of an SVG stays text (the application's default).
 pub(crate) fn export_graph(
     session: &SessionHandle,
@@ -450,12 +450,13 @@ pub(crate) fn export_graph(
     let spec = graph_spec(&snapshot, id, epoch)?;
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
     stokesforge_render_svg::export_to_file(
         path,
         &plot,
-        stokesforge_render_svg::DEFAULT_SIZE,
+        stokesforge_render_svg::figure_size(&spec, &measurer, &choice),
         &measurer,
-        &stokesforge_render_svg::FontChoice::default(),
+        &choice,
         format,
     )
     .map_err(|error| HostError::InvalidValue(error.to_string()))

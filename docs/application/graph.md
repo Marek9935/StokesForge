@@ -728,11 +728,40 @@ all three are a single `Command::EditPlotSpec` (one undo step), with the reasons
   node) removes the cell and its overlay layers; on an overlay layer, that layer
   only. The last cell is refused (entry greyed, `error-last-layer`).
 
-`compose::insert_cell`: Right shifts only the row of the reference cell (cells
-at a greater column move +1, with their overlays), Below only its column; the new
+`compose::insert_cell` (#394): Right inserts a **whole grid column** after the
+reference cell's (every cell at a greater column moves +1, whatever its row, with
+its overlays; the other rows get a hole where the new cell is), Below a whole row;
+the new column (row) takes the width (height) of the reference cell, so the new
+cell is exactly the reference one (4/3 stays 4/3) and the figure grows. The new
 layer is appended last, so existing indices do not move. `compose::remove_cell`
-closes the gap in the row, drops a row left empty, and resets the graph
-`title_anchor` when layer 0 goes (it is in the frame of the first layer).
+removes the column (row) a deleted cell leaves empty, with its size, so the figure
+shrinks by it; a column (row) that still holds a cell stays, with a hole. It
+resets the graph `title_anchor` when layer 0 goes (it is in the frame of the
+first layer).
+
+### Graph size (#394)
+
+The figure is the sum of the **width of each grid column** and the **height of each
+grid row** (`PlotSpec::column_widths` / `row_heights`, points) plus the title band;
+see `docs/rendering.md`, "Figure size and cells".
+
+- **Graph Properties > General > Size**: one field per column width and per row
+  height ("Width", "Column 2 width"…), in the unit of Preferences > General >
+  Length unit (cm by default, mm, pt, in; `length_unit::LengthUnit`, the file
+  keeps points), and the read-only "Graph size". The fields edit the draft of the
+  window like the others (one undo step for the window); a graph from an old
+  file is first made explicit (`cell_sizes::set_size_in_draft`), so the other
+  cells keep the size they were drawn with.
+- **`Action::SetCellSize { graph, axis, index, size }`** (`PlotEditKind::
+  ResizeCell`, "Resize Graph", one `EditPlotSpec`, one undo step) is the path of a
+  drag handle on a cell boundary (phase 2): it materializes a legacy graph, clamps
+  the size to `[MIN_CELL, MAX_CELL_SIZE]` and sends nothing if the size is
+  unchanged or outside the grid. Add Layer Beside and Delete materialize the same
+  way before they edit.
+- A new graph is 480 × 360 pt (`PlotSpec::new_graph`), titled or not (a title
+  adds its band above, `pyst.plot` included); the Beside / Below layers keep their
+  reference layer's size, the figure grows. `pyst` has no size setter yet.
+- The window follows the figure and the drag handles are phase 2 of #394.
 
 **Indices that follow a removal** (and its undo): `ViewState::remap_panels`
 (framings), `GraphView::remap_layers` (active layer, selection, gestures in

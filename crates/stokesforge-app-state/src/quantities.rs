@@ -263,3 +263,22 @@ pub const COUNT: Quantity = Quantity::whole(10.0).between(0.0, 9_007_199_254_740
 
 /// A line number of the import (1 and up).
 pub const LINE_NUMBER: Quantity = Quantity::whole(10.0).between(1.0, 9_007_199_254_740_991.0);
+
+/// The width (`Column`) or height (`Row`) of a grid column or row of a graph,
+/// in `unit` (#394): bounded by the size a cell may have
+/// ([`stokesforge_plot::MIN_CELL`], [`stokesforge_plot::MAX_CELL_SIZE`]), a
+/// notch and decimals suited to the unit. The unit itself is in the label
+/// (S-N10).
+pub fn cell_size(
+    unit: crate::length_unit::LengthUnit,
+    axis: stokesforge_core::compose::CellAxis,
+) -> Quantity {
+    let min_pt = match axis {
+        stokesforge_core::compose::CellAxis::Column => stokesforge_plot::MIN_CELL.0,
+        stokesforge_core::compose::CellAxis::Row => stokesforge_plot::MIN_CELL.1,
+    };
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals()).between(
+        unit.from_points(f64::from(min_pt)),
+        unit.from_points(stokesforge_plot::MAX_CELL_SIZE),
+    )
+}

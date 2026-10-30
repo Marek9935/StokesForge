@@ -343,6 +343,9 @@ pub fn non_trivial_spec(
             size: Some(30.0),
             ..Default::default()
         },
+        // #394: sizes of the cells in points, none of them a default.
+        column_widths: vec![431.5],
+        row_heights: vec![260.25, 140.0],
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

@@ -19,6 +19,7 @@
 //! (`{ "language": "fr" }`). The `STOKESFORGE_LANG` environment variable wins at
 //! startup (see [`crate::i18n::choose_language`]).
 
+use crate::length_unit::LengthUnit;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use stokesforge_analysis::ops::OperationKind;
@@ -217,6 +218,9 @@ struct PreferencesFile {
     /// `"text"` or `"outlines"` (#162); any other value: the default.
     #[serde(default, deserialize_with = "lenient")]
     svg_text: Option<String>,
+    /// `"cm"`, `"mm"`, `"pt"` or `"in"` (#394); any other value: centimetres.
+    #[serde(default, deserialize_with = "lenient")]
+    length_unit: Option<String>,
     /// Size cap of a `.stf` on open, in MB (A2, #316). Out of bounds: brought back
     /// within the bounds; missing or unreadable: the default.
     #[serde(default, deserialize_with = "lenient")]
@@ -327,6 +331,7 @@ pub struct Preferences {
     object_manager_open: bool,
     object_manager_settings: ObjectManagerSettings,
     svg_text: SvgTextMode,
+    length_unit: LengthUnit,
     max_file_mb: u32,
     max_cells_m: u32,
     autosave: bool,
@@ -383,6 +388,11 @@ impl Preferences {
                 Some("outlines") => SvgTextMode::Outlines,
                 _ => SvgTextMode::Text,
             },
+            length_unit: file
+                .length_unit
+                .as_deref()
+                .and_then(LengthUnit::from_symbol)
+                .unwrap_or_default(),
             max_file_mb: file
                 .max_file_mb
                 .map_or(DEFAULT_MAX_FILE_MB, clamp_max_file_mb),
@@ -489,6 +499,18 @@ impl Preferences {
             SvgTextMode::Outlines => "outlines",
         };
         self.save_field("svg_text", name.into())
+    }
+
+    /// The unit in which the size of a graph is shown and typed (#394);
+    /// centimetres by default. The `.stf` stores points whatever it is.
+    pub fn length_unit(&self) -> LengthUnit {
+        self.length_unit
+    }
+
+    /// Remembers the unit without replacing the other preferences.
+    pub fn save_length_unit(&mut self, unit: LengthUnit) -> std::io::Result<()> {
+        self.length_unit = unit;
+        self.save_field("length_unit", unit.symbol().into())
     }
 
     /// The default folder of a kind of file dialog, as written; `None` if empty
@@ -1491,6 +1513,26 @@ mod object_manager_tests {
 
     /// #162: SVG text by default; the choice of outlines is remembered from one
     /// session to the next, without overwriting the other preferences.
+    #[test]
+    fn the_length_unit_is_remembered_and_defaults_to_centimetres() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(&path, r#"{"language":"fr","length_unit":"furlong"}"#).unwrap();
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        assert_eq!(prefs.length_unit(), LengthUnit::Cm, "unknown: the default");
+        std::fs::write(&path, r#"{"length_unit":42}"#).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path.clone())).length_unit(),
+            LengthUnit::Cm,
+            "wrong type: the default"
+        );
+        prefs.save_length_unit(LengthUnit::Mm).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path)).length_unit(),
+            LengthUnit::Mm
+        );
+    }
+
     #[test]
     fn the_svg_text_mode_is_remembered_and_defaults_to_text() {
         let dir = tempfile::tempdir().unwrap();

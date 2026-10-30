@@ -20,6 +20,7 @@ stokesforge-render-egui   stokesforge-render-svg
 
 1. **Place the feature in `stokesforge-render`**, generic over the backend (invariant 5). The only living exception is `stokesforge-render-egui::feathering`. A data translation (a mixed cell becoming `NaN`) happens upstream, once.
 2. **Measure text only through `stokesforge_render::text`** (invariant 4). Plotters' `configure_series_labels` and `MultiLineText` bypass it: that is why the legend is hand-written in `stokesforge_render::legend`.
+2b. **Size the figure from `pipeline::figure_layout` only** (#394): cell sizes + title band + rounded prefix-sum breakpoints; a new reader of the figure size (export, copy, label, ratio) calls it (`GraphView::figure_layout` on screen, `render_svg::figure_size` for files), never a constant.
 3. **Leave the cache key alone** — `(revision, rect, pixels_per_point, view_generation)`: feathering never enters it (invariant 6); a selection enters neither the key nor the pipeline; zoom and pan stay in `ViewState`, never in the `PlotSpec`.
 4. **No `f64` rule in `stokesforge-render-egui`**: framing, zoom, pan, nearest point live in `stokesforge-render` (`view`, `interact`); egui keeps only the `Pos2` adapter. A screen painted outside `GraphView` (analysis preview) paints in the app but takes all geometry from `stokesforge-render`.
 5. **Choose a figure text's style in the pipeline**: `rich_style` (Typst) for titles, axis titles and legend entries, `literal_style` for text taken from a column; graduations never go through Typst.

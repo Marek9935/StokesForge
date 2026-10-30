@@ -33,6 +33,7 @@
 pub mod analysis;
 pub mod analysis_recent;
 pub mod cell_sides;
+pub mod cell_sizes;
 pub mod column_move;
 pub mod default_folders;
 pub mod errors;
@@ -40,6 +41,7 @@ pub mod figure_texts;
 pub mod file_picker;
 pub mod history_text;
 pub mod i18n;
+pub mod length_unit;
 pub mod object_drag;
 pub mod object_format;
 pub mod object_manager;

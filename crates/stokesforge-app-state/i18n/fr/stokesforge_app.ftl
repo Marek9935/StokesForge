@@ -764,6 +764,15 @@ plot-general-dark-note = Les couleurs auto passent au blanc sur fond sombre
 plot-stale-warning = Avertir si des données ne sont pas à jour
     .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports
 
+plot-size = Taille
+plot-size-width = Largeur ({ $unit })
+plot-size-height = Hauteur ({ $unit })
+plot-size-column-width = Largeur de la colonne { $n } ({ $unit })
+plot-size-row-height = Hauteur de la ligne { $n } ({ $unit })
+plot-size-total = Taille du graphique ({ $unit })
+plot-size-total-value = { $width } × { $height }
+plot-size-note = Le titre, s'il est affiché, ajoute sa hauteur au-dessus des lignes. Les autres colonnes et lignes gardent leur taille quand l'une change : le graphique s'agrandit ou se réduit.
+
 # Onglet Zone de tracé
 
 plot-area-layer-title =
@@ -1219,6 +1228,7 @@ history-plot-reorder-group = Réordonner le groupe
 history-plot-closed-frame = Modifier le cadre fermé
 history-plot-add-cell = Ajouter un calque à côté
 history-plot-remove-cell = Supprimer le calque
+history-plot-resize-cell = Redimensionner le graphique
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -1858,6 +1868,12 @@ preferences-folders-browse = Parcourir…
     .hint = Choisit le dossier dans une fenêtre de choix de fichier
 preferences-folders-not-found = Dossier introuvable
 preferences-folders-pick-title = Choisir le dossier par défaut
+preferences-length-unit = Unité de longueur
+preferences-length-unit-cm = Centimètres (cm)
+preferences-length-unit-mm = Millimètres (mm)
+preferences-length-unit-pt = Points (pt)
+preferences-length-unit-in = Pouces (in)
+preferences-length-unit-note = Sert à la taille des graphiques. Le fichier garde des points (1 in = 72 pt).
 preferences-files = Fichiers
 preferences-max-file-size = Taille maximale d'un fichier (Mo)
 preferences-max-cells = Nombre maximal de cellules (millions)

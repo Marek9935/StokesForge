@@ -303,6 +303,8 @@ mod tests {
                 y2_range: None,
                 pixel_origin: (80, 60),
                 pixel_size: (360, 220),
+                cell_origin: (0, 40),
+                cell_size: (480, 320),
                 x_scale: AxisScale::Linear,
                 y_scale: AxisScale::Linear,
                 y2_scale: AxisScale::Linear,

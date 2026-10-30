@@ -153,13 +153,13 @@ or from the `Visuals` it sets (`error_fg_color`, `warn_fg_color`,
 and matrices stay bounded to the common rectangle. In a
 graph (`graph_view_contents`,
 `crates/stokesforge-app/src/app/graph_window.rs`), the figure keeps the ratio of
-`DEFAULT_FIGURE_SIZE` (`stokesforge-render::pipeline`, 4:3) but is scaled
+figure (`GraphView::figure_layout`: the sum of the cell sizes plus the title band, #394; 480×360 for a new graph) but is scaled
 "contain" in the available space — maximized by taking the limiting
 dimension, width or height, both when enlarging and when shrinking
 (F11). No clipping or scrolling for the graph: the whole figure always stays
 visible. It is a **zoom**: the layout (ticks, margins,
-legend, text measurements) is always computed at the reference size
-`DEFAULT_FIGURE_SIZE` (480×360), then the whole result, text and line
+legend, text measurements) is always computed at the figure's own size
+(`figure_layout`), then the whole result, text and line
 widths included, is enlarged or reduced uniformly (`GraphView::paint_scaled`,
 `stokesforge-render-egui`). Resizing the window therefore lays out nothing again, and
 does not rebuild the shape cache. The rule is identical in a floating

@@ -222,6 +222,19 @@ and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
 (literal values); changing it would make every calculation of the files already
 written stale on reading.
 
+## Cell sizes: additive fields (#394)
+
+`PlotSpecRecord` gained `column_widths` and `row_heights` (`Vec<f64>`, points;
+`#[serde(default)]`). **`FORMAT_VERSION` did not move**: a file without them
+reads as empty vectors, which **mean 480 × 360 pt shared equally, title band
+inside, for good** (changing that meaning would be a breaking change). They are
+written as the spec holds them, unsanitized (a hostile value, extra entries
+beyond the grid): `PlotSpec::cell_widths()` / `cell_heights()` sanitize on read,
+the file is never rewritten for it. An older version that opens and re-saves the
+file drops the two fields without a message: the figure goes back to 480 × 360 pt.
+Witness `tests/witnesses/v1/project.stf` regenerated with non-default sizes;
+`schema.rs` keeps the old-record test.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

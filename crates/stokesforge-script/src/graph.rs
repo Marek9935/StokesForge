@@ -414,7 +414,7 @@ fn build_spec(
                 "parent must be a folder handle".into(),
             ));
         }
-        PlotSpec::default()
+        PlotSpec::new_graph()
     };
     if let Some(title) = &request.title {
         spec.title.clone_from(title);
