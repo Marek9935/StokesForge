@@ -19,7 +19,7 @@ The numbers in brackets refer to the gaps numbered below.
 | | one series per cell, type Line/Scatter/Histogram/Bar | ✓ per cell, but only in 1×1 |
 | | Histogram 20 bins (:92) | ✓ Series › Bins (#359) |
 | `Axes` (:144) | log scale, grid | ✓ Graph Properties › Axes (`plot_settings.rs`) |
-| | series on the right Y axis of the same panel (`SeriesAxis::Right`, :165) | **✗ [3]** |
+| | series on the right Y axis of the same panel (`SeriesAxis::Right`, :165) | ✓ Series › Y axis (#358) |
 | | title of the right axis | ✓ Axes › Right tab (`PlotAxis::Right`, state.rs:2213) |
 | | layer with secondary axes (:181) | ✓ Graph › New Layer (menus.rs:456-505), or X2/Y2 columns (`ColumnRole`, column.rs:205) |
 | | titles and units of the layer axes | ✓ Axes tab (Top and Right) |
@@ -49,8 +49,9 @@ missing feature.
    only the X3/Y3 layers and following.
 2. **Number of bins of a histogram: done (#359).** Series › Bins, and
    Series › Width (X units) for the bars.
-3. **Series on the right Y axis of the same panel: B.** `SeriesAxis::Right`
-   is assigned only by the demo, `pyst` and persistence. The only neighboring
+3. **Series on the right Y axis of the same panel: done (#358).** Series ›
+   Y axis (Left / Right); the gap below is kept for the record. `SeriesAxis::Right`
+   was assigned only by the demo, `pyst` and persistence. The only neighboring
    widget is the Axes › Right tab, which sets the axis without placing a series
    on it. The need is partly covered by a layer with Y on the right (New Layer,
    or X2/Y2 columns), but it is a different structure: the demo puts two series
@@ -82,7 +83,7 @@ missing feature.
   covers `Panels` and `PlotTypes`.
 - **S3 (B, medium)**: designate the error column of an ErrorBar series. To
   decide between a column role (`yEr`, like X2/Y2) and a field in Series.
-- **S4 (B, to arbitrate)**: assign a series to the right Y axis of the panel, or
+- **S4 (B, done #358)**: assign a series to the right Y axis of the panel, or
   declare that the layer is enough and rewrite the `Axes` demo with a layer.
 - **S5 (done, #357)**: grid of several cells (adding,
   removing, row/column placement). Depends on the product choice "multi-panel

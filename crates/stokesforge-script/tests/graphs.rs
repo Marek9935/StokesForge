@@ -179,6 +179,7 @@ fn adds_without_overwriting_series_panels_and_settings() {
         stokesforge_plot::palette_color(1)
     );
     assert_eq!(panel.right.label, "Second");
+    assert!(panel.right.visible, "axis='right' shows the right axis");
     assert_eq!(panel.right.scale, AxisScale::Log);
     b.session.undo().unwrap();
     assert_eq!(graph_spec(&b), first);

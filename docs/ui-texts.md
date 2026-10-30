@@ -167,7 +167,8 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | New Layer Beside | Calque à côté | Graph menu submenu: **Right** / **À droite**, **Below** / **En dessous**; adds a layer in a new cell of the graph's grid (#357). "Cell" / "Case" stays off the interface | Cell, Case, Panel | O |
 | Title | Titre | Text at the top of the graph | Intitulé | G |
 | Axis (pl. Axes) | Axe | Graduated line carrying a quantity | — | G |
-| X (bottom) / Y (left) / Secondary Y (right) | X (bas) / Y (gauche) / Y secondaire (droite) | The three axes of an area | Y2, Axe de droite | G |
+| Bottom / Left / Right / Top | Bas / Gauche / Droite / Haut | The four axes of an area, named by their place (#358); composed texts are phrased by a selector, never by gluing: « Axe du bas », « Titre de l'axe de gauche » | X (bottom), Y2, Secondary Y, Axe X (bas) | G |
+| Y axis | Axe Y | Series field: the vertical axis the series is drawn against, Left or Right (#358); grayed out on an overlaid layer | Axe secondaire | G |
 | Axis title | Titre de l'axe | Text that names the quantity of the axis | Libellé, Label | G |
 | Tick | Graduation | Mark on the axis | Repère, Coche | I |
 | Tick label | Étiquette de graduation | Value written next to a tick | Libellé de graduation | G (Q11) |
@@ -395,7 +396,7 @@ everywhere, **except Q14 and Q22** where the alternative wins (marked ✔).
 | Layer | Calque | A plot panel (`PlotSpec::panels`) |
 | Series | Séries | The series of a layer, with their series groups indented (formerly « Plot Group », #177) |
 | Graph texts | Textes du graphique | Titles of the graph, of the layers and of the axes, and legend: never listed in the Object Manager (#214): edited by double-click or in the properties |
-| Show Axes | Afficher les axes | The axes of a layer (line, ticks, labels), listed in the Object Manager if the "Show Axes" toggle is on (#111, #147); this filter does not change their visibility on the figure; one « X (bottom) Axis » / « Axe X (bas) » row per axis, including Secondary X (top) / X secondaire (haut) |
+| Show Axes | Afficher les axes | The axes of a layer (line, ticks, labels), listed in the Object Manager if the "Show Axes" toggle is on (#111, #147); this filter does not change their visibility on the figure; one « Bottom Axis » / « Axe du bas » row per axis, including « Top Axis » / « Axe du haut » |
 | Mirror axis | Axe miroir | Top or right axis of an ordinary layer that repeats the scale of the bottom or left one, without a title (#176) |
 | Closed frame | Cadre fermé | Toggle of a layer (`Action::SetClosedFrame`): top and right as mirror axes without tick labels, ticks copied from the bottom and left (#344). **No command in the interface** since the lightened Axes page: the `action-closed-frame*` keys are removed |
 | Minor ticks | Sous-graduations | Small marks drawn between the major ticks of an axis, in the same direction; their number per interval (Auto or 1 to 9); « Un nombre sur n » writes only one tick number out of n (#344) |

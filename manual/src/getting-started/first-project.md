@@ -113,7 +113,7 @@ See [Plot columns from a workbook](../guide/graphs.md#plot-columns-from-a-workbo
 
 ### 8. Write the title of the X axis
 
-Double-click the numbers of the X axis, under the graph, or the line of the axis (the bottom edge of the plot). The **Graph Properties** window opens on the **Axes** tab, on the axis **X (bottom)**.
+Double-click the numbers of the X axis, under the graph, or the line of the axis (the bottom edge of the plot). The **Graph Properties** window opens on the **Axes** tab, on the **Bottom** axis.
 
 In the section **Axis title**:
 
@@ -128,7 +128,7 @@ See [Axis title](../guide/graphs.md#axis-title) and [Titles and formulas](../gui
 
 ### 9. Write the title of the Y axis, with a subscript
 
-In the same window, pick the axis **Y (left)** at the top of the **Axes** tab.
+In the same window, pick the **Left** axis at the top of the **Axes** tab.
 
 1. Type `Absorbance of $"Ru(bpy)"_3$` in **Quantity**. The `_3` makes a subscript. The quotes keep `Ru(bpy)` in upright letters.
 2. Type `a.u.` in **Units**.

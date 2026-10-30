@@ -454,18 +454,18 @@ fn build_spec(
         axis_range("x", request.x_bounds)?,
     )?;
     let axis = request.series.axis;
-    let y_axis = panel.axis_mut(axis.side());
     update_axis(
-        y_axis,
+        panel.axis_mut(axis.side()),
         &request.y_title,
         request.y_scale,
         axis_range("y", request.y_bounds)?,
     )?;
-    if axis == SeriesAxis::Right {
-        y_axis.visible = true;
-    }
     let first = panel.series.len();
     panel.push_series_batch(batch);
+    // The rule "Right shows the right axis" lives in the panel (#358).
+    for index in first..panel.series.len() {
+        panel.set_series_axis(index, axis);
+    }
     if let Some(name) = &request.group_name {
         if let Some(group) = panel.series[first].group {
             panel.rename_group(group, name);

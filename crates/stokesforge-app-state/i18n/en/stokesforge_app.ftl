@@ -722,20 +722,28 @@ plot-tab-theme = Theme
 
 # The three axes of a layer
 
-plot-axis-bottom = X (bottom)
-plot-axis-left = Y (left)
-plot-axis-right = Secondary Y (right)
-plot-axis-top = Secondary X (top)
-plot-axis-overlay-x = X (top)
-plot-axis-overlay-y = Y (right)
+plot-axis-bottom = Bottom
+plot-axis-left = Left
+plot-axis-right = Right
+plot-axis-top = Top
 
 # What a right-click designates (head of the context menu)
 
 plot-target-graph = Graph
 plot-target-title = Title
 plot-target-plot-area = Plot Area
-plot-target-axis = { $axis } Axis
-plot-target-axis-title = { $axis } Axis Title
+plot-target-axis = { $side ->
+        [bottom] Bottom Axis
+        [left] Left Axis
+        [right] Right Axis
+       *[top] Top Axis
+    }
+plot-target-axis-title = { $side ->
+        [bottom] Bottom Axis Title
+        [left] Left Axis Title
+        [right] Right Axis Title
+       *[top] Top Axis Title
+    }
 plot-target-text = Text
 plot-target-object = Object
 plot-target-legend = Legend
@@ -821,6 +829,9 @@ plot-series-name =
 plot-series-plot-type = Plot type
 plot-series-type-unknown = Unknown type (from a newer version)
 plot-series-bins = Bins
+plot-series-axis = Y axis
+    .hint = The vertical axis this series is drawn against. Right shows the right axis.
+    .disabled = A layer drawn on top has a single Y axis; this setting does not apply
 plot-series-bar-width = Width (X units)
 plot-series-show = Show series
 plot-series-show-in-legend = Show in legend

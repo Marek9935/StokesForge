@@ -976,6 +976,7 @@ pub(super) fn series_editor(
     env: &mut PickerEnv,
     locked: bool,
     auto_bar_width: f64,
+    overlay: bool,
 ) -> bool {
     form(ui, "plot_series_editor", |form| {
         let mut commit = false;
@@ -1056,6 +1057,39 @@ pub(super) fn series_editor(
             }
             _ => {}
         }
+        // Y axis (#358): Left or Right. Here only the series field changes;
+        // `series_page` applies it through `PanelSpec::set_series_axis` (the
+        // right axis becomes visible) and copies it to the group. Grayed out
+        // on an overlaid layer: the rendering ignores Right there.
+        commit |= form.row(tr!("plot-series-axis"), |ui| {
+            let shown = ui.add_enabled_ui(!overlay, |ui| {
+                choice(
+                    ui,
+                    "plot_config_series_axis",
+                    &mut series.axis,
+                    &[
+                        ChoiceOption::new(
+                            stokesforge_plot::SeriesAxis::Left,
+                            tr!("plot-axis-left"),
+                        ),
+                        ChoiceOption::new(
+                            stokesforge_plot::SeriesAxis::Right,
+                            tr!("plot-axis-right"),
+                        ),
+                    ],
+                )
+            });
+            if overlay {
+                shown
+                    .response
+                    .on_disabled_hover_text(tr!("plot-series-axis", "disabled"));
+            } else {
+                shown
+                    .response
+                    .on_hover_text(tr!("plot-series-axis", "hint"));
+            }
+            shown.inner
+        });
         // "Show series" is the checkbox of the series list (curve_settings.rs).
         commit |= per_series(form, locked, |form| {
             form.checkbox(
@@ -1229,8 +1263,8 @@ mod tests {
     use eframe::egui;
     use stokesforge_core::{Column, ColumnMeta, MetaLine, NodeId, Project};
     use stokesforge_plot::{
-        LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, RawVariant, SeriesSpec,
-        SymbolShape, THEMES,
+        LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, RawVariant, SeriesAxis,
+        SeriesSpec, SymbolShape, THEMES,
     };
     use stokesforge_render_egui::formula;
     use stokesforge_session::Session;
@@ -2618,6 +2652,113 @@ mod tests {
         assert_eq!(series[0].bar_width, Some(0.5));
         assert_eq!(series[1].bar_width, Some(0.5), "Bar member");
         assert_eq!(series[2].bar_width, None, "Histogram member untouched");
+    }
+
+    // -- Y axis of a series (#358) ----------------------------------------
+
+    /// A graph whose right axis is hidden (a new panel shows it as a mirror).
+    fn hidden_right(spec: &mut PlotSpec) {
+        first_panel(spec).right.visible = false;
+    }
+
+    fn right_visible(spec: &PlotSpec) -> bool {
+        spec.panels[0].right.visible
+    }
+
+    /// Clicking "Right" attaches the series to the right axis and shows it, in
+    /// one history entry: a single Undo gives back the left axis **and** the
+    /// hidden right axis.
+    #[test]
+    fn choosing_the_right_axis_shows_it_in_one_history_entry() {
+        let mut harness = harness(hidden_right);
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        let original = harness.model();
+        assert!(!right_visible(&original));
+        assert_eq!(original.panels[0].series[0].axis, SeriesAxis::Left);
+        click_label(&context, &mut harness.state, &tr!("plot-axis-right"));
+        let after = harness.model();
+        assert_eq!(after.panels[0].series[0].axis, SeriesAxis::Right);
+        assert!(right_visible(&after), "the right axis is shown");
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "a single Undo");
+        assert!(!right_visible(&harness.model()));
+    }
+
+    /// Going back to "Left" hides nothing.
+    #[test]
+    fn going_back_to_left_keeps_the_right_axis_shown() {
+        let mut harness = harness(|spec| {
+            hidden_right(spec);
+            first_panel(spec).set_series_axis(0, SeriesAxis::Right);
+        });
+        harness.open(PlotSettingsTab::Series, None);
+        let context = test_support::context();
+        click_label(&context, &mut harness.state, &tr!("plot-axis-left"));
+        let after = harness.model();
+        assert_eq!(after.panels[0].series[0].axis, SeriesAxis::Left);
+        assert!(right_visible(&after));
+    }
+
+    /// An overlaid layer: the field is painted, grayed out, with its reason;
+    /// a click on "Right" changes nothing.
+    #[test]
+    fn the_axis_field_is_disabled_with_its_reason_on_an_overlaid_layer() {
+        let mut harness = harness(|spec| {
+            let base = first_panel(spec).clone();
+            let mut layer =
+                PanelSpec::overlay_on(&base, stokesforge_plot::OverlaySpec::new(true, true));
+            layer.series.push(base.series[0].clone());
+            spec.panels = stokesforge_plot::Panels::new(vec![base, layer]);
+        });
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_panel = 1;
+        let context = test_support::context();
+        context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let original = harness.model();
+        let reason = tr!("plot-series-axis", "disabled");
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-series-axis")));
+        assert!(
+            !is_painted(&painted, &reason),
+            "witness: without hovering, no explanation"
+        );
+        let pos = text_exact(&painted, &tr!("plot-axis-right")).center;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen = texts(&image(
+                &context,
+                vec![egui::Event::PointerMoved(pos)],
+                |ui| plot_settings_window(ui.ctx(), &mut harness.state),
+            ));
+        }
+        assert!(is_painted(&seen, &reason), "hovering says why");
+        click_label(&context, &mut harness.state, &tr!("plot-axis-right"));
+        assert_eq!(harness.model(), original, "nothing changes");
+    }
+
+    /// "Whole group": the axis is copied to every member of the group, and
+    /// the right axis is shown.
+    #[test]
+    fn the_axis_is_copied_to_the_whole_group() {
+        let mut harness = harness(|spec| {
+            hidden_right(spec);
+            let panel = first_panel(spec);
+            let model = panel.series[0].clone();
+            panel.series.clear();
+            panel.push_series_batch(vec![model.clone(), model.clone(), model]);
+        });
+        harness.open(PlotSettingsTab::Series, None);
+        harness.state.plot_edit_mut().unwrap().selected_series = 0;
+        let context = test_support::context();
+        click_label(&context, &mut harness.state, &tr!("plot-axis-right"));
+        let after = harness.model();
+        assert!(after.panels[0]
+            .series
+            .iter()
+            .all(|s| s.axis == SeriesAxis::Right));
+        assert!(right_visible(&after));
     }
 
     /// S-F7: the first Escape gives the field its value back (the dialog stays open),

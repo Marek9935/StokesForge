@@ -570,20 +570,20 @@ pub struct ObjectTree {
 /// The name of an axis **where it is displayed**: the X axis of an overlaid
 /// layer is at the top, its Y axis on the right (#171).
 fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
-    if panel.overlay.is_some() {
-        let axis = match side {
-            AxisSide::Left => crate::tr!("plot-axis-overlay-y"),
-            _ => crate::tr!("plot-axis-overlay-x"),
-        };
-        return crate::tr!("plot-target-axis", axis = axis);
-    }
-    let axis = match side {
-        AxisSide::Bottom => crate::tr!("plot-axis-bottom"),
-        AxisSide::Left => crate::tr!("plot-axis-left"),
-        AxisSide::Right => crate::tr!("plot-axis-right"),
-        AxisSide::Top => crate::tr!("plot-axis-top"),
+    let place = if panel.overlay.is_some() {
+        match side {
+            AxisSide::Left => "right",
+            _ => "top",
+        }
+    } else {
+        match side {
+            AxisSide::Bottom => "bottom",
+            AxisSide::Left => "left",
+            AxisSide::Right => "right",
+            AxisSide::Top => "top",
+        }
     };
-    crate::tr!("plot-target-axis", axis = axis)
+    crate::tr!("plot-target-axis", side = place)
 }
 
 /// The displayed name of a series group (#197): the one given to it, otherwise

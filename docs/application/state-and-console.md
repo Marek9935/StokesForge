@@ -136,7 +136,8 @@ per calculation family, including `Integrate`, `FitPolynomial` and `FitGaussian`
 their calculation already done, visible in the Results panel) and six graphs (`Panels`,
 `Axes`, `PlotTypes`, `Annotations`, `Groups`, `Rows`). `Panels` and `PlotTypes`
 can be rebuilt by hand since #357 (Graph > New Layer Beside, or columns dropped
-on the edge of the graph). The window names there
+on the edge of the graph). The `Growth` curve of `Axes` sits on the right Y axis
+of its panel, which can be redone from Series › Y axis (#358). The window names there
 are unique across the whole project. All its names and texts are English, hard-coded (#379). `demo_session` requests a full
 recalculation right after `Session::spawn`: the columns with formulas carry only
 their formula (invariant 11) and would stay empty without it. The noise of the measurements
