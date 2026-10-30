@@ -3,7 +3,7 @@
 //! ([`super::column_formula_help`]).
 //!
 //! Read-only, hence `modal_read_only` (Close only, Enter and Escape close, S-F2),
-//! Large class (a list and its content side by side). The families are the
+//! content size 900 x 560 (a read-only window may take the size of its content, `PlainSize::Content`; wide so that each description takes one to three lines). The families are the
 //! fixed vertical tabs at the left (S-L9, [`TabStripSide::Left`]); the table of
 //! the chosen family (Function, Example, What it does) is on the right and is
 //! the only part that scrolls. The rows come from
@@ -15,7 +15,7 @@ use stokesforge_app_state::formula_help::{self, HelpGroup};
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
-use super::dialogs::{modal_read_only, DialogOutcome, PlainSize, SizeClass};
+use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
 use super::tab_strip::{tab_strip, TabStripSide};
 use crate::theme;
 
@@ -34,7 +34,7 @@ pub(super) fn formula_functions_window(
         ctx,
         egui::Id::new("stokesforge_formula_functions"),
         &tr!("formula-help-title"),
-        PlainSize::Class(SizeClass::Large),
+        PlainSize::Content(egui::vec2(900.0, 560.0)),
         |ui| {
             ui.label(tr!("formula-help-note"));
             ui.add_space(theme::SPACE_ITEM);

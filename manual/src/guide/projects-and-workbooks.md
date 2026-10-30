@@ -277,7 +277,7 @@ For example, to fill column C with the sum of A and B, double-click the **F(x)=*
 
 While you type, a small **?** icon sits at the right of the cell. Click it to open the **Formula Functions** window: the operators and functions you can use, one family at a time (pick the family in the tabs at the left), each with its signature, an example and what it does. Press <kbd>Esc</kbd> or **Close** to leave it.
 
-<img src="../images/workbooks-formula-help.png" alt="The Formula Functions window on the Column values family: the families as tabs at the left, a table of Function, Example and What it does at the right." width="640">
+<img src="../images/workbooks-formula-help.png" alt="The Formula Functions window on the Column values family: the families as tabs at the left, a table of Function, Example and What it does at the right." width="900">
 
 If you misspell a function name, the message proposes the nearest one (`sqr(A)` gives "Did you mean sqrt?"), and a wrong number of values names the function to write instead (`log(B, 2)` gives "Use logx instead"). You can hide the icon in **Preferences ▸ Display ▸ Interface** (**Show F(x)= help**).
 
