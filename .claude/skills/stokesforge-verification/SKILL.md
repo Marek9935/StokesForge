@@ -21,7 +21,7 @@ A green `cargo test --workspace` does not prove what one assumes in this repo. T
 After a merge the user asked for and a successful push to `main`, remove the task's temporary worktree **and its local branch** without waiting to be asked; removing a worktree does not delete its branch.
 
 - Check the branch is fully merged: `git merge-base --is-ancestor <branch> main`; inspect its `git status --short` and `git worktree list` first; keep any undelivered work and needed files, ignored ones included. Untracked or modified files that block the removal are shown to the user, who decides; no `--force`. List the task's open sub-agents and its `backup-*` branches too.
-- From the main checkout on `main`: archive a Codex-managed worktree with `archive_worktree` (identity from `list_artifacts`); remove a clean ordinary worktree with `git worktree remove <path>`; confirm removal before deleting the branch.
+- From the main checkout on `main`: archive a Codex-managed worktree with `archive_worktree` (identity from `list_artifacts`); remove a clean ordinary worktree with `git worktree remove ../_stokesforge/feature<n>` (the `_stokesforge` folder itself stays); confirm removal before deleting the branch.
 - Delete the merged local branch with `git branch -d <branch>`, never `-D` nor a forced removal to get past a failure.
 - Confirm neither remains and include the cleanup in the report; if it blocks, give the precise cause and keep what is left to deliver.
 

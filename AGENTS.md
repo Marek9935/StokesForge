@@ -120,6 +120,7 @@ confirmation on the usual choices covered by the request.
 ## Finishing a change
 
 - After a merge and push on `main`, clean up the task's temporary worktree and its merged local branch automatically, unless asked to keep them; follow `stokesforge-verification`, "Clean up after a merge on `main`".
+- Worktrees: a task's worktree lives in `../_stokesforge/feature<n>` (a folder beside the main checkout, `<n>` = the issue number), created from an up-to-date `main` with `git worktree add ../_stokesforge/feature<n> -b feature/<n>-<topic> main`. Never a `StokesForge-<n>` folder beside the checkout, nor the harness folder `.claude/worktrees/`: the main session creates the worktree and hands its path to the implementing agent instead of `isolation: "worktree"`.
 
 Run the checks suited to the change, re-read the diff and update
 the documentation concerned. Do not hide a regression by

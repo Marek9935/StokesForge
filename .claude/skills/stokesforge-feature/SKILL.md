@@ -9,7 +9,7 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
-Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/v1-criteria.md` § Branches and versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
+Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/v1-criteria.md` § Branches and versions). Work in the worktree `../_stokesforge/feature<n>` (`<n>` = issue number), created from an up-to-date `main` with `git worktree add ../_stokesforge/feature<n> -b feature/<n>-<topic> main`, never elsewhere (`CLAUDE.md` § Conventions, "Worktrees"); run `git worktree list` first, other agents may work in parallel, and keep out of their files.
 
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
 2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routing, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
