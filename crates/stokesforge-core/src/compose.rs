@@ -30,10 +30,13 @@
 //! the interface passes the translated name of the "row" series as a parameter
 //! ([`row_series`]).
 
+use std::collections::BTreeMap;
+
 use stokesforge_id::NodeId;
 use stokesforge_plot::{OverlaySpec, PanelSpec, PlotSpec, PlotType, SeriesSpec};
 
 use crate::column::ColumnRole;
+use crate::formula::Formula;
 use crate::node::{Node, NodeKind};
 use crate::tree::Tree;
 
@@ -112,6 +115,21 @@ pub fn x_for(tree: &Tree, y: NodeId) -> Option<NodeId> {
     let position = columns.iter().position(|id| *id == y)?;
     let x_role = role_of(tree, y)?.paired_x().unwrap_or(ColumnRole::X);
     nearest_left(tree, &columns, position, x_role)
+}
+
+/// The X column of each column a formula reads the X of
+/// ([`Formula::columns_needing_x`]), by the rule of [`x_for`] (#402). A column
+/// with no X to its left is left out of the map: the formula computes as
+/// [`crate::formula::FormulaError::NoPairedX`].
+///
+/// One function for the recalculation (fingerprint, dependency order) and for
+/// the message of the formula cell: they cannot disagree on the X.
+pub fn paired_x_columns(tree: &Tree, formula: &Formula) -> BTreeMap<NodeId, NodeId> {
+    formula
+        .columns_needing_x()
+        .into_iter()
+        .filter_map(|y| x_for(tree, y).map(|x| (y, x)))
+        .collect()
 }
 
 /// The first column of role `error_role` to the **right** of the column at
@@ -828,6 +846,94 @@ mod tests {
         assert_eq!(x_for(tree, c[5]), Some(c[1]), "a Y ignores X2");
         // Not a column: nothing.
         assert_eq!(x_for(tree, tree.root()), None);
+    }
+
+    /// Gives column `at` the formula `text` (read in letters).
+    fn set_formula(project: &mut Project, at: NodeId, text: &str) {
+        let formula = project.tree().formula_from_letters(at, text).unwrap();
+        let mut meta = project
+            .tree()
+            .node(at)
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        project.set_column_meta(at, meta).unwrap();
+    }
+
+    #[test]
+    fn the_formula_x_follows_the_roles_and_the_position_of_the_column() {
+        // c0 X, c1 Y, c2 Y (formula column).
+        let (mut project, _sheet, c) = sheet_with(&[X, Y, Y]);
+        set_formula(&mut project, c[2], "B / at(B, 2)");
+        let compiled = |p: &Project| {
+            p.tree()
+                .node(c[2])
+                .and_then(Node::as_column)
+                .unwrap()
+                .meta()
+                .formula
+                .clone()
+                .unwrap()
+                .compile()
+                .unwrap()
+        };
+        let pairs = |p: &Project| paired_x_columns(p.tree(), &compiled(p));
+        assert_eq!(pairs(&project), BTreeMap::from([(c[1], c[0])]));
+        assert!(!project.tree().formula_lacks_paired_x(c[2]));
+        // B no longer has an X to its left: the pairing disappears.
+        let mut meta = project
+            .tree()
+            .node(c[0])
+            .and_then(Node::as_column)
+            .unwrap()
+            .meta()
+            .clone();
+        meta.role = Y;
+        project.set_column_meta(c[0], meta).unwrap();
+        assert_eq!(pairs(&project), BTreeMap::new());
+        assert!(project.tree().formula_lacks_paired_x(c[2]));
+        // A formula that needs no X is never short of one.
+        set_formula(&mut project, c[2], "B / max(B)");
+        assert!(!project.tree().formula_lacks_paired_x(c[2]));
+    }
+
+    #[test]
+    fn a_formula_whose_every_cell_is_empty_found_no_point() {
+        let (mut project, _sheet, c) = sheet_with(&[X, Y, Y]);
+        set_formula(&mut project, c[2], "at(B, 900)");
+        let all_empty = |p: &mut Project| {
+            let n = 3;
+            p.set_length(c[2], n).unwrap();
+            p.set_column_type(c[2], crate::column::ColumnType::Mixed)
+                .unwrap();
+            p.set_values(
+                c[2],
+                0,
+                crate::column::ValueBlock::Mixed(vec![crate::column::MixedCell::Empty; n]),
+            )
+            .unwrap();
+        };
+        // Cells not yet written as empty: a number among them.
+        assert!(!project.tree().formula_found_no_point(c[2]));
+        all_empty(&mut project);
+        assert!(project.tree().formula_found_no_point(c[2]));
+        // `---` is another message, a number is a result.
+        project
+            .set_values(
+                c[2],
+                1,
+                crate::column::ValueBlock::Mixed(vec![crate::column::MixedCell::Text(
+                    "---".into(),
+                )]),
+            )
+            .unwrap();
+        assert!(!project.tree().formula_found_no_point(c[2]));
+        // No column function: no such message.
+        all_empty(&mut project);
+        set_formula(&mut project, c[2], "B * 2");
+        assert!(!project.tree().formula_found_no_point(c[2]));
     }
 
     #[test]

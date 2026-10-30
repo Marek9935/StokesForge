@@ -4,8 +4,30 @@
 //! references, **row-wise functions** (`sqrt(A)`, `round(B, 2)`, `pi()`, ...
 //! the table shared with the Fit, `stokesforge_analysis::functions`, #401),
 //! comparisons (`< <= > >= == !=`, true = 1, false = 0) and
-//! `if(cond, a, b)`. No cross-sheet reference, no function that reads a whole
-//! column — out of scope for this version.
+//! `if(cond, a, b)`, and the **column functions** (#402) that give one value
+//! for a whole column: `at(B, x)`, `max/min/mean/sum/std(B)`, `integral(B)`
+//! and their range forms `max(B, x1, x2)`. No cross-sheet reference.
+//!
+//! # Column functions (#402)
+//!
+//! `f(B)` is the whole column; `f(B, x1, x2)` the part whose X is between the
+//! bounds (any order, included); `max(B, C)` stays the row-wise `max` of #401
+//! (three arguments are always a range). The first argument is a **column**,
+//! never an expression ([`FormulaError::ColumnExpected`], refused at input), and
+//! so is the third of `at(B, x, D)`, which reads X in `D`. Without `D`, and for
+//! `integral` and the range forms, X is the column **paired** with `B` by the
+//! rule of the plot ([`crate::compose::x_for`]); the caller resolves it and
+//! passes it to [`evaluate_with_x`] ([`Formula::columns_needing_x`] says for
+//! which columns). Without a paired X: [`FormulaError::NoPairedX`], cells `---`.
+//! `max(B)` and the other statistics without a range read no X.
+//!
+//! The value is computed **once per formula**, before the row loop
+//! (`B / max(B)` on 100 000 rows is one pass, not 100 000); only bounds or an
+//! `at` abscissa that are columns are read per row, through an index built
+//! once (`stokesforge_analysis::column_values`, `O(log n)` per row). Empty and
+//! text cells, rows whose X is empty or text, and infinite values are ignored;
+//! no point (empty column, empty range, `at` outside the X domain) is an empty
+//! cell — `sum` and `integral` too, never 0.
 //!
 //! Precedence, lowest first: comparisons; `+ -`; `* /`; unary sign; `^`
 //! (right-associative, `-2^2 = -4`, `2^3^2 = 512`); call, number, column,
@@ -69,7 +91,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use stokesforge_id::NodeId;
 
+use stokesforge_analysis::column_values::{column_stat, AtTable, ColumnIndex, Stat};
 use stokesforge_analysis::functions::Func;
+use stokesforge_analysis::integrate::{integrate, IntegrateSpec, Under};
+use stokesforge_analysis::series::{clean, Series};
 
 use crate::column::{ColumnValues, NumericStatus};
 
@@ -136,6 +161,20 @@ pub enum FormulaError {
     /// `pi` alone in a sheet without a `PI` column: the number π is `pi()`.
     /// Refused at input.
     PiNeedsParentheses,
+    /// A column function (`at`, `max(B)`, `integral`...) whose column argument
+    /// is an expression (`max(B*2)`): it needs a column to find its X.
+    /// Refused at input. Static data only, like the variant above.
+    ColumnExpected { name: &'static str },
+    /// A column function that needs the X of a column (`at` without a third
+    /// argument, `integral`, the range forms) and finds none paired with it.
+    /// The formula is kept, its cells show `---`, and it computes as soon as an
+    /// X appears.
+    NoPairedX,
+    /// Every cell of the result is empty because the column functions found no
+    /// point (empty column, empty range, `at` outside the X domain). Never
+    /// returned by [`evaluate`]: the application derives it from the cells
+    /// ([`crate::tree::Tree::formula_found_no_point`]) to frame the formula.
+    NoPoint,
 }
 
 impl std::fmt::Display for FormulaError {
@@ -185,6 +224,17 @@ impl std::fmt::Display for FormulaError {
             ),
             FormulaError::PiNeedsParentheses => {
                 write!(f, "pi alone is a column: for the number pi, write pi()")
+            }
+            FormulaError::ColumnExpected { name } => write!(
+                f,
+                "function {name} reads a whole column: give it a column, not an expression"
+            ),
+            FormulaError::NoPairedX => write!(
+                f,
+                "the column read has no X column paired with it (the nearest X to its left)"
+            ),
+            FormulaError::NoPoint => {
+                write!(f, "the column functions found no point to compute from")
             }
         }
     }
@@ -290,6 +340,81 @@ impl CmpOp {
 pub enum Callee {
     Table(Func),
     If,
+    /// A function of one whole column (#402).
+    Column(ColumnFunc),
+}
+
+/// The functions that give **one value for a whole column** (#402). `Max` and
+/// `Min` here are the one-column and range forms (`max(B)`, `max(B, x1, x2)`);
+/// `max(B, C)` is the row-wise `Func::Max` of the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnFunc {
+    At,
+    Max,
+    Min,
+    Mean,
+    Sum,
+    Std,
+    Integral,
+}
+
+impl ColumnFunc {
+    /// Every column function once, in help order.
+    pub const ALL: [ColumnFunc; 7] = [
+        ColumnFunc::At,
+        ColumnFunc::Max,
+        ColumnFunc::Min,
+        ColumnFunc::Mean,
+        ColumnFunc::Sum,
+        ColumnFunc::Std,
+        ColumnFunc::Integral,
+    ];
+
+    /// By name, case-insensitive. `max` and `min` are **not** found here: by
+    /// name they are the row-wise functions, the argument count decides
+    /// ([`Callee::resolve`]).
+    fn from_name(name: &str) -> Option<ColumnFunc> {
+        match name.to_ascii_lowercase().as_str() {
+            "at" => Some(ColumnFunc::At),
+            "mean" => Some(ColumnFunc::Mean),
+            "sum" => Some(ColumnFunc::Sum),
+            "std" => Some(ColumnFunc::Std),
+            "integral" => Some(ColumnFunc::Integral),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ColumnFunc::At => "at",
+            ColumnFunc::Max => "max",
+            ColumnFunc::Min => "min",
+            ColumnFunc::Mean => "mean",
+            ColumnFunc::Sum => "sum",
+            ColumnFunc::Std => "std",
+            ColumnFunc::Integral => "integral",
+        }
+    }
+
+    /// The allowed argument counts: `at(B, x)` or `at(B, x, D)`; `f(B)` or
+    /// `f(B, x1, x2)`.
+    pub fn arity(self) -> &'static [usize] {
+        match self {
+            ColumnFunc::At => &[2, 3],
+            _ => &[1, 3],
+        }
+    }
+
+    fn stat(self) -> Option<Stat> {
+        match self {
+            ColumnFunc::Max => Some(Stat::Max),
+            ColumnFunc::Min => Some(Stat::Min),
+            ColumnFunc::Mean => Some(Stat::Mean),
+            ColumnFunc::Sum => Some(Stat::Sum),
+            ColumnFunc::Std => Some(Stat::Std),
+            ColumnFunc::At | ColumnFunc::Integral => None,
+        }
+    }
 }
 
 impl Callee {
@@ -299,6 +424,7 @@ impl Callee {
             .into_iter()
             .map(Callee::Table)
             .chain(std::iter::once(Callee::If))
+            .chain(ColumnFunc::ALL.into_iter().map(Callee::Column))
     }
 
     /// The callee whose name is nearest to `name` (case-insensitive), for
@@ -323,16 +449,38 @@ impl Callee {
     pub fn alternative(self, found: usize) -> Option<Callee> {
         match self {
             Callee::Table(f) => f.alternative(found).map(Callee::Table),
-            Callee::If => None,
+            Callee::If | Callee::Column(_) => None,
         }
     }
 
-    /// Case-insensitive.
+    /// Case-insensitive. By name only: `max` and `min` give the row-wise
+    /// function, [`Callee::resolve`] picks the column form by argument count.
     pub fn from_name(name: &str) -> Option<Callee> {
         if name.eq_ignore_ascii_case("if") {
             Some(Callee::If)
+        } else if let Some(column) = ColumnFunc::from_name(name) {
+            Some(Callee::Column(column))
         } else {
             Func::from_name(name).map(Callee::Table)
+        }
+    }
+
+    /// The callee a call with `found` arguments really is: `max(B)` and
+    /// `max(B, x1, x2)` are the column forms, `max(B, C)` the row-wise one.
+    pub fn resolve(self, found: usize) -> Callee {
+        match (self, found) {
+            (Callee::Table(Func::Max), 1 | 3) => Callee::Column(ColumnFunc::Max),
+            (Callee::Table(Func::Min), 1 | 3) => Callee::Column(ColumnFunc::Min),
+            _ => self,
+        }
+    }
+
+    /// The counts the **name** accepts, all forms together (`max`: 1, 2 or 3):
+    /// what an argument-count refusal lists.
+    fn accepted_counts(self) -> &'static [usize] {
+        match self {
+            Callee::Table(Func::Max | Func::Min) => &[1, 2, 3],
+            other => other.arity(),
         }
     }
 
@@ -341,6 +489,7 @@ impl Callee {
         match self {
             Callee::If => "if",
             Callee::Table(f) => f.name(),
+            Callee::Column(f) => f.name(),
         }
     }
 
@@ -349,6 +498,7 @@ impl Callee {
         match self {
             Callee::If => &[3],
             Callee::Table(f) => f.arity(),
+            Callee::Column(f) => f.arity(),
         }
     }
 }
@@ -543,6 +693,37 @@ enum Expr {
     Cmp(CmpOp, Box<Expr>, Box<Expr>),
     Call(Func, Vec<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// A column function (#402). Boxed: keeps `Expr` small, the parser
+    /// recurses on it.
+    OfColumn(Box<ColumnCall>),
+}
+
+/// A call of a [`ColumnFunc`]: its column(s) and its other arguments.
+#[derive(Debug, Clone, PartialEq)]
+struct ColumnCall {
+    func: ColumnFunc,
+    /// The first argument: the column the value is computed over.
+    source: NodeId,
+    /// `at(B, x, D)`: the explicit X column.
+    x_column: Option<NodeId>,
+    /// `at`: `[x]`; the statistics and `integral`: none, or `[x1, x2]`.
+    args: Vec<Expr>,
+    /// Rank of the call in the formula (order of parsing): where its value is
+    /// kept during an evaluation. A nested call comes before its parent.
+    slot: usize,
+}
+
+impl ColumnCall {
+    /// True if the value reads the X paired with `source`: `at` without a
+    /// third argument, `integral`, and the range forms. The unranged
+    /// statistics ignore X.
+    fn needs_paired_x(&self) -> bool {
+        match self.func {
+            ColumnFunc::At => self.x_column.is_none(),
+            ColumnFunc::Integral => true,
+            _ => !self.args.is_empty(),
+        }
+    }
 }
 
 /// Depth cap of the tree, in "cost": one nesting level
@@ -558,6 +739,8 @@ struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
     depth: usize,
+    /// Column calls met so far ([`ColumnCall::slot`]).
+    slots: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -566,6 +749,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             depth: 0,
+            slots: 0,
         }
     }
 
@@ -717,6 +901,33 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
+    /// Builds the call of a column function from its parsed arguments (count
+    /// already checked): the first, and for `at` the third, must be columns.
+    fn column_call(&mut self, func: ColumnFunc, args: Vec<Expr>) -> Result<Expr, FormulaError> {
+        let expected = FormulaError::ColumnExpected { name: func.name() };
+        let mut args = args.into_iter();
+        let Some(Expr::Column(source)) = args.next() else {
+            return Err(expected);
+        };
+        let mut rest: Vec<Expr> = args.collect();
+        let mut x_column = None;
+        if func == ColumnFunc::At && rest.len() == 2 {
+            match rest.pop() {
+                Some(Expr::Column(id)) => x_column = Some(id),
+                _ => return Err(expected),
+            }
+        }
+        let slot = self.slots;
+        self.slots += 1;
+        Ok(Expr::OfColumn(Box::new(ColumnCall {
+            func,
+            source,
+            x_column,
+            args: rest,
+            slot,
+        })))
+    }
+
     /// `primary := number | column | name '(' args ')' | '(' cmp ')'`
     fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
         match self.tokens.get(self.pos) {
@@ -752,15 +963,18 @@ impl<'a> Parser<'a> {
                 }
                 self.pos += 1;
                 let args = self.nested(Self::parse_args)?;
-                if !callee.arity().contains(&args.len()) {
+                // `max(B)` and `max(B, x1, x2)` are the column forms.
+                let callee = callee.resolve(args.len());
+                if !callee.accepted_counts().contains(&args.len()) {
                     return Err(FormulaError::WrongArgumentCount {
                         name: callee.name(),
-                        expected: callee.arity(),
+                        expected: callee.accepted_counts(),
                         found: args.len(),
                         suggestion: callee.alternative(args.len()).map(Callee::name),
                     });
                 }
                 match callee {
+                    Callee::Column(func) => self.column_call(func, args),
                     // The arity (3) was just checked.
                     Callee::If => match <[Expr; 3]>::try_from(args) {
                         Ok([cond, then, otherwise]) => Ok(Expr::If(
@@ -916,7 +1130,10 @@ impl ColumnFormula {
         let formula = Self { parts };
         // A wrong argument count is refused here; any other syntax error is
         // stored and returned by `compile`, as before.
-        if let Err(error @ FormulaError::WrongArgumentCount { .. }) = formula.compile() {
+        if let Err(
+            error @ (FormulaError::WrongArgumentCount { .. } | FormulaError::ColumnExpected { .. }),
+        ) = formula.compile()
+        {
             return Err(error);
         }
         Ok(formula)
@@ -995,7 +1212,10 @@ impl ColumnFormula {
                 "unexpected tokens after the formula".to_string(),
             ));
         }
-        Ok(Formula { expr })
+        Ok(Formula {
+            expr,
+            slots: parser.slots,
+        })
     }
 }
 
@@ -1005,6 +1225,8 @@ impl ColumnFormula {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Formula {
     expr: Expr,
+    /// Number of column calls ([`ColumnCall::slot`]).
+    slots: usize,
 }
 
 impl Formula {
@@ -1036,11 +1258,60 @@ impl Formula {
                     walk(a, out);
                     walk(b, out);
                 }
+                Expr::OfColumn(call) => {
+                    out.insert(call.source);
+                    out.extend(call.x_column);
+                    call.args.iter().for_each(|arg| walk(arg, out));
+                }
             }
         }
         let mut set = BTreeSet::new();
         walk(&self.expr, &mut set);
         set
+    }
+
+    /// The columns whose **paired X** the formula reads (#402): the first
+    /// argument of `integral`, of the range forms, and of `at` without a third
+    /// argument. Pure; the caller resolves each one's X
+    /// ([`crate::compose::paired_x_columns`]) and passes the result to
+    /// [`evaluate_with_x`]. That X is a hidden input of the formula: it enters
+    /// the recalculation fingerprint and its dependency order.
+    pub fn columns_needing_x(&self) -> BTreeSet<NodeId> {
+        fn walk(expr: &Expr, out: &mut BTreeSet<NodeId>) {
+            match expr {
+                Expr::Number(_) | Expr::Column(_) => {}
+                Expr::Neg(inner) => walk(inner, out),
+                Expr::Add(a, b)
+                | Expr::Sub(a, b)
+                | Expr::Mul(a, b)
+                | Expr::Div(a, b)
+                | Expr::Pow(a, b)
+                | Expr::Cmp(_, a, b) => {
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::Call(_, args) => args.iter().for_each(|arg| walk(arg, out)),
+                Expr::If(c, a, b) => {
+                    walk(c, out);
+                    walk(a, out);
+                    walk(b, out);
+                }
+                Expr::OfColumn(call) => {
+                    if call.needs_paired_x() {
+                        out.insert(call.source);
+                    }
+                    call.args.iter().for_each(|arg| walk(arg, out));
+                }
+            }
+        }
+        let mut set = BTreeSet::new();
+        walk(&self.expr, &mut set);
+        set
+    }
+
+    /// True if the formula calls a column function (#402).
+    pub fn has_column_function(&self) -> bool {
+        self.slots > 0
     }
 }
 
@@ -1100,6 +1371,21 @@ pub fn evaluate(
     columns: &[(NodeId, ColumnValues)],
     target_len: usize,
 ) -> FormulaEvaluation {
+    evaluate_with_x(formula, columns, &BTreeMap::new(), target_len)
+}
+
+/// [`evaluate`] with the X columns paired with the columns that need one
+/// (#402): `paired_x` maps a column of [`Formula::columns_needing_x`] to its X.
+/// A column function that needs an X and finds none (absent from the map, or
+/// not among `columns`) degrades the whole result to
+/// [`FormulaError::NoPairedX`]. The column functions are computed **here,
+/// once**, before the row loop.
+pub fn evaluate_with_x(
+    formula: &Formula,
+    columns: &[(NodeId, ColumnValues)],
+    paired_x: &BTreeMap<NodeId, NodeId>,
+    target_len: usize,
+) -> FormulaEvaluation {
     let mut resolved: BTreeMap<NodeId, &ColumnValues> = BTreeMap::new();
     for id in formula.referenced_columns() {
         match columns.iter().find(|(column, _)| *column == id) {
@@ -1118,8 +1404,24 @@ pub fn evaluate(
             }
         }
     }
+    let mut states = vec![CallState::Unset; formula.slots];
+    if let Err(error) = prepare(
+        &formula.expr,
+        &resolved,
+        &Pairing {
+            all: columns,
+            paired_x,
+        },
+        &mut states,
+    ) {
+        return FormulaEvaluation::degraded(target_len, error);
+    }
+    let ctx = Ctx {
+        columns: &resolved,
+        states: &states,
+    };
     let (values, statuses) = (0..target_len)
-        .map(|row| eval_expr(&formula.expr, row, &resolved))
+        .map(|row| eval_expr(&formula.expr, row, &ctx))
         .unzip();
     FormulaEvaluation {
         values,
@@ -1134,11 +1436,7 @@ pub fn evaluate(
 /// ([`NumericStatus::combine`]): a non-numeric text anywhere in the
 /// expression must show, even drowned in an addition with an empty
 /// cell.
-fn eval_expr(
-    expr: &Expr,
-    row: usize,
-    columns: &BTreeMap<NodeId, &ColumnValues>,
-) -> (f64, NumericStatus) {
+fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
     match expr {
         Expr::Number(value) => (*value, NumericStatus::Ok),
         // `number_at`/`status_at` rather than `get`: the read without
@@ -1147,24 +1445,24 @@ fn eval_expr(
         // bounds). `get` would clone a `String` per row only to throw it away.
         // A column absent from `columns` cannot happen
         // here (`evaluate` refused it): `NaN`, never a panic.
-        Expr::Column(id) => match columns.get(id) {
+        Expr::Column(id) => match ctx.columns.get(id) {
             Some(values) => (values.number_at(row), values.status_at(row)),
             None => (f64::NAN, NumericStatus::Missing),
         },
         Expr::Neg(inner) => {
-            let (value, status) = eval_expr(inner, row, columns);
+            let (value, status) = eval_expr(inner, row, ctx);
             (-value, status)
         }
-        Expr::Add(a, b) => combine(a, b, row, columns, |x, y| x + y),
-        Expr::Sub(a, b) => combine(a, b, row, columns, |x, y| x - y),
-        Expr::Mul(a, b) => combine(a, b, row, columns, |x, y| x * y),
-        Expr::Div(a, b) => combine(a, b, row, columns, |x, y| x / y),
+        Expr::Add(a, b) => combine(a, b, row, ctx, |x, y| x + y),
+        Expr::Sub(a, b) => combine(a, b, row, ctx, |x, y| x - y),
+        Expr::Mul(a, b) => combine(a, b, row, ctx, |x, y| x * y),
+        Expr::Div(a, b) => combine(a, b, row, ctx, |x, y| x / y),
         Expr::Pow(a, b) => {
-            let (value, status) = combine(a, b, row, columns, |x, y| Func::Pow.apply(&[x, y]));
+            let (value, status) = combine(a, b, row, ctx, |x, y| Func::Pow.apply(&[x, y]));
             domain_checked(nan_unless_ok(value, status), status)
         }
         Expr::Cmp(op, a, b) => {
-            let (value, status) = combine(a, b, row, columns, |x, y| {
+            let (value, status) = combine(a, b, row, ctx, |x, y| {
                 if x.is_nan() || y.is_nan() {
                     f64::NAN
                 } else if op.test(x, y) {
@@ -1180,24 +1478,227 @@ fn eval_expr(
             let values: Vec<f64> = args
                 .iter()
                 .map(|arg| {
-                    let (value, arg_status) = eval_expr(arg, row, columns);
+                    let (value, arg_status) = eval_expr(arg, row, ctx);
                     status = status.combine(arg_status);
                     value
                 })
                 .collect();
             domain_checked(nan_unless_ok(func.apply(&values), status), status)
         }
+        Expr::OfColumn(call) => eval_column_call(call, row, ctx),
         // Only the chosen branch is evaluated, status included: an empty cell
         // in the other branch does not matter.
         Expr::If(cond, then, otherwise) => {
-            let (c, c_status) = eval_expr(cond, row, columns);
+            let (c, c_status) = eval_expr(cond, row, ctx);
             if c.is_nan() {
                 (f64::NAN, c_status)
             } else if c != 0.0 {
-                eval_expr(then, row, columns)
+                eval_expr(then, row, ctx)
             } else {
-                eval_expr(otherwise, row, columns)
+                eval_expr(otherwise, row, ctx)
             }
+        }
+    }
+}
+
+/// What an evaluation reads: the columns of the sheet, and the column
+/// functions already computed.
+struct Ctx<'a> {
+    columns: &'a BTreeMap<NodeId, &'a ColumnValues>,
+    states: &'a [CallState],
+}
+
+/// The columns of the sheet and the X pairing, to find the X of a column call.
+struct Pairing<'a> {
+    all: &'a [(NodeId, ColumnValues)],
+    paired_x: &'a BTreeMap<NodeId, NodeId>,
+}
+
+/// What a column call keeps between the computation (before the row loop) and
+/// the rows.
+#[derive(Debug, Clone)]
+enum CallState {
+    /// Not computed yet (a call is computed after its nested calls).
+    Unset,
+    /// One value for every row; `None`: no point, an empty cell.
+    Value(Option<f64>),
+    /// `at(B, x)` with `x` read per row.
+    At(AtTable),
+    /// A statistic or an integral over bounds read per row.
+    Range(ColumnIndex),
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Column calls computed on this thread: the witness of "once per formula".
+    static COMPUTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Computes every column call of `expr` (nested calls first) into `states`.
+fn prepare(
+    expr: &Expr,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+    pairing: &Pairing,
+    states: &mut [CallState],
+) -> Result<(), FormulaError> {
+    match expr {
+        Expr::Number(_) | Expr::Column(_) => Ok(()),
+        Expr::Neg(inner) => prepare(inner, columns, pairing, states),
+        Expr::Add(a, b)
+        | Expr::Sub(a, b)
+        | Expr::Mul(a, b)
+        | Expr::Div(a, b)
+        | Expr::Pow(a, b)
+        | Expr::Cmp(_, a, b) => {
+            prepare(a, columns, pairing, states)?;
+            prepare(b, columns, pairing, states)
+        }
+        Expr::Call(_, args) => args
+            .iter()
+            .try_for_each(|arg| prepare(arg, columns, pairing, states)),
+        Expr::If(c, a, b) => {
+            prepare(c, columns, pairing, states)?;
+            prepare(a, columns, pairing, states)?;
+            prepare(b, columns, pairing, states)
+        }
+        Expr::OfColumn(call) => {
+            for arg in &call.args {
+                prepare(arg, columns, pairing, states)?;
+            }
+            let state = compute_call(call, columns, pairing, states)?;
+            states[call.slot] = state;
+            Ok(())
+        }
+    }
+}
+
+/// True if `expr` gives the same value on every row: no column read, apart
+/// from inside a column call whose own arguments are such.
+fn row_independent(expr: &Expr) -> bool {
+    match expr {
+        Expr::Number(_) => true,
+        Expr::Column(_) => false,
+        Expr::Neg(inner) => row_independent(inner),
+        Expr::Add(a, b)
+        | Expr::Sub(a, b)
+        | Expr::Mul(a, b)
+        | Expr::Div(a, b)
+        | Expr::Pow(a, b)
+        | Expr::Cmp(_, a, b) => row_independent(a) && row_independent(b),
+        Expr::Call(_, args) => args.iter().all(row_independent),
+        Expr::If(c, a, b) => row_independent(c) && row_independent(a) && row_independent(b),
+        Expr::OfColumn(call) => call.args.iter().all(row_independent),
+    }
+}
+
+/// The numbers of a column, `NaN` for what is not one.
+fn numbers_of(values: &ColumnValues) -> Vec<f64> {
+    (0..values.len()).map(|row| values.number_at(row)).collect()
+}
+
+/// The value of a column call over its column(s): once per formula.
+fn compute_call(
+    call: &ColumnCall,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+    pairing: &Pairing,
+    states: &[CallState],
+) -> Result<CallState, FormulaError> {
+    #[cfg(test)]
+    COMPUTATIONS.with(|count| count.set(count.get() + 1));
+    let ys = columns
+        .get(&call.source)
+        .map(|values| numbers_of(values))
+        .ok_or(FormulaError::DeletedColumn)?;
+    let xs = || -> Result<Vec<f64>, FormulaError> {
+        let x_id = call
+            .x_column
+            .or_else(|| pairing.paired_x.get(&call.source).copied())
+            .ok_or(FormulaError::NoPairedX)?;
+        // The paired X is not necessarily read by name: look it up among all
+        // the columns of the sheet.
+        pairing
+            .all
+            .iter()
+            .find(|(id, _)| *id == x_id)
+            .map(|(_, values)| numbers_of(values))
+            .ok_or(FormulaError::NoPairedX)
+    };
+    if call.func == ColumnFunc::At {
+        return Ok(CallState::At(AtTable::new(&xs()?, &ys)));
+    }
+    let Some((lo, hi)) = call.args.first().zip(call.args.get(1)) else {
+        // The whole column.
+        return Ok(CallState::Value(match call.func.stat() {
+            Some(stat) => column_stat(stat, &ys),
+            None => integral_of(&xs()?, &ys, None),
+        }));
+    };
+    let xs = xs()?;
+    if row_independent(lo) && row_independent(hi) {
+        // Constant bounds: one value, computed now.
+        let ctx = Ctx { columns, states };
+        let bounds = (eval_expr(lo, 0, &ctx), eval_expr(hi, 0, &ctx));
+        let value = match bounds {
+            ((lo, NumericStatus::Ok), (hi, NumericStatus::Ok))
+                if lo.is_finite() && hi.is_finite() =>
+            {
+                match call.func.stat() {
+                    Some(stat) => ColumnIndex::new(&xs, &ys).stat(stat, lo, hi),
+                    None => integral_of(&xs, &ys, Some((lo, hi))),
+                }
+            }
+            _ => None,
+        };
+        return Ok(CallState::Value(value));
+    }
+    Ok(CallState::Range(ColumnIndex::new(&xs, &ys)))
+}
+
+/// The Integration tool's total (no baseline) over the finite points, on the
+/// whole curve or on a range: the same function, not a copy. `None` where the
+/// tool fails (fewer than two points, empty range) or overflows.
+fn integral_of(xs: &[f64], ys: &[f64], range: Option<(f64, f64)>) -> Option<f64> {
+    let cleaned = clean(xs, ys).series;
+    let spec = IntegrateSpec {
+        ranges: range.into_iter().collect(),
+        under: Under::Zero,
+        cumulative: false,
+        normalize: false,
+    };
+    integrate(&Series::new(cleaned.x, cleaned.y), &spec)
+        .ok()
+        .map(|result| result.total)
+        .filter(|total| total.is_finite())
+}
+
+/// The value of a column call on one row. An empty or failed operand (the
+/// abscissa or a bound of that row) makes the row's cell empty or failed, like
+/// any function; a call that found no point is an **empty cell** (`NaN`, status
+/// `Ok`): not a failure, and not the `---` of a missing operand.
+fn eval_column_call(call: &ColumnCall, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
+    let found = |value: Option<f64>| (value.unwrap_or(f64::NAN), NumericStatus::Ok);
+    match &ctx.states[call.slot] {
+        CallState::Unset => (f64::NAN, NumericStatus::Missing),
+        CallState::Value(value) => found(*value),
+        CallState::At(table) => {
+            let (x, status) = eval_expr(&call.args[0], row, ctx);
+            if status == NumericStatus::Ok {
+                found(table.at(x))
+            } else {
+                (f64::NAN, status)
+            }
+        }
+        CallState::Range(index) => {
+            let (lo, lo_status) = eval_expr(&call.args[0], row, ctx);
+            let (hi, hi_status) = eval_expr(&call.args[1], row, ctx);
+            let status = lo_status.combine(hi_status);
+            if status != NumericStatus::Ok {
+                return (f64::NAN, status);
+            }
+            found(match call.func.stat() {
+                Some(stat) => index.stat(stat, lo, hi),
+                None => index.integral(lo, hi),
+            })
         }
     }
 }
@@ -1230,11 +1731,11 @@ fn combine(
     a: &Expr,
     b: &Expr,
     row: usize,
-    columns: &BTreeMap<NodeId, &ColumnValues>,
+    ctx: &Ctx,
     op: impl Fn(f64, f64) -> f64,
 ) -> (f64, NumericStatus) {
-    let (av, astatus) = eval_expr(a, row, columns);
-    let (bv, bstatus) = eval_expr(b, row, columns);
+    let (av, astatus) = eval_expr(a, row, ctx);
+    let (bv, bstatus) = eval_expr(b, row, ctx);
     (op(av, bv), astatus.combine(bstatus))
 }
 
@@ -2511,11 +3012,36 @@ mod tests {
     #[test]
     fn every_callee_is_listed_once_and_found_by_its_name() {
         let names: Vec<&str> = Callee::all().map(Callee::name).collect();
-        assert_eq!(names.len(), Func::ALL.len() + 1);
+        assert_eq!(
+            names.len(),
+            Func::ALL.len() + 1 + ColumnFunc::ALL.len(),
+            "the table, `if`, the column functions"
+        );
         assert!(names.contains(&"if"));
+        // A name is found, but `max` and `min` have two callees (row-wise and
+        // column forms): the name gives the row-wise one, the argument count
+        // resolves the other.
         for callee in Callee::all() {
-            assert_eq!(Callee::from_name(callee.name()), Some(callee));
+            let found = Callee::from_name(callee.name()).expect("found by name");
+            assert_eq!(found.name(), callee.name());
         }
+        // (name, arity) is unique.
+        let mut seen = BTreeSet::new();
+        for callee in Callee::all() {
+            assert!(seen.insert((callee.name(), callee.arity())), "{callee:?}");
+        }
+        assert_eq!(
+            Callee::from_name("max").map(|c| c.resolve(1)),
+            Some(Callee::Column(ColumnFunc::Max))
+        );
+        assert_eq!(
+            Callee::from_name("MIN").map(|c| c.resolve(3)),
+            Some(Callee::Column(ColumnFunc::Min))
+        );
+        assert_eq!(
+            Callee::from_name("max").map(|c| c.resolve(2)),
+            Some(Callee::Table(Func::Max))
+        );
     }
 
     #[test]
@@ -2583,5 +3109,354 @@ mod tests {
         assert!(close(value, 1.0));
         // Comparison chains are bounded too.
         assert!(too_deep(format!("{}A", "A<".repeat(100_000))));
+    }
+
+    // -- column functions (#402) --
+
+    /// `A` = X, `B` = the signal, paired like the plot does.
+    fn pairs() -> BTreeMap<NodeId, NodeId> {
+        BTreeMap::from([(col(1), col(0))])
+    }
+
+    /// Evaluates `src` on the sheet `columns`, `B` paired with `A`.
+    fn runx(src: &str, columns: &[ColumnValues], rows: usize) -> FormulaEvaluation {
+        let formula = parse(src).expect("parse");
+        evaluate_with_x(&formula, &sheet_values(columns), &pairs(), rows)
+    }
+
+    fn cells(evaluation: &FormulaEvaluation) -> Vec<Option<f64>> {
+        evaluation
+            .values
+            .iter()
+            .map(|v| (!v.is_nan()).then_some(*v))
+            .collect()
+    }
+
+    /// A spectrum: X 250 (a high peak, out of the window), 330, 340, 350.
+    fn spectrum() -> [ColumnValues; 2] {
+        [
+            float_column(&[250.0, 330.0, 340.0, 350.0]),
+            float_column(&[9.0, 1.0, 2.0, 1.5]),
+        ]
+    }
+
+    #[test]
+    fn at_reads_the_value_at_x_by_interpolation() {
+        let columns = [float_column(&[339.5, 340.5]), float_column(&[0.80, 0.84])];
+        let result = runx("at(B, 340)", &columns, 2);
+        assert_eq!(result.error, None);
+        assert!(close(result.values[0], 0.82));
+        assert!(close(result.values[1], 0.82), "the same value on every row");
+        // Outside the X domain: an empty cell, not an extrapolation.
+        assert_eq!(cells(&runx("at(B, 900)", &columns, 2)), vec![None, None]);
+        assert_eq!(cells(&runx("at(B, 300)", &columns, 2)), vec![None, None]);
+    }
+
+    #[test]
+    fn at_sorts_and_merges_the_pairs() {
+        let unsorted = [
+            float_column(&[3.0, 1.0, 2.0]),
+            float_column(&[30.0, 10.0, 20.0]),
+        ];
+        assert_eq!(runx("at(B, 2.5)", &unsorted, 1).values, vec![25.0]);
+        let doubled = [
+            float_column(&[1.0, 2.0, 2.0, 3.0]),
+            float_column(&[0.0, 1.0, 3.0, 4.0]),
+        ];
+        assert_eq!(runx("at(B, 2)", &doubled, 1).values, vec![2.0]);
+        assert_eq!(runx("at(B, 1.5)", &doubled, 1).values, vec![1.0]);
+    }
+
+    #[test]
+    fn normalizing_by_the_value_at_x_gives_one_there() {
+        let columns = spectrum();
+        let result = runx("B / at(B, 340)", &columns, 4);
+        assert_eq!(result.error, None);
+        assert!(close(result.values[2], 1.0));
+        assert!(close(result.values[0], 4.5));
+    }
+
+    #[test]
+    fn at_reads_an_explicit_x_column_and_a_per_row_abscissa() {
+        // B has no pair, D (= the fourth column) is its X.
+        let columns = [
+            float_column(&[0.0, 0.0, 0.0]),
+            float_column(&[10.0, 20.0, 30.0]),
+            float_column(&[0.0, 0.0, 0.0]),
+            float_column(&[1.0, 2.0, 3.0]),
+        ];
+        let formula = parse("at(B, 2.5, D)").expect("parse");
+        let result = evaluate_with_x(&formula, &sheet_values(&columns), &BTreeMap::new(), 3);
+        assert_eq!(result.error, None, "an explicit X needs no pairing");
+        assert_eq!(result.values, vec![25.0; 3]);
+        // `at(B, C)`: the abscissa is read row by row from C.
+        let columns = [
+            float_column(&[1.0, 2.0, 3.0]),
+            float_column(&[10.0, 20.0, 30.0]),
+            float_column(&[1.5, 3.0, 9.0]),
+        ];
+        let result = runx("at(B, C)", &columns, 3);
+        assert_eq!(cells(&result), vec![Some(15.0), Some(30.0), None]);
+    }
+
+    #[test]
+    fn a_range_keeps_only_the_points_between_the_bounds() {
+        let columns = spectrum();
+        for src in ["max(B, 330, 350)", "max(B, 350, 330)"] {
+            assert_eq!(runx(src, &columns, 1).values, vec![2.0], "{src}");
+        }
+        assert_eq!(runx("max(B)", &columns, 1).values, vec![9.0]);
+        assert_eq!(runx("min(B, 330, 350)", &columns, 1).values, vec![1.0]);
+        assert_eq!(runx("sum(B, 330, 340)", &columns, 1).values, vec![3.0]);
+        assert_eq!(runx("mean(B, 330, 350)", &columns, 1).values, vec![1.5]);
+        // Three arguments are always a range, never the max of three columns.
+        let result = runx("max(B, 900, 950)", &columns, 2);
+        assert_eq!(
+            cells(&result),
+            vec![None, None],
+            "no point is an empty cell"
+        );
+    }
+
+    #[test]
+    fn two_arguments_of_max_and_min_stay_row_wise() {
+        let columns = [float_column(&[1.0, 5.0]), float_column(&[3.0, 2.0])];
+        assert_eq!(runx("max(A, B)", &columns, 2).values, vec![3.0, 5.0]);
+        assert_eq!(runx("min(A, B)", &columns, 2).values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn statistics_skip_text_empty_and_infinite_cells() {
+        let columns = [
+            float_column(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            mixed_column(&[
+                Some(Ok(2.0)),
+                Some(Err("n/a")),
+                None,
+                Some(Ok(f64::INFINITY)),
+                Some(Ok(4.0)),
+                Some(Ok(6.0)),
+            ]),
+        ];
+        // No X needed without a range: an empty pairing map is fine.
+        let formula = parse("mean(B)").expect("parse");
+        let result = evaluate_with_x(&formula, &sheet_values(&columns), &BTreeMap::new(), 1);
+        assert_eq!(result.error, None);
+        assert_eq!(result.values, vec![4.0]);
+        assert_eq!(runx("sum(B)", &columns, 1).values, vec![12.0]);
+        assert_eq!(runx("max(B)", &columns, 1).values, vec![6.0]);
+        assert_eq!(runx("min(B)", &columns, 1).values, vec![2.0]);
+        assert!(close(runx("std(B)", &columns, 1).values[0], 2.0));
+        // A row whose X is empty or text is ignored by the range forms.
+        let columns = [
+            mixed_column(&[Some(Ok(1.0)), None, Some(Err("x")), Some(Ok(4.0))]),
+            float_column(&[10.0, 100.0, 1000.0, 20.0]),
+        ];
+        assert_eq!(runx("sum(B, 0, 10)", &columns, 1).values, vec![30.0]);
+        assert_eq!(runx("sum(B)", &columns, 1).values, vec![1130.0]);
+    }
+
+    #[test]
+    fn std_is_the_sample_deviation() {
+        let y = float_column(&[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]);
+        let columns = [float_column(&[0.0; 8]), y];
+        let got = runx("std(B)", &columns, 1).values[0];
+        assert!((got - 2.138089935299395).abs() < 1e-12, "{got}");
+        let offset = [
+            float_column(&[0.0; 3]),
+            float_column(&[1e9 + 1.0, 1e9 + 2.0, 1e9 + 3.0]),
+        ];
+        assert!(close(runx("std(B)", &offset, 1).values[0], 1.0));
+    }
+
+    #[test]
+    fn no_point_is_an_empty_cell_for_every_function() {
+        let columns = [float_column(&[1.0, 2.0]), mixed_column(&[None, None])];
+        for src in [
+            "sum(B)",
+            "max(B)",
+            "min(B)",
+            "mean(B)",
+            "std(B)",
+            "integral(B)",
+            "sum(B, 0, 9)",
+        ] {
+            let result = runx(src, &columns, 2);
+            assert_eq!(result.error, None, "{src}");
+            assert_eq!(cells(&result), vec![None, None], "{src}: not 0");
+            assert_eq!(
+                result.statuses,
+                vec![NumericStatus::Ok; 2],
+                "{src}: empty, not ---"
+            );
+        }
+    }
+
+    #[test]
+    fn integral_follows_the_integration_tool() {
+        // X 0, 1, 1, 3 / B 0, 2, 4, 0: the duplicate X are kept: 1 + 4.
+        let columns = [
+            float_column(&[0.0, 1.0, 1.0, 3.0]),
+            float_column(&[0.0, 2.0, 4.0, 0.0]),
+        ];
+        assert_eq!(runx("integral(B)", &columns, 1).values, vec![5.0]);
+        // Decreasing X: the sign does not depend on the recording direction.
+        let down = [
+            float_column(&[3.0, 2.0, 1.0]),
+            float_column(&[1.0, 1.0, 1.0]),
+        ];
+        assert_eq!(runx("integral(B)", &down, 1).values, vec![2.0]);
+        assert_eq!(runx("integral(B, 1, 2)", &down, 1).values, vec![1.0]);
+        assert_eq!(runx("integral(B, 2, 1)", &down, 1).values, vec![1.0]);
+        // One point has no area.
+        let one = [float_column(&[1.0]), float_column(&[1.0])];
+        assert_eq!(cells(&runx("integral(B)", &one, 1)), vec![None]);
+    }
+
+    #[test]
+    fn bounds_read_from_columns_are_taken_row_by_row() {
+        // Row 0: [1, 3]; row 1: [3, 1] (reversed); row 2: no point;
+        // row 3: empty bound.
+        let columns = [
+            float_column(&[1.0, 2.0, 3.0, 4.0]),
+            float_column(&[10.0, 20.0, 30.0, 40.0]),
+            float_column(&[1.0, 3.0, 8.0, f64::NAN]),
+            float_column(&[3.0, 1.0, 9.0, 4.0]),
+        ];
+        let result = runx("max(B, C, D)", &columns, 4);
+        assert_eq!(result.error, None);
+        assert_eq!(result.values[0], 30.0);
+        assert_eq!(result.values[1], 30.0);
+        assert!(result.values[2].is_nan());
+        assert!(result.values[3].is_nan());
+        assert_eq!(result.statuses[2], NumericStatus::Ok, "no point: empty");
+        assert_eq!(
+            result.statuses[3],
+            NumericStatus::Missing,
+            "empty bound: ---"
+        );
+        assert_eq!(runx("sum(B, C, D)", &columns, 4).values[0], 60.0);
+        assert_eq!(runx("integral(B, C, D)", &columns, 4).values[0], 40.0);
+    }
+
+    #[test]
+    fn a_column_function_without_x_degrades_the_whole_result() {
+        let columns = spectrum();
+        let formula = parse("at(B, 340)").expect("parse");
+        let result = evaluate(&formula, &sheet_values(&columns), 4);
+        assert_eq!(result.error, Some(FormulaError::NoPairedX));
+        assert!(result.values.iter().all(|v| v.is_nan()));
+        assert_eq!(result.statuses, vec![NumericStatus::Missing; 4]);
+        // Needed by at (without D), integral and the range forms; not by
+        // the unranged statistics.
+        let needing = |src: &str| parse(src).unwrap().columns_needing_x();
+        assert_eq!(needing("at(B, 1)"), BTreeSet::from([col(1)]));
+        assert_eq!(needing("integral(B)"), BTreeSet::from([col(1)]));
+        assert_eq!(needing("max(B, 1, 2)"), BTreeSet::from([col(1)]));
+        assert_eq!(needing("at(B, 1, C)"), BTreeSet::new());
+        assert_eq!(needing("max(B) + mean(B)"), BTreeSet::new());
+        assert_eq!(needing("max(B, C)"), BTreeSet::new());
+    }
+
+    #[test]
+    fn column_functions_are_inputs_of_the_formula() {
+        // The orchestrator builds its edges and fingerprint from this.
+        let formula = parse("at(B, 340, D) + max(C, E, F)").unwrap();
+        assert_eq!(
+            formula.referenced_columns(),
+            BTreeSet::from([col(1), col(3), col(2), col(4), col(5)])
+        );
+        assert!(formula.has_column_function());
+        assert!(!parse("max(B, C)").unwrap().has_column_function());
+    }
+
+    #[test]
+    fn the_first_argument_must_be_a_column() {
+        let refused = |src: &str| ColumnFormula::from_letters(src, &sheet(), OWN).unwrap_err();
+        assert_eq!(
+            refused("max(B*2)"),
+            FormulaError::ColumnExpected { name: "max" }
+        );
+        assert_eq!(
+            refused("mean(B+1, 1, 2)"),
+            FormulaError::ColumnExpected { name: "mean" }
+        );
+        assert_eq!(
+            refused("at(1, B)"),
+            FormulaError::ColumnExpected { name: "at" }
+        );
+        assert_eq!(
+            refused("at(B, 1, A+1)"),
+            FormulaError::ColumnExpected { name: "at" }
+        );
+        assert_eq!(
+            refused("integral(sqrt(B))"),
+            FormulaError::ColumnExpected { name: "integral" }
+        );
+        // A saved text degrades to a syntax error instead (invariant 10).
+        assert!(ColumnFormula::from_letters("max(B)", &sheet(), OWN).is_ok());
+    }
+
+    #[test]
+    fn column_functions_resolve_by_name_and_argument_count() {
+        let counts = |src: &str| match ColumnFormula::from_letters(src, &sheet(), OWN) {
+            Err(FormulaError::WrongArgumentCount { name, expected, .. }) => Some((name, expected)),
+            _ => None,
+        };
+        let any: &[usize] = &[1, 2, 3];
+        assert_eq!(counts("max()"), Some(("max", any)));
+        assert_eq!(counts("min(A, B, C, D)"), Some(("min", any)));
+        assert_eq!(counts("mean(A, B)"), Some(("mean", &[1, 3][..])));
+        assert_eq!(counts("at(A)"), Some(("at", &[2, 3][..])));
+        assert_eq!(counts("integral(A, B)"), Some(("integral", &[1, 3][..])));
+        assert_eq!(counts("max(A)"), None);
+        assert_eq!(counts("max(A, B)"), None);
+        assert_eq!(counts("max(A, 1, 2)"), None);
+    }
+
+    #[test]
+    fn the_column_value_is_computed_once_per_formula() {
+        let rows = 1000;
+        let x: Vec<f64> = (0..rows).map(f64::from).collect();
+        let columns = [float_column(&x), float_column(&x)];
+        COMPUTATIONS.with(|count| count.set(0));
+        let result = runx("B / max(B)", &columns, rows as usize);
+        assert_eq!(result.error, None);
+        assert_eq!(COMPUTATIONS.with(std::cell::Cell::get), 1);
+        assert!(close(result.values[500], 500.0 / 999.0));
+        // Two calls, two computations: one per call, not per row.
+        COMPUTATIONS.with(|count| count.set(0));
+        runx("B - mean(B) + at(B, 10)", &columns, rows as usize);
+        assert_eq!(COMPUTATIONS.with(std::cell::Cell::get), 2);
+    }
+
+    #[test]
+    fn nested_column_calls_with_constant_bounds_are_computed_first() {
+        // The bounds `min(B)` and `max(B)` are themselves column values.
+        let columns = spectrum();
+        let result = runx("sum(B, 330, max(A))", &columns, 1);
+        assert_eq!(result.error, None);
+        assert_eq!(result.values, vec![4.5]);
+    }
+
+    #[test]
+    fn calls_of_column_functions_count_towards_the_depth_cap() {
+        // `max(A)` is a nesting level like any call: 99 `abs` around it pass,
+        // 100 do not.
+        let nested = |n: usize| format!("{}max(A){}", "abs(".repeat(n), ")".repeat(n));
+        assert!(on_2_mib_stack(move || parse(&nested(99)).is_ok()));
+        assert!(too_deep(nested(100)));
+        assert!(too_deep(nested(100_000)));
+        // The commas of the argument list cost too.
+        assert!(too_deep(format!("at(B, {}A)", "A+".repeat(1000))));
+        // A call at the limit evaluates without overflowing the stack.
+        let value = on_2_mib_stack(move || {
+            let formula = parse(&nested(99)).unwrap();
+            let columns = [(col(0), float_column(&[16.0]))];
+            let value = evaluate(&formula, &columns, 1).values[0];
+            drop(formula);
+            value
+        });
+        assert!(close(value, 16.0));
     }
 }

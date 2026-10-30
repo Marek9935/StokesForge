@@ -613,6 +613,52 @@ impl Tree {
             .is_some_and(|formula| formula.has_deleted_reference(self.sheet_columns_of(column)))
     }
 
+    /// True if the formula of `column` reads the X of a column that has none
+    /// paired with it (#402: `at(B, x)`, `integral(B)`, `max(B, x1, x2)`
+    /// without an X to the left of B): it computes as
+    /// [`FormulaError::NoPairedX`], cells `---`. False for a formula that does
+    /// not compile, or that reads a deleted column (that message comes first).
+    pub fn formula_lacks_paired_x(&self, column: NodeId) -> bool {
+        let Some(formula) = self
+            .node(column)
+            .and_then(Node::as_column)
+            .and_then(|column| column.meta().formula.as_ref())
+        else {
+            return false;
+        };
+        if formula.has_deleted_reference(self.sheet_columns_of(column)) {
+            return false;
+        }
+        let Ok(compiled) = formula.compile() else {
+            return false;
+        };
+        let paired = crate::compose::paired_x_columns(self, &compiled);
+        compiled
+            .columns_needing_x()
+            .iter()
+            .any(|y| !paired.contains_key(y))
+    }
+
+    /// True if the formula of `column` calls a column function and **every**
+    /// cell of its result is empty (#402): the functions found no point (empty
+    /// column, empty range, `at` outside the X domain). A row with no value
+    /// among others stays silent; so does a result whose cells show `---`
+    /// (another message) and a column with no row.
+    pub fn formula_found_no_point(&self, column: NodeId) -> bool {
+        let Some(node) = self.node(column).and_then(Node::as_column) else {
+            return false;
+        };
+        let Some(formula) = node.meta().formula.as_ref() else {
+            return false;
+        };
+        let calls_a_column_function = formula
+            .compile()
+            .is_ok_and(|compiled| compiled.has_column_function());
+        calls_a_column_function
+            && !node.is_empty()
+            && (0..node.len()).all(|row| node.is_missing(row))
+    }
+
     /// Iterates over `(NodeId, &Node)` in no guaranteed order (persistence, statistics).
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node)> {
         self.nodes.iter().map(|(id, node)| (*id, node.as_ref()))
