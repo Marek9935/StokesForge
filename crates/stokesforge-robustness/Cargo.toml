@@ -31,6 +31,9 @@ stokesforge-python = { path = "../stokesforge-python", optional = true, features
 # The application state, for the batteries that test the cell <-> text
 # translation (`stokesforge-app-state` does not depend on egui: #263).
 stokesforge-app-state = { path = "../stokesforge-app-state" }
+# The layout of a figure, for the batteries that bound its size (b13, #398).
+stokesforge-render = { path = "../stokesforge-render" }
+stokesforge-render-svg = { path = "../stokesforge-render-svg" }
 proptest = "1"
 tempfile = "3"
 rmp-serde = "1.3.1"

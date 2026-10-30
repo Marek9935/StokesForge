@@ -173,6 +173,33 @@ pub fn fix_legacy_frames(
     Ok(true)
 }
 
+/// The free frames a graph on the grid would keep in free placement (#398),
+/// measured like the export; see [`pipeline::free_frames_from_grid`]. `None`
+/// for a graph that is free already, legacy or too large a grid.
+pub fn free_frames_from_grid(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> Result<Option<Vec<Option<stokesforge_plot::FreeFrame>>>, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::free_frames_from_grid(spec, probe)
+    })
+}
+
+/// The frame of a layer added beside layer `panel` of a free graph (#398, L8),
+/// measured like the export; see [`pipeline::place_beside`].
+pub fn place_beside(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+    panel: usize,
+    side: pipeline::BesideSide,
+) -> Result<Option<stokesforge_plot::FreeFrame>, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::place_beside(spec, probe, panel, side)
+    })
+}
+
 /// [`figure_layout`]'s size, or the legacy default if the measurement fails
 /// (it practically cannot).
 pub fn figure_size(

@@ -26,6 +26,13 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Free placement of graph panels, first part (#398): the model, the `.stf` file
+  and the layout. A graph can hold a frame per panel (left, top, width, height,
+  overlap allowed) instead of the regular grid; the image is the bounding box of
+  the panels. Nothing in the interface yet. **Additive `.stf` fields**
+  (`layer_placement`, and `free_frame` on each panel): an older version that
+  opens and saves a file again drops them without a message and shows the grid.
+
 - `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
   (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =
   Auto) and `fixed_size`, with a `unit="cm"|"mm"|"pt"|"in"` keyword (centimetres

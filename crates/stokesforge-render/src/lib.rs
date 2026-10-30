@@ -130,8 +130,8 @@ pub use interact::{
     PanelTransform, SnapZone,
 };
 pub use pipeline::{
-    draw, draw_on, draw_on_with_texts, draw_with_texts, AxisArea, AxisAreas, DrawnAnnotation,
-    DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText,
+    draw, draw_on, draw_on_with_texts, draw_with_texts, AxisArea, AxisAreas, BesideSide,
+    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText,
 };
 pub use series::{Geometry, Prepared};
 pub use shapes::DrawnShape;

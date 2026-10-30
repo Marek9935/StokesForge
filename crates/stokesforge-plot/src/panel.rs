@@ -7,6 +7,7 @@ use crate::annotation::AnnotationSpec;
 use crate::axis::{AxisSide, AxisSpec};
 use crate::legend::LegendSpec;
 use crate::series::{SeriesAxis, SeriesSpec};
+use crate::spec::{FALLBACK_FRAME, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
 use crate::text_anchor::TextAnchor;
 
 /// Layer overlaid on another (#167), in the manner of Origin's "New Layer (Axes)":
@@ -93,6 +94,53 @@ impl SeriesSlot {
     }
 }
 
+/// Frame of a cell in free placement (#398), in points: the plot area, from
+/// the left and top edge of the image. Plain data (invariant 3).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FreeFrame {
+    /// Left edge of the frame.
+    pub left: f64,
+    /// Top edge of the frame (graph title band included, as #405 P1).
+    pub top: f64,
+    /// Width of the frame.
+    pub width: f64,
+    /// Height of the frame.
+    pub height: f64,
+}
+
+impl FreeFrame {
+    /// The frame a missing or hostile entry reads as.
+    pub const FALLBACK: FreeFrame = FreeFrame {
+        left: 0.0,
+        top: 0.0,
+        width: FALLBACK_FRAME.0,
+        height: FALLBACK_FRAME.1,
+    };
+
+    /// This frame made usable: a non-finite number reads its fallback, the
+    /// size is brought into `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`, the position
+    /// into `±MAX_FIGURE_EXTENT / 2`.
+    pub fn sanitized(self) -> FreeFrame {
+        let half = MAX_FIGURE_EXTENT / 2.0;
+        let position = |v: f64| {
+            if v.is_finite() {
+                v.clamp(-half, half)
+            } else {
+                0.0
+            }
+        };
+        let size = |v: f64, fallback: f64| {
+            (if v.is_finite() { v } else { fallback }).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE)
+        };
+        FreeFrame {
+            left: position(self.left),
+            top: position(self.top),
+            width: size(self.width, FALLBACK_FRAME.0),
+            height: size(self.height, FALLBACK_FRAME.1),
+        }
+    }
+}
+
 /// A panel and its four axes.
 ///
 /// `row`/`column` place the panel in the grid of the [`crate::PlotSpec`] —
@@ -151,9 +199,20 @@ pub struct PanelSpec {
     /// keep their colors. A series that joins a group with a
     /// color gradient gets its color ([`PanelSpec::set_series_group`]).
     pub group_gradients: std::collections::BTreeMap<u32, Vec<String>>,
+    /// Frame of the cell in free placement (#398), stored on the ordinary
+    /// (base) layer of a cell only; an overlaid layer uses its base's.
+    /// Ignored in grid placement. Read through
+    /// [`PanelSpec::sanitized_free_frame`].
+    pub free_frame: Option<FreeFrame>,
 }
 
 impl PanelSpec {
+    /// [`PanelSpec::free_frame`] made usable: missing reads
+    /// [`FreeFrame::FALLBACK`], a hostile value is clamped.
+    pub fn sanitized_free_frame(&self) -> FreeFrame {
+        self.free_frame.unwrap_or(FreeFrame::FALLBACK).sanitized()
+    }
+
     /// Default panel placed at `(row, column)`.
     pub fn at(row: usize, column: usize) -> Self {
         Self {
@@ -802,7 +861,53 @@ impl Default for PanelSpec {
             shapes: Vec::new(),
             group_names: std::collections::BTreeMap::new(),
             group_gradients: std::collections::BTreeMap::new(),
+            free_frame: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod free_frame_tests {
+    use super::*;
+
+    fn frame(left: f64, top: f64, width: f64, height: f64) -> PanelSpec {
+        PanelSpec {
+            free_frame: Some(FreeFrame {
+                left,
+                top,
+                width,
+                height,
+            }),
+            ..PanelSpec::default()
+        }
+    }
+
+    #[test]
+    fn a_missing_frame_reads_the_fallback() {
+        assert_eq!(
+            PanelSpec::default().sanitized_free_frame(),
+            FreeFrame::FALLBACK
+        );
+    }
+
+    #[test]
+    fn hostile_frames_are_brought_into_bounds() {
+        let nan = frame(f64::NAN, f64::INFINITY, f64::NAN, f64::NEG_INFINITY);
+        assert_eq!(nan.sanitized_free_frame(), FreeFrame::FALLBACK);
+        let huge = frame(-1e300, 1e300, 1e300, -5.0).sanitized_free_frame();
+        assert_eq!(huge.left, -MAX_FIGURE_EXTENT / 2.0);
+        assert_eq!(huge.top, MAX_FIGURE_EXTENT / 2.0);
+        assert_eq!(huge.width, MAX_FRAME_SIZE);
+        assert_eq!(huge.height, MIN_FRAME_SIZE);
+    }
+
+    #[test]
+    fn a_sane_frame_is_left_alone() {
+        let ok = frame(-100.0, 20.0, 300.0, 200.0).sanitized_free_frame();
+        assert_eq!(
+            (ok.left, ok.top, ok.width, ok.height),
+            (-100.0, 20.0, 300.0, 200.0)
+        );
     }
 }
 
