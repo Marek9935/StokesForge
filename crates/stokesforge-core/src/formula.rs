@@ -731,7 +731,9 @@ impl ColumnCall {
 /// `a+b+c…` or `a*b*c…`, and one comma of an argument list, costs 1. The parser, `eval_expr`/`combine`, `referenced_columns` and
 /// the `Drop` of the tree recurse by that much: bounded here, none can exceed
 /// the stack of a 2 MiB thread, even in debug (`docs/archive/rustrewrite/
-/// questions-ouvertes.md` §11, #289). Allows 100 nestings or about 1,000 terms (1,001 pass).
+/// questions-ouvertes.md` §11, #289). The recursive functions keep a thin
+/// frame (their heavy arms are `#[inline(never)]` helpers, #408), and the test
+/// at the cap runs on 1 MiB: a 2x margin against compiler drift. Allows 100 nestings or about 1,000 terms (1,001 pass).
 pub const MAX_DEPTH: usize = 1000;
 const NEST_COST: usize = 10;
 
@@ -1457,47 +1459,68 @@ fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
         Expr::Sub(a, b) => combine(a, b, row, ctx, |x, y| x - y),
         Expr::Mul(a, b) => combine(a, b, row, ctx, |x, y| x * y),
         Expr::Div(a, b) => combine(a, b, row, ctx, |x, y| x / y),
-        Expr::Pow(a, b) => {
-            let (value, status) = combine(a, b, row, ctx, |x, y| Func::Pow.apply(&[x, y]));
-            domain_checked(nan_unless_ok(value, status), status)
-        }
-        Expr::Cmp(op, a, b) => {
-            let (value, status) = combine(a, b, row, ctx, |x, y| {
-                if x.is_nan() || y.is_nan() {
-                    f64::NAN
-                } else if op.test(x, y) {
-                    1.0
-                } else {
-                    0.0
-                }
-            });
-            (nan_unless_ok(value, status), status)
-        }
-        Expr::Call(func, args) => {
-            let mut status = NumericStatus::Ok;
-            let values: Vec<f64> = args
-                .iter()
-                .map(|arg| {
-                    let (value, arg_status) = eval_expr(arg, row, ctx);
-                    status = status.combine(arg_status);
-                    value
-                })
-                .collect();
-            domain_checked(nan_unless_ok(func.apply(&values), status), status)
-        }
+        Expr::Pow(a, b) => eval_pow(a, b, row, ctx),
+        Expr::Cmp(op, a, b) => eval_cmp(*op, a, b, row, ctx),
+        Expr::Call(func, args) => eval_call(func, args, row, ctx),
         Expr::OfColumn(call) => eval_column_call(call, row, ctx),
         // Only the chosen branch is evaluated, status included: an empty cell
         // in the other branch does not matter.
-        Expr::If(cond, then, otherwise) => {
-            let (c, c_status) = eval_expr(cond, row, ctx);
-            if c.is_nan() {
-                (f64::NAN, c_status)
-            } else if c != 0.0 {
-                eval_expr(then, row, ctx)
-            } else {
-                eval_expr(otherwise, row, ctx)
-            }
+        Expr::If(cond, then, otherwise) => eval_if(cond, then, otherwise, row, ctx),
+    }
+}
+
+// The arms below stay out of `eval_expr` so that its frame, which every level
+// of the tree pays in debug, holds the locals of none of them (#408).
+
+#[inline(never)]
+fn eval_pow(a: &Expr, b: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
+    let (value, status) = combine(a, b, row, ctx, |x, y| Func::Pow.apply(&[x, y]));
+    domain_checked(nan_unless_ok(value, status), status)
+}
+
+#[inline(never)]
+fn eval_cmp(op: CmpOp, a: &Expr, b: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
+    let (value, status) = combine(a, b, row, ctx, |x, y| {
+        if x.is_nan() || y.is_nan() {
+            f64::NAN
+        } else if op.test(x, y) {
+            1.0
+        } else {
+            0.0
         }
+    });
+    (nan_unless_ok(value, status), status)
+}
+
+#[inline(never)]
+fn eval_call(func: &Func, args: &[Expr], row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
+    let mut status = NumericStatus::Ok;
+    let values: Vec<f64> = args
+        .iter()
+        .map(|arg| {
+            let (value, arg_status) = eval_expr(arg, row, ctx);
+            status = status.combine(arg_status);
+            value
+        })
+        .collect();
+    domain_checked(nan_unless_ok(func.apply(&values), status), status)
+}
+
+#[inline(never)]
+fn eval_if(
+    cond: &Expr,
+    then: &Expr,
+    otherwise: &Expr,
+    row: usize,
+    ctx: &Ctx,
+) -> (f64, NumericStatus) {
+    let (c, c_status) = eval_expr(cond, row, ctx);
+    if c.is_nan() {
+        (f64::NAN, c_status)
+    } else if c != 0.0 {
+        eval_expr(then, row, ctx)
+    } else {
+        eval_expr(otherwise, row, ctx)
     }
 }
 
@@ -1549,27 +1572,55 @@ fn prepare(
         | Expr::Mul(a, b)
         | Expr::Div(a, b)
         | Expr::Pow(a, b)
-        | Expr::Cmp(_, a, b) => {
-            prepare(a, columns, pairing, states)?;
-            prepare(b, columns, pairing, states)
-        }
-        Expr::Call(_, args) => args
-            .iter()
-            .try_for_each(|arg| prepare(arg, columns, pairing, states)),
-        Expr::If(c, a, b) => {
-            prepare(c, columns, pairing, states)?;
-            prepare(a, columns, pairing, states)?;
-            prepare(b, columns, pairing, states)
-        }
-        Expr::OfColumn(call) => {
-            for arg in &call.args {
-                prepare(arg, columns, pairing, states)?;
-            }
-            let state = compute_call(call, columns, pairing, states)?;
-            states[call.slot] = state;
-            Ok(())
-        }
+        | Expr::Cmp(_, a, b) => prepare_pair(a, b, columns, pairing, states),
+        Expr::Call(_, args) => prepare_all(args, columns, pairing, states),
+        Expr::If(c, a, b) => prepare_all([&**c, &**a, &**b], columns, pairing, states),
+        Expr::OfColumn(call) => prepare_call(call, columns, pairing, states),
     }
+}
+
+/// The binary arm of [`prepare`], out of its frame (#408).
+#[inline(never)]
+fn prepare_pair(
+    a: &Expr,
+    b: &Expr,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+    pairing: &Pairing,
+    states: &mut [CallState],
+) -> Result<(), FormulaError> {
+    prepare(a, columns, pairing, states)?;
+    prepare(b, columns, pairing, states)
+}
+
+/// The list arms of [`prepare`] (call arguments, `if` operands), out of its
+/// frame (#408).
+#[inline(never)]
+fn prepare_all<'e>(
+    exprs: impl IntoIterator<Item = &'e Expr>,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+    pairing: &Pairing,
+    states: &mut [CallState],
+) -> Result<(), FormulaError> {
+    for expr in exprs {
+        prepare(expr, columns, pairing, states)?;
+    }
+    Ok(())
+}
+
+/// The `OfColumn` arm of [`prepare`], out of its frame (#408).
+#[inline(never)]
+fn prepare_call(
+    call: &ColumnCall,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+    pairing: &Pairing,
+    states: &mut [CallState],
+) -> Result<(), FormulaError> {
+    for arg in &call.args {
+        prepare(arg, columns, pairing, states)?;
+    }
+    let state = compute_call(call, columns, pairing, states)?;
+    states[call.slot] = state;
+    Ok(())
 }
 
 /// True if `expr` gives the same value on every row: no column read, apart
@@ -2396,7 +2447,9 @@ mod tests {
 
     #[test]
     fn a_formula_just_under_the_cap_is_accepted_and_evaluated() {
-        let v = on_2_mib_stack(|| {
+        // Half the 2 MiB contract: a margin against compiler drift in debug
+        // frames (#408).
+        let v = on_stack(ONE_MIB, || {
             let columns = [float_column(&[2.0])];
             let sum = parse(&format!("{}A", "A+".repeat(MAX_DEPTH - 2))).unwrap();
             let n = MAX_DEPTH / NEST_COST - 1;
