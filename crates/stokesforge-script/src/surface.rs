@@ -805,8 +805,11 @@ saving and figure export.
     pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
                   (y: a column, or a list of columns = a series group;
                    label=[...] one name per series, group_name='...')
-    pyst.set_graph(graph, *, panel=(0, 0), axis='left', **options) -> None (titles, scales,
-                  bounds, legend...; one history entry; keys in help(pyst.set_graph))
+    pyst.set_graph(graph, *, panel=(0, 0), axis='left', unit='cm', **options) -> None (titles,
+                  scales, bounds, legend, plot areas...; one history entry; keys in
+                  help(pyst.set_graph))
+    pyst.graph_size(graph, *, unit='cm') -> dict (width, height, plot_widths, plot_heights,
+                  plot_left, plot_top, fixed_size; lengths in `unit`)
     pyst.insert_rows(worksheet, at, count=1) -> None
     pyst.delete_rows(worksheet, at, count=1) -> None
     pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed')
@@ -861,7 +864,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.1";
+pub const PYST_API_VERSION: &str = "0.2";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///
@@ -912,6 +915,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(export_graph, &module)?)?;
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add_function(wrap_pyfunction!(crate::set_graph::set_graph, &module)?)?;
+    module.add_function(wrap_pyfunction!(crate::graph_size::graph_size, &module)?)?;
     for function in [
         wrap_pyfunction!(crate::sheet_edit::insert_rows, &module)?,
         wrap_pyfunction!(crate::sheet_edit::delete_rows, &module)?,

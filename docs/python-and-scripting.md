@@ -177,7 +177,8 @@ describes its effects.
 | `save_as(path)` | saves at this path (text or `pathlib.Path`), which becomes the current path |
 | `export_graph(graph, path, *, png_scale=4.0)` | exports a graph to `.svg`, `.pdf` or `.png` (unknown extension: `InvalidValueError`), same rendering as the application's export |
 | `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets |
-| `set_graph(graph, *, panel=(0, 0), axis="left", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below); **a single history entry**; unknown key or refused value: `InvalidValueError`, nothing is written |
+| `set_graph(graph, *, panel=(0, 0), axis="left", unit="cm", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below), sizes included (#399, in `unit`); **a single history entry**; unknown key, unit or refused value: `InvalidValueError`, nothing is written |
+| `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
 | `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
 | `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
 | `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column refuses |
@@ -430,6 +431,29 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `x_auto_range`, `y_auto_range` | `True` makes the framing automatic (contradictory with bounds given in the same call) |
 | `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booleans; `x_inverted=True` on increasing bounds swaps them (the direction is read from their order, `AxisSpec::orient`, #344); the surface itself does not change |
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
+| `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
+| `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
+| `fixed_size` | boolean, "Figure size = Fixed" (#399) |
+
+**Sizes (#399).** The five size keys read their numbers in `unit`, a keyword of
+`set_graph` (`"cm"` by default, `"mm"`, `"pt"`, `"in"`), **never** the unit of
+the Preferences: a script gives the same figure on every machine. They go
+through the setters of the interface (`compose::set_frame_size`,
+`set_figure_offset`, `set_fixed_figure`), in the same `SetPlotSpec` as the
+other keys. The size of the image itself is not settable: it follows the plot
+areas and the axes, titles and legend around them. A graph from an old file
+(no stored plot area) is given the ones it is drawn with first, in the same
+history entry (#394, G7); a call that then changes nothing writes nothing and
+the graph stays as it was. A graph too large to store its plot areas (more
+cells than the layout handles) refuses a size key with `InvalidValueError`.
+
+**`graph_size(graph, *, unit="cm")`** reads one snapshot and the layout the
+screen and the exports read (invariant 4); it never writes and does not open
+the script group. `width` and `height` are the image, `plot_widths` and
+`plot_heights` the plot areas of the grid columns and rows (the ones a graph
+from an old file is drawn with), `plot_left` and `plot_top` are `None` for
+Auto, otherwise the stored value raised to the smallest the axes allow, and
+`fixed_size` a boolean. Contract: `tests/set_graph.rs`.
 
 Outside `set_graph` for now (nothing technically prevents them, they
 were not judged safe enough for this batch): fonts and anchors of the titles,
@@ -617,7 +641,7 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.1"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.2"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
@@ -676,6 +700,7 @@ function create_worksheet(workbook, name=None)
 function delete_rows(worksheet, at, count=1)
 function duplicate(handle, name=None)
 function export_graph(graph, path, *, png_scale=4.0)
+function graph_size(graph, *, unit='cm')
 function group_series(graph, indices, *, name=None, panel=(0, 0))
 function import_file(path, recipe=None)
 function info(handle)
@@ -697,7 +722,7 @@ function series_groups(graph, *, panel=(0, 0))
 function set_column(handle, values, *, expected_version=None)
 function set_column_meta(handle, **metadata)
 function set_column_type(column, column_type)
-function set_graph(graph, *, panel=(0, 0), axis='left', **options)
+function set_graph(graph, *, panel=(0, 0), axis='left', unit='cm', **options)
 function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None)
 function set_note(note, text)
 function set_series_group(graph, index, group, *, panel=(0, 0))
@@ -779,6 +804,11 @@ x_visible
 y_visible
 legend_visible
 legend_position
+plot_width
+plot_height
+plot_left
+plot_top
+fixed_size
 ```
 
 ```pyst-api options set_column_meta
@@ -810,6 +840,16 @@ x_prime
 display_format
 formula
 version
+```
+
+```pyst-api returns graph_size
+width
+height
+plot_widths
+plot_heights
+plot_left
+plot_top
+fixed_size
 ```
 
 ```pyst-api returns series.item
@@ -944,6 +984,13 @@ cross
 ```pyst-api enum scale
 linear
 log
+```
+
+```pyst-api enum length_unit
+cm
+mm
+pt
+in
 ```
 
 ```pyst-api enum axis

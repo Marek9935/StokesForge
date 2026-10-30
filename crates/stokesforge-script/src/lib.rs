@@ -77,6 +77,8 @@ mod error;
 #[cfg(feature = "python")]
 mod graph;
 #[cfg(feature = "python")]
+mod graph_size;
+#[cfg(feature = "python")]
 mod groups;
 #[cfg(feature = "python")]
 mod outcome;
