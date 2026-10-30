@@ -132,24 +132,6 @@ fn book_with_menu_rect(h: &Harness<'static, Bench>) -> egui::Rect {
         .fold(workspace_window_rect(h), |all, menu| all.union(menu))
 }
 
-/// The workbook window and the hover bubble open over it.
-fn book_with_tooltip_rect(h: &Harness<'static, Bench>) -> egui::Rect {
-    let screen = h.ctx.content_rect();
-    let bubbles: Vec<egui::Rect> = h.ctx.memory(|memory| {
-        memory
-            .areas()
-            .visible_layer_ids()
-            .into_iter()
-            .filter(|layer| layer.order == egui::Order::Tooltip)
-            .filter_map(|layer| memory.area_rect(layer.id))
-            .filter(|rect| *rect != screen)
-            .collect()
-    });
-    bubbles
-        .into_iter()
-        .fold(workspace_window_rect(h), |all, bubble| all.union(bubble))
-}
-
 /// The open menu (and its submenus): the popups above everything else.
 fn menu_rect(h: &Harness<'static, Bench>) -> egui::Rect {
     let screen = h.ctx.content_rect();
@@ -272,8 +254,8 @@ const SHOTS: &[Shot] = &[
     },
     Shot {
         name: "workbooks-formula-help",
-        setup: formula_help_open,
-        crop: Crop::Rect(book_with_tooltip_rect),
+        setup: formula_functions_open,
+        crop: Crop::Rect(dialog_rect),
     },
     Shot {
         name: "import-wizard-format",
@@ -868,48 +850,22 @@ fn show_book_alone(h: &mut Harness<'static, Bench>) {
     place(h, book, egui::pos2(4.0, 4.0), egui::vec2(560.0, 440.0));
 }
 
-/// The `F(x)=` cell of column B in edit, the pointer on its "?" icon, the bubble
-/// of the functions open (#404). The icon has no label: it is the image that
-/// the edit adds to the published nodes.
-fn formula_help_open(h: &mut Harness<'static, Bench>) {
-    use egui_kittest::kittest::Queryable as _;
-    show_book_alone(h);
-    h.ctx
-        .all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
-    let images = |h: &Harness<'static, Bench>| -> Vec<egui::Rect> {
-        h.query_all_by_role(egui::accesskit::Role::Image)
-            .map(|node| node.rect())
-            .collect()
-    };
-    settle(h);
-    let before = images(h);
-    let sheet = node_named(h, "Spectrum");
-    let column = h
-        .state()
-        .app
-        .state
-        .snapshot()
-        .tree
-        .children(sheet)
-        .expect("sheet")[1];
-    h.state_mut()
-        .app
-        .state
-        .begin_header_edit(column, stokesforge_app_state::state::HeaderField::Formula);
-    settle(h);
-    let icon = images(h)
-        .into_iter()
-        .find(|rect| {
-            !before
+/// The Formula Functions window (#402) on its "Column values" tab, opened by the
+/// "?" of the `F(x)=` cell.
+fn formula_functions_open(h: &mut Harness<'static, Bench>) {
+    let family = stokesforge_app_state::formula_help::groups()
+        .iter()
+        .position(|group| {
+            group
+                .rows
                 .iter()
-                .any(|old| (old.center() - rect.center()).length() < 1.0)
+                .any(|row| matches!(row.callee, Some(stokesforge_core::Callee::Column(_))))
         })
-        .expect("the help icon appears while the F(x)= cell is edited");
-    // The bubble opens after the tooltip delay of the interface, in real time.
-    for _ in 0..8 {
-        h.event(egui::Event::PointerMoved(icon.center()));
-        settle(h);
-    }
+        .expect("a family of column functions");
+    let state = &mut h.state_mut().app.state;
+    state.dispatch(Action::OpenFormulaFunctions);
+    state.dispatch(Action::SelectFormulaFunctionsFamily(family));
+    settle(h);
 }
 
 /// The application and what keeps it alive.
@@ -1085,12 +1041,8 @@ fn render_shot(shot: &Shot) -> image::RgbaImage {
     };
     let mut harness = harness(noise);
     (shot.setup)(&mut harness);
-    // The help bubble lives only while the pointer is on its icon, and the
-    // edit it belongs to ends with the focus.
-    if shot.name != "workbooks-formula-help" {
-        pointer_away(&mut harness);
-        drop_focus(&mut harness);
-    }
+    pointer_away(&mut harness);
+    drop_focus(&mut harness);
     let full = harness.render().expect("render");
     match shot.crop {
         Crop::Whole => full,

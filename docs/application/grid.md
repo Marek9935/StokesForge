@@ -292,9 +292,12 @@ While the `F(x)=` cell is edited (`header_field_widget`, `HeaderField::Formula`)
 a "?" icon sits at its right (`app::column_formula_help`), shown only when the
 preference `show_column_formula_help` is on. The text field gives up the icon's
 width (`reserved_width`) so that a narrow column does not clip it. The icon
-senses only the hover (`hover_help`): it never takes the keyboard focus, and
-hovering it keeps the cell open; a click on it is a click outside the field,
-which validates the cell like any other (`FocusLoss::Ends`, S-T4). The list is
+never takes the keyboard focus; a **press** on it (the press already ends the
+cell edit, which removes the icon before the release) validates the cell like
+any other (`FocusLoss::Ends`, S-T4) and sends `Action::OpenFormulaFunctions`: the
+read-only modal window **Formula Functions** (`formula_functions_window.rs`,
+#402, `docs/windows.md`) shows the functions one family at a time, families as
+vertical tabs at the left. Its state (open, chosen family) is in `AppState`. The list is
 `stokesforge_app_state::formula_help::groups()`, read from `Callee::all()`.
 
 ### The header-side gutter: uniform, and also selectable

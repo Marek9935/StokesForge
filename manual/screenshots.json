@@ -27,7 +27,7 @@
   {
     "image": "workbooks-formula-help.png",
     "page": "guide/projects-and-workbooks.md",
-    "shows": "The F(x)= cell of column B being edited, with the pointer on its ? icon: the bubble lists the functions by family, with their signature, an example and a description."
+    "shows": "The Formula Functions window opened by the ? of the F(x)= cell, on the Column values family: the families as vertical tabs at the left, the table Function, Example, What it does at the right."
   },
   {
     "image": "import-wizard-format.png",

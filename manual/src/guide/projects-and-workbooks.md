@@ -275,9 +275,9 @@ A column can compute its values from other columns of the same sheet. Type the f
 
 For example, to fill column C with the sum of A and B, double-click the **F(x)=** cell of column C, type `A+B` and press <kbd>Enter</kbd>.
 
-While you type, a small **?** icon sits at the right of the cell. Hover it to see the operators and functions you can use, grouped by family, each with an example. The rows of the "Column values" family end with their own **?**: move the pointer onto it for the full explanation.
+While you type, a small **?** icon sits at the right of the cell. Click it to open the **Formula Functions** window: the operators and functions you can use, one family at a time (pick the family in the tabs at the left), each with its signature, an example and what it does. Press <kbd>Esc</kbd> or **Close** to leave it.
 
-<img src="../images/workbooks-formula-help.png" alt="The F(x)= cell of column B being edited: the bubble of its ? icon lists the functions by family, each with its signature, an example and a description." width="800">
+<img src="../images/workbooks-formula-help.png" alt="The Formula Functions window on the Column values family: the families as tabs at the left, a table of Function, Example and What it does at the right." width="640">
 
 If you misspell a function name, the message proposes the nearest one (`sqr(A)` gives "Did you mean sqrt?"), and a wrong number of values names the function to write instead (`log(B, 2)` gives "Use logx instead"). You can hide the icon in **Preferences ▸ Display ▸ Interface** (**Show F(x)= help**).
 

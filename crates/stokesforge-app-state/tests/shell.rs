@@ -2999,6 +2999,34 @@ fn a_formula_reading_its_own_column_is_refused_while_typing() {
     assert_eq!(formula_letters(&state, note).as_deref(), Some("A*2"));
 }
 
+/// #402: the Formula Functions window opens on the first family, shows the one
+/// chosen, ignores an index out of the list and closes. Every family has rows.
+#[test]
+fn the_formula_functions_window_shows_one_family_at_a_time() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state) = start_demo(dir.path());
+    let groups = stokesforge_app_state::formula_help::groups();
+    assert!(groups.len() > 1 && groups.iter().all(|group| !group.rows.is_empty()));
+    assert!(!state.formula_functions_open());
+
+    state.dispatch(Action::OpenFormulaFunctions);
+    assert!(state.formula_functions_open());
+    assert_eq!(state.formula_functions_family(), 0);
+    state.dispatch(Action::SelectFormulaFunctionsFamily(2));
+    assert_eq!(state.formula_functions_family(), 2);
+    state.dispatch(Action::SelectFormulaFunctionsFamily(groups.len()));
+    assert_eq!(
+        state.formula_functions_family(),
+        2,
+        "out of the list: ignored"
+    );
+    state.dispatch(Action::CloseFormulaFunctions);
+    assert!(!state.formula_functions_open());
+    // Opened again, it starts on the first family.
+    state.dispatch(Action::OpenFormulaFunctions);
+    assert_eq!(state.formula_functions_family(), 0);
+}
+
 /// #402: a column function that reads an X finds none paired with its column:
 /// the Formula cell says so, until an X appears; a result that is entirely
 /// empty because the functions found no point says so too, and a result with

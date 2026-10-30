@@ -148,6 +148,7 @@ mod figure_copy;
 mod file_drop;
 mod form;
 mod format;
+mod formula_functions_window;
 mod graph_targets;
 mod graph_text_edit;
 mod graph_window;
@@ -201,6 +202,7 @@ use column_use::{column_use_window, full_copy_window};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
 };
+use formula_functions_window::formula_functions_window;
 use graph_text_edit::{
     annotation_editor_id, pending_format_id, pending_zone_font_id, text_editor_id,
     AnnotationEditor, TextEditor,
@@ -1257,6 +1259,7 @@ impl StokesForgeApp {
         status_history_window(ctx, &self.state, actions);
         low_r2_list_window(ctx, &self.state, actions);
         keyboard_shortcuts_window(ctx, &self.state, actions);
+        formula_functions_window(ctx, &self.state, actions);
         about_window(ctx, &self.state, actions);
         if let Some(language) = preferences_window(ctx, &self.state, actions) {
             self.choose_language(language);

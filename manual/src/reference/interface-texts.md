@@ -61,7 +61,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Fitting | Ajustement |
 | Fitting… | Ajustement… |
 | Format | Format |
-| Functions of a formula | Fonctions d'une formule |
+| Formula Functions | Fonctions de formule |
 | General | Général |
 | Graph | Graphique |
 | Graph Properties… | Propriétés du graphique… |
