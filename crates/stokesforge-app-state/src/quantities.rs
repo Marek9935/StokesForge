@@ -51,6 +51,9 @@ pub struct Quantity {
     pub presets: &'static [f64],
     /// What the quantity does with `auto` and an emptied field.
     pub auto: AutoKind,
+    /// The field is wide enough for six significant digits ("705.556",
+    /// "2000"): a size shown in a unit with decimals.
+    pub wide: bool,
 }
 
 impl Quantity {
@@ -65,6 +68,7 @@ impl Quantity {
             integer: false,
             presets: &[],
             auto: AutoKind::None,
+            wide: false,
         }
     }
 
@@ -79,6 +83,7 @@ impl Quantity {
             integer: true,
             presets: &[],
             auto: AutoKind::None,
+            wide: false,
         }
     }
 
@@ -97,6 +102,7 @@ impl Quantity {
             && self.max < 1000.0
             && self.presets.is_empty()
             && self.auto == AutoKind::None
+            && !self.wide
     }
 
     /// The same quantity bounded to `min..=max`.
@@ -107,6 +113,11 @@ impl Quantity {
     /// The same quantity, with the given Auto.
     pub const fn with_auto(self, auto: AutoKind) -> Self {
         Self { auto, ..self }
+    }
+
+    /// The same quantity, with a field wide enough for six significant digits.
+    pub const fn wide(self) -> Self {
+        Self { wide: true, ..self }
     }
 
     /// The same quantity with its offered values.
@@ -263,3 +274,17 @@ pub const COUNT: Quantity = Quantity::whole(10.0).between(0.0, 9_007_199_254_740
 
 /// A line number of the import (1 and up).
 pub const LINE_NUMBER: Quantity = Quantity::whole(10.0).between(1.0, 9_007_199_254_740_991.0);
+
+/// The width (columns) or height (rows) of the frame, the plot area, of a grid
+/// column or row of a graph, in `unit` (#394): bounded by the size a frame may
+/// have ([`stokesforge_plot::MIN_FRAME_SIZE`],
+/// [`stokesforge_plot::MAX_FRAME_SIZE`]), a notch and decimals suited to the
+/// unit. The unit itself is in the label (S-N10).
+pub fn frame_size(unit: crate::length_unit::LengthUnit) -> Quantity {
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(
+            unit.from_points(stokesforge_plot::MIN_FRAME_SIZE),
+            unit.from_points(stokesforge_plot::MAX_FRAME_SIZE),
+        )
+        .wide()
+}

@@ -365,6 +365,11 @@ pub struct StokesForgeApp {
     /// 4 sides + 4 corners) — sole source of truth of the size, as
     /// `window_positions` is of the position.
     window_sizes: HashMap<Tab, egui::Vec2>,
+    /// The figure each open graph window last painted (size and display
+    /// scale), from which the window follows the figure when its size changes
+    /// (#394). Window geometry: stays in the shell (invariant 2). Cleared with
+    /// the windows when a project is opened, so that opening resizes nothing.
+    figure_follow: HashMap<NodeId, window_placement::FigureFollow>,
     /// Current scroll of the workspace (MDI area, fixed size
     /// [`WORKSPACE_SIZE`](crate::app::window_placement::WORKSPACE_SIZE)) — see its doc. `window_positions`/`window_sizes`
     /// above, and the geometry persisted in the project, are expressed
@@ -519,6 +524,7 @@ impl StokesForgeApp {
             detached_tabs: HashMap::new(),
             window_positions: HashMap::new(),
             window_sizes: HashMap::new(),
+            figure_follow: HashMap::new(),
             workspace_scroll: egui::Vec2::ZERO,
             saved_window_geometries,
             floating_rects,
@@ -1777,6 +1783,7 @@ impl StokesForgeApp {
         self.maximized_tab = None;
         self.window_positions.clear();
         self.window_sizes.clear();
+        self.figure_follow.clear();
         self.workspace_scroll = egui::Vec2::ZERO;
         self.saved_window_geometries.clear();
         self.floating_rects.clear();

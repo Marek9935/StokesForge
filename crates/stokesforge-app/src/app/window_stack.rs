@@ -135,9 +135,10 @@ use super::window_chrome::{
     FLOATING_WINDOW_ORDER, MIN_CONTENT_WINDOW_SIZE, WINDOW_HEADER_HEIGHT,
 };
 use super::window_placement::{
-    clamp_to_workspace, floating_window_display_size, floating_window_geometry_to_persist,
-    geometry_rect, workspace_scroll_to_reveal, workspace_to_screen, BOOK_WINDOW_WIDTH,
-    CASCADE_STEP, CASCADE_WRAP, FLOATING_WINDOW_SIZE, GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
+    clamp_to_workspace, floating_room, floating_window_display_size,
+    floating_window_geometry_to_persist, geometry_rect, workspace_scroll_to_reveal,
+    workspace_to_screen, FigureFollow, BOOK_WINDOW_WIDTH, CASCADE_STEP, CASCADE_WRAP,
+    FLOATING_WINDOW_SIZE, GRAPH_WINDOW_SIZE, WORKSPACE_SIZE,
 };
 use super::StokesForgeApp;
 
@@ -238,6 +239,7 @@ struct Workspace<'a> {
     maximized_tab: &'a mut Option<Tab>,
     window_positions: &'a mut HashMap<Tab, egui::Pos2>,
     window_sizes: &'a mut HashMap<Tab, egui::Vec2>,
+    figure_follow: &'a mut HashMap<NodeId, FigureFollow>,
     workspace_scroll: &'a mut egui::Vec2,
     floating_rects: &'a mut HashMap<NodeId, egui::Rect>,
     actions: &'a mut Vec<Action>,
@@ -282,6 +284,9 @@ impl Workspace<'_> {
             self.activate_clicked_tab(ui.ctx(), tab);
         }
         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
+        // A maximized window does not resize (the figure is contained), but it
+        // keeps the record up to date so that restoring it resizes nothing.
+        self.follow_figure(ui.ctx(), tab, None);
         // The maximized window has no frame: the drop target (#386) lights up
         // the maximized area itself.
         if super::file_drop::is_drop_target(ui.ctx(), ui.layer_id()) {
@@ -291,6 +296,43 @@ impl Workspace<'_> {
                 crate::theme::drop_target_stroke(),
                 egui::StrokeKind::Inside,
             );
+        }
+    }
+
+    /// The window follows the figure (#394): when the logical size of the figure
+    /// a graph window painted changed since the last frame, a floating window
+    /// grows or shrinks by the difference at its display scale, top-left fixed,
+    /// right and down, clamped to the visible part of the workspace (`visible`, the
+    /// far corner; `None`: a maximized window only records). The first frame of a graph, after opening or loading,
+    /// resizes nothing.
+    fn follow_figure(&mut self, ctx: &egui::Context, tab: Tab, visible: Option<egui::Vec2>) {
+        let Tab::Graph(graph) = tab else {
+            return;
+        };
+        let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
+            return;
+        };
+        let scale = self
+            .graph_views
+            .get(&graph)
+            .and_then(GraphView::display_scale);
+        let Some(step) = FigureFollow::observe(self.figure_follow, graph, size, scale) else {
+            return;
+        };
+        let Some(visible) = visible else {
+            return;
+        };
+        let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
+            return;
+        };
+        if let (Some(&position), Some(window)) = (
+            self.window_positions.get(&tab),
+            self.window_sizes.get_mut(&tab),
+        ) {
+            let chrome = (*window - area).max(egui::Vec2::ZERO);
+            let room = floating_room(position, visible);
+            *window = FigureFollow::resize(self.figure_follow, graph, step, *window, chrome, room);
+            ctx.request_repaint();
         }
     }
 
@@ -517,6 +559,12 @@ impl Workspace<'_> {
         if shown.is_none() {
             return;
         }
+        if !was_collapsed {
+            // Far corner of the visible part of the workspace, in its own
+            // coordinates: the window never grows past it.
+            let visible = *self.workspace_scroll + viewport_rect.size();
+            self.follow_figure(ui.ctx(), tab, Some(visible));
+        }
         if window_pointer_pressed(
             ui.ctx(),
             egui::LayerId::new(FLOATING_WINDOW_ORDER, id),
@@ -612,6 +660,7 @@ impl StokesForgeApp {
             maximized_tab,
             window_positions,
             window_sizes,
+            figure_follow,
             workspace_scroll,
             floating_rects,
             ..
@@ -630,6 +679,7 @@ impl StokesForgeApp {
             maximized_tab,
             window_positions,
             window_sizes,
+            figure_follow,
             workspace_scroll,
             floating_rects,
             actions,
@@ -654,6 +704,9 @@ impl StokesForgeApp {
                 self.cascade_rank.remove(&tab);
                 self.window_positions.remove(&tab);
                 self.window_sizes.remove(&tab);
+                if let Tab::Graph(graph) = tab {
+                    self.figure_follow.remove(&graph);
+                }
             }
             if self.maximized_tab == Some(tab) {
                 // Consistency guard, as in `detach_tab` — should not
@@ -1265,5 +1318,318 @@ mod tests {
         let exposed = egui::pos2(70.0, 70.0);
         paint(vec![egui::Event::PointerMoved(exposed)], false);
         paint(vec![press(exposed)], true);
+    }
+
+    /// A workspace with one open graph window at `position`, `size`, painted a
+    /// few frames so that the figure is recorded and the scale settled.
+    struct FollowBench {
+        app: StokesForgeApp,
+        context: egui::Context,
+        session: stokesforge_session::Session,
+        tab: Tab,
+        graph: NodeId,
+        screen: egui::Vec2,
+    }
+
+    impl FollowBench {
+        fn new(position: egui::Pos2, size: egui::Vec2) -> Self {
+            let (session, graph) = crate::app::graph_window::tests::plotted_graph();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let tab = Tab::Graph(graph);
+            let mut app = StokesForgeApp::new(state);
+            app.floating_tabs = vec![tab];
+            app.window_positions.insert(tab, position);
+            app.window_sizes.insert(tab, size);
+            let context = super::super::test_support::context();
+            egui_extras::install_image_loaders(&context);
+            let mut bench = Self {
+                app,
+                context,
+                session,
+                tab,
+                graph,
+                screen: egui::vec2(1920.0, 1080.0),
+            };
+            bench.settle();
+            bench
+        }
+
+        fn frame(&mut self) {
+            let Self {
+                app,
+                context,
+                tab,
+                screen,
+                ..
+            } = self;
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, *screen)),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let active = app.maximized_tab.or(Some(*tab));
+                        app.show_workspace(
+                            ui,
+                            active,
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                        );
+                    },
+                )
+                .textures_delta
+                .clear();
+        }
+
+        fn settle(&mut self) {
+            for _ in 0..4 {
+                self.frame();
+            }
+        }
+
+        fn size(&self) -> egui::Vec2 {
+            self.app.window_sizes[&self.tab]
+        }
+
+        fn figure(&self) -> (u32, u32) {
+            crate::app::graph_window::published_figure_size(&self.context, self.graph)
+                .expect("the figure is published")
+        }
+
+        fn scale(&self) -> f32 {
+            self.app.graph_views[&self.graph]
+                .display_scale()
+                .expect("painted")
+        }
+    }
+
+    /// #394: adding a cell beside grows the window to the right by the growth
+    /// of the figure at the display scale, height and top-left unchanged; Undo
+    /// brings both back.
+    #[test]
+    fn the_window_grows_with_the_figure_and_shrinks_back_on_undo() {
+        let position = egui::pos2(40.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(700.0, 560.0));
+        let (before, scale, figure) = (bench.size(), bench.scale(), bench.figure());
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        bench.settle();
+        let grown = bench.figure().0 - figure.0;
+        assert!(grown > 0, "the figure is wider");
+        assert_eq!(bench.figure().1, figure.1, "same height");
+        let after = bench.size();
+        assert!(
+            (after.x - before.x - grown as f32 * scale).abs() < 0.01,
+            "{before:?} -> {after:?}, figure +{grown} at scale {scale}"
+        );
+        assert_eq!(after.y, before.y, "height unchanged");
+        assert_eq!(
+            bench.app.window_positions[&bench.tab], position,
+            "top-left fixed"
+        );
+
+        bench.app.state.dispatch(Action::Undo);
+        bench.settle();
+        assert_eq!(bench.figure(), figure);
+        assert!(
+            (bench.size() - before).length() < 0.01,
+            "back to {before:?}"
+        );
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
+
+        // Redo, then a handle commit (what a drag releases): the top-left stays
+        // where it was, whatever the figure does.
+        bench.app.state.dispatch(Action::Redo);
+        bench.settle();
+        assert_eq!(
+            bench.app.window_positions[&bench.tab], position,
+            "after Redo"
+        );
+        bench.app.state.dispatch(Action::SetFrameSizes {
+            graph: bench.graph,
+            column: Some((0, 380.0)),
+            row: Some((0, 330.0)),
+        });
+        bench.settle();
+        assert_eq!(
+            bench.app.window_positions[&bench.tab], position,
+            "after a drag"
+        );
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394: an axis added makes the image grow around the fixed plot area, and
+    /// the window follows (the stored frame does not change).
+    #[test]
+    fn adding_a_right_axis_grows_the_window() {
+        let mut bench = FollowBench::new(egui::pos2(40.0, 30.0), egui::vec2(700.0, 560.0));
+        let (before, scale, figure) = (bench.size(), bench.scale(), bench.figure());
+        let mut spec = bench.app.state.plot_spec(bench.graph).expect("spec");
+        let mut panels: Vec<_> = spec.panels.iter().cloned().collect();
+        panels[0].set_series_axis(0, stokesforge_plot::SeriesAxis::Right);
+        spec.panels = stokesforge_plot::Panels::new(panels);
+        bench.app.state.dispatch(Action::SetPlotSpec {
+            graph: bench.graph,
+            spec,
+        });
+        bench.settle();
+        let grown = bench.figure().0 - figure.0;
+        assert!(grown > 0, "the right axis widens the image");
+        assert!(
+            (bench.size().x - before.x - grown as f32 * scale).abs() < 0.01,
+            "{before:?} -> {:?}",
+            bench.size()
+        );
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394: the window never leaves the workspace to the right.
+    #[test]
+    fn the_window_stops_at_the_edge_of_the_workspace() {
+        let position = egui::pos2(1500.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(380.0, 560.0));
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        bench.settle();
+        assert!(position.x + bench.size().x <= WORKSPACE_SIZE.x);
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394 (T2): in a workspace narrower than its canvas the window stops at the
+    /// right edge of the VISIBLE part, title bar and buttons included, and the
+    /// figure is contained in it; the top-left does not move.
+    #[test]
+    fn the_window_stops_at_the_visible_edge_of_a_narrow_workspace() {
+        let position = egui::pos2(40.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(700.0, 400.0));
+        bench.screen = egui::vec2(1000.0, 700.0);
+        bench.settle();
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        bench.settle();
+        let visible = bench.screen.x;
+        assert!(
+            position.x + bench.size().x <= visible,
+            "window right edge {} past the visible edge {visible}",
+            position.x + bench.size().x
+        );
+        assert!(bench.size().x > 700.0, "it did grow up to the edge");
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394 (T2): with three cells in a narrow workspace the window stops at the
+    /// visible edge AND follows the contained figure on the height, so the
+    /// figure fills it with no blank band; Undo twice brings back the display
+    /// scale it had before the clamp.
+    #[test]
+    fn a_contained_figure_fills_its_window_and_undo_restores_the_scale() {
+        let position = egui::pos2(40.0, 30.0);
+        let mut bench = FollowBench::new(position, egui::vec2(560.0, 460.0));
+        bench.screen = egui::vec2(1000.0, 700.0);
+        bench.settle();
+        let (scale, height) = (bench.scale(), bench.size().y);
+        for _ in 0..2 {
+            bench.app.state.dispatch(Action::AddCell {
+                graph: bench.graph,
+                panel: 0,
+                side: stokesforge_core::compose::CellSide::Right,
+                columns: Vec::new(),
+            });
+            bench.settle();
+        }
+        let area = crate::app::graph_window::published_figure_area(&bench.context, bench.graph)
+            .expect("area");
+        let shown = bench.app.graph_views[&bench.graph]
+            .display_rect()
+            .expect("painted");
+        assert!(bench.size().y < height, "the window got shorter");
+        assert!(
+            (shown.height() - area.y).abs() < 1.5 && (shown.width() - area.x).abs() < 1.5,
+            "blank band: figure {:?} in {area:?}",
+            shown.size()
+        );
+        assert_eq!(bench.app.window_positions[&bench.tab], position);
+        for _ in 0..2 {
+            bench.app.state.dispatch(Action::Undo);
+            bench.settle();
+        }
+        assert!(
+            (bench.scale() - scale).abs() < 0.01 * scale,
+            "scale {} back to {scale}",
+            bench.scale()
+        );
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394: a maximized window does not resize, and restoring it does not
+    /// either (the record was kept up to date).
+    #[test]
+    fn a_maximized_window_does_not_resize() {
+        let mut bench = FollowBench::new(egui::pos2(40.0, 30.0), egui::vec2(700.0, 560.0));
+        let before = bench.size();
+        bench.app.maximized_tab = Some(bench.tab);
+        bench.settle();
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        bench.settle();
+        assert_eq!(bench.size(), before, "maximized");
+        bench.app.maximized_tab = None;
+        bench.settle();
+        assert_eq!(bench.size(), before, "restored");
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #394: a figure seen for the first time (opening or loading a project)
+    /// resizes nothing, whatever its size.
+    #[test]
+    fn opening_a_graph_resizes_nothing() {
+        let (session, graph) = crate::app::graph_window::tests::plotted_graph();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let tab = Tab::Graph(graph);
+        let mut app = StokesForgeApp::new(state);
+        app.state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        app.floating_tabs = vec![tab];
+        app.window_positions.insert(tab, egui::pos2(40.0, 30.0));
+        app.window_sizes.insert(tab, egui::vec2(700.0, 560.0));
+        let mut bench = FollowBench {
+            app,
+            context: {
+                let context = super::super::test_support::context();
+                egui_extras::install_image_loaders(&context);
+                context
+            },
+            session,
+            tab,
+            graph,
+            screen: egui::vec2(1920.0, 1080.0),
+        };
+        bench.settle();
+        assert_eq!(bench.size(), egui::vec2(700.0, 560.0));
+        bench.session.shutdown().unwrap();
     }
 }

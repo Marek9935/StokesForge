@@ -229,11 +229,17 @@ fn export_graph_writes_svg_pdf_and_png_like_the_application() {
         other => panic!("{other:?}"),
     };
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    // The page is the size of the figure (#394): a new graph is created
+    // with plot areas chosen for a 480 x 360 pt figure, title band included.
+    let size = stokesforge_render_svg::figure_size(&spec, &measurer, &choice);
+    assert_eq!(size, (480, 360));
     let expected = stokesforge_render_svg::export_bytes(
         &plot,
-        stokesforge_render_svg::DEFAULT_SIZE,
-        &stokesforge_render_svg::SvgTextMeasurer::default(),
-        &stokesforge_render_svg::FontChoice::default(),
+        size,
+        &measurer,
+        &choice,
         stokesforge_render_svg::ExportFormat::Svg {
             text: stokesforge_render_svg::SvgTextMode::Text,
         },

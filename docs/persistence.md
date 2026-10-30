@@ -222,6 +222,23 @@ and the FNV-1a are frozen by `the_digest_is_frozen_on_known_inputs`
 (literal values); changing it would make every calculation of the files already
 written stale on reading.
 
+## Frame sizes: additive fields (#394)
+
+`PlotSpecRecord` gained `frame_widths` and `frame_heights` (`Vec<f64>`, points;
+`#[serde(default)]`): the width of the plot area (the frame) of each grid column
+and its height for each grid row; the axis bands and the title band are added
+around it. They are not the worksheet `column_widths` of the view tables.
+**`FORMAT_VERSION` did not move**: a file without them reads as empty vectors,
+which **mean 480 × 360 pt shared equally, axis bands and title band inside, for
+good** (changing that meaning would be a breaking change). They are written as
+the spec holds them, unsanitized (a hostile value, extra entries beyond the
+grid): `PlotSpec::sanitized_frame_widths()` / `sanitized_frame_heights()`
+sanitize on read, the file is never rewritten for it. A legacy graph is given
+its frames by its first edit, never at load (invariant 1). An older version that
+opens and re-saves the file drops the two fields without a message: the figure
+goes back to 480 × 360 pt. Witness `tests/witnesses/v1/project.stf` regenerated
+with non-default frames; `schema.rs` keeps the old-record test.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

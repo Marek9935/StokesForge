@@ -425,6 +425,84 @@ fn an_enlarged_graph_paints_its_formulas_at_the_displayed_size() {
     assert_eq!(view.formula_count(), formulas, "a text was recompiled");
 }
 
+// -- #394: the logical figure is its frames and bands, not the window --
+
+/// The figure is laid out at the size its frames, bands and title give it (cached
+/// under that logical rectangle), a window resize only scales the cached
+/// shapes, and a change of a frame size is a new revision, hence a miss.
+#[test]
+fn the_figure_is_its_frames_and_a_window_resize_is_a_cache_hit() {
+    let fixture = Fixture::with_title("Sized");
+    let context = new_context();
+    let mut view = GraphView::new();
+    let set_sizes = |widths: Vec<f64>, heights: Vec<f64>| {
+        let mut spec = match fixture
+            .snapshot()
+            .tree
+            .node(fixture.graph)
+            .expect("graph")
+            .kind()
+        {
+            stokesforge_core::node::NodeKind::Graph { spec, .. } => spec.clone(),
+            _ => panic!("not a graph"),
+        };
+        spec.frame_widths = widths;
+        spec.frame_heights = heights;
+        fixture
+            .handle()
+            .execute(Command::SetPlotSpec {
+                graph: fixture.graph,
+                spec,
+            })
+            .expect("spec set");
+    };
+    let paint = |view: &mut GraphView, size: egui::Vec2| {
+        let mut from_cache = false;
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            from_cache = view
+                .paint_scaled(
+                    ui,
+                    Rect::from_min_size(Pos2::ZERO, size),
+                    &fixture.snapshot(),
+                    fixture.graph,
+                )
+                .expect("painting");
+        });
+        consume(output);
+        from_cache
+    };
+    let logical = |view: &GraphView| view.cache().key().expect("a key").rect.size();
+
+    set_sizes(vec![600.0], vec![200.0]);
+    assert!(!paint(&mut view, egui::vec2(300.0, 200.0)));
+    let band = {
+        let mut band = 0;
+        let output = context.run_ui(egui::RawInput::default(), |_| {
+            band = view
+                .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+                .expect("layout")
+                .title_band;
+        });
+        consume(output);
+        band
+    };
+    assert!(band > 0, "the title takes a band");
+    assert_eq!(logical(&view), egui::vec2(688.0, 276.0 + band as f32));
+
+    assert!(
+        paint(&mut view, egui::vec2(900.0, 500.0)),
+        "a window resize scales the cached shapes"
+    );
+    assert_eq!(logical(&view), egui::vec2(688.0, 276.0 + band as f32));
+
+    set_sizes(vec![600.0], vec![250.0]);
+    assert!(
+        !paint(&mut view, egui::vec2(900.0, 500.0)),
+        "a new size: a miss"
+    );
+    assert_eq!(logical(&view), egui::vec2(688.0, 326.0 + band as f32));
+}
+
 // -- Issue #35: dragging and double-clicking a free text --
 
 /// A fixture whose panel carries a free text in the middle of the data.

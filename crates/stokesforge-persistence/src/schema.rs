@@ -711,6 +711,16 @@ pub(crate) struct PlotSpecRecord {
     /// file, hence the point.
     #[serde(default)]
     pub(crate) decimal_comma: bool,
+    /// Width of the plot area (frame) of each grid column in points (#394):
+    /// absent from an older file, hence empty = legacy (480 pt shared equally,
+    /// axis bands inside). Kept as written; the reader of the spec sanitizes.
+    /// Not the worksheet `column_widths`: this one is a graph's.
+    #[serde(default)]
+    pub(crate) frame_widths: Vec<f64>,
+    /// Height of the plot area (frame) of each grid row in points (#394):
+    /// absent = legacy (360 pt shared equally, bands and title inside).
+    #[serde(default)]
+    pub(crate) frame_heights: Vec<f64>,
 }
 
 /// [`stokesforge_plot::TextFont`], flat.
@@ -747,6 +757,8 @@ impl Default for PlotSpecRecord {
             title_font: TextFontRecord::default(),
             stale_warning: true,
             decimal_comma: false,
+            frame_widths: Vec::new(),
+            frame_heights: Vec::new(),
         }
     }
 }
@@ -1330,6 +1342,9 @@ mod tests {
             reloaded.stale_warning,
             "an old graph keeps the out-of-date data warning"
         );
+        // #394: an old graph records no frame size = legacy 480 x 360 pt.
+        assert!(reloaded.frame_widths.is_empty());
+        assert!(reloaded.frame_heights.is_empty());
     }
 }
 

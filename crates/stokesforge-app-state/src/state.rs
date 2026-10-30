@@ -740,6 +740,40 @@ pub enum Action {
         /// Dragged columns; empty for the menu.
         columns: Vec<NodeId>,
     },
+    /// Sets the frame (plot area) width of grid column `index` or the frame
+    /// height of grid row `index` of the graph, in points (#394). The one path
+    /// of the size fields of Graph Properties and of a drag handle on the outer
+    /// edge of a cell: the other columns and rows keep their frame, the axis
+    /// bands and the title band are added around, so the figure grows or
+    /// shrinks by the difference. A graph without stored frames is first given
+    /// the ones it is drawn with. A single undo step
+    /// ([`PlotEditKind::ResizeCell`]); nothing sent if the size is already
+    /// that one or the index is outside the grid.
+    SetFrameSize {
+        /// Target graph.
+        graph: NodeId,
+        /// Frame width of a column or frame height of a row.
+        axis: stokesforge_core::compose::FrameAxis,
+        /// Grid column or row.
+        index: usize,
+        /// The new size, in points; brought into the bounds.
+        size: f64,
+    },
+    /// Sets the frame width of a column and/or the frame height of a row in
+    /// one go, as one undo step (#394): what a drag of a handle on the outer
+    /// edge of a cell commits, which may pull a corner (both axes). Same rules
+    /// as [`Action::SetFrameSize`].
+    SetFrameSizes {
+        /// Target graph.
+        graph: NodeId,
+        /// Grid column and its new frame width, in points.
+        column: Option<(usize, f64)>,
+        /// Grid row and its new frame height, in points.
+        row: Option<(usize, f64)>,
+    },
+    /// Sets the unit in which the sizes of a graph are shown and typed (#394).
+    /// Application preference: no command, no history, no `.stf`.
+    SetLengthUnit(crate::length_unit::LengthUnit),
     /// Opens or closes the panel; a user preference, outside history.
     SetObjectManagerOpen(bool),
     /// Lists or hides the scales (axes) in the Object Manager (#111).
@@ -4973,6 +5007,28 @@ impl AppState {
                     ..PlotSpec::empty("")
                 },
             }),
+            Action::SetFrameSize {
+                graph,
+                axis,
+                index,
+                size,
+            } => self.set_frame_sizes(graph, [(axis, index, size)]),
+            Action::SetFrameSizes { graph, column, row } => {
+                let column = column.map(|(index, size)| {
+                    (stokesforge_core::compose::FrameAxis::Column, index, size)
+                });
+                let row = row
+                    .map(|(index, size)| (stokesforge_core::compose::FrameAxis::Row, index, size));
+                self.set_frame_sizes(graph, column.into_iter().chain(row))
+            }
+            Action::SetLengthUnit(unit) => {
+                if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::AddWorkbook => self.add_workbook(),
             Action::AddFolder { parent } => self.add_folder(parent),
             Action::SelectSheet(id) => self.select_sheet(id),
@@ -6951,6 +7007,7 @@ impl AppState {
 
     /// Sends a command to the actor and reports the result.
     fn execute(&mut self, command: Command) {
+        let command = self.with_fixed_frames(command);
         // The label is computed on the tree from **before**: afterwards, a
         // deleted column has no name.
         let label = command.label(&self.snapshot.tree);
@@ -6963,6 +7020,43 @@ impl AppState {
                 self.settle_recalc();
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
+        }
+    }
+
+    /// The one door of the graph frames (#394, G7): a command that replaces
+    /// the spec of a graph from an old file (nothing stored) carries the frames
+    /// the graph is drawn with *now*, so that the edit — a title, an axis, a
+    /// layer — changes the figure around the plot areas and never the plot
+    /// areas. A graph created legacy fixes itself, so a new graph is exactly
+    /// 480 x 360 pt and explicit. Nothing is written at load and nothing is
+    /// added to the history: the frames ride in the very command of the edit.
+    fn with_fixed_frames(&self, command: Command) -> Command {
+        match command {
+            Command::SetPlotSpec { graph, mut spec } => {
+                if let Some(current) = self.plot_spec(graph) {
+                    crate::frame_sizes::fix_from(&current, &mut spec);
+                }
+                Command::SetPlotSpec { graph, spec }
+            }
+            Command::EditPlotSpec {
+                graph,
+                mut spec,
+                kind,
+            } => {
+                if let Some(current) = self.plot_spec(graph) {
+                    crate::frame_sizes::fix_from(&current, &mut spec);
+                }
+                Command::EditPlotSpec { graph, spec, kind }
+            }
+            Command::AddGraph {
+                parent,
+                name,
+                mut spec,
+            } => {
+                crate::frame_sizes::fix_new(&mut spec);
+                Command::AddGraph { parent, name, spec }
+            }
+            other => other,
         }
     }
 
@@ -7423,6 +7517,11 @@ impl AppState {
         self.object_manager_preferences.copy_formats()
     }
 
+    /// The unit in which the sizes of a graph are shown and typed (#394).
+    pub fn length_unit(&self) -> crate::length_unit::LengthUnit {
+        self.object_manager_preferences.length_unit()
+    }
+
     pub fn svg_text_mode(&self) -> stokesforge_render_svg::SvgTextMode {
         self.object_manager_preferences.svg_text_mode()
     }
@@ -7433,7 +7532,7 @@ impl AppState {
     }
 
     /// See [`Action::ExportGraph`]. Measures and composes like the screen:
-    /// same logical size (`DEFAULT_SIZE`, the one where
+    /// same logical size (`stokesforge_render_svg::figure_size`, the one where
     /// `GraphView::paint_scaled` lays out the figure), same fonts.
     ///
     /// The native picker asks before overwriting the typed name; the extension
@@ -7465,12 +7564,13 @@ impl AppState {
         };
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let choice = stokesforge_render_svg::FontChoice::default();
         match stokesforge_render_svg::export_to_file_with_texts(
             path,
             &plot,
-            stokesforge_render_svg::DEFAULT_SIZE,
+            stokesforge_render_svg::figure_size(spec, &measurer, &choice),
             &measurer,
-            &stokesforge_render_svg::FontChoice::default(),
+            &choice,
             format,
             &crate::figure_texts::figure_texts(),
         ) {
@@ -7517,11 +7617,12 @@ impl AppState {
             })
             .collect();
         let formats: Vec<ExportFormat> = wanted.iter().map(|(_, format)| *format).collect();
+        let choice = stokesforge_render_svg::FontChoice::default();
         let results = match stokesforge_render_svg::export_bytes_many_with_texts(
             &plot,
-            stokesforge_render_svg::DEFAULT_SIZE,
+            stokesforge_render_svg::figure_size(spec, &measurer, &choice),
             &measurer,
-            &stokesforge_render_svg::FontChoice::default(),
+            &choice,
             &formats,
             &crate::figure_texts::figure_texts(),
         ) {
@@ -9874,6 +9975,9 @@ impl AppState {
             return;
         };
         let plot_type = panel_plot_type(reference);
+        // The new cell keeps the frame of its reference: the frames are fixed
+        // before the grid changes.
+        crate::frame_sizes::fix_new(&mut spec);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
@@ -9893,6 +9997,33 @@ impl AppState {
         });
     }
 
+    /// [`Action::SetFrameSize`] and [`Action::SetFrameSizes`]: every size is
+    /// applied to one spec and committed as one step; nothing is sent if one of
+    /// them is refused or if the result is the spec as it is.
+    fn set_frame_sizes(
+        &mut self,
+        graph: NodeId,
+        sizes: impl IntoIterator<Item = (stokesforge_core::compose::FrameAxis, usize, f64)>,
+    ) {
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        crate::frame_sizes::fix_new(&mut spec);
+        for (axis, index, size) in sizes {
+            if !stokesforge_core::compose::set_frame_size(&mut spec, axis, index, size) {
+                return;
+            }
+        }
+        if self.plot_spec(graph).is_some_and(|before| before == spec) {
+            return;
+        }
+        self.execute(Command::EditPlotSpec {
+            graph,
+            spec,
+            kind: PlotEditKind::ResizeCell,
+        });
+    }
+
     /// [`Action::RemovePlotObject`] of a layer: see
     /// [`stokesforge_core::compose::remove_cell`]. Refused with a message for
     /// the last cell. Pending drops and the open properties window forget
@@ -9901,6 +10032,7 @@ impl AppState {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
         };
+        crate::frame_sizes::fix_new(&mut spec);
         if !remove_cell(&mut spec, panel) {
             if spec.panels.get(panel).is_some() {
                 self.fail(tr!("error-last-layer"));

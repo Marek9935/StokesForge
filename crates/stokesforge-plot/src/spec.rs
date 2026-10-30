@@ -153,6 +153,44 @@ impl std::fmt::Display for SeriesRef {
 /// No color: white with zero opacity. The default background of a graph.
 pub const TRANSPARENT: &str = "#ffffff00";
 
+/// Default size of a StokesForge figure, in points — `(width, height)`.
+///
+/// The meaning of a file that records no frame size (`frame_widths` and
+/// `frame_heights` empty): a 480 × 360 pt figure shared equally between the
+/// cells, axis bands and title band inside. **Fixed for good** (invariant 12):
+/// changing it would change every old file. A new graph does not rely on it:
+/// it is given explicit frames at creation, chosen so that its figure is this
+/// size.
+pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
+
+/// Dimensions below which a **legacy** cell is no longer a plot area, in
+/// points — `(width, height)`.
+///
+/// A panel smaller than this has room for neither its ticks nor its frame;
+/// the renderer counts it as omitted rather than drawing a mess. Only legacy
+/// grids (and the compact fallback grid) can come to it: a stored frame is at
+/// least [`MIN_FRAME_SIZE`] and the axis bands are added around it. Data, hence
+/// here (invariant 3).
+pub const MIN_CELL: (u32, u32) = (48, 36);
+
+/// Lower bound of a stored frame size, in points (≈ 1.3 cm).
+pub const MIN_FRAME_SIZE: f64 = 36.0;
+
+/// Upper bound of a stored frame size, in points (≈ 70 cm): a PNG export
+/// enlarges the figure up to four times, and a hostile file must not ask for
+/// the moon.
+pub const MAX_FRAME_SIZE: f64 = 2000.0;
+
+/// Frame a missing entry of a stored vector reads as, in points —
+/// `(width, height)`: the frame of a new, empty, untitled graph (the
+/// 480 × 360 pt figure minus its margins and the bands of its two axes).
+pub const FALLBACK_FRAME: (f64, f64) = (392.0, 284.0);
+
+/// Upper bound of the sum of the frame sizes along one axis of the grid, in
+/// points: a grid of 256 cells of 2000 pt would otherwise ask for a figure of
+/// half a million points. A sum beyond it is scaled down, proportionally.
+pub const MAX_FIGURE_EXTENT: f64 = 20_000.0;
+
 /// The complete description of a graph: the only object a renderer will read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSpec {
@@ -184,9 +222,61 @@ pub struct PlotSpec {
     /// (#223, S-N4 → S-R9). Setting **of the graph**, independent of the
     /// interface language; applies to the screen and to exports.
     pub decimal_comma: bool,
+    /// Width of the **plot area** (the frame) of each grid column, in points
+    /// (#394). Entry `i` is column `i`. The axis bands and margins are added
+    /// around it, so the figure grows with them and the frame never moves.
+    /// **Empty = legacy**: the figure is [`DEFAULT_FIGURE_SIZE`] wide, shared
+    /// equally, the bands inside. Read through
+    /// [`PlotSpec::sanitized_frame_widths`].
+    pub frame_widths: Vec<f64>,
+    /// Height of the plot area (the frame) of each grid row, in points
+    /// (#394); the graph title band and the axis bands are added around.
+    /// Empty = legacy. Read through [`PlotSpec::sanitized_frame_heights`].
+    pub frame_heights: Vec<f64>,
+}
+
+/// A stored size made usable: a missing, non-finite or non-positive entry
+/// takes `fallback`, then every entry is brought into
+/// `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`,
+/// and a sum beyond [`MAX_FIGURE_EXTENT`] is scaled down.
+fn sanitized_sizes(stored: &[f64], count: usize, fallback: f64) -> Vec<f64> {
+    let mut sizes: Vec<f64> = (0..count)
+        .map(|i| {
+            let value = stored
+                .get(i)
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(fallback);
+            value.clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE)
+        })
+        .collect();
+    let sum: f64 = sizes.iter().sum();
+    if sum > MAX_FIGURE_EXTENT {
+        let factor = MAX_FIGURE_EXTENT / sum;
+        sizes.iter_mut().for_each(|size| *size *= factor);
+    }
+    sizes
 }
 
 impl PlotSpec {
+    /// The width of the frame of each grid column in points, sanitized, or
+    /// `None` if the graph is legacy (no stored width). Always
+    /// [`PlotSpec::columns`] entries: a missing, non-finite or non-positive
+    /// entry reads [`FALLBACK_FRAME`], every entry is clamped to
+    /// `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`; entries beyond the grid are ignored
+    /// (but kept in the field).
+    pub fn sanitized_frame_widths(&self) -> Option<Vec<f64>> {
+        (!self.frame_widths.is_empty())
+            .then(|| sanitized_sizes(&self.frame_widths, self.columns(), FALLBACK_FRAME.0))
+    }
+
+    /// The height of the frame of each grid row in points, sanitized (see
+    /// [`PlotSpec::sanitized_frame_widths`]), or `None` if the graph is legacy.
+    pub fn sanitized_frame_heights(&self) -> Option<Vec<f64>> {
+        (!self.frame_heights.is_empty())
+            .then(|| sanitized_sizes(&self.frame_heights, self.rows(), FALLBACK_FRAME.1))
+    }
+
     /// An empty but valid graph: one panel, no series.
     pub fn empty(title: impl Into<String>) -> Self {
         Self {
@@ -308,6 +398,8 @@ impl Default for PlotSpec {
             title_font: TextFont::default(),
             stale_warning: true,
             decimal_comma: false,
+            frame_widths: Vec::new(),
+            frame_heights: Vec::new(),
         }
     }
 }
@@ -335,6 +427,70 @@ mod tests {
         let panels = Panels::new([PanelSpec::at(0, 0), PanelSpec::at(1, 0)]);
         assert_eq!(panels.len(), 2);
         assert_eq!(panels[1].row, 1);
+    }
+
+    fn three_columns() -> PlotSpec {
+        PlotSpec::default().with_panels(Panels::new([
+            PanelSpec::at(0, 0),
+            PanelSpec::at(0, 1),
+            PanelSpec::at(0, 2),
+        ]))
+    }
+
+    /// Hostile or damaged widths become usable ones, never a panic.
+    #[test]
+    fn stored_widths_are_sanitized() {
+        let fallback = FALLBACK_FRAME.0;
+        let mut spec = three_columns();
+        assert_eq!(
+            spec.sanitized_frame_widths(),
+            None,
+            "legacy: nothing stored"
+        );
+        spec.frame_widths = vec![200.0, f64::NAN, -5.0];
+        assert_eq!(
+            spec.sanitized_frame_widths(),
+            Some(vec![200.0, fallback, fallback])
+        );
+        spec.frame_widths = vec![1.0, 1e9, f64::INFINITY];
+        assert_eq!(
+            spec.sanitized_frame_widths(),
+            Some(vec![MIN_FRAME_SIZE, MAX_FRAME_SIZE, fallback])
+        );
+        spec.frame_widths = vec![300.0];
+        assert_eq!(
+            spec.sanitized_frame_widths(),
+            Some(vec![300.0, fallback, fallback])
+        );
+        spec.frame_widths = vec![300.0, 300.0, 300.0, 999.0, 999.0];
+        assert_eq!(
+            spec.sanitized_frame_widths().unwrap().len(),
+            3,
+            "extra entries ignored"
+        );
+        assert_eq!(spec.frame_widths.len(), 5, "but kept for the round trip");
+    }
+
+    #[test]
+    fn a_figure_beyond_the_extent_cap_is_scaled_down_proportionally() {
+        let mut spec = PlotSpec::default().with_panels(Panels::new(
+            (0..20).map(|c| PanelSpec::at(0, c)).collect::<Vec<_>>(),
+        ));
+        spec.frame_widths = vec![MAX_FRAME_SIZE; 20];
+        let widths = spec.sanitized_frame_widths().unwrap();
+        assert!((widths.iter().sum::<f64>() - MAX_FIGURE_EXTENT).abs() < 1e-6);
+        assert!(widths.iter().all(|w| (w - 1000.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn stored_heights_are_sanitized() {
+        let mut spec = PlotSpec {
+            frame_heights: vec![0.0],
+            ..PlotSpec::default()
+        };
+        assert_eq!(spec.sanitized_frame_heights(), Some(vec![FALLBACK_FRAME.1]));
+        spec.frame_heights = vec![5.0];
+        assert_eq!(spec.sanitized_frame_heights(), Some(vec![MIN_FRAME_SIZE]));
     }
 
     #[test]

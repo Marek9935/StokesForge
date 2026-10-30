@@ -791,6 +791,15 @@ plot-general-dark-note = Auto colors turn white on a dark background
 plot-stale-warning = Warn about out-of-date data
     .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports
 
+plot-size = Size
+plot-size-width = Plot area width ({ $unit })
+plot-size-height = Plot area height ({ $unit })
+plot-size-column-width = Plot area width, column { $n } ({ $unit })
+plot-size-row-height = Plot area height, row { $n } ({ $unit })
+plot-size-total = Graph size ({ $unit })
+plot-size-total-value = { $width } × { $height }
+plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size.
+
 # Plot Area tab
 
 plot-area-layer-title =
@@ -1289,6 +1298,7 @@ history-plot-reorder-group = Reorder Group
 history-plot-closed-frame = Change Closed Frame
 history-plot-add-cell = Add Layer Beside
 history-plot-remove-cell = Delete Layer
+history-plot-resize-cell = Resize Plot Area
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel
@@ -1930,6 +1940,12 @@ preferences-folders-browse = Browse…
     .hint = Chooses the folder in a file dialog
 preferences-folders-not-found = Folder not found
 preferences-folders-pick-title = Choose Default Folder
+preferences-length-unit = Length unit
+preferences-length-unit-cm = Centimeters (cm)
+preferences-length-unit-mm = Millimeters (mm)
+preferences-length-unit-pt = Points (pt)
+preferences-length-unit-in = Inches (in)
+preferences-length-unit-note = Used for the size of graphs. The file keeps points (1 in = 72 pt).
 preferences-files = Files
 preferences-max-file-size = Maximum file size (MB)
 preferences-max-cells = Maximum cells (millions)

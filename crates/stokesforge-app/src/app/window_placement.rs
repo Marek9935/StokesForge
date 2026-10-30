@@ -7,8 +7,13 @@
 //! and sizes are in **logical** workspace coordinates; the conversion to
 //! screen coordinates happens only at paint time (`workspace_to_screen`).
 
+use std::collections::HashMap;
+
 use eframe::egui;
+use stokesforge_core::NodeId;
 use stokesforge_session::WindowGeometry;
+
+use super::window_chrome::MIN_CONTENT_WINDOW_SIZE;
 
 /// Default size of floating windows that do not show a graph — see the
 /// module's top doc, § Confined floating windows. Trimmed to the available
@@ -151,6 +156,145 @@ pub(super) fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
     let size = rect.size().min(WORKSPACE_SIZE);
     let max_min = (WORKSPACE_SIZE - size).to_pos2();
     egui::Rect::from_min_size(rect.min.clamp(egui::Pos2::ZERO, max_min), size)
+}
+
+/// What a graph window remembers of the figure it last painted (#394), so that
+/// the window follows the figure: when the figure's logical size changes (a cell
+/// added or removed, an undo, a size field, a handle drag, an axis or a title
+/// that makes the image grow around a fixed plot area, `pyst`), the window grows
+/// or shrinks by the difference at the display scale it had, top-left fixed.
+/// When the room runs out the figure is contained, and the window then follows
+/// the contained figure on both sides (no blank band); the scale it had before
+/// is kept here so that a return to a size that fits restores it.
+/// Window geometry stays in the shell (invariant 2): app-state never sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FigureFollow {
+    /// Size of the figure in points the last time it was recorded.
+    size: (u32, u32),
+    /// Screen points per figure point the window keeps (the "display scale"):
+    /// the displayed one while the figure fits, the one from before the clamp
+    /// while it does not.
+    scale: f32,
+    /// The smaller scale the window showed when the room ran out, until the
+    /// displayed scale moves away from it (the user resized the window).
+    held: Option<f32>,
+}
+
+/// A change of figure size to follow, see [`FigureFollow::observe`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct FollowStep {
+    /// The new size of the figure, in points.
+    figure: egui::Vec2,
+    /// How much the figure grew (negative: shrank), in points.
+    delta: egui::Vec2,
+    /// The scale the window keeps.
+    scale: f32,
+    /// The figure was contained (the room had run out) before this change.
+    was_held: bool,
+}
+
+impl FigureFollow {
+    /// Records the figure `graph` paints this frame (`size` in points, `scale`
+    /// the display scale of its view) and returns the step to follow if the
+    /// figure's size changed since the previous record. The scale is the one
+    /// from before the change, so that the figure keeps its display scale.
+    /// Nothing is returned the first time a graph is seen: opening or loading a
+    /// project never resizes a window.
+    pub(super) fn observe(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        graph: NodeId,
+        size: (u32, u32),
+        scale: Option<f32>,
+    ) -> Option<FollowStep> {
+        let scale = scale.filter(|scale| scale.is_finite() && *scale > 0.0);
+        let Some(follow) = follows.get_mut(&graph) else {
+            follows.insert(
+                graph,
+                FigureFollow {
+                    size,
+                    scale: scale.unwrap_or(1.0),
+                    held: None,
+                },
+            );
+            return None;
+        };
+        if follow.size == size {
+            if let Some(shown) = scale {
+                match follow.held {
+                    // Still the contained figure we sized the window to.
+                    Some(held) if (shown - held).abs() <= 0.01 * held => {}
+                    // The user resized the window: the new scale is the one to keep.
+                    _ => {
+                        follow.scale = shown;
+                        follow.held = None;
+                    }
+                }
+            }
+            return None;
+        }
+        let delta = egui::vec2(
+            (i64::from(size.0) - i64::from(follow.size.0)) as f32,
+            (i64::from(size.1) - i64::from(follow.size.1)) as f32,
+        );
+        follow.size = size;
+        Some(FollowStep {
+            figure: egui::vec2(size.0 as f32, size.1 as f32),
+            delta,
+            scale: follow.scale,
+            was_held: follow.held.is_some(),
+        })
+    }
+
+    /// The window size that follows `step`, from the current `window` size,
+    /// `chrome` (what the window adds around the figure's area: header, margins,
+    /// controls) and `room`, the largest size it may take. The window changes by
+    /// the figure's change at the kept scale; when it cannot, the figure is
+    /// contained at the largest scale that fits and the window shrinks on the
+    /// other side to fit the contained figure, so no blank band is left. A
+    /// window that was already contained is sized from the figure at the kept
+    /// scale (not from its delta), which makes clamp then unclamp return to the
+    /// same size.
+    pub(super) fn resize(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        graph: NodeId,
+        step: FollowStep,
+        window: egui::Vec2,
+        chrome: egui::Vec2,
+        room: egui::Vec2,
+    ) -> egui::Vec2 {
+        let desired = if step.was_held {
+            chrome + step.figure * step.scale
+        } else {
+            window + step.delta * step.scale
+        };
+        let room = room.max(MIN_CONTENT_WINDOW_SIZE);
+        let fitted = desired.max(MIN_CONTENT_WINDOW_SIZE).min(room);
+        let area = (fitted - chrome).max(egui::vec2(1.0, 1.0));
+        let shown = (area.x / step.figure.x.max(1.0)).min(area.y / step.figure.y.max(1.0));
+        let held = (shown < step.scale * 0.999).then_some(shown);
+        if let Some(follow) = follows.get_mut(&graph) {
+            follow.held = held;
+        }
+        match held {
+            Some(shown) => (chrome + step.figure * shown)
+                .max(MIN_CONTENT_WINDOW_SIZE)
+                .min(room),
+            None => fitted,
+        }
+    }
+}
+
+/// The largest size a floating window of top-left `position` may take: up to
+/// `limit`, the far corner, in workspace coordinates, of what is visible (the
+/// scroll area's viewport, never past the virtual canvas), so that its title bar
+/// and buttons stay reachable.
+pub(super) fn floating_room(position: egui::Pos2, limit: egui::Vec2) -> egui::Vec2 {
+    (limit.min(WORKSPACE_SIZE) - position.to_vec2()).max(MIN_CONTENT_WINDOW_SIZE)
+}
+
+/// The largest inner size of a detached OS window: its monitor, when known.
+pub(super) fn viewport_room(monitor: Option<egui::Vec2>) -> egui::Vec2 {
+    monitor.unwrap_or(egui::Vec2::splat(f32::MAX))
 }
 
 #[cfg(test)]
@@ -339,5 +483,134 @@ mod tests {
         ] {
             assert_eq!(clamp_to_workspace(legal), legal);
         }
+    }
+
+    fn graph() -> NodeId {
+        NodeId::from_raw(7)
+    }
+
+    fn step(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        size: (u32, u32),
+        scale: f32,
+    ) -> Option<FollowStep> {
+        FigureFollow::observe(follows, graph(), size, Some(scale))
+    }
+
+    #[test]
+    fn the_first_record_of_a_graph_never_resizes() {
+        let mut follows = HashMap::new();
+        assert_eq!(step(&mut follows, (960, 360), 1.5), None);
+        assert_eq!(step(&mut follows, (960, 360), 1.5), None, "same size");
+    }
+
+    /// The difference is taken at the scale from before the change: a figure
+    /// that grows by 480 points at scale 1.5 asks for 720 screen points.
+    #[test]
+    fn a_change_of_size_moves_the_window_by_the_difference_at_the_display_scale() {
+        let mut follows = HashMap::new();
+        step(&mut follows, (480, 360), 1.5);
+        // The frame the figure changes is painted contained in the old window:
+        // its fresh scale (0.75 here) must not be used.
+        let grow = step(&mut follows, (960, 360), 0.75).expect("step");
+        assert_eq!(grow.delta * grow.scale, egui::vec2(720.0, 0.0));
+        let shrink = step(&mut follows, (480, 360), 1.5).expect("step");
+        assert_eq!(shrink.delta * shrink.scale, egui::vec2(-720.0, 0.0));
+    }
+
+    const CHROME: egui::Vec2 = egui::vec2(60.0, 100.0);
+
+    /// Room runs out on the width: the window follows the CONTAINED figure on
+    /// the height too, no blank band; Undo back to a size that fits gives the
+    /// original window again, whatever the number of clamp/unclamp cycles.
+    #[test]
+    fn a_clamped_window_follows_the_contained_figure_and_returns_to_its_size() {
+        let mut follows = HashMap::new();
+        let room = egui::vec2(1000.0, 800.0);
+        let original = egui::vec2(540.0, 460.0);
+        // Figure 480 x 360, shown at scale 1.0 in the 500 x 360 area.
+        step(&mut follows, (480, 360), 1.0);
+        let mut window = original;
+        for _ in 0..3 {
+            // Two more cells: 1440 x 360 would need 1500 x 360 + chrome.
+            let two = step(&mut follows, (1440, 360), 1.0).expect("step");
+            window = FigureFollow::resize(&mut follows, graph(), two, window, CHROME, room);
+            assert_eq!(window.x, 1000.0, "stops at the room");
+            let contained = (1000.0 - CHROME.x) / 1440.0;
+            assert!(
+                (window.y - (CHROME.y + 360.0 * contained)).abs() < 0.01,
+                "{window:?}"
+            );
+            // The view now shows the contained scale: still the same figure.
+            assert_eq!(step(&mut follows, (1440, 360), contained), None);
+            // Undo twice, one frame each: back to the original window.
+            let one = step(&mut follows, (960, 360), contained).expect("step");
+            window = FigureFollow::resize(&mut follows, graph(), one, window, CHROME, room);
+            let zero = step(&mut follows, (480, 360), 0.9).expect("step");
+            window = FigureFollow::resize(&mut follows, graph(), zero, window, CHROME, room);
+            assert!((window - original).length() < 0.01, "{window:?}");
+            assert_eq!(step(&mut follows, (480, 360), 1.0), None);
+        }
+    }
+
+    /// The height can be the clamped side too.
+    #[test]
+    fn a_clamped_height_shrinks_the_width_to_the_contained_figure() {
+        let mut follows = HashMap::new();
+        step(&mut follows, (480, 360), 1.0);
+        let tall = step(&mut follows, (480, 1080), 1.0).expect("step");
+        let window = FigureFollow::resize(
+            &mut follows,
+            graph(),
+            tall,
+            egui::vec2(560.0, 460.0),
+            CHROME,
+            egui::vec2(1000.0, 460.0),
+        );
+        assert_eq!(window.y, 460.0);
+        let contained = (460.0 - CHROME.y) / 1080.0;
+        assert!(
+            (window.x - (CHROME.x + 480.0 * contained)).abs() < 0.01,
+            "{window:?}"
+        );
+    }
+
+    /// A user resizing a contained window sets the scale to keep.
+    #[test]
+    fn resizing_a_contained_window_by_hand_resets_the_kept_scale() {
+        let mut follows = HashMap::new();
+        step(&mut follows, (480, 360), 1.0);
+        let wide = step(&mut follows, (1440, 360), 1.0).expect("step");
+        FigureFollow::resize(
+            &mut follows,
+            graph(),
+            wide,
+            egui::vec2(560.0, 460.0),
+            CHROME,
+            egui::vec2(1000.0, 800.0),
+        );
+        assert_eq!(step(&mut follows, (1440, 360), 0.9), None);
+        let back = step(&mut follows, (480, 360), 0.9).expect("step");
+        assert_eq!(back.scale, 0.9);
+        assert!(!back.was_held);
+    }
+
+    #[test]
+    fn rooms() {
+        let position = egui::pos2(100.0, 50.0);
+        assert_eq!(
+            floating_room(position, WORKSPACE_SIZE),
+            WORKSPACE_SIZE - position.to_vec2()
+        );
+        assert_eq!(
+            floating_room(position, egui::vec2(1050.0, 600.0)),
+            egui::vec2(950.0, 550.0),
+            "the visible part"
+        );
+        assert_eq!(viewport_room(None).x, f32::MAX);
+        assert_eq!(
+            viewport_room(Some(egui::vec2(1280.0, 800.0))),
+            egui::vec2(1280.0, 800.0)
+        );
     }
 }

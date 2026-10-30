@@ -180,10 +180,10 @@ pub enum DataDelta {
     PlotSpec {
         /// Target graph.
         graph: NodeId,
-        /// Spec before.
-        before: PlotSpec,
+        /// Spec before (boxed: a spec is much larger than the other deltas).
+        before: Box<PlotSpec>,
         /// Spec after.
-        after: PlotSpec,
+        after: Box<PlotSpec>,
     },
     /// Replacing the colors saved in the project — a few
     /// strings, `before`/`after` directly.
@@ -1384,8 +1384,8 @@ impl History {
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::PlotSpec {
                         graph,
-                        before,
-                        after: spec,
+                        before: Box::new(before),
+                        after: Box::new(spec),
                     }),
                     label,
                 })
@@ -1551,7 +1551,7 @@ impl History {
                 Ok(())
             }
             DataDelta::PlotSpec { graph, before, .. } => {
-                project.set_plot_spec(*graph, before.clone())?;
+                project.set_plot_spec(*graph, before.as_ref().clone())?;
                 Ok(())
             }
             DataDelta::SavedColors { before, .. } => {
@@ -1628,7 +1628,7 @@ impl History {
                 Ok(())
             }
             DataDelta::PlotSpec { graph, after, .. } => {
-                project.set_plot_spec(*graph, after.clone())?;
+                project.set_plot_spec(*graph, after.as_ref().clone())?;
                 Ok(())
             }
             DataDelta::SavedColors { after, .. } => {

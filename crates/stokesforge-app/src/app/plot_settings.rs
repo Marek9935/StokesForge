@@ -19,14 +19,19 @@ use stokesforge_plot::{
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
-use crate::number_field::{auto_number_field, number_field};
+use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
+use stokesforge_app_state::frame_sizes::set_size_in_draft;
+use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
 use stokesforge_app_state::tr;
+use stokesforge_core::compose::FrameAxis;
+use stokesforge_plot::FALLBACK_FRAME;
+use stokesforge_render_egui::FigureLayout;
 
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{
@@ -222,6 +227,8 @@ fn plot_settings_contents(
     }
 
     let mut commit = false;
+    let unit = state.length_unit();
+    let published = super::graph_window::published_figure_layout(ui.ctx(), settings.graph);
     let mut gradient_actions: Vec<Action> = Vec::new();
     // Saved colors, read before borrowing the draft; the
     // picker requests (save, remove) are translated into actions
@@ -297,7 +304,8 @@ fn plot_settings_contents(
                 .auto_shrink([false, false])
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {
-                        commit |= graph_settings_page(ui, spec, &mut env);
+                        let layout = dialog_layout(ui.ctx(), settings.graph, spec, published);
+                        commit |= graph_settings_page(ui, spec, &mut env, layout.as_ref(), unit);
                     }
                     PlotSettingsTab::PlotArea => {
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
@@ -347,8 +355,44 @@ fn plot_settings_contents(
     }
 }
 
+/// The layout the size fields read: the one the graph's view last published
+/// when it describes the draft (same grid, same legacy or stored frames), else
+/// one computed from the draft with the measurement of the exports, memoized
+/// until the draft changes. The graph may not be on screen, or the draft may
+/// have just fixed the frames of a legacy graph.
+fn dialog_layout(
+    ctx: &egui::Context,
+    graph: NodeId,
+    draft: &PlotSpec,
+    published: Option<FigureLayout>,
+) -> Option<FigureLayout> {
+    let stored = !draft.frame_widths.is_empty() || !draft.frame_heights.is_empty();
+    if let Some(layout) = published.filter(|layout| {
+        layout.frame_widths.len() == draft.columns()
+            && layout.frame_heights.len() == draft.rows()
+            && layout.is_explicit() == stored
+    }) {
+        return Some(layout);
+    }
+    let id = egui::Id::new(("graph_size_layout", graph));
+    if let Some((cached, layout)) = ctx.data(|data| data.get_temp::<(PlotSpec, FigureLayout)>(id)) {
+        if cached == *draft {
+            return Some(layout);
+        }
+    }
+    let layout = stokesforge_app_state::frame_sizes::figure_layout(draft)?;
+    ctx.data_mut(|data| data.insert_temp(id, (draft.clone(), layout.clone())));
+    Some(layout)
+}
+
 /// Graph page: title and background, as a two-column form (#227).
-fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
+fn graph_settings_page(
+    ui: &mut egui::Ui,
+    spec: &mut PlotSpec,
+    env: &mut PickerEnv,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
     form(ui, "plot_graph_page", |form| {
         let mut commit = false;
         commit |= formula_field(
@@ -377,8 +421,103 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
+        commit |= size_section(form, spec, layout, unit);
         commit
     })
+}
+
+/// General › Size (#394): the width of the plot area (the frame) of each grid
+/// column and its height for each grid row, in the unit of the Preferences, and
+/// the size of the graph they add up to with the axes and the title (read-only).
+/// Edits go into the draft like every other field of the window, in the one
+/// undo step of the window; a graph from an old file is first given the frames
+/// it is drawn with, so only the edited one changes.
+fn size_section(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    // What each frame is drawn with: the stored size, else the legacy one the
+    // last painted figure laid out (its `frame_widths` are the frames a legacy
+    // graph is drawn with).
+    let drawn = |stored: Option<Vec<f64>>, painted: Option<&Vec<f64>>, count: usize, fallback| {
+        stored.unwrap_or_else(|| {
+            painted
+                .filter(|sizes| sizes.len() == count)
+                .cloned()
+                .unwrap_or_else(|| vec![fallback; count])
+        })
+    };
+    let drawn_widths = drawn(
+        spec.sanitized_frame_widths(),
+        layout.map(|layout| &layout.frame_widths),
+        spec.columns(),
+        FALLBACK_FRAME.0,
+    );
+    let drawn_heights = drawn(
+        spec.sanitized_frame_heights(),
+        layout.map(|layout| &layout.frame_heights),
+        spec.rows(),
+        FALLBACK_FRAME.1,
+    );
+    if drawn_widths.len() != spec.columns() || drawn_heights.len() != spec.rows() {
+        return false;
+    }
+    let symbol = unit.symbol();
+    form.section(tr!("plot-size"));
+    let mut commit = false;
+    let quantity = quantities::frame_size(unit);
+    for (axis, sizes) in [
+        (FrameAxis::Column, &drawn_widths),
+        (FrameAxis::Row, &drawn_heights),
+    ] {
+        for (index, &points) in sizes.iter().enumerate() {
+            let number = index + 1;
+            let label = match (axis, sizes.len() == 1) {
+                (FrameAxis::Column, true) => tr!("plot-size-width", unit = symbol),
+                (FrameAxis::Column, false) => {
+                    tr!("plot-size-column-width", n = number, unit = symbol)
+                }
+                (FrameAxis::Row, true) => tr!("plot-size-height", unit = symbol),
+                (FrameAxis::Row, false) => tr!("plot-size-row-height", n = number, unit = symbol),
+            };
+            let mut shown = unit.from_points(points);
+            let id = ("graph_size", matches!(axis, FrameAxis::Row), index);
+            let changed = form.row(label, |ui| {
+                number_field(ui, id, &mut shown, &quantity).changed
+            });
+            if changed {
+                commit |= set_size_in_draft(
+                    spec,
+                    (&drawn_widths, &drawn_heights),
+                    axis,
+                    index,
+                    unit.to_points(shown),
+                );
+            }
+        }
+    }
+    // The graph the frames make once the axes and the title are added around
+    // them, as the last painted figure lays them out.
+    let frames = (
+        spec.sanitized_frame_widths().unwrap_or(drawn_widths),
+        spec.sanitized_frame_heights().unwrap_or(drawn_heights),
+    );
+    let (total_width, total_height) = layout.map_or_else(
+        || (frames.0.iter().sum(), frames.1.iter().sum()),
+        |layout| layout.size_with_frames(&frames.0, &frames.1),
+    );
+    form.row(tr!("plot-size-total", unit = symbol), |ui| {
+        ui.label(tr!(
+            "plot-size-total-value",
+            width = format_value(unit.from_points(total_width.round()), unit.decimals()),
+            height = format_value(unit.from_points(total_height.round()), unit.decimals())
+        ));
+        false
+    });
+    form.note(tr!("plot-size-note"));
+    commit
 }
 
 /// Layer page: title and gridlines.
@@ -2109,6 +2248,63 @@ mod tests {
         );
         one_frame(context, &mut harness.state, vec![key(egui::Key::Enter)]);
         one_frame(context, &mut harness.state, Vec::new());
+    }
+
+    /// #394: General › Size shows the plot area width, its height and the size
+    /// of the graph in the unit of the Preferences (centimetres: a 392 x 284 pt
+    /// plot area is 13.83 x 10.02, the 480 x 360 pt graph it makes with its two
+    /// axes 16.93 x 12.7), and typing a width stores points and leaves the height alone, in
+    /// the one step of the window.
+    #[test]
+    fn the_size_fields_show_the_unit_and_store_points() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.frame_widths = vec![392.0];
+            spec.frame_heights = vec![284.0];
+        });
+        harness.open(PlotSettingsTab::Graph, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size"),
+            tr!("plot-size-width", unit = "cm"),
+            tr!("plot-size-height", unit = "cm"),
+            tr!("plot-size-total", unit = "cm"),
+            "13.8289".to_owned(),
+            "10.0189".to_owned(),
+            "16.93 × 12.7".to_owned(),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        let history = harness.state.undo_label();
+
+        type_into(&context, &mut harness, "13.8289", "10");
+        let model = harness.model();
+        assert!(
+            (model.frame_widths[0] - 283.464_566_9).abs() < 1e-6,
+            "{model:?}"
+        );
+        assert_eq!(model.frame_heights, [284.0]);
+        // The window is one history entry, closed with it.
+        harness.state.close_plot_settings();
+        assert_ne!(harness.state.undo_label(), history, "an undoable entry");
+    }
+
+    /// #394: editing one size of a graph from an old file (no stored frame)
+    /// first gives it the frames it is drawn with, so the other axis keeps its
+    /// size.
+    #[test]
+    fn editing_a_size_of_a_legacy_graph_keeps_the_other_axis() {
+        let context = test_support::context();
+        let mut harness = harness(|_| {});
+        harness.open(PlotSettingsTab::Graph, None);
+        assert!(harness.model().frame_widths.is_empty());
+        type_into(&context, &mut harness, "10.0189", "5");
+        let model = harness.model();
+        assert_eq!(model.frame_widths, [392.0], "drawn width stored as it was");
+        assert!(
+            (model.frame_heights[0] - 141.732_283).abs() < 1e-5,
+            "{model:?}"
+        );
     }
 
     /// #344: under Auto, From and To show the computed bounds; typing in one

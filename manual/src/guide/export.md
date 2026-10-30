@@ -21,7 +21,7 @@ The export shows what you see:
 - **Everything drawn in the graph:** curves, symbols, axes, ticks, grid, legend, titles, free texts and shapes.
 - **Titles and texts set as on screen**, including scientific notation and the formulas you typed between `$` signs.
 
-The export does not depend on the size of the window. The graph is always laid out on the same page of 480 × 360 points (about 17 × 12.7 cm), so a graph exports identically whether its window is small, large or detached. To change the proportions of the text against the curves, change the font sizes and line widths in the graph settings.
+The export does not depend on the size of the window. The page is the size of the graph itself (see [Graph size](graphs.md#graph-size)): 480 × 360 points (about 17 × 12.7 cm) for a new graph. A graph exports identically whether its window is small, large or detached. To change the proportions of the text against the curves, change the font sizes and line widths in the graph settings.
 
 If the graph has no background color (the "no color" choice), the file has a transparent background.
 
@@ -46,7 +46,7 @@ The PDF is a vector page with selectable text. The fonts StokesForge needs are e
 
 PNG is a bitmap. Choose its size in **Graph ▸ Export ▸ PNG Resolution**, or in **File ▸ Preferences… ▸ Export** (**×1**, **×2** or **×4**). StokesForge remembers it for the next sessions.
 
-The sizes are:
+The sizes below are those of a graph of 480 × 360 points; a bigger or smaller graph gives a bigger or smaller image.
 
 | Choice | Size of the image |
 |---|---|

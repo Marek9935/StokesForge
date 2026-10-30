@@ -267,6 +267,7 @@ The rubrics (**General**, **Display**, **Export** and **Folders**) are listed ac
 
 - **General**
   - **Language**.
+  - **Length unit**: **Centimeters**, **Millimeters**, **Points** or **Inches**, used for the size of graphs (see [Graph size](graphs.md#graph-size)). Files keep points whatever you choose.
   - **Maximum file size (MB)** and **Maximum cells (millions)**: the largest project StokesForge agrees to open. A bigger file is refused before it is read, which protects your computer from a file you received. Raise a limit here if you must open a large project.
   - **Save a recovery copy automatically** and **Copy every (min)**: see [Recovery copies](projects-and-workbooks.md#recovery-copies).
   - **Analysis**: **Values** sets whether an analysis window starts on **Show** or on **Keep in Results** the first time you use that analysis (see [Analysis](analysis.md)). **Warn when R² is low** opens a dialog after a calculation when R² is below 0.6.

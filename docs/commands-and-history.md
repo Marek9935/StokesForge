@@ -228,6 +228,16 @@ with the `PlotEditKind` reason in `HistoryLabel::EditPlotSpec`. Visibility,
 renaming, ordering and removal have their `history-plot-*` keys, with no
 sentence carried by the actor. The menu and the tree emit the same `Action`.
 A stale target, an unchanged rank or an identical value sends no command.
+Frame sizes (#394) are part of that spec: Add Layer Beside / Below and Delete
+carry their column or row frame in the same `EditPlotSpec` (`AddCell`,
+`RemoveCell`: one step, the frames restored by Undo), and `Action::SetFrameSize`
+sends one `EditPlotSpec` with `PlotEditKind::ResizeCell` ("Resize Plot Area"). A
+legacy graph (no stored frame) is given the frames it is drawn with **in that
+same command**, never in a separate step and never at load: any
+`SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
+(or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
+legacy file as it was. The Graph Properties size fields edit the draft of the
+window, hence the window's single `GraphProperties` macro.
 Opening the panel, choosing a content or opening its properties belongs to
 the view state; validated changes are undoable.
 

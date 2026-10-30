@@ -425,7 +425,7 @@ pub(crate) fn save(context: &ScriptContext, path: Option<&Path>) -> Result<(), H
 pub(crate) const DEFAULT_PNG_SCALE: f32 = 4.0;
 
 /// `pyst.export_graph`: the same rendering as the application's export (size
-/// `DEFAULT_SIZE`, default fonts, Typst), the format coming from the extension.
+/// of the figure, default fonts, Typst), the format coming from the extension.
 /// The text of an SVG stays text (the application's default).
 pub(crate) fn export_graph(
     session: &SessionHandle,
@@ -450,12 +450,13 @@ pub(crate) fn export_graph(
     let spec = graph_spec(&snapshot, id, epoch)?;
     let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
     let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
     stokesforge_render_svg::export_to_file(
         path,
         &plot,
-        stokesforge_render_svg::DEFAULT_SIZE,
+        stokesforge_render_svg::figure_size(&spec, &measurer, &choice),
         &measurer,
-        &stokesforge_render_svg::FontChoice::default(),
+        &choice,
         format,
     )
     .map_err(|error| HostError::InvalidValue(error.to_string()))
@@ -545,11 +546,37 @@ pub(crate) fn graph_spec(
     }
 }
 
+/// The one door of the frames of a graph written by a script (#394, G7): a
+/// legacy `spec` (nothing stored) replacing a legacy graph carries the frames
+/// that graph is drawn with *now*, so that an axis, a title or a layer edited
+/// by a script changes the figure around the plot areas and never the plot
+/// areas. `current` is the graph as it is, `None` for a graph being created,
+/// which fixes itself (a new graph is exactly 480 x 360 pt and explicit). The
+/// frames ride in the very command of the edit: no history step of their own.
+pub(crate) fn fix_frames(current: Option<&PlotSpec>, spec: &mut PlotSpec) {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let reference = current.cloned().unwrap_or_else(|| spec.clone());
+    // A failed measurement (it practically cannot) leaves the spec legacy,
+    // which draws as before.
+    let _ = stokesforge_render_svg::fix_legacy_frames(&reference, spec, &measurer, &choice);
+}
+
+/// The spec graph `graph` has now in the session, if it is one.
+pub(crate) fn current_graph_spec(session: &SessionHandle, graph: NodeId) -> Option<PlotSpec> {
+    let snapshot = session.snapshot().ok()?;
+    match snapshot.tree.node(graph)?.kind() {
+        stokesforge_core::node::NodeKind::Graph { spec, .. } => Some(spec.clone()),
+        _ => None,
+    }
+}
+
 pub(crate) fn set_graph_spec(
     session: &SessionHandle,
     graph: NodeId,
-    spec: PlotSpec,
+    mut spec: PlotSpec,
 ) -> Result<(), HostError> {
+    fix_frames(current_graph_spec(session, graph).as_ref(), &mut spec);
     session
         .execute(Command::SetPlotSpec { graph, spec })
         .map(|_| ())

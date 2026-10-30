@@ -119,13 +119,27 @@ While the window is open, your changes show on the graph at once. Click **OK** t
 
 | Tab | What you set |
 |---|---|
-| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data** |
+| **General** | **Title**, **Title color**, **Background**, **Warn about out-of-date data**, **Size** |
 | **Plot Area** | **Layer title**, vertical and horizontal **Gridlines** |
 | **Axes** | One axis at a time: title, scale, range, ticks, color |
 | **Legend** | **Show legend**, **Position** |
 | **Theme** | **Light** or **Dark** theme, and **Global colors** |
 
 A new graph has no background color: the figure is transparent when exported, and white on screen. Choose a dark background and the automatic text turns white.
+
+### Graph size
+
+What you set is the size of the **plot area**, the rectangle bounded by the axes. In **General**, the **Size** section sets the plot area width of each column of layers and the plot area height of each row, in the unit chosen in **File ▸ Preferences… ▸ General ▸ Length unit** (centimeters by default; millimeters, points or inches). A graph with one layer has **Plot area width** and **Plot area height**; with several, **Plot area width, column 1**, **Plot area width, column 2**, **Plot area height, row 1** and so on. **Graph size** shows the whole graph, which you cannot type in: the plot areas plus the room taken around them by the margins, the axes with their numbers and titles, and the title of the graph.
+
+<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Plot area width for columns 1 and 2, Plot area height and Graph size." width="480">
+
+A new graph is 480 × 360 points (about 17 × 12.7 cm) in all. Adding an axis, or a title, makes the graph bigger around the plot area: the plot area keeps its size, and the whole graph is shown scaled to fit its window. Removing one makes the graph smaller. A plot area can be from 36 points (about 1.3 cm) to 2000 points (about 70 cm) wide or high. Changing one size does not change the others: the graph grows or shrinks by the difference. The plot areas of one column are as wide as each other and line up, and so do those of one row, even when one layer has more axes than its neighbor. Setting the plot area of two graphs to the same numbers lets you place them one over the other at the same scale. The size is part of the file, and the change is one step of the window's single **Undo**.
+
+You can also resize by dragging. Point at the outer edge of a layer, beyond its numbers and its axis title, on the right or at the bottom: the pointer becomes a double arrow. Drag, and the plot area of that column or row grows or shrinks by the distance you drag, the graph with it, and the graph window follows. The edge two layers share resizes the left (or upper) one; the right edge of the graph resizes the last column, the bottom edge the last row, so a graph with one layer can be resized too; the bottom right corner does both. One drag is one step of **Undo**. A click on the axis line still selects the axis.
+
+When the graph gets bigger or smaller, whether by dragging, by the **Size** fields, by adding or deleting a layer, by adding an axis or by **Undo**, its window grows or shrinks by the same amount on screen, to the right and downward (at most to the visible edge of the workspace, after which the graph is scaled down to fit; a detached window stops at the edge of the screen). A maximized window does not change size: the graph is scaled to fit it.
+
+A graph saved by an older version has no sizes of its own. It keeps its familiar look, and its first change, of any kind, fixes the plot areas it had: from then on an axis or a title you add grows the graph instead of squeezing the plot area.
 
 ## Change a series
 
@@ -364,11 +378,11 @@ Zoom and pan act on all the layers that share a plot area, so the ticks stay ali
 
 ## Several layers side by side
 
-A graph can show several plot areas in a grid. To add one, choose **Graph ▸ New Layer Beside** and pick **Right** or **Below**: an empty layer appears next to the active layer and becomes active.
+A graph can show several plot areas in a grid. To add one, choose **Graph ▸ New Layer Beside** and pick **Right** or **Below**: an empty layer appears next to the active layer and becomes active. Its plot area is as big as that of the layer it sits next to, so a 4:3 plot area gets a 4:3 neighbor, and the graph grows to make room (its axes come on top). On a grid of several rows, **Right** adds a whole column (the other rows get an empty space there) and **Below** a whole row.
 
 You can also drag columns from a worksheet onto the right or bottom edge of the graph. While you drag, the two edges are outlined. Drop on the right edge to put the series in a new layer to the right of the nearest layer, or on the bottom edge to put it below. In the bottom-right corner, the new layer goes to the right.
 
-To delete a layer, right-click its node in the Object Manager and choose **Delete**. The layer disappears with the layers overlaid on it, and its neighbours close the gap. The last layer cannot be deleted. Deleting an overlay layer removes only that layer. **Undo** brings it back in one step.
+To delete a layer, right-click its node in the Object Manager and choose **Delete**. The layer disappears with the layers overlaid on it. If it was alone in its column or row, that column or row goes away with its plot area and the graph shrinks by it; otherwise it leaves an empty space. The last layer cannot be deleted. Deleting an overlay layer removes only that layer. **Undo** brings it back in one step.
 
 ## The Object Manager
 

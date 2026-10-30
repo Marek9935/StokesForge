@@ -14,7 +14,7 @@ use eframe::egui;
 use stokesforge_core::compose::CellSide;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::{
-    AxisSide, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
+    AxisSide, FigureLayout, GraphView, PlotComponent, TextTarget, DEFAULT_FIGURE_SIZE,
 };
 use stokesforge_session::Snapshot;
 
@@ -371,13 +371,19 @@ pub(super) fn graph_view_contents(
         egui::Sense::hover(),
     );
     // The displayed rectangle follows the available space (F11) with the ratio of
-    // `DEFAULT_FIGURE_SIZE`: "contain" scaling, bounded by the
-    // limiting dimension. `paint_scaled` keeps the layout at 480×360 and
+    // the figure (`GraphView::figure_layout`, #394: the sum of the cell sizes
+    // plus the title band): "contain" scaling, bounded by the
+    // limiting dimension. `paint_scaled` lays the figure out at its own size and
     // then enlarges or shrinks the shapes, text included: no
     // tick mark is recomputed for the window size (point 3 of
     // `retours-2026-09-24-bugs.md`). The child Ui bounds the
     // interactions without growing the parent window.
-    let (fig_w, fig_h) = DEFAULT_FIGURE_SIZE;
+    publish_figure_area(ui.ctx(), graph_id, outer.size());
+    let layout = view.figure_layout(ui.ctx(), snapshot, graph_id).ok();
+    let (fig_w, fig_h) = layout.as_ref().map_or(DEFAULT_FIGURE_SIZE, |l| l.size);
+    if let Some(layout) = layout {
+        publish_figure_layout(ui.ctx(), graph_id, layout);
+    }
     let scale = if fig_w > 0 && fig_h > 0 {
         (outer.width() / fig_w as f32)
             .min(outer.height() / fig_h as f32)
@@ -541,6 +547,41 @@ pub(super) fn published_axis_bounds(
     ctx.data(|data| data.get_temp::<Vec<PanelBounds>>(axis_bounds_id(graph)))?
         .into_iter()
         .find(|bounds| bounds.index == panel)
+}
+
+/// Publishes the layout of the figure of `graph`, as its view last laid it out
+/// (#394): the size in points, the title band and the cell breakpoints. The PNG
+/// resolution labels of the menus and the size fields of Graph Properties read
+/// it without a [`GraphView`], and the window that follows the figure compares
+/// the size with the previous one.
+fn publish_figure_layout(ctx: &egui::Context, graph: NodeId, layout: FigureLayout) {
+    ctx.data_mut(|data| data.insert_temp(figure_layout_id(graph), layout));
+}
+
+/// Publishes the area the figure of `graph` is contained in (the window's
+/// content, controls left out): the window that follows the figure measures
+/// what its frame adds around it (#394).
+fn publish_figure_area(ctx: &egui::Context, graph: NodeId, area: egui::Vec2) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(("stokesforge_figure_area", graph)), area));
+}
+
+/// The area `graph`'s figure was last contained in; `None` before a painted view.
+pub(super) fn published_figure_area(ctx: &egui::Context, graph: NodeId) -> Option<egui::Vec2> {
+    ctx.data(|data| data.get_temp(egui::Id::new(("stokesforge_figure_area", graph))))
+}
+
+/// The figure layout `graph` last published; `None` for lack of a painted view.
+pub(super) fn published_figure_layout(ctx: &egui::Context, graph: NodeId) -> Option<FigureLayout> {
+    ctx.data(|data| data.get_temp(figure_layout_id(graph)))
+}
+
+/// The figure size `graph` last published, in points.
+pub(super) fn published_figure_size(ctx: &egui::Context, graph: NodeId) -> Option<(u32, u32)> {
+    published_figure_layout(ctx, graph).map(|layout| layout.size)
+}
+
+fn figure_layout_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_figure_layout", graph))
 }
 
 /// The active layer of `graph`, as its last painted view published it
@@ -1004,6 +1045,9 @@ fn annotation_interactions(
                         font,
                     });
                 }
+            }
+            stokesforge_render_egui::GraphEvent::FrameResized { column, row } => {
+                actions.push(Action::SetFrameSizes { graph, column, row });
             }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {

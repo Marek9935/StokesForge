@@ -38,7 +38,7 @@ use stokesforge_app_state::tr;
 
 use super::busy::{work_in_progress, Work};
 use super::graph_text_edit::add_annotation_at;
-use super::graph_window::{graph_properties_menu, published_active_panel};
+use super::graph_window::{graph_properties_menu, published_active_panel, published_figure_size};
 use super::menu_sections::{menu_choice, MenuSections};
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
@@ -702,7 +702,8 @@ impl StokesForgeApp {
                     ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
                         let current = self.state.png_export_scale();
                         for scale in stokesforge_app_state::state::PNG_EXPORT_SCALES {
-                            let (w, h) = DEFAULT_FIGURE_SIZE;
+                            let (w, h) = published_figure_size(ui.ctx(), graph)
+                                .unwrap_or(DEFAULT_FIGURE_SIZE);
                             let (width, height) =
                                 ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
                             let label = tr!(

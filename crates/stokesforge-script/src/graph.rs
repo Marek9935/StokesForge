@@ -506,11 +506,10 @@ fn plot_native(context: &ScriptContext, request: Request) -> Result<Target, Host
         spec = build_spec(&snapshot, &request, parent)?;
     }
     if let Some((graph, epoch)) = request.graph {
-        session
-            .execute(Command::SetPlotSpec { graph, spec })
-            .map_err(HostError::from_session)?;
+        bridge::set_graph_spec(session, graph, spec)?;
         Ok((graph, epoch))
     } else {
+        bridge::fix_frames(None, &mut spec);
         let id = bridge::add_created_node(
             session,
             parent.0,

@@ -88,6 +88,7 @@ use std::sync::Arc;
 use egui::{
     Color32, Galley, Id, Painter, PointerButton, Pos2, Rect, Response, Shape, Stroke, StrokeKind,
 };
+use plotters::drawing::IntoDrawingArea;
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::resolve::{resolve_spec, ResolvedPlot};
 use stokesforge_core::{NodeId, Tree};
@@ -108,8 +109,8 @@ pub use feathering::Feathering;
 // `stokesforge-render` to read what the figure drew: this crate is already
 // its screen rendering facade.
 pub use stokesforge_render::pipeline::{
-    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, AXIS_DESC_SIZE,
-    DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
+    DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot, DrawnText, FigureLayout,
+    AXIS_DESC_SIZE, DEFAULT_FIGURE_SIZE, LABEL_SIZE, PANEL_TITLE_SIZE, TITLE_SIZE,
 };
 // The address and model of a free text: the application handles them with
 // the signals of the view ([`GraphEvent`]).
@@ -172,6 +173,16 @@ pub enum GraphEvent {
         target: ShapeRef,
         /// Its new version.
         shape: ShapeSpec,
+    },
+    /// A resize handle on the outer boundary of a cell was pulled then released
+    /// (#394): the new frame (plot area) size, in points, of a grid column
+    /// and/or row, to commit as **one** change of the model. The preview stays
+    /// displayed until the model changes ([`GraphView::hold_preview`]).
+    FrameResized {
+        /// Grid column and its new frame width, for a vertical boundary.
+        column: Option<(usize, f64)>,
+        /// Grid row and its new frame height, for a horizontal boundary.
+        row: Option<(usize, f64)>,
     },
     /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
@@ -251,6 +262,74 @@ impl GraphTool {
             Self::Pointer | Self::ZoomBox | Self::Text => None,
         }
     }
+}
+
+/// The frame sizes a cell handle is being pulled to (#394): applied to the
+/// clone of the spec when the figure is laid out and drawn, never to the model.
+/// `base` is the frames the figure was drawn with when the gesture began, so
+/// that a legacy graph (no stored frame) previews exactly what the committing
+/// action will fix.
+#[derive(Debug, Clone, PartialEq)]
+struct FramePreview {
+    column: Option<(usize, f64)>,
+    row: Option<(usize, f64)>,
+    base: (Vec<f64>, Vec<f64>),
+}
+
+impl FramePreview {
+    fn apply(&self, spec: &mut PlotSpec) {
+        let bounds = |size: f64| {
+            size.clamp(
+                stokesforge_plot::MIN_FRAME_SIZE,
+                stokesforge_plot::MAX_FRAME_SIZE,
+            )
+        };
+        let mut widths = spec
+            .sanitized_frame_widths()
+            .unwrap_or_else(|| self.base.0.clone());
+        let mut heights = spec
+            .sanitized_frame_heights()
+            .unwrap_or_else(|| self.base.1.clone());
+        if let Some((index, size)) = self.column {
+            if let Some(slot) = widths.get_mut(index) {
+                *slot = bounds(size);
+            }
+        }
+        if let Some((index, size)) = self.row {
+            if let Some(slot) = heights.get_mut(index) {
+                *slot = bounds(size);
+            }
+        }
+        spec.frame_widths = widths;
+        spec.frame_heights = heights;
+    }
+}
+
+/// True if the previewed size differs from the starting one by half a point
+/// or more (the preview is rounded to whole points).
+fn moved(preview: Option<(usize, f64)>, start: Option<(usize, f64)>) -> bool {
+    match (preview, start) {
+        (Some((_, now)), Some((_, before))) => (now - before).abs() >= 0.5,
+        _ => false,
+    }
+}
+
+/// A cell-handle drag in progress (#394).
+#[derive(Debug, Clone)]
+struct FrameDrag {
+    /// Column and frame width at the start of the gesture.
+    column: Option<(usize, f64)>,
+    /// Row and frame height at the start of the gesture.
+    row: Option<(usize, f64)>,
+    /// Press point, in screen coordinates, and the display scale at that
+    /// moment: the distance is measured in screen points and divided by that
+    /// scale, because the figure (and the window that follows it) grows under
+    /// the pointer while the gesture goes on, so the live mapping of the
+    /// position would be a frame behind.
+    press: Pos2,
+    scale: f32,
+    /// The frames the figure was drawn with at the start.
+    base: (Vec<f64>, Vec<f64>),
 }
 
 /// A title or legend drag in progress (issue #53).
@@ -491,6 +570,10 @@ pub struct PointHit {
     pub distance: f32,
 }
 
+/// Key of the memoized figure layout: graph, revision, pixels per point (bits),
+/// preview generation.
+type FigureMemoKey = (NodeId, Revision, u32, u64);
+
 /// A displayed graph: its cache, its view state, and what it takes to repaint it.
 ///
 /// One `GraphView` per view, not one per graph: two windows on the same
@@ -515,6 +598,8 @@ pub struct GraphView {
     /// formulas (issue #31) included: see [`scaled`].
     scaled: scaled::ScaledShapes,
     last: Option<DrawnPlot>,
+    /// The memoized [`GraphView::figure_layout`], with its key.
+    figure_memo: Option<(FigureMemoKey, FigureLayout)>,
     measurer: TextMeasurer,
     view: ViewState,
     id: Id,
@@ -550,6 +635,9 @@ pub struct GraphView {
     /// Preview of the width of a title being resized (#244).
     text_width_preview: Option<(TextTarget, f64)>,
     text_drag: Option<TextDrag>,
+    /// Preview of the frame sizes of a cell handle being pulled (#394).
+    frame_preview: Option<FramePreview>,
+    frame_drag: Option<FrameDrag>,
     /// Selected free text (click), target of Delete.
     selected_annotation: Option<AnnotationRef>,
     /// The selected title, axis title or legend (issue #77).
@@ -651,6 +739,7 @@ impl GraphView {
             font_choice,
             scaled: scaled::ScaledShapes::default(),
             last: None,
+            figure_memo: None,
             measurer: TextMeasurer::default(),
             view: ViewState::new(),
             id: Id::new((
@@ -670,6 +759,8 @@ impl GraphView {
             text_preview: None,
             text_width_preview: None,
             text_drag: None,
+            frame_preview: None,
+            frame_drag: None,
             selected_annotation: None,
             selected_text: None,
             shape_preview: None,
@@ -724,6 +815,8 @@ impl GraphView {
         self.annotation_preview = None;
         self.text_drag = None;
         self.text_preview = None;
+        self.frame_drag = None;
+        self.frame_preview = None;
         self.shape_drag = None;
         self.shape_preview = None;
     }
@@ -1004,6 +1097,18 @@ impl GraphView {
         self.set_text_preview(None);
         self.set_text_width_preview(None);
         self.set_shape_preview(None);
+        self.set_frame_preview(None);
+    }
+
+    /// Sets (or removes) the preview of the frame sizes of a cell handle
+    /// (#394): the figure is laid out and drawn with them at the next frame,
+    /// without touching the model.
+    fn set_frame_preview(&mut self, preview: Option<FramePreview>) {
+        self.preview_until = None;
+        if self.frame_preview != preview {
+            self.frame_preview = preview;
+            self.preview_generation += 1;
+        }
     }
 
     /// The preview of a moved title or legend, if there is one.
@@ -1333,6 +1438,16 @@ impl GraphView {
         component_at_with_tolerance(self.last.as_ref()?, pos.x as f64, pos.y as f64, tolerance)
     }
 
+    /// The cell resize handle under the screen position `pos` (#394): the outer
+    /// boundary of a cell, with a strip of the same width on screen whatever
+    /// the enlargement of the figure.
+    pub fn cell_edge_at(&self, pos: Pos2) -> Option<stokesforge_render::CellEdge> {
+        let pos = self.figure_position(pos)?;
+        let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
+            / self.display_scale().unwrap_or(1.0) as f64;
+        stokesforge_render::cell_edge_at(self.last.as_ref()?, pos.x as f64, pos.y as f64, tolerance)
+    }
+
     /// The point designated by the cursor at the last painted frame, if
     /// there is one within [`HIT_RADIUS`] pixels — task R7.2.
     pub fn hovered_point(&self) -> Option<&PointHit> {
@@ -1357,9 +1472,64 @@ impl GraphView {
         self.paint_with_layout(ui, rect, rect, snapshot, graph)
     }
 
-    /// Always lays out the figure at `DEFAULT_FIGURE_SIZE`, then applies a
-    /// uniform transformation to its shapes. The density of the ticks, the
-    /// placement of the legends and the text measurements therefore do not
+    /// The layout of the figure of `graph` ([`pipeline::figure_layout`], #394):
+    /// the size the screen paints, the exports write and the window keeps the
+    /// ratio of. Measured with the screen's text (Typst titles included) and
+    /// memoized by (graph, revision, pixels per point, preview generation): a
+    /// window resize or a zoom does not measure again; a title edit or a cell
+    /// size edit does.
+    pub fn figure_layout(
+        &mut self,
+        context: &egui::Context,
+        snapshot: &Snapshot,
+        graph: NodeId,
+    ) -> Result<FigureLayout, RenderError> {
+        let key = (
+            graph,
+            snapshot.revision,
+            context.pixels_per_point().to_bits(),
+            self.preview_generation,
+        );
+        if let Some((cached, layout)) = &self.figure_memo {
+            if *cached == key {
+                return Ok(layout.clone());
+            }
+        }
+        let mut spec = graph_spec(&snapshot.tree, graph)?;
+        if let Some((target, width)) = self.text_width_preview {
+            if let Some(mut font) = target.font(&spec) {
+                font.width = Some(width);
+                target.set_font(&mut spec, font);
+            }
+        }
+        if let Some(preview) = &self.frame_preview {
+            preview.apply(&mut spec);
+        }
+        let text = ScreenText::new(context, &self.measurer);
+        let mut shapes = Vec::new();
+        let probe_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1.0, 1.0));
+        let backend = EguiBackend::in_rect(&mut shapes, probe_rect, &text);
+        let layout = match &self.typst_fonts {
+            Some(fonts) => {
+                let typst = TypstScreen::with_fonts(
+                    context,
+                    &self.formulas,
+                    &self.font_choice,
+                    fonts.clone(),
+                );
+                let probe = backend.with_typst(typst).into_drawing_area();
+                pipeline::figure_layout(&spec, &probe)
+            }
+            None => pipeline::figure_layout(&spec, &backend.into_drawing_area()),
+        }
+        .map_err(|error| RenderError::Drawing(error.to_string()))?;
+        self.figure_memo = Some((key, layout.clone()));
+        Ok(layout)
+    }
+
+    /// Lays out the figure at its own size ([`GraphView::figure_layout`]), then
+    /// applies a uniform transformation to its shapes. The density of the ticks,
+    /// the placement of the legends and the text measurements therefore do not
     /// change with the window size; only their displayed size changes.
     pub fn paint_scaled(
         &mut self,
@@ -1368,7 +1538,7 @@ impl GraphView {
         snapshot: &Snapshot,
         graph: NodeId,
     ) -> Result<bool, RenderError> {
-        let (width, height) = DEFAULT_FIGURE_SIZE;
+        let (width, height) = self.figure_layout(ui.ctx(), snapshot, graph)?.size;
         let logical_rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(width as f32, height as f32));
         if display_rect.width() <= 0.0 || display_rect.height() <= 0.0 {
             self.hover = None;
@@ -1440,6 +1610,7 @@ impl GraphView {
         let text_preview = &self.text_preview;
         let width_preview = self.text_width_preview;
         let shape_preview = &self.shape_preview;
+        let frame_preview = &self.frame_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
         let figure_texts = &self.figure_texts;
@@ -1449,6 +1620,9 @@ impl GraphView {
             // original `PlotSpec` — see `crate::view` for the reason.
             let mut framed = spec.clone();
             view.apply(&mut framed);
+            if let Some(frames) = frame_preview {
+                frames.apply(&mut framed);
+            }
             if let Some((target, annotation)) = preview {
                 target.set(&mut framed, annotation.clone());
             }
@@ -1649,6 +1823,9 @@ impl GraphView {
         }
         let nav = self.decide_nav(response, context);
         let pan = nav.is_some_and(NavDrag::is_pan);
+        if self.tool == GraphTool::Pointer && !pan {
+            self.frame_handle_cursor(response, context);
+        }
 
         // Issue #35: a click picks the free text under the pointer (or none),
         // a double click on a text edits it instead of resetting the zoom.
@@ -1737,7 +1914,8 @@ impl GraphView {
         }
         if self.tool == GraphTool::Pointer
             && !pan
-            && (self.handle_annotation_drag(response, spec)
+            && (self.handle_frame_drag(response, context)
+                || self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
                 || self.handle_text_drag(response, spec))
         {
@@ -1855,6 +2033,129 @@ impl GraphView {
                 }
             }
         }
+    }
+
+    /// The resize cursor over a cell handle, and during its drag (#394).
+    fn frame_handle_cursor(&self, response: &Response, context: &egui::Context) {
+        let edge = match &self.frame_drag {
+            Some(drag) => Some(stokesforge_render::CellEdge {
+                column: drag.column.map(|(index, _)| index),
+                row: drag.row.map(|(index, _)| index),
+            }),
+            None if response.hovered() => response
+                .hover_pos()
+                .and_then(|pos| self.cell_edge_at(pos))
+                .filter(|edge| self.edge_is_editable(edge)),
+            None => None,
+        };
+        let icon = match edge {
+            Some(stokesforge_render::CellEdge {
+                column: Some(_),
+                row: Some(_),
+            }) => egui::CursorIcon::ResizeNwSe,
+            Some(stokesforge_render::CellEdge {
+                column: Some(_), ..
+            }) => egui::CursorIcon::ResizeHorizontal,
+            Some(_) => egui::CursorIcon::ResizeVertical,
+            None => return,
+        };
+        context.set_cursor_icon(icon);
+    }
+
+    /// True if the layout the figure was drawn with has a frame for the column
+    /// or the row of `edge` (a compact fallback grid has none to edit).
+    fn edge_is_editable(&self, edge: &stokesforge_render::CellEdge) -> bool {
+        let Some((_, layout)) = &self.figure_memo else {
+            return false;
+        };
+        edge.column
+            .is_some_and(|index| index < layout.frame_widths.len())
+            || edge
+                .row
+                .is_some_and(|index| index < layout.frame_heights.len())
+    }
+
+    /// Pulling a cell handle (#394): a primary drag **starting on the outer
+    /// boundary of a cell** changes the frame size of its column and/or row by
+    /// the distance the pointer travels. The preview follows the pointer; at
+    /// release, a single [`GraphEvent::FrameResized`]. Returns `true` if the
+    /// gesture is a handle drag (the other drags must then do nothing with it).
+    fn handle_frame_drag(&mut self, response: &Response, context: &egui::Context) -> bool {
+        if response.drag_stopped_by(PointerButton::Primary) {
+            let Some(drag) = self.frame_drag.take() else {
+                return false;
+            };
+            match self.frame_preview.clone() {
+                Some(preview)
+                    if moved(preview.column, drag.column) || moved(preview.row, drag.row) =>
+                {
+                    self.events.push(GraphEvent::FrameResized {
+                        column: preview.column,
+                        row: preview.row,
+                    });
+                    self.hold_preview();
+                }
+                _ => self.set_frame_preview(None),
+            }
+            return true;
+        }
+        if !response.dragged_by(PointerButton::Primary) {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return self.frame_drag.is_some();
+        };
+        if self.frame_drag.is_none() {
+            let origin = context
+                .input(|input| input.pointer.press_origin())
+                .unwrap_or(pos - response.drag_delta());
+            let Some(edge) = self.cell_edge_at(origin) else {
+                return false;
+            };
+            let Some((_, layout)) = &self.figure_memo else {
+                return false;
+            };
+            let base = (layout.frame_widths.clone(), layout.frame_heights.clone());
+            let column = edge
+                .column
+                .and_then(|index| Some((index, *base.0.get(index)?)));
+            let row = edge
+                .row
+                .and_then(|index| Some((index, *base.1.get(index)?)));
+            let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0) else {
+                return false;
+            };
+            if column.is_none() && row.is_none() {
+                return false;
+            }
+            self.frame_drag = Some(FrameDrag {
+                column,
+                row,
+                press: origin,
+                scale,
+                base,
+            });
+        }
+        let Some(drag) = self.frame_drag.clone() else {
+            return false;
+        };
+        let delta = (pos - drag.press) / drag.scale;
+        let bounds = |size: f64| {
+            size.round().clamp(
+                stokesforge_plot::MIN_FRAME_SIZE,
+                stokesforge_plot::MAX_FRAME_SIZE,
+            )
+        };
+        self.set_frame_preview(Some(FramePreview {
+            column: drag
+                .column
+                .map(|(index, start)| (index, bounds(start + f64::from(delta.x)))),
+            row: drag
+                .row
+                .map(|(index, start)| (index, bounds(start + f64::from(delta.y)))),
+            base: drag.base,
+        }));
+        true
     }
 
     /// Dragging a free text (issue #35): a primary drag **starting from a
