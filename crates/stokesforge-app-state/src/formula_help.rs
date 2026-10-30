@@ -22,6 +22,7 @@ use crate::tr;
 /// A family of the help, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Family {
+    Operators,
     Powers,
     Trigonometry,
     Error,
@@ -32,7 +33,8 @@ enum Family {
 
 impl Family {
     /// The display order.
-    const ALL: [Family; 6] = [
+    const ALL: [Family; 7] = [
+        Family::Operators,
         Family::Powers,
         Family::Trigonometry,
         Family::Error,
@@ -43,6 +45,7 @@ impl Family {
 
     fn title(self) -> String {
         match self {
+            Family::Operators => tr!("formula-help-family-operators"),
             Family::Powers => tr!("formula-help-family-powers"),
             Family::Trigonometry => tr!("formula-help-family-trigonometry"),
             Family::Error => tr!("formula-help-family-error"),
@@ -56,7 +59,8 @@ impl Family {
 /// One function of the help.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HelpRow {
-    pub callee: Callee,
+    /// The callee the row documents; `None` for an operator.
+    pub callee: Option<Callee>,
     /// The name with its arguments, as written in a formula: `logx(x, b)`.
     pub signature: &'static str,
     /// A formula that uses it, on columns `A`..`D`: `logx(B, 2)`.
@@ -148,6 +152,26 @@ fn entry(callee: Callee) -> Entry {
     }
 }
 
+/// What a formula can use besides functions: a fixed list, since operators are
+/// not callees (the exhaustive `match` above covers the callees only).
+fn operator_rows() -> Vec<HelpRow> {
+    let operator = |signature, example, description| HelpRow {
+        callee: None,
+        signature,
+        example,
+        description,
+    };
+    vec![
+        operator("+ - * /", "(B + C) / 2", tr!("formula-help-op-arithmetic")),
+        operator("^", "B^2", tr!("formula-help-op-power")),
+        operator(
+            "< <= > >= == !=",
+            "B > 0",
+            tr!("formula-help-op-comparison"),
+        ),
+    ]
+}
+
 /// The help, family by family, in the interface language. A family with no
 /// callee is left out.
 pub fn groups() -> Vec<HelpGroup> {
@@ -157,16 +181,21 @@ pub fn groups() -> Vec<HelpGroup> {
     Family::ALL
         .into_iter()
         .filter_map(|family| {
-            let rows: Vec<HelpRow> = entries
-                .iter()
-                .filter(|(_, entry)| entry.family == family)
-                .map(|(callee, entry)| HelpRow {
-                    callee: *callee,
-                    signature: entry.signature,
-                    example: entry.example,
-                    description: entry.description.clone(),
-                })
-                .collect();
+            let mut rows: Vec<HelpRow> = Vec::new();
+            if family == Family::Operators {
+                rows.extend(operator_rows());
+            }
+            rows.extend(
+                entries
+                    .iter()
+                    .filter(|(_, entry)| entry.family == family)
+                    .map(|(callee, entry)| HelpRow {
+                        callee: Some(*callee),
+                        signature: entry.signature,
+                        example: entry.example,
+                        description: entry.description.clone(),
+                    }),
+            );
             (!rows.is_empty()).then(|| HelpGroup {
                 title: family.title(),
                 rows,
@@ -190,7 +219,10 @@ mod tests {
     fn every_callee_has_exactly_one_non_empty_row() {
         let rows = all_rows();
         for callee in Callee::all() {
-            let mine: Vec<&HelpRow> = rows.iter().filter(|row| row.callee == callee).collect();
+            let mine: Vec<&HelpRow> = rows
+                .iter()
+                .filter(|row| row.callee == Some(callee))
+                .collect();
             assert_eq!(mine.len(), 1, "{}", callee.name());
             let row = mine[0];
             assert!(!row.signature.is_empty(), "{}", callee.name());
@@ -203,7 +235,11 @@ mod tests {
                 row.signature
             );
         }
-        assert_eq!(rows.len(), Callee::all().count());
+        assert_eq!(
+            rows.iter().filter(|row| row.callee.is_some()).count(),
+            Callee::all().count()
+        );
+        assert!(rows.iter().any(|row| row.callee.is_none()), "operators");
     }
 
     /// An example is a formula that the parser accepts, on a sheet `A`..`D`.
@@ -224,7 +260,8 @@ mod tests {
     #[test]
     fn every_example_calls_its_own_function() {
         for row in all_rows() {
-            let name = row.callee.name();
+            let Some(callee) = row.callee else { continue };
+            let name = callee.name();
             assert!(
                 row.example
                     .to_ascii_lowercase()

@@ -1037,6 +1037,10 @@ workbook-header-formula = F(x)=
 # Help of the F(x)= cell (#404): the functions a column formula can call
 formula-help-title = Functions of a formula
 formula-help-note = Names are not case-sensitive. A column is written by its letter.
+formula-help-family-operators = Operators
+formula-help-op-arithmetic = Add, subtract, multiply, divide
+formula-help-op-power = Power
+formula-help-op-comparison = Comparison: 1 if true, 0 if false
 formula-help-family-powers = Powers and logarithms
 formula-help-family-trigonometry = Trigonometry
 formula-help-family-error = Error function

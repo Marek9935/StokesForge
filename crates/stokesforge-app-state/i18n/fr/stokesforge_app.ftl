@@ -1036,6 +1036,10 @@ workbook-header-formula = F(x)=
 # Aide de la case F(x)= (#404) : les fonctions qu'une formule de colonne peut appeler
 formula-help-title = Fonctions d'une formule
 formula-help-note = Les noms ne distinguent pas majuscules et minuscules. Une colonne s'écrit par sa lettre.
+formula-help-family-operators = Opérateurs
+formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
+formula-help-op-power = Puissance
+formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
 formula-help-family-powers = Puissances et logarithmes
 formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur

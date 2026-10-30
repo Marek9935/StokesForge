@@ -125,7 +125,7 @@ mod tests {
 
     fn group(rows: usize) -> HelpGroup {
         let row = || HelpRow {
-            callee: stokesforge_core::Callee::If,
+            callee: Some(stokesforge_core::Callee::If),
             signature: "f()",
             example: "f()",
             description: String::new(),
