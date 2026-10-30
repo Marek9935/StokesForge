@@ -46,8 +46,13 @@ pub enum Geometry {
         /// The error-bar whiskers, empty if the series has none.
         whiskers: Vec<Whisker>,
     },
-    /// Vertical bars: `(left edge, right edge, top)`.
-    Bars(Vec<(f64, f64, f64)>),
+    /// Vertical bars.
+    Bars {
+        /// `(left edge, right edge, top)` of each bar.
+        bars: Vec<(f64, f64, f64)>,
+        /// The error-bar whiskers (#360), empty if the series has none.
+        whiskers: Vec<Whisker>,
+    },
 }
 
 impl Geometry {
@@ -56,7 +61,7 @@ impl Geometry {
         match self {
             Geometry::Nothing => true,
             Geometry::Curve { points, .. } => points.is_empty(),
-            Geometry::Bars(bars) => bars.is_empty(),
+            Geometry::Bars { bars, .. } => bars.is_empty(),
         }
     }
 
@@ -65,14 +70,14 @@ impl Geometry {
         match self {
             Geometry::Nothing => 0,
             Geometry::Curve { points, .. } => points.len(),
-            Geometry::Bars(bars) => bars.len(),
+            Geometry::Bars { bars, .. } => bars.len(),
         }
     }
 
     /// True if the geometry rests on a baseline (the bars), which must then
     /// enter the framing or the bars would float.
     pub fn needs_baseline(&self) -> bool {
-        matches!(self, Geometry::Bars(_))
+        matches!(self, Geometry::Bars { .. })
     }
 }
 
@@ -195,13 +200,10 @@ fn curve_geometry(
         return Geometry::Nothing;
     };
     let xs = resolved.x.as_ref().map(|x| x.as_slice());
-    let wants_errors = matches!(resolved.spec.plot_type, PlotType::ErrorBar);
-    let x_errors = wants_errors
-        .then(|| resolved.x_error.as_ref().map(|e| e.as_slice()))
-        .flatten();
-    let y_errors = wants_errors
-        .then(|| resolved.y_error.as_ref().map(|e| e.as_slice()))
-        .flatten();
+    // Whiskers on every plot type that draws points (#360): what makes the
+    // bars appear is the error column, not the type.
+    let x_errors = resolved.x_error.as_ref().map(|e| e.as_slice());
+    let y_errors = resolved.y_error.as_ref().map(|e| e.as_slice());
 
     let mut points = Vec::with_capacity(ys.len());
     let mut whiskers = Vec::new();
@@ -289,8 +291,14 @@ fn bars_geometry(
     let width = bar_width(Some(xs), resolved.spec.bar_width);
     let half = width / 2.0;
 
+    let x_errors = resolved.x_error.as_ref().map(|e| e.as_slice());
+    let y_errors = resolved.y_error.as_ref().map(|e| e.as_slice());
+
     let mut bars = Vec::with_capacity(ys.len());
-    for (&raw_x, &raw_y) in xs.iter().zip(ys.iter()) {
+    let mut whiskers = Vec::new();
+    // Indexed per point, like `curve_geometry`: the error columns follow the
+    // rows, not the bars that survived the scale.
+    for (index, (&raw_x, &raw_y)) in xs.iter().zip(ys.iter()).enumerate() {
         let (Some(left), Some(right), Some(top)) = (
             forward(x_scale, raw_x - half),
             forward(x_scale, raw_x + half),
@@ -299,8 +307,21 @@ fn bars_geometry(
             continue;
         };
         bars.push((left.min(right), left.max(right), top));
+        let (Some(x), Some(y)) = (forward(x_scale, raw_x), forward(y_scale, raw_y)) else {
+            continue;
+        };
+        if let Some(half) = x_errors.and_then(|e| e.get(index)).copied() {
+            if let Some(whisker) = whisker_along_x(raw_x, half, y, x_scale) {
+                whiskers.push(whisker);
+            }
+        }
+        if let Some(half) = y_errors.and_then(|e| e.get(index)).copied() {
+            if let Some(whisker) = whisker_along_y(raw_y, half, x, y_scale) {
+                whiskers.push(whisker);
+            }
+        }
     }
-    Geometry::Bars(bars)
+    Geometry::Bars { bars, whiskers }
 }
 
 /// Bins and counts, computed by the core.
@@ -338,7 +359,10 @@ fn histogram_geometry(
         };
         bars.push((left.min(right), left.max(right), top));
     }
-    Geometry::Bars(bars)
+    Geometry::Bars {
+        bars,
+        whiskers: Vec::new(),
+    }
 }
 
 /// Extent of a geometry on the abscissa axis.
@@ -346,7 +370,7 @@ pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,
         Geometry::Curve { points, .. } => extent(points.iter().map(|(x, _)| *x)),
-        Geometry::Bars(bars) => extent(bars.iter().flat_map(|(l, r, _)| [*l, *r])),
+        Geometry::Bars { bars, .. } => extent(bars.iter().flat_map(|(l, r, _)| [*l, *r])),
     }
 }
 
@@ -363,7 +387,11 @@ pub fn y_extent(geometry: &Geometry) -> Option<(f64, f64)> {
                 .map(|(_, y)| *y)
                 .chain(whiskers.iter().flat_map(|(a, b)| [a.1, b.1])),
         ),
-        Geometry::Bars(bars) => extent(bars.iter().map(|(_, _, top)| *top)),
+        Geometry::Bars { bars, whiskers } => extent(
+            bars.iter()
+                .map(|(_, _, top)| *top)
+                .chain(whiskers.iter().flat_map(|(a, b)| [a.1, b.1])),
+        ),
     }
 }
 

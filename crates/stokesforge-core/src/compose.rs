@@ -13,6 +13,10 @@
 //!   (Y2, Y3, Y4) follows the same rule with the Xn columns ([`x_for`],
 //!   [`series_from_columns`]). With no X to the left, the abscissa stays implicit
 //!   (row number);
+//! - **error pairing** (#360): the first column of role
+//!   [`ColumnRole::YError`] (resp. [`ColumnRole::XError`]) to the **right** of
+//!   a Y column (Y2–Y4 too), before the next ordinate column (any of Y, Y2,
+//!   Y3, Y4), fills `y_error` (`x_error`), selected or not ([`errors_for`]);
 //! - **palette**: the color of a series is that of its rank
 //!   ([`SeriesSpec::from_palette`]), never written by hand;
 //! - **layers**: the ordinary layer that an overlay layer covers
@@ -110,6 +114,47 @@ pub fn x_for(tree: &Tree, y: NodeId) -> Option<NodeId> {
     nearest_left(tree, &columns, position, x_role)
 }
 
+/// The first column of role `error_role` to the **right** of the column at
+/// rank `position` in `columns`, before the next ordinate column (Y, Y2, Y3
+/// or Y4).
+fn first_error_right(
+    tree: &Tree,
+    columns: &[NodeId],
+    position: usize,
+    error_role: ColumnRole,
+) -> Option<NodeId> {
+    for id in &columns[position + 1..] {
+        match role_of(tree, *id) {
+            Some(role) if role == error_role => return Some(*id),
+            Some(ColumnRole::Y | ColumnRole::Y2 | ColumnRole::Y3 | ColumnRole::Y4) => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The error columns paired with column `y`, as `(x_error, y_error)`: the first
+/// X Error (resp. Y Error) column to its right in its sheet, before the next
+/// ordinate column (#360). `(None, None)` if `y` is not a column of a sheet
+/// or is not an ordinate. It is the rule of [`series_from_columns`], for
+/// whoever wants only the error columns (`pyst.plot(y)`).
+pub fn errors_for(tree: &Tree, y: NodeId) -> (Option<NodeId>, Option<NodeId>) {
+    let Some(sheet) = tree.node(y).and_then(Node::parent) else {
+        return (None, None);
+    };
+    let columns = sheet_columns(tree, sheet);
+    let Some(position) = columns.iter().position(|id| *id == y) else {
+        return (None, None);
+    };
+    if role_of(tree, y).and_then(ColumnRole::paired_x).is_none() {
+        return (None, None);
+    }
+    (
+        first_error_right(tree, &columns, position, ColumnRole::XError),
+        first_error_right(tree, &columns, position, ColumnRole::YError),
+    )
+}
+
 /// Builds the series of the selection `columns` of `sheet`: the columns of
 /// role Y (or Y2, Y3, Y4) present in `columns`, in the order they appear
 /// in the sheet, each paired with its X ([`x_for`]) — including an unselected
@@ -151,6 +196,8 @@ pub fn series_from_columns(
         let x_role = role.paired_x().unwrap_or(ColumnRole::X);
         let mut spec = SeriesSpec::from_palette(*column, start + list.len());
         spec.x = nearest_left(tree, &ordered, position, x_role);
+        spec.x_error = first_error_right(tree, &ordered, position, ColumnRole::XError);
+        spec.y_error = first_error_right(tree, &ordered, position, ColumnRole::YError);
         spec.plot_type = plot_type.clone();
         list.push(spec);
     }
@@ -502,7 +549,77 @@ mod tests {
         (project, sheet, columns)
     }
 
-    use ColumnRole::{None as NoRole, X, X2, X3, X4, Y, Y2, Y3, Y4};
+    use ColumnRole::{None as NoRole, XError, YError, X, X2, X3, X4, Y, Y2, Y3, Y4};
+
+    /// Pairing of the error columns for the selection `selected` of a sheet.
+    fn planned_for(roles: &[ColumnRole], selected: &[usize]) -> (PlannedSeries, Vec<NodeId>) {
+        let (project, sheet, c) = sheet_with(roles);
+        let ids: Vec<NodeId> = selected.iter().map(|i| c[*i]).collect();
+        let planned = series_from_columns(
+            project.tree(),
+            sheet,
+            &ids,
+            &PlotType::Line,
+            0,
+            [0; OVERLAY_ROLES],
+        );
+        (planned, c)
+    }
+
+    #[test]
+    fn the_y_error_to_the_right_fills_y_error_even_unselected() {
+        let (p, c) = planned_for(&[X, Y, YError], &[1]);
+        assert_eq!(p.primary[0].y_error, Some(c[2]));
+        assert_eq!(p.primary[0].x_error, None);
+    }
+
+    #[test]
+    fn the_error_pairs_with_the_y_that_precedes_it_not_the_first_y() {
+        let (p, c) = planned_for(&[X, Y, Y, YError], &[1, 2]);
+        assert_eq!(p.primary[0].y_error, None);
+        assert_eq!(p.primary[1].y_error, Some(c[3]));
+    }
+
+    #[test]
+    fn the_first_error_column_wins() {
+        let (p, c) = planned_for(&[X, Y, YError, YError], &[1]);
+        assert_eq!(p.primary[0].y_error, Some(c[2]));
+    }
+
+    #[test]
+    fn both_error_roles_pair() {
+        let (p, c) = planned_for(&[X, Y, XError, YError], &[1]);
+        assert_eq!(p.primary[0].x_error, Some(c[2]));
+        assert_eq!(p.primary[0].y_error, Some(c[3]));
+    }
+
+    #[test]
+    fn an_error_column_to_the_left_does_not_pair() {
+        let (p, _) = planned_for(&[X, YError, Y], &[2]);
+        assert_eq!(p.primary[0].y_error, None);
+    }
+
+    #[test]
+    fn an_x_column_between_does_not_stop_the_scan() {
+        let (p, c) = planned_for(&[X, Y, X, YError], &[1]);
+        assert_eq!(p.primary[0].y_error, Some(c[3]));
+    }
+
+    #[test]
+    fn a_y2_pairs_with_its_error_on_the_overlay_series() {
+        let (p, c) = planned_for(&[X, Y, X2, Y2, YError], &[1, 3]);
+        assert_eq!(p.primary[0].y_error, None, "stopped by the Y2");
+        assert_eq!(p.overlays[0][0].y_error, Some(c[4]));
+    }
+
+    #[test]
+    fn errors_for_follows_the_rule_of_the_plot() {
+        let (project, _sheet, c) = sheet_with(&[X, Y, XError, YError, Y]);
+        let tree = project.tree();
+        assert_eq!(errors_for(tree, c[1]), (Some(c[2]), Some(c[3])));
+        assert_eq!(errors_for(tree, c[4]), (None, None));
+        assert_eq!(errors_for(tree, c[0]), (None, None), "not an ordinate");
+    }
 
     #[test]
     fn each_y_takes_the_nearest_x_to_its_left_even_if_unselected() {

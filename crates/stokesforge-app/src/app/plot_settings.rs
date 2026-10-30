@@ -10,7 +10,7 @@
 //! the order commit → saved colors → page/axis selection.
 
 use eframe::egui;
-use stokesforge_core::Tree;
+use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{
     AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape, TickDirection,
 };
@@ -977,6 +977,7 @@ pub(super) fn series_editor(
     locked: bool,
     auto_bar_width: f64,
     overlay: bool,
+    error_columns: &[(NodeId, String)],
 ) -> bool {
     form(ui, "plot_series_editor", |form| {
         let mut commit = false;
@@ -1090,6 +1091,32 @@ pub(super) fn series_editor(
             }
             shown.inner
         });
+        // Error columns (#360): Y error and X error, "None" first. Per
+        // series even in "whole group" scope (the columns are data, not
+        // style), so `series_page` copies nothing. Not for a "row" series
+        // (#166) nor a histogram, which has no point to put a whisker on.
+        if series.row.is_none() && series.plot_type != PlotType::Histogram {
+            commit |= error_row(
+                form,
+                (
+                    tr!("plot-series-y-error"),
+                    tr!("plot-series-y-error", "hint"),
+                ),
+                "plot_series_y_error",
+                error_columns,
+                &mut series.y_error,
+            );
+            commit |= error_row(
+                form,
+                (
+                    tr!("plot-series-x-error"),
+                    tr!("plot-series-x-error", "hint"),
+                ),
+                "plot_series_x_error",
+                error_columns,
+                &mut series.x_error,
+            );
+        }
         // "Show series" is the checkbox of the series list (curve_settings.rs).
         commit |= per_series(form, locked, |form| {
             form.checkbox(
@@ -1171,6 +1198,27 @@ pub(super) fn series_editor(
             );
         }
         commit
+    })
+}
+
+/// A "Y error" / "X error" row (#360): None, then the candidate columns.
+fn error_row(
+    form: &mut Form<'_>,
+    (label, hint): (String, String),
+    id_salt: &str,
+    columns: &[(NodeId, String)],
+    value: &mut Option<NodeId>,
+) -> bool {
+    form.row(label, |ui| {
+        let mut options = vec![ChoiceOption::new(None, tr!("plot-series-error-none"))];
+        options.extend(
+            columns
+                .iter()
+                .map(|(id, name)| ChoiceOption::new(Some(*id), name.clone())),
+        );
+        let changed = choice(ui, id_salt, value, &options);
+        help_text(ui, hint);
+        changed
     })
 }
 
@@ -3585,5 +3633,111 @@ mod tests {
             Vec::new(),
         );
         assert!(is_painted(&painted, &tr!("workbook-metadata-title")));
+    }
+
+    // -- Error columns of a series (#360) ----------------------------------
+
+    /// Like [`harness`], with a third column "C" in the sheet of the series;
+    /// `adjust` receives the series and that column.
+    fn error_harness(adjust: impl FnOnce(&mut SeriesSpec, NodeId)) -> (Harness, NodeId) {
+        let mut project = Project::new("Properties").unwrap();
+        let root = project.root();
+        let (x, y) = xy_columns(&mut project);
+        let sheet = project.tree().node(y).and_then(|n| n.parent()).unwrap();
+        let extra = project
+            .add_column(sheet, None, Some("C"), Column::from_f64(&[0.5, 0.5]))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        let mut series = SeriesSpec::new_xy(x, y);
+        adjust(&mut series, extra);
+        panel.series.push(series);
+        let spec = PlotSpec::default().with_panels(panel);
+        let graph = project.add_graph(root, None, spec).unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let mut harness = Harness {
+            state,
+            graph,
+            _session: session,
+        };
+        harness.open(PlotSettingsTab::Series, None);
+        (harness, extra)
+    }
+
+    /// Clicks the painted text `label` just below the row `row` (the "Y error"
+    /// row comes before the "X error" row, both offer the same columns, and
+    /// "None" also names the group and the line style).
+    fn click_below(context: &egui::Context, state: &mut AppState, row: &str, label: &str) {
+        // A first click on the row label takes the focus away from the name
+        // field (its `lost_focus` would commit the draft by itself and hide a
+        // missing commit of the field under test).
+        let painted = paint_window(context, state, Vec::new());
+        click(
+            context,
+            text_exact(&painted, row).center,
+            egui::PointerButton::Primary,
+            |ui| plot_settings_window(ui.ctx(), state),
+        );
+        let painted = paint_window(context, state, Vec::new());
+        let top = text_exact(&painted, row).center.y;
+        let pos = painted
+            .iter()
+            .filter(|t| t.text == label && t.center.y >= top - 1.0)
+            .min_by(|a, b| a.center.y.total_cmp(&b.center.y))
+            .unwrap_or_else(|| panic!("{label} not painted below {row}"))
+            .center;
+        click(context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), state)
+        });
+        paint_window(context, state, Vec::new());
+    }
+
+    /// Choosing a column in "Y error" sets it, in one history entry.
+    #[test]
+    fn choosing_a_y_error_column_sets_it_in_one_history_entry() {
+        let (mut harness, extra) = error_harness(|_, _| {});
+        let context = test_support::context();
+        let original = harness.model();
+        assert_eq!(original.panels[0].series[0].y_error, None);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &tr!("plot-series-y-error")));
+        assert!(is_painted(&painted, &tr!("plot-series-x-error")));
+        click_below(
+            &context,
+            &mut harness.state,
+            &tr!("plot-series-y-error"),
+            "C",
+        );
+        let after = harness.model();
+        assert_eq!(after.panels[0].series[0].y_error, Some(extra));
+        assert_eq!(after.panels[0].series[0].x_error, None);
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "a single Undo");
+    }
+
+    /// "None" removes the error column.
+    #[test]
+    fn choosing_none_removes_the_y_error_column() {
+        let (mut harness, _) = error_harness(|series, extra| series.y_error = Some(extra));
+        let context = test_support::context();
+        assert!(harness.model().panels[0].series[0].y_error.is_some());
+        click_below(
+            &context,
+            &mut harness.state,
+            &tr!("plot-series-y-error"),
+            &tr!("plot-series-error-none"),
+        );
+        assert_eq!(harness.model().panels[0].series[0].y_error, None);
+    }
+
+    /// A "row" series (#166) has no error column: the rows are not painted.
+    #[test]
+    fn a_row_series_has_no_error_fields() {
+        let (mut harness, _) = error_harness(|series, _| series.row = Some(0));
+        let context = test_support::context();
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(!is_painted(&painted, &tr!("plot-series-y-error")));
+        assert!(!is_painted(&painted, &tr!("plot-series-x-error")));
     }
 }

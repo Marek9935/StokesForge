@@ -169,6 +169,7 @@ Before proposing a synonym or a new term, reread § 4 Decisions: a term already 
 | Axis (pl. Axes) | Axe | Graduated line carrying a quantity | — | G |
 | Bottom / Left / Right / Top | Bas / Gauche / Droite / Haut | The four axes of an area, named by their place (#358); composed texts are phrased by a selector, never by gluing: « Axe du bas », « Titre de l'axe de gauche » | X (bottom), Y2, Secondary Y, Axe X (bas) | G |
 | Y axis | Axe Y | Series field: the vertical axis the series is drawn against, Left or Right (#358); grayed out on an overlaid layer | Axe secondaire | G |
+| Y error / X error | Erreur Y / Erreur X | Series fields (#360): the column drawn as error bars on the series, whatever its plot type; first choice None. Not the role Y Error / X Error of the column, which only decides the pairing at plot time | Incertitude, Écart-type | G |
 | Axis title | Titre de l'axe | Text that names the quantity of the axis | Libellé, Label | G |
 | Tick | Graduation | Mark on the axis | Repère, Coche | I |
 | Tick label | Étiquette de graduation | Value written next to a tick | Libellé de graduation | G (Q11) |

@@ -48,6 +48,8 @@ Columns with the roles **Y2**, **Y3** and **Y4** are paired with the nearest **X
 
 If you select several Y columns at once, the new series form one series group.
 
+Error columns follow the same idea, on the right. The first column with the **Y Error** role to the right of a Y column (and the first with the **X Error** role) becomes the error of that series, up to the next Y column. It does not need to be selected. A Y Error column to the left of its Y, or after another Y column, pairs with nothing. Error bars are drawn as soon as a series has an error column, whatever its plot type. To change or remove the pairing, use the **Y error** and **X error** fields of **Series Properties**.
+
 ### Start from an empty graph
 
 Choose **File ▸ New ▸ Add Graph**, or click **Add Graph** in the **File** toolbar. You get an empty graph with one plot area. Then add data as described next.
@@ -153,7 +155,9 @@ Use **Save Color** to keep a color in the project or for yourself. Right-click a
 - **Histogram** counts the values of one column and draws the counts as bars. In **Series Properties**, the **Bins** field sets the number of bars, from 1 to 65536.
 - **Bar** draws one bar per point. The **Width (X units)** field sets the width of the bars in the units of the X axis. It shows **Auto** with the computed width in gray until you type a value; empty the field, or type `auto`, to go back to it.
 - When the series is in a group and the scope is **Whole group**, **Bins** and **Width (X units)** are copied to the members that have the matching type.
-- **Line + Error Bars** draws a whisker above and below each point. The error values must come from columns that you give with a script, using the `x_error` and `y_error` options of `pyst.plot`. See [The pyst API](../scripting/api.md). The plot menus do not set them.
+- **Y error** and **X error** (in **Series Properties**) choose the column of uncertainties of the series. **None** is the first choice and removes the error bars. The list holds the other columns of the same worksheet. By default, the field shows the column paired by its role (see [How columns become series](#how-columns-become-series)). The field applies to the selected series only, even in **Whole group** scope, because an error column is data, not style. It is not shown for a histogram or for a series made from a row.
+- Error bars are drawn for every plot type as soon as the series has an error column: **Line**, **Scatter**, **Line + Symbol**, **Bar** and **Line + Error Bars**. A whisker is drawn above and below each point for **Y error**, and left and right for **X error**.
+- With a script, `pyst.plot` pairs the error columns the same way. The `x_error` and `y_error` options choose a column explicitly, and `None` goes without. See [The pyst API](../scripting/api.md).
 
 ### Series groups
 

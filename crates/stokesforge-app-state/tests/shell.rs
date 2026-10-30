@@ -6504,6 +6504,50 @@ fn plot_columns_pairs_each_y_with_the_nearest_x_to_its_left() {
     assert_eq!(series[0].plot_type, PlotType::Line);
 }
 
+/// #360: the Y Error column to the right of the Y, even unselected, fills
+/// `y_error` of the series created by `PlotColumns`.
+#[test]
+fn plot_columns_pairs_the_y_error_column_to_the_right_of_the_y() {
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let mut project = Project::new("Errors").expect("project");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("read")
+        .expect("sheet");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("column")
+    };
+    let (x, y, e) = (add("X"), add("Y"), add("E"));
+    let (_session, mut state) = start(project, &dir.path().join("errors.stf"));
+    for (column, role) in [
+        (x, ColumnRole::X),
+        (y, ColumnRole::Y),
+        (e, ColumnRole::YError),
+    ] {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: vec![y],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graph");
+    let spec = state.plot_spec(graph).expect("spec");
+    let series = &spec.panels[0].series;
+    assert_eq!(series.len(), 1);
+    assert_eq!(series[0].y_error, Some(e));
+    assert_eq!(series[0].x_error, None);
+}
+
 /// #167: a Y2 is paired with the nearest X2 to its left and goes on a
 /// **second layer** overlaid (X axis on top, Y axis on the right); the Y stays
 /// on the first. Adding columns to the graph afterwards reuses this layer.

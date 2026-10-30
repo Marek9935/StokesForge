@@ -16,8 +16,16 @@ struct Bench {
     _actor: Session,
     x: NodeId,
     y: NodeId,
+    /// Third column "E" (no role), only for `bench_with_error`.
+    e: Option<NodeId>,
 }
 fn bench() -> Bench {
+    bench_columns(false)
+}
+fn bench_with_error() -> Bench {
+    bench_columns(true)
+}
+fn bench_columns(with_error: bool) -> Bench {
     let mut project = Project::new("Graphs").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
@@ -27,6 +35,11 @@ fn bench() -> Bench {
     let y = project
         .add_column(sheet, None, Some("Y"), Column::from_f64(&[2., 4., 8.]))
         .unwrap();
+    let e = with_error.then(|| {
+        project
+            .add_column(sheet, None, Some("E"), Column::from_f64(&[0.1, 0.2, 0.3]))
+            .unwrap()
+    });
     let actor = Session::spawn(project, None).unwrap();
     let session = actor.handle();
     let home = std::env::var_os(interpreter::HOME_ENV)
@@ -41,6 +54,7 @@ fn bench() -> Bench {
         _actor: actor,
         x,
         y,
+        e,
     }
 }
 fn run(b: &Bench, source: &str) {
@@ -705,4 +719,37 @@ for colors in (['#ff0000'], ['#ff0000', '#00ff00', '#0000ff'], []):
     );
     let after = b.session.snapshot().unwrap();
     assert_eq!(*after.tree, *before.tree);
+}
+
+/// #360: `pyst.plot(y)` pairs the first Y Error column to the right of the Y
+/// (the rule of the window); `y_error=None` goes without; an explicit handle
+/// wins over the pairing.
+#[test]
+fn plot_pairs_the_error_column_like_the_window_unless_told_otherwise() {
+    let b = bench_with_error();
+    let e = b.e.unwrap();
+    let setup = format!(
+        "{HANDLES}e = pyst.resolve('[Book1]Sheet1!E')\n\
+         pyst.set_column_meta(x, role='x')\n\
+         pyst.set_column_meta(y, role='y')\n\
+         pyst.set_column_meta(e, role='y_error')\n"
+    );
+    run(
+        &b,
+        &format!(
+            "{setup}pyst.plot(y, name='Graph1')\n\
+             pyst.plot(y, graph=pyst.resolve('[Graph1]'), y_error=None)\n\
+             pyst.plot(y, graph=pyst.resolve('[Graph1]'), y_error=x)\n"
+        ),
+    );
+    let spec = graph_spec(&b);
+    let series = &spec.panels[0].series;
+    assert_eq!(series[0].y_error, Some(e), "paired by role");
+    assert_eq!(series[0].x, Some(b.x));
+    assert_eq!(
+        series[1].y_error, None,
+        "explicit None disables the pairing"
+    );
+    assert_eq!(series[2].y_error, Some(b.x), "an explicit handle wins");
+    assert_eq!(series[0].x_error, None);
 }

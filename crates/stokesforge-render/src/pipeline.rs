@@ -2047,6 +2047,47 @@ fn draw_annotation<DB: DrawingBackend>(
     }))
 }
 
+/// Paints the error-bar whiskers of a series (any type that carries them,
+/// #360) and records their clipped pixel segments for selection.
+fn paint_whiskers<DB: DrawingBackend>(
+    screen: &DrawingArea<DB, Shift>,
+    whiskers: &[crate::series::Whisker],
+    map: &impl Fn((f64, f64)) -> plotters_backend::BackendCoord,
+    series: &Prepared<'_>,
+    bounds: Option<PixelBounds>,
+    geometry: &mut crate::series_selection::DrawnSeries,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if whiskers.is_empty() {
+        return Ok(());
+    }
+    let spec = series.spec;
+    let segments: Vec<_> = whiskers
+        .iter()
+        .map(|(from, to)| (map(*from), map(*to)))
+        .collect();
+    if series.stale {
+        paint::whiskers(screen, &segments, &paint::grayed(&spec.line))?;
+    } else {
+        paint::whiskers(screen, &segments, &spec.line)?;
+    }
+    for (a, b) in segments {
+        match bounds {
+            Some(bounds) => {
+                if let Some((a, b)) =
+                    clip::clip_segment(bounds, (a.0 as f64, a.1 as f64), (b.0 as f64, b.1 as f64))
+                {
+                    geometry.whiskers.push((
+                        (a.0.round() as i32, a.1.round() as i32),
+                        (b.0.round() as i32, b.1.round() as i32),
+                    ));
+                }
+            }
+            None => geometry.whiskers.push((a, b)),
+        }
+    }
+    Ok(())
+}
+
 /// Paints a prepared series, and returns the number of points that
 /// decimation removed.
 fn paint_series<DB: DrawingBackend>(
@@ -2062,7 +2103,7 @@ fn paint_series<DB: DrawingBackend>(
     let spec = series.spec;
     match &series.geometry {
         Geometry::Nothing => Ok((0, geometry)),
-        Geometry::Bars(bars) => {
+        Geometry::Bars { bars, whiskers } => {
             // The baseline of a bar is zero when the axis can represent it,
             // and the bottom of the framing otherwise — on a logarithmic
             // scale, zero has no place.
@@ -2098,6 +2139,7 @@ fn paint_series<DB: DrawingBackend>(
                     })
                 })
                 .unzip();
+            paint_whiskers(screen, whiskers, &map, series, bounds, &mut geometry)?;
             if series.stale {
                 if let Some(&tip) = geometry.bar_tips.last() {
                     paint::stale_marker(screen, stale_marker_at(tip, bounds))?;
@@ -2153,34 +2195,7 @@ fn paint_series<DB: DrawingBackend>(
                     }
                 }
             }
-            if !whiskers.is_empty() {
-                let segments: Vec<_> = whiskers
-                    .iter()
-                    .map(|(from, to)| (map(*from), map(*to)))
-                    .collect();
-                if series.stale {
-                    paint::whiskers(screen, &segments, &paint::grayed(&spec.line))?;
-                } else {
-                    paint::whiskers(screen, &segments, &spec.line)?;
-                }
-                for (a, b) in segments {
-                    match bounds {
-                        Some(bounds) => {
-                            if let Some((a, b)) = clip::clip_segment(
-                                bounds,
-                                (a.0 as f64, a.1 as f64),
-                                (b.0 as f64, b.1 as f64),
-                            ) {
-                                geometry.whiskers.push((
-                                    (a.0.round() as i32, a.1.round() as i32),
-                                    (b.0.round() as i32, b.1.round() as i32),
-                                ));
-                            }
-                        }
-                        None => geometry.whiskers.push((a, b)),
-                    }
-                }
-            }
+            paint_whiskers(screen, whiskers, &map, series, bounds, &mut geometry)?;
             if spec.plot_type.draws_symbols()
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {

@@ -43,6 +43,9 @@ struct Request {
     parent: Option<Target>,
     name: Option<String>,
     series: SeriesSpec,
+    /// `x_error=` / `y_error=` given (a handle, or `None` to go without):
+    /// the pairing by role (#360) then does not apply to that error.
+    explicit_errors: [bool; 2],
     /// One color per series (list) or one for all (string), #207.
     color: Option<ColorOption>,
     title: Option<String>,
@@ -106,7 +109,9 @@ pub(crate) const PLOT_OPTIONS: &[&str] = &[
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
 /// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to and
 /// y_from/y_to (both together; from > to draws the axis reversed), axis (left,
-/// right), x_error/y_error (handles), histogram_bins.
+/// right), x_error/y_error (handles; without them, each y takes the first
+/// X Error / Y Error column to its right, before the next Y; `None` goes
+/// without error bars, #360), histogram_bins.
 /// Explicit titles and label: Typst markup. No label: the column's automatic
 /// name, shown literally. One run = one undoable group.
 #[pyfunction]
@@ -157,6 +162,7 @@ pub(crate) fn plot(
         parent: parent.map(target),
         name,
         series: SeriesSpec::new(ys[0].0),
+        explicit_errors: [false; 2],
         color: None,
         title: None,
         x_title: None,
@@ -226,7 +232,12 @@ pub(crate) fn plot(
                     "left" => SeriesAxis::Left, "right" => SeriesAxis::Right,
                     _ => return Err(invalid("unknown series axis: use left or right")),
                 },
+                "x_error" | "y_error" if value.is_none() => {
+                    // Explicit `None`: no error bars, the pairing by role is skipped.
+                    request.explicit_errors[usize::from(key == "y_error")] = true;
+                }
                 "x_error" | "y_error" => {
+                    request.explicit_errors[usize::from(key == "y_error")] = true;
                     let handle = value.extract::<PyRef<'_, Handle>>().map_err(|_| invalid(format!("{key} must be a column handle")))?;
                     if request.members.len() > 1 {
                         return Err(invalid(format!("{key} applies to a single series")));
@@ -425,6 +436,15 @@ fn build_spec(
             series.x = member
                 .x
                 .or_else(|| compose::x_for(&snapshot.tree, member.y));
+            // Error columns: the first X Error / Y Error to the right of the
+            // y, unless `x_error=` / `y_error=` said otherwise (#360).
+            let (paired_x, paired_y) = compose::errors_for(&snapshot.tree, member.y);
+            if !request.explicit_errors[0] {
+                series.x_error = paired_x;
+            }
+            if !request.explicit_errors[1] {
+                series.y_error = paired_y;
+            }
             series.name.clone_from(&member.label);
             // Without `color=`, the palette color of the series' rank in the
             // panel (`SeriesSpec::from_palette`, line and markers).
