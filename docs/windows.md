@@ -178,7 +178,9 @@ standard):
 - the size and position are remembered **per identifier** of dialog
   (dialog key = `egui::Id`), in the preferences, 32 kinds at most;
   give a new window a stable and unique identifier `stokesforge_<nom>`;
-- Esc: a text field then the dialog; the cross is the same as Cancel;
+- Esc: a text field then the dialog; the cross is the same as Cancel. While a
+  modal is shown, no workspace keyboard (grid, Project Manager) acts: they test
+  `dialogs::modal_shown` (#406);
 - initial focus: set by the nature (S-F11): the first text field, found
   by the building block, for settings, drafts, choices and wizards; the
   default button (Cancel, Save, Close) for a confirmation, a

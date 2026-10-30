@@ -430,7 +430,12 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
             ));
         }
     }
-    if pending.is_some() || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()) {
+    // #406: under a modal window the tree keys (Del, F2, Enter, arrows,
+    // clipboard) belong to the modal.
+    if !super::dialogs::modal_shown(ctx)
+        && (pending.is_some()
+            || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()))
+    {
         let parent =
             pending.unwrap_or_else(|| paste_parent(interaction.selection, interaction.root));
         let mut paste = None;
@@ -1186,6 +1191,8 @@ pub(super) mod tests {
         /// What a grid painted afterwards would see (it reads the arrows without
         /// consuming them, #170 point 6).
         arrow_down_left: std::cell::Cell<bool>,
+        /// Paint a modal window after the panel, in the same frame (#406).
+        modal: std::cell::Cell<bool>,
     }
 
     impl Bench {
@@ -1197,6 +1204,7 @@ pub(super) mod tests {
                 open: RefCell::new(HashSet::new()),
                 close_requests: RefCell::new(Vec::new()),
                 arrow_down_left: std::cell::Cell::new(false),
+                modal: std::cell::Cell::new(false),
             }
         }
 
@@ -1239,6 +1247,17 @@ pub(super) mod tests {
                 project_manager_contents_from_tree(ui, tree, &mut interaction);
                 self.arrow_down_left
                     .set(ui.input(|input| input.key_pressed(egui::Key::ArrowDown)));
+                if self.modal.get() {
+                    super::super::dialogs::modal_read_only(
+                        ui.ctx(),
+                        egui::Id::new("pm_test_modal"),
+                        "Modal",
+                        super::super::dialogs::PlainSize::Content(egui::vec2(200.0, 100.0)),
+                        |ui| {
+                            ui.label("content");
+                        },
+                    );
+                }
             });
             output.textures_delta.clear();
             output
@@ -2544,6 +2563,44 @@ pub(super) mod tests {
         assert_eq!(
             bench.actions.take(),
             vec![Action::RenameObjects(vec![(folder, "Sample".into())])]
+        );
+    }
+
+    /// #406: Del, F2 and Enter on the tree do nothing while a modal window is
+    /// shown, even though the tree keeps the focus; they act again once the
+    /// modal is gone.
+    #[test]
+    fn delete_f2_and_enter_do_nothing_under_a_modal() {
+        let (tree, _tabs) = tree_with_collapsed_folder();
+        let folder = tree_folder();
+        let context = egui::Context::default();
+        let bench = Bench::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| bench.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let pos = find_text_center(&first.shapes, "Folder");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        bench.modal.set(true);
+        paint(&context, vec![]);
+        paint(&context, vec![]);
+        bench.actions.borrow_mut().clear();
+        for key in [egui::Key::Delete, egui::Key::F2, egui::Key::Enter] {
+            paint(&context, vec![pm_key(key)]);
+            paint(&context, vec![]);
+        }
+        assert!(bench.actions.borrow().is_empty(), "no action under a modal");
+        assert!(
+            renaming_in(&context, context.viewport_id()).is_empty(),
+            "no rename under a modal"
+        );
+        // The modal gone for two frames: the tree answers again.
+        bench.modal.set(false);
+        paint(&context, vec![]);
+        paint(&context, vec![]);
+        paint(&context, vec![pm_key(egui::Key::Delete)]);
+        assert_eq!(
+            bench.actions.take(),
+            vec![Action::DeleteObjects(vec![folder])]
         );
     }
 
