@@ -58,8 +58,8 @@ use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
 use stokesforge_core::tsv;
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeCopy, NodeId, Tree,
-    ValueBlock,
+    same_name_ignoring_case, Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node,
+    NodeCopy, NodeId, Tree, ValueBlock,
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
@@ -8220,7 +8220,11 @@ impl AppState {
                     .children(parent)
                     .unwrap_or_default()
                     .iter()
-                    .all(|id| self.tree().node(*id).is_none_or(|node| node.name() != name))
+                    .all(|id| {
+                        self.tree()
+                            .node(*id)
+                            .is_none_or(|node| !same_name_ignoring_case(node.name(), name))
+                    })
             })
             .unwrap_or_else(|| origin.to_string())
     }
@@ -9451,7 +9455,7 @@ impl AppState {
                 node.children()
                     .iter()
                     .filter_map(|child| tree.node(*child))
-                    .any(|child| child.name() == name)
+                    .any(|child| same_name_ignoring_case(child.name(), name))
             })
         };
         let mut n = 1u64;

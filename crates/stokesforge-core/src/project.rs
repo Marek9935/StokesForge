@@ -17,6 +17,7 @@ use stokesforge_plot::{PlotSpec, SavedColors};
 use crate::column::{Column, ColumnMeta, ColumnType, ColumnValues, ValueBlock, ValuesDelta};
 use crate::error::{CoreError, CoreResult};
 use crate::id::{IdAllocator, NodeId};
+use crate::name::same_name_ignoring_case;
 use crate::node::{Node, NodeKind, WindowMeta};
 use crate::path::{format_path, ObjectPath};
 use crate::tree::Tree;
@@ -155,7 +156,12 @@ impl Project {
                 tree.iter()
                     .filter_map(|(_, node)| node.as_column())
                     .filter_map(|column| column.meta().formula.as_ref())
-                    .flat_map(|formula| formula.columns())
+                    .flat_map(|formula| {
+                        // And the sheets they read (#403).
+                        let sheets: Vec<NodeId> =
+                            formula.remote_refs().values().map(|r| r.sheet).collect();
+                        formula.columns().into_iter().chain(sheets)
+                    })
                     .map(|id| id.raw()),
             )
             .max()
@@ -466,21 +472,27 @@ impl Project {
                     continue;
                 };
                 let mut failure = None;
-                let remapped = formula.remap(|old| {
-                    if let Some(&id) = ids.get(&old).or_else(|| reserved.get(&old)) {
-                        return id;
-                    }
-                    match self.ids.next() {
-                        Ok(id) => {
-                            reserved.insert(old, id);
-                            id
+                let remapped = formula.remap_keeping(
+                    |old| {
+                        if let Some(&id) = ids.get(&old).or_else(|| reserved.get(&old)) {
+                            return id;
                         }
-                        Err(error) => {
-                            failure.get_or_insert(error);
-                            old
+                        match self.ids.next() {
+                            Ok(id) => {
+                                reserved.insert(old, id);
+                                id
+                            }
+                            Err(error) => {
+                                failure.get_or_insert(error);
+                                old
+                            }
                         }
-                    }
-                });
+                    },
+                    // A remote reference keeps reading the original sheet it
+                    // did not copy (#403); a sheet pasted from another project
+                    // gets a reservation, shown as `#REF`.
+                    |sheet| !copy.is_external() && !ids.contains_key(&sheet),
+                );
                 if let Some(error) = failure {
                     return Err(error);
                 }
@@ -1111,7 +1123,7 @@ impl Project {
         while children
             .iter()
             .filter_map(|child| self.tree.node(*child))
-            .any(|node| node.name() == candidate)
+            .any(|node| same_name_ignoring_case(node.name(), &candidate))
         {
             n += 1;
             candidate = format!("{prefix}{n}");
@@ -1450,6 +1462,99 @@ mod tests {
         let ids = columns_of(&destination, sheet);
         assert!(formula.has_deleted_reference(&ids));
         assert!(formula.columns().iter().all(|id| !ids.contains(id)));
+    }
+
+    /// A remote reference of a duplicated sheet keeps reading the original
+    /// sheet it did not copy (#403). Mutant: the remote reference passes through
+    /// the renumbering like a local one -> the copy shows `#REF`.
+    #[test]
+    fn duplicating_a_sheet_keeps_its_remote_references() {
+        let mut project = Project::new("Demo").expect("project");
+        let (sheet1, c1) = sheet_with_columns(&mut project, "Book1", 3);
+        let book = project.tree().parent(sheet1).unwrap().unwrap();
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).expect("sheet");
+        let c3: Vec<NodeId> = (0..2)
+            .map(|k| {
+                project
+                    .add_column(sheet3, None, None, Column::from_f64(&[k as f64]))
+                    .expect("column")
+            })
+            .collect();
+        set_formula(&mut project, c1[2], "A + max(Sheet3!B)");
+
+        let copy = project.duplicate_worksheet(sheet1, "Copy").expect("copy");
+        let copied = columns_of(&project, copy);
+        let formula = formula_of(&project, copied[2]);
+        // The local part is the copy's own A, the remote part still Sheet3's B.
+        assert_eq!(
+            project.tree().formula_letters(copied[2]).as_deref(),
+            Some("A + max(Sheet3!B)")
+        );
+        assert!(formula.columns().contains(&copied[0]));
+        assert!(formula.columns().contains(&c3[1]));
+        assert_eq!(formula.remote_sheets().get(&c3[1]), Some(&sheet3));
+    }
+
+    /// Duplicating the workbook that holds both sheets: the copy reads its own
+    /// Sheet3 (#403). Mutant: `keep` always true -> the copy reads the original.
+    #[test]
+    fn duplicating_a_workbook_makes_the_copy_read_its_own_sheet() {
+        let mut project = Project::new("Demo").expect("project");
+        let (sheet1, c1) = sheet_with_columns(&mut project, "Book1", 3);
+        let book = project.tree().parent(sheet1).unwrap().unwrap();
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).expect("sheet");
+        let original_b = project
+            .add_column(sheet3, None, None, Column::from_f64(&[1.0]))
+            .expect("column");
+        set_formula(&mut project, c1[2], "max(Sheet3!A)");
+
+        let root = project.root();
+        let content = crate::NodeCopy::capture(project.tree(), book).expect("capture");
+        let new_book = project
+            .insert_copy(root, &content, "Book1 copy")
+            .expect("copy");
+        let new_sheets = project.tree().children(new_book).unwrap().to_vec();
+        let new_sheet1 = new_sheets[0];
+        let new_sheet3 = new_sheets[1];
+        let new_c = columns_of(&project, new_sheet1)[2];
+        let formula = formula_of(&project, new_c);
+        let read = columns_of(&project, new_sheet3)[0];
+        assert_ne!(read, original_b);
+        assert_eq!(formula.columns(), std::collections::BTreeSet::from([read]));
+        assert_eq!(formula.remote_sheets().get(&read), Some(&new_sheet3));
+        assert_eq!(
+            project.tree().formula_letters(new_c).as_deref(),
+            Some("max(Sheet3!A)")
+        );
+    }
+
+    /// Pasted into another project, a remote reference reads nothing: `#REF`
+    /// (#403). Mutant: `keep` ignores `is_external` -> the pasted formula keeps
+    /// identifiers of the other project.
+    #[test]
+    fn an_external_paste_turns_a_remote_reference_into_ref() {
+        let mut source = Project::new("Source").expect("project");
+        let (sheet1, c1) = sheet_with_columns(&mut source, "Book1", 3);
+        let book = source.tree().parent(sheet1).unwrap().unwrap();
+        let sheet3 = source.add_worksheet(book, Some("Sheet3")).expect("sheet");
+        source
+            .add_column(sheet3, None, None, Column::from_f64(&[1.0]))
+            .expect("column");
+        set_formula(&mut source, c1[2], "max(Sheet3!A)");
+        let copy = crate::NodeCopy::capture(source.tree(), c1[2])
+            .expect("capture")
+            .into_external();
+
+        let mut destination = Project::new("Destination").expect("project");
+        let (dest_sheet, _) = sheet_with_columns(&mut destination, "BookD", 0);
+        let pasted = destination
+            .insert_copy(dest_sheet, &copy, "Pasted")
+            .expect("paste");
+        assert_eq!(
+            destination.tree().formula_letters(pasted).as_deref(),
+            Some("max(#REF)")
+        );
+        assert!(destination.tree().formula_has_deleted_reference(pasted));
     }
 
     /// `next_id_hint` behind: a file saved after the deletion

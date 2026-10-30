@@ -696,6 +696,14 @@ error-formula-pi-needs-parentheses = For the number π, write pi() (a lone pi wo
 error-formula-column-expected = Function { $name } reads a whole column. Give it a column letter, not a calculation (B, not B*2)
 error-formula-no-paired-x = The column this formula reads has no X column. Put a column with the role X to its left
 error-formula-no-point = The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds
+error-formula-unknown-sheet = There is no sheet named { $name } in this workbook. Check its spelling
+error-formula-unknown-workbook = There is no workbook named { $name }. Check its spelling
+error-formula-workbook-without-sheet = A reference to another workbook names its sheet. Write [{ $name }]Sheet1!B
+error-formula-ambiguous-workbook = Several workbooks are named { $name }. Write the path from the project root, for example [Folder/{ $name }]Sheet1!B
+error-formula-ambiguous-name = Several objects are named { $name } apart from case. Rename one of them
+error-formula-unknown-column-in = Column { $column } does not exist in sheet { $sheet }
+error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
+error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists

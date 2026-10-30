@@ -6,7 +6,8 @@
 //! comparisons (`< <= > >= == !=`, true = 1, false = 0) and
 //! `if(cond, a, b)`, and the **column functions** (#402) that give one value
 //! for a whole column: `at(B, x)`, `max/min/mean/sum/std(B)`, `integral(B)`
-//! and their range forms `max(B, x1, x2)`. No cross-sheet reference.
+//! and their range forms `max(B, x1, x2)`. A column function may read a column
+//! of **another sheet or workbook** (#403, below); nothing else may.
 //!
 //! # Column functions (#402)
 //!
@@ -39,6 +40,33 @@
 //! A function call adds nothing to a formula's inputs: only the columns it
 //! names count (invariant 11, [`Formula::referenced_columns`] walks every
 //! node).
+//!
+//! # Columns of another sheet or workbook (#403)
+//!
+//! A reference is **one argument**, its prefix glued to the column letters:
+//! `B` (this sheet), `Sheet3!B` (another sheet of the workbook),
+//! `[Book2]Sheet5!B` (another workbook), `[Mesures/Book2]Sheet5!B` (path from
+//! the project root, only when the short name is ambiguous). The range stays on
+//! the right: `integral(Sheet3!B, 10, 100)`, `at(Sheet3!B, 340)`,
+//! `B / max(Sheet3!B)`. A name that holds anything other than ASCII letters and
+//! digits, or starts with a digit, is single-quoted, a `'` inside doubled:
+//! `'Blanc 2'!B`, `'it''s'!B`. Case is ignored in sheet and workbook names
+//! (`sheet3!b` = `Sheet3!B`); the display restores the real name.
+//!
+//! Only the **read column of a column function** (`at`, `max`, `min`, `mean`,
+//! `sum`, `std`, `integral`) may be remote: `Sheet3!B + 1`, `max(Sheet3!B, C)`
+//! (the row-wise form) and a remote X argument are refused
+//! ([`FormulaError::RemoteOutsideColumnFunction`],
+//! [`FormulaError::RemoteXColumn`]). In `at(Sheet3!B, x, D)`, `D` is read in
+//! `Sheet3`; `x` and the range bounds are local expressions, per row.
+//!
+//! The stored form stays a column identifier ([`FormulaPart::Column`]), with a
+//! side table `part index -> sheet identifier` ([`RemoteRef`]): the formula
+//! stores the **sheet** only, the workbook is read from the tree (moving the
+//! sheet to another workbook changes the displayed prefix, not the values). A
+//! remote column that is no longer in its sheet, or a deleted sheet, displays
+//! [`REF_TOKEN`] and computes as [`FormulaError::DeletedColumn`]. The pure
+//! module reaches the tree through [`SheetDirectory`] only.
 //!
 //! # A formula names columns, not letters (#321)
 //!
@@ -170,6 +198,28 @@ pub enum FormulaError {
     /// The formula is kept, its cells show `---`, and it computes as soon as an
     /// X appears.
     NoPairedX,
+    /// A sheet prefix names no sheet of the workbook (`Sheet9!B`).
+    UnknownSheet(String),
+    /// A `[Book]` prefix names no workbook of the project.
+    UnknownWorkbook(String),
+    /// `[Book2]B`: a reference to another workbook must name its sheet
+    /// (`[Book2]Sheet1!B`), even when the workbook has a single sheet.
+    WorkbookWithoutSheet(String),
+    /// The workbook name is carried by several workbooks outside the folder of
+    /// the formula's workbook: write the path from the project root
+    /// (`[Mesures/Book2]Sheet5!B`).
+    AmbiguousWorkbook(String),
+    /// Two siblings differ only by case (an older file): the name cannot be
+    /// resolved, since case is ignored.
+    AmbiguousName(String),
+    /// The sheet exists but has no such column (`Sheet3!Z`).
+    UnknownColumnIn { sheet: String, column: String },
+    /// A column of another sheet outside the read column of a column function
+    /// (`Sheet3!B + 1`, `max(Sheet3!B, C)`). Refused at input.
+    RemoteOutsideColumnFunction,
+    /// `at(B, x, Sheet3!D)`: the X column must be in the sheet of the column
+    /// read. Refused at input.
+    RemoteXColumn,
     /// Every cell of the result is empty because the column functions found no
     /// point (empty column, empty range, `at` outside the X domain). Never
     /// returned by [`evaluate`]: the application derives it from the cells
@@ -236,6 +286,33 @@ impl std::fmt::Display for FormulaError {
             FormulaError::NoPoint => {
                 write!(f, "the column functions found no point to compute from")
             }
+            FormulaError::UnknownSheet(name) => write!(f, "no sheet named {name}"),
+            FormulaError::UnknownWorkbook(name) => write!(f, "no workbook named {name}"),
+            FormulaError::WorkbookWithoutSheet(name) => {
+                write!(f, "name the sheet after the workbook: [{name}]Sheet1!B")
+            }
+            FormulaError::AmbiguousWorkbook(name) => write!(
+                f,
+                "several workbooks are named {name}: write the path from the project root, \
+                 for example [Folder/{name}]Sheet1!B"
+            ),
+            FormulaError::AmbiguousName(name) => write!(
+                f,
+                "several objects are named {name} up to case: rename one of them"
+            ),
+            FormulaError::UnknownColumnIn { sheet, column } => {
+                write!(f, "column {column} does not exist in the sheet {sheet}")
+            }
+            FormulaError::RemoteOutsideColumnFunction => write!(
+                f,
+                "a column of another sheet can only be the column read by at, max, min, \
+                 mean, sum, std or integral"
+            ),
+            FormulaError::RemoteXColumn => write!(
+                f,
+                "the X column of a remote at(...) is read in the sheet of the column, \
+                 write it without a prefix"
+            ),
         }
     }
 }
@@ -294,6 +371,8 @@ fn letters_to_index(letters: &str) -> Option<usize> {
 enum Token {
     Number(f64),
     Column(NodeId),
+    /// A column of another sheet, written with its prefix (#403).
+    Remote(NodeId),
     Plus,
     Minus,
     Star,
@@ -574,12 +653,18 @@ fn number_end(chars: &[char], start: usize) -> usize {
 /// read** — a letter in a text fragment (crafted file) is an
 /// unexpected character, not a column (invariant 10: a syntax
 /// error, never a panic).
-fn tokenize(parts: &[FormulaPart]) -> Result<Vec<Token>, FormulaError> {
+fn tokenize(
+    parts: &[FormulaPart],
+    remote: &BTreeMap<usize, RemoteRef>,
+) -> Result<Vec<Token>, FormulaError> {
     let mut tokens = Vec::new();
-    for part in parts {
+    for (index, part) in parts.iter().enumerate() {
         match part {
             FormulaPart::Text(text) => tokenize_text(text, &mut tokens)?,
-            FormulaPart::Column(id) => tokens.push(Token::Column(*id)),
+            FormulaPart::Column(id) => match remote.get(&index) {
+                Some(RemoteRef { prefixed: true, .. }) => tokens.push(Token::Remote(*id)),
+                _ => tokens.push(Token::Column(*id)),
+            },
         }
     }
     Ok(tokens)
@@ -684,6 +769,9 @@ fn tokenize_text(source: &str, tokens: &mut Vec<Token>) -> Result<(), FormulaErr
 enum Expr {
     Number(f64),
     Column(NodeId),
+    /// A column of another sheet (#403): only a column function may take it as
+    /// its first argument, the parser refuses it anywhere else.
+    Remote(NodeId),
     Neg(Box<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
@@ -743,6 +831,10 @@ struct Parser<'a> {
     depth: usize,
     /// Column calls met so far ([`ColumnCall::slot`]).
     slots: usize,
+    /// Remote columns read so far, and those taken as the column of a column
+    /// function: the two must be equal at the end (#403).
+    remotes: usize,
+    remotes_taken: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -752,6 +844,8 @@ impl<'a> Parser<'a> {
             pos: 0,
             depth: 0,
             slots: 0,
+            remotes: 0,
+            remotes_taken: 0,
         }
     }
 
@@ -908,14 +1002,20 @@ impl<'a> Parser<'a> {
     fn column_call(&mut self, func: ColumnFunc, args: Vec<Expr>) -> Result<Expr, FormulaError> {
         let expected = FormulaError::ColumnExpected { name: func.name() };
         let mut args = args.into_iter();
-        let Some(Expr::Column(source)) = args.next() else {
-            return Err(expected);
+        let source = match args.next() {
+            Some(Expr::Column(source)) => source,
+            Some(Expr::Remote(source)) => {
+                self.remotes_taken += 1;
+                source
+            }
+            _ => return Err(expected),
         };
         let mut rest: Vec<Expr> = args.collect();
         let mut x_column = None;
         if func == ColumnFunc::At && rest.len() == 2 {
             match rest.pop() {
                 Some(Expr::Column(id)) => x_column = Some(id),
+                Some(Expr::Remote(_)) => return Err(FormulaError::RemoteXColumn),
                 _ => return Err(expected),
             }
         }
@@ -940,6 +1040,11 @@ impl<'a> Parser<'a> {
             Some(Token::Column(index)) => {
                 self.pos += 1;
                 Ok(Expr::Column(*index))
+            }
+            Some(Token::Remote(index)) => {
+                self.pos += 1;
+                self.remotes += 1;
+                Ok(Expr::Remote(*index))
             }
             Some(Token::LParen) => {
                 self.pos += 1;
@@ -1005,6 +1110,10 @@ impl<'a> Parser<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnFormula {
     parts: Vec<FormulaPart>,
+    /// The parts that read a column of **another sheet** (#403), by part index.
+    /// Empty for a formula that reads its own sheet only, and for every formula
+    /// read from a file today (the `.stf` does not carry it yet).
+    remote: BTreeMap<usize, RemoteRef>,
 }
 
 /// A piece of a [`ColumnFormula`].
@@ -1016,13 +1125,191 @@ pub enum FormulaPart {
     Column(NodeId),
 }
 
+/// Where a [`FormulaPart::Column`] that is not in the formula's own sheet is
+/// read (#403): the **sheet** identifier, the workbook being read from the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteRef {
+    /// The sheet the column must be in.
+    pub sheet: NodeId,
+    /// True if the user wrote the prefix (`Sheet3!B`); false for the column
+    /// that follows the sheet of the column read without a prefix of its own
+    /// (`D` in `at(Sheet3!B, x, D)`).
+    pub prefixed: bool,
+}
+
+/// The address of a sheet, relative to the sheet of a formula (#403).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetAddress {
+    /// The workbook, in the shortest form that resolves to it from the formula
+    /// (`Book2`, or `Mesures/Book2` for a duplicate); `None` for a sheet of the
+    /// formula's own workbook.
+    pub workbook: Option<String>,
+    /// The real name of the sheet.
+    pub sheet: String,
+}
+
+/// What a formula needs to know of the tree to read other sheets (#403): the
+/// pure module reaches the project through this trait only.
+pub trait SheetDirectory {
+    /// The sheet a prefix names, seen from a formula of `own_sheet`: `workbook`
+    /// is the text between brackets (a name, or a path from the project root),
+    /// `None` for a sheet of the own workbook.
+    fn find_sheet(
+        &self,
+        own_sheet: NodeId,
+        workbook: Option<&str>,
+        sheet: &str,
+    ) -> Result<NodeId, FormulaError>;
+    /// The columns of `sheet`, in order; `None` if it is no sheet of the tree.
+    fn columns_of(&self, sheet: NodeId) -> Option<&[NodeId]>;
+    /// The shortest unambiguous address of `target` from `own_sheet`; `None` if
+    /// `target` is no sheet of the tree.
+    fn address_of(&self, own_sheet: NodeId, target: NodeId) -> Option<SheetAddress>;
+}
+
+/// A formula in its sheet, with the directory of the other sheets: the context
+/// of the typed text (#403).
+#[derive(Clone, Copy)]
+pub struct SheetScope<'a> {
+    /// The sheet that holds the formula column.
+    pub own_sheet: NodeId,
+    pub directory: &'a dyn SheetDirectory,
+}
+
+/// A sheet name written in a formula: bare if it is made of ASCII letters and
+/// digits and does not start with a digit, single-quoted otherwise, a `'`
+/// inside written `''` (#403).
+pub fn sheet_token(name: &str) -> String {
+    let bare = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric());
+    if bare {
+        name.to_string()
+    } else {
+        format!("'{}'", name.replace('\'', "''"))
+    }
+}
+
+/// What precedes the column letters of a reference.
+struct Prefix {
+    workbook: Option<String>,
+    sheet: String,
+    /// Index just after the `!`.
+    end: usize,
+}
+
+/// A single-quoted name that starts at `start` (a `'`): its text and the index
+/// after the closing quote. `''` inside is a quote.
+fn quoted_at(chars: &[char], start: usize) -> Result<(String, usize), FormulaError> {
+    let mut name = String::new();
+    let mut i = start + 1;
+    while i < chars.len() {
+        if chars[i] == '\'' {
+            if chars.get(i + 1) == Some(&'\'') {
+                name.push('\'');
+                i += 2;
+                continue;
+            }
+            return Ok((name, i + 1));
+        }
+        name.push(chars[i]);
+        i += 1;
+    }
+    Err(FormulaError::Parse("missing closing quote".to_string()))
+}
+
+/// The sheet name that starts at `start`, quoted or made of ASCII letters and
+/// digits, and the index after it. `None` if there is none.
+fn sheet_name_at(chars: &[char], start: usize) -> Result<Option<(String, usize)>, FormulaError> {
+    match chars.get(start) {
+        Some('\'') => quoted_at(chars, start).map(Some),
+        Some(c) if c.is_ascii_alphabetic() => {
+            let mut end = start;
+            while end < chars.len() && chars[end].is_ascii_alphanumeric() {
+                end += 1;
+            }
+            Ok(Some((chars[start..end].iter().collect(), end)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The reference prefix that starts at `i`, if there is one: `[Book]Sheet!`,
+/// `Sheet!`, `'Quoted name'!`. `Ok(None)` for anything else (a column, a
+/// function...). A `!` followed by `=` is the operator `!=`, not a prefix.
+fn prefix_at(chars: &[char], i: usize) -> Result<Option<Prefix>, FormulaError> {
+    let bang = |at: usize| chars.get(at) == Some(&'!') && chars.get(at + 1) != Some(&'=');
+    match chars[i] {
+        '[' => {
+            let Some(close) = chars[i + 1..].iter().position(|c| *c == ']') else {
+                return Err(FormulaError::Parse(
+                    "missing closing bracket after the workbook name".to_string(),
+                ));
+            };
+            let close = i + 1 + close;
+            let workbook: String = chars[i + 1..close].iter().collect();
+            match sheet_name_at(chars, close + 1)? {
+                Some((sheet, end)) if bang(end) => Ok(Some(Prefix {
+                    workbook: Some(workbook),
+                    sheet,
+                    end: end + 1,
+                })),
+                _ => Err(FormulaError::WorkbookWithoutSheet(workbook)),
+            }
+        }
+        '\'' => {
+            let (sheet, end) = quoted_at(chars, i)?;
+            if bang(end) {
+                Ok(Some(Prefix {
+                    workbook: None,
+                    sheet,
+                    end: end + 1,
+                }))
+            } else {
+                Err(FormulaError::Parse(
+                    "a quoted name must be followed by !".to_string(),
+                ))
+            }
+        }
+        _ => Ok(sheet_name_at(chars, i)?
+            .filter(|(_, end)| bang(*end))
+            .map(|(sheet, end)| Prefix {
+                workbook: None,
+                sheet,
+                end: end + 1,
+            })),
+    }
+}
+
+/// One open parenthesis while a typed text is read (#403): a call or a group.
+struct Frame {
+    /// The call is `at(...)`.
+    is_at: bool,
+    /// Commas met at this level.
+    argument: usize,
+    /// The sheet (and its name as typed) of the first argument, when it is
+    /// remote: the third argument of `at` is read there.
+    remote: Option<(NodeId, String)>,
+}
+
 impl ColumnFormula {
     /// Rebuilds a formula from its fragments (reading a file).
     /// Nothing is checked here: a text that does not compile, or an
     /// identifier outside the sheet, degrades at computation
     /// ([`ColumnFormula::compile`], [`evaluate`]).
     pub fn from_parts(parts: Vec<FormulaPart>) -> Self {
-        Self { parts }
+        Self {
+            parts,
+            remote: BTreeMap::new(),
+        }
+    }
+
+    /// [`ColumnFormula::from_parts`] with the parts that read another sheet
+    /// (#403). Nothing is checked: an entry past the last part is ignored.
+    pub fn from_parts_with_remote(
+        parts: Vec<FormulaPart>,
+        remote: BTreeMap<usize, RemoteRef>,
+    ) -> Self {
+        Self { parts, remote }
     }
 
     /// The fragments, in text order.
@@ -1030,10 +1317,29 @@ impl ColumnFormula {
         &self.parts
     }
 
+    /// The parts that read a column of another sheet, by part index.
+    pub fn remote_refs(&self) -> &BTreeMap<usize, RemoteRef> {
+        &self.remote
+    }
+
+    /// The sheet each remote column must be in, by column identifier. A column
+    /// absent from the map is read in the formula's own sheet.
+    pub fn remote_sheets(&self) -> BTreeMap<NodeId, NodeId> {
+        self.remote
+            .iter()
+            .filter_map(|(index, remote)| match self.parts.get(*index) {
+                Some(FormulaPart::Column(id)) => Some((*id, remote.sheet)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Reads a typed text: each sequence of letters is the **position** of a
     /// column of the sheet (`sheet_columns`, in the order of the sheet's
     /// children) and becomes its identifier; `own` is the column that will carry
-    /// the formula.
+    /// the formula. A formula that names another sheet is refused
+    /// ([`FormulaError::UnknownSheet`]); [`ColumnFormula::from_letters_in`]
+    /// reads such a prefix.
     ///
     /// A name followed by `(` is a function and is kept as typed (the shared
     /// table, case-insensitive); refused if unknown
@@ -1056,9 +1362,26 @@ impl ColumnFormula {
         sheet_columns: &[NodeId],
         own: NodeId,
     ) -> Result<Self, FormulaError> {
+        Self::from_letters_in(text, sheet_columns, own, None)
+    }
+
+    /// [`ColumnFormula::from_letters`] in a project (#403): `scope` lets the
+    /// text name columns of other sheets and workbooks (`Sheet3!B`,
+    /// `[Book2]Sheet5!B`). A prefix naming the own sheet reads it as a local
+    /// reference. Case is ignored in sheet and workbook names.
+    pub fn from_letters_in(
+        text: &str,
+        sheet_columns: &[NodeId],
+        own: NodeId,
+        scope: Option<SheetScope<'_>>,
+    ) -> Result<Self, FormulaError> {
         let chars: Vec<char> = text.chars().collect();
         let mut parts = Vec::new();
+        let mut remote = BTreeMap::new();
         let mut buffer = String::new();
+        let mut frames: Vec<Frame> = Vec::new();
+        // The name just read is `at` and waits for its `(`.
+        let mut pending_at = false;
         let mut i = 0;
         while i < chars.len() {
             let c = chars[i];
@@ -1073,6 +1396,75 @@ impl ColumnFormula {
             } else if c.is_ascii_digit() || c == '.' {
                 let end = number_end(&chars, i);
                 buffer.extend(&chars[i..end]);
+                i = end;
+            } else if let Some(prefix) = if matches!(c, '[' | '\'') || c.is_ascii_alphabetic() {
+                prefix_at(&chars, i)?
+            } else {
+                None
+            } {
+                let start = prefix.end;
+                let mut end = start;
+                while end < chars.len() && chars[end].is_ascii_alphabetic() {
+                    end += 1;
+                }
+                if end == start {
+                    return Err(FormulaError::Parse(
+                        "a sheet prefix is followed by column letters".to_string(),
+                    ));
+                }
+                let letters: String = chars[start..end]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_uppercase();
+                let argument = frames.last().map_or(0, |frame| frame.argument);
+                if argument == 2 && frames.last().is_some_and(|frame| frame.is_at) {
+                    return Err(FormulaError::RemoteXColumn);
+                }
+                let Some(scope) = scope else {
+                    return Err(FormulaError::UnknownSheet(prefix.sheet));
+                };
+                let target = scope.directory.find_sheet(
+                    scope.own_sheet,
+                    prefix.workbook.as_deref(),
+                    &prefix.sheet,
+                )?;
+                let local = target == scope.own_sheet;
+                let columns = if local {
+                    sheet_columns
+                } else {
+                    scope
+                        .directory
+                        .columns_of(target)
+                        .ok_or_else(|| FormulaError::UnknownSheet(prefix.sheet.clone()))?
+                };
+                let Some(&id) = letters_to_index(&letters).and_then(|index| columns.get(index))
+                else {
+                    return Err(FormulaError::UnknownColumnIn {
+                        sheet: prefix.sheet,
+                        column: letters,
+                    });
+                };
+                if id == own {
+                    return Err(FormulaError::SelfReference(letters));
+                }
+                if !buffer.is_empty() {
+                    parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
+                }
+                if !local {
+                    remote.insert(
+                        parts.len(),
+                        RemoteRef {
+                            sheet: target,
+                            prefixed: true,
+                        },
+                    );
+                    if argument == 0 {
+                        if let Some(frame) = frames.last_mut() {
+                            frame.remote = Some((target, prefix.sheet));
+                        }
+                    }
+                }
+                parts.push(FormulaPart::Column(id));
                 i = end;
             } else if c.is_ascii_alphabetic() {
                 let start = i;
@@ -1093,6 +1485,7 @@ impl ColumnFormula {
                             }
                         });
                     }
+                    pending_at = name.eq_ignore_ascii_case("at");
                     buffer.push_str(&name);
                     i = end;
                     continue;
@@ -1104,6 +1497,37 @@ impl ColumnFormula {
                     .iter()
                     .collect::<String>()
                     .to_ascii_uppercase();
+                // The third argument of `at(Sheet3!B, x, D)` is read in the
+                // sheet of the first one.
+                let in_remote_sheet = frames
+                    .last()
+                    .filter(|frame| frame.is_at && frame.argument == 2)
+                    .and_then(|frame| frame.remote.clone());
+                if let (Some((sheet, name)), Some(scope)) = (in_remote_sheet, scope) {
+                    let columns = scope
+                        .directory
+                        .columns_of(sheet)
+                        .ok_or_else(|| FormulaError::UnknownSheet(name.clone()))?;
+                    let Some(&id) = letters_to_index(&letters).and_then(|index| columns.get(index))
+                    else {
+                        return Err(FormulaError::UnknownColumnIn {
+                            sheet: name,
+                            column: letters,
+                        });
+                    };
+                    if !buffer.is_empty() {
+                        parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
+                    }
+                    remote.insert(
+                        parts.len(),
+                        RemoteRef {
+                            sheet,
+                            prefixed: false,
+                        },
+                    );
+                    parts.push(FormulaPart::Column(id));
+                    continue;
+                }
                 let Some(&id) =
                     letters_to_index(&letters).and_then(|index| sheet_columns.get(index))
                 else {
@@ -1122,6 +1546,22 @@ impl ColumnFormula {
                 }
                 parts.push(FormulaPart::Column(id));
             } else {
+                match c {
+                    '(' => frames.push(Frame {
+                        is_at: std::mem::take(&mut pending_at),
+                        argument: 0,
+                        remote: None,
+                    }),
+                    ')' => {
+                        frames.pop();
+                    }
+                    ',' => {
+                        if let Some(frame) = frames.last_mut() {
+                            frame.argument += 1;
+                        }
+                    }
+                    _ => {}
+                }
                 buffer.push(c);
                 i += 1;
             }
@@ -1129,11 +1569,14 @@ impl ColumnFormula {
         if !buffer.is_empty() {
             parts.push(FormulaPart::Text(buffer));
         }
-        let formula = Self { parts };
+        let formula = Self { parts, remote };
         // A wrong argument count is refused here; any other syntax error is
         // stored and returned by `compile`, as before.
         if let Err(
-            error @ (FormulaError::WrongArgumentCount { .. } | FormulaError::ColumnExpected { .. }),
+            error @ (FormulaError::WrongArgumentCount { .. }
+            | FormulaError::ColumnExpected { .. }
+            | FormulaError::RemoteOutsideColumnFunction
+            | FormulaError::RemoteXColumn),
         ) = formula.compile()
         {
             return Err(error);
@@ -1145,29 +1588,89 @@ impl ColumnFormula {
     /// position letter** in `sheet_columns` (letters follow the
     /// columns), or [`REF_TOKEN`] if it is no longer there. For display
     /// only: never reread to compute or to modify another field
-    /// (see the top-level doc).
+    /// (see the top-level doc). A column of another sheet displays
+    /// [`REF_TOKEN`] here: [`ColumnFormula::letters_in`] knows the sheets.
     pub fn letters(&self, sheet_columns: &[NodeId]) -> String {
+        self.letters_in(sheet_columns, None)
+    }
+
+    /// [`ColumnFormula::letters`] in a project (#403): a column of another
+    /// sheet is written with the shortest prefix that resolves to it from the
+    /// formula's sheet (`Sheet3!B`, `[Book2]Sheet5!B`, `'Blanc 2'!B`), the
+    /// sheet and workbook names being the current ones; [`REF_TOKEN`] when the
+    /// sheet is gone or no longer holds the column.
+    pub fn letters_in(&self, sheet_columns: &[NodeId], scope: Option<SheetScope<'_>>) -> String {
         let mut out = String::new();
-        for part in &self.parts {
+        for (index, part) in self.parts.iter().enumerate() {
             match part {
                 FormulaPart::Text(text) => out.push_str(text),
-                FormulaPart::Column(id) => match sheet_columns.iter().position(|c| c == id) {
-                    Some(index) => out.push_str(&index_to_letters(index)),
-                    None => out.push_str(REF_TOKEN),
-                },
+                FormulaPart::Column(id) => {
+                    match self.reference_text(index, *id, sheet_columns, scope) {
+                        Some(text) => out.push_str(&text),
+                        None => out.push_str(REF_TOKEN),
+                    }
+                }
             }
         }
         out
+    }
+
+    /// The text of the column part `index`, `None` if it is no longer where it
+    /// must be (deleted, moved, sheet gone).
+    fn reference_text(
+        &self,
+        index: usize,
+        id: NodeId,
+        sheet_columns: &[NodeId],
+        scope: Option<SheetScope<'_>>,
+    ) -> Option<String> {
+        let letters_in =
+            |columns: &[NodeId]| columns.iter().position(|c| *c == id).map(index_to_letters);
+        let Some(remote) = self.remote.get(&index) else {
+            return letters_in(sheet_columns);
+        };
+        let scope = scope?;
+        if remote.sheet == scope.own_sheet {
+            return letters_in(sheet_columns);
+        }
+        let letters = letters_in(scope.directory.columns_of(remote.sheet)?)?;
+        if !remote.prefixed {
+            return Some(letters);
+        }
+        let address = scope.directory.address_of(scope.own_sheet, remote.sheet)?;
+        let workbook = address
+            .workbook
+            .map(|workbook| format!("[{workbook}]"))
+            .unwrap_or_default();
+        Some(format!(
+            "{workbook}{}!{letters}",
+            sheet_token(&address.sheet)
+        ))
     }
 
     /// True if a column read is no longer in `sheet_columns`: the formula
     /// displays with [`REF_TOKEN`] and computes as
     /// [`FormulaError::DeletedColumn`].
     pub fn has_deleted_reference(&self, sheet_columns: &[NodeId]) -> bool {
-        self.parts.iter().any(|part| match part {
-            FormulaPart::Column(id) => !sheet_columns.contains(id),
-            FormulaPart::Text(_) => false,
-        })
+        self.has_deleted_reference_in(sheet_columns, None)
+    }
+
+    /// [`ColumnFormula::has_deleted_reference`] in a project (#403): a column
+    /// of another sheet is deleted when that sheet is gone or no longer holds it.
+    pub fn has_deleted_reference_in(
+        &self,
+        sheet_columns: &[NodeId],
+        scope: Option<SheetScope<'_>>,
+    ) -> bool {
+        self.parts
+            .iter()
+            .enumerate()
+            .any(|(index, part)| match part {
+                FormulaPart::Column(id) => self
+                    .reference_text(index, *id, sheet_columns, scope)
+                    .is_none(),
+                FormulaPart::Text(_) => false,
+            })
     }
 
     /// Identifiers of all columns read, with no judgment on their
@@ -1184,17 +1687,48 @@ impl ColumnFormula {
 
     /// Same formula, each identifier passed through `map` (copy of a sheet
     /// or workbook: the copy reads its own columns). Text fragments
-    /// are unchanged.
-    pub fn remap(&self, mut map: impl FnMut(NodeId) -> NodeId) -> Self {
+    /// are unchanged. A remote column and its sheet go through `map` too.
+    pub fn remap(&self, map: impl FnMut(NodeId) -> NodeId) -> Self {
+        self.remap_keeping(map, |_| false)
+    }
+
+    /// [`ColumnFormula::remap`], except that a remote column whose sheet
+    /// satisfies `keep` is left as it is (#403): a copy of a sheet keeps
+    /// reading the original sheets it did not copy.
+    pub fn remap_keeping(
+        &self,
+        mut map: impl FnMut(NodeId) -> NodeId,
+        keep: impl Fn(NodeId) -> bool,
+    ) -> Self {
+        let mut remote_refs = BTreeMap::new();
+        let parts = self
+            .parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| match part {
+                FormulaPart::Column(id) => match self.remote.get(&index) {
+                    Some(reference) if keep(reference.sheet) => {
+                        remote_refs.insert(index, *reference);
+                        FormulaPart::Column(*id)
+                    }
+                    Some(reference) => {
+                        remote_refs.insert(
+                            index,
+                            RemoteRef {
+                                sheet: map(reference.sheet),
+                                prefixed: reference.prefixed,
+                            },
+                        );
+                        FormulaPart::Column(map(*id))
+                    }
+                    None => FormulaPart::Column(map(*id)),
+                },
+                FormulaPart::Text(text) => FormulaPart::Text(text.clone()),
+            })
+            .collect();
         Self {
-            parts: self
-                .parts
-                .iter()
-                .map(|part| match part {
-                    FormulaPart::Column(id) => FormulaPart::Column(map(*id)),
-                    FormulaPart::Text(text) => FormulaPart::Text(text.clone()),
-                })
-                .collect(),
+            parts,
+            remote: remote_refs,
         }
     }
 
@@ -1203,7 +1737,7 @@ impl ColumnFormula {
     /// v1 grammar — never a panic, whatever the input (a free
     /// typed text, or a crafted file).
     pub fn compile(&self) -> Result<Formula, FormulaError> {
-        let tokens = tokenize(&self.parts)?;
+        let tokens = tokenize(&self.parts, &self.remote)?;
         if tokens.is_empty() {
             return Err(FormulaError::Parse("empty formula".to_string()));
         }
@@ -1213,6 +1747,10 @@ impl ColumnFormula {
             return Err(FormulaError::Parse(
                 "unexpected tokens after the formula".to_string(),
             ));
+        }
+        // A remote column that no column function took as its column.
+        if parser.remotes != parser.remotes_taken {
+            return Err(FormulaError::RemoteOutsideColumnFunction);
         }
         Ok(Formula {
             expr,
@@ -1241,7 +1779,7 @@ impl Formula {
         fn walk(expr: &Expr, out: &mut BTreeSet<NodeId>) {
             match expr {
                 Expr::Number(_) => {}
-                Expr::Column(id) => {
+                Expr::Column(id) | Expr::Remote(id) => {
                     out.insert(*id);
                 }
                 Expr::Neg(inner) => walk(inner, out),
@@ -1281,7 +1819,7 @@ impl Formula {
     pub fn columns_needing_x(&self) -> BTreeSet<NodeId> {
         fn walk(expr: &Expr, out: &mut BTreeSet<NodeId>) {
             match expr {
-                Expr::Number(_) | Expr::Column(_) => {}
+                Expr::Number(_) | Expr::Column(_) | Expr::Remote(_) => {}
                 Expr::Neg(inner) => walk(inner, out),
                 Expr::Add(a, b)
                 | Expr::Sub(a, b)
@@ -1451,6 +1989,8 @@ fn eval_expr(expr: &Expr, row: usize, ctx: &Ctx) -> (f64, NumericStatus) {
             Some(values) => (values.number_at(row), values.status_at(row)),
             None => (f64::NAN, NumericStatus::Missing),
         },
+        // Refused by the parser outside a column function: never evaluated.
+        Expr::Remote(_) => (f64::NAN, NumericStatus::Missing),
         Expr::Neg(inner) => {
             let (value, status) = eval_expr(inner, row, ctx);
             (-value, status)
@@ -1565,7 +2105,7 @@ fn prepare(
     states: &mut [CallState],
 ) -> Result<(), FormulaError> {
     match expr {
-        Expr::Number(_) | Expr::Column(_) => Ok(()),
+        Expr::Number(_) | Expr::Column(_) | Expr::Remote(_) => Ok(()),
         Expr::Neg(inner) => prepare(inner, columns, pairing, states),
         Expr::Add(a, b)
         | Expr::Sub(a, b)
@@ -1628,7 +2168,7 @@ fn prepare_call(
 fn row_independent(expr: &Expr) -> bool {
     match expr {
         Expr::Number(_) => true,
-        Expr::Column(_) => false,
+        Expr::Column(_) | Expr::Remote(_) => false,
         Expr::Neg(inner) => row_independent(inner),
         Expr::Add(a, b)
         | Expr::Sub(a, b)

@@ -111,12 +111,11 @@ impl Project {
         // told apart by its marker, not by its name.
         let mut name = STORE_NAME.to_string();
         let mut n = 1;
-        while self
-            .tree()
-            .children(root)?
-            .iter()
-            .any(|c| self.tree().node(*c).is_some_and(|node| node.name() == name))
-        {
+        while self.tree().children(root)?.iter().any(|c| {
+            self.tree()
+                .node(*c)
+                .is_some_and(|node| crate::name::same_name_ignoring_case(node.name(), &name))
+        }) {
             n += 1;
             name = format!("{STORE_NAME} {n}");
         }

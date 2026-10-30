@@ -29,6 +29,17 @@ fn is_control_or_deceptive_format(c: char) -> bool {
         )
 }
 
+/// True if two names are the same name for a formula and for the sibling rule
+/// (#403): equal ignoring case, the way a column letter or a function name is.
+/// The one comparison shared by the lookup of a sheet or workbook in a formula
+/// and by the check of sibling names, so that they cannot disagree.
+pub fn same_name_ignoring_case(a: &str, b: &str) -> bool {
+    a == b
+        || a.chars()
+            .flat_map(char::to_lowercase)
+            .eq(b.chars().flat_map(char::to_lowercase))
+}
+
 /// Validates an object name: not empty, no edge space, no
 /// reserved character, no control character nor deceptive Unicode
 /// formatting/direction mark, and at most [`MAX_NAME_CHARS`] characters. Returns the name
@@ -73,6 +84,14 @@ mod tests {
                 "expected InvalidName for {name:?}"
             );
         }
+    }
+
+    #[test]
+    fn names_equal_ignoring_case_only() {
+        assert!(same_name_ignoring_case("Sheet1", "SHEET1"));
+        assert!(same_name_ignoring_case("Été", "été"));
+        assert!(!same_name_ignoring_case("Sheet1", "Sheet 1"));
+        assert!(!same_name_ignoring_case("Sheet1", "Sheet2"));
     }
 
     #[test]

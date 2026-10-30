@@ -10,7 +10,7 @@
 
 use pyo3::prelude::*;
 use stokesforge_commands::Command;
-use stokesforge_core::{NodeCopy, NodeId};
+use stokesforge_core::{same_name_ignoring_case, NodeCopy, NodeId};
 
 use crate::bridge::{self, HostError};
 use crate::engine::{self, ScriptContext};
@@ -230,7 +230,7 @@ fn free_copy_name(
                 snapshot
                     .tree
                     .node(*id)
-                    .is_some_and(|node| node.name() == name)
+                    .is_some_and(|node| same_name_ignoring_case(node.name(), name))
             })
     };
     (1u64..)
