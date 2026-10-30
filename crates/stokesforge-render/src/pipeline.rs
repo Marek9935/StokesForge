@@ -480,6 +480,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             frames,
             Some(root_width),
             &mut |text, font, size, width| text_band(root, text, font, size, width),
+            &mut |_| Ok(title_height),
         )?),
         None => None,
     };
@@ -778,11 +779,48 @@ struct ExplicitGrid {
     cells: std::collections::HashMap<usize, Gutters>,
     /// Width of the figure the panel titles were measured at.
     width: u32,
+    /// Height of the graph title band, above the rows.
+    title_band: u32,
+    /// True if the figure is [`Placement::fixed`] and something asks for more
+    /// than the reserve (an axis beyond the one per side, a title, a value of
+    /// Left or Top too small for the axes and title): the image grows anyway.
+    overflow: bool,
+    /// Smallest Left the axes of the first column allow, in points.
+    min_left: u32,
+    /// Smallest Top the axes of the first row and the graph title allow.
+    min_top: u32,
 }
+
+/// How the figure is placed around its frames (#405): the "Fixed" figure size
+/// and the position of the first frame, from the spec.
+#[derive(Debug, Clone, Copy, Default)]
+struct Placement {
+    /// "Figure size = Fixed": the bands of four axes are reserved.
+    fixed: bool,
+    /// Left edge of the image to the frame of column 0, in points; `None` =
+    /// Auto.
+    left: Option<u32>,
+    /// Top edge of the image (title band included) to the frame of row 0.
+    top: Option<u32>,
+}
+
+impl Placement {
+    fn of(spec: &PlotSpec) -> Self {
+        Self {
+            fixed: spec.fixed_figure,
+            left: spec.sanitized_figure_left().map(|v| v.round() as u32),
+            top: spec.sanitized_figure_top().map(|v| v.round() as u32),
+        }
+    }
+}
+
+/// The height of the graph title band of a figure of the given width.
+type MeasureTitle<'a, E> = dyn FnMut(u32) -> Result<u32, E> + 'a;
 
 impl ExplicitGrid {
     /// `width`: the width of the figure when the caller imposes one (the
     /// backend being drawn on), otherwise the sum of the columns.
+    #[allow(clippy::too_many_arguments)]
     fn build<E>(
         spec: &PlotSpec,
         layout: &Layout,
@@ -790,8 +828,13 @@ impl ExplicitGrid {
         frames: (Vec<f64>, Vec<f64>),
         width: Option<u32>,
         measure: &mut MeasureBand<'_, E>,
+        measure_title: &mut MeasureTitle<'_, E>,
     ) -> Result<Self, E> {
         let (frame_widths, frame_heights) = frames;
+        let place = Placement::of(spec);
+        let reserve_x = MARGIN + Y_LABEL_AREA;
+        let reserve_y = MARGIN + X_LABEL_AREA;
+        let mut overflow = false;
         // Horizontally first: the width of the figure sets the width of the
         // title boxes, hence the height of the panel title bands.
         let mut column_gutters = vec![(MARGIN, MARGIN); layout.columns];
@@ -806,6 +849,19 @@ impl ExplicitGrid {
                 (gutters.left, gutters.right)
             };
         }
+        let min_left = column_gutters.first().map_or(MARGIN, |g| g.0);
+        for (column, slot) in column_gutters.iter_mut().enumerate() {
+            // The floor of a side: the position the user asked for, which
+            // replaces the reserve, or the reserve of one axis (Fixed).
+            let left_floor = match (column, place.left) {
+                (0, Some(left)) => left,
+                _ if place.fixed => reserve_x,
+                _ => 0,
+            };
+            let right_floor = if place.fixed { reserve_x } else { 0 };
+            overflow |= place.fixed && (slot.0 > left_floor || slot.1 > right_floor);
+            *slot = (slot.0.max(left_floor), slot.1.max(right_floor));
+        }
         let width = width.unwrap_or_else(|| {
             frame_widths
                 .iter()
@@ -814,22 +870,53 @@ impl ExplicitGrid {
                 .sum::<f64>()
                 .round() as u32
         });
+        let title_band = measure_title(width)?;
         let bands = panel_bands(spec, layout, width, measure)?;
         let mut row_gutters = vec![(MARGIN, MARGIN); layout.rows];
         let mut seen_row = vec![false; layout.rows];
         let mut cells = std::collections::HashMap::new();
+        let mut natural_top = vec![MARGIN; layout.rows];
         for (&cell, plan) in plans {
             let row = cell / layout.columns;
             let gutters = plan.gutters(bands.get(&cell).copied().unwrap_or(0));
             let slot = &mut row_gutters[row];
             let top = gutters.top + gutters.band;
-            *slot = if std::mem::replace(&mut seen_row[row], true) {
-                (slot.0.max(top), slot.1.max(gutters.bottom))
+            natural_top[row] = natural_top[row].max(top);
+            // A graph title is never part of the reserve; neither is a panel
+            // title (F2).
+            let top = if place.fixed && !(row == 0 && place.top.is_some()) {
+                overflow |= gutters.top > reserve_y || gutters.band > 0;
+                gutters.top.max(reserve_y) + gutters.band
             } else {
-                (top, gutters.bottom)
+                top
+            };
+            let bottom = if place.fixed {
+                overflow |= gutters.bottom > reserve_y;
+                gutters.bottom.max(reserve_y)
+            } else {
+                gutters.bottom
+            };
+            *slot = if std::mem::replace(&mut seen_row[row], true) {
+                (slot.0.max(top), slot.1.max(bottom))
+            } else {
+                (top, bottom)
             };
             cells.insert(cell, gutters);
         }
+        for (row, slot) in row_gutters.iter_mut().enumerate() {
+            if place.fixed && !seen_row[row] {
+                *slot = (reserve_y, reserve_y);
+            }
+            if row == 0 {
+                if let Some(wanted) = place.top {
+                    overflow |= place.fixed && title_band + natural_top[0] > wanted;
+                    slot.0 = slot.0.max(wanted.saturating_sub(title_band));
+                } else if place.fixed && title_band > 0 {
+                    overflow = true;
+                }
+            }
+        }
+        let min_top = title_band + natural_top.first().copied().unwrap_or(MARGIN);
         Ok(Self {
             frame_widths,
             frame_heights,
@@ -837,6 +924,10 @@ impl ExplicitGrid {
             row_gutters,
             cells,
             width,
+            title_band,
+            overflow,
+            min_left,
+            min_top,
         })
     }
 
@@ -917,6 +1008,17 @@ pub struct FigureLayout {
     pub frame_widths: Vec<f64>,
     /// Height of the frame of each row in points, same rule.
     pub frame_heights: Vec<f64>,
+    /// True if the figure is "Fixed" ([`PlotSpec::fixed_figure`]) and the
+    /// image is nevertheless larger than the reserve of four axes: an axis
+    /// beyond the one per side, a title, or a Left / Top too small (#405). The
+    /// frame has not moved; Graph Properties and the status bar say so.
+    pub fixed_overflow: bool,
+    /// Smallest Left the axes of the first column allow, in points (#405):
+    /// below it, the value is raised to it. `0` for a legacy graph.
+    pub min_left: u32,
+    /// Smallest Top the first row's axes and the graph title allow, in
+    /// points (#405). `0` for a legacy graph.
+    pub min_top: u32,
 }
 
 impl FigureLayout {
@@ -999,6 +1101,9 @@ pub fn figure_layout<DB: DrawingBackend>(
             row_gutters: Vec::new(),
             frame_widths,
             frame_heights,
+            fixed_overflow: false,
+            min_left: 0,
+            min_top: 0,
         });
     };
     let (plans, _) = cell_plans(spec, &layout);
@@ -1009,8 +1114,9 @@ pub fn figure_layout<DB: DrawingBackend>(
         frames,
         None,
         &mut |text, font, size, width| text_band(probe, text, font, size, width),
+        &mut |width| graph_title_band(spec, probe, width),
     )?;
-    let band = graph_title_band(spec, probe, grid.width)?;
+    let band = grid.title_band;
     let area_height = grid.outer_heights().iter().sum::<f64>().round() as u32;
     Ok(FigureLayout {
         size: (grid.width, area_height.saturating_add(band)),
@@ -1021,6 +1127,9 @@ pub fn figure_layout<DB: DrawingBackend>(
         row_gutters: grid.row_gutters,
         frame_widths: grid.frame_widths,
         frame_heights: grid.frame_heights,
+        fixed_overflow: grid.overflow,
+        min_left: grid.min_left,
+        min_top: grid.min_top,
     })
 }
 

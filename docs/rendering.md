@@ -499,7 +499,9 @@ bottom edges to the last column and row; left and top edges have none. The strip
 is `CELL_EDGE_TOLERANCE_POINTS` (4) screen points either side
 (`GraphView::cell_edge_at` passes `4 / display_scale`), bounded by
 `CELL_EDGE_MAX_TOLERANCE` (half the 12 px margin) so that it never reaches an axis
-line. `GraphView` pulls it on the preview pattern (`FramePreview`, applied to the
+line. The left and top edges of the figure are `hit::figure_edge_at`
+(`FigureEdge { left, top }`, #405): they set Left and Top of the plot area
+(`GraphEvent::FramePlaced`), never the width of a cell. `GraphView` pulls it on the preview pattern (`FramePreview`, applied to the
 spec clone by `figure_layout` and the cache build, so the figure and the window
 that follows it see the new layout live; model untouched; the distance is
 measured in screen points over the display scale of the press because the figure
@@ -983,6 +985,25 @@ the graph title grows or shrinks the *image*, never the frame.
   size a draft would give. `probe` is any drawing area of the backend that will
   draw the figure: only its text measurement matters, Typst titles included
   (invariant 4). Overlay layers: union of the plans, as before.
+- **Fixed figure size, Left and Top (#405).** `PlotSpec::fixed_figure`,
+  `figure_left`, `figure_top` (`Placement` in `pipeline.rs`) only act on the
+  explicit path, so the legacy algorithm and `drawn_legacy_frames` ignore them
+  (goldens untouched). In `ExplicitGrid::build` the gutters are floored: in
+  Fixed mode every column has left and right `>= MARGIN + Y_LABEL_AREA` (76) and
+  every row top and bottom `>= MARGIN + X_LABEL_AREA` (64), the panel title band
+  coming **on top** of the top floor and the graph title band above the rows
+  (F2: no reserve for a title). Left (Top), when set, **replaces** the reserve of
+  column 0 (row 0) in Fixed mode and is a plain floor in Grows mode; Top counts
+  from the image top, title band included (`slot.0 >= Top - title_band`). A value
+  below what the axes need is raised (`FigureLayout::min_left`, `min_top`).
+  When the floors are not enough (a second right axis, a title, a small Left) the
+  image grows anyway and `FigureLayout::fixed_overflow` is true; the frame keeps
+  its size, and its distance to the right and bottom edge. Growing at the left
+  or the top moves it inside the image, which is why the window follows the
+  figure on that side while those edges are dragged. The title band is measured
+  once (`ExplicitGrid::title_band`) and used by the layout and the drawing path.
+  Hit test: `hit::figure_edge_at` (left and top edges of the figure, same
+  bounded strip as `cell_edge_at`).
 - Everyone reads it: `draw`, `GraphView::figure_layout` (screen, memoized by
   graph, revision, pixels per point and preview generation; published per graph
   by `graph_view_contents` for the menus, the size fields and the window), the

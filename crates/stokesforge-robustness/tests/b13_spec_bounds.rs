@@ -438,3 +438,52 @@ fn b13_hostile_frame_sizes_cross_the_disk_and_read_back_bounded() {
     assert!(heights.iter().sum::<f64>() <= extent + 1e-6);
     assert!(widths.iter().all(|w| w.is_finite() && *w > 0.0));
 }
+
+/// #405: a hostile Left or Top (NaN, negative, infinite, absurdly large) crosses
+/// the disk as written, reads back within bounds (Auto or clamped), and the
+/// figure of a Fixed 16 x 16 grid stays within `MAX_FIGURE_EXTENT` plus the
+/// bounded bands.
+#[test]
+fn b13_hostile_left_and_top_cross_the_disk_and_read_back_bounded() {
+    let dir = TempDir::new().expect("temporary directory");
+    let path = dir.path().join("hostile-offsets.stf");
+    let mut project = Project::new("Hostile").expect("valid project");
+    let root = project.root();
+    let mut graphs = Vec::new();
+    for (index, value) in [f64::NAN, f64::INFINITY, -3.0, 1e300]
+        .into_iter()
+        .enumerate()
+    {
+        let panels: Vec<PanelSpec> = (0..16)
+            .flat_map(|r| (0..16).map(move |c| PanelSpec::at(r, c)))
+            .collect();
+        let spec = PlotSpec {
+            frame_widths: vec![100.0; 16],
+            frame_heights: vec![100.0; 16],
+            fixed_figure: true,
+            figure_left: Some(value),
+            figure_top: Some(value),
+            ..PlotSpec::empty("T").with_panels(Panels::new(panels))
+        };
+        graphs.push(
+            project
+                .add_graph(root, Some(&format!("Fig{index}")), spec)
+                .expect("graph"),
+        );
+    }
+    stokesforge_persistence::save(&project, &path).expect("save");
+    let reloaded = stokesforge_persistence::load(&path).expect("reload");
+    for graph in graphs {
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            reloaded.tree().node(graph).expect("graph").kind()
+        else {
+            panic!("a graph expected");
+        };
+        assert!(spec.fixed_figure, "kept as written");
+        for read in [spec.sanitized_figure_left(), spec.sanitized_figure_top()] {
+            assert!(read.is_none_or(
+                |v| v.is_finite() && (0.0..=stokesforge_plot::MAX_FRAME_SIZE).contains(&v)
+            ));
+        }
+    }
+}

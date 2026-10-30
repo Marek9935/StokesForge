@@ -321,6 +321,15 @@ const SHOTS: &[Shot] = &[
                     columns: Vec::new(),
                 },
             );
+            // Left stored (Top stays Auto): both kinds of value are shown.
+            act(
+                h,
+                Action::SetFigureOffsets {
+                    graph,
+                    left: Some(100.0),
+                    top: None,
+                },
+            );
             act(
                 h,
                 Action::OpenPlotSettings {
@@ -329,7 +338,9 @@ const SHOTS: &[Shot] = &[
                     axis: None,
                 },
             );
-            grow_dialog(h, 120.0);
+            grow_dialog(h, 250.0);
+            // The Advanced block, closed by default, opened to show Figure size.
+            click(h, "Advanced");
         },
         crop: Crop::Rect(dialog_rect),
     },

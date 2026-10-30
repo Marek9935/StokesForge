@@ -346,6 +346,10 @@ pub fn non_trivial_spec(
         // #394: frame sizes in points, none of them a default.
         frame_widths: vec![431.5],
         frame_heights: vec![260.25, 140.0],
+        // #405: fixed figure and frame position, none of them a default.
+        fixed_figure: true,
+        figure_left: Some(133.5),
+        figure_top: Some(97.25),
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }

@@ -48,6 +48,21 @@ without a message, see `docs/persistence.md`).
   message. The outer right and bottom boundaries of a layer are drag handles that
   resize its column or row (one undo step), and the graph window grows or
   shrinks with the graph at the same display scale.
+- Fixed figure size and plot area position (#405): Graph Properties > General >
+  **Advanced** (closed by default) has **Figure size**: **Grows with the axes**
+  (default) or **Fixed**. With Fixed the image keeps room for one axis on each
+  side from the start, so adding or removing an axis, a mirror axis or an
+  overlaid layer leaves the image and the plot area exactly as they are (for
+  slides that switch from one graph to the next). An axis beyond that room, or a
+  title (graph or layer), still makes the image bigger, and says so in the status
+  bar and under Size. **Size** also gets **Plot area, from the left edge** and
+  **from the top edge** (empty = Auto): where the first plot area sits in the
+  image, never below what the axes (and the title, for the top) need. Dragging
+  the left or top edge of the figure sets them (one undo step; the window grows
+  to the left or upward so the plot area stays still on screen). New additive
+  `.stf` fields on the graph (`fixed_figure`, `figure_left`, `figure_top`; absent
+  = Grows with the axes, Auto): an older version that saves the file again loses
+  them without a message.
 - Error bars (#360): the first Y Error (X Error) column to the right of a Y
   column, before the next Y column, is paired with it at plot time, and the
   **Y error** / **X error** fields of Series Properties change or remove it

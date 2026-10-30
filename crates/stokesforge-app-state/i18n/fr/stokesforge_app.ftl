@@ -353,6 +353,7 @@ import-step-columns-title = Colonnes
 
 # Valeurs partagées par plusieurs listes.
 common-auto = Auto
+common-advanced = Avancé
 common-auto-value = Auto ({ $value })
 import-option-none = Aucun
 import-option-comma = Virgule
@@ -797,7 +798,16 @@ plot-size-column-width = Largeur de la zone de tracé, colonne { $n } ({ $unit }
 plot-size-row-height = Hauteur de la zone de tracé, ligne { $n } ({ $unit })
 plot-size-total = Taille du graphique ({ $unit })
 plot-size-total-value = { $width } × { $height }
+plot-size-left = Zone de tracé, depuis le bord gauche ({ $unit })
+plot-size-top = Zone de tracé, depuis le bord haut ({ $unit })
+plot-size-left-raised = Les axes demandent au moins { $minimum } ({ $unit }) à gauche : la valeur a été remontée à ce minimum
+plot-size-top-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) en haut : la valeur a été remontée à ce minimum
 plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit le graphique, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille.
+
+plot-figure-size = Taille de la figure
+    .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
+plot-figure-size-grows = Grandit avec les axes
+plot-figure-size-fixed = Fixe
 
 # Onglet Zone de tracé
 
@@ -840,7 +850,7 @@ plot-axes-minor-tick-count = Sous-graduations par intervalle
     .auto = Auto
     .hint = Nombre de petits tirets entre deux graduations principales. Vide = Auto. Sans effet en échelle logarithmique, qui montre toujours 2 à 9
 plot-axes-ticks-section = Graduations
-plot-axes-advanced = Avancé
+
 plot-axes-tick-length = Longueur des grands tirets (px)
 plot-axes-minor-tick-length = Longueur des petits tirets (px)
 plot-axes-tick-width = Épaisseur des tirets (pt)
@@ -1298,6 +1308,7 @@ history-plot-closed-frame = Modifier le cadre fermé
 history-plot-add-cell = Ajouter un calque à côté
 history-plot-remove-cell = Supprimer le calque
 history-plot-resize-cell = Redimensionner la zone de tracé
+history-plot-place-figure = Positionner la zone de tracé
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -2034,6 +2045,7 @@ help-open-list = Ouvrir la liste des valeurs
 busy-stop = Arrêter
     .hint = Arrête le travail en cours
 status-import-stopped = Import arrêté. Rien n'a été importé
+status-figure-grew = L’image a dépassé la place gardée par la taille de figure Fixe. La zone de tracé a gardé sa taille
 status-recalculating = Recalcul en cours…
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
 

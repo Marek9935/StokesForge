@@ -98,6 +98,41 @@ pub fn cell_edge_at(plot: &DrawnPlot, x: f64, y: f64, tolerance: f64) -> Option<
     (edge.column.is_some() || edge.row.is_some()).then_some(edge)
 }
 
+/// The edge of the figure under a pixel (#405): its left edge, which sets the
+/// distance from the image to the frame of the first column (Left), and its top
+/// edge, which sets the same for the first row (Top). Both are set near the
+/// top-left corner. The right and bottom edges of the figure are the handles
+/// of the last column and row ([`CellEdge`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FigureEdge {
+    /// Near the left edge of the figure.
+    pub left: bool,
+    /// Near the top edge of the figure.
+    pub top: bool,
+}
+
+/// The figure edge at pixel `(x, y)` (backend coordinate space), within
+/// `tolerance` figure pixels (bounded by [`CELL_EDGE_MAX_TOLERANCE`], so it
+/// never reaches the axis line the margin keeps away), **on either side of the
+/// edge**: the strip straddles it, so the margin the window leaves around the
+/// figure is grabbable too. `None` elsewhere and
+/// for a figure with no drawn panel.
+pub fn figure_edge_at(plot: &DrawnPlot, x: f64, y: f64, tolerance: f64) -> Option<FigureEdge> {
+    if plot.panels.is_empty() {
+        return None;
+    }
+    let tolerance = if tolerance.is_finite() {
+        tolerance.clamp(0.0, CELL_EDGE_MAX_TOLERANCE)
+    } else {
+        0.0
+    };
+    let edge = FigureEdge {
+        left: (-tolerance..=tolerance).contains(&x),
+        top: (-tolerance..=tolerance).contains(&y),
+    };
+    (edge.left || edge.top).then_some(edge)
+}
+
 /// An axis of a panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AxisSide {
@@ -809,6 +844,49 @@ mod tests {
             Some(CellEdge {
                 column: Some(0),
                 row: Some(0)
+            })
+        );
+    }
+
+    /// #405: the left and top edges of the figure are handles of their own;
+    /// the boundary two columns share stays the width handle of the left one.
+    #[test]
+    fn the_figure_edges_are_the_left_and_top_handles() {
+        let plot = figure();
+        let tol = CELL_EDGE_TOLERANCE_POINTS;
+        let edge = |left, top| Some(FigureEdge { left, top });
+        assert_eq!(figure_edge_at(&plot, 0.0, 150.0, tol), edge(true, false));
+        assert_eq!(figure_edge_at(&plot, 4.0, 150.0, tol), edge(true, false));
+        assert_eq!(figure_edge_at(&plot, 5.0, 150.0, tol), None);
+        // The strip straddles the edge: the margin outside the figure is a
+        // handle too, as far as the tolerance.
+        assert_eq!(figure_edge_at(&plot, -4.0, 150.0, tol), edge(true, false));
+        assert_eq!(figure_edge_at(&plot, 240.0, -3.0, tol), edge(false, true));
+        assert_eq!(figure_edge_at(&plot, -5.0, 150.0, tol), None);
+        assert_eq!(figure_edge_at(&plot, 240.0, 0.0, tol), edge(false, true));
+        assert_eq!(figure_edge_at(&plot, 1.0, 2.0, tol), edge(true, true));
+        // The axis line (x = 82) and the frame are not figure edges.
+        assert_eq!(figure_edge_at(&plot, 82.0, 150.0, tol), None);
+        assert_eq!(figure_edge_at(&plot, 240.0, 150.0, tol), None);
+        // The strip is bounded by half the margin; hostile tolerances do not
+        // panic.
+        assert_eq!(figure_edge_at(&plot, 8.0, 150.0, 1000.0), None);
+        assert_eq!(figure_edge_at(&plot, 1.0, 150.0, f64::NAN), None);
+        assert!(figure_edge_at(&plot, 0.0, 150.0, f64::NAN).is_some());
+        // The shared boundary of two columns keeps its width handle.
+        let mut two = figure();
+        two.panels[0].cell_size = (240, 320);
+        let mut right = two.panels[0].clone();
+        right.index = 1;
+        right.column = 1;
+        right.cell_origin = (240, 40);
+        two.panels.push(right);
+        assert_eq!(figure_edge_at(&two, 240.0, 100.0, tol), None);
+        assert_eq!(
+            cell_edge_at(&two, 240.0, 100.0, tol),
+            Some(CellEdge {
+                column: Some(0),
+                row: None
             })
         );
     }
