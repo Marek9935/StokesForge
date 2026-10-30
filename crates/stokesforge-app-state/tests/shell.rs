@@ -7444,7 +7444,7 @@ fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
     );
     assert_eq!(
         PlotTarget::AxisTitle(PlotAxis::Bottom).label(),
-        "X (bottom) Axis Title"
+        "Bottom Axis Title"
     );
 }
 

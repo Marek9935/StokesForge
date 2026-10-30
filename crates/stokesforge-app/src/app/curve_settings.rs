@@ -424,7 +424,19 @@ fn series_page(
         env,
         whole_group,
         auto_bar_width,
+        panel.overlay.is_some(),
     );
+    // The Y axis (#358) goes through the panel, which makes the right axis
+    // visible; in "whole group" scope every member gets it.
+    let axis = panel.series[*index].axis;
+    if axis != before.axis {
+        panel.set_series_axis(*index, axis);
+        if let (true, Some(group)) = (whole_group, group) {
+            for member in panel.group_members(group) {
+                panel.set_series_axis(member, axis);
+            }
+        }
+    }
     if let (true, Some(group)) = (whole_group, group) {
         propagate_style(panel, group, &before, *index);
     }

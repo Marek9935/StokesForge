@@ -597,7 +597,13 @@ in `stokesforge-plot` (read before writing, as requested):
   a finite value above 0.000001 fixes it. In "whole group" scope both are
   copied to the members of the matching type (`propagate_style`); the plot
   type stays per series. Both go through the draft and `commit_plot_edit`
-  (one history entry per validated entry);
+  (one history entry per validated entry); then **Y axis: Left / Right**
+  (`SeriesSpec::axis`, #358), applied through `PanelSpec::set_series_axis`
+  (Right makes the right axis visible, same rule as `pyst` `axis`; going back
+  to Left hides nothing). In "whole group" scope the axis is copied to every
+  member. Grayed out, with its reason, on an overlaid layer (the rendering
+  ignores Right there, `pipeline.rs`). Known limit: the data cursor skips
+  series on the right axis (`render/src/interact.rs`);
 - **Legend**: `LegendSpec::visible`, `position`.
 
 **`PlotType::Unknown` never appears in the dropdown menu**, but a

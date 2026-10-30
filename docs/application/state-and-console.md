@@ -134,7 +134,8 @@ each column type and columns with formulas; `Measurements`: the data of the
 graphs; a matrix; the `ReadMe` note), an `Analysis` folder (one workbook
 per calculation family, including `Integrate`, `FitPolynomial` and `FitGaussian` with
 their calculation already done, visible in the Results panel) and six graphs (`Panels`,
-`Axes`, `PlotTypes`, `Annotations`, `Groups`, `Rows`). The window names there
+`Axes`, `PlotTypes`, `Annotations`, `Groups`, `Rows`). The `Growth` curve of `Axes` sits on the
+right Y axis of its panel, which can be redone from Series › Y axis (#358). The window names there
 are unique across the whole project. All its names and texts are English, hard-coded (#379). `demo_session` requests a full
 recalculation right after `Session::spawn`: the columns with formulas carry only
 their formula (invariant 11) and would stay empty without it. The noise of the measurements

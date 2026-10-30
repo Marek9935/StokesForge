@@ -181,7 +181,7 @@ right as long as no series is attached to it, as a mirror without numbers and co
 **once** the presence, direction and subticks of the bottom and left ticks; it has
 no effect on an overlaid layer. An **overlaid layer** (#171)
 lists only the axes it displays (`object_manager::axis_sides`): its X axis
-named "X (top)" if `x_top`, its Y axis named "Y (right)" if `y_right`,
+named "Top Axis" if `x_top`, its Y axis named "Right Axis" if `y_right`,
 each controlling the `AxisSpec` `bottom` / `left` that carries it; its dead
 `right` / `top` rows do not exist. The group is **collapsed by
 default** (#138): a click on its arrow expands the axis rows, without touching

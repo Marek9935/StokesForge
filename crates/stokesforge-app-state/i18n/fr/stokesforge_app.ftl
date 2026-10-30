@@ -714,20 +714,28 @@ plot-tab-theme = Thème
 
 # Les trois axes d'un calque
 
-plot-axis-bottom = X (bas)
-plot-axis-left = Y (gauche)
-plot-axis-right = Y secondaire (droite)
-plot-axis-top = X secondaire (haut)
-plot-axis-overlay-x = X (haut)
-plot-axis-overlay-y = Y (droite)
+plot-axis-bottom = Bas
+plot-axis-left = Gauche
+plot-axis-right = Droite
+plot-axis-top = Haut
 
 # Ce que désigne un clic droit (tête du menu contextuel)
 
 plot-target-graph = Graphique
 plot-target-title = Titre
 plot-target-plot-area = Zone de tracé
-plot-target-axis = Axe { $axis }
-plot-target-axis-title = Titre de l'axe { $axis }
+plot-target-axis = { $side ->
+        [bottom] Axe du bas
+        [left] Axe de gauche
+        [right] Axe de droite
+       *[top] Axe du haut
+    }
+plot-target-axis-title = { $side ->
+        [bottom] Titre de l'axe du bas
+        [left] Titre de l'axe de gauche
+        [right] Titre de l'axe de droite
+       *[top] Titre de l'axe du haut
+    }
 plot-target-text = Texte
 plot-target-object = Objet
 plot-target-legend = Légende
@@ -813,6 +821,9 @@ plot-series-name =
 plot-series-plot-type = Type de tracé
 plot-series-type-unknown = Type inconnu (d'une version plus récente)
 plot-series-bins = Classes
+plot-series-axis = Axe Y
+    .hint = L'axe vertical contre lequel cette série est tracée. Droite fait apparaître l'axe de droite.
+    .disabled = Un calque superposé n'a qu'un seul axe Y ; ce réglage ne s'applique pas
 plot-series-bar-width = Largeur (unités X)
 plot-series-show = Afficher la série
 plot-series-show-in-legend = Afficher dans la légende

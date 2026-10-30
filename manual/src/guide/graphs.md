@@ -136,6 +136,7 @@ The settings of the selected series:
 - **Name**. If you leave it empty, the series uses the name of its column.
 - **Plot type**: **Scatter**, **Line**, **Line + Symbol**, **Bar**, **Histogram** or **Line + Error Bars**.
 - **Show series** and **Show in legend**.
+- **Y axis**: **Left** or **Right**. **Right** draws the series against the right axis of the layer and shows that axis; going back to **Left** does not hide it. With the scope **Whole group**, the choice is copied to every series of the group. The field is grayed out on a layer drawn on top, which has a single Y axis. The data cursor does not read series on the right axis.
 - **Line**: **Color**, **Line style** and **Line width (pt)**. Line styles are **None**, **Solid**, **Dashed**, **Dotted** and **Dash-dot**.
 - **Symbol**: **Shape**, **Size (pt)** and **Symbol color**. Shapes are **None**, **Circle**, **Square**, **Triangle**, **Diamond**, **Plus (+)** and **Cross (×)**.
 
@@ -174,9 +175,9 @@ Name, plot type, visibility and colors always stay per series. With the whole gr
 
 ## Axes
 
-Open the **Axes** tab and pick the axis at the top of the page: **X (bottom)**, **Y (left)**, and the others when the layer uses them. Or double-click an axis on the figure.
+Open the **Axes** tab and pick the axis at the top of the page: **Bottom**, **Left**, and the others (**Right**, **Top**) when the layer uses them. Or double-click an axis on the figure.
 
-<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, X (bottom) axis: title, scale, range and display settings." width="480">
+<img src="../images/graphs-properties-axes.png" alt="The Graph Properties window on its Axes tab, Bottom axis: title, scale, range and display settings." width="480">
 
 ### Axis title
 
@@ -199,7 +200,7 @@ In the **Scale** section:
 
 While the range is automatic, the two fields show the range StokesForge computed.
 
-<img src="../images/graphs-axes-log-scale.png" alt="The X (bottom) axis with Log scale ticked." width="480">
+<img src="../images/graphs-axes-log-scale.png" alt="The Bottom axis with Log scale ticked." width="480">
 
 ### Display and ticks
 

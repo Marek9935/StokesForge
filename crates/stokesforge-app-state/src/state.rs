@@ -2232,13 +2232,13 @@ impl PlotSettingsTab {
 /// An editable axis of the (first) panel of a graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotAxis {
-    /// X axis, at the bottom.
+    /// Bottom axis (X).
     Bottom,
-    /// Main Y axis, on the left.
+    /// Left axis (main Y).
     Left,
-    /// Secondary Y axis, on the right.
+    /// Right axis (secondary Y).
     Right,
-    /// Secondary X axis, at the top: the mirror axis of the bottom one (#176).
+    /// Top axis (secondary X): the mirror axis of the bottom one (#176).
     Top,
 }
 
@@ -2250,6 +2250,17 @@ impl PlotAxis {
             PlotAxis::Left => tr!("plot-axis-left"),
             PlotAxis::Right => tr!("plot-axis-right"),
             PlotAxis::Top => tr!("plot-axis-top"),
+        }
+    }
+
+    /// Selector key of the composed texts (`plot-target-axis*`): the axis is
+    /// named by its place, and each language words the whole phrase.
+    pub fn key(self) -> &'static str {
+        match self {
+            PlotAxis::Bottom => "bottom",
+            PlotAxis::Left => "left",
+            PlotAxis::Right => "right",
+            PlotAxis::Top => "top",
         }
     }
 }
@@ -2293,8 +2304,8 @@ impl PlotTarget {
             PlotTarget::Background => tr!("plot-target-graph"),
             PlotTarget::Title => tr!("plot-target-title"),
             PlotTarget::PlotArea => tr!("plot-target-plot-area"),
-            PlotTarget::Axis(axis) => tr!("plot-target-axis", axis = axis.label()),
-            PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", axis = axis.label()),
+            PlotTarget::Axis(axis) => tr!("plot-target-axis", side = axis.key()),
+            PlotTarget::AxisTitle(axis) => tr!("plot-target-axis-title", side = axis.key()),
             PlotTarget::Annotation(_) => tr!("plot-target-text"),
             PlotTarget::Legend => tr!("plot-target-legend"),
             PlotTarget::Object(_) => tr!("plot-target-object"),

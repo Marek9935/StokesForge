@@ -213,6 +213,20 @@ impl PanelSpec {
         self.series.iter().any(|s| s.axis == SeriesAxis::Right)
     }
 
+    /// Attaches the series `index` to a Y axis (#358). Choosing the right axis
+    /// also makes it visible: otherwise the series would be silently drawn on
+    /// the left scale. Going back to the left hides nothing. No effect if the
+    /// index is out of range.
+    pub fn set_series_axis(&mut self, index: usize, axis: SeriesAxis) {
+        let Some(series) = self.series.get_mut(index) else {
+            return;
+        };
+        series.axis = axis;
+        if axis == SeriesAxis::Right {
+            self.right.visible = true;
+        }
+    }
+
     /// The top axis is a mirror of the bottom one (#176).
     pub fn mirrors_top(&self) -> bool {
         self.overlay.is_none() && self.top.mirror
@@ -798,6 +812,23 @@ mod group_tests {
 
     fn make_series(n: u64) -> SeriesSpec {
         SeriesSpec::new(NodeId::from_raw(n))
+    }
+
+    /// #358: choosing the right axis shows it (else the series would be drawn
+    /// on the left scale); going back to the left hides nothing.
+    #[test]
+    fn set_series_axis_right_shows_the_right_axis_and_left_hides_nothing() {
+        let mut panel = PanelSpec::default();
+        panel.series.push(make_series(1));
+        panel.right.visible = false;
+        panel.set_series_axis(0, SeriesAxis::Right);
+        assert_eq!(panel.series[0].axis, SeriesAxis::Right);
+        assert!(panel.right.visible);
+        panel.set_series_axis(0, SeriesAxis::Left);
+        assert_eq!(panel.series[0].axis, SeriesAxis::Left);
+        assert!(panel.right.visible);
+        // Out of range: nothing happens.
+        panel.set_series_axis(9, SeriesAxis::Right);
     }
 
     /// #257: `remove_series` removes exactly the series of rank `index`, without

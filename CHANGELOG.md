@@ -24,6 +24,12 @@ without a message, see `docs/persistence.md`).
 
 ## [Unreleased]
 
+### Added
+
+- Series Properties (#358): a **Y axis: Left / Right** field attaches a series to
+  the right axis of its layer (Right shows the axis; "Whole group" copies it to
+  the members). It is grayed out on a layer drawn on top.
+
 ### Fixed
 
 - Peak Decomposition window (#384): the preview no longer overflows the window
@@ -33,6 +39,9 @@ without a message, see `docs/persistence.md`).
 
 ### Changed
 
+- The axes are named **Bottom / Top / Left / Right** everywhere in the interface
+  (Bas / Haut / Gauche / Droite in French), instead of "X (bottom)", "Secondary Y
+  (right)"...: axis tabs, context menu, Object Manager (#358).
 - Preferences window (#148): the rubrics (General, Display, Export) are now
   vertical tabs at the left, and Display has the sub-tabs Interface, Object
   Manager and New. Display › Object Manager sets the same lists and
