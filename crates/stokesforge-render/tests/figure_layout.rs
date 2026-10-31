@@ -1108,3 +1108,124 @@ fn the_title_anchor_does_not_move_with_the_stacking() {
     assert!(compose::bring_to_front(&mut spec, 1));
     assert_eq!(drawn(&spec).1.title.expect("title").center, before);
 }
+
+// ---- Total image size (#407) ----
+
+use stokesforge_render::pipeline::{fit_figure_size, FittedFigure, SizeAxis};
+
+fn fit(spec: &PlotSpec, axis: SizeAxis, target: f64) -> Option<FittedFigure> {
+    let probe = mute((1, 1)).into_drawing_area();
+    fit_figure_size(spec, &probe, axis, target).expect("fit")
+}
+
+/// The spec with the fit applied, and what the fit said.
+fn fitted(spec: &PlotSpec, axis: SizeAxis, target: f64) -> (PlotSpec, FittedFigure) {
+    let result = fit(spec, axis, target).expect("a fit");
+    let mut out = spec.clone();
+    result.apply_to(&mut out);
+    (out, result)
+}
+
+/// Frames 300 and 100 wide under a bare grid: the image is the frames plus the
+/// bands, the ratio of the frames is kept. Witness: the bands forgotten (the
+/// image would be 500 minus nothing, 500 - 152 left to the frames is not used).
+#[test]
+fn fitting_the_width_of_a_grid_keeps_the_frame_ratio_and_the_bands() {
+    let spec = framed(grid("", 1, 2), &[300.0, 100.0], &[150.0]);
+    let before = layout_of(&spec);
+    let (out, result) = fitted(&spec, SizeAxis::Width, 500.0);
+    let layout = layout_of(&out);
+    assert_eq!(layout.size.0, 500);
+    assert!(!result.raised);
+    let (w0, w1) = (out.frame_widths[0], out.frame_widths[1]);
+    assert!((w0 / w1 - 3.0).abs() < 1e-9, "ratio 3:1, got {w0} / {w1}");
+    assert_eq!(out.frame_heights, spec.frame_heights);
+    assert_eq!(layout.column_gutters, before.column_gutters, "bands stay");
+}
+
+/// Fixed and an explicit Left: the plan's gutters would miss the reserve and
+/// the override. Witness: the gutters taken from the plans, not the layout.
+#[test]
+fn fitting_a_fixed_figure_with_left_set_lands_on_the_target() {
+    let mut spec = fixed(framed(grid("", 1, 1), &[300.0], &[200.0]));
+    spec.figure_left = Some(150.0);
+    let layout = layout_of(&spec);
+    let (out, _) = fitted(&spec, SizeAxis::Width, 600.0);
+    let after = layout_of(&out);
+    assert_eq!(after.size.0, 600);
+    assert_eq!(after.column_gutters, layout.column_gutters);
+}
+
+/// Below the range the frames stop at the smallest bound and the minimum is
+/// given. Witness: no clamp (frames would go negative or below 36).
+#[test]
+fn a_target_below_the_range_is_raised_to_the_minimum() {
+    let spec = framed(grid("", 1, 2), &[300.0, 100.0], &[150.0]);
+    let bands = layout_of(&spec).size.0 as f64 - 400.0;
+    let result = fit(&spec, SizeAxis::Width, 10.0).expect("a fit");
+    assert!(result.raised);
+    let FittedFrames::Grid { widths, .. } = &result.frames else {
+        panic!("a grid")
+    };
+    assert!((widths[1] - 36.0).abs() < 1e-9, "the smallest frame at 36");
+    assert!((widths[0] - 108.0).abs() < 1e-9, "the ratio is kept");
+    assert!((result.range.0 - (bands + 144.0)).abs() < 1e-9);
+    let high = fit(&spec, SizeAxis::Width, 1e9).expect("a fit");
+    assert!(high.raised);
+    let FittedFrames::Grid { widths, .. } = &high.frames else {
+        panic!("a grid")
+    };
+    assert!((widths[0] - 2000.0).abs() < 1e-9, "the largest at 2000");
+}
+
+use stokesforge_render::pipeline::FittedFrames;
+
+/// Free, three layers: the top-left layer keeps its left and top, the gaps
+/// scale, and the image is the target to the point. Witness: scaling about
+/// the page origin, or the widths alone.
+#[test]
+fn fitting_a_free_graph_scales_about_the_top_left_layer() {
+    let spec = free(
+        "",
+        &[
+            (0, 0, 100.0, 50.0, 200.0, 100.0),
+            (0, 1, 400.0, 50.0, 200.0, 100.0),
+            (1, 0, 100.0, 300.0, 300.0, 100.0),
+        ],
+    );
+    let before = layout_of(&spec);
+    let target = f64::from(before.size.0) * 1.5;
+    let (out, result) = fitted(&spec, SizeAxis::Width, target);
+    assert!(!result.raised);
+    let size = layout_of(&out).size.0;
+    assert!(
+        (f64::from(size) - target).abs() <= 0.5,
+        "got {size}, wanted {target}"
+    );
+    let frame = |i: usize| out.panels[i].sanitized_free_frame();
+    assert_eq!((frame(0).left, frame(0).top), (100.0, 50.0), "anchor");
+    let scale = frame(0).width / 200.0;
+    assert!(scale > 1.0);
+    assert!(
+        (frame(1).left - (100.0 + 300.0 * scale)).abs() < 1e-9,
+        "gap"
+    );
+    assert!((frame(2).width - 300.0 * scale).abs() < 1e-9);
+    assert_eq!(frame(1).height, 100.0, "the height axis is untouched");
+    assert_eq!(frame(2).top, 300.0);
+}
+
+/// The height of a free graph counts the graph title band.
+#[test]
+fn fitting_the_height_of_a_free_graph_counts_the_title_band() {
+    let mut spec = two_cells();
+    spec.title = "T".to_string();
+    let (out, _) = fitted(&spec, SizeAxis::Height, 500.0);
+    assert!((i64::from(layout_of(&out).size.1) - 500).abs() <= 1);
+}
+
+/// A legacy graph has nothing to scale: the caller fixes its frames first.
+#[test]
+fn a_legacy_graph_has_no_figure_to_fit() {
+    assert!(fit(&grid("", 1, 1), SizeAxis::Width, 500.0).is_none());
+}

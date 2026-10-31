@@ -18,13 +18,13 @@ use stokesforge_plot::{
 
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
-use crate::icons::ICON_SIZE;
+use crate::icons::{icon_button, Icon, IconRole, ICON_SIZE};
 use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
 use stokesforge_app_state::frame_sizes::{
     free_fields, set_fixed_in_draft, set_free_field_in_draft, set_offset_in_draft,
-    set_placement_in_draft, set_size_in_draft,
+    set_placement_in_draft, set_size_in_draft, set_total_in_draft, SizeLock, TotalFit,
 };
 use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::quantities;
@@ -34,6 +34,7 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 use stokesforge_core::compose::{FigureOffset, FrameAxis, FreeField};
 use stokesforge_plot::{LayerPlacement, FALLBACK_FRAME};
+use stokesforge_render::pipeline::SizeAxis;
 use stokesforge_render_egui::FigureLayout;
 
 use super::curve_settings::curve_settings_page;
@@ -324,6 +325,7 @@ fn plot_settings_contents(
                             ui,
                             spec,
                             edit.selected_panel,
+                            &mut edit.size_lock,
                             &mut env,
                             layout.as_ref(),
                             unit,
@@ -417,6 +419,7 @@ fn graph_settings_page(
     ui: &mut egui::Ui,
     spec: &mut PlotSpec,
     panel: usize,
+    size_lock: &mut Option<SizeLock>,
     env: &mut PickerEnv,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
@@ -449,7 +452,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, spec, panel, layout, unit, env);
+        commit |= size_section(form, spec, panel, size_lock, layout, unit, env);
         // S-L8 (#405): the figure size has an Auto default ("Grows with the
         // axes"), almost never changed: it lives in the closed Advanced block.
         commit |= form
@@ -522,12 +525,13 @@ fn size_section(
     form: &mut Form<'_>,
     spec: &mut PlotSpec,
     panel: usize,
+    size_lock: &mut Option<SizeLock>,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
 ) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
-        return free_size_section(form, spec, panel, layout, unit, env);
+        return free_size_section(form, spec, panel, size_lock, layout, unit, env);
     }
     // What each frame is drawn with: the stored size, else the legacy one the
     // last painted figure laid out (its `frame_widths` are the frames a legacy
@@ -600,16 +604,176 @@ fn size_section(
         || (frames.0.iter().sum(), frames.1.iter().sum()),
         |layout| layout.size_with_frames(&frames.0, &frames.1),
     );
-    form.row(tr!("plot-size-total", unit = symbol), |ui| {
-        ui.label(tr!(
-            "plot-size-total-value",
-            width = format_value(unit.from_points(total_width.round()), unit.decimals()),
-            height = format_value(unit.from_points(total_height.round()), unit.decimals())
-        ));
-        false
-    });
+    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-note"));
     commit
+}
+
+/// General › Size › Graph size (#407): the total width and height of the image,
+/// two fields in the unit of the Preferences and the lock beside them. Typing
+/// one resizes every plot area in proportion ([`set_total_in_draft`]) in the
+/// draft, so the frame fields above follow live and the value is one step of
+/// undo. A value outside what the axes allow is brought back to the nearest end,
+/// orange, with a bubble that says why; with the lock closed the other field
+/// follows at the ratio the image had when the lock was closed.
+///
+/// `image` is the size of the image as laid out now (points): it is where the
+/// lock re-captures its ratio when anything else changed the image
+/// ([`SizeLock::follow`]).
+fn total_row(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    size_lock: &mut Option<SizeLock>,
+    image: (f64, f64),
+    unit: LengthUnit,
+) -> bool {
+    if let Some(lock) = size_lock.as_mut() {
+        lock.follow(image);
+    }
+    let quantity = quantities::figure_total(unit, 0.0, stokesforge_plot::MAX_FIGURE_EXTENT);
+    form.row(tr!("plot-size-total", unit = unit.symbol()), |ui| {
+        let mut commit = false;
+        let fields = [(SizeAxis::Width, image.0), (SizeAxis::Height, image.1)];
+        for (index, (axis, points)) in fields.into_iter().enumerate() {
+            if index == 1 {
+                ui.label(tr!("plot-size-total-by"));
+            }
+            let mut shown = round_to_unit(unit.from_points(points), unit);
+            let response = number_field(ui, ("graph_total", index), &mut shown, &quantity);
+            if response.changed {
+                commit |= type_total(ui, spec, size_lock, axis, unit.to_points(shown), unit);
+                ui.ctx().request_repaint();
+            }
+        }
+        let (icon, tooltip) = if size_lock.is_some() {
+            (Icon::LockClosed, tr!("plot-size-lock-closed"))
+        } else {
+            (Icon::LockOpen, tr!("plot-size-lock-open"))
+        };
+        if icon_button(ui, icon, IconRole::Neutral, tooltip).clicked() {
+            *size_lock = match size_lock {
+                Some(_) => None,
+                None => SizeLock::close(image),
+            };
+        }
+        commit
+    })
+}
+
+/// A total typed along `axis`, in points: fits the draft, tells the lock, and
+/// flags the field(s) the value was brought back in.
+fn type_total(
+    ui: &egui::Ui,
+    spec: &mut PlotSpec,
+    size_lock: &mut Option<SizeLock>,
+    axis: SizeAxis,
+    target: f64,
+    unit: LengthUnit,
+) -> bool {
+    let before = spec.clone();
+    let ratio = size_lock.map(|lock| lock.ratio);
+    let Some(fit) = set_total_in_draft(spec, axis, target, ratio) else {
+        return false;
+    };
+    if let Some(lock) = size_lock.as_mut() {
+        lock.adopt_next();
+    }
+    let typed = axis as usize;
+    // A value brought back is brought back to the end **as the field shows
+    // it** (the minimum rounded up, the maximum rounded down, in the unit's
+    // decimals): the field then reads what the bubble says, and typing what it
+    // shows is accepted.
+    let shown_end = |range: (f64, f64), raised: bool| {
+        unit.to_points(if raised {
+            round_up_in_unit(range.0, unit)
+        } else {
+            round_down_in_unit(range.1, unit)
+        })
+    };
+    flag_total(ui, typed, &fit, target, unit);
+    if fit.raised {
+        let raised = target < fit.range.0;
+        set_total_in_draft(spec, axis, shown_end(fit.range, raised), ratio);
+    }
+    if let Some(((low, high), true)) = fit.other {
+        let other_axis = match axis {
+            SizeAxis::Width => SizeAxis::Height,
+            SizeAxis::Height => SizeAxis::Width,
+        };
+        let applied =
+            stokesforge_app_state::frame_sizes::figure_extent(spec).map(
+                |extent| match other_axis {
+                    SizeAxis::Width => extent.0,
+                    SizeAxis::Height => extent.1,
+                },
+            );
+        let below = applied.is_some_and(|size| (size - low).abs() <= (size - high).abs());
+        flag_total_bound(ui, 1 - typed, below, (low, high), unit);
+        set_total_in_draft(spec, other_axis, shown_end((low, high), below), None);
+    }
+    *spec != before
+}
+
+/// Flags the typed field when `fit` brought the value back.
+fn flag_total(ui: &egui::Ui, field: usize, fit: &TotalFit, target: f64, unit: LengthUnit) {
+    // A tolerance: the minimum shown rounded up in the unit must not turn
+    // orange when it is typed back.
+    const EPSILON: f64 = 1e-6;
+    if !fit.raised {
+        return;
+    }
+    if target < fit.range.0 - EPSILON {
+        flag_total_bound(ui, field, true, fit.range, unit);
+    } else if target > fit.range.1 + EPSILON {
+        flag_total_bound(ui, field, false, fit.range, unit);
+    }
+}
+
+fn flag_total_bound(
+    ui: &egui::Ui,
+    field: usize,
+    raised: bool,
+    range: (f64, f64),
+    unit: LengthUnit,
+) {
+    let (id, symbol) = (
+        field_state::field_id(ui, ("graph_total", field)),
+        unit.symbol(),
+    );
+    let message = if raised {
+        tr!(
+            "plot-size-total-raised",
+            minimum = format_value(round_up_in_unit(range.0, unit), unit.decimals()),
+            unit = symbol
+        )
+    } else {
+        tr!(
+            "plot-size-total-lowered",
+            maximum = format_value(round_down_in_unit(range.1, unit), unit.decimals()),
+            unit = symbol
+        )
+    };
+    let now = ui.ctx().input(|input| input.time);
+    field_state::flag(ui.ctx(), id, FieldIssue::Clamped { message }, now);
+}
+
+/// `value` rounded to the decimals the unit shows.
+fn round_to_unit(value: f64, unit: LengthUnit) -> f64 {
+    let scale = 10f64.powi(i32::try_from(unit.decimals()).unwrap_or(0));
+    (value * scale).round() / scale
+}
+
+/// The smallest size, in the unit's decimals, that is not below `points`: the
+/// minimum as shown, so that typing it back is not raised again.
+fn round_up_in_unit(points: f64, unit: LengthUnit) -> f64 {
+    let scale = 10f64.powi(i32::try_from(unit.decimals()).unwrap_or(0));
+    (unit.from_points(points) * scale - 1e-9).ceil() / scale
+}
+
+/// The largest size, in the unit's decimals, that is not above `points`.
+fn round_down_in_unit(points: f64, unit: LengthUnit) -> f64 {
+    let scale = 10f64.powi(i32::try_from(unit.decimals()).unwrap_or(0));
+    (unit.from_points(points) * scale + 1e-9).floor() / scale
 }
 
 /// General › Size › Layer placement (#398): Regular grid or Free. Switching
@@ -636,6 +800,7 @@ fn free_size_section(
     form: &mut Form<'_>,
     spec: &mut PlotSpec,
     panel: usize,
+    size_lock: &mut Option<SizeLock>,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
     env: &mut PickerEnv,
@@ -708,15 +873,11 @@ fn free_size_section(
         stokesforge_core::compose::set_layer_background(spec, panel, &background);
     }
     commit |= ended;
-    let (total_width, total_height) = (f64::from(layout.size.0), f64::from(layout.size.1));
-    form.row(tr!("plot-size-total", unit = symbol), |ui| {
-        ui.label(tr!(
-            "plot-size-total-value",
-            width = format_value(unit.from_points(total_width), unit.decimals()),
-            height = format_value(unit.from_points(total_height), unit.decimals())
-        ));
-        false
-    });
+    // The extent as frames and bands add up, not the whole-point size: a total
+    // typed and reached reads back as typed (#407).
+    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
+        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
+    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-free-note"));
     commit
 }
@@ -1798,7 +1959,7 @@ mod tests {
     use stokesforge_session::Session;
 
     use super::{
-        column_metadata_window, form, formula_field, formula_help, formula_memo_rows,
+        column_metadata_window, form, format_value, formula_field, formula_help, formula_memo_rows,
         legend_position_label, line_style_label, plot_settings_window, plot_type_label,
         symbol_shape_label, theme_editor, TickDirection, FORMULA_HELP_HIDDEN,
     };
@@ -2539,7 +2700,8 @@ mod tests {
             tr!("plot-size-total", unit = "cm"),
             "13.8289".to_owned(),
             "10.0189".to_owned(),
-            "16.93 × 12.7".to_owned(),
+            "16.93".to_owned(),
+            "12.7".to_owned(),
         ] {
             assert!(is_painted(&painted, &label), "{label:?} not painted");
         }
@@ -2575,6 +2737,295 @@ mod tests {
         );
     }
 
+    // -- Graph size: the total width and height (#407) ---------------------
+
+    /// The size of the image of `spec` as the Graph size fields read it.
+    fn image_size(spec: &PlotSpec) -> (f64, f64) {
+        let size = stokesforge_app_state::frame_sizes::figure_layout(spec)
+            .expect("layout")
+            .size;
+        (f64::from(size.0), f64::from(size.1))
+    }
+
+    /// What a Graph size field shows for `points`, in centimetres.
+    fn total_text(points: f64) -> String {
+        let unit = stokesforge_app_state::length_unit::LengthUnit::Cm;
+        format_value(
+            super::round_to_unit(unit.from_points(points), unit),
+            unit.decimals(),
+        )
+    }
+
+    /// A graph with one 392 x 284 pt plot area: a 480 x 360 pt image.
+    fn sized_harness() -> Harness {
+        harness(|spec| {
+            spec.frame_widths = vec![392.0];
+            spec.frame_heights = vec![284.0];
+        })
+    }
+
+    /// The smallest width the axes allow, from the fit itself.
+    fn minimum_width(spec: &PlotSpec) -> f64 {
+        let mut probe = spec.clone();
+        stokesforge_app_state::frame_sizes::set_total_in_draft(
+            &mut probe,
+            super::SizeAxis::Width,
+            1.0,
+            None,
+        )
+        .expect("a fit")
+        .range
+        .0
+    }
+
+    /// Clicks the lock beside the Graph size fields (the icon on their row).
+    fn click_lock(context: &egui::Context, harness: &mut Harness) {
+        egui_extras::install_image_loaders(context);
+        let width = total_text(480.0);
+        for _ in 0..8 {
+            paint_window(context, &mut harness.state, Vec::new());
+        }
+        let row = text_exact(
+            &paint_window(context, &mut harness.state, Vec::new()),
+            &width,
+        )
+        .center
+        .y;
+        let output = image(context, Vec::new(), |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        let lock = super::super::window_chrome::tests::find_icon_centers(&output)
+            .into_iter()
+            .rfind(|center| (center.y - row).abs() < 8.0)
+            .expect("the lock icon on the Graph size row");
+        // The test window is narrow: the icon is half clipped, press its visible part.
+        let lock = egui::pos2(lock.x - 4.0, lock.y);
+        click(context, lock, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut harness.state)
+        });
+        paint_window(context, &mut harness.state, Vec::new());
+    }
+
+    /// #407: a width typed in Graph size resizes the plot areas in the same
+    /// draft (the frame field follows) and is one step of undo. Witness: two
+    /// commits per typed value (a second Ctrl+Z needed), or a frame field that
+    /// keeps its old value.
+    #[test]
+    fn typing_a_graph_width_resizes_the_plot_areas_in_one_undo_step() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        let original = harness.model();
+        type_into(&context, &mut harness, &total_text(480.0), "20");
+        let model = harness.model();
+        let (width, height) = image_size(&model);
+        assert!((width - 566.929).abs() <= 1.0, "20 cm, got {width}");
+        assert_eq!(height, 360.0, "the height is not linked");
+        assert!(model.frame_widths[0] > 392.0);
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(
+            is_painted(&painted, &cm(model.frame_widths[0])),
+            "the plot area field follows"
+        );
+        harness.state.close_plot_settings();
+        harness.state.dispatch(Action::Undo);
+        assert_eq!(harness.model(), original, "one undo step");
+    }
+
+    /// #407: a width below what the axes need is brought back to that minimum
+    /// and the field says why; the minimum, shown rounded up, typed back is
+    /// accepted without a bubble. Witness: the plain `field-clamped-min`
+    /// bubble, or a minimum rounded down (orange on its own value).
+    #[test]
+    fn a_graph_width_below_the_minimum_is_raised_with_its_reason() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        let minimum = minimum_width(&harness.model());
+        let unit = stokesforge_app_state::length_unit::LengthUnit::Cm;
+        let shown_minimum = format_value(super::round_up_in_unit(minimum, unit), unit.decimals());
+        let reason = tr!(
+            "plot-size-total-raised",
+            minimum = shown_minimum.clone(),
+            unit = "cm"
+        );
+        type_into(&context, &mut harness, &total_text(480.0), "0.5");
+        let raised = image_size(&harness.model()).0;
+        assert!((raised - minimum).abs() <= 1.5, "{raised} vs {minimum}");
+        // The field reads the minimum the bubble names, not the nearer rounding.
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(
+            is_painted(&painted, &shown_minimum),
+            "field shows {shown_minimum}: {painted:?}"
+        );
+        let hovered = hover_label(&context, &mut harness.state, &shown_minimum);
+        assert!(
+            is_painted(&hovered, &reason),
+            "{reason:?} not in {hovered:?}"
+        );
+
+        // The minimum as displayed, typed from a wider graph: no bubble.
+        let mut again = sized_harness();
+        again.open(PlotSettingsTab::Graph, None);
+        type_into(&context, &mut again, &total_text(480.0), &shown_minimum);
+        let hovered = hover_label(&context, &mut again.state, &shown_minimum);
+        assert!(!is_painted(&hovered, &reason), "typed back: no bubble");
+    }
+
+    /// #407: a size typed and reached reads back as typed (the field shows the
+    /// extent frames and bands add up to, not the whole-point size), with the
+    /// lock open or closed and in a free graph. Witness: showing the rounded
+    /// `size` (10 cm reads 9.98).
+    #[test]
+    fn a_total_typed_and_reached_reads_back_as_typed() {
+        let context = test_support::context();
+        for locked in [false, true] {
+            let mut harness = sized_harness();
+            harness.open(PlotSettingsTab::Graph, None);
+            if locked {
+                click_lock(&context, &mut harness);
+            }
+            type_into(&context, &mut harness, &total_text(480.0), "10");
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert!(is_painted(&painted, "10"), "locked={locked}: {painted:?}");
+        }
+        let mut free = harness(|spec| two_layers(spec, true));
+        free.open(PlotSettingsTab::Graph, None);
+        let (width, _) = image_size(&free.model());
+        type_into(&context, &mut free, &total_text(width), "25");
+        let painted = paint_window(&context, &mut free.state, Vec::new());
+        assert!(is_painted(&painted, "25"), "free: {painted:?}");
+        free.state.close_plot_settings();
+    }
+
+    /// #407: the lock is window state: closing it changes no spec, and a
+    /// reopened window is unlocked. Witness: the lock stored in the spec or
+    /// kept between openings.
+    #[test]
+    fn the_lock_changes_no_spec_and_is_open_again_in_a_new_window() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        let original = harness.model();
+        assert!(
+            harness.state.plot_edit().is_none()
+                || harness.state.plot_edit().unwrap().size_lock.is_none()
+        );
+        click_lock(&context, &mut harness);
+        let lock = harness.state.plot_edit().unwrap().size_lock;
+        assert!(
+            lock.is_some_and(|lock| (lock.ratio - 0.75).abs() < 1e-9),
+            "{lock:?}"
+        );
+        assert_eq!(harness.draft(), original);
+        assert_eq!(harness.model(), original);
+        harness.state.close_plot_settings();
+        harness.open(PlotSettingsTab::Graph, None);
+        paint_window(&context, &mut harness.state, Vec::new());
+        assert!(harness.state.plot_edit().unwrap().size_lock.is_none());
+        click_lock(&context, &mut harness);
+        click_lock(&context, &mut harness);
+        assert!(
+            harness.state.plot_edit().unwrap().size_lock.is_none(),
+            "open again"
+        );
+        assert_eq!(harness.model(), original);
+    }
+
+    /// #407: with the lock closed, a width typed gives the height the ratio the
+    /// image had when the lock was closed. Witness: the ratio ignored (the
+    /// height stays 360).
+    #[test]
+    fn with_the_lock_closed_the_height_follows_the_width() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        click_lock(&context, &mut harness);
+        type_into(&context, &mut harness, &total_text(480.0), "20");
+        let (width, height) = image_size(&harness.model());
+        assert!((width - 566.929).abs() <= 1.0);
+        assert!((height - width * 0.75).abs() <= 1.0, "{width} x {height}");
+    }
+
+    /// #407: a frame field changed while the lock is closed takes the ratio
+    /// again from the image. Witness: the ratio not re-captured (the height
+    /// follows the old 0.75).
+    #[test]
+    fn a_frame_field_changed_under_the_lock_takes_the_ratio_again() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        click_lock(&context, &mut harness);
+        type_into(&context, &mut harness, "10.0189", "5");
+        let (w0, h0) = image_size(&harness.model());
+        let ratio = h0 / w0;
+        assert!(
+            (ratio - 0.75).abs() > 0.1,
+            "the frame field changed the image"
+        );
+        type_into(&context, &mut harness, &total_text(w0), "20");
+        let (width, height) = image_size(&harness.model());
+        assert!((width - 566.929).abs() <= 1.0);
+        assert!(
+            (height - width * ratio).abs() <= 1.5,
+            "{width} x {height}, new ratio {ratio}"
+        );
+    }
+
+    /// #407: a raise under the lock does not move the ratio: the next value
+    /// typed keeps the captured one. Witness: the ratio taken at each typing
+    /// (the height follows the raised image's ratio).
+    #[test]
+    fn a_raise_under_the_lock_does_not_make_the_ratio_drift() {
+        let context = test_support::context();
+        let mut harness = sized_harness();
+        harness.open(PlotSettingsTab::Graph, None);
+        click_lock(&context, &mut harness);
+        type_into(&context, &mut harness, &total_text(480.0), "0.5");
+        let (w1, h1) = image_size(&harness.model());
+        assert!(
+            (h1 / w1 - 0.75).abs() > 0.02,
+            "the raise must bend the ratio for this test to prove anything: {w1} x {h1}"
+        );
+        let shown = total_text(
+            stokesforge_app_state::frame_sizes::figure_extent(&harness.model())
+                .unwrap()
+                .0,
+        );
+        type_into(&context, &mut harness, &shown, "20");
+        let (width, height) = image_size(&harness.model());
+        assert!((width - 566.929).abs() <= 1.0);
+        assert!((height - width * 0.75).abs() <= 1.5, "{width} x {height}");
+    }
+
+    /// #407: in a free graph the plot areas and their positions scale together
+    /// about the corner of the layers. Witness: the sizes scaled but not the
+    /// positions (the gap between the layers unchanged).
+    #[test]
+    fn typing_a_graph_width_scales_a_free_graph() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| two_layers(spec, true));
+        harness.open(PlotSettingsTab::Graph, None);
+        let before = harness.model();
+        let frame = |spec: &PlotSpec, index: usize| spec.panels[index].free_frame.unwrap();
+        let (width, _) = image_size(&before);
+        type_into(&context, &mut harness, &total_text(width), "30");
+        let after = harness.model();
+        let (new_width, _) = image_size(&after);
+        assert!((new_width - 850.394).abs() <= 1.0, "30 cm, got {new_width}");
+        let scale = frame(&after, 0).width / frame(&before, 0).width;
+        assert!(scale > 1.0);
+        let second = frame(&after, 1).width / frame(&before, 1).width;
+        assert!((scale - second).abs() < 1e-6, "same scale for each layer");
+        let gap = |spec: &PlotSpec| frame(spec, 1).left - frame(spec, 0).left;
+        assert!(
+            (gap(&after) / gap(&before) - scale).abs() < 1e-6,
+            "positions scale"
+        );
+        assert_eq!(frame(&after, 0).height, frame(&before, 0).height);
+        harness.state.close_plot_settings();
+    }
+
     /// #405: the figure size lives in the Advanced block of General, closed by
     /// default (S-L8); opening it changes nothing, and choosing Fixed commits
     /// the draft in one entry, a graph from an old file being given its frames
@@ -2599,7 +3050,8 @@ mod tests {
         click(&context, pos, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), &mut harness.state)
         });
-        let painted = scroll_down(&context, &mut harness.state, &tr!("plot-size"));
+        // The page is taller than the window: "Size" is already scrolled out.
+        let painted = scroll_down(&context, &mut harness.state, &tr!("common-advanced"));
         assert!(is_painted(&painted, &tr!("plot-figure-size")));
         assert!(is_painted(&painted, &tr!("plot-figure-size-grows")));
         assert_eq!(harness.model(), harness.draft(), "opening changes nothing");

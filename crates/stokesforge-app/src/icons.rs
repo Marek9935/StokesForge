@@ -96,6 +96,10 @@ pub enum Icon {
     Stale,
     /// A column corrected in place (#212), distinct from a stale computation.
     ModifiedData,
+    /// The lock beside the total width and height of a graph, closed (#407).
+    LockClosed,
+    /// The same lock, open.
+    LockOpen,
     /// Barre Edit (#238).
     Undo,
     Redo,
@@ -325,6 +329,16 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::ModifiedData,
         IconRole::Neutral,
         svg!("pencil-simple.neutral.svg"),
+    ),
+    (
+        Icon::LockClosed,
+        IconRole::Neutral,
+        svg!("lock-simple.neutral.svg"),
+    ),
+    (
+        Icon::LockOpen,
+        IconRole::Neutral,
+        svg!("lock-simple-open.neutral.svg"),
     ),
     (
         Icon::Undo,

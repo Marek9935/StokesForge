@@ -352,10 +352,11 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `plot_width`, `plot_height` | Size of the plot area of the column (width) and of the row (height) of `panel`, in `unit`. From 1.27 cm to 70.56 cm (36 to 2000 pt). |
 | `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, in `unit`, from 0 to 70.56 cm. `None` means automatic. |
 | `fixed_size` | `True` or `False`: the Fixed figure size of Graph Properties |
+| `figure_width`, `figure_height` | Total size of the image, in `unit`. The plot areas follow in proportion; the axes, margins and titles keep their size. It is applied last in the call. A value outside what the graph allows is refused with the allowed range. Not combined with `plot_width` or `plot_height` in the same call. |
 | `layer_placement` | `"grid"` or `"free"`: the Layer placement of Graph Properties. It is applied first in the call. |
 | `layer_left`, `layer_top` | Free placement only: position of the plot area of `panel` from the page origin, in `unit`. May be negative, up to 352.78 cm either side. |
 
-The size options are numbers in `unit`: `"cm"` (the default), `"mm"`, `"pt"` or `"in"`. A script never uses the unit chosen in Preferences, so it gives the same figure on every computer. A value outside the range is refused, not corrected. The size of the whole image cannot be set: it follows the plot areas and the axes, titles and legend around them.
+The size options are numbers in `unit`: `"cm"` (the default), `"mm"`, `"pt"` or `"in"`. A script never uses the unit chosen in Preferences, so it gives the same figure on every computer. A value outside the range is refused, not corrected. The size of the whole image is set with `figure_width` and `figure_height`; the plot areas then change in proportion.
 
 ```python
 pyst.set_graph(g, title="Absorption spectrum", x_from=300, x_to=800,
@@ -364,6 +365,9 @@ pyst.set_graph(g, title="Absorption spectrum", x_from=300, x_to=800,
 # A plot area of 8 cm by 5 cm, then 100 mm wide.
 pyst.set_graph(g, plot_width=8, plot_height=5)
 pyst.set_graph(g, plot_width=100, unit="mm")
+
+# The whole image 8.5 cm wide, for a one-column journal figure.
+pyst.set_graph(g, figure_width=8.5)
 
 # Free placement: nothing moves when you switch. Then move the layer at
 # row 0, column 1 two centimetres to the left of the page origin.

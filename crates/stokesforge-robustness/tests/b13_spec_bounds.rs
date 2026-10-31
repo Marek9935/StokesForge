@@ -553,3 +553,74 @@ fn b13_hostile_free_frames_cross_the_disk_and_lay_out_bounded() {
     );
     assert!(layout.size.0 > 0 && layout.size.1 > 0);
 }
+
+/// #407: a hostile target size (NaN, infinite, negative, absurd) given to the
+/// figure fit never panics and never writes a damaged frame: it comes back
+/// `None`, or a range with every frame finite and within bounds. The spec is
+/// never touched by the fit itself. Witness: without the `is_finite` filter a
+/// NaN scale damages every frame.
+#[test]
+fn b13_a_hostile_total_size_is_refused_or_bounded() {
+    use stokesforge_plot::{FreeFrame, LayerPlacement, MAX_FRAME_SIZE, MIN_FRAME_SIZE};
+    use stokesforge_render::pipeline::{FittedFrames, SizeAxis};
+    let grid = PlotSpec {
+        frame_widths: vec![300.0, 100.0],
+        frame_heights: vec![200.0],
+        ..PlotSpec::empty("T")
+            .with_panels(Panels::new(vec![PanelSpec::at(0, 0), PanelSpec::at(0, 1)]))
+    };
+    let frame = |left: f64| PanelSpec {
+        free_frame: Some(FreeFrame {
+            left,
+            top: 40.0,
+            width: 200.0,
+            height: 150.0,
+            stack: 0,
+        }),
+        ..PanelSpec::at(0, if left > 0.0 { 1 } else { 0 })
+    };
+    let free = PlotSpec {
+        layer_placement: LayerPlacement::Free,
+        ..PlotSpec::empty("T").with_panels(Panels::new(vec![frame(0.0), frame(300.0)]))
+    };
+    let measurer = stokesforge_render::TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    for spec in [grid, free] {
+        let before = spec.clone();
+        for target in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1e300] {
+            for axis in [SizeAxis::Width, SizeAxis::Height] {
+                let fitted = stokesforge_render_svg::fit_figure_size(
+                    &spec, &measurer, &choice, axis, target,
+                )
+                .expect("measured");
+                assert_eq!(spec, before, "the fit does not write");
+                let Some(fitted) = fitted else {
+                    assert!(!target.is_finite(), "{target} should fit");
+                    continue;
+                };
+                assert!(fitted.range.0.is_finite() && fitted.range.0 <= fitted.range.1);
+                assert!(fitted.raised, "{target} is outside the range");
+                let frames: Vec<f64> = match &fitted.frames {
+                    FittedFrames::Grid { widths, heights } => {
+                        widths.iter().chain(heights).copied().collect()
+                    }
+                    FittedFrames::Free(cells) => cells
+                        .iter()
+                        .flat_map(|(_, f)| [f.left, f.top, f.width, f.height])
+                        .collect(),
+                };
+                assert!(frames.iter().all(|v| v.is_finite()), "{target}: {frames:?}");
+                let mut applied = spec.clone();
+                fitted.apply_to(&mut applied);
+                let layout = stokesforge_render_svg::figure_layout(&applied, &measurer, &choice)
+                    .expect("a layout");
+                assert!(layout.size.0 > 0 && layout.size.1 > 0);
+                if let FittedFrames::Grid { widths, .. } = &fitted.frames {
+                    assert!(widths
+                        .iter()
+                        .all(|w| (MIN_FRAME_SIZE..=MAX_FRAME_SIZE).contains(w)));
+                }
+            }
+        }
+    }
+}

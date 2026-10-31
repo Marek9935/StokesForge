@@ -1088,6 +1088,35 @@ cell (overlay lookup, `pyst` `panel=`, what an older version draws as a grid).
   transitive overlap of the vertical extents, left to right inside a row, then
   the largest frame per column and row.
 
+### Setting the total size (#407)
+
+`pipeline::fit_figure_size(spec, probe, axis, target_pt)` (wrapper
+`stokesforge_render_svg::fit_figure_size`) gives the frames that make the image
+`target_pt` wide or high, with every frame **keeping its proportion**: the axis
+bands, margins, titles, Fixed reserve and Left / Top stay as
+`figure_layout` gives them.
+
+- **Grid.** One `figure_layout`, then arithmetic: width `s = (T - sum of column
+  gutters) / sum of frame widths`; height the same with the row gutters plus the
+  title band. The horizontal bands are constants (no iteration; tick density,
+  #397, changes none). The graph and panel title bands are measured at the
+  figure width, so **fit the width, then call again for the height**
+  (`app-state::set_total_in_draft` and `pyst` do).
+- **Free.** Positions and sizes scale about the top-left corner of the frames'
+  bounding box (so the top-left layer keeps its numbers), the bands staying. The
+  size of the bounding box is piecewise linear and not necessarily monotone in
+  the scale: it is sampled, the first bracket of the target is bisected, else
+  the nearest sample is kept.
+- **Range.** The smallest size is reached when the smallest frame hits
+  `MIN_FRAME_SIZE`, the largest when the largest hits `MAX_FRAME_SIZE`, the sum
+  of the frames hits `MAX_FIGURE_EXTENT` or a free position reaches
+  `MAX_FIGURE_EXTENT / 2`. A target outside comes back at the nearest end with
+  `FittedFigure::raised`; the caller shows it (Graph Properties) or refuses with
+  the range (`pyst`, never clamped). A non-finite target, or a legacy graph (its
+  frames are fixed first), gives `None`. The image is whole points: the size
+  lands within half a point. Tests: `render/tests/figure_layout.rs` ("Total
+  image size"), `render-svg/tests/figure_size.rs`, robustness `b13`.
+
 ### Enlarging a graph without blurring the text
 
 `GraphView::paint_scaled` lays the figure out at its own size (`GraphView::figure_layout`, #394) then scales it to

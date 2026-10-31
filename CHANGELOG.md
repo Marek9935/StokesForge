@@ -26,6 +26,16 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Set the total size of a graph (#407): in Graph Properties > General > Size,
+  **Graph size** is now two fields, width and height, in the unit of the
+  Preferences. Typing one resizes every plot area in proportion (the axes,
+  margins and title keep their size; in Free placement the positions scale too),
+  the plot area fields follow, and one typed value is one **Undo** step. A size
+  the axes cannot fit is brought back to the nearest possible one (orange field,
+  bubble with the minimum). A padlock beside the fields keeps the height / width
+  ratio of the image taken when it is closed; it is window state, never stored
+  in the file. `pyst`: `figure_width` / `figure_height` in `set_graph` (API 0.4).
+
 - Free placement of graph layers (#398), first batch: Graph Properties >
   General > Size > **Layer placement** switches between **Regular grid** and
   **Free**. In Free each layer has its own plot area, set with **Position, left**,
@@ -82,6 +92,13 @@ without a message, see `docs/persistence.md`).
   by default, never the Preferences unit); values out of range are refused. The
   new `pyst.graph_size(graph, unit="cm")` reads the image size, the plot areas,
   Left / Top and Fixed. `pyst.__api_version__` is now `0.2`.
+
+- `pyst` total image size (#407): `pyst.set_graph` gains `figure_width` and
+  `figure_height` (the whole image, in `unit`): the plot areas follow in
+  proportion, the axes, margins and titles keeping their size; a value out of
+  the range the graph allows is refused with that range. They cannot be
+  combined with `plot_width` / `plot_height` in one call.
+  `pyst.__api_version__` is now `0.4`.
 
 - `pyst` free placement (#411): `pyst.set_graph` gains `layer_placement="grid"|"free"`
   (applied first in the call), `layer_left` and `layer_top` (position of the layer of

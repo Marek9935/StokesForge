@@ -238,7 +238,9 @@ fn number_field_core<T: Number>(
     let edited = field_state::edit_text_with_arrow(
         ui,
         id_salt,
-        if quantity.is_compact() {
+        if quantity.short {
+            FIELD_WIDTH
+        } else if quantity.is_compact() {
             crate::theme::FIELD_WIDTH_DIGITS
         } else if quantity.is_compact_signed() {
             crate::theme::FIELD_WIDTH_SIGNED_DIGITS

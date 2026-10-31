@@ -818,3 +818,138 @@ fn graph_size_lists_the_free_layers_in_stacking_order() {
     );
     assert_eq!(out.stdout.trim(), "grid []");
 }
+
+// --- Total image size (#407) ------------------------------------------------------------
+
+/// The image is whole points: the size lands within half a point.
+fn within_half_point(value: u32, expected_points: f64) {
+    assert!(
+        (f64::from(value) - expected_points).abs() <= 0.5 + 1e-9,
+        "{value} pt != {expected_points} pt"
+    );
+}
+
+#[test]
+fn figure_width_sets_the_image_and_keeps_the_ratio_of_the_frames_in_one_entry() {
+    let b = grid_1x2();
+    let before = graph_spec(&b);
+    let ratio = before.frame_widths[0] / before.frame_widths[1];
+    let history = history_len(&b);
+    run(&b, "pyst.set_graph(pyst.resolve('[G]'), figure_width=17)");
+    let after = graph_spec(&b);
+    within_half_point(layout_of(&after).size.0, 17.0 * CM);
+    near(after.frame_widths[0] / after.frame_widths[1], ratio);
+    assert_eq!(after.frame_heights, before.frame_heights);
+    assert_eq!(history_len(&b), history + 1);
+    b.session.undo().unwrap();
+    assert_eq!(graph_spec(&b).frame_widths, before.frame_widths);
+}
+
+#[test]
+fn figure_width_and_height_follow_the_unit_keyword() {
+    let b = grid_1x2();
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), figure_width=170, figure_height=100, unit='mm')",
+    );
+    let size = layout_of(&graph_spec(&b)).size;
+    within_half_point(size.0, 17.0 * CM);
+    within_half_point(size.1, 10.0 * CM);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), figure_width=400, unit='pt')",
+    );
+    within_half_point(layout_of(&graph_spec(&b)).size.0, 400.0);
+}
+
+/// The total is applied last: the title set in the same call changes the
+/// height bands, and the image still has the height asked for. Witness: the
+/// figure applied before `title=`.
+#[test]
+fn the_total_size_is_applied_after_the_title_of_the_same_call() {
+    let b = grid_1x2();
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), title='A title', title_visible=True, figure_height=9)",
+    );
+    let spec = graph_spec(&b);
+    let layout = layout_of(&spec);
+    assert!(layout.title_band > 0);
+    within_half_point(layout.size.1, 9.0 * CM);
+}
+
+#[test]
+fn figure_width_on_a_legacy_graph_fixes_the_frames_in_the_same_entry() {
+    let b = legacy_graph();
+    let history = history_len(&b);
+    run(&b, "pyst.set_graph(pyst.resolve('[G]'), figure_width=12)");
+    let spec = graph_spec(&b);
+    assert!(!spec.frame_widths.is_empty() && !spec.frame_heights.is_empty());
+    within_half_point(layout_of(&spec).size.0, 12.0 * CM);
+    assert_eq!(history_len(&b), history + 1);
+}
+
+#[test]
+fn figure_width_on_a_free_graph_scales_positions_and_frames_about_the_first_layer() {
+    let b = free_1x2();
+    let before = graph_spec(&b);
+    run(&b, "pyst.set_graph(pyst.resolve('[G]'), figure_width=20)");
+    let after = graph_spec(&b);
+    within_half_point(layout_of(&after).size.0, 20.0 * CM);
+    let (a0, a1) = (free_frame(&before, 0), free_frame(&before, 1));
+    let (b0, b1) = (free_frame(&after, 0), free_frame(&after, 1));
+    near(b0.left, a0.left);
+    near(b0.top, a0.top);
+    let scale = b0.width / a0.width;
+    near(b1.width, a1.width * scale);
+    near(b1.left - b0.left, (a1.left - a0.left) * scale);
+    near(b1.height, a1.height);
+}
+
+/// Out of the range the graph allows: refused with that range, nothing
+/// written (never brought back). Witness: a silent clamp.
+#[test]
+fn a_total_size_out_of_range_is_refused_with_the_range_and_writes_nothing() {
+    let b = grid_1x2();
+    let history = b.session.snapshot().unwrap().history;
+    let spec = graph_spec(&b);
+    let message = refused(&b, "pyst.set_graph(g, title='X', figure_width=1)");
+    assert!(
+        message.starts_with("figure_width must be between ") && message.ends_with(" cm"),
+        "{message}"
+    );
+    refused(&b, "pyst.set_graph(g, figure_height=1000)");
+    refused(&b, "pyst.set_graph(g, figure_width=float('nan'))");
+    assert_eq!(graph_spec(&b), spec);
+    assert_eq!(b.session.snapshot().unwrap().history, history);
+    // The range announced is accepted: the smallest, rounded up, is.
+    let low: f64 = message
+        .trim_start_matches("figure_width must be between ")
+        .split(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    run(
+        &b,
+        &format!("pyst.set_graph(pyst.resolve('[G]'), figure_width={low})"),
+    );
+}
+
+#[test]
+fn the_total_size_cannot_be_combined_with_a_plot_area_size() {
+    let b = grid_1x2();
+    let spec = graph_spec(&b);
+    for call in [
+        "pyst.set_graph(g, figure_width=17, plot_width=6)",
+        "pyst.set_graph(g, figure_height=10, plot_width=6)",
+        "pyst.set_graph(g, figure_width=17, plot_height=4)",
+    ] {
+        let message = refused(&b, call);
+        assert!(
+            message.contains("figure_width and figure_height"),
+            "{message}"
+        );
+    }
+    assert_eq!(graph_spec(&b), spec);
+}
