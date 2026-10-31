@@ -1242,6 +1242,22 @@ fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
+/// The refusal tint of a header cell (#410): fills the cell **between** its
+/// horizontal grid lines (the lines are centred on the top and bottom edges of
+/// the cell), so a translucent fill never darkens a line.
+fn paint_refusal_tint(ui: &egui::Ui, cell: egui::Rect) {
+    ui.painter().rect_filled(
+        refusal_tint_rect(ui, cell),
+        0.0,
+        crate::theme::field_refused_fill(),
+    );
+}
+
+fn refusal_tint_rect(ui: &egui::Ui, cell: egui::Rect) -> egui::Rect {
+    let line = ui.visuals().widgets.noninteractive.bg_stroke.width;
+    cell.shrink2(egui::vec2(0.0, line))
+}
+
 /// Background of a gutter box of the grid, in three levels — see
 /// [`crate::theme::header_letter_row_fill`]/[`crate::theme::
 /// header_letter_row_touched_fill`]/[`crate::theme::
@@ -1331,8 +1347,7 @@ fn header_field_widget(
             // cell and never crosses its grid lines, unlike a frame. The bubble
             // with the reason stays.
             if refusal.is_some() {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::theme::field_refused_fill());
+                paint_refusal_tint(ui, rect);
             }
             let shown = paint(ui, f32::INFINITY);
             if let Some(message) = refusal.as_deref() {
@@ -1396,18 +1411,24 @@ fn header_field_widget(
                 ui.visuals().selection.bg_fill.linear_multiply(0.35),
             );
         }
+        // The tint goes under the text.
+        let issue = (field == HeaderField::Formula)
+            .then(|| state.formula_issue(column))
+            .flatten();
+        if issue.is_some() {
+            paint_refusal_tint(ui, rect);
+        }
         ui.put(
             rect,
             egui::Label::new(egui::RichText::new(text).weak())
                 .selectable(false)
                 .truncate(),
         );
-        // A formula that reads a deleted column shows `#REF`: red frame and bubble on
-        // its box (#321). The sentence comes from `app-state`.
+        // A formula that reads a deleted column shows `#REF`: tinted cell and bubble
+        // (#321, #410). The sentence comes from `app-state`.
         if field == HeaderField::Formula {
-            if let Some(message) = state.formula_issue(column) {
-                crate::field_state::show_issue(
-                    ui,
+            if let Some(message) = issue {
+                crate::field_state::show_bubble(
                     &response,
                     &crate::field_state::FieldIssue::refused(message),
                 );
@@ -5689,6 +5710,78 @@ mod tests {
             _ => false,
         });
         assert!(!framed, "no red frame in the grid");
+        assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// No line of the grid crosses `tint`: a translucent fill over a line would
+    /// darken it.
+    fn assert_no_grid_line_under(bench: &Bench, tint: egui::Rect) {
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        for painted in shapes {
+            let egui::Shape::LineSegment { points, stroke } = &painted.shape else {
+                continue;
+            };
+            // Grid lines only, not the text cursor.
+            let grid = bench
+                .context
+                .global_style()
+                .visuals
+                .widgets
+                .noninteractive
+                .bg_stroke;
+            if stroke.color != grid.color {
+                continue;
+            }
+            let band = egui::Rect::from_two_pos(points[0], points[1])
+                .expand2(egui::vec2(0.0, stroke.width / 2.0));
+            let band = if points[0].y == points[1].y {
+                band
+            } else {
+                egui::Rect::from_two_pos(points[0], points[1])
+                    .expand2(egui::vec2(stroke.width / 2.0, 0.0))
+            };
+            assert!(
+                !band.intersects(tint),
+                "the tint {tint:?} covers a grid line {points:?}"
+            );
+        }
+    }
+
+    /// #410: a formula whose column was deleted shows `#REF` as a tinted cell
+    /// between the lines, without the red frame.
+    #[test]
+    fn a_formula_that_lost_a_column_tints_its_box_and_draws_no_frame() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let column = bench.columns[2];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "B*2".to_string();
+        bench.state.commit_header_edit();
+        bench.state.select_column(bench.sheet, bench.columns[1]);
+        bench
+            .state
+            .dispatch(Action::DeleteSelectedCells { sheet: bench.sheet });
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.formula_issue(column).is_some(), "#REF expected");
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        let fill = theme::field_refused_fill();
+        let tint = shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                _ => None,
+            })
+            .expect("the tint of the box");
+        let framed = shapes.iter().any(|painted| match &painted.shape {
+            egui::Shape::Rect(rect) => {
+                rect.stroke.color == theme::field_refused_color() && rect.stroke.width > 0.0
+            }
+            _ => false,
+        });
+        assert!(!framed, "no red frame");
+        assert_no_grid_line_under(&bench, tint);
     }
 
     /// The icon is gone as soon as the edit ends: no leftover layer.
