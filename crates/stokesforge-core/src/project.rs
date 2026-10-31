@@ -1557,6 +1557,42 @@ mod tests {
         assert!(destination.tree().formula_has_deleted_reference(pasted));
     }
 
+    /// The sheet a remote reference names is never reassigned either (#403,
+    /// invariant 7): a file saved after the sheet was deleted keeps its number
+    /// in the formula. Mutant: the sheets chained out of `from_tree`'s
+    /// `highest` -> the number serves again.
+    #[test]
+    fn from_tree_does_not_reassign_a_sheet_read_by_a_remote_formula() {
+        let mut project = Project::new("Demo").expect("project");
+        let (sheet1, columns) = sheet_with_columns(&mut project, "Book1", 2);
+        let book = project.tree().parent(sheet1).unwrap().unwrap();
+        // The sheet is the newest identifier of the project, the column it
+        // holds is older (moved into it).
+        let sheet3 = project.add_worksheet(book, Some("Sheet3")).expect("sheet");
+        project.move_node(columns[0], sheet3, 0).expect("move");
+        let formula = project
+            .tree()
+            .formula_from_letters(columns[1], "max(Sheet3!A)")
+            .expect("formula");
+        let mut meta = project
+            .tree()
+            .node(columns[1])
+            .and_then(Node::as_column)
+            .expect("column")
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        project.set_column_meta(columns[1], meta).expect("meta");
+        project.remove(sheet3).expect("remove");
+
+        let reloaded = Project::from_tree(project.tree().clone(), 1);
+        assert!(
+            reloaded.next_id_hint() > sheet3.raw(),
+            "next identifier: {}",
+            reloaded.next_id_hint()
+        );
+    }
+
     /// `next_id_hint` behind: a file saved after the deletion
     /// of a read column keeps its number in the formula, and that number must
     /// never be reassigned. Mutant: the chain of formula identifiers
