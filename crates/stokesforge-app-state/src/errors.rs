@@ -667,6 +667,28 @@ pub mod formula {
             }
             FormulaError::NoPairedX => tr!("error-formula-no-paired-x"),
             FormulaError::NoPoint => tr!("error-formula-no-point"),
+            FormulaError::UnknownSheet(name) => {
+                tr!("error-formula-unknown-sheet", name = name.as_str())
+            }
+            FormulaError::UnknownWorkbook(name) => {
+                tr!("error-formula-unknown-workbook", name = name.as_str())
+            }
+            FormulaError::WorkbookWithoutSheet(name) => {
+                tr!("error-formula-workbook-without-sheet", name = name.as_str())
+            }
+            FormulaError::AmbiguousWorkbook(name) => {
+                tr!("error-formula-ambiguous-workbook", name = name.as_str())
+            }
+            FormulaError::AmbiguousName(name) => {
+                tr!("error-formula-ambiguous-name", name = name.as_str())
+            }
+            FormulaError::UnknownColumnIn { sheet, column } => tr!(
+                "error-formula-unknown-column-in",
+                sheet = sheet.as_str(),
+                column = column.as_str()
+            ),
+            FormulaError::RemoteOutsideColumnFunction => tr!("error-formula-remote-outside"),
+            FormulaError::RemoteXColumn => tr!("error-formula-remote-x"),
         }
     }
 
@@ -707,8 +729,19 @@ pub mod formula {
                 FormulaError::ColumnExpected { name: "max" },
                 FormulaError::NoPairedX,
                 FormulaError::NoPoint,
+                FormulaError::UnknownSheet("Sheet9".into()),
+                FormulaError::UnknownWorkbook("Book9".into()),
+                FormulaError::WorkbookWithoutSheet("Book2".into()),
+                FormulaError::AmbiguousWorkbook("Book2".into()),
+                FormulaError::AmbiguousName("Blanc".into()),
+                FormulaError::UnknownColumnIn {
+                    sheet: "Sheet3".into(),
+                    column: "Z".into(),
+                },
+                FormulaError::RemoteOutsideColumnFunction,
+                FormulaError::RemoteXColumn,
             ];
-            let mut seen = [false; 13];
+            let mut seen = [false; 21];
             let mut suggested = [false; 2];
             for sample in &samples {
                 let index = match sample {
@@ -731,6 +764,14 @@ pub mod formula {
                     FormulaError::ColumnExpected { .. } => 10,
                     FormulaError::NoPairedX => 11,
                     FormulaError::NoPoint => 12,
+                    FormulaError::UnknownSheet(_) => 13,
+                    FormulaError::UnknownWorkbook(_) => 14,
+                    FormulaError::WorkbookWithoutSheet(_) => 15,
+                    FormulaError::AmbiguousWorkbook(_) => 16,
+                    FormulaError::AmbiguousName(_) => 17,
+                    FormulaError::UnknownColumnIn { .. } => 18,
+                    FormulaError::RemoteOutsideColumnFunction => 19,
+                    FormulaError::RemoteXColumn => 20,
                 };
                 seen[index] = true;
             }
@@ -1555,7 +1596,8 @@ pub mod tests_support {
     ];
 
     /// `message` is the catalog sentence of `error`: not empty, without jargon,
-    /// without a final period or exclamation mark, in Sentence case. It may
+    /// without a final period or exclamation mark (a `!` inside is the sheet
+    /// separator of a formula reference, `Sheet1!B`), in Sentence case. It may
     /// coincide with the English `Display` ("X is not a StokesForge file"): what
     /// guarantees that the variant is mapped is the exhaustive `match`.
     ///
@@ -1570,7 +1612,7 @@ pub mod tests_support {
             );
         }
         assert!(
-            !message.ends_with('.') && !message.contains('!'),
+            !message.ends_with('.') && !message.ends_with('!'),
             "final punctuation in {message:?}"
         );
         let first = message.chars().next();

@@ -52,7 +52,7 @@
   {
     "image": "graphs-properties-general.png",
     "page": "guide/graphs.md",
-    "shows": "The Graph Properties window on its General tab for a graph with two layers side by side: title, colors, and the Size section with the plot area width of each column, the plot area height of the row, the distance from the left and top edges of the graph to the first plot area (Left stored, Top Auto) and the size of the graph in centimeters, then the Advanced block opened on Figure size."
+    "shows": "The Graph Properties window on its General tab for a graph with two layers side by side: title, colors, and the Size section with the plot area width of each column, the plot area height of the row, the distance from the left and top edges of the graph to the first plot area (Left stored, Top Auto) and the size of the graph in centimeters, then the Advanced block opened on Figure size. The Size section also shows the Layer placement choice (Regular grid selected)."
   },
   {
     "image": "graphs-properties-axes.png",

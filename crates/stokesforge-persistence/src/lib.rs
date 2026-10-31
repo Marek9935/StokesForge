@@ -628,14 +628,20 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
         // others: bounded at read (invariant 7), otherwise a crafted file
         // would make the allocator start at the edge of `u64`.
         if let schema::KindRecord::Column {
-            formula_parts: Some(parts),
+            formula_parts,
+            formula_remote,
             ..
         } = &kind
         {
-            for part in parts {
+            for part in formula_parts.iter().flatten() {
                 if let schema::FormulaPartRecord::Column(read) = part {
                     check_node_id(*read, path)?;
                 }
+            }
+            // The sheets read by remote references (#403) are identifiers
+            // too.
+            for remote in formula_remote {
+                check_node_id(remote.sheet, path)?;
             }
         }
         let kind = convert::record_to_kind(kind).map_err(|err| convert_error(err, path))?;
@@ -1156,6 +1162,7 @@ mod tests {
                 values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 bytes, not a multiple of 8
                 version: 0,
                 formula_parts: None,
+                formula_remote: Vec::new(),
                 file_metadata: Vec::new(),
                 import_source: None,
                 x_prime: None,
@@ -1626,5 +1633,137 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = write_body(&dir, "id_too_large.stf", &body);
         assert!(load_with_report(&path).is_err());
+    }
+
+    /// A body with two sheets of one workbook: the column 5 (sheet 3) reads
+    /// the column 4 (sheet 6) through `max(...)`, with the given remote
+    /// references.
+    fn remote_body(remote: Vec<schema::RemoteRefRecord>) -> FileBody {
+        let node = |id: u64, name: &str, parent: u64, kind: KindRecord| NodeRecord {
+            id,
+            name: name.to_string(),
+            parent: Some(parent),
+            kind,
+        };
+        let column = |values: f64, parts: Option<Vec<schema::FormulaPartRecord>>, remote| {
+            KindRecord::Column {
+                column_type: TypeRecord::Numeric,
+                role: schema::RoleRecord::Y,
+                unit: String::new(),
+                long_name: String::new(),
+                comment: String::new(),
+                display_format: String::new(),
+                values: schema::ValuesRecord::Float(values.to_le_bytes().to_vec()),
+                version: 1,
+                formula_parts: parts,
+                formula_remote: remote,
+                file_metadata: Vec::new(),
+                import_source: None,
+                x_prime: None,
+            }
+        };
+        let parts = vec![
+            schema::FormulaPartRecord::Text("max(".to_string()),
+            schema::FormulaPartRecord::Column(4),
+            schema::FormulaPartRecord::Text(")".to_string()),
+        ];
+        FileBody {
+            root: 1,
+            next_id_hint: 7,
+            nodes: vec![
+                folder_record(1, "Root", vec![2]),
+                node(
+                    2,
+                    "Book1",
+                    1,
+                    KindRecord::Workbook {
+                        sheets: vec![3, 6],
+                        hidden: false,
+                        label: String::new(),
+                        comment: String::new(),
+                    },
+                ),
+                node(3, "Sheet1", 2, KindRecord::Worksheet { columns: vec![5] }),
+                node(6, "Sheet2", 2, KindRecord::Worksheet { columns: vec![4] }),
+                node(4, "A", 6, column(10.0, None, Vec::new())),
+                node(5, "A", 3, column(0.0, Some(parts), remote)),
+            ],
+            save_counter: 0,
+            saved_colors: Default::default(),
+            calculations: Default::default(),
+            correction_traces: Default::default(),
+            transposes: Default::default(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
+        }
+    }
+
+    fn remote_ref(part: u64, sheet: u64) -> schema::RemoteRefRecord {
+        schema::RemoteRefRecord {
+            part,
+            sheet,
+            prefixed: true,
+        }
+    }
+
+    fn letters_of_column_5(body: FileBody) -> String {
+        let project = build_project(body, Path::new("test.stf")).expect("the file loads");
+        project
+            .tree()
+            .formula_letters(NodeId::from_raw(5))
+            .expect("formula")
+    }
+
+    /// The reference to a sheet read from a file is bounded like any other
+    /// identifier (invariant 7).
+    #[test]
+    fn a_remote_sheet_identifier_beyond_the_limit_is_refused() {
+        let body = remote_body(vec![remote_ref(1, MAX_NODE_ID + 1)]);
+        let err = build_project(body, Path::new("test.stf")).unwrap_err();
+        assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
+    }
+
+    /// The well-formed side field reads back as the remote reference.
+    #[test]
+    fn a_well_formed_remote_reference_reads_back() {
+        assert_eq!(
+            letters_of_column_5(remote_body(vec![remote_ref(1, 6)])),
+            "max(Sheet2!A)"
+        );
+    }
+
+    /// A sheet that is missing, or is not a sheet, degrades to `#REF`
+    /// (invariant 10): the load itself succeeds.
+    #[test]
+    fn a_remote_reference_to_a_missing_or_non_sheet_node_shows_ref() {
+        for sheet in [999, 5, 2, 1] {
+            let letters = letters_of_column_5(remote_body(vec![remote_ref(1, sheet)]));
+            assert_eq!(letters, "max(#REF)", "sheet {sheet}");
+        }
+    }
+
+    /// A part index out of range, or pointing at a text part, is dropped:
+    /// the column then reads outside its sheet, `#REF`.
+    #[test]
+    fn a_remote_reference_to_a_bad_part_is_dropped() {
+        for part in [0, 2, 3, 99, u64::MAX] {
+            let body = remote_body(vec![remote_ref(part, 6)]);
+            let project = build_project(body, Path::new("test.stf")).expect("the file loads");
+            let formula = project
+                .tree()
+                .node(NodeId::from_raw(5))
+                .and_then(|node| node.as_column())
+                .and_then(|column| column.meta().formula.clone())
+                .expect("formula");
+            assert!(formula.remote_refs().is_empty(), "part {part}");
+            assert_eq!(
+                project
+                    .tree()
+                    .formula_letters(NodeId::from_raw(5))
+                    .as_deref(),
+                Some("max(#REF)"),
+                "part {part}"
+            );
+        }
     }
 }

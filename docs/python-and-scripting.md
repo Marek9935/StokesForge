@@ -178,7 +178,7 @@ describes its effects.
 | `export_graph(graph, path, *, png_scale=4.0)` | exports a graph to `.svg`, `.pdf` or `.png` (unknown extension: `InvalidValueError`), same rendering as the application's export |
 | `import_file(path, recipe=None)` | import into a new workbook, one undoable macro; handles of the created sheets |
 | `set_graph(graph, *, panel=(0, 0), axis="left", unit="cm", **options)` | sets an existing graph through the Graph Properties keys ("`set_graph`" table below), sizes included (#399, in `unit`); **a single history entry**; unknown key, unit or refused value: `InvalidValueError`, nothing is written |
-| `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
+| `graph_size(graph, *, unit="cm")` | reads the size of a graph (#399): dict `width`, `height`, `plot_widths`, `plot_heights`, `plot_left`, `plot_top`, `fixed_size`, `layer_placement`, `layers`, lengths in `unit` (`cm`, `mm`, `pt`, `in`); never writes |
 | `insert_rows(worksheet, at, count=1)` | inserts empty rows at row `at` (0 = at the top) in all columns of the sheet; `at` beyond the last row: `InvalidValueError` |
 | `delete_rows(worksheet, at, count=1)` | deletes `count` rows from `at` in the columns of the sheet; `undo()` gives the cells back |
 | `set_column_type(column, column_type)` | `numeric`, `datetime` or `mixed`; **destructive conversion** of the values the new type cannot represent (undoable); a formula column refuses |
@@ -433,7 +433,9 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `legend_visible`, `legend_position` | boolean; `top_left`, `top_right`, `bottom_left`, `bottom_right` (legend of the `panel` panel) |
 | `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
 | `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
-| `fixed_size` | boolean, "Figure size = Fixed" (#399) |
+| `fixed_size` | boolean, "Figure size = Fixed" (#399); works in both placements |
+| `layer_placement` | `grid` or `free` (#411): switches the placement as Graph Properties does, **first in the call** (`panel` is read in the placement the graph has when the call starts) |
+| `layer_left`, `layer_top` | free placement only: position of the plot area of `panel` in stable page coordinates, in `unit`, may be negative, at most 352.78 cm either side of the origin; refused beyond, never brought back (#411) |
 
 **Sizes (#399).** The five size keys read their numbers in `unit`, a keyword of
 `set_graph` (`"cm"` by default, `"mm"`, `"pt"`, `"in"`), **never** the unit of
@@ -446,6 +448,19 @@ areas and the axes, titles and legend around them. A graph from an old file
 history entry (#394, G7); a call that then changes nothing writes nothing and
 the graph stays as it was. A graph too large to store its plot areas (more
 cells than the layout handles) refuses a size key with `InvalidValueError`.
+**Free placement (#411).** `layer_placement="free"` switches like Graph Properties
+(a legacy graph is given its frames first, every layer takes the frame the grid
+draws it with, nothing moves); `layer_placement="grid"` puts the layers back in
+rows then columns (`compose::set_grid_placement`, L7 then C4). The shared switch
+is `stokesforge_render_svg::set_layer_placement`, used by Graph Properties too.
+In Free, `plot_width` and `plot_height` set the frame of the layer
+`panel=(row, column)` only, `layer_left` and `layer_top` its position in page
+coordinates (the stored value, as the Position fields show it; Top excludes the
+title band), `fixed_size` works, and `plot_left` / `plot_top` (hidden in Free in
+the application) are refused with a message naming `layer_left` / `layer_top`.
+On the regular grid `layer_left` / `layer_top` are refused. Everything is
+validated before the first write; a switch and its other keys are a single
+history entry, and a call that changes nothing writes nothing.
 
 **`graph_size(graph, *, unit="cm")`** reads one snapshot and the layout the
 screen and the exports read (invariant 4); it never writes and does not open
@@ -453,7 +468,13 @@ the script group. `width` and `height` are the image, `plot_widths` and
 `plot_heights` the plot areas of the grid columns and rows (the ones a graph
 from an old file is drawn with), `plot_left` and `plot_top` are `None` for
 Auto, otherwise the stored value raised to the smallest the axes allow, and
-`fixed_size` a boolean. Contract: `tests/set_graph.rs`.
+`fixed_size` a boolean. `layer_placement` is `"grid"` or `"free"` and `layers`
+is `[]` on the grid. On a free graph it reports the image size, empty
+`plot_widths` and `plot_heights`, `None` for `plot_left` and `plot_top`, and in
+`layers` one dict per cell in stacking order: `panel` (`(row, column)`), `left`,
+`top` (page coordinates as stored, not subtracted from any origin), `width`,
+`height`, in `unit`. Contract:
+`tests/set_graph.rs`.
 
 Outside `set_graph` for now (nothing technically prevents them, they
 were not judged safe enough for this batch): fonts and anchors of the titles,
@@ -641,11 +662,11 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.2"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.3"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
-  (`0.1` to `0.2`); there is no stability promise. `1.0` stabilizes the API.
+  (`0.2` to `0.3`); there is no stability promise. `1.0` stabilizes the API.
 - **From `1.0`**: a pure addition raises the minor; any modified or removed line
   (adding an optional parameter changes the signature line) raises the major
   and resets the minor to 0. The API major may not exceed the major of the crates.
@@ -809,6 +830,9 @@ plot_height
 plot_left
 plot_top
 fixed_size
+layer_placement
+layer_left
+layer_top
 ```
 
 ```pyst-api options set_column_meta
@@ -850,6 +874,16 @@ plot_heights
 plot_left
 plot_top
 fixed_size
+layer_placement
+layers
+```
+
+```pyst-api returns graph_size.layer
+panel
+left
+top
+width
+height
 ```
 
 ```pyst-api returns series.item
@@ -991,6 +1025,11 @@ cm
 mm
 pt
 in
+```
+
+```pyst-api enum layer_placement
+grid
+free
 ```
 
 ```pyst-api enum axis

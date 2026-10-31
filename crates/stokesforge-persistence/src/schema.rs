@@ -219,6 +219,12 @@ pub(crate) enum KindRecord {
         /// disagreement between a file written by a third party and what the formula
         /// would recalculate does not survive the first `load`.
         formula_parts: Option<Vec<FormulaPartRecord>>,
+        /// The parts of the formula that read a column of **another sheet**
+        /// (#403): part index, sheet identifier, prefix flag. Additive side
+        /// field, written only when non-empty and absent from earlier files
+        /// (`#[serde(default)]`: no remote reference). A reader that does not
+        /// know it sees the part as a column outside its sheet: `#REF`.
+        formula_remote: Vec<RemoteRefRecord>,
         /// Metadata of the original file (`ColumnMeta::file_metadata`),
         /// key / value pairs in order. Absent from files written
         /// before this field: `KindRecordKnown` brings them back to an empty list.
@@ -301,6 +307,8 @@ enum KindRecordKnown {
         #[serde(default)]
         formula_parts: Option<Vec<FormulaPartRecord>>,
         #[serde(default)]
+        formula_remote: Vec<RemoteRefRecord>,
+        #[serde(default)]
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
         import_source: Option<Box<ImportSourceRecord>>,
@@ -356,6 +364,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -369,6 +378,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -433,6 +443,18 @@ pub(crate) enum FormulaPartRecord {
     Column(u64),
 }
 
+/// A part of a formula that reads a column of another sheet
+/// (`stokesforge_core::RemoteRef`, #403).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RemoteRefRecord {
+    /// Index of the part in `formula_parts`; must be a `Column` part.
+    pub part: u64,
+    /// Identifier of the sheet the column is read in; bounded at read.
+    pub sheet: u64,
+    /// True if the user wrote the sheet prefix.
+    pub prefixed: bool,
+}
+
 /// Mirror of [`KindRecord`] **by reference**: serializes a known
 /// variant without cloning its content — in particular the bytes of a
 /// `Float` column, potentially large, which `Serialize` only needs to
@@ -461,6 +483,8 @@ enum KindRecordRef<'a> {
         values: &'a ValuesRecord,
         version: u64,
         formula_parts: &'a Option<Vec<FormulaPartRecord>>,
+        #[serde(skip_serializing_if = "<[RemoteRefRecord]>::is_empty")]
+        formula_remote: &'a [RemoteRefRecord],
         file_metadata: &'a Vec<(String, String)>,
         import_source: &'a Option<Box<ImportSourceRecord>>,
         x_prime: Option<f64>,
@@ -518,6 +542,7 @@ impl Serialize for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -531,6 +556,7 @@ impl Serialize for KindRecord {
                 values,
                 version: *version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime: *x_prime,
@@ -733,6 +759,29 @@ pub(crate) struct PlotSpecRecord {
     /// (#405): absent = Auto.
     #[serde(default)]
     pub(crate) figure_top: Option<f64>,
+    /// Placement of the cells (#398): absent = the regular grid; an unknown
+    /// value (newer file) reads as the grid too.
+    #[serde(default)]
+    pub(crate) layer_placement: LayerPlacementRecord,
+}
+
+/// [`stokesforge_plot::LayerPlacement`], flat. An unknown value reads as the
+/// grid (graceful degradation, invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum LayerPlacementRecord {
+    Free,
+    #[default]
+    #[serde(other)]
+    Grid,
+}
+
+/// [`stokesforge_plot::FreeFrame`], flat, in points. Written as held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FreeFrameRecord {
+    pub(crate) left: f64,
+    pub(crate) top: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
 /// [`stokesforge_plot::TextFont`], flat.
@@ -774,6 +823,7 @@ impl Default for PlotSpecRecord {
             fixed_figure: false,
             figure_left: None,
             figure_top: None,
+            layer_placement: LayerPlacementRecord::Grid,
         }
     }
 }
@@ -821,6 +871,9 @@ pub(crate) struct PanelSpecRecord {
     /// older file, hence no group has a color gradient.
     #[serde(default)]
     pub(crate) group_gradients: Vec<GroupGradientRecord>,
+    /// Frame of the cell in free placement (#398); absent = none.
+    #[serde(default)]
+    pub(crate) free_frame: Option<FreeFrameRecord>,
 }
 
 /// The stops of the color gradient of a series group (#213), flat.
@@ -928,6 +981,7 @@ impl Default for PanelSpecRecord {
             shapes: Vec::new(),
             group_names: Vec::new(),
             group_gradients: Vec::new(),
+            free_frame: None,
         }
     }
 }
@@ -1282,6 +1336,23 @@ mod tests {
         assert_eq!(reloaded, TickDirectionRecord::In);
     }
 
+    /// An unknown placement (newer file) reads as the grid, a known one as
+    /// itself (invariant 10).
+    #[test]
+    fn an_unknown_layer_placement_reads_as_the_grid() {
+        #[derive(Serialize)]
+        enum Future {
+            Floating,
+            Free,
+        }
+        let unknown = rmp_serde::to_vec_named(&Future::Floating).expect("encoding");
+        let reloaded: LayerPlacementRecord = rmp_serde::from_slice(&unknown).expect("decoding");
+        assert_eq!(reloaded, LayerPlacementRecord::Grid);
+        let known = rmp_serde::to_vec_named(&Future::Free).expect("encoding");
+        let reloaded: LayerPlacementRecord = rmp_serde::from_slice(&known).expect("decoding");
+        assert_eq!(reloaded, LayerPlacementRecord::Free);
+    }
+
     /// A file written before the addition of the text colors (graph
     /// title, title and scale of the axes) reads back: the absent fields
     /// come back empty, that is to say in automatic color.
@@ -1353,6 +1424,9 @@ mod tests {
             "an old graph keeps its title visible"
         );
         assert_eq!(reloaded.title_color, "");
+        // #398: an old graph is on the grid, and its panels have no free frame.
+        assert_eq!(reloaded.layer_placement, LayerPlacementRecord::Grid);
+        assert_eq!(reloaded.panels[0].free_frame, None);
         assert!(
             reloaded.stale_warning,
             "an old graph keeps the out-of-date data warning"

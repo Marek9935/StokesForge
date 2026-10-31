@@ -26,6 +26,19 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
+- Free placement of graph layers (#398), first batch: Graph Properties >
+  General > Size > **Layer placement** switches between **Regular grid** and
+  **Free**. In Free each layer has its own plot area, set with **Position, left**,
+  **Position, top**, **Plot area width** and **Plot area height** (positions are
+  page coordinates: read back as typed, unchanged when another layer moves,
+  possibly negative); the image is the bounding box of the layers. Switching to Free moves
+  nothing; going back to the grid puts layers side by side in a row and gives
+  each column and row its largest plot area. **New Layer Beside** places the new
+  layer next to the active one without overlap, **Delete Layer** moves no other
+  layer. No mouse gestures yet (they come in a later batch). **Additive `.stf` fields** (`layer_placement`,
+  and `free_frame` on each panel): an older version that opens and saves a file
+  again drops them without a message and shows the grid.
+
 - `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
   (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =
   Auto) and `fixed_size`, with a `unit="cm"|"mm"|"pt"|"in"` keyword (centimetres
@@ -33,12 +46,30 @@ without a message, see `docs/persistence.md`).
   new `pyst.graph_size(graph, unit="cm")` reads the image size, the plot areas,
   Left / Top and Fixed. `pyst.__api_version__` is now `0.2`.
 
+- `pyst` free placement (#411): `pyst.set_graph` gains `layer_placement="grid"|"free"`
+  (applied first in the call), `layer_left` and `layer_top` (position of the layer of
+  `panel` in page coordinates, in `unit`, may be negative); in Free `plot_width` and
+  `plot_height` size that layer alone and `plot_left` / `plot_top` are refused.
+  `pyst.graph_size` adds `layer_placement` and `layers` (left, top, width, height per
+  layer). `pyst.__api_version__` is now `0.3`.
+
 - Column formulas (#401): the `^` operator, comparisons (`<`, `<=`, `>`, `>=`,
   `==`, `!=`, true = 1) and row-wise functions in **F(x)=** (`sqrt`, `root`,
   `exp`, `ln`, `log`, `log2`, `logx`, `abs`, `sign`, trigonometry, `round`,
   `floor`, `ceil`, `mod`, `min`, `max`, `if`, `pi()`). A name followed by `(`
   is a function, a lone name stays a column. The Fit gains `round`, `mod` and
   `root`, accepts `pi()` and no longer cares about the case of function names.
+
+- Column formulas (#403): a formula reads a column of **another sheet or
+  workbook**: `max(Sheet3!B)`, `B / at(Sheet3!B, 340)`,
+  `integral([Book2]Sheet5!B, 10, 100)` (quotes for names with a space or a
+  special character, `'Blanc 2'!B`; a workbook is always followed by its sheet).
+  The formula follows the sheet when it is renamed or moved, shows `#REF` when
+  it is deleted, and a loop between sheets is refused at typing. Two siblings
+  can no longer differ only by case. **Additive `.stf` field**
+  (`formula_remote` on a column, written only for such a formula): an older
+  version that opens and saves a file again drops it without a message, and the
+  formula then shows `#REF`.
 
 - Column formulas (#402): functions that give one value for a whole column,
   usable in a row-by-row formula: `at(B, 340)` (linear interpolation at an X,

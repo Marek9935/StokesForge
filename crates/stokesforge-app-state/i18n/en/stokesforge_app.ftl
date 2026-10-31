@@ -696,6 +696,14 @@ error-formula-pi-needs-parentheses = For the number π, write pi() (a lone pi wo
 error-formula-column-expected = Function { $name } reads a whole column. Give it a column letter, not a calculation (B, not B*2)
 error-formula-no-paired-x = The column this formula reads has no X column. Put a column with the role X to its left
 error-formula-no-point = The formula found no point to compute from: the column or the range is empty, or the value asked for is outside the X data. Check the bounds
+error-formula-unknown-sheet = There is no sheet named { $name } in this workbook. Check its spelling
+error-formula-unknown-workbook = There is no workbook named { $name }. Check its spelling
+error-formula-workbook-without-sheet = A reference to another workbook names its sheet. Write [{ $name }]Sheet1!B
+error-formula-ambiguous-workbook = Several workbooks are named { $name }. Write the path from the project root, for example [Folder/{ $name }]Sheet1!B
+error-formula-ambiguous-name = Several objects are named { $name } apart from case. Rename one of them
+error-formula-unknown-column-in = Column { $column } does not exist in sheet { $sheet }
+error-formula-remote-outside = A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column
+error-formula-remote-x = The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists
@@ -807,6 +815,12 @@ plot-size-top = Plot area, from the top edge ({ $unit })
 plot-size-left-raised = The axes need at least { $minimum } ({ $unit }) on the left: the value was raised to it
 plot-size-top-raised = The axes and the title need at least { $minimum } ({ $unit }) at the top: the value was raised to it
 plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size.
+plot-size-placement = Layer placement
+plot-size-placement-grid = Regular grid
+plot-size-placement-free = Free
+plot-size-position-left = Position, left ({ $unit })
+plot-size-position-top = Position, top ({ $unit })
+plot-size-free-note = The values above belong to the layer chosen in the list. Positions are on the page: they do not change when another layer moves, and they can be negative. The graph grows or shrinks around the layers.
 
 plot-figure-size = Figure size
     .hint = Grows with the axes: an added axis or title makes the image larger. Fixed: room for four axes is kept from the start, so adding an axis leaves the image and the plot area as they are
@@ -1068,6 +1082,7 @@ formula-help-family-operators = Operators
 formula-help-op-arithmetic = Add, subtract, multiply, divide
 formula-help-op-power = Power
 formula-help-op-comparison = Comparison: 1 if true, 0 if false
+formula-help-reference = Column of another sheet, read by the column functions (at, max, min, mean, sum, std, integral). Another workbook: [Book2]Sheet5!B. A name with a space is quoted: 'Blanc 2'!B
 formula-help-family-powers = Powers and logarithms
 formula-help-family-trigonometry = Trigonometry
 formula-help-family-error = Error function

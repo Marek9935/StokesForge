@@ -425,3 +425,98 @@ fn copying_or_duplicating_a_folder_is_refused_with_its_reason() {
         "witness: a window can be copied"
     );
 }
+
+/// `Book1` holds `Sheet1` (A, B = `max(Sheet2!A)`, C = `max([Book2]Sheet1!A)`)
+/// and `Sheet2`; `Book2` holds `Sheet1` (#403). Returns the session, the
+/// state, the root and `Book1`.
+fn remote_formula_fixture() -> (Session, AppState, NodeId, NodeId) {
+    let mut project = Project::new("Test").unwrap();
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).unwrap();
+    let book2 = project.add_workbook(root, Some("Book2")).unwrap();
+    let sheet1 = project.tree().children(book).unwrap()[0];
+    let sheet2 = project.add_worksheet(book, Some("Sheet2")).unwrap();
+    let other = project.tree().children(book2).unwrap()[0];
+    for sheet in [sheet2, other] {
+        project
+            .add_column(sheet, None, Some("A"), Column::from_f64(&[5., 7.]))
+            .unwrap();
+    }
+    project
+        .add_column(sheet1, None, Some("A"), Column::from_f64(&[1., 2.]))
+        .unwrap();
+    for (name, text) in [("B", "max(Sheet2!A)"), ("C", "max([Book2]Sheet1!A)")] {
+        let id = project
+            .add_column(sheet1, None, Some(name), Column::from_f64(&[0., 0.]))
+            .unwrap();
+        let formula = project.tree().formula_from_letters(id, text).unwrap();
+        project
+            .set_column_meta(
+                id,
+                stokesforge_core::ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let session = Session::spawn(project, None).unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    (session, state, root, book)
+}
+
+/// The texts of the formulas B and C of the first sheet of a pasted `Book1`,
+/// and the sheet `B` reads.
+fn pasted_formulas(state: &AppState, pasted_book: NodeId) -> (String, String, Option<NodeId>) {
+    let sheets = state.tree().children(pasted_book).unwrap();
+    let columns = state.tree().children(sheets[0]).unwrap();
+    let read_sheet = state
+        .tree()
+        .node(columns[1])
+        .and_then(|node| node.as_column())
+        .and_then(|column| column.meta().formula.as_ref())
+        .and_then(|formula| formula.remote_sheets().values().next().copied());
+    assert_eq!(read_sheet.is_some(), read_sheet == Some(sheets[1]));
+    (
+        state.tree().formula_letters(columns[1]).unwrap(),
+        state.tree().formula_letters(columns[2]).unwrap(),
+        read_sheet,
+    )
+}
+
+/// #403: the object clipboard goes through the `.stf` conversions. Pasted in
+/// the project it was copied from, a workbook keeps its references: to its
+/// own copied sheet, and to a sheet outside the copy. Pasted in another
+/// project, only the reference to a sheet outside the copy is `#REF` (the other
+/// project's identifiers mean nothing there), even when it holds the same names.
+#[test]
+fn object_clipboard_keeps_remote_references_in_its_project_only() {
+    let (_session, mut state, root, book) = remote_formula_fixture();
+    state.dispatch(Action::CopyObjects(vec![book]));
+    let text = state.take_object_clipboard_text().unwrap();
+    state.dispatch(Action::PasteObjects {
+        parent: root,
+        text: text.clone(),
+    });
+    let pasted = state.take_copied_objects()[0].1;
+    assert_ne!(pasted, book);
+    let (inside, outside, read_sheet) = pasted_formulas(&state, pasted);
+    assert_eq!(inside, "max(Sheet2!A)");
+    assert!(read_sheet.is_some(), "B reads the pasted Sheet2");
+    assert_eq!(outside, "max([Book2]Sheet1!A)");
+
+    let (_session2, mut other, other_root, _) = remote_formula_fixture();
+    other.dispatch(Action::PasteObjects {
+        parent: other_root,
+        text,
+    });
+    let pasted = other.take_copied_objects()[0].1;
+    let (inside, outside, _) = pasted_formulas(&other, pasted);
+    assert_eq!(inside, "max(Sheet2!A)", "the copied sheet comes along");
+    assert_eq!(outside, "max(#REF)");
+}

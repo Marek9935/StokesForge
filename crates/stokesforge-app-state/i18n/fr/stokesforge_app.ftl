@@ -695,6 +695,14 @@ error-formula-pi-needs-parentheses = Pour le nombre π, écrire pi() (un pi seul
 error-formula-column-expected = La fonction { $name } lit une colonne entière. Lui donner une lettre de colonne, pas un calcul (B, pas B*2)
 error-formula-no-paired-x = La colonne lue par cette formule n'a pas de colonne X. Placer à sa gauche une colonne de rôle X
 error-formula-no-point = La formule n'a trouvé aucun point à calculer : la colonne ou la plage est vide, ou la valeur demandée est hors des X. Vérifier les bornes
+error-formula-unknown-sheet = Il n'y a pas de feuille nommée { $name } dans ce classeur. Vérifier son orthographe
+error-formula-unknown-workbook = Il n'y a pas de classeur nommé { $name }. Vérifier son orthographe
+error-formula-workbook-without-sheet = Une référence à un autre classeur nomme sa feuille. Écrire [{ $name }]Sheet1!B
+error-formula-ambiguous-workbook = Plusieurs classeurs s'appellent { $name }. Écrire le chemin depuis la racine du projet, par exemple [Dossier/{ $name }]Sheet1!B
+error-formula-ambiguous-name = Plusieurs objets s'appellent { $name } à la casse près. Renommer l'un d'eux
+error-formula-unknown-column-in = La colonne { $column } n'existe pas dans la feuille { $sheet }
+error-formula-remote-outside = Une colonne d'une autre feuille ne peut être lue que par at, max, min, mean, sum, std ou integral. La donner à l'une d'elles comme colonne
+error-formula-remote-x = La colonne X d'un at() sur une autre feuille se lit dans cette feuille. L'écrire sans préfixe (D, pas Sheet3!D)
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus
@@ -806,6 +814,12 @@ plot-size-top = Zone de tracé, depuis le bord haut ({ $unit })
 plot-size-left-raised = Les axes demandent au moins { $minimum } ({ $unit }) à gauche : la valeur a été remontée à ce minimum
 plot-size-top-raised = Les axes et le titre demandent au moins { $minimum } ({ $unit }) en haut : la valeur a été remontée à ce minimum
 plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé : en ajouter ou en retirer agrandit ou réduit le graphique, jamais la zone de tracé. Les autres colonnes et lignes gardent leur taille.
+plot-size-placement = Placement des calques
+plot-size-placement-grid = Grille régulière
+plot-size-placement-free = Libre
+plot-size-position-left = Position, gauche ({ $unit })
+plot-size-position-top = Position, haut ({ $unit })
+plot-size-free-note = Les valeurs ci-dessus sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. Le graphique grandit ou rétrécit autour des calques.
 
 plot-figure-size = Taille de la figure
     .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles
@@ -1067,6 +1081,7 @@ formula-help-family-operators = Opérateurs
 formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
 formula-help-op-power = Puissance
 formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
+formula-help-reference = Colonne d'une autre feuille, lue par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B
 formula-help-family-powers = Puissances et logarithmes
 formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur

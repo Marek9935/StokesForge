@@ -58,8 +58,8 @@ use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
 use stokesforge_core::tsv;
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeCopy, NodeId, Tree,
-    ValueBlock,
+    same_name_ignoring_case, Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node,
+    NodeCopy, NodeId, Tree, ValueBlock,
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
@@ -1930,7 +1930,7 @@ impl HeaderField {
                     None
                 } else {
                     Some(
-                        tree.formula_from_letters(column, &text)
+                        tree.formula_for_entry(column, &text)
                             .map_err(HeaderTextRefused::Formula)?,
                     )
                 };
@@ -1948,6 +1948,16 @@ impl HeaderField {
     pub fn rank(self) -> isize {
         self.index() as isize - Self::COUNT as isize
     }
+}
+
+/// The refusal of a formula being typed, with what it was computed from
+/// ([`AppState::header_edit_refusal`]).
+struct FormulaRefusalMemo {
+    column: NodeId,
+    buffer: String,
+    revision: stokesforge_session::Revision,
+    epoch: u64,
+    refusal: Option<String>,
 }
 
 /// Grid area touched by the current selection — the header, the
@@ -2487,6 +2497,9 @@ pub struct PlotEdit {
     pub selected_series: usize,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
+    /// True once `selected_panel` has been set from the graph's active layer
+    /// (the shell does it at the first frame of the window, #398).
+    pub panel_initialized: bool,
     /// The spec of the model the draft started from (or just
     /// committed). As long as `spec` equals it, the draft has nothing in
     /// progress: if the model changes under it (Undo, Redo, script,
@@ -2939,6 +2952,11 @@ pub struct AppState {
     selection: std::collections::HashMap<NodeId, Selection>,
     /// Entry in progress in a column header field, if any.
     header_editing: Option<HeaderEdit>,
+    /// The refusal computed for the formula being typed, kept for the frames
+    /// that follow: the grid asks for it every frame, and the loop check walks
+    /// the formulas of the project (#403). Valid for one buffer on one
+    /// revision of one project.
+    formula_refusal_memo: std::cell::RefCell<Option<FormulaRefusalMemo>>,
     /// Last structured grid clipboard, set by [`AppState::
     /// copy_selection`]/[`AppState::copy_full_columns`] — pure UI state, like
     /// [`AppState::selection`]: never in the history, never sent to
@@ -3142,6 +3160,7 @@ impl AppState {
             user_colors: UserColors::load(),
             selection: std::collections::HashMap::new(),
             header_editing: None,
+            formula_refusal_memo: std::cell::RefCell::new(None),
             grid_clipboard: None,
             clipboard_text: None,
             clipboard_dirty: false,
@@ -4484,18 +4503,39 @@ impl AppState {
         {
             return None;
         }
-        self.snapshot
+        let key = (
+            edit.column,
+            edit.buffer.as_str(),
+            self.snapshot.revision,
+            self.snapshot.epoch,
+        );
+        if let Some(memo) = self.formula_refusal_memo.borrow().as_ref() {
+            if (memo.column, memo.buffer.as_str(), memo.revision, memo.epoch) == key {
+                return memo.refusal.clone();
+            }
+        }
+        let refusal = self
+            .snapshot
             .tree
-            .formula_from_letters(edit.column, &edit.buffer)
+            .formula_for_entry(edit.column, &edit.buffer)
             .err()
-            .map(|error| errors::formula::error_message(&error))
+            .map(|error| errors::formula::error_message(&error));
+        *self.formula_refusal_memo.borrow_mut() = Some(FormulaRefusalMemo {
+            column: edit.column,
+            buffer: edit.buffer.clone(),
+            revision: self.snapshot.revision,
+            epoch: self.snapshot.epoch,
+            refusal: refusal.clone(),
+        });
+        refusal
     }
 
     /// The sentence saying why the formula of `column` no longer computes,
-    /// when it reads a deleted column (`#REF`, #321), when a column function
-    /// finds no X paired with the column it reads, or when every cell of the
-    /// result is empty because the functions found no point (#402): the grid
-    /// paints it as a frame on the Formula cell.
+    /// when it reads a deleted column (`#REF`, #321), when it is part of a loop
+    /// that a file holds (#403), when a column function finds no X paired with
+    /// the column it reads, or when every cell of the result is empty because
+    /// the functions found no point (#402): the grid paints it as a frame on
+    /// the Formula cell.
     pub fn formula_issue(&self, column: NodeId) -> Option<String> {
         use stokesforge_core::FormulaError;
         let tree = &self.snapshot.tree;
@@ -4503,6 +4543,9 @@ impl AppState {
         // shows `---` everywhere; no point is the whole result empty (#402).
         let error = if tree.formula_has_deleted_reference(column) {
             FormulaError::DeletedColumn
+        } else if tree.formula_in_loop(column) {
+            // A file can hold a loop that input would have refused (#403).
+            FormulaError::Cycle
         } else if tree.formula_lacks_paired_x(column) {
             FormulaError::NoPairedX
         } else if tree.formula_found_no_point(column) {
@@ -4708,8 +4751,26 @@ impl AppState {
             spec: model.clone(),
             selected_series: 0,
             selected_panel: 0,
+            panel_initialized: false,
             base: model,
         });
+    }
+
+    /// Opens the draft on the graph's active layer `active`, once: the first
+    /// call after the draft is created chooses the layer, later calls (the
+    /// draft being reused) keep what the user chose.
+    pub fn init_plot_edit_panel(&mut self, graph: NodeId, active: usize) {
+        if let Some(edit) = self
+            .plot_edit
+            .as_mut()
+            .filter(|edit| edit.graph == graph && !edit.panel_initialized)
+        {
+            edit.panel_initialized = true;
+            // A layer already chosen (not the default first one) is kept.
+            if edit.selected_panel == 0 {
+                edit.selected_panel = active.min(edit.spec.panels.len().saturating_sub(1));
+            }
+        }
     }
 
     /// Closes the current editing draft without committing anything.
@@ -5189,7 +5250,7 @@ impl AppState {
                 // the command (`SetColumnMeta` never validates references).
                 match formula {
                     None => self.set_column_meta_field(column, |meta| meta.formula = None),
-                    Some(text) => match self.snapshot.tree.formula_from_letters(column, &text) {
+                    Some(text) => match self.snapshot.tree.formula_for_entry(column, &text) {
                         Ok(formula) => {
                             self.set_column_meta_field(column, |meta| meta.formula = Some(formula));
                         }
@@ -8220,7 +8281,11 @@ impl AppState {
                     .children(parent)
                     .unwrap_or_default()
                     .iter()
-                    .all(|id| self.tree().node(*id).is_none_or(|node| node.name() != name))
+                    .all(|id| {
+                        self.tree()
+                            .node(*id)
+                            .is_none_or(|node| !same_name_ignoring_case(node.name(), name))
+                    })
             })
             .unwrap_or_else(|| origin.to_string())
     }
@@ -8470,7 +8535,11 @@ impl AppState {
                     number = n.to_string()
                 )
             })
-            .find(|candidate| existing.iter().all(|(_, other)| other != candidate))
+            .find(|candidate| {
+                existing
+                    .iter()
+                    .all(|(_, other)| !same_name_ignoring_case(other, candidate))
+            })
             .unwrap_or(origin.clone());
         let before: Vec<NodeId> = existing.iter().map(|(id, _)| *id).collect();
         self.execute(Command::DuplicateWorksheet { sheet, name });
@@ -8492,11 +8561,15 @@ impl AppState {
             self.fail(tr!("sheet-delete-last"));
         } else {
             let users = self.sheet_users(sheet);
+            // The readers of its columns, computed on the tree from before
+            // (#306, #403: a formula of another sheet reads them too).
+            let readers = self.column_users_before(&[sheet]);
             self.editing = None;
             self.execute(Command::RemoveNode { id: sheet });
             if !users.is_empty() && !self.last_action_failed() {
                 self.notice(tr!("sheet-delete-used", graphs = users.join(", ")));
             }
+            self.open_column_use(readers);
         }
     }
 
@@ -9451,7 +9524,7 @@ impl AppState {
                 node.children()
                     .iter()
                     .filter_map(|child| tree.node(*child))
-                    .any(|child| child.name() == name)
+                    .any(|child| same_name_ignoring_case(child.name(), name))
             })
         };
         let mut n = 1u64;
@@ -10127,10 +10200,18 @@ impl AppState {
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
         crate::frame_sizes::fix_new(&mut spec);
+        // Free placement (#398, L8): the new layer is placed beside the
+        // reference, never over another one, in the same command.
+        let beside = crate::frame_sizes::place_beside(&spec, panel, side);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };
+        if let Some(frame) = beside {
+            if let Some(target) = spec.panels.get_mut(new_cell) {
+                target.free_frame = Some(frame);
+            }
+        }
         if !columns.is_empty() {
             if let Err(message) =
                 self.add_columns_to_spec(&mut spec, new_cell, &columns, Some(plot_type))

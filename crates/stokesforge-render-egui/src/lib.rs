@@ -1497,6 +1497,9 @@ impl GraphView {
     /// boundary of a cell, with a strip of the same width on screen whatever
     /// the enlargement of the figure.
     pub fn cell_edge_at(&self, pos: Pos2) -> Option<stokesforge_render::CellEdge> {
+        if self.layout_is_free() {
+            return None;
+        }
         let pos = self.figure_position(pos)?;
         let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
             / self.display_scale().unwrap_or(1.0) as f64;
@@ -1505,6 +1508,9 @@ impl GraphView {
 
     /// The figure edge (left, top) under the screen position `pos` (#405).
     pub fn figure_edge_at(&self, pos: Pos2) -> Option<stokesforge_render::FigureEdge> {
+        if self.layout_is_free() {
+            return None;
+        }
         let pos = self.figure_position(pos)?;
         let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
             / self.display_scale().unwrap_or(1.0) as f64;
@@ -2156,11 +2162,22 @@ impl GraphView {
         context.set_cursor_icon(icon);
     }
 
+    /// True if the figure was drawn with free layer placement (#398): its
+    /// layers have no grid column or row to pull, so no handle exists (they
+    /// come with the mouse gestures of free placement).
+    fn layout_is_free(&self) -> bool {
+        self.figure_memo
+            .as_ref()
+            .is_some_and(|(_, layout)| layout.placement == stokesforge_plot::LayerPlacement::Free)
+    }
+
     /// True if the layout the figure was drawn with has frames to place (a
-    /// compact fallback grid has none).
+    /// compact fallback grid has none; a free figure has no handle yet).
     fn figure_is_placeable(&self) -> bool {
         self.figure_memo.as_ref().is_some_and(|(_, layout)| {
-            !layout.frame_widths.is_empty() && !layout.frame_heights.is_empty()
+            layout.placement == stokesforge_plot::LayerPlacement::Grid
+                && !layout.frame_widths.is_empty()
+                && !layout.frame_heights.is_empty()
         })
     }
 
@@ -2170,6 +2187,9 @@ impl GraphView {
         let Some((_, layout)) = &self.figure_memo else {
             return false;
         };
+        if layout.placement == stokesforge_plot::LayerPlacement::Free {
+            return false;
+        }
         edge.column
             .is_some_and(|index| index < layout.frame_widths.len())
             || edge

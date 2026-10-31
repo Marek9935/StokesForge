@@ -970,14 +970,15 @@ pub(crate) fn set_column_meta(
             // fields leave the stored formula as is (never a round trip
             // through letters, otherwise a `#REF` would block any change
             // of the unit). Letters to identifiers through
-            // `Tree::formula_from_letters`, like the interface.
+            // `Tree::formula_for_entry`, like the interface: it refuses a loop,
+            // project-wide (#403).
             "formula" => {
                 meta.formula = match value {
                     None => None,
                     Some(text) => Some(
                         snapshot
                             .tree
-                            .formula_from_letters(id, &text)
+                            .formula_for_entry(id, &text)
                             .map_err(|error| HostError::InvalidValue(error.to_string()))?,
                     ),
                 }

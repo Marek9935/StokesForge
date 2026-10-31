@@ -6,26 +6,26 @@
 use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
     Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError,
-    FormulaPart, MixedCell, Node, NodeId, NodeKind, ValueBlock, WindowMeta,
+    FormulaPart, MixedCell, Node, NodeId, NodeKind, RemoteRef, ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{
-    AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
-    PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape,
-    SymbolSpec, TickDirection,
+    AnnotationSpec, AxisScale, AxisSpec, FreeFrame, LayerPlacement, LegendPosition, LegendSpec,
+    LineSpec, LineStyle, PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind,
+    ShapeSpec, SymbolShape, SymbolSpec, TickDirection,
 };
 
 use stokesforge_import::recipe::ImportRecipe;
 
 use crate::recipe_record::ImportSourceRecord;
 use crate::schema::{
-    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, GroupGradientRecord,
-    GroupNameRecord, KindRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord,
-    LineStyleRecord, NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord,
-    PlotTypeRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
-    SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TextAlignRecord, TextAnchorRecord, TextFontRecord, TickDirectionRecord, TypeRecord,
-    ValuesRecord, WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY,
-    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, FreeFrameRecord,
+    GroupGradientRecord, GroupNameRecord, KindRecord, LayerPlacementRecord, LegendPositionRecord,
+    LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord,
+    PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RemoteRefRecord, RoleRecord,
+    SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
+    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord,
+    TextFontRecord, TickDirectionRecord, TypeRecord, ValuesRecord, WindowGeometryRecord,
+    WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Upper bound of a panel coordinate (`row`/`column`) read from a file
@@ -613,6 +613,12 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 stops: stops.clone(),
             })
             .collect(),
+        free_frame: panel.free_frame.map(|frame| FreeFrameRecord {
+            left: frame.left,
+            top: frame.top,
+            width: frame.width,
+            height: frame.height,
+        }),
     }
 }
 
@@ -722,6 +728,12 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             .filter(|entry| !entry.stops.is_empty())
             .map(|entry| (entry.group, entry.stops))
             .collect(),
+        free_frame: record.free_frame.map(|frame| FreeFrame {
+            left: frame.left,
+            top: frame.top,
+            width: frame.width,
+            height: frame.height,
+        }),
     })
 }
 
@@ -778,6 +790,10 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         fixed_figure: spec.fixed_figure,
         figure_left: spec.figure_left,
         figure_top: spec.figure_top,
+        layer_placement: match spec.layer_placement {
+            LayerPlacement::Grid => LayerPlacementRecord::Grid,
+            LayerPlacement::Free => LayerPlacementRecord::Free,
+        },
     }
 }
 
@@ -806,6 +822,10 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         fixed_figure: record.fixed_figure,
         figure_left: record.figure_left,
         figure_top: record.figure_top,
+        layer_placement: match record.layer_placement {
+            LayerPlacementRecord::Grid => LayerPlacement::Grid,
+            LayerPlacementRecord::Free => LayerPlacement::Free,
+        },
     })
 }
 
@@ -954,6 +974,21 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                         })
                         .collect()
                 }),
+                formula_remote: meta
+                    .formula
+                    .as_ref()
+                    .map(|formula| {
+                        formula
+                            .remote_refs()
+                            .iter()
+                            .map(|(index, remote)| RemoteRefRecord {
+                                part: *index as u64,
+                                sheet: remote.sheet.raw(),
+                                prefixed: remote.prefixed,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 file_metadata: meta
                     .file_metadata
                     .iter()
@@ -1030,6 +1065,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             values,
             version,
             formula_parts,
+            formula_remote,
             file_metadata,
             import_source,
             x_prime,
@@ -1055,18 +1091,38 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 // `check_node_id` (`build_project_reported`). A column that
                 // is no longer in the sheet degrades at calculation (`#REF`),
                 // never into a panic (invariant 10).
+                //
+                // The remote references (#403) are checked for shape here: a
+                // part index out of range or pointing at a text part is
+                // dropped (that part then reads a column outside its sheet:
+                // `#REF`), and a sheet that is missing or not a sheet shows
+                // `#REF` at display. Never a failure of the load.
                 formula: formula_parts.map(|parts| {
-                    ColumnFormula::from_parts(
-                        parts
-                            .into_iter()
-                            .map(|part| match part {
-                                FormulaPartRecord::Text(text) => FormulaPart::Text(text),
-                                FormulaPartRecord::Column(id) => {
-                                    FormulaPart::Column(NodeId::from_raw(id))
-                                }
+                    let parts: Vec<FormulaPart> = parts
+                        .into_iter()
+                        .map(|part| match part {
+                            FormulaPartRecord::Text(text) => FormulaPart::Text(text),
+                            FormulaPartRecord::Column(id) => {
+                                FormulaPart::Column(NodeId::from_raw(id))
+                            }
+                        })
+                        .collect();
+                    let remote = formula_remote
+                        .into_iter()
+                        .filter_map(|record| {
+                            let index = usize::try_from(record.part).ok()?;
+                            matches!(parts.get(index), Some(FormulaPart::Column(_))).then(|| {
+                                (
+                                    index,
+                                    RemoteRef {
+                                        sheet: NodeId::from_raw(record.sheet),
+                                        prefixed: record.prefixed,
+                                    },
+                                )
                             })
-                            .collect(),
-                    )
+                        })
+                        .collect();
+                    ColumnFormula::from_parts_with_remote(parts, remote)
                 }),
                 // A file can carry any float: only a finite
                 // value is an abscissa.
@@ -1219,6 +1275,31 @@ mod tests {
             decode_mixed(&[0, 0, 0, 0], &[], vec![], 3),
             Err(ConvertError::TooManyRows { .. })
         ));
+    }
+
+    /// #398: a Free graph round-trips unsanitized: negative left, a hostile
+    /// size kept as written, an overlay without frame. Witness: a field
+    /// dropped by one direction of the conversion.
+    #[test]
+    fn a_free_graph_round_trips_as_written() {
+        let base = PanelSpec {
+            free_frame: Some(FreeFrame {
+                left: -75.5,
+                top: 12.0,
+                width: 1e300,
+                height: 200.0,
+            }),
+            ..PanelSpec::at(0, 0)
+        };
+        let overlay = PanelSpec::overlay_on(&base, stokesforge_plot::OverlaySpec::new(true, true));
+        let spec = PlotSpec {
+            layer_placement: LayerPlacement::Free,
+            ..PlotSpec::empty("free").with_panels(vec![base, overlay])
+        };
+        let back = record_to_plot_spec(plot_spec_to_record(&spec)).unwrap();
+        assert_eq!(back, spec);
+        assert_eq!(back.layer_placement, LayerPlacement::Free);
+        assert_eq!(back.panels[1].free_frame, None);
     }
 
     /// A layer with two groups of two series, the first named "Café".

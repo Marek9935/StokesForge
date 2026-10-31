@@ -257,10 +257,15 @@ Two consequences that cross the crates:
   hidden workbook of copies (#248), never on the original column: the copy
   is deduplicated by **content**, never by version number, which depends on the
   history and would distort the `b22` oracle. A formula reads a column **of
-  its sheet**: membership in the sheet (`None` in the fingerprint: the
-  column was deleted or moved elsewhere) is read by the calculation, so it is in
-  the fingerprint; the **displayed letters**, which the calculation does not read, are not
-  in it (they follow the columns);
+  the sheet it must be in** — its own, or the sheet of a remote reference
+  (`Sheet3!B`, #403): membership in that sheet (`None` in the fingerprint: the
+  column was deleted or moved elsewhere, or the sheet is gone) is read by the
+  calculation, so it is in the fingerprint, with the remote column's version and
+  the version of its paired X; the **displayed letters** and the displayed
+  sheet and workbook names, which the calculation does not read, are not in it
+  (they follow the tree). One order serves the **whole project**: a formula that
+  reads a column of another sheet comes after the formula that writes it, and a
+  loop across sheets is a cycle like a local one;
 - **every data write to a column draws a fresh version number**
   (`Project::next_column_version`, `stokesforge-core`), **and every insertion
   of a column that already carries a number moves the counter beyond it**

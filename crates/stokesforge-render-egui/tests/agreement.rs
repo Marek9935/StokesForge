@@ -1062,3 +1062,110 @@ fn the_backends_agree_on_a_fixed_figure_with_a_title_and_top() {
     assert_eq!(drawn.panels[0].pixel_origin, (120, 110));
     assert_eq!(drawn.panels[0].pixel_size, (500, 250));
 }
+
+/// #398: a free figure (two overlapping-in-height cells, one left of the
+/// origin, a graph title, fractional frames) is the same figure on screen and
+/// in the export, primitive by primitive, at its own size and scaled.
+#[test]
+fn the_backends_agree_on_a_free_figure() {
+    use stokesforge_plot::{FreeFrame, LayerPlacement};
+    let mut fixture = minimal();
+    fixture.spec.title = "Free figure".to_owned();
+    let mut second = fixture.spec.panels[0].clone();
+    second.column = 1;
+    let mut panels: Vec<_> = fixture.spec.panels.iter().cloned().collect();
+    panels.push(second);
+    let frame = |left, top, width, height| {
+        Some(FreeFrame {
+            left,
+            top,
+            width,
+            height,
+        })
+    };
+    panels[0].free_frame = frame(-80.4, 20.3, 310.6, 200.5);
+    panels[1].free_frame = frame(330.7, 70.2, 240.4, 150.9);
+    fixture.spec.panels = stokesforge_plot::Panels::new(panels);
+    fixture.spec.layer_placement = LayerPlacement::Free;
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("layout");
+    assert_eq!(layout.placement, LayerPlacement::Free);
+    agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        layout.size,
+        "free figure",
+    );
+    let drawn = drawn_with_typst(fixture.project.tree(), &fixture.spec, layout.size);
+    for (cell, panel) in layout.free_cells.iter().zip(&drawn.panels) {
+        assert_eq!(
+            panel.pixel_origin,
+            (cell.frame.0 as i32, cell.frame.1 as i32),
+            "the frame is where the layout says"
+        );
+        assert_eq!(panel.pixel_size, (cell.frame.2, cell.frame.3));
+    }
+    agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        (layout.size.0 + 40, layout.size.1 + 25),
+        "free figure, scaled",
+    );
+}
+
+/// The geometry of `spec` drawn on screen the way the application draws it:
+/// titles through Typst, which is also how the layout probe measures them.
+/// (`render_egui` draws without Typst, so its title band is the `epaint`
+/// one; the layout is only comparable with this drawing.)
+fn drawn_with_typst(tree: &Tree, spec: &PlotSpec, size: (u32, u32)) -> DrawnPlot {
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let plot = resolve_spec(tree, spec);
+    let ctx = egui::Context::default();
+    ctx.set_fonts(stokesforge_render::font_definitions());
+    let cache = stokesforge_render::formula::FormulaCache::new();
+    let mut drawn = None;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text = stokesforge_render_egui::ScreenText::new(&ctx, &measurer);
+        let typst =
+            stokesforge_render_egui::TypstScreen::new(&ctx, &cache, &choice).expect("fonts");
+        let mut shapes = Vec::new();
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32));
+        drawn = Some(
+            stokesforge_render_egui::collect_shapes_with_typst(
+                &mut shapes,
+                rect,
+                &text,
+                typst,
+                &plot,
+            )
+            .expect("egui drawing"),
+        );
+    });
+    output.textures_delta.clear();
+    drawn.expect("drawn")
+}
+
+/// #409: a titled Grid graph, drawn on screen the way the application draws
+/// it (titles through Typst), has the title band the layout probe reserved and
+/// its frame at the layout's rectangle, with no tolerance.
+#[test]
+fn a_titled_grid_graph_has_the_same_title_band_in_the_layout_and_on_screen() {
+    let mut fixture = minimal();
+    fixture.spec.title = "Grid figure".to_owned();
+    fixture.spec.frame_widths = vec![700.3];
+    fixture.spec.frame_heights = vec![310.4];
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("layout");
+
+    let drawn = drawn_with_typst(fixture.project.tree(), &fixture.spec, layout.size);
+    assert_eq!(layout.title_band, drawn.title_height);
+    let (x, y, w, h) = layout.frame_rect(0, 0).expect("frame");
+    let panel = &drawn.panels[0];
+    assert_eq!(panel.pixel_origin, (x as i32, y as i32));
+    assert_eq!(panel.pixel_size, (w, h));
+}

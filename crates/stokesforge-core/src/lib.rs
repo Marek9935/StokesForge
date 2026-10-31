@@ -65,6 +65,7 @@ pub mod number_format;
 pub mod path;
 pub mod project;
 pub mod resolve;
+pub mod sheet_refs;
 pub mod transpose;
 pub mod tree;
 pub mod tsv;
@@ -82,12 +83,12 @@ pub use compose::PlannedSeries;
 pub use copy::NodeCopy;
 pub use error::{CoreError, CoreResult};
 pub use formula::{
-    evaluate as evaluate_formula, evaluate_with_x as evaluate_formula_with_x, topological_order,
-    Callee, ColumnFormula, ColumnFunc, Formula, FormulaError, FormulaEvaluation, FormulaPart,
-    REF_TOKEN,
+    evaluate as evaluate_formula, evaluate_with_x as evaluate_formula_with_x, sheet_token,
+    topological_order, Callee, ColumnFormula, ColumnFunc, Formula, FormulaError, FormulaEvaluation,
+    FormulaPart, RemoteRef, SheetAddress, SheetDirectory, SheetScope, REF_TOKEN,
 };
 pub use id::{IdAllocator, NodeId};
-pub use name::{check_name, RESERVED_NAME_CHARS};
+pub use name::{check_name, same_name_ignoring_case, RESERVED_NAME_CHARS};
 pub use node::{Node, NodeKind, WindowMeta};
 pub use path::{format_path, parse_path, ObjectPath, PathDepth};
 pub use project::{spreadsheet_name, Project};
@@ -96,6 +97,7 @@ pub use resolve::{
     series_label, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
     SeriesLabel,
 };
+pub use sheet_refs::{FormulaInput, FormulaInputs};
 pub use transpose::{
     content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,
     TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,

@@ -14456,3 +14456,141 @@ fn undoing_a_figure_placement_is_flagged_for_the_window() {
     state.dispatch(Action::Undo);
     assert_ne!(state.placement_step_revision(), Some(state.revision()));
 }
+
+// -- Free placement of the layers (#398) --------------------------------------------
+
+/// Puts the graph in free placement through the draft helper of Graph Properties.
+fn go_free(state: &mut AppState, graph: NodeId) {
+    let mut spec = graph_spec(state, graph);
+    assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+        &mut spec, true
+    ));
+    state.dispatch(Action::SetPlotSpec { graph, spec });
+}
+
+/// The outer rectangle of each cell of a free graph, `(x0, y0, x1, y1)` in
+/// figure pixels, in the order of `free_cells`, and the size of the figure.
+type Rect = (u32, u32, u32, u32);
+
+fn free_outers(spec: &stokesforge_plot::PlotSpec) -> (Vec<Rect>, (u32, u32)) {
+    let layout = stokesforge_app_state::frame_sizes::figure_layout(spec).expect("layout");
+    let outers = layout
+        .free_cells
+        .iter()
+        .map(|c| {
+            (
+                c.outer.0,
+                c.outer.1,
+                c.outer.0 + c.outer.2,
+                c.outer.1 + c.outer.3,
+            )
+        })
+        .collect();
+    (outers, layout.size)
+}
+
+fn overlap(a: Rect, b: Rect) -> bool {
+    a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
+}
+
+/// #398 (L8): in Free, a layer added Right takes the active layer's frame size
+/// and top, and Below its left; the outer rectangles touch without overlapping,
+/// and one Undo gives the graph back.
+#[test]
+fn add_cell_in_free_places_the_layer_beside_never_over_the_other() {
+    use stokesforge_core::compose::CellSide;
+    for side in [CellSide::Right, CellSide::Below] {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let (_session, mut state, graph, _c) = cell_bench(dir.path());
+        go_free(&mut state, graph);
+        let before = graph_spec(&state, graph);
+        let first = before.panels[0].free_frame.expect("frame");
+
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side,
+            columns: Vec::new(),
+        });
+        let after = graph_spec(&state, graph);
+        assert_eq!(after.panels.len(), 2, "{side:?}");
+        assert_eq!(after.panels[0], before.panels[0], "the first does not move");
+        let second = after.panels[1].free_frame.expect("a stored frame");
+        assert_eq!((second.width, second.height), (first.width, first.height));
+        match side {
+            CellSide::Right => assert_eq!(second.top, first.top, "same top"),
+            CellSide::Below => assert_eq!(second.left, first.left, "same left"),
+        }
+        let (outers, _) = free_outers(&after);
+        assert_eq!(outers.len(), 2);
+        assert!(!overlap(outers[0], outers[1]), "{side:?}: {outers:?}");
+        match side {
+            CellSide::Right => assert_eq!(outers[0].2, outers[1].0, "touching, right"),
+            CellSide::Below => assert_eq!(outers[0].3, outers[1].1, "touching, below"),
+        }
+
+        state.dispatch(Action::Undo);
+        assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+    }
+}
+
+/// #398 (L8): a place that is taken moves further along; the others keep their
+/// frames.
+#[test]
+fn add_cell_in_free_moves_past_a_taken_place() {
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    go_free(&mut state, graph);
+    for _ in 0..2 {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+    }
+    let spec = graph_spec(&state, graph);
+    assert_eq!(spec.panels.len(), 3);
+    let (outers, _) = free_outers(&spec);
+    assert_eq!(outers.len(), 3);
+    for (i, a) in outers.iter().enumerate() {
+        for b in &outers[i + 1..] {
+            assert!(!overlap(*a, *b), "{outers:?}");
+        }
+    }
+    let frames: Vec<_> = spec.panels.iter().map(|p| p.free_frame.unwrap()).collect();
+    assert!(frames[2].left > frames[1].left, "further along: {frames:?}");
+    assert_eq!(frames[2].top, frames[0].top);
+}
+
+/// #398 (L8): deleting a layer of a free graph moves no other layer, and the
+/// image shrinks around what is left.
+#[test]
+fn removing_a_layer_in_free_leaves_the_others_and_shrinks_the_image() {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    go_free(&mut state, graph);
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let two = graph_spec(&state, graph);
+    let second = two.panels[1].free_frame.expect("frame");
+    let (_, size_two) = free_outers(&two);
+
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::Panel(0),
+    });
+    let one = graph_spec(&state, graph);
+    assert_eq!(one.panels.len(), 1);
+    assert_eq!(one.panels[0].free_frame, Some(second), "did not move");
+    let (_, size_one) = free_outers(&one);
+    assert!(size_one.0 < size_two.0, "{size_one:?} < {size_two:?}");
+    assert_eq!(one.layer_placement, stokesforge_plot::LayerPlacement::Free);
+}
