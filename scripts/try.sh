@@ -6,8 +6,10 @@
 # Finds the worktree of branch feature/<n>-*, prints what is new (the last merges
 # on main, then the commits of the branch), builds `stokesforge-app` with the
 # worktree's own target folder and runs it in native Wayland (WAYLAND_DISPLAY
-# kept, STOKESFORGE_X11 unset). `main` tries the main checkout itself. The user's
-# OK on this trial is the go-ahead to merge a visible change.
+# kept, STOKESFORGE_X11 unset) on the user's own preferences (no separate config
+# folder) with the demo project open (STOKESFORGE_DEMO=1, as the run-stokesforge
+# driver does). `main` tries the main checkout itself. The user's OK on this
+# trial is the go-ahead to merge a visible change.
 # --dry-run prints the build and run commands without running them.
 set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
@@ -17,7 +19,7 @@ target=""
 for a in "$@"; do
     case "$a" in
     --dry-run) dry=1 ;;
-    -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) target="$a" ;;
     esac
 done
@@ -59,4 +61,5 @@ if [ "$dry" = 1 ]; then
 fi
 "${build[@]}"
 unset STOKESFORGE_X11
+export STOKESFORGE_DEMO=1
 exec "${run[@]}"

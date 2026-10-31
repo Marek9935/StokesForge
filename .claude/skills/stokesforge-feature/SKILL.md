@@ -57,7 +57,7 @@ Texts: `stokesforge-ui-texts`. Commands, rendering, import, Python: their own sk
 
 - `AppState` logic: `crates/stokesforge-app-state/tests/shell.rs`; a painted gesture: the surface module's `tests`. Placement and witnesses: `stokesforge-verification`.
 - Tests cover geometry, not appearance: a visual change is **looked at** (`run-stokesforge`), before and after, also with `STOKESFORGE_LANG=en-XA`.
-- **Trial of a visible change (#413)**: when the change is visible, ask the user to run `scripts/try.sh <n>` from the main checkout (builds the branch, opens it on their screen); their OK is the merge go-ahead. After a late fix, rerun the app and look again before delivering. The merge adds an entry to the To-test page (`stokesforge-verification`).
+- **Trial of a visible change (#413)**: when the change is visible, ask the user to run `scripts/try.sh <n>` from the main checkout (builds the branch and opens it on their screen, with their own preferences and the demo project open); their OK is the merge go-ahead. After a late fix, rerun the app and look again before delivering. The merge adds an entry to the To-test page (`stokesforge-verification`).
 - Manual: a user-visible feature is described in `manual/src/` in the same commit (rule in `CLAUDE.md`, « Conventions »); a changed interface regenerates its screenshot.
 - `//!` of the module carries the *why*; the `docs/` page describes the code as it is. A new rule goes to `.claude/conventions.md` or `docs/`, in the same commit.
 

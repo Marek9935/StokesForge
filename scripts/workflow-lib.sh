@@ -49,7 +49,7 @@ sf_first_free() {
     local used c
     used="$(sf_used_colours)"
     for c in "${SF_COLOURS[@]}"; do
-        printf '%s\n' "$used" | grep -qxF "$c" || { printf '%s\n' "$c"; return 0; }
+        printf '%s\n' "$used" | grep -xF "$c" > /dev/null || { printf '%s\n' "$c"; return 0; }
     done
 }
 

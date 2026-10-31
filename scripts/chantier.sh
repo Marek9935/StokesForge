@@ -10,7 +10,14 @@
 # starts `claude -n "<square> #<n> <short name>"` from the main checkout, with
 # the worktree(s) added by --add-dir. Run it from the main checkout.
 #
-# Test seam: SF_ISSUE_TITLE replaces the `glab issue view` lookup.
+# Session name: "<square> #<n> <short name>", the short name being the first 3
+# words of the title, in the issue's own language. Several issues in one session:
+# every square, joined by " · " ("🟦 #398 Graph size · 🟩 #399 Frames").
+# Seven work packages cannot run at once: with the six colours taken the script
+# refuses with a message and a non-zero exit.
+#
+# Test seam: SF_ISSUE_TITLE_<n> (or SF_ISSUE_TITLE for any issue) replaces the
+# `glab issue view` lookup.
 # --dry-run creates nothing and prints what it would do.
 set -euo pipefail
 . "$(dirname "$0")/workflow-lib.sh"
@@ -31,6 +38,8 @@ main="$(sf_main_dir)"
 root="$(sf_wt_root)"
 
 title_of() {
+    local var="SF_ISSUE_TITLE_$1"
+    if [ -n "${!var:-}" ]; then printf '%s\n' "${!var}"; return; fi
     if [ -n "${SF_ISSUE_TITLE:-}" ]; then printf '%s\n' "$SF_ISSUE_TITLE"; return; fi
     glab issue view "$1" -F json | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])'
 }
@@ -41,10 +50,18 @@ slug_of() {
         | cut -c1-40 | sed 's/-$//'
 }
 
-# Short name for the session: the title up to the first colon or dash, 40 characters.
+# Short name: the title up to the first colon or dash, then its first 3 words.
 short_of() {
-    printf '%s' "$1" | sed 's/ *[:—] .*//; s/ - .*//' | cut -c1-40
+    printf '%s' "$1" | sed 's/ *[:—] .*//; s/ - .*//' | awk '{ n = (NF < 3) ? NF : 3; s = $1; for (i = 2; i <= n; i++) s = s " " $i; print s }'
 }
+
+all_taken() {
+    local all=""
+    for c in "${SF_COLOURS[@]}"; do all="$all$c"; done
+    echo "6 work packages in progress ($all): finish or remove one first (git worktree list)" >&2
+    exit 1
+}
+reserved=""   # colours promised in this run (dry-run only)
 
 if [ "$dry" = 0 ] && git -C "$main" remote | grep -qx origin; then
     git -C "$main" fetch origin
@@ -61,11 +78,15 @@ for n in "${issues[@]}"; do
         colour="$(sf_colour_of "$wt")"
     else
         colour="$(sf_first_free)"
-        branch="feature/$n-$(slug_of "$title")"
-        if [ -z "$colour" ]; then
-            echo "all six colours are taken: finish or remove a worktree first (git worktree list)" >&2
-            exit 1
+        if [ "$dry" = 1 ]; then
+            for c in "${SF_COLOURS[@]}"; do
+                if ! { sf_used_colours; printf '%s\n' $reserved; } | grep -xF "$c" > /dev/null; then colour="$c"; break; fi
+                colour=""
+            done
+            reserved="$reserved $colour"
         fi
+        branch="feature/$n-$(slug_of "$title")"
+        [ -n "$colour" ] || all_taken
         if [ "$dry" = 1 ]; then
             echo "would run: git worktree add $wt -b $branch --no-track $base"
         else
@@ -74,7 +95,7 @@ for n in "${issues[@]}"; do
                 set -e
                 . "$1/workflow-lib.sh"
                 colour="$(sf_first_free)"
-                [ -n "$colour" ] || { echo "all six colours are taken" >&2; exit 1; }
+                [ -n "$colour" ] || { echo "6 work packages in progress: finish or remove one first" >&2; exit 1; }
                 git -C "$2" worktree add "$3" -b "$4" --no-track "$5"
                 printf "%s\n" "$colour" > "$(sf_colour_file "$3")"
             ' _ "$(dirname "$0")" "$main" "$wt" "$branch" "$base"
@@ -86,9 +107,8 @@ for n in "${issues[@]}"; do
     wts+=("$wt")
 done
 
-# One issue: its name. Several issues in one session: see session_name.
-session_name() { printf '%s' "${names[0]}"; }
-name="$(session_name)"
+name=""
+for x in "${names[@]}"; do name="${name:+$name · }$x"; done
 
 args=(claude -n "$name")
 for wt in "${wts[@]}"; do args+=(--add-dir "$wt"); done

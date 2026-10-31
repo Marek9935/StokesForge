@@ -1,4 +1,4 @@
-# Asking the user to decide: slides or a multiple-choice form
+# Asking the user to decide: the multiple-choice form
 
 Used by every skill that asks questions (feature, bug report, bug fix, commands). The user is not a developer and is dyslexic: they arbitrate **observable behaviour**, never code structure, and decide best one card at a time, in short bullets with a sketch.
 
@@ -29,8 +29,9 @@ Before offering options on an architecture choice, give the figures the user dec
 
 ## How to ask
 
-- **1 to 4 questions: `AskUserQuestion`** (the "small slides"; a sketch or several issues in the batch: the form, even under five): one question per slide, 2 to 4 options, recommendation first with « (Recommandé) » ("(Recommended)" in the interaction language), the advantage and the drawback of each option in its description, a `preview` sketch when a screen or gesture can be drawn.
-- **5 questions or more: the multiple-choice form**, a published Artifact page built from [`decision-form.html`](decision-form.html). Never a list of questions in the terminal.
+- **The decisions of a work package** (start form and follow-up form), even a single question: the multiple-choice form, below.
+- **`AskUserQuestion`** only for a quick question outside a work package's decisions (a yes/no on process): one question, 2 to 4 options, recommendation first with « (Recommandé) » ("(Recommended)" in the interaction language), advantage and drawback in each description.
+- **The multiple-choice form** is a published Artifact page built from [`decision-form.html`](decision-form.html). Never a list of questions in the terminal.
 
 The page is written in the **interaction language** (`CLAUDE.md`, "Interaction language"). The template `decision-form.html` is in French and exempt from the French guard; when the interaction language is not French, translate its wording when filling it. Interface texts appear in English, as on screen.
 

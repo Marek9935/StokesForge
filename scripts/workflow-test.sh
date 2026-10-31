@@ -44,9 +44,23 @@ eq "$(colour_of 3)" 🟦 "colour kept on rerun"
 [ -f "$tmp/_stokesforge/feature3/stokesforge-colour" ] && fail "colour file in the worktree root"
 unset SF_ISSUE_TITLE
 
+# Two issues in one session: every square, 3 words each; seventh refused.
+out="$(SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" --dry-run 7 8)"
+grep -xF '🟧 #7 Graph size · 🟪 #8 Frames follow the' <<< "$out" > /dev/null || fail "two-issue name: $out"
+for k in 11 12 13; do add_wt "$k"; done
+printf '%s\n' 🟧 > "$(git -C "$tmp/_stokesforge/feature11" rev-parse --absolute-git-dir)/stokesforge-colour"
+printf '%s\n' 🟪 > "$(git -C "$tmp/_stokesforge/feature12" rev-parse --absolute-git-dir)/stokesforge-colour"
+printf '%s\n' 🟥 > "$(git -C "$tmp/_stokesforge/feature13" rev-parse --absolute-git-dir)/stokesforge-colour"
+add_wt 14; printf '%s\n' 🟨 > "$(git -C "$tmp/_stokesforge/feature14" rev-parse --absolute-git-dir)/stokesforge-colour"
+if SF_ISSUE_TITLE="Seventh" "$here/chantier.sh" 9 2> "$tmp/err7"; then fail "seventh work package accepted"; fi
+grep -q '6 work packages in progress (🟦🟩🟧🟪🟥🟨)' "$tmp/err7" || fail "seventh message: $(cat "$tmp/err7")"
+[ ! -e "$tmp/_stokesforge/feature9" ] || fail "seventh worktree created"
+for k in 11 12 13 14; do git worktree remove "$tmp/_stokesforge/feature$k"; done
+
 # try.sh targets the worktree's own target folder; unknown issue points to main.
 out="$("$here/try.sh" --dry-run 2)"
 echo "$out" | grep -q "CARGO_TARGET_DIR=$tmp/_stokesforge/feature2/target" || fail "try target: $out"
+grep -q 'STOKESFORGE_DEMO=1' "$here/try.sh" || fail "try.sh opens the demo"
 echo "$out" | grep -q -- "--manifest-path $tmp/_stokesforge/feature2/Cargo.toml" || fail "try manifest"
 if "$here/try.sh" --dry-run 99 2> "$tmp/err"; then fail "try.sh 99 should fail"; fi
 grep -q 'try.sh main' "$tmp/err" || fail "try.sh 99 message"
