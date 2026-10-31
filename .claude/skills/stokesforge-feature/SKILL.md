@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implement a StokesForge feature end to end — layer, menus, toolbars, icons, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute » / add, « implémente » / implement, « fais que… » / make it so that…, « traite #N », « lance #N », « lance le package sur <thème> » — any phrasing that starts a work package, with or without a number); during issue reporting, only once implementation is explicitly asked.
+description: "Implement a StokesForge feature end to end — layer, menus, toolbars, icons, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute » / add, « implémente » / implement, « fais que… » / make it so that…, « traite #N », « lance #N », « lance le package sur <thème> » — any phrasing that starts a work package, with or without a number); during issue reporting, only once implementation is explicitly asked."
 ---
 
 A feature almost always spans several layers. This skill keeps each piece in the right one and none forgotten.

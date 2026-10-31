@@ -6,6 +6,10 @@
 //! each `SKILL.md`: they must point to an existing file, and no sheet
 //! of `references/` may stay unlinked (orphan).
 //!
+//! A third check guards the frontmatter: an unquoted `description:` holding
+//! ` #` (a YAML comment) or `: ` (a mapping indicator) would be cut by any
+//! YAML parser, so it must be quoted; a missing or empty one is refused too.
+//!
 //! Why: the headings of `docs/` change when the documentation is
 //! translated into English; a renamed or removed section must break the test
 //! instead of leaving a mute sheet. Third-party skills (apex, skill-manager,
@@ -178,6 +182,51 @@ fn link_errors(root: &Path) -> Vec<String> {
     errors
 }
 
+/// Errors of the frontmatter `description:`: missing, empty, or unquoted
+/// with ` #` or `: ` (a YAML parser would cut it).
+fn description_errors(root: &Path) -> Vec<String> {
+    let mut errors = Vec::new();
+    for skill in project_skills(root) {
+        let file = skill.join("SKILL.md");
+        let text =
+            fs::read_to_string(&file).unwrap_or_else(|e| panic!("reading {}: {e}", file.display()));
+        let name = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        let value = text
+            .lines()
+            .skip_while(|l| l.trim_end() != "---")
+            .skip(1)
+            .take_while(|l| l.trim_end() != "---")
+            .find_map(|l| l.strip_prefix("description:"))
+            .map(str::trim);
+        match value {
+            None | Some("") => errors.push(format!("{name}: missing or empty description")),
+            Some(v) if v.starts_with('"') || v.starts_with('\'') => {}
+            Some(v) if v.contains(" #") || v.contains(": ") || v.ends_with(':') => {
+                errors.push(format!(
+                    "{name}: unquoted description contains \" #\" or \": \", \
+                     it would be cut by YAML, quote it"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    errors
+}
+
+#[test]
+fn skill_descriptions_survive_yaml() {
+    let errors = description_errors(&root());
+    assert!(
+        errors.is_empty(),
+        "descriptions cut by YAML:\n{}",
+        errors.join("\n")
+    );
+}
+
 #[test]
 fn skill_references_point_to_existing_sections() {
     let root = root();
@@ -269,6 +318,47 @@ fn witness_correct_tree_has_no_error() {
     assert!(link_errors(&a.0).is_empty());
 }
 
+fn with_description(a: &Tree, line: &str) {
+    a.write(
+        &format!("{}/SKILL.md", a.skill()),
+        &format!("---\nname: x\n{line}\n---\nBody.\n"),
+    );
+}
+
+#[test]
+fn witness_unquoted_description_with_hash_is_reported() {
+    let a = Tree::correct("deschash");
+    with_description(&a, "description: Use for « traite #N » now");
+    assert!(contains_error(&description_errors(&a.0), "cut by YAML"));
+}
+
+#[test]
+fn witness_unquoted_description_with_colon_is_reported() {
+    let a = Tree::correct("desccolon");
+    with_description(&a, "description: Use when: something");
+    assert!(contains_error(&description_errors(&a.0), "cut by YAML"));
+}
+
+#[test]
+fn witness_quoted_description_with_hash_is_accepted() {
+    let a = Tree::correct("descquoted");
+    with_description(&a, "description: \"Use for « traite #N »: now\"");
+    assert!(!contains_error(
+        &description_errors(&a.0),
+        "stokesforge-one"
+    ));
+}
+
+#[test]
+fn witness_missing_description_is_reported() {
+    let a = Tree::correct("descmissing");
+    with_description(&a, "other: x");
+    assert!(contains_error(
+        &description_errors(&a.0),
+        "missing or empty"
+    ));
+}
+
 #[test]
 fn witness_missing_heading_is_reported() {
     let a = Tree::correct("heading");
@@ -343,5 +433,10 @@ fn witness_third_party_skill_is_ignored() {
     a.write(".claude/skills/apex/references/orphan.md", "Nothing.\n");
     assert!(reference_errors(&a.0).is_empty());
     assert!(link_errors(&a.0).is_empty());
+    a.write(
+        ".claude/skills/apex/SKILL.md",
+        "---\ndescription: bad #1\n---\n",
+    );
+    assert!(!contains_error(&description_errors(&a.0), "apex"));
     assert_eq!(project_skills(&a.0).len(), 3);
 }
