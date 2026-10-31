@@ -8,7 +8,8 @@
 //!
 //! A third check guards the frontmatter: an unquoted `description:` holding
 //! ` #` (a YAML comment) or `: ` (a mapping indicator) would be cut by any
-//! YAML parser, so it must be quoted; a missing or empty one is refused too.
+//! YAML parser, so it must be quoted; a missing or empty one is refused too,
+//! as is one longer than 1024 characters or holding an XML/HTML tag.
 //!
 //! Why: the headings of `docs/` change when the documentation is
 //! translated into English; a renamed or removed section must break the test
@@ -182,8 +183,20 @@ fn link_errors(root: &Path) -> Vec<String> {
     errors
 }
 
-/// Errors of the frontmatter `description:`: missing, empty, or unquoted
-/// with ` #` or `: ` (a YAML parser would cut it).
+/// True if `s` holds a tag: a `<` followed by an ASCII letter.
+fn has_tag(s: &str) -> bool {
+    s.char_indices().any(|(i, c)| {
+        c == '<'
+            && s[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|n| n.is_ascii_alphabetic())
+    })
+}
+
+/// Errors of the frontmatter `description:`: missing, empty, unquoted
+/// with ` #` or `: ` (a YAML parser would cut it), longer than 1024
+/// characters, or holding an XML/HTML tag.
 fn description_errors(root: &Path) -> Vec<String> {
     let mut errors = Vec::new();
     for skill in project_skills(root) {
@@ -212,6 +225,23 @@ fn description_errors(root: &Path) -> Vec<String> {
                 ));
             }
             Some(_) => {}
+        }
+        if let Some(v) = value.filter(|v| !v.is_empty()) {
+            let content = match v.chars().next() {
+                Some(q @ ('"' | '\'')) => v[1..].strip_suffix(q).unwrap_or(&v[1..]),
+                _ => v,
+            };
+            let len = content.chars().count();
+            if len > 1024 {
+                errors.push(format!(
+                    "{name}: description is {len} characters, the limit is 1024"
+                ));
+            }
+            if has_tag(content) {
+                errors.push(format!(
+                    "{name}: description holds an XML/HTML tag (a \"<\" followed by a letter)"
+                ));
+            }
         }
     }
     errors
@@ -343,6 +373,50 @@ fn witness_unquoted_description_with_colon_is_reported() {
 fn witness_quoted_description_with_hash_is_accepted() {
     let a = Tree::correct("descquoted");
     with_description(&a, "description: \"Use for « traite #N »: now\"");
+    assert!(!contains_error(
+        &description_errors(&a.0),
+        "stokesforge-one"
+    ));
+}
+
+#[test]
+fn witness_description_with_tag_is_reported() {
+    let a = Tree::correct("destag");
+    with_description(&a, "description: \"Use for « lance sur <thème> » now\"");
+    let errors = description_errors(&a.0);
+    assert!(contains_error(
+        &errors,
+        "stokesforge-one/SKILL.md: description holds an XML/HTML tag"
+    ));
+    let b = Tree::correct("destagb");
+    with_description(&b, "description: \"Use <b>bold</b>\"");
+    assert!(contains_error(&description_errors(&b.0), "XML/HTML tag"));
+}
+
+#[test]
+fn witness_description_with_arrow_or_spaced_lt_is_accepted() {
+    let a = Tree::correct("deslt");
+    with_description(&a, "description: \"a <- b, and 2 < 3\"");
+    assert!(!contains_error(
+        &description_errors(&a.0),
+        "stokesforge-one"
+    ));
+}
+
+#[test]
+fn witness_description_over_1024_characters_is_reported() {
+    let a = Tree::correct("deslong");
+    with_description(&a, &format!("description: \"{}\"", "é".repeat(1025)));
+    assert!(contains_error(
+        &description_errors(&a.0),
+        "stokesforge-one/SKILL.md: description is 1025 characters"
+    ));
+}
+
+#[test]
+fn witness_description_of_exactly_1024_characters_is_accepted() {
+    let a = Tree::correct("deslimit");
+    with_description(&a, &format!("description: \"{}\"", "é".repeat(1024)));
     assert!(!contains_error(
         &description_errors(&a.0),
         "stokesforge-one"
