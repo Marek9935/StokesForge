@@ -4,7 +4,7 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 
 | Skill | For | Triggers on |
 |---|---|---|
-| [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implement a feature end to end | a change to make in the repo |
+| [`stokesforge-feature`](stokesforge-feature/SKILL.md) | implement a feature end to end | a change to make in the repo; « lance #N » or a work package named in plain words |
 | [`stokesforge-bug-report`](stokesforge-bug-report/SKILL.md) | triage feedback into GitLab issues | « ça plante », a batch of remarks, an issue |
 | [`stokesforge-bug-fix`](stokesforge-bug-fix/SKILL.md) | fix: reproduce first, repair at the cause | an explicit request to fix in the code |
 | [`stokesforge-command`](stokesforge-command/SKILL.md) | add an undoable command | any mutation of the project |
