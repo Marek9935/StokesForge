@@ -302,15 +302,13 @@ pub fn figure_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) 
         .with_auto(AutoKind::Field)
 }
 
-/// Left or Top of a layer in free placement, from the edge of the image, in
-/// `unit` (#398): never below `minimum_points`, the bands the layer's own axes
-/// and title need (a smaller value is raised to it). No Auto: a free layer
-/// always has a place.
-pub fn free_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) -> Quantity {
+/// Left or Top of a layer in free placement, a page coordinate in `unit`
+/// (#398): signed, bounded by the position range a free frame keeps
+/// (`stokesforge_plot::MAX_FIGURE_EXTENT / 2` each way). The unit is in the
+/// label.
+pub fn free_position(unit: crate::length_unit::LengthUnit) -> Quantity {
+    let half = stokesforge_plot::MAX_FIGURE_EXTENT / 2.0;
     Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
-        .between(
-            unit.from_points(minimum_points.clamp(0.0, stokesforge_plot::MAX_FRAME_SIZE)),
-            unit.from_points(stokesforge_plot::MAX_FRAME_SIZE),
-        )
+        .between(unit.from_points(-half), unit.from_points(half))
         .wide()
 }

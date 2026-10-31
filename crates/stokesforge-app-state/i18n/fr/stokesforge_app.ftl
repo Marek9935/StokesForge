@@ -809,7 +809,9 @@ plot-size-note = Les axes et le titre s’ajoutent autour de la zone de tracé 
 plot-size-placement = Placement des calques
 plot-size-placement-grid = Grille régulière
 plot-size-placement-free = Libre
-plot-size-free-note = Les valeurs ci-dessus sont celles du calque choisi dans la liste. Le graphique grandit ou rétrécit autour des calques : changer ou supprimer l’un ne déplace jamais les autres.
+plot-size-position-left = Position, gauche ({ $unit })
+plot-size-position-top = Position, haut ({ $unit })
+plot-size-free-note = Les valeurs ci-dessus sont celles du calque choisi dans la liste. Les positions sont celles de la page : elles ne changent pas quand un autre calque bouge, et elles peuvent être négatives. Le graphique grandit ou rétrécit autour des calques.
 
 plot-figure-size = Taille de la figure
     .hint = Grandit avec les axes : un axe ou un titre ajouté agrandit l’image. Fixe : la place de quatre axes est gardée d’avance, donc ajouter un axe laisse l’image et la zone de tracé telles quelles

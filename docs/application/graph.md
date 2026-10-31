@@ -835,19 +835,26 @@ its frames first). Free to grid is `compose::set_grid_placement`: layers whose
 vertical extents overlap share a row, left to right inside a row, then each
 column takes its widest frame and each row its tallest.
 
-In Free, **Size** shows **Left**, **Top**, **Width** and **Height** of the layer
-chosen in the layer list (which stays live on this page, greyed out only on the
-grid), the read-only **Graph size**, and a note. Width and Height are the plot
-area (`quantities::frame_size`, 36 to 2000 pt). Left and Top are the distance
-from the image edge to the plot area, the graph title band included at the top
-(`frame_sizes::free_fields`; stored = `FigureLayout::free_origin` + value, minus
-the title band for Top), never below the layer's own bands: the field clamps
-(`quantities::free_offset`) with its usual orange frame and bubble. The figure
-Left / Top and the per-column and per-row fields are hidden and stay stored for
-the way back. **Figure size = Fixed** applies per layer. There is no handle on
-any edge in Free until the mouse gestures come (`GraphView::layout_is_free`); a
-click still activates the layer drawn under the cursor, found from the drawn
-plot areas, never from grid breakpoints.
+In Free, **Size** shows **Position, left**, **Position, top**, **Plot area
+width** and **Plot area height** of the layer chosen in the layer list (which
+stays live on this page, greyed out only on the grid), the read-only **Graph
+size**, and a note. Width and Height are the plot area
+(`quantities::frame_size`, 36 to 2000 pt). The two positions are **stable page
+coordinates** (`frame_sizes::free_fields`): exactly the stored
+`FreeFrame::left` / `top`, in the Preferences unit, so a value is read back as
+typed, a layer that does not move keeps its numbers whatever the others do, and
+they can be negative (`quantities::free_position`, the `±MAX_FIGURE_EXTENT / 2`
+range of `FreeFrame::sanitized`). The origin is the top-left corner of the image
+at the moment the graph went Free (`free_frames_from_grid`), so right after
+switching the numbers are the former distances from the image edge. Top does not
+include the graph title band, so showing or hiding the title changes neither the
+stored nor the shown numbers (with a title, the first Top reads the band less
+than the old distance). The image still surrounds the layers (it may grow on the
+left or above). The figure Left / Top and the per-column and per-row fields are
+hidden and stay stored for the way back. **Figure size = Fixed** applies per
+layer. There is no handle on any edge in Free until the mouse gestures come
+(`GraphView::layout_is_free`); a click still activates the layer drawn under the
+cursor, found from the drawn plot areas, never from grid breakpoints.
 
 **Add Layer Beside** in Free writes the frame of the new layer in the same
 `EditPlotSpec(AddCell)` (`frame_sizes::place_beside`, `render::place_beside`):

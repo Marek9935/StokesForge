@@ -16,7 +16,7 @@ use stokesforge_core::compose::{
     set_grid_placement, CellSide, FigureOffset, FrameAxis, FreeField,
 };
 use stokesforge_plot::{FreeFrame, LayerPlacement, PlotSpec};
-use stokesforge_render::pipeline::{BesideSide, FigureLayout};
+use stokesforge_render::pipeline::BesideSide;
 
 /// True if the graph stores no frame at all (an old file). A **free** graph
 /// stores its frames in its layers (#398): it is never legacy, so nothing here
@@ -148,70 +148,54 @@ pub fn set_placement_in_draft(spec: &mut PlotSpec, free: bool) -> bool {
 }
 
 /// The four numbers of the frame of a layer as Graph Properties shows them in
-/// free placement, in points (#398), with the smallest Left and Top its own
-/// axes allow.
+/// free placement, in points (#398).
+///
+/// Left and Top are **page coordinates**, exactly what is stored: the origin
+/// is the top-left corner of the image at the moment the graph went free
+/// (`free_frames_from_grid`), so a layer that does not move keeps its numbers
+/// whatever the others do, and a value is read back as typed. They may be
+/// negative. Top does **not** include the graph title band (the stored value
+/// does not), so showing or hiding the title changes neither the stored nor the
+/// shown numbers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FreeFields {
-    /// Distance from the left edge of the image to the frame.
+    /// Page x of the left edge of the plot area.
     pub left: f64,
-    /// Distance from the top edge of the image (title band included) to the
-    /// frame.
+    /// Page y of the top edge of the plot area, title band excluded.
     pub top: f64,
-    /// Width of the frame.
+    /// Width of the plot area.
     pub width: f64,
-    /// Height of the frame.
+    /// Height of the plot area.
     pub height: f64,
-    /// Smallest Left: the left bands of the layer itself.
-    pub min_left: f64,
-    /// Smallest Top: the title band and the top bands of the layer itself.
-    pub min_top: f64,
 }
 
-/// What the free fields show for layer `panel` of `spec` (#398), read on
-/// `layout`, the layout of this very spec. `None` if the graph is not free or
-/// the layer has no cell in the layout.
-pub fn free_fields(spec: &PlotSpec, layout: &FigureLayout, panel: usize) -> Option<FreeFields> {
+/// What the free fields show for layer `panel` of `spec` (#398). `None` if the
+/// graph is not free or the layer does not exist.
+pub fn free_fields(spec: &PlotSpec, panel: usize) -> Option<FreeFields> {
     if spec.layer_placement != LayerPlacement::Free {
         return None;
     }
     let base = *spec.cell_bases().get(panel)?;
-    let cell = layout.free_cells.iter().find(|cell| cell.base == base)?;
     let frame = spec.panels.get(base)?.sanitized_free_frame();
-    let band = f64::from(layout.title_band);
     Some(FreeFields {
-        left: frame.left - layout.free_origin.0,
-        top: frame.top - layout.free_origin.1 + band,
+        left: frame.left,
+        top: frame.top,
         width: frame.width,
         height: frame.height,
-        min_left: f64::from(cell.frame.0.saturating_sub(cell.outer.0)),
-        min_top: band + f64::from(cell.frame.1.saturating_sub(cell.outer.1)),
     })
 }
 
-/// Sets one field of layer `panel` of a free draft from the value Graph
-/// Properties shows (#398): Left and Top are distances from the edge of the
-/// image, raised to the layer's own bands, stored as `origin + value`; Width
-/// and Height are the frame itself. `layout` is the layout of `spec` as it is.
-/// `false`, with the draft unchanged, if the field is refused.
+/// Sets one field of layer `panel` of a free draft (#398), stored as given
+/// (brought into bounds like [`FreeFrame::sanitized`]). `false`, with the
+/// draft unchanged, if the field is refused.
 pub fn set_free_field_in_draft(
     spec: &mut PlotSpec,
-    layout: &FigureLayout,
     panel: usize,
     field: FreeField,
-    shown: f64,
+    value: f64,
 ) -> bool {
-    let Some(fields) = free_fields(spec, layout, panel) else {
-        return false;
-    };
-    let stored = match field {
-        FreeField::Left => shown.max(fields.min_left) + layout.free_origin.0,
-        FreeField::Top => {
-            shown.max(fields.min_top) + layout.free_origin.1 - f64::from(layout.title_band)
-        }
-        FreeField::Width | FreeField::Height => shown,
-    };
     let mut candidate = spec.clone();
-    if !set_free_frame(&mut candidate, panel, field, stored) {
+    if !set_free_frame(&mut candidate, panel, field, value) {
         return false;
     }
     *spec = candidate;
@@ -425,68 +409,61 @@ mod tests {
         assert!(!set_placement_in_draft(&mut spec, false), "already a grid");
     }
 
-    /// #398: Left and Top show the distance from the image edge (title band
-    /// included at the top), not the stored coordinate; typing one stores
-    /// `origin + value`; a value below the layer's own bands is raised.
+    /// #398: Left and Top are stable page coordinates: what is typed is read
+    /// back, negative values are accepted, and a layer that does not move keeps
+    /// its numbers when another one moves.
     #[test]
-    fn free_fields_are_distances_from_the_image_edge() {
+    fn free_positions_are_page_coordinates_read_back_as_typed() {
         let mut spec = free_two_columns();
+        let first = free_fields(&spec, 0).expect("fields");
+        let second = free_fields(&spec, 1).expect("fields");
+        // Layer 1 moved to 25 cm (708.66 pt), right of layer 2.
+        let typed = 25.0 * 72.0 / 2.54;
+        assert!(set_free_field_in_draft(
+            &mut spec,
+            0,
+            FreeField::Left,
+            typed
+        ));
+        assert_eq!(free_fields(&spec, 0).unwrap().left, typed);
+        assert_eq!(
+            free_fields(&spec, 1).unwrap(),
+            second,
+            "layer 2 keeps its numbers"
+        );
+        // A negative position, left of the origin, round-trips.
+        assert!(set_free_field_in_draft(
+            &mut spec,
+            1,
+            FreeField::Left,
+            -120.0
+        ));
+        assert!(set_free_field_in_draft(&mut spec, 1, FreeField::Top, -30.0));
+        let moved = free_fields(&spec, 1).unwrap();
+        assert_eq!((moved.left, moved.top), (-120.0, -30.0));
+        assert_eq!(
+            free_fields(&spec, 0).unwrap().left,
+            typed,
+            "and layer 1 too"
+        );
+        assert_eq!(free_fields(&spec, 0).unwrap().top, first.top);
+        // Hiding or showing the title changes no number.
+        let before = free_fields(&spec, 0).unwrap();
         spec.title = "T".to_owned();
-        // Shift the whole picture far from the stored origin.
-        for panel in spec.panels.iter_mut() {
-            if let Some(frame) = panel.free_frame.as_mut() {
-                frame.left += 1000.0;
-                frame.top += 700.0;
-            }
-        }
-        let layout = figure_layout(&spec).expect("layout");
-        let cell = &layout.free_cells[0];
-        let fields = free_fields(&spec, &layout, 0).expect("fields");
-        assert_ne!(
-            fields.left,
-            spec.panels[0].free_frame.unwrap().left,
-            "not raw"
-        );
-        assert!(
-            (fields.left - f64::from(cell.frame.0)).abs() < 1.0,
-            "{fields:?}"
-        );
-        assert!(
-            (fields.top - f64::from(cell.frame.1)).abs() < 1.0,
-            "{fields:?}"
-        );
-        assert!(layout.title_band > 0 && fields.top > f64::from(layout.title_band));
+        assert_eq!(free_fields(&spec, 0).unwrap(), before);
+    }
 
-        // Layer 1 moved to 50 pt more than layer 0's Left: stored = origin + 50.
-        let target = fields.left + 50.0;
-        assert!(set_free_field_in_draft(
-            &mut spec,
-            &layout,
-            1,
-            FreeField::Left,
-            target
-        ));
-        let moved = spec.panels[1].free_frame.unwrap().left;
-        assert!(
-            (moved - (layout.free_origin.0 + target)).abs() < 1e-9,
-            "{moved}"
-        );
-        // Below its own left bands: raised to them.
-        let layout = figure_layout(&spec).expect("layout");
-        let low = free_fields(&spec, &layout, 1).expect("fields");
-        assert!(set_free_field_in_draft(
-            &mut spec,
-            &layout,
-            1,
-            FreeField::Left,
-            0.0
-        ));
-        let layout = figure_layout(&spec).expect("layout");
-        let raised = free_fields(&spec, &layout, 1).expect("fields");
-        assert!(
-            (raised.left - low.min_left).abs() < 1.0,
-            "{raised:?} {low:?}"
-        );
+    /// #398: right after Grid to Free the numbers are the former distances
+    /// from the image edge (no title: the plot area's place in the image).
+    #[test]
+    fn right_after_going_free_the_positions_are_the_former_distances() {
+        let grid = figure_layout(&two_columns()).expect("layout");
+        let spec = free_two_columns();
+        for (index, (row, column)) in [(0, 0), (0, 1)].into_iter().enumerate() {
+            let (x, y, _, _) = grid.frame_rect(row, column).expect("explicit");
+            let fields = free_fields(&spec, index).expect("fields");
+            assert_eq!((fields.left, fields.top), (f64::from(x), f64::from(y)));
+        }
     }
 
     /// #398: the fields belong to the layer asked for, an overlaid layer reads
@@ -494,14 +471,12 @@ mod tests {
     #[test]
     fn free_fields_follow_the_layer_asked_for() {
         let mut spec = free_two_columns();
-        let layout = figure_layout(&spec).expect("layout");
-        let a = free_fields(&spec, &layout, 0).expect("fields");
-        let b = free_fields(&spec, &layout, 1).expect("fields");
+        let a = free_fields(&spec, 0).expect("fields");
+        let b = free_fields(&spec, 1).expect("fields");
         assert_ne!(a.left, b.left);
         assert_eq!((a.width, b.width), (300.0, 200.0));
         assert!(set_free_field_in_draft(
             &mut spec,
-            &layout,
             1,
             FreeField::Width,
             150.0
@@ -510,11 +485,10 @@ mod tests {
         assert_eq!(spec.panels[1].free_frame.unwrap().width, 150.0);
         assert!(!set_free_field_in_draft(
             &mut spec,
-            &layout,
             1,
             FreeField::Width,
             f64::NAN
         ));
-        assert!(free_fields(&two_columns(), &layout, 0).is_none());
+        assert!(free_fields(&two_columns(), 0).is_none());
     }
 }

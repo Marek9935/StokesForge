@@ -644,22 +644,22 @@ fn free_size_section(
     let Some(layout) = layout else {
         return commit;
     };
-    let Some(fields) = free_fields(spec, layout, panel) else {
+    let Some(fields) = free_fields(spec, panel) else {
         return commit;
     };
     let size = quantities::frame_size(unit);
     let rows = [
         (
             FreeField::Left,
-            tr!("plot-size-left", unit = symbol),
-            fields.left.max(fields.min_left),
-            quantities::free_offset(unit, fields.min_left),
+            tr!("plot-size-position-left", unit = symbol),
+            fields.left,
+            quantities::free_position(unit),
         ),
         (
             FreeField::Top,
-            tr!("plot-size-top", unit = symbol),
-            fields.top.max(fields.min_top),
-            quantities::free_offset(unit, fields.min_top),
+            tr!("plot-size-position-top", unit = symbol),
+            fields.top,
+            quantities::free_position(unit),
         ),
         (
             FreeField::Width,
@@ -678,12 +678,10 @@ fn free_size_section(
         let mut shown = unit.from_points(points);
         let id = ("graph_free", panel, field as u8);
         let changed = form.row(label, |ui| {
-            // A Left or Top below the layer's own bands is clamped to them by
-            // the field itself (orange frame and bubble, S-clamp).
             number_field(ui, id, &mut shown, &quantity).changed
         });
         if changed {
-            commit |= set_free_field_in_draft(spec, layout, panel, field, unit.to_points(shown));
+            commit |= set_free_field_in_draft(spec, panel, field, unit.to_points(shown));
         }
     }
     let (total_width, total_height) = (f64::from(layout.size.0), f64::from(layout.size.1));
@@ -2735,8 +2733,8 @@ mod tests {
         // The four fields show, the grid ones are gone.
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         for label in [
-            tr!("plot-size-left", unit = "cm"),
-            tr!("plot-size-top", unit = "cm"),
+            tr!("plot-size-position-left", unit = "cm"),
+            tr!("plot-size-position-top", unit = "cm"),
             tr!("plot-size-width", unit = "cm"),
             tr!("plot-size-height", unit = "cm"),
             tr!("plot-size-total", unit = "cm"),
@@ -2761,9 +2759,9 @@ mod tests {
         harness.state.close_plot_settings();
     }
 
-    /// #398: the four fields belong to the layer chosen in the list, store
-    /// points from the unit of the Preferences, and show Left as the distance
-    /// from the edge of the image, not the stored coordinate.
+    /// #398: the four fields belong to the layer chosen in the list and store
+    /// points from the unit of the Preferences. Left is the stored page
+    /// coordinate, read back as typed, and the other layer keeps its numbers.
     #[test]
     fn the_free_fields_are_those_of_the_selected_layer_in_the_unit_of_the_preferences() {
         let context = test_support::context();
@@ -2771,28 +2769,37 @@ mod tests {
         harness.open(PlotSettingsTab::Graph, None);
         harness.state.plot_edit_mut().unwrap().selected_panel = 1;
         let draft = harness.draft();
-        let layout = stokesforge_app_state::frame_sizes::figure_layout(&draft).expect("layout");
-        let fields =
-            stokesforge_app_state::frame_sizes::free_fields(&draft, &layout, 1).expect("fields");
+        let raw = draft.panels[1].free_frame.unwrap().left;
+        assert!(raw > 1000.0, "the layer sits far from the origin");
         let painted = paint_window(&context, &mut harness.state, Vec::new());
         assert!(is_painted(&painted, &cm(220.0)), "width of layer 2");
         assert!(
             !is_painted(&painted, &cm(300.0)),
             "not the width of layer 1"
         );
-        assert!(is_painted(&painted, &cm(fields.left)), "Left of layer 2");
-        let raw = draft.panels[1].free_frame.unwrap().left;
         assert!(
-            raw > 1000.0 && !is_painted(&painted, &cm(raw)),
-            "not the stored value"
+            is_painted(&painted, &cm(raw)),
+            "Left is the stored position"
         );
 
-        // 5 cm typed: stored in points, on layer 2 only.
+        // 5 cm typed in Width, 25 cm in Left: stored in points on layer 2 only.
         type_into(&context, &mut harness, &cm(220.0), "5");
+        type_into(&context, &mut harness, &cm(raw), "25");
         let model = harness.model();
-        let width = |index: usize| model.panels[index].free_frame.unwrap().width;
-        assert!((width(1) - 141.732_283).abs() < 1e-5, "{}", width(1));
-        assert_eq!(width(0), 300.0, "layer 1 untouched");
+        let frame = |index: usize| model.panels[index].free_frame.unwrap();
+        assert!((frame(1).width - 141.732_283).abs() < 1e-5);
+        assert!(
+            (frame(1).left - 708.661_417).abs() < 1e-5,
+            "{}",
+            frame(1).left
+        );
+        assert_eq!(
+            frame(0),
+            draft.panels[0].free_frame.unwrap(),
+            "layer 1 untouched"
+        );
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, "25"), "read back as typed");
         harness.state.close_plot_settings();
     }
 

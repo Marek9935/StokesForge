@@ -28,9 +28,10 @@ without a message, see `docs/persistence.md`).
 
 - Free placement of graph layers (#398), first batch: Graph Properties >
   General > Size > **Layer placement** switches between **Regular grid** and
-  **Free**. In Free each layer has its own plot area, set with **Left**, **Top**,
-  **Width** and **Height** (Left and Top are the distance from the edge of the
-  image); the image is the bounding box of the layers. Switching to Free moves
+  **Free**. In Free each layer has its own plot area, set with **Position, left**,
+  **Position, top**, **Plot area width** and **Plot area height** (positions are
+  page coordinates: read back as typed, unchanged when another layer moves,
+  possibly negative); the image is the bounding box of the layers. Switching to Free moves
   nothing; going back to the grid puts layers side by side in a row and gives
   each column and row its largest plot area. **New Layer Beside** places the new
   layer next to the active one without overlap, **Delete Layer** moves no other
