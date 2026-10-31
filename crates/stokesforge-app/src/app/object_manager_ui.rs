@@ -405,6 +405,11 @@ pub(super) fn object_node_menu(
                     }
                 }
             }
+            if let (T::Panel(layer), stokesforge_plot::LayerPlacement::Free) =
+                (target, spec.layer_placement)
+            {
+                layer_stacking_items(ui, graph, spec, layer, actions);
+            }
             if hideable
                 && ui
                     .add_enabled(
@@ -455,6 +460,43 @@ pub(super) fn object_node_menu(
             ui.close();
         }
     });
+}
+
+/// Bring to Front / Send to Back of a layer in free placement (#398), greyed
+/// with the reason when the layer already is in front or at the back. The caller
+/// shows them only in free placement.
+pub(super) fn layer_stacking_items(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    spec: &stokesforge_plot::PlotSpec,
+    panel: usize,
+    actions: &mut Vec<Action>,
+) {
+    use stokesforge_core::compose::{is_at_back, is_in_front};
+    if ui
+        .add_enabled(
+            !is_in_front(spec, panel),
+            egui::Button::new(tr!("action-layer-bring-to-front")),
+        )
+        .on_hover_text(tr!("action-layer-bring-to-front", "hint"))
+        .on_disabled_hover_text(tr!("action-layer-bring-to-front", "disabled"))
+        .clicked()
+    {
+        actions.push(Action::BringLayerToFront { graph, panel });
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            !is_at_back(spec, panel),
+            egui::Button::new(tr!("action-layer-send-to-back")),
+        )
+        .on_hover_text(tr!("action-layer-send-to-back", "hint"))
+        .on_disabled_hover_text(tr!("action-layer-send-to-back", "disabled"))
+        .clicked()
+    {
+        actions.push(Action::SendLayerToBack { graph, panel });
+        ui.close();
+    }
 }
 
 /// Why a series or a group can no longer move up or down (#226).
@@ -1714,6 +1756,61 @@ mod tests {
             vec![SeriesRef::new(0, 0)],
             "a row curve is analyzable"
         );
+    }
+
+    /// #398: the layer menu offers Bring to Front / Send to Back in Free only,
+    /// never on the grid, and greys the one that does nothing out.
+    #[test]
+    fn the_layer_menu_offers_stacking_only_in_free_placement() {
+        use egui_kittest::kittest::Queryable;
+        use stokesforge_plot::{FreeFrame, LayerPlacement, Panels};
+        let cell = |column: usize| PanelSpec {
+            free_frame: Some(FreeFrame {
+                left: column as f64 * 100.0,
+                top: 0.0,
+                width: 200.0,
+                height: 150.0,
+                stack: 0,
+            }),
+            ..PanelSpec::at(0, column)
+        };
+        let grid = PlotSpec::default().with_panels(Panels::new([cell(0), cell(1)]));
+        let free = PlotSpec {
+            layer_placement: LayerPlacement::Free,
+            ..grid.clone()
+        };
+        let menu = |spec: PlotSpec| {
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(500.0, 400.0))
+                .build_ui_state(
+                    |ui, spec: &mut PlotSpec| {
+                        let mut actions = Vec::new();
+                        let mut requests = Vec::new();
+                        object_node_menu(
+                            ui,
+                            NodeId::from_raw(1),
+                            T::Panel(0),
+                            spec,
+                            Shown::BASE,
+                            &mut actions,
+                            &mut requests,
+                        );
+                    },
+                    spec,
+                );
+            harness
+                .ctx
+                .set_fonts(stokesforge_render_egui::font_definitions());
+            crate::theme::install(&harness.ctx);
+            harness.run();
+            harness
+        };
+        let on_grid = menu(grid);
+        assert!(on_grid.query_by_label("Bring to Front").is_none());
+        assert!(on_grid.query_by_label("Send to Back").is_none());
+        let in_free = menu(free);
+        assert!(in_free.query_by_label("Bring to Front").is_some());
+        assert!(in_free.query_by_label("Send to Back").is_some());
     }
 
     /// A graph of three series ("First", "Second", "Last"), the first selected,

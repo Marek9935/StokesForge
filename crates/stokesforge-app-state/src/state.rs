@@ -63,8 +63,8 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, OverlaySpec, PanelSpec, Panels, PlotSpec, PlotType,
-    SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, OverlaySpec, PanelSpec, Panels, PlotSpec,
+    PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -802,6 +802,36 @@ pub enum Action {
         left: Option<f64>,
         /// New Top.
         top: Option<f64>,
+    },
+    /// Puts the cell of layer `panel` in front of the others in free placement
+    /// (#398); an overlay layer acts on its base. Layer numbers are kept. One
+    /// undo step ([`PlotEditKind::BringLayerToFront`]); nothing sent on the
+    /// grid or when the cell is already in front.
+    BringLayerToFront {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer under the click.
+        panel: usize,
+    },
+    /// Puts the cell of layer `panel` behind the others (#398); see
+    /// [`Action::BringLayerToFront`] ([`PlotEditKind::SendLayerToBack`]).
+    SendLayerToBack {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer under the click.
+        panel: usize,
+    },
+    /// Sets the background of the cell of layer `panel` in free placement
+    /// (#398): empty = Auto, else a color. One undo step
+    /// ([`PlotEditKind::LayerBackground`]); nothing sent on the grid, for an
+    /// unreadable color or when it is already that one.
+    SetLayerBackground {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer of the cell.
+        panel: usize,
+        /// `#RRGGBB[AA]` or empty for Auto.
+        color: String,
     },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
@@ -5441,6 +5471,24 @@ impl AppState {
                     panel.set_frame_closed(closed);
                     true
                 })
+            }),
+            Action::BringLayerToFront { graph, panel } => {
+                self.edit_plot_object(graph, PlotEditKind::BringLayerToFront, |spec| {
+                    stokesforge_core::compose::bring_to_front(spec, panel)
+                })
+            }
+            Action::SendLayerToBack { graph, panel } => {
+                self.edit_plot_object(graph, PlotEditKind::SendLayerToBack, |spec| {
+                    stokesforge_core::compose::send_to_back(spec, panel)
+                })
+            }
+            Action::SetLayerBackground {
+                graph,
+                panel,
+                color,
+            } => self.edit_plot_object(graph, PlotEditKind::LayerBackground, |spec| {
+                (color.is_empty() || stokesforge_plot::parse_hex(&color).is_some())
+                    && stokesforge_core::compose::set_layer_background(spec, panel, &color)
             }),
             Action::PlaceSeries {
                 graph,
@@ -10209,7 +10257,9 @@ impl AppState {
         };
         if let Some(frame) = beside {
             if let Some(target) = spec.panels.get_mut(new_cell) {
-                target.free_frame = Some(frame);
+                // The stacking key the cell got (in front) is kept.
+                let stack = target.free_frame.map_or(0, |f| f.stack);
+                target.free_frame = Some(FreeFrame { stack, ..frame });
             }
         }
         if !columns.is_empty() {

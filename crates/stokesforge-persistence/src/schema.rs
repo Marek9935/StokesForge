@@ -782,6 +782,9 @@ pub(crate) struct FreeFrameRecord {
     pub(crate) top: f64,
     pub(crate) width: f64,
     pub(crate) height: f64,
+    /// Stacking key (#398); absent from an older file, hence 0.
+    #[serde(default)]
+    pub(crate) stack: i32,
 }
 
 /// [`stokesforge_plot::TextFont`], flat.
@@ -874,6 +877,10 @@ pub(crate) struct PanelSpecRecord {
     /// Frame of the cell in free placement (#398); absent = none.
     #[serde(default)]
     pub(crate) free_frame: Option<FreeFrameRecord>,
+    /// Background of the cell in free placement (#398); absent or empty =
+    /// Auto.
+    #[serde(default)]
+    pub(crate) layer_background: String,
 }
 
 /// The stops of the color gradient of a series group (#213), flat.
@@ -982,6 +989,7 @@ impl Default for PanelSpecRecord {
             group_names: Vec::new(),
             group_gradients: Vec::new(),
             free_frame: None,
+            layer_background: String::new(),
         }
     }
 }
@@ -1438,6 +1446,46 @@ mod tests {
         assert!(!reloaded.fixed_figure);
         assert_eq!(reloaded.figure_left, None);
         assert_eq!(reloaded.figure_top, None);
+    }
+}
+
+#[cfg(test)]
+mod layer_stacking_tests {
+    use super::*;
+
+    /// #398: a file written before the stacking key and the layer background
+    /// reads them as 0 and Auto. Witness: `#[serde(default)]` removed from
+    /// either field makes the decoding fail.
+    #[test]
+    fn a_panel_without_stack_or_background_reads_the_defaults() {
+        let record = PanelSpecRecord {
+            free_frame: Some(FreeFrameRecord {
+                left: 1.0,
+                top: 2.0,
+                width: 3.0,
+                height: 4.0,
+                stack: 9,
+            }),
+            layer_background: "#112233".to_string(),
+            ..PanelSpecRecord::default()
+        };
+        let bytes = rmp_serde::to_vec_named(&record).expect("encoding");
+        let mut value: rmpv::Value = rmp_serde::from_slice(&bytes).expect("value");
+        let rmpv::Value::Map(entries) = &mut value else {
+            panic!("a record is a map");
+        };
+        entries.retain(|(key, _)| key.as_str() != Some("layer_background"));
+        for (key, frame) in entries.iter_mut() {
+            if key.as_str() == Some("free_frame") {
+                if let rmpv::Value::Map(fields) = frame {
+                    fields.retain(|(name, _)| name.as_str() != Some("stack"));
+                }
+            }
+        }
+        let old = rmp_serde::to_vec_named(&value).expect("encoding");
+        let back: PanelSpecRecord = rmp_serde::from_slice(&old).expect("decoding");
+        assert_eq!(back.layer_background, "");
+        assert_eq!(back.free_frame.expect("frame").stack, 0);
     }
 }
 

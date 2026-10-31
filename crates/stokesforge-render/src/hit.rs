@@ -193,8 +193,14 @@ pub fn component_at_with_tolerance(
     y: f64,
     line_tolerance: f64,
 ) -> Option<PlotComponent> {
-    // The last drawn is on top: search from the last to the first.
-    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+    // The last drawn is on top: search from the last to the first. In free
+    // placement (#398) that is front to back by cell rank, and what lies under
+    // the outer rectangle of a cell drawn after its own is hidden. On the grid
+    // every rank is 0: nothing is hidden and the order is the spec's.
+    let on_top = front_to_back(plot, x, y, true);
+    let by_index = front_to_back(plot, x, y, false);
+    for &panel in &on_top {
+        let drawn = &plot.panels[panel];
         if let Some(annotation) = drawn.annotations.iter().rev().find(|a| a.contains(x, y)) {
             return Some(PlotComponent::Annotation {
                 panel,
@@ -204,7 +210,8 @@ pub fn component_at_with_tolerance(
     }
     // The graphic objects (issue #76): the topmost first, and only within
     // the plot area where they are clipped.
-    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+    for &panel in &on_top {
+        let drawn = &plot.panels[panel];
         let (left, top) = (drawn.pixel_origin.0 as f64, drawn.pixel_origin.1 as f64);
         let inside = x >= left
             && x <= left + drawn.pixel_size.0 as f64
@@ -222,7 +229,8 @@ pub fn component_at_with_tolerance(
     }
     // The titles and legends (issue #53), from the last panel to the first;
     // the legend first by its rows, then by its frame.
-    for (panel, drawn) in plot.panels.iter().enumerate().rev() {
+    for &panel in &on_top {
+        let drawn = &plot.panels[panel];
         let on_legend = drawn
             .texts
             .iter()
@@ -252,19 +260,18 @@ pub fn component_at_with_tolerance(
     }
     // The tick areas first, all layers together: overlaid layers (#167)
     // share the plot area, but each has its own axes.
-    plot.panels
+    by_index
         .iter()
-        .enumerate()
-        .find_map(|(index, panel)| axis_component_at(index, panel, x, y))
+        .find_map(|&index| axis_component_at(index, &plot.panels[index], x, y))
         .or_else(|| {
             // Then the axis lines: a strip inside the plot area (#385).
-            plot.panels
+            by_index
                 .iter()
-                .enumerate()
-                .find_map(|(index, panel)| axis_line_at(index, panel, x, y, line_tolerance))
+                .find_map(|&index| axis_line_at(index, &plot.panels[index], x, y, line_tolerance))
         })
         .or_else(|| {
-            plot.panels.iter().enumerate().find_map(|(index, panel)| {
+            by_index.iter().find_map(|&index| {
+                let panel = &plot.panels[index];
                 let left = panel.pixel_origin.0 as f64;
                 let top = panel.pixel_origin.1 as f64;
                 let inside = (left..=left + panel.pixel_size.0 as f64).contains(&x)
@@ -272,6 +279,37 @@ pub fn component_at_with_tolerance(
                 inside.then_some(PlotComponent::PlotArea { panel: index })
             })
         })
+}
+
+/// Positions in `plot.panels` of the layers that can be hit at `(x, y)`, front
+/// cell first (#398). Layers of one cell stay together: with `top_first`, the
+/// last layer first (the one drawn on top of its cell); without, spec order
+/// (the base first, which owns the plot area and the axes shared with its
+/// overlays). A layer whose cell lies under the outer rectangle of a cell with
+/// a higher rank at `(x, y)` is left out: that cell hides it.
+fn front_to_back(plot: &DrawnPlot, x: f64, y: f64, top_first: bool) -> Vec<usize> {
+    let hides = |rank: usize| {
+        plot.panels.iter().any(|front| {
+            front.cell_rank > rank
+                && x >= front.cell_origin.0 as f64
+                && x < front.cell_origin.0 as f64 + front.cell_size.0 as f64
+                && y >= front.cell_origin.1 as f64
+                && y < front.cell_origin.1 as f64 + front.cell_size.1 as f64
+        })
+    };
+    let mut order: Vec<usize> = (0..plot.panels.len())
+        .filter(|&position| !hides(plot.panels[position].cell_rank))
+        .collect();
+    order.sort_by_key(|&position| {
+        let rank = std::cmp::Reverse(plot.panels[position].cell_rank);
+        let within = if top_first {
+            std::cmp::Reverse(position)
+        } else {
+            std::cmp::Reverse(usize::MAX - position)
+        };
+        (rank, within)
+    });
+    order
 }
 
 /// The axis of a panel whose tick area contains `(x, y)`. The reported side
@@ -398,6 +436,7 @@ mod tests {
                 y2_range: None,
                 pixel_origin: (80, 60),
                 pixel_size: (360, 220),
+                cell_rank: 0,
                 cell_origin: (0, 40),
                 cell_size: (480, 320),
                 x_scale: AxisScale::Linear,

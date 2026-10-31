@@ -618,7 +618,9 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
             top: frame.top,
             width: frame.width,
             height: frame.height,
+            stack: frame.stack,
         }),
+        layer_background: panel.layer_background.clone(),
     }
 }
 
@@ -733,7 +735,14 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             top: frame.top,
             width: frame.width,
             height: frame.height,
+            stack: frame.stack,
         }),
+        // An unreadable color reads Auto (invariant 10).
+        layer_background: if stokesforge_plot::parse_hex(&record.layer_background).is_some() {
+            record.layer_background
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -1288,7 +1297,9 @@ mod tests {
                 top: 12.0,
                 width: 1e300,
                 height: 200.0,
+                stack: 7,
             }),
+            layer_background: "#112233".to_string(),
             ..PanelSpec::at(0, 0)
         };
         let overlay = PanelSpec::overlay_on(&base, stokesforge_plot::OverlaySpec::new(true, true));
@@ -1300,6 +1311,18 @@ mod tests {
         assert_eq!(back, spec);
         assert_eq!(back.layer_placement, LayerPlacement::Free);
         assert_eq!(back.panels[1].free_frame, None);
+    }
+
+    /// #398: an unreadable layer background reads Auto (invariant 10).
+    /// Witness: the color kept as written.
+    #[test]
+    fn an_unreadable_layer_background_reads_auto() {
+        let spec = PlotSpec::empty("free").with_panels(vec![PanelSpec {
+            layer_background: "not a color".to_string(),
+            ..PanelSpec::at(0, 0)
+        }]);
+        let back = record_to_plot_spec(plot_spec_to_record(&spec)).unwrap();
+        assert_eq!(back.panels[0].layer_background, "");
     }
 
     /// A layer with two groups of two series, the first named "Café".

@@ -713,6 +713,8 @@ struct ContextHit {
     pos: Option<egui::Pos2>,
     /// The data point under the click, for "Add Text".
     point: Option<(usize, f64, f64)>,
+    /// The layer under the click (#398): the plot area's, else the active one.
+    layer: Option<usize>,
 }
 
 /// Context menu of the figure (#152): a right-click (without dragging — the
@@ -789,12 +791,21 @@ fn graph_context_menu(
         if let (Some(spec), Some(object)) = (spec.as_ref(), object) {
             select_manager_target(view, Some(object), spec);
         }
+        let layer = match component {
+            Some(PlotComponent::PlotArea { panel }) => view
+                .last_drawn()
+                .and_then(|last| last.panels.get(panel))
+                .map(|drawn| drawn.index),
+            _ => None,
+        }
+        .or_else(|| spec.as_ref().map(|spec| view.active_panel(spec)));
         let hit = ContextHit {
             target,
             object,
             legend_entry,
             pos,
             point: pos.and_then(|pos| view.data_at(pos)),
+            layer,
         };
         ui.memory_mut(|memory| memory.data.insert_temp(hit_id, hit));
     }
@@ -809,6 +820,7 @@ fn graph_context_menu(
                     legend_entry: None,
                     pos: None,
                     point: None,
+                    layer: None,
                 });
         ui.weak(hit.target.label());
         let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
@@ -917,6 +929,18 @@ fn background_menu(
                 }
             }
         });
+    });
+    // Free placement (#398): the layer under the click, in front of or behind
+    // the others. Absent on the grid.
+    let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
+    let stacking = spec
+        .as_ref()
+        .filter(|spec| spec.layer_placement == stokesforge_plot::LayerPlacement::Free)
+        .zip(hit.layer);
+    sections.section(ui, stacking.is_some(), |ui| {
+        if let Some((spec, layer)) = stacking {
+            super::object_manager_ui::layer_stacking_items(ui, graph_id, spec, layer, actions);
+        }
     });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-export"), |ui| {

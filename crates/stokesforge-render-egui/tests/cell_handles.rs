@@ -60,6 +60,12 @@ impl Fixture {
     /// A graph in free placement (#398) with two layers: layer 0 at the right
     /// (grid cell `(0, 0)`), layer 1 at the left (grid cell `(0, 1)`).
     fn free_two_layers() -> Self {
+        Self::free_two_layers_at((400.0, 40.0), (0, 0))
+    }
+
+    /// [`Self::free_two_layers`] with the `left` of each layer and their
+    /// stacking keys given (overlapping when the lefts are closer than 300).
+    fn free_two_layers_at(lefts: (f64, f64), stacks: (i32, i32)) -> Self {
         let fixture = Self::new(false);
         let snapshot = fixture.snapshot();
         let node = snapshot.tree.node(fixture.graph).expect("graph");
@@ -68,19 +74,21 @@ impl Fixture {
         };
         let mut first = spec.panels[0].clone();
         first.free_frame = Some(FreeFrame {
-            left: 400.0,
+            left: lefts.0,
             top: 20.0,
             width: 300.0,
             height: 200.0,
+            stack: stacks.0,
         });
         let mut second = first.clone();
         second.row = 0;
         second.column = 1;
         second.free_frame = Some(FreeFrame {
-            left: 40.0,
+            left: lefts.1,
             top: 20.0,
             width: 300.0,
             height: 200.0,
+            stack: stacks.1,
         });
         let mut free = spec.clone().with_panels(Panels::new([first, second]));
         free.layer_placement = LayerPlacement::Free;
@@ -754,4 +762,46 @@ fn a_click_activates_the_layer_drawn_under_the_cursor_in_free_placement() {
     assert_eq!(view.active_panel(&spec), 1);
     click(&mut view, centre(0), 2.0);
     assert_eq!(view.active_panel(&spec), 0);
+}
+
+/// #398: on the area two overlapping layers share, a click activates the cell
+/// in front, whichever has the lower index. Witness: a forward scan activates
+/// layer 0 in both cases.
+#[test]
+fn a_click_on_the_shared_area_activates_the_front_cell() {
+    for (stacks, front) in [((0, 0), 1), ((1, 0), 0)] {
+        let fixture = Fixture::free_two_layers_at((100.0, 200.0), stacks);
+        let (context, mut view) = ready(&fixture);
+        let spec = {
+            let snapshot = fixture.snapshot();
+            let node = snapshot.tree.node(fixture.graph).expect("graph");
+            let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+                panic!("a graph");
+            };
+            spec.clone()
+        };
+        let drawn = view.last_drawn().expect("drawn").panels.clone();
+        let (a, b) = (&drawn[0], &drawn[1]);
+        // A point inside both plot areas.
+        let at = Pos2::new(
+            b.pixel_origin.0 as f32 + 20.0,
+            b.pixel_origin.1 as f32 + 20.0,
+        );
+        assert!(at.x < (a.pixel_origin.0 + a.pixel_size.0 as i32) as f32);
+        frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![egui::Event::PointerMoved(at), button_event(at, true)],
+            1.0,
+        );
+        frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![button_event(at, false)],
+            1.05,
+        );
+        assert_eq!(view.active_panel(&spec), front, "stacks {stacks:?}");
+    }
 }

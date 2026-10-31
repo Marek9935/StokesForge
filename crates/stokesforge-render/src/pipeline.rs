@@ -73,7 +73,7 @@ use stokesforge_plot::{
 };
 
 use crate::clip::{self, PixelBounds};
-use crate::color::{auto_ink, over_white, parse_hex, rgba_or};
+use crate::color::{auto_ink, composite, over_white, parse_hex, rgba_or};
 use crate::decimate;
 use crate::formula::literal_style_font;
 use crate::legend;
@@ -159,6 +159,12 @@ pub struct DrawnPanel {
     pub cell_origin: (i32, i32),
     /// Dimensions of the cell, in backend pixels.
     pub cell_size: (u32, u32),
+    /// Rank of the cell in the drawing order, 0 for the one drawn first
+    /// (#398). Always 0 on the grid, where cells never overlap; in free
+    /// placement the cells are drawn by ascending stacking key, and a cell
+    /// with a higher rank hides what lies under its outer rectangle
+    /// ([`crate::hit`]).
+    pub cell_rank: usize,
     /// Scale of the abscissa axis, as it was applied.
     pub x_scale: AxisScale,
     /// Scale of the left ordinate.
@@ -453,7 +459,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         title_height,
         title: None,
     };
-    let mut first_projection: Option<Projection> = None;
+    let mut first_projection: Option<(usize, Projection)> = None;
 
     // The whole figure, in screen coordinates: moved texts (titles, legend,
     // free texts) are drawn there without being brought back into the cell or
@@ -553,7 +559,38 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         }
     }
 
-    for (index, panel) in plot.panels.iter().enumerate() {
+    // Drawing order (#398): spec order on the grid; in free placement the
+    // cells go by ascending stacking key (ties: creation order), each cell's
+    // layers together, base first. `cell_ranks` numbers the cells in that order.
+    let mut order: Vec<usize> = (0..plot.panels.len()).collect();
+    let cell_of = |index: usize| layout.cells.get(index).copied().unwrap_or(index);
+    if free_placement {
+        order.sort_by_key(|&index| {
+            let cell = cell_of(index);
+            let stack = plot
+                .panels
+                .get(cell)
+                .and_then(|p| p.spec.free_frame)
+                .map_or(0, |frame| frame.stack);
+            (stack, cell, index)
+        });
+    }
+    let mut cell_ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    if free_placement {
+        for &index in &order {
+            let next = cell_ranks.len();
+            cell_ranks.entry(cell_of(index)).or_insert(next);
+        }
+    }
+    // Outer rectangles of the cells already drawn, and the cells whose
+    // background has been decided.
+    let mut behind: Vec<(i32, i32, u32, u32)> = Vec::new();
+    let mut backed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
+    for &index in &order {
+        let Some(panel) = plot.panels.get(index) else {
+            continue;
+        };
         let Some(cell_index) = layout.cells.get(index).copied() else {
             drawn.omitted_panels += 1;
             continue;
@@ -581,12 +618,41 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             .flatten()
             .filter_map(|&i| plot.panels.get(i))
             .collect();
-        let (panel_drawn, projection, frame) = draw_panel(
+        // Free placement: the background of the cell, painted under its
+        // layers (#398). Explicit color: always. Auto: only where the cell
+        // covers another one drawn before it (white if the graph has no
+        // color, else the graph's), so a figure without overlap stays
+        // exactly as it was, transparent exports included.
+        let mut panel_background = background;
+        if free_placement && backed.insert(cell_index) {
+            let (x0, y0) = cell.get_base_pixel();
+            let rect = (x0, y0, w, h);
+            let explicit = plot
+                .panels
+                .get(cell_index)
+                .and_then(|base| parse_hex(&base.spec.layer_background));
+            let covers = behind.iter().any(|other| rects_overlap(*other, rect));
+            let fill = explicit.or_else(|| {
+                covers.then(|| {
+                    if background.3 > 0 {
+                        background
+                    } else {
+                        opaque(PAPER)
+                    }
+                })
+            });
+            if let Some(fill) = fill.filter(|fill| fill.3 > 0) {
+                cell.fill(&rgba(fill))?;
+                panel_background = composite(fill, background);
+            }
+            behind.push(rect);
+        }
+        let (mut panel_drawn, projection, frame) = draw_panel(
             cell,
             &canvas,
             panel,
             index,
-            background,
+            panel_background,
             plan,
             padding,
             ranks.get(index).copied().unwrap_or_default(),
@@ -598,9 +664,12 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         if panel.spec.overlay.is_none() {
             bases.insert(cell_index, frame);
         }
-        if first_projection.is_none() {
-            first_projection = Some(projection);
+        // The graph title anchor reads the layer of lowest index, whatever
+        // the drawing order (#398).
+        if first_projection.as_ref().is_none_or(|(at, _)| index < *at) {
+            first_projection = Some((index, projection));
         }
+        panel_drawn.cell_rank = cell_ranks.get(&cell_index).copied().unwrap_or(0);
         drawn.drawn_series += panel_drawn.drawn_series;
         drawn.broken_series += panel_drawn.broken_series;
         drawn.unknown_series += panel_drawn.unknown_series;
@@ -615,7 +684,7 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         // the figure rather than disappearing.
         let pixel = first_projection
             .as_ref()
-            .and_then(|projection| projection.pixel(anchor))
+            .and_then(|(_, projection)| projection.pixel(anchor))
             .unwrap_or(((root_width / 2) as i32, (MARGIN + 12) as i32));
         let size = draw_centered_text(root, &spec.title, &title_style, 0.0, pixel)?;
         drawn_title = Some(DrawnText {
@@ -627,9 +696,25 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
         });
     }
     drawn.title = drawn_title;
+    // `panels` stays in spec order whatever the drawing order was.
+    drawn.panels.sort_by_key(|panel| panel.index);
 
     root.present()?;
     Ok(drawn)
+}
+
+/// True if two pixel rectangles `(x, y, width, height)` share some area
+/// (touching edges do not count).
+fn rects_overlap(a: (i32, i32, u32, u32), b: (i32, i32, u32, u32)) -> bool {
+    let (ax1, ay1) = (
+        i64::from(a.0) + i64::from(a.2),
+        i64::from(a.1) + i64::from(a.3),
+    );
+    let (bx1, by1) = (
+        i64::from(b.0) + i64::from(b.2),
+        i64::from(b.1) + i64::from(b.3),
+    );
+    i64::from(a.0) < bx1 && i64::from(b.0) < ax1 && i64::from(a.1) < by1 && i64::from(b.1) < ay1
 }
 
 /// The stored frame sizes of a graph whose grid is the declared one: `(widths,
@@ -1276,7 +1361,9 @@ pub struct FigureLayout {
     /// vectors above (`column_breaks`, `row_breaks`, the gutters, the frame
     /// sizes) are empty and the cells are in `free_cells`.
     pub placement: LayerPlacement,
-    /// The cells of a free figure, one per `(row, column)`; empty on the grid.
+    /// The cells of a free figure, one per `(row, column)`, **back to front**:
+    /// the order they are drawn in (ascending stacking key, ties by base layer
+    /// index), so the last one is the front-most (#398); empty on the grid.
     pub free_cells: Vec<FreeCellRect>,
     /// Stored coordinates of the top-left corner of the image, below the
     /// title band, in points (free placement; `(0, 0)` on the grid). A stored
@@ -1389,8 +1476,17 @@ pub fn figure_layout<DB: DrawingBackend>(
         )?;
         let natural = free.natural_size();
         let band = free.title_band;
-        let free_cells = free
-            .place(natural)
+        let mut placed = free.place(natural);
+        // Back to front, the order cells are drawn in (#398).
+        placed.sort_by_key(|cell| {
+            let stack = spec
+                .panels
+                .get(cell.key)
+                .and_then(|p| p.free_frame)
+                .map_or(0, |frame| frame.stack);
+            (stack, cell.key)
+        });
+        let free_cells = placed
             .iter()
             .map(|cell| FreeCellRect {
                 base: cell.key,
@@ -1526,6 +1622,7 @@ pub fn free_frames_from_grid<DB: DrawingBackend>(
             top: f64::from(y.saturating_sub(layout.title_band)),
             width,
             height,
+            stack: 0,
         }));
     }
     Ok(Some(frames))
@@ -1619,6 +1716,7 @@ pub fn place_beside<DB: DrawingBackend>(
         top: candidate.1 + new_top,
         width: frame.width,
         height: frame.height,
+        stack: frame.stack,
     }))
 }
 
@@ -2797,6 +2895,7 @@ fn draw_panel<DB: DrawingBackend>(
         y2_range: y2_range.map(|range| data_range(y2_scale, range)),
         pixel_origin: origin,
         pixel_size: size,
+        cell_rank: 0,
         cell_origin: cell.get_base_pixel(),
         cell_size: cell.dim_in_pixel(),
         x_scale,

@@ -39,6 +39,17 @@ without a message, see `docs/persistence.md`).
   and `free_frame` on each panel): an older version that opens and saves a file
   again drops them without a message and shows the grid.
 
+- Stacking and background of free layers (#398), second batch (first part):
+  overlapping layers are drawn in creation order (a new layer starts in
+  front); right-click a layer or its Object Manager node for **Bring to Front**
+  and **Send to Back** (layer numbers are kept), and set a layer's
+  **Layer Background** in General > Size. **Auto** paints only where a layer covers
+  another one (white, or the graph's color), so a graph without overlap and
+  transparent exports are unchanged. A click on the shared area picks the front
+  layer, and what lies under a front layer cannot be picked. **Additive `.stf`
+  fields** (`stack` in `free_frame`, `layer_background` on each panel): an older
+  version that saves the file again drops them without a message.
+
 - `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
   (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =
   Auto) and `fixed_size`, with a `unit="cm"|"mm"|"pt"|"in"` keyword (centimetres

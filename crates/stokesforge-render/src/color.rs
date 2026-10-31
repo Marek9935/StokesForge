@@ -40,6 +40,23 @@ pub fn over_white((r, g, b, a): (u8, u8, u8, u8)) -> (u8, u8, u8) {
     (blend(r), blend(g), blend(b))
 }
 
+/// `top` painted over `bottom` (straight alpha, "over" operator).
+pub fn composite(top: (u8, u8, u8, u8), bottom: (u8, u8, u8, u8)) -> (u8, u8, u8, u8) {
+    let (ta, ba) = (f64::from(top.3) / 255.0, f64::from(bottom.3) / 255.0);
+    let alpha = ta + ba * (1.0 - ta);
+    if alpha <= 0.0 {
+        return (0, 0, 0, 0);
+    }
+    let mix =
+        |t: u8, b: u8| ((f64::from(t) * ta + f64::from(b) * ba * (1.0 - ta)) / alpha).round() as u8;
+    (
+        mix(top.0, bottom.0),
+        mix(top.1, bottom.1),
+        mix(top.2, bottom.2),
+        (alpha * 255.0).round() as u8,
+    )
+}
+
 /// Dark ink, the one for text and axes on a light background.
 pub const DARK_INK: (u8, u8, u8) = (0x20, 0x20, 0x20);
 /// Light ink, the one for text and axes on a dark background.

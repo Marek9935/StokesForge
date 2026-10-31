@@ -1052,6 +1052,24 @@ cell (overlay lookup, `pyst` `panel=`, what an older version draws as a grid).
   stored coordinates of the image's top-left corner, below the title band).
   `cell_rect` / `frame_rect` answer by `(row, column)`; `is_explicit` is true;
   `column_breaks`, `row_breaks`, the gutters and `frame_widths/heights` are empty.
+- **Stacking and background (#398, batch 2a).** `FreeFrame::stack` orders the
+  cells: `draw_on_with_texts` draws them by `(stack, base index)` (ties =
+  creation order), each cell's layers together, base first; `FigureLayout::
+  free_cells` is listed in that order (back to front, the last is in front).
+  Before the first layer of a cell, its **outer rectangle** is filled with its
+  background: an explicit `PanelSpec::layer_background` always, **Auto** (empty
+  or unreadable) only when that rectangle overlaps one already drawn (white if
+  the graph's background has no opacity, else the graph's color), so a figure
+  without overlap is byte-identical to before and a transparent export stays
+  transparent. The layer's background, composited over the graph's, is the
+  background of the automatic ink (`draw_panel`). `DrawnPlot::panels` stays in
+  spec order whatever the drawing order; each `DrawnPanel` carries its
+  `cell_rank` (0 = drawn first; always 0 on the grid) and `cell_origin` /
+  `cell_size`, its outer rectangle. **Occlusion:** an object of a cell lying
+  under the outer rectangle of a cell with a higher rank is not pickable
+  (`hit::front_to_back`, `GraphView::panel_at`). The graph title anchor is
+  projected through layer index 0, not the first layer drawn (smallest index
+  drawn if layer 0 is omitted).
 - **#405 in free placement.** `figure_left` / `figure_top` are ignored (kept
   stored, they come back on the grid). Fixed raises each of a cell's four gutters
   to the reserve of one axis (a title is never reserved); `fixed_overflow` works

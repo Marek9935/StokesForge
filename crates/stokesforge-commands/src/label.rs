@@ -280,9 +280,15 @@ pub enum PlotEditKind {
     /// The first plot area placed from the left or top edge of the image
     /// (Left, Top) by dragging an edge of the figure (#405).
     PlaceFigure,
+    /// A layer put in front of the others in free placement (#398).
+    BringLayerToFront,
+    /// A layer put behind the others in free placement (#398).
+    SendLayerToBack,
+    /// Background of a layer in free placement (#398).
+    LayerBackground,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 19] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -299,6 +305,9 @@ impl PlotEditKind {
         Self::RemoveCell,
         Self::ResizeCell,
         Self::PlaceFigure,
+        Self::BringLayerToFront,
+        Self::SendLayerToBack,
+        Self::LayerBackground,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -320,6 +329,9 @@ impl std::fmt::Display for PlotEditKind {
             Self::RemoveCell => "Delete Layer",
             Self::ResizeCell => "Resize Plot Area",
             Self::PlaceFigure => "Position Plot Area",
+            Self::BringLayerToFront => "Bring Layer to Front",
+            Self::SendLayerToBack => "Send Layer to Back",
+            Self::LayerBackground => "Change Layer Background",
         })
     }
 }

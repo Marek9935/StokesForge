@@ -856,6 +856,19 @@ layer. There is no handle on any edge in Free until the mouse gestures come
 (`GraphView::layout_is_free`); a click still activates the layer drawn under the
 cursor, found from the drawn plot areas, never from grid breakpoints.
 
+**Stacking and Background (#398, batch 2a).** Overlapping layers are drawn in
+stacking order (`FreeFrame::stack`, ties: creation order). **Bring to Front** and
+**Send to Back** (`compose::bring_to_front` / `send_to_back`, rewriting the keys
+of all cells to `0..n`) keep the layer numbers; they are in the right-click of a
+layer (plot area or blank figure: the active layer) and in its Object Manager
+node, only in Free, grayed out with a reason when already in front / at the back.
+`Action::BringLayerToFront` / `SendLayerToBack` / `SetLayerBackground` are each
+one `EditPlotSpec` step (`PlotEditKind::BringLayerToFront`, `SendLayerToBack`,
+`LayerBackground`). A layer added beside is created in front. **Layer Background** is
+a color field in **General > Size** (Free only, base layer's value): **Auto** by
+default, see `docs/rendering.md`. Going back to the grid drops the stacking keys
+and keeps the colors.
+
 **Add Layer Beside** in Free writes the frame of the new layer in the same
 `EditPlotSpec(AddCell)` (`frame_sizes::place_beside`, `render::place_beside`):
 the active layer's frame size, the same top (Right) or the same left (Below),

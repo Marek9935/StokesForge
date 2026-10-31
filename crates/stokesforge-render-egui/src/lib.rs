@@ -1826,14 +1826,41 @@ impl GraphView {
                 .contains(pos.x as f64, pos.y as f64)
                 .then_some((index, transform))
         };
+        // Free cells may overlap (#398): the front-most cell under the cursor
+        // takes the gesture, a cell hidden by the outer rectangle of a cell in
+        // front of it does not. On the grid every rank is 0.
+        let hidden = |panel: &DrawnPanel| {
+            last.panels.iter().any(|front| {
+                front.cell_rank > panel.cell_rank
+                    && pos.x as f64 >= front.cell_origin.0 as f64
+                    && (pos.x as f64) < front.cell_origin.0 as f64 + front.cell_size.0 as f64
+                    && pos.y as f64 >= front.cell_origin.1 as f64
+                    && (pos.y as f64) < front.cell_origin.1 as f64 + front.cell_size.1 as f64
+            })
+        };
+        let front = last
+            .panels
+            .iter()
+            .enumerate()
+            .filter(|(_, panel)| !hidden(panel))
+            .filter_map(|(index, panel)| hit((index, panel)).map(|_| panel.cell_rank))
+            .max()?;
+        let in_front = |(_, panel): &(usize, &DrawnPanel)| panel.cell_rank == front;
         // Superimposed layers overlap: the active layer takes the gesture
         // (#161), failing that the first drawn one.
         last.panels
             .iter()
             .enumerate()
+            .filter(in_front)
             .filter(|(_, panel)| panel.index == self.active_panel)
             .find_map(hit)
-            .or_else(|| last.panels.iter().enumerate().find_map(hit))
+            .or_else(|| {
+                last.panels
+                    .iter()
+                    .enumerate()
+                    .filter(in_front)
+                    .find_map(hit)
+            })
     }
 
     /// Applies a framing gesture (zoom, drag, rectangle) to all the own

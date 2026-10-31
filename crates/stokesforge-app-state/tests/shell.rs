@@ -14594,3 +14594,85 @@ fn removing_a_layer_in_free_leaves_the_others_and_shrinks_the_image() {
     assert!(size_one.0 < size_two.0, "{size_one:?} < {size_two:?}");
     assert_eq!(one.layer_placement, stokesforge_plot::LayerPlacement::Free);
 }
+
+/// #398 (batch 2a): Bring to Front, Send to Back and a layer Background each
+/// make one undo step in Free, Undo gives the graph back, and a second Bring to
+/// Front of the same layer sends nothing. On the grid none of them does
+/// anything.
+#[test]
+fn layer_stacking_and_background_are_single_steps_in_free_and_nothing_on_the_grid() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+
+    // Grid: nothing is sent.
+    let grid = graph_spec(&state, graph);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::BringLayerToFront { graph, panel: 0 });
+    state.dispatch(Action::SendLayerToBack { graph, panel: 1 });
+    state.dispatch(Action::SetLayerBackground {
+        graph,
+        panel: 0,
+        color: "#ff0000".to_string(),
+    });
+    assert_eq!(state.snapshot().revision, revision, "no step on the grid");
+    assert_eq!(graph_spec(&state, graph), grid);
+
+    go_free(&mut state, graph);
+    let before = graph_spec(&state, graph);
+    assert_eq!(before.free_draw_order(), [0, 1]);
+    let label = |state: &AppState| state.snapshot().history.undo_label.clone();
+
+    state.dispatch(Action::BringLayerToFront { graph, panel: 0 });
+    let after = graph_spec(&state, graph);
+    assert_eq!(after.free_draw_order(), [1, 0]);
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::BringLayerToFront))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+    state.dispatch(Action::Redo);
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::BringLayerToFront { graph, panel: 0 });
+    assert_eq!(state.snapshot().revision, revision, "already in front");
+
+    state.dispatch(Action::SendLayerToBack { graph, panel: 0 });
+    assert_eq!(graph_spec(&state, graph).free_draw_order(), [0, 1]);
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::SendLayerToBack))
+    );
+
+    let ordered = graph_spec(&state, graph);
+    state.dispatch(Action::SetLayerBackground {
+        graph,
+        panel: 1,
+        color: "#336699".to_string(),
+    });
+    assert_eq!(
+        graph_spec(&state, graph).panels[1].layer_background,
+        "#336699"
+    );
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::LayerBackground))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), ordered);
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetLayerBackground {
+        graph,
+        panel: 1,
+        color: "not a color".to_string(),
+    });
+    assert_eq!(state.snapshot().revision, revision, "unreadable color");
+}
