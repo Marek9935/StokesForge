@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers of the parallel-orchestrator workflow (#413). Sourced, not run:
-# chantier.sh, try.sh, main-lock.sh, statusline.sh, workflow-test.sh.
+# chantier.sh, try.sh, main-lock.sh, workflow-test.sh.
 #
 # Layout: the main checkout is the repository root; the worktrees of the work
 # packages live in ../_stokesforge/feature<n> (CLAUDE.md, "Worktrees"). A work

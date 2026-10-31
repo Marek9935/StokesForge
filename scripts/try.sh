@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build and launch a branch on the user's screen, from the main checkout (#413).
+# Open a branch on the user's screen, from the main checkout (#413, #417). Its value
+# is for a branch (feature/<n>); for `main`, `cargo run -p stokesforge-app` is the
+# same. The orchestrator runs it itself at the trial of a visible change.
 #
 #   scripts/try.sh [--dry-run] <issue-number>|main
 #
@@ -19,11 +21,11 @@ target=""
 for a in "$@"; do
     case "$a" in
     --dry-run) dry=1 ;;
-    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,18p' "$0"; exit 0 ;;
     *) target="$a" ;;
     esac
 done
-[ -n "$target" ] || { echo "usage: try.sh [--dry-run] <issue-number>|main" >&2; exit 2; }
+[ -n "$target" ] || { echo "usage: try.sh [--dry-run] <issue-number>|main  (opens a branch on the screen; for main, cargo run -p stokesforge-app is the same)" >&2; exit 2; }
 
 main="$(sf_main_dir)"
 if [ "$target" = main ]; then

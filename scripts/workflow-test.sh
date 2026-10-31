@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests of the parallel-orchestrator workflow scripts (#413): colours, session
-# name, try.sh target, main lock, status line, driver run folders. Everything runs
+# Tests of the parallel-orchestrator workflow scripts (#413, #417): colours and
+# briefing, try.sh target, main lock, driver run folders. Everything runs
 # in a throwaway repository; nothing touches the real worktrees.
 #
 #   scripts/workflow-test.sh
@@ -19,19 +19,24 @@ cd "$main"
 add_wt() { git worktree add -q "$tmp/_stokesforge/feature$1" -b "feature/$1-x" --no-track main; }
 colour_of() { cat "$(git -C "$tmp/_stokesforge/feature$1" rev-parse --absolute-git-dir)/stokesforge-colour"; }
 
-# Colours: first free, kept, freed on removal.
-SF_ISSUE_TITLE="Fix axis label" "$here/chantier.sh" --dry-run 5 > "$tmp/out" 
-grep -qx '🟦 #5 Fix axis label' "$tmp/out" || fail "session name: $(cat "$tmp/out")"
-grep -q "claude -n .*#5 Fix axis label.*--add-dir .*feature5" "$tmp/out" || fail "claude line"
+# Colours: first free, kept, freed on removal. No session is started.
+export SF_NO_FETCH=1
+SF_ISSUE_TITLE="Fix axis label" "$here/chantier.sh" --dry-run 5 > "$tmp/out"
+grep -q '^  🟦 #5 Fix axis label  worktree ' "$tmp/out" || fail "tag: $(cat "$tmp/out")"
+grep -q 'scripts/try.sh <n>' "$tmp/out" || fail "briefing steps"
+grep -q 'one worktree each, one session' "$tmp/out" || fail "briefing: several issues"
+[ "$(wc -l < "$tmp/out")" -le 30 ] || fail "briefing too long"
+grep -q 'claude -n\|--add-dir' "$tmp/out" && fail "dry-run still mentions a claude launch"
 [ ! -e "$tmp/_stokesforge/feature5" ] || fail "dry-run created a worktree"
 
 export SF_ISSUE_TITLE="Fix axis label"
-PATH="$tmp/bin:$PATH"
-mkdir -p "$tmp/bin"
-printf '#!/bin/sh\necho "claude $*" > "%s/claude.args"\n' "$tmp" > "$tmp/bin/claude"
-chmod +x "$tmp/bin/claude"
-"$here/chantier.sh" 1 > /dev/null
-grep -q '🟦 #1 Fix axis label' "$tmp/claude.args" || fail "claude started with the name"
+"$here/chantier.sh" 1 > "$tmp/run1"
+grep -q '^  🟦 #1 Fix axis label' "$tmp/run1" || fail "real run tag: $(cat "$tmp/run1")"
+# Rerun (after a /clear): same colour, same worktree, nothing new.
+n_before="$(git worktree list | wc -l)"
+"$here/chantier.sh" 1 > "$tmp/rerun1"
+grep -q '^  🟦 #1 Fix axis label' "$tmp/rerun1" || fail "rerun colour: $(cat "$tmp/rerun1")"
+eq "$(git worktree list | wc -l)" "$n_before" "rerun creates nothing"
 "$here/chantier.sh" 2 > /dev/null
 eq "$(colour_of 1)" 🟦 "A colour"
 eq "$(colour_of 2)" 🟩 "B colour"
@@ -44,9 +49,14 @@ eq "$(colour_of 3)" 🟦 "colour kept on rerun"
 [ -f "$tmp/_stokesforge/feature3/stokesforge-colour" ] && fail "colour file in the worktree root"
 unset SF_ISSUE_TITLE
 
-# Two issues in one session: every square, 3 words each; seventh refused.
+# Two issues in one session: one worktree each, 3-word names; seventh refused.
 out="$(SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" --dry-run 7 8)"
-grep -xF '🟧 #7 Graph size · 🟪 #8 Frames follow' <<< "$out" > /dev/null || fail "two-issue name: $out"
+grep -qF '🟧 #7 Graph size  worktree' <<< "$out" || fail "two-issue tag 7: $out"
+grep -qF '🟪 #8 Frames follow  worktree' <<< "$out" || fail "two-issue tag 8: $out"
+SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" 7 8 > /dev/null
+[ -d "$tmp/_stokesforge/feature7" ] && [ -d "$tmp/_stokesforge/feature8" ] || fail "two issues, two worktrees"
+eq "$(colour_of 7)$(colour_of 8)" 🟧🟪 "two-issue colours"
+for k in 7 8; do git worktree remove "$tmp/_stokesforge/feature$k"; done
 for k in 11 12 13; do add_wt "$k"; done
 printf '%s\n' 🟧 > "$(git -C "$tmp/_stokesforge/feature11" rev-parse --absolute-git-dir)/stokesforge-colour"
 printf '%s\n' 🟪 > "$(git -C "$tmp/_stokesforge/feature12" rev-parse --absolute-git-dir)/stokesforge-colour"
@@ -70,12 +80,6 @@ grep -q 'try.sh main' "$tmp/err" || fail "try.sh 99 message"
 if "$here/main-lock.sh" take "B #2" 2> /dev/null; then fail "second take succeeded"; fi
 "$here/main-lock.sh" status | grep -q 'locked: A #1' || fail "lock status"
 
-# Status line: own colour, others, lock.
-line="$(cd "$tmp/_stokesforge/feature2" && printf '{"cwd":"%s"}' "$tmp/_stokesforge/feature2" | HOME="$tmp/nohome" "$here/statusline.sh")"
-echo "$line" | grep -q '^🟩 #2 | others 🟦 | main lock: A #1' || fail "statusline: $line"
-# A session started by chantier.sh runs in the main checkout: the name tells its work package.
-line="$(cd "$main" && printf '{"cwd":"%s"}' "$main" | SF_SESSION="🟩 #2 Fix axis" HOME="$tmp/nohome" "$here/statusline.sh")"
-echo "$line" | grep -q '^🟩 #2 | others 🟦 | main lock: A #1' || fail "statusline from main checkout: $line"
 "$here/main-lock.sh" release > /dev/null
 eq "$("$here/main-lock.sh" status)" free "lock released"
 

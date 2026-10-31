@@ -574,7 +574,7 @@ arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the C
 `main` that contains your commit (`git merge-base --is-ancestor <commit> origin/main`), not of your
 own commit. To keep pushes orderly, merge and push `main` under the lock
 `scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
-(`chantier.sh`, `try.sh`, `main-lock.sh`, `statusline.sh`, `workflow-lib.sh`) are tested by
+(`chantier.sh`, `try.sh`, `main-lock.sh`, `workflow-lib.sh`) are tested by
 `scripts/workflow-test.sh`, run by the `fmt` job.
 
 **Reading the result.**
