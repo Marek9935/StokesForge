@@ -12,7 +12,8 @@ StokesForge is an egui desktop app with no port and no API. Drive it with `drive
 
    ```sh
    D=.claude/skills/run-stokesforge/driver.py
-   python3 $D start [project.stf]   # Xwayland :99 (1400x900) + the app in X11, ~15 s
+   python3 $D start [project.stf]   # Xwayland on the first free display (:99, :100…, 1400x900) + the app in X11, ~15 s
+   python3 $D where                 # display and run folder of this checkout
    python3 $D click 20 11           # x y [left|right|double] — File menu
    python3 $D key ctrl+z            # F2, Return, Escape, ctrl+shift+s…
    python3 $D type "Renamed"
@@ -20,9 +21,9 @@ StokesForge is an egui desktop app with no port and no API. Drive it with `drive
    python3 $D stop                  # kills the app and Xwayland
    ```
 
-   Screen pixels, app window 1100x700 at (0,0), scale 1.0. Without argument, `start` opens the demo project (the driver sets `STOKESFORGE_DEMO=1`; a normal launch opens it only the first time, #333) (Book1, Graph1, folders Workbooks and Analysis, graphs Panels, Axes, PlotTypes, Annotations, Groups, Rows; `crates/stokesforge-app/src/demo/`). A project to open: `target/debug/stokesforge-cli import --out p.stf file.csv`. Logs: `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR`). `SF_APP` picks the binary (release measurements: `docs/performance-measurement.md` § Running the application in release).
+   Screen pixels, app window 1100x700 at (0,0), scale 1.0. Without argument, `start` opens the demo project (the driver sets `STOKESFORGE_DEMO=1`; a normal launch opens it only the first time, #333) (Book1, Graph1, folders Workbooks and Analysis, graphs Panels, Axes, PlotTypes, Annotations, Groups, Rows; `crates/stokesforge-app/src/demo/`). A project to open: `target/debug/stokesforge-cli import --out p.stf file.csv`. Logs: `/tmp/stokesforge-run/<checkout folder name>/{app,xwayland}.log` (`SF_RUN_DIR`; one folder and one display per checkout, so two worktrees never collide; two agents in the **same** worktree set distinct `SF_RUN_DIR`). The app runs with `STOKESFORGE_CONFIG_DIR=$RUN/config`: your preferences are never written (#332). `SF_APP` picks the binary (release measurements: `docs/performance-measurement.md` § Running the application in release).
 3. **Single capture in native Wayland**, or text checks with the pseudo-language: [references/quick-capture.md](references/quick-capture.md).
-4. **Read the PNG** with the Read tool and compare before / after; a visual claim without a capture is not made.
+4. **Read the PNG** with the Read tool and compare before / after, on zoomed crops of the changed area (`magick shot.png -crop 300x200+x+y +repage -scale 200% crop.png`); a visual claim without a capture is not made.
 5. **Stop**: always `stop` (or `kill` by pid); reset the language to English if a test switched it.
 
 Traps (lost clicks, capture lag, focus, killing the right process) and troubleshooting: [references/pitfalls.md](references/pitfalls.md).

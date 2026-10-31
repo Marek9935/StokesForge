@@ -9,13 +9,13 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
-Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/v1-criteria.md` § Branches and versions). Work in the worktree `../_stokesforge/feature<n>` (`<n>` = issue number), created from an up-to-date `main` with `git worktree add ../_stokesforge/feature<n> -b feature/<n>-<topic> main`, never elsewhere (`CLAUDE.md` § Conventions, "Worktrees"); run `git worktree list` first, other agents may work in parallel, and keep out of their files.
+Branch `feature/<n>-<topic>`, one per issue, short; merge `main` into it once, just before delivering (not at every step), then merge it into `main` with `--no-ff` (`docs/v1-criteria.md` § Branches and versions). Work in the worktree `../_stokesforge/feature<n>` (`<n>` = issue number), created by `scripts/chantier.sh <n>` (from an up-to-date `origin/main`, with the session colour; `CLAUDE.md` § Conventions, "Worktrees"), never elsewhere. Several orchestrators may work in parallel: before scoping, run `git worktree list`, `scripts/ci-status.sh` on `main` (a red `main` is reported first), read the issue, **all its comments**, its sibling issues, and the `chantiers` collection of the To-test page ([to-test-page](../stokesforge-verification/references/to-test-page.md)); keep out of the other worktrees.
 
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
 2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routing, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
 3. Search what exists (`rg`): an `Action`, a `Command`, a helper that already does most of it. Reuse beats writing.
 4. A limit that looks wrong may be arbitrated: `docs/archive/rustrewrite/questions-ouvertes.md` §11.
-5. Resolve edge-case ambiguities now, in one batch: [`../stokesforge-bug-report/references/decision-form.md`](../stokesforge-bug-report/references/decision-form.md) says when and how to ask.
+5. Resolve edge-case ambiguities now, in **one start form** (several issues may share it; sketch or mockup of a new surface inside the form, W4), then work on what the answers do not change while waiting (W8). A question born during coding waits for the single follow-up form: [`../stokesforge-bug-report/references/decision-form.md`](../stokesforge-bug-report/references/decision-form.md) says when and how to ask.
 6. New window, dialog or gesture: name the existing twin you imitate (`docs/windows.md`, `docs/gestures.md`), compare screenshots with `run-stokesforge`; a new window gets a mockup the user validates before code.
 7. Announce what you reuse, the zone you change and the checks you will run, then code. Scope and delegation: `CLAUDE.md` § Delegation and model choice (agent `perimetre`, Sonnet implements).
 
@@ -57,6 +57,7 @@ Texts: `stokesforge-ui-texts`. Commands, rendering, import, Python: their own sk
 
 - `AppState` logic: `crates/stokesforge-app-state/tests/shell.rs`; a painted gesture: the surface module's `tests`. Placement and witnesses: `stokesforge-verification`.
 - Tests cover geometry, not appearance: a visual change is **looked at** (`run-stokesforge`), before and after, also with `STOKESFORGE_LANG=en-XA`.
+- **Trial of a visible change (#413)**: when the change is visible, ask the user to run `scripts/try.sh <n>` from the main checkout (builds the branch, opens it on their screen); their OK is the merge go-ahead. After a late fix, rerun the app and look again before delivering. The merge adds an entry to the To-test page (`stokesforge-verification`).
 - Manual: a user-visible feature is described in `manual/src/` in the same commit (rule in `CLAUDE.md`, « Conventions »); a changed interface regenerates its screenshot.
 - `//!` of the module carries the *why*; the `docs/` page describes the code as it is. A new rule goes to `.claude/conventions.md` or `docs/`, in the same commit.
 

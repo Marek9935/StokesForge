@@ -10,14 +10,14 @@ Read from `run-stokesforge` when a click, key or capture does not do what you ex
 - **A click on a far target is lost** if the pointer never hovered it: `click` moves, micro-moves and waits before pressing. Menu entries need it.
 - **No window manager → no keyboard focus**: `start` calls `focus()`; without it `key` / `type` do nothing.
 - **Menus are fixed pixels**; in French the widths change (« Préférences… » stays at (58,183) but the menu is wider).
-- **The chosen language is saved** in the user's `preferences.json` (outside the project): switch back to English before finishing.
+- **The chosen language** is saved in `$RUN/config/preferences.json` (the driver sets `STOKESFORGE_CONFIG_DIR`, so not in the user's own); it persists across `start`s of the same run folder: switch back to English before finishing.
 - **First render is slow** (software wgpu; `MESA: warning … Xe KMD` is harmless): `start` waits 10 s; an earlier capture shows a black window.
 - `type` knows letters, digits and `. , - _ = ( ) / # " : [ ] !`; add others to the `names` table of `driver.py`.
 
 ## Troubleshooting
 
 - `unknown key: #` → character missing from the `names` table of `type_text`.
-- `app: DEAD` after `start` → read `/tmp/stokesforge-run/app.log`.
+- `app: DEAD` after `start` → read `$RUN/app.log` (`driver.py where` prints the folder).
 - `app window not found` (`focus`) → the app is not mapped yet: wait or rerun `start`.
 - Capture shows the menu open but not its effect → the click was lost or a second `ss` is needed; click again.
 - Known-good scenario: Preferences → switch to Français (whole UI changes) → back to English; Book1 in the Project Manager → `F2` → `type Renamed` → `Return` → renamed → `ctrl+z` → undone.

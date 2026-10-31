@@ -569,6 +569,14 @@ for Linux CI to finish, then a few moments for the report. A more recent push
 on the same reference cancels the running series. Pull requests start
 GitHub CI but report nothing to GitLab (intended, see below).
 
+**Several orchestrators on `main` (#413).** `ci.yml` cancels a running series when a newer push
+arrives (`concurrency`): a cancelled run is *superseded*, not failed. Read the CI of the newest
+`main` that contains your commit (`git merge-base --is-ancestor <commit> origin/main`), not of your
+own commit. To keep pushes orderly, merge and push `main` under the lock
+`scripts/main-lock.sh take "<square> #<n>"` … `release`. The scripts of this workflow
+(`chantier.sh`, `try.sh`, `main-lock.sh`, `statusline.sh`, `workflow-lib.sh`) are tested by
+`scripts/workflow-test.sh`, run by the `fmt` job.
+
 **Reading the result.**
 
 ```sh
