@@ -32,8 +32,8 @@
 //! touching the structure.
 
 use stokesforge_core::{
-    CalculationDraft, Column, ColumnMeta, ColumnType, NodeCopy, NodeId, Tree, ValueBlock,
-    WindowMeta,
+    CalculationDraft, Column, ColumnMeta, ColumnType, CopyInsertion, NodeCopy, NodeId, Tree,
+    ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{PlotSpec, SavedColors};
 
@@ -229,6 +229,13 @@ pub enum Command {
         /// Name chosen in the destination container.
         name: String,
     },
+    /// Pastes the roots of one gesture with a single map of new identifiers
+    /// (#391): what is inside the gesture reads the copies, whichever root
+    /// holds it. `Project::insert_copies`.
+    InsertCopies {
+        /// One item per root, in the order of the gesture.
+        items: Vec<CopyInsertion>,
+    },
     /// Adds a graph carrying `spec`. `name: None` → first free "GraphN".
     /// `spec` is required, as in `Project::add_graph`: a graph without a spec
     /// describes nothing more than an empty window, so make it explicit here
@@ -414,7 +421,9 @@ impl Command {
             Command::DuplicateWorksheet { sheet, .. } => {
                 HistoryLabel::DuplicateWorksheet { name: name(*sheet) }
             }
-            Command::InsertCopy { .. } => HistoryLabel::Macro(crate::MacroKind::PasteObjects),
+            Command::InsertCopy { .. } | Command::InsertCopies { .. } => {
+                HistoryLabel::Macro(crate::MacroKind::PasteObjects)
+            }
             Command::AddGraph { .. } => HistoryLabel::AddGraph,
             Command::AddMatrix { .. } => HistoryLabel::AddMatrix,
             Command::AddNote { .. } => HistoryLabel::AddNote,
@@ -489,6 +498,7 @@ impl Command {
                 | Command::AddWorksheet { .. }
                 | Command::DuplicateWorksheet { .. }
                 | Command::InsertCopy { .. }
+                | Command::InsertCopies { .. }
                 | Command::AddGraph { .. }
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }

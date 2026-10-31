@@ -51,8 +51,24 @@ pub(crate) struct TransposeRecord {
 /// The links of the tree, in the order of their sheet (two saves of the same
 /// project stay byte-identical).
 pub(crate) fn transposes_to_records(tree: &ModelTree) -> Vec<TransposeRecord> {
-    tree.transposes()
-        .iter()
+    links_to_records(
+        tree.transposes()
+            .iter()
+            .map(|(sheet, link)| (sheet, link.as_ref())),
+    )
+}
+
+/// The links travelling with a copy (#391).
+pub(crate) fn copied_transposes_to_records(
+    links: &[(NodeId, TransposeLink)],
+) -> Vec<TransposeRecord> {
+    links_to_records(links.iter().map(|(sheet, link)| (sheet, link)))
+}
+
+fn links_to_records<'a>(
+    links: impl Iterator<Item = (&'a NodeId, &'a TransposeLink)>,
+) -> Vec<TransposeRecord> {
+    links
         .map(|(sheet, link)| TransposeRecord {
             sheet: sheet.raw(),
             source: link.source.raw(),

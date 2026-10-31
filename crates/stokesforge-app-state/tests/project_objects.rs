@@ -1,7 +1,6 @@
 //! #105: Project Manager decisions without a display server.
 
-use stokesforge_app_state::state::{Action, AppState, StatusLevel};
-use stokesforge_app_state::tr;
+use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_commands::{HistoryLabel, MacroKind};
 use stokesforge_core::{Column, NodeId, NodeKind, Project};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -38,9 +37,10 @@ fn fixture() -> (Session, AppState, NodeId, NodeId, NodeId) {
 }
 
 #[test]
-fn grouped_multiple_duplication_and_graphs_on_the_original_columns() {
+fn windows_duplicated_together_read_each_others_copies_in_one_history_entry() {
     let (_session, mut state, book, graph, y) = fixture();
     let before = state.tree().clone();
+    // The graph is listed before the workbook it plots, and the book twice.
     state.dispatch(Action::DuplicateObjects(vec![graph, book, book]));
     let created = state.take_copied_objects();
     assert_eq!(created.len(), 2);
@@ -65,10 +65,19 @@ fn grouped_multiple_duplication_and_graphs_on_the_original_columns() {
         .unwrap()
         .iter()
         .all(|id| !before.contains(*id)));
+    let sheet_copy = state.tree().children(book_copy).unwrap()[0];
+    let y_copy = state.tree().children(sheet_copy).unwrap()[1];
     let NodeKind::Graph { spec, .. } = state.tree().node(graph_copy).unwrap().kind() else {
         panic!("graph")
     };
-    assert!(spec.references(y));
+    assert!(spec.references(y_copy), "the copied graph plots the copy");
+    assert!(!spec.references(y), "and no longer the original");
+    // Deleting the original workbook reports the original graph only.
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    let text = state.status().expect("message").text.clone();
+    assert!(text.contains("Graph1"), "{text}");
+    assert!(!text.contains("Graph1 copy"), "{text}");
+    state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(state.tree(), &before);
     state.dispatch(Action::Redo);
@@ -384,46 +393,175 @@ fn embedded_calculated_columns_keep_their_values_without_dependencies() {
     assert_eq!(data.meta().formula, None);
 }
 
-/// #170, point 4: copying or duplicating a folder is refused for now
-/// (the local copy would keep its references to the original workbooks).
-/// Nothing is written to the clipboard or the tree, the history does not move,
-/// and the status bar says why. Witness: the same copy of a window works.
-#[test]
-fn copying_or_duplicating_a_folder_is_refused_with_its_reason() {
+/// `Folder` holds `Book1` (A, B) and `Graph1` (plots B); `Other` is an empty
+/// folder. Returns the session, the state and the ids (#391).
+struct FolderFixture {
+    _session: Session,
+    state: AppState,
+    root: NodeId,
+    folder: NodeId,
+    other: NodeId,
+    book: NodeId,
+}
+
+fn folder_fixture() -> FolderFixture {
     let mut project = Project::new("Folders").unwrap();
     let root = project.root();
     let folder = project.add_folder(root, "Folder").unwrap();
-    let note = project.add_note(root, Some("Note1"), "").unwrap();
+    let other = project.add_folder(root, "Other").unwrap();
+    let book = project.add_workbook(folder, Some("Book1")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1., 2.]))
+        .unwrap();
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[3., 4.]))
+        .unwrap();
+    let mut panel = PanelSpec::default();
+    panel.series.push(SeriesSpec::new(b));
+    project
+        .add_graph(
+            folder,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(stokesforge_plot::Panels::one(panel)),
+        )
+        .unwrap();
     let session = Session::spawn(project, None).unwrap();
-    let mut state = AppState::new_with_preferences(
+    let state = AppState::new_with_preferences(
         session.handle(),
         String::new(),
         stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .unwrap();
-    let before = state.tree().clone();
-    let undo = state.snapshot().history.undo_label.clone();
-
-    for action in [
-        Action::CopyObjects(vec![folder]),
-        Action::CopyObjects(vec![note, folder]),
-        Action::DuplicateObjects(vec![folder]),
-        Action::DuplicateObjects(vec![note, folder]),
-    ] {
-        state.dispatch(action.clone());
-        assert_eq!(state.take_object_clipboard_text(), None, "{action:?}");
-        assert_eq!(state.tree(), &before, "{action:?}");
-        assert_eq!(state.snapshot().history.undo_label, undo, "{action:?}");
-        let status = state.status().expect("the reason is given");
-        assert_eq!(status.level, StatusLevel::Warning, "{action:?}");
-        assert_eq!(status.text, tr!("disabled-copy-folder"), "{action:?}");
+    FolderFixture {
+        _session: session,
+        state,
+        root,
+        folder,
+        other,
+        book,
     }
+}
 
-    state.dispatch(Action::CopyObjects(vec![note]));
-    assert!(
-        state.take_object_clipboard_text().is_some(),
-        "witness: a window can be copied"
+fn child_by_name(state: &AppState, parent: NodeId, name: &str) -> NodeId {
+    *state
+        .tree()
+        .children(parent)
+        .unwrap()
+        .iter()
+        .find(|id| state.tree().node(**id).unwrap().name() == name)
+        .unwrap_or_else(|| panic!("no child {name}"))
+}
+
+fn names_in(state: &AppState, parent: NodeId) -> Vec<String> {
+    state
+        .tree()
+        .children(parent)
+        .unwrap()
+        .iter()
+        .map(|id| state.tree().node(*id).unwrap().name().to_string())
+        .collect()
+}
+
+/// The first column the graph of `folder` plots.
+fn plotted_column(state: &AppState, folder: NodeId) -> NodeId {
+    let graph = child_by_name(state, folder, "Graph1");
+    state.plot_spec(graph).unwrap().panels[0].series[0].y
+}
+
+/// #391 (C1): copying a folder and pasting it into another folder gives
+/// `<name> copy 1`, inner windows keep their names, and the copied graph
+/// plots the copied workbook. Witness: the original graph keeps its own.
+#[test]
+fn a_copied_folder_pasted_into_another_folder_reads_its_own_workbook() {
+    let mut f = folder_fixture();
+    let original_column = plotted_column(&f.state, f.folder);
+    f.state.dispatch(Action::CopyObjects(vec![f.folder]));
+    let text = f.state.take_object_clipboard_text().expect("copied");
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.other,
+        text,
+    });
+    assert_eq!(names_in(&f.state, f.other), vec!["Folder copy 1"]);
+    let copy = child_by_name(&f.state, f.other, "Folder copy 1");
+    assert_eq!(names_in(&f.state, copy), vec!["Book1", "Graph1"]);
+    let copied_book = child_by_name(&f.state, copy, "Book1");
+    assert_ne!(copied_book, f.book);
+    let copied_column = plotted_column(&f.state, copy);
+    assert_ne!(copied_column, original_column);
+    assert_eq!(
+        f.state.tree().parent(copied_column).unwrap().and_then(|s| f
+            .state
+            .tree()
+            .parent(s)
+            .unwrap()),
+        Some(copied_book)
     );
+    assert_eq!(plotted_column(&f.state, f.folder), original_column);
+}
+
+/// #391 (C2): Ctrl+V with the copied folder itself selected pastes beside it,
+/// not inside it. Witness: without the redirect the copy lands in `Folder`.
+#[test]
+fn pasting_with_the_copied_folder_selected_puts_the_copy_beside_it() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::CopyObjects(vec![f.folder]));
+    let text = f.state.take_object_clipboard_text().expect("copied");
+    f.state.dispatch(Action::PasteObjects {
+        parent: f.folder,
+        text,
+    });
+    assert_eq!(
+        names_in(&f.state, f.root),
+        vec!["Folder", "Other", "Folder copy 1"]
+    );
+    assert_eq!(names_in(&f.state, f.folder), vec!["Book1", "Graph1"]);
+}
+
+/// #391: Duplicate puts the copy beside the original in one history entry:
+/// one Undo restores the tree, one Redo brings the copy back.
+#[test]
+fn duplicating_a_folder_is_one_history_entry_beside_the_original() {
+    let mut f = folder_fixture();
+    let before = f.state.tree().clone();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.folder]));
+    assert_eq!(
+        names_in(&f.state, f.root),
+        vec!["Folder", "Other", "Folder copy 1"]
+    );
+    assert_eq!(
+        f.state.snapshot().history.undo_label,
+        Some(HistoryLabel::Macro(MacroKind::DuplicateObjects))
+    );
+    let after = f.state.tree().clone();
+    f.state.dispatch(Action::Undo);
+    assert_eq!(f.state.tree(), &before);
+    f.state.dispatch(Action::Redo);
+    assert_eq!(f.state.tree(), &after);
+}
+
+/// #391: a folder and a window inside it, selected together, give a single
+/// copy (the window travels with its folder).
+#[test]
+fn a_folder_and_a_window_inside_it_make_a_single_copy() {
+    let mut f = folder_fixture();
+    f.state
+        .dispatch(Action::DuplicateObjects(vec![f.folder, f.book]));
+    assert_eq!(f.state.take_copied_objects().len(), 1);
+    assert_eq!(
+        names_in(&f.state, f.root),
+        vec!["Folder", "Other", "Folder copy 1"]
+    );
+    assert_eq!(names_in(&f.state, f.folder), vec!["Book1", "Graph1"]);
+}
+
+/// #391 with #306: after copying a folder, deleting the original workbook
+/// names only the original graph; the copied one reads the copied workbook.
+#[test]
+fn the_copied_graph_is_not_a_user_of_the_original_workbook() {
+    let mut f = folder_fixture();
+    f.state.dispatch(Action::DuplicateObjects(vec![f.folder]));
+    assert_eq!(f.state.object_users(&[f.book]), vec!["Graph1"]);
 }
 
 /// `Book1` holds `Sheet1` (A, B = `max(Sheet2!A)`, C = `max([Book2]Sheet1!A)`)

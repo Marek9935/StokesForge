@@ -200,6 +200,12 @@ enum Step {
     PasteWorkbook {
         sheet: usize,
     },
+    /// Copy-paste (`InsertCopy`) of the folder that holds a worksheet's
+    /// workbook, inside its parent (#391): what is inside the copy reads the
+    /// copy, formulas and calculations included.
+    PasteFolder {
+        sheet: usize,
+    },
     DeleteWorksheet {
         sheet: usize,
     },
@@ -336,6 +342,7 @@ fn step() -> impl Strategy<Value = Step> {
         1 => f.clone().prop_map(|sheet| Step::DuplicateWorksheet { sheet }),
         1 => f.clone().prop_map(|sheet| Step::PasteWorksheet { sheet }),
         1 => f.clone().prop_map(|sheet| Step::PasteWorkbook { sheet }),
+        1 => f.clone().prop_map(|sheet| Step::PasteFolder { sheet }),
         1 => f.clone().prop_map(|sheet| Step::DeleteWorksheet { sheet }),
         3 => (f.clone(), 0usize..8).prop_map(|(sheet, column)| Step::ReplaceCorrection { sheet, column }),
         4 => (f, 0usize..8, 0usize..8, any::<bool>(), any::<bool>()).prop_map(
@@ -358,7 +365,7 @@ fn step() -> impl Strategy<Value = Step> {
         }),
         2 => Just(Step::RecalculateOutOfDate),
         4 => Just(Step::Undo),
-        2 => Just(Step::Redo),
+        3 => Just(Step::Redo),
         2 => (1usize..5).prop_map(|k| Step::UndoThenRedo { k }),
         1 => Just(Step::OpenMacro),
         1 => Just(Step::CloseMacro),
@@ -387,6 +394,7 @@ const STEP_NAMES: &[&str] = &[
     "DuplicateWorksheet",
     "PasteWorksheet",
     "PasteWorkbook",
+    "PasteFolder",
     "DeleteWorksheet",
     "AddCalculation",
     "RemoveCalculation",
@@ -422,6 +430,7 @@ fn step_name(step: &Step) -> &'static str {
         Step::DuplicateWorksheet { .. } => "DuplicateWorksheet",
         Step::PasteWorksheet { .. } => "PasteWorksheet",
         Step::PasteWorkbook { .. } => "PasteWorkbook",
+        Step::PasteFolder { .. } => "PasteFolder",
         Step::DeleteWorksheet { .. } => "DeleteWorksheet",
         Step::AddCalculation { .. } => "AddCalculation",
         Step::RemoveCalculation { .. } => "RemoveCalculation",
@@ -823,6 +832,15 @@ fn command(step: &Step, tree: &Tree, rank: usize) -> Option<Command> {
                 parent: tree.root(),
                 copy: NodeCopy::capture(tree, book).ok()?,
                 name: format!("PastedBook{rank}"),
+            })
+        }),
+        Step::PasteFolder { sheet: f } => sheet_at(f).and_then(|sheet| {
+            let book = tree.parent(sheet).ok()??;
+            let folder = tree.parent(book).ok()??;
+            Some(Command::InsertCopy {
+                parent: folder,
+                copy: NodeCopy::capture(tree, folder).ok()?,
+                name: format!("PastedFolder{rank}"),
             })
         }),
         Step::DeleteWorksheet { sheet: f } => {

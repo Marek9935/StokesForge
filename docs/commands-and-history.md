@@ -266,12 +266,44 @@ Manager); moving several columns of a sheet has its own,
 single `execute` with no macro for one column); an intermediate failure aborts
 the whole group. These labels stay data and are not recorded in the `.stf`.
 
+What is inside the copy reads the copy (#391): after the node loop,
+`insert_copy` renumbers the series of copied graphs (x, y, errors), the formulas
+(#321, #403), the calculations (`NodeCopy::calculations`: output columns inside
+the subtree, fresh identifier, series, auxiliary and outputs renumbered) and the
+transposed sheets (`NodeCopy::transposes`: sheet and source both inside) through
+the same map of new identifiers. The renumbering comes **after** the loop,
+because a graph may come before the workbook it plots (prefix order). A
+reference to a node outside the copy keeps the original in a local copy. A
+folder is therefore copyable like any other node: the Project Manager no longer
+refuses it, and one `MacroKind` entry covers the gesture.
+
+The rule covers the whole gesture, not only one subtree (#391, S1). The roots
+selected together are captured by `NodeCopy::capture_all` (one `NodeCopy` per
+root, but one set of "inside" nodes: a graph never embeds a column of another
+root, and a calculation or transposed sheet whose ends sit in different roots
+travels with the root that holds its first output or its sheet), and inserted by
+`Command::InsertCopies { items: Vec<CopyInsertion> }` / `Project::insert_copies`
+with **one** old-to-new identifier map: a copied graph plots the copied
+workbook, a formula reads the copied sheet, a calculation links the copies,
+whichever root holds each end and whatever the order of the roots. `InsertCopy`
+stays for one root and wraps the same function. The hidden workbooks of an
+external paste are inserted after all the roots, so that they never take the
+name of a pasted root. The app-state sends one command inside the macro (one
+history entry, undo and redo whole); the clipboard record keeps its per-root
+fields and the reader rebuilds all the roots in one project before capturing
+them again.
+
 For cross-project graphs (#107), the copy also carries the frozen
 dependencies; `NodeCopy::into_external` enables their insertion in
 `InsertCopy`. Hidden workbooks and graphs are created atomically in the same
-structural entry, with the references replaced. Within the same project, the
-dependencies are not inserted. Revealing the workbook reuses
-`SetWindowMeta`, hence its delta and its undo.
+structural entry, with the references replaced. Columns inside the copied
+subtree are never embedded (the graph reads the pasted workbook); a formula or a
+calculation that reads outside the copy becomes `#REF`, respectively plain
+columns. Within the same project, the dependencies are not inserted. Revealing
+the workbook reuses `SetWindowMeta`, hence its delta and its undo. The system
+clipboard carries the calculations and transposed sheets of the copy in two
+`#[serde(default)]` fields of `ClipboardRecord` (the `.stf` format is unchanged,
+invariant 12).
 
 ## Analysis calculations (#181)
 

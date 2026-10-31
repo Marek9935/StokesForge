@@ -16,11 +16,10 @@
 //! A click on a folder selects it and, if it is closed, expands it; a click on
 //! an open folder does not collapse it (a selection click must not make the
 //! tree jump); the double-click and the triangle collapse it. Delete and
-//! Rename act on it, a folder selection pastes **into** that folder. **Copying
-//! and duplicating a folder are refused for now**: a local copy would keep its
-//! references to the original workbooks (outside the folder); the menu entry is
-//! grayed out with its reason, and `AppState` refuses the keyboard gesture with
-//! the same sentence. To be taken up in a separate issue.
+//! Rename act on it, a folder selection pastes **into** that folder. Copy and
+//! Duplicate work on a folder too (#391): `AppState` copies the whole subtree,
+//! what is inside the copy reads the copy, and pasting with the copied folder
+//! itself selected puts the copy beside it.
 //!
 //! **Keyboard navigation (#170, point 6).** With the panel focused
 //! (`PmMemory::focus`, set by a click), ↑ and ↓ move the selection from one
@@ -177,11 +176,6 @@ fn note_visible(ctx: &egui::Context, memory_key: egui::Id, entry: PmEntry) {
     });
 }
 
-/// Does the selection contain a folder (copy refused, see the head doc)?
-pub(super) fn selection_has_folder(selection: &HashSet<PmEntry>) -> bool {
-    selection.iter().any(|entry| entry.is_folder())
-}
-
 pub(super) fn viewport_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("stokesforge_project_manager_window")
 }
@@ -278,32 +272,20 @@ pub(super) enum ObjectMenuTarget {
 /// `sections` is the calling menu's: the entries specific to the panel
 /// (Open · Close) are painted before, under the same count of separators.
 /// Pasting triggers a read request to egui-winit, hence also uses the Wayland
-/// receiver. `has_folder`: the selection contains a folder, so Copy and
-/// Duplicate are grayed out (folder copy refused, #170).
-#[allow(clippy::too_many_arguments)]
+/// receiver.
 pub(super) fn object_menu(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
     target: ObjectMenuTarget,
     ids: &[NodeId],
     parent: NodeId,
-    has_folder: bool,
     actions: &mut Vec<Action>,
     rename_viewport: egui::ViewportId,
 ) {
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
     let enabled = !ids.is_empty();
-    // Copy and duplicate: refused as soon as a folder is targeted (see the head doc).
-    let has_folder = has_folder || target == ObjectMenuTarget::Folder;
-    let copy_enabled = enabled && !has_folder;
-    let copy_reason = || {
-        if has_folder {
-            tr!("disabled-copy-folder")
-        } else {
-            tr!("project-manager-selection-needed")
-        }
-    };
+    let copy_reason = || tr!("project-manager-selection-needed");
     if target == ObjectMenuTarget::Folder {
         // The only gesture that creates in a subfolder (#326, `docs/menus.md`).
         sections.section(ui, true, |ui| {
@@ -320,7 +302,7 @@ pub(super) fn object_menu(
     sections.section(ui, true, |ui| {
         if ui
             .add_enabled(
-                copy_enabled,
+                enabled,
                 egui::Button::new(tr!("action-copy"))
                     .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_COPY)),
             )
@@ -366,7 +348,7 @@ pub(super) fn object_menu(
         }
         if ui
             .add_enabled(
-                copy_enabled,
+                enabled,
                 egui::Button::new(tr!("action-duplicate-project-object"))
                     .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_OBJECT)),
             )
@@ -826,14 +808,12 @@ fn project_tree_node_ui(
                         .data(|data| data.get_temp::<PmMemory>(memory_key))
                         .unwrap_or_default();
                     let ids = selected_ids(interaction.selection, &memory.order);
-                    let has_folder = selection_has_folder(interaction.selection);
                     object_menu(
                         ui,
                         &mut MenuSections::new(),
                         ObjectMenuTarget::Folder,
                         &ids,
                         *id,
-                        has_folder,
                         interaction.actions,
                         viewport,
                     )
@@ -936,14 +916,12 @@ fn project_tree_node_ui(
                 let ids = selected_ids(interaction.selection, &memory.order);
                 let viewport = ui.ctx().viewport_id();
                 let parent = paste_parent(interaction.selection, interaction.root);
-                let has_folder = selection_has_folder(interaction.selection);
                 object_menu(
                     ui,
                     &mut sections,
                     ObjectMenuTarget::Windows,
                     &ids,
                     parent,
-                    has_folder,
                     interaction.actions,
                     viewport,
                 );
@@ -2041,17 +2019,19 @@ pub(super) mod tests {
         for absent in [tr!("project-manager-open"), tr!("project-manager-close")] {
             assert!(!painted(&menu, &absent), "{absent} makes no sense here");
         }
-        // Copying and duplicating a folder are refused for now: the entries
-        // stay visible, grayed out (their click pushes nothing).
-        for grayed in [tr!("action-copy"), tr!("action-duplicate-project-object")] {
-            assert!(painted(&menu, &grayed), "{grayed} grayed out on a folder");
-            let at = find_text_center(&menu.shapes, &grayed);
+        // Copy and Duplicate are enabled on a folder (#391): the right click
+        // targets the folder, and the click pushes the action.
+        for (label, expected) in [
+            (tr!("action-copy"), Action::CopyObjects(vec![folder])),
+            (
+                tr!("action-duplicate-project-object"),
+                Action::DuplicateObjects(vec![folder]),
+            ),
+        ] {
+            assert!(painted(&menu, &label), "{label} on a folder");
+            let at = find_text_center(&menu.shapes, &label);
             click_at(&context, at, egui::Modifiers::NONE, paint);
-            assert!(
-                bench.actions.borrow().is_empty(),
-                "{grayed} grayed out: no action, {:?}",
-                bench.actions.borrow()
-            );
+            assert_eq!(bench.actions.take(), vec![expected], "{label}");
             open_context_menu(&context, pos, paint);
         }
         let rename = find_text_center(&menu.shapes, &tr!("action-rename-project-object"));
@@ -2604,12 +2584,11 @@ pub(super) mod tests {
         );
     }
 
-    /// Copying and duplicating a folder are refused (see the head doc):
-    /// Ctrl+C and Ctrl+D pass the gesture on to the state, which refuses it
-    /// with its reason (`stokesforge-app-state/tests/project_objects.rs`); the
-    /// menu entry is grayed out (test of a folder's right click).
+    /// Ctrl+C on a selected folder copies the folder (#391): the panel pushes
+    /// `CopyObjects` with the folder, and the state copies its subtree
+    /// (`stokesforge-app-state/tests/project_objects.rs`).
     #[test]
-    fn ctrl_c_on_a_folder_goes_through_the_state_which_refuses_it() {
+    fn ctrl_c_on_a_folder_copies_the_folder() {
         let (tree, _tabs) = tree_with_collapsed_folder();
         let folder = tree_folder();
         let context = egui::Context::default();
