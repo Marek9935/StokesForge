@@ -184,7 +184,19 @@ named cases are in `recalc_targeted.rs` (`moving_the_paired_x_recalculates_at`,
 `an_x_computed_by_a_formula_is_recalculated_first`,
 `an_x_reading_a_column_it_is_the_x_of_is_a_cycle`,
 `an_unrelated_command_rewrites_no_column_function`) and `b22` draws the column
-functions with a `SetRole` step.
+functions with a `SetRole` step. A formula that reads **another sheet or
+workbook** (#403) adds the remote column, its paired X and their membership in
+the sheet they must be in: named cases in `recalc_targeted.rs`
+(`editing_the_remote_column_recalculates_the_reader`,
+`a_role_change_in_the_remote_sheet_recalculates_the_reader`,
+`deleting_the_remote_sheet_gives_ref_then_undo_restores_the_values`,
+`moving_the_remote_column_to_a_third_sheet_gives_ref`,
+`a_chain_across_sheets_is_calculated_in_one_pass`,
+`a_loop_across_sheets_stays_not_calculated_and_stable`,
+`the_result_keeps_the_length_of_its_own_sheet`), `analysis.rs` (a loop through a
+calculation and a remote formula), the `stokesforge-core/src/sheet_refs.rs`
+tests (syntax, quotes, lookup, names, loops) and `b22`, which draws remote
+formulas (and does not save them while the `.stf` does not carry the sheet).
 
 ### What holds it today
 
@@ -196,6 +208,7 @@ functions with a `SetRole` step.
 | Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`an_oriented_axis_is_drawn_like_the_original_axis`, `stokesforge-render/tests/geometry.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_orients_the_axes_from_the_order_of_the_bounds`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more "Inverted axis" / "Auto range" / "Closed frame" boxes, "Advanced" block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of "Advanced" counted twice) |
 | `stokesforge-session/tests/analysis.rs` (`on_load_no_calculation_is_rerun_and_the_fingerprint_says_whether_it_is_stale`, `trust_on_load_applies_only_to_the_load`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
 | `stokesforge-session/tests/formula.rs` | the behavior of formulas itself (before #193, unchanged) |
+| `stokesforge-core/src/sheet_refs.rs` (`tests`), `stokesforge-app-state/tests/formula_sheets.rs`, `stokesforge-persistence/tests/remote_formula_batch1.rs` | formulas that read other sheets (#403, batch 1): reading `Sheet3!B` / `[Book2]Sheet5!B`, case, quotes, workbook lookup (own folder, then project, path when ambiguous), the refusals (outside a column function, remote X, workbook without sheet), sibling names that differ only by case, loops (local, remote, through a paired X) refused at typing and framed when a file holds one; a remote formula saved and reloaded is `#REF` without crashing (flips in batch 2, when the `.stf` carries the sheet) |
 | `stokesforge-robustness/tests/b14_sweep.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
 | `stokesforge-core` (`project.rs`, `an_inserted_column_moves_the_counter_past_its_version`) | inserting a column moves the counter beyond its version |
 
@@ -229,6 +242,15 @@ tests see it.
 | paired X removed from the fingerprint altogether (#402) | `moving_the_paired_x_recalculates_at`, `a_role_change_pairing_another_x_recalculates_at`, `editing_the_unnamed_x_recalculates_at`, `an_x_computed_by_a_formula_is_recalculated_first`, `a_column_without_x_shows_dashes_until_one_appears` |
 | identifier of the paired X removed, version kept (#402) | **nobody, by construction**: a version names one content in the whole project, so a different X has a different version. The identifier stays for readability |
 | paired X missing from the dependency order and from the cycles (#402) | `an_x_computed_by_a_formula_is_recalculated_first`, `an_x_reading_a_column_it_is_the_x_of_is_a_cycle` — not `b22` (a chain through a formula X is too rare in the draw) |
+| remote column or paired X missing from the fingerprint (#403) | `editing_the_remote_column_recalculates_the_reader`, `a_role_change_in_the_remote_sheet_recalculates_the_reader`, `b22` |
+| membership read as "exists in the tree" instead of "is in the sheet it must be in" (#403) | `moving_the_remote_column_to_a_third_sheet_gives_ref`, `a_deleted_sheet_or_a_moved_column_shows_ref` |
+| one order per sheet instead of one for the project (#403) | `a_chain_across_sheets_is_calculated_in_one_pass` |
+| a remote column counted in the length of the result (#403) | `the_result_keeps_the_length_of_its_own_sheet` |
+| cycles and calculations kept to the own sheet (#403) | `a_loop_across_sheets_stays_not_calculated_and_stable`, `a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture`, `loops_are_found_project_wide` |
+| loop check without the paired X (#403) | `a_loop_through_a_paired_x_is_found` |
+| kept refusal not tied to the revision (#403) | `the_kept_refusal_follows_the_project` |
+| copy renumbers a remote reference like a local one, or keeps it on an external paste (#403) | `duplicating_a_sheet_keeps_its_remote_references`, `duplicating_a_workbook_makes_the_copy_read_its_own_sheet`, `an_external_paste_turns_a_remote_reference_into_ref` |
+| siblings compared exactly instead of ignoring case, or a name generator that does not skip them (#403) | `siblings_may_not_differ_only_by_case`, `automatic_names_skip_a_name_taken_up_to_case` |
 | recalculate everything (the "targeted" is no longer targeted) | the "targeted" cases and their witnesses, `b22` (property 3) |
 | presence in the memo instead of fingerprint equality | fifteen named cases, `b22` |
 | self-reference | refused on input (`Tree::formula_from_letters`: `SelfReference`, test of `core`); a fabricated file that carries it ends up in the cycle, never in `evaluate_formula` |

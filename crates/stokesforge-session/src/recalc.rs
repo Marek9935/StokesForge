@@ -54,6 +54,22 @@
 //! to test then: `docs/tests.md`,
 //! "Targeted recalculation".
 //!
+//! **Other sheets and workbooks (#403).** A formula may read a column of another
+//! sheet (`Sheet3!B`, `[Book2]Sheet5!B`). The formula stores the sheet of each
+//! remote column (`ColumnFormula::remote_refs`, part of the stored formula in
+//! the fingerprint); the sheet each column must be in is one answer for the
+//! whole project, `Tree::formula_inputs`: the columns named, where they must be,
+//! and the X paired with them. A column that is not in that sheet (deleted,
+//! moved to a third sheet, sheet gone) has the version `None` in the
+//! fingerprint and computes as `#REF`; the version of a remote column and of its
+//! paired X are in the fingerprint like the local ones, and the dependency order
+//! is **one order for the whole project** (`recalc_project`), not one per sheet:
+//! a formula that reads a column of another sheet comes after the formula that
+//! writes it, and a loop between sheets is a cycle (`NaN` blocks, never a
+//! hang). The length of the result follows the columns read **in the own sheet**
+//! only. The displayed prefix (sheet and workbook names) is not read by the
+//! calculation, so a rename or a move of the sheet rewrites nothing.
+//!
 //! **The paired X is a hidden input (#402).** `at(B, 340)`, `integral(B)` and
 //! `max(B, 330, 350)` read, besides `B`, the X column that the plot pairs with
 //! `B` (`stokesforge_core::compose::x_for`: the nearest X to its left, by role).

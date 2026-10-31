@@ -152,15 +152,28 @@ After each successful `Execute`, `Undo`, `Redo`, `AbortMacro` and after each
 **rewrites** only those for which some data of the computation has changed since
 their last computation. For each one it keeps a *fingerprint* — the stored
 formula (text and column identifiers, #321), the version of each column read
-from the sheet (or its absence: deleted, or in another sheet), the length of the
-result, the version of the column itself, the outcome (computed, unreadable,
-caught in a cycle) — and compares it with the current state. An unrelated
+from the sheet it must be in (or its absence: deleted, moved to another sheet,
+or its sheet gone), the length of the result, the version of the column itself,
+the outcome (computed, unreadable, caught in a cycle) — and compares it with the
+current state. An unrelated
 command (a curve color, a folder) therefore rewrites no column; modifying A
 rewrites only what reads A, then, through the version of what has just been
 rewritten, what reads that in turn.
 
+**Across sheets and workbooks (#403).** A formula may read a column of another
+sheet or workbook (`max(Sheet3!B)`, `at([Book2]Sheet5!B, 340)`): the pass
+orders the formula columns of the **whole project** in one dependency order (a
+sheet is no longer processed alone), and the fingerprint holds the remote
+column, its paired X and their membership in the sheet they must be in. The
+formula stores the sheet identifier of a remote column; the workbook is read
+from the tree, so moving the sheet changes the displayed prefix, not the
+values. A loop across sheets is a `FormulaError::Cycle` (cells empty, never a
+hang) and is refused at input (`Tree::formula_for_entry`), by the interface and
+by `pyst`; a file that already holds one frames the Formula cell. A remote
+column does not lengthen the result: it keeps the length of its own sheet.
+
 **Result length (#194).** A formula column has the length of the longest of the
-columns it reads; beyond the length of a shorter column, the row is `NaN`. When
+columns it reads in its own sheet; beyond the length of a shorter column, the row is `NaN`. When
 it reads no column — constant, unreadable formula, caught in a cycle — it takes
 the length of the longest **ordinary** column (without a formula) of the sheet,
 never that of another formula column. A formula therefore does not grow with a
