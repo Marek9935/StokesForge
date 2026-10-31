@@ -1242,6 +1242,22 @@ fn header_row_separator(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
+/// The refusal tint of a header cell (#410): fills the cell **between** its
+/// horizontal grid lines (the lines are centred on the top and bottom edges of
+/// the cell), so a translucent fill never darkens a line.
+fn paint_refusal_tint(ui: &egui::Ui, cell: egui::Rect) {
+    ui.painter().rect_filled(
+        refusal_tint_rect(ui, cell),
+        0.0,
+        crate::theme::field_refused_fill(),
+    );
+}
+
+fn refusal_tint_rect(ui: &egui::Ui, cell: egui::Rect) -> egui::Rect {
+    let line = ui.visuals().widgets.noninteractive.bg_stroke.width;
+    cell.shrink2(egui::vec2(0.0, line))
+}
+
 /// Background of a gutter box of the grid, in three levels — see
 /// [`crate::theme::header_letter_row_fill`]/[`crate::theme::
 /// header_letter_row_touched_fill`]/[`crate::theme::
@@ -1310,10 +1326,10 @@ fn header_field_widget(
             };
             // The shared in-place edit contract (#224); it consumes Enter, Tab and Escape,
             // which the shortcut block further down must not see again (#38).
-            // The "?" of the F(x)= cell (#404, S-T6): only while it is edited, at the
-            // right of the field, which gives up the width of the icon so that a
-            // narrow column does not clip it. The icon senses only the hover, so it
-            // never takes the focus whose loss ends the edit.
+            // The "?" of the F(x)= cell (#404, S-T6, #410): only while it is edited,
+            // painted just right of the cell in a layer above the grid, over the
+            // neighbouring column, so the field keeps the whole width of the cell.
+            // The icon never takes the focus whose loss ends the edit.
             let id = ui.id().with("header_edit");
             let mut paint = |ui: &mut egui::Ui, width: f32| {
                 inplace_edit::show(
@@ -1324,27 +1340,36 @@ fn header_field_widget(
                         .desired_width(width),
                     opening,
                     inplace_edit::FocusLoss::Ends,
-                    refusal.as_deref(),
+                    None,
                 )
             };
-            let shown = if help {
-                ui.horizontal(|ui| {
-                    let width =
-                        ui.available_width() - super::column_formula_help::reserved_width(ui);
-                    let shown = paint(ui, width.max(0.0));
-                    super::column_formula_help::icon(ui, actions);
-                    shown
-                })
-                .inner
-            } else {
-                paint(ui, f32::INFINITY)
-            };
+            // A refused entry tints the cell itself (#410): the fill follows the
+            // cell and never crosses its grid lines, unlike a frame. The bubble
+            // with the reason stays.
+            if refusal.is_some() {
+                paint_refusal_tint(ui, rect);
+            }
+            let shown = paint(ui, f32::INFINITY);
+            if let Some(message) = refusal.as_deref() {
+                crate::field_state::show_bubble(
+                    &shown.response,
+                    &crate::field_state::FieldIssue::refused(message),
+                );
+            }
+            if help {
+                // The icon sits on the neighbouring cell, whose edge is only known
+                // once the header row is laid out: remember this cell, the table
+                // paints the icon afterwards (#410).
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(formula_help_cell_id(sheet), Some((column, rect)));
+                });
+            }
             match shown.end {
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
                     let refused = state.header_edit_refusal().is_some();
-                    // Enter or Tab on a refused text: the field stays open (red frame and
+                    // Enter or Tab on a refused text: the field stays open (tinted cell and
                     // bubble). A click elsewhere closes without writing anything.
                     let write = match inplace_edit::resolve(end, false, refused) {
                         inplace_edit::Resolution::Stay => return,
@@ -1386,18 +1411,24 @@ fn header_field_widget(
                 ui.visuals().selection.bg_fill.linear_multiply(0.35),
             );
         }
+        // The tint goes under the text.
+        let issue = (field == HeaderField::Formula)
+            .then(|| state.formula_issue(column))
+            .flatten();
+        if issue.is_some() {
+            paint_refusal_tint(ui, rect);
+        }
         ui.put(
             rect,
             egui::Label::new(egui::RichText::new(text).weak())
                 .selectable(false)
                 .truncate(),
         );
-        // A formula that reads a deleted column shows `#REF`: red frame and bubble on
-        // its box (#321). The sentence comes from `app-state`.
+        // A formula that reads a deleted column shows `#REF`: tinted cell and bubble
+        // (#321, #410). The sentence comes from `app-state`.
         if field == HeaderField::Formula {
-            if let Some(message) = state.formula_issue(column) {
-                crate::field_state::show_issue(
-                    ui,
+            if let Some(message) = issue {
+                crate::field_state::show_bubble(
                     &response,
                     &crate::field_state::FieldIssue::refused(message),
                 );
@@ -1824,6 +1855,8 @@ pub(super) fn grid_contents(
         actions.push(Action::SetColumnWidth { column, width });
     }
 
+    paint_formula_help_icon(ui, actions, sheet, &extents);
+
     let last_column_right = extents
         .last()
         .map_or(grid_rect.left(), |&(_, _, right)| right);
@@ -1932,6 +1965,46 @@ fn prepare_grid(ui: &mut egui::Ui, sheet: NodeId) -> (egui::Rect, egui::Id) {
         ui.memory_mut(|memory| memory.set_focus_lock_filter(focus_anchor, GRID_KEYS));
     }
     (grid_rect, focus_anchor)
+}
+
+/// Where [`header_field_widget`] leaves the edited `F(x)=` cell of `sheet` (and
+/// its column) for [`paint_formula_help_icon`], for this frame only.
+fn formula_help_cell_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new("formula_help_cell").with(sheet)
+}
+
+/// Paints the "?" of the edited `F(x)=` cell (#410) on the **neighbouring** cell:
+/// at the left edge of the next column, whatever the widths, vertically centred
+/// on the row. The last column has no neighbour: the icon starts one column
+/// spacing after its right edge (past the separator), in the empty area.
+fn paint_formula_help_icon(
+    ui: &egui::Ui,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+    extents: &[ColumnExtent],
+) {
+    let id = formula_help_cell_id(sheet);
+    let Some((column, cell)) = ui.ctx().data_mut(|data| {
+        data.remove_temp::<Option<(NodeId, egui::Rect)>>(id)
+            .flatten()
+    }) else {
+        return;
+    };
+    let Some(index) = extents.iter().position(|(extent, _, _)| *extent == column) else {
+        return;
+    };
+    let left = extents
+        .get(index + 1)
+        .map_or(extents[index].2 + ui.spacing().item_spacing.x, |next| {
+            next.1
+        });
+    super::column_formula_help::show_beside(
+        ui.ctx(),
+        id.with("icon"),
+        left,
+        cell.center().y,
+        actions,
+    );
 }
 
 /// The header lays out the columns and records the bound of the free area.
@@ -5475,16 +5548,255 @@ mod tests {
         assert!(bench.seen.contains(&Action::OpenFormulaFunctions));
     }
 
+    /// The bounds of the text field being edited, from the accessibility tree.
+    fn edited_field_bounds(bench: &Bench) -> egui::Rect {
+        let update = bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accesskit enabled");
+        let bounds = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
+            .filter_map(|(_, node)| node.bounds())
+            .next()
+            .expect("the edited field");
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        )
+    }
+
+    /// #410: the field keeps the whole width of the cell, as without the icon.
     #[test]
-    fn the_help_icon_takes_its_width_from_the_field_not_from_the_cell() {
-        let (bench, icon) = help_icon(HeaderField::Formula, true);
-        let icon = icon.expect("the icon");
-        // The icon stays inside the first column: right of its text, left of
-        // the second column's first cell.
-        let second = bench.center_of("201").expect("cell of the second column");
+    fn the_help_icon_leaves_the_field_the_whole_cell_width() {
+        let (with, _) = icons_while_editing(HeaderField::Formula, true);
+        let (without, _) = icons_while_editing(HeaderField::Formula, false);
+        let (with, without) = (edited_field_bounds(&with), edited_field_bounds(&without));
         assert!(
-            icon.x < second.x - 20.0,
-            "icon {icon:?}, next cell {second:?}"
+            (with.width() - without.width()).abs() < 0.5,
+            "with the icon {with:?}, without {without:?}"
+        );
+    }
+
+    /// The painted fill of the letter of visible column `index`: the whole cell.
+    fn letter_fill(bench: &Bench, index: usize) -> egui::Rect {
+        let center = bench
+            .center_of(&visible_letter(bench, index))
+            .expect("letter painted");
+        bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
+                        && rect.rect.contains(center) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .expect("fill of the letter")
+    }
+
+    /// The first column's F(x)= cell edited in a bench whose columns 0 and 1 were
+    /// resized by `widths`; returns the bench, the icon and the field's bounds.
+    fn formula_edit_with_widths(widths: [f32; 2]) -> (Bench, egui::Pos2, egui::Rect) {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        resize(&mut bench, 0, widths[0]);
+        resize(&mut bench, 1, widths[1]);
+        let column = bench.columns[0];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        let field = edited_field_bounds(&bench);
+        let icon = image_centers(&bench)
+            .into_iter()
+            .find(|c| c.x > field.right() && (c.y - field.center().y).abs() < 6.0)
+            .expect("the icon right of the cell");
+        (bench, icon, field)
+    }
+
+    /// #410: the icon sits on the neighbouring cell, right after its left edge,
+    /// whatever the widths of the edited column and of the next one.
+    #[test]
+    fn the_help_icon_starts_at_the_left_edge_of_the_next_cell() {
+        for widths in [[-10.0, 0.0], [20.0, 0.0], [0.0, 25.0], [30.0, -15.0]] {
+            let (bench, icon, field) = formula_edit_with_widths(widths);
+            let next = letter_fill(&bench, 1);
+            let left = icon.x - crate::icons::ICON_SIZE / 2.0;
+            assert!(
+                (left - (next.left() + super::super::column_formula_help::GAP)).abs() < 1.0,
+                "{widths:?}: icon left {left}, next cell {next:?}"
+            );
+            assert!(left > field.right() + 1.0, "off the separator: {widths:?}");
+        }
+    }
+
+    /// #410: the icon is centred on the F(x)= row, in a layer above the grid.
+    #[test]
+    fn the_help_icon_is_centred_on_the_row_above_the_grid() {
+        let (bench, icon, field) = formula_edit_with_widths([0.0, 0.0]);
+        assert!(
+            (icon.y - field.center().y).abs() <= 1.0,
+            "{icon:?} {field:?}"
+        );
+        let layer = bench.context.layer_id_at(icon).expect("a layer");
+        assert_eq!(layer.order, egui::Order::Foreground, "above the grid");
+    }
+
+    /// #410: the last column has no neighbour; the icon starts at its right edge.
+    #[test]
+    fn the_help_icon_of_the_last_column_starts_at_its_right_edge() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let last = bench.columns.len() - 1;
+        let column = bench.columns[last];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        let cell = letter_fill(&bench, last);
+        let field = edited_field_bounds(&bench);
+        let icon = image_centers(&bench)
+            .into_iter()
+            .find(|c| c.x > cell.right() && (c.y - field.center().y).abs() < 6.0)
+            .expect("the icon past the last column");
+        let left = icon.x - crate::icons::ICON_SIZE / 2.0;
+        let spacing = bench.context.global_style().spacing.item_spacing.x;
+        assert!(
+            (left - (cell.right() + spacing + super::super::column_formula_help::GAP)).abs() < 1.0,
+            "icon left {left}, cell {cell:?}"
+        );
+    }
+
+    /// #410: a refused entry tints the whole cell and paints no red frame.
+    #[test]
+    fn a_refused_grid_entry_tints_the_cell_and_draws_no_frame() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let column = bench.columns[0];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "Q+1".to_string();
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.header_edit_refusal().is_some(), "refused text");
+        let field = edited_field_bounds(&bench);
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        let fill = theme::field_refused_fill();
+        let tint = shapes.iter().find_map(|painted| match &painted.shape {
+            egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+            _ => None,
+        });
+        let tint = tint.expect("the tint of the cell");
+        assert!(
+            (tint.left() - field.left()).abs() < 0.5 && (tint.right() - field.right()).abs() < 0.5,
+            "tint {tint:?}, cell {field:?}"
+        );
+        let framed = shapes.iter().any(|painted| match &painted.shape {
+            egui::Shape::Rect(rect) => {
+                rect.stroke.color == theme::field_refused_color() && rect.stroke.width > 0.0
+            }
+            _ => false,
+        });
+        assert!(!framed, "no red frame in the grid");
+        assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// No line of the grid crosses `tint`: a translucent fill over a line would
+    /// darken it.
+    fn assert_no_grid_line_under(bench: &Bench, tint: egui::Rect) {
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        for painted in shapes {
+            let egui::Shape::LineSegment { points, stroke } = &painted.shape else {
+                continue;
+            };
+            // Grid lines only, not the text cursor.
+            let grid = bench
+                .context
+                .global_style()
+                .visuals
+                .widgets
+                .noninteractive
+                .bg_stroke;
+            if stroke.color != grid.color {
+                continue;
+            }
+            let band = egui::Rect::from_two_pos(points[0], points[1])
+                .expand2(egui::vec2(0.0, stroke.width / 2.0));
+            let band = if points[0].y == points[1].y {
+                band
+            } else {
+                egui::Rect::from_two_pos(points[0], points[1])
+                    .expand2(egui::vec2(stroke.width / 2.0, 0.0))
+            };
+            assert!(
+                !band.intersects(tint),
+                "the tint {tint:?} covers a grid line {points:?}"
+            );
+        }
+    }
+
+    /// #410: a formula whose column was deleted shows `#REF` as a tinted cell
+    /// between the lines, without the red frame.
+    #[test]
+    fn a_formula_that_lost_a_column_tints_its_box_and_draws_no_frame() {
+        let mut bench = Bench::new();
+        bench.context.enable_accesskit();
+        let column = bench.columns[2];
+        bench.state.begin_header_edit(column, HeaderField::Formula);
+        bench.state.header_editing_mut().expect("editing").buffer = "B*2".to_string();
+        bench.state.commit_header_edit();
+        bench.state.select_column(bench.sheet, bench.columns[1]);
+        bench
+            .state
+            .dispatch(Action::DeleteSelectedCells { sheet: bench.sheet });
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        assert!(bench.state.formula_issue(column).is_some(), "#REF expected");
+        let shapes = &bench.last_frame.as_ref().unwrap().shapes;
+        let fill = theme::field_refused_fill();
+        let tint = shapes
+            .iter()
+            .find_map(|painted| match &painted.shape {
+                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                _ => None,
+            })
+            .expect("the tint of the box");
+        let framed = shapes.iter().any(|painted| match &painted.shape {
+            egui::Shape::Rect(rect) => {
+                rect.stroke.color == theme::field_refused_color() && rect.stroke.width > 0.0
+            }
+            _ => false,
+        });
+        assert!(!framed, "no red frame");
+        assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// The icon is gone as soon as the edit ends: no leftover layer.
+    #[test]
+    fn the_help_icon_disappears_when_the_edit_ends() {
+        let (mut bench, icon) = help_icon(HeaderField::Formula, true);
+        let icon = icon.expect("the icon");
+        bench.state.cancel_header_edit();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let layer = bench.context.layer_id_at(icon);
+        assert!(
+            layer.is_none_or(|layer| layer.order != egui::Order::Foreground),
+            "{layer:?}"
         );
     }
 }

@@ -100,6 +100,13 @@ pub fn show_issue(ui: &egui::Ui, response: &egui::Response, issue: &FieldIssue) 
         egui::Stroke::new(FRAME_WIDTH, issue.color()),
         egui::StrokeKind::Outside,
     );
+    show_bubble(response, issue);
+}
+
+/// The bubble of `issue` alone, while the field is hovered or has focus: for a
+/// field that shows its refusal by another means than the frame (the grid
+/// tints the cell, #410).
+pub fn show_bubble(response: &egui::Response, issue: &FieldIssue) {
     if response.hovered() || response.has_focus() {
         response.show_tooltip_text(issue.message());
     }
