@@ -1,6 +1,6 @@
 ---
 name: stokesforge-bug-fix
-description: Fix a StokesForge bug — failing reproduction first, repair at the layer of the cause, regression test, issue closed. Use on an explicit request to fix in the code (« corrige ce bug dans le code » / "fix this bug in the code", « répare #12 », « traite #12 », « lance #12 » or a bug named in plain words, identified as in the skill `stokesforge-feature`, section 1), or to lift a reproduction's #[ignore].
+description: "Fix a StokesForge bug — failing reproduction first, repair at the layer of the cause, regression test, issue closed. Use on an explicit request to fix in the code (« corrige ce bug dans le code » / \"fix this bug in the code\", « répare #12 », « traite #12 », or a bug launched through the skill `stokesforge-feature`, section 1), or to lift a reproduction's #[ignore]."
 ---
 
 Reproduce, then fix. A fix written before the reproduction does not know what it fixes.
