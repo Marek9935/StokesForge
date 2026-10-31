@@ -575,3 +575,73 @@ fn a_legacy_graph_too_large_to_store_its_areas_refuses_a_size_key() {
     refused(&b, "pyst.set_graph(g, plot_width=6)");
     assert_eq!(b.session.snapshot().unwrap().history, history);
 }
+
+// --- Free layer placement (#398) -------------------------------------------------------
+
+/// The graph `[G]` in free placement, its first layer shifted so that the
+/// image does not start at the stored origin.
+fn free_graph() -> Bench {
+    let b = bench();
+    run(&b, GRAPH);
+    let mut spec = graph_spec(&b);
+    spec.frame_widths = vec![300.0];
+    spec.frame_heights = vec![250.0];
+    spec.figure_left = Some(150.0);
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let frames = stokesforge_render_svg::free_frames_from_grid(&spec, &measurer, &choice)
+        .expect("measured")
+        .expect("frames");
+    assert!(stokesforge_core::compose::set_free_placement(
+        &mut spec, &frames
+    ));
+    store(&b, spec);
+    b
+}
+
+/// A size key on a free graph is refused in English, the spec is untouched and
+/// no history entry is written, even when other keys share the call.
+#[test]
+fn a_size_key_on_a_free_graph_is_refused_and_writes_nothing() {
+    let b = free_graph();
+    let before = graph_spec(&b);
+    let history = history_len(&b);
+    for body in [
+        "pyst.set_graph(g, plot_width=6)",
+        "pyst.set_graph(g, plot_height=4)",
+        "pyst.set_graph(g, plot_left=3)",
+        "pyst.set_graph(g, plot_top=None)",
+        "pyst.set_graph(g, fixed_size=True)",
+        "pyst.set_graph(g, title='T', plot_width=6)",
+    ] {
+        let message = refused(&b, body);
+        assert!(
+            message.contains("free layer placement") && message.contains("cannot be set"),
+            "{body}: {message}"
+        );
+    }
+    assert_eq!(graph_spec(&b), before);
+    assert_eq!(history_len(&b), history);
+    // Other keys still work.
+    run(&b, "pyst.set_graph(pyst.resolve('[G]'), title='T')");
+    assert_eq!(graph_spec(&b).title, "T");
+}
+
+/// `graph_size` of a free graph reports the image size, no grid column or row
+/// and no figure Left / Top.
+#[test]
+fn graph_size_of_a_free_graph_reports_the_image_only() {
+    let b = free_graph();
+    let out = run(
+        &b,
+        "s = pyst.graph_size(pyst.resolve('[G]'), unit='pt')\n\
+         print(s['width'], s['height'], s['plot_widths'], s['plot_heights'], s['plot_left'], s['plot_top'])\n",
+    );
+    let size = layout_of(&graph_spec(&b)).size;
+    assert_eq!(
+        out.stdout.trim(),
+        format!("{}.0 {}.0 [] [] None None", size.0, size.1),
+        "{}",
+        out.stdout
+    );
+}

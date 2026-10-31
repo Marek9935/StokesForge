@@ -105,7 +105,7 @@ pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{LegendPosition, LegendSpec};
 pub use length_unit::LengthUnit;
 pub use palettes::{NamedPalette, PaletteNature, CURVE_PALETTES};
-pub use panel::{OverlaySpec, PanelSpec, SeriesSlot};
+pub use panel::{FreeFrame, OverlaySpec, PanelSpec, SeriesSlot};
 pub use raw::RawVariant;
 pub use saved::{ColorUsage, SavedColors, SavedGradient, MAX_SAVED_COLORS};
 pub use series::{
@@ -113,8 +113,8 @@ pub use series::{
 };
 pub use shape::{ShapeKind, ShapeRef, ShapeSpec};
 pub use spec::{
-    Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE, FALLBACK_FRAME,
-    MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
+    LayerPlacement, Panels, PlotSpec, SeriesGroupRef, SeriesRef, DEFAULT_FIGURE_SIZE,
+    FALLBACK_FRAME, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_CELL, MIN_FRAME_SIZE, TRANSPARENT,
 };
 pub use style::{
     palette_color, parse_hex, LineSpec, LineStyle, SymbolShape, SymbolSpec, DEFAULT_PALETTE,

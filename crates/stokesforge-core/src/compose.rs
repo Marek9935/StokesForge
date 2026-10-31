@@ -33,7 +33,9 @@
 use std::collections::BTreeMap;
 
 use stokesforge_id::NodeId;
-use stokesforge_plot::{OverlaySpec, PanelSpec, PlotSpec, PlotType, SeriesSpec};
+use stokesforge_plot::{
+    FreeFrame, LayerPlacement, OverlaySpec, PanelSpec, PlotSpec, PlotType, SeriesSpec,
+};
 
 use crate::column::ColumnRole;
 use crate::formula::Formula;
@@ -368,6 +370,9 @@ pub enum CellSide {
 /// would overflow (rows and columns are free `usize`s once read from a file)
 /// or if the grid would exceed [`MAX_GRID_CELLS`].
 pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<usize> {
+    if spec.layer_placement == LayerPlacement::Free {
+        return insert_free_cell(spec, panel, side);
+    }
     let base = spec.panels.get(overlay_base(spec, panel))?;
     let (row, column) = (base.row, base.column);
     let (new_row, new_column) = match side {
@@ -418,6 +423,43 @@ pub fn insert_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<
                 spec.frame_heights = heights;
             }
         }
+    }
+    spec.panels.push(PanelSpec::at(new_row, new_column));
+    Some(spec.panels.len() - 1)
+}
+
+/// [`insert_cell`] in free placement (#398): nothing shifts and no frame size
+/// is stored per column, the new cell only needs an identity no other cell
+/// has: past the last column of the reference row (Right) or the last row of
+/// the reference column (Below). The caller gives it its frame
+/// ([`set_free_frame`]).
+fn insert_free_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option<usize> {
+    let base = spec.panels.get(spec.cell_bases().get(panel).copied()?)?;
+    let (row, column) = (base.row, base.column);
+    let (new_row, new_column) = match side {
+        CellSide::Right => (
+            row,
+            spec.panels
+                .iter()
+                .filter(|p| p.row == row)
+                .map(|p| p.column)
+                .max()?
+                .checked_add(1)?,
+        ),
+        CellSide::Below => (
+            spec.panels
+                .iter()
+                .filter(|p| p.column == column)
+                .map(|p| p.row)
+                .max()?
+                .checked_add(1)?,
+            column,
+        ),
+    };
+    let rows = spec.rows().max(new_row.checked_add(1)?);
+    let columns = spec.columns().max(new_column.checked_add(1)?);
+    if rows.checked_mul(columns)? > MAX_GRID_CELLS {
+        return None;
     }
     spec.panels.push(PanelSpec::at(new_row, new_column));
     Some(spec.panels.len() - 1)
@@ -497,6 +539,154 @@ pub fn set_fixed_figure(spec: &mut PlotSpec, fixed: bool) -> bool {
         return false;
     }
     spec.fixed_figure = fixed;
+    true
+}
+
+/// Puts the graph in free placement (#398) with `frames`, one entry per layer
+/// in spec order: the frame of each ordinary layer, `None` for an overlaid one
+/// (it uses its base's; a frame given to it is dropped). `false`, with the spec
+/// unchanged, if `frames` does not have one entry per layer. The grid fields
+/// ([`PlotSpec::frame_widths`], `figure_left`…) stay stored, ignored until the
+/// graph goes back to the grid. Core does not measure: the frames of a graph
+/// leaving the grid come from `stokesforge_render::pipeline::free_frames_from_grid`.
+pub fn set_free_placement(spec: &mut PlotSpec, frames: &[Option<FreeFrame>]) -> bool {
+    if frames.len() != spec.panels.len() {
+        return false;
+    }
+    spec.layer_placement = LayerPlacement::Free;
+    for (panel, frame) in spec.panels.iter_mut().zip(frames) {
+        panel.free_frame = if panel.overlay.is_some() {
+            None
+        } else {
+            *frame
+        };
+    }
+    true
+}
+
+/// Puts the graph back on the regular grid (#398, L7 then C4), from the
+/// positions of the free frames alone (pure, no measurement):
+///
+/// - panels whose vertical extents overlap share a row, transitively (A over
+///   B, B over C: one row even if A and C do not meet); extents that only touch
+///   make two rows; rows run top to bottom;
+/// - inside a row, panels take columns left to right;
+/// - each column then takes its widest frame, each row its tallest (C4: no
+///   frame shrinks).
+///
+/// Overlaid layers follow the new identity of their base; the free frames are
+/// dropped. `false`, with the spec unchanged, if the graph is not free or the
+/// grid would exceed [`MAX_GRID_CELLS`].
+pub fn set_grid_placement(spec: &mut PlotSpec) -> bool {
+    if spec.layer_placement != LayerPlacement::Free {
+        return false;
+    }
+    let bases = spec.cell_bases();
+    // One entry per cell: (old identity, frame, index of its base layer).
+    let mut cells: Vec<((usize, usize), FreeFrame, usize)> = Vec::new();
+    for (index, &base) in bases.iter().enumerate() {
+        if base == index {
+            let panel = &spec.panels[index];
+            cells.push((
+                (panel.row, panel.column),
+                panel.sanitized_free_frame(),
+                index,
+            ));
+        }
+    }
+    // L7: rows by transitive overlap of the vertical extents.
+    cells.sort_by(|a, b| a.1.top.total_cmp(&b.1.top).then(a.2.cmp(&b.2)));
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut reach = f64::NEG_INFINITY;
+    for (at, (_, frame, _)) in cells.iter().enumerate() {
+        match rows.last_mut() {
+            Some(row) if frame.top < reach => {
+                row.push(at);
+                reach = reach.max(frame.top + frame.height);
+            }
+            _ => {
+                rows.push(vec![at]);
+                reach = frame.top + frame.height;
+            }
+        }
+    }
+    for row in &mut rows {
+        row.sort_by(|a, b| {
+            cells[*a]
+                .1
+                .left
+                .total_cmp(&cells[*b].1.left)
+                .then(cells[*a].2.cmp(&cells[*b].2))
+        });
+    }
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(1);
+    if rows
+        .len()
+        .checked_mul(columns)
+        .is_none_or(|n| n > MAX_GRID_CELLS)
+    {
+        return false;
+    }
+    // C4: the largest frame of each column and each row.
+    let mut widths = vec![0.0_f64; columns];
+    let mut heights = vec![0.0_f64; rows.len()];
+    let mut identity: BTreeMap<(usize, usize), (usize, usize)> = BTreeMap::new();
+    for (row, members) in rows.iter().enumerate() {
+        for (column, &at) in members.iter().enumerate() {
+            let (old, frame, _) = &cells[at];
+            widths[column] = widths[column].max(frame.width);
+            heights[row] = heights[row].max(frame.height);
+            identity.insert(*old, (row, column));
+        }
+    }
+    for panel in spec.panels.iter_mut() {
+        if let Some(&(row, column)) = identity.get(&(panel.row, panel.column)) {
+            panel.row = row;
+            panel.column = column;
+        }
+        panel.free_frame = None;
+    }
+    spec.frame_widths = widths;
+    spec.frame_heights = heights;
+    spec.layer_placement = LayerPlacement::Grid;
+    true
+}
+
+/// Which number of a free frame (#398).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreeField {
+    /// Left edge of the frame.
+    Left,
+    /// Top edge of the frame.
+    Top,
+    /// Width of the frame.
+    Width,
+    /// Height of the frame.
+    Height,
+}
+
+/// Sets one number of the free frame of the cell of layer `panel` (#398; an
+/// overlaid layer writes its base's), brought into bounds like
+/// [`FreeFrame::sanitized`]. A cell with no frame yet starts from the fallback
+/// frame. `false`, with the spec unchanged, in grid placement, for a missing
+/// layer or a value that is not finite.
+pub fn set_free_frame(spec: &mut PlotSpec, panel: usize, field: FreeField, value: f64) -> bool {
+    if spec.layer_placement != LayerPlacement::Free || !value.is_finite() {
+        return false;
+    }
+    let Some(&base) = spec.cell_bases().get(panel) else {
+        return false;
+    };
+    let mut frame = spec.panels[base].sanitized_free_frame();
+    match field {
+        FreeField::Left => frame.left = value,
+        FreeField::Top => frame.top = value,
+        FreeField::Width => frame.width = value,
+        FreeField::Height => frame.height = value,
+    }
+    if let Some(target) = spec.panels.get_mut(base) {
+        target.free_frame = Some(frame.sanitized());
+    }
     true
 }
 
@@ -616,6 +806,7 @@ pub fn remap_between(previous: &PlotSpec, next: &PlotSpec) -> Vec<Option<usize>>
         let mut b = b.clone();
         b.row = a.row;
         b.column = a.column;
+        b.free_frame = a.free_frame;
         *a == b
     };
     let mut from = 0;
@@ -1456,5 +1647,204 @@ mod tests {
         assert!(!set_fixed_figure(&mut legacy, true));
         assert!(!legacy.fixed_figure && legacy.figure_top.is_none());
         assert!(set_fixed_figure(&mut spec, true) && spec.fixed_figure);
+    }
+}
+
+#[cfg(test)]
+mod free_placement_tests {
+    use super::*;
+    use stokesforge_plot::Panels;
+
+    fn cell(row: usize, column: usize, frame: (f64, f64, f64, f64)) -> PanelSpec {
+        PanelSpec {
+            free_frame: Some(FreeFrame {
+                left: frame.0,
+                top: frame.1,
+                width: frame.2,
+                height: frame.3,
+            }),
+            ..PanelSpec::at(row, column)
+        }
+    }
+
+    fn free(panels: Vec<PanelSpec>) -> PlotSpec {
+        PlotSpec {
+            layer_placement: LayerPlacement::Free,
+            ..PlotSpec::empty("free").with_panels(Panels::new(panels))
+        }
+    }
+
+    fn identities(spec: &PlotSpec) -> Vec<(usize, usize)> {
+        spec.panels.iter().map(|p| (p.row, p.column)).collect()
+    }
+
+    /// A overlaps B, B overlaps C, A does not meet C: one row. Witness: a
+    /// grouping that only compares with the first member makes two rows.
+    #[test]
+    fn rows_are_grouped_transitively() {
+        let mut spec = free(vec![
+            cell(0, 0, (0.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (200.0, 80.0, 100.0, 100.0)),
+            cell(0, 2, (400.0, 170.0, 100.0, 100.0)),
+        ]);
+        assert!(set_grid_placement(&mut spec));
+        assert_eq!(identities(&spec), [(0, 0), (0, 1), (0, 2)]);
+        assert_eq!(spec.layer_placement, LayerPlacement::Grid);
+    }
+
+    /// Extents that only touch are two rows. Witness: `<=` instead of `<`.
+    #[test]
+    fn touching_vertical_extents_make_two_rows() {
+        let mut spec = free(vec![
+            cell(0, 0, (0.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (200.0, 100.0, 100.0, 50.0)),
+        ]);
+        assert!(set_grid_placement(&mut spec));
+        assert_eq!(identities(&spec), [(0, 0), (1, 0)]);
+    }
+
+    /// Inside a row the columns run left to right, rows top to bottom,
+    /// whatever the old identities were.
+    #[test]
+    fn a_row_is_ordered_by_left_and_rows_by_top() {
+        let mut spec = free(vec![
+            cell(0, 0, (300.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (0.0, 20.0, 100.0, 100.0)),
+            cell(0, 2, (50.0, 500.0, 100.0, 100.0)),
+        ]);
+        assert!(set_grid_placement(&mut spec));
+        assert_eq!(identities(&spec), [(0, 1), (0, 0), (1, 0)]);
+    }
+
+    /// C4: each column takes its widest frame, each row its tallest.
+    /// Witness: `min` instead of `max`.
+    #[test]
+    fn the_grid_takes_the_largest_frame_of_each_column_and_row() {
+        let mut spec = free(vec![
+            cell(0, 0, (0.0, 0.0, 100.0, 80.0)),
+            cell(0, 1, (200.0, 10.0, 150.0, 120.0)),
+            cell(1, 0, (0.0, 400.0, 180.0, 60.0)),
+        ]);
+        assert!(set_grid_placement(&mut spec));
+        assert_eq!(spec.frame_widths, vec![180.0, 150.0]);
+        assert_eq!(spec.frame_heights, vec![120.0, 60.0]);
+        assert!(spec.panels.iter().all(|p| p.free_frame.is_none()));
+    }
+
+    #[test]
+    fn overlays_follow_the_old_identity_of_their_base() {
+        let base_a = cell(0, 0, (300.0, 0.0, 100.0, 100.0));
+        let base_b = cell(0, 1, (0.0, 0.0, 100.0, 100.0));
+        let overlay = PanelSpec::overlay_on(&base_a, OverlaySpec::new(true, true));
+        let mut spec = free(vec![base_a, overlay, base_b]);
+        assert!(set_grid_placement(&mut spec));
+        // B (left 0) is now column 0, A column 1; A's overlay goes with A.
+        assert_eq!(identities(&spec), [(0, 1), (0, 1), (0, 0)]);
+    }
+
+    #[test]
+    fn going_to_the_grid_needs_a_free_graph_and_a_bounded_grid() {
+        let mut grid = PlotSpec::empty("grid");
+        assert!(!set_grid_placement(&mut grid));
+        // 17 rows, the first with 17 cells: 17 x 17 > 256.
+        let mut panels: Vec<PanelSpec> = (0..17)
+            .map(|i| cell(0, i, (i as f64 * 200.0, 0.0, 100.0, 100.0)))
+            .collect();
+        panels.extend((1..17).map(|i| cell(i, 0, (0.0, i as f64 * 200.0, 100.0, 100.0))));
+        let mut spec = free(panels);
+        let before = spec.clone();
+        assert!(!set_grid_placement(&mut spec));
+        assert_eq!(spec, before, "refused, unchanged");
+    }
+
+    #[test]
+    fn free_placement_stores_frames_on_base_layers_only() {
+        let base = PanelSpec::at(0, 0);
+        let overlay = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+        let mut spec = PlotSpec::empty("g").with_panels(Panels::new(vec![base, overlay]));
+        let frame = FreeFrame {
+            left: -10.0,
+            top: 5.0,
+            width: 300.0,
+            height: 200.0,
+        };
+        assert!(
+            !set_free_placement(&mut spec, &[Some(frame)]),
+            "wrong length"
+        );
+        assert_eq!(spec.layer_placement, LayerPlacement::Grid);
+        assert!(set_free_placement(&mut spec, &[Some(frame), Some(frame)]));
+        assert_eq!(spec.layer_placement, LayerPlacement::Free);
+        assert_eq!(spec.panels[0].free_frame, Some(frame));
+        assert_eq!(spec.panels[1].free_frame, None, "an overlay has none");
+    }
+
+    #[test]
+    fn set_free_frame_on_an_overlay_writes_its_base() {
+        let base = cell(0, 0, (0.0, 0.0, 300.0, 200.0));
+        let overlay = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+        let mut spec = free(vec![base, overlay]);
+        assert!(set_free_frame(&mut spec, 1, FreeField::Left, -50.0));
+        assert_eq!(spec.panels[0].free_frame.map(|f| f.left), Some(-50.0));
+        assert_eq!(spec.panels[1].free_frame, None);
+        assert!(set_free_frame(&mut spec, 0, FreeField::Width, 1e300));
+        assert_eq!(
+            spec.panels[0].free_frame.map(|f| f.width),
+            Some(stokesforge_plot::MAX_FRAME_SIZE)
+        );
+    }
+
+    #[test]
+    fn set_free_frame_refuses_the_grid_a_missing_layer_and_non_finite_values() {
+        let mut grid = PlotSpec::empty("g");
+        assert!(!set_free_frame(&mut grid, 0, FreeField::Left, 1.0));
+        let mut spec = free(vec![cell(0, 0, (0.0, 0.0, 300.0, 200.0))]);
+        let before = spec.clone();
+        assert!(!set_free_frame(&mut spec, 5, FreeField::Left, 1.0));
+        assert!(!set_free_frame(&mut spec, 0, FreeField::Top, f64::NAN));
+        assert_eq!(spec, before);
+    }
+
+    /// In free placement a new cell only gets an unused identity: nothing
+    /// shifts, no column width is stored.
+    #[test]
+    fn inserting_a_cell_in_free_placement_only_allocates_an_identity() {
+        let mut spec = free(vec![
+            cell(0, 0, (0.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (200.0, 0.0, 100.0, 100.0)),
+        ]);
+        let before: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+        let at = insert_cell(&mut spec, 0, CellSide::Right).expect("inserted");
+        assert_eq!(at, 2);
+        assert_eq!((spec.panels[2].row, spec.panels[2].column), (0, 2));
+        assert_eq!(spec.panels[2].free_frame, None);
+        assert_eq!(
+            spec.panels.iter().take(2).cloned().collect::<Vec<_>>(),
+            before
+        );
+        assert!(spec.frame_widths.is_empty());
+        let below = insert_cell(&mut spec, 0, CellSide::Below).expect("inserted");
+        assert_eq!((spec.panels[below].row, spec.panels[below].column), (1, 0));
+    }
+
+    /// Deleting a cell leaves the frames of the others alone.
+    #[test]
+    fn removing_a_cell_in_free_placement_keeps_the_other_frames() {
+        let mut spec = free(vec![
+            cell(0, 0, (-30.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (200.0, 40.0, 120.0, 90.0)),
+        ]);
+        let kept = spec.panels[1].free_frame;
+        assert!(remove_cell(&mut spec, 0));
+        assert_eq!(spec.panels[0].free_frame, kept);
+    }
+
+    /// Layers that differ only by their free frame are the same layer.
+    /// Witness: the `free_frame` line of `remap_between` removed.
+    #[test]
+    fn remap_between_ignores_the_free_frame() {
+        let before = free(vec![cell(0, 0, (0.0, 0.0, 100.0, 100.0))]);
+        let after = free(vec![cell(0, 0, (50.0, 20.0, 300.0, 200.0))]);
+        assert_eq!(remap_between(&before, &after), vec![Some(0)]);
     }
 }

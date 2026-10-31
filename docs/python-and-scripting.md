@@ -446,6 +446,11 @@ areas and the axes, titles and legend around them. A graph from an old file
 history entry (#394, G7); a call that then changes nothing writes nothing and
 the graph stays as it was. A graph too large to store its plot areas (more
 cells than the layout handles) refuses a size key with `InvalidValueError`.
+A graph with **free layer placement** (#398) refuses the five size keys the same
+way ("the graph uses free layer placement: its sizes cannot be set from a script
+yet"), whatever other keys share the call: the spec is unchanged and no history
+entry is written. Per-layer keys will come in a later API version; this is no
+change of the API, so `__api_version__` stays.
 
 **`graph_size(graph, *, unit="cm")`** reads one snapshot and the layout the
 screen and the exports read (invariant 4); it never writes and does not open
@@ -453,7 +458,9 @@ the script group. `width` and `height` are the image, `plot_widths` and
 `plot_heights` the plot areas of the grid columns and rows (the ones a graph
 from an old file is drawn with), `plot_left` and `plot_top` are `None` for
 Auto, otherwise the stored value raised to the smallest the axes allow, and
-`fixed_size` a boolean. Contract: `tests/set_graph.rs`.
+`fixed_size` a boolean. On a free graph it reports the image size, empty `plot_widths` and
+`plot_heights`, and `None` for `plot_left` and `plot_top`. Contract:
+`tests/set_graph.rs`.
 
 Outside `set_graph` for now (nothing technically prevents them, they
 were not judged safe enough for this batch): fonts and anchors of the titles,

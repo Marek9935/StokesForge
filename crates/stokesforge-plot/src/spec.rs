@@ -191,6 +191,18 @@ pub const FALLBACK_FRAME: (f64, f64) = (392.0, 284.0);
 /// half a million points. A sum beyond it is scaled down, proportionally.
 pub const MAX_FIGURE_EXTENT: f64 = 20_000.0;
 
+/// How the cells of a graph are placed (#398).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayerPlacement {
+    /// The regular grid of #394: one width per column, one height per row.
+    #[default]
+    Grid,
+    /// Free placement: each cell holds its own frame
+    /// ([`crate::PanelSpec::free_frame`]), overlap allowed. `(row, column)`
+    /// stays the identity of a cell.
+    Free,
+}
+
 /// The complete description of a graph: the only object a renderer will read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSpec {
@@ -248,6 +260,10 @@ pub struct PlotSpec {
     /// the frame of the first row, in points (#405); `None` = Auto. Read
     /// through [`PlotSpec::sanitized_figure_top`].
     pub figure_top: Option<f64>,
+    /// Placement of the cells (#398): the regular grid (default) or free
+    /// frames. In `Free`, [`PlotSpec::frame_widths`], [`PlotSpec::frame_heights`],
+    /// `figure_left` and `figure_top` are kept stored but ignored.
+    pub layer_placement: LayerPlacement,
 }
 
 /// A stored size made usable: a missing, non-finite or non-positive entry
@@ -310,6 +326,25 @@ impl PlotSpec {
     /// [`PlotSpec::sanitized_figure_left`]).
     pub fn sanitized_figure_top(&self) -> Option<f64> {
         sanitized_offset(self.figure_top)
+    }
+
+    /// The base layer of the cell of each layer (#398), by index: the first
+    /// ordinary layer of its `(row, column)`, or its first layer when only
+    /// overlaid ones are left. The key of a cell in free placement; never
+    /// `row * columns + column`, which means nothing beyond the grid limits.
+    pub fn cell_bases(&self) -> Vec<usize> {
+        let mut bases: std::collections::HashMap<(usize, usize), usize> =
+            std::collections::HashMap::new();
+        for (index, panel) in self.panels.iter().enumerate() {
+            let base = bases.entry((panel.row, panel.column)).or_insert(index);
+            if panel.overlay.is_none() && self.panels[*base].overlay.is_some() {
+                *base = index;
+            }
+        }
+        self.panels
+            .iter()
+            .map(|panel| bases[&(panel.row, panel.column)])
+            .collect()
     }
 
     /// An empty but valid graph: one panel, no series.
@@ -438,6 +473,7 @@ impl Default for PlotSpec {
             fixed_figure: false,
             figure_left: None,
             figure_top: None,
+            layer_placement: LayerPlacement::Grid,
         }
     }
 }

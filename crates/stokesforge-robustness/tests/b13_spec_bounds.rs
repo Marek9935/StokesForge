@@ -487,3 +487,68 @@ fn b13_hostile_left_and_top_cross_the_disk_and_read_back_bounded() {
         }
     }
 }
+
+/// #398: hostile free frames (NaN, infinite, absurd positions and sizes, a
+/// missing frame) cross the disk as written, and the figure laid out from them
+/// is bounded: no panic, an image within the clamped positions and sizes plus
+/// the bounded bands. Witness: without the clamp of `FreeFrame::sanitized` the
+/// image takes the absurd extent.
+#[test]
+fn b13_hostile_free_frames_cross_the_disk_and_lay_out_bounded() {
+    use stokesforge_plot::{FreeFrame, LayerPlacement, MAX_FIGURE_EXTENT, MAX_FRAME_SIZE};
+    let dir = TempDir::new().expect("temporary directory");
+    let path = dir.path().join("hostile-free.stf");
+    let mut project = Project::new("Hostile").expect("valid project");
+    let root = project.root();
+    let hostile = [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -1e300,
+        1e300,
+        -3.0,
+        0.0,
+    ];
+    let mut panels: Vec<PanelSpec> = Vec::new();
+    for (i, &left) in hostile.iter().enumerate() {
+        for (j, &size) in hostile.iter().enumerate() {
+            panels.push(PanelSpec {
+                free_frame: Some(FreeFrame {
+                    left,
+                    top: hostile[(i + j) % hostile.len()],
+                    width: size,
+                    height: hostile[(i + 2 * j) % hostile.len()],
+                }),
+                ..PanelSpec::at(i, j)
+            });
+        }
+    }
+    // A cell with no frame at all, and an identity far beyond any grid (the reader accepts up to 10 000).
+    panels.push(PanelSpec::at(100, 100));
+    panels.push(PanelSpec::at(9_999, 9_999));
+    let spec = PlotSpec {
+        layer_placement: LayerPlacement::Free,
+        ..PlotSpec::empty("T").with_panels(Panels::new(panels))
+    };
+    let graph = project.add_graph(root, Some("Fig"), spec).expect("graph");
+    stokesforge_persistence::save(&project, &path).expect("save");
+    let reloaded = stokesforge_persistence::load(&path).expect("reload");
+    let stokesforge_core::NodeKind::Graph { spec, .. } =
+        reloaded.tree().node(graph).expect("graph").kind()
+    else {
+        panic!("a graph expected");
+    };
+    assert_eq!(spec.layer_placement, LayerPlacement::Free);
+    let nan_frame = spec.panels[0].free_frame.expect("kept as written");
+    assert!(nan_frame.left.is_nan(), "written unsanitized");
+    let measurer = stokesforge_render::TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout = stokesforge_render_svg::figure_layout(spec, &measurer, &choice).expect("a layout");
+    let bound = (MAX_FIGURE_EXTENT + MAX_FRAME_SIZE + 1000.0) as u32;
+    assert!(
+        layout.size.0 <= bound && layout.size.1 <= bound,
+        "bounded image, got {:?}",
+        layout.size
+    );
+    assert!(layout.size.0 > 0 && layout.size.1 > 0);
+}

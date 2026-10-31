@@ -7,7 +7,9 @@
 use egui::{Pos2, Rect};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::{NodeId, Project};
-use stokesforge_plot::{LineSpec, PanelSpec, PlotSpec, SeriesSpec};
+use stokesforge_plot::{
+    FreeFrame, LayerPlacement, LineSpec, PanelSpec, Panels, PlotSpec, SeriesSpec,
+};
 use stokesforge_render_egui::{font_definitions, GraphEvent, GraphView};
 use stokesforge_session::{Session, Snapshot};
 
@@ -53,6 +55,44 @@ impl Fixture {
             session: Session::spawn(project, None).expect("session"),
             graph,
         }
+    }
+
+    /// A graph in free placement (#398) with two layers: layer 0 at the right
+    /// (grid cell `(0, 0)`), layer 1 at the left (grid cell `(0, 1)`).
+    fn free_two_layers() -> Self {
+        let fixture = Self::new(false);
+        let snapshot = fixture.snapshot();
+        let node = snapshot.tree.node(fixture.graph).expect("graph");
+        let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+            panic!("a graph");
+        };
+        let mut first = spec.panels[0].clone();
+        first.free_frame = Some(FreeFrame {
+            left: 400.0,
+            top: 20.0,
+            width: 300.0,
+            height: 200.0,
+        });
+        let mut second = first.clone();
+        second.row = 0;
+        second.column = 1;
+        second.free_frame = Some(FreeFrame {
+            left: 40.0,
+            top: 20.0,
+            width: 300.0,
+            height: 200.0,
+        });
+        let mut free = spec.clone().with_panels(Panels::new([first, second]));
+        free.layer_placement = LayerPlacement::Free;
+        fixture
+            .session
+            .handle()
+            .execute(stokesforge_commands::Command::SetPlotSpec {
+                graph: fixture.graph,
+                spec: free,
+            })
+            .expect("free spec");
+        fixture
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -618,4 +658,100 @@ fn the_outer_edges_are_grabbed_from_the_margin_outside_the_figure() {
             row: None
         }]
     );
+}
+
+/// #398: in free placement the figure has no handle on any edge (they come
+/// with the mouse gestures of the free mode): no resize cursor over a cell
+/// boundary or a figure edge, and no event after a drag from there.
+#[test]
+fn a_free_figure_has_no_handle_on_its_edges() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let layout = view
+        .figure_layout(&context, &fixture.snapshot(), fixture.graph)
+        .expect("layout");
+    assert_eq!(layout.placement, LayerPlacement::Free);
+    // Where a grid would put a handle: the right boundary of each cell, its
+    // bottom boundary, and the left edge of the figure.
+    let panels = view.last_drawn().expect("drawn").panels.clone();
+    let mut starts = vec![Pos2::new(1.0, layout.size.1 as f32 / 2.0)];
+    for panel in &panels {
+        let right = (panel.cell_origin.0 + panel.cell_size.0 as i32) as f32;
+        let bottom = (panel.cell_origin.1 + panel.cell_size.1 as i32) as f32;
+        starts.push(Pos2::new(right - 2.0, bottom / 2.0));
+        starts.push(Pos2::new(right / 2.0, bottom - 2.0));
+    }
+    for from in starts {
+        // A fresh view per start: the clock of egui does not go back.
+        let (context, mut view) = ready(&fixture);
+        let (_, cursor) = frame(
+            &context,
+            &mut view,
+            &fixture,
+            vec![egui::Event::PointerMoved(from)],
+            0.05,
+        );
+        assert_eq!(
+            cursor,
+            egui::CursorIcon::Default,
+            "no resize cursor at {from:?}"
+        );
+        let signals = drag(
+            &context,
+            &mut view,
+            &fixture,
+            from,
+            from + egui::vec2(40.0, 30.0),
+        );
+        assert!(signals.is_empty(), "{from:?}: {signals:?}");
+    }
+}
+
+/// #398: a click picks the layer under the cursor by where it is drawn, not by
+/// its grid cell: layer 1 sits left of layer 0, and clicking there activates
+/// layer 1.
+#[test]
+fn a_click_activates_the_layer_drawn_under_the_cursor_in_free_placement() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let spec = {
+        let snapshot = fixture.snapshot();
+        let node = snapshot.tree.node(fixture.graph).expect("graph");
+        let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+            panic!("a graph");
+        };
+        spec.clone()
+    };
+    let drawn = view.last_drawn().expect("drawn").panels.clone();
+    let centre = |index: usize| {
+        let panel = drawn
+            .iter()
+            .find(|p| p.index == index)
+            .expect("drawn layer");
+        Pos2::new(
+            panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+            panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+        )
+    };
+    assert!(centre(1).x < centre(0).x, "layer 1 is drawn on the left");
+    let click = |view: &mut GraphView, at: Pos2, time: f64| {
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(at), button_event(at, true)],
+            time,
+        );
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![button_event(at, false)],
+            time + 0.05,
+        );
+    };
+    click(&mut view, centre(1), 1.0);
+    assert_eq!(view.active_panel(&spec), 1);
+    click(&mut view, centre(0), 2.0);
+    assert_eq!(view.active_panel(&spec), 0);
 }

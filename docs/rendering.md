@@ -1026,6 +1026,45 @@ the graph title grows or shrinks the *image*, never the frame.
   legacy and fixed at once: its figure is exactly 480 × 360 pt, explicit
   (frame 392 × 284 pt without a title).
 
+### Free placement of the cells (#398)
+
+`PlotSpec::layer_placement` is `Grid` (default, everything above) or `Free`.
+In `Free` each cell holds its own frame (`PanelSpec::free_frame`: `left`, `top`,
+`width`, `height` in points, the plot area), stored on the base layer of the
+cell; overlay layers use their base's. `(row, column)` stays the identity of a
+cell (overlay lookup, `pyst` `panel=`, what an older version draws as a grid).
+
+- **`FreeLayout::build` is the one copy**, read by `figure_layout` and by
+  `draw_on_with_texts` like `ExplicitGrid`. It is checked **before**
+  `explicit_frames`, and a free graph is never legacy (`legacy_frames` returns
+  `None`). Each cell is its frame plus its **own** gutters (`CellPlan::gutters`,
+  panel title band included on top): no alignment between cells, padding 0. The
+  image is the bounding box of the outer rectangles, the graph title band on
+  top. Horizontal pass first (the width sets the panel title bands), then the
+  bands, as `ExplicitGrid`.
+- **Cells are keyed by the index of their base layer** (`PlotSpec::cell_bases`),
+  never by `row * columns + column`: beyond `MAX_CELLS` that product means
+  nothing (`grid_of` falls back to declaration order). Every outer edge is rounded
+  once, in `FreeLayout::place`; a backend whose size differs scales the cells like
+  `fit_breaks` (identity at the figure's own size).
+- `FigureLayout` in free placement: `placement`, `free_cells` (base index, outer
+  and frame rectangles in px, title band included in `y`) and `free_origin` (the
+  stored coordinates of the image's top-left corner, below the title band).
+  `cell_rect` / `frame_rect` answer by `(row, column)`; `is_explicit` is true;
+  `column_breaks`, `row_breaks`, the gutters and `frame_widths/heights` are empty.
+- **#405 in free placement.** `figure_left` / `figure_top` are ignored (kept
+  stored, they come back on the grid). Fixed raises each of a cell's four gutters
+  to the reserve of one axis (a title is never reserved); `fixed_overflow` works
+  as on the grid.
+- **Conversions.** `pipeline::free_frames_from_grid` (grid to free: positions
+  from `frame_rect`, sizes from the stored frames, so nothing moves) and
+  `pipeline::place_beside` (L8: same frame, same top for Right, same left for
+  Below, outer rectangles never overlapping, jumping past an obstacle at most
+  `panels + 1` times), with `render_svg` wrappers next to `fix_legacy_frames`.
+  The way back (`compose::set_grid_placement`) is pure and lives in core: rows by
+  transitive overlap of the vertical extents, left to right inside a row, then
+  the largest frame per column and row.
+
 ### Enlarging a graph without blurring the text
 
 `GraphView::paint_scaled` lays the figure out at its own size (`GraphView::figure_layout`, #394) then scales it to

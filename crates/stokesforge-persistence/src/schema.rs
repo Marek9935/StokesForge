@@ -733,6 +733,29 @@ pub(crate) struct PlotSpecRecord {
     /// (#405): absent = Auto.
     #[serde(default)]
     pub(crate) figure_top: Option<f64>,
+    /// Placement of the cells (#398): absent = the regular grid; an unknown
+    /// value (newer file) reads as the grid too.
+    #[serde(default)]
+    pub(crate) layer_placement: LayerPlacementRecord,
+}
+
+/// [`stokesforge_plot::LayerPlacement`], flat. An unknown value reads as the
+/// grid (graceful degradation, invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum LayerPlacementRecord {
+    Free,
+    #[default]
+    #[serde(other)]
+    Grid,
+}
+
+/// [`stokesforge_plot::FreeFrame`], flat, in points. Written as held.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FreeFrameRecord {
+    pub(crate) left: f64,
+    pub(crate) top: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
 }
 
 /// [`stokesforge_plot::TextFont`], flat.
@@ -774,6 +797,7 @@ impl Default for PlotSpecRecord {
             fixed_figure: false,
             figure_left: None,
             figure_top: None,
+            layer_placement: LayerPlacementRecord::Grid,
         }
     }
 }
@@ -821,6 +845,9 @@ pub(crate) struct PanelSpecRecord {
     /// older file, hence no group has a color gradient.
     #[serde(default)]
     pub(crate) group_gradients: Vec<GroupGradientRecord>,
+    /// Frame of the cell in free placement (#398); absent = none.
+    #[serde(default)]
+    pub(crate) free_frame: Option<FreeFrameRecord>,
 }
 
 /// The stops of the color gradient of a series group (#213), flat.
@@ -928,6 +955,7 @@ impl Default for PanelSpecRecord {
             shapes: Vec::new(),
             group_names: Vec::new(),
             group_gradients: Vec::new(),
+            free_frame: None,
         }
     }
 }
@@ -1282,6 +1310,23 @@ mod tests {
         assert_eq!(reloaded, TickDirectionRecord::In);
     }
 
+    /// An unknown placement (newer file) reads as the grid, a known one as
+    /// itself (invariant 10).
+    #[test]
+    fn an_unknown_layer_placement_reads_as_the_grid() {
+        #[derive(Serialize)]
+        enum Future {
+            Floating,
+            Free,
+        }
+        let unknown = rmp_serde::to_vec_named(&Future::Floating).expect("encoding");
+        let reloaded: LayerPlacementRecord = rmp_serde::from_slice(&unknown).expect("decoding");
+        assert_eq!(reloaded, LayerPlacementRecord::Grid);
+        let known = rmp_serde::to_vec_named(&Future::Free).expect("encoding");
+        let reloaded: LayerPlacementRecord = rmp_serde::from_slice(&known).expect("decoding");
+        assert_eq!(reloaded, LayerPlacementRecord::Free);
+    }
+
     /// A file written before the addition of the text colors (graph
     /// title, title and scale of the axes) reads back: the absent fields
     /// come back empty, that is to say in automatic color.
@@ -1353,6 +1398,9 @@ mod tests {
             "an old graph keeps its title visible"
         );
         assert_eq!(reloaded.title_color, "");
+        // #398: an old graph is on the grid, and its panels have no free frame.
+        assert_eq!(reloaded.layer_placement, LayerPlacementRecord::Grid);
+        assert_eq!(reloaded.panels[0].free_frame, None);
         assert!(
             reloaded.stale_warning,
             "an old graph keeps the out-of-date data warning"

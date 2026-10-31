@@ -12,13 +12,19 @@
 //! exports measure.
 
 use stokesforge_core::compose::{
-    set_figure_offset, set_fixed_figure, set_frame_size, FigureOffset, FrameAxis,
+    set_figure_offset, set_fixed_figure, set_frame_size, set_free_frame, set_free_placement,
+    set_grid_placement, CellSide, FigureOffset, FrameAxis, FreeField,
 };
-use stokesforge_plot::PlotSpec;
+use stokesforge_plot::{FreeFrame, LayerPlacement, PlotSpec};
+use stokesforge_render::pipeline::BesideSide;
 
-/// True if the graph stores no frame at all (an old file).
+/// True if the graph stores no frame at all (an old file). A **free** graph
+/// stores its frames in its layers (#398): it is never legacy, so nothing here
+/// ever puts it back on the grid.
 pub fn is_legacy(spec: &PlotSpec) -> bool {
-    spec.frame_widths.is_empty() && spec.frame_heights.is_empty()
+    spec.layer_placement == LayerPlacement::Grid
+        && spec.frame_widths.is_empty()
+        && spec.frame_heights.is_empty()
 }
 
 /// Fixes the frames of a legacy `target` from `reference`, the spec as it is
@@ -109,6 +115,105 @@ pub fn set_offset_in_draft(
     }
     *spec = candidate;
     true
+}
+
+/// Switches a draft between the regular grid and free placement (#398).
+///
+/// To free: a legacy draft is given its frames first, then every layer takes
+/// the frame the grid draws it with, so nothing moves on screen. To the grid:
+/// [`set_grid_placement`] (L7 then C4). `false`, with the draft unchanged, if
+/// the draft is already in that placement or the conversion is refused.
+pub fn set_placement_in_draft(spec: &mut PlotSpec, free: bool) -> bool {
+    let mut candidate = spec.clone();
+    if free {
+        if candidate.layer_placement == LayerPlacement::Free {
+            return false;
+        }
+        fix_from(&spec.clone(), &mut candidate);
+        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let choice = stokesforge_render_svg::FontChoice::default();
+        let Ok(Some(frames)) =
+            stokesforge_render_svg::free_frames_from_grid(&candidate, &measurer, &choice)
+        else {
+            return false;
+        };
+        if !set_free_placement(&mut candidate, &frames) {
+            return false;
+        }
+    } else if !set_grid_placement(&mut candidate) {
+        return false;
+    }
+    *spec = candidate;
+    true
+}
+
+/// The four numbers of the frame of a layer as Graph Properties shows them in
+/// free placement, in points (#398).
+///
+/// Left and Top are **page coordinates**, exactly what is stored: the origin
+/// is the top-left corner of the image at the moment the graph went free
+/// (`free_frames_from_grid`), so a layer that does not move keeps its numbers
+/// whatever the others do, and a value is read back as typed. They may be
+/// negative. Top does **not** include the graph title band (the stored value
+/// does not), so showing or hiding the title changes neither the stored nor the
+/// shown numbers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FreeFields {
+    /// Page x of the left edge of the plot area.
+    pub left: f64,
+    /// Page y of the top edge of the plot area, title band excluded.
+    pub top: f64,
+    /// Width of the plot area.
+    pub width: f64,
+    /// Height of the plot area.
+    pub height: f64,
+}
+
+/// What the free fields show for layer `panel` of `spec` (#398). `None` if the
+/// graph is not free or the layer does not exist.
+pub fn free_fields(spec: &PlotSpec, panel: usize) -> Option<FreeFields> {
+    if spec.layer_placement != LayerPlacement::Free {
+        return None;
+    }
+    let base = *spec.cell_bases().get(panel)?;
+    let frame = spec.panels.get(base)?.sanitized_free_frame();
+    Some(FreeFields {
+        left: frame.left,
+        top: frame.top,
+        width: frame.width,
+        height: frame.height,
+    })
+}
+
+/// Sets one field of layer `panel` of a free draft (#398), stored as given
+/// (brought into bounds like [`FreeFrame::sanitized`]). `false`, with the
+/// draft unchanged, if the field is refused.
+pub fn set_free_field_in_draft(
+    spec: &mut PlotSpec,
+    panel: usize,
+    field: FreeField,
+    value: f64,
+) -> bool {
+    let mut candidate = spec.clone();
+    if !set_free_frame(&mut candidate, panel, field, value) {
+        return false;
+    }
+    *spec = candidate;
+    true
+}
+
+/// The frame of a layer added beside layer `panel` of a free `spec` (#398,
+/// L8), measured like the exports. `None` if the graph is not free.
+pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<FreeFrame> {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let side = match side {
+        CellSide::Right => BesideSide::Right,
+        CellSide::Below => BesideSide::Below,
+    };
+    stokesforge_render_svg::place_beside(spec, &measurer, &choice, panel, side)
+        .ok()
+        .flatten()
 }
 
 #[cfg(test)]
@@ -220,5 +325,170 @@ mod tests {
             &stokesforge_render_svg::FontChoice::default(),
         );
         assert_eq!(size, (480, 360));
+    }
+
+    fn two_columns() -> PlotSpec {
+        let mut spec = PlotSpec::default()
+            .with_panels(Panels::new([PanelSpec::at(0, 0), PanelSpec::at(0, 1)]));
+        spec.frame_widths = vec![300.0, 200.0];
+        spec.frame_heights = vec![250.0];
+        spec
+    }
+
+    fn free_two_columns() -> PlotSpec {
+        let mut spec = two_columns();
+        assert!(set_placement_in_draft(&mut spec, true));
+        spec
+    }
+
+    /// #398: grid to free keeps every plot area and the size of the image, for
+    /// a stored grid and for a legacy one (given its frames first).
+    #[test]
+    fn going_free_moves_nothing_on_screen() {
+        for mut spec in [two_columns(), {
+            let mut legacy = two_columns();
+            legacy.frame_widths.clear();
+            legacy.frame_heights.clear();
+            legacy
+        }] {
+            let grid = figure_layout(&spec).expect("grid layout");
+            assert!(set_placement_in_draft(&mut spec, true));
+            assert_eq!(spec.layer_placement, LayerPlacement::Free);
+            assert!(!is_legacy(&spec), "a free graph is never legacy");
+            let free = figure_layout(&spec).expect("free layout");
+            assert_eq!(free.size, grid.size, "the image does not change");
+            for panel in spec.panels.iter() {
+                let cell = free
+                    .free_cells
+                    .iter()
+                    .find(|cell| (cell.row, cell.column) == (panel.row, panel.column))
+                    .expect("a cell");
+                if grid.is_explicit() {
+                    assert_eq!(
+                        Some(cell.frame),
+                        grid.frame_rect(panel.row, panel.column),
+                        "plot area of ({}, {})",
+                        panel.row,
+                        panel.column
+                    );
+                } else {
+                    // A legacy grid stores nothing to place: its sizes carry over.
+                    assert_eq!(
+                        f64::from(cell.frame.2),
+                        grid.frame_widths[panel.column].round()
+                    );
+                    assert_eq!(
+                        f64::from(cell.frame.3),
+                        grid.frame_heights[panel.row].round()
+                    );
+                }
+            }
+            assert!(!set_placement_in_draft(&mut spec, true), "already free");
+        }
+    }
+
+    /// #398: free to grid applies the rules of the model (L7 then C4): two
+    /// layers side by side share a row, each column takes its frame.
+    #[test]
+    fn going_back_to_the_grid_groups_by_position_and_keeps_the_largest_frames() {
+        let mut spec = free_two_columns();
+        // Layer 0 is moved right of layer 1 and made taller.
+        let first = spec.panels[0].free_frame.expect("frame");
+        let second = spec.panels[1].free_frame.expect("frame");
+        spec.panels.get_mut(0).unwrap().free_frame = Some(FreeFrame {
+            left: second.left + 400.0,
+            height: 300.0,
+            ..first
+        });
+        assert!(set_placement_in_draft(&mut spec, false));
+        assert_eq!(spec.layer_placement, LayerPlacement::Grid);
+        assert_eq!((spec.panels[0].row, spec.panels[0].column), (0, 1));
+        assert_eq!((spec.panels[1].row, spec.panels[1].column), (0, 0));
+        assert_eq!(spec.frame_widths, [200.0, 300.0]);
+        assert_eq!(spec.frame_heights, [300.0]);
+        assert!(!set_placement_in_draft(&mut spec, false), "already a grid");
+    }
+
+    /// #398: Left and Top are stable page coordinates: what is typed is read
+    /// back, negative values are accepted, and a layer that does not move keeps
+    /// its numbers when another one moves.
+    #[test]
+    fn free_positions_are_page_coordinates_read_back_as_typed() {
+        let mut spec = free_two_columns();
+        let first = free_fields(&spec, 0).expect("fields");
+        let second = free_fields(&spec, 1).expect("fields");
+        // Layer 1 moved to 25 cm (708.66 pt), right of layer 2.
+        let typed = 25.0 * 72.0 / 2.54;
+        assert!(set_free_field_in_draft(
+            &mut spec,
+            0,
+            FreeField::Left,
+            typed
+        ));
+        assert_eq!(free_fields(&spec, 0).unwrap().left, typed);
+        assert_eq!(
+            free_fields(&spec, 1).unwrap(),
+            second,
+            "layer 2 keeps its numbers"
+        );
+        // A negative position, left of the origin, round-trips.
+        assert!(set_free_field_in_draft(
+            &mut spec,
+            1,
+            FreeField::Left,
+            -120.0
+        ));
+        assert!(set_free_field_in_draft(&mut spec, 1, FreeField::Top, -30.0));
+        let moved = free_fields(&spec, 1).unwrap();
+        assert_eq!((moved.left, moved.top), (-120.0, -30.0));
+        assert_eq!(
+            free_fields(&spec, 0).unwrap().left,
+            typed,
+            "and layer 1 too"
+        );
+        assert_eq!(free_fields(&spec, 0).unwrap().top, first.top);
+        // Hiding or showing the title changes no number.
+        let before = free_fields(&spec, 0).unwrap();
+        spec.title = "T".to_owned();
+        assert_eq!(free_fields(&spec, 0).unwrap(), before);
+    }
+
+    /// #398: right after Grid to Free the numbers are the former distances
+    /// from the image edge (no title: the plot area's place in the image).
+    #[test]
+    fn right_after_going_free_the_positions_are_the_former_distances() {
+        let grid = figure_layout(&two_columns()).expect("layout");
+        let spec = free_two_columns();
+        for (index, (row, column)) in [(0, 0), (0, 1)].into_iter().enumerate() {
+            let (x, y, _, _) = grid.frame_rect(row, column).expect("explicit");
+            let fields = free_fields(&spec, index).expect("fields");
+            assert_eq!((fields.left, fields.top), (f64::from(x), f64::from(y)));
+        }
+    }
+
+    /// #398: the fields belong to the layer asked for, an overlaid layer reads
+    /// and writes its base's cell, and a grid draft has none.
+    #[test]
+    fn free_fields_follow_the_layer_asked_for() {
+        let mut spec = free_two_columns();
+        let a = free_fields(&spec, 0).expect("fields");
+        let b = free_fields(&spec, 1).expect("fields");
+        assert_ne!(a.left, b.left);
+        assert_eq!((a.width, b.width), (300.0, 200.0));
+        assert!(set_free_field_in_draft(
+            &mut spec,
+            1,
+            FreeField::Width,
+            150.0
+        ));
+        assert_eq!(spec.panels[0].free_frame.unwrap().width, 300.0);
+        assert_eq!(spec.panels[1].free_frame.unwrap().width, 150.0);
+        assert!(!set_free_field_in_draft(
+            &mut spec,
+            1,
+            FreeField::Width,
+            f64::NAN
+        ));
+        assert!(free_fields(&two_columns(), 0).is_none());
     }
 }
