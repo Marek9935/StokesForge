@@ -61,6 +61,8 @@ const MENU_FUNCTIONS: &[&str] = &[
     "send_to_graph_menu",
     "analysis_menu_contents",
     "graph_menu",
+    "layout_menu",
+    "layout_menu_contents",
     "graph_properties_menu",
     "view_menu",
     "object_manager_settings_contents",

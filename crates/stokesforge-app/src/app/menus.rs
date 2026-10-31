@@ -38,7 +38,9 @@ use stokesforge_app_state::tr;
 
 use super::busy::{work_in_progress, Work};
 use super::graph_text_edit::add_annotation_at;
-use super::graph_window::{graph_properties_menu, published_active_panel, published_figure_size};
+use super::graph_window::{
+    graph_properties_menu, published_active_panel, published_figure_size, published_layer_selection,
+};
 use super::menu_sections::{menu_choice, MenuSections};
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
@@ -87,6 +89,9 @@ impl StokesForgeApp {
                     titles.extend(self.workbook_menu(ui, ctx, actions));
                     if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
                         titles.push(self.graph_menu(ui, ctx, graph, actions, &mut object_requests));
+                    }
+                    if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
+                        titles.push(self.layout_menu(ui, ctx, graph, actions));
                     }
                     titles.push(self.analysis_menu(
                         ui,
@@ -439,6 +444,28 @@ impl StokesForgeApp {
         .response
     }
 
+    /// The Layout menu (#398): how the layers of the active graph are laid out
+    /// on the page. The content is [`layout_menu_contents`], shared with the
+    /// right-click of the figure.
+    fn layout_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        graph: NodeId,
+        actions: &mut Vec<Action>,
+    ) -> egui::Response {
+        ui.menu_button(tr!("menu-layout"), |ui| {
+            let Some(spec) = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+            else {
+                return;
+            };
+            let active = published_active_panel(ctx, graph);
+            let extra = published_layer_selection(ctx, graph);
+            layout_menu_contents(ui, graph, &spec, active, &extra, actions);
+        })
+        .response
+    }
+
     fn graph_menu(
         &mut self,
         ui: &mut egui::Ui,
@@ -532,42 +559,6 @@ impl StokesForgeApp {
                 })
                 .response
                 .on_hover_text(tr!("menu-new-layer", "hint"));
-                // A new cell in the grid of the graph, next to the active layer's (#357).
-                ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
-                    let panel = published_active_panel(ctx, graph);
-                    for (label, hint, side) in [
-                        (
-                            tr!("action-new-layer-beside-right"),
-                            tr!("action-new-layer-beside-right", "hint"),
-                            CellSide::Right,
-                        ),
-                        (
-                            tr!("action-new-layer-beside-below"),
-                            tr!("action-new-layer-beside-below", "hint"),
-                            CellSide::Below,
-                        ),
-                    ] {
-                        let room = spec.as_ref().is_some_and(|spec| {
-                            insert_cell(&mut spec.clone(), panel, side).is_some()
-                        });
-                        if ui
-                            .add_enabled(room, egui::Button::new(label))
-                            .on_hover_text(hint)
-                            .on_disabled_hover_text(tr!("menu-new-layer-beside", "disabled"))
-                            .clicked()
-                        {
-                            actions.push(Action::AddCell {
-                                graph,
-                                panel,
-                                side,
-                                columns: Vec::new(),
-                            });
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(tr!("menu-new-layer-beside", "hint"));
             });
             // The menu of the selected object is that of the right-click and of
             // the Object Manager; with no selection, the entry is greyed out.
@@ -1013,6 +1004,210 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
         });
     })
     .response
+}
+
+/// The content of the Layout menu (#398), painted by the menu bar and, under
+/// `Layout ▸`, by the right-click of the figure: layer placement, New Layer
+/// Beside, then in free placement only Align, Same Width / Height, Distribute,
+/// Bring to Front / Send to Back, and Delete Layer. `active` is the reference
+/// layer, `extra` the other layers selected with Shift + click. Align, Same
+/// and Distribute act on the selected cells, on all of them when fewer than two
+/// are selected ([`arrange_targets`]).
+pub(super) fn layout_menu_contents(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    spec: &stokesforge_plot::PlotSpec,
+    active: usize,
+    extra: &[usize],
+    actions: &mut Vec<Action>,
+) {
+    use stokesforge_app_state::object_manager::VisibilityTarget;
+    use stokesforge_app_state::state::LayerArrange;
+    use stokesforge_core::compose::{arrange_targets, AlignEdge, Dimension};
+    use stokesforge_render::pipeline::DistributeAxis;
+    let free = spec.layer_placement == stokesforge_plot::LayerPlacement::Free;
+    let cells = arrange_targets(spec, active, extra).len();
+    let mut sections = MenuSections::new();
+    sections.section(ui, true, |ui| {
+        ui.menu_button(tr!("menu-layer-placement"), |ui| {
+            for (label, hint, to_free) in [
+                (
+                    tr!("action-layer-placement-grid"),
+                    tr!("action-layer-placement-grid", "hint"),
+                    false,
+                ),
+                (
+                    tr!("action-layer-placement-free"),
+                    tr!("action-layer-placement-free", "hint"),
+                    true,
+                ),
+            ] {
+                if menu_choice(ui, free == to_free, label)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    if free != to_free {
+                        actions.push(Action::SetLayerPlacement {
+                            graph,
+                            free: to_free,
+                        });
+                    }
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text(tr!("menu-layer-placement", "hint"));
+    });
+    // A new cell in the grid of the graph, next to the active layer's (#357).
+    sections.section(ui, true, |ui| {
+        ui.menu_button(tr!("menu-new-layer-beside"), |ui| {
+            for (label, hint, side) in [
+                (
+                    tr!("action-new-layer-beside-right"),
+                    tr!("action-new-layer-beside-right", "hint"),
+                    CellSide::Right,
+                ),
+                (
+                    tr!("action-new-layer-beside-below"),
+                    tr!("action-new-layer-beside-below", "hint"),
+                    CellSide::Below,
+                ),
+            ] {
+                let room = insert_cell(&mut spec.clone(), active, side).is_some();
+                if ui
+                    .add_enabled(room, egui::Button::new(label))
+                    .on_hover_text(hint)
+                    .on_disabled_hover_text(tr!("menu-new-layer-beside", "disabled"))
+                    .clicked()
+                {
+                    actions.push(Action::AddCell {
+                        graph,
+                        panel: active,
+                        side,
+                        columns: Vec::new(),
+                    });
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text(tr!("menu-new-layer-beside", "hint"));
+    });
+    let arrange = |actions: &mut Vec<Action>, arrange: LayerArrange| {
+        actions.push(Action::ArrangeLayers {
+            graph,
+            active,
+            extra: extra.to_vec(),
+            arrange,
+        });
+    };
+    sections.section(ui, free, |ui| {
+        ui.add_enabled_ui(cells >= 2, |ui| {
+            ui.menu_button(tr!("menu-layout-align"), |ui| {
+                for (label, hint, edge) in [
+                    (
+                        tr!("action-layout-align-bottom"),
+                        tr!("action-layout-align-bottom", "hint"),
+                        AlignEdge::Bottom,
+                    ),
+                    (
+                        tr!("action-layout-align-top"),
+                        tr!("action-layout-align-top", "hint"),
+                        AlignEdge::Top,
+                    ),
+                    (
+                        tr!("action-layout-align-vcenter"),
+                        tr!("action-layout-align-vcenter", "hint"),
+                        AlignEdge::VCenter,
+                    ),
+                    (
+                        tr!("action-layout-align-left"),
+                        tr!("action-layout-align-left", "hint"),
+                        AlignEdge::Left,
+                    ),
+                    (
+                        tr!("action-layout-align-right"),
+                        tr!("action-layout-align-right", "hint"),
+                        AlignEdge::Right,
+                    ),
+                    (
+                        tr!("action-layout-align-hcenter"),
+                        tr!("action-layout-align-hcenter", "hint"),
+                        AlignEdge::HCenter,
+                    ),
+                ] {
+                    if ui.button(label).on_hover_text(hint).clicked() {
+                        arrange(actions, LayerArrange::Align(edge));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+        })
+        .inner
+        .on_hover_text(tr!("menu-layout-align", "hint"))
+        .on_disabled_hover_text(tr!("menu-layout-align", "disabled"));
+        for (enabled, label, hint, disabled, what) in [
+            (
+                cells >= 2,
+                tr!("action-layout-same-width"),
+                tr!("action-layout-same-width", "hint"),
+                tr!("action-layout-same-width", "disabled"),
+                LayerArrange::Match(Dimension::Width),
+            ),
+            (
+                cells >= 2,
+                tr!("action-layout-same-height"),
+                tr!("action-layout-same-height", "hint"),
+                tr!("action-layout-same-height", "disabled"),
+                LayerArrange::Match(Dimension::Height),
+            ),
+            (
+                cells >= 3,
+                tr!("action-layout-distribute-horizontally"),
+                tr!("action-layout-distribute-horizontally", "hint"),
+                tr!("action-layout-distribute-horizontally", "disabled"),
+                LayerArrange::Distribute(DistributeAxis::Horizontal),
+            ),
+            (
+                cells >= 3,
+                tr!("action-layout-distribute-vertically"),
+                tr!("action-layout-distribute-vertically", "hint"),
+                tr!("action-layout-distribute-vertically", "disabled"),
+                LayerArrange::Distribute(DistributeAxis::Vertical),
+            ),
+        ] {
+            if ui
+                .add_enabled(enabled, egui::Button::new(label))
+                .on_hover_text(hint)
+                .on_disabled_hover_text(disabled)
+                .clicked()
+            {
+                arrange(actions, what);
+                ui.close();
+            }
+        }
+    });
+    sections.section(ui, free, |ui| {
+        super::object_manager_ui::layer_stacking_items(ui, graph, spec, active, actions);
+    });
+    // The last cell cannot be deleted: greyed out, with the reason (#357).
+    sections.section(ui, true, |ui| {
+        let target = VisibilityTarget::Panel(active);
+        if ui
+            .add_enabled(
+                target.removable(spec),
+                egui::Button::new(tr!("action-delete-layer")),
+            )
+            .on_hover_text(tr!("action-delete-layer", "hint"))
+            .on_disabled_hover_text(tr!("error-last-layer"))
+            .clicked()
+        {
+            actions.push(Action::RemovePlotObject { graph, target });
+            ui.close();
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1464,6 +1659,7 @@ mod tests {
                 tr!("menu-file"),
                 tr!("menu-edit"),
                 tr!("menu-graph"),
+                tr!("menu-layout"),
                 tr!("menu-analysis"),
                 tr!("menu-view"),
                 tr!("menu-window"),
@@ -2205,7 +2401,7 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// #357: "New Layer Beside" acts on the active layer: it sends `AddCell`
+    /// #357, #398: "New Layer Beside" (in the Layout menu) acts on the active layer: it sends `AddCell`
     /// with that layer and the chosen side, and is greyed out when the grid is
     /// full.
     #[test]
@@ -2228,7 +2424,7 @@ mod tests {
                 data.insert_temp(super::super::graph_window::active_panel_id(graph), 1usize)
             });
             let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
-            let pos = active(&entries(&output), &tr!("menu-graph")).center;
+            let pos = active(&entries(&output), &tr!("menu-layout")).center;
             click_at(&mut app, &ctx, tab, pos);
             let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
             let pos = active(&menu, &tr!("menu-new-layer-beside")).center;
@@ -2247,6 +2443,358 @@ mod tests {
                 "the active layer (2), not the first"
             );
         }
+        session.shutdown().unwrap();
+    }
+
+    /// A bench graph with `cells` cells, in free placement or not.
+    fn layout_bench(cells: usize, free: bool) -> (Session, StokesForgeApp, NodeId) {
+        let (session, mut app, graph) = bench();
+        for _ in 1..cells {
+            app.state.dispatch(Action::AddCell {
+                graph,
+                panel: 0,
+                side: CellSide::Right,
+                columns: Vec::new(),
+            });
+        }
+        if free {
+            app.state
+                .dispatch(Action::SetLayerPlacement { graph, free: true });
+        }
+        (session, app, graph)
+    }
+
+    /// #398: the Layout menu lists, in free placement, Layer Placement, New
+    /// Layer Beside, Align, Same Width / Height, Distribute, Bring to Front /
+    /// Send to Back and Delete Layer, in that order; and its entries are
+    /// absent from the Graph menu. Witness: painting Align on the grid too, or
+    /// leaving New Layer Beside in Graph.
+    #[test]
+    fn the_layout_menu_lists_its_entries_in_order_in_free_placement() {
+        let (session, mut app, graph) = layout_bench(3, true);
+        let tab = Some(Tab::Graph(graph));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-layout"));
+        let order = [
+            tr!("menu-layer-placement"),
+            tr!("menu-new-layer-beside"),
+            tr!("menu-layout-align"),
+            tr!("action-layout-same-width"),
+            tr!("action-layout-same-height"),
+            tr!("action-layout-distribute-horizontally"),
+            tr!("action-layout-distribute-vertically"),
+            tr!("action-layer-bring-to-front"),
+            tr!("action-layer-send-to-back"),
+            tr!("action-delete-layer"),
+        ];
+        let ys: Vec<f32> = order
+            .iter()
+            .map(|label| active(&menu, label).center.y)
+            .collect();
+        assert!(
+            ys.windows(2).all(|pair| pair[0] < pair[1]),
+            "{order:?} at {ys:?}"
+        );
+        assert!(active(&menu, &tr!("menu-layout-align")).enabled);
+        assert!(active(&menu, &tr!("action-layout-distribute-vertically")).enabled);
+        let (_, graph_menu) = open_menu(&mut app, tab, &tr!("menu-graph"));
+        for moved in [tr!("menu-new-layer-beside"), tr!("menu-layout-align")] {
+            assert!(
+                find_entry(&graph_menu, &moved).is_none(),
+                "{moved} stays out of Graph"
+            );
+        }
+        assert!(
+            find_entry(&graph_menu, &tr!("menu-new-layer")).is_some(),
+            "New Layer stays"
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// #398: on the regular grid, Align, Same, Distribute, Bring to Front and
+    /// Send to Back are absent; placement, New Layer Beside and Delete Layer
+    /// stay, the last greyed for the only cell.
+    #[test]
+    fn the_layout_menu_hides_what_does_not_apply_on_the_grid() {
+        let (session, mut app, graph) = layout_bench(1, false);
+        let (_, menu) = open_menu(&mut app, Some(Tab::Graph(graph)), &tr!("menu-layout"));
+        for absent in [
+            tr!("menu-layout-align"),
+            tr!("action-layout-same-width"),
+            tr!("action-layout-same-height"),
+            tr!("action-layout-distribute-horizontally"),
+            tr!("action-layout-distribute-vertically"),
+            tr!("action-layer-bring-to-front"),
+            tr!("action-layer-send-to-back"),
+        ] {
+            assert!(find_entry(&menu, &absent).is_none(), "{absent} on the grid");
+        }
+        assert!(active(&menu, &tr!("menu-layer-placement")).enabled);
+        assert!(active(&menu, &tr!("menu-new-layer-beside")).enabled);
+        assert!(
+            !active(&menu, &tr!("action-delete-layer")).enabled,
+            "last cell"
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// #398: with a single cell Align and Same are greyed out; with two,
+    /// Distribute is (it needs three). Witness: enabling them unconditionally.
+    #[test]
+    fn align_same_and_distribute_are_greyed_out_for_too_few_layers() {
+        let (session, mut app, graph) = layout_bench(1, true);
+        let tab = Some(Tab::Graph(graph));
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-layout"));
+        for label in [
+            tr!("menu-layout-align"),
+            tr!("action-layout-same-width"),
+            tr!("action-layout-same-height"),
+        ] {
+            assert!(!active(&menu, &label).enabled, "{label}, one cell");
+        }
+        assert!(
+            !active(&menu, &tr!("action-delete-layer")).enabled,
+            "the last cell stays"
+        );
+        app.state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+        let (_, menu) = open_menu(&mut app, tab, &tr!("menu-layout"));
+        assert!(active(&menu, &tr!("menu-layout-align")).enabled);
+        assert!(active(&menu, &tr!("action-layout-same-width")).enabled);
+        for label in [
+            tr!("action-layout-distribute-horizontally"),
+            tr!("action-layout-distribute-vertically"),
+        ] {
+            assert!(!active(&menu, &label).enabled, "{label}, two cells");
+        }
+        assert!(active(&menu, &tr!("action-delete-layer")).enabled);
+        session.shutdown().unwrap();
+    }
+
+    /// #398: Layer Placement checks the current mode only, and choosing the
+    /// other one sends `SetLayerPlacement`; Align ▸ Left sends the arrange
+    /// action for the active layer and the published selection.
+    #[test]
+    fn layout_choices_send_their_actions_with_the_published_selection() {
+        let (session, mut app, graph) = layout_bench(3, true);
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = open_path(
+            &mut app,
+            tab,
+            &[tr!("menu-layout"), tr!("menu-layer-placement")],
+        );
+        assert_eq!(
+            active(&menu, &tr!("action-layer-placement-free")).toggled,
+            Some(true)
+        );
+        assert_eq!(
+            active(&menu, &tr!("action-layer-placement-grid")).toggled,
+            Some(false)
+        );
+        let pos = active(&menu, &tr!("action-layer-placement-grid")).center;
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, pos),
+            vec![Action::SetLayerPlacement { graph, free: false }]
+        );
+        assert_closed(&mut app, &ctx, tab);
+
+        let ctx = context();
+        ctx.data_mut(|data| {
+            data.insert_temp(super::super::graph_window::active_panel_id(graph), 1usize);
+            data.insert_temp(
+                super::super::graph_window::layer_selection_id(graph),
+                vec![2usize],
+            );
+        });
+        let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
+        click_at(
+            &mut app,
+            &ctx,
+            tab,
+            active(&entries(&output), &tr!("menu-layout")).center,
+        );
+        let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+        click_at(
+            &mut app,
+            &ctx,
+            tab,
+            active(&menu, &tr!("menu-layout-align")).center,
+        );
+        let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+        let pos = active(&menu, &tr!("action-layout-align-left")).center;
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, pos),
+            vec![Action::ArrangeLayers {
+                graph,
+                active: 1,
+                extra: vec![2],
+                arrange: stokesforge_app_state::state::LayerArrange::Align(
+                    stokesforge_core::compose::AlignEdge::Left
+                ),
+            }],
+            "the reference is the active layer, the others the published selection"
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// A whole frame: the menu bar and the workspace, then the actions applied
+    /// (what `ui` does, without the OS frame).
+    fn paint_whole(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Tab,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                    .chain(events)
+                    .collect(),
+                ..Default::default()
+            },
+            |ui| {
+                let ctx = ui.ctx().clone();
+                let mut actions = Vec::new();
+                app.menu_bar(ui, &ctx, &mut actions, Some(tab));
+                app.show_workspace(
+                    ui,
+                    Some(tab),
+                    &mut actions,
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                );
+                app.dispatch_actions(&ctx, actions);
+            },
+        );
+        output.textures_delta.clear();
+        output
+    }
+
+    /// #398, end to end: a plain click then a Shift + click on two layers of a
+    /// free figure, then Layout ▸ Align ▸ Left moves the selected layer onto the
+    /// active one and leaves the third where it was. Witness: ignoring the
+    /// published selection (every layer would follow the reference).
+    #[test]
+    fn align_left_moves_only_the_layers_selected_with_shift_click() {
+        let (session, mut app, graph) = layout_bench(3, true);
+        let tab = Tab::Graph(graph);
+        let ctx = context();
+        for _ in 0..4 {
+            paint_whole(&mut app, &ctx, tab, Vec::new(), egui::Modifiers::NONE);
+        }
+        let lefts = |app: &StokesForgeApp| -> Vec<f64> {
+            let spec =
+                stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
+            (0..3)
+                .map(|i| spec.panels[i].sanitized_free_frame().left)
+                .collect()
+        };
+        let before = lefts(&app);
+        assert!(
+            before[0] != before[1] && before[0] != before[2],
+            "{before:?}"
+        );
+        let centre = |app: &StokesForgeApp, layer: usize| {
+            app.graph_views[&graph]
+                .plot_rect_screen(layer)
+                .expect("drawn")
+                .center()
+        };
+        let click = |app: &mut StokesForgeApp, at: egui::Pos2, modifiers: egui::Modifiers| {
+            for pressed in [Some(true), None, Some(false)] {
+                let events = match pressed {
+                    Some(pressed) => vec![egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers,
+                    }],
+                    None => vec![egui::Event::PointerMoved(at)],
+                };
+                paint_whole(app, &ctx, tab, events, modifiers);
+            }
+        };
+        let first = centre(&app, 0);
+        click(&mut app, first, egui::Modifiers::NONE);
+        let third = centre(&app, 2);
+        click(&mut app, third, egui::Modifiers::SHIFT);
+        paint_whole(&mut app, &ctx, tab, Vec::new(), egui::Modifiers::NONE);
+        assert_eq!(
+            super::super::graph_window::published_layer_selection(&ctx, graph),
+            vec![2]
+        );
+        assert_eq!(
+            super::super::graph_window::published_active_panel(&ctx, graph),
+            0
+        );
+
+        let mut pick = |label: String| {
+            let output = paint_whole(&mut app, &ctx, tab, Vec::new(), egui::Modifiers::NONE);
+            let at = active(&entries(&output), &label).center;
+            for events in [
+                vec![egui::Event::PointerMoved(at)],
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            ] {
+                paint_whole(&mut app, &ctx, tab, events, egui::Modifiers::NONE);
+            }
+        };
+        pick(tr!("menu-layout"));
+        pick(tr!("menu-layout-align"));
+        pick(tr!("action-layout-align-left"));
+        let after = lefts(&app);
+        assert_eq!(
+            after[2], after[0],
+            "the selected layer is aligned: {after:?}"
+        );
+        assert_eq!(after[1], before[1], "the unselected layer stays: {after:?}");
+        session.shutdown().unwrap();
+    }
+
+    /// #398: Delete Layer removes the active layer.
+    #[test]
+    fn delete_layer_removes_the_active_layer() {
+        let (session, mut app, graph) = layout_bench(2, false);
+        let tab = Some(Tab::Graph(graph));
+        let ctx = context();
+        ctx.data_mut(|data| {
+            data.insert_temp(super::super::graph_window::active_panel_id(graph), 1usize)
+        });
+        let (output, _) = paint_bar(&mut app, &ctx, tab, Vec::new());
+        click_at(
+            &mut app,
+            &ctx,
+            tab,
+            active(&entries(&output), &tr!("menu-layout")).center,
+        );
+        let menu = entries(&paint_bar(&mut app, &ctx, tab, Vec::new()).0);
+        let pos = active(&menu, &tr!("action-delete-layer")).center;
+        assert_eq!(
+            click_at(&mut app, &ctx, tab, pos),
+            vec![Action::RemovePlotObject {
+                graph,
+                target: stokesforge_app_state::object_manager::VisibilityTarget::Panel(1),
+            }]
+        );
         session.shutdown().unwrap();
     }
 

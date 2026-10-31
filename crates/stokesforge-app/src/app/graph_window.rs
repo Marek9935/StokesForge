@@ -608,6 +608,19 @@ pub(super) fn active_panel_id(graph: NodeId) -> egui::Id {
     egui::Id::new(("stokesforge_active_panel", graph))
 }
 
+/// The other layers selected with Shift + click in `graph` (#398), as its last
+/// painted view published them: base layers in click order, the active layer
+/// not among them. Read by the Layout menu of the bar, which has no access to
+/// the [`GraphView`]. Empty on the grid and for lack of a painted view.
+pub(super) fn published_layer_selection(ctx: &egui::Context, graph: NodeId) -> Vec<usize> {
+    ctx.data(|data| data.get_temp(layer_selection_id(graph)))
+        .unwrap_or_default()
+}
+
+pub(super) fn layer_selection_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_layer_selection", graph))
+}
+
 /// Layer marker (#161), Origin style: a small number per
 /// layer at the top left of its own cell (#395; side by side for the overlays of
 /// one cell, in the corner of the window for a layer not drawn), the active layer's highlighted;
@@ -621,8 +634,24 @@ fn layer_badges(
     outer: egui::Rect,
 ) {
     let active = view.active_panel(spec);
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(active_panel_id(graph), active));
+    let extra = view.extra_layers(spec);
+    let bases = spec.cell_bases();
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(active_panel_id(graph), active);
+        data.insert_temp(layer_selection_id(graph), extra.clone());
+    });
+    // Free placement (#398): a thin outline around each selected frame, the
+    // reference included while other layers are selected. Interface overlay,
+    // never exported.
+    if !extra.is_empty() {
+        let stroke = egui::Stroke::new(1.5, ui.visuals().selection.bg_fill);
+        for &base in bases.get(active).iter().copied().chain(&extra) {
+            if let Some(rect) = view.plot_rect_screen(base) {
+                ui.painter()
+                    .rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+            }
+        }
+    }
     let side = 18.0;
     let gap = 3.0;
     // Badges already placed per anchor (the cell's outer corner, or the window
@@ -657,11 +686,12 @@ fn layer_badges(
                 egui::Sense::click(),
             )
             .on_hover_text(tr!("plot-layer-badge", "hint", n = number.to_string()));
+        let selected = index == active || bases.get(index).is_some_and(|base| extra.contains(base));
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,
                 ui.is_enabled(),
-                index == active,
+                selected,
                 tr!("plot-layer-badge-accessible", n = number.to_string()),
             )
         });
@@ -681,6 +711,14 @@ fn layer_badges(
         };
         let painter = ui.painter();
         painter.rect_filled(rect, 3.0, fill);
+        if selected && index != active {
+            painter.rect_stroke(
+                rect,
+                3.0,
+                egui::Stroke::new(1.5, visuals.selection.bg_fill),
+                egui::StrokeKind::Inside,
+            );
+        }
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -689,9 +727,22 @@ fn layer_badges(
             ink,
         );
         if response.clicked() {
-            view.set_active_panel(index, spec);
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(active_panel_id(graph), index));
+            // Shift + click selects without changing the reference (#398).
+            if ui.input(|input| input.modifiers.shift)
+                && spec.layer_placement == stokesforge_plot::LayerPlacement::Free
+            {
+                view.toggle_extra_layer(index, spec);
+                let extra = view.extra_layers(spec);
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(layer_selection_id(graph), extra));
+            } else {
+                view.set_active_panel(index, spec);
+                view.clear_extra_layers();
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(active_panel_id(graph), index);
+                    data.insert_temp(layer_selection_id(graph), Vec::<usize>::new());
+                });
+            }
         }
     }
 }
@@ -939,18 +990,19 @@ fn background_menu(
             }
         });
     });
-    // Free placement (#398): the layer under the click, in front of or behind
-    // the others. Absent on the grid.
+    // Layout (#398): the content of the Layout menu of the bar, one level
+    // down (an accepted exception to the depth of two, `docs/menus.md`). The
+    // reference is the layer under the click.
     let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
-    let stacking = spec
-        .as_ref()
-        .filter(|spec| spec.layer_placement == stokesforge_plot::LayerPlacement::Free)
-        .zip(hit.layer);
-    sections.section(ui, stacking.is_some(), |ui| {
-        if let Some((spec, layer)) = stacking {
-            super::object_manager_ui::layer_stacking_items(ui, graph_id, spec, layer, actions);
-        }
-    });
+    if let Some(spec) = spec.as_ref() {
+        let active = hit.layer.unwrap_or_else(|| view.active_panel(spec));
+        let extra = view.extra_layers(spec);
+        sections.section(ui, true, |ui| {
+            ui.menu_button(tr!("menu-layout"), |ui| {
+                super::menus::layout_menu_contents(ui, graph_id, spec, active, &extra, actions);
+            });
+        });
+    }
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-export"), |ui| {
             if ui
@@ -1777,17 +1829,118 @@ pub(super) mod tests {
         );
     }
 
+    /// #398: the right-click of a free figure offers the Layout menu one level
+    /// down (`Layout ▸ Align ▸ Left`): Bring to Front and Align are not painted
+    /// flat any more, and choosing Left sends the arrange action for the layer
+    /// under the click. Witness: keeping the flat stacking section.
+    #[test]
+    fn right_click_offers_the_layout_menu_one_level_down() {
+        use super::super::test_support::{context as new_context, frame_of};
+        let (session, graph) = plotted_graph();
+        let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: stokesforge_core::compose::CellSide::Right,
+            columns: Vec::new(),
+        });
+        state.dispatch(Action::SetLayerPlacement { graph, free: true });
+        let context = new_context();
+        context.all_styles_mut(|style| style.animation_time = 0.0);
+        let view = std::cell::RefCell::new(GraphView::new());
+        let actions = std::cell::RefCell::new(Vec::new());
+        let paint = |events| {
+            frame_of(&context, egui::vec2(1200.0, 900.0), events, |ui| {
+                graph_view_contents(
+                    ui,
+                    &mut view.borrow_mut(),
+                    state.snapshot(),
+                    graph,
+                    &mut actions.borrow_mut(),
+                );
+            })
+        };
+        paint(Vec::new());
+        paint(Vec::new());
+        let pos = view.borrow().plot_rect_screen(1).expect("drawn").center();
+        paint(vec![egui::Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            paint(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        let output = paint(Vec::new());
+        let painted = |output: &egui::FullOutput, label: &str| {
+            output.shapes.iter().any(|painted| match &painted.shape {
+                egui::Shape::Text(shape) => shape.galley.job.text == label,
+                _ => false,
+            })
+        };
+        assert!(
+            painted(&output, &tr!("menu-layout")),
+            "Layout ▸ on the background"
+        );
+        for flat in [tr!("action-layer-bring-to-front"), tr!("menu-layout-align")] {
+            assert!(!painted(&output, &flat), "{flat} only under Layout ▸");
+        }
+        let at = find_text_center(&output.shapes, &tr!("menu-layout"));
+        click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+            paint(events)
+        });
+        let output = paint(Vec::new());
+        for entry in [
+            tr!("menu-layer-placement"),
+            tr!("menu-new-layer-beside"),
+            tr!("action-layer-bring-to-front"),
+            tr!("action-delete-layer"),
+        ] {
+            assert!(painted(&output, &entry), "{entry} under Layout ▸");
+        }
+        let at = find_text_center(&output.shapes, &tr!("menu-layout-align"));
+        click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+            paint(events)
+        });
+        let output = paint(Vec::new());
+        let at = find_text_center(&output.shapes, &tr!("action-layout-align-left"));
+        click_at(&context, at, egui::Modifiers::NONE, |_, events| {
+            paint(events)
+        });
+        assert_eq!(
+            *actions.borrow(),
+            vec![Action::ArrangeLayers {
+                graph,
+                active: 1,
+                extra: Vec::new(),
+                arrange: stokesforge_app_state::state::LayerArrange::Align(
+                    stokesforge_core::compose::AlignEdge::Left
+                ),
+            }],
+            "the layer under the click is the reference"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// #170: each badge is named like a layer and announces its
-    /// selection; both states are exercised on each of the two layers.
+    /// selection (the reference and the layers selected with Shift + click).
+    /// Witness: announcing the active layer only.
     #[test]
     fn layer_badges_announce_their_number_and_selection() {
-        for active in [0, 1] {
+        // The active layer alone, then with other layers selected (#398).
+        for (active, extra) in [(0, vec![]), (1, vec![]), (0, vec![2]), (1, vec![0, 2])] {
             let context = egui::Context::default();
             context.enable_accesskit();
             let mut spec = PlotSpec::empty("Figure");
             spec.panels.push(PanelSpec::at(0, 1));
+            spec.panels.push(PanelSpec::at(0, 2));
+            spec.layer_placement = stokesforge_plot::LayerPlacement::Free;
             let mut view = GraphView::new();
             view.set_active_panel(active, &spec);
+            for &panel in &extra {
+                view.toggle_extra_layer(panel, &spec);
+            }
             let mut output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1821,11 +1974,11 @@ pub(super) mod tests {
                     (node.label().unwrap().to_owned(), node.toggled())
                 })
                 .collect();
-            let mut expected: Vec<_> = (0..2)
+            let mut expected: Vec<_> = (0..3)
                 .map(|index| {
                     (
                         tr!("plot-layer-badge-accessible", n = (index + 1).to_string()),
-                        Some(if index == active {
+                        Some(if index == active || extra.contains(&index) {
                             egui::accesskit::Toggled::True
                         } else {
                             egui::accesskit::Toggled::False

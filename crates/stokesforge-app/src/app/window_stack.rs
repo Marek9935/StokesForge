@@ -1569,6 +1569,124 @@ mod tests {
         bench.session.shutdown().unwrap();
     }
 
+    /// #398: Ctrl+Z pressed in the frame right after the release of a layer drag,
+    /// or in the release frame itself, restores the frame (the report: « ignored
+    /// once after a drag »). Not reproduced for the next frame; in the release
+    /// frame the shortcut used to reach the history before the drag was
+    /// committed and undid the step before it. Witness: applying the held-back
+    /// Undo before the frame's other actions (in the bench and in `ui`).
+    #[test]
+    fn ctrl_z_right_after_a_layer_drag_restores_the_frame() {
+        for same_frame in [false, true] {
+            use stokesforge_core::compose::{current_plot_spec, CellSide};
+            let mut bench = FollowBench::new(egui::pos2(40.0, 30.0), egui::vec2(900.0, 560.0));
+            bench.app.state.dispatch(Action::AddCell {
+                graph: bench.graph,
+                panel: 0,
+                side: CellSide::Right,
+                columns: Vec::new(),
+            });
+            let mut spec = current_plot_spec(bench.app.state.tree(), bench.graph).expect("spec");
+            assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+                &mut spec, true
+            ));
+            bench.app.state.dispatch(Action::SetPlotSpec {
+                graph: bench.graph,
+                spec,
+            });
+            bench.settle();
+            let frame_of = |bench: &FollowBench| {
+                current_plot_spec(bench.app.state.tree(), bench.graph)
+                    .expect("spec")
+                    .panels[0]
+                    .sanitized_free_frame()
+            };
+            let before = frame_of(&bench);
+            // One whole app frame: shortcuts, workspace, then the actions applied.
+            let step = |bench: &mut FollowBench, events: Vec<egui::Event>| {
+                let FollowBench {
+                    app,
+                    context,
+                    tab,
+                    screen,
+                    ..
+                } = bench;
+                let mut actions = Vec::new();
+                context
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, *screen)),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let ctx = ui.ctx().clone();
+                            let history =
+                                app.collect_shortcuts_deferring_history(&ctx, &mut actions);
+                            app.show_workspace(
+                                ui,
+                                Some(*tab),
+                                &mut actions,
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                                &mut Vec::new(),
+                            );
+                            actions.extend(history);
+                            app.dispatch_actions(&ctx, std::mem::take(&mut actions));
+                        },
+                    )
+                    .textures_delta
+                    .clear();
+            };
+            let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let ctrl_z = || egui::Event::Key {
+                key: egui::Key::Z,
+                physical_key: Some(egui::Key::Z),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            };
+            let from = bench.app.graph_views[&bench.graph]
+                .plot_rect_screen(0)
+                .expect("drawn")
+                .center();
+            step(
+                &mut bench,
+                vec![egui::Event::PointerMoved(from), button(from, true)],
+            );
+            for k in 1..=4 {
+                let pos = from + egui::vec2(15.0 * k as f32, 8.0 * k as f32);
+                step(&mut bench, vec![egui::Event::PointerMoved(pos)]);
+            }
+            let to = from + egui::vec2(60.0, 32.0);
+            step(
+                &mut bench,
+                if same_frame {
+                    vec![button(to, false), ctrl_z()]
+                } else {
+                    vec![button(to, false)]
+                },
+            );
+            let moved = frame_of(&bench);
+            if same_frame {
+                assert_eq!(frame_of(&bench), before, "same frame: restored");
+            } else {
+                assert!(
+                    (moved.left - before.left).abs() > 1.0,
+                    "the drag committed: {before:?} -> {moved:?}"
+                );
+                step(&mut bench, vec![ctrl_z()]);
+                assert_eq!(frame_of(&bench), before, "next frame: restored");
+            }
+            bench.session.shutdown().unwrap();
+        }
+    }
+
     /// #394: an axis added makes the image grow around the fixed plot area, and
     /// the window follows (the stored frame does not change).
     #[test]

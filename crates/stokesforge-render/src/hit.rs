@@ -281,6 +281,20 @@ pub fn component_at_with_tolerance(
         })
 }
 
+/// Whether a cell with a rank above `rank` covers `(x, y)` (figure pixels,
+/// outer rectangle of the cell): what is drawn there by a cell of `rank` is
+/// hidden by a layer in front of it (#398). Always `false` on the regular
+/// grid, where every cell has the same rank.
+pub fn hidden_by_front(plot: &DrawnPlot, rank: usize, x: f64, y: f64) -> bool {
+    plot.panels.iter().any(|front| {
+        front.cell_rank > rank
+            && x >= front.cell_origin.0 as f64
+            && x < front.cell_origin.0 as f64 + front.cell_size.0 as f64
+            && y >= front.cell_origin.1 as f64
+            && y < front.cell_origin.1 as f64 + front.cell_size.1 as f64
+    })
+}
+
 /// Positions in `plot.panels` of the layers that can be hit at `(x, y)`, front
 /// cell first (#398). Layers of one cell stay together: with `top_first`, the
 /// last layer first (the one drawn on top of its cell); without, spec order
@@ -288,15 +302,7 @@ pub fn component_at_with_tolerance(
 /// overlays). A layer whose cell lies under the outer rectangle of a cell with
 /// a higher rank at `(x, y)` is left out: that cell hides it.
 fn front_to_back(plot: &DrawnPlot, x: f64, y: f64, top_first: bool) -> Vec<usize> {
-    let hides = |rank: usize| {
-        plot.panels.iter().any(|front| {
-            front.cell_rank > rank
-                && x >= front.cell_origin.0 as f64
-                && x < front.cell_origin.0 as f64 + front.cell_size.0 as f64
-                && y >= front.cell_origin.1 as f64
-                && y < front.cell_origin.1 as f64 + front.cell_size.1 as f64
-        })
-    };
+    let hides = |rank: usize| hidden_by_front(plot, rank, x, y);
     let mut order: Vec<usize> = (0..plot.panels.len())
         .filter(|&position| !hides(plot.panels[position].cell_rank))
         .collect();
@@ -989,5 +995,23 @@ mod tests {
                 row: Some(1)
             })
         );
+    }
+
+    /// A cell hides what a lower-ranked cell draws under its outer rectangle,
+    /// and nothing else (#398). Witness: `>=` on the rank hides the front cell
+    /// from itself; dropping the rank test hides the grid.
+    #[test]
+    fn a_front_cell_hides_only_the_lower_ranks_under_its_rectangle() {
+        let mut plot = figure();
+        let mut front = plot.panels[0].clone();
+        front.cell_rank = 1;
+        front.cell_origin = (100, 100);
+        front.cell_size = (50, 50);
+        plot.panels.push(front);
+        assert!(hidden_by_front(&plot, 0, 120.0, 120.0), "under the front");
+        assert!(!hidden_by_front(&plot, 0, 20.0, 120.0), "outside it");
+        assert!(!hidden_by_front(&plot, 1, 120.0, 120.0), "the front itself");
+        plot.panels[1].cell_rank = 0;
+        assert!(!hidden_by_front(&plot, 0, 120.0, 120.0), "same rank: grid");
     }
 }

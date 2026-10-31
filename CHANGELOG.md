@@ -39,6 +39,22 @@ without a message, see `docs/persistence.md`).
   and `free_frame` on each panel): an older version that opens and saves a file
   again drops them without a message and shows the grid.
 
+- Layout menu for free layers (#398), third batch: a new **Layout** menu after
+  Graph (and **Layout ▸** in the right-click of the figure) holds **Layer
+  Placement** (Regular Grid / Free), **New Layer Beside** (moved from Graph),
+  **Align** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center),
+  **Same Width**, **Same Height**, **Distribute Horizontally / Vertically**,
+  **Bring to Front**, **Send to Back** and **Delete Layer**; in Free placement
+  only the arranging entries apply. **Shift + click** a layer (or its number
+  badge) to select several layers (a second Shift + click removes it): the
+  arranging entries then act on the selection, with the active layer as the
+  reference, or on every layer when fewer than two are selected. Each is one
+  step of **Undo**. A curve hidden by a layer in front no longer shows selection
+  handles under it, a detached graph window follows the image when a layer
+  goes left of or above its origin (not on native Wayland, where a window
+  cannot be placed), and Ctrl+Z pressed in the very frame a drag is released
+  undoes that drag.
+
 - Mouse gestures of free layers (#398), second batch (second part): with
   **Layer placement = Free**, drag a layer's plot area with the Pointer tool to
   move it, and drag the outer boundary of a layer (edges and corners) to resize

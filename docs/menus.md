@@ -52,7 +52,11 @@ An empty section disappears with its separators.
   the envelope of a shared content that keeps its depth 2 in the right-click:
   View › Object Manager › Expand by Default, and Workbook › Columns › Move ▸ /
   Type ▸ / Role ▸ (three levels in the bar: Workbook, Columns, the
-  submenu; #319 for Move ▸).
+  submenu; #319 for Move ▸). **Layout (#398)** is the other exception, in the
+  right-click: the background of a figure offers `Layout ▸` with the same content
+  as the bar's Layout menu, so `Layout ▸ Align ▸ Left` and `Layout ▸ New Layer
+  Beside ▸ Right` are three levels (flattening them would have split a family of
+  entries between the bar and the right-click; one more exception was chosen).
 - **Absent or disabled**: not applicable to this target → **absent** (Show Data
   outside a curve); relevant but temporarily
   impossible → **disabled with a `.disabled` tooltip** that says why.
@@ -85,7 +89,8 @@ An empty section disappears with its separators.
 | Target | Menu |
 |---|---|
 | Background, plot area | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, placed at the clicked point at the default size) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
-| Layer (Free only, #398), in the Object Manager node and in the blank of the figure | Bring to Front · Send to Back (grayed out with a reason when already in front / at the back) — absent on the regular grid |
+| Layer (#398), blank of the figure or plot area | `Layout ▸` (below), after Add Text / Insert Object ▸ and before Export ▸ |
+| Layer node of the Object Manager (#398) | its own Bring to Front · Send to Back (Free only, grayed out with a reason when already in front / at the back) and Delete |
 | Curve | Show Data (the workbook of **this** curve) ─ Rename · Move Up · Move Down · Hide ─ Delete ─ Properties… |
 | Title, axis title | Edit Text · Reset Position ─ Hide ─ Properties… |
 | Legend entry | Edit Text ─ Properties… |
@@ -160,6 +165,21 @@ The top menus arrange their sections in the same order; what they
 wrap is the content of the right-clicks: Edit › Selection (menu of the
 Project Manager's windows), Graph › Selection (menu of the object),
 Workbook › Sheet (including Reset Column Widths) / Columns (including Reset Width) / Plot, View › Object Manager.
+
+**Layout (#398)** sits right after Graph, only when a graph is active
+(`layout_menu` / `layout_menu_contents`, one paint for the bar and for the
+right-click's `Layout ▸`). Sections, create before organize: **Layer Placement ▸**
+(Regular Grid / Free, one check mark through `menu_choice`) ─ **New Layer Beside ▸**
+(Right / Below, moved here from Graph; New Layer, the overlays, stays in Graph) ─
+**Align ▸** (Bottom, Top, Vertical Center, Left, Right, Horizontal Center) · Same
+Width · Same Height · Distribute Horizontally · Distribute Vertically ─ Bring to
+Front · Send to Back ─ **Delete Layer** (the active layer; disabled with the
+"keeps at least one layer" reason for the last cell). On the regular grid Align,
+Same, Distribute, Bring to Front and Send to Back are **absent** (they do not
+apply); in Free they are disabled with a `.disabled` tooltip when there are too
+few layers (Align and Same need two, Distribute three). They act on the cells
+selected with Shift + click (`docs/gestures.md`), on all of them when fewer than
+two are selected.
 
 **Switch on hover (#343).** When a menu of the bar is already open, moving the
 pointer over the title of another menu opens that one and closes the first,

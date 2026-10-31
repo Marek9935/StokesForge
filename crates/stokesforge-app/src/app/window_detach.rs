@@ -342,17 +342,46 @@ fn follow_figure_in_viewport(
     let Some(step) = FigureFollow::observe(follows, graph, size, origin, scale) else {
         return;
     };
-    let (inner, maximized, monitor) = ctx.input(|input| {
+    let (inner, maximized, monitor, outer) = ctx.input(|input| {
         let viewport = input.viewport();
         (
             viewport.inner_rect.map(|rect| rect.size()),
             viewport.maximized.unwrap_or(false),
             viewport.monitor_size,
+            viewport.outer_rect,
         )
     });
     let Some(inner) = inner.filter(|_| !maximized) else {
         return;
     };
+    // Free placement (#398): the image's origin moved, and the window moves by
+    // that at the kept scale so that page coordinates stay still on screen,
+    // as a floating window does. Without the outer rectangle (a native Wayland
+    // client cannot know nor set where its window is) nothing is sent.
+    let free_shift = FigureFollow::origin_follow(step);
+    if let (Some(outer), true) = (outer, free_shift != egui::Vec2::ZERO) {
+        let corner = FigureFollow::shifted_corner(follows, graph, outer.min, free_shift);
+        // Kept on the monitor when the window was on it.
+        let corner = match monitor {
+            Some(monitor) => {
+                let limit = (monitor - outer.size()).max(egui::Vec2::ZERO);
+                egui::pos2(
+                    if outer.min.x <= limit.x {
+                        corner.x.min(limit.x)
+                    } else {
+                        corner.x
+                    },
+                    if outer.min.y <= limit.y {
+                        corner.y.min(limit.y)
+                    } else {
+                        corner.y
+                    },
+                )
+            }
+            None => corner,
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(corner));
+    }
     let Some(area) = super::graph_window::published_figure_area(ctx, graph) else {
         return;
     };
@@ -2513,6 +2542,114 @@ mod tests {
         publish(&mut app);
         assert_eq!(paint(), None, "a maximized window does not resize");
         session.shutdown().unwrap();
+    }
+
+    /// #398: a detached free graph follows the move of its image's origin: the
+    /// OS window moves by the shift at the kept display scale; without the
+    /// outer rectangle (native Wayland) nothing is sent. Witness: sending the
+    /// shift unscaled, or sending a position when `outer_rect` is unknown.
+    #[test]
+    fn a_detached_free_graph_window_follows_the_origin_of_its_figure() {
+        for known in [true, false] {
+            let (session, graph) = plotted_graph();
+            let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            app.state
+                .dispatch(Action::SetLayerPlacement { graph, free: true });
+            let context = egui::Context::default();
+            context.set_embed_viewports(false);
+            context.set_fonts(stokesforge_render_egui::font_definitions());
+            egui_extras::install_image_loaders(&context);
+            let root_input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            app.detach_tab(Tab::Graph(graph));
+            let tab = Tab::Graph(graph);
+            let viewport_id = egui::ViewportId::from_hash_of(tab);
+            let publish = |app: &mut StokesForgeApp| {
+                let mut output = context.run_ui(root_input.clone(), |ui| {
+                    app.show_detached_tabs(ui.ctx());
+                });
+                output.textures_delta.clear();
+                output
+            };
+            let mut output = publish(&mut app);
+            let callback = output.viewport_output[&viewport_id]
+                .viewport_ui_cb
+                .clone()
+                .expect("a viewport callback");
+            output.textures_delta.clear();
+            let outer = egui::Rect::from_min_size(egui::pos2(400.0, 300.0), GRAPH_WINDOW_SIZE);
+            let paint = || -> Option<egui::Pos2> {
+                let mut input = root_input.clone();
+                input.viewport_id = viewport_id;
+                input.viewports.insert(
+                    viewport_id,
+                    egui::ViewportInfo {
+                        parent: Some(egui::ViewportId::ROOT),
+                        outer_rect: known.then_some(outer),
+                        inner_rect: Some(outer),
+                        monitor_size: Some(egui::vec2(3000.0, 2000.0)),
+                        maximized: Some(false),
+                        ..Default::default()
+                    },
+                );
+                input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, outer.size()));
+                let mut output = context.run_ui(input, |ui| callback(ui));
+                output.textures_delta.clear();
+                output.viewport_output[&viewport_id]
+                    .commands
+                    .iter()
+                    .find_map(|command| match command {
+                        egui::ViewportCommand::OuterPosition(pos) => Some(*pos),
+                        _ => None,
+                    })
+            };
+            for _ in 0..3 {
+                assert_eq!(paint(), None, "the first frames move nothing");
+            }
+            let origin = || {
+                super::super::graph_window::published_figure_origin(&context, graph)
+                    .expect("free origin")
+            };
+            let before = origin();
+            let scale = app.detached_tabs[&tab]
+                .view_model
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .graph_view
+                .as_ref()
+                .and_then(GraphView::display_scale)
+                .expect("painted");
+            let snapshot = app.state.tree().clone();
+            let spec = stokesforge_core::compose::current_plot_spec(&snapshot, graph).unwrap();
+            let mut frame = spec.panels[0].sanitized_free_frame();
+            frame.left -= 30.0;
+            app.state.dispatch(Action::SetFreeFrame {
+                graph,
+                panel: 0,
+                frame,
+            });
+            publish(&mut app);
+            let command = paint();
+            let shift = (origin().0 - before.0) as f32;
+            assert!(shift < -1.0, "the origin moved left: {shift}");
+            if known {
+                let command = command.expect("the window follows the origin");
+                assert!(
+                    (command.x - (outer.min.x + shift * scale)).abs() < 0.01,
+                    "{command:?} for {shift} at scale {scale}"
+                );
+                assert_eq!(command.y, outer.min.y, "no vertical move");
+            } else {
+                assert_eq!(command, None, "no outer rectangle: nothing to send");
+            }
+            session.shutdown().unwrap();
+        }
     }
 
     // B1/B3 continued, then B7 (`retours-2026-09-23-bugs.md`):

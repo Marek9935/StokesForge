@@ -869,7 +869,11 @@ size does). `FigureFollow` also remembers the image's origin (`free_origin`):
 shell moves the floating window by the shift at the kept scale
 (`FigureFollow::origin_follow`, `shifted_corner`); Undo and Redo go through the
 same path, so no "placement step" is needed in Free (it is still noted for the
-two kinds). Detached OS windows do not move. Anything that maps a rank of
+two kinds). A detached OS window follows the same moves
+(`follow_figure_in_viewport` sends `ViewportCommand::OuterPosition`, kept on the
+monitor); on native Wayland the client does not know where its window is
+(`outer_rect` is `None`): nothing is sent and the window stays where it is.
+Anything that maps a rank of
 `DrawnPlot::panels` to a layer goes through `.index`, never the position.
 
 **Stacking and Background (#398, batch 2a).** Overlapping layers are drawn in
@@ -884,6 +888,24 @@ one `EditPlotSpec` step (`PlotEditKind::BringLayerToFront`, `SendLayerToBack`,
 a color field in **General > Size** (Free only, base layer's value): **Auto** by
 default, see `docs/rendering.md`. Going back to the grid drops the stacking keys
 and keeps the colors.
+
+**Layout menu and selection of layers (#398, batch 3).** The **Layout** bar menu
+and the right-click's `Layout ▸` (`docs/menus.md`) hold Layer Placement, New
+Layer Beside, Align, Same Width / Height, Distribute, Bring to Front / Send to
+Back and Delete Layer. A Shift + click on a layer (plot area or badge) toggles its
+cell in the **selection of layers**, stored in the view
+(`GraphView::extra_layers`, base indices in click order; the active layer is the
+reference and is never listed) and published each frame like the active layer
+(`published_layer_selection`) for the bar. `Action::ArrangeLayers { graph, active,
+extra, arrange }` acts on `compose::arrange_targets`: the selected cells, or every
+cell with fewer than two selected; Align and Same by frames, Distribute by outer
+rectangles with the extremes fixed. Each is one `EditPlotSpec` (`AlignLayers`,
+`MatchLayerSize`, `DistributeLayers`); `Action::SetLayerPlacement` (`LayerPlacement`)
+switches Regular Grid / Free from the menu. A curve hidden by a layer in front of
+its cell shows no selection handle there (`hit::hidden_by_front`,
+`GraphView::series_handle_centers`). Undo and Redo are read in the same frame as a drag's release
+after the drag is committed (`collect_shortcuts_deferring_history`), so Ctrl+Z
+undoes the drag.
 
 **Add Layer Beside** in Free writes the frame of the new layer in the same
 `EditPlotSpec(AddCell)` (`frame_sizes::place_beside`, `render::place_beside`):

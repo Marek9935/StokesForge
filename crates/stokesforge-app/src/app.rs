@@ -589,6 +589,25 @@ impl StokesForgeApp {
             .or(only_detached_book)
     }
 
+    /// [`Self::collect_shortcuts`], with Undo and Redo held back and returned: the
+    /// caller appends them after the actions the frame's gestures produce. A
+    /// Ctrl+Z pressed in the very frame a drag is released then undoes that
+    /// drag, instead of the step before it (#398).
+    fn collect_shortcuts_deferring_history(
+        &mut self,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+    ) -> Vec<Action> {
+        let start = actions.len();
+        self.collect_shortcuts(ctx, actions);
+        let (history, others): (Vec<Action>, Vec<Action>) = actions
+            .split_off(start)
+            .into_iter()
+            .partition(|action| matches!(action, Action::Undo | Action::Redo));
+        actions.extend(others);
+        history
+    }
+
     /// Consumes the shortcuts at the context level and turns them into actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.state.blocking_dialog() {
@@ -987,7 +1006,7 @@ impl eframe::App for StokesForgeApp {
         grid::publish_header_row_defaults(&ctx, metadata, x_prime);
         analysis_menu::publish_last_presets(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
-        self.collect_shortcuts(&ctx, &mut actions);
+        let history = self.collect_shortcuts_deferring_history(&ctx, &mut actions);
         // Ctrl+C on the active graph, before panels and contents read
         // the `Event::Copy` (#149).
         self.request_active_figure_copy(&ctx, active_tab, &mut actions);
@@ -1030,6 +1049,7 @@ impl eframe::App for StokesForgeApp {
         self.blocking_confirmations(&ctx, &mut actions);
         self.refresh_monitors(|| frame.winit_window().map(|w| w.available_monitors().count()));
         self.sync_panel_layout(&mut actions);
+        actions.extend(history);
         self.dispatch_actions(&ctx, actions);
         self.close_when_ready(&ctx);
         self.offer_figure(frame);
