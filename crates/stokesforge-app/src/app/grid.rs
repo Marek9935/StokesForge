@@ -1310,10 +1310,10 @@ fn header_field_widget(
             };
             // The shared in-place edit contract (#224); it consumes Enter, Tab and Escape,
             // which the shortcut block further down must not see again (#38).
-            // The "?" of the F(x)= cell (#404, S-T6): only while it is edited, at the
-            // right of the field, which gives up the width of the icon so that a
-            // narrow column does not clip it. The icon senses only the hover, so it
-            // never takes the focus whose loss ends the edit.
+            // The "?" of the F(x)= cell (#404, S-T6, #410): only while it is edited,
+            // painted just right of the cell in a layer above the grid, over the
+            // neighbouring column, so the field keeps the whole width of the cell.
+            // The icon never takes the focus whose loss ends the edit.
             let id = ui.id().with("header_edit");
             let mut paint = |ui: &mut egui::Ui, width: f32| {
                 inplace_edit::show(
@@ -1327,18 +1327,10 @@ fn header_field_widget(
                     refusal.as_deref(),
                 )
             };
-            let shown = if help {
-                ui.horizontal(|ui| {
-                    let width =
-                        ui.available_width() - super::column_formula_help::reserved_width(ui);
-                    let shown = paint(ui, width.max(0.0));
-                    super::column_formula_help::icon(ui, actions);
-                    shown
-                })
-                .inner
-            } else {
-                paint(ui, f32::INFINITY)
-            };
+            let shown = paint(ui, f32::INFINITY);
+            if help {
+                super::column_formula_help::show_beside(ui.ctx(), id.with("help"), rect, actions);
+            }
             match shown.end {
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
@@ -5475,16 +5467,107 @@ mod tests {
         assert!(bench.seen.contains(&Action::OpenFormulaFunctions));
     }
 
+    /// The bounds of the text field being edited, from the accessibility tree.
+    fn edited_field_bounds(bench: &Bench) -> egui::Rect {
+        let update = bench
+            .last_frame
+            .as_ref()
+            .unwrap()
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accesskit enabled");
+        let bounds = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
+            .filter_map(|(_, node)| node.bounds())
+            .next()
+            .expect("the edited field");
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        )
+    }
+
+    /// #410: the field keeps the whole width of the cell, as without the icon.
     #[test]
-    fn the_help_icon_takes_its_width_from_the_field_not_from_the_cell() {
+    fn the_help_icon_leaves_the_field_the_whole_cell_width() {
+        let (with, _) = icons_while_editing(HeaderField::Formula, true);
+        let (without, _) = icons_while_editing(HeaderField::Formula, false);
+        let (with, without) = (edited_field_bounds(&with), edited_field_bounds(&without));
+        assert!(
+            (with.width() - without.width()).abs() < 0.5,
+            "with the icon {with:?}, without {without:?}"
+        );
+    }
+
+    /// #410: the icon sits right of the cell, in a layer above the grid.
+    #[test]
+    fn the_help_icon_is_painted_right_of_the_cell_above_the_next_column() {
         let (bench, icon) = help_icon(HeaderField::Formula, true);
         let icon = icon.expect("the icon");
-        // The icon stays inside the first column: right of its text, left of
-        // the second column's first cell.
-        let second = bench.center_of("201").expect("cell of the second column");
+        let (without, _) = icons_while_editing(HeaderField::Formula, false);
+        let cell = edited_field_bounds(&without);
         assert!(
-            icon.x < second.x - 20.0,
-            "icon {icon:?}, next cell {second:?}"
+            icon.x - crate::icons::ICON_SIZE / 2.0 >= cell.right() - 0.5,
+            "icon {icon:?}, cell {cell:?}"
+        );
+        assert!(
+            (icon.y - cell.center().y).abs() < 2.0,
+            "centred on the cell"
+        );
+        let layer = bench.context.layer_id_at(icon).expect("a layer");
+        assert_eq!(layer.order, egui::Order::Foreground, "above the grid");
+    }
+
+    /// #410: the icon follows the right edge of the cell, not the typed text:
+    /// a wider or narrower column moves it with that edge.
+    #[test]
+    fn the_help_icon_follows_the_cell_right_edge_when_the_column_width_changes() {
+        let mut edges = Vec::new();
+        for width in [14.0, 40.0] {
+            let mut bench = Bench::new();
+            bench.context.enable_accesskit();
+            resize(&mut bench, 0, width);
+            let column = bench.columns[0];
+            bench.state.begin_header_edit(column, HeaderField::Formula);
+            for _ in 0..4 {
+                bench.image(Vec::new());
+            }
+            let cell = edited_field_bounds(&bench);
+            let centers = image_centers(&bench);
+            let icon = centers
+                .into_iter()
+                .find(|c| (c.y - cell.center().y).abs() < 2.0 && c.x > cell.right() - 1.0)
+                .expect("the icon right of the cell");
+            let left = icon.x - crate::icons::ICON_SIZE / 2.0;
+            assert!(
+                (left - cell.right()).abs() < 1.5,
+                "width {width}: icon left {left}, cell right {}",
+                cell.right()
+            );
+            edges.push(cell.right());
+        }
+        assert!(
+            edges[1] - edges[0] > 10.0,
+            "the two widths differ: {edges:?}"
+        );
+    }
+
+    /// The icon is gone as soon as the edit ends: no leftover layer.
+    #[test]
+    fn the_help_icon_disappears_when_the_edit_ends() {
+        let (mut bench, icon) = help_icon(HeaderField::Formula, true);
+        let icon = icon.expect("the icon");
+        bench.state.cancel_header_edit();
+        for _ in 0..3 {
+            bench.image(Vec::new());
+        }
+        let layer = bench.context.layer_id_at(icon);
+        assert!(
+            layer.is_none_or(|layer| layer.order != egui::Order::Foreground),
+            "{layer:?}"
         );
     }
 }

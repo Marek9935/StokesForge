@@ -1,6 +1,8 @@
 //! The "?" icon of the `F(x)=` cell of the workbook grid (#404, S-T6).
 //!
-//! While the cell is edited, a "?" icon sits at its right; a click on it opens
+//! While the cell is edited, a "?" icon is painted just right of it, over the
+//! neighbouring column, so the text field keeps the whole width of the cell
+//! (#410); a press on it opens
 //! the **Formula Functions** window ([`super::formula_functions_window`], #402),
 //! which lists the callable functions one family at a time. The list comes from
 //! `stokesforge_app_state::formula_help`, itself built from the callees of the
@@ -23,10 +25,25 @@ use stokesforge_app_state::tr;
 use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
 use crate::theme;
 
-/// The width the icon takes at the right of the field, spacing included: the
-/// text field is shortened by it so that a narrow column never clips the icon.
-pub(super) fn reserved_width(ui: &egui::Ui) -> f32 {
-    ICON_SIZE + ui.spacing().item_spacing.x
+/// Paints the icon in a layer above the grid, just right of `cell` and
+/// centred on its height: it overlaps the neighbouring column (or the empty
+/// area after the last one) and the text field keeps the whole cell. The layer
+/// keeps the icon inside the viewport, so the last column does not hide it.
+/// Call it only in the frames where the cell is edited.
+pub(super) fn show_beside(
+    ctx: &egui::Context,
+    id: egui::Id,
+    cell: egui::Rect,
+    actions: &mut Vec<Action>,
+) {
+    let pos = egui::pos2(cell.right(), cell.center().y - ICON_SIZE / 2.0);
+    egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos)
+        .constrain(true)
+        .show(ctx, |ui| {
+            icon(ui, actions);
+        });
 }
 
 /// Paints the "?" icon at the current position; a click asks to open the

@@ -454,8 +454,9 @@ History: #224.
   instruction. Formula field (S-T6): the "?" icon alone. The `F(x)=` cell of
   the grid has no empty-field text: its "?" (`app/column_formula_help.rs`,
   shown only while the cell is edited, own preference "Show F(x)= help", #404)
-  lists the callable functions by family; the icon only senses the hover, so it
-  never takes the focus whose loss ends the edit.
+  lists the callable functions by family; it is painted just right of the cell,
+  over the neighbouring column (#410), so the field keeps the whole cell width;
+  it never takes the focus whose loss ends the edit.
 - **Status bar** (#230): normal information, warning in the warning
   tint, error in red with an icon (S-M4). An information message fades
   after ≈ 8 s; warning and error stay until the next action
