@@ -8514,7 +8514,11 @@ impl AppState {
                     number = n.to_string()
                 )
             })
-            .find(|candidate| existing.iter().all(|(_, other)| other != candidate))
+            .find(|candidate| {
+                existing
+                    .iter()
+                    .all(|(_, other)| !same_name_ignoring_case(other, candidate))
+            })
             .unwrap_or(origin.clone());
         let before: Vec<NodeId> = existing.iter().map(|(id, _)| *id).collect();
         self.execute(Command::DuplicateWorksheet { sheet, name });

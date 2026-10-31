@@ -1545,8 +1545,18 @@ mod tests {
             .expect("capture")
             .into_external();
 
+        // The destination is built like the source, so that the identifiers
+        // the formula holds name real nodes there: only the reservation keeps
+        // the pasted formula off them.
         let mut destination = Project::new("Destination").expect("project");
-        let (dest_sheet, _) = sheet_with_columns(&mut destination, "BookD", 0);
+        let (dest_sheet, _) = sheet_with_columns(&mut destination, "Book1", 3);
+        let dest_book = destination.tree().parent(dest_sheet).unwrap().unwrap();
+        let dest_sheet3 = destination
+            .add_worksheet(dest_book, Some("Sheet3"))
+            .expect("sheet");
+        destination
+            .add_column(dest_sheet3, None, None, Column::from_f64(&[1.0]))
+            .expect("column");
         let pasted = destination
             .insert_copy(dest_sheet, &copy, "Pasted")
             .expect("paste");

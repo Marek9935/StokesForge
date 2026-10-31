@@ -1196,8 +1196,26 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
             .unwrap();
         let output_sheet = snapshot.tree.parent(output).unwrap().unwrap();
 
-        // F now reads the calculation's output, in whichever sheet it lives.
-        let loops = ColumnFormula::from_parts_with_remote(
+        // G, a column of Sheet1, reads the calculation's output (in the sheet
+        // it lives in); F then reads G: F -> G -> output -> calculation -> F,
+        // two of the three links across sheets.
+        handle
+            .execute(Command::AddColumn {
+                sheet: m.sheet,
+                index: None,
+                name: Some("G".to_string()),
+                column: Column::from_f64(&[]),
+            })
+            .unwrap();
+        let g = *handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .children(m.sheet)
+            .unwrap()
+            .last()
+            .unwrap();
+        let reads_output = ColumnFormula::from_parts_with_remote(
             vec![
                 FormulaPart::Text("max(".to_string()),
                 FormulaPart::Column(output),
@@ -1211,6 +1229,21 @@ fn a_loop_through_a_calculation_and_a_remote_formula_waits_for_a_gesture() {
                 },
             )]),
         );
+        handle
+            .execute(Command::SetColumnMeta {
+                column: g,
+                meta: ColumnMeta {
+                    formula: Some(reads_output),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let loops = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .formula_from_letters(f, "max(Sheet1!C)")
+            .unwrap();
         handle
             .execute(Command::SetColumnMeta {
                 column: f,
