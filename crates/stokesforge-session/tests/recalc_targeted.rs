@@ -1450,7 +1450,7 @@ fn with_sheet3(mode: FormulaRecalc) -> (Session, SessionHandle, SheetFixture, Ot
         .expect("workbook")
         .last()
         .expect("Sheet3");
-    let mut add = |name: &str, values: &[f64]| {
+    let add = |name: &str, values: &[f64]| {
         handle
             .execute(Command::AddColumn {
                 sheet,
