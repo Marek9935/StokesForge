@@ -81,7 +81,7 @@ const CALLS: &[&str] = &[
 
 /// The free functions of the application that place a label (#169):
 /// `theme::section_title(ui, "…")`, the three text levels
-/// (`section_heading`, `table_header`, `secondary_text`, #170), `theme::bold("…")`,
+/// (`section_heading`, `table_header`, `secondary_text`, `dimmed_text`, #170, #392), `theme::bold("…")`,
 /// the list row.
 /// Seen called alone or through a path (`crate::theme::bold(`), never
 /// as a method.
@@ -90,6 +90,7 @@ const FREE_FUNCTIONS: &[&str] = &[
     "section_heading",
     "table_header",
     "secondary_text",
+    "dimmed_text",
     "bold",
     "list_row",
     "list_row_text",
@@ -562,6 +563,7 @@ fn the_guard_sees_the_labels_of_the_free_theme_functions() {
         r#"fn f(ui: &mut Ui) { ui.label(theme::section_heading("Title")); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(theme::table_header("Value")); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(theme::secondary_text("Detail")); }"#,
+        r#"fn f(ui: &mut Ui) { paint(ui, theme::dimmed_text("Empty")); }"#,
         r#"fn f(ui: &mut Ui) { list_row(ui, None, "Series", true, false); }"#,
     ] {
         assert_eq!(find_violations(code).len(), 1, "not seen: {code}");

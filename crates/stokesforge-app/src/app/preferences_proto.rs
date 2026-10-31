@@ -468,7 +468,7 @@ fn folders_page(ui: &mut egui::Ui, p: &mut Proto) {
             ("Import recipes", "~/.config/stokesforge/recipes/"),
         ] {
             rows.row(label, |ui| {
-                ui.label(egui::RichText::new(path).weak());
+                ui.label(crate::theme::dimmed_text(path));
                 ui.button("Open Folder").clicked()
             });
         }

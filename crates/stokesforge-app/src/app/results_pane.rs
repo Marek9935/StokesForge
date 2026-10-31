@@ -298,7 +298,7 @@ fn detail(
         }
     }
     if columns.is_empty() {
-        ui.label(egui::RichText::new(tr!("results-no-values")).weak());
+        ui.label(crate::theme::dimmed_text(tr!("results-no-values")));
         return;
     }
     // RAW-SCROLL(#347): table, rows are the content: no end margin

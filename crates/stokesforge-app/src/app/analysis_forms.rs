@@ -293,7 +293,7 @@ fn optional_range(
 }
 
 fn caption(ui: &mut egui::Ui, text: String) {
-    ui.label(egui::RichText::new(text).weak());
+    ui.label(crate::theme::secondary_text(text));
 }
 
 /// The whole form: input, family, output, in a two-column grid (#227) whose
@@ -405,7 +405,7 @@ fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &
                 });
         });
         if candidates.is_empty() {
-            rows.note(tr!("analysis-field-no-candidate"));
+            rows.note_dimmed(tr!("analysis-field-no-candidate"));
         }
     }
 }
@@ -1052,7 +1052,7 @@ fn output_block(
         Some(tr!("analysis-output-low-r2", "hint")),
     );
     if !form.auto_recalc && form.series.len() > stokesforge_analysis::ops::HEAVY_BATCH {
-        rows.note(tr!("analysis-output-heavy"));
+        rows.note_dimmed(tr!("analysis-output-heavy"));
     }
 }
 
@@ -1105,7 +1105,7 @@ pub(super) fn value_row(
     unit: &str,
 ) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).weak());
+        ui.label(crate::theme::dimmed_text(label));
         exact_result_label(
             ui,
             with_unit(format_value(value, error), unit),

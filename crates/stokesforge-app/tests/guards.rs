@@ -29,6 +29,8 @@
 //! - `no_literal_add_space_outside_the_theme` (#227, S-L4): a gap is placed
 //!   with the two constants of `theme.rs` (`SPACE_ITEM`, `SPACE_SECTION`),
 //!   never with a number written in place, no exemption;
+//! - `no_weak_outside_the_theme` (#392): a dimmed text is `theme::secondary_text`
+//!   or `theme::dimmed_text`, never a `.weak()` written elsewhere, no exemption;
 //! - `no_consume_key_outside_the_registry` (#231, S-K1): every consumed key is
 //!   a constant of `app/shortcuts.rs`, never a `consume_key` nor a
 //!   `KeyboardShortcut::new` written elsewhere, no exemption;
@@ -1570,6 +1572,82 @@ fn the_spacing_guard_sees_a_number_written_in_place() {
     assert!(
         literal_add_space(&[file("theme.rs", "fn f(ui: &mut Ui) { ui.add_space(6.0); }")])
             .is_empty()
+    );
+}
+
+/// The `.weak()` method calls of the production code outside `theme.rs`,
+/// `path:line` (#392). Whitespace inside the call and a call on its own line
+/// are seen; `weak_text_color()` and `my.weakest()` are not calls of `weak`.
+fn weak_outside_theme(sources: &[SourceFile]) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in sources {
+        if file.path == "theme.rs" {
+            continue;
+        }
+        let source = file.production();
+        let mask = &source.mask;
+        for i in 0..mask.len() {
+            if !starts_with_at(mask, i, ".weak") {
+                continue;
+            }
+            let mut rest = mask[i + ".weak".len()..]
+                .iter()
+                .skip_while(|c| c.is_whitespace());
+            if rest.next() != Some(&'(') {
+                continue;
+            }
+            if rest.find(|c| !c.is_whitespace()) == Some(&')') {
+                found.push(format!(
+                    "src/{}:{}",
+                    file.path,
+                    line_of(&source.original, i)
+                ));
+            }
+        }
+    }
+    found
+}
+
+/// Rule #392 (`docs/interface-standard.md`, "Dimmed text"): the muted text is
+/// written by two functions of `theme.rs`, never by a `.weak()` in place.
+#[test]
+fn no_weak_outside_the_theme() {
+    let sources = sources::sources();
+    let offenders = weak_outside_theme(&sources);
+    assert!(
+        offenders.is_empty(),
+        "`.weak()`: use `theme::secondary_text` or `theme::dimmed_text`: {offenders:?}"
+    );
+}
+
+/// The witness: a `.weak()` is seen however it is written; the colour helper,
+/// a comment, test code, `theme.rs` and a longer method name pass.
+#[test]
+fn the_weak_guard_sees_a_weak_written_in_place() {
+    for code in [
+        "fn f() { let t = RichText::new(t).weak(); }",
+        "fn f() { let t = RichText::new(t).weak (); }",
+        "fn f() { let t = RichText::new(t)\n    .weak(); }",
+    ] {
+        assert_eq!(
+            weak_outside_theme(&[file("app/e.rs", code)]).len(),
+            1,
+            "not seen: {code}"
+        );
+    }
+    for code in [
+        "fn f() { let c = weak_text_color(); }",
+        "fn f() {} // RichText::new(t).weak()",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { RichText::new(t).weak(); } }",
+        "fn f() { my.weakest(); }",
+    ] {
+        assert!(
+            weak_outside_theme(&[file("app/e.rs", code)]).is_empty(),
+            "false positive: {code}"
+        );
+    }
+    assert!(
+        weak_outside_theme(&[file("theme.rs", "fn f() { RichText::new(t).weak(); }")]).is_empty()
     );
 }
 

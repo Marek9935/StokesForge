@@ -948,11 +948,11 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                     chosen = Some(String::new());
                 }
                 ui.separator();
-                ui.label(egui::RichText::new(tr!("format-font-embedded")).weak());
+                ui.label(crate::theme::dimmed_text(tr!("format-font-embedded")));
                 for family in stokesforge_render_egui::available_families() {
                     if !family.embedded && !shown_system_title {
                         ui.separator();
-                        ui.label(egui::RichText::new(tr!("format-font-system")).weak());
+                        ui.label(crate::theme::dimmed_text(tr!("format-font-system")));
                         shown_system_title = true;
                     }
                     if ui
