@@ -9,6 +9,8 @@
 # `prune` deletes it, which frees the colour.
 
 SF_COLOURS=(🟦 🟩 🟧 🟪 🟥 🟨)
+# The To-test page (artifact with a database), shared by every session.
+SF_TO_TEST_URL="https://claude.ai/artifact/UsyyHWZc5cj1enWrRr7yEJ"
 
 # Main checkout (absolute), whichever worktree we run from.
 sf_main_dir() {
