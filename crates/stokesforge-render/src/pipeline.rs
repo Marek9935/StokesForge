@@ -1628,6 +1628,85 @@ pub fn free_frames_from_grid<DB: DrawingBackend>(
     Ok(Some(frames))
 }
 
+/// The new frame of each cell moved by an arrangement: `(base layer, frame)`.
+pub type CellFrames = Vec<(usize, FreeFrame)>;
+
+/// The axis along which layers are distributed (#398, L4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DistributeAxis {
+    /// Left to right: only the lefts change.
+    Horizontal,
+    /// Top to bottom: only the tops change.
+    Vertical,
+}
+
+/// The new frames of `targets` (base layers) of a **free** graph spread along
+/// `axis` with equal gaps between their **outer** rectangles (frame plus axis
+/// bands, #398, L4), measured like the export. The cells are ordered by outer
+/// center (ties: base index); the first and the last stay put, and only the
+/// coordinate along `axis` changes. A gap may be negative. Returns every cell
+/// with its frame, in that order. `None` if the graph is not free, a target is
+/// not a cell of it, or there are fewer than three distinct cells.
+pub fn distribute_frames<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+    targets: &[usize],
+    axis: DistributeAxis,
+) -> Result<Option<CellFrames>, DrawingAreaErrorKind<DB::ErrorType>> {
+    if spec.layer_placement != LayerPlacement::Free {
+        return Ok(None);
+    }
+    let bases = spec.cell_bases();
+    let mut cells: Vec<usize> = Vec::new();
+    for panel in targets {
+        let Some(&base) = bases.get(*panel) else {
+            return Ok(None);
+        };
+        if !cells.contains(&base) {
+            cells.push(base);
+        }
+    }
+    if cells.len() < 3 {
+        return Ok(None);
+    }
+    let layout = figure_layout(spec, probe)?;
+    // `(base, start, size)` of each outer rectangle along the axis.
+    let mut spans: Vec<(usize, f64, f64)> = Vec::with_capacity(cells.len());
+    for &base in &cells {
+        let Some(cell) = layout.free_cells.iter().find(|cell| cell.base == base) else {
+            return Ok(None);
+        };
+        let (x, y, w, h) = cell.outer;
+        let (start, size) = match axis {
+            DistributeAxis::Horizontal => (f64::from(x), f64::from(w)),
+            DistributeAxis::Vertical => (f64::from(y), f64::from(h)),
+        };
+        spans.push((base, start, size));
+    }
+    spans.sort_by(|a, b| {
+        (a.1 + a.2 / 2.0)
+            .total_cmp(&(b.1 + b.2 / 2.0))
+            .then(a.0.cmp(&b.0))
+    });
+    let first = spans[0];
+    let last = spans[spans.len() - 1];
+    let sizes: f64 = spans.iter().map(|span| span.2).sum();
+    let gap = (last.1 + last.2 - first.1 - sizes) / (spans.len() - 1) as f64;
+    let mut at = first.1;
+    let mut out = Vec::with_capacity(spans.len());
+    for (base, start, size) in spans {
+        let mut frame = spec.panels[base].sanitized_free_frame();
+        let shift = at - start;
+        match axis {
+            DistributeAxis::Horizontal => frame.left += shift,
+            DistributeAxis::Vertical => frame.top += shift,
+        }
+        out.push((base, frame));
+        at += size + gap;
+    }
+    Ok(Some(out))
+}
+
 /// A rectangle in stored coordinates, `(x0, y0, x1, y1)`.
 type StoredRect = (f64, f64, f64, f64);
 

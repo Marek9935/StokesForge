@@ -1269,3 +1269,209 @@ fn a_click_on_the_shared_area_activates_the_front_cell() {
         assert_eq!(view.active_panel(&spec), front, "stacks {stacks:?}");
     }
 }
+
+/// The spec of the fixture's graph.
+fn spec_of(fixture: &Fixture) -> PlotSpec {
+    let snapshot = fixture.snapshot();
+    let node = snapshot.tree.node(fixture.graph).expect("graph");
+    let stokesforge_core::node::NodeKind::Graph { spec, .. } = node.kind() else {
+        panic!("a graph");
+    };
+    spec.clone()
+}
+
+/// A click at `at` with `modifiers` held (press, then release).
+fn click_with(
+    context: &egui::Context,
+    view: &mut GraphView,
+    fixture: &Fixture,
+    at: Pos2,
+    modifiers: egui::Modifiers,
+    time: f64,
+) {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    frame_with(
+        context,
+        view,
+        fixture,
+        vec![egui::Event::PointerMoved(at), button(true)],
+        time,
+        1.0,
+        modifiers,
+    );
+    frame_with(
+        context,
+        view,
+        fixture,
+        vec![button(false)],
+        time + 0.05,
+        1.0,
+        modifiers,
+    );
+}
+
+/// #398: Shift + click on another layer of a free figure selects it without
+/// changing the active layer, a second one removes it, a plain click on a layer
+/// clears the selection and activates that layer, and the object selection is
+/// left alone. Witness: Shift + click changes the active layer, or does not
+/// toggle.
+#[test]
+fn shift_click_selects_other_layers_and_a_plain_click_clears_them() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let spec = spec_of(&fixture);
+    let drawn = view.last_drawn().expect("drawn").panels.clone();
+    let centre = |index: usize| {
+        let panel = drawn.iter().find(|p| p.index == index).expect("layer");
+        Pos2::new(
+            panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+            panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+        )
+    };
+    let shift = egui::Modifiers::SHIFT;
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(0),
+        egui::Modifiers::NONE,
+        1.0,
+    );
+    assert_eq!(view.active_panel(&spec), 0);
+    assert!(view.extra_layers(&spec).is_empty());
+
+    let object = view.selected_series();
+    click_with(&context, &mut view, &fixture, centre(1), shift, 2.0);
+    assert_eq!(view.extra_layers(&spec), vec![1], "selected");
+    assert_eq!(view.active_panel(&spec), 0, "the reference does not change");
+    assert_eq!(
+        view.selected_series(),
+        object,
+        "the object selection is left alone"
+    );
+    assert!(view.take_events().is_empty(), "no move started");
+
+    click_with(&context, &mut view, &fixture, centre(1), shift, 3.0);
+    assert!(
+        view.extra_layers(&spec).is_empty(),
+        "a second Shift + click removes it"
+    );
+    assert_eq!(view.active_panel(&spec), 0);
+
+    click_with(&context, &mut view, &fixture, centre(1), shift, 4.0);
+    assert_eq!(view.extra_layers(&spec), vec![1]);
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(1),
+        egui::Modifiers::NONE,
+        5.0,
+    );
+    assert_eq!(
+        view.active_panel(&spec),
+        1,
+        "a plain click activates the layer"
+    );
+    assert!(
+        view.extra_layers(&spec).is_empty(),
+        "and clears the selection"
+    );
+}
+
+/// #398: a curve hidden by a layer in front shows no handle where the front
+/// layer covers it; the front layer's own curve keeps all of its handles.
+/// Witness: dropping the filter, or hiding with `>=` on the rank.
+#[test]
+fn a_curve_loses_its_handles_where_a_front_layer_covers_it() {
+    let count = |lefts: (f64, f64), panel: usize| {
+        let fixture = Fixture::free_two_layers_at(lefts, (0, 0));
+        let (_, view) = ready(&fixture);
+        view.series_handle_centers(stokesforge_plot::SeriesRef::new(panel, 0))
+            .len()
+    };
+    let (apart_back, apart_front) = (count((100.0, 500.0), 0), count((100.0, 500.0), 1));
+    assert!(apart_back > 4, "the curve has handles: {apart_back}");
+    assert!(
+        count((100.0, 200.0), 0) < apart_back,
+        "the back curve is covered"
+    );
+    assert_eq!(
+        count((100.0, 200.0), 1),
+        apart_front,
+        "the front curve is whole"
+    );
+}
+
+/// #398: a right-click on a layer inside the selection of layers keeps the
+/// selection and its reference; outside it, the layer pointed at becomes the
+/// active one and the selection is cleared. Witness: a right-click that always
+/// resets the selection.
+#[test]
+fn a_right_click_inside_the_layer_selection_keeps_it() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let spec = spec_of(&fixture);
+    let drawn = view.last_drawn().expect("drawn").panels.clone();
+    let centre = |index: usize| {
+        let panel = drawn.iter().find(|p| p.index == index).expect("layer");
+        Pos2::new(
+            panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+            panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+        )
+    };
+    let right_click = |view: &mut GraphView, at: Pos2, time: f64| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(at), button(true)],
+            time,
+        );
+        frame(&context, view, &fixture, vec![button(false)], time + 0.05);
+    };
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(0),
+        egui::Modifiers::NONE,
+        1.0,
+    );
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(1),
+        egui::Modifiers::SHIFT,
+        2.0,
+    );
+    assert_eq!(view.extra_layers(&spec), vec![1]);
+    right_click(&mut view, centre(1), 3.0);
+    assert_eq!(view.active_panel(&spec), 0, "the reference stays");
+    assert_eq!(view.extra_layers(&spec), vec![1], "the selection stays");
+    // Outside the selection: a lone layer replaces it.
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(1),
+        egui::Modifiers::NONE,
+        4.0,
+    );
+    assert!(view.extra_layers(&spec).is_empty());
+    right_click(&mut view, centre(0), 5.0);
+    assert_eq!(view.active_panel(&spec), 0);
+    assert!(view.extra_layers(&spec).is_empty());
+}

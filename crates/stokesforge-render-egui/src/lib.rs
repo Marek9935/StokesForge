@@ -750,6 +750,11 @@ pub struct GraphView {
     /// additions. Interface state, outside the model; never drawn in the
     /// figure. Read by [`Self::active_panel`], which revalidates it.
     active_panel: usize,
+    /// The other layers selected with Shift + click in free placement (#398),
+    /// as base layer indices in click order; the active layer is the
+    /// reference of the selection and is never listed. Interface state like
+    /// [`Self::active_panel`]; read through [`Self::extra_layers`].
+    extra_layers: Vec<usize>,
     /// Selection seen at the previous frame: the active layer follows a
     /// change of selection, not the selection itself (a click on a layer
     /// marker therefore stays valid as long as nothing else is selected).
@@ -859,6 +864,7 @@ impl GraphView {
             selected_group: None,
             nav_drag: None,
             active_panel: 0,
+            extra_layers: Vec::new(),
             seen_selection: (None, None, None, None),
             events: Vec::new(),
         }
@@ -883,6 +889,65 @@ impl GraphView {
         }
     }
 
+    /// The layers selected besides the active one (#398): base layers in click
+    /// order, stale indices and the active layer's own cell left out. Only in
+    /// free placement; empty on the grid.
+    pub fn extra_layers(&self, spec: &PlotSpec) -> Vec<usize> {
+        if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
+            return Vec::new();
+        }
+        let bases = spec.cell_bases();
+        let active = bases.get(self.active_panel(spec)).copied();
+        let mut kept: Vec<usize> = Vec::new();
+        for &panel in &self.extra_layers {
+            if let Some(&base) = bases.get(panel) {
+                if Some(base) != active && !kept.contains(&base) {
+                    kept.push(base);
+                }
+            }
+        }
+        kept
+    }
+
+    /// Shift + click on a layer (#398): adds its cell to the selection, or
+    /// removes it when already selected. The active layer stays the reference;
+    /// clicking it, or any layer on the grid, does nothing.
+    pub fn toggle_extra_layer(&mut self, panel: usize, spec: &PlotSpec) {
+        if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
+            return;
+        }
+        let bases = spec.cell_bases();
+        let Some(&base) = bases.get(panel) else {
+            return;
+        };
+        if bases.get(self.active_panel(spec)) == Some(&base) {
+            return;
+        }
+        let mut current = self.extra_layers(spec);
+        if let Some(at) = current.iter().position(|&b| b == base) {
+            current.remove(at);
+        } else {
+            current.push(base);
+        }
+        self.extra_layers = current;
+    }
+
+    /// Whether the cell of layer `panel` is the reference or one of the other
+    /// selected layers, with at least one other layer selected (#398).
+    pub fn layer_in_selection(&self, panel: usize, spec: &PlotSpec) -> bool {
+        let extra = self.extra_layers(spec);
+        let bases = spec.cell_bases();
+        !extra.is_empty()
+            && bases.get(panel).is_some_and(|base| {
+                extra.contains(base) || bases.get(self.active_panel(spec)) == Some(base)
+            })
+    }
+
+    /// Drops the selection of other layers (a plain click on a layer).
+    pub fn clear_extra_layers(&mut self) {
+        self.extra_layers.clear();
+    }
+
     /// Follows a change of the layers' indices (#357: a cell or a layer was
     /// deleted, or its deletion undone): `map[old]` is the new index of layer
     /// `old`, `None` if it is gone. The framings and the active layer move with
@@ -891,6 +956,7 @@ impl GraphView {
     pub fn remap_layers(&mut self, map: &[Option<usize>]) {
         self.view.remap_panels(map);
         self.active_panel = map.get(self.active_panel).copied().flatten().unwrap_or(0);
+        self.extra_layers.clear();
         self.selected_annotation = None;
         self.selected_shape = None;
         self.selected_series = None;
@@ -962,6 +1028,44 @@ impl GraphView {
         }
     }
 
+    /// Centers, in display pixels from the top-left corner of the figure, of
+    /// the selection handles of `target` (#98): placed by
+    /// `stokesforge_render::series_selection`, in display pixels so that their
+    /// spacing does not follow the enlargement of the figure. A handle where a
+    /// layer in front of the curve's cell covers it is left out (#398). Empty
+    /// for a series that was not drawn.
+    pub fn series_handle_centers(&self, target: stokesforge_plot::SeriesRef) -> Vec<(f64, f64)> {
+        let Some(plot) = self.last.as_ref() else {
+            return Vec::new();
+        };
+        let Some(panel) = plot.panels.iter().find(|p| p.index == target.panel) else {
+            return Vec::new();
+        };
+        let Some(series) = panel
+            .series_geometry
+            .iter()
+            .find(|s| s.index == target.index)
+        else {
+            return Vec::new();
+        };
+        let Some(scale) = self.display_scale() else {
+            return Vec::new();
+        };
+        let scale = f64::from(scale);
+        series
+            .handle_centers(|(x, y)| (x * scale, y * scale))
+            .into_iter()
+            .filter(|&(x, y)| {
+                !stokesforge_render::hit::hidden_by_front(
+                    plot,
+                    panel.cell_rank,
+                    x / scale,
+                    y / scale,
+                )
+            })
+            .collect()
+    }
+
     fn paint_series_handles(
         &self,
         painter: &egui::Painter,
@@ -971,33 +1075,12 @@ impl GraphView {
         if target.panel >= spec.panels.len() {
             return;
         }
-        let Some(panel) = self
-            .last
-            .as_ref()
-            .and_then(|plot| plot.panels.iter().find(|p| p.index == target.panel))
-        else {
-            return;
-        };
-        let Some(series) = panel
-            .series_geometry
-            .iter()
-            .find(|s| s.index == target.index)
-        else {
-            return;
-        };
         let Some(rect) = self.display_rect else {
             return;
         };
-        let Some(scale) = self.display_scale() else {
-            return;
-        };
-        // Selection handles (#98): placed and painted by
-        // `stokesforge_render::series_selection`, in display pixels so that
-        // their size and spacing do not follow the enlargement of the
-        // figure. Painted over the cached figure, never inside it: selecting
-        // rebuilds nothing, and the export knows nothing about them.
-        let scale = f64::from(scale);
-        let centers = series.handle_centers(|(x, y)| (x * scale, y * scale));
+        // Painted over the cached figure, never inside it: selecting rebuilds
+        // nothing, and the export knows nothing about them.
+        let centers = self.series_handle_centers(target);
         let mut shapes = Vec::with_capacity(centers.len());
         let size = (rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
         let mut backend = EguiBackend::new(&mut shapes, rect.min, size, &self.measurer);
@@ -1730,6 +1813,9 @@ impl GraphView {
         self.selected_shape = self.selected_shape.filter(|t| t.get(&spec).is_some());
         self.selected_text = self.selected_text.filter(|t| t.visible(&spec).is_some());
         self.follow_selection(&spec);
+        if spec.layer_placement != stokesforge_plot::LayerPlacement::Free {
+            self.extra_layers.clear();
+        }
         self.handle_navigation(&response, &context, &spec);
         let real_gesture = response.dragged()
             && (self.nav_drag.is_some_and(NavDrag::is_pan)
@@ -1883,13 +1969,12 @@ impl GraphView {
         // takes the gesture, a cell hidden by the outer rectangle of a cell in
         // front of it does not. On the grid every rank is 0.
         let hidden = |panel: &DrawnPanel| {
-            last.panels.iter().any(|front| {
-                front.cell_rank > panel.cell_rank
-                    && pos.x as f64 >= front.cell_origin.0 as f64
-                    && (pos.x as f64) < front.cell_origin.0 as f64 + front.cell_size.0 as f64
-                    && pos.y as f64 >= front.cell_origin.1 as f64
-                    && (pos.y as f64) < front.cell_origin.1 as f64 + front.cell_size.1 as f64
-            })
+            stokesforge_render::hit::hidden_by_front(
+                last,
+                panel.cell_rank,
+                pos.x as f64,
+                pos.y as f64,
+            )
         };
         let front = last
             .panels
@@ -2008,8 +2093,31 @@ impl GraphView {
             let hit = pointer
                 .and_then(|pos| self.panel_at(pos))
                 .and_then(|(i, _)| Some(self.last.as_ref()?.panels.get(i)?.index));
+            // Shift + click on a layer in free placement (#398) adds it to, or
+            // removes it from, the selection of layers: the active layer stays
+            // the reference, the selected object is left alone and no move
+            // starts.
+            if let (true, true, Some(panel)) = (
+                response.clicked() && self.layout_is_free() && context.input(|i| i.modifiers.shift),
+                self.tool == GraphTool::Pointer,
+                hit,
+            ) {
+                self.toggle_extra_layer(panel, spec);
+                return;
+            }
             if let Some(panel) = hit {
-                self.set_active_panel(panel, spec);
+                // A right-click inside the selection of layers keeps it and its
+                // reference (the menu acts on all of it); outside, the layer
+                // pointed at replaces it (#398).
+                let inside = response.secondary_clicked()
+                    && !response.clicked()
+                    && self.layer_in_selection(panel, spec);
+                if !inside {
+                    self.set_active_panel(panel, spec);
+                    if response.clicked() || response.secondary_clicked() {
+                        self.clear_extra_layers();
+                    }
+                }
             }
         }
         if response.clicked() {
@@ -3067,6 +3175,66 @@ mod tests {
         // The active layer deleted: back to the first.
         view.remap_layers(&[Some(0), None]);
         assert_eq!(view.active_panel(&two), 0);
+    }
+
+    /// #398: the selection of other layers keeps click order, toggles, never
+    /// lists the active layer's cell, stands for the base of an overlay, is
+    /// empty on the grid and dropped when the layers are renumbered. Witness:
+    /// letting the grid keep a selection, or listing the active layer.
+    #[test]
+    fn the_layer_selection_toggles_and_follows_the_placement() {
+        let mut panels: Vec<PanelSpec> = (0..3).map(|column| PanelSpec::at(0, column)).collect();
+        panels.push(PanelSpec::overlay_on(
+            &panels[2],
+            stokesforge_plot::OverlaySpec::TOP_X,
+        ));
+        let mut free = PlotSpec::empty("Layers").with_panels(Panels::new(panels));
+        free.layer_placement = stokesforge_plot::LayerPlacement::Free;
+        let mut view = GraphView::new();
+        view.set_active_panel(1, &free);
+        view.toggle_extra_layer(2, &free);
+        view.toggle_extra_layer(0, &free);
+        assert_eq!(view.extra_layers(&free), vec![2, 0], "click order");
+        view.toggle_extra_layer(1, &free);
+        assert_eq!(
+            view.extra_layers(&free),
+            vec![2, 0],
+            "the reference is not listed"
+        );
+        view.toggle_extra_layer(2, &free);
+        assert_eq!(
+            view.extra_layers(&free),
+            vec![0],
+            "a second click removes it"
+        );
+        view.toggle_extra_layer(3, &free);
+        assert_eq!(
+            view.extra_layers(&free),
+            vec![0, 2],
+            "an overlay stands for its base cell"
+        );
+        view.set_active_panel(2, &free);
+        assert_eq!(
+            view.extra_layers(&free),
+            vec![0],
+            "the new reference leaves it"
+        );
+
+        let mut grid = free.clone();
+        grid.layer_placement = stokesforge_plot::LayerPlacement::Grid;
+        assert!(view.extra_layers(&grid).is_empty(), "nothing on the grid");
+        let mut other = GraphView::new();
+        other.toggle_extra_layer(1, &grid);
+        assert!(
+            other.extra_layers(&free).is_empty(),
+            "no toggling on the grid"
+        );
+
+        view.remap_layers(&[Some(0), Some(1), Some(2), Some(3)]);
+        assert!(view.extra_layers(&free).is_empty(), "renumbering drops it");
+        view.toggle_extra_layer(0, &free);
+        view.clear_extra_layers();
+        assert!(view.extra_layers(&free).is_empty());
     }
 
     /// Issue #37: the input field is centered on the rendered text, at its

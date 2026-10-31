@@ -198,6 +198,22 @@ pub fn place_beside(spec: &PlotSpec, panel: usize, side: CellSide) -> Option<Fre
         .flatten()
 }
 
+/// The new frames of the cells `targets` of a free `spec` spread along `axis`
+/// with equal gaps between their outer rectangles (#398, L4), measured like
+/// the exports. `None` if the graph is not free or there are fewer than three
+/// cells.
+pub fn distribute_frames(
+    spec: &PlotSpec,
+    targets: &[usize],
+    axis: stokesforge_render::pipeline::DistributeAxis,
+) -> Option<stokesforge_render::pipeline::CellFrames> {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    stokesforge_render_svg::distribute_frames(spec, &measurer, &choice, targets, axis)
+        .ok()
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

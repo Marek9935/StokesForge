@@ -21,10 +21,12 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Add Graph | Ajouter un graphique |
 | Add Text | Ajouter un texte |
 | Add Workbook | Ajouter un classeur |
+| Align | Aligner |
 | Analysis | Analyse |
 | Axes | Axes |
 | Axes… | Axes… |
 | Below | En dessous |
+| Bottom | Bas |
 | Bring to Front | Amener devant |
 | Choose Default Folder | Choisir le dossier par défaut |
 | Choose Files to Import | Choisir les fichiers à importer |
@@ -42,11 +44,14 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Delete and Shift Up | Supprimer et remonter |
 | Delete calculation | Supprimer le calcul |
 | Delete Calculation… | Supprimer le calcul… |
+| Delete Layer | Supprimer le calque |
 | Delete Recovery Copy | Supprimer la copie de secours |
 | Delete Template | Supprimer le modèle |
 | Detach from Calculation | Détacher du calcul |
 | Detach Project Manager | Détacher le gestionnaire de projet |
 | Direct Deconvolution… | Déconvolution directe… |
+| Distribute Horizontally | Répartir horizontalement |
+| Distribute Vertically | Répartir verticalement |
 | Duplicate | Dupliquer |
 | Edit | Édition |
 | Edit Calculation… | Modifier le calcul… |
@@ -62,12 +67,14 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Fitting… | Ajustement… |
 | Format | Format |
 | Formula Functions | Fonctions de formule |
+| Free | Libre |
 | General | Général |
 | Graph | Graphique |
 | Graph Properties… | Propriétés du graphique… |
 | Header and Data End | En-tête et fin des données |
 | Help | Aide |
 | Hide | Masquer |
+| Horizontal Center | Centre horizontal |
 | Import | Importer |
 | Import Template | Importer un modèle |
 | Import Wizard | Assistant d'import |
@@ -78,6 +85,9 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Keyboard Shortcuts | Raccourcis clavier |
 | Keyboard Shortcuts… | Raccourcis clavier… |
 | Language | Langue |
+| Layer Placement | Placement des calques |
+| Layout | Disposition |
+| Left | Gauche |
 | Legend | Légende |
 | Legend… | Légende… |
 | Low R² | R² faible |
@@ -124,6 +134,7 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Recover Projects | Récupérer des projets |
 | Reference Correction… | Correction par référence… |
 | Refresh from Source | Actualiser depuis la source |
+| Regular Grid | Grille régulière |
 | Relink transposed sheet | Relier de nouveau la feuille transposée |
 | Remove Formula, Keep Data | Retirer la formule, garder les données |
 | Rename | Renommer |
@@ -136,9 +147,12 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Reset Width | Réinitialiser la largeur |
 | Reset Zoom | Réinitialiser le zoom |
 | Restore Original Data | Restaurer les données originales |
+| Right | Droite |
 | Right | À droite |
 | Right Mirror Axis | Axe miroir de droite |
 | Right Y (Linked X) | Y à droite (X lié) |
+| Same Height | Même hauteur |
+| Same Width | Même largeur |
 | Save | Enregistrer |
 | Save As… | Enregistrer sous… |
 | Save Project | Enregistrer le projet |
@@ -161,12 +175,14 @@ Texts that contain a variable (a name, a number) are not listed. A trailing "…
 | Theme | Thème |
 | Theme… | Thème… |
 | Tools | Outils |
+| Top | Haut |
 | Top Mirror Axis | Axe miroir du haut |
 | Top X (Linked Y) | X en haut (Y lié) |
 | Top X, Right Y | X en haut, Y à droite |
 | Ungroup | Dissoudre le groupe |
 | Unsaved Changes | Modifications non enregistrées |
 | Untitled project | Projet sans titre |
+| Vertical Center | Centre vertical |
 | View | Affichage |
 | Window | Fenêtre |
 | Workbook | Classeur |

@@ -704,6 +704,129 @@ pub fn set_free_frame(spec: &mut PlotSpec, panel: usize, field: FreeField, value
     true
 }
 
+/// Which edge or center the layers of an Align line up on (#398, L4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignEdge {
+    /// Bottom edges of the frames.
+    Bottom,
+    /// Top edges of the frames.
+    Top,
+    /// Vertical centers of the frames.
+    VCenter,
+    /// Left edges of the frames.
+    Left,
+    /// Right edges of the frames.
+    Right,
+    /// Horizontal centers of the frames.
+    HCenter,
+}
+
+/// Which size of the reference the other layers take (#398, L4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    /// Width of the plot area.
+    Width,
+    /// Height of the plot area.
+    Height,
+}
+
+/// The cells an arrange action (Align, Same Width…) acts on (#398, L5), as
+/// base layer indices: `active` is the reference and comes first, then the
+/// `extra` selected layers, an overlay standing for its base and a cell
+/// counted once. With fewer than two distinct cells, every cell of the graph:
+/// the active one first, then the others in creation order.
+pub fn arrange_targets(spec: &PlotSpec, active: usize, extra: &[usize]) -> Vec<usize> {
+    let bases = spec.cell_bases();
+    let mut picked: Vec<usize> = Vec::new();
+    for panel in std::iter::once(&active).chain(extra) {
+        if let Some(&base) = bases.get(*panel) {
+            if !picked.contains(&base) {
+                picked.push(base);
+            }
+        }
+    }
+    if picked.len() >= 2 {
+        return picked;
+    }
+    let mut all: Vec<usize> = bases
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &base)| (index == base).then_some(index))
+        .collect();
+    if let Some(&first) = picked.first() {
+        all.retain(|&base| base != first);
+        all.insert(0, first);
+    }
+    all
+}
+
+/// The base cells of `targets` with their frames, the reference first; `None`
+/// in grid placement, for a missing layer or an empty list.
+fn target_frames(spec: &PlotSpec, targets: &[usize]) -> Option<Vec<(usize, FreeFrame)>> {
+    if spec.layer_placement != LayerPlacement::Free || targets.is_empty() {
+        return None;
+    }
+    let bases = spec.cell_bases();
+    let mut out: Vec<(usize, FreeFrame)> = Vec::with_capacity(targets.len());
+    for panel in targets {
+        let base = *bases.get(*panel)?;
+        if !out.iter().any(|(b, _)| *b == base) {
+            out.push((base, spec.panels[base].sanitized_free_frame()));
+        }
+    }
+    Some(out)
+}
+
+/// Lines the plot areas of `targets` (base layers, the **first is the
+/// reference** and does not move) up on one edge or center of the
+/// reference's frame (#398, L4, L5). Frames, not outer rectangles, like the
+/// magnets; sizes and stacking keys are kept. `false`, with the spec
+/// unchanged, in grid placement or for a missing layer.
+pub fn align_layers(spec: &mut PlotSpec, targets: &[usize], edge: AlignEdge) -> bool {
+    let Some(frames) = target_frames(spec, targets) else {
+        return false;
+    };
+    let reference = frames[0].1;
+    for (base, mut frame) in frames.into_iter().skip(1) {
+        match edge {
+            AlignEdge::Bottom => frame.top = reference.top + reference.height - frame.height,
+            AlignEdge::Top => frame.top = reference.top,
+            AlignEdge::VCenter => {
+                frame.top = reference.top + (reference.height - frame.height) / 2.0;
+            }
+            AlignEdge::Left => frame.left = reference.left,
+            AlignEdge::Right => frame.left = reference.left + reference.width - frame.width,
+            AlignEdge::HCenter => {
+                frame.left = reference.left + (reference.width - frame.width) / 2.0;
+            }
+        }
+        if let Some(panel) = spec.panels.get_mut(base) {
+            panel.free_frame = Some(frame.sanitized());
+        }
+    }
+    true
+}
+
+/// Gives the plot areas of `targets` (the first is the reference) the width
+/// or the height of the reference's, their left and top kept (#398, L4, L5).
+/// `false`, with the spec unchanged, in grid placement or for a missing layer.
+pub fn match_layer_size(spec: &mut PlotSpec, targets: &[usize], dimension: Dimension) -> bool {
+    let Some(frames) = target_frames(spec, targets) else {
+        return false;
+    };
+    let reference = frames[0].1;
+    for (base, mut frame) in frames.into_iter().skip(1) {
+        match dimension {
+            Dimension::Width => frame.width = reference.width,
+            Dimension::Height => frame.height = reference.height,
+        }
+        if let Some(panel) = spec.panels.get_mut(base) {
+            panel.free_frame = Some(frame.sanitized());
+        }
+    }
+    true
+}
+
 /// Rewrites the stacking keys of the cells to `0..n` following `order` (base
 /// layer indices, back to front), so no key ever overflows.
 fn restack(spec: &mut PlotSpec, order: &[usize]) {
@@ -1776,6 +1899,110 @@ mod free_placement_tests {
 
     fn identities(spec: &PlotSpec) -> Vec<(usize, usize)> {
         spec.panels.iter().map(|p| (p.row, p.column)).collect()
+    }
+
+    fn three() -> PlotSpec {
+        free(vec![
+            cell(0, 0, (100.0, 50.0, 300.0, 200.0)),
+            cell(0, 1, (500.0, 10.0, 200.0, 100.0)),
+            cell(0, 2, (800.0, 120.0, 150.0, 300.0)),
+        ])
+    }
+
+    fn frame(spec: &PlotSpec, panel: usize) -> FreeFrame {
+        spec.panels[panel].sanitized_free_frame()
+    }
+
+    /// Align puts the others on the reference's edge or center and touches
+    /// nothing else. Witness: Bottom written with `top`, or Top and Bottom
+    /// swapped.
+    #[test]
+    fn align_lines_the_frames_up_on_the_reference() {
+        let reference = frame(&three(), 0);
+        for (edge, check) in [
+            (AlignEdge::Bottom, 0),
+            (AlignEdge::Top, 1),
+            (AlignEdge::VCenter, 2),
+            (AlignEdge::Left, 3),
+            (AlignEdge::Right, 4),
+            (AlignEdge::HCenter, 5),
+        ] {
+            let mut spec = three();
+            assert!(align_layers(&mut spec, &[0, 1, 2], edge));
+            assert_eq!(frame(&spec, 0), reference, "the reference stays");
+            for panel in [1, 2] {
+                let (before, after) = (frame(&three(), panel), frame(&spec, panel));
+                assert_eq!((after.width, after.height), (before.width, before.height));
+                assert_eq!(after.stack, before.stack);
+                let key = |f: FreeFrame| match check {
+                    0 => f.top + f.height,
+                    1 => f.top,
+                    2 => f.top + f.height / 2.0,
+                    3 => f.left,
+                    4 => f.left + f.width,
+                    _ => f.left + f.width / 2.0,
+                };
+                assert_eq!(key(after), key(reference), "{edge:?} panel {panel}");
+                // The other coordinate is kept.
+                if check <= 2 {
+                    assert_eq!(after.left, before.left);
+                } else {
+                    assert_eq!(after.top, before.top);
+                }
+            }
+        }
+    }
+
+    /// Same Width gives the reference's width and keeps left and top.
+    /// Witness: assigning the height.
+    #[test]
+    fn match_size_takes_the_reference_dimension_only() {
+        let mut spec = three();
+        assert!(match_layer_size(&mut spec, &[0, 1, 2], Dimension::Width));
+        for panel in [1, 2] {
+            let (before, after) = (frame(&three(), panel), frame(&spec, panel));
+            assert_eq!(after.width, 300.0);
+            assert_eq!(after.height, before.height);
+            assert_eq!((after.left, after.top), (before.left, before.top));
+        }
+        let mut spec = three();
+        assert!(match_layer_size(&mut spec, &[0, 1], Dimension::Height));
+        assert_eq!(frame(&spec, 1).height, 200.0);
+        assert_eq!(frame(&spec, 1).width, 200.0);
+        assert_eq!(frame(&spec, 2), frame(&three(), 2), "not selected");
+    }
+
+    /// On the grid, or for a missing layer, nothing changes. Witness: the
+    /// Free guard removed.
+    #[test]
+    fn arranging_is_refused_on_the_grid_and_for_a_missing_layer() {
+        let mut grid = three();
+        grid.layer_placement = LayerPlacement::Grid;
+        let before = grid.clone();
+        assert!(!align_layers(&mut grid, &[0, 1], AlignEdge::Left));
+        assert!(!match_layer_size(&mut grid, &[0, 1], Dimension::Width));
+        assert_eq!(grid, before);
+        let mut spec = three();
+        let before = spec.clone();
+        assert!(!align_layers(&mut spec, &[0, 9], AlignEdge::Left));
+        assert!(!match_layer_size(&mut spec, &[0, 9], Dimension::Width));
+        assert_eq!(spec, before);
+    }
+
+    /// An overlay of the reference counts as the reference: one cell, so every
+    /// cell is targeted, active first. Witness: returning the selection as given.
+    #[test]
+    fn targets_collapse_overlays_and_fall_back_to_all_cells() {
+        let mut spec = three();
+        let mut overlay = PanelSpec::at(0, 1);
+        overlay.overlay = Some(Default::default());
+        spec.panels.push(overlay);
+        // Panel 3 is an overlay of the cell of panel 1.
+        assert_eq!(arrange_targets(&spec, 1, &[3]), [1, 0, 2]);
+        assert_eq!(arrange_targets(&spec, 2, &[]), [2, 0, 1]);
+        // Several distinct cells: the selection, reference first, no duplicates.
+        assert_eq!(arrange_targets(&spec, 2, &[0, 3, 0]), [2, 0, 1]);
+        assert_eq!(arrange_targets(&spec, 1, &[2]), [1, 2]);
     }
 
     /// A overlaps B, B overlaps C, A does not meet C: one row. Witness: a

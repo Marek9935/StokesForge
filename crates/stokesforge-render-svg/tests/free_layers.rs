@@ -97,3 +97,75 @@ fn bringing_the_first_cell_to_the_front_moves_the_painted_rectangle() {
     assert!(has_rect(&svg, 0, 0, 388, 276, "#FFCC00"));
     assert!(!has_rect(&svg, 150, 40, 388, 276, "#FFCC00"));
 }
+
+/// Outer rectangles `(x, y, w, h)` of the cells of a free figure, by base.
+fn outers(spec: &PlotSpec) -> Vec<(usize, (u32, u32, u32, u32))> {
+    let layout =
+        figure_layout(spec, &TextMeasurer::default(), &FontChoice::default()).expect("layout");
+    let mut cells: Vec<_> = layout
+        .free_cells
+        .iter()
+        .map(|c| (c.base, c.outer))
+        .collect();
+    cells.sort_by_key(|c| c.0);
+    cells
+}
+
+/// Three layers, the middle one with a layer on a right axis: Distribute Horizontally
+/// leaves equal gaps between the OUTER rectangles (axis bands included), the
+/// extremes' outer rectangles and every top where they were. Witness: gaps
+/// computed on the frames leave the outer gaps unequal by the band.
+#[test]
+fn distribute_horizontally_equalises_the_gaps_between_outer_rectangles() {
+    let mut spec = free("", &[(0.0, 0.0), (330.0, 20.0), (900.0, 40.0)]);
+    // An overlay with a right axis widens the middle cell by one band.
+    spec.panels.push(PanelSpec {
+        overlay: Some(stokesforge_plot::OverlaySpec {
+            y_right: true,
+            ..Default::default()
+        }),
+        ..PanelSpec::at(0, 1)
+    });
+    let before = outers(&spec);
+    let frames = stokesforge_render_svg::distribute_frames(
+        &spec,
+        &TextMeasurer::default(),
+        &FontChoice::default(),
+        &[0, 1, 2],
+        stokesforge_render::pipeline::DistributeAxis::Horizontal,
+    )
+    .expect("measured")
+    .expect("three cells");
+    assert_eq!(frames.len(), 3);
+    let mut moved = spec.clone();
+    for (base, frame) in &frames {
+        let old = spec.panels[*base].sanitized_free_frame();
+        assert_eq!(frame.top, old.top, "only the lefts change");
+        assert_eq!(frame.width, old.width);
+        moved.panels.get_mut(*base).expect("cell").free_frame = Some(*frame);
+    }
+    let after = outers(&moved);
+    assert_eq!(after[0].1, before[0].1, "first outer rectangle unmoved");
+    assert_eq!(after[2].1, before[2].1, "last outer rectangle unmoved");
+    let gap =
+        |a: (u32, u32, u32, u32), b: (u32, u32, u32, u32)| f64::from(b.0) - f64::from(a.0 + a.2);
+    let (g1, g2) = (gap(after[0].1, after[1].1), gap(after[1].1, after[2].1));
+    assert!((g1 - g2).abs() <= 1.0, "{g1} vs {g2}");
+    let (b1, b2) = (gap(before[0].1, before[1].1), gap(before[1].1, before[2].1));
+    assert!((b1 - b2).abs() > 5.0, "the start was not already even");
+}
+
+/// Two cells are not enough to distribute. Witness: threshold 2.
+#[test]
+fn distribute_needs_three_cells() {
+    let spec = free("", &[(0.0, 0.0), (400.0, 0.0)]);
+    let frames = stokesforge_render_svg::distribute_frames(
+        &spec,
+        &TextMeasurer::default(),
+        &FontChoice::default(),
+        &[0, 1],
+        stokesforge_render::pipeline::DistributeAxis::Vertical,
+    )
+    .expect("measured");
+    assert!(frames.is_none());
+}
