@@ -313,6 +313,12 @@ pub fn field_refused_color() -> Color32 {
     Color32::from_rgb(200, 30, 30)
 }
 
+/// Background of a grid cell whose in-place entry is **refused** (#410): the
+/// refusal red, see-through, so the text and the grid lines stay readable.
+pub fn field_refused_fill() -> Color32 {
+    field_refused_color().gamma_multiply(0.18)
+}
+
 /// Tint of a low R² (#288), according to its level: orange below 0.95, red
 /// from 0.8 (the dialog box, below 0.6, keeps this red). The only red allowed
 /// outside field refusal: a **dedicated** token, used for nothing else. Color

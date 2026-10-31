@@ -1,7 +1,7 @@
 //! The "?" icon of the `F(x)=` cell of the workbook grid (#404, S-T6).
 //!
-//! While the cell is edited, a "?" icon is painted just right of it, over the
-//! neighbouring column, so the text field keeps the whole width of the cell
+//! While the cell is edited, a "?" icon is painted on the **neighbouring** cell,
+//! just after its left edge, so the text field keeps the whole width of the cell
 //! (#410); a press on it opens
 //! the **Formula Functions** window ([`super::formula_functions_window`], #402),
 //! which lists the callable functions one family at a time. The list comes from
@@ -25,18 +25,23 @@ use stokesforge_app_state::tr;
 use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
 use crate::theme;
 
-/// Paints the icon in a layer above the grid, just right of `cell` and
-/// centred on its height: it overlaps the neighbouring column (or the empty
-/// area after the last one) and the text field keeps the whole cell. The layer
-/// keeps the icon inside the viewport, so the last column does not hide it.
-/// Call it only in the frames where the cell is edited.
+/// Gap between the left edge of the neighbouring cell and the icon.
+pub(super) const GAP: f32 = 3.0;
+
+/// Paints the icon in a layer above the grid, on the neighbouring cell:
+/// `next_left` is the left edge of that cell and `center_y` the vertical centre
+/// of the edited row. The icon thus never touches the column separator, however
+/// the columns are resized, and the text field keeps the whole edited cell. The
+/// layer keeps the icon inside the viewport. Call it only in the frames where
+/// the cell is edited.
 pub(super) fn show_beside(
     ctx: &egui::Context,
     id: egui::Id,
-    cell: egui::Rect,
+    next_left: f32,
+    center_y: f32,
     actions: &mut Vec<Action>,
 ) {
-    let pos = egui::pos2(cell.right(), cell.center().y - ICON_SIZE / 2.0);
+    let pos = egui::pos2(next_left + GAP, center_y - ICON_SIZE / 2.0);
     egui::Area::new(id)
         .order(egui::Order::Foreground)
         .fixed_pos(pos)

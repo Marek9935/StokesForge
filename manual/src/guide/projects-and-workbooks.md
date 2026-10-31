@@ -275,7 +275,7 @@ A column can compute its values from other columns of the same sheet. Type the f
 
 For example, to fill column C with the sum of A and B, double-click the **F(x)=** cell of column C, type `A+B` and press <kbd>Enter</kbd>.
 
-While you type, a small **?** icon appears just right of the cell, over the next column. Click it to open the **Formula Functions** window: the operators and functions you can use, one family at a time (pick the family in the tabs at the left), each with its signature, an example and what it does. Press <kbd>Esc</kbd> or **Close** to leave it.
+While you type, a small **?** icon appears in the next cell, just after the line that ends the one you are editing. Click it to open the **Formula Functions** window: the operators and functions you can use, one family at a time (pick the family in the tabs at the left), each with its signature, an example and what it does. Press <kbd>Esc</kbd> or **Close** to leave it.
 
 <img src="../images/workbooks-formula-help.png" alt="The Formula Functions window on the Column values family: the families as tabs at the left, a table of Function, Example and What it does at the right." width="900">
 
