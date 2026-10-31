@@ -219,6 +219,12 @@ pub(crate) enum KindRecord {
         /// disagreement between a file written by a third party and what the formula
         /// would recalculate does not survive the first `load`.
         formula_parts: Option<Vec<FormulaPartRecord>>,
+        /// The parts of the formula that read a column of **another sheet**
+        /// (#403): part index, sheet identifier, prefix flag. Additive side
+        /// field, written only when non-empty and absent from earlier files
+        /// (`#[serde(default)]`: no remote reference). A reader that does not
+        /// know it sees the part as a column outside its sheet: `#REF`.
+        formula_remote: Vec<RemoteRefRecord>,
         /// Metadata of the original file (`ColumnMeta::file_metadata`),
         /// key / value pairs in order. Absent from files written
         /// before this field: `KindRecordKnown` brings them back to an empty list.
@@ -301,6 +307,8 @@ enum KindRecordKnown {
         #[serde(default)]
         formula_parts: Option<Vec<FormulaPartRecord>>,
         #[serde(default)]
+        formula_remote: Vec<RemoteRefRecord>,
+        #[serde(default)]
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
         import_source: Option<Box<ImportSourceRecord>>,
@@ -356,6 +364,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -369,6 +378,7 @@ impl From<KindRecordKnown> for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -433,6 +443,18 @@ pub(crate) enum FormulaPartRecord {
     Column(u64),
 }
 
+/// A part of a formula that reads a column of another sheet
+/// (`stokesforge_core::RemoteRef`, #403).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct RemoteRefRecord {
+    /// Index of the part in `formula_parts`; must be a `Column` part.
+    pub part: u64,
+    /// Identifier of the sheet the column is read in; bounded at read.
+    pub sheet: u64,
+    /// True if the user wrote the sheet prefix.
+    pub prefixed: bool,
+}
+
 /// Mirror of [`KindRecord`] **by reference**: serializes a known
 /// variant without cloning its content — in particular the bytes of a
 /// `Float` column, potentially large, which `Serialize` only needs to
@@ -461,6 +483,8 @@ enum KindRecordRef<'a> {
         values: &'a ValuesRecord,
         version: u64,
         formula_parts: &'a Option<Vec<FormulaPartRecord>>,
+        #[serde(skip_serializing_if = "<[RemoteRefRecord]>::is_empty")]
+        formula_remote: &'a [RemoteRefRecord],
         file_metadata: &'a Vec<(String, String)>,
         import_source: &'a Option<Box<ImportSourceRecord>>,
         x_prime: Option<f64>,
@@ -518,6 +542,7 @@ impl Serialize for KindRecord {
                 values,
                 version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -531,6 +556,7 @@ impl Serialize for KindRecord {
                 values,
                 version: *version,
                 formula_parts,
+                formula_remote,
                 file_metadata,
                 import_source,
                 x_prime: *x_prime,

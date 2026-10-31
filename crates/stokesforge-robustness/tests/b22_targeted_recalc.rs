@@ -935,15 +935,6 @@ impl Reply {
     }
 }
 
-/// True if a formula of the tree reads a column of another sheet (#403).
-fn has_remote_formula(tree: &Tree) -> bool {
-    tree.iter().any(|(_, node)| {
-        node.as_column()
-            .and_then(|column| column.meta().formula.as_ref())
-            .is_some_and(|formula| !formula.remote_refs().is_empty())
-    })
-}
-
 /// Plays a step on a twin. `saves`: the files of this twin, in the
 /// order they were written.
 fn play(
@@ -1001,14 +992,6 @@ fn play(
         Step::CloseMacro => Reply::from_result(handle.end_macro(), |_| false),
         Step::AbortMacro => Reply::from_result(handle.abort_macro(), |_| true),
         Step::Reload => {
-            // Batch 1 of #403: the `.stf` does not carry the sheet of a remote
-            // column yet, so a file holding a remote formula reloads it as
-            // `#REF` — a legitimate change of meaning that the oracle would
-            // report, since the calculations of the file are trusted. Such a
-            // save is not played until the format carries it (batch 2).
-            if handle.snapshot().is_ok_and(|s| has_remote_formula(&s.tree)) {
-                return Reply::Rejected;
-            }
             let path = dir.path().join(format!("{name}-{}.stf", saves.len()));
             if handle.save(&path).is_err() {
                 return Reply::Rejected;

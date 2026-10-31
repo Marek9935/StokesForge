@@ -6,7 +6,7 @@
 use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
     Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError,
-    FormulaPart, MixedCell, Node, NodeId, NodeKind, ValueBlock, WindowMeta,
+    FormulaPart, MixedCell, Node, NodeId, NodeKind, RemoteRef, ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, FreeFrame, LayerPlacement, LegendPosition, LegendSpec,
@@ -21,11 +21,11 @@ use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, FreeFrameRecord,
     GroupGradientRecord, GroupNameRecord, KindRecord, LayerPlacementRecord, LegendPositionRecord,
     LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord, OverlaySpecRecord,
-    PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord, SavedColorsRecord,
-    SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord,
-    SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord, TextFontRecord,
-    TickDirectionRecord, TypeRecord, ValuesRecord, WindowGeometryRecord, WindowModeRecord,
-    WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RemoteRefRecord, RoleRecord,
+    SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
+    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord,
+    TextFontRecord, TickDirectionRecord, TypeRecord, ValuesRecord, WindowGeometryRecord,
+    WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Upper bound of a panel coordinate (`row`/`column`) read from a file
@@ -974,6 +974,21 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                         })
                         .collect()
                 }),
+                formula_remote: meta
+                    .formula
+                    .as_ref()
+                    .map(|formula| {
+                        formula
+                            .remote_refs()
+                            .iter()
+                            .map(|(index, remote)| RemoteRefRecord {
+                                part: *index as u64,
+                                sheet: remote.sheet.raw(),
+                                prefixed: remote.prefixed,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 file_metadata: meta
                     .file_metadata
                     .iter()
@@ -1050,6 +1065,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             values,
             version,
             formula_parts,
+            formula_remote,
             file_metadata,
             import_source,
             x_prime,
@@ -1075,18 +1091,38 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 // `check_node_id` (`build_project_reported`). A column that
                 // is no longer in the sheet degrades at calculation (`#REF`),
                 // never into a panic (invariant 10).
+                //
+                // The remote references (#403) are checked for shape here: a
+                // part index out of range or pointing at a text part is
+                // dropped (that part then reads a column outside its sheet:
+                // `#REF`), and a sheet that is missing or not a sheet shows
+                // `#REF` at display. Never a failure of the load.
                 formula: formula_parts.map(|parts| {
-                    ColumnFormula::from_parts(
-                        parts
-                            .into_iter()
-                            .map(|part| match part {
-                                FormulaPartRecord::Text(text) => FormulaPart::Text(text),
-                                FormulaPartRecord::Column(id) => {
-                                    FormulaPart::Column(NodeId::from_raw(id))
-                                }
+                    let parts: Vec<FormulaPart> = parts
+                        .into_iter()
+                        .map(|part| match part {
+                            FormulaPartRecord::Text(text) => FormulaPart::Text(text),
+                            FormulaPartRecord::Column(id) => {
+                                FormulaPart::Column(NodeId::from_raw(id))
+                            }
+                        })
+                        .collect();
+                    let remote = formula_remote
+                        .into_iter()
+                        .filter_map(|record| {
+                            let index = usize::try_from(record.part).ok()?;
+                            matches!(parts.get(index), Some(FormulaPart::Column(_))).then(|| {
+                                (
+                                    index,
+                                    RemoteRef {
+                                        sheet: NodeId::from_raw(record.sheet),
+                                        prefixed: record.prefixed,
+                                    },
+                                )
                             })
-                            .collect(),
-                    )
+                        })
+                        .collect();
+                    ColumnFormula::from_parts_with_remote(parts, remote)
                 }),
                 // A file can carry any float: only a finite
                 // value is an abscissa.

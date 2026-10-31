@@ -271,6 +271,35 @@ graph comes back as a grid of 480 x 360 pt shared equally, or as the stored
 `frame_widths` say. Witness `tests/witnesses/v1/project.stf` regenerated with a
 free graph; `schema.rs` keeps the old-record test.
 
+## Formulas that read another sheet: additive field (#403)
+
+The `Column` record gained `formula_remote` (`Vec<RemoteRefRecord>`, each
+`part`, `sheet`, `prefixed`; `#[serde(default)]`), beside `formula_parts`:
+`part` is the index of a `Column` fragment of `formula_parts`, `sheet` the
+**identifier of the sheet** it is read in (the workbook is read from the tree,
+so moving the sheet keeps the reference), `prefixed` whether the user wrote the
+`Sheet3!` prefix (false for the paired X column of a remote `at`).
+`formula_parts` and `FormulaPartRecord` did not change. **`FORMAT_VERSION` did
+not move**: a file without the field reads no remote reference, and the field
+is **not written** for a formula that reads its own sheet only, so such files
+are byte-identical to before. A side field rather than a new fragment variant
+because a 1.0.x reader then keeps the column and its formula, and shows the part
+as `#REF` (a column outside its sheet), instead of turning the whole column into
+an unknown node. That reader, if it saves the file again, drops the field
+without a message: the formula then reads `#REF`.
+
+Read bounds: `sheet` is bounded by `check_node_id` (`MAX_NODE_ID`, invariant 7,
+the file is refused like any identifier beyond it). A `part` out of range or
+pointing at a text fragment is dropped; a `sheet` that is missing or not a sheet
+loads and shows `#REF` (invariant 10). The sheet identifiers named by remote
+references are never reassigned (`Project::from_tree`). Witness
+`tests/witnesses/v1/project.stf` regenerated with two remote formulas (same
+workbook, other workbook); tests in `tests/remote_formula.rs` and the forged
+files of `lib.rs` (`tests`). The object clipboard goes through the same
+conversions: pasted in its own project, a workbook keeps a reference to a sheet
+outside the copy and follows the one inside it; pasted in another project, the
+reference to a sheet outside the copy is `#REF`.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added
@@ -517,7 +546,9 @@ transport is limited to `MAX_OBJECT_CLIPBOARD_BYTES` (64 MiB).
   sheet (forged file, vanished column) loads and displays as `#REF`
   (invariant 10). The old key `formula` (letters) is no longer read (change made
   before V1, when the format did not have to stay compatible): the column
-  loads with its values and without a formula.
+  loads with its values and without a formula. The columns of **another
+  sheet** (#403) are carried by an additive side field, see "Formulas that read
+  another sheet" below.
 - Input fingerprint (A1, #316): each calculation writes `inputs_digest`, a
   fingerprint **of the content** of its input columns (`Calculation::inputs_digest`,
   `stokesforge-core/src/calc.rs`: type + values, little-endian `f64::to_bits`,

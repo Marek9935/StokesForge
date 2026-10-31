@@ -258,6 +258,37 @@ fn witness_project() -> (Project, ViewTables) {
     }
     project.transpose_rows(source, &[0, 1]).expect("transposed");
 
+    // Formulas that read other sheets (#403): `Sheet2!X` in the same workbook,
+    // `[Spectres]<sheet>!X` in another one (the additive remote side field).
+    let sheet_name =
+        |project: &Project, id: NodeId| project.tree().get(id).expect("sheet").name().to_string();
+    let remote_sheet = project
+        .add_worksheet(book, Some("Distante"))
+        .expect("sheet");
+    add_column(&mut project, remote_sheet, "Lue", &[7.0, 8.0, 9.0]);
+    let own = sheet_name(&project, sheet);
+    let other = sheet_name(&project, source);
+    for (name, text) in [
+        ("DansClasseur", format!("A+max({own}!A)")),
+        ("AutreClasseur", format!("max([Spectres]{other}!A)")),
+    ] {
+        let id = add_column(&mut project, remote_sheet, name, &[0.0, 0.0, 0.0]);
+        let formula = project
+            .tree()
+            .formula_from_letters(id, &text)
+            .expect("remote formula entered");
+        assert!(!formula.remote_refs().is_empty(), "{text}");
+        project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .expect("formula set");
+    }
+
     project.set_saved_colors(
         SavedColors::default()
             .with_added(ColorUsage::Curves, "#ff0000")

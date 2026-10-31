@@ -1111,8 +1111,8 @@ impl<'a> Parser<'a> {
 pub struct ColumnFormula {
     parts: Vec<FormulaPart>,
     /// The parts that read a column of **another sheet** (#403), by part index.
-    /// Empty for a formula that reads its own sheet only, and for every formula
-    /// read from a file today (the `.stf` does not carry it yet).
+    /// Empty for a formula that reads its own sheet only. The `.stf` carries it
+    /// in the `formula_remote` side field.
     remote: BTreeMap<usize, RemoteRef>,
 }
 

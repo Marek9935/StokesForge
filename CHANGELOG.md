@@ -54,6 +54,17 @@ without a message, see `docs/persistence.md`).
   is a function, a lone name stays a column. The Fit gains `round`, `mod` and
   `root`, accepts `pi()` and no longer cares about the case of function names.
 
+- Column formulas (#403): a formula reads a column of **another sheet or
+  workbook**: `max(Sheet3!B)`, `B / at(Sheet3!B, 340)`,
+  `integral([Book2]Sheet5!B, 10, 100)` (quotes for names with a space or a
+  special character, `'Blanc 2'!B`; a workbook is always followed by its sheet).
+  The formula follows the sheet when it is renamed or moved, shows `#REF` when
+  it is deleted, and a loop between sheets is refused at typing. Two siblings
+  can no longer differ only by case. **Additive `.stf` field**
+  (`formula_remote` on a column, written only for such a formula): an older
+  version that opens and saves a file again drops it without a message, and the
+  formula then shows `#REF`.
+
 - Column formulas (#402): functions that give one value for a whole column,
   usable in a row-by-row formula: `at(B, 340)` (linear interpolation at an X,
   empty outside the data), `max`, `min`, `mean`, `sum`, `std` (n - 1) and
