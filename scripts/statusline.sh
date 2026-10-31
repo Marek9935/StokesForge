@@ -31,7 +31,16 @@ if [ -x "$HOME/.claude/statusline.sh" ]; then
 fi
 
 part=""
-if [ -n "$own" ]; then part="$own #$num"; else part="main"; fi
+if [ -n "${SF_SESSION:-}" ]; then
+    # Started by scripts/chantier.sh: show the session's own squares and numbers,
+    # and as "others" only the live colours that are not this session's.
+    part="$(printf '%s' "$SF_SESSION" | grep -oE '[^ ]+ #[0-9]+' | paste -sd' ' -)"
+    rest=""
+    for c in $(printf '%s' "$own$others" | grep -oE '🟦|🟩|🟧|🟪|🟥|🟨'); do
+        case "$SF_SESSION" in *"$c"*) ;; *) rest="$rest$c" ;; esac
+    done
+    others="$rest"
+elif [ -n "$own" ]; then part="$own #$num"; else part="main"; fi
 [ -z "$others" ] || part="$part | others $others"
 lock="$(sf_wt_root 2> /dev/null)/.main.lock/owner"
 [ ! -f "$lock" ] || part="$part | main lock: $(cut -d' ' -f1,2 "$lock")"

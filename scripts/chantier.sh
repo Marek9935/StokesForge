@@ -50,9 +50,14 @@ slug_of() {
         | cut -c1-40 | sed 's/-$//'
 }
 
-# Short name: the title up to the first colon or dash, then its first 3 words.
+# Short name: the title up to the first colon or dash, then its first 3 words,
+# without a trailing small word ("Frames follow the" reads "Frames follow").
 short_of() {
-    printf '%s' "$1" | sed 's/ *[:—] .*//; s/ - .*//' | awk '{ n = (NF < 3) ? NF : 3; s = $1; for (i = 2; i <= n; i++) s = s " " $i; print s }'
+    # The small-word list is English and French: issue titles may be French.
+    printf '%s' "$1" | sed 's/ *[:—] .*//; s/ - .*//' | awk '
+        # lang: fr
+        BEGIN { split("the a an of to in on for and with by at from de la le les des du et à au aux en un une pour par sur", w, " "); for (k in w) small[w[k]] = 1 }
+        { n = (NF < 3) ? NF : 3; while (n > 1 && (tolower($n) in small)) n--; s = $1; for (i = 2; i <= n; i++) s = s " " $i; print s }'
 }
 
 all_taken() {
@@ -122,4 +127,7 @@ if [ "$dry" = 1 ]; then
     exit 0
 fi
 cd "$main"
+# The status line (scripts/statusline.sh) reads the name: the session runs in the
+# main checkout, so its own work package cannot be found from the cwd.
+export SF_SESSION="$name"
 exec "${args[@]}"

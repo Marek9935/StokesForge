@@ -46,7 +46,7 @@ unset SF_ISSUE_TITLE
 
 # Two issues in one session: every square, 3 words each; seventh refused.
 out="$(SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" --dry-run 7 8)"
-grep -xF '🟧 #7 Graph size · 🟪 #8 Frames follow the' <<< "$out" > /dev/null || fail "two-issue name: $out"
+grep -xF '🟧 #7 Graph size · 🟪 #8 Frames follow' <<< "$out" > /dev/null || fail "two-issue name: $out"
 for k in 11 12 13; do add_wt "$k"; done
 printf '%s\n' 🟧 > "$(git -C "$tmp/_stokesforge/feature11" rev-parse --absolute-git-dir)/stokesforge-colour"
 printf '%s\n' 🟪 > "$(git -C "$tmp/_stokesforge/feature12" rev-parse --absolute-git-dir)/stokesforge-colour"
@@ -73,6 +73,9 @@ if "$here/main-lock.sh" take "B #2" 2> /dev/null; then fail "second take succeed
 # Status line: own colour, others, lock.
 line="$(cd "$tmp/_stokesforge/feature2" && printf '{"cwd":"%s"}' "$tmp/_stokesforge/feature2" | HOME="$tmp/nohome" "$here/statusline.sh")"
 echo "$line" | grep -q '^🟩 #2 | others 🟦 | main lock: A #1' || fail "statusline: $line"
+# A session started by chantier.sh runs in the main checkout: the name tells its work package.
+line="$(cd "$main" && printf '{"cwd":"%s"}' "$main" | SF_SESSION="🟩 #2 Fix axis" HOME="$tmp/nohome" "$here/statusline.sh")"
+echo "$line" | grep -q '^🟩 #2 | others 🟦 | main lock: A #1' || fail "statusline from main checkout: $line"
 "$here/main-lock.sh" release > /dev/null
 eq "$("$here/main-lock.sh" status)" free "lock released"
 
