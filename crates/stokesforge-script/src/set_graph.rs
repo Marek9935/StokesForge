@@ -16,6 +16,7 @@ use stokesforge_plot::{
     AxisScale, AxisSpec, LayerPlacement, LegendPosition, LengthUnit, PlotSpec, SeriesAxis,
     MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
 };
+use stokesforge_render_svg::SizeAxis;
 use stokesforge_session::Snapshot;
 
 use crate::bridge::{self, HostError};
@@ -65,6 +66,9 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     "plot_left",
     "plot_top",
     "fixed_size",
+    // The total size of the image (#407), in `unit`: the frames follow.
+    "figure_width",
+    "figure_height",
     // Free layer placement (#411): the placement, and the position of the
     // layer of `panel` in page coordinates (Free only).
     "layer_placement",
@@ -75,6 +79,17 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
 /// A length in `unit` at most as precise as this once in points: the
 /// comparison against the bounds tolerates the rounding of the conversion.
 const LENGTH_TOLERANCE: f64 = 1e-9;
+
+/// `value` rounded up to two decimals (the least a user can type and be
+/// accepted at the bottom of a range).
+fn ceil_2(value: f64) -> f64 {
+    (value * 100.0 - 1e-6).ceil() / 100.0
+}
+
+/// `value` rounded down to two decimals.
+fn floor_2(value: f64) -> f64 {
+    (value * 100.0 + 1e-6).floor() / 100.0
+}
 
 /// A number with at most two decimals, no trailing zero: `1.27`, `70.56`, `36`.
 fn short_number(value: f64) -> String {
@@ -145,6 +160,12 @@ struct Changes {
     plot_left: Option<Option<f64>>,
     plot_top: Option<Option<f64>>,
     fixed_size: Option<bool>,
+    /// The total size of the image in points (#407); checked against the
+    /// range the graph allows when applied.
+    figure_width: Option<f64>,
+    figure_height: Option<f64>,
+    /// The unit the call was given in, for the messages.
+    unit: LengthUnit,
     /// `true` = free placement, `false` = regular grid (#411).
     free_placement: Option<bool>,
     /// Page coordinates of the layer of `panel` in free placement, in points.
@@ -161,6 +182,8 @@ impl Changes {
             || self.plot_left.is_some()
             || self.plot_top.is_some()
             || self.fixed_size.is_some()
+            || self.figure_width.is_some()
+            || self.figure_height.is_some()
     }
 
     /// The placement the graph has once the call is applied.
@@ -170,7 +193,10 @@ impl Changes {
     }
 
     fn parse(options: &Bound<'_, PyDict>, unit: LengthUnit) -> PyResult<Self> {
-        let mut changes = Self::default();
+        let mut changes = Self {
+            unit,
+            ..Self::default()
+        };
         for (key, value) in options.iter() {
             let key: String = key.extract()?;
             let string = || {
@@ -249,6 +275,8 @@ impl Changes {
                 "plot_height" => {
                     changes.plot_height = Some(length(MIN_FRAME_SIZE, MAX_FRAME_SIZE)?)
                 }
+                "figure_width" => changes.figure_width = Some(unit.to_points(bound()?)),
+                "figure_height" => changes.figure_height = Some(unit.to_points(bound()?)),
                 "plot_left" => changes.plot_left = Some(offset()?),
                 "plot_top" => changes.plot_top = Some(offset()?),
                 "fixed_size" => changes.fixed_size = Some(boolean()?),
@@ -299,7 +327,48 @@ impl Changes {
                 }
             }
         }
+        if (changes.figure_width.is_some() || changes.figure_height.is_some())
+            && (changes.plot_width.is_some() || changes.plot_height.is_some())
+        {
+            return Err(invalid(
+                "figure_width and figure_height cannot be combined with plot_width or plot_height: give the size of the image or the size of the plot area",
+            ));
+        }
         Ok(changes)
+    }
+
+    /// Fits the total size of the image along `axis`, the frames following in
+    /// proportion (#407). A value out of the range the graph allows is refused
+    /// with that range, never brought back.
+    fn fit_figure(
+        &self,
+        spec: &mut PlotSpec,
+        key: &str,
+        axis: SizeAxis,
+        points: f64,
+    ) -> Result<(), HostError> {
+        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+        let choice = stokesforge_render_svg::FontChoice::default();
+        let fitted =
+            stokesforge_render_svg::fit_figure_size(spec, &measurer, &choice, axis, points)
+                .ok()
+                .flatten()
+                .ok_or_else(|| {
+                    HostError::InvalidValue(format!(
+                        "{key} cannot be set: the graph has no plot area to scale"
+                    ))
+                })?;
+        let (low, high) = fitted.range;
+        if points < low - LENGTH_TOLERANCE || points > high + LENGTH_TOLERANCE {
+            return Err(HostError::InvalidValue(format!(
+                "{key} must be between {} and {} {}",
+                short_number(ceil_2(self.unit.from_points(low))),
+                short_number(floor_2(self.unit.from_points(high))),
+                self.unit.symbol()
+            )));
+        }
+        fitted.apply_to(spec);
+        Ok(())
     }
 
     /// Applies the changes to the spec; `layer` is the rank of the targeted
@@ -426,6 +495,15 @@ impl Changes {
                 stored(compose::set_fixed_figure(spec, fixed))?;
             }
         }
+        // The total size last (#407): the bands it keeps depend on the title,
+        // the axes, Fixed, Left / Top and the placement set above. Width
+        // first: the height is measured at the new width.
+        if let Some(width) = self.figure_width {
+            self.fit_figure(spec, "figure_width", SizeAxis::Width, width)?;
+        }
+        if let Some(height) = self.figure_height {
+            self.fit_figure(spec, "figure_height", SizeAxis::Height, height)?;
+        }
         Ok(())
     }
 }
@@ -504,10 +582,17 @@ fn set_graph_native(
 /// 2000 pt), `plot_left` and `plot_top` (distance from the image edge to the
 /// first plot area, `None` = Auto, 0 to 70.56 cm; a value below what the axes
 /// need is kept and drawn raised to it) and `fixed_size` (Figure size =
-/// Fixed). The image size itself is not settable: it follows the plot areas
-/// (read it with `pyst.graph_size`). A value out of range is refused, never
-/// brought back. A graph from an old file is given the plot areas it is drawn
-/// with in the same history entry.
+/// Fixed). The total size of the image is set with `figure_width` and
+/// `figure_height` (#407): the frames follow in proportion, axes, margins and
+/// titles keeping their size (in free placement, positions and frames scale
+/// about the top-left layer). They are applied last, after everything else in
+/// the call, and cannot be combined with `plot_width` / `plot_height`. The
+/// range depends on the graph (smallest frame 1.27 cm, largest 70.56 cm, the
+/// bands around them); a value out of it is refused with the range. The image
+/// is whole points, so the size lands within half a point (read it with
+/// `pyst.graph_size`). A value out of range is refused, never brought back. A
+/// graph from an old file is given the plot areas it is drawn with in the same
+/// history entry.
 ///
 /// Layer placement (#411): `layer_placement='grid'` or `'free'` switches the
 /// graph like Graph Properties does, first in the call (switching to free moves

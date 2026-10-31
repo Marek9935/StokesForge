@@ -123,6 +123,11 @@ The "out of date" state of an analysis computation (#200) uses `warning`
 series that plots it. The warning hue stays that of the letter
 (`theme::stale_color`), not a palette role.
 
+The lock between the total width and height of a graph (#407, Graph
+Properties › General › Size) uses `lock-simple` (`Icon::LockClosed`) and
+`lock-simple-open` (`Icon::LockOpen`), neutral role; the tooltip says what the
+state is and what a click does.
+
 ## Color swatches (#89)
 
 A color setting is a **small square** (`color_picker::color_button`).

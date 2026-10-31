@@ -54,6 +54,9 @@ pub struct Quantity {
     /// The field is wide enough for six significant digits ("705.556",
     /// "2000"): a size shown in a unit with decimals.
     pub wide: bool,
+    /// The field keeps the standard short width whatever the bounds (two of
+    /// them side by side in a row, #407).
+    pub short: bool,
 }
 
 impl Quantity {
@@ -69,6 +72,7 @@ impl Quantity {
             presets: &[],
             auto: AutoKind::None,
             wide: false,
+            short: false,
         }
     }
 
@@ -84,6 +88,7 @@ impl Quantity {
             presets: &[],
             auto: AutoKind::None,
             wide: false,
+            short: false,
         }
     }
 
@@ -103,6 +108,7 @@ impl Quantity {
             && self.presets.is_empty()
             && self.auto == AutoKind::None
             && !self.wide
+            && !self.short
     }
 
     /// The same quantity bounded to `min..=max`.
@@ -118,6 +124,14 @@ impl Quantity {
     /// The same quantity, with a field wide enough for six significant digits.
     pub const fn wide(self) -> Self {
         Self { wide: true, ..self }
+    }
+
+    /// The same quantity, in the standard short field whatever its bounds.
+    pub const fn short(self) -> Self {
+        Self {
+            short: true,
+            ..self
+        }
     }
 
     /// The same quantity with its offered values.
@@ -287,6 +301,22 @@ pub fn frame_size(unit: crate::length_unit::LengthUnit) -> Quantity {
             unit.from_points(stokesforge_plot::MAX_FRAME_SIZE),
         )
         .wide()
+}
+
+/// The total width or height of the image of a graph, in `unit` (#407): bounded
+/// by what the frames and the bands around them allow (`min_points` and
+/// `max_points`, from [`stokesforge_render::pipeline::FittedFigure::range`], so
+/// a value outside is brought to the nearest end), a notch and decimals suited
+/// to the unit. The unit is in the label (S-N10).
+pub fn figure_total(
+    unit: crate::length_unit::LengthUnit,
+    min_points: f64,
+    max_points: f64,
+) -> Quantity {
+    let (min, max) = (min_points.min(max_points), max_points.max(min_points));
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(unit.from_points(min), unit.from_points(max))
+        .short()
 }
 
 /// Left or Top of the first plot area, from the edge of the image, in `unit`

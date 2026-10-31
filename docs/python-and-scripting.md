@@ -434,6 +434,7 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 | `plot_width`, `plot_height` | the plot area of the column (width) and of the row (height) of `panel`, a finite number in `unit`, from 1.27 to 70.56 cm (36 to 2000 pt); refused outside, never brought back (#399) |
 | `plot_left`, `plot_top` | distance from the image edge to the first plot area, `None` = Auto, otherwise from 0 to 70.56 cm; a value below what the axes need is kept and drawn raised to it, as in the application (#399) |
 | `fixed_size` | boolean, "Figure size = Fixed" (#399); works in both placements |
+| `figure_width`, `figure_height` | the total size of the image, a finite number in `unit` (#407): the frames follow in proportion, **applied last** in the call, refused with the range the graph allows (smallest frame 36 pt, largest 2000 pt, plus the bands around them) outside it, never brought back; not combined with `plot_width` / `plot_height` |
 | `layer_placement` | `grid` or `free` (#411): switches the placement as Graph Properties does, **first in the call** (`panel` is read in the placement the graph has when the call starts) |
 | `layer_left`, `layer_top` | free placement only: position of the plot area of `panel` in stable page coordinates, in `unit`, may be negative, at most 352.78 cm either side of the origin; refused beyond, never brought back (#411) |
 
@@ -442,8 +443,9 @@ test will read. The Y keys target the `axis` axis (`left` by default, `right`).
 the Preferences: a script gives the same figure on every machine. They go
 through the setters of the interface (`compose::set_frame_size`,
 `set_figure_offset`, `set_fixed_figure`), in the same `SetPlotSpec` as the
-other keys. The size of the image itself is not settable: it follows the plot
-areas and the axes, titles and legend around them. A graph from an old file
+other keys. The size of the image itself is set by `figure_width` and
+`figure_height` (#407, below), or follows the plot areas and the axes, titles
+and legend around them. A graph from an old file
 (no stored plot area) is given the ones it is drawn with first, in the same
 history entry (#394, G7); a call that then changes nothing writes nothing and
 the graph stays as it was. A graph too large to store its plot areas (more
@@ -461,6 +463,19 @@ the application) are refused with a message naming `layer_left` / `layer_top`.
 On the regular grid `layer_left` / `layer_top` are refused. Everything is
 validated before the first write; a switch and its other keys are a single
 history entry, and a call that changes nothing writes nothing.
+
+**Total image size (#407).** `figure_width` / `figure_height` (in `unit`) set the
+size of the whole image: `stokesforge_render_svg::fit_figure_size` scales the
+frames in proportion (the axis bands, margins, titles, Fixed reserve and Left /
+Top keep their size; in Free the positions and frames scale about the top-left
+corner of the frames), width first and the height measured after it. They are
+applied **last** in `apply` (the bands depend on everything else in the call,
+and the range with them), the fit is checked there: a value outside
+`[min, max]` (min rounded up, max rounded down to two decimals) raises
+`InvalidValueError` "figure_width must be between X and Y cm" with nothing
+written, never clamped. The image is whole points, so the size lands within half
+a point. `plot_width` / `plot_height` in the same call as either key are
+refused. `graph_size()["width"]` reads the result. API `0.4`.
 
 **`graph_size(graph, *, unit="cm")`** reads one snapshot and the layout the
 screen and the exports read (invariant 4); it never writes and does not open
@@ -662,11 +677,11 @@ difference with the module actually built, saying which one.
 ### API version (#356)
 
 `pyst.__api_version__` is a string `"MAJOR.MINOR"`, the constant
-`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.3"`).
+`PYST_API_VERSION` of `stokesforge-script/src/surface.rs` (currently `"0.4"`).
 It is independent of the software version.
 
 - **Alpha, `0.x`**: any change of the list (addition or break) raises the minor
-  (`0.2` to `0.3`); there is no stability promise. `1.0` stabilizes the API.
+  (`0.3` to `0.4`); there is no stability promise. `1.0` stabilizes the API.
 - **From `1.0`**: a pure addition raises the minor; any modified or removed line
   (adding an optional parameter changes the signature line) raises the major
   and resets the minor to 0. The API major may not exceed the major of the crates.
@@ -830,6 +845,8 @@ plot_height
 plot_left
 plot_top
 fixed_size
+figure_width
+figure_height
 layer_placement
 layer_left
 layer_top

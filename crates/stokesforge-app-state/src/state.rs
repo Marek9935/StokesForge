@@ -2578,6 +2578,11 @@ pub struct PlotEdit {
     /// Series currently chosen in the list, for detailed editing —
     /// pure UI state, never sent to the model.
     pub selected_series: usize,
+    /// The lock between the total width and height of the image (#407):
+    /// `None` = open (the default, and each time the window opens), `Some`
+    /// holds the ratio. Window state like `selected_series`: never sent to
+    /// the model, kept by the realignment of the draft and by Undo.
+    pub size_lock: Option<crate::frame_sizes::SizeLock>,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
     /// True once `selected_panel` has been set from the graph's active layer
@@ -4833,6 +4838,7 @@ impl AppState {
             graph,
             spec: model.clone(),
             selected_series: 0,
+            size_lock: None,
             selected_panel: 0,
             panel_initialized: false,
             base: model,

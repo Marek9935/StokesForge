@@ -1707,6 +1707,361 @@ pub fn distribute_frames<DB: DrawingBackend>(
     Ok(Some(out))
 }
 
+/// The side of the image whose total size is set (#407).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeAxis {
+    /// The width of the image.
+    Width,
+    /// The height of the image, graph title band included.
+    Height,
+}
+
+/// The frames a figure fit gives back, to write into the spec
+/// ([`FittedFigure::apply_to`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FittedFrames {
+    /// Frame width of each column and frame height of each row (the axis not
+    /// fitted comes back unchanged).
+    Grid {
+        /// Frame width of each column, in points.
+        widths: Vec<f64>,
+        /// Frame height of each row, in points.
+        heights: Vec<f64>,
+    },
+    /// The new frame of each cell of a free graph, `(base layer, frame)`.
+    Free(CellFrames),
+}
+
+/// The result of [`fit_figure_size`] (#407).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FittedFigure {
+    /// The frames that give the image the (possibly adjusted) size.
+    pub frames: FittedFrames,
+    /// The smallest and the largest size the image can take along the axis, in
+    /// points, with the bands and the proportions as they are now.
+    pub range: (f64, f64),
+    /// True if the target was outside `range`: the frames are those of the
+    /// nearest end (raised to the minimum, or lowered to the maximum).
+    pub raised: bool,
+}
+
+impl FittedFigure {
+    /// Writes the fitted frames into `spec`.
+    pub fn apply_to(&self, spec: &mut PlotSpec) {
+        match &self.frames {
+            FittedFrames::Grid { widths, heights } => {
+                spec.frame_widths = widths.clone();
+                spec.frame_heights = heights.clone();
+            }
+            FittedFrames::Free(cells) => {
+                for (base, frame) in cells {
+                    if let Some(panel) = spec.panels.get_mut(*base) {
+                        panel.free_frame = Some(*frame);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How many samples [`fit_free_axis`] takes of the size as a function of the
+/// scale, to find its range and the neighborhood of the target.
+const FIT_SAMPLES: usize = 64;
+/// Bisection steps inside the bracket of the target.
+const FIT_STEPS: usize = 60;
+
+/// The scales a list of frame sizes can take while every one stays in
+/// `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]` and their sum within
+/// [`stokesforge_plot::MAX_FIGURE_EXTENT`]: `(smallest, largest)`.
+fn scale_bounds(sizes: &[f64]) -> Option<(f64, f64)> {
+    let min = sizes.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = sizes.iter().copied().fold(0.0, f64::max);
+    let sum: f64 = sizes.iter().sum();
+    if sizes.is_empty() || min.is_nan() || min <= 0.0 || !sum.is_finite() {
+        return None;
+    }
+    let low = MIN_FRAME_SIZE / min;
+    let high = (MAX_FRAME_SIZE / max).min(stokesforge_plot::MAX_FIGURE_EXTENT / sum);
+    Some((low.min(high), high))
+}
+
+/// One cell of a free graph along one axis: where its frame starts, its
+/// length, and the bands before and after it (frame to outer edge).
+#[derive(Debug, Clone, Copy)]
+struct Span {
+    pos: f64,
+    len: f64,
+    before: f64,
+    after: f64,
+}
+
+/// The extent of the bounding box of the outer rectangles when every `pos`
+/// and `len` is scaled by `scale` about `origin` and the bands stay.
+fn scaled_extent(spans: &[Span], origin: f64, scale: f64) -> f64 {
+    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+    for span in spans {
+        let start = origin + scale * (span.pos - origin);
+        low = low.min(start - span.before);
+        high = high.max(start + scale * span.len + span.after);
+    }
+    (high - low).max(0.0)
+}
+
+/// The new total size of a figure along `axis`, the frames changing in
+/// proportion and the bands (axes, titles, Fixed reserve, Left and Top) staying
+/// as they are now (#407). The frames of a grid all take the same factor on
+/// that axis; so do the sizes and the positions of a free graph, about the
+/// top-left corner of its frames.
+///
+/// The size can reach `range` (the smallest frame at [`MIN_FRAME_SIZE`], the
+/// largest at [`MAX_FRAME_SIZE`], the sums within the figure bound and the free
+/// positions within bounds); a `target_pt` outside it comes back adjusted to
+/// the nearest end, with `raised` set. The image is whole points: the size is
+/// reached to half a point. Fitting the width changes the width of the title
+/// boxes, hence the bands of the other axis: **fit the width first and call
+/// again for the height**, which measures the figure as it then is.
+///
+/// `None` for a legacy graph (its frames are fixed first, [`legacy_frames`]),
+/// a target that is not finite, or a graph with nothing to scale.
+pub fn fit_figure_size<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+    axis: SizeAxis,
+    target_pt: f64,
+) -> Result<Option<FittedFigure>, DrawingAreaErrorKind<DB::ErrorType>> {
+    if !target_pt.is_finite() {
+        return Ok(None);
+    }
+    let layout = figure_layout(spec, probe)?;
+    if !layout.is_explicit() {
+        return Ok(None);
+    }
+    if layout.placement == LayerPlacement::Free {
+        return Ok(fit_free_axis(spec, &layout, axis, target_pt));
+    }
+    let (sizes, bands) = match axis {
+        SizeAxis::Width => (
+            &layout.frame_widths,
+            layout
+                .column_gutters
+                .iter()
+                .map(|(a, b)| f64::from(*a + *b))
+                .sum::<f64>(),
+        ),
+        SizeAxis::Height => (
+            &layout.frame_heights,
+            layout
+                .row_gutters
+                .iter()
+                .map(|(a, b)| f64::from(*a + *b))
+                .sum::<f64>()
+                + f64::from(layout.title_band),
+        ),
+    };
+    let Some((low, high)) = scale_bounds(sizes) else {
+        return Ok(None);
+    };
+    let sum: f64 = sizes.iter().sum();
+    let range = (bands + low * sum, bands + high * sum);
+    let wanted = target_pt.clamp(range.0, range.1);
+    let scale = ((wanted - bands) / sum).clamp(low, high);
+    let scaled: Vec<f64> = sizes
+        .iter()
+        .map(|size| (size * scale).clamp(MIN_FRAME_SIZE, MAX_FRAME_SIZE))
+        .collect();
+    let (widths, heights) = match axis {
+        SizeAxis::Width => (scaled, layout.frame_heights.clone()),
+        SizeAxis::Height => (layout.frame_widths.clone(), scaled),
+    };
+    Ok(Some(FittedFigure {
+        frames: FittedFrames::Grid { widths, heights },
+        range,
+        raised: wanted != target_pt,
+    }))
+}
+
+/// The span of every cell of a free layout along `axis`: `(base layer, its
+/// frame, span)`.
+fn free_spans(
+    spec: &PlotSpec,
+    layout: &FigureLayout,
+    axis: SizeAxis,
+) -> Option<Vec<(usize, FreeFrame, Span)>> {
+    layout
+        .free_cells
+        .iter()
+        .map(|cell| {
+            let frame = spec.panels.get(cell.base)?.sanitized_free_frame();
+            let (outer, rect) = (cell.outer, cell.frame);
+            let span = match axis {
+                SizeAxis::Width => {
+                    let before = rect.0.saturating_sub(outer.0);
+                    Span {
+                        pos: frame.left,
+                        len: frame.width,
+                        before: f64::from(before),
+                        after: f64::from(outer.2.saturating_sub(rect.2).saturating_sub(before)),
+                    }
+                }
+                SizeAxis::Height => {
+                    let before = rect.1.saturating_sub(outer.1);
+                    Span {
+                        pos: frame.top,
+                        len: frame.height,
+                        before: f64::from(before),
+                        after: f64::from(outer.3.saturating_sub(rect.3).saturating_sub(before)),
+                    }
+                }
+            };
+            Some((cell.base, frame, span))
+        })
+        .collect()
+}
+
+/// The size of the image of a free layout as the frames and bands add up, in
+/// points **before** the whole-point rounding of [`FigureLayout::size`]:
+/// `(width, height)` (#407). What a total field shows, so that a size typed and
+/// reached reads back as typed.
+pub fn free_extent(spec: &PlotSpec, layout: &FigureLayout) -> Option<(f64, f64)> {
+    let along = |axis| -> Option<f64> {
+        let spans: Vec<Span> = free_spans(spec, layout, axis)?
+            .into_iter()
+            .map(|(_, _, span)| span)
+            .collect();
+        let origin = spans
+            .iter()
+            .map(|span| span.pos)
+            .fold(f64::INFINITY, f64::min);
+        let extra = match axis {
+            SizeAxis::Width => 0.0,
+            SizeAxis::Height => f64::from(layout.title_band),
+        };
+        origin
+            .is_finite()
+            .then(|| scaled_extent(&spans, origin, 1.0) + extra)
+    };
+    Some((along(SizeAxis::Width)?, along(SizeAxis::Height)?))
+}
+
+/// [`fit_figure_size`] for a free graph: the scale is found on the bounding
+/// box of the outer rectangles, which is piecewise linear in it and not
+/// necessarily monotone, so the size is sampled and the scale nearest to the
+/// target is refined by bisection.
+fn fit_free_axis(
+    spec: &PlotSpec,
+    layout: &FigureLayout,
+    axis: SizeAxis,
+    target_pt: f64,
+) -> Option<FittedFigure> {
+    struct Cell {
+        base: usize,
+        frame: FreeFrame,
+        span: Span,
+    }
+    let cells: Vec<Cell> = free_spans(spec, layout, axis)?
+        .into_iter()
+        .map(|(base, frame, span)| Cell { base, frame, span })
+        .collect();
+    let spans: Vec<Span> = cells.iter().map(|cell| cell.span).collect();
+    let lens: Vec<f64> = spans.iter().map(|span| span.len).collect();
+    let (mut low, mut high) = scale_bounds(&lens)?;
+    let origin = spans
+        .iter()
+        .map(|span| span.pos)
+        .fold(f64::INFINITY, f64::min);
+    // Positions stay within the bounds a frame is read with.
+    let limit = stokesforge_plot::MAX_FIGURE_EXTENT / 2.0;
+    for span in &spans {
+        let from_origin = span.pos - origin;
+        if from_origin > 0.0 {
+            high = high.min((limit - origin) / from_origin);
+        }
+    }
+    low = low.min(high);
+    // The graph title band comes on top of the height of the cells.
+    let extra = match axis {
+        SizeAxis::Width => 0.0,
+        SizeAxis::Height => f64::from(layout.title_band),
+    };
+    let size_at = |scale: f64| scaled_extent(&spans, origin, scale) + extra;
+    let samples: Vec<(f64, f64)> = (0..=FIT_SAMPLES)
+        .map(|i| {
+            let scale = low + (high - low) * i as f64 / FIT_SAMPLES as f64;
+            (scale, size_at(scale))
+        })
+        .filter(|(_, size)| *size <= stokesforge_plot::MAX_FIGURE_EXTENT + extra)
+        .collect();
+    let first = *samples.first()?;
+    let (mut smallest, mut largest) = (first, first);
+    for &sample in &samples {
+        if sample.1 < smallest.1 {
+            smallest = sample;
+        }
+        if sample.1 > largest.1 {
+            largest = sample;
+        }
+    }
+    let range = (smallest.1, largest.1);
+    let wanted = target_pt.clamp(range.0, range.1);
+    let scale = if wanted <= range.0 {
+        smallest.0
+    } else if wanted >= range.1 {
+        largest.0
+    } else {
+        // The first bracket of the target, else the nearest sample.
+        let bracket = samples
+            .windows(2)
+            .find(|pair| (pair[0].1 - wanted) * (pair[1].1 - wanted) <= 0.0);
+        match bracket {
+            Some(pair) => {
+                let (mut a, mut b) = (pair[0], pair[1]);
+                for _ in 0..FIT_STEPS {
+                    let mid = (a.0 + b.0) / 2.0;
+                    let at = (mid, size_at(mid));
+                    if (a.1 - wanted) * (at.1 - wanted) <= 0.0 {
+                        b = at;
+                    } else {
+                        a = at;
+                    }
+                }
+                if (a.1 - wanted).abs() <= (b.1 - wanted).abs() {
+                    a.0
+                } else {
+                    b.0
+                }
+            }
+            None => {
+                samples
+                    .iter()
+                    .min_by(|x, y| (x.1 - wanted).abs().total_cmp(&(y.1 - wanted).abs()))?
+                    .0
+            }
+        }
+    };
+    let fitted = cells
+        .iter()
+        .map(|cell| {
+            let mut frame = cell.frame;
+            match axis {
+                SizeAxis::Width => {
+                    frame.left = origin + scale * (frame.left - origin);
+                    frame.width *= scale;
+                }
+                SizeAxis::Height => {
+                    frame.top = origin + scale * (frame.top - origin);
+                    frame.height *= scale;
+                }
+            }
+            (cell.base, frame.sanitized())
+        })
+        .collect();
+    Some(FittedFigure {
+        frames: FittedFrames::Free(fitted),
+        range,
+        raised: wanted != target_pt,
+    })
+}
+
 /// A rectangle in stored coordinates, `(x0, y0, x1, y1)`.
 type StoredRect = (f64, f64, f64, f64);
 
