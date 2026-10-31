@@ -2,8 +2,9 @@
 """Driver for stokesforge-app: rootful Xwayland + XTEST injection + capture.
 
 Subcommands (each call is independent; state lives in $SF_RUN_DIR):
-  start [fichier.stf]   starts Xwayland :99 then the app (X11), waits for the first frame
-  ss FICHIER.png        captures the X screen (the whole root window :99)
+  start [fichier.stf]   starts Xwayland on the first free display (:99, :100...) then the app (X11), waits for the first frame
+  where                 prints the display and the run folder of this checkout
+  ss FICHIER.png        captures the X screen (the whole root window)
   click X Y [left|right|double]   moves the pointer and clicks
   move X Y              moves the pointer
   key NOM [NOM...]      keys (e.g. ctrl+n, F2, Return, Escape)
@@ -12,9 +13,30 @@ Subcommands (each call is independent; state lives in $SF_RUN_DIR):
 """
 import os, subprocess, sys, time, signal, pathlib
 
-DISPLAY = os.environ.get("SF_DISPLAY", ":99")
-RUN = pathlib.Path(os.environ.get("SF_RUN_DIR", "/tmp/stokesforge-run"))
 ROOT = pathlib.Path(__file__).resolve().parents[3]
+# One run folder per checkout (worktree): two sessions never share a display.
+RUN = pathlib.Path(os.environ.get("SF_RUN_DIR", f"/tmp/stokesforge-run/{ROOT.name}"))
+
+
+def free_display(first=99):
+    k = first
+    while (pathlib.Path(f"/tmp/.X11-unix/X{k}").exists()
+           or pathlib.Path(f"/tmp/.X{k}-lock").exists()):
+        k += 1
+    return f":{k}"
+
+
+def current_display():
+    """SF_DISPLAY wins, then the display `start` wrote, else :99."""
+    if os.environ.get("SF_DISPLAY"):
+        return os.environ["SF_DISPLAY"]
+    try:
+        return (RUN / "display").read_text().strip()
+    except Exception:
+        return ":99"
+
+
+DISPLAY = current_display()
 APP = pathlib.Path(os.environ.get("SF_APP", ROOT / "target/debug/stokesforge-app"))
 GEOM = os.environ.get("SF_GEOMETRY", "1400x900")
 
@@ -39,8 +61,16 @@ def spawn(name, argv, env=None):
     return p
 
 
+def where(args=()):
+    print(f"display={DISPLAY} run={RUN}")
+
+
 def start(args):
+    global DISPLAY
     RUN.mkdir(parents=True, exist_ok=True)
+    if not alive("xwayland"):
+        DISPLAY = os.environ.get("SF_DISPLAY") or free_display()
+        (RUN / "display").write_text(DISPLAY)
     if not APP.exists():
         sys.exit(f"{APP} missing: cargo build -p stokesforge-app")
     if not alive("xwayland"):
@@ -50,7 +80,10 @@ def start(args):
         time.sleep(3)
     if alive("app"):
         stop(["app"])
-    env = dict(os.environ, DISPLAY=DISPLAY, STOKESFORGE_X11="1", STOKESFORGE_DEMO="1")
+    # The app writes its preferences under $RUN/config, never the user's own (#332).
+    (RUN / "config").mkdir(exist_ok=True)
+    env = dict(os.environ, DISPLAY=DISPLAY, STOKESFORGE_X11="1", STOKESFORGE_DEMO="1",
+               STOKESFORGE_CONFIG_DIR=str(RUN / "config"))
     env.pop("WAYLAND_DISPLAY", None)
     spawn("app", [str(APP), *args], env)
     time.sleep(10)  # the first wgpu/llvmpipe render is slow
@@ -187,6 +220,7 @@ if __name__ == "__main__":
     cmd, *a = sys.argv[1:] or ["-h"]
     if cmd == "start": start(a)
     elif cmd == "stop": stop()
+    elif cmd == "where": where()
     elif cmd == "ss": ss(a[0])
     elif cmd == "click": click(a[0], a[1], a[2] if len(a) > 2 else "left")
     elif cmd == "move": move(a[0], a[1])

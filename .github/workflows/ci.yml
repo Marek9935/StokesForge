@@ -53,6 +53,7 @@ jobs:
       - run: scripts/linux-packages-test.sh
       - run: scripts/versions-aligned.sh
       - run: scripts/release-tag-test.sh
+      - run: scripts/workflow-test.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 

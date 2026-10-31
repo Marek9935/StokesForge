@@ -120,7 +120,7 @@ confirmation on the usual choices covered by the request.
 ## Finishing a change
 
 - After a merge and push on `main`, clean up the task's temporary worktree and its merged local branch automatically, unless asked to keep them; follow `stokesforge-verification`, "Clean up after a merge on `main`".
-- Worktrees: a task's worktree lives in `../_stokesforge/feature<n>` (a folder beside the main checkout, `<n>` = the issue number), created from an up-to-date `main` with `git worktree add ../_stokesforge/feature<n> -b feature/<n>-<topic> main`. Never a `StokesForge-<n>` folder beside the checkout, nor the harness folder `.claude/worktrees/`: the main session creates the worktree and hands its path to the implementing agent instead of `isolation: "worktree"`.
+- Worktrees and parallel orchestrators (#413): a task's worktree lives in `../_stokesforge/feature<n>` (a folder beside the main checkout, `<n>` = the issue number), created by `scripts/chantier.sh <n>` from an up-to-date `origin/main` (branch `feature/<n>-<topic>`, no upstream tracking). Never a `StokesForge-<n>` folder beside the checkout, nor the harness folder `.claude/worktrees/`. Several orchestrator sessions may run at once: the session is named `<square> #<n> <short name>`; its colour is the first free of 🟦🟩🟧🟪🟥🟨 at launch, kept until the merge and freed by `git worktree remove`. Merges happen only in the main checkout, under the `main` lock (`scripts/main-lock.sh`); `scripts/try.sh <n>` opens a branch on the user's screen. Rules in `.claude/skills/stokesforge-verification/SKILL.md`, step 6.
 
 Run the checks suited to the change, re-read the diff and update
 the documentation concerned. Do not hide a regression by

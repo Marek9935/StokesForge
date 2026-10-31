@@ -119,6 +119,13 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .msc.ok span{background:var(--ok-soft);color:var(--ok);font-weight:700}
 .msc.warn span{background:var(--warn-soft);color:var(--warn);font-weight:700}
 .msc.new span{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.mflow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mfb{display:inline-block;padding:3px 9px;border:2px solid var(--muted);border-radius:6px;background:var(--panel);font-size:.9rem;white-space:nowrap}
+.mfb.you{border-color:var(--warn);background:var(--warn-soft)} .mfb.ag{border-color:var(--accent);background:var(--accent-soft)}
+.mfb.ok{border-color:var(--ok);background:var(--ok-soft)} .mfb.bad{border-color:var(--bad);background:var(--bad-soft)}
+.mfa{color:var(--muted);font-weight:700}
+#intro{display:flex;flex-direction:column;gap:8px;padding-block:8px}
+.itag{font-weight:700;border:2px solid var(--muted);border-radius:6px;padding:1px 8px;white-space:nowrap}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 <div class="wrap">
@@ -126,6 +133,7 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
   <div class="top"><h1 id="h1"></h1><button class="link" id="goSum">Voir le résumé</button></div>
   <div class="prog" aria-hidden="true"><i id="bar"></i></div>
   <div class="count" id="count" aria-live="polite"></div>
+  <details class="map" id="introbox" hidden open><summary>Contexte</summary><div id="intro"></div></details>
   <details class="map"><summary>Toutes les décisions</summary><div id="map"></div></details>
 </header>
 <main id="main"></main>
@@ -151,12 +159,19 @@ const sbar=(...lines)=>`<div class="mbar">${lines.join('')}</div>`;
 const slider=p=>`<span class="msl"><i style="width:${p}%"></i><b style="left:${p}%"></b></span>`;
 // Feuille : colonnes [lettre, contenu, c] ; c = bad | ok | warn | new (colonne insérée)
 const sheet=cols=>`<div class="msh">${cols.map(([l,t,c=''])=>`<div class="msc ${c}"><b>${l}</b><span>${t}</span></div>`).join('')}</div>`;
+// Schéma de déroulé : chaînes = étapes, '→' = flèche, [texte, classe] : you (toi, attente), ag (agents), ok (livré), bad (problème)
+const flow=(...s)=>`<div class="mflow">${s.map(x=>x==='→'?'<span class="mfa">→</span>':Array.isArray(x)?`<span class="mfb ${x[1]}">${x[0]}</span>`:`<span class="mfb">${x}</span>`).join('')}</div>`;
 // Une option : nom, puces « après », schéma « après », avantage, défaut. La première est la recommandation.
 const O=(t,pts,m,plus,moins)=>({t,pts:pts||[],m:m||'',plus:plus||'',moins:moins||''});
 
 /* DONNÉES — début. Remplacer ce bloc pour un nouveau lot de décisions (voir decision-form.md). */
 const TITRE='Arbitrages StokesForge — suite des décisions d’interface';
 const SEC={R:'Reprise'};
+// Issues du lot (un seul formulaire peut en couvrir plusieurs) : clé -> {n: numéro, name: nom court, colour: carré}.
+// Chaque décision porte is:'<clé>' et k:'look'|'gesture'|'syntax'|'other'|'tech' (voir decision-form.md).
+const ISSUES={};
+// Présentation du lot (HTML : paragraphes, flow(...), listes) ; vide = pas de bloc d’introduction.
+const INTRO='';
 const D=[
 // ---------- P1
 {c:'R1',p:1,t:'La molette change-t-elle un champ numérique ?',l:'X1, N1, N2',
@@ -280,9 +295,14 @@ const D=[
 ];
 /* DONNÉES — fin */
 
-D.forEach(d=>{d.s=SEC[d.c[0]]||'';});
+D.forEach(d=>{d.s=SEC[d.c[0]]||'';d.k=d.k||'other';});
+const isTech=d=>d.k==='tech';
 const PN={1:'Priorité 1 · risque de perte ou piège silencieux',2:'Priorité 2 · incohérence visible',3:'Priorité 3 · finition'};
-const ORDER=D.slice().sort((a,z)=>a.p-z.p);
+// Rendu, geste et syntaxe d’abord ; choix techniques regroupés à la fin ; puis priorité.
+const ORDER=D.slice().sort((a,z)=>(isTech(a)-isTech(z))||(a.p-z.p));
+const gid=d=>isTech(d)?'t':d.p;
+const gname=d=>isTech(d)?'Choix techniques · en général tu prends la recommandation':PN[d.p];
+const itag=d=>{const x=ISSUES[d.is];return x?'<span class="itag">'+esc(x.colour)+' #'+x.n+' '+esc(x.name)+'</span>':'';};
 const KEY='sf-dec-'+ORDER.map(d=>d.c).join(',');
 let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';
 const $=id=>document.getElementById(id);
@@ -291,13 +311,14 @@ function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 try{ans=JSON.parse(lsGet(KEY)||'{}')}catch(e){ans={}}
 const pos=parseInt(lsGet(KEY+'-pos')||'0',10); if(pos>=0&&pos<ORDER.length)cur=pos;
+if(INTRO){$('intro').innerHTML=INTRO;$('introbox').hidden=false;}
 $('h1').textContent=TITRE; document.title=document.title||TITRE;
 
 function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
 function save(d){
   lsSet(KEY,JSON.stringify(ans)); lsSet(KEY+'-pos',String(cur));
   const a=ans[d.c];
-  if(store&&a){ store.doc('decisions/'+d.c).set({code:d.c,priorite:d.p,question:d.t,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()})
+  if(store&&a){ store.doc('decisions/'+d.c).set({code:d.c,priorite:d.p,question:d.t,issue:(ISSUES[d.is]||{}).n||null,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()})
     .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
 }
 function paintSync(){const e=document.querySelector('.sync'); if(e)e.textContent=sync;}
@@ -307,7 +328,7 @@ function paintTop(){
   $('bar').style.width=(100*n/ORDER.length)+'%';
   $('count').textContent=n+' sur '+ORDER.length+' tranchées';
   let h='',last=0;
-  ORDER.forEach((d,i)=>{ if(d.p!==last){last=d.p;h+=(i?'</div>':'')+'<div class="grp">'+PN[d.p]+'</div><div class="chips">';}
+  ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+=(i?'</div>':'')+'<div class="grp">'+gname(d)+'</div><div class="chips">';}
     h+='<button class="chip '+stat(d)+(view==='card'&&i===cur?' cur':'')+'" data-i="'+i+'">'+d.c+'</button>'; });
   $('map').innerHTML=h+'</div>';
   $('map').querySelectorAll('.chip').forEach(x=>x.onclick=()=>go(+x.dataset.i));
@@ -324,9 +345,9 @@ function opt(o,i,a){
 }
 function card(){
   const d=ORDER[cur], a=ans[d.c]||{};
-  const idx=ORDER.filter(x=>x.p===d.p).indexOf(d)+1, tot=ORDER.filter(x=>x.p===d.p).length;
+  const grp=ORDER.filter(x=>gid(x)===gid(d)), idx=grp.indexOf(d)+1, tot=grp.length;
   let h='<div class="card">';
-  h+='<div class="meta"><span class="tag p'+d.p+'">P'+d.p+'</span>'+(d.s?'<span>'+esc(d.s)+'</span>':'')+'<span class="code">'+d.c+' · '+idx+'/'+tot+'</span></div>';
+  h+='<div class="meta">'+itag(d)+'<span class="tag p'+d.p+'">P'+d.p+'</span>'+(d.s?'<span>'+esc(d.s)+'</span>':'')+'<span class="code">'+d.c+' · '+idx+'/'+tot+'</span></div>';
   h+='<h2>'+esc(d.t)+'</h2>';
   if(d.ctx&&d.ctx.length)h+='<div class="block"><div class="lbl">Contexte</div>'+pts(d.ctx)+(d.l?'<div class="links">Décisions liées : '+esc(d.l)+'</div>':'')+'</div>';
   if(d.av)h+='<div class="block avant"><div class="lbl">Aujourd’hui (avant)</div>'+pts(d.av.pts)+(d.av.m?'<div class="schema" aria-label="Avant">'+d.av.m+'</div>':'')+'</div>';
@@ -347,7 +368,7 @@ function summary(){
     else h+='<div class="confirm"><b>Appliquer la recommandation aux '+rest+' décisions restantes ?</b><span>Tu pourras encore changer chacune ensuite.</span><div class="row2"><button class="primary" id="accAllOk">Oui, appliquer</button><button class="sec" id="accAllNo">Annuler</button></div></div>'; }
   h+='<div><button class="link" id="copy">Copier le résumé</button> <span class="sync" id="copied"></span></div>';
   let last=0;
-  ORDER.forEach((d,i)=>{ if(d.p!==last){last=d.p;h+='<div class="grp">'+PN[d.p]+'</div>';}
+  ORDER.forEach((d,i)=>{ if(gid(d)!==last){last=gid(d);h+='<div class="grp">'+gname(d)+'</div>';}
     const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
     h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):''):'Pas encore vue')+'</span></button>'; });
   return h+'</div>';

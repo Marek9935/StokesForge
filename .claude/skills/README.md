@@ -21,10 +21,10 @@ Each folder holds a `SKILL.md`: its `description` is the trigger, its body the s
 ```text
 question ──► stokesforge-explain
 symptom  ──► stokesforge-bug-report ──(explicit request)──► stokesforge-bug-fix ──┐
-request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► commit (on request)
+request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► merge (green, or the trial OK)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app. Asking the user to decide (≤ 4 questions: slides; ≥ 5: a published form): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
+`run-stokesforge` sits beside verification for any change to see or handle in the real app. Several orchestrators may work at once: `scripts/chantier.sh <n>` starts a work package (worktree, colour, named session), `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the "To test" page lists what landed (`stokesforge-verification/references/to-test-page.md`). Asking the user to decide (one start form, one follow-up form, always the published form even for one question): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 
