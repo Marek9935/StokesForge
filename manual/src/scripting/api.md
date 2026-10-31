@@ -352,6 +352,8 @@ pyst.plot(y2, x, graph=g, line_style="dash", label="Blank")
 | `plot_width`, `plot_height` | Size of the plot area of the column (width) and of the row (height) of `panel`, in `unit`. From 1.27 cm to 70.56 cm (36 to 2000 pt). |
 | `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, in `unit`, from 0 to 70.56 cm. `None` means automatic. |
 | `fixed_size` | `True` or `False`: the Fixed figure size of Graph Properties |
+| `layer_placement` | `"grid"` or `"free"`: the Layer placement of Graph Properties. It is applied first in the call. |
+| `layer_left`, `layer_top` | Free placement only: position of the plot area of `panel` from the page origin, in `unit`. May be negative, up to 352.78 cm either side. |
 
 The size options are numbers in `unit`: `"cm"` (the default), `"mm"`, `"pt"` or `"in"`. A script never uses the unit chosen in Preferences, so it gives the same figure on every computer. A value outside the range is refused, not corrected. The size of the whole image cannot be set: it follows the plot areas and the axes, titles and legend around them.
 
@@ -362,7 +364,14 @@ pyst.set_graph(g, title="Absorption spectrum", x_from=300, x_to=800,
 # A plot area of 8 cm by 5 cm, then 100 mm wide.
 pyst.set_graph(g, plot_width=8, plot_height=5)
 pyst.set_graph(g, plot_width=100, unit="mm")
+
+# Free placement: nothing moves when you switch. Then move the layer at
+# row 0, column 1 two centimetres to the left of the page origin.
+pyst.set_graph(g, layer_placement="free")
+pyst.set_graph(g, panel=(0, 1), layer_left=-2, layer_top=1, plot_width=6)
 ```
+
+In free placement `plot_width` and `plot_height` change only the layer named by `panel`, and `plot_left` and `plot_top` are refused: use `layer_left` and `layer_top`. On the regular grid `layer_left` and `layer_top` are refused. Switching back with `layer_placement="grid"` puts the layers in rows and columns, and each column and row takes its largest plot area.
 
 ### Read the graph size
 
@@ -374,6 +383,8 @@ pyst.set_graph(g, plot_width=100, unit="mm")
 | `plot_widths`, `plot_heights` | Plot area of each grid column (widths) and row (heights), as lists |
 | `plot_left`, `plot_top` | Distance from the edge of the image to the first plot area, or `None` for automatic |
 | `fixed_size` | `True` if the figure size is Fixed |
+| `layer_placement` | `"grid"` or `"free"` |
+| `layers` | Empty on the regular grid. In free placement, one dictionary per layer in stacking order: `panel` (`(row, column)`), `left`, `top`, `width`, `height` |
 
 ```python
 size = pyst.graph_size(g, unit="mm")

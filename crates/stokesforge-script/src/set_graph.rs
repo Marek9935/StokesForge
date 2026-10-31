@@ -10,11 +10,11 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use stokesforge_core::compose::{self, FigureOffset, FrameAxis};
+use stokesforge_core::compose::{self, FigureOffset, FrameAxis, FreeField};
 use stokesforge_core::NodeId;
 use stokesforge_plot::{
     AxisScale, AxisSpec, LayerPlacement, LegendPosition, LengthUnit, PlotSpec, SeriesAxis,
-    MAX_FRAME_SIZE, MIN_FRAME_SIZE,
+    MAX_FIGURE_EXTENT, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
 };
 use stokesforge_session::Snapshot;
 
@@ -65,6 +65,11 @@ pub(crate) const SET_GRAPH_OPTIONS: &[&str] = &[
     "plot_left",
     "plot_top",
     "fixed_size",
+    // Free layer placement (#411): the placement, and the position of the
+    // layer of `panel` in page coordinates (Free only).
+    "layer_placement",
+    "layer_left",
+    "layer_top",
 ];
 
 /// A length in `unit` at most as precise as this once in points: the
@@ -140,6 +145,11 @@ struct Changes {
     plot_left: Option<Option<f64>>,
     plot_top: Option<Option<f64>>,
     fixed_size: Option<bool>,
+    /// `true` = free placement, `false` = regular grid (#411).
+    free_placement: Option<bool>,
+    /// Page coordinates of the layer of `panel` in free placement, in points.
+    layer_left: Option<f64>,
+    layer_top: Option<f64>,
 }
 
 impl Changes {
@@ -151,6 +161,12 @@ impl Changes {
             || self.plot_left.is_some()
             || self.plot_top.is_some()
             || self.fixed_size.is_some()
+    }
+
+    /// The placement the graph has once the call is applied.
+    fn target_free(&self, before: &PlotSpec) -> bool {
+        self.free_placement
+            .unwrap_or(before.layer_placement == LayerPlacement::Free)
     }
 
     fn parse(options: &Bound<'_, PyDict>, unit: LengthUnit) -> PyResult<Self> {
@@ -216,7 +232,19 @@ impl Changes {
                     length(0.0, MAX_FRAME_SIZE).map(Some)
                 }
             };
+            // A page coordinate: may be negative, refused beyond the bound
+            // the stored position is brought into.
+            let position = || length(-MAX_FIGURE_EXTENT / 2.0, MAX_FIGURE_EXTENT / 2.0);
             match key.as_str() {
+                "layer_placement" => {
+                    changes.free_placement = Some(match string()?.as_str() {
+                        "grid" => false,
+                        "free" => true,
+                        _ => return Err(invalid("unknown layer placement: use grid or free")),
+                    })
+                }
+                "layer_left" => changes.layer_left = Some(position()?),
+                "layer_top" => changes.layer_top = Some(position()?),
                 "plot_width" => changes.plot_width = Some(length(MIN_FRAME_SIZE, MAX_FRAME_SIZE)?),
                 "plot_height" => {
                     changes.plot_height = Some(length(MIN_FRAME_SIZE, MAX_FRAME_SIZE)?)
@@ -283,6 +311,35 @@ impl Changes {
         cell: (usize, usize),
         side: SeriesAxis,
     ) -> Result<(), HostError> {
+        // The placement first (#411): the other keys act on the result. `layer`
+        // stays the rank of the panel; its grid identity is read again.
+        let free = self.target_free(spec);
+        if free != (spec.layer_placement == LayerPlacement::Free) {
+            let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+            let choice = stokesforge_render_svg::FontChoice::default();
+            if !stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice) {
+                return Err(HostError::InvalidValue(
+                    "the layer placement cannot be switched: the layers do not fit a grid"
+                        .to_owned(),
+                ));
+            }
+        }
+        let cell = spec
+            .panels
+            .get(layer)
+            .map_or(cell, |panel| (panel.row, panel.column));
+        if free && (self.plot_left.is_some() || self.plot_top.is_some()) {
+            return Err(HostError::InvalidValue(
+                "plot_left and plot_top do not apply to free layer placement: use layer_left and layer_top"
+                    .to_owned(),
+            ));
+        }
+        if !free && (self.layer_left.is_some() || self.layer_top.is_some()) {
+            return Err(HostError::InvalidValue(
+                "layer_left and layer_top need free layer placement: the graph uses the regular grid"
+                    .to_owned(),
+            ));
+        }
         if let Some(title) = &self.title {
             spec.title.clone_from(title);
         }
@@ -328,7 +385,18 @@ impl Changes {
                 ))
             }
         };
-        if let Some(width) = self.plot_width {
+        if free {
+            for (field, value) in [
+                (FreeField::Width, self.plot_width),
+                (FreeField::Height, self.plot_height),
+                (FreeField::Left, self.layer_left),
+                (FreeField::Top, self.layer_top),
+            ] {
+                if let Some(value) = value {
+                    stored(compose::set_free_frame(spec, layer, field, value))?;
+                }
+            }
+        } else if let Some(width) = self.plot_width {
             stored(compose::set_frame_size(
                 spec,
                 FrameAxis::Column,
@@ -336,7 +404,7 @@ impl Changes {
                 width,
             ))?;
         }
-        if let Some(height) = self.plot_height {
+        if let (false, Some(height)) = (free, self.plot_height) {
             stored(compose::set_frame_size(
                 spec,
                 FrameAxis::Row,
@@ -351,7 +419,12 @@ impl Changes {
             stored(compose::set_figure_offset(spec, FigureOffset::Top, top))?;
         }
         if let Some(fixed) = self.fixed_size {
-            stored(compose::set_fixed_figure(spec, fixed))?;
+            if free {
+                // A free graph stores no grid frame to test: the flag alone.
+                spec.fixed_figure = fixed;
+            } else {
+                stored(compose::set_fixed_figure(spec, fixed))?;
+            }
         }
         Ok(())
     }
@@ -373,22 +446,21 @@ fn set_graph_native(
                 panel.0, panel.1
             ))
         })?;
-        // The size keys are the grid's: a free graph (#398) has a frame per
-        // layer, which a script cannot set yet.
-        if changes.sets_size() && before.layer_placement == LayerPlacement::Free {
-            return Err(HostError::InvalidValue(
-                "the graph uses free layer placement: its sizes cannot be set from a script yet"
-                    .to_owned(),
-            ));
-        }
         let mut spec = before.clone();
+        let switching =
+            changes.target_free(&before) != (before.layer_placement == LayerPlacement::Free);
         // A size key on a graph from an old file: it is given the plot areas
         // it is drawn with first (G7), and a call that then changes nothing
-        // writes nothing, the graph staying as it was.
-        if changes.sets_size() {
+        // writes nothing, the graph staying as it was. A switch to free fixes
+        // them itself; a free graph is never legacy.
+        if changes.sets_size() && !switching && before.layer_placement == LayerPlacement::Grid {
             bridge::fix_frames(Some(&before), &mut spec);
         }
-        let reference = spec.clone();
+        let reference = if switching {
+            before.clone()
+        } else {
+            spec.clone()
+        };
         changes.apply(&mut spec, layer, panel, side)?;
         let changed = spec != reference;
         Ok::<_, HostError>((spec, changed))
@@ -436,6 +508,17 @@ fn set_graph_native(
 /// (read it with `pyst.graph_size`). A value out of range is refused, never
 /// brought back. A graph from an old file is given the plot areas it is drawn
 /// with in the same history entry.
+///
+/// Layer placement (#411): `layer_placement='grid'` or `'free'` switches the
+/// graph like Graph Properties does, first in the call (switching to free moves
+/// nothing; back to the grid, layers are put in rows then columns and each
+/// column and row takes its largest frame). `panel=(row, column)` is read in the
+/// placement the graph has when the call starts. In free placement
+/// `plot_width` and `plot_height` set the frame of `panel` alone, `layer_left`
+/// and `layer_top` its position in stable page coordinates (in `unit`, may be
+/// negative, at most 352.78 cm either side of the origin), and `plot_left` /
+/// `plot_top` are refused; on the regular grid `layer_left` / `layer_top` are
+/// refused.
 ///
 /// An unknown key or unit, a value of the wrong type or refused bounds raise
 /// `InvalidValueError` without writing anything; `BrokenReferenceError` for a
