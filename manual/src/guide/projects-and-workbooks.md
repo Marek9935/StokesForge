@@ -333,7 +333,24 @@ When there is no point to compute from (an empty column, an empty range, a value
 
 The value is computed once for the whole column, not once per row, so `B / max(B)` stays fast on long columns. It is recalculated when B, its X, or the bounds change, and also when you change the role of a column or move one so that B has another X.
 
-A formula reads columns of its own sheet only.
+#### Columns of another sheet or workbook
+
+A whole-column function can read a column of **another sheet**, or of **another workbook**. Write the sheet before the column letter, joined with `!`:
+
+- `B` is a column of this sheet;
+- `Sheet3!B` is a column of another sheet of the same workbook;
+- `[Book2]Sheet5!B` is a column of a sheet of another workbook. A workbook always comes with its sheet: `[Book2]B` is refused, write `[Book2]Sheet1!B`.
+
+The reference is one value of the function, so the range stays on the right: `at(Sheet3!B, 340)`, `integral(Sheet3!B, 10, 100)`, `max([Book2]Sheet5!B, 330, 350)`, and `B / max(Sheet3!B)` to normalize a column by the maximum of another sheet. The functions that accept it are `at`, `max`, `min`, `mean`, `sum`, `std` and `integral`. `Sheet3!B + 1`, `sqrt(Sheet3!B)` and `max(Sheet3!B, C)` (the row-by-row maximum) are refused: such a reference is read by a whole-column function only.
+
+- **Quotes.** A sheet name that holds anything other than ASCII letters and digits (a space, `_`, an accent, `ᵀ`), or that starts with a digit, is written between single quotes: `'Blanc 2'!B`. A quote inside the name is doubled: `'it''s'!B`. A workbook name between brackets needs no quotes.
+- **Case.** Sheet and workbook names are read without regard to case: `sheet3!b` is `Sheet3!B`, and the field shows the real name. For the same reason, two objects next to each other can no longer differ only by case: `SHEET1` is refused beside `sheet1` (sheets, workbooks, folders, graphs, notes). Column names are not concerned. A project saved earlier that holds such names still opens; a formula that names one of them is refused as ambiguous.
+- **Which workbook.** `[Book2]` is looked up in the folder of the workbook that holds the formula first, then in the whole project. If several workbooks outside that folder carry the name, StokesForge asks for the path from the project root: `[Mesures/Book2]Sheet5!B` (`[/Book2]Sheet5!B` for a workbook at the root). The field always shows the shortest form that is not ambiguous.
+- **The X column.** The X of a column of another sheet is the one paired with it **in its own sheet**. In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3` and `x` is calculated in this sheet, row by row; an X column written with its own prefix (`at(B, x, Sheet3!D)`) is refused.
+- **The result.** The result column has the length of its own sheet, whatever the length of the column read.
+- **Renaming and moving.** The formula follows the sheet: renaming `Sheet3`, or moving it to another workbook (the field then shows `[Book2]Sheet3!B`), changes the text of the field and keeps the values. If the sheet or the column is deleted, or the column is moved to another sheet, the formula shows `#REF` in red and its cells are empty; undoing brings the values back.
+- **Loops.** A formula that would read itself, directly or through other formulas of any sheet, is refused when you type it: "Formulas refer to each other in a loop. Remove one of the references".
+- **Copies.** A copied sheet keeps reading the other sheets it did not copy. When you copy a workbook, a formula reads the copy of the sheet that was copied with it. Pasted into another project, the reference becomes `#REF`.
 
 If you need functions of the data, you can use a script (see [The pyst API](../scripting/api.md)), or use the [Analysis](analysis.md) tools.
 
@@ -351,6 +368,10 @@ If you need functions of the data, you can use a script (see [The pyst API](../s
 StokesForge refuses a formula, and leaves the field open, when:
 
 - a letter names no column in the sheet;
+- a sheet or a workbook of a reference does not exist, or the sheet has no such column;
+- a reference to another workbook does not name its sheet, or its workbook name is carried by several workbooks (write the path);
+- a column of another sheet is used outside a whole-column function, or as the X column of `at`;
+- the formula would read itself through other formulas;
 - the formula uses the column that holds it;
 - the text still contains `#REF`;
 - a name followed by `(` is not a function;
@@ -359,7 +380,7 @@ StokesForge refuses a formula, and leaves the field open, when:
 - the column of a whole-column function is an expression: `max(B*2)`, `at(B, 1, A+1)`;
 - `pi` is written alone and the sheet has no column PI: write `pi()`.
 
-Two formulas that read each other in a loop are reported as an error. A formula with a syntax error is kept and the column has no values until you fix it.
+A formula with a syntax error is kept and the column has no values until you fix it.
 
 ### Keep the values, remove the formula
 

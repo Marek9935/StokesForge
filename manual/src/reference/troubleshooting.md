@@ -201,7 +201,15 @@ The best attempt is still drawn. See [Fitting](../guide/analysis.md#fitting).
 | "This column is produced by a calculation. Detach it from the calculation to edit its values" | Right-click the header and choose **Detach from Calculation**. |
 | "This column is computed by a formula. Edit the formula to change its values" | Change the **F(x)=** cell, or use **Remove Formula, Keep Data**. |
 | "Column … does not exist in this sheet" | A formula names a letter that is not in the sheet. |
-| "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between two formulas. |
+| "Formulas refer to each other in a loop. Remove one of the references" | Break the loop between formulas, in the same sheet or in several. When you type it, the field stays open; a project saved earlier that holds a loop frames the **F(x)=** cell in red and leaves the cells empty. |
+| "There is no sheet named … in this workbook. Check its spelling" | A reference such as `Sheet3!B` names a sheet that is not in the workbook of the formula. Write `[Book2]Sheet3!B` for another workbook. |
+| "There is no workbook named …. Check its spelling" | The name between brackets matches no workbook of the project. |
+| "A reference to another workbook names its sheet. Write […]Sheet1!B" | Add the sheet: `[Book2]Sheet5!B`, even if the workbook has a single sheet. |
+| "Several workbooks are named …. Write the path from the project root, for example […]Sheet1!B" | Write the folders before the name: `[Mesures/Book2]Sheet5!B`. |
+| "Several objects are named … apart from case. Rename one of them" | An older project holds two objects whose names differ only by case. Rename one of them. |
+| "Column … does not exist in sheet …" | The sheet of the reference has fewer columns. |
+| "A column of another sheet can only be read by at, max, min, mean, sum, std or integral. Give it to one of them as its column" | Write `max(Sheet3!B)` and use the result in the formula (`B / max(Sheet3!B)`). |
+| "The X column of an at() on another sheet is read in that sheet. Write it without a prefix (D, not Sheet3!D)" | In `at(Sheet3!B, x, D)`, `D` is a column of `Sheet3`. |
 | "Unknown function …. Check its spelling" | A name followed by `(` is not one of the functions listed in [Formula syntax](../guide/projects-and-workbooks.md#formula-syntax). |
 | "Unknown function …. Did you mean …?" | The name is close to a function: write that one. |
 | "Function … takes … arguments (found …)" | Give the function the number of values it takes, separated by commas (`pi()` takes none). |

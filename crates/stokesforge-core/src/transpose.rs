@@ -19,6 +19,7 @@ use std::sync::Arc;
 use crate::column::{Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, MixedCell};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
+use crate::name::same_name_ignoring_case;
 use crate::node::NodeKind;
 use crate::project::{spreadsheet_name, Project};
 use crate::tree::Tree;
@@ -371,7 +372,7 @@ impl Project {
             self.tree().children(parent).is_ok_and(|kids| {
                 kids.iter()
                     .filter_map(|k| self.tree().node(*k))
-                    .any(|n| n.name() == name)
+                    .any(|n| same_name_ignoring_case(n.name(), name))
             })
         };
         let mut candidate = base.to_string();
@@ -512,7 +513,7 @@ impl Project {
                 .iter()
                 .filter(|k| **k != sheet)
                 .filter_map(|k| self.tree().node(*k))
-                .any(|n| n.name() == wanted)
+                .any(|n| same_name_ignoring_case(n.name(), &wanted))
         });
         if free {
             let _ = self.rename_without_follow(sheet, &wanted);

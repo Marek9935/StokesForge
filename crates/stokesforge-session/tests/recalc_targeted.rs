@@ -1419,3 +1419,343 @@ fn an_x_reading_a_column_it_is_the_x_of_is_a_cycle() {
         assert!(all_not_calculated(&take_snapshot(&handle), f.c), "{mode:?}");
     }
 }
+
+// -- formulas that read another sheet (#403) ------------------------------------
+
+/// `Sheet3` of the same workbook, with `A` an X column [0, 1, 2] and `B`
+/// [100, 200, 300], and `C` for a formula.
+struct OtherSheet {
+    sheet: NodeId,
+    x: NodeId,
+    y: NodeId,
+    c: NodeId,
+}
+
+fn with_sheet3(mode: FormulaRecalc) -> (Session, SessionHandle, SheetFixture, OtherSheet) {
+    let (session, handle, f) = start(mode);
+    let book = take_snapshot(&handle)
+        .tree
+        .parent(f.sheet)
+        .expect("consistent tree")
+        .expect("workbook");
+    handle
+        .execute(Command::AddWorksheet {
+            book,
+            name: Some("Sheet3".to_string()),
+        })
+        .expect("Sheet3");
+    let sheet = *take_snapshot(&handle)
+        .tree
+        .children(book)
+        .expect("workbook")
+        .last()
+        .expect("Sheet3");
+    let add = |name: &str, values: &[f64]| {
+        handle
+            .execute(Command::AddColumn {
+                sheet,
+                index: None,
+                name: Some(name.to_string()),
+                column: Column::from_f64(values),
+            })
+            .expect("column");
+        *take_snapshot(&handle)
+            .tree
+            .children(sheet)
+            .expect("sheet")
+            .last()
+            .expect("column")
+    };
+    let x = add("A", &[0.0, 1.0, 2.0]);
+    let y = add("B", &[100.0, 200.0, 300.0]);
+    let c = add("C", &[]);
+    handle
+        .execute(set_role(&handle, x, stokesforge_core::ColumnRole::X))
+        .expect("A is X");
+    (session, handle, f, OtherSheet { sheet, x, y, c })
+}
+
+const BOTH: [FormulaRecalc; 2] = [FormulaRecalc::Targeted, FormulaRecalc::Full];
+
+#[test]
+fn a_formula_reads_a_column_of_another_sheet() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "max(Sheet3!B)"))
+            .expect("C = max(Sheet3!B)");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c), some(&[300.0; 3]), "{mode:?}");
+        assert_eq!(
+            s.tree.formula_letters(f.c).as_deref(),
+            Some("max(Sheet3!B)")
+        );
+        // Only remote references: still a Mixed column (a result can be `---`).
+        let column = s.tree.node(f.c).and_then(|n| n.as_column()).unwrap();
+        assert_eq!(column.column_type(), ColumnType::Mixed, "{mode:?}");
+        // The paired X of a remote column is that of its own sheet.
+        handle
+            .execute(set_formula(&handle, f.d, "at(Sheet3!B, 1)"))
+            .expect("D = at(Sheet3!B, 1)");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.d),
+            some(&[200.0; 3]),
+            "{mode:?}"
+        );
+        let _ = o;
+    }
+}
+
+/// The result has the length of the own sheet, not that of the remote column.
+#[test]
+fn the_result_keeps_the_length_of_its_own_sheet() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(enter(o.y, 0, &[1.0, 2.0, 3.0, 4.0, 5.0]))
+            .expect("Sheet3!B is longer");
+        handle
+            .execute(set_formula(&handle, f.c, "max(Sheet3!B)"))
+            .expect("formula");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.c), some(&[5.0; 3]), "{mode:?}: three rows");
+    }
+}
+
+/// Editing the remote column, or its X, recalculates the reader; an unrelated
+/// command does not (the full recalculation does: witness).
+#[test]
+fn editing_the_remote_column_recalculates_the_reader() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "at(Sheet3!B, 1)"))
+            .expect("formula");
+        assert_eq!(numbers(&take_snapshot(&handle), f.c), some(&[200.0; 3]));
+        handle
+            .execute(enter(o.y, 1, &[250.0]))
+            .expect("Sheet3!B edited");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[250.0; 3]),
+            "{mode:?}: the remote value"
+        );
+        // The unnamed X of the remote column.
+        handle
+            .execute(enter(o.x, 1, &[0.5]))
+            .expect("Sheet3!A edited");
+        let got = numbers(&take_snapshot(&handle), f.c);
+        // X 0, 0.5, 2 and Y 100, 250, 300: x = 1 is between the last two.
+        let expected = 250.0 + 50.0 * (1.0 - 0.5) / (2.0 - 0.5);
+        assert!(
+            got.iter()
+                .all(|v| v.is_some_and(|v| (v - expected).abs() < 1e-9)),
+            "{mode:?}: {got:?}"
+        );
+    }
+    let versions = |mode| {
+        let (_session, handle, f, _o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "max(Sheet3!B)"))
+            .expect("formula");
+        let before = take_snapshot(&handle);
+        handle.execute(unrelated(&before, 0)).expect("unrelated");
+        let after = take_snapshot(&handle);
+        (version(&before, f.c), version(&after, f.c))
+    };
+    let (before, after) = versions(FormulaRecalc::Targeted);
+    assert_eq!(before, after, "not rewritten");
+    let (before, after) = versions(FormulaRecalc::Full);
+    assert_ne!(before, after, "witness: the full mode rewrites");
+}
+
+/// A role change in the other sheet changes the X paired with the remote
+/// column: the reader follows (hidden input of the remote column).
+#[test]
+fn a_role_change_in_the_remote_sheet_recalculates_the_reader() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "at(Sheet3!B, 1)"))
+            .expect("formula");
+        assert_eq!(numbers(&take_snapshot(&handle), f.c), some(&[200.0; 3]));
+        handle
+            .execute(set_role(&handle, o.x, stokesforge_core::ColumnRole::Y))
+            .expect("A is no X any more");
+        let s = take_snapshot(&handle);
+        assert!(all_not_calculated(&s, f.c), "{mode:?}: no paired X");
+        handle.undo().expect("undo the role");
+        assert_eq!(numbers(&take_snapshot(&handle), f.c), some(&[200.0; 3]));
+        // Moving the remote column in its sheet keeps it read.
+        handle
+            .execute(Command::Move {
+                id: o.y,
+                new_parent: o.sheet,
+                index: 0,
+            })
+            .expect("B in front of A");
+        let s = take_snapshot(&handle);
+        assert_eq!(
+            s.tree.formula_letters(f.c).as_deref(),
+            Some("at(Sheet3!A, 1)")
+        );
+        assert!(all_not_calculated(&s, f.c), "{mode:?}: no X left of it");
+    }
+}
+
+/// Deleting the remote sheet: `#REF`, empty cells; Undo brings the values back.
+#[test]
+fn deleting_the_remote_sheet_gives_ref_then_undo_restores_the_values() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "max(Sheet3!B)"))
+            .expect("formula");
+        handle
+            .execute(Command::RemoveNode { id: o.sheet })
+            .expect("delete Sheet3");
+        let s = take_snapshot(&handle);
+        assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("max(#REF)"));
+        assert!(all_empty(&s, f.c), "{mode:?}: empty cells, not \"---\"");
+        handle.undo().expect("undo the deletion");
+        let s = take_snapshot(&handle);
+        assert_eq!(
+            s.tree.formula_letters(f.c).as_deref(),
+            Some("max(Sheet3!B)")
+        );
+        assert_eq!(numbers(&s, f.c), some(&[300.0; 3]), "{mode:?}");
+    }
+}
+
+/// A remote column that moves to a third sheet is no longer read: `#REF`
+/// (membership in the sheet it must be in, not existence in the tree).
+#[test]
+fn moving_the_remote_column_to_a_third_sheet_gives_ref() {
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "max(Sheet3!B)"))
+            .expect("formula");
+        let book = take_snapshot(&handle)
+            .tree
+            .parent(f.sheet)
+            .unwrap()
+            .unwrap();
+        handle
+            .execute(Command::AddWorksheet {
+                book,
+                name: Some("Sheet4".to_string()),
+            })
+            .expect("Sheet4");
+        let sheet4 = *take_snapshot(&handle)
+            .tree
+            .children(book)
+            .unwrap()
+            .last()
+            .unwrap();
+        handle
+            .execute(Command::Move {
+                id: o.y,
+                new_parent: sheet4,
+                index: 0,
+            })
+            .expect("B goes to Sheet4");
+        let s = take_snapshot(&handle);
+        assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("max(#REF)"));
+        assert!(all_empty(&s, f.c), "{mode:?}");
+        handle.undo().expect("undo the move");
+        assert_eq!(
+            numbers(&take_snapshot(&handle), f.c),
+            some(&[300.0; 3]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// A chain across sheets, in both directions of the identifier order, is
+/// right after one edit, and a second pass writes nothing.
+#[test]
+fn a_chain_across_sheets_is_calculated_in_one_pass() {
+    for mode in BOTH {
+        // Sheet3!C = B * 2 (computed); Sheet1!D = max(Sheet3!C).
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, o.c, "B*2"))
+            .expect("Sheet3!C = B*2");
+        handle
+            .execute(set_formula(&handle, f.d, "max(Sheet3!C)"))
+            .expect("D reads it");
+        handle
+            .execute(enter(o.y, 0, &[7.0, 8.0, 9.0]))
+            .expect("edit Sheet3!B");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, f.d), some(&[18.0; 3]), "{mode:?}: one pass");
+
+        // The other direction: Sheet1!C = A+1 (computed); Sheet3!C = max(Sheet1!C).
+        let (_session, handle, f, o) = with_sheet3(mode);
+        handle
+            .execute(set_formula(&handle, f.c, "A+1"))
+            .expect("Sheet1!C");
+        handle
+            .execute(set_formula(&handle, o.c, "max(Sheet1!C)"))
+            .expect("Sheet3!C reads it");
+        handle
+            .execute(enter(f.a, 0, &[10.0, 20.0, 30.0]))
+            .expect("edit Sheet1!A");
+        let s = take_snapshot(&handle);
+        assert_eq!(numbers(&s, o.c).first().copied().flatten(), Some(31.0));
+        if mode == FormulaRecalc::Targeted {
+            let before = take_snapshot(&handle);
+            handle.execute(unrelated(&before, 1)).expect("unrelated");
+            let after = take_snapshot(&handle);
+            assert_eq!(version(&before, o.c), version(&after, o.c), "stable");
+            assert_eq!(version(&before, f.c), version(&after, f.c), "stable");
+        }
+    }
+}
+
+/// A loop across two sheets that a file already holds: both are `---`, no
+/// hang, nothing rewritten by the next pass.
+#[test]
+fn a_loop_across_sheets_stays_not_calculated_and_stable() {
+    use stokesforge_core::{ColumnFormula, FormulaPart, RemoteRef};
+    for mode in BOTH {
+        let (_session, handle, f, o) = with_sheet3(mode);
+        let remote_formula = |read: NodeId, sheet: NodeId| {
+            ColumnFormula::from_parts_with_remote(
+                vec![
+                    FormulaPart::Text("max(".to_string()),
+                    FormulaPart::Column(read),
+                    FormulaPart::Text(")".to_string()),
+                ],
+                std::collections::BTreeMap::from([(
+                    1,
+                    RemoteRef {
+                        sheet,
+                        prefixed: true,
+                    },
+                )]),
+            )
+        };
+        for (column, read, sheet) in [(f.c, o.c, o.sheet), (o.c, f.c, f.sheet)] {
+            handle
+                .execute(Command::SetColumnMeta {
+                    column,
+                    meta: ColumnMeta {
+                        formula: Some(remote_formula(read, sheet)),
+                        ..Default::default()
+                    },
+                })
+                .expect("formula installed as a file would hold it");
+        }
+        let s = take_snapshot(&handle);
+        assert!(all_not_calculated(&s, f.c), "{mode:?}");
+        assert!(all_not_calculated(&s, o.c), "{mode:?}");
+        if mode == FormulaRecalc::Targeted {
+            handle.execute(unrelated(&s, 2)).expect("unrelated");
+            let after = take_snapshot(&handle);
+            assert_eq!(version(&s, f.c), version(&after, f.c), "stable");
+            assert_eq!(version(&s, o.c), version(&after, o.c), "stable");
+        }
+    }
+}

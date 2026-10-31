@@ -19,9 +19,8 @@ use stokesforge_plot::SavedColors;
 use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
-use crate::formula::{ColumnFormula, FormulaError};
 use crate::id::NodeId;
-use crate::name::check_name;
+use crate::name::{check_name, same_name_ignoring_case};
 use crate::node::{containment_message, Node, NodeKind};
 use crate::path::{format_path, parse_path, ObjectPath};
 use crate::transpose::TransposeLink;
@@ -472,7 +471,9 @@ impl Tree {
     pub fn find_window(&self, name: &str) -> Option<NodeId> {
         let mut found = None;
         self.visit_windows(|id| {
-            let is_match = self.node(id).is_some_and(|node| node.name() == name);
+            let is_match = self
+                .node(id)
+                .is_some_and(|node| same_name_ignoring_case(node.name(), name));
             if is_match {
                 found = Some(id);
             }
@@ -567,50 +568,12 @@ impl Tree {
     /// Columns of the sheet of `column` (its siblings, itself included), in
     /// the order of the sheet — which makes the letters. Empty if `column` has
     /// no parent.
-    fn sheet_columns_of(&self, column: NodeId) -> &[NodeId] {
+    pub(crate) fn sheet_columns_of(&self, column: NodeId) -> &[NodeId] {
         self.parent(column)
             .ok()
             .flatten()
             .and_then(|sheet| self.children(sheet).ok())
             .unwrap_or(&[])
-    }
-
-    /// Reads a formula **typed in letters** for `column`: each letter
-    /// becomes the identifier of the column it designates in the sheet of
-    /// `column` (see [`ColumnFormula::from_letters`] for the refusals).
-    ///
-    /// This is, with [`Tree::formula_letters`], the **only** letters ↔
-    /// identifiers pass — shared by the application and by `pyst`. It is done
-    /// *above* the commands: `Command::SetColumnMeta` never validates
-    /// the references, and the gesture that changes another field keeps the
-    /// stored formula as is (otherwise a `#REF` would block any
-    /// change to the unit).
-    pub fn formula_from_letters(
-        &self,
-        column: NodeId,
-        text: &str,
-    ) -> Result<ColumnFormula, FormulaError> {
-        ColumnFormula::from_letters(text, self.sheet_columns_of(column), column)
-    }
-
-    /// Text to show for the formula of `column`: the **current** letters
-    /// of its read columns, `#REF` for a column that is no longer in the
-    /// sheet. `None` if `column` is not a column or has no
-    /// formula. Display only: never read back to compute.
-    pub fn formula_letters(&self, column: NodeId) -> Option<String> {
-        let formula = self.node(column)?.as_column()?.meta().formula.as_ref()?;
-        Some(formula.letters(self.sheet_columns_of(column)))
-    }
-
-    /// True if the formula of `column` reads a column that is no longer in its
-    /// sheet (deleted, or moved elsewhere): it is shown with
-    /// [`REF_TOKEN`](crate::REF_TOKEN) and computes to
-    /// [`FormulaError::DeletedColumn`].
-    pub fn formula_has_deleted_reference(&self, column: NodeId) -> bool {
-        self.node(column)
-            .and_then(Node::as_column)
-            .and_then(|column| column.meta().formula.as_ref())
-            .is_some_and(|formula| formula.has_deleted_reference(self.sheet_columns_of(column)))
     }
 
     /// True if the formula of `column` reads the X of a column that has none
@@ -626,7 +589,7 @@ impl Tree {
         else {
             return false;
         };
-        if formula.has_deleted_reference(self.sheet_columns_of(column)) {
+        if formula.has_deleted_reference_in(self.sheet_columns_of(column), self.scope_of(column)) {
             return false;
         }
         let Ok(compiled) = formula.compile() else {
@@ -803,7 +766,7 @@ impl Tree {
     fn check_name_available(
         &self,
         parent: Option<NodeId>,
-        _kind: &NodeKind,
+        kind: &NodeKind,
         name: &str,
         ignore: Option<NodeId>,
     ) -> CoreResult<()> {
@@ -817,7 +780,18 @@ impl Tree {
             if Some(*child) == ignore {
                 continue;
             }
-            if self.node(*child).is_some_and(|node| node.name() == name) {
+            // Case is ignored for every sibling except a column (#403): a
+            // formula names sheets and workbooks without regard to case, so
+            // two of them may not differ only by case. Columns are written by
+            // letter and keep the exact comparison.
+            let collides = self.node(*child).is_some_and(|node| {
+                if kind.is_column() {
+                    node.name() == name
+                } else {
+                    same_name_ignoring_case(node.name(), name)
+                }
+            });
+            if collides {
                 return Err(CoreError::DuplicateName(format!(
                     "{name} in {}",
                     parent_node.name()
