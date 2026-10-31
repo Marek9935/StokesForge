@@ -21,6 +21,9 @@ colour_of() { cat "$(git -C "$tmp/_stokesforge/feature$1" rev-parse --absolute-g
 
 # Colours: first free, kept, freed on removal. No session is started.
 export SF_NO_FETCH=1
+# No network: sub-issue lookups read a fixture (an empty list unless a test says so).
+echo '[]' > "$tmp/none.json"
+export SF_ISSUES_JSON="$tmp/none.json"
 SF_ISSUE_TITLE="Fix axis label" "$here/chantier.sh" --dry-run 5 > "$tmp/out"
 grep -q '^  🟦 #5 Fix axis label  worktree ' "$tmp/out" || fail "tag: $(cat "$tmp/out")"
 grep -q 'scripts/try.sh <n>' "$tmp/out" || fail "briefing steps"
@@ -29,6 +32,7 @@ grep -qx 'Start EVERY message to the user with: 🟦 #5 Fix axis label' "$tmp/ou
 grep -q '^To-test page: https://claude.ai/artifact/' "$tmp/out" || fail "briefing: To-test link"
 # A one-word domain before a colon keeps the next words.
 SF_ISSUE_TITLE="Workflow: every message of an orchestrator" "$here/chantier.sh" --dry-run 6 > "$tmp/out6"; grep -q "^  🟦 #6 Workflow every message  worktree " "$tmp/out6" || fail "domain prefix name: $(cat "$tmp/out6")"
+SF_ISSUE_TITLE="Workflow: launch a work package" "$here/chantier.sh" --dry-run 6 > "$tmp/out6b"; grep -q "^  🟦 #6 Workflow launch  worktree " "$tmp/out6b" || fail "small word dropped after the domain"
 [ "$(wc -l < "$tmp/out")" -le 30 ] || fail "briefing too long"
 grep -q 'claude -n\|--add-dir' "$tmp/out" && fail "dry-run still mentions a claude launch"
 [ ! -e "$tmp/_stokesforge/feature5" ] || fail "dry-run created a worktree"
@@ -52,6 +56,58 @@ eq "$(colour_of 3)" 🟦 "freed colour is reused"
 eq "$(colour_of 3)" 🟦 "colour kept on rerun"
 [ -f "$tmp/_stokesforge/feature3/stokesforge-colour" ] && fail "colour file in the worktree root"
 unset SF_ISSUE_TITLE
+
+# (Colours 🟦 and 🟩 are held by the worktrees 3 and 2 here; the package takes the next one.)
+# Work package with sub-issues (#419): detected from a fixture, no worktree
+# without --start, one colour reserved for the whole package.
+cat > "$tmp/issues.json" <<'JSON'
+[
+ {"iid": 221, "title": "Third thing", "state": "opened", "description": "Sub-issue of #217"},
+ {"iid": 219, "title": "Rejected fields: show why", "state": "opened", "description": "PARENT : #217\nrest"},
+ {"iid": 220, "title": "Second step (#217)", "state": "opened", "description": ""},
+ {"iid": 2170, "title": "Other", "state": "opened", "description": "Parent: #2170 and Parent: #2171"},
+ {"iid": 230, "title": "Closed one", "state": "closed", "description": "Parent: #217"},
+ {"iid": 231, "title": "Old form", "state": "opened", "description": "Sous-ticket du chantier #217"},
+ {"iid": 232, "title": "Short form", "state": "opened", "description": "Sous-ticket de #217."},
+ {"iid": 419, "title": "Docs quoting an example", "state": "opened", "description": "Example: `Parent : #217`, and\n```\nParent: #217\n```"}
+]
+JSON
+export SF_ISSUES_JSON="$tmp/issues.json"
+export SF_ISSUE_BODY_217=$'Work:\n- #231 old form\n- #220\n- #219'
+export SF_ISSUE_TITLE_217="Parent work: many sub-issues"
+export SF_ISSUE_TITLE_88="Plain issue"
+"$here/chantier.sh" 217 > "$tmp/pkg"
+grep -qF '🟧 #217 Parent work' "$tmp/pkg" || fail "package tag: $(cat "$tmp/pkg")"
+grep -n '^  [0-9]\. #' "$tmp/pkg" | sed 's/^[0-9]*://' | tr '\n' '|' > "$tmp/order"
+eq "$(cat "$tmp/order")" "  1. #231 Old form|  2. #220 Second step (#217)|  3. #219 Rejected fields|  4. #221 Third thing|  5. #232 Short form|" "package order (parent body, then number; #2170, closed and quoted ignored)"
+grep -q 'first card of the start form' "$tmp/pkg" || fail "briefing: list is the first card"
+grep -q -- '--start 231' "$tmp/pkg" || fail "briefing: --start hint"
+[ ! -e "$tmp/_stokesforge/feature217" ] && [ ! -e "$tmp/_stokesforge/feature219" ] || fail "worktree created without --start"
+eq "$(head -n 1 "$tmp/_stokesforge/.packages/217")" 🟧 "package colour reserved"
+"$here/chantier.sh" 217 --start 219 > "$tmp/pkg2"
+eq "$(colour_of 219)" 🟧 "sub-issue gets the package colour"
+grep -qF 'Start EVERY message to the user with: 🟧 #217 › #219 Rejected fields' "$tmp/pkg2" || fail "sub-issue tag: $(cat "$tmp/pkg2")"
+[ ! -e "$tmp/_stokesforge/feature220" ] || fail "other sub-issue created"
+# The colour stays reserved between two sub-issues; a plain issue takes the next one.
+git worktree remove "$tmp/_stokesforge/feature219"
+"$here/chantier.sh" 88 > /dev/null
+eq "$(colour_of 88)" 🟪 "package colour still reserved"
+git worktree remove "$tmp/_stokesforge/feature88"; git branch -q -D feature/88-plain-issue
+"$here/chantier.sh" 217 --start 220 > /dev/null
+eq "$(colour_of 220)" 🟧 "second sub-issue, same colour"
+if "$here/chantier.sh" 217 --start 99 2> /dev/null; then fail "--start of a non sub-issue accepted"; fi
+if "$here/chantier.sh" --done 217 2> "$tmp/errd"; then fail "--done accepted with a worktree left"; fi
+grep -q 'still has worktrees' "$tmp/errd" || fail "--done message"
+git worktree remove "$tmp/_stokesforge/feature220"
+"$here/chantier.sh" --done 217 > /dev/null
+[ ! -e "$tmp/_stokesforge/.packages/217" ] || fail "--done keeps the reservation"
+"$here/chantier.sh" 88 > /dev/null
+eq "$(colour_of 88)" 🟧 "colour free after --done"
+git worktree remove "$tmp/_stokesforge/feature88"
+# A plain issue (no sub-issue) behaves as before.
+"$here/chantier.sh" --dry-run 88 > "$tmp/out88"; grep -q '^  🟧 #88 Plain issue  worktree ' "$tmp/out88" || fail "plain issue changed"
+unset SF_ISSUE_BODY_217 SF_ISSUE_TITLE_217 SF_ISSUE_TITLE_88
+export SF_ISSUES_JSON="$tmp/none.json"
 
 # Two issues in one session: one worktree each, 3-word names; seventh refused.
 out="$(SF_ISSUE_TITLE_7="Graph size: width and height fields" SF_ISSUE_TITLE_8="Frames follow the axes" "$here/chantier.sh" --dry-run 7 8)"

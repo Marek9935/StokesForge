@@ -61,6 +61,7 @@ Add **Cause probable** only when established, with its `path:line`. « Non local
 
 The state of a bug lives only in the project's GitLab issues (`origin` = `gitlab.com:askrzypczak/stokesforge`). A dated `.md` does not know a commit made it false.
 
+- A sub-issue of a work package: its description starts with the line `Parent: #<n>` (before the template below), and the parent's description lists the sub-issues in delivery order (#419).
 - Create: `glab issue create --title "<symptom>" --label bug --description "<template>"` (`--label évolution` for a request). One issue per bug.
 - Recap of open bugs: `glab issue list --label bug`. A bug believed open without an issue is checked (`git log --all --grep`, unmerged branches, the user) before being repeated.
 - `glab` missing or not authenticated: say so and suggest `! glab auth login`; never fall back silently to a `.md`.
