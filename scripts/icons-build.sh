@@ -14,7 +14,9 @@ dir=crates/stokesforge-app/assets/icons
 out=${ICON_SHEET_DIR:-target/icons}
 
 if [[ ${1:-} == --add ]]; then
-  cp "vendor/phosphor-icons/SVGs/duotone/$2-duotone.svg" "$dir/src/"
+  src="vendor/phosphor-icons/SVGs/duotone/${2:?usage: --add NAME}-duotone.svg"
+  [[ -f $src ]] || { echo "not found: $src" >&2; exit 1; }
+  cp "$src" "$dir/src/"
   echo "copied: $2; add a line to $dir/icons.tsv"
   exit 0
 fi
@@ -26,18 +28,33 @@ while IFS="$tab" read -r role s f; do
   stroke[$role]=$s; fill[$role]=$f
 done < "$dir/palette.tsv"
 
-rm -f "$dir"/*.*.svg
+# Check everything before touching anything: all roles known, all sources
+# present (all problems are reported), then bake into a temporary directory
+# and swap it in only once every variant succeeded.
+bad=0
+while IFS="$tab" read -r name roles; do
+  [[ -z $name || $name == \#* ]] && continue
+  [[ -f $dir/src/$name-duotone.svg ]] || { echo "missing source: $dir/src/$name-duotone.svg" >&2; bad=1; }
+  for role in ${roles//,/ }; do
+    [[ -n ${stroke[$role]:-} ]] || { echo "unknown role: $role ($name)" >&2; bad=1; }
+  done
+done < "$dir/icons.tsv"
+(( bad == 0 )) || { echo "nothing replaced in $dir" >&2; exit 1; }
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 variants=()
 while IFS="$tab" read -r name roles; do
   [[ -z $name || $name == \#* ]] && continue
   for role in ${roles//,/ }; do
-    [[ -n ${stroke[$role]:-} ]] || { echo "unknown role: $role ($name)" >&2; exit 1; }
     sed -e "s/currentColor/${stroke[$role]}/g" \
         -e "s/opacity=\"0.2\"/fill=\"${fill[$role]}\" opacity=\"0.2\"/g" \
-        "$dir/src/$name-duotone.svg" > "$dir/$name.$role.svg"
+        "$dir/src/$name-duotone.svg" > "$tmp/$name.$role.svg"
     variants+=("$name.$role")
   done
 done < "$dir/icons.tsv"
+rm -f "$dir"/*.*.svg
+mv "$tmp"/*.svg "$dir/"
 echo "${#variants[@]} variants in $dir"
 
 [[ ${1:-} == --sheet ]] || exit 0
