@@ -12,8 +12,8 @@
 //! exports measure.
 
 use stokesforge_core::compose::{
-    set_figure_offset, set_fixed_figure, set_frame_size, set_free_frame, set_free_placement,
-    set_grid_placement, CellSide, FigureOffset, FrameAxis, FreeField,
+    set_figure_offset, set_fixed_figure, set_frame_size, set_free_frame, CellSide, FigureOffset,
+    FrameAxis, FreeField,
 };
 use stokesforge_plot::{FreeFrame, LayerPlacement, PlotSpec};
 use stokesforge_render::pipeline::BesideSide;
@@ -124,27 +124,9 @@ pub fn set_offset_in_draft(
 /// [`set_grid_placement`] (L7 then C4). `false`, with the draft unchanged, if
 /// the draft is already in that placement or the conversion is refused.
 pub fn set_placement_in_draft(spec: &mut PlotSpec, free: bool) -> bool {
-    let mut candidate = spec.clone();
-    if free {
-        if candidate.layer_placement == LayerPlacement::Free {
-            return false;
-        }
-        fix_from(&spec.clone(), &mut candidate);
-        let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
-        let choice = stokesforge_render_svg::FontChoice::default();
-        let Ok(Some(frames)) =
-            stokesforge_render_svg::free_frames_from_grid(&candidate, &measurer, &choice)
-        else {
-            return false;
-        };
-        if !set_free_placement(&mut candidate, &frames) {
-            return false;
-        }
-    } else if !set_grid_placement(&mut candidate) {
-        return false;
-    }
-    *spec = candidate;
-    true
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    stokesforge_render_svg::set_layer_placement(spec, free, &measurer, &choice)
 }
 
 /// The four numbers of the frame of a layer as Graph Properties shows them in

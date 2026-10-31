@@ -400,6 +400,9 @@ print('info|' + keys(r))
 print('info.column|' + keys(r['column']))
 two = pyst.plot([a, b], None)
 print('graph_size|' + keys(pyst.graph_size(pyst.plot(b, a))))
+g2 = pyst.plot(b, a)
+pyst.set_graph(g2, layer_placement='free')
+print('graph_size.layer|' + keys(pyst.graph_size(g2)['layers'][0]))
 print('series.item|' + keys(pyst.series(two)[0]))
 print('series_groups.item|' + keys(pyst.series_groups(two)[0]))
 r = pyst.analysis.baseline(b, a, method='line', points=[(1, 1), (3, 3)], keep_baseline=True)
@@ -504,6 +507,11 @@ const INPUTS: &[Input] = &[
     Input {
         name: "length_unit",
         body: "pyst.graph_size(g, unit=v)",
+        refusal: true,
+    },
+    Input {
+        name: "layer_placement",
+        body: "pyst.set_graph(g, layer_placement=v)",
         refusal: true,
     },
     Input {

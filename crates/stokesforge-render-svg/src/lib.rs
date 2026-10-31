@@ -187,6 +187,41 @@ pub fn free_frames_from_grid(
     })
 }
 
+/// Switches `spec` between the regular grid and free placement (#398, #411),
+/// the one rule of Graph Properties and `pyst.set_graph`.
+///
+/// To free: a legacy graph is given its frames first, then every layer takes
+/// the frame the grid draws it with, so nothing moves. To the grid:
+/// [`stokesforge_core::compose::set_grid_placement`] (L7 then C4). `false`,
+/// with `spec` unchanged, if it is already in that placement or the
+/// conversion is refused.
+pub fn set_layer_placement(
+    spec: &mut PlotSpec,
+    free: bool,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+) -> bool {
+    use stokesforge_plot::LayerPlacement;
+    let mut candidate = spec.clone();
+    if free {
+        if candidate.layer_placement == LayerPlacement::Free {
+            return false;
+        }
+        let reference = spec.clone();
+        let _ = fix_legacy_frames(&reference, &mut candidate, measurer, choice);
+        let Ok(Some(frames)) = free_frames_from_grid(&candidate, measurer, choice) else {
+            return false;
+        };
+        if !stokesforge_core::compose::set_free_placement(&mut candidate, &frames) {
+            return false;
+        }
+    } else if !stokesforge_core::compose::set_grid_placement(&mut candidate) {
+        return false;
+    }
+    *spec = candidate;
+    true
+}
+
 /// The frame of a layer added beside layer `panel` of a free graph (#398, L8),
 /// measured like the export; see [`pipeline::place_beside`].
 pub fn place_beside(

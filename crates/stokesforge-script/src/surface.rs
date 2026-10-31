@@ -809,7 +809,7 @@ saving and figure export.
                   scales, bounds, legend, plot areas...; one history entry; keys in
                   help(pyst.set_graph))
     pyst.graph_size(graph, *, unit='cm') -> dict (width, height, plot_widths, plot_heights,
-                  plot_left, plot_top, fixed_size; lengths in `unit`)
+                  plot_left, plot_top, fixed_size, layer_placement, layers; lengths in `unit`)
     pyst.insert_rows(worksheet, at, count=1) -> None
     pyst.delete_rows(worksheet, at, count=1) -> None
     pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed')
@@ -864,7 +864,7 @@ Known limits of this surface:
 /// Alpha while it is `0.x`: any change of surface (addition or break) bumps the
 /// minor. `scripts/versions-aligned.sh` checks it against the frozen snapshot
 /// `tests/api-witnesses/v<version>.txt` (see docs/python-and-scripting.md).
-pub const PYST_API_VERSION: &str = "0.2";
+pub const PYST_API_VERSION: &str = "0.3";
 
 /// Builds the `pyst` module and registers it in `sys.modules`.
 ///

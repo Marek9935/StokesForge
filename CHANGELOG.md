@@ -35,8 +35,7 @@ without a message, see `docs/persistence.md`).
   nothing; going back to the grid puts layers side by side in a row and gives
   each column and row its largest plot area. **New Layer Beside** places the new
   layer next to the active one without overlap, **Delete Layer** moves no other
-  layer. No mouse gestures yet (they come in a later batch), and `pyst` refuses
-  the size keys on a free graph. **Additive `.stf` fields** (`layer_placement`,
+  layer. No mouse gestures yet (they come in a later batch). **Additive `.stf` fields** (`layer_placement`,
   and `free_frame` on each panel): an older version that opens and saves a file
   again drops them without a message and shows the grid.
 
@@ -46,6 +45,13 @@ without a message, see `docs/persistence.md`).
   by default, never the Preferences unit); values out of range are refused. The
   new `pyst.graph_size(graph, unit="cm")` reads the image size, the plot areas,
   Left / Top and Fixed. `pyst.__api_version__` is now `0.2`.
+
+- `pyst` free placement (#411): `pyst.set_graph` gains `layer_placement="grid"|"free"`
+  (applied first in the call), `layer_left` and `layer_top` (position of the layer of
+  `panel` in page coordinates, in `unit`, may be negative); in Free `plot_width` and
+  `plot_height` size that layer alone and `plot_left` / `plot_top` are refused.
+  `pyst.graph_size` adds `layer_placement` and `layers` (left, top, width, height per
+  layer). `pyst.__api_version__` is now `0.3`.
 
 - Column formulas (#401): the `^` operator, comparisons (`<`, `<=`, `>`, `>=`,
   `==`, `!=`, true = 1) and row-wise functions in **F(x)=** (`sqrt`, `root`,
