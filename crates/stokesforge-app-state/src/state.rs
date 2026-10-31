@@ -10127,10 +10127,18 @@ impl AppState {
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
         crate::frame_sizes::fix_new(&mut spec);
+        // Free placement (#398, L8): the new layer is placed beside the
+        // reference, never over another one, in the same command.
+        let beside = crate::frame_sizes::place_beside(&spec, panel, side);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };
+        if let Some(frame) = beside {
+            if let Some(target) = spec.panels.get_mut(new_cell) {
+                target.free_frame = Some(frame);
+            }
+        }
         if !columns.is_empty() {
             if let Err(message) =
                 self.add_columns_to_spec(&mut spec, new_cell, &columns, Some(plot_type))

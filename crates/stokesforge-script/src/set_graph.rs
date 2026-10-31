@@ -13,8 +13,8 @@ use pyo3::types::PyDict;
 use stokesforge_core::compose::{self, FigureOffset, FrameAxis};
 use stokesforge_core::NodeId;
 use stokesforge_plot::{
-    AxisScale, AxisSpec, LegendPosition, LengthUnit, PlotSpec, SeriesAxis, MAX_FRAME_SIZE,
-    MIN_FRAME_SIZE,
+    AxisScale, AxisSpec, LayerPlacement, LegendPosition, LengthUnit, PlotSpec, SeriesAxis,
+    MAX_FRAME_SIZE, MIN_FRAME_SIZE,
 };
 use stokesforge_session::Snapshot;
 
@@ -373,6 +373,14 @@ fn set_graph_native(
                 panel.0, panel.1
             ))
         })?;
+        // The size keys are the grid's: a free graph (#398) has a frame per
+        // layer, which a script cannot set yet.
+        if changes.sets_size() && before.layer_placement == LayerPlacement::Free {
+            return Err(HostError::InvalidValue(
+                "the graph uses free layer placement: its sizes cannot be set from a script yet"
+                    .to_owned(),
+            ));
+        }
         let mut spec = before.clone();
         // A size key on a graph from an old file: it is given the plot areas
         // it is drawn with first (G7), and a call that then changes nothing

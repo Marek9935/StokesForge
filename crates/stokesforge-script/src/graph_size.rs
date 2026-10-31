@@ -10,7 +10,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use stokesforge_plot::LengthUnit;
+use stokesforge_plot::{LayerPlacement, LengthUnit};
 
 use crate::bridge::{self, HostError};
 use crate::engine;
@@ -44,7 +44,9 @@ struct Sizes {
 /// (`None` = Auto, otherwise the distance from the image edge, raised to the
 /// smallest value the axes allow) and `fixed_size` (`bool`). A graph from an
 /// old file, which stores no plot area, reports the ones it is drawn with and
-/// stays as it is.
+/// stays as it is. A graph with free layer placement (#398) reports its image
+/// size, empty `plot_widths` and `plot_heights` and `None` for `plot_left` and
+/// `plot_top`.
 ///
 /// Raises `InvalidValueError` for an unknown unit, `BrokenReferenceError` for
 /// a stale handle.
@@ -70,15 +72,20 @@ pub(crate) fn graph_size<'py>(
             let choice = stokesforge_render_svg::FontChoice::default();
             let layout = stokesforge_render_svg::figure_layout(&spec, &measurer, &choice)
                 .map_err(|error| HostError::InvalidValue(error.to_string()))?;
+            // A free graph (#398) has no grid column or row, and the figure's
+            // Left / Top are not used: only the image size is reported.
+            let free = spec.layer_placement == LayerPlacement::Free;
             Ok(Sizes {
                 size: (f64::from(layout.size.0), f64::from(layout.size.1)),
                 widths: layout.frame_widths.clone(),
                 heights: layout.frame_heights.clone(),
                 left: spec
                     .figure_left
+                    .filter(|_| !free)
                     .map(|left| left.max(f64::from(layout.min_left))),
                 top: spec
                     .figure_top
+                    .filter(|_| !free)
                     .map(|top| top.max(f64::from(layout.min_top))),
                 fixed: spec.fixed_figure,
             })

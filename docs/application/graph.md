@@ -823,3 +823,37 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
 progress), driven by `StokesForgeApp::follow_layer_changes` with the exact map of a
 deletion (`compose::remap_after_removal`) or, for Undo/Redo, the content match
 `compose::remap_between`. The new cell becomes the active layer.
+
+### Free layer placement (#398)
+
+**Graph Properties > General > Size > Layer placement** chooses **Regular grid**
+(default, everything above) or **Free** (`PlotSpec::layer_placement`,
+`frame_sizes::set_placement_in_draft`, in the draft like every field: one undo
+step for the window). Grid to Free leaves every plot area where it is drawn and
+the image as it is (`render_svg::free_frames_from_grid`, a legacy graph is given
+its frames first). Free to grid is `compose::set_grid_placement`: layers whose
+vertical extents overlap share a row, left to right inside a row, then each
+column takes its widest frame and each row its tallest.
+
+In Free, **Size** shows **Left**, **Top**, **Width** and **Height** of the layer
+chosen in the layer list (which stays live on this page, greyed out only on the
+grid), the read-only **Graph size**, and a note. Width and Height are the plot
+area (`quantities::frame_size`, 36 to 2000 pt). Left and Top are the distance
+from the image edge to the plot area, the graph title band included at the top
+(`frame_sizes::free_fields`; stored = `FigureLayout::free_origin` + value, minus
+the title band for Top), never below the layer's own bands: the field clamps
+(`quantities::free_offset`) with its usual orange frame and bubble. The figure
+Left / Top and the per-column and per-row fields are hidden and stay stored for
+the way back. **Figure size = Fixed** applies per layer. There is no handle on
+any edge in Free until the mouse gestures come (`GraphView::layout_is_free`); a
+click still activates the layer drawn under the cursor, found from the drawn
+plot areas, never from grid breakpoints.
+
+**Add Layer Beside** in Free writes the frame of the new layer in the same
+`EditPlotSpec(AddCell)` (`frame_sizes::place_beside`, `render::place_beside`):
+the active layer's frame size, the same top (Right) or the same left (Below),
+and never over another layer (further along if the place is taken). **Delete
+Layer** moves no other layer; the image shrinks around what is left. Neither
+`AppState` nor `with_fixed_frames` ever puts a Free spec back on the grid
+(`frame_sizes::is_legacy` is false in Free). `pyst` refuses the size keys on a
+Free graph (`docs/python-and-scripting.md`).

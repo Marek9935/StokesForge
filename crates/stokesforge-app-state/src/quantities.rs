@@ -301,3 +301,16 @@ pub fn figure_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) 
         .wide()
         .with_auto(AutoKind::Field)
 }
+
+/// Left or Top of a layer in free placement, from the edge of the image, in
+/// `unit` (#398): never below `minimum_points`, the bands the layer's own axes
+/// and title need (a smaller value is raised to it). No Auto: a free layer
+/// always has a place.
+pub fn free_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) -> Quantity {
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(
+            unit.from_points(minimum_points.clamp(0.0, stokesforge_plot::MAX_FRAME_SIZE)),
+            unit.from_points(stokesforge_plot::MAX_FRAME_SIZE),
+        )
+        .wide()
+}

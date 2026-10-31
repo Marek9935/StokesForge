@@ -26,12 +26,18 @@ without a message, see `docs/persistence.md`).
 
 ### Added
 
-- Free placement of graph panels, first part (#398): the model, the `.stf` file
-  and the layout. A graph can hold a frame per panel (left, top, width, height,
-  overlap allowed) instead of the regular grid; the image is the bounding box of
-  the panels. Nothing in the interface yet. **Additive `.stf` fields**
-  (`layer_placement`, and `free_frame` on each panel): an older version that
-  opens and saves a file again drops them without a message and shows the grid.
+- Free placement of graph layers (#398), first batch: Graph Properties >
+  General > Size > **Layer placement** switches between **Regular grid** and
+  **Free**. In Free each layer has its own plot area, set with **Left**, **Top**,
+  **Width** and **Height** (Left and Top are the distance from the edge of the
+  image); the image is the bounding box of the layers. Switching to Free moves
+  nothing; going back to the grid puts layers side by side in a row and gives
+  each column and row its largest plot area. **New Layer Beside** places the new
+  layer next to the active one without overlap, **Delete Layer** moves no other
+  layer. No mouse gestures yet (they come in a later batch), and `pyst` refuses
+  the size keys on a free graph. **Additive `.stf` fields** (`layer_placement`,
+  and `free_frame` on each panel): an older version that opens and saves a file
+  again drops them without a message and shows the grid.
 
 - `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
   (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =

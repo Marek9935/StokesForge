@@ -160,7 +160,8 @@ pub fn fix_legacy_frames(
     measurer: &TextMeasurer,
     choice: &stokesforge_render::FontChoice,
 ) -> Result<bool, SvgError> {
-    if !(target.frame_widths.is_empty() && target.frame_heights.is_empty())
+    if target.layer_placement == stokesforge_plot::LayerPlacement::Free
+        || !(target.frame_widths.is_empty() && target.frame_heights.is_empty())
         || (target.rows(), target.columns()) != (reference.rows(), reference.columns())
     {
         return Ok(false);

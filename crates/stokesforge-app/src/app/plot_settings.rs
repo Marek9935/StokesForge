@@ -23,7 +23,8 @@ use crate::number_field::{auto_number_field, format_value, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::cell_sides::{self, PLACES};
 use stokesforge_app_state::frame_sizes::{
-    set_fixed_in_draft, set_offset_in_draft, set_size_in_draft,
+    free_fields, set_fixed_in_draft, set_free_field_in_draft, set_offset_in_draft,
+    set_placement_in_draft, set_size_in_draft,
 };
 use stokesforge_app_state::length_unit::LengthUnit;
 use stokesforge_app_state::quantities;
@@ -31,8 +32,8 @@ use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
 use stokesforge_app_state::tr;
-use stokesforge_core::compose::{FigureOffset, FrameAxis};
-use stokesforge_plot::FALLBACK_FRAME;
+use stokesforge_core::compose::{FigureOffset, FrameAxis, FreeField};
+use stokesforge_plot::{LayerPlacement, FALLBACK_FRAME};
 use stokesforge_render_egui::FigureLayout;
 
 use super::curve_settings::curve_settings_page;
@@ -249,7 +250,14 @@ fn plot_settings_contents(
         if spec.panels.len() > 1 {
             // The "Graph" and "Theme" pages apply to the whole graph:
             // the layer choice stays displayed but grayed out, with its reason (#180).
-            let per_layer = !matches!(chosen_tab, PlotSettingsTab::Graph | PlotSettingsTab::Theme);
+            // Except the Graph page of a free graph, whose Size section edits
+            // the layer chosen here (#398).
+            let free = spec.layer_placement == LayerPlacement::Free;
+            let per_layer = match chosen_tab {
+                PlotSettingsTab::Graph => free,
+                PlotSettingsTab::Theme => false,
+                _ => true,
+            };
             let layer_choice = ui.add_enabled_ui(per_layer, |ui| {
                 egui::ComboBox::from_id_salt("plot_settings_layer")
                     .selected_text(tr!(
@@ -307,7 +315,14 @@ fn plot_settings_contents(
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {
                         let layout = dialog_layout(ui.ctx(), settings.graph, spec, published);
-                        commit |= graph_settings_page(ui, spec, &mut env, layout.as_ref(), unit);
+                        commit |= graph_settings_page(
+                            ui,
+                            spec,
+                            edit.selected_panel,
+                            &mut env,
+                            layout.as_ref(),
+                            unit,
+                        );
                     }
                     PlotSettingsTab::PlotArea => {
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
@@ -369,8 +384,13 @@ fn dialog_layout(
     published: Option<FigureLayout>,
 ) -> Option<FigureLayout> {
     let stored = !draft.frame_widths.is_empty() || !draft.frame_heights.is_empty();
+    // A free graph is always measured from the draft: the origin of the image
+    // moves with every value typed, and the published layout may be one edit
+    // behind (#398).
+    let published = published.filter(|_| draft.layer_placement == LayerPlacement::Grid);
     if let Some(layout) = published.filter(|layout| {
-        layout.frame_widths.len() == draft.columns()
+        layout.placement == LayerPlacement::Grid
+            && layout.frame_widths.len() == draft.columns()
             && layout.frame_heights.len() == draft.rows()
             && layout.is_explicit() == stored
     }) {
@@ -391,6 +411,7 @@ fn dialog_layout(
 fn graph_settings_page(
     ui: &mut egui::Ui,
     spec: &mut PlotSpec,
+    panel: usize,
     env: &mut PickerEnv,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
@@ -423,7 +444,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, spec, layout, unit);
+        commit |= size_section(form, spec, panel, layout, unit);
         // S-L8 (#405): the figure size has an Auto default ("Grows with the
         // axes"), almost never changed: it lives in the closed Advanced block.
         commit |= form
@@ -495,9 +516,13 @@ fn figure_size_row(
 fn size_section(
     form: &mut Form<'_>,
     spec: &mut PlotSpec,
+    panel: usize,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
 ) -> bool {
+    if spec.layer_placement == LayerPlacement::Free {
+        return free_size_section(form, spec, panel, layout, unit);
+    }
     // What each frame is drawn with: the stored size, else the legacy one the
     // last painted figure laid out (its `frame_widths` are the frames a legacy
     // graph is drawn with).
@@ -526,7 +551,7 @@ fn size_section(
     }
     let symbol = unit.symbol();
     form.section(tr!("plot-size"));
-    let mut commit = false;
+    let mut commit = placement_row(form, spec);
     let quantity = quantities::frame_size(unit);
     for (axis, sizes) in [
         (FrameAxis::Column, &drawn_widths),
@@ -578,6 +603,94 @@ fn size_section(
         false
     });
     form.note(tr!("plot-size-note"));
+    commit
+}
+
+/// General › Size › Layer placement (#398): Regular grid or Free. Switching
+/// goes through the draft like every field of the window; going free leaves
+/// every plot area where it is drawn, going back applies the grid rules of the
+/// model.
+fn placement_row(form: &mut Form<'_>, spec: &mut PlotSpec) -> bool {
+    let options = [
+        ChoiceOption::new(false, tr!("plot-size-placement-grid")),
+        ChoiceOption::new(true, tr!("plot-size-placement-free")),
+    ];
+    let mut free = spec.layer_placement == LayerPlacement::Free;
+    let changed = form.row(tr!("plot-size-placement"), |ui| {
+        choice(ui, "plot_layer_placement", &mut free, &options)
+    });
+    changed && set_placement_in_draft(spec, free)
+}
+
+/// General › Size of a free graph (#398): Left, Top, Width and Height of the
+/// plot area of the layer chosen in the list, in the unit of the Preferences,
+/// and the size of the graph around the layers (read-only). Left and Top are
+/// distances from the edge of the image, which surrounds the layers.
+fn free_size_section(
+    form: &mut Form<'_>,
+    spec: &mut PlotSpec,
+    panel: usize,
+    layout: Option<&FigureLayout>,
+    unit: LengthUnit,
+) -> bool {
+    let symbol = unit.symbol();
+    form.section(tr!("plot-size"));
+    let mut commit = placement_row(form, spec);
+    let Some(layout) = layout else {
+        return commit;
+    };
+    let Some(fields) = free_fields(spec, layout, panel) else {
+        return commit;
+    };
+    let size = quantities::frame_size(unit);
+    let rows = [
+        (
+            FreeField::Left,
+            tr!("plot-size-left", unit = symbol),
+            fields.left.max(fields.min_left),
+            quantities::free_offset(unit, fields.min_left),
+        ),
+        (
+            FreeField::Top,
+            tr!("plot-size-top", unit = symbol),
+            fields.top.max(fields.min_top),
+            quantities::free_offset(unit, fields.min_top),
+        ),
+        (
+            FreeField::Width,
+            tr!("plot-size-width", unit = symbol),
+            fields.width,
+            size,
+        ),
+        (
+            FreeField::Height,
+            tr!("plot-size-height", unit = symbol),
+            fields.height,
+            size,
+        ),
+    ];
+    for (field, label, points, quantity) in rows {
+        let mut shown = unit.from_points(points);
+        let id = ("graph_free", panel, field as u8);
+        let changed = form.row(label, |ui| {
+            // A Left or Top below the layer's own bands is clamped to them by
+            // the field itself (orange frame and bubble, S-clamp).
+            number_field(ui, id, &mut shown, &quantity).changed
+        });
+        if changed {
+            commit |= set_free_field_in_draft(spec, layout, panel, field, unit.to_points(shown));
+        }
+    }
+    let (total_width, total_height) = (f64::from(layout.size.0), f64::from(layout.size.1));
+    form.row(tr!("plot-size-total", unit = symbol), |ui| {
+        ui.label(tr!(
+            "plot-size-total-value",
+            width = format_value(unit.from_points(total_width), unit.decimals()),
+            height = format_value(unit.from_points(total_height), unit.decimals())
+        ));
+        false
+    });
+    form.note(tr!("plot-size-free-note"));
     commit
 }
 
@@ -2507,6 +2620,148 @@ mod tests {
         type_into(&context, &mut harness, "5", "1");
         let left = harness.model().figure_left.expect("stored");
         assert!((left - 76.0).abs() < 0.01, "{left}");
+    }
+
+    /// A graph of two layers side by side: 300 x 250 pt and 220 x 250 pt plot
+    /// areas on the grid, or in free placement shifted far from the stored
+    /// origin (so a raw stored coordinate and a distance from the image edge
+    /// differ).
+    fn two_layers(spec: &mut PlotSpec, free: bool) {
+        let first = first_panel(spec).clone();
+        *spec = spec
+            .clone()
+            .with_panels(stokesforge_plot::Panels::new([first, PanelSpec::at(0, 1)]));
+        spec.frame_widths = vec![300.0, 220.0];
+        spec.frame_heights = vec![250.0];
+        if free {
+            assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+                spec, true
+            ));
+            for index in 0..2 {
+                let panel = spec.panels.get_mut(index).unwrap();
+                let frame = panel.free_frame.as_mut().unwrap();
+                frame.left += 1000.0;
+                frame.top += 700.0;
+            }
+        }
+    }
+
+    /// A length in points as a number field of the window shows it in
+    /// centimetres: six significant digits, trailing zeros dropped.
+    fn cm(points: f64) -> String {
+        let value = stokesforge_plot::LengthUnit::Cm.from_points(points);
+        let decimals = if value.abs() < 1.0 {
+            6
+        } else {
+            (5 - value.abs().log10().floor() as i32).max(0) as usize
+        };
+        let text = format!("{value:.decimals$}");
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.').to_owned()
+        } else {
+            text
+        }
+    }
+
+    /// #398: switching General > Size to Free moves nothing (every plot area and
+    /// the image keep their place and size), switching back applies the grid
+    /// rules.
+    #[test]
+    fn the_placement_choice_switches_without_moving_anything_and_back_to_the_grid() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| two_layers(spec, false));
+        harness.open(PlotSettingsTab::Graph, None);
+        let grid =
+            stokesforge_app_state::frame_sizes::figure_layout(&harness.model()).expect("layout");
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size-placement"),
+            tr!("plot-size-placement-grid"),
+            tr!("plot-size-placement-free"),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-size-placement-free"),
+        );
+        let free = harness.model();
+        assert_eq!(free.layer_placement, stokesforge_plot::LayerPlacement::Free);
+        let layout = stokesforge_app_state::frame_sizes::figure_layout(&free).expect("layout");
+        assert_eq!(layout.size, grid.size, "the image does not change");
+        for cell in &layout.free_cells {
+            assert_eq!(
+                Some(cell.frame),
+                grid.frame_rect(cell.row, cell.column),
+                "plot area of ({}, {})",
+                cell.row,
+                cell.column
+            );
+        }
+
+        // The four fields show, the grid ones are gone.
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        for label in [
+            tr!("plot-size-left", unit = "cm"),
+            tr!("plot-size-top", unit = "cm"),
+            tr!("plot-size-width", unit = "cm"),
+            tr!("plot-size-height", unit = "cm"),
+            tr!("plot-size-total", unit = "cm"),
+        ] {
+            assert!(is_painted(&painted, &label), "{label:?} not painted");
+        }
+        assert!(
+            !is_painted(&painted, &tr!("plot-size-column-width", n = 1, unit = "cm")),
+            "no grid field in Free"
+        );
+
+        click_label(
+            &context,
+            &mut harness.state,
+            &tr!("plot-size-placement-grid"),
+        );
+        let back = harness.model();
+        assert_eq!(back.layer_placement, stokesforge_plot::LayerPlacement::Grid);
+        assert_eq!(back.frame_widths, [300.0, 220.0]);
+        assert_eq!(back.frame_heights, [250.0]);
+        assert_eq!((back.panels[1].row, back.panels[1].column), (0, 1));
+        harness.state.close_plot_settings();
+    }
+
+    /// #398: the four fields belong to the layer chosen in the list, store
+    /// points from the unit of the Preferences, and show Left as the distance
+    /// from the edge of the image, not the stored coordinate.
+    #[test]
+    fn the_free_fields_are_those_of_the_selected_layer_in_the_unit_of_the_preferences() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| two_layers(spec, true));
+        harness.open(PlotSettingsTab::Graph, None);
+        harness.state.plot_edit_mut().unwrap().selected_panel = 1;
+        let draft = harness.draft();
+        let layout = stokesforge_app_state::frame_sizes::figure_layout(&draft).expect("layout");
+        let fields =
+            stokesforge_app_state::frame_sizes::free_fields(&draft, &layout, 1).expect("fields");
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(is_painted(&painted, &cm(220.0)), "width of layer 2");
+        assert!(
+            !is_painted(&painted, &cm(300.0)),
+            "not the width of layer 1"
+        );
+        assert!(is_painted(&painted, &cm(fields.left)), "Left of layer 2");
+        let raw = draft.panels[1].free_frame.unwrap().left;
+        assert!(
+            raw > 1000.0 && !is_painted(&painted, &cm(raw)),
+            "not the stored value"
+        );
+
+        // 5 cm typed: stored in points, on layer 2 only.
+        type_into(&context, &mut harness, &cm(220.0), "5");
+        let model = harness.model();
+        let width = |index: usize| model.panels[index].free_frame.unwrap().width;
+        assert!((width(1) - 141.732_283).abs() < 1e-5, "{}", width(1));
+        assert_eq!(width(0), 300.0, "layer 1 untouched");
+        harness.state.close_plot_settings();
     }
 
     /// #344: under Auto, From and To show the computed bounds; typing in one

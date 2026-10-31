@@ -131,7 +131,7 @@ A new graph has no background color: the figure is transparent when exported, an
 
 What you set is the size of the **plot area**, the rectangle bounded by the axes. In **General**, the **Size** section sets the plot area width of each column of layers and the plot area height of each row, in the unit chosen in **File ▸ Preferences… ▸ General ▸ Length unit** (centimeters by default; millimeters, points or inches). A graph with one layer has **Plot area width** and **Plot area height**; with several, **Plot area width, column 1**, **Plot area width, column 2**, **Plot area height, row 1** and so on. **Graph size** shows the whole graph, which you cannot type in: the plot areas plus the room taken around them by the margins, the axes with their numbers and titles, and the title of the graph.
 
-<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Plot area width for columns 1 and 2, Plot area height, the distance from the left and top edges, Graph size, and the opened Advanced block with Figure size." width="480">
+<img src="../images/graphs-properties-general.png" alt="The General tab of Graph Properties for a graph with two layers side by side: Title, colors, then Size with Layer placement (Regular grid selected), Plot area width for columns 1 and 2, Plot area height, the distance from the left and top edges, Graph size, and the opened Advanced block with Figure size." width="480">
 
 A new graph is 480 × 360 points (about 17 × 12.7 cm) in all. Adding an axis, or a title, makes the graph bigger around the plot area: the plot area keeps its size, and the whole graph is shown scaled to fit its window. Removing one makes the graph smaller. A plot area can be from 36 points (about 1.3 cm) to 2000 points (about 70 cm) wide or high. Changing one size does not change the others: the graph grows or shrinks by the difference. The plot areas of one column are as wide as each other and line up, and so do those of one row, even when one layer has more axes than its neighbor. Setting the plot area of two graphs to the same numbers lets you place them one over the other at the same scale. The size is part of the file, and the change is one step of the window's single **Undo**.
 
@@ -146,6 +146,16 @@ When the graph gets bigger or smaller, whether by dragging, by the **Size** fiel
 Open **Advanced** at the bottom of **General** and set **Figure size** to **Fixed**. The graph then keeps room for one axis on each side from the start. Add a right axis, a top axis, a mirror axis or an overlaid layer, or remove them again, and neither the image nor the plot area moves: put two such graphs on consecutive slides and the first curves stay where they were. **Grows with the axes**, the default, is what the graph did before: each axis added makes the image bigger.
 
 Fixed is not a hard limit. A second axis on the same side, or a title (of the graph or of a layer), needs more room than was kept: the image grows anyway, the plot area keeps its size, and the status bar and a note under **Size** say so. **Left** and **Top** replace the room kept on their side.
+
+#### Placing layers freely
+
+By default the layers of a graph sit on a regular grid. In **General ▸ Size**, set **Layer placement** to **Free** and each layer gets its own plot area, anywhere in the graph. Nothing moves when you switch: every plot area stays where it was drawn.
+
+In **Free**, the fields of **Size** belong to one layer, the one chosen in the layer list at the top of the page (**Layer 1**, **Layer 2**…). **Plot area, from the left edge** and **Plot area, from the top edge** give the distance from the left and top edges of the graph to its plot area, the title of the graph included, in the same unit as the other sizes. **Plot area width** and **Plot area height** give its size. A distance smaller than the layer's own axes need is raised to it. The graph is always the smallest rectangle that holds all the layers with their axes and titles, so it grows and shrinks by itself and nothing is cut. Layers may overlap.
+
+**Graph ▸ New Layer Beside** puts the new layer to the right of, or below, the active one, with the same plot area, never on top of another layer: if the place is taken it goes further along. **Delete** removes a layer without moving the others, and the graph shrinks around what is left. **Figure size = Fixed** (in **Advanced**) then keeps room for one axis on each side of every layer.
+
+Choose **Regular grid** to go back. Layers whose rows overlap on the page share a row, from left to right, then each column takes the widest plot area of its layers and each row the tallest, so no plot area shrinks. Switching, and each edit, is one step of **Undo**. Moving and resizing with the mouse comes later: for now, use the fields.
 
 A graph saved by an older version has no sizes of its own. It keeps its familiar look, and its first change, of any kind, fixes the plot areas it had: from then on an axis or a title you add grows the graph instead of squeezing the plot area.
 

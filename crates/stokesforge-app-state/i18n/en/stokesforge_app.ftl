@@ -807,6 +807,10 @@ plot-size-top = Plot area, from the top edge ({ $unit })
 plot-size-left-raised = The axes need at least { $minimum } ({ $unit }) on the left: the value was raised to it
 plot-size-top-raised = The axes and the title need at least { $minimum } ({ $unit }) at the top: the value was raised to it
 plot-size-note = The axes and the title are added around the plot area: adding or removing one grows or shrinks the graph, never the plot area. The other columns and rows keep their size.
+plot-size-placement = Layer placement
+plot-size-placement-grid = Regular grid
+plot-size-placement-free = Free
+plot-size-free-note = The values above belong to the layer chosen in the list. The graph grows or shrinks around the layers: changing or deleting one never moves the others.
 
 plot-figure-size = Figure size
     .hint = Grows with the axes: an added axis or title makes the image larger. Fixed: room for four axes is kept from the start, so adding an axis leaves the image and the plot area as they are
