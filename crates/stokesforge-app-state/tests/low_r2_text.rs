@@ -41,8 +41,7 @@ fn the_counts_group_by_type_in_a_fixed_order() {
 
 #[test]
 fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
-    let _guard = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    i18n::set_language(Language::English);
+    let _language = i18n::test_language(Language::English);
     let text = summary_text(&groups());
     assert_eq!(
         text,
@@ -75,18 +74,11 @@ fn the_summary_and_the_badge_are_plural_aware_in_english_and_french() {
 
 // ---- Hardening (#290): names by type, plurals, grouping of the dialog ----
 
-use std::sync::Mutex;
 use stokesforge_app_state::r_squared::group_line;
 
-/// The language is global to the process: the tests of this file take turns.
-static LANGUAGE_LOCK: Mutex<()> = Mutex::new(());
-
 fn with_language<T>(language: Language, f: impl FnOnce() -> T) -> T {
-    let _guard = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    i18n::set_language(language);
-    let out = f();
-    i18n::set_language(Language::English);
-    out
+    let _language = i18n::test_language(language);
+    f()
 }
 
 /// Exhaustive match without `_`: a type added to `OperationKind` breaks the

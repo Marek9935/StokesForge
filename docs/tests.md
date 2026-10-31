@@ -750,6 +750,11 @@ attempts, pagination, pipeline selection and HTTP retries.
 ## What to know before writing a test
 
 - A test that compares two paths needs a **witness** that must differ.
+- The interface language is a process global and tests run in parallel: a
+  test that calls `set_language`, or asserts a text of a given language
+  through `tr!`/`error_message`, takes `let _language =
+  i18n::test_language(Language::English);` for its whole body (never a local
+  mutex, never a bare `set_language`). A test that does not care takes nothing.
 - A cap that looks like a bug is probably not one: the
   caps and counters already decided are documented where their
   constant is, and listed in

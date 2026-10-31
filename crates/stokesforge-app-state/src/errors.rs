@@ -170,7 +170,7 @@ pub mod model {
         fn the_fields_enter_the_sentence() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&CoreError::DuplicateName("Sheet1 in Book1".into())),
                 "Name already used: Sheet1 in Book1"
@@ -251,7 +251,7 @@ pub mod commands {
         fn a_model_error_keeps_its_sentence() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             let core = CoreError::IdentifiersExhausted;
             assert_eq!(
                 error_message(&CommandError::Core(core.clone())),
@@ -473,7 +473,7 @@ pub mod file {
         fn the_fields_enter_the_sentence() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&PersistenceError::NotAStokesForgeFile {
                     path: "/data/run.stf".into()
@@ -574,7 +574,7 @@ pub mod import {
         fn a_failed_file_names_the_file_and_the_cause() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             let failure = ImportFailure {
                 path: "/data/a.csv".into(),
                 cause: ImportFailureCause::Parse(ImportError::Empty),
@@ -790,7 +790,7 @@ pub mod formula {
         #[test]
         fn the_deleted_column_says_what_to_replace() {
             // Compared in English: the language does not depend on the environment.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&FormulaError::DeletedColumn),
                 "Column deleted. Replace #REF with a column letter"
@@ -825,7 +825,7 @@ pub mod formula {
         #[test]
         fn the_function_errors_say_what_to_write() {
             // Compared in English: the language does not depend on the environment.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&FormulaError::UnknownFunction {
                     name: "foo".into(),
@@ -926,7 +926,7 @@ pub mod formula {
             let error = formula.compile().unwrap_err();
             assert_eq!(error, FormulaError::TooDeep);
             // Compared in English: the language does not depend on the environment.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&error),
                 "The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)"
@@ -1140,7 +1140,7 @@ pub mod analysis {
             assert_eq!(error.kind, ExprErrorKind::TooDeep);
             assert_eq!(error.position, 101);
             // Compared in English: the language does not depend on the environment.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 expr_message(&error),
                 "Expression nested too deeply (position 101)"
@@ -1400,7 +1400,7 @@ pub mod export {
         fn the_fields_enter_the_sentence() {
             // These sentences are compared in English: the language does not depend on the
             // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
-            crate::i18n::set_language(crate::i18n::Language::English);
+            let _language = crate::i18n::test_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&ExportError::Write {
                     path: "/out/fig.svg".into(),

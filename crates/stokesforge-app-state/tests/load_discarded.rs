@@ -106,7 +106,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
 
-    i18n::set_language(Language::English);
+    let _language = i18n::test_language(Language::English);
     // No discard: "Loaded", as information, no warning.
     write_file(&path, 2, 0);
     let (level, text) = load_message(&path);

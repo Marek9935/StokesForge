@@ -32,14 +32,14 @@
 //! knows at compile time, and reading the files keeps the global language
 //! untouched for the French side. The shortcut labels (`HELP` holds
 //! functions that call `tr!`) need the global language set to English, under
-//! [`LANGUAGE_LOCK`].
+//! the `test_language` guard.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use fluent_syntax::ast::{Entry, PatternElement};
-use stokesforge_app_state::i18n::{set_language, Language};
+use stokesforge_app_state::i18n::{test_language, Language};
 
 use super::shortcuts::{HelpArea, HELP};
 
@@ -47,11 +47,6 @@ const EN: &str = include_str!("../../../stokesforge-app-state/i18n/en/stokesforg
 const FR: &str = include_str!("../../../stokesforge-app-state/i18n/fr/stokesforge_app.ftl");
 
 const COMMAND: &str = "UPDATE_MANUAL_PAGES=1 cargo test -p stokesforge-app --lib manual_pages";
-
-/// The language is global: the generator sets English under this lock so that
-/// two tests of this module never overlap. (The other tests that touch the
-/// language also set English only.)
-static LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Escapes a table cell.
 fn cell(text: &str) -> String {
@@ -85,8 +80,7 @@ fn kbd(keys: &str) -> String {
 
 /// The "Shortcuts" page.
 fn shortcuts_page() -> String {
-    let _lock = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    set_language(Language::English);
+    let _language = test_language(Language::English);
     let mut page = header("Shortcuts");
     page.push_str(
         "On macOS, Cmd replaces Ctrl.\n\nThe same list is shown by **Help ▸ Keyboard Shortcuts…**.\n",

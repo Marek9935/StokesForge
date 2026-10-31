@@ -12,6 +12,7 @@ use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
 use stokesforge_session::Session;
 
 struct Setup {
+    _language: i18n::LanguageGuard,
     session: Session,
     state: AppState,
     sheet: NodeId,
@@ -21,7 +22,7 @@ struct Setup {
 /// Six columns of four rows, x' = 0, 10, 20..., row `r` being worth
 /// `(r + 1) * (column + 1)`: each row is a line of x'.
 fn setup(dir: &std::path::Path) -> Setup {
-    i18n::set_language(Language::English);
+    let language = i18n::test_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -47,6 +48,7 @@ fn setup(dir: &std::path::Path) -> Setup {
     )
     .unwrap();
     Setup {
+        _language: language,
         session,
         state,
         sheet,

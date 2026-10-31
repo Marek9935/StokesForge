@@ -1221,10 +1221,6 @@ mod tests {
     use stokesforge_plot::{AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
 
-    /// The language is global: the badge tests set it to English
-    /// under this lock.
-    static LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn the_weak_r2_badge_exists_only_if_there_are_any() {
         assert_eq!(low_r2_badge_content(0, false), None);
@@ -1233,9 +1229,8 @@ mod tests {
 
     #[test]
     fn the_weak_r2_badge_states_the_count() {
-        use stokesforge_app_state::i18n::{set_language, Language};
-        let _lock = LANGUAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        set_language(Language::English);
+        use stokesforge_app_state::i18n::{test_language, Language};
+        let _language = test_language(Language::English);
         for (total, expected) in [(1, "1 low R²"), (2, "2 low R²"), (13, "13 low R²")] {
             let (text, _) = low_r2_badge_content(total, false).unwrap();
             assert_eq!(text, expected);

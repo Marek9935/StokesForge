@@ -11,6 +11,7 @@ use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
 use stokesforge_session::Session;
 
 struct Setup {
+    _language: i18n::LanguageGuard,
     _session: Session,
     state: AppState,
     sheet: NodeId,
@@ -25,7 +26,7 @@ fn setup(dir: &std::path::Path) -> Setup {
 
 /// Like [`setup`], with `n` points (peak decomposition wants 16).
 fn setup_points(dir: &std::path::Path, n: u32) -> Setup {
-    i18n::set_language(Language::English);
+    let language = i18n::test_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -54,6 +55,7 @@ fn setup_points(dir: &std::path::Path, n: u32) -> Setup {
     )
     .unwrap();
     Setup {
+        _language: language,
         _session: session,
         state,
         sheet,
@@ -404,6 +406,7 @@ fn the_output_choice_is_remembered_per_operation_across_sessions() {
         "validating does not change the default"
     );
     // A fresh session finds the choice of the Fit again, and only its.
+    drop(s);
     let mut s = setup(dir.path());
     on_preferences_file(&mut s, dir.path(), &file);
     open(&mut s, Preset::Fit(Model::Linear));
@@ -927,7 +930,7 @@ fn restoring_the_original_data_overwrites_the_input_and_undoes() {
 
 #[test]
 fn a_correction_keeps_its_reference_even_if_the_original_column_disappears() {
-    i18n::set_language(Language::English);
+    let _language = i18n::test_language(Language::English);
     let dir = tempfile::tempdir().unwrap();
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();

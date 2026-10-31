@@ -121,8 +121,8 @@ impl World {
             .unwrap();
     }
 
-    fn open_in(self, dir: &std::path::Path) -> (Session, AppState) {
-        i18n::set_language(Language::English);
+    fn open_in(self, dir: &std::path::Path) -> (Session, AppState, i18n::LanguageGuard) {
+        let language = i18n::test_language(Language::English);
         let session = Session::spawn(self.project, None).unwrap();
         let state = AppState::new_with_preferences(
             session.handle(),
@@ -130,7 +130,7 @@ impl World {
             stokesforge_app_state::preferences::Preferences::load_from(None),
         )
         .unwrap();
-        (session, state)
+        (session, state, language)
     }
 }
 
@@ -170,7 +170,7 @@ fn twelve_reconvolutions_and_one_fit_read_end_to_end() {
         true,
         true,
     );
-    let (_session, mut state) = world.open_in(dir.path());
+    let (_session, mut state, _language) = world.open_in(dir.path());
 
     assert_eq!(
         groups_of(&state),
@@ -203,7 +203,7 @@ fn the_count_is_per_series_and_not_per_calculation() {
     let mut world = World::new();
     // A calculation with 3 series, 2 of them at fault.
     world.add_calculation(fit_operation(), &[0.1, 0.9, 0.2], true, true);
-    let (_session, state) = world.open_in(dir.path());
+    let (_session, state, _language) = world.open_in(dir.path());
     assert_eq!(groups_of(&state), vec![(OperationKind::Fit, 2)]);
     assert_eq!(state.low_r2_total(), 2);
 }
@@ -213,7 +213,7 @@ fn a_project_without_a_low_r2_has_neither_group_nor_list() {
     let dir = tempfile::tempdir().unwrap();
     let mut world = World::new();
     world.add_calculation(fit_operation(), &[0.99, 0.6], true, true);
-    let (_session, mut state) = world.open_in(dir.path());
+    let (_session, mut state, _language) = world.open_in(dir.path());
     assert!(state.low_r2_groups().is_empty());
     assert_eq!(state.low_r2_total(), 0);
     // The badge has nothing to list: opening has no effect.

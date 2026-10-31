@@ -376,13 +376,12 @@ mod tests {
 
     #[test]
     fn the_families_follow_the_display_order_and_the_texts_exist_in_both_languages() {
-        crate::i18n::set_language(crate::i18n::Language::English);
+        let _language = crate::i18n::test_language(crate::i18n::Language::English);
         let titles: Vec<String> = groups().into_iter().map(|group| group.title).collect();
         assert_eq!(titles.len(), Family::ALL.len());
         assert!(titles.iter().all(|title| !title.is_empty()));
         crate::i18n::set_language(crate::i18n::Language::French);
         let french: Vec<String> = groups().into_iter().map(|group| group.title).collect();
         assert_ne!(titles, french);
-        crate::i18n::set_language(crate::i18n::Language::English);
     }
 }

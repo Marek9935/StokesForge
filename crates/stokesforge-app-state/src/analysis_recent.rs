@@ -252,8 +252,8 @@ mod tests {
     use stokesforge_analysis::integrate::{IntegrateSpec, Under};
     use stokesforge_core::SeriesRef;
 
-    fn english() {
-        i18n::set_language(Language::English);
+    fn english() -> i18n::LanguageGuard {
+        i18n::test_language(Language::English)
     }
 
     fn form(preset: &Preset) -> AnalysisForm {
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn the_label_names_the_method_and_its_setting() {
-        english();
+        let _language = english();
         let polynomial = recent(Operation::Baseline {
             method: BaselineMethod::Zones {
                 zones: vec![(0.0, 1.0)],

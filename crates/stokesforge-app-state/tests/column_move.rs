@@ -10,6 +10,7 @@ use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
 use stokesforge_session::Session;
 
 struct Setup {
+    _language: i18n::LanguageGuard,
     _session: Session,
     state: AppState,
     sheet: NodeId,
@@ -18,7 +19,7 @@ struct Setup {
 
 /// A sheet `A`, `B`, `C`, `D`, `E` of distinct values over 3 rows.
 fn setup(dir: &std::path::Path) -> Setup {
-    i18n::set_language(Language::English);
+    let language = i18n::test_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -55,6 +56,7 @@ fn setup(dir: &std::path::Path) -> Setup {
     )
     .unwrap();
     Setup {
+        _language: language,
         _session: session,
         state,
         sheet,
