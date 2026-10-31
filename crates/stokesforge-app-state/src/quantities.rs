@@ -54,6 +54,9 @@ pub struct Quantity {
     /// The field is wide enough for six significant digits ("705.556",
     /// "2000"): a size shown in a unit with decimals.
     pub wide: bool,
+    /// The field keeps the standard short width whatever the bounds (two of
+    /// them side by side in a row, #407).
+    pub short: bool,
 }
 
 impl Quantity {
@@ -69,6 +72,7 @@ impl Quantity {
             presets: &[],
             auto: AutoKind::None,
             wide: false,
+            short: false,
         }
     }
 
@@ -84,6 +88,7 @@ impl Quantity {
             presets: &[],
             auto: AutoKind::None,
             wide: false,
+            short: false,
         }
     }
 
@@ -103,6 +108,7 @@ impl Quantity {
             && self.presets.is_empty()
             && self.auto == AutoKind::None
             && !self.wide
+            && !self.short
     }
 
     /// The same quantity bounded to `min..=max`.
@@ -118,6 +124,14 @@ impl Quantity {
     /// The same quantity, with a field wide enough for six significant digits.
     pub const fn wide(self) -> Self {
         Self { wide: true, ..self }
+    }
+
+    /// The same quantity, in the standard short field whatever its bounds.
+    pub const fn short(self) -> Self {
+        Self {
+            short: true,
+            ..self
+        }
     }
 
     /// The same quantity with its offered values.
@@ -302,7 +316,7 @@ pub fn figure_total(
     let (min, max) = (min_points.min(max_points), max_points.max(min_points));
     Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
         .between(unit.from_points(min), unit.from_points(max))
-        .wide()
+        .short()
 }
 
 /// Left or Top of the first plot area, from the edge of the image, in `unit`

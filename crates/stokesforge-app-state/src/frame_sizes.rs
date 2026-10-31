@@ -92,6 +92,60 @@ pub struct TotalFit {
     pub other: Option<((f64, f64), bool)>,
 }
 
+/// The lock beside the total width and height of Graph Properties (#407): while
+/// it is closed, the height / width ratio of the image taken when it was
+/// closed is kept by every total typed. Window state like `selected_series`:
+/// never stored in the `.stf`, unlocked when the window opens.
+///
+/// The ratio must never go stale: any **other** change of the image made while
+/// the lock is closed (a frame field, a drag of a frame on the page, Undo,
+/// Redo, Left, Top, a title or an axis toggled) takes it again from the image
+/// as it is, which [`SizeLock::follow`] does once per frame from the one place
+/// that knows the image (the Size section). What a total typed does itself,
+/// raise included, is [`SizeLock::adopt_next`]: the ratio stays the captured one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SizeLock {
+    /// Height / width of the image when the lock was closed (or last
+    /// re-captured).
+    pub ratio: f64,
+    /// The image size last seen, `None` right after a total was typed (the
+    /// next one seen is the effect of that typing).
+    seen: Option<(f64, f64)>,
+}
+
+impl SizeLock {
+    /// Closes the lock on an image of `image` (width, height) points; `None`
+    /// if that image has no usable ratio.
+    pub fn close(image: (f64, f64)) -> Option<Self> {
+        let ratio = image.1 / image.0;
+        (ratio.is_finite() && ratio > 0.0).then_some(Self {
+            ratio,
+            seen: Some(image),
+        })
+    }
+
+    /// Called with the image as it is now: a change nobody announced with
+    /// [`SizeLock::adopt_next`] takes the ratio again from it.
+    pub fn follow(&mut self, image: (f64, f64)) {
+        let moved = self
+            .seen
+            .is_some_and(|seen| (seen.0 - image.0).abs() > 0.5 || (seen.1 - image.1).abs() > 0.5);
+        if moved {
+            if let Some(lock) = Self::close(image) {
+                *self = lock;
+                return;
+            }
+        }
+        self.seen = Some(image);
+    }
+
+    /// A total was just typed: the next image seen is its effect, the ratio
+    /// stays.
+    pub fn adopt_next(&mut self) {
+        self.seen = None;
+    }
+}
+
 /// Sets the total size of the image along `axis` in a draft, the frames
 /// following in proportion (#407): a legacy draft is given its frames first
 /// ([`fix_from`]), then [`stokesforge_render::pipeline::fit_figure_size`], all
@@ -627,5 +681,28 @@ mod tests {
             assert!(set_total_in_draft(&mut spec, SizeAxis::Width, target, ratio).is_none());
             assert_eq!(spec, PlotSpec::default());
         }
+    }
+
+    /// #407: the ratio is re-captured when the image changes by any other way,
+    /// kept after a total typed. Witness: no re-capture (stale ratio), or a
+    /// re-capture after a total typed (drift after a raise).
+    #[test]
+    fn the_lock_recaptures_other_changes_and_keeps_its_ratio_after_a_total() {
+        let mut lock = SizeLock::close((400.0, 200.0)).expect("a ratio");
+        assert_eq!(lock.ratio, 0.5);
+        lock.follow((400.0, 200.0));
+        assert_eq!(lock.ratio, 0.5, "same image: unchanged");
+        lock.follow((400.0, 300.0));
+        assert_eq!(lock.ratio, 0.75, "a frame field changed the image");
+        lock.adopt_next();
+        lock.follow((500.0, 90.0));
+        assert_eq!(
+            lock.ratio, 0.75,
+            "the effect of a total typed, raise included"
+        );
+        lock.follow((500.0, 90.0));
+        lock.follow((250.0, 90.0));
+        assert!((lock.ratio - 0.36).abs() < 1e-9, "next change re-captures");
+        assert!(SizeLock::close((0.0, 10.0)).is_none());
     }
 }

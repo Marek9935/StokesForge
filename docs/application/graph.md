@@ -761,6 +761,27 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
   published `FigureLayout::frame_widths`), so the other plot areas keep their
   size. The fields are `quantities::frame_size` (36 to 2000 pt, wide enough for
   six digits).
+- **Total size (#407).** **Graph size** is two editable fields `[width] × [height]`
+  and a padlock (`total_row`, `type_total` in `plot_settings.rs`;
+  `quantities::figure_total`). Typing one calls `frame_sizes::set_total_in_draft`
+  (`stokesforge_render::pipeline::fit_figure_size`: every frame in proportion,
+  bands untouched; a Free graph scales frames and positions about the corner of
+  the layers) on the draft, so the frame fields read the new frames the same
+  frame, and the commit is one `SetPlotSpec`. A value outside the range the fit
+  reports is brought to its nearest end: the field turns orange with the bubble
+  `plot-size-total-raised` / `-lowered` (the minimum shown **rounded up** in the
+  unit, so typing it back is accepted). The padlock is `PlotEdit::size_lock:
+  Option<SizeLock>`: window state like `selected_series`, `None` when the window
+  opens, kept by the draft realignment and Undo, never in the `.stf`. Closed, it
+  holds the height / width ratio of the image at that moment, and a typed total
+  sets the other axis from the **applied** value (`set_total_in_draft`'s
+  `lock_ratio`). The ratio never goes stale: the one place that knows the image
+  (`total_row`, once per frame) calls `SizeLock::follow` with the image size, and
+  any change nobody announced (a frame field, a frame drag, Undo / Redo, Left,
+  Top, a title or an axis) takes the ratio again from it; what a typed total
+  does itself, a raise included, is announced by `adopt_next` and keeps the
+  ratio. `pyst` sets the same with `figure_width` / `figure_height`
+  (`docs/python-and-scripting.md`).
 - **`Action::SetFrameSize { graph, axis: FrameAxis, index, size }`**
   (`PlotEditKind::ResizeCell`, "Resize Plot Area", one `EditPlotSpec`, one undo
   step) is the path of the Size fields and (with `SetFrameSizes`) of the drag handles: it fixes a legacy graph,
@@ -816,7 +837,7 @@ image, never the frame; see `docs/rendering.md`, "Figure size, frames and bands"
 - A new graph is created legacy and fixed at once (`frame_sizes::fix_new`), so
   its figure is exactly 480 × 360 pt, explicit; a title added later grows the
   figure by its band (`pyst.plot` included). Beside / Below layers have the frame
-  of their reference layer. `pyst` has no size setter yet.
+  of their reference layer. `pyst` sets the plot areas with `plot_width` / `plot_height` and the whole image with `figure_width` / `figure_height`.
 
 **Indices that follow a removal** (and its undo): `ViewState::remap_panels`
 (framings), `GraphView::remap_layers` (active layer, selection, gestures in
