@@ -11,6 +11,7 @@ Read from `run-stokesforge` when a click, key or capture does not do what you ex
 - **No window manager → no keyboard focus**: `start` calls `focus()`; without it `key` / `type` do nothing.
 - **Menus are fixed pixels**; in French the widths change (« Préférences… » stays at (58,183) but the menu is wider).
 - **The chosen language** is saved in `$RUN/config/preferences.json` (the driver sets `STOKESFORGE_CONFIG_DIR`, so not in the user's own); it persists across `start`s of the same run folder: switch back to English before finishing.
+- **Ctrl+letter follows the user's layout, not the driver's** (#415): the driver resolves keysyms in the X core map (US), but winit under Xwayland reads the compositor keymap (AZERTY here). `key ctrl+a` therefore reaches the app as Ctrl+Q and **quits it cleanly (status 0)**; likewise `ctrl+w` arrives as Ctrl+Z and `ctrl+z` as Ctrl+Z. This is not an application bug (confirmed with event logging: `Key { key: Q, ctrl }`). Plain letters and `type` are not affected. To send Ctrl+A on an AZERTY session use `key ctrl+q`; check the layout first (`gsettings get org.gnome.desktop.input-sources sources`) and prefer shortcuts not on A/Q/W/Z (ctrl+s, ctrl+m behave).
 - **First render is slow** (software wgpu; `MESA: warning … Xe KMD` is harmless): `start` waits 10 s; an earlier capture shows a black window.
 - `type` knows letters, digits and `. , - _ = ( ) / # " : [ ] !`; add others to the `names` table of `driver.py`.
 
