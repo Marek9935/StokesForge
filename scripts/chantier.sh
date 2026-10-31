@@ -138,7 +138,7 @@ Steps, in order:
  4. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
  5. Visible change: `scripts/try.sh <n>` opens the branch on the user's screen;
     their OK is the go-ahead (stokesforge-verification, step 6).
- 6. Merge under `scripts/main-lock.sh` from the main checkout (step 6), read the CI.
+ 6. Merge under `scripts/main-lock.sh` from the main checkout (same step 6), read the CI.
  7. Add the To-test entry, delete the `chantiers/<n>` document (step 8).
  8. Clean up the worktree and branch (section "Clean up after a merge on main").
 EOF
