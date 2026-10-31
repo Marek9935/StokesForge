@@ -67,7 +67,9 @@ cat > "$tmp/issues.json" <<'JSON'
  {"iid": 220, "title": "Second step (#217)", "state": "opened", "description": ""},
  {"iid": 2170, "title": "Other", "state": "opened", "description": "Parent: #2170 and Parent: #2171"},
  {"iid": 230, "title": "Closed one", "state": "closed", "description": "Parent: #217"},
- {"iid": 231, "title": "Old form", "state": "opened", "description": "Sous-ticket du chantier #217"}
+ {"iid": 231, "title": "Old form", "state": "opened", "description": "Sous-ticket du chantier #217"},
+ {"iid": 232, "title": "Short form", "state": "opened", "description": "Sous-ticket de #217."},
+ {"iid": 419, "title": "Docs quoting an example", "state": "opened", "description": "Example: `Parent : #217`, and\n```\nParent: #217\n```"}
 ]
 JSON
 export SF_ISSUES_JSON="$tmp/issues.json"
@@ -77,7 +79,7 @@ export SF_ISSUE_TITLE_88="Plain issue"
 "$here/chantier.sh" 217 > "$tmp/pkg"
 grep -qF '🟧 #217 Parent work' "$tmp/pkg" || fail "package tag: $(cat "$tmp/pkg")"
 grep -n '^  [0-9]\. #' "$tmp/pkg" | sed 's/^[0-9]*://' | tr '\n' '|' > "$tmp/order"
-eq "$(cat "$tmp/order")" "  1. #231 Old form|  2. #220 Second step (#217)|  3. #219 Rejected fields|  4. #221 Third thing|" "package order (parent body, then number; #2170 and closed ignored)"
+eq "$(cat "$tmp/order")" "  1. #231 Old form|  2. #220 Second step (#217)|  3. #219 Rejected fields|  4. #221 Third thing|  5. #232 Short form|" "package order (parent body, then number; #2170, closed and quoted ignored)"
 grep -q 'first card of the start form' "$tmp/pkg" || fail "briefing: list is the first card"
 grep -q -- '--start 231' "$tmp/pkg" || fail "briefing: --start hint"
 [ ! -e "$tmp/_stokesforge/feature217" ] && [ ! -e "$tmp/_stokesforge/feature219" ] || fail "worktree created without --start"

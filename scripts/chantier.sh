@@ -132,7 +132,25 @@ children_of() {
         list="$SF_ISSUES_JSON"
     else
         list="$tmpf"
-        glab issue list --per-page 100 -O json > "$list" 2> /dev/null || echo '[]' > "$list"
+        # Every open issue, page by page (100 per page), merged into one JSON list.
+        python3 -I - "$list" << 'PY' || echo '[]' > "$list"
+import json, subprocess, sys
+out, page = [], 1
+while True:
+    r = subprocess.run(["glab", "issue", "list", "--per-page", "100", "--page", str(page), "-O", "json"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        break
+    try:
+        batch = json.loads(r.stdout or "[]")
+    except ValueError:
+        break
+    out += batch
+    if len(batch) < 100:
+        break
+    page += 1
+json.dump(out, open(sys.argv[1], "w"))
+PY
     fi
     if [ -n "${!var+x}" ]; then body="${!var}"
     elif [ -n "${SF_ISSUES_JSON:-}" ]; then body=""
@@ -149,7 +167,8 @@ try:
 except Exception:
     issues = []
 # Case-insensitive; "(?!\d)" so that #2170 never matches #217.
-refs = [r"parent\s*:\s*#%s(?!\d)", r"sous-ticket\s+du\s+chantier\s+#%s(?!\d)",
+# lang: fr
+refs = [r"parent\s*:\s*#%s(?!\d)", r"sous-ticket\s+(?:du\s+chantier\s+|de\s+)#%s(?!\d)",
         r"suite\s+du\s+chantier\s+#%s(?!\d)", r"sub-issue\s+of\s+#%s(?!\d)"]
 pats = [re.compile(r % n, re.I) for r in refs]
 title_pat = re.compile(r"\(#%s\)\s*$" % n)
@@ -159,6 +178,9 @@ for it in issues:
     if not iid or iid == n or it.get("state", "opened") != "opened":
         continue
     title, desc = it.get("title") or "", it.get("description") or ""
+    # Text in backticks is quoted (an example, a command), never a parent link.
+    desc = re.sub(r"```.*?```", " ", desc, flags=re.S)
+    desc = re.sub(r"`[^`\n]*`", " ", desc)
     if any(p.search(desc) or p.search(title) for p in pats) or title_pat.search(title.strip()):
         found.append((iid, title.replace("\t", " ").replace("\n", " ")))
 def rank(item):
