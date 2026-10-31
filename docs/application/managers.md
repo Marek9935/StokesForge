@@ -24,7 +24,7 @@ otherwise at the root. A deleted folder leaves the selection. **Copy and
 Duplicate work on a folder (#391)**: the whole subtree is copied in one history
 entry, **what is inside the copy reads the copy** (a graph plots the copied
 workbook, a formula the copied sheet, a calculation or a transposed sheet the
-copied columns) and the rest keeps reading the original. Duplicate puts the
+copied columns) and the rest keeps reading the original. The same rule covers every window of one gesture, not only one subtree (#391, S1): Book1 and Graph1 selected together give a copied Graph1 that plots the copied Book1. Duplicate puts the
 copy beside the original; Ctrl+V with the copied folder itself selected also
 pastes beside it (`AppState::paste_objects`), with another folder selected
 inside that folder.

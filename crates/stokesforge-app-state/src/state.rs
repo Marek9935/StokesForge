@@ -58,8 +58,8 @@ use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
 use stokesforge_core::tsv;
 use stokesforge_core::{
-    same_name_ignoring_case, Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node,
-    NodeCopy, NodeId, Tree, ValueBlock,
+    same_name_ignoring_case, Cell, Column, ColumnMeta, ColumnRole, ColumnType, CopyInsertion,
+    MixedCell, Node, NodeCopy, NodeId, Tree, ValueBlock,
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
@@ -8369,10 +8369,9 @@ impl AppState {
     }
 
     fn capture_objects(&self, ids: &[NodeId]) -> Vec<NodeCopy> {
-        self.object_targets(ids)
-            .into_iter()
-            .filter_map(|id| NodeCopy::capture(self.tree(), id).ok())
-            .collect()
+        // One capture for the whole gesture: the roots read each other's
+        // copies (#391, S1).
+        NodeCopy::capture_all(self.tree(), &self.object_targets(ids)).unwrap_or_default()
     }
 
     /// Makes the given data workbooks visible and opens them.
@@ -8403,7 +8402,12 @@ impl AppState {
         }
     }
 
-    fn next_object_copy_name(&self, parent: NodeId, origin: &str) -> String {
+    fn next_object_copy_name(
+        &self,
+        parent: NodeId,
+        origin: &str,
+        taken: &[(NodeId, String)],
+    ) -> String {
         (1u64..)
             .map(|number| {
                 tr!(
@@ -8413,15 +8417,19 @@ impl AppState {
                 )
             })
             .find(|name| {
-                self.tree()
-                    .children(parent)
-                    .unwrap_or_default()
+                taken
                     .iter()
-                    .all(|id| {
-                        self.tree()
-                            .node(*id)
-                            .is_none_or(|node| !same_name_ignoring_case(node.name(), name))
-                    })
+                    .all(|(at, other)| *at != parent || !same_name_ignoring_case(other, name))
+                    && self
+                        .tree()
+                        .children(parent)
+                        .unwrap_or_default()
+                        .iter()
+                        .all(|id| {
+                            self.tree()
+                                .node(*id)
+                                .is_none_or(|node| !same_name_ignoring_case(node.name(), name))
+                        })
             })
             .unwrap_or_else(|| origin.to_string())
     }
@@ -8477,41 +8485,46 @@ impl AppState {
         if self.handle.begin_macro(kind).is_err() {
             return;
         }
-        let mut created = Vec::new();
+        // One command for the whole gesture, so that the copies read each
+        // other (#391, S1); the macro only gives the history entry its label.
+        let mut items: Vec<CopyInsertion> = Vec::new();
+        let mut taken: Vec<(NodeId, String)> = Vec::new();
+        let mut sources = Vec::new();
         for copy in copies {
-            let source = copy.root().id();
             let destination = parent
                 .or(copy.root().parent())
                 .unwrap_or(self.tree().root());
-            let name = self.next_object_copy_name(destination, copy.root().name());
-            let before = self
-                .tree()
-                .children(destination)
-                .unwrap_or_default()
-                .to_vec();
-            let copy_kind = copy.root().kind().type_name();
-            if let Err(err) = self.handle.execute(Command::InsertCopy {
+            let name = self.next_object_copy_name(destination, copy.root().name(), &taken);
+            taken.push((destination, name.clone()));
+            sources.push(copy.root().id());
+            items.push(CopyInsertion {
                 parent: destination,
                 copy,
                 name,
-            }) {
-                let _ = self.handle.abort_macro();
-                self.refresh();
-                self.fail(errors::session::error_message(&err));
-                return;
-            }
+            });
+        }
+        let placed: Vec<(NodeId, String)> = items
+            .iter()
+            .map(|item| (item.parent, item.name.clone()))
+            .collect();
+        if let Err(err) = self.handle.execute(Command::InsertCopies { items }) {
+            let _ = self.handle.abort_macro();
             self.refresh();
+            self.fail(errors::session::error_message(&err));
+            return;
+        }
+        self.refresh();
+        let mut created = Vec::new();
+        for (source, (destination, name)) in sources.into_iter().zip(placed) {
             if let Some(id) = self
                 .tree()
                 .children(destination)
                 .unwrap_or_default()
                 .iter()
                 .find(|id| {
-                    !before.contains(id)
-                        && self
-                            .tree()
-                            .node(**id)
-                            .is_some_and(|node| node.kind().type_name() == copy_kind)
+                    self.tree()
+                        .node(**id)
+                        .is_some_and(|node| node.name() == name)
                 })
             {
                 created.push((source, *id, duplicate));

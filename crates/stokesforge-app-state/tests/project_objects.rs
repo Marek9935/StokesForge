@@ -37,9 +37,10 @@ fn fixture() -> (Session, AppState, NodeId, NodeId, NodeId) {
 }
 
 #[test]
-fn grouped_multiple_duplication_and_graphs_on_the_original_columns() {
+fn windows_duplicated_together_read_each_others_copies_in_one_history_entry() {
     let (_session, mut state, book, graph, y) = fixture();
     let before = state.tree().clone();
+    // The graph is listed before the workbook it plots, and the book twice.
     state.dispatch(Action::DuplicateObjects(vec![graph, book, book]));
     let created = state.take_copied_objects();
     assert_eq!(created.len(), 2);
@@ -64,10 +65,19 @@ fn grouped_multiple_duplication_and_graphs_on_the_original_columns() {
         .unwrap()
         .iter()
         .all(|id| !before.contains(*id)));
+    let sheet_copy = state.tree().children(book_copy).unwrap()[0];
+    let y_copy = state.tree().children(sheet_copy).unwrap()[1];
     let NodeKind::Graph { spec, .. } = state.tree().node(graph_copy).unwrap().kind() else {
         panic!("graph")
     };
-    assert!(spec.references(y));
+    assert!(spec.references(y_copy), "the copied graph plots the copy");
+    assert!(!spec.references(y), "and no longer the original");
+    // Deleting the original workbook reports the original graph only.
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    let text = state.status().expect("message").text.clone();
+    assert!(text.contains("Graph1"), "{text}");
+    assert!(!text.contains("Graph1 copy"), "{text}");
+    state.dispatch(Action::Undo);
     state.dispatch(Action::Undo);
     assert_eq!(state.tree(), &before);
     state.dispatch(Action::Redo);

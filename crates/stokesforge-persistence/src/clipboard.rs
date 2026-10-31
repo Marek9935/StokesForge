@@ -135,24 +135,18 @@ pub fn decode_objects(text: &str) -> PersistenceResult<(String, Vec<NodeCopy>)> 
         }
     }
     let mut data = record.graph_data.into_iter();
-    let mut calculations = record.calculations.into_iter();
-    let mut transposes = record.transposes.into_iter();
+    // The roots of one gesture are rebuilt in one project, so that a link
+    // between two roots (calculation, transposed sheet, #391) survives and
+    // each root keeps only what is inside the whole gesture.
     let mut copies = Vec::new();
-    for nodes in record.objects {
-        let copy = decode_copy(
-            nodes,
-            calculations.next().unwrap_or_default(),
-            transposes.next().unwrap_or_default(),
-        )?;
+    for copy in decode_copies(record.objects, record.calculations, record.transposes)? {
         let dependencies = data
             .next()
             .unwrap_or_default()
             .into_iter()
             .map(|(graph, nodes)| {
-                Ok((
-                    NodeId::from_raw(graph),
-                    decode_copy(nodes, Vec::new(), Vec::new())?,
-                ))
+                let mut copies = decode_copies(vec![nodes], Vec::new(), Vec::new())?;
+                Ok((NodeId::from_raw(graph), copies.remove(0)))
             })
             .collect::<PersistenceResult<Vec<_>>>()?;
         copies.push(copy.with_graph_data(dependencies).map_err(|source| {
@@ -177,15 +171,24 @@ fn copy_records(copy: &NodeCopy) -> Vec<NodeRecord> {
         .collect()
 }
 
-fn decode_copy(
-    mut nodes: Vec<NodeRecord>,
-    calculations: Vec<CalculationRecord>,
-    transposes: Vec<TransposeRecord>,
-) -> PersistenceResult<NodeCopy> {
-    let root = nodes
-        .first()
-        .ok_or_else(|| corrupt("empty object".into()))?
-        .id;
+fn decode_copies(
+    objects: Vec<Vec<NodeRecord>>,
+    calculations: Vec<Vec<CalculationRecord>>,
+    transposes: Vec<Vec<TransposeRecord>>,
+) -> PersistenceResult<Vec<NodeCopy>> {
+    let calculations: Vec<CalculationRecord> = calculations.into_iter().flatten().collect();
+    let transposes: Vec<TransposeRecord> = transposes.into_iter().flatten().collect();
+    let mut roots = Vec::new();
+    let mut nodes = Vec::new();
+    for object in objects {
+        roots.push(
+            object
+                .first()
+                .ok_or_else(|| corrupt("empty object".into()))?
+                .id,
+        );
+        nodes.extend(object);
+    }
     let wrapper = nodes
         .iter()
         .map(|n| n.id)
@@ -196,7 +199,11 @@ fn decode_copy(
         .checked_add(1)
         .filter(|id| *id <= MAX_NODE_ID)
         .ok_or_else(|| corrupt("invalid object identifiers".into()))?;
-    nodes[0].parent = Some(wrapper);
+    for node in &mut nodes {
+        if roots.contains(&node.id) {
+            node.parent = Some(wrapper);
+        }
+    }
     nodes.insert(
         0,
         NodeRecord {
@@ -204,7 +211,7 @@ fn decode_copy(
             name: "Clipboard".into(),
             parent: None,
             kind: KindRecord::Folder {
-                children: vec![root],
+                children: roots.clone(),
             },
         },
     );
@@ -223,11 +230,10 @@ fn decode_copy(
         },
         Path::new("clipboard"),
     )?;
-    NodeCopy::capture(project.tree(), NodeId::from_raw(root)).map_err(|source| {
-        PersistenceError::InvalidModel {
-            path: "clipboard".into(),
-            source,
-        }
+    let roots: Vec<NodeId> = roots.into_iter().map(NodeId::from_raw).collect();
+    NodeCopy::capture_all(project.tree(), &roots).map_err(|source| PersistenceError::InvalidModel {
+        path: "clipboard".into(),
+        source,
     })
 }
 

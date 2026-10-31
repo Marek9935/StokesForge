@@ -409,3 +409,68 @@ fn an_external_folder_paste_reads_its_own_workbook_and_reserves_what_is_outside(
         "a formula reading outside the folder is #REF"
     );
 }
+
+/// #391, S1: a graph copied with its workbook in one gesture reads the pasted
+/// workbook after an external paste, with no hidden workbook for it; the
+/// graph of the same gesture that plots a workbook left out still embeds it.
+#[test]
+fn an_external_paste_of_a_workbook_and_its_graph_reads_the_pasted_workbook() {
+    use stokesforge_core::CopyInsertion;
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let mut books = Vec::new();
+    for name in ["Book1", "Left out"] {
+        let book = source.add_workbook(root, Some(name)).unwrap();
+        let sheet = source.tree().children(book).unwrap()[0];
+        let column = source
+            .add_column(sheet, None, Some("B"), Column::from_f64(&[3.0, 4.0]))
+            .unwrap();
+        books.push((book, column));
+    }
+    let graph_of = |source: &mut Project, name: &str, column| {
+        let mut panel = PanelSpec::default();
+        panel.series.push(SeriesSpec::new(column));
+        source
+            .add_graph(
+                root,
+                Some(name),
+                PlotSpec::default().with_panels(Panels::one(panel)),
+            )
+            .unwrap()
+    };
+    let graph = graph_of(&mut source, "Graph1", books[0].1);
+    let stray = graph_of(&mut source, "Graph2", books[1].1);
+    let copies = NodeCopy::capture_all(source.tree(), &[books[0].0, graph, stray]).unwrap();
+    // The embedded data of Graph1 would be the columns of its own workbook.
+    assert!(copies[1].graph_data().is_empty());
+    assert_eq!(copies[2].graph_data().len(), 1);
+    let (_, decoded) = decode_objects(&encode_objects("source", &copies).unwrap()).unwrap();
+    assert!(decoded[1].graph_data().is_empty());
+    assert_eq!(decoded[2].graph_data().len(), 1);
+
+    let mut destination = Project::new("Destination").unwrap();
+    let parent = destination.root();
+    // Shift the identifiers so that the two projects do not coincide.
+    destination.add_workbook(parent, Some("Existing")).unwrap();
+    let items: Vec<_> = decoded
+        .into_iter()
+        .map(NodeCopy::into_external)
+        .map(|copy| {
+            let name = copy.root().name().to_string();
+            CopyInsertion { parent, copy, name }
+        })
+        .collect();
+    let roots = destination.insert_copies(&items).unwrap();
+    // Existing, Book1, Graph1, Graph2 and one hidden workbook for Graph2 only.
+    assert_eq!(destination.tree().children(parent).unwrap().len(), 5);
+    let pasted_column = destination.tree().walk(roots[0]).unwrap()[2];
+    let series_column = |graph| {
+        let NodeKind::Graph { spec, .. } = destination.tree().node(graph).unwrap().kind() else {
+            panic!("graph")
+        };
+        spec.panels[0].series[0].y
+    };
+    assert_eq!(series_column(roots[1]), pasted_column);
+    assert_ne!(series_column(roots[2]), pasted_column);
+}

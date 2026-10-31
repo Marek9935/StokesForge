@@ -277,6 +277,22 @@ reference to a node outside the copy keeps the original in a local copy. A
 folder is therefore copyable like any other node: the Project Manager no longer
 refuses it, and one `MacroKind` entry covers the gesture.
 
+The rule covers the whole gesture, not only one subtree (#391, S1). The roots
+selected together are captured by `NodeCopy::capture_all` (one `NodeCopy` per
+root, but one set of "inside" nodes: a graph never embeds a column of another
+root, and a calculation or transposed sheet whose ends sit in different roots
+travels with the root that holds its first output or its sheet), and inserted by
+`Command::InsertCopies { items: Vec<CopyInsertion> }` / `Project::insert_copies`
+with **one** old-to-new identifier map: a copied graph plots the copied
+workbook, a formula reads the copied sheet, a calculation links the copies,
+whichever root holds each end and whatever the order of the roots. `InsertCopy`
+stays for one root and wraps the same function. The hidden workbooks of an
+external paste are inserted after all the roots, so that they never take the
+name of a pasted root. The app-state sends one command inside the macro (one
+history entry, undo and redo whole); the clipboard record keeps its per-root
+fields and the reader rebuilds all the roots in one project before capturing
+them again.
+
 For cross-project graphs (#107), the copy also carries the frozen
 dependencies; `NodeCopy::into_external` enables their insertion in
 `InsertCopy`. Hidden workbooks and graphs are created atomically in the same

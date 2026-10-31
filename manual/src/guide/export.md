@@ -144,7 +144,8 @@ You can copy workbooks, graphs, notes and folders, and paste them in a folder of
 What to expect:
 
 - A copy gets a new name when the name is already used in the folder ("copy 1", "copy 2"…).
-- A graph pasted into **another** project brings the data it plots, in a hidden workbook. Choose **Show Data** in the **Graph** menu to open it. A graph pasted in the **same** project keeps pointing at the original columns.
+- A graph pasted into **another** project brings the data it plots, in a hidden workbook. Choose **Show Data** in the **Graph** menu to open it. If the workbook it plots is copied in the same gesture, the graph plots the pasted workbook and no hidden workbook is added. A graph pasted in the **same** project without its workbook keeps pointing at the original columns.
+- Objects copied **together** (several windows selected, then **Copy** and **Paste**, or **Duplicate**) keep each other: the copied graph plots the copied workbook, a formula reads the copied sheet, and a calculation links the copied columns. What is not part of the gesture keeps reading the original.
 - A copied **folder** keeps what is inside it together: a graph of the folder plots the workbook copied with it, and a formula reads the copied sheet. What the folder reads from outside stays on the original in the same project; in another project, a formula that reads outside the folder shows `#REF`.
 - Analysis calculations travel with the folder or workbook that holds both their data and their results. A calculation that reads data outside what you copied is not carried over, and its columns become ordinary columns.
 - To paste a copied folder next to itself, select that folder and choose **Paste**.

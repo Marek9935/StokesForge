@@ -29,7 +29,7 @@ A data command that **moves rows** rewrites, in the same delta, the row referenc
 
 ## Copy
 
-`Command::InsertCopy` renumbers everything the copy carries that points at another node (graph series, formulas, calculations, transposed sheets) through the map of new identifiers, **after** the node loop: what is inside the copy reads the copy, the rest the original (#391). A new kind of reference to a node goes through the same renumbering in `Project::insert_copy`, and in `NodeCopy::capture` if it is not a node. Source: `docs/commands-and-history.md` § Copying objects.
+`Command::InsertCopy` (one root) and `Command::InsertCopies` (the roots of one gesture, **one shared map**, from `NodeCopy::capture_all`; S1) renumber everything the copy carries that points at another node (graph series, formulas, calculations, transposed sheets) through the map of new identifiers, **after** the node loop: what is inside the copy reads the copy, the rest the original (#391). A new kind of reference to a node goes through the same renumbering in `Project::insert_copies` (`insert_copy` wraps it), and in `NodeCopy::capture_all` if it is not a node. Source: `docs/commands-and-history.md` § Copying objects.
 
 ## Persistence
 

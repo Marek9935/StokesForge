@@ -80,7 +80,7 @@ pub use column::{
     MixedCell, NumericStatus, ValueBlock, ValuesDelta,
 };
 pub use compose::PlannedSeries;
-pub use copy::NodeCopy;
+pub use copy::{CopyInsertion, NodeCopy};
 pub use error::{CoreError, CoreResult};
 pub use formula::{
     evaluate as evaluate_formula, evaluate_with_x as evaluate_formula_with_x, sheet_token,

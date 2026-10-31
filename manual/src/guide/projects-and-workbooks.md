@@ -90,7 +90,7 @@ Select one or more entries in the Project Manager, then use the right-click menu
 
 An empty name is refused and the previous name is kept.
 
-A folder can be copied and duplicated with everything it holds. What is inside the copy reads the copy: a graph in the copied folder plots the copied workbook, not the original. What is outside the folder is still read from the original. To paste into a folder, select only that folder and choose **Paste**. If the folder you copied is itself selected, **Paste** puts the copy next to it.
+A folder can be copied and duplicated with everything it holds. What is inside the copy reads the copy: a graph in the copied folder plots the copied workbook, not the original. What is outside the folder is still read from the original. The same holds for several windows copied together: if you select Book1 and Graph1 and copy them in one gesture, the copied Graph1 plots the copied Book1. To paste into a folder, select only that folder and choose **Paste**. If the folder you copied is itself selected, **Paste** puts the copy next to it.
 
 **Delete** asks no confirmation. If graphs used the deleted data, the status bar says so. Undo brings everything back. Undo does not reopen the windows.
 
