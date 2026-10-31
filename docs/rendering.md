@@ -755,6 +755,11 @@ The two points are projected **without** a framing membership test
 (closed outline), fill by Sutherland-Hodgman (`clip_polygon`), arrowhead
 omitted if it is outside the frame. The ellipse is a convex polygon whose number of sides follows the radius in pixels (`ellipse_segments`: chord less than 0.1 px from the arc, #91).
 The outline (rectangle, ellipse, line, arrow shaft) is plotted **at sub-pixel precision**: Plotters accepts only integer coordinates, which aliased the circle whatever the number of sides. Convention read by both backends (`stokesforge_render::subpixel`): fixed points ×16 and a flag in the thickness; the screen decodes in `draw_path`, the export rewrites the marked `<polyline>`s (`stokesforge-render-svg::subpixel::resolve`, called by each export entry point). `SubpixelPath` goes through a `CoordMapper` without `Rect::truncate`, which would crush the fixed points. A backend that ignores the convention plots these paths sixteen times too big.
+Free placement gestures (#398): the dashed magnet guides of a layer being moved
+or resized are painted by `GraphView::paint_overlay` from `free_drag.guides`, over
+the figure, never in the cached `Vec<Shape>` (not exported, like the zoom
+rectangle); the moved frame itself goes through `FramePreview.free` and
+`preview_generation`, nothing in the cache key (invariant 6).
 `DrawnPanel::shapes` (`DrawnShape`, unclipped pixels) serves `hit`:
 `PlotComponent::Shape`, designated **on its stroke** (or inside it if filled)
 in the plot area, under the free texts. On the screen side, `GraphView`
@@ -1052,6 +1057,24 @@ cell (overlay lookup, `pyst` `panel=`, what an older version draws as a grid).
   stored coordinates of the image's top-left corner, below the title band).
   `cell_rect` / `frame_rect` answer by `(row, column)`; `is_explicit` is true;
   `column_breaks`, `row_breaks`, the gutters and `frame_widths/heights` are empty.
+- **Stacking and background (#398, batch 2a).** `FreeFrame::stack` orders the
+  cells: `draw_on_with_texts` draws them by `(stack, base index)` (ties =
+  creation order), each cell's layers together, base first; `FigureLayout::
+  free_cells` is listed in that order (back to front, the last is in front).
+  Before the first layer of a cell, its **outer rectangle** is filled with its
+  background: an explicit `PanelSpec::layer_background` always, **Auto** (empty
+  or unreadable) only when that rectangle overlaps one already drawn (white if
+  the graph's background has no opacity, else the graph's color), so a figure
+  without overlap is byte-identical to before and a transparent export stays
+  transparent. The layer's background, composited over the graph's, is the
+  background of the automatic ink (`draw_panel`). `DrawnPlot::panels` stays in
+  spec order whatever the drawing order; each `DrawnPanel` carries its
+  `cell_rank` (0 = drawn first; always 0 on the grid) and `cell_origin` /
+  `cell_size`, its outer rectangle. **Occlusion:** an object of a cell lying
+  under the outer rectangle of a cell with a higher rank is not pickable
+  (`hit::front_to_back`, `GraphView::panel_at`). The graph title anchor is
+  projected through layer index 0, not the first layer drawn (smallest index
+  drawn if layer 0 is omitted).
 - **#405 in free placement.** `figure_left` / `figure_top` are ignored (kept
   stored, they come back on the grid). Fixed raises each of a cell's four gutters
   to the reserve of one axis (a title is never reserved); `fixed_overflow` works

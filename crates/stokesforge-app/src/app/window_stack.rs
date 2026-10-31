@@ -316,7 +316,9 @@ impl Workspace<'_> {
             .graph_views
             .get(&graph)
             .and_then(GraphView::display_scale);
-        let Some(step) = FigureFollow::observe(self.figure_follow, graph, size, scale) else {
+        let origin = super::graph_window::published_figure_origin(ctx, graph);
+        let Some(step) = FigureFollow::observe(self.figure_follow, graph, size, origin, scale)
+        else {
             return;
         };
         let Some(visible) = visible else {
@@ -336,10 +338,18 @@ impl Workspace<'_> {
         if self.state.placement_step_revision() == Some(self.state.revision()) {
             (left, top) = (true, true);
         }
-        if left || top {
+        // Free placement (#398): the image's origin moved (a layer went past
+        // it, or came back), and the window moves by that, whichever gesture,
+        // Undo or Redo caused it; the pulled-edge rule is the grid's.
+        let free_shift = FigureFollow::origin_follow(step);
+        if origin.is_some() {
+            (left, top) = (false, false);
+        }
+        if left || top || free_shift != egui::Vec2::ZERO {
             if let Some(position) = self.window_positions.get_mut(&tab) {
-                let shift = FigureFollow::anchor_shift(step, left, top);
-                *position = (*position + shift).max(egui::Pos2::ZERO);
+                let shift = FigureFollow::anchor_shift(step, left, top) + free_shift;
+                *position =
+                    FigureFollow::shifted_corner(self.figure_follow, graph, *position, shift);
             }
         }
         if let (Some(&position), Some(window)) = (
@@ -1479,6 +1489,83 @@ mod tests {
             bench.app.window_positions[&bench.tab], position,
             "after a drag"
         );
+        bench.session.shutdown().unwrap();
+    }
+
+    /// #398: the screen x of page x `page` of a free figure, up to a constant
+    /// of the window's chrome: window left plus the distance from the image's
+    /// origin at the display scale.
+    fn page_x_on_screen(bench: &FollowBench, page: f64) -> f32 {
+        let origin = crate::app::graph_window::published_figure_origin(&bench.context, bench.graph)
+            .expect("free figure");
+        bench.app.window_positions[&bench.tab].x + (page - origin.0) as f32 * bench.scale()
+    }
+
+    /// #398: a layer of a free figure dragged to the left of the origin makes
+    /// the image grow to the left; the window moves left by the growth at the
+    /// display scale, so the other layer does not move on screen. Undo and Redo
+    /// bring the window back and forth the same way.
+    #[test]
+    fn a_layer_dragged_left_of_the_origin_moves_the_window_not_the_other_layer() {
+        use stokesforge_core::compose::{current_plot_spec, CellSide};
+        let mut bench = FollowBench::new(egui::pos2(400.0, 30.0), egui::vec2(700.0, 560.0));
+        bench.app.state.dispatch(Action::AddCell {
+            graph: bench.graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+        let mut spec = current_plot_spec(bench.app.state.tree(), bench.graph).expect("spec");
+        assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+            &mut spec, true
+        ));
+        bench.app.state.dispatch(Action::SetPlotSpec {
+            graph: bench.graph,
+            spec,
+        });
+        bench.settle();
+        let frame_of = |bench: &FollowBench, panel: usize| {
+            current_plot_spec(bench.app.state.tree(), bench.graph)
+                .expect("spec")
+                .panels[panel]
+                .sanitized_free_frame()
+        };
+        let (first, second) = (frame_of(&bench, 0), frame_of(&bench, 1));
+        let (window, width) = (bench.app.window_positions[&bench.tab], bench.size().x);
+        let other_on_screen = page_x_on_screen(&bench, second.left);
+
+        // Layer 0 goes 120 pt left of where the image starts.
+        bench.app.state.dispatch(Action::SetFreeFrame {
+            graph: bench.graph,
+            panel: 0,
+            frame: stokesforge_plot::FreeFrame {
+                left: first.left - 120.0 - 100.0,
+                ..first
+            },
+        });
+        bench.settle();
+        assert!(
+            bench.app.window_positions[&bench.tab].x < window.x,
+            "the window moved left"
+        );
+        assert!(bench.size().x > width, "and grew");
+        assert!(
+            (page_x_on_screen(&bench, second.left) - other_on_screen).abs() < 0.5,
+            "the other layer stays still on screen"
+        );
+
+        bench.app.state.dispatch(Action::Undo);
+        bench.settle();
+        assert!(
+            (bench.app.window_positions[&bench.tab] - window).length() < 0.01,
+            "Undo"
+        );
+        assert!((bench.size().x - width).abs() < 0.5);
+        assert!((page_x_on_screen(&bench, second.left) - other_on_screen).abs() < 0.5);
+        bench.app.state.dispatch(Action::Redo);
+        bench.settle();
+        assert!(bench.app.window_positions[&bench.tab].x < window.x, "Redo");
+        assert!((page_x_on_screen(&bench, second.left) - other_on_screen).abs() < 0.5);
         bench.session.shutdown().unwrap();
     }
 

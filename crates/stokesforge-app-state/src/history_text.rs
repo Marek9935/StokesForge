@@ -134,6 +134,11 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::RemoveCell => tr!("history-plot-remove-cell"),
             PlotEditKind::ResizeCell => tr!("history-plot-resize-cell"),
             PlotEditKind::PlaceFigure => tr!("history-plot-place-figure"),
+            PlotEditKind::BringLayerToFront => tr!("history-plot-bring-layer-to-front"),
+            PlotEditKind::SendLayerToBack => tr!("history-plot-send-layer-to-back"),
+            PlotEditKind::LayerBackground => tr!("history-plot-layer-background"),
+            PlotEditKind::MoveLayer => tr!("history-plot-move-layer"),
+            PlotEditKind::ResizeLayer => tr!("history-plot-resize-layer"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
         HistoryLabel::ReplaceAnalysisData(kind) => tr!(

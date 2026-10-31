@@ -106,6 +106,10 @@ pub struct FreeFrame {
     pub width: f64,
     /// Height of the frame.
     pub height: f64,
+    /// Stacking key (#398): cells are drawn by ascending `stack`, ties by
+    /// creation order (base layer index). Only the drawing order depends on
+    /// it, never the layer numbers.
+    pub stack: i32,
 }
 
 impl FreeFrame {
@@ -115,6 +119,7 @@ impl FreeFrame {
         top: 0.0,
         width: FALLBACK_FRAME.0,
         height: FALLBACK_FRAME.1,
+        stack: 0,
     };
 
     /// This frame made usable: a non-finite number reads its fallback, the
@@ -137,6 +142,7 @@ impl FreeFrame {
             top: position(self.top),
             width: size(self.width, FALLBACK_FRAME.0),
             height: size(self.height, FALLBACK_FRAME.1),
+            stack: self.stack,
         }
     }
 }
@@ -204,6 +210,11 @@ pub struct PanelSpec {
     /// Ignored in grid placement. Read through
     /// [`PanelSpec::sanitized_free_frame`].
     pub free_frame: Option<FreeFrame>,
+    /// Background of the cell's outer rectangle in free placement (#398),
+    /// stored on the base layer of a cell only. Empty = Auto: painted only
+    /// where the cell covers another one behind it. Ignored in grid
+    /// placement.
+    pub layer_background: String,
 }
 
 impl PanelSpec {
@@ -862,6 +873,7 @@ impl Default for PanelSpec {
             group_names: std::collections::BTreeMap::new(),
             group_gradients: std::collections::BTreeMap::new(),
             free_frame: None,
+            layer_background: String::new(),
         }
     }
 }
@@ -877,6 +889,7 @@ mod free_frame_tests {
                 top,
                 width,
                 height,
+                stack: 0,
             }),
             ..PanelSpec::default()
         }

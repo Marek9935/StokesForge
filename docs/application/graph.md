@@ -852,9 +852,38 @@ stored nor the shown numbers (with a title, the first Top reads the band less
 than the old distance). The image still surrounds the layers (it may grow on the
 left or above). The figure Left / Top and the per-column and per-row fields are
 hidden and stay stored for the way back. **Figure size = Fixed** applies per
-layer. There is no handle on any edge in Free until the mouse gestures come
-(`GraphView::layout_is_free`); a click still activates the layer drawn under the
-cursor, found from the drawn plot areas, never from grid breakpoints.
+layer. A click activates the layer drawn under the cursor, found from the drawn plot
+areas, never from grid breakpoints.
+
+**Mouse gestures (#398, batch 2b).** `docs/gestures.md` has the matrix. A plain
+Pointer drag in a layer's plot area moves it, the outer boundary resizes it,
+magnets snap its edges to the other layers' (Shift: none). The pure geometry is
+`stokesforge_render::free_gesture` (`free_handle_at`, `framed_by`, `magnetized`);
+`GraphView::handle_free_drag` runs it (first call: edges and any gesture in
+progress; last call: the move, after the object handlers) and signals one
+`GraphEvent::LayerFramed { panel, frame, resized }` at release, which
+`graph_window.rs` turns into `Action::SetFreeFrame` (one `EditPlotSpec`,
+`PlotEditKind::MoveLayer` when only the position changes, `ResizeLayer` when the
+size does). `FigureFollow` also remembers the image's origin (`free_origin`):
+`observe` returns a step when the origin moves while the size stays, and the
+shell moves the floating window by the shift at the kept scale
+(`FigureFollow::origin_follow`, `shifted_corner`); Undo and Redo go through the
+same path, so no "placement step" is needed in Free (it is still noted for the
+two kinds). Detached OS windows do not move. Anything that maps a rank of
+`DrawnPlot::panels` to a layer goes through `.index`, never the position.
+
+**Stacking and Background (#398, batch 2a).** Overlapping layers are drawn in
+stacking order (`FreeFrame::stack`, ties: creation order). **Bring to Front** and
+**Send to Back** (`compose::bring_to_front` / `send_to_back`, rewriting the keys
+of all cells to `0..n`) keep the layer numbers; they are in the right-click of a
+layer (plot area or blank figure: the active layer) and in its Object Manager
+node, only in Free, grayed out with a reason when already in front / at the back.
+`Action::BringLayerToFront` / `SendLayerToBack` / `SetLayerBackground` are each
+one `EditPlotSpec` step (`PlotEditKind::BringLayerToFront`, `SendLayerToBack`,
+`LayerBackground`). A layer added beside is created in front. **Layer Background** is
+a color field in **General > Size** (Free only, base layer's value): **Auto** by
+default, see `docs/rendering.md`. Going back to the grid drops the stacking keys
+and keeps the colors.
 
 **Add Layer Beside** in Free writes the frame of the new layer in the same
 `EditPlotSpec(AddCell)` (`frame_sizes::place_beside`, `render::place_beside`):

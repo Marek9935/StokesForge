@@ -85,6 +85,7 @@ An empty section disappears with its separators.
 | Target | Menu |
 |---|---|
 | Background, plot area | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, placed at the clicked point at the default size) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
+| Layer (Free only, #398), in the Object Manager node and in the blank of the figure | Bring to Front · Send to Back (grayed out with a reason when already in front / at the back) — absent on the regular grid |
 | Curve | Show Data (the workbook of **this** curve) ─ Rename · Move Up · Move Down · Hide ─ Delete ─ Properties… |
 | Title, axis title | Edit Text · Reset Position ─ Hide ─ Properties… |
 | Legend entry | Edit Text ─ Properties… |

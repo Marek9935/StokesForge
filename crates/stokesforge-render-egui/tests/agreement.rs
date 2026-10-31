@@ -1081,6 +1081,7 @@ fn the_backends_agree_on_a_free_figure() {
             top,
             width,
             height,
+            stack: 0,
         })
     };
     panels[0].free_frame = frame(-80.4, 20.3, 310.6, 200.5);
@@ -1113,6 +1114,59 @@ fn the_backends_agree_on_a_free_figure() {
         (layout.size.0 + 40, layout.size.1 + 25),
         "free figure, scaled",
     );
+}
+
+/// #398: two overlapping free cells, the front one over the other, are the
+/// same figure on screen and in the export, background included; an explicit
+/// background color on the back cell adds its fill on both sides. Witness: a backend that
+/// skips the fill of the front cell makes the primitives differ.
+#[test]
+fn the_backends_agree_on_overlapping_free_cells_and_their_background() {
+    use stokesforge_plot::{FreeFrame, LayerPlacement};
+    let mut fixture = minimal();
+    fixture.spec.title = "Stacked".to_owned();
+    let mut second = fixture.spec.panels[0].clone();
+    second.column = 1;
+    let mut panels: Vec<_> = fixture.spec.panels.iter().cloned().collect();
+    panels.push(second);
+    let frame = |left, top, width, height, stack| {
+        Some(FreeFrame {
+            left,
+            top,
+            width,
+            height,
+            stack,
+        })
+    };
+    panels[0].free_frame = frame(0.0, 20.0, 310.0, 200.0, 1);
+    panels[1].free_frame = frame(200.0, 70.0, 240.0, 150.0, 0);
+    fixture.spec.panels = stokesforge_plot::Panels::new(panels);
+    fixture.spec.layer_placement = LayerPlacement::Free;
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let size = stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice)
+        .expect("layout")
+        .size;
+    let tree = fixture.project.tree();
+    let (auto, drawn) = agree(tree, &fixture.spec, size, "stacked, Auto background");
+    assert_eq!(drawn.panels[0].cell_rank, 1, "layer 0 is in front");
+    assert_eq!(drawn.panels[1].cell_rank, 0);
+    agree(
+        tree,
+        &fixture.spec,
+        (size.0 + 30, size.1 + 20),
+        "stacked, scaled",
+    );
+    let mut colored = fixture.spec.clone();
+    assert!(stokesforge_core::compose::set_layer_background(
+        &mut colored,
+        1,
+        "#ffaa00"
+    ));
+    let (explicit, _) = agree(tree, &colored, size, "stacked, explicit background");
+    // Auto paints nothing under the back cell; an explicit color does, so the
+    // fill shows as one more rectangle (primitives carry no color).
+    assert_eq!(explicit.len(), auto.len() + 1, "the color is drawn");
 }
 
 /// The geometry of `spec` drawn on screen the way the application draws it:

@@ -518,6 +518,7 @@ fn b13_hostile_free_frames_cross_the_disk_and_lay_out_bounded() {
                     top: hostile[(i + j) % hostile.len()],
                     width: size,
                     height: hostile[(i + 2 * j) % hostile.len()],
+                    stack: 0,
                 }),
                 ..PanelSpec::at(i, j)
             });

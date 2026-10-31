@@ -39,6 +39,27 @@ without a message, see `docs/persistence.md`).
   and `free_frame` on each panel): an older version that opens and saves a file
   again drops them without a message and shows the grid.
 
+- Mouse gestures of free layers (#398), second batch (second part): with
+  **Layer placement = Free**, drag a layer's plot area with the Pointer tool to
+  move it, and drag the outer boundary of a layer (edges and corners) to resize
+  it; left and top edges keep the opposite edge still, sizes stay within 36 and
+  2000 pt. Edges snap to the edges of the other layers (6 screen points, a
+  dashed guide shows it); hold **Shift** for no magnet. Each gesture is one
+  step of **Undo** ("Move Layer", "Resize Layer"), and the graph window follows
+  the image when a layer goes left of or above its origin (and on Undo / Redo),
+  so the other layers stay still on screen. The regular grid is unchanged.
+
+- Stacking and background of free layers (#398), second batch (first part):
+  overlapping layers are drawn in creation order (a new layer starts in
+  front); right-click a layer or its Object Manager node for **Bring to Front**
+  and **Send to Back** (layer numbers are kept), and set a layer's
+  **Layer Background** in General > Size. **Auto** paints only where a layer covers
+  another one (white, or the graph's color), so a graph without overlap and
+  transparent exports are unchanged. A click on the shared area picks the front
+  layer, and what lies under a front layer cannot be picked. **Additive `.stf`
+  fields** (`stack` in `free_frame`, `layer_background` on each panel): an older
+  version that saves the file again drops them without a message.
+
 - `pyst` graph sizes (#399): `pyst.set_graph` gains `plot_width`, `plot_height`
   (plot area of the column / row of `panel`), `plot_left`, `plot_top` (`None` =
   Auto) and `fixed_size`, with a `unit="cm"|"mm"|"pt"|"in"` keyword (centimetres

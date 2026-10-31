@@ -237,13 +237,14 @@ same command**, never in a separate step and never at load: any
 `SetPlotSpec` / `EditPlotSpec` / `AddGraph` that goes through `AppState::execute`
 (or `bridge::set_graph_spec` for `pyst`) carries them, so Undo returns to the
 legacy file as it was. Dragging the left or top edge of the figure (#405) sends
+`Action::SetFreeFrame` (#398, a drag of a layer or of one of its edges) = one `EditPlotSpec`, `PlotEditKind::MoveLayer` ("Move Layer") when the size is unchanged, `ResizeLayer` ("Resize Layer") otherwise; nothing sent on the grid, for a missing layer or an unchanged frame.
 `Action::SetFigureOffsets` = one `EditPlotSpec` with `PlotEditKind::PlaceFigure`
 ("Position Plot Area"), legacy graphs fixed in the same command. "Figure size",
 Left and Top typed in Graph Properties are part of the window's draft and macro.
 `AppState::execute` also compares the layouts before and after a `SetPlotSpec` /
 `EditPlotSpec` of a Fixed figure and puts `status-figure-grew` in the status bar
 when the image grew past the reserve (F1/F2). The Graph Properties size fields edit the draft of the
-window, hence the window's single `GraphProperties` macro. In free placement (#398) switching placement (`frame_sizes::set_placement_in_draft`) and the Left / Top / Width / Height fields are part of that draft too, and Add Layer Beside writes the new layer's frame (`frame_sizes::place_beside`) inside the same `EditPlotSpec(AddCell)`; a Free spec is never given grid frames (`frame_sizes::is_legacy` is false in Free).
+window, hence the window's single `GraphProperties` macro. In free placement (#398) switching placement (`frame_sizes::set_placement_in_draft`) and the Left / Top / Width / Height fields are part of that draft too, `Action::BringLayerToFront` / `SendLayerToBack` / `SetLayerBackground` (#398) are each one `EditPlotSpec` (`PlotEditKind::BringLayerToFront`, `SendLayerToBack`, `LayerBackground`; nothing sent on the grid or when nothing changes), and Add Layer Beside writes the new layer's frame (`frame_sizes::place_beside`) inside the same `EditPlotSpec(AddCell)`; a Free spec is never given grid frames (`frame_sizes::is_legacy` is false in Free).
 Opening the panel, choosing a content or opening its properties belongs to
 the view state; validated changes are undoable.
 

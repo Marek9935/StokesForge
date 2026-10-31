@@ -171,6 +171,9 @@ pub(super) fn clamp_to_workspace(rect: egui::Rect) -> egui::Rect {
 pub(super) struct FigureFollow {
     /// Size of the figure in points the last time it was recorded.
     size: (u32, u32),
+    /// Stored page coordinates of the figure's top-left corner the last time
+    /// it was recorded (free placement, #398); `None` on the grid.
+    origin: Option<(f64, f64)>,
     /// Screen points per figure point the window keeps (the "display scale"):
     /// the displayed one while the figure fits, the one from before the clamp
     /// while it does not.
@@ -178,6 +181,12 @@ pub(super) struct FigureFollow {
     /// The smaller scale the window showed when the room ran out, until the
     /// displayed scale moves away from it (the user resized the window).
     held: Option<f32>,
+    /// Shift the workspace edge refused to the window's corner, and where the
+    /// window was put (#398): the next shift starts from the unclamped
+    /// position, so that an Undo gives the window back where it was instead of
+    /// moving it by the full shift from a corner that never moved.
+    slack: egui::Vec2,
+    placed: Option<egui::Pos2>,
 }
 
 /// A change of figure size to follow, see [`FigureFollow::observe`].
@@ -191,6 +200,12 @@ pub(super) struct FollowStep {
     scale: f32,
     /// The figure was contained (the room had run out) before this change.
     was_held: bool,
+    /// How far the figure's origin moved in page points (free placement,
+    /// #398): new origin minus old. A layer dragged to the left of the origin
+    /// makes it negative; the window moves by it at the kept scale so that the
+    /// page coordinates stay still on screen. `None` on the grid or when the
+    /// graph just became free.
+    origin_shift: Option<egui::Vec2>,
 }
 
 impl FigureFollow {
@@ -200,10 +215,16 @@ impl FigureFollow {
     /// from before the change, so that the figure keeps its display scale.
     /// Nothing is returned the first time a graph is seen: opening or loading a
     /// project never resizes a window.
+    ///
+    /// In free placement `origin` is the stored position of the image's
+    /// top-left corner (#398): a step is also returned when only the origin
+    /// moves (one layer dragged left while the image keeps its size), with the
+    /// move in [`FollowStep::origin_shift`].
     pub(super) fn observe(
         follows: &mut HashMap<NodeId, FigureFollow>,
         graph: NodeId,
         size: (u32, u32),
+        origin: Option<(f64, f64)>,
         scale: Option<f32>,
     ) -> Option<FollowStep> {
         let scale = scale.filter(|scale| scale.is_finite() && *scale > 0.0);
@@ -212,13 +233,16 @@ impl FigureFollow {
                 graph,
                 FigureFollow {
                     size,
+                    origin,
                     scale: scale.unwrap_or(1.0),
                     held: None,
+                    slack: egui::Vec2::ZERO,
+                    placed: None,
                 },
             );
             return None;
         };
-        if follow.size == size {
+        if follow.size == size && follow.origin == origin {
             if let Some(shown) = scale {
                 match follow.held {
                     // Still the contained figure we sized the window to.
@@ -236,12 +260,21 @@ impl FigureFollow {
             (i64::from(size.0) - i64::from(follow.size.0)) as f32,
             (i64::from(size.1) - i64::from(follow.size.1)) as f32,
         );
+        let origin_shift = match (follow.origin, origin) {
+            (Some(before), Some(now)) => Some(egui::vec2(
+                (now.0 - before.0) as f32,
+                (now.1 - before.1) as f32,
+            )),
+            _ => None,
+        };
         follow.size = size;
+        follow.origin = origin;
         Some(FollowStep {
             figure: egui::vec2(size.0 as f32, size.1 as f32),
             delta,
             scale: follow.scale,
             was_held: follow.held.is_some(),
+            origin_shift,
         })
     }
 
@@ -257,6 +290,41 @@ impl FigureFollow {
             if left { -grow.x } else { 0.0 },
             if top { -grow.y } else { 0.0 },
         )
+    }
+
+    /// How far the window's top-left corner moves for `step` in free placement
+    /// (#398): the origin's move in page points at the kept scale, so that page
+    /// coordinates stay still on screen (an image that grows to the left moves
+    /// the window left by the growth; one that shrinks from the left moves it
+    /// right). Zero without an origin move.
+    pub(super) fn origin_follow(step: FollowStep) -> egui::Vec2 {
+        step.origin_shift
+            .map_or(egui::Vec2::ZERO, |shift| shift * step.scale)
+    }
+
+    /// The window corner after moving it by `shift`, never past the top-left
+    /// corner of the workspace. What the edge refuses is remembered and given
+    /// back by the shifts that follow, as long as the window was not moved by
+    /// something else in between.
+    pub(super) fn shifted_corner(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        graph: NodeId,
+        corner: egui::Pos2,
+        shift: egui::Vec2,
+    ) -> egui::Pos2 {
+        let Some(follow) = follows.get_mut(&graph) else {
+            return (corner + shift).max(egui::Pos2::ZERO);
+        };
+        let slack = if follow.placed == Some(corner) {
+            follow.slack
+        } else {
+            egui::Vec2::ZERO
+        };
+        let wanted = corner + slack + shift;
+        let applied = wanted.max(egui::Pos2::ZERO);
+        follow.slack = wanted - applied;
+        follow.placed = Some(applied);
+        applied
     }
 
     /// The window size that follows `step`, from the current `window` size,
@@ -508,7 +576,16 @@ mod tests {
         size: (u32, u32),
         scale: f32,
     ) -> Option<FollowStep> {
-        FigureFollow::observe(follows, graph(), size, Some(scale))
+        FigureFollow::observe(follows, graph(), size, None, Some(scale))
+    }
+
+    fn free_step(
+        follows: &mut HashMap<NodeId, FigureFollow>,
+        size: (u32, u32),
+        origin: (f64, f64),
+        scale: f32,
+    ) -> Option<FollowStep> {
+        FigureFollow::observe(follows, graph(), size, Some(origin), Some(scale))
     }
 
     #[test]
@@ -562,6 +639,65 @@ mod tests {
             egui::vec2(30.0, 0.0),
             "pushed in, the corner moves right"
         );
+    }
+
+    /// #398: an image that grows to the left (origin -30 pt) at scale 2 moves
+    /// the window 60 left; one that shrinks from the left moves it back right.
+    #[test]
+    fn an_origin_moving_left_moves_the_window_by_the_shift_at_the_kept_scale() {
+        let mut follows = HashMap::new();
+        free_step(&mut follows, (700, 300), (0.0, 0.0), 2.0);
+        let grow = free_step(&mut follows, (730, 300), (-30.0, 0.0), 2.0).expect("step");
+        assert_eq!(FigureFollow::origin_follow(grow), egui::vec2(-60.0, 0.0));
+        assert_eq!(grow.delta * grow.scale, egui::vec2(60.0, 0.0));
+        let shrink = free_step(&mut follows, (700, 300), (0.0, 0.0), 2.0).expect("step");
+        assert_eq!(FigureFollow::origin_follow(shrink), egui::vec2(60.0, 0.0));
+        let up = free_step(&mut follows, (700, 320), (0.0, -20.0), 2.0).expect("step");
+        assert_eq!(FigureFollow::origin_follow(up), egui::vec2(0.0, -40.0));
+    }
+
+    /// #398: one layer dragged left while another keeps the image's size
+    /// moves the origin without changing the size: that is a step too. Witness:
+    /// returning `None` when the size is unchanged.
+    #[test]
+    fn an_origin_move_with_the_same_size_is_a_step() {
+        let mut follows = HashMap::new();
+        free_step(&mut follows, (700, 300), (0.0, 0.0), 1.5);
+        let step = free_step(&mut follows, (700, 300), (-20.0, 0.0), 1.5).expect("step");
+        assert_eq!(step.delta, egui::Vec2::ZERO);
+        assert_eq!(FigureFollow::origin_follow(step), egui::vec2(-30.0, 0.0));
+        assert_eq!(free_step(&mut follows, (700, 300), (-20.0, 0.0), 1.5), None);
+        // Going from the grid to free (no origin before) shifts nothing.
+        let mut follows = HashMap::new();
+        step_grid(&mut follows);
+        let first = free_step(&mut follows, (700, 300), (0.0, 0.0), 1.0).expect("step");
+        assert_eq!(FigureFollow::origin_follow(first), egui::Vec2::ZERO);
+    }
+
+    fn step_grid(follows: &mut HashMap<NodeId, FigureFollow>) {
+        step(follows, (480, 360), 1.0);
+    }
+
+    /// #398: a shift the workspace edge refuses is given back by the opposite
+    /// one (Undo of a drag past the edge), unless the user moved the window.
+    #[test]
+    fn what_the_workspace_edge_refuses_is_given_back() {
+        let mut follows = HashMap::new();
+        step(&mut follows, (480, 360), 1.0);
+        let at = |x: f32| egui::pos2(x, 30.0);
+        let there =
+            FigureFollow::shifted_corner(&mut follows, graph(), at(10.0), egui::vec2(-50.0, 0.0));
+        assert_eq!(there, at(0.0));
+        let back =
+            FigureFollow::shifted_corner(&mut follows, graph(), there, egui::vec2(50.0, 0.0));
+        assert_eq!(back, at(10.0), "back where it was");
+        // Pinned again, then the user moves the window: the debt is forgotten.
+        let pinned =
+            FigureFollow::shifted_corner(&mut follows, graph(), back, egui::vec2(-50.0, 0.0));
+        assert_eq!(pinned, at(0.0));
+        let moved =
+            FigureFollow::shifted_corner(&mut follows, graph(), at(200.0), egui::vec2(50.0, 0.0));
+        assert_eq!(moved, at(250.0));
     }
 
     const CHROME: egui::Vec2 = egui::vec2(60.0, 100.0);

@@ -461,7 +461,21 @@ fn insert_free_cell(spec: &mut PlotSpec, panel: usize, side: CellSide) -> Option
     if rows.checked_mul(columns)? > MAX_GRID_CELLS {
         return None;
     }
-    spec.panels.push(PanelSpec::at(new_row, new_column));
+    // The new cell is in front of every other one (#398).
+    let front = spec
+        .panels
+        .iter()
+        .filter_map(|p| p.free_frame)
+        .map(|frame| frame.stack)
+        .max()
+        .map_or(0, |top| top.saturating_add(1));
+    spec.panels.push(PanelSpec {
+        free_frame: Some(FreeFrame {
+            stack: front,
+            ..FreeFrame::FALLBACK
+        }),
+        ..PanelSpec::at(new_row, new_column)
+    });
     Some(spec.panels.len() - 1)
 }
 
@@ -690,6 +704,90 @@ pub fn set_free_frame(spec: &mut PlotSpec, panel: usize, field: FreeField, value
     true
 }
 
+/// Rewrites the stacking keys of the cells to `0..n` following `order` (base
+/// layer indices, back to front), so no key ever overflows.
+fn restack(spec: &mut PlotSpec, order: &[usize]) {
+    for (rank, &base) in order.iter().enumerate() {
+        let Some(panel) = spec.panels.get_mut(base) else {
+            continue;
+        };
+        let mut frame = panel.sanitized_free_frame();
+        frame.stack = i32::try_from(rank).unwrap_or(i32::MAX);
+        panel.free_frame = Some(frame);
+    }
+}
+
+/// Puts the cell of layer `panel` (an overlay acts on its base) in front of
+/// all the others (#398). Layer numbers are kept; only the drawing order
+/// changes. `false`, with the spec unchanged, in grid placement, for a
+/// missing layer or when the cell is already in front.
+pub fn bring_to_front(spec: &mut PlotSpec, panel: usize) -> bool {
+    move_in_stack(spec, panel, true)
+}
+
+/// Puts the cell of layer `panel` behind all the others (#398); see
+/// [`bring_to_front`].
+pub fn send_to_back(spec: &mut PlotSpec, panel: usize) -> bool {
+    move_in_stack(spec, panel, false)
+}
+
+fn move_in_stack(spec: &mut PlotSpec, panel: usize, front: bool) -> bool {
+    if spec.layer_placement != LayerPlacement::Free {
+        return false;
+    }
+    let Some(&base) = spec.cell_bases().get(panel) else {
+        return false;
+    };
+    let mut order = spec.free_draw_order();
+    let Some(at) = order.iter().position(|&b| b == base) else {
+        return false;
+    };
+    if (front && at + 1 == order.len()) || (!front && at == 0) {
+        return false;
+    }
+    order.remove(at);
+    if front {
+        order.push(base);
+    } else {
+        order.insert(0, base);
+    }
+    restack(spec, &order);
+    true
+}
+
+/// True if the cell of layer `panel` is in front of every other cell (or
+/// alone): there is nothing to bring forward (#398).
+pub fn is_in_front(spec: &PlotSpec, panel: usize) -> bool {
+    let Some(&base) = spec.cell_bases().get(panel) else {
+        return true;
+    };
+    spec.free_draw_order().last() == Some(&base)
+}
+
+/// True if the cell of layer `panel` is behind every other cell (or alone).
+pub fn is_at_back(spec: &PlotSpec, panel: usize) -> bool {
+    let Some(&base) = spec.cell_bases().get(panel) else {
+        return true;
+    };
+    spec.free_draw_order().first() == Some(&base)
+}
+
+/// Sets the background of the cell of layer `panel` (#398; an overlay writes
+/// its base's): empty = Auto, else a color string. `false`, with the spec
+/// unchanged, in grid placement or for a missing layer.
+pub fn set_layer_background(spec: &mut PlotSpec, panel: usize, color: &str) -> bool {
+    if spec.layer_placement != LayerPlacement::Free {
+        return false;
+    }
+    let Some(&base) = spec.cell_bases().get(panel) else {
+        return false;
+    };
+    if let Some(target) = spec.panels.get_mut(base) {
+        target.layer_background = color.to_string();
+    }
+    true
+}
+
 /// The layers that deleting layer `panel` removes (#357): an overlay layer
 /// alone; an ordinary layer (a cell) with all the overlay layers of its cell.
 /// Empty if `panel` does not exist.
@@ -807,6 +905,7 @@ pub fn remap_between(previous: &PlotSpec, next: &PlotSpec) -> Vec<Option<usize>>
         b.row = a.row;
         b.column = a.column;
         b.free_frame = a.free_frame;
+        b.layer_background = a.layer_background.clone();
         *a == b
     };
     let mut from = 0;
@@ -1662,6 +1761,7 @@ mod free_placement_tests {
                 top: frame.1,
                 width: frame.2,
                 height: frame.3,
+                stack: 0,
             }),
             ..PanelSpec::at(row, column)
         }
@@ -1767,6 +1867,7 @@ mod free_placement_tests {
             top: 5.0,
             width: 300.0,
             height: 200.0,
+            stack: 0,
         };
         assert!(
             !set_free_placement(&mut spec, &[Some(frame)]),
@@ -1805,6 +1906,89 @@ mod free_placement_tests {
         assert_eq!(spec, before);
     }
 
+    fn stacked_three() -> PlotSpec {
+        free(vec![
+            cell(0, 0, (0.0, 0.0, 100.0, 100.0)),
+            cell(0, 1, (50.0, 0.0, 100.0, 100.0)),
+            cell(0, 2, (100.0, 0.0, 100.0, 100.0)),
+        ])
+    }
+
+    /// Witness: ties broken by descending index give [2, 1, 0].
+    #[test]
+    fn equal_stacking_keys_are_drawn_in_creation_order() {
+        assert_eq!(stacked_three().free_draw_order(), [0, 1, 2]);
+    }
+
+    #[test]
+    fn bring_to_front_and_send_to_back_reorder_without_renumbering() {
+        let mut spec = stacked_three();
+        assert!(bring_to_front(&mut spec, 0));
+        assert_eq!(spec.free_draw_order(), [1, 2, 0]);
+        assert!(is_in_front(&spec, 0) && !is_at_back(&spec, 0));
+        assert!(!bring_to_front(&mut spec, 0), "already in front");
+        assert!(send_to_back(&mut spec, 2));
+        assert_eq!(spec.free_draw_order(), [2, 1, 0]);
+        let keys: Vec<i32> = spec
+            .panels
+            .iter()
+            .map(|p| p.free_frame.unwrap().stack)
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(sorted, [0, 1, 2], "keys rewritten to 0..n, no overflow");
+        assert_eq!(
+            spec.panels
+                .iter()
+                .map(|p| (p.row, p.column))
+                .collect::<Vec<_>>(),
+            [(0, 0), (0, 1), (0, 2)],
+            "layer numbers are kept"
+        );
+    }
+
+    #[test]
+    fn send_to_back_puts_the_cell_behind_the_others() {
+        let mut spec = stacked_three();
+        assert!(send_to_back(&mut spec, 2));
+        assert_eq!(spec.free_draw_order(), [2, 0, 1]);
+    }
+
+    /// Witness: writing the key on the overlay instead of its base.
+    #[test]
+    fn an_overlay_acts_on_its_base_cell() {
+        let mut spec = stacked_three();
+        let overlay = PanelSpec::overlay_on(&spec.panels[0], OverlaySpec::new(true, true));
+        let mut panels: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+        panels.insert(1, overlay);
+        spec.panels = Panels::new(panels);
+        assert!(bring_to_front(&mut spec, 1));
+        assert_eq!(spec.free_draw_order(), [2, 3, 0]);
+        assert_eq!(spec.panels[1].free_frame, None, "an overlay has none");
+        assert!(set_layer_background(&mut spec, 1, "#ff0000"));
+        assert_eq!(spec.panels[0].layer_background, "#ff0000");
+        assert_eq!(spec.panels[1].layer_background, "");
+    }
+
+    #[test]
+    fn stacking_and_background_are_refused_on_the_grid() {
+        let mut spec = PlotSpec::default();
+        assert!(!bring_to_front(&mut spec, 0));
+        assert!(!send_to_back(&mut spec, 0));
+        assert!(!set_layer_background(&mut spec, 0, "#fff"));
+    }
+
+    /// Going back to the grid drops the stacking key and keeps the color.
+    #[test]
+    fn leaving_free_clears_the_stack_and_keeps_the_background() {
+        let mut spec = stacked_three();
+        assert!(bring_to_front(&mut spec, 0));
+        assert!(set_layer_background(&mut spec, 0, "#ff0000"));
+        assert!(set_grid_placement(&mut spec));
+        assert!(spec.panels.iter().all(|p| p.free_frame.is_none()));
+        assert_eq!(spec.panels[0].layer_background, "#ff0000");
+    }
+
     /// In free placement a new cell only gets an unused identity: nothing
     /// shifts, no column width is stored.
     #[test]
@@ -1817,7 +2001,11 @@ mod free_placement_tests {
         let at = insert_cell(&mut spec, 0, CellSide::Right).expect("inserted");
         assert_eq!(at, 2);
         assert_eq!((spec.panels[2].row, spec.panels[2].column), (0, 2));
-        assert_eq!(spec.panels[2].free_frame, None);
+        // The new cell is in front of the others (#398); its frame is the
+        // fallback until the caller gives it one.
+        let new_frame = spec.panels[2].free_frame.expect("a frame");
+        assert_eq!(new_frame.stack, 1);
+        assert_eq!(spec.free_draw_order(), [0, 1, 2]);
         assert_eq!(
             spec.panels.iter().take(2).cloned().collect::<Vec<_>>(),
             before

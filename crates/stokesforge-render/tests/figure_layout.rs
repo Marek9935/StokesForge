@@ -658,6 +658,7 @@ fn free(title: &str, cells: &[(usize, usize, f64, f64, f64, f64)]) -> PlotSpec {
                 top,
                 width,
                 height,
+                stack: 0,
             }),
             ..PanelSpec::at(row, column)
         })
@@ -978,4 +979,132 @@ fn a_panel_title_grows_its_free_cell_upward_and_leaves_the_frame_alone() {
     let plot = draw_at(&spec, titled.size);
     let f = titled.frame_rect(0, 0).unwrap();
     assert_eq!(frames(&plot)[0], ((f.0 as i32, f.1 as i32), (f.2, f.3)));
+}
+
+// ---------------------------------------------------------------------------
+// Stacking of free cells (#398)
+// ---------------------------------------------------------------------------
+
+use stokesforge_render::hit::{component_at, PlotComponent};
+
+/// Two cells whose frames and outer rectangles overlap; cell 1 is in front.
+fn overlapping() -> PlotSpec {
+    free(
+        "",
+        &[
+            (0, 0, 100.0, 50.0, 300.0, 200.0),
+            (0, 1, 250.0, 100.0, 300.0, 200.0),
+        ],
+    )
+}
+
+/// A pixel inside both plot areas.
+fn shared_point(plot: &DrawnPlot) -> (f64, f64) {
+    let (a, b) = (&plot.panels[0], &plot.panels[1]);
+    let x = f64::from(b.pixel_origin.0) + 10.0;
+    let y = f64::from(b.pixel_origin.1) + 10.0;
+    for p in [a, b] {
+        assert!(x < f64::from(p.pixel_origin.0 + p.pixel_size.0 as i32));
+        assert!(x > f64::from(p.pixel_origin.0));
+        assert!(y < f64::from(p.pixel_origin.1 + p.pixel_size.1 as i32));
+        assert!(y > f64::from(p.pixel_origin.1));
+    }
+    (x, y)
+}
+
+/// `free_cells` runs back to front. Witness: spec order kept.
+#[test]
+fn free_cells_are_listed_back_to_front() {
+    let mut spec = overlapping();
+    assert_eq!(
+        layout_of(&spec)
+            .free_cells
+            .iter()
+            .map(|c| c.base)
+            .collect::<Vec<_>>(),
+        [0, 1]
+    );
+    assert!(compose::bring_to_front(&mut spec, 0));
+    assert_eq!(
+        layout_of(&spec)
+            .free_cells
+            .iter()
+            .map(|c| c.base)
+            .collect::<Vec<_>>(),
+        [1, 0]
+    );
+}
+
+/// On the shared area the front cell's plot area is returned. Witness: the
+/// forward scan returns the cell with the lowest index.
+#[test]
+fn a_click_on_the_shared_area_picks_the_front_cell() {
+    let mut spec = overlapping();
+    let (_, plot) = drawn(&spec);
+    let (x, y) = shared_point(&plot);
+    assert_eq!(
+        component_at(&plot, x, y),
+        Some(PlotComponent::PlotArea { panel: 1 })
+    );
+    assert!(compose::bring_to_front(&mut spec, 0));
+    let (_, plot) = drawn(&spec);
+    assert_eq!(plot.panels[0].cell_rank, 1);
+    assert_eq!(plot.panels[1].cell_rank, 0);
+    let (x, y) = shared_point(&plot);
+    assert_eq!(
+        component_at(&plot, x, y),
+        Some(PlotComponent::PlotArea { panel: 0 })
+    );
+}
+
+/// An annotation of the back cell hidden under the front cell is not
+/// returned. Witness: the occlusion filter removed.
+#[test]
+fn an_object_hidden_under_the_front_cell_is_not_picked() {
+    let spec = overlapping();
+    let (_, mut plot) = drawn(&spec);
+    let (x, y) = shared_point(&plot);
+    plot.panels[0]
+        .annotations
+        .push(stokesforge_render::pipeline::DrawnAnnotation {
+            index: 0,
+            center: (x, y),
+            size: (40, 20),
+            rotation: 0.0,
+        });
+    assert_eq!(
+        component_at(&plot, x, y),
+        Some(PlotComponent::PlotArea { panel: 1 })
+    );
+    // Away from the front cell it is picked again.
+    let back = &plot.panels[0];
+    let free_x = f64::from(back.pixel_origin.0) + 5.0;
+    let free_y = f64::from(back.pixel_origin.1) + 5.0;
+    plot.panels[0]
+        .annotations
+        .push(stokesforge_render::pipeline::DrawnAnnotation {
+            index: 1,
+            center: (free_x, free_y),
+            size: (8, 8),
+            rotation: 0.0,
+        });
+    assert_eq!(
+        component_at(&plot, free_x, free_y),
+        Some(PlotComponent::Annotation { panel: 0, index: 1 })
+    );
+}
+
+/// The graph title anchor reads layer 0 whatever the drawing order. Witness:
+/// the anchor read on the first layer drawn.
+#[test]
+fn the_title_anchor_does_not_move_with_the_stacking() {
+    let mut spec = overlapping();
+    spec.title = "T".to_string();
+    spec.title_visible = true;
+    spec.title_anchor = Some(stokesforge_plot::TextAnchor::new(0.5, 0.5));
+    let before = drawn(&spec).1.title.expect("title").center;
+    assert!(compose::send_to_back(&mut spec, 1));
+    assert_eq!(drawn(&spec).1.title.expect("title").center, before);
+    assert!(compose::bring_to_front(&mut spec, 1));
+    assert_eq!(drawn(&spec).1.title.expect("title").center, before);
 }

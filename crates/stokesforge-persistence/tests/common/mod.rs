@@ -317,6 +317,7 @@ pub fn non_trivial_spec(
             top: 33.25,
             width: 301.5,
             height: 222.75,
+            stack: 0,
         }),
         ..PanelSpec::at(0, 0)
     };
@@ -342,7 +343,9 @@ pub fn non_trivial_spec(
             top: 310.5,
             width: 250.0,
             height: 111.0,
+            stack: -3,
         }),
+        layer_background: "#aabbcc80".to_string(),
         ..PanelSpec::at(1, 0)
     };
 

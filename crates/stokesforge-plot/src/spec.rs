@@ -347,6 +347,25 @@ impl PlotSpec {
             .collect()
     }
 
+    /// The base layers of the cells in free placement (#398), back to front:
+    /// ascending [`crate::FreeFrame::stack`], ties by ascending base layer
+    /// index (creation order). A cell with no frame reads stack 0.
+    pub fn free_draw_order(&self) -> Vec<usize> {
+        let mut bases: Vec<usize> = self
+            .cell_bases()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, base)| (index == base).then_some(index))
+            .collect();
+        bases.sort_by_key(|&base| {
+            (
+                self.panels[base].free_frame.map_or(0, |frame| frame.stack),
+                base,
+            )
+        });
+        bases
+    }
+
     /// An empty but valid graph: one panel, no series.
     pub fn empty(title: impl Into<String>) -> Self {
         Self {

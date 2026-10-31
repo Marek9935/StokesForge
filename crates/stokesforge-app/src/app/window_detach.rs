@@ -338,7 +338,8 @@ fn follow_figure_in_viewport(
     let Some(size) = super::graph_window::published_figure_size(ctx, graph) else {
         return;
     };
-    let Some(step) = FigureFollow::observe(follows, graph, size, scale) else {
+    let origin = super::graph_window::published_figure_origin(ctx, graph);
+    let Some(step) = FigureFollow::observe(follows, graph, size, origin, scale) else {
         return;
     };
     let (inner, maximized, monitor) = ctx.input(|input| {

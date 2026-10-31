@@ -449,7 +449,7 @@ fn graph_settings_page(
             tr!("plot-stale-warning"),
             Some(tr!("plot-stale-warning", "hint")),
         );
-        commit |= size_section(form, spec, panel, layout, unit);
+        commit |= size_section(form, spec, panel, layout, unit, env);
         // S-L8 (#405): the figure size has an Auto default ("Grows with the
         // axes"), almost never changed: it lives in the closed Advanced block.
         commit |= form
@@ -524,9 +524,10 @@ fn size_section(
     panel: usize,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
+    env: &mut PickerEnv,
 ) -> bool {
     if spec.layer_placement == LayerPlacement::Free {
-        return free_size_section(form, spec, panel, layout, unit);
+        return free_size_section(form, spec, panel, layout, unit, env);
     }
     // What each frame is drawn with: the stored size, else the legacy one the
     // last painted figure laid out (its `frame_widths` are the frames a legacy
@@ -637,6 +638,7 @@ fn free_size_section(
     panel: usize,
     layout: Option<&FigureLayout>,
     unit: LengthUnit,
+    env: &mut PickerEnv,
 ) -> bool {
     let symbol = unit.symbol();
     form.section(tr!("plot-size"));
@@ -684,6 +686,28 @@ fn free_size_section(
             commit |= set_free_field_in_draft(spec, panel, field, unit.to_points(shown));
         }
     }
+    // Background of the layer (#398): Auto paints only where the layer covers
+    // another one.
+    let stored = spec
+        .cell_bases()
+        .get(panel)
+        .and_then(|&base| spec.panels.get(base))
+        .map(|base| base.layer_background.clone())
+        .unwrap_or_default();
+    let mut background = stored.clone();
+    // The picker edits the string while a gesture is under way and reports the
+    // end of it: the draft follows every change, the commit flag only the end.
+    let ended = form.color(
+        &tr!("plot-size-layer-background"),
+        &mut background,
+        ColorUsage::Background,
+        Some(&tr!("plot-size-layer-background-auto")),
+        env,
+    );
+    if background != stored {
+        stokesforge_core::compose::set_layer_background(spec, panel, &background);
+    }
+    commit |= ended;
     let (total_width, total_height) = (f64::from(layout.size.0), f64::from(layout.size.1));
     form.row(tr!("plot-size-total", unit = symbol), |ui| {
         ui.label(tr!(

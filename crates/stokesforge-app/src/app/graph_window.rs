@@ -578,6 +578,15 @@ pub(super) fn published_figure_layout(ctx: &egui::Context, graph: NodeId) -> Opt
     ctx.data(|data| data.get_temp(figure_layout_id(graph)))
 }
 
+/// The stored position of the top-left corner of the image of `graph`, in page
+/// points, when the figure is in free placement (#398); `None` on the grid.
+/// The window follows its moves so that page coordinates stay still on screen.
+pub(super) fn published_figure_origin(ctx: &egui::Context, graph: NodeId) -> Option<(f64, f64)> {
+    published_figure_layout(ctx, graph)
+        .filter(|layout| layout.placement == stokesforge_plot::LayerPlacement::Free)
+        .map(|layout| layout.free_origin)
+}
+
 /// The figure size `graph` last published, in points.
 pub(super) fn published_figure_size(ctx: &egui::Context, graph: NodeId) -> Option<(u32, u32)> {
     published_figure_layout(ctx, graph).map(|layout| layout.size)
@@ -713,6 +722,8 @@ struct ContextHit {
     pos: Option<egui::Pos2>,
     /// The data point under the click, for "Add Text".
     point: Option<(usize, f64, f64)>,
+    /// The layer under the click (#398): the plot area's, else the active one.
+    layer: Option<usize>,
 }
 
 /// Context menu of the figure (#152): a right-click (without dragging — the
@@ -789,12 +800,21 @@ fn graph_context_menu(
         if let (Some(spec), Some(object)) = (spec.as_ref(), object) {
             select_manager_target(view, Some(object), spec);
         }
+        let layer = match component {
+            Some(PlotComponent::PlotArea { panel }) => view
+                .last_drawn()
+                .and_then(|last| last.panels.get(panel))
+                .map(|drawn| drawn.index),
+            _ => None,
+        }
+        .or_else(|| spec.as_ref().map(|spec| view.active_panel(spec)));
         let hit = ContextHit {
             target,
             object,
             legend_entry,
             pos,
             point: pos.and_then(|pos| view.data_at(pos)),
+            layer,
         };
         ui.memory_mut(|memory| memory.data.insert_temp(hit_id, hit));
     }
@@ -809,6 +829,7 @@ fn graph_context_menu(
                     legend_entry: None,
                     pos: None,
                     point: None,
+                    layer: None,
                 });
         ui.weak(hit.target.label());
         let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
@@ -917,6 +938,18 @@ fn background_menu(
                 }
             }
         });
+    });
+    // Free placement (#398): the layer under the click, in front of or behind
+    // the others. Absent on the grid.
+    let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
+    let stacking = spec
+        .as_ref()
+        .filter(|spec| spec.layer_placement == stokesforge_plot::LayerPlacement::Free)
+        .zip(hit.layer);
+    sections.section(ui, stacking.is_some(), |ui| {
+        if let Some((spec, layer)) = stacking {
+            super::object_manager_ui::layer_stacking_items(ui, graph_id, spec, layer, actions);
+        }
     });
     sections.section(ui, true, |ui| {
         ui.menu_button(tr!("menu-export"), |ui| {
@@ -1071,6 +1104,13 @@ fn annotation_interactions(
             }
             stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
                 actions.push(Action::SetFigureOffsets { graph, left, top });
+            }
+            stokesforge_render_egui::GraphEvent::LayerFramed { panel, frame, .. } => {
+                actions.push(Action::SetFreeFrame {
+                    graph,
+                    panel,
+                    frame,
+                });
             }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {

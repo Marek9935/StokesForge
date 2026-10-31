@@ -63,8 +63,8 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, OverlaySpec, PanelSpec, Panels, PlotSpec, PlotType,
-    SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorUsage, FreeFrame, OverlaySpec, PanelSpec, Panels, PlotSpec,
+    PlotType, SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -802,6 +802,51 @@ pub enum Action {
         left: Option<f64>,
         /// New Top.
         top: Option<f64>,
+    },
+    /// Sets the frame (plot area) of layer `panel` in free placement, in
+    /// points, in one go: what a drag of the layer or of one of its edges
+    /// commits (#398). The four numbers are stored as given (brought into
+    /// bounds); the stacking key stays. One undo step, [`PlotEditKind::MoveLayer`]
+    /// when only the position changes, [`PlotEditKind::ResizeLayer`] when the
+    /// size does; nothing sent on the grid, for a missing layer or when the
+    /// frame is already that one.
+    SetFreeFrame {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer of the cell.
+        panel: usize,
+        /// The new frame; its `stack` is ignored.
+        frame: FreeFrame,
+    },
+    /// Puts the cell of layer `panel` in front of the others in free placement
+    /// (#398); an overlay layer acts on its base. Layer numbers are kept. One
+    /// undo step ([`PlotEditKind::BringLayerToFront`]); nothing sent on the
+    /// grid or when the cell is already in front.
+    BringLayerToFront {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer under the click.
+        panel: usize,
+    },
+    /// Puts the cell of layer `panel` behind the others (#398); see
+    /// [`Action::BringLayerToFront`] ([`PlotEditKind::SendLayerToBack`]).
+    SendLayerToBack {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer under the click.
+        panel: usize,
+    },
+    /// Sets the background of the cell of layer `panel` in free placement
+    /// (#398): empty = Auto, else a color. One undo step
+    /// ([`PlotEditKind::LayerBackground`]); nothing sent on the grid, for an
+    /// unreadable color or when it is already that one.
+    SetLayerBackground {
+        /// Target graph.
+        graph: NodeId,
+        /// Layer of the cell.
+        panel: usize,
+        /// `#RRGGBB[AA]` or empty for Auto.
+        color: String,
     },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
@@ -5155,6 +5200,11 @@ impl AppState {
             Action::SetFigureOffsets { graph, left, top } => {
                 self.set_figure_offsets(graph, left, top)
             }
+            Action::SetFreeFrame {
+                graph,
+                panel,
+                frame,
+            } => self.set_free_frame(graph, panel, frame),
             Action::SetLengthUnit(unit) => {
                 if let Err(error) = self.object_manager_preferences.save_length_unit(unit) {
                     self.fail(tr!(
@@ -5441,6 +5491,24 @@ impl AppState {
                     panel.set_frame_closed(closed);
                     true
                 })
+            }),
+            Action::BringLayerToFront { graph, panel } => {
+                self.edit_plot_object(graph, PlotEditKind::BringLayerToFront, |spec| {
+                    stokesforge_core::compose::bring_to_front(spec, panel)
+                })
+            }
+            Action::SendLayerToBack { graph, panel } => {
+                self.edit_plot_object(graph, PlotEditKind::SendLayerToBack, |spec| {
+                    stokesforge_core::compose::send_to_back(spec, panel)
+                })
+            }
+            Action::SetLayerBackground {
+                graph,
+                panel,
+                color,
+            } => self.edit_plot_object(graph, PlotEditKind::LayerBackground, |spec| {
+                (color.is_empty() || stokesforge_plot::parse_hex(&color).is_some())
+                    && stokesforge_core::compose::set_layer_background(spec, panel, &color)
             }),
             Action::PlaceSeries {
                 graph,
@@ -7381,7 +7449,9 @@ impl AppState {
     fn note_placement_step(&mut self, label: Option<&HistoryLabel>) {
         self.placement_step = matches!(
             label,
-            Some(HistoryLabel::EditPlotSpec(PlotEditKind::PlaceFigure))
+            Some(HistoryLabel::EditPlotSpec(
+                PlotEditKind::PlaceFigure | PlotEditKind::MoveLayer | PlotEditKind::ResizeLayer
+            ))
         )
         .then_some(self.snapshot.revision);
     }
@@ -10209,7 +10279,9 @@ impl AppState {
         };
         if let Some(frame) = beside {
             if let Some(target) = spec.panels.get_mut(new_cell) {
-                target.free_frame = Some(frame);
+                // The stacking key the cell got (in front) is kept.
+                let stack = target.free_frame.map_or(0, |f| f.stack);
+                target.free_frame = Some(FreeFrame { stack, ..frame });
             }
         }
         if !columns.is_empty() {
@@ -10252,6 +10324,42 @@ impl AppState {
             spec,
             kind: PlotEditKind::ResizeCell,
         });
+    }
+
+    /// [`Action::SetFreeFrame`]: the four numbers applied to one spec and
+    /// committed as one step, a move or a resize.
+    fn set_free_frame(&mut self, graph: NodeId, panel: usize, frame: FreeFrame) {
+        use stokesforge_core::compose::{set_free_frame, FreeField};
+        let Some(mut spec) = self.plot_spec(graph) else {
+            return;
+        };
+        let Some(&base) = spec.cell_bases().get(panel) else {
+            return;
+        };
+        let before = spec.panels[base].sanitized_free_frame();
+        for (field, value) in [
+            (FreeField::Left, frame.left),
+            (FreeField::Top, frame.top),
+            (FreeField::Width, frame.width),
+            (FreeField::Height, frame.height),
+        ] {
+            if !set_free_frame(&mut spec, panel, field, value) {
+                return;
+            }
+        }
+        if self
+            .plot_spec(graph)
+            .is_some_and(|previous| previous == spec)
+        {
+            return;
+        }
+        let resized = spec.panels[base].sanitized_free_frame();
+        let kind = if (resized.width, resized.height) == (before.width, before.height) {
+            PlotEditKind::MoveLayer
+        } else {
+            PlotEditKind::ResizeLayer
+        };
+        self.execute(Command::EditPlotSpec { graph, spec, kind });
     }
 
     /// [`Action::SetFigureOffsets`]: Left and Top applied to one spec and

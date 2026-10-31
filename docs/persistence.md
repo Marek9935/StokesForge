@@ -271,6 +271,17 @@ graph comes back as a grid of 480 x 360 pt shared equally, or as the stored
 `frame_widths` say. Witness `tests/witnesses/v1/project.stf` regenerated with a
 free graph; `schema.rs` keeps the old-record test.
 
+### Stacking and layer background (#398, batch 2a)
+
+`FreeFrameRecord` gained `stack` (`i32`, the stacking key) and `PanelSpecRecord`
+gained `layer_background` (string, empty = Auto), both `#[serde(default)]`: a
+file without them reads stack 0 (creation order) and Auto, so **`FORMAT_VERSION`
+did not move**. A `layer_background` that is not a `#RRGGBB[AA]` color reads
+Auto (invariant 10). An older version that re-saves the file drops both without
+a message: the layers come back in creation order with no background. Witness
+`tests/witnesses/v1/project.stf` regenerated (a layer with `stack = -3` and a
+background); `schema.rs` keeps the old-record test.
+
 ## Formulas that read another sheet: additive field (#403)
 
 The `Column` record gained `formula_remote` (`Vec<RemoteRefRecord>`, each
