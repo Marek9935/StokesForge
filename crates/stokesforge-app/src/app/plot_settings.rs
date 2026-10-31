@@ -604,13 +604,7 @@ fn size_section(
         || (frames.0.iter().sum(), frames.1.iter().sum()),
         |layout| layout.size_with_frames(&frames.0, &frames.1),
     );
-    commit |= total_row(
-        form,
-        spec,
-        size_lock,
-        (total_width.round(), total_height.round()),
-        unit,
-    );
+    commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-note"));
     commit
 }
@@ -677,24 +671,45 @@ fn type_total(
     unit: LengthUnit,
 ) -> bool {
     let before = spec.clone();
-    let Some(fit) = set_total_in_draft(spec, axis, target, size_lock.map(|lock| lock.ratio)) else {
+    let ratio = size_lock.map(|lock| lock.ratio);
+    let Some(fit) = set_total_in_draft(spec, axis, target, ratio) else {
         return false;
     };
     if let Some(lock) = size_lock.as_mut() {
         lock.adopt_next();
     }
     let typed = axis as usize;
+    // A value brought back is brought back to the end **as the field shows
+    // it** (the minimum rounded up, the maximum rounded down, in the unit's
+    // decimals): the field then reads what the bubble says, and typing what it
+    // shows is accepted.
+    let shown_end = |range: (f64, f64), raised: bool| {
+        unit.to_points(if raised {
+            round_up_in_unit(range.0, unit)
+        } else {
+            round_down_in_unit(range.1, unit)
+        })
+    };
     flag_total(ui, typed, &fit, target, unit);
+    if fit.raised {
+        let raised = target < fit.range.0;
+        set_total_in_draft(spec, axis, shown_end(fit.range, raised), ratio);
+    }
     if let Some(((low, high), true)) = fit.other {
-        // The other field was moved by the ratio: it is brought back when the
-        // size it ended on is one of the ends of its range.
+        let other_axis = match axis {
+            SizeAxis::Width => SizeAxis::Height,
+            SizeAxis::Height => SizeAxis::Width,
+        };
         let applied =
-            stokesforge_app_state::frame_sizes::figure_layout(spec).map(|layout| match axis {
-                SizeAxis::Width => f64::from(layout.size.1),
-                SizeAxis::Height => f64::from(layout.size.0),
-            });
+            stokesforge_app_state::frame_sizes::figure_extent(spec).map(
+                |extent| match other_axis {
+                    SizeAxis::Width => extent.0,
+                    SizeAxis::Height => extent.1,
+                },
+            );
         let below = applied.is_some_and(|size| (size - low).abs() <= (size - high).abs());
         flag_total_bound(ui, 1 - typed, below, (low, high), unit);
+        set_total_in_draft(spec, other_axis, shown_end((low, high), below), None);
     }
     *spec != before
 }
@@ -858,7 +873,10 @@ fn free_size_section(
         stokesforge_core::compose::set_layer_background(spec, panel, &background);
     }
     commit |= ended;
-    let (total_width, total_height) = (f64::from(layout.size.0), f64::from(layout.size.1));
+    // The extent as frames and bands add up, not the whole-point size: a total
+    // typed and reached reads back as typed (#407).
+    let (total_width, total_height) = stokesforge_render::pipeline::free_extent(spec, layout)
+        .unwrap_or((f64::from(layout.size.0), f64::from(layout.size.1)));
     commit |= total_row(form, spec, size_lock, (total_width, total_height), unit);
     form.note(tr!("plot-size-free-note"));
     commit
@@ -2833,8 +2851,14 @@ mod tests {
         );
         type_into(&context, &mut harness, &total_text(480.0), "0.5");
         let raised = image_size(&harness.model()).0;
-        assert!((raised - minimum).abs() <= 1.0, "{raised} vs {minimum}");
-        let hovered = hover_label(&context, &mut harness.state, &total_text(raised));
+        assert!((raised - minimum).abs() <= 1.5, "{raised} vs {minimum}");
+        // The field reads the minimum the bubble names, not the nearer rounding.
+        let painted = paint_window(&context, &mut harness.state, Vec::new());
+        assert!(
+            is_painted(&painted, &shown_minimum),
+            "field shows {shown_minimum}: {painted:?}"
+        );
+        let hovered = hover_label(&context, &mut harness.state, &shown_minimum);
         assert!(
             is_painted(&hovered, &reason),
             "{reason:?} not in {hovered:?}"
@@ -2844,8 +2868,34 @@ mod tests {
         let mut again = sized_harness();
         again.open(PlotSettingsTab::Graph, None);
         type_into(&context, &mut again, &total_text(480.0), &shown_minimum);
-        let hovered = hover_label(&context, &mut again.state, &total_text(minimum));
+        let hovered = hover_label(&context, &mut again.state, &shown_minimum);
         assert!(!is_painted(&hovered, &reason), "typed back: no bubble");
+    }
+
+    /// #407: a size typed and reached reads back as typed (the field shows the
+    /// extent frames and bands add up to, not the whole-point size), with the
+    /// lock open or closed and in a free graph. Witness: showing the rounded
+    /// `size` (10 cm reads 9.98).
+    #[test]
+    fn a_total_typed_and_reached_reads_back_as_typed() {
+        let context = test_support::context();
+        for locked in [false, true] {
+            let mut harness = sized_harness();
+            harness.open(PlotSettingsTab::Graph, None);
+            if locked {
+                click_lock(&context, &mut harness);
+            }
+            type_into(&context, &mut harness, &total_text(480.0), "10");
+            let painted = paint_window(&context, &mut harness.state, Vec::new());
+            assert!(is_painted(&painted, "10"), "locked={locked}: {painted:?}");
+        }
+        let mut free = harness(|spec| two_layers(spec, true));
+        free.open(PlotSettingsTab::Graph, None);
+        let (width, _) = image_size(&free.model());
+        type_into(&context, &mut free, &total_text(width), "25");
+        let painted = paint_window(&context, &mut free.state, Vec::new());
+        assert!(is_painted(&painted, "25"), "free: {painted:?}");
+        free.state.close_plot_settings();
     }
 
     /// #407: the lock is window state: closing it changes no spec, and a
@@ -2937,7 +2987,12 @@ mod tests {
             (h1 / w1 - 0.75).abs() > 0.02,
             "the raise must bend the ratio for this test to prove anything: {w1} x {h1}"
         );
-        type_into(&context, &mut harness, &total_text(w1), "20");
+        let shown = total_text(
+            stokesforge_app_state::frame_sizes::figure_extent(&harness.model())
+                .unwrap()
+                .0,
+        );
+        type_into(&context, &mut harness, &shown, "20");
         let (width, height) = image_size(&harness.model());
         assert!((width - 566.929).abs() <= 1.0);
         assert!((height - width * 0.75).abs() <= 1.5, "{width} x {height}");

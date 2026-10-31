@@ -171,12 +171,15 @@ pub fn set_total_in_draft(
     let other = match lock_ratio {
         None => None,
         Some(ratio) => {
-            let size = figure_layout(&candidate)?.size;
+            let extent = figure_extent(&candidate)?;
             let (other_axis, other_target) = match axis {
-                SizeAxis::Width => (SizeAxis::Height, f64::from(size.0) * ratio),
-                SizeAxis::Height => (SizeAxis::Width, f64::from(size.1) / ratio),
+                SizeAxis::Width => (SizeAxis::Height, extent.0 * ratio),
+                SizeAxis::Height => (SizeAxis::Width, extent.1 / ratio),
             };
             let second = fit_and_apply(&mut candidate, other_axis, other_target)?;
+            // Moving the other axis may change the bands of this one (tick
+            // labels, title boxes): reach the applied size again.
+            fit_and_apply(&mut candidate, axis, first_applied(&first, target_pt))?;
             Some((second.range, second.raised))
         }
     };
@@ -186,6 +189,23 @@ pub fn set_total_in_draft(
         raised: first.raised,
         other,
     })
+}
+
+/// The size the first fit gave the typed axis: `target`, or the end of the range
+/// it was brought to.
+fn first_applied(first: &stokesforge_render::pipeline::FittedFigure, target: f64) -> f64 {
+    target.clamp(first.range.0, first.range.1)
+}
+
+/// The size of the image of `spec` as frames and bands add up, in points
+/// before the whole-point rounding of the layout: `(width, height)`.
+pub fn figure_extent(spec: &PlotSpec) -> Option<(f64, f64)> {
+    let layout = figure_layout(spec)?;
+    if layout.placement == LayerPlacement::Free {
+        stokesforge_render::pipeline::free_extent(spec, &layout)
+    } else {
+        Some(layout.size_with_frames(&layout.frame_widths, &layout.frame_heights))
+    }
 }
 
 /// Fits `spec` along `axis` and writes the frames; what the fit said.

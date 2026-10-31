@@ -1880,22 +1880,14 @@ pub fn fit_figure_size<DB: DrawingBackend>(
     }))
 }
 
-/// [`fit_figure_size`] for a free graph: the scale is found on the bounding
-/// box of the outer rectangles, which is piecewise linear in it and not
-/// necessarily monotone, so the size is sampled and the scale nearest to the
-/// target is refined by bisection.
-fn fit_free_axis(
+/// The span of every cell of a free layout along `axis`: `(base layer, its
+/// frame, span)`.
+fn free_spans(
     spec: &PlotSpec,
     layout: &FigureLayout,
     axis: SizeAxis,
-    target_pt: f64,
-) -> Option<FittedFigure> {
-    struct Cell {
-        base: usize,
-        frame: FreeFrame,
-        span: Span,
-    }
-    let cells: Vec<Cell> = layout
+) -> Option<Vec<(usize, FreeFrame, Span)>> {
+    layout
         .free_cells
         .iter()
         .map(|cell| {
@@ -1921,13 +1913,55 @@ fn fit_free_axis(
                     }
                 }
             };
-            Some(Cell {
-                base: cell.base,
-                frame,
-                span,
-            })
+            Some((cell.base, frame, span))
         })
-        .collect::<Option<_>>()?;
+        .collect()
+}
+
+/// The size of the image of a free layout as the frames and bands add up, in
+/// points **before** the whole-point rounding of [`FigureLayout::size`]:
+/// `(width, height)` (#407). What a total field shows, so that a size typed and
+/// reached reads back as typed.
+pub fn free_extent(spec: &PlotSpec, layout: &FigureLayout) -> Option<(f64, f64)> {
+    let along = |axis| -> Option<f64> {
+        let spans: Vec<Span> = free_spans(spec, layout, axis)?
+            .into_iter()
+            .map(|(_, _, span)| span)
+            .collect();
+        let origin = spans
+            .iter()
+            .map(|span| span.pos)
+            .fold(f64::INFINITY, f64::min);
+        let extra = match axis {
+            SizeAxis::Width => 0.0,
+            SizeAxis::Height => f64::from(layout.title_band),
+        };
+        origin
+            .is_finite()
+            .then(|| scaled_extent(&spans, origin, 1.0) + extra)
+    };
+    Some((along(SizeAxis::Width)?, along(SizeAxis::Height)?))
+}
+
+/// [`fit_figure_size`] for a free graph: the scale is found on the bounding
+/// box of the outer rectangles, which is piecewise linear in it and not
+/// necessarily monotone, so the size is sampled and the scale nearest to the
+/// target is refined by bisection.
+fn fit_free_axis(
+    spec: &PlotSpec,
+    layout: &FigureLayout,
+    axis: SizeAxis,
+    target_pt: f64,
+) -> Option<FittedFigure> {
+    struct Cell {
+        base: usize,
+        frame: FreeFrame,
+        span: Span,
+    }
+    let cells: Vec<Cell> = free_spans(spec, layout, axis)?
+        .into_iter()
+        .map(|(base, frame, span)| Cell { base, frame, span })
+        .collect();
     let spans: Vec<Span> = cells.iter().map(|cell| cell.span).collect();
     let lens: Vec<f64> = spans.iter().map(|span| span.len).collect();
     let (mut low, mut high) = scale_bounds(&lens)?;
