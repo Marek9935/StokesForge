@@ -1352,6 +1352,8 @@ history-plot-place-figure = Position Plot Area
 history-plot-bring-layer-to-front = Bring Layer to Front
 history-plot-send-layer-to-back = Send Layer to Back
 history-plot-layer-background = Change Layer Background
+history-plot-move-layer = Move Layer
+history-plot-resize-layer = Resize Layer
 
 # Fixed panels and detached windows (#100)
 panel-expand = Expand the panel

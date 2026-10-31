@@ -286,9 +286,13 @@ pub enum PlotEditKind {
     SendLayerToBack,
     /// Background of a layer in free placement (#398).
     LayerBackground,
+    /// A layer of a free graph moved with the mouse (#398).
+    MoveLayer,
+    /// A layer of a free graph resized by one of its edges (#398).
+    ResizeLayer,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -308,6 +312,8 @@ impl PlotEditKind {
         Self::BringLayerToFront,
         Self::SendLayerToBack,
         Self::LayerBackground,
+        Self::MoveLayer,
+        Self::ResizeLayer,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -332,6 +338,8 @@ impl std::fmt::Display for PlotEditKind {
             Self::BringLayerToFront => "Bring Layer to Front",
             Self::SendLayerToBack => "Send Layer to Back",
             Self::LayerBackground => "Change Layer Background",
+            Self::MoveLayer => "Move Layer",
+            Self::ResizeLayer => "Resize Layer",
         })
     }
 }

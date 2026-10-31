@@ -755,6 +755,11 @@ The two points are projected **without** a framing membership test
 (closed outline), fill by Sutherland-Hodgman (`clip_polygon`), arrowhead
 omitted if it is outside the frame. The ellipse is a convex polygon whose number of sides follows the radius in pixels (`ellipse_segments`: chord less than 0.1 px from the arc, #91).
 The outline (rectangle, ellipse, line, arrow shaft) is plotted **at sub-pixel precision**: Plotters accepts only integer coordinates, which aliased the circle whatever the number of sides. Convention read by both backends (`stokesforge_render::subpixel`): fixed points ×16 and a flag in the thickness; the screen decodes in `draw_path`, the export rewrites the marked `<polyline>`s (`stokesforge-render-svg::subpixel::resolve`, called by each export entry point). `SubpixelPath` goes through a `CoordMapper` without `Rect::truncate`, which would crush the fixed points. A backend that ignores the convention plots these paths sixteen times too big.
+Free placement gestures (#398): the dashed magnet guides of a layer being moved
+or resized are painted by `GraphView::paint_overlay` from `free_drag.guides`, over
+the figure, never in the cached `Vec<Shape>` (not exported, like the zoom
+rectangle); the moved frame itself goes through `FramePreview.free` and
+`preview_generation`, nothing in the cache key (invariant 6).
 `DrawnPanel::shapes` (`DrawnShape`, unclipped pixels) serves `hit`:
 `PlotComponent::Shape`, designated **on its stroke** (or inside it if filled)
 in the plot area, under the free texts. On the screen side, `GraphView`

@@ -1351,6 +1351,8 @@ history-plot-place-figure = Positionner la zone de tracé
 history-plot-bring-layer-to-front = Mettre le calque au premier plan
 history-plot-send-layer-to-back = Mettre le calque à l'arrière-plan
 history-plot-layer-background = Modifier le fond du calque
+history-plot-move-layer = Déplacer le calque
+history-plot-resize-layer = Redimensionner le calque
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

@@ -578,6 +578,15 @@ pub(super) fn published_figure_layout(ctx: &egui::Context, graph: NodeId) -> Opt
     ctx.data(|data| data.get_temp(figure_layout_id(graph)))
 }
 
+/// The stored position of the top-left corner of the image of `graph`, in page
+/// points, when the figure is in free placement (#398); `None` on the grid.
+/// The window follows its moves so that page coordinates stay still on screen.
+pub(super) fn published_figure_origin(ctx: &egui::Context, graph: NodeId) -> Option<(f64, f64)> {
+    published_figure_layout(ctx, graph)
+        .filter(|layout| layout.placement == stokesforge_plot::LayerPlacement::Free)
+        .map(|layout| layout.free_origin)
+}
+
 /// The figure size `graph` last published, in points.
 pub(super) fn published_figure_size(ctx: &egui::Context, graph: NodeId) -> Option<(u32, u32)> {
     published_figure_layout(ctx, graph).map(|layout| layout.size)
@@ -1095,6 +1104,13 @@ fn annotation_interactions(
             }
             stokesforge_render_egui::GraphEvent::FramePlaced { left, top } => {
                 actions.push(Action::SetFigureOffsets { graph, left, top });
+            }
+            stokesforge_render_egui::GraphEvent::LayerFramed { panel, frame, .. } => {
+                actions.push(Action::SetFreeFrame {
+                    graph,
+                    panel,
+                    frame,
+                });
             }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {

@@ -92,7 +92,7 @@ use plotters::drawing::IntoDrawingArea;
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::resolve::{resolve_spec, ResolvedPlot};
 use stokesforge_core::{NodeId, Tree};
-use stokesforge_plot::{PlotSpec, SeriesAxis};
+use stokesforge_plot::{FreeFrame, PlotSpec, SeriesAxis};
 use stokesforge_render::formula::FormulaCache;
 use stokesforge_render::interact;
 use stokesforge_render::pipeline::{self};
@@ -194,6 +194,20 @@ pub enum GraphEvent {
         /// New Top, for the top edge.
         top: Option<f64>,
     },
+    /// A layer of a free figure was moved or resized with the mouse, then the
+    /// button was released (#398): its new frame, to commit as **one** change
+    /// of the model. Nothing is signalled during the gesture, nor for a click
+    /// without movement. The preview stays displayed until the model changes
+    /// ([`GraphView::hold_preview`]).
+    LayerFramed {
+        /// Base layer of the cell in `PlotSpec::panels`.
+        panel: usize,
+        /// The new frame in stored page coordinates, in points (the stacking
+        /// key is the one it had).
+        frame: FreeFrame,
+        /// The size changed (an edge was pulled), else the layer only moved.
+        resized: bool,
+    },
     /// Double click on a title: edit it in place (issue #53).
     EditText(TextTarget),
     /// Double click on a legend entry: rename the series of layer `panel`
@@ -287,10 +301,19 @@ struct FramePreview {
     left: Option<f64>,
     top: Option<f64>,
     base: (Vec<f64>, Vec<f64>),
+    /// The frame a free layer is being moved or resized to (#398): the base
+    /// layer of its cell and the frame.
+    free: Option<(usize, FreeFrame)>,
 }
 
 impl FramePreview {
     fn apply(&self, spec: &mut PlotSpec) {
+        if let Some((base, frame)) = self.free {
+            if let Some(panel) = spec.panels.get_mut(base) {
+                panel.free_frame = Some(frame);
+            }
+            return;
+        }
         let bounds = |size: f64| {
             size.clamp(
                 stokesforge_plot::MIN_FRAME_SIZE,
@@ -367,6 +390,32 @@ struct FrameDrag {
     scale: f32,
     /// The frames the figure was drawn with at the start.
     base: (Vec<f64>, Vec<f64>),
+}
+
+/// Which layer gesture a call of [`GraphView::handle_free_drag`] may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FreeStart {
+    /// A resize from an edge or a corner.
+    Edges,
+    /// A move from the plot area.
+    Move,
+}
+
+/// A move or resize of a layer of a free figure in progress (#398).
+#[derive(Debug, Clone)]
+struct FreeDrag {
+    /// What the press grabbed.
+    handle: stokesforge_render::FreeHandle,
+    /// The frame at the start of the gesture.
+    start: FreeFrame,
+    /// The frames of the other layers (the magnets' targets).
+    others: Vec<FreeFrame>,
+    /// Press point in screen coordinates and the display scale at that moment
+    /// (frozen, as for [`FrameDrag`]: the figure grows under the pointer).
+    press: Pos2,
+    scale: f32,
+    /// The dashed guides of the magnets, painted over the figure.
+    guides: Vec<stokesforge_render::Guide>,
 }
 
 /// A title or legend drag in progress (issue #53).
@@ -675,6 +724,8 @@ pub struct GraphView {
     /// Preview of the frame sizes of a cell handle being pulled (#394).
     frame_preview: Option<FramePreview>,
     frame_drag: Option<FrameDrag>,
+    /// Move or resize of a layer of a free figure in progress (#398).
+    free_drag: Option<FreeDrag>,
     /// Selected free text (click), target of Delete.
     selected_annotation: Option<AnnotationRef>,
     /// The selected title, axis title or legend (issue #77).
@@ -798,6 +849,7 @@ impl GraphView {
             text_drag: None,
             frame_preview: None,
             frame_drag: None,
+            free_drag: None,
             selected_annotation: None,
             selected_text: None,
             shape_preview: None,
@@ -853,6 +905,7 @@ impl GraphView {
         self.text_drag = None;
         self.text_preview = None;
         self.frame_drag = None;
+        self.free_drag = None;
         self.frame_preview = None;
         self.shape_drag = None;
         self.shape_preview = None;
@@ -2033,9 +2086,15 @@ impl GraphView {
         if self.tool == GraphTool::Pointer
             && !pan
             && (self.handle_frame_drag(response, context)
+                // A layer edge beats every object; a gesture in progress is
+                // always continued here, before another handler can pick it up
+                // from the layer sliding under the pointer (#398).
+                || self.handle_free_drag(response, context, spec, FreeStart::Edges)
                 || self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
-                || self.handle_text_drag(response, spec))
+                || self.handle_text_drag(response, spec)
+                // Nothing else claimed the drag: the plot area moves its layer.
+                || self.handle_free_drag(response, context, spec, FreeStart::Move))
         {
             return;
         }
@@ -2156,6 +2215,10 @@ impl GraphView {
     /// The resize cursor over a cell handle or a figure edge, and during its
     /// drag (#394, #405).
     fn frame_handle_cursor(&self, response: &Response, context: &egui::Context) {
+        if let Some(icon) = self.free_cursor(response) {
+            context.set_cursor_icon(icon);
+            return;
+        }
         let (mut horizontal, mut vertical) = (false, false);
         match &self.frame_drag {
             Some(drag) => {
@@ -2346,6 +2409,163 @@ impl GraphView {
             left: drag.left.map(|start| offset(start, delta.x, min_left)),
             top: drag.top.map(|start| offset(start, delta.y, min_top)),
             base: drag.base,
+            free: None,
+        }));
+        true
+    }
+
+    /// The dashed guides of the magnets painted over the figure while a layer
+    /// is moved or resized (#398); empty otherwise.
+    pub fn magnet_guides(&self) -> &[stokesforge_render::Guide] {
+        self.free_drag
+            .as_ref()
+            .map_or(&[], |drag| drag.guides.as_slice())
+    }
+
+    /// The cursor of the layer gestures of a free figure (#398): the move
+    /// cursor while a layer moves, a resize cursor while an edge is pulled and
+    /// over an edge or a corner. `None` elsewhere.
+    fn free_cursor(&self, response: &Response) -> Option<egui::CursorIcon> {
+        let handle = match &self.free_drag {
+            Some(drag) => drag.handle,
+            None if response.hovered() && self.layout_is_free() => {
+                let pos = self.figure_position(response.hover_pos()?)?;
+                self.free_handle_at(pos)
+                    .filter(|handle| !handle.is_move())?
+            }
+            None => return None,
+        };
+        Some(
+            match (handle.left || handle.right, handle.top || handle.bottom) {
+                (false, false) => egui::CursorIcon::Move,
+                (true, false) => egui::CursorIcon::ResizeHorizontal,
+                (false, true) => egui::CursorIcon::ResizeVertical,
+                (true, true) if handle.left == handle.top => egui::CursorIcon::ResizeNwSe,
+                (true, true) => egui::CursorIcon::ResizeNeSw,
+            },
+        )
+    }
+
+    /// The handle of a layer of the free figure under the figure position
+    /// `pos` ([`stokesforge_render::free_handle_at`]), the edge strip being
+    /// the same width on screen whatever the enlargement.
+    fn free_handle_at(&self, pos: Pos2) -> Option<stokesforge_render::FreeHandle> {
+        let (_, layout) = self.figure_memo.as_ref()?;
+        let tolerance = stokesforge_render::CELL_EDGE_TOLERANCE_POINTS
+            / f64::from(self.display_scale().filter(|scale| *scale > 0.0)?);
+        stokesforge_render::free_handle_at(layout, f64::from(pos.x), f64::from(pos.y), tolerance)
+    }
+
+    /// Moving or resizing a layer of a free figure (#398): a primary drag
+    /// **starting on an edge of a layer** (`FreeStart::Edges`) resizes its
+    /// frame, one starting in its plot area (`FreeStart::Move`, tried after the
+    /// handlers of texts, shapes, titles and legends) moves it. The preview
+    /// follows the pointer, with the magnets (Shift held: none); at release a
+    /// single [`GraphEvent::LayerFramed`]. A gesture in progress is continued
+    /// by the first call whatever its kind. Returns `true` if the gesture is a
+    /// layer gesture.
+    fn handle_free_drag(
+        &mut self,
+        response: &Response,
+        context: &egui::Context,
+        spec: &PlotSpec,
+        start: FreeStart,
+    ) -> bool {
+        if response.drag_stopped_by(PointerButton::Primary) {
+            let Some(drag) = self.free_drag.take() else {
+                return false;
+            };
+            match self.frame_preview.clone().and_then(|preview| preview.free) {
+                Some((panel, frame))
+                    if (frame.left - drag.start.left).abs() >= 0.005
+                        || (frame.top - drag.start.top).abs() >= 0.005
+                        || (frame.width - drag.start.width).abs() >= 0.005
+                        || (frame.height - drag.start.height).abs() >= 0.005 =>
+                {
+                    self.events.push(GraphEvent::LayerFramed {
+                        panel,
+                        frame,
+                        resized: !drag.handle.is_move(),
+                    });
+                    self.hold_preview();
+                }
+                _ => self.set_frame_preview(None),
+            }
+            return true;
+        }
+        if !response.dragged_by(PointerButton::Primary) || !self.layout_is_free() {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return self.free_drag.is_some();
+        };
+        if self.free_drag.is_none() {
+            let origin = context
+                .input(|input| input.pointer.press_origin())
+                .unwrap_or(pos - response.drag_delta());
+            let Some(handle) = self
+                .figure_position(origin)
+                .and_then(|figure| self.free_handle_at(figure))
+            else {
+                return false;
+            };
+            let wanted = match start {
+                FreeStart::Edges => !handle.is_move(),
+                // The axis line lies in the frame: a drag from it does nothing.
+                FreeStart::Move => {
+                    handle.is_move()
+                        && matches!(
+                            self.component_at(origin),
+                            Some(PlotComponent::PlotArea { .. })
+                        )
+                }
+            };
+            let Some(scale) = self.display_scale().filter(|scale| *scale > 0.0 && wanted) else {
+                return false;
+            };
+            let Some(first) = spec.panels.get(handle.base) else {
+                return false;
+            };
+            let others = spec
+                .free_draw_order()
+                .into_iter()
+                .filter(|base| *base != handle.base)
+                .filter_map(|base| spec.panels.get(base))
+                .map(|panel| panel.sanitized_free_frame())
+                .collect();
+            self.free_drag = Some(FreeDrag {
+                handle,
+                start: first.sanitized_free_frame(),
+                others,
+                press: origin,
+                scale,
+                guides: Vec::new(),
+            });
+        }
+        let Some(drag) = self.free_drag.clone() else {
+            return false;
+        };
+        let scale = f64::from(drag.scale);
+        let delta = (pos - drag.press) / drag.scale;
+        let shift = context.input(|input| input.modifiers.shift);
+        let result = stokesforge_render::magnetized(
+            drag.start,
+            &drag.handle,
+            (f64::from(delta.x), f64::from(delta.y)),
+            &drag.others,
+            stokesforge_render::MAGNET_THRESHOLD_POINTS / scale,
+            !shift,
+        );
+        if let Some(active) = self.free_drag.as_mut() {
+            active.guides = result.guides;
+        }
+        self.set_frame_preview(Some(FramePreview {
+            column: None,
+            row: None,
+            left: None,
+            top: None,
+            base: (Vec::new(), Vec::new()),
+            free: Some((drag.handle.base, result.frame)),
         }));
         true
     }
@@ -2584,6 +2804,37 @@ impl GraphView {
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
                 StrokeKind::Outside,
             );
+        }
+
+        // The magnets' guides of a layer being moved or resized (#398): dashed
+        // lines over the figure, screen only like the zoom rectangle.
+        if let (Some(drag), Some((_, layout)), Some(display), Some(scale)) = (
+            &self.free_drag,
+            &self.figure_memo,
+            self.display_rect,
+            self.display_scale(),
+        ) {
+            let (origin_x, origin_y) = layout.free_origin;
+            let band = f64::from(layout.title_band);
+            let to_screen = |x: f64, y: f64| {
+                display.min
+                    + egui::vec2((x - origin_x) as f32, (y - origin_y + band) as f32) * scale
+            };
+            let stroke = Stroke::new(1.0, Color32::from_rgb(232, 62, 140));
+            for guide in &drag.guides {
+                let ends = if guide.vertical {
+                    [
+                        to_screen(guide.at, guide.from),
+                        to_screen(guide.at, guide.to),
+                    ]
+                } else {
+                    [
+                        to_screen(guide.from, guide.at),
+                        to_screen(guide.to, guide.at),
+                    ]
+                };
+                painter.extend(egui::Shape::dashed_line(&ends, stroke, 5.0, 3.0));
+            }
         }
 
         // The selected free text: its rotated rectangle (issue #35).

@@ -40,3 +40,5 @@ Hit-testing (`hit.rs`, #385): an axis is its tick band **and** its line (a strip
 ## Tests
 
 The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`measurement.rs`, `agreement.rs`, `feathering.rs`, `no_ui_dependency.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/shapes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text witness stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).
+
+- Free layer gestures (#398): a gesture in progress must be continued by the first handler of the chain in `handle_navigation` (`handle_free_drag(.., FreeStart::Edges)`), not by the last one: the layer slides under the pointer, and a text or legend handler that runs earlier would pick the drag up mid-gesture. Hit-testing is front to back on the outer rectangles, with the strip outside an outer boundary tried only afterwards, so touching layers each keep their side of the shared boundary. A press must be read with the display scale of the last drawn frame: test at another scale after a quiet frame at that scale.

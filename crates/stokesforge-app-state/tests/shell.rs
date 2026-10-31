@@ -14469,7 +14469,7 @@ fn go_free(state: &mut AppState, graph: NodeId) {
 }
 
 /// The outer rectangle of each cell of a free graph, `(x0, y0, x1, y1)` in
-/// figure pixels, in the order of `free_cells`, and the size of the figure.
+/// figure pixels, in the order of `free_cells` (back to front), and the size of the figure.
 type Rect = (u32, u32, u32, u32);
 
 fn free_outers(spec: &stokesforge_plot::PlotSpec) -> (Vec<Rect>, (u32, u32)) {
@@ -14675,4 +14675,102 @@ fn layer_stacking_and_background_are_single_steps_in_free_and_nothing_on_the_gri
         color: "not a color".to_string(),
     });
     assert_eq!(state.snapshot().revision, revision, "unreadable color");
+}
+
+/// #398 (L2): a drag of a layer commits one step, `Move Layer` when only the
+/// position changes and `Resize Layer` when the size does; nothing on the grid,
+/// for a missing layer or for the frame it already has. Undo gives back the
+/// frame, and the shell is told (placement step) so the window follows it.
+/// Witness: always labelling `ResizeLayer`.
+#[test]
+fn moving_or_resizing_a_layer_is_one_undoable_step_in_free() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    use stokesforge_plot::FreeFrame;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let frame_of = |state: &AppState, panel: usize| {
+        graph_spec(state, graph).panels[panel].sanitized_free_frame()
+    };
+    let label = |state: &AppState| state.snapshot().history.undo_label.clone();
+
+    // Grid: nothing is sent.
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeFrame {
+        graph,
+        panel: 0,
+        frame: FreeFrame::FALLBACK,
+    });
+    assert_eq!(state.snapshot().revision, revision, "no step on the grid");
+
+    go_free(&mut state, graph);
+    let before = frame_of(&state, 0);
+    let other = frame_of(&state, 1);
+
+    let moved = FreeFrame {
+        left: before.left - 80.0,
+        top: before.top + 10.0,
+        ..before
+    };
+    state.dispatch(Action::SetFreeFrame {
+        graph,
+        panel: 0,
+        frame: moved,
+    });
+    assert_eq!(frame_of(&state, 0), moved);
+    assert_eq!(frame_of(&state, 1), other, "the other layer stays");
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::MoveLayer))
+    );
+    assert_eq!(
+        state.placement_step_revision(),
+        None,
+        "doing it is not undoing it"
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frame_of(&state, 0), before, "one Undo is enough");
+    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+    state.dispatch(Action::Redo);
+    assert_eq!(frame_of(&state, 0), moved);
+    assert_eq!(state.placement_step_revision(), Some(state.revision()));
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetFreeFrame {
+        graph,
+        panel: 0,
+        frame: moved,
+    });
+    assert_eq!(state.snapshot().revision, revision, "already that frame");
+    state.dispatch(Action::SetFreeFrame {
+        graph,
+        panel: 9,
+        frame: moved,
+    });
+    assert_eq!(state.snapshot().revision, revision, "no such layer");
+
+    let resized = FreeFrame {
+        width: moved.width + 40.0,
+        left: moved.left - 40.0,
+        ..moved
+    };
+    state.dispatch(Action::SetFreeFrame {
+        graph,
+        panel: 0,
+        frame: resized,
+    });
+    assert_eq!(frame_of(&state, 0), resized);
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ResizeLayer))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(frame_of(&state, 0), moved);
+    assert_eq!(state.placement_step_revision(), Some(state.revision()));
 }
