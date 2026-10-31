@@ -40,10 +40,37 @@ sf_colour_of() {
     [ -f "$f" ] && cat "$f" || true
 }
 
-# Colours held by the live worktrees, one per line.
+# Work packages with sub-issues (#419): ../_stokesforge/.packages/<parent> holds
+# the package colour on line 1, then one "<n><TAB><title>" line per sub-issue.
+# The colour stays reserved between two sub-issues, until `chantier.sh --done`.
+sf_pkg_dir() { printf '%s/.packages\n' "$(sf_wt_root)"; }
+
+# Colour reserved for package <parent>, empty if none.
+sf_pkg_colour() {
+    local f
+    f="$(sf_pkg_dir)/$1"
+    [ -f "$f" ] && head -n 1 "$f" || true
+}
+
+# Reserve (or keep) the colour of package <parent>; $2 = file of "<n><TAB><title>"
+# lines. Prints the colour. Call with the colour lock held.
+sf_pkg_reserve() {
+    local parent="$1" list="$2" colour
+    colour="$(sf_pkg_colour "$parent")"
+    [ -n "$colour" ] || colour="$(sf_first_free)"
+    [ -n "$colour" ] || return 1
+    mkdir -p "$(sf_pkg_dir)"
+    { printf '%s\n' "$colour"; cat "$list"; } > "$(sf_pkg_dir)/$parent"
+    printf '%s\n' "$colour"
+}
+
+# Colours held by the live worktrees and the reserved packages, one per line.
 sf_used_colours() {
-    local wt
+    local wt f
     sf_worktrees | while read -r wt; do sf_colour_of "$wt"; done | sed '/^$/d'
+    for f in "$(sf_pkg_dir)"/*; do
+        if [ -f "$f" ]; then head -n 1 "$f"; fi
+    done | sed '/^$/d'
 }
 
 # First colour of SF_COLOURS that nobody holds; empty if all six are taken.

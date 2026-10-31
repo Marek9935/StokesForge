@@ -18,11 +18,13 @@ Read from step 7 of `stokesforge-verification`, and by `stokesforge-feature` at 
 
 Written when the work package starts and at each state change; deleted after the merge.
 
+A package with sub-issues (#419): one `chantiers/<parent>` document for the whole package (`n` = the parent, one colour), whose `what` names the sub-issue in progress (`#219 Rejected fields: code`); it is deleted after the last sub-issue merges. The `name` is the parent's short name.
+
 `tests/<n>-<k>`: one document per merge on `main` that changes something usable.
 
 | Field | Content |
 |---|---|
-| `n`, `colour`, `name` | as above |
+| `n`, `colour`, `name` | as above; for a sub-issue of a package, `n` = the sub-issue number and `name` starts with `#<parent> ›` (`#217 › Rejected fields`) |
 | `title` | what is new, one line |
 | `where` | array of menu or window steps, English labels as on screen |
 | `steps` | array of short imperative steps, in French |
