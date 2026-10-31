@@ -93,6 +93,17 @@ pub use column_use::FullColumnsCopy;
 /// shorter than that stays invisible and synchronous.
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// What [`Action::ArrangeLayers`] does to the selected layers (#398, L4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerArrange {
+    /// Line the frames up on an edge or center of the reference's.
+    Align(stokesforge_core::compose::AlignEdge),
+    /// Give the frames the width or height of the reference's.
+    Match(stokesforge_core::compose::Dimension),
+    /// Spread the cells with equal gaps between their outer rectangles.
+    Distribute(stokesforge_render::pipeline::DistributeAxis),
+}
+
 /// What the user can ask for. The window layer only produces these values; it
 /// never touches the actor directly.
 // `ImportFiles` carries a whole import recipe, much bigger than the other
@@ -847,6 +858,33 @@ pub enum Action {
         panel: usize,
         /// `#RRGGBB[AA]` or empty for Auto.
         color: String,
+    },
+    /// Arranges the layers of a free graph (#398, L4, L5): `active` is the
+    /// reference, `extra` the other selected layers (Shift + click); with
+    /// fewer than two distinct cells selected, every cell of the graph
+    /// follows the active one. One undo step ([`PlotEditKind::AlignLayers`],
+    /// [`PlotEditKind::MatchLayerSize`] or [`PlotEditKind::DistributeLayers`]);
+    /// nothing sent on the grid, when nothing moves, or for a distribution of
+    /// fewer than three cells.
+    ArrangeLayers {
+        /// Target graph.
+        graph: NodeId,
+        /// Reference layer.
+        active: usize,
+        /// The other selected layers.
+        extra: Vec<usize>,
+        /// What to do.
+        arrange: LayerArrange,
+    },
+    /// Switches a graph between the regular grid (`free = false`) and free
+    /// placement (#398), as Graph Properties does. One undo step
+    /// ([`PlotEditKind::LayerPlacement`]); nothing sent when the graph is
+    /// already in that placement or the conversion is refused.
+    SetLayerPlacement {
+        /// Target graph.
+        graph: NodeId,
+        /// `true` for free placement.
+        free: bool,
     },
     /// Sets the unit in which the sizes of a graph are shown and typed (#394).
     /// Application preference: no command, no history, no `.stf`.
@@ -5510,6 +5548,48 @@ impl AppState {
                 (color.is_empty() || stokesforge_plot::parse_hex(&color).is_some())
                     && stokesforge_core::compose::set_layer_background(spec, panel, &color)
             }),
+            Action::ArrangeLayers {
+                graph,
+                active,
+                extra,
+                arrange,
+            } => {
+                let Some(spec) = self.plot_spec(graph) else {
+                    return;
+                };
+                let targets = stokesforge_core::compose::arrange_targets(&spec, active, &extra);
+                let kind = match arrange {
+                    LayerArrange::Align(_) => PlotEditKind::AlignLayers,
+                    LayerArrange::Match(_) => PlotEditKind::MatchLayerSize,
+                    LayerArrange::Distribute(_) => PlotEditKind::DistributeLayers,
+                };
+                self.edit_plot_object(graph, kind, |spec| match arrange {
+                    LayerArrange::Align(edge) => {
+                        stokesforge_core::compose::align_layers(spec, &targets, edge)
+                    }
+                    LayerArrange::Match(dimension) => {
+                        stokesforge_core::compose::match_layer_size(spec, &targets, dimension)
+                    }
+                    LayerArrange::Distribute(axis) => {
+                        let Some(frames) =
+                            crate::frame_sizes::distribute_frames(spec, &targets, axis)
+                        else {
+                            return false;
+                        };
+                        for (base, frame) in frames {
+                            if let Some(panel) = spec.panels.get_mut(base) {
+                                panel.free_frame = Some(frame.sanitized());
+                            }
+                        }
+                        true
+                    }
+                });
+            }
+            Action::SetLayerPlacement { graph, free } => {
+                self.edit_plot_object(graph, PlotEditKind::LayerPlacement, |spec| {
+                    crate::frame_sizes::set_placement_in_draft(spec, free)
+                })
+            }
             Action::PlaceSeries {
                 graph,
                 source,

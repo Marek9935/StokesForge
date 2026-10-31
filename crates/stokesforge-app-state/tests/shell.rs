@@ -14774,3 +14774,110 @@ fn moving_or_resizing_a_layer_is_one_undoable_step_in_free() {
     assert_eq!(frame_of(&state, 0), moved);
     assert_eq!(state.placement_step_revision(), Some(state.revision()));
 }
+
+/// #398 (batch 3a): Align Bottom on a free graph is one undo step
+/// `AlignLayers`; with nothing else selected every layer follows the active
+/// one, and one Undo gives every frame back. On the grid nothing is sent.
+#[test]
+fn aligning_layers_is_one_undoable_step_in_free() {
+    use stokesforge_app_state::state::LayerArrange;
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::{AlignEdge, CellSide};
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    for _ in 0..2 {
+        state.dispatch(Action::AddCell {
+            graph,
+            panel: 0,
+            side: CellSide::Right,
+            columns: Vec::new(),
+        });
+    }
+    let align = |state: &mut AppState| {
+        state.dispatch(Action::ArrangeLayers {
+            graph,
+            active: 0,
+            extra: Vec::new(),
+            arrange: LayerArrange::Align(AlignEdge::Bottom),
+        });
+    };
+    let revision = state.snapshot().revision;
+    align(&mut state);
+    assert_eq!(state.snapshot().revision, revision, "no step on the grid");
+
+    go_free(&mut state, graph);
+    for (panel, height) in [(1, 100.0), (2, 150.0)] {
+        let mut frame = graph_spec(&state, graph).panels[panel].sanitized_free_frame();
+        frame.height = height;
+        frame.top += 30.0 * panel as f64;
+        state.dispatch(Action::SetFreeFrame {
+            graph,
+            panel,
+            frame,
+        });
+    }
+    let before = graph_spec(&state, graph);
+    align(&mut state);
+    let after = graph_spec(&state, graph);
+    let bottom = |spec: &stokesforge_plot::PlotSpec, panel: usize| {
+        let frame = spec.panels[panel].sanitized_free_frame();
+        frame.top + frame.height
+    };
+    assert_eq!(bottom(&after, 1), bottom(&before, 0));
+    assert_eq!(bottom(&after, 2), bottom(&before, 0));
+    assert_eq!(after.panels[0], before.panels[0], "the reference stays");
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::AlignLayers))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before, "one Undo is enough");
+    state.dispatch(Action::Redo);
+    let revision = state.snapshot().revision;
+    align(&mut state);
+    assert_eq!(state.snapshot().revision, revision, "already aligned");
+}
+
+/// #398 (batch 3a): `SetLayerPlacement` gives the frames Graph Properties
+/// gives, in one step `LayerPlacement`, and sends nothing when the graph is
+/// already in that placement.
+#[test]
+fn set_layer_placement_is_one_step_with_the_draft_result() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_core::compose::CellSide;
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let (_session, mut state, graph, _c) = cell_bench(dir.path());
+    state.dispatch(Action::AddCell {
+        graph,
+        panel: 0,
+        side: CellSide::Right,
+        columns: Vec::new(),
+    });
+    let grid = graph_spec(&state, graph);
+    let mut expected = grid.clone();
+    assert!(stokesforge_app_state::frame_sizes::set_placement_in_draft(
+        &mut expected,
+        true
+    ));
+
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetLayerPlacement { graph, free: false });
+    assert_eq!(state.snapshot().revision, revision, "already the grid");
+
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    let free = graph_spec(&state, graph);
+    for (got, want) in free.panels.iter().zip(expected.panels.iter()) {
+        assert_eq!(got.free_frame, want.free_frame);
+    }
+    assert_eq!(free.layer_placement, expected.layer_placement);
+    assert_eq!(
+        state.snapshot().history.undo_label,
+        Some(HistoryLabel::EditPlotSpec(K::LayerPlacement))
+    );
+    let revision = state.snapshot().revision;
+    state.dispatch(Action::SetLayerPlacement { graph, free: true });
+    assert_eq!(state.snapshot().revision, revision, "already free");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), grid, "one Undo is enough");
+}

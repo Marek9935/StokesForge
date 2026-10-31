@@ -1353,6 +1353,10 @@ history-plot-send-layer-to-back = Mettre le calque à l'arrière-plan
 history-plot-layer-background = Modifier le fond du calque
 history-plot-move-layer = Déplacer le calque
 history-plot-resize-layer = Redimensionner le calque
+history-plot-align-layers = Aligner les calques
+history-plot-match-layer-size = Uniformiser la taille des calques
+history-plot-distribute-layers = Répartir les calques
+history-plot-layer-placement = Changer le placement des calques
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau

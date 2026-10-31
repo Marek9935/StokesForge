@@ -236,6 +236,21 @@ pub fn place_beside(
     })
 }
 
+/// The new frames of the cells `targets` spread with equal gaps between their
+/// outer rectangles (#398, L4), measured like the export; see
+/// [`pipeline::distribute_frames`].
+pub fn distribute_frames(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+    targets: &[usize],
+    axis: pipeline::DistributeAxis,
+) -> Result<Option<pipeline::CellFrames>, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::distribute_frames(spec, probe, targets, axis)
+    })
+}
+
 /// [`figure_layout`]'s size, or the legacy default if the measurement fails
 /// (it practically cannot).
 pub fn figure_size(
