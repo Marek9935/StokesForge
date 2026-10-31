@@ -145,7 +145,9 @@ What to expect:
 
 - A copy gets a new name when the name is already used in the folder ("copy 1", "copy 2"…).
 - A graph pasted into **another** project brings the data it plots, in a hidden workbook. Choose **Show Data** in the **Graph** menu to open it. A graph pasted in the **same** project keeps pointing at the original columns.
-- Analysis calculations are not carried over. The copied columns become ordinary columns.
+- A copied **folder** keeps what is inside it together: a graph of the folder plots the workbook copied with it, and a formula reads the copied sheet. What the folder reads from outside stays on the original in the same project; in another project, a formula that reads outside the folder shows `#REF`.
+- Analysis calculations travel with the folder or workbook that holds both their data and their results. A calculation that reads data outside what you copied is not carried over, and its columns become ordinary columns.
+- To paste a copied folder next to itself, select that folder and choose **Paste**.
 - A paste is one step in the history: a single **Undo** removes all the pasted objects.
 - If the clipboard does not hold StokesForge objects, the status bar says so.
 

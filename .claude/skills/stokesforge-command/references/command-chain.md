@@ -27,6 +27,10 @@ The sentence is written in `stokesforge-app-state`: a `history-*` key in `i18n/e
 
 A data command that **moves rows** rewrites, in the same delta, the row references that depend on them (row series of graphs, field `plots` of `InsertRows`/`DeleteRows`, #307): specs before/after captured at apply time. Source: `docs/commands-and-history.md` § A data command that moves rows rewrites the row references (#307).
 
+## Copy
+
+`Command::InsertCopy` renumbers everything the copy carries that points at another node (graph series, formulas, calculations, transposed sheets) through the map of new identifiers, **after** the node loop: what is inside the copy reads the copy, the rest the original (#391). A new kind of reference to a node goes through the same renumbering in `Project::insert_copy`, and in `NodeCopy::capture` if it is not a node. Source: `docs/commands-and-history.md` § Copying objects.
+
 ## Persistence
 
 `convert.rs` / `schema.rs` have their own transport types: `stokesforge-plot` does not depend on `serde` (invariant 3). An unknown enum variant is kept in a `RawVariant` — loss bounded to the node (invariant 10). Version rule: `docs/persistence.md` § Version rule: every V1 file can be read back up to V3 (additive `#[serde(default)]` field → regenerate `tests/witnesses/v1/project.stf` with an off-default value in `witness_project`; removal, rename or change of meaning → bump and migrate).

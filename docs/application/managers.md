@@ -21,11 +21,13 @@ collapsing it**; a double-click collapses it, and so does the triangle. Delete a
 on it (one history entry, `DeleteObjects` / `RenameObjects`). Paste
 with only this folder selected pastes **into** this folder (`paste_parent`),
 otherwise at the root. A deleted folder leaves the selection. **Copy and
-Duplicate of a folder are refused**: a local copy would keep its references
-to the original workbooks, which are outside the folder. The menu disables both
-entries (`disabled-copy-folder`), and `AppState::refuse_folder_copy` refuses the
-keyboard gesture with the same sentence in the status bar. What remains: a separate
-issue to copy a folder with its dependencies.
+Duplicate work on a folder (#391)**: the whole subtree is copied in one history
+entry, **what is inside the copy reads the copy** (a graph plots the copied
+workbook, a formula the copied sheet, a calculation or a transposed sheet the
+copied columns) and the rest keeps reading the original. Duplicate puts the
+copy beside the original; Ctrl+V with the copied folder itself selected also
+pastes beside it (`AppState::paste_objects`), with another folder selected
+inside that folder.
 **Keyboard (#170, point 6, S-K9).** With the panel focused, Up and Down move the
 selection from one visible row to the next (`PmMemory::visible`, collected during
 painting; `order`, which keeps collapsed folders, is used only for Shift ranges),

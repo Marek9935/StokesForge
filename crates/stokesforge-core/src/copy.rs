@@ -3,10 +3,13 @@
 //! closed list of copyable types; their children are rebuilt through the
 //! same insertion path as ordinary creations.
 //! Graphs capture only their referenced columns, with shared buffers.
-//! `into_external` enables their insertion into the destination; local copies
-//! keep their references, with no extra dependencies in the model.
+//! `into_external` enables their insertion into the destination. A graph reads
+//! the copy for what is inside the copied subtree and the original otherwise
+//! (#391); the columns inside the subtree are never embedded.
+//! Calculations and transposed sheets whose ends are inside the subtree travel
+//! with it.
 
-use crate::{CoreResult, Node, NodeId, NodeKind, Tree, WindowMeta};
+use crate::{Calculation, CoreResult, Node, NodeId, NodeKind, TransposeLink, Tree, WindowMeta};
 use std::collections::HashSet;
 
 /// Content frozen at the moment of the Copy gesture, independent of the source project.
@@ -14,6 +17,10 @@ use std::collections::HashSet;
 pub struct NodeCopy {
     nodes: Vec<Node>,
     graph_data: Vec<(NodeId, NodeCopy)>,
+    /// Calculations whose output columns are inside the subtree.
+    calculations: Vec<(NodeId, Calculation)>,
+    /// Transposed sheets of the subtree whose source is inside it too.
+    transposes: Vec<(NodeId, TransposeLink)>,
     external: bool,
 }
 
@@ -25,6 +32,7 @@ impl NodeCopy {
             .into_iter()
             .map(|id| tree.get(id).cloned())
             .collect::<CoreResult<Vec<_>>>()?;
+        let inside: HashSet<NodeId> = nodes.iter().map(Node::id).collect();
         let mut graph_data = Vec::new();
         for node in &nodes {
             if let NodeKind::Graph { spec, .. } = node.kind() {
@@ -53,6 +61,9 @@ impl NodeCopy {
                         }
                     }
                 }
+                // What is inside the copy reads the copy: no hidden workbook
+                // for it, even in an external paste.
+                referenced.retain(|column| !inside.contains(column));
                 let sheets: Vec<_> = tree
                     .walk_all()
                     .into_iter()
@@ -133,16 +144,51 @@ impl NodeCopy {
                     Self {
                         nodes: data,
                         graph_data: Vec::new(),
+                        calculations: Vec::new(),
+                        transposes: Vec::new(),
                         external: false,
                     },
                 ));
             }
         }
+        let calculations = tree
+            .calculations()
+            .iter()
+            .filter(|(_, calc)| {
+                let columns: Vec<NodeId> = calc.outputs.iter().filter_map(|o| o.column).collect();
+                // Only the outputs that still exist count: an output deleted
+                // from the sheet does not tie the calculation elsewhere.
+                let existing: Vec<&NodeId> = columns
+                    .iter()
+                    .filter(|c| tree.node(**c).is_some())
+                    .collect();
+                !existing.is_empty() && existing.iter().all(|c| inside.contains(*c))
+            })
+            .map(|(id, calc)| (*id, calc.as_ref().clone()))
+            .collect();
+        let transposes = tree
+            .transposes()
+            .iter()
+            .filter(|(sheet, link)| inside.contains(*sheet) && inside.contains(&link.source))
+            .map(|(sheet, link)| (*sheet, link.as_ref().clone()))
+            .collect();
         Ok(Self {
             nodes,
             graph_data,
+            calculations,
+            transposes,
             external: false,
         })
+    }
+
+    /// Calculations carried by the copy, with their identifier in the source.
+    pub fn calculations(&self) -> &[(NodeId, Calculation)] {
+        &self.calculations
+    }
+
+    /// Transposed sheets carried by the copy, by transposed sheet.
+    pub fn transposes(&self) -> &[(NodeId, TransposeLink)] {
+        &self.transposes
     }
 
     /// Frozen dependencies of each graph, for inter-project transport.

@@ -8391,27 +8391,7 @@ impl AppState {
         }
     }
 
-    /// Copying or duplicating a folder is refused for now (#170, point 4): the
-    /// local copy would keep its references to the original workbooks, which
-    /// are not in the folder. The gesture is explained in the status bar (the
-    /// menu disables the entry with the same sentence). Returns true when the
-    /// gesture is refused. To take up in a separate issue.
-    fn refuse_folder_copy(&mut self, ids: &[NodeId]) -> bool {
-        let has_folder = self.object_targets(ids).into_iter().any(|id| {
-            self.tree()
-                .node(id)
-                .is_some_and(|node| node.kind().is_folder())
-        });
-        if has_folder {
-            self.warn(tr!("disabled-copy-folder"));
-        }
-        has_folder
-    }
-
     fn copy_objects(&mut self, ids: &[NodeId]) {
-        if self.refuse_folder_copy(ids) {
-            return;
-        }
         let copies = self.capture_objects(ids);
         if copies.is_empty() {
             return;
@@ -8447,9 +8427,6 @@ impl AppState {
     }
 
     fn duplicate_objects(&mut self, ids: &[NodeId]) {
-        if self.refuse_folder_copy(ids) {
-            return;
-        }
         let copies = self.capture_objects(ids);
         if copies.is_empty() {
             return;
@@ -8465,10 +8442,23 @@ impl AppState {
                 return;
             }
         };
-        let copies = if origin != self.clipboard_origin() {
-            copies.into_iter().map(NodeCopy::into_external).collect()
-        } else {
+        let same_origin = origin == self.clipboard_origin();
+        let copies = if same_origin {
             copies
+        } else {
+            copies.into_iter().map(NodeCopy::into_external).collect()
+        };
+        // Ctrl+V with the copied folder itself selected pastes the copy
+        // beside it, not inside it (#391, C2); with any other folder
+        // selected, inside that folder.
+        let parent = if same_origin
+            && copies
+                .iter()
+                .any(|copy| copy.root().id() == parent && copy.root().kind().is_folder())
+        {
+            self.tree().parent(parent).ok().flatten().unwrap_or(parent)
+        } else {
+            parent
         };
         self.insert_object_copies(copies, Some(parent), false);
     }

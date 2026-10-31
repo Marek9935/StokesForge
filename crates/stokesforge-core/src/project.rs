@@ -358,9 +358,10 @@ impl Project {
     }
 
     /// Pastes a subtree with identifiers created in this project.
-    /// Graphs keep their references: transferring their data
-    /// between projects belongs to another gesture (#107). Any failure restores the tree,
-    /// but never moves the allocator back.
+    /// What is inside the copy reads the copy (graph series, formulas,
+    /// calculations, transposed sheets, #391); the rest keeps reading the
+    /// original, or, from another project, the embedded data (#107). Any
+    /// failure restores the tree, but never moves the allocator back.
     pub fn insert_copy(
         &mut self,
         parent: NodeId,
@@ -370,12 +371,19 @@ impl Project {
         let before = self.tree.clone();
         let result = (|| {
             let mut ids = std::collections::HashMap::new();
-            let mut graph_specs = std::collections::HashMap::new();
+            // Columns of the hidden workbook embedded for each graph of an
+            // external copy: old column -> new column. Everything else a
+            // graph reads is resolved after the node loop, once the
+            // identifiers of the copy are known.
+            let mut embedded: std::collections::HashMap<
+                NodeId,
+                std::collections::HashMap<NodeId, NodeId>,
+            > = std::collections::HashMap::new();
             if copy.is_external() {
                 for source in copy.nodes() {
-                    let NodeKind::Graph { spec, .. } = source.kind() else {
+                    if !matches!(source.kind(), NodeKind::Graph { .. }) {
                         continue;
-                    };
+                    }
                     let mut columns = std::collections::HashMap::new();
                     if let Some((_, data)) =
                         copy.graph_data().iter().find(|(id, _)| *id == source.id())
@@ -389,36 +397,7 @@ impl Project {
                             }
                         }
                     }
-                    // A broken reference receives a reservation with no node:
-                    // neither an existing column nor a future allocation
-                    // must give it another meaning in the destination.
-                    let mut spec = spec.clone();
-                    for series in spec.panels.iter_mut().flat_map(|p| &mut p.series) {
-                        for reference in [&mut series.x, &mut series.x_error, &mut series.y_error]
-                            .into_iter()
-                            .flatten()
-                        {
-                            let id = match columns.get(reference) {
-                                Some(id) => *id,
-                                None => {
-                                    let id = self.ids.next()?;
-                                    columns.insert(*reference, id);
-                                    id
-                                }
-                            };
-                            *reference = id;
-                        }
-                        let id = match columns.get(&series.y) {
-                            Some(id) => *id,
-                            None => {
-                                let id = self.ids.next()?;
-                                columns.insert(series.y, id);
-                                id
-                            }
-                        };
-                        series.y = id;
-                    }
-                    graph_specs.insert(source.id(), spec);
+                    embedded.insert(source.id(), columns);
                 }
             }
             let mut root = None;
@@ -432,11 +411,6 @@ impl Project {
                         .ok_or_else(|| CoreError::Structure("copy is not in prefix order".into()))?
                 };
                 let mut kind = source.kind().clone();
-                if let NodeKind::Graph { spec, .. } = &mut kind {
-                    if let Some(replacement) = graph_specs.remove(&source.id()) {
-                        *spec = replacement;
-                    }
-                }
                 // A version coming from another project must never be
                 // reassigned later to other content of this column:
                 // `insert_node`, below, moves the counter past it.
@@ -452,6 +426,64 @@ impl Project {
                 )?;
                 ids.insert(source.id(), id);
                 root.get_or_insert(id);
+            }
+            // What is inside the copy reads the copy, the rest reads the
+            // original (#391). Resolved after the loop, because a graph may
+            // come before the workbook it plots (prefix order). A column
+            // that is outside the copy keeps its identifier in a local copy;
+            // an external one gets the column of the embedded workbook
+            // (#107) or, failing that, a reservation with no node, so that
+            // neither an existing column nor a future allocation gives the
+            // broken reference another meaning.
+            for source in copy.nodes() {
+                let NodeKind::Graph { spec, .. } = source.kind() else {
+                    continue;
+                };
+                let Some(&new_graph) = ids.get(&source.id()) else {
+                    continue;
+                };
+                let mut local = embedded.remove(&source.id()).unwrap_or_default();
+                let mut failure = None;
+                let mut resolve = |old: NodeId| -> NodeId {
+                    if let Some(&id) = ids.get(&old) {
+                        return id;
+                    }
+                    if let Some(&id) = local.get(&old) {
+                        return id;
+                    }
+                    if !copy.is_external() {
+                        return old;
+                    }
+                    match self.ids.next() {
+                        Ok(id) => {
+                            local.insert(old, id);
+                            id
+                        }
+                        Err(error) => {
+                            failure.get_or_insert(error);
+                            old
+                        }
+                    }
+                };
+                let mut spec = spec.clone();
+                for series in spec.panels.iter_mut().flat_map(|p| &mut p.series) {
+                    for reference in [&mut series.x, &mut series.x_error, &mut series.y_error]
+                        .into_iter()
+                        .flatten()
+                    {
+                        *reference = resolve(*reference);
+                    }
+                    series.y = resolve(series.y);
+                }
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+                let slot = Arc::make_mut(&mut self.tree)
+                    .node_mut(new_graph)?
+                    .kind_mut()
+                    .plot_spec_mut()
+                    .ok_or_else(|| CoreError::Structure(format!("{new_graph} is not a graph")))?;
+                *slot = spec;
             }
             // The formulas of the copied columns read the columns **of the
             // copy** (#321), like the series above: renumbered after
@@ -500,6 +532,57 @@ impl Project {
                 let mut meta = column.meta().clone();
                 meta.formula = Some(remapped);
                 column.set_meta(meta);
+            }
+            // Analysis calculations and transposed sheets whose both ends are
+            // inside the copy (#391): fresh identifiers (invariant 7), inputs
+            // and outputs renumbered to the copy. A calculation read from
+            // outside the copy keeps its inputs in a local copy; in an
+            // external one the link is dropped and the columns stay plain.
+            let renumber = |old: NodeId| ids.get(&old).copied().unwrap_or(old);
+            for (_, calc) in copy.calculations() {
+                if copy.is_external()
+                    && !calc
+                        .input_columns()
+                        .iter()
+                        .all(|column| ids.contains_key(column))
+                {
+                    continue;
+                }
+                let mut calc = calc.clone();
+                for series in &mut calc.series {
+                    series.x = series.x.map(renumber);
+                    series.y = renumber(series.y);
+                    series.sigma = series.sigma.map(renumber);
+                }
+                if let Some(aux) = &mut calc.aux {
+                    aux.x = aux.x.map(renumber);
+                    aux.y = renumber(aux.y);
+                }
+                for output in &mut calc.outputs {
+                    output.column = output.column.map(renumber);
+                }
+                let id = self.ids.next()?;
+                Arc::make_mut(&mut self.tree)
+                    .calculations_mut()
+                    .insert(id, Arc::new(calc));
+            }
+            for (sheet, link) in copy.transposes() {
+                let (Some(&new_sheet), Some(&new_source)) = (ids.get(sheet), ids.get(&link.source))
+                else {
+                    continue;
+                };
+                let mut link = link.clone();
+                link.source = new_source;
+                link.x_column = renumber(link.x_column);
+                for row in &mut link.rows {
+                    row.column = renumber(row.column);
+                }
+                for input in &mut link.inputs {
+                    input.column = renumber(input.column);
+                }
+                Arc::make_mut(&mut self.tree)
+                    .transposes_mut()
+                    .insert(new_sheet, Arc::new(link));
             }
             root.ok_or_else(|| CoreError::Structure("empty copy".into()))
         })();

@@ -9,7 +9,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use stokesforge_core::{NodeCopy, NodeId};
 
+use crate::calculations::{copied_calculations_to_records, CalculationRecord};
 use crate::schema::{FileBody, KindRecord, NodeRecord};
+use crate::transposes::{copied_transposes_to_records, TransposeRecord};
 use crate::{build_project, convert, PersistenceError, PersistenceResult, MAX_NODE_ID};
 
 /// Maximum size of the published text: 64 MiB, hexadecimal included.
@@ -42,6 +44,12 @@ struct ClipboardRecord {
     objects: Vec<Vec<NodeRecord>>,
     #[serde(default)]
     graph_data: Vec<Vec<(u64, Vec<NodeRecord>)>>,
+    /// Calculations of each object whose outputs are inside it (#391).
+    #[serde(default)]
+    calculations: Vec<Vec<CalculationRecord>>,
+    /// Transposed sheets of each object whose source is inside it (#391).
+    #[serde(default)]
+    transposes: Vec<Vec<TransposeRecord>>,
 }
 
 /// Recognizes an object transport before a spreadsheet treats it as text.
@@ -62,6 +70,14 @@ pub fn encode_objects(origin: &str, copies: &[NodeCopy]) -> PersistenceResult<St
                     .map(|(id, data)| (id.raw(), copy_records(data)))
                     .collect()
             })
+            .collect(),
+        calculations: copies
+            .iter()
+            .map(|copy| copied_calculations_to_records(copy.calculations()))
+            .collect(),
+        transposes: copies
+            .iter()
+            .map(|copy| copied_transposes_to_records(copy.transposes()))
             .collect(),
     };
     let mut buffer = ClipboardBuffer {
@@ -113,15 +129,31 @@ pub fn decode_objects(text: &str) -> PersistenceResult<(String, Vec<NodeCopy>)> 
     if !record.graph_data.is_empty() && record.graph_data.len() != record.objects.len() {
         return Err(corrupt("invalid graph data count".into()));
     }
+    for count in [record.calculations.len(), record.transposes.len()] {
+        if count != 0 && count != record.objects.len() {
+            return Err(corrupt("invalid calculation data count".into()));
+        }
+    }
     let mut data = record.graph_data.into_iter();
+    let mut calculations = record.calculations.into_iter();
+    let mut transposes = record.transposes.into_iter();
     let mut copies = Vec::new();
     for nodes in record.objects {
-        let copy = decode_copy(nodes)?;
+        let copy = decode_copy(
+            nodes,
+            calculations.next().unwrap_or_default(),
+            transposes.next().unwrap_or_default(),
+        )?;
         let dependencies = data
             .next()
             .unwrap_or_default()
             .into_iter()
-            .map(|(graph, nodes)| Ok((NodeId::from_raw(graph), decode_copy(nodes)?)))
+            .map(|(graph, nodes)| {
+                Ok((
+                    NodeId::from_raw(graph),
+                    decode_copy(nodes, Vec::new(), Vec::new())?,
+                ))
+            })
             .collect::<PersistenceResult<Vec<_>>>()?;
         copies.push(copy.with_graph_data(dependencies).map_err(|source| {
             PersistenceError::InvalidModel {
@@ -145,7 +177,11 @@ fn copy_records(copy: &NodeCopy) -> Vec<NodeRecord> {
         .collect()
 }
 
-fn decode_copy(mut nodes: Vec<NodeRecord>) -> PersistenceResult<NodeCopy> {
+fn decode_copy(
+    mut nodes: Vec<NodeRecord>,
+    calculations: Vec<CalculationRecord>,
+    transposes: Vec<TransposeRecord>,
+) -> PersistenceResult<NodeCopy> {
     let root = nodes
         .first()
         .ok_or_else(|| corrupt("empty object".into()))?
@@ -153,6 +189,8 @@ fn decode_copy(mut nodes: Vec<NodeRecord>) -> PersistenceResult<NodeCopy> {
     let wrapper = nodes
         .iter()
         .map(|n| n.id)
+        // A calculation id is not a node, but it must not become the wrapper.
+        .chain(calculations.iter().map(|c| c.id))
         .max()
         .unwrap_or(0)
         .checked_add(1)
@@ -176,9 +214,9 @@ fn decode_copy(mut nodes: Vec<NodeRecord>) -> PersistenceResult<NodeCopy> {
             next_id_hint: wrapper,
             nodes,
             saved_colors: Default::default(),
-            calculations: Default::default(),
+            calculations,
             correction_traces: Default::default(),
-            transposes: Default::default(),
+            transposes,
             window_geometries: Default::default(),
             column_widths: Default::default(),
             save_counter: 0,
