@@ -16,7 +16,7 @@ use stokesforge_core::compose::{
     FrameAxis, FreeField,
 };
 use stokesforge_plot::{FreeFrame, LayerPlacement, PlotSpec};
-use stokesforge_render::pipeline::BesideSide;
+use stokesforge_render::pipeline::{BesideSide, SizeAxis};
 
 /// True if the graph stores no frame at all (an old file). A **free** graph
 /// stores its frames in its layers (#398): it is never legacy, so nothing here
@@ -78,6 +78,74 @@ pub fn set_size_in_draft(
     }
     *spec = candidate;
     true
+}
+
+/// What fitting a total image size changed (#407).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TotalFit {
+    /// The smallest and the largest size of the typed axis, in points.
+    pub range: (f64, f64),
+    /// The typed value was outside `range` and was brought to its nearest end.
+    pub raised: bool,
+    /// With a closed ratio lock, the same for the other axis (the ratio can ask
+    /// for more than it allows); `None` without a lock.
+    pub other: Option<((f64, f64), bool)>,
+}
+
+/// Sets the total size of the image along `axis` in a draft, the frames
+/// following in proportion (#407): a legacy draft is given its frames first
+/// ([`fix_from`]), then [`stokesforge_render::pipeline::fit_figure_size`], all
+/// in the same draft so that one `SetPlotSpec` carries it.
+///
+/// With `lock_ratio = Some(r)`, `r` being height / width of the image when the
+/// lock was closed, the other axis then follows: height = **applied** width
+/// x `r` (after any raise of the typed value), or width = applied height / `r`.
+/// `None`, with the draft unchanged, if the target or the ratio is not usable
+/// or the graph has no frame to scale.
+pub fn set_total_in_draft(
+    spec: &mut PlotSpec,
+    axis: SizeAxis,
+    target_pt: f64,
+    lock_ratio: Option<f64>,
+) -> Option<TotalFit> {
+    if lock_ratio.is_some_and(|ratio| !(ratio.is_finite() && ratio > 0.0)) {
+        return None;
+    }
+    let mut candidate = spec.clone();
+    fix_from(spec, &mut candidate);
+    let first = fit_and_apply(&mut candidate, axis, target_pt)?;
+    let other = match lock_ratio {
+        None => None,
+        Some(ratio) => {
+            let size = figure_layout(&candidate)?.size;
+            let (other_axis, other_target) = match axis {
+                SizeAxis::Width => (SizeAxis::Height, f64::from(size.0) * ratio),
+                SizeAxis::Height => (SizeAxis::Width, f64::from(size.1) / ratio),
+            };
+            let second = fit_and_apply(&mut candidate, other_axis, other_target)?;
+            Some((second.range, second.raised))
+        }
+    };
+    *spec = candidate;
+    Some(TotalFit {
+        range: first.range,
+        raised: first.raised,
+        other,
+    })
+}
+
+/// Fits `spec` along `axis` and writes the frames; what the fit said.
+fn fit_and_apply(
+    spec: &mut PlotSpec,
+    axis: SizeAxis,
+    target_pt: f64,
+) -> Option<stokesforge_render::pipeline::FittedFigure> {
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let fitted = stokesforge_render_svg::fit_figure_size(spec, &measurer, &choice, axis, target_pt)
+        .ok()??;
+    fitted.apply_to(spec);
+    Some(fitted)
 }
 
 /// Gives a legacy draft the `drawn` frames (a no-op for a graph that stores
@@ -488,5 +556,76 @@ mod tests {
             f64::NAN
         ));
         assert!(free_fields(&two_columns(), 0).is_none());
+    }
+
+    fn size_of(spec: &PlotSpec) -> (u32, u32) {
+        figure_layout(spec).expect("layout").size
+    }
+
+    /// #407: a legacy draft is given its frames and scaled in the same draft.
+    /// Witness: `fix_from` forgotten (the fit finds nothing to scale).
+    #[test]
+    fn a_legacy_draft_is_materialised_and_scaled_in_one_draft() {
+        let mut spec = PlotSpec::default();
+        assert!(is_legacy(&spec));
+        let fit = set_total_in_draft(&mut spec, SizeAxis::Width, 600.0, None).expect("a fit");
+        assert!(!fit.raised && fit.other.is_none());
+        assert!(!is_legacy(&spec));
+        assert_eq!(size_of(&spec).0, 600);
+        assert_eq!(size_of(&spec).1, 360, "the height is what it was drawn");
+    }
+
+    /// #407: without a lock the other axis is untouched; with `Some(r)` it
+    /// follows from the **applied** value, after a raise too. Witness: the
+    /// ratio ignored (heights identical), or applied to the typed value.
+    #[test]
+    fn a_closed_lock_makes_the_other_axis_follow_the_applied_size() {
+        let mut unlocked = two_columns();
+        let before = unlocked.frame_heights.clone();
+        set_total_in_draft(&mut unlocked, SizeAxis::Width, 800.0, None).expect("a fit");
+        assert_eq!(unlocked.frame_heights, before, "no lock: heights identical");
+        let mut spec = two_columns();
+        let (w0, h0) = size_of(&spec);
+        let ratio = f64::from(h0) / f64::from(w0);
+        let fit =
+            set_total_in_draft(&mut spec, SizeAxis::Width, 800.0, Some(ratio)).expect("a fit");
+        assert!(!fit.raised);
+        let (w, h) = size_of(&spec);
+        assert_eq!(w, 800);
+        assert!(
+            (f64::from(h) - 800.0 * ratio).abs() <= 1.0,
+            "height {h} follows 800 x {ratio}"
+        );
+        // A typed value below the range is raised; the height follows the
+        // raised width, not the typed one.
+        let mut small = two_columns();
+        let fit = set_total_in_draft(&mut small, SizeAxis::Width, 10.0, Some(1.0)).expect("a fit");
+        assert!(fit.raised && fit.other.is_some_and(|other| !other.1));
+        let (w, h) = size_of(&small);
+        assert!(w > 10, "raised to the minimum, not the typed 10");
+        assert!(
+            w.abs_diff(h) <= 1,
+            "square: {w} x {h} follows the applied width"
+        );
+        // Typing the height: the width follows (divided by the ratio).
+        let mut tall = two_columns();
+        set_total_in_draft(&mut tall, SizeAxis::Height, 500.0, Some(ratio)).expect("a fit");
+        let (w, h) = size_of(&tall);
+        assert_eq!(h, 500);
+        assert!((f64::from(w) - 500.0 / ratio).abs() <= 1.0);
+    }
+
+    /// #407: a refused target or ratio leaves the draft as it was.
+    #[test]
+    fn an_unusable_total_or_ratio_leaves_the_draft_untouched() {
+        for (target, ratio) in [
+            (f64::NAN, None),
+            (500.0, Some(0.0)),
+            (500.0, Some(f64::NAN)),
+        ] {
+            let mut spec = PlotSpec::default();
+            assert!(set_total_in_draft(&mut spec, SizeAxis::Width, target, ratio).is_none());
+            assert_eq!(spec, PlotSpec::default());
+        }
     }
 }

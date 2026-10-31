@@ -289,6 +289,22 @@ pub fn frame_size(unit: crate::length_unit::LengthUnit) -> Quantity {
         .wide()
 }
 
+/// The total width or height of the image of a graph, in `unit` (#407): bounded
+/// by what the frames and the bands around them allow (`min_points` and
+/// `max_points`, from [`stokesforge_render::pipeline::FittedFigure::range`], so
+/// a value outside is brought to the nearest end), a notch and decimals suited
+/// to the unit. The unit is in the label (S-N10).
+pub fn figure_total(
+    unit: crate::length_unit::LengthUnit,
+    min_points: f64,
+    max_points: f64,
+) -> Quantity {
+    let (min, max) = (min_points.min(max_points), max_points.max(min_points));
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(unit.from_points(min), unit.from_points(max))
+        .wide()
+}
+
 /// Left or Top of the first plot area, from the edge of the image, in `unit`
 /// (#405): Auto when empty, and never below `minimum_points`, what the axes and
 /// the title need (a smaller value is raised to it). The unit is in the label.

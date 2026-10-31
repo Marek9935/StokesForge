@@ -1,0 +1,272 @@
+enum analysis_kind	baseline
+enum analysis_kind	correct
+enum analysis_kind	deconvolve
+enum analysis_kind	fit
+enum analysis_kind	integrate
+enum analysis_kind	peaks
+enum analysis_kind	reconvolve
+enum analysis_kind	smooth
+enum axis	left
+enum axis	right
+enum baseline_method	anchors
+enum baseline_method	constant
+enum baseline_method	line
+enum baseline_method	zones
+enum baseline_op	divide
+enum baseline_op	subtract
+enum column_type	datetime
+enum column_type	mixed
+enum column_type	numeric
+enum export_extension	pdf
+enum export_extension	png
+enum export_extension	svg
+enum fit_model	exponential
+enum fit_model	exponential2
+enum fit_model	exponential_offset
+enum fit_model	gaussian
+enum fit_model	linear
+enum fit_model	logarithm
+enum fit_model	lorentzian
+enum fit_model	polynomial
+enum fit_model	power
+enum integrate_under	line
+enum integrate_under	zero
+enum kind	column
+enum kind	folder
+enum kind	graph
+enum kind	matrix
+enum kind	note
+enum kind	unknown
+enum kind	workbook
+enum kind	worksheet
+enum layer_placement	free
+enum layer_placement	grid
+enum legend_position	bottom_left
+enum legend_position	bottom_right
+enum legend_position	top_left
+enum legend_position	top_right
+enum length_unit	cm
+enum length_unit	in
+enum length_unit	mm
+enum length_unit	pt
+enum line_style	dash
+enum line_style	dash_dot
+enum line_style	dot
+enum line_style	none
+enum line_style	solid
+enum plot_type	bar
+enum plot_type	error_bar
+enum plot_type	histogram
+enum plot_type	line
+enum plot_type	line_scatter
+enum plot_type	scatter
+enum readiness_reason	bad_expression
+enum readiness_reason	invalid
+enum readiness_reason	needs_points
+enum readiness_reason	needs_zone
+enum readiness_reason	no_parameter
+enum role	label
+enum role	none
+enum role	x
+enum role	x2
+enum role	x3
+enum role	x4
+enum role	x_error
+enum role	y
+enum role	y2
+enum role	y3
+enum role	y4
+enum role	y_error
+enum role	z
+enum scale	linear
+enum scale	log
+enum shape_kind	arrow
+enum shape_kind	ellipse
+enum shape_kind	line
+enum shape_kind	rectangle
+enum smooth_method	adjacent
+enum smooth_method	median
+enum smooth_method	savitzky-golay
+enum symbol	circle
+enum symbol	cross
+enum symbol	diamond
+enum symbol	none
+enum symbol	plus
+enum symbol	square
+enum symbol	triangle
+enum type	datetime
+enum type	mixed
+enum type	numeric
+module pyst	class Handle
+module pyst	exception BrokenReferenceError
+module pyst	exception ConcurrentWriteError
+module pyst	exception InvalidValueError
+module pyst	exception UnknownPathError
+module pyst	function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', line_color='', line_width=1.5, fill_color='')
+module pyst	function apply_gradient(graph, group, gradient, *, panel=(0, 0))
+module pyst	function children(handle=None)
+module pyst	function column(handle)
+module pyst	function create_column(worksheet, name=None, column_type='numeric')
+module pyst	function create_workbook(name=None, parent=None)
+module pyst	function create_worksheet(workbook, name=None)
+module pyst	function delete_rows(worksheet, at, count=1)
+module pyst	function duplicate(handle, name=None)
+module pyst	function export_graph(graph, path, *, png_scale=4.0)
+module pyst	function graph_size(graph, *, unit='cm')
+module pyst	function group_series(graph, indices, *, name=None, panel=(0, 0))
+module pyst	function import_file(path, recipe=None)
+module pyst	function info(handle)
+module pyst	function insert_rows(worksheet, at, count=1)
+module pyst	function move(handle, parent, index=None)
+module pyst	function plot(y, x=None, *, graph=None, name=None, parent=None, **options)
+module pyst	function redo()
+module pyst	function remove(handle)
+module pyst	function remove_group(graph, group, *, panel=(0, 0))
+module pyst	function remove_shape(graph, index, *, panel=(0, 0))
+module pyst	function rename(handle, name)
+module pyst	function rename_group(graph, group, name, *, panel=(0, 0))
+module pyst	function resolve(path)
+module pyst	function root()
+module pyst	function save()
+module pyst	function save_as(path)
+module pyst	function series(graph, *, panel=(0, 0))
+module pyst	function series_groups(graph, *, panel=(0, 0))
+module pyst	function set_column(handle, values, *, expected_version=None)
+module pyst	function set_column_meta(handle, **metadata)
+module pyst	function set_column_type(column, column_type)
+module pyst	function set_graph(graph, *, panel=(0, 0), axis='left', unit='cm', **options)
+module pyst	function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None)
+module pyst	function set_note(note, text)
+module pyst	function set_series_group(graph, index, group, *, panel=(0, 0))
+module pyst	function set_values(handle, values, *, expected_version=None)
+module pyst	function undo()
+module pyst	function ungroup(graph, group, *, panel=(0, 0))
+module pyst	function values(handle)
+module pyst	module analysis
+module pyst.analysis	function baseline(y, x=None, *, method='anchors', points=None, zones=None, degree=1, interpolation='segments', op='subtract', keep_baseline=False, keep_results=False, auto_recalc=True, replace_original=False)
+module pyst.analysis	function correct(y, reference, x=None, reference_x=None, *, op='divide', keep_results=False, auto_recalc=True, replace_original=False)
+module pyst.analysis	function deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', iterations=50, noise=None, shift=0.0, keep_results=False, auto_recalc=False)
+module pyst.analysis	function fit(y, x=None, *, model='linear', degree=3, initial=None, bounds=None, fixed=None, shared=None, fit_range=None, residuals=False, sigma=None, keep_results=False, auto_recalc=True)
+module pyst.analysis	function integrate(y, x=None, *, ranges=None, under='zero', cumulative=False, normalize=False, keep_results=False, auto_recalc=True)
+module pyst.analysis	function peaks(y, x=None, *, shape='gaussian', background='constant', centers=None, link_widths=False, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=False, peak_columns=True, sum_column=True, keep_results=False, auto_recalc=True)
+module pyst.analysis	function readiness(kind, **options)
+module pyst.analysis	function reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, fit_shift=True, window=None, residuals=False, keep_results=False, auto_recalc=False)
+module pyst.analysis	function smooth(y, x=None, *, method='adjacent', window=5.0, window_unit='points', order=2, keep_results=False, auto_recalc=True, replace_original=False)
+options plot	axis
+options plot	color
+options plot	group_name
+options plot	histogram_bins
+options plot	label
+options plot	line_style
+options plot	line_width
+options plot	plot_type
+options plot	symbol
+options plot	symbol_size
+options plot	title
+options plot	x_error
+options plot	x_from
+options plot	x_scale
+options plot	x_title
+options plot	x_to
+options plot	y_error
+options plot	y_from
+options plot	y_scale
+options plot	y_title
+options plot	y_to
+options set_column_meta	comment
+options set_column_meta	display_format
+options set_column_meta	formula
+options set_column_meta	long_name
+options set_column_meta	role
+options set_column_meta	unit
+options set_graph	background
+options set_graph	decimal_comma
+options set_graph	figure_height
+options set_graph	figure_width
+options set_graph	fixed_size
+options set_graph	layer_left
+options set_graph	layer_placement
+options set_graph	layer_top
+options set_graph	legend_position
+options set_graph	legend_visible
+options set_graph	panel_title
+options set_graph	plot_height
+options set_graph	plot_left
+options set_graph	plot_top
+options set_graph	plot_width
+options set_graph	stale_warning
+options set_graph	title
+options set_graph	title_color
+options set_graph	title_visible
+options set_graph	x_auto_range
+options set_graph	x_from
+options set_graph	x_grid
+options set_graph	x_inverted
+options set_graph	x_scale
+options set_graph	x_title
+options set_graph	x_to
+options set_graph	x_unit
+options set_graph	x_visible
+options set_graph	y_auto_range
+options set_graph	y_from
+options set_graph	y_grid
+options set_graph	y_inverted
+options set_graph	y_scale
+options set_graph	y_title
+options set_graph	y_to
+options set_graph	y_unit
+options set_graph	y_visible
+returns analysis	columns
+returns analysis	errors
+returns analysis	values
+returns analysis	warnings
+returns analysis.baseline.columns	baseline
+returns analysis.baseline.columns	corrected
+returns analysis.batch	series
+returns analysis.correct.columns	corrected
+returns analysis.smooth.columns	smoothed
+returns graph_size	fixed_size
+returns graph_size	height
+returns graph_size	layer_placement
+returns graph_size	layers
+returns graph_size	plot_heights
+returns graph_size	plot_left
+returns graph_size	plot_top
+returns graph_size	plot_widths
+returns graph_size	width
+returns graph_size.layer	height
+returns graph_size.layer	left
+returns graph_size.layer	panel
+returns graph_size.layer	top
+returns graph_size.layer	width
+returns info	column
+returns info	kind
+returns info	name
+returns info	parent
+returns info	row_count
+returns info.column	comment
+returns info.column	display_format
+returns info.column	formula
+returns info.column	long_name
+returns info.column	role
+returns info.column	type
+returns info.column	unit
+returns info.column	version
+returns info.column	x_prime
+returns readiness	message
+returns readiness	ready
+returns readiness	reason
+returns readiness.needs_points	have
+returns readiness.needs_points	message
+returns readiness.needs_points	needed
+returns readiness.needs_points	ready
+returns readiness.needs_points	reason
+returns series.item	color
+returns series.item	group
+returns series.item	index
+returns series.item	name
+returns series.item	visible
+returns series.item	y
+returns series_groups.item	id
+returns series_groups.item	members
+returns series_groups.item	name

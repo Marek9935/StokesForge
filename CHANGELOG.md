@@ -83,6 +83,13 @@ without a message, see `docs/persistence.md`).
   new `pyst.graph_size(graph, unit="cm")` reads the image size, the plot areas,
   Left / Top and Fixed. `pyst.__api_version__` is now `0.2`.
 
+- `pyst` total image size (#407): `pyst.set_graph` gains `figure_width` and
+  `figure_height` (the whole image, in `unit`): the plot areas follow in
+  proportion, the axes, margins and titles keeping their size; a value out of
+  the range the graph allows is refused with that range. They cannot be
+  combined with `plot_width` / `plot_height` in one call.
+  `pyst.__api_version__` is now `0.4`.
+
 - `pyst` free placement (#411): `pyst.set_graph` gains `layer_placement="grid"|"free"`
   (applied first in the call), `layer_left` and `layer_top` (position of the layer of
   `panel` in page coordinates, in `unit`, may be negative); in Free `plot_width` and

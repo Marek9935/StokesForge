@@ -72,6 +72,7 @@ pub use typst_export::SvgTextMode;
 // state) does not have to declare an edge to `stokesforge-render`.
 pub use pdf::{document_to_pdf, render_to_pdf, render_to_pdf_file, PdfError};
 pub use png::{document_to_png, render_to_png, render_to_png_file, PngError};
+pub use stokesforge_render::pipeline::{FittedFigure, FittedFrames, SizeAxis};
 pub use stokesforge_render::text::{font_definitions, TextMeasurer as SvgTextMeasurer};
 pub use stokesforge_render::{FigureTexts, FontChoice};
 
@@ -248,6 +249,20 @@ pub fn distribute_frames(
 ) -> Result<Option<pipeline::CellFrames>, SvgError> {
     with_probe(spec, measurer, choice, |probe| {
         pipeline::distribute_frames(spec, probe, targets, axis)
+    })
+}
+
+/// The frames that give the figure of `spec` a total size along `axis`
+/// (#407), measured like the export; see [`pipeline::fit_figure_size`].
+pub fn fit_figure_size(
+    spec: &PlotSpec,
+    measurer: &TextMeasurer,
+    choice: &stokesforge_render::FontChoice,
+    axis: pipeline::SizeAxis,
+    target_pt: f64,
+) -> Result<Option<pipeline::FittedFigure>, SvgError> {
+    with_probe(spec, measurer, choice, |probe| {
+        pipeline::fit_figure_size(spec, probe, axis, target_pt)
     })
 }
 

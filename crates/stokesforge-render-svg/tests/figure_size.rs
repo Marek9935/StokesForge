@@ -126,3 +126,42 @@ fn a_fixed_figure_with_left_and_top_is_exported_at_its_layout_size() {
     .expect("PNG");
     assert_eq!(png_size(&png), (826, 354));
 }
+
+/// #407: a title that wraps once the image is narrower grows the title band,
+/// so the height is fitted after the width, on the figure as it then is.
+/// Witness: the height bands measured before the width change (the image would
+/// miss the target by the extra lines).
+#[test]
+fn fitting_the_height_after_the_width_measures_the_title_at_the_new_width() {
+    use stokesforge_render::pipeline::SizeAxis;
+    use stokesforge_render_svg::fit_figure_size;
+
+    let mut sample = sample::minimal().expect("minimal graph");
+    sample.spec.title = "A very long graph title that has to wrap over several lines".to_owned();
+    sample.spec.title_visible = true;
+    // A title box half the width of the image: the narrower, the more lines.
+    sample.spec.title_font.width = Some(0.5);
+    sample.spec.frame_widths = vec![600.0];
+    sample.spec.frame_heights = vec![200.0];
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let band = |spec: &stokesforge_plot::PlotSpec| {
+        stokesforge_render_svg::figure_layout(spec, &measurer, &choice)
+            .expect("layout")
+            .title_band
+    };
+    let fit = |spec: &mut stokesforge_plot::PlotSpec, axis, target| {
+        let fitted = fit_figure_size(spec, &measurer, &choice, axis, target)
+            .expect("measured")
+            .expect("a fit");
+        fitted.apply_to(spec);
+    };
+
+    let wide_band = band(&sample.spec);
+    fit(&mut sample.spec, SizeAxis::Width, 260.0);
+    assert!(band(&sample.spec) > wide_band, "the title wraps at 260 pt");
+    fit(&mut sample.spec, SizeAxis::Height, 400.0);
+    let size = figure_size(&sample.spec, &measurer, &choice);
+    assert_eq!(size.1, 400);
+    assert_eq!(size.0, 260);
+}
