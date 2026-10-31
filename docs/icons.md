@@ -84,6 +84,9 @@ separately: **each variant (icon, role) is baked into the SVG** by
    it: in grayscale, the shapes must stay distinct.
 5. In `icons.rs`: a variant of `Icon` and its lines of `VARIANTS`.
    The test `the_variants_table_follows_icons_tsv` fails if one is missing.
+   The script first checks that every source of `icons.tsv` exists and every
+   role is known (it reports all problems and replaces nothing), bakes into a
+   temporary directory, then swaps the result in.
 6. The baked variants and `src/` are versioned; commit both.
 
 ## Guards

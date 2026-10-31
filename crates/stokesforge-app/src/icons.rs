@@ -455,7 +455,7 @@ mod tests {
     }
 
     /// `icons.tsv` (what the script produces) and `VARIANTS` (what the code
-    /// uses) say the same thing, and every baked file is an SVG.
+    /// uses) say the same thing, every icon has its source and every baked file is an SVG.
     #[test]
     fn the_variants_table_follows_icons_tsv() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons");
@@ -468,6 +468,11 @@ mod tests {
                 continue;
             }
             let (name, roles) = line.split_once('\t').unwrap();
+            // The bake script reads this source; without it the run fails.
+            assert!(
+                dir.join(format!("src/{name}-duotone.svg")).is_file(),
+                "icons.tsv lists {name} but src/{name}-duotone.svg is missing"
+            );
             for role in roles.split(',') {
                 expected.insert(format!("{name}.{role}.svg"));
             }
