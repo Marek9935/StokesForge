@@ -24,7 +24,7 @@ symptom  ──► stokesforge-bug-report ──(explicit request)──► stok
 request  ──► stokesforge-feature ──► command / rendering / import / python / ui-texts ──┴─► stokesforge-verification ──► merge (green, or the trial OK)
 ```
 
-`run-stokesforge` sits beside verification for any change to see or handle in the real app. Several orchestrators may work at once: `scripts/chantier.sh <n>` starts a work package (worktree, colour, named session), `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the "To test" page lists what landed (`stokesforge-verification/references/to-test-page.md`). Asking the user to decide (one start form, one follow-up form, always the published form even for one question): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
+`run-stokesforge` sits beside verification for any change to see or handle in the real app. Several orchestrators may work at once: `scripts/chantier.sh <n>…`, run by the orchestrator in the current session, creates or finds the worktrees, assigns the colours and prints the briefing, `scripts/try.sh <n>` opens a branch on the user's screen for the trial, the "To test" page lists what landed (`stokesforge-verification/references/to-test-page.md`). Asking the user to decide (one start form, one follow-up form, always the published form even for one question): [`stokesforge-bug-report/references/decision-form.md`](stokesforge-bug-report/references/decision-form.md). Delegation (agents `perimetre` and `recherche` in `.claude/agents/`): `CLAUDE.md`, "Delegation and model choice".
 
 ## Keeping them true
 

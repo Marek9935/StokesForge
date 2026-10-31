@@ -1,0 +1,183 @@
+<title>StokesForge à tester</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one readable column; colour square + number leads every row so the eye finds a work package without reading. */
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --fg:#17202b; --muted:#5a6675; --line:#d6dce3;
+  --accent:#1f5f8b; --accent-soft:#e2eef7; --accent-fg:#ffffff;
+  --ok:#1d7a46; --ok-soft:#e1f3e8; --warn:#9a5b00; --warn-soft:#fbefd9; --bad:#b3261e; --bad-soft:#fbe4e2;
+  --c-blue:#2f6fde; --c-green:#2e9e57; --c-orange:#e07b16; --c-purple:#8a4fd1; --c-red:#d23b32; --c-yellow:#e5b800;
+  --font:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12171d; --panel:#1b222b; --fg:#e8edf2; --muted:#9aa7b5; --line:#2e3844;
+  --accent:#6fb1e3; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#5fcf8c; --ok-soft:#173327; --warn:#f0b452; --warn-soft:#3a2c14; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12171d; --panel:#1b222b; --fg:#e8edf2; --muted:#9aa7b5; --line:#2e3844;
+  --accent:#6fb1e3; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#5fcf8c; --ok-soft:#173327; --warn:#f0b452; --warn-soft:#3a2c14; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:17px;line-height:1.5;margin:0}
+.wrap{max-width:760px;margin-inline:auto;padding-block:20px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+h1{font-size:1.7rem;margin:0;text-wrap:balance}
+h2{font-size:1.15rem;margin:0;display:flex;align-items:center;gap:10px}
+.count{display:inline-flex;min-width:2rem;justify-content:center;padding:1px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:1rem}
+.sub{color:var(--muted);margin:4px 0 0}
+section{display:flex;flex-direction:column;gap:12px}
+.sq{flex:none;width:30px;height:30px;border-radius:7px;background:var(--muted)}
+.sq.blue{background:var(--c-blue)} .sq.green{background:var(--c-green)} .sq.orange{background:var(--c-orange)}
+.sq.purple{background:var(--c-purple)} .sq.red{background:var(--c-red)} .sq.yellow{background:var(--c-yellow)}
+.num{font-weight:700;font-variant-numeric:tabular-nums}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.head{display:flex;align-items:center;gap:12px;min-width:0}
+.head .t{min-width:0;overflow-wrap:anywhere}
+.steps{display:flex;flex-wrap:wrap;gap:6px}
+.st{padding:2px 10px;border-radius:99px;border:2px solid var(--line);color:var(--muted);font-size:.9rem}
+.st.done{border-color:var(--ok);color:var(--ok)}
+.st.cur{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
+.wait{align-self:flex-start;padding:3px 12px;border-radius:99px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.what{color:var(--muted)}
+.where{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.where code{font-family:var(--mono);font-size:.92rem;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--fg)}
+.where .sep{color:var(--muted)}
+.lbl{font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+ol{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:4px}
+.expect{border-left:4px solid var(--ok);padding-left:12px}
+.meta{color:var(--muted);font-size:.85rem}
+.acts{display:flex;flex-wrap:wrap;gap:10px}
+button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font-weight:700}
+button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.ok{border-color:var(--ok);color:var(--ok)}
+button.ok.on{background:var(--ok);color:var(--panel)}
+button.back{border-color:var(--bad);color:var(--bad)}
+button.back.on{background:var(--bad);color:var(--panel)}
+button.save{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+textarea{font:inherit;width:100%;min-height:80px;padding:10px;border-radius:8px;border:2px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
+.box.isok{opacity:.75}
+.box.isback{border-color:var(--bad)}
+.banner{border:2px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:12px;padding:12px 16px;font-weight:700}
+.empty{color:var(--muted);border:2px dashed var(--line);border-radius:12px;padding:16px}
+details summary{cursor:pointer;font-weight:700;color:var(--muted);padding:6px 0}
+.note{color:var(--muted);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<div class="wrap">
+  <header>
+    <h1>À tester dans StokesForge</h1>
+    <p class="sub" id="sub">Chargement…</p>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <section aria-labelledby="h-cur">
+    <h2 id="h-cur">En cours <span class="count" id="n-cur">–</span></h2>
+    <div id="cur"></div>
+  </section>
+  <section aria-labelledby="h-todo">
+    <h2 id="h-todo">À tester <span class="count" id="n-todo">–</span></h2>
+    <div id="todo"></div>
+  </section>
+  <section aria-labelledby="h-back">
+    <h2 id="h-back">Retours envoyés <span class="count" id="n-back">–</span></h2>
+    <div id="back"></div>
+  </section>
+  <details id="done-wrap"><summary>Testé et OK (<span id="n-done">0</span>)</summary><div id="done" style="display:flex;flex-direction:column;gap:12px"></div></details>
+  <p class="note">Les agents remplissent cette page à chaque étape et à chaque fusion, depuis n’importe quelle session. Toi, tu coches « C’est bon », tu écris un retour (il deviendra une issue) ou tu ajoutes un commentaire. La page reste en ligne même quand tu fermes Claude.</p>
+</div>
+<script>
+const COL={'🟦':'blue','🟩':'green','🟧':'orange','🟪':'purple','🟥':'red','🟨':'yellow'};
+const STATES=[['questions','Questions'],['code','Code'],['essai','Essai'],['fusion','Fusion']];
+const $=id=>document.getElementById(id);
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+function head(x,extra){
+  const h=el('div','head');
+  const sq=el('span','sq '+(COL[x.colour]||''));sq.setAttribute('aria-hidden','true');h.appendChild(sq);
+  const t=el('div','t');t.appendChild(el('span','num','#'+(x.n??'?')+' '));t.appendChild(document.createTextNode(x.name||''));
+  if(extra){t.appendChild(el('div','what',extra));}
+  h.appendChild(t);return h;
+}
+let tests=[],chantiers=[],db=null,openBack=null,loaded={c:false,t:false};
+
+function renderCur(){
+  const box=$('cur');box.replaceChildren();
+  const list=chantiers.slice().sort((a,z)=>(z.waiting?1:0)-(a.waiting?1:0)||(a.n||0)-(z.n||0));
+  $('n-cur').textContent=list.length;
+  if(!list.length){box.appendChild(el('div','empty','Aucun chantier en cours. Un chantier apparaît ici dès qu’un orchestrateur le lance.'));return;}
+  list.forEach(c=>{
+    const b=el('div','box');b.appendChild(head(c,c.what||''));
+    const s=el('div','steps');const i=STATES.findIndex(([k])=>k===c.state);
+    STATES.forEach(([k,l],j)=>s.appendChild(el('span','st'+(j<i?' done':j===i?' cur':''),l)));
+    b.appendChild(s);
+    if(c.waiting)b.appendChild(el('span','wait','T’attend : '+(c.waiting===true?'ta réponse':c.waiting)));
+    box.appendChild(b);
+  });
+}
+function testBox(x){
+  const b=el('div','box'+(x.status==='ok'?' isok':x.status==='retour'?' isback':''));
+  b.appendChild(head(x,x.title||''));
+  if(Array.isArray(x.where)&&x.where.length){
+    b.appendChild(el('div','lbl','Où'));
+    const w=el('div','where');x.where.forEach((p,i)=>{if(i)w.appendChild(el('span','sep','›'));w.appendChild(el('code','',p));});b.appendChild(w);
+  }
+  if(Array.isArray(x.steps)&&x.steps.length){
+    b.appendChild(el('div','lbl','Fais'));const o=el('ol');x.steps.forEach(s=>o.appendChild(el('li','',s)));b.appendChild(o);
+  }
+  if(x.expect){b.appendChild(el('div','lbl','Tu dois voir'));b.appendChild(el('div','expect',x.expect));}
+  const m=[];if(x.date)m.push(String(x.date).slice(0,10));if(x.commit)m.push('commit '+String(x.commit).slice(0,8));
+  if(m.length)b.appendChild(el('div','meta',m.join(' · ')));
+  const editing=openBack&&openBack.id===x.id;
+  if(x.comment&&!editing){b.appendChild(el('div','lbl',x.status==='retour'?'Ton retour':'Ton commentaire'));b.appendChild(el('div','',x.comment));}
+  const a=el('div','acts');
+  const ok=el('button','ok'+(x.status==='ok'?' on':''),x.status==='ok'?'✓ OK':'✓ C’est bon');ok.type='button';ok.id='ok-'+x.id;
+  ok.onclick=()=>write(x,{status:x.status==='ok'?'todo':'ok'});
+  const bk=el('button','back'+(x.status==='retour'?' on':''),'Ça ne va pas');bk.type='button';bk.id='bk-'+x.id;
+  bk.onclick=()=>{openBack=editing&&openBack.mode==='retour'?null:{id:x.id,mode:'retour'};render();const t=$('tx-'+x.id);if(t)t.focus();};
+  const cm=el('button','',x.comment?'Modifier le commentaire':'Ajouter un commentaire');cm.type='button';cm.id='cm-'+x.id;
+  cm.onclick=()=>{openBack=editing&&openBack.mode==='note'?null:{id:x.id,mode:'note'};render();const t=$('tx-'+x.id);if(t)t.focus();};
+  a.appendChild(ok);a.appendChild(bk);a.appendChild(cm);b.appendChild(a);
+  if(editing){
+    const retour=openBack.mode==='retour';
+    const t=el('textarea');t.id='tx-'+x.id;t.value=x.comment||'';t.placeholder=retour?'Ce que tu as vu, ce que tu attendais':'Une remarque, une idée, une précision';
+    const r=el('div','acts');
+    const sv=el('button','save',retour?'Envoyer le retour':'Enregistrer le commentaire');sv.type='button';
+    sv.onclick=()=>{const v=t.value.trim();if(retour&&!v){t.focus();return;}openBack=null;write(x,retour?{status:'retour',comment:v}:{comment:v});};
+    const cn=el('button','','Annuler');cn.type='button';cn.onclick=()=>{openBack=null;render();};
+    r.appendChild(sv);r.appendChild(cn);b.appendChild(t);b.appendChild(r);
+  }
+  return b;
+}
+function renderTests(){
+  const by=s=>tests.filter(x=>(x.status||'todo')===s).sort((a,z)=>String(z.date||'').localeCompare(String(a.date||'')));
+  const todo=by('todo'),back=by('retour'),done=by('ok');
+  $('n-todo').textContent=todo.length;$('n-back').textContent=back.length;$('n-done').textContent=done.length;
+  const fill=(id,arr,empty)=>{const box=$(id);box.replaceChildren();box.style.display='flex';box.style.flexDirection='column';box.style.gap='12px';
+    if(!arr.length&&empty){box.appendChild(el('div','empty',empty));return;}arr.forEach(x=>box.appendChild(testBox(x)));};
+  fill('todo',todo,'Rien à tester pour l’instant. Chaque fusion dans main ajoute ici ce qu’il faut essayer.');
+  fill('back',back,'Aucun retour en attente.');
+  fill('done',done,'');
+  const bn=$('banner');
+  if(todo.length>=5){bn.hidden=false;bn.textContent=todo.length+' choses attendent ton essai. Tester maintenant aide les prochaines décisions.';}else bn.hidden=true;
+}
+function render(){renderCur();renderTests();
+  const n=tests.filter(x=>(x.status||'todo')==='todo').length;
+  $('sub').textContent=(loaded.c&&loaded.t)?(n?n+' essai'+(n>1?'s':'')+' à faire · '+chantiers.length+' chantier'+(chantiers.length>1?'s':'')+' en cours':'Tout est testé · '+chantiers.length+' chantier'+(chantiers.length>1?'s':'')+' en cours'):($('sub').textContent);
+}
+async function write(x,patch){
+  Object.assign(x,patch);render();
+  if(!db)return;
+  try{await db.doc('tests/'+x.id).update(Object.assign({},patch,{reviewed:new Date().toISOString()}));}
+  catch(e){$('sub').textContent='Pas enregistré : '+(e&&e.code==='permission_denied'?'tu n’as pas le droit d’écrire ici.':'réessaie dans un instant.');}
+}
+render();
+(async()=>{
+  const timer=setTimeout(()=>{if(!(loaded.c&&loaded.t))$('sub').textContent='Les données ne répondent pas. Recharge la page plus tard.';},10000);
+  try{
+    db=await (window.claude&&window.claude.use?window.claude.use('db'):null);
+    if(!db){clearTimeout(timer);$('sub').textContent='Base indisponible ici : ouvre la page connecté à claude.ai.';return;}
+    db.collection('chantiers').onSnapshot(s=>{chantiers=s.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.c=true;if(loaded.t)clearTimeout(timer);render();},()=>{loaded.c=true;render();});
+    db.collection('tests').onSnapshot(s=>{tests=s.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.t=true;if(loaded.c)clearTimeout(timer);render();},()=>{loaded.t=true;render();});
+  }catch(e){clearTimeout(timer);$('sub').textContent='Base indisponible ici.';}
+})();
+</script>

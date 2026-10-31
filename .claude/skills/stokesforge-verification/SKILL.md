@@ -17,7 +17,7 @@ A green `cargo test --workspace` does not prove what one assumes in this repo. T
    - **Sequence, one orchestrator at a time on `main`**, from the main checkout (`git status --short` clean first, else stop): `scripts/main-lock.sh take "<square> #<n>"`, merge `main` into the branch (once, just before delivering) and recheck, `git merge --no-ff`, push, `scripts/main-lock.sh release`. A held lock is waited for or reported, never broken.
    - **Read the CI after every push.** A newer push cancels the running series (`ci.yml` concurrency): a cancelled run is superseded, read the CI of the newest `main` that contains your commit (`git merge-base --is-ancestor`). A red `main` is reported and fixed first, whoever broke it.
 7. **Close the issues the diff settles**: list them, put `Closes #<n>` in the commit (« Refs » closes nothing) or `glab issue close <n>` with a comment citing the commit, then check with `glab issue view <n>`. Report which issues are closed and which stay open.
-8. **Record what landed**: add the entry of the merge to the To-test page, delete the `chantiers/<n>` document, notify the phone: [references/to-test-page.md](references/to-test-page.md).
+8. **Record what landed**: add the entry of the merge to the To-test page, delete the `chantiers/<n>` document, notify the phone: [references/to-test-page.md](references/to-test-page.md) (page source to republish: [references/to-test-page.html](references/to-test-page.html)).
 9. **Report** three things without rounding: what changed, the checks **actually run** (not planned), the validation limits. A failing test is reported with its output; a skipped step is said.
 
 ## Clean up after a merge on `main`
