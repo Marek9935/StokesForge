@@ -1407,3 +1407,71 @@ fn a_curve_loses_its_handles_where_a_front_layer_covers_it() {
         "the front curve is whole"
     );
 }
+
+/// #398: a right-click on a layer inside the selection of layers keeps the
+/// selection and its reference; outside it, the layer pointed at becomes the
+/// active one and the selection is cleared. Witness: a right-click that always
+/// resets the selection.
+#[test]
+fn a_right_click_inside_the_layer_selection_keeps_it() {
+    let fixture = Fixture::free_two_layers();
+    let (context, mut view) = ready(&fixture);
+    let spec = spec_of(&fixture);
+    let drawn = view.last_drawn().expect("drawn").panels.clone();
+    let centre = |index: usize| {
+        let panel = drawn.iter().find(|p| p.index == index).expect("layer");
+        Pos2::new(
+            panel.pixel_origin.0 as f32 + panel.pixel_size.0 as f32 / 2.0,
+            panel.pixel_origin.1 as f32 + panel.pixel_size.1 as f32 / 2.0,
+        )
+    };
+    let right_click = |view: &mut GraphView, at: Pos2, time: f64| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &context,
+            view,
+            &fixture,
+            vec![egui::Event::PointerMoved(at), button(true)],
+            time,
+        );
+        frame(&context, view, &fixture, vec![button(false)], time + 0.05);
+    };
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(0),
+        egui::Modifiers::NONE,
+        1.0,
+    );
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(1),
+        egui::Modifiers::SHIFT,
+        2.0,
+    );
+    assert_eq!(view.extra_layers(&spec), vec![1]);
+    right_click(&mut view, centre(1), 3.0);
+    assert_eq!(view.active_panel(&spec), 0, "the reference stays");
+    assert_eq!(view.extra_layers(&spec), vec![1], "the selection stays");
+    // Outside the selection: a lone layer replaces it.
+    click_with(
+        &context,
+        &mut view,
+        &fixture,
+        centre(1),
+        egui::Modifiers::NONE,
+        4.0,
+    );
+    assert!(view.extra_layers(&spec).is_empty());
+    right_click(&mut view, centre(0), 5.0);
+    assert_eq!(view.active_panel(&spec), 0);
+    assert!(view.extra_layers(&spec).is_empty());
+}

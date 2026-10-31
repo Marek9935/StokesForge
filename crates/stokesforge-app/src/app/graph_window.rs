@@ -995,8 +995,12 @@ fn background_menu(
     // reference is the layer under the click.
     let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
     if let Some(spec) = spec.as_ref() {
-        let active = hit.layer.unwrap_or_else(|| view.active_panel(spec));
         let extra = view.extra_layers(spec);
+        // Inside the selection of layers the reference stays the active layer.
+        let active = hit
+            .layer
+            .filter(|layer| !view.layer_in_selection(*layer, spec))
+            .unwrap_or_else(|| view.active_panel(spec));
         sections.section(ui, true, |ui| {
             ui.menu_button(tr!("menu-layout"), |ui| {
                 super::menus::layout_menu_contents(ui, graph_id, spec, active, &extra, actions);

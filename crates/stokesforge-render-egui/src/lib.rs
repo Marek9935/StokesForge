@@ -932,6 +932,17 @@ impl GraphView {
         self.extra_layers = current;
     }
 
+    /// Whether the cell of layer `panel` is the reference or one of the other
+    /// selected layers, with at least one other layer selected (#398).
+    pub fn layer_in_selection(&self, panel: usize, spec: &PlotSpec) -> bool {
+        let extra = self.extra_layers(spec);
+        let bases = spec.cell_bases();
+        !extra.is_empty()
+            && bases.get(panel).is_some_and(|base| {
+                extra.contains(base) || bases.get(self.active_panel(spec)) == Some(base)
+            })
+    }
+
     /// Drops the selection of other layers (a plain click on a layer).
     pub fn clear_extra_layers(&mut self) {
         self.extra_layers.clear();
@@ -2095,9 +2106,17 @@ impl GraphView {
                 return;
             }
             if let Some(panel) = hit {
-                self.set_active_panel(panel, spec);
-                if response.clicked() {
-                    self.clear_extra_layers();
+                // A right-click inside the selection of layers keeps it and its
+                // reference (the menu acts on all of it); outside, the layer
+                // pointed at replaces it (#398).
+                let inside = response.secondary_clicked()
+                    && !response.clicked()
+                    && self.layer_in_selection(panel, spec);
+                if !inside {
+                    self.set_active_panel(panel, spec);
+                    if response.clicked() || response.secondary_clicked() {
+                        self.clear_extra_layers();
+                    }
                 }
             }
         }
