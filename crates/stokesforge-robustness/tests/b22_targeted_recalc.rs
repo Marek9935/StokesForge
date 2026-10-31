@@ -79,7 +79,7 @@ use tempfile::TempDir;
 /// text. The step converts them to identifiers (`Tree::formula_from_letters`)
 /// as the interface does; a refusal (letter outside the worksheet,
 /// self-reference) gives a step without a command, counted as "rejected".
-const FORMULAS: [&str; 20] = [
+const FORMULAS: [&str; 24] = [
     "A*2",
     "B+1",
     "A+B",
@@ -104,6 +104,14 @@ const FORMULAS: [&str; 20] = [
     "integral(A)",
     "mean(B, 1, 3)",
     "max(B, C, D)",
+    // Columns of other sheets and workbooks (#403): read by a column function
+    // only, with their paired X, in the sheet they are in. Typed in the sheet
+    // they name, they are plain local references; typed where the sheet or the
+    // workbook does not exist, they are refused (a step without a command).
+    "max(Sheet2!A)",
+    "at(Sheet1!B, 2)",
+    "B / mean([Book2]Sheet1!B, 1, 3)",
+    "integral([Book2]Sheet1!B)",
 ];
 
 #[derive(Debug, Clone)]
@@ -447,7 +455,8 @@ fn runner(cases: u32) -> TestRunner {
 
 /// `Book1` with two worksheets of different lengths, already equipped with
 /// formulas (including a chain and a constant), so that the first steps have
-/// something to recalculate.
+/// something to recalculate, and a `Book2` with a worksheet of its own, for the
+/// formulas that read another workbook (#403).
 fn initial_project() -> Project {
     let mut project = Project::new("Demo").expect("valid project");
     let root = project.root();
@@ -488,6 +497,30 @@ fn initial_project() -> Project {
                 },
             )
             .expect("role X");
+    }
+    // The other workbook: an X column and a column to read.
+    let other = project.add_workbook(root, Some("Book2")).expect("Book2");
+    let other_sheet = project.tree().children(other).expect("sheets")[0];
+    for (values, role) in [
+        (&[4.0, 5.0, 6.0][..], ColumnRole::X),
+        (&[40.0, 50.0, 60.0][..], ColumnRole::default()),
+    ] {
+        project
+            .add_column(
+                other_sheet,
+                None,
+                None,
+                Column::from_block(
+                    ColumnType::Numeric,
+                    ValueBlock::Float(values.to_vec()),
+                    ColumnMeta {
+                        role,
+                        ..Default::default()
+                    },
+                )
+                .expect("column"),
+            )
+            .expect("column of Book2");
     }
     // Formulas are entered in letters once the columns of their worksheet are
     // in place (#321): letters to identifiers.
@@ -902,6 +935,15 @@ impl Reply {
     }
 }
 
+/// True if a formula of the tree reads a column of another sheet (#403).
+fn has_remote_formula(tree: &Tree) -> bool {
+    tree.iter().any(|(_, node)| {
+        node.as_column()
+            .and_then(|column| column.meta().formula.as_ref())
+            .is_some_and(|formula| !formula.remote_refs().is_empty())
+    })
+}
+
 /// Plays a step on a twin. `saves`: the files of this twin, in the
 /// order they were written.
 fn play(
@@ -959,6 +1001,14 @@ fn play(
         Step::CloseMacro => Reply::from_result(handle.end_macro(), |_| false),
         Step::AbortMacro => Reply::from_result(handle.abort_macro(), |_| true),
         Step::Reload => {
+            // Batch 1 of #403: the `.stf` does not carry the sheet of a remote
+            // column yet, so a file holding a remote formula reloads it as
+            // `#REF` — a legitimate change of meaning that the oracle would
+            // report, since the calculations of the file are trusted. Such a
+            // save is not played until the format carries it (batch 2).
+            if handle.snapshot().is_ok_and(|s| has_remote_formula(&s.tree)) {
+                return Reply::Rejected;
+            }
             let path = dir.path().join(format!("{name}-{}.stf", saves.len()));
             if handle.save(&path).is_err() {
                 return Reply::Rejected;
@@ -1009,6 +1059,8 @@ struct Coverage {
     /// Present before and after a pass, with the same version: spared by the
     /// targeted pass.
     spared: usize,
+    /// Computed columns whose formula reads another sheet or workbook (#403).
+    remote_computed: usize,
     /// Steps accepted by both sessions, recalculation pass or not.
     accepted: usize,
     /// Analysis calculations present after a pass, including the stale ones.
@@ -1024,6 +1076,7 @@ impl Coverage {
         self.computed += other.computed;
         self.not_computed += other.not_computed;
         self.spared += other.spared;
+        self.remote_computed += other.remote_computed;
         self.accepted += other.accepted;
         self.calculations += other.calculations;
         self.stale_calculations += other.stale_calculations;
@@ -1060,6 +1113,12 @@ impl Coverage {
             });
             if is_computed {
                 self.computed += 1;
+                let reads_remote = column
+                    .meta()
+                    .formula
+                    .as_ref()
+                    .is_some_and(|formula| !formula.remote_refs().is_empty());
+                self.remote_computed += usize::from(reads_remote);
             } else {
                 self.not_computed += 1;
             }
@@ -1186,6 +1245,8 @@ fn b22_the_targeted_recalculation_returns_exactly_the_full_recalculation() {
     assert!(total.computed > 1000, "{total:?}");
     assert!(total.not_computed > 100, "{total:?}");
     assert!(total.spared > 1000, "{total:?}");
+    // The formulas that read another sheet or workbook (#403) were reached.
+    assert!(total.remote_computed > 100, "{total:?}");
     assert!(total.calculations > 200, "{total:?}");
     assert!(total.stale_calculations > 30, "{total:?}");
     // Every gesture that launches a pass did so often enough for the oracle to

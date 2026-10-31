@@ -185,6 +185,33 @@ impl Tree {
         )
     }
 
+    /// True if the **stored** formula of `column` is part of a loop (#403): a
+    /// file can hold one that input would have refused. Its cells stay empty
+    /// ([`FormulaError::Cycle`] in the recalculation).
+    pub fn formula_in_loop(&self, column: NodeId) -> bool {
+        self.node(column)
+            .and_then(crate::node::Node::as_column)
+            .and_then(|node| node.meta().formula.as_ref())
+            .is_some_and(|formula| self.formula_loop(column, formula))
+    }
+
+    /// [`Tree::formula_from_letters`] for a formula **being entered** (#403):
+    /// a text that would make `column` read itself, in any sheet of the
+    /// project, is refused with [`FormulaError::Cycle`]. The one entry point of
+    /// the interface and of `pyst`; the loop check is not part of the plain
+    /// reading, which tests use to build the loops of an older file on purpose.
+    pub fn formula_for_entry(
+        &self,
+        column: NodeId,
+        text: &str,
+    ) -> Result<ColumnFormula, FormulaError> {
+        let formula = self.formula_from_letters(column, text)?;
+        if self.formula_loop(column, &formula) {
+            return Err(FormulaError::Cycle);
+        }
+        Ok(formula)
+    }
+
     /// Text to show for the formula of `column`: the **current** letters
     /// of its read columns, with the prefix of those of another sheet, `#REF`
     /// for a column that is no longer where it must be. `None` if `column` is

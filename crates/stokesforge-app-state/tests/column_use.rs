@@ -16,6 +16,8 @@ struct Setup {
     state: AppState,
     sheet: NodeId,
     cols: Vec<NodeId>,
+    /// `Sheet3` of the same workbook, with one column `A`.
+    other: NodeId,
 }
 
 /// A sheet with plain `A` (X), `B` (Y), `C`, `D`, over 5 rows.
@@ -33,6 +35,10 @@ fn setup(dir: &std::path::Path) -> Setup {
                 .unwrap()
         })
         .collect();
+    let other = project.add_worksheet(book, Some("Sheet3")).unwrap();
+    project
+        .add_column(other, None, Some("A"), Column::from_f64(&values))
+        .unwrap();
     project
         .set_column_meta(
             cols[0],
@@ -54,6 +60,7 @@ fn setup(dir: &std::path::Path) -> Setup {
         state,
         sheet,
         cols,
+        other,
     }
 }
 
@@ -245,4 +252,43 @@ fn ctrl_shift_c_without_a_formula_copies_directly() {
     s.state.select_column(s.sheet, c[1]);
     assert!(s.state.copy_full_columns(s.sheet).is_some());
     assert_eq!(s.state.pending_full_copy(), None);
+}
+
+/// #403: a formula reads a column of another sheet; deleting that sheet, or
+/// the column, lists the reader with its full path. Mutant: the scan keeps to
+/// the sheets that lose a column -> nothing is listed.
+#[test]
+fn deleting_a_sheet_read_by_a_formula_of_another_sheet_lists_that_formula() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let c = s.cols.clone();
+    set_formula(&mut s, c[2], "max(Sheet3!A)");
+    assert_eq!(
+        s.state.tree().formula_letters(c[2]).as_deref(),
+        Some("max(Sheet3!A)")
+    );
+    s.state.dispatch(Action::DeleteSheet(s.other));
+    assert_eq!(
+        s.state.column_use_lines(),
+        Some(vec!["[Book]Sheet1!C (formula)".to_string()])
+    );
+    s.state.dispatch(Action::UndoColumnUse);
+    assert!(
+        s.state.tree().node(s.other).is_some(),
+        "Undo brings it back"
+    );
+    assert_eq!(
+        s.state.tree().formula_letters(c[2]).as_deref(),
+        Some("max(Sheet3!A)")
+    );
+
+    // Deleting only the column does the same.
+    let a3 = s.state.tree().children(s.other).unwrap()[0];
+    s.state.select_column(s.other, a3);
+    s.state
+        .dispatch(Action::DeleteSelectedCells { sheet: s.other });
+    assert_eq!(
+        s.state.column_use_lines(),
+        Some(vec!["[Book]Sheet1!C (formula)".to_string()])
+    );
 }

@@ -1075,6 +1075,7 @@ formula-help-family-operators = Opérateurs
 formula-help-op-arithmetic = Additionner, soustraire, multiplier, diviser
 formula-help-op-power = Puissance
 formula-help-op-comparison = Comparaison : 1 si vrai, 0 si faux
+formula-help-reference = Colonne d'une autre feuille, lue par les fonctions de colonne (at, max, min, mean, sum, std, integral). Autre classeur : [Book2]Sheet5!B. Un nom avec une espace se met entre apostrophes : 'Blanc 2'!B
 formula-help-family-powers = Puissances et logarithmes
 formula-help-family-trigonometry = Trigonométrie
 formula-help-family-error = Fonction d'erreur

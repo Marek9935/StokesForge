@@ -1076,6 +1076,7 @@ formula-help-family-operators = Operators
 formula-help-op-arithmetic = Add, subtract, multiply, divide
 formula-help-op-power = Power
 formula-help-op-comparison = Comparison: 1 if true, 0 if false
+formula-help-reference = Column of another sheet, read by the column functions (at, max, min, mean, sum, std, integral). Another workbook: [Book2]Sheet5!B. A name with a space is quoted: 'Blanc 2'!B
 formula-help-family-powers = Powers and logarithms
 formula-help-family-trigonometry = Trigonometry
 formula-help-family-error = Error function

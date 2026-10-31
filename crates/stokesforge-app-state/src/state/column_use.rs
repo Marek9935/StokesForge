@@ -9,7 +9,7 @@
 //! gesture succeeded. The texts are `tr!` here, never in the crates below.
 //!
 //! Four kinds of readers, and a single exclusion:
-//! - a **formula** column of the same sheet that reads a deleted column
+//! - a **formula** column, of any sheet (#403), that reads a deleted column
 //!   (#321: a formula keeps columns by identifier, the following letters no
 //!   longer slide; the formula displays `#REF`);
 //! - an **analysis calculation** one of whose series (X, Y, σ) is a deleted
@@ -44,7 +44,8 @@ pub enum FullColumnsCopy {
 /// A reader of a deleted column, as data: the text is made at display time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ColumnUser {
-    /// A formula column, named by its short name (same sheet).
+    /// A formula column, named by its short name (same sheet as a deleted
+    /// column) or by `[Workbook]Sheet!Column` (another sheet, #403).
     Formula { name: String },
     /// An analysis calculation: its family and its first output column,
     /// named `[Workbook]Sheet!Column` (or by its short name in the sheet of a
@@ -85,18 +86,23 @@ pub(super) fn columns_under(tree: &Tree, ids: &[NodeId]) -> Vec<NodeId> {
 pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
     let gone: BTreeSet<NodeId> = deleted.iter().copied().collect();
     let mut users = Vec::new();
-    // Formula columns: per sheet, from the smallest deleted rank.
-    let sheets: BTreeSet<NodeId> = deleted
+    // Formula columns, in every sheet of the project (#403: a formula reads
+    // columns of other sheets too). Named by their short name in a sheet that
+    // loses a column, by their full path elsewhere.
+    let losing: BTreeSet<NodeId> = deleted
         .iter()
         .filter_map(|&c| tree.node(c).and_then(Node::parent))
         .collect();
+    let mut sheets: Vec<NodeId> = tree
+        .iter()
+        .filter(|(_, node)| node.kind().is_worksheet())
+        .map(|(id, _)| id)
+        .collect();
+    sheets.sort();
     for sheet in sheets {
         let Ok(columns) = tree.children(sheet) else {
             continue;
         };
-        if !columns.iter().any(|c| gone.contains(c)) {
-            continue;
-        }
         for &column in columns {
             if gone.contains(&column) {
                 continue;
@@ -108,9 +114,12 @@ pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
                 continue;
             };
             if formula.columns().iter().any(|read| gone.contains(read)) {
-                users.push(ColumnUser::Formula {
-                    name: node.name().to_string(),
-                });
+                let name = if losing.contains(&sheet) {
+                    node.name().to_string()
+                } else {
+                    column_path(tree, column).unwrap_or_else(|| node.name().to_string())
+                };
+                users.push(ColumnUser::Formula { name });
             }
         }
     }

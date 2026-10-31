@@ -221,6 +221,17 @@ fn operator_rows() -> Vec<HelpRow> {
     ]
 }
 
+/// The reference to a column of another sheet or workbook (#403): not a
+/// callee either, so a fixed row beside the column functions that read it.
+fn reference_rows() -> Vec<HelpRow> {
+    vec![HelpRow {
+        callee: None,
+        signature: "Sheet3!B",
+        example: "B / max(Sheet3!B)",
+        description: tr!("formula-help-reference"),
+    }]
+}
+
 /// The help, family by family, in the interface language. A family with no
 /// callee is left out.
 pub fn groups() -> Vec<HelpGroup> {
@@ -245,6 +256,9 @@ pub fn groups() -> Vec<HelpGroup> {
                         description: entry.description.clone(),
                     }),
             );
+            if family == Family::ColumnValues {
+                rows.extend(reference_rows());
+            }
             (!rows.is_empty()).then(|| HelpGroup {
                 title: family.title(),
                 rows,
@@ -256,7 +270,38 @@ pub fn groups() -> Vec<HelpGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stokesforge_core::{ColumnFormula, NodeId};
+    use stokesforge_core::{
+        ColumnFormula, FormulaError, NodeId, SheetAddress, SheetDirectory, SheetScope,
+    };
+
+    /// A second sheet `Sheet3` of four columns, for the examples that name it.
+    struct TwoSheets {
+        other: NodeId,
+        columns: Vec<NodeId>,
+    }
+
+    impl SheetDirectory for TwoSheets {
+        fn find_sheet(
+            &self,
+            _own_sheet: NodeId,
+            _workbook: Option<&str>,
+            sheet: &str,
+        ) -> Result<NodeId, FormulaError> {
+            if sheet.eq_ignore_ascii_case("Sheet3") {
+                Ok(self.other)
+            } else {
+                Err(FormulaError::UnknownSheet(sheet.to_string()))
+            }
+        }
+
+        fn columns_of(&self, sheet: NodeId) -> Option<&[NodeId]> {
+            (sheet == self.other).then_some(self.columns.as_slice())
+        }
+
+        fn address_of(&self, _own_sheet: NodeId, _target: NodeId) -> Option<SheetAddress> {
+            None
+        }
+    }
 
     fn all_rows() -> Vec<HelpRow> {
         groups().into_iter().flat_map(|group| group.rows).collect()
@@ -296,8 +341,16 @@ mod tests {
     fn every_example_compiles_on_a_four_column_sheet() {
         let sheet: Vec<NodeId> = (1..=4).map(NodeId::from_raw).collect();
         let own = NodeId::from_raw(99);
+        let directory = TwoSheets {
+            other: NodeId::from_raw(50),
+            columns: (51..=54).map(NodeId::from_raw).collect(),
+        };
+        let scope = SheetScope {
+            own_sheet: NodeId::from_raw(98),
+            directory: &directory,
+        };
         for row in all_rows() {
-            let formula = ColumnFormula::from_letters(row.example, &sheet, own)
+            let formula = ColumnFormula::from_letters_in(row.example, &sheet, own, Some(scope))
                 .unwrap_or_else(|error| panic!("{}: {error}", row.example));
             formula
                 .compile()

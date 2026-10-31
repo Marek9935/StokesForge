@@ -459,6 +459,42 @@ assert meta['unit'] == 'm' and meta['formula'] == '#REF * 2'
     );
 }
 
+/// A formula that would loop is refused by `pyst` like by the interface
+/// (#403), and a formula may read a column of another sheet.
+#[test]
+fn a_formula_loop_is_refused_and_another_sheet_is_read() {
+    let bench = bench();
+    execute(
+        &bench,
+        r#"
+c = pyst.resolve('[Book1]Sheet1!M')
+e = pyst.resolve('[Book1]Sheet1!Empty')
+pyst.set_column_meta(c, formula='A*2')
+pyst.set_column_meta(e, formula='C+1')
+try:
+    pyst.set_column_meta(c, formula='E+1')
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('loop accepted')
+assert pyst.info(c)['column']['formula'] == 'A*2'
+
+# Another sheet of the workbook is named like in the interface: this one has
+# no column, the other does not exist.
+for text in ('max(Empty!A)', 'max(Nope!A)'):
+    try:
+        pyst.set_column_meta(e, formula=text)
+    except pyst.InvalidValueError:
+        pass
+    else:
+        raise AssertionError('refused text accepted: ' + text)
+a = pyst.resolve('[Book1]Sheet1!A')
+pyst.set_column_meta(e, formula='max(Sheet1!A)')
+assert pyst.info(e)['column']['formula'] == 'max(A)'
+"#,
+    );
+}
+
 #[test]
 fn closed_session_also_refuses_the_root_and_reads_without_a_handle() {
     let Bench {
