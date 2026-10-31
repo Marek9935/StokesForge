@@ -152,10 +152,15 @@ pub fn table_header(text: impl Into<String>) -> egui::RichText {
     bold(text).small()
 }
 
-/// Level 3: the secondary text (detail, help), muted and in small text. The
-/// usage rules are those of muted text (`docs/interface-standard.md`).
+/// Size of the secondary text: one step under the body (12.5 pt). egui's
+/// `TextStyle::Small` (9 pt, 72 % of the body) was too small to read (#392 trial).
+pub const SECONDARY_TEXT_SIZE: f32 = 11.0;
+
+/// Level 3: the secondary text (detail, help), muted and slightly smaller than
+/// body ([`SECONDARY_TEXT_SIZE`]). The usage rules are those of muted text
+/// (`docs/interface-standard.md`).
 pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).small().weak()
+    egui::RichText::new(text).size(SECONDARY_TEXT_SIZE).weak()
 }
 
 /// Level 4: the dimmed text, muted but at body size and not bold: empty
@@ -773,7 +778,10 @@ mod tests {
         assert_ne!(secondary.sections[0].format.coords, bold_variations());
         assert_eq!(section.sections[0].format.font_id.size, body);
         assert!(header.sections[0].format.font_id.size < body);
-        assert!(secondary.sections[0].format.font_id.size < body);
+        let small = egui::Style::default().text_styles[&egui::TextStyle::Small].size;
+        let secondary_size = secondary.sections[0].format.font_id.size;
+        assert_eq!(secondary_size, SECONDARY_TEXT_SIZE);
+        assert!(small < secondary_size && secondary_size < body);
         // Only the secondary is muted: the other two keep the fallback
         // color (`PLACEHOLDER`), resolved at paint time.
         assert_eq!(section.sections[0].format.color, Color32::PLACEHOLDER);

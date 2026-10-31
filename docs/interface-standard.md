@@ -99,7 +99,7 @@ mechanics.
 | S-L3 | `titre-de-section-entre-blocs` | A section heading between two blocks, never a rule line alone. |
 | S-L4 | `deux-espacements` | Two spacing constants in `theme.rs`; no numeric `add_space` elsewhere. |
 | S-L5 | `pas-de-section-repliable` | No collapsible section in a form; too long, switch to tabs. Only exception: the "Advanced" block (S-L8). |
-| S-L6 | `quatre-niveaux-de-texte` | Four text levels named in `theme.rs`: section heading, table header, secondary text, dimmed text; never `bold(…).small()` nor `.weak()` written in place. |
+| S-L6 | `quatre-niveaux-de-texte` | Four text levels named in `theme.rs`: section heading, table header, secondary text (slightly smaller than body, 11 pt), dimmed text; never `bold(…).small()` nor `.weak()` written in place. |
 | S-L7 | `hauteur-de-ligne-unique` | A list or tree row has a single height, `LIST_ROW_HEIGHT`, composed or not. |
 | S-L8 | `bloc-avance-replie` | Settings that are almost never touched, all Auto by default, go in a collapsible "Advanced" block, closed by default, at the bottom of their section; never a common setting nor one without Auto. |
 | S-L9 | `onglets-secondaires-a-gauche` | One level of tabs: the strip is on top. Two levels: the primary tabs are horizontal on top, the secondary tabs vertical at the left of the content; the secondary strip stays fixed, only the content scrolls. |
@@ -525,7 +525,7 @@ How it is held (`app/dialogs.rs`, all through the same `modal_frame` body):
   button of its content.
 - **Dimmed text**: reserved for what is secondary, in two named functions of
   `theme.rs` (`.weak()` is written nowhere else, `no_weak_outside_the_theme`,
-  #392). `theme::secondary_text` (small size, muted): help under a field,
+  #392). `theme::secondary_text` (slightly smaller than body, 11 pt, muted): help under a field,
   reason of a disabled button, technical detail under a sentence (the system
   error of a failed save). `theme::dimmed_text` (normal size, muted, not
   bold): empty state, "Calculating…", the label beside a result, a menu
@@ -698,7 +698,7 @@ History: #226.
   Properties › Axes (Bottom, Left, Right, Top at the left, under the main tabs).
 - **Four text levels** (S-L6, #170, #392): `theme::section_heading` (section
   heading, bold), `theme::table_header` (column header of a table, bold
-  in small size), `theme::secondary_text` (dimmed, small size),
+  in small size), `theme::secondary_text` (dimmed, slightly smaller than body, 11 pt),
   `theme::dimmed_text` (dimmed, normal size). Guards
   `no_small_bold_outside_the_theme` and `no_weak_outside_the_theme`.
 - **A single row height** (S-L7, #170): `list_row::LIST_ROW_HEIGHT`
@@ -711,7 +711,7 @@ How it is held:
 - **`app/form.rs`**: `form(ui, sel, |rows| …)` opens the grid; `Form::row`
   (label + field, the "?" icon after the field), `Form::field` (field column
   without a label), `Form::checkbox`, `Form::color`, `Form::note` (help,
-  `secondary_text`: small size), `Form::note_dimmed` (`dimmed_text`: normal
+  `secondary_text`: slightly smaller than body, 11 pt), `Form::note_dimmed` (`dimmed_text`: normal
   size, for an empty state or a warning), `Form::section` (heading across the full width), `Form::enabled`
   (disabled rows, S-G4), `Form::ui` (table or list across the full width).
   The label column takes the width of the longest, measured on the previous
