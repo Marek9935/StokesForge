@@ -23,8 +23,8 @@
 
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{
-    Cell, Column, ColumnMeta, ColumnType, ColumnValues, MixedCell, NodeCopy, NodeId, Project,
-    ValueBlock,
+    Cell, Column, ColumnMeta, ColumnType, ColumnValues, CopyInsertion, MixedCell, NodeCopy, NodeId,
+    Project, ValueBlock,
 };
 use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
 
@@ -1758,4 +1758,150 @@ fn a_loop_across_sheets_stays_not_calculated_and_stable() {
             assert_eq!(version(&s, o.c), version(&after, o.c), "stable");
         }
     }
+}
+
+/// #391: after pasting a folder, the formula of the **copied** workbook reads
+/// the copied column and the original formula keeps reading the original one:
+/// writing a copied A recomputes the copied C only, and vice versa.
+#[test]
+fn a_pasted_folder_recalculates_its_own_formulas_and_not_the_original() {
+    let mut project = Project::new("Demo").expect("valid project");
+    let root = project.root();
+    let folder = project.add_folder(root, "Folder").expect("folder");
+    let book = project
+        .add_workbook(folder, Some("Book1"))
+        .expect("workbook");
+    let sheet = project.tree().children(book).expect("book")[0];
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .expect("A");
+    let c = project
+        .add_column(sheet, None, Some("C"), Column::new(ColumnType::Numeric))
+        .expect("C");
+    let formula = project
+        .tree()
+        .formula_from_letters(c, "A*2")
+        .expect("formula");
+    project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .expect("meta");
+    let copy = NodeCopy::capture(project.tree(), folder).expect("capture");
+    let session =
+        Session::spawn_with_recalc(project, None, FormulaRecalc::Targeted).expect("actor started");
+    let handle = session.handle();
+    handle
+        .execute(Command::InsertCopy {
+            parent: root,
+            copy,
+            name: "Folder copy 1".into(),
+        })
+        .expect("paste the folder");
+    let s = take_snapshot(&handle);
+    let copied_folder = *s.tree.children(root).unwrap().last().unwrap();
+    let copied_book = s.tree.children(copied_folder).unwrap()[0];
+    let copied_sheet = s.tree.children(copied_book).unwrap()[0];
+    let (copied_a, copied_c) = {
+        let columns = s.tree.children(copied_sheet).unwrap();
+        (columns[0], columns[1])
+    };
+    assert_ne!(copied_c, c);
+    let original_c = numbers(&s, c);
+
+    handle
+        .execute(enter(copied_a, 0, &[10.0, 20.0, 30.0]))
+        .expect("write the copied A");
+    let s = take_snapshot(&handle);
+    assert_eq!(numbers(&s, copied_c), some(&[20.0, 40.0, 60.0]));
+    assert_eq!(
+        numbers(&s, c),
+        original_c,
+        "the original formula is not recomputed"
+    );
+
+    handle
+        .execute(enter(a, 0, &[100.0, 200.0, 300.0]))
+        .expect("write the original A");
+    let s = take_snapshot(&handle);
+    assert_eq!(numbers(&s, c), some(&[200.0, 400.0, 600.0]));
+    assert_eq!(numbers(&s, copied_c), some(&[20.0, 40.0, 60.0]));
+}
+
+/// #391, S1: after pasting two workbooks in one gesture, the formula of the
+/// copied Book1 reads the copied Book2: writing the copied Book2 recomputes the
+/// copied formula, not the original, and the original Book2 does not touch the
+/// copy.
+#[test]
+fn a_formula_pasted_with_the_workbook_it_reads_recalculates_against_the_copy() {
+    let mut project = Project::new("Demo").expect("valid project");
+    let root = project.root();
+    let mut columns = Vec::new();
+    for name in ["Book1", "Book2"] {
+        let book = project.add_workbook(root, Some(name)).expect("workbook");
+        let sheet = project.tree().children(book).expect("book")[0];
+        let a = project
+            .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("A");
+        let c = project
+            .add_column(sheet, None, Some("C"), Column::new(ColumnType::Numeric))
+            .expect("C");
+        columns.push((book, a, c));
+    }
+    let (book1, _, c) = columns[0];
+    let (book2, a2, _) = columns[1];
+    let formula = project
+        .tree()
+        .formula_from_letters(c, "max([Book2]Sheet1!A)")
+        .expect("formula");
+    project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                formula: Some(formula),
+                ..Default::default()
+            },
+        )
+        .expect("meta");
+    let items: Vec<_> = NodeCopy::capture_all(project.tree(), &[book1, book2])
+        .expect("capture")
+        .into_iter()
+        .map(|copy| CopyInsertion {
+            parent: root,
+            name: format!("{} copy", copy.root().name()),
+            copy,
+        })
+        .collect();
+    let session =
+        Session::spawn_with_recalc(project, None, FormulaRecalc::Targeted).expect("actor started");
+    let handle = session.handle();
+    handle
+        .execute(Command::InsertCopies { items })
+        .expect("paste both workbooks");
+    let s = take_snapshot(&handle);
+    let children = s.tree.children(root).unwrap();
+    let (copied_book1, copied_book2) = (children[children.len() - 2], children[children.len() - 1]);
+    let sheet_of = |book| s.tree.children(book).unwrap()[0];
+    let copied_c = s.tree.children(sheet_of(copied_book1)).unwrap()[1];
+    let copied_a2 = s.tree.children(sheet_of(copied_book2)).unwrap()[0];
+    assert_ne!(copied_a2, a2);
+    let original_c = numbers(&s, c);
+
+    handle
+        .execute(enter(copied_a2, 0, &[10.0, 20.0, 30.0]))
+        .expect("write the copied Book2");
+    let s = take_snapshot(&handle);
+    assert_eq!(numbers(&s, copied_c), some(&[30.0, 30.0, 30.0]));
+    assert_eq!(numbers(&s, c), original_c, "the original is not recomputed");
+
+    handle
+        .execute(enter(a2, 0, &[100.0, 200.0, 300.0]))
+        .expect("write the original Book2");
+    let s = take_snapshot(&handle);
+    assert_eq!(numbers(&s, c), some(&[300.0, 300.0, 300.0]));
+    assert_eq!(numbers(&s, copied_c), some(&[30.0, 30.0, 30.0]));
 }

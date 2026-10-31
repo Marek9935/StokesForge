@@ -3,10 +3,13 @@
 //! closed list of copyable types; their children are rebuilt through the
 //! same insertion path as ordinary creations.
 //! Graphs capture only their referenced columns, with shared buffers.
-//! `into_external` enables their insertion into the destination; local copies
-//! keep their references, with no extra dependencies in the model.
+//! `into_external` enables their insertion into the destination. A graph reads
+//! the copy for what is inside the copied subtree and the original otherwise
+//! (#391); the columns inside the subtree are never embedded.
+//! Calculations and transposed sheets whose ends are inside the subtree travel
+//! with it.
 
-use crate::{CoreResult, Node, NodeId, NodeKind, Tree, WindowMeta};
+use crate::{Calculation, CoreResult, Node, NodeId, NodeKind, TransposeLink, Tree, WindowMeta};
 use std::collections::HashSet;
 
 /// Content frozen at the moment of the Copy gesture, independent of the source project.
@@ -14,12 +17,70 @@ use std::collections::HashSet;
 pub struct NodeCopy {
     nodes: Vec<Node>,
     graph_data: Vec<(NodeId, NodeCopy)>,
+    /// Calculations whose output columns are inside the subtree.
+    calculations: Vec<(NodeId, Calculation)>,
+    /// Transposed sheets of the subtree whose source is inside it too.
+    transposes: Vec<(NodeId, TransposeLink)>,
     external: bool,
 }
 
 impl NodeCopy {
     /// Captures a valid subtree, in prefix order.
     pub fn capture(tree: &Tree, root: NodeId) -> CoreResult<Self> {
+        let mut copies = Self::capture_all(tree, &[root])?;
+        copies
+            .pop()
+            .ok_or_else(|| crate::CoreError::Structure("empty copy".into()))
+    }
+
+    /// Captures the roots of **one gesture**, one `NodeCopy` per root. What is
+    /// inside any of the roots counts as "inside" for all of them (#391, S1):
+    /// a graph never embeds a column of another root, and a calculation or a
+    /// transposed sheet whose ends are in different roots travels (with the
+    /// root that holds its first output, or its sheet). The roots must not be
+    /// nested.
+    pub fn capture_all(tree: &Tree, roots: &[NodeId]) -> CoreResult<Vec<Self>> {
+        let mut inside = HashSet::new();
+        for root in roots {
+            inside.extend(tree.walk(*root)?);
+        }
+        let mut copies = roots
+            .iter()
+            .map(|root| Self::capture_root(tree, *root, &inside))
+            .collect::<CoreResult<Vec<_>>>()?;
+        let owner = |column: &NodeId, copies: &[Self]| {
+            copies
+                .iter()
+                .position(|copy| copy.nodes.iter().any(|n| n.id() == *column))
+        };
+        for (id, calc) in tree.calculations() {
+            let existing: Vec<NodeId> = calc
+                .outputs
+                .iter()
+                .filter_map(|o| o.column)
+                // Only the outputs that still exist count: an output deleted
+                // from the sheet does not tie the calculation elsewhere.
+                .filter(|c| tree.node(*c).is_some())
+                .collect();
+            if existing.is_empty() || !existing.iter().all(|c| inside.contains(c)) {
+                continue;
+            }
+            if let Some(at) = owner(&existing[0], &copies) {
+                copies[at].calculations.push((*id, calc.as_ref().clone()));
+            }
+        }
+        for (sheet, link) in tree.transposes() {
+            if !inside.contains(sheet) || !inside.contains(&link.source) {
+                continue;
+            }
+            if let Some(at) = owner(sheet, &copies) {
+                copies[at].transposes.push((*sheet, link.as_ref().clone()));
+            }
+        }
+        Ok(copies)
+    }
+
+    fn capture_root(tree: &Tree, root: NodeId, inside: &HashSet<NodeId>) -> CoreResult<Self> {
         let nodes: Vec<Node> = tree
             .walk(root)?
             .into_iter()
@@ -53,6 +114,9 @@ impl NodeCopy {
                         }
                     }
                 }
+                // What is inside the copy reads the copy: no hidden workbook
+                // for it, even in an external paste.
+                referenced.retain(|column| !inside.contains(column));
                 let sheets: Vec<_> = tree
                     .walk_all()
                     .into_iter()
@@ -133,6 +197,8 @@ impl NodeCopy {
                     Self {
                         nodes: data,
                         graph_data: Vec::new(),
+                        calculations: Vec::new(),
+                        transposes: Vec::new(),
                         external: false,
                     },
                 ));
@@ -141,8 +207,20 @@ impl NodeCopy {
         Ok(Self {
             nodes,
             graph_data,
+            calculations: Vec::new(),
+            transposes: Vec::new(),
             external: false,
         })
+    }
+
+    /// Calculations carried by the copy, with their identifier in the source.
+    pub fn calculations(&self) -> &[(NodeId, Calculation)] {
+        &self.calculations
+    }
+
+    /// Transposed sheets carried by the copy, by transposed sheet.
+    pub fn transposes(&self) -> &[(NodeId, TransposeLink)] {
+        &self.transposes
     }
 
     /// Frozen dependencies of each graph, for inter-project transport.
@@ -189,4 +267,17 @@ impl NodeCopy {
     pub fn root(&self) -> &Node {
         &self.nodes[0]
     }
+}
+
+/// One root of a paste: the destination container, the captured copy and the
+/// name it takes there. `Project::insert_copies` inserts the items of one
+/// gesture with a single map of new identifiers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyInsertion {
+    /// Destination container.
+    pub parent: NodeId,
+    /// Values captured at copy time.
+    pub copy: NodeCopy,
+    /// Name chosen in the destination container.
+    pub name: String,
 }

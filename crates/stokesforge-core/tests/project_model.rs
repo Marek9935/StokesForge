@@ -1201,3 +1201,426 @@ fn worksheet_duplication_is_atomic_even_if_identifiers_are_exhausted() {
     assert!(project.duplicate_worksheet(demo.sheet, "Copy").is_err());
     assert_eq!(project.tree(), &before);
 }
+
+// -- copy of a folder (#391): what is inside the copy reads the copy --
+
+mod folder_copy {
+    use super::*;
+    use stokesforge_core::{
+        CalculationDraft, ColumnMeta, NodeCopy, OutputDraft, SeriesRef, SeriesResult,
+    };
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+
+    fn graph_spec(columns: &[NodeId]) -> PlotSpec {
+        let mut panel = PanelSpec::default();
+        for column in columns {
+            panel.series.push(SeriesSpec::new(*column));
+        }
+        PlotSpec::default().with_panels(Panels::one(panel))
+    }
+
+    fn graph_columns(project: &Project, graph: NodeId) -> Vec<NodeId> {
+        let NodeKind::Graph { spec, .. } = project.tree().node(graph).unwrap().kind() else {
+            panic!("graph");
+        };
+        spec.panels
+            .iter()
+            .flat_map(|p| &p.series)
+            .map(|s| s.y)
+            .collect()
+    }
+
+    fn sheet_of(project: &Project, book: NodeId) -> NodeId {
+        project.tree().children(book).unwrap()[0]
+    }
+
+    fn child(project: &Project, parent: NodeId, name: &str) -> NodeId {
+        *project
+            .tree()
+            .children(parent)
+            .unwrap()
+            .iter()
+            .find(|id| name_of(project, **id) == name)
+            .unwrap_or_else(|| panic!("no child {name}"))
+    }
+
+    fn column_of(project: &Project, book: NodeId, name: &str) -> NodeId {
+        child(project, sheet_of(project, book), name)
+    }
+
+    fn copy_folder(project: &mut Project, folder: NodeId, name: &str) -> NodeId {
+        let copy = NodeCopy::capture(project.tree(), folder).unwrap();
+        let parent = project.root();
+        project.insert_copy(parent, &copy, name).unwrap()
+    }
+
+    fn set_formula(project: &mut Project, column: NodeId, text: &str) {
+        let formula = project.tree().formula_from_letters(column, text).unwrap();
+        let mut meta: ColumnMeta = project
+            .tree()
+            .node(column)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        project.set_column_meta(column, meta).unwrap();
+    }
+
+    fn book_with(project: &mut Project, parent: NodeId, name: &str, columns: &[&str]) -> NodeId {
+        let book = project.add_workbook(parent, Some(name)).unwrap();
+        let sheet = sheet_of(project, book);
+        for column in columns {
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    Some(column),
+                    Column::from_f64(&[1.0, 2.0, 3.0]),
+                )
+                .unwrap();
+        }
+        book
+    }
+
+    #[test]
+    fn a_copied_graph_plots_the_copied_workbook() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder").unwrap();
+        let book = book_with(&mut project, folder, "Book1", &["A", "B"]);
+        let b = column_of(&project, book, "B");
+        let graph = project
+            .add_graph(folder, Some("Graph1"), graph_spec(&[b]))
+            .unwrap();
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        let copied_book = child(&project, copied, "Book1");
+        let copied_graph = child(&project, copied, "Graph1");
+        let copied_b = column_of(&project, copied_book, "B");
+        assert_eq!(graph_columns(&project, copied_graph), vec![copied_b]);
+        assert_ne!(copied_b, b);
+        // The original keeps reading the original.
+        assert_eq!(graph_columns(&project, graph), vec![b]);
+    }
+
+    #[test]
+    fn a_graph_placed_before_its_workbook_is_remapped_too() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder").unwrap();
+        let book = book_with(&mut project, folder, "Book1", &["A"]);
+        let a = column_of(&project, book, "A");
+        let graph = project
+            .add_graph(folder, Some("Graph1"), graph_spec(&[a]))
+            .unwrap();
+        // Graph first, workbook second.
+        project.move_node(graph, folder, 0).unwrap();
+        assert_eq!(project.tree().children(folder).unwrap()[0], graph);
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        let copied_a = column_of(&project, child(&project, copied, "Book1"), "A");
+        assert_eq!(
+            graph_columns(&project, child(&project, copied, "Graph1")),
+            vec![copied_a]
+        );
+    }
+
+    #[test]
+    fn a_graph_reading_a_workbook_outside_the_folder_keeps_the_original() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let outside = book_with(&mut project, root, "Outside", &["A"]);
+        let a = column_of(&project, outside, "A");
+        let folder = project.add_folder(root, "Folder").unwrap();
+        project
+            .add_graph(folder, Some("Graph1"), graph_spec(&[a]))
+            .unwrap();
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        assert_eq!(
+            graph_columns(&project, child(&project, copied, "Graph1")),
+            vec![a]
+        );
+    }
+
+    #[test]
+    fn formulas_read_the_copied_book_inside_and_the_original_outside() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder").unwrap();
+        let book1 = book_with(&mut project, folder, "Book1", &["A", "C", "D"]);
+        let book2 = book_with(&mut project, folder, "Book2", &["A"]);
+        let book3 = book_with(&mut project, root, "Book3", &["A"]);
+        let c = column_of(&project, book1, "C");
+        let d = column_of(&project, book1, "D");
+        set_formula(&mut project, c, "max([Book2]Sheet1!A)");
+        set_formula(&mut project, d, "max([Book3]Sheet1!A)");
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        let copied_book1 = child(&project, copied, "Book1");
+        let copied_book2 = child(&project, copied, "Book2");
+        let remote = |column: NodeId| {
+            project
+                .tree()
+                .node(column)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .meta()
+                .formula
+                .clone()
+                .unwrap()
+                .remote_sheets()
+        };
+        let read_by_c = remote(column_of(&project, copied_book1, "C"));
+        assert_eq!(
+            read_by_c.values().copied().collect::<Vec<_>>(),
+            vec![sheet_of(&project, copied_book2)]
+        );
+        let read_by_d = remote(column_of(&project, copied_book1, "D"));
+        assert_eq!(
+            read_by_d.values().copied().collect::<Vec<_>>(),
+            vec![sheet_of(&project, book3)]
+        );
+        // The original keeps its own.
+        let original_c = remote(c);
+        assert_eq!(
+            original_c.values().copied().collect::<Vec<_>>(),
+            vec![sheet_of(&project, book2)]
+        );
+    }
+
+    fn calculation_in(project: &mut Project, x: NodeId, y: NodeId) -> NodeId {
+        project
+            .add_calculation(CalculationDraft {
+                operation: stokesforge_analysis::ops::Operation::Correct {
+                    op: stokesforge_analysis::correct::CorrectOp::Divide,
+                },
+                series: vec![SeriesRef {
+                    x: Some(x),
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![1.0, 2.0, 3.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: true,
+                auto_recalc: true,
+                low_r2_dialog: true,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_calculation_inside_the_folder_gets_a_new_identity_and_the_copied_columns() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder").unwrap();
+        let book = book_with(&mut project, folder, "Book1", &["X", "Y"]);
+        let x = column_of(&project, book, "X");
+        let y = column_of(&project, book, "Y");
+        let original = calculation_in(&mut project, x, y);
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        let copied_sheet = sheet_of(&project, child(&project, copied, "Book1"));
+        let copied_x = child(&project, copied_sheet, "X");
+        let copied_y = child(&project, copied_sheet, "Y");
+        let calculations = project.tree().calculations();
+        assert_eq!(calculations.len(), 2);
+        let (new_id, calc) = calculations
+            .iter()
+            .find(|(id, _)| **id != original)
+            .unwrap();
+        assert!(new_id.raw() > original.raw());
+        assert_eq!(calc.series[0].x, Some(copied_x));
+        assert_eq!(calc.series[0].y, copied_y);
+        let output = calc.outputs[0].column.unwrap();
+        assert_eq!(project.tree().parent(output).unwrap(), Some(copied_sheet));
+        // The original calculation is untouched.
+        let first = &calculations[&original];
+        assert_eq!(first.series[0].y, y);
+    }
+
+    #[test]
+    fn a_transposed_sheet_and_its_source_inside_the_folder_stay_linked_together() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let folder = project.add_folder(root, "Folder").unwrap();
+        let book = project.add_workbook(folder, Some("Book1")).unwrap();
+        let source = sheet_of(&project, book);
+        for (i, data) in [[1.0, 2.0], [3.0, 4.0]].iter().enumerate() {
+            let mut column = Column::from_f64(data);
+            column.set_meta(ColumnMeta {
+                x_prime: Some(i as f64),
+                ..ColumnMeta::default()
+            });
+            project
+                .add_column(source, None, Some(&format!("S{i}")), column)
+                .unwrap();
+        }
+        let transposed = project.transpose_rows(source, &[0]).unwrap();
+        let copied = copy_folder(&mut project, folder, "Folder copy 1");
+        let copied_source = sheet_of(&project, child(&project, copied, "Book1"));
+        assert_ne!(copied_source, source);
+        let (copied_sheet, link) = project.tree().transposed_from(copied_source).unwrap();
+        assert_ne!(copied_sheet, transposed);
+        assert_eq!(link.source, copied_source);
+        assert_eq!(
+            project.tree().parent(copied_sheet).unwrap(),
+            project.tree().parent(copied_source).unwrap()
+        );
+        assert!(project.tree().contains(link.x_column));
+        assert_eq!(
+            project.tree().parent(link.x_column).unwrap(),
+            Some(copied_sheet)
+        );
+        assert!(link
+            .inputs
+            .iter()
+            .all(|i| project.tree().parent(i.column).unwrap() == Some(copied_source)));
+        // The original link is untouched.
+        assert_eq!(
+            project.tree().transposed_from(source).unwrap().0,
+            transposed
+        );
+        assert!(
+            !project
+                .tree()
+                .transpose_link(copied_sheet)
+                .unwrap()
+                .state(project.tree())
+                .stale
+        );
+    }
+    // -- one gesture, several roots (#391, S1) --
+
+    fn copy_roots(project: &mut Project, roots: &[NodeId], suffix: &str) -> Vec<NodeId> {
+        let copies = NodeCopy::capture_all(project.tree(), roots).unwrap();
+        let parent = project.root();
+        let items: Vec<_> = copies
+            .into_iter()
+            .map(|copy| {
+                let name = format!("{}{suffix}", copy.root().name());
+                stokesforge_core::CopyInsertion { parent, copy, name }
+            })
+            .collect();
+        project.insert_copies(&items).unwrap()
+    }
+
+    fn remote_sheets(project: &Project, column: NodeId) -> Vec<NodeId> {
+        project
+            .tree()
+            .node(column)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .meta()
+            .formula
+            .clone()
+            .unwrap()
+            .remote_sheets()
+            .values()
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn a_graph_copied_with_its_workbook_plots_the_copied_workbook() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let book = book_with(&mut project, root, "Book1", &["A", "B"]);
+        let b = column_of(&project, book, "B");
+        let graph = project
+            .add_graph(root, Some("Graph1"), graph_spec(&[b]))
+            .unwrap();
+        let copies = copy_roots(&mut project, &[book, graph], " copy");
+        let copied_b = column_of(&project, copies[0], "B");
+        assert_ne!(copied_b, b);
+        assert_eq!(graph_columns(&project, copies[1]), vec![copied_b]);
+        assert_eq!(graph_columns(&project, graph), vec![b]);
+    }
+
+    #[test]
+    fn a_graph_listed_before_its_workbook_in_the_gesture_is_remapped_too() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let book = book_with(&mut project, root, "Book1", &["B"]);
+        let b = column_of(&project, book, "B");
+        let graph = project
+            .add_graph(root, Some("Graph1"), graph_spec(&[b]))
+            .unwrap();
+        let copies = copy_roots(&mut project, &[graph, book], " copy");
+        let copied_b = column_of(&project, copies[1], "B");
+        assert_eq!(graph_columns(&project, copies[0]), vec![copied_b]);
+    }
+
+    #[test]
+    fn a_graph_copied_without_its_workbook_still_reads_the_original() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let book = book_with(&mut project, root, "Book1", &["B"]);
+        let other = book_with(&mut project, root, "Other", &["B"]);
+        let b = column_of(&project, book, "B");
+        let graph = project
+            .add_graph(root, Some("Graph1"), graph_spec(&[b]))
+            .unwrap();
+        let copies = copy_roots(&mut project, &[graph, other], " copy");
+        assert_eq!(graph_columns(&project, copies[0]), vec![b]);
+    }
+
+    #[test]
+    fn a_formula_reads_the_copied_book_of_the_gesture_and_the_original_outside() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let book1 = book_with(&mut project, root, "Book1", &["A", "C", "D"]);
+        let book2 = book_with(&mut project, root, "Book2", &["A"]);
+        let book3 = book_with(&mut project, root, "Book3", &["A"]);
+        let c = column_of(&project, book1, "C");
+        let d = column_of(&project, book1, "D");
+        set_formula(&mut project, c, "max([Book2]Sheet1!A)");
+        set_formula(&mut project, d, "max([Book3]Sheet1!A)");
+        let copies = copy_roots(&mut project, &[book1, book2], " copy");
+        let read_by_c = remote_sheets(&project, column_of(&project, copies[0], "C"));
+        assert_eq!(read_by_c, vec![sheet_of(&project, copies[1])]);
+        let read_by_d = remote_sheets(&project, column_of(&project, copies[0], "D"));
+        assert_eq!(read_by_d, vec![sheet_of(&project, book3)]);
+        assert_eq!(remote_sheets(&project, c), vec![sheet_of(&project, book2)]);
+    }
+
+    #[test]
+    fn a_calculation_between_two_roots_of_the_gesture_links_the_copies() {
+        let mut project = Project::new("P").unwrap();
+        let root = project.root();
+        let book1 = book_with(&mut project, root, "Book1", &["X", "Y"]);
+        let book2 = book_with(&mut project, root, "Book2", &["Z"]);
+        let x = column_of(&project, book1, "X");
+        let y = column_of(&project, book1, "Y");
+        let original = calculation_in(&mut project, x, y);
+        // The output column lives in Book2.
+        let output = project.tree().calculations()[&original].outputs[0]
+            .column
+            .unwrap();
+        let sheet2 = sheet_of(&project, book2);
+        project.move_node(output, sheet2, 0).unwrap();
+        let copies = copy_roots(&mut project, &[book1, book2], " copy");
+        let (_, calc) = project
+            .tree()
+            .calculations()
+            .iter()
+            .find(|(id, _)| **id != original)
+            .expect("the calculation travels with the gesture");
+        assert_eq!(calc.series[0].y, column_of(&project, copies[0], "Y"));
+        let copied_output = calc.outputs[0].column.unwrap();
+        assert_eq!(
+            project.tree().parent(copied_output).unwrap(),
+            Some(sheet_of(&project, copies[1]))
+        );
+        // Copying only Book1 leaves the calculation with the original.
+        let before = project.tree().calculations().len();
+        copy_roots(&mut project, &[book1], " again");
+        assert_eq!(project.tree().calculations().len(), before);
+    }
+}

@@ -210,6 +210,18 @@ pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord
     map_to_records(tree.calculations(), Some(tree))
 }
 
+/// The calculations travelling with a copy (#391), without input fingerprint:
+/// the receiving project computes its own.
+pub(crate) fn copied_calculations_to_records(
+    calculations: &[(NodeId, Calculation)],
+) -> Vec<CalculationRecord> {
+    let map: BTreeMap<NodeId, Arc<Calculation>> = calculations
+        .iter()
+        .map(|(id, calc)| (*id, Arc::new(calc.clone())))
+        .collect();
+    map_to_records(&map, None)
+}
+
 /// `digest_in`: the tree where to read the inputs to write their fingerprint
 /// (`None` for the correction traces, which do not go stale).
 fn map_to_records(

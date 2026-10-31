@@ -248,3 +248,229 @@ fn external_graph_with_line_series_carries_the_x_prime_columns_of_the_sheet() {
     assert_eq!(series.x.as_ref().unwrap().as_slice(), [0.0, 10.0]);
     assert_eq!(series.y.as_ref().unwrap().as_slice(), [1.0, 2.0]);
 }
+
+/// #391: a folder travels whole (subfolder, workbook, graph, note, calculation)
+/// and comes back with the same tree and the calculation kept.
+#[test]
+fn a_folder_with_a_calculation_survives_the_transport() {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult};
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let folder = source.add_folder(root, "Folder").unwrap();
+    source.add_folder(folder, "Inner").unwrap();
+    let book = source.add_workbook(folder, Some("Book1")).unwrap();
+    let sheet = source.tree().children(book).unwrap()[0];
+    let x = source
+        .add_column(sheet, None, Some("X"), Column::from_f64(&[1.0, 2.0, 3.0]))
+        .unwrap();
+    let y = source
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&[4.0, 5.0, 6.0]))
+        .unwrap();
+    source.add_note(folder, Some("Note1"), "hello").unwrap();
+    let mut panel = PanelSpec::default();
+    panel.series.push(SeriesSpec::new_xy(x, y));
+    source
+        .add_graph(
+            folder,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(Panels::one(panel)),
+        )
+        .unwrap();
+    source
+        .add_calculation(CalculationDraft {
+            operation: Operation::Correct {
+                op: CorrectOp::Divide,
+            },
+            series: vec![SeriesRef {
+                x: Some(x),
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: vec![OutputDraft {
+                series: 0,
+                key: "corrected".into(),
+                index: None,
+                meta: ColumnMeta::default(),
+                data: vec![1.0, 2.0, 3.0],
+            }],
+            results: vec![SeriesResult::default()],
+            keep_results: true,
+            auto_recalc: true,
+            low_r2_dialog: true,
+        })
+        .unwrap();
+    let copy = NodeCopy::capture(source.tree(), folder).unwrap();
+    assert_eq!(copy.calculations().len(), 1);
+    let (_, copies) =
+        decode_objects(&encode_objects("source", std::slice::from_ref(&copy)).unwrap()).unwrap();
+    assert_eq!(copies[0].nodes().len(), copy.nodes().len());
+    assert_eq!(copies[0].calculations().len(), 1);
+    assert!(copies[0].graph_data().is_empty());
+    // Same origin: pasted as a local copy, the calculation reads the copy.
+    let pasted = source
+        .insert_copy(root, &copies[0], "Folder copy 1")
+        .unwrap();
+    assert_eq!(
+        source.tree().walk(pasted).unwrap().len(),
+        copy.nodes().len()
+    );
+    assert_eq!(source.tree().calculations().len(), 2);
+}
+
+/// #391, external paste: a graph reads the pasted workbook with no hidden
+/// workbook; a formula reading outside the folder is `#REF`; a calculation
+/// that reads outside the folder is dropped (plain columns).
+#[test]
+fn an_external_folder_paste_reads_its_own_workbook_and_reserves_what_is_outside() {
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let outside = source.add_workbook(root, Some("Outside")).unwrap();
+    let outside_sheet = source.tree().children(outside).unwrap()[0];
+    source
+        .add_column(outside_sheet, None, Some("A"), Column::from_f64(&[9.0]))
+        .unwrap();
+    let folder = source.add_folder(root, "Folder").unwrap();
+    let book = source.add_workbook(folder, Some("Book1")).unwrap();
+    let sheet = source.tree().children(book).unwrap()[0];
+    let a = source
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
+        .unwrap();
+    let f = source
+        .add_column(sheet, None, Some("F"), Column::from_f64(&[0.0]))
+        .unwrap();
+    let formula = source
+        .tree()
+        .formula_from_letters(f, "max([Outside]Sheet1!A)")
+        .unwrap();
+    let mut meta = source
+        .tree()
+        .node(f)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.formula = Some(formula);
+    source.set_column_meta(f, meta).unwrap();
+    let mut panel = PanelSpec::default();
+    panel.series.push(SeriesSpec::new(a));
+    source
+        .add_graph(
+            folder,
+            Some("Graph1"),
+            PlotSpec::default().with_panels(Panels::one(panel)),
+        )
+        .unwrap();
+    let copy = NodeCopy::capture(source.tree(), folder).unwrap();
+    // The column read from inside the folder is not embedded.
+    assert!(copy.graph_data().is_empty());
+    let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
+    let mut target = Project::new("Target").unwrap();
+    let root = target.root();
+    let pasted = target
+        .insert_copy(root, &copies[0].clone().into_external(), "Folder copy 1")
+        .unwrap();
+    let books: Vec<_> = target
+        .tree()
+        .walk_all()
+        .into_iter()
+        .filter(|id| {
+            matches!(
+                target.tree().node(*id).unwrap().kind(),
+                NodeKind::Workbook { .. }
+            )
+        })
+        .collect();
+    assert_eq!(books.len(), 1, "no hidden workbook for what is inside");
+    let find = |parent, name: &str| {
+        *target
+            .tree()
+            .children(parent)
+            .unwrap()
+            .iter()
+            .find(|id| target.tree().node(**id).unwrap().name() == name)
+            .unwrap()
+    };
+    let pasted_sheet = target.tree().children(find(pasted, "Book1")).unwrap()[0];
+    let pasted_a = find(pasted_sheet, "A");
+    let NodeKind::Graph { spec, .. } = target.tree().node(find(pasted, "Graph1")).unwrap().kind()
+    else {
+        panic!("graph");
+    };
+    assert_eq!(spec.panels[0].series[0].y, pasted_a);
+    let pasted_f = find(pasted_sheet, "F");
+    assert!(
+        target.tree().formula_has_deleted_reference(pasted_f),
+        "a formula reading outside the folder is #REF"
+    );
+}
+
+/// #391, S1: a graph copied with its workbook in one gesture reads the pasted
+/// workbook after an external paste, with no hidden workbook for it; the
+/// graph of the same gesture that plots a workbook left out still embeds it.
+#[test]
+fn an_external_paste_of_a_workbook_and_its_graph_reads_the_pasted_workbook() {
+    use stokesforge_core::CopyInsertion;
+    use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
+    let mut source = Project::new("Source").unwrap();
+    let root = source.root();
+    let mut books = Vec::new();
+    for name in ["Book1", "Left out"] {
+        let book = source.add_workbook(root, Some(name)).unwrap();
+        let sheet = source.tree().children(book).unwrap()[0];
+        let column = source
+            .add_column(sheet, None, Some("B"), Column::from_f64(&[3.0, 4.0]))
+            .unwrap();
+        books.push((book, column));
+    }
+    let graph_of = |source: &mut Project, name: &str, column| {
+        let mut panel = PanelSpec::default();
+        panel.series.push(SeriesSpec::new(column));
+        source
+            .add_graph(
+                root,
+                Some(name),
+                PlotSpec::default().with_panels(Panels::one(panel)),
+            )
+            .unwrap()
+    };
+    let graph = graph_of(&mut source, "Graph1", books[0].1);
+    let stray = graph_of(&mut source, "Graph2", books[1].1);
+    let copies = NodeCopy::capture_all(source.tree(), &[books[0].0, graph, stray]).unwrap();
+    // The embedded data of Graph1 would be the columns of its own workbook.
+    assert!(copies[1].graph_data().is_empty());
+    assert_eq!(copies[2].graph_data().len(), 1);
+    let (_, decoded) = decode_objects(&encode_objects("source", &copies).unwrap()).unwrap();
+    assert!(decoded[1].graph_data().is_empty());
+    assert_eq!(decoded[2].graph_data().len(), 1);
+
+    let mut destination = Project::new("Destination").unwrap();
+    let parent = destination.root();
+    // Shift the identifiers so that the two projects do not coincide.
+    destination.add_workbook(parent, Some("Existing")).unwrap();
+    let items: Vec<_> = decoded
+        .into_iter()
+        .map(NodeCopy::into_external)
+        .map(|copy| {
+            let name = copy.root().name().to_string();
+            CopyInsertion { parent, copy, name }
+        })
+        .collect();
+    let roots = destination.insert_copies(&items).unwrap();
+    // Existing, Book1, Graph1, Graph2 and one hidden workbook for Graph2 only.
+    assert_eq!(destination.tree().children(parent).unwrap().len(), 5);
+    let pasted_column = destination.tree().walk(roots[0]).unwrap()[2];
+    let series_column = |graph| {
+        let NodeKind::Graph { spec, .. } = destination.tree().node(graph).unwrap().kind() else {
+            panic!("graph")
+        };
+        spec.panels[0].series[0].y
+    };
+    assert_eq!(series_column(roots[1]), pasted_column);
+    assert_ne!(series_column(roots[2]), pasted_column);
+}

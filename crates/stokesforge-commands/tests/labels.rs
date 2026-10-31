@@ -84,10 +84,11 @@ fn rank(command: &Command) -> usize {
         Command::RestoreOriginalData { .. } => 30,
         Command::TransposeRows { .. } => 31,
         Command::RecalculateTranspose { .. } => 32,
+        Command::InsertCopies { .. } => 33,
     }
 }
 
-const VARIANTS: usize = 33;
+const VARIANTS: usize = 34;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -109,6 +110,16 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 parent: root,
                 copy: stokesforge_core::NodeCopy::capture(w.project.tree(), w.book).unwrap(),
                 name: "Copy".into(),
+            },
+            HistoryLabel::Macro(MacroKind::PasteObjects),
+        ),
+        (
+            Command::InsertCopies {
+                items: vec![stokesforge_core::CopyInsertion {
+                    parent: root,
+                    copy: stokesforge_core::NodeCopy::capture(w.project.tree(), w.book).unwrap(),
+                    name: "Copy".into(),
+                }],
             },
             HistoryLabel::Macro(MacroKind::PasteObjects),
         ),

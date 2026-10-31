@@ -359,7 +359,6 @@ impl StokesForgeApp {
                         super::project_manager::ObjectMenuTarget::Windows,
                         &ids,
                         super::project_manager::paste_parent(&self.pm_selection, root),
-                        super::project_manager::selection_has_folder(&self.pm_selection),
                         actions,
                         rename_viewport,
                     );
