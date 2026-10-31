@@ -132,7 +132,7 @@ children_of() {
         list="$SF_ISSUES_JSON"
     else
         list="$tmpf"
-        glab issue list --search "#$n" --per-page 100 -F json > "$list" 2> /dev/null || echo '[]' > "$list"
+        glab issue list --per-page 100 -O json > "$list" 2> /dev/null || echo '[]' > "$list"
     fi
     if [ -n "${!var+x}" ]; then body="${!var}"
     elif [ -n "${SF_ISSUES_JSON:-}" ]; then body=""
