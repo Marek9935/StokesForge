@@ -61,6 +61,22 @@ short_of() {
         { n = (NF < 3) ? NF : 3; while (n > 1 && (tolower($n) in small)) n--; s = $1; for (i = 2; i <= n; i++) s = s " " $i; print s }'
 }
 
+# A one-word prefix before a colon is a domain ("Workflow: every message…"):
+# keep it and add the first words after the colon, so the name says something.
+name_of() {
+    local head rest
+    head="$(short_of "$1")"
+    case "$1" in
+    *:*) rest="${1#*:}" ;;
+    *) rest="" ;;
+    esac
+    if [ -n "$rest" ] && [ "$(printf '%s' "$head" | wc -w)" -eq 1 ]; then
+        printf '%s %s\n' "$head" "$(short_of "$(printf '%s' "$rest" | sed 's/^ *//')" | awk '{ print $1 (NF > 1 ? " " $2 : "") }')"
+    else
+        printf '%s\n' "$head"
+    fi
+}
+
 all_taken() {
     local all=""
     for c in "${SF_COLOURS[@]}"; do all="$all$c"; done
@@ -116,7 +132,7 @@ for n in "${issues[@]}"; do
         fi
     fi
     [ -n "$colour" ] || colour="?"
-    names+=("$colour #$n $(short_of "$title")")
+    names+=("$colour #$n $(name_of "$title")")
     wts+=("$wt")
     brs+=("$branch")
 done
@@ -126,13 +142,18 @@ echo "Work package briefing (scripts/chantier.sh); the tag goes in forms, the To
 for i in "${!names[@]}"; do
     echo "  ${names[$i]}  worktree ${wts[$i]}  branch ${brs[$i]}"
 done
+tags=""
+for x in "${names[@]}"; do tags="${tags:+$tags · }$x"; done
+# The user tells parallel terminals apart by this tag, without reading (#418).
+echo "Start EVERY message to the user with: $tags"
+echo "To-test page: $SF_TO_TEST_URL"
 cat <<'EOF'
 Several issues: one worktree each, one session. Never work in another worktree.
 Steps, in order:
  1. Read each issue, ALL its comments, the sibling issues, `git worktree list`
     (stokesforge-feature, section 1).
  2. Register the work package in the `chantiers` collection of the To-test page
-    (URL in stokesforge-verification/references/to-test-page.md).
+    (link above; procedure in stokesforge-verification/references/to-test-page.md).
  3. One start decision form for all open decisions, cards tagged with the issue's
     square (stokesforge-bug-report/references/decision-form.md).
  4. Agent `perimetre`, then Sonnet implements in the worktree (CLAUDE.md, "Delegation").
