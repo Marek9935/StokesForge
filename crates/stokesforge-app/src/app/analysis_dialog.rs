@@ -163,17 +163,14 @@ fn values_panel(
                 );
             }
             if outcome.pending {
-                ui.label(egui::RichText::new(tr!("analysis-calculating")).weak());
+                ui.label(theme::dimmed_text(tr!("analysis-calculating")));
                 return;
             }
             if outcome.skipped > 0 {
-                ui.label(
-                    egui::RichText::new(tr!(
-                        "analysis-skipped-rows",
-                        count = i64::try_from(outcome.skipped).unwrap_or(i64::MAX)
-                    ))
-                    .weak(),
-                );
+                ui.label(theme::secondary_text(tr!(
+                    "analysis-skipped-rows",
+                    count = i64::try_from(outcome.skipped).unwrap_or(i64::MAX)
+                )));
             }
             for value in &outcome.values {
                 value_row(
@@ -377,13 +374,10 @@ pub(super) fn calculation_delete_window(
         |ui| {
             ui.label(tr!("analysis-delete-confirm", name = name.as_str()));
             ui.add_space(crate::theme::SPACE_ITEM);
-            ui.label(
-                egui::RichText::new(tr!(
-                    "analysis-delete-columns",
-                    count = i64::try_from(columns).unwrap_or(i64::MAX)
-                ))
-                .weak(),
-            );
+            ui.label(theme::secondary_text(tr!(
+                "analysis-delete-columns",
+                count = i64::try_from(columns).unwrap_or(i64::MAX)
+            )));
         },
     );
     if with_columns {

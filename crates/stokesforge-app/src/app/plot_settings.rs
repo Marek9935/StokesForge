@@ -948,7 +948,7 @@ fn offset_rows(
         }
     }
     if layout.is_some_and(|layout| spec.fixed_figure && layout.fixed_overflow) {
-        form.note(tr!("status-figure-grew"));
+        form.note_dimmed(tr!("status-figure-grew"));
     }
     commit
 }

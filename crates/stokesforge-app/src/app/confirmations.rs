@@ -67,7 +67,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             PlainSize::Class(SizeClass::Small),
             |ui| {
                 ui.label(tr!("alert-session-lost"));
-                ui.label(egui::RichText::new(&alert.message).weak());
+                ui.label(crate::theme::secondary_text(&alert.message));
             },
         );
         if outcome != DialogOutcome::Open {
@@ -103,7 +103,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             (&action.0, &action.1),
             |ui| {
                 ui.label(intro);
-                ui.label(egui::RichText::new(&alert.message).weak());
+                ui.label(crate::theme::secondary_text(&alert.message));
             },
         ) {
             AlertOutcome::Open => {}

@@ -12,7 +12,7 @@ pub(super) fn empty_state(ui: &mut egui::Ui, text: impl Into<String>) {
     let text = text.into();
     ui.vertical_centered(|ui| {
         ui.add_space(theme::SPACE_SECTION);
-        ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+        ui.add(egui::Label::new(theme::dimmed_text(text)).wrap());
     });
 }
 

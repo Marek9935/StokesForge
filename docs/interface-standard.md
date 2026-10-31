@@ -99,7 +99,7 @@ mechanics.
 | S-L3 | `titre-de-section-entre-blocs` | A section heading between two blocks, never a rule line alone. |
 | S-L4 | `deux-espacements` | Two spacing constants in `theme.rs`; no numeric `add_space` elsewhere. |
 | S-L5 | `pas-de-section-repliable` | No collapsible section in a form; too long, switch to tabs. Only exception: the "Advanced" block (S-L8). |
-| S-L6 | `trois-niveaux-de-texte` | Three text levels named in `theme.rs`: section heading, table header, secondary text; never `bold(…).small()` written in place. |
+| S-L6 | `quatre-niveaux-de-texte` | Four text levels named in `theme.rs`: section heading, table header, secondary text (slightly smaller than body, 11 pt), dimmed text; never `bold(…).small()` nor `.weak()` written in place. |
 | S-L7 | `hauteur-de-ligne-unique` | A list or tree row has a single height, `LIST_ROW_HEIGHT`, composed or not. |
 | S-L8 | `bloc-avance-replie` | Settings that are almost never touched, all Auto by default, go in a collapsible "Advanced" block, closed by default, at the bottom of their section; never a common setting nor one without Auto. |
 | S-L9 | `onglets-secondaires-a-gauche` | One level of tabs: the strip is on top. Two levels: the primary tabs are horizontal on top, the secondary tabs vertical at the left of the content; the secondary strip stays fixed, only the content scrolls. |
@@ -160,6 +160,7 @@ two rules above:
 | "framed texts" building block (`app/form.rs`: `toggle_texts`) | toggle exclusive choice, rounded frame around each label (active: solid accent fill; inactive: outline only); reserved for the gesture row of the analysis preview (exception S-K7) | **in place** (#270) |
 | page scroll area (`theme::page_scroll_area`) + guard: no raw scroll area without justification (`no_raw_scroll_area_without_justification`, witness `the_scroll_area_guard_sees_a_bare_area`) | end margin `SPACE_SECTION` under the last control of a scrolling page; trees, tables, canvas: `// RAW-SCROLL(#347)` | **in place** (#347) |
 | guard: no literal `add_space` outside `theme.rs` (`no_literal_add_space_outside_the_theme`) | | **in place** (#227) |
+| guard: no `.weak()` outside `theme.rs` (`no_weak_outside_the_theme`) | | **in place** (#392) |
 | message area of the footer of `modal_dialog_with`, initial focus, remembered size, `modal_wizard`, `modal_live_settings`, `modal_read_only` | button order, error and reason in the footer, Esc, S-F8, S-F9 | **in place** (#228) |
 | window nature (`app/dialogs.rs`: `DialogNature`, `SizeClass`, `InteractiveSize`, `PlainSize`, `DialogFooter::always` / `gated`) | footer, size class, initial focus and default button imposed by exhaustive `match` (S-F11) | **in place** (#300) |
 | guard: no free size without justification (`no_free_size_without_justification`, witness `the_sizes_guard_sees_a_bare_free_size`) | `InteractiveSize::Free` refused without the marker `// FREE-SIZE(#300): <justification>` (S-F11) | **in place** (#300) |
@@ -522,9 +523,15 @@ How it is held (`app/dialogs.rs`, all through the same `modal_frame` body):
   (Preferences); **`modal_read_only`**: `[message] [Close]` (metadata of a
   column). A gesture of a read-only window ("Use as x'") stays a
   button of its content.
-- **Dimmed text (`.weak()`)**: reserved for what is secondary — technical
-  detail under a sentence (the system error of a failed save), reason,
-  help, empty state. Never the **main content** of a dialog or of a
+- **Dimmed text**: reserved for what is secondary, in two named functions of
+  `theme.rs` (`.weak()` is written nowhere else, `no_weak_outside_the_theme`,
+  #392). `theme::secondary_text` (slightly smaller than body, 11 pt, muted): help under a field,
+  reason of a disabled button, technical detail under a sentence (the system
+  error of a failed save). `theme::dimmed_text` (normal size, muted, not
+  bold): empty state, "Calculating…", the label beside a result, a menu
+  sub-group title. The header rows of the worksheet (x', Long Name, Units,
+  Comments, F(x)) are no longer dimmed: their text is in normal colour, only the
+  row labels on the left keep the gutter colour. Never the **main content** of a dialog or of a
   read-only window: what the user must read (the low R² counters,
   a status message to remember) is in normal text. The grey of egui has
   low contrast on a light background; when in doubt, normal text.
@@ -689,10 +696,11 @@ History: #226.
   (`theme::page_scroll_area` inside the column at the right of the strip).
   Examples: Preferences (rubrics on top, Display sub-tabs at the left), Graph
   Properties › Axes (Bottom, Left, Right, Top at the left, under the main tabs).
-- **Three text levels** (S-L6, #170): `theme::section_heading` (section
+- **Four text levels** (S-L6, #170, #392): `theme::section_heading` (section
   heading, bold), `theme::table_header` (column header of a table, bold
-  in small size), `theme::secondary_text` (dimmed, small size). Guard
-  `no_small_bold_outside_the_theme`.
+  in small size), `theme::secondary_text` (dimmed, slightly smaller than body, 11 pt),
+  `theme::dimmed_text` (dimmed, normal size). Guards
+  `no_small_bold_outside_the_theme` and `no_weak_outside_the_theme`.
 - **A single row height** (S-L7, #170): `list_row::LIST_ROW_HEIGHT`
   (24 pt) for `list_row` and for the composed rows of the Object Manager, the
   Project Manager (folder included) and the series list.
@@ -702,8 +710,9 @@ How it is held:
 
 - **`app/form.rs`**: `form(ui, sel, |rows| …)` opens the grid; `Form::row`
   (label + field, the "?" icon after the field), `Form::field` (field column
-  without a label), `Form::checkbox`, `Form::color`, `Form::note` (dimmed
-  plain text), `Form::section` (heading across the full width), `Form::enabled`
+  without a label), `Form::checkbox`, `Form::color`, `Form::note` (help,
+  `secondary_text`: slightly smaller than body, 11 pt), `Form::note_dimmed` (`dimmed_text`: normal
+  size, for an empty state or a warning), `Form::section` (heading across the full width), `Form::enabled`
   (disabled rows, S-G4), `Form::ui` (table or list across the full width).
   The label column takes the width of the longest, measured on the previous
   frame; a frame in which it changes is redone (`request_discard`).

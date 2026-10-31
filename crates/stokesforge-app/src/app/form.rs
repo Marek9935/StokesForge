@@ -155,7 +155,20 @@ impl Form<'_> {
         self.ui.horizontal_top(|ui| {
             ui.add_space(indent);
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+                ui.add(egui::Label::new(theme::secondary_text(text)).wrap());
+            });
+        });
+    }
+
+    /// Like [`Form::note`], but at body size ([`theme::dimmed_text`]): for an
+    /// empty state or a warning in the fields column rather than a help.
+    pub(super) fn note_dimmed(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        let indent = self.indent();
+        self.ui.horizontal_top(|ui| {
+            ui.add_space(indent);
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new(theme::dimmed_text(text)).wrap());
             });
         });
     }

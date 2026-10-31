@@ -1420,7 +1420,7 @@ fn header_field_widget(
         }
         ui.put(
             rect,
-            egui::Label::new(egui::RichText::new(text).weak())
+            egui::Label::new(egui::RichText::new(text))
                 .selectable(false)
                 .truncate(),
         );
@@ -5782,6 +5782,41 @@ mod tests {
         });
         assert!(!framed, "no red frame");
         assert_no_grid_line_under(&bench, tint);
+    }
+
+    /// #392: the text typed in a header-row field is in the normal colour,
+    /// not dimmed; the row label on the left keeps the gutter colour.
+    #[test]
+    fn header_row_field_text_is_normal_and_the_row_label_keeps_the_gutter_colour() {
+        let mut bench = Bench::new();
+        let column = bench.columns[0];
+        bench.state.begin_header_edit(column, HeaderField::LongName);
+        bench.state.header_editing_mut().expect("editing").buffer = "Wavelength".to_string();
+        bench.state.commit_header_edit();
+        for _ in 0..4 {
+            bench.image(Vec::new());
+        }
+        let color_of = |text: &str| {
+            bench
+                .last_frame
+                .as_ref()
+                .unwrap()
+                .shapes
+                .iter()
+                .find_map(|painted| match &painted.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text == text => {
+                        Some(shape.galley.job.sections[0].format.color)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{text:?} not painted"))
+        };
+        let weak = bench.context.global_style().visuals.weak_text_color();
+        assert_ne!(color_of("Wavelength"), weak, "the field text is not dimmed");
+        assert_eq!(
+            color_of(&tr!("column-long-name")),
+            theme::gutter_text_color()
+        );
     }
 
     /// The icon is gone as soon as the edit ends: no leftover layer.

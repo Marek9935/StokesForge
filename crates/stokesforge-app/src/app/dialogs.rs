@@ -1201,7 +1201,7 @@ fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
         Some(FooterMessage::Error(error)) => {
             egui::RichText::new(error).color(ui.visuals().error_fg_color)
         }
-        Some(FooterMessage::Reason(reason)) => egui::RichText::new(reason).weak(),
+        Some(FooterMessage::Reason(reason)) => crate::theme::secondary_text(reason),
         None => return,
     };
     ui.add(egui::Label::new(text).truncate());

@@ -136,8 +136,10 @@ stays at normal weight, without error.
 Three named text levels (#170, S-L6), in `theme.rs`: the section
 title (`section_heading`, bold at normal size; `section_title` places it with
 its space), the column header of a table (`table_header`, bold at small
-size: import preview, results, formula memo) and the secondary text
-(`secondary_text`, muted at small size). A bold at small size written
+size: import preview, results, formula memo) the secondary text
+(`secondary_text`, muted at small size) and the dimmed text (`dimmed_text`,
+muted at normal size: empty state, "Calculating…", label beside a result).
+`.weak()` written in place is refused (`no_weak_outside_the_theme`, #392). A bold at small size written
 in place (`bold(…).small()`) is refused (`no_small_bold_outside_the_theme`). A
 list row (`list_row`) and any composed row (checkbox, swatch,
 label) have the same height, `list_row::LIST_ROW_HEIGHT` (S-L7): the

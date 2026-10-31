@@ -132,10 +132,12 @@ impl FieldWidth {
     }
 }
 
-/// The **three text levels** of the interface (#170, point 10); no other
+/// The **four text levels** of the interface (#170, point 10, #392); no other
 /// is written by hand. Level 1 is the section title ([`section_heading`]),
 /// level 2 the column header of a table ([`table_header`]), level 3
-/// the secondary text ([`secondary_text`]). Combining `bold(` and `.small()` outside
+/// the secondary text ([`secondary_text`]), level 4 the dimmed text
+/// ([`dimmed_text`]). `.weak()` is written only in this module
+/// (`no_weak_outside_the_theme`, `tests/guards.rs`). Combining `bold(` and `.small()` outside
 /// this module is refused (`no_small_bold_outside_the_theme`, `tests/guards.rs`).
 ///
 /// Level 1: the text of a section title, in [`bold`] at body size.
@@ -150,10 +152,22 @@ pub fn table_header(text: impl Into<String>) -> egui::RichText {
     bold(text).small()
 }
 
-/// Level 3: the secondary text (detail, help), muted and in small text. The
-/// usage rules are those of muted text (`docs/interface-standard.md`).
+/// Size of the secondary text: one step under the body (12.5 pt). egui's
+/// `TextStyle::Small` (9 pt, 72 % of the body) was too small to read (#392 trial).
+pub const SECONDARY_TEXT_SIZE: f32 = 11.0;
+
+/// Level 3: the secondary text (detail, help), muted and slightly smaller than
+/// body ([`SECONDARY_TEXT_SIZE`]). The usage rules are those of muted text
+/// (`docs/interface-standard.md`).
 pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text).small().weak()
+    egui::RichText::new(text).size(SECONDARY_TEXT_SIZE).weak()
+}
+
+/// Level 4: the dimmed text, muted but at body size and not bold: empty
+/// states, "Calculating…", the label beside a result, a menu sub-group title.
+/// Help under a field stays [`secondary_text`].
+pub fn dimmed_text(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).weak()
 }
 
 /// **The** section title of a form (graph properties, import wizard…):
@@ -758,17 +772,25 @@ mod tests {
         let section = job(section_heading("x"));
         let header = job(table_header("x"));
         let secondary = job(secondary_text("x"));
+        let dimmed = job(dimmed_text("x"));
         assert_eq!(section.sections[0].format.coords, bold_variations());
         assert_eq!(header.sections[0].format.coords, bold_variations());
         assert_ne!(secondary.sections[0].format.coords, bold_variations());
         assert_eq!(section.sections[0].format.font_id.size, body);
         assert!(header.sections[0].format.font_id.size < body);
-        assert!(secondary.sections[0].format.font_id.size < body);
+        let small = egui::Style::default().text_styles[&egui::TextStyle::Small].size;
+        let secondary_size = secondary.sections[0].format.font_id.size;
+        assert_eq!(secondary_size, SECONDARY_TEXT_SIZE);
+        assert!(small < secondary_size && secondary_size < body);
         // Only the secondary is muted: the other two keep the fallback
         // color (`PLACEHOLDER`), resolved at paint time.
         assert_eq!(section.sections[0].format.color, Color32::PLACEHOLDER);
         assert_eq!(header.sections[0].format.color, Color32::PLACEHOLDER);
         assert_ne!(secondary.sections[0].format.color, Color32::PLACEHOLDER);
+        // The dimmed text is muted like the secondary, but at body size, not bold.
+        assert_ne!(dimmed.sections[0].format.coords, bold_variations());
+        assert_eq!(dimmed.sections[0].format.font_id.size, body);
+        assert_ne!(dimmed.sections[0].format.color, Color32::PLACEHOLDER);
     }
 
     /// `section_title` relies on level 1: same weight, same size.
