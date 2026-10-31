@@ -1062,3 +1062,61 @@ fn the_backends_agree_on_a_fixed_figure_with_a_title_and_top() {
     assert_eq!(drawn.panels[0].pixel_origin, (120, 110));
     assert_eq!(drawn.panels[0].pixel_size, (500, 250));
 }
+
+/// #398: a free figure (two overlapping-in-height cells, one left of the
+/// origin, a graph title, fractional frames) is the same figure on screen and
+/// in the export, primitive by primitive, at its own size and scaled.
+#[test]
+fn the_backends_agree_on_a_free_figure() {
+    use stokesforge_plot::{FreeFrame, LayerPlacement};
+    let mut fixture = minimal();
+    fixture.spec.title = "Free figure".to_owned();
+    let mut second = fixture.spec.panels[0].clone();
+    second.column = 1;
+    let mut panels: Vec<_> = fixture.spec.panels.iter().cloned().collect();
+    panels.push(second);
+    let frame = |left, top, width, height| {
+        Some(FreeFrame {
+            left,
+            top,
+            width,
+            height,
+        })
+    };
+    panels[0].free_frame = frame(-80.4, 20.3, 310.6, 200.5);
+    panels[1].free_frame = frame(330.7, 70.2, 240.4, 150.9);
+    fixture.spec.panels = stokesforge_plot::Panels::new(panels);
+    fixture.spec.layer_placement = LayerPlacement::Free;
+    let measurer = TextMeasurer::default();
+    let choice = stokesforge_render_svg::FontChoice::default();
+    let layout =
+        stokesforge_render_svg::figure_layout(&fixture.spec, &measurer, &choice).expect("layout");
+    assert_eq!(layout.placement, LayerPlacement::Free);
+    let (_, drawn) = agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        layout.size,
+        "free figure",
+    );
+    for (cell, panel) in layout.free_cells.iter().zip(&drawn.panels) {
+        assert_eq!(
+            panel.pixel_origin,
+            (
+                cell.frame.0 as i32,
+                (cell.frame.1 - layout.title_band + drawn.title_height) as i32
+            ),
+            "the frame is where the layout says (title band as drawn)"
+        );
+        // The title band measured by the probe of the layout can differ by one
+        // pixel from the drawn one (grid mode does the same), which the
+        // heights follow by one pixel.
+        assert_eq!(panel.pixel_size.0, cell.frame.2);
+        assert!(panel.pixel_size.1.abs_diff(cell.frame.3) <= 1);
+    }
+    agree(
+        fixture.project.tree(),
+        &fixture.spec,
+        (layout.size.0 + 40, layout.size.1 + 25),
+        "free figure, scaled",
+    );
+}

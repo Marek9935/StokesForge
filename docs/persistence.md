@@ -253,6 +253,24 @@ Written as the spec holds them; `PlotSpec::sanitized_figure_left()` /
 them without a message. Witness `tests/witnesses/v1/project.stf` regenerated
 with non-default values; `schema.rs` keeps the old-record test.
 
+## Free placement: additive fields (#398)
+
+`PlotSpecRecord` gained `layer_placement` (`LayerPlacementRecord`: `Grid` or
+`Free`) and `PanelSpecRecord` gained `free_frame` (`Option<FreeFrameRecord>`:
+`left`, `top`, `width`, `height` in points; the plot area of a cell, on its base
+layer only), both `#[serde(default)]`. A file without them reads **Grid** and no
+frame, so **`FORMAT_VERSION` did not move**. An unknown placement value (newer
+file) reads `Grid` (`#[serde(other)]`, invariant 10). They are written as the
+spec holds them, unsanitized (negative `left`, hostile numbers):
+`PanelSpec::sanitized_free_frame()` reads them (missing or non-finite = the
+fallback frame, sizes clamped to `[MIN_FRAME_SIZE, MAX_FRAME_SIZE]`, positions
+to `+-MAX_FIGURE_EXTENT / 2`). `frame_widths`, `frame_heights`, `figure_left`
+and `figure_top` stay stored and are ignored while the graph is free. An older
+version that opens and re-saves the file drops both fields without a message: the
+graph comes back as a grid of 480 x 360 pt shared equally, or as the stored
+`frame_widths` say. Witness `tests/witnesses/v1/project.stf` regenerated with a
+free graph; `schema.rs` keeps the old-record test.
+
 ## Mixed-type columns: additive change, no migration
 
 `ColumnType::Mixed` ([`data-model.md`](data-model.md)) added

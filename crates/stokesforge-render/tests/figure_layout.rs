@@ -638,3 +638,344 @@ fn hostile_left_and_top_draw_without_panicking() {
         assert!(layout.size.0 < 30_000 && layout.size.1 < 30_000);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Free placement (#398)
+// ---------------------------------------------------------------------------
+
+use stokesforge_core::compose;
+use stokesforge_plot::{FreeFrame, LayerPlacement};
+
+/// A free graph of empty cells: `(row, column, left, top, width, height)`.
+/// An empty cell shows the default axes: 76 pt on the left, 64 pt below, 12 pt
+/// above and on the right.
+fn free(title: &str, cells: &[(usize, usize, f64, f64, f64, f64)]) -> PlotSpec {
+    let panels: Vec<PanelSpec> = cells
+        .iter()
+        .map(|&(row, column, left, top, width, height)| PanelSpec {
+            free_frame: Some(FreeFrame {
+                left,
+                top,
+                width,
+                height,
+            }),
+            ..PanelSpec::at(row, column)
+        })
+        .collect();
+    PlotSpec {
+        layer_placement: LayerPlacement::Free,
+        ..PlotSpec::empty(title).with_panels(Panels::new(panels))
+    }
+}
+
+fn two_cells() -> PlotSpec {
+    free(
+        "",
+        &[
+            (0, 0, 100.0, 50.0, 300.0, 200.0),
+            (0, 1, 600.0, 80.0, 200.0, 150.0),
+        ],
+    )
+}
+
+/// The image is the bounding box of the outer rectangles (frame plus its own
+/// bands): x 24..812, y 38..314 in the stored coordinates.
+#[test]
+fn a_free_figure_is_the_bounding_box_of_its_outer_rectangles() {
+    let layout = layout_of(&two_cells());
+    assert_eq!(layout.placement, LayerPlacement::Free);
+    assert!(layout.is_explicit());
+    assert_eq!(layout.size, (788, 276));
+    assert_eq!(layout.title_band, 0);
+    assert_eq!(layout.cell_rect(0, 0), Some((0, 0, 388, 276)));
+    assert_eq!(layout.frame_rect(0, 0), Some((76, 12, 300, 200)));
+    assert_eq!(layout.cell_rect(0, 1), Some((500, 30, 288, 226)));
+    assert_eq!(layout.frame_rect(0, 1), Some((576, 42, 200, 150)));
+    assert_eq!(layout.free_origin, (24.0, 38.0));
+    assert!(layout.column_breaks.is_empty() && layout.row_breaks.is_empty());
+    assert!(layout.column_gutters.is_empty() && layout.frame_widths.is_empty());
+    assert_eq!(layout.frame_rect(1, 0), None, "no such cell");
+}
+
+/// What is drawn is what the layout says.
+#[test]
+fn a_free_figure_is_drawn_where_its_layout_says() {
+    let (layout, plot) = drawn(&two_cells());
+    assert_eq!(
+        frames(&plot),
+        vec![((76, 12), (300, 200)), ((576, 42), (200, 150))]
+    );
+    assert_eq!(
+        cells(&plot),
+        vec![((0, 0), (388, 276)), ((500, 30), (288, 226))]
+    );
+    assert_eq!(layout.size, (788, 276));
+}
+
+/// Moving a cell to the left of the others grows the image on that side; the
+/// cell that did not move keeps its place relative to the others. Witness: the
+/// origin taken from the frames instead of the outer rectangles.
+#[test]
+fn moving_a_cell_left_grows_the_image_to_the_left() {
+    let before = free(
+        "",
+        &[
+            (0, 0, 0.0, 50.0, 300.0, 200.0),
+            (0, 1, 600.0, 50.0, 200.0, 200.0),
+        ],
+    );
+    let after = free(
+        "",
+        &[
+            (0, 0, -100.0, 50.0, 300.0, 200.0),
+            (0, 1, 600.0, 50.0, 200.0, 200.0),
+        ],
+    );
+    let (b, a) = (layout_of(&before), layout_of(&after));
+    assert_eq!(a.size.0, b.size.0 + 100);
+    assert_eq!(a.size.1, b.size.1);
+    let (b0, a0) = (b.frame_rect(0, 0).unwrap(), a.frame_rect(0, 0).unwrap());
+    let (b1, a1) = (b.frame_rect(0, 1).unwrap(), a.frame_rect(0, 1).unwrap());
+    assert_eq!(
+        a0, b0,
+        "the moved cell is the leftmost: it stays at the edge"
+    );
+    assert_eq!(a1.0, b1.0 + 100, "the other one is 100 pt further right");
+    assert_eq!(a1.0 - a0.0, (b1.0 - b0.0) + 100);
+    assert_eq!((a1.1, a1.2, a1.3), (b1.1, b1.2, b1.3));
+}
+
+/// A graph title adds its band on top and changes no width. Witness: the band
+/// not taken off the cells' tops.
+#[test]
+fn the_graph_title_adds_its_band_on_top_of_a_free_figure() {
+    let bare = layout_of(&two_cells());
+    let mut titled_spec = two_cells();
+    titled_spec.title = "Title".to_string();
+    let titled = layout_of(&titled_spec);
+    assert!(titled.title_band > 0);
+    assert_eq!(titled.size.0, bare.size.0);
+    assert_eq!(titled.size.1, bare.size.1 + titled.title_band);
+    let (b, t) = (
+        bare.frame_rect(0, 1).unwrap(),
+        titled.frame_rect(0, 1).unwrap(),
+    );
+    assert_eq!(t.1, b.1 + titled.title_band);
+    let plot = draw_at(&titled_spec, titled.size);
+    assert_eq!(frames(&plot)[1].0, (t.0 as i32, t.1 as i32));
+}
+
+/// Left and Top of the figure are kept stored and ignored in free placement.
+/// Witness: applied.
+#[test]
+fn the_figure_left_and_top_do_nothing_in_free_placement() {
+    let plain = layout_of(&two_cells());
+    let mut spec = two_cells();
+    spec.figure_left = Some(300.0);
+    spec.figure_top = Some(200.0);
+    assert_eq!(layout_of(&spec), plain);
+}
+
+fn with_right_axis(mut spec: PlotSpec, column: NodeId, cell: usize) -> PlotSpec {
+    let mut series = SeriesSpec::new(column);
+    series.axis = SeriesAxis::Right;
+    let panel = spec.panels.get_mut(cell).expect("panel");
+    panel.right.visible = true;
+    panel.series.push(series);
+    spec
+}
+
+/// Fixed (#405) in free placement: each cell reserves one axis on each side, so
+/// adding a right axis changes neither the image nor any frame. Witness: the
+/// reserve floors removed.
+#[test]
+fn a_fixed_free_figure_keeps_its_size_when_an_axis_comes_in() {
+    let (_, column) = project_with_column();
+    let mut bare = two_cells();
+    bare.fixed_figure = true;
+    let with_axis = with_right_axis(bare.clone(), column, 0);
+    let (a, b) = (layout_of(&bare), layout_of(&with_axis));
+    assert_eq!(b.size, a.size);
+    assert_eq!(b.frame_rect(0, 0), a.frame_rect(0, 0));
+    assert_eq!(b.frame_rect(0, 1), a.frame_rect(0, 1));
+    assert!(!b.fixed_overflow);
+    // The reserve is the same on the four sides of every cell: 76 pt left and
+    // right, 64 pt above and below.
+    assert_eq!(a.frame_rect(0, 0).map(|f| f.0), Some(76));
+    // From the left reserve of the first cell to the right reserve of the last.
+    assert_eq!(a.size.0, 76 + (800 - 100) + 76);
+    let plot = draw_at(&with_axis, b.size);
+    assert_eq!(frames(&plot)[0], ((76, 64), (300, 200)));
+}
+
+/// An axis beyond the reserve, or a title, still grows a fixed figure and is
+/// reported.
+#[test]
+fn a_title_grows_a_fixed_free_figure_and_is_reported() {
+    let mut spec = two_cells();
+    spec.fixed_figure = true;
+    assert!(!layout_of(&spec).fixed_overflow);
+    spec.title = "Title".to_string();
+    assert!(layout_of(&spec).fixed_overflow);
+}
+
+/// A grid on 2 x 2 with a title and a right axis goes to free placement
+/// without anything moving: same size, same frame in every cell. The way back
+/// gives the same rows, columns and frame vectors.
+#[test]
+fn grid_to_free_and_back_keeps_the_figure_and_the_grid() {
+    let (_, column) = project_with_column();
+    let mut grid = framed(
+        with_right_axis(grid("Title", 2, 2), column, 1),
+        &[300.0, 200.0],
+        &[180.0, 120.0],
+    );
+    grid.panels.get_mut(2).expect("panel").title = "Panel".to_string();
+    let grid_layout = layout_of(&grid);
+    let probe = mute((1, 1)).into_drawing_area();
+    let frames_out = pipeline::free_frames_from_grid(&grid, &probe)
+        .expect("layout")
+        .expect("a grid with stored frames");
+    let mut spec = grid.clone();
+    assert!(compose::set_free_placement(&mut spec, &frames_out));
+    let free_layout = layout_of(&spec);
+    assert_eq!(free_layout.size, grid_layout.size);
+    for (row, column) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        assert_eq!(
+            free_layout.frame_rect(row, column),
+            grid_layout.frame_rect(row, column),
+            "cell ({row}, {column})"
+        );
+    }
+    assert!(compose::set_grid_placement(&mut spec));
+    assert_eq!(spec.rows(), grid.rows());
+    assert_eq!(spec.columns(), grid.columns());
+    assert_eq!(spec.frame_widths, grid.frame_widths);
+    assert_eq!(spec.frame_heights, grid.frame_heights);
+    assert_eq!(
+        spec.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>(),
+        grid.panels
+            .iter()
+            .map(|p| (p.row, p.column))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(layout_of(&spec), grid_layout);
+}
+
+#[test]
+fn a_legacy_graph_has_no_free_frames_to_give() {
+    let probe = mute((1, 1)).into_drawing_area();
+    assert_eq!(
+        pipeline::free_frames_from_grid(&grid("", 1, 2), &probe).expect("layout"),
+        None
+    );
+    assert_eq!(
+        pipeline::free_frames_from_grid(&two_cells(), &probe).expect("layout"),
+        None,
+        "already free"
+    );
+}
+
+/// A free graph is never legacy: its frames are not to be fixed.
+#[test]
+fn a_free_graph_has_no_legacy_frames() {
+    let probe = mute((1, 1)).into_drawing_area();
+    assert_eq!(
+        pipeline::legacy_frames(&two_cells(), &probe).expect("layout"),
+        None
+    );
+}
+
+/// Overlays share the frame of their base and do not make a cell of their own.
+#[test]
+fn an_overlay_layer_shares_the_cell_of_its_base() {
+    let mut spec = two_cells();
+    let overlay = PanelSpec::overlay_on(&spec.panels[0], OverlaySpec::new(true, true));
+    let mut panels: Vec<PanelSpec> = spec.panels.iter().cloned().collect();
+    panels.insert(1, overlay);
+    spec.panels = Panels::new(panels);
+    let layout = layout_of(&spec);
+    assert_eq!(layout.free_cells.len(), 2);
+    assert_eq!(
+        layout.free_cells[1].base, 2,
+        "keyed by the base layer index"
+    );
+    let plot = draw_at(&spec, layout.size);
+    assert_eq!(plot.panels.len(), 3);
+    assert_eq!(plot.panels[0].pixel_origin, plot.panels[1].pixel_origin);
+}
+
+/// Hostile identities (beyond the grid limits) do not confuse the cells.
+#[test]
+fn free_cells_are_keyed_by_identity_not_by_grid_position() {
+    let spec = free(
+        "",
+        &[
+            (0, 0, 0.0, 0.0, 200.0, 100.0),
+            (usize::MAX - 1, 5, 400.0, 0.0, 200.0, 100.0),
+        ],
+    );
+    let layout = layout_of(&spec);
+    assert_eq!(layout.free_cells.len(), 2);
+    assert_eq!(layout.frame_rect(usize::MAX - 1, 5).map(|f| f.2), Some(200));
+    let plot = draw_at(&spec, layout.size);
+    assert_eq!(plot.omitted_panels, 0);
+}
+
+#[test]
+fn a_layer_goes_beside_a_free_cell_without_overlapping() {
+    let spec = two_cells();
+    let probe = mute((1, 1)).into_drawing_area();
+    // Right of cell 0: its outer rectangle ends at x 412; the next cell's
+    // outer rectangle starts at 524, which the new one (frame + 88 pt of
+    // bands) would hit, so it goes past it: outer left 812, frame left 888.
+    let right = pipeline::place_beside(&spec, &probe, 0, pipeline::BesideSide::Right)
+        .expect("layout")
+        .expect("a free graph");
+    assert_eq!(
+        (right.left, right.top, right.width, right.height),
+        (888.0, 50.0, 300.0, 200.0)
+    );
+    // Below cell 0: same left, under its outer rectangle (bottom at 314).
+    let below = pipeline::place_beside(&spec, &probe, 0, pipeline::BesideSide::Below)
+        .expect("layout")
+        .expect("a free graph");
+    assert_eq!(
+        (below.left, below.top, below.width, below.height),
+        (100.0, 326.0, 300.0, 200.0)
+    );
+    assert_eq!(
+        pipeline::place_beside(&grid("", 1, 1), &probe, 0, pipeline::BesideSide::Right)
+            .expect("layout"),
+        None
+    );
+}
+
+/// A panel title takes a band inside its cell's outer rectangle, above the
+/// frame: the frame does not move, the cell grows upward (and the image with
+/// it when it is the topmost). Witness: the band left out of the top of the
+/// outer rectangle.
+#[test]
+fn a_panel_title_grows_its_free_cell_upward_and_leaves_the_frame_alone() {
+    let mut spec = free("", &[(0, 0, 100.0, 80.0, 300.0, 200.0)]);
+    let bare = layout_of(&spec);
+    spec.panels.get_mut(0).expect("panel").title = "Panel".to_string();
+    let titled = layout_of(&spec);
+    let band = titled.size.1 - bare.size.1;
+    assert!(band > 0);
+    assert_eq!(titled.size.0, bare.size.0);
+    assert_eq!(
+        titled.frame_rect(0, 0).map(|f| (f.2, f.3)),
+        Some((300, 200))
+    );
+    assert_eq!(
+        titled.frame_rect(0, 0).map(|f| f.1),
+        bare.frame_rect(0, 0).map(|f| f.1 + band)
+    );
+    let plot = draw_at(&spec, titled.size);
+    let f = titled.frame_rect(0, 0).unwrap();
+    assert_eq!(frames(&plot)[0], ((f.0 as i32, f.1 as i32), (f.2, f.3)));
+}

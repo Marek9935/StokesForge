@@ -68,8 +68,8 @@ use plotters::coord::Shift;
 use plotters::prelude::*;
 use stokesforge_core::resolve::{ResolvedPanel, ResolvedPlot};
 use stokesforge_plot::{
-    AxisScale, AxisSide as PlotAxisSide, AxisSpec, PanelSpec, PlotSpec, SeriesAxis, TextAnchor,
-    TextTarget, TickDirection,
+    AxisScale, AxisSide as PlotAxisSide, AxisSpec, FreeFrame, LayerPlacement, PanelSpec, PlotSpec,
+    SeriesAxis, TextAnchor, TextTarget, TickDirection,
 };
 
 use crate::clip::{self, PixelBounds};
@@ -460,7 +460,12 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // the plot area (`BackendCoordOnly` clips each point to the rectangle of
     // its area, #163).
     let canvas = root.use_screen_coord();
-    let layout = grid_of(spec, plot.panels.len());
+    let free_placement = spec.layer_placement == LayerPlacement::Free;
+    let layout = if free_placement {
+        free_layout_of(spec)
+    } else {
+        grid_of(spec, plot.panels.len())
+    };
     let (area_width, area_height) = area.dim_in_pixel();
 
     // The tick areas of each cell: the union of what its layers ask for, so
@@ -469,32 +474,66 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
     // layer covers. The ranks of the superimposed layers come with them.
     let (plans, ranks) = cell_plans(spec, &layout);
 
-    // Stored frames (#394): the cells are as large as their frame plus the
-    // bands of their axes; a legacy graph (nothing stored) shares the area
-    // equally, bands inside.
-    let explicit = match explicit_frames(spec) {
-        Some(frames) => Some(ExplicitGrid::build(
+    // Free placement (#398): every cell is its stored frame plus its own
+    // gutters, placed where the frame says. `cells` is indexed by the cell key
+    // (the index of its base layer); the other entries are never read.
+    let free = if free_placement {
+        Some(FreeLayout::build(
             spec,
             &layout,
             &plans,
-            frames,
             Some(root_width),
             &mut |text, font, size, width| text_band(root, text, font, size, width),
             &mut |_| Ok(title_height),
-        )?),
-        None => None,
+        )?)
+    } else {
+        None
     };
-    let (column_breaks, row_breaks) = match &explicit {
-        Some(grid) => (
-            fit_breaks(Some(&grid.outer_widths()), layout.columns, area_width),
-            fit_breaks(Some(&grid.outer_heights()), layout.rows, area_height),
-        ),
-        None => (
-            fit_breaks(None, layout.columns, area_width),
-            fit_breaks(None, layout.rows, area_height),
-        ),
+    let mut free_paddings: std::collections::HashMap<usize, Padding> =
+        std::collections::HashMap::new();
+    let (explicit, cells) = if let Some(free) = &free {
+        let mut cells: Vec<DrawingArea<DB, Shift>> = (0..plot.panels.len())
+            .map(|_| area.clone().shrink((0, 0), (0, 0)))
+            .collect();
+        for placed in free.place((area_width, area_height)) {
+            if let Some(slot) = cells.get_mut(placed.key) {
+                *slot = area.clone().shrink(
+                    (placed.outer.0 as i32, placed.outer.1 as i32),
+                    (placed.outer.2, placed.outer.3),
+                );
+            }
+            free_paddings.insert(placed.key, placed.padding);
+        }
+        (None, cells)
+    } else {
+        // Stored frames (#394): the cells are as large as their frame plus the
+        // bands of their axes; a legacy graph (nothing stored) shares the area
+        // equally, bands inside.
+        let explicit = match explicit_frames(spec) {
+            Some(frames) => Some(ExplicitGrid::build(
+                spec,
+                &layout,
+                &plans,
+                frames,
+                Some(root_width),
+                &mut |text, font, size, width| text_band(root, text, font, size, width),
+                &mut |_| Ok(title_height),
+            )?),
+            None => None,
+        };
+        let (column_breaks, row_breaks) = match &explicit {
+            Some(grid) => (
+                fit_breaks(Some(&grid.outer_widths()), layout.columns, area_width),
+                fit_breaks(Some(&grid.outer_heights()), layout.rows, area_height),
+            ),
+            None => (
+                fit_breaks(None, layout.columns, area_width),
+                fit_breaks(None, layout.rows, area_height),
+            ),
+        };
+        let cells = grid_cells(&area, &column_breaks, &row_breaks);
+        (explicit, cells)
     };
-    let cells = grid_cells(&area, &column_breaks, &row_breaks);
     let mut bases = std::collections::HashMap::new();
     // The legend of an ordinary layer also lists the curves of the
     // superimposed layers that cover it (#172): `overlays_of` gives, per
@@ -529,9 +568,13 @@ pub fn draw_on_with_texts<DB: DrawingBackend>(
             continue;
         }
         let plan = plans.get(&cell_index).copied().unwrap_or_default();
-        let padding = explicit
-            .as_ref()
-            .map(|grid| grid.padding(cell_index, layout.columns));
+        let padding = if free_placement {
+            Some(free_paddings.get(&cell_index).copied().unwrap_or_default())
+        } else {
+            explicit
+                .as_ref()
+                .map(|grid| grid.padding(cell_index, layout.columns))
+        };
         let overlay_panels: Vec<&ResolvedPanel<'_>> = overlays_of
             .get(&index)
             .into_iter()
@@ -977,6 +1020,216 @@ struct Padding {
     bottom: u32,
 }
 
+/// One cell of a [`FreeLayout`], in the coordinates the frames are stored in.
+#[derive(Debug, Clone, Copy)]
+struct FreeCell {
+    /// Index of the base layer of the cell: its key in [`Layout::cells`].
+    key: usize,
+    row: usize,
+    column: usize,
+    /// Outer rectangle (frame, own gutters, panel title band): `(x, y, width,
+    /// height)`.
+    outer: (f64, f64, f64, f64),
+    /// The gutters of the cell, raised to the reserve of one axis when the
+    /// figure is Fixed; `band` is the panel title band.
+    gutters: Gutters,
+    /// What the layer must leave empty to reach `gutters` (Fixed only).
+    padding: Padding,
+}
+
+/// A cell of a [`FreeLayout`] placed in pixels, relative to the area under the
+/// graph title band.
+#[derive(Debug, Clone, Copy)]
+struct PlacedCell {
+    key: usize,
+    row: usize,
+    column: usize,
+    /// `(x, y, width, height)` of the outer rectangle.
+    outer: (u32, u32, u32, u32),
+    /// `(x, y, width, height)` of the frame (plot area).
+    frame: (u32, u32, u32, u32),
+    padding: Padding,
+}
+
+/// The geometry of a graph in free placement (#398): each cell is its stored
+/// frame plus its **own** gutters, nothing is aligned, and the image is the
+/// bounding box of the outer rectangles under the graph title band. **One
+/// copy**, read by [`figure_layout`] and by [`draw_on_with_texts`], like
+/// [`ExplicitGrid`]. Every outer edge is rounded once, in [`FreeLayout::place`].
+struct FreeLayout {
+    cells: Vec<FreeCell>,
+    /// Stored coordinates of the top-left corner of the bounding box.
+    origin: (f64, f64),
+    /// Width and height of the bounding box, in points.
+    extent: (f64, f64),
+    /// Height of the graph title band, above the cells.
+    title_band: u32,
+    overflow: bool,
+}
+
+/// The cells of a graph in free placement: every layer is keyed by the index
+/// of the base layer of its `(row, column)` (its first ordinary layer, or its
+/// first layer when only overlays are left). Never `row * columns + column`:
+/// beyond [`MAX_CELLS`] that product means nothing.
+fn free_layout_of(spec: &PlotSpec) -> Layout {
+    Layout {
+        rows: spec.rows(),
+        columns: spec.columns(),
+        cells: spec.cell_bases(),
+    }
+}
+
+impl FreeLayout {
+    /// `width`: the width of the figure when the caller imposes one (the
+    /// backend being drawn on), otherwise the width of the bounding box.
+    fn build<E>(
+        spec: &PlotSpec,
+        layout: &Layout,
+        plans: &std::collections::HashMap<usize, CellPlan>,
+        width: Option<u32>,
+        measure: &mut MeasureBand<'_, E>,
+        measure_title: &mut MeasureTitle<'_, E>,
+    ) -> Result<Self, E> {
+        let fixed = spec.fixed_figure;
+        let reserve_x = MARGIN + Y_LABEL_AREA;
+        let reserve_y = MARGIN + X_LABEL_AREA;
+        let keys: Vec<usize> = layout
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(index, key)| index == *key)
+            .map(|(_, key)| *key)
+            .collect();
+        let mut overflow = false;
+        // Horizontally first: the width of the figure sets the width of the
+        // title boxes, hence the height of the panel title bands.
+        let mut cells: Vec<FreeCell> = Vec::with_capacity(keys.len());
+        let (mut x_min, mut x_max) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &key in &keys {
+            let panel = &spec.panels[key];
+            let own = plans.get(&key).copied().unwrap_or_default().gutters(0);
+            let mut gutters = own;
+            if fixed {
+                overflow |= own.left > reserve_x || own.right > reserve_x;
+                gutters.left = own.left.max(reserve_x);
+                gutters.right = own.right.max(reserve_x);
+            }
+            let frame = panel.sanitized_free_frame();
+            let x0 = frame.left - f64::from(gutters.left);
+            let x1 = frame.left + frame.width + f64::from(gutters.right);
+            x_min = x_min.min(x0);
+            x_max = x_max.max(x1);
+            cells.push(FreeCell {
+                key,
+                row: panel.row,
+                column: panel.column,
+                outer: (x0, 0.0, x1 - x0, 0.0),
+                gutters,
+                padding: Padding {
+                    left: gutters.left - own.left,
+                    right: gutters.right - own.right,
+                    ..Padding::default()
+                },
+            });
+        }
+        let width = width.unwrap_or_else(|| (x_max - x_min).round() as u32);
+        let title_band = measure_title(width)?;
+        let bands = panel_bands(spec, layout, width, measure)?;
+        let (mut y_min, mut y_max) = (f64::INFINITY, f64::NEG_INFINITY);
+        for cell in &mut cells {
+            let frame = spec.panels[cell.key].sanitized_free_frame();
+            let own = plans
+                .get(&cell.key)
+                .copied()
+                .unwrap_or_default()
+                .gutters(bands.get(&cell.key).copied().unwrap_or(0));
+            // A graph title is never part of the reserve; neither is a panel
+            // title.
+            overflow |= fixed && (own.top > reserve_y || own.bottom > reserve_y || own.band > 0);
+            let mut gutters = cell.gutters;
+            gutters.top = if fixed {
+                own.top.max(reserve_y)
+            } else {
+                own.top
+            };
+            gutters.bottom = if fixed {
+                own.bottom.max(reserve_y)
+            } else {
+                own.bottom
+            };
+            gutters.band = own.band;
+            let y0 = frame.top - f64::from(gutters.top) - f64::from(gutters.band);
+            let y1 = frame.top + frame.height + f64::from(gutters.bottom);
+            y_min = y_min.min(y0);
+            y_max = y_max.max(y1);
+            cell.outer.1 = y0;
+            cell.outer.3 = y1 - y0;
+            cell.padding.top = gutters.band + gutters.top - own.top;
+            cell.padding.bottom = gutters.bottom - own.bottom;
+            cell.gutters = gutters;
+        }
+        overflow |= fixed && title_band > 0;
+        Ok(Self {
+            cells,
+            origin: (x_min, y_min),
+            extent: ((x_max - x_min).max(0.0), (y_max - y_min).max(0.0)),
+            title_band,
+            overflow,
+        })
+    }
+
+    /// The natural size of the area under the title band, in pixels.
+    fn natural_size(&self) -> (u32, u32) {
+        (self.extent.0.round() as u32, self.extent.1.round() as u32)
+    }
+
+    /// The cells in pixels, relative to an area `total` pixels large (the
+    /// natural size for the figure itself). Each outer edge is rounded once;
+    /// a backend whose size differs scales the cells, as [`fit_breaks`] does.
+    fn place(&self, total: (u32, u32)) -> Vec<PlacedCell> {
+        let natural = self.natural_size();
+        let scale = |total: u32, natural: u32, extent: f64| {
+            if total == natural || extent <= 0.0 {
+                1.0
+            } else {
+                f64::from(total) / extent
+            }
+        };
+        let (sx, sy) = (
+            scale(total.0, natural.0, self.extent.0),
+            scale(total.1, natural.1, self.extent.1),
+        );
+        let edge = |value: f64, scale: f64, total: u32| -> u32 {
+            ((value * scale).round().max(0.0) as u32).min(total)
+        };
+        self.cells
+            .iter()
+            .map(|cell| {
+                let x0 = edge(cell.outer.0 - self.origin.0, sx, total.0);
+                let x1 = edge(cell.outer.0 + cell.outer.2 - self.origin.0, sx, total.0);
+                let y0 = edge(cell.outer.1 - self.origin.1, sy, total.1);
+                let y1 = edge(cell.outer.1 + cell.outer.3 - self.origin.1, sy, total.1);
+                let g = cell.gutters;
+                let (w, h) = (x1 - x0, y1 - y0);
+                let frame = (
+                    x0 + g.left,
+                    y0 + g.band + g.top,
+                    w.saturating_sub(g.left + g.right),
+                    h.saturating_sub(g.band + g.top + g.bottom),
+                );
+                PlacedCell {
+                    key: cell.key,
+                    row: cell.row,
+                    column: cell.column,
+                    outer: (x0, y0, w, h),
+                    frame,
+                    padding: cell.padding,
+                }
+            })
+            .collect()
+    }
+}
+
 /// The size of a figure and where its cells and frames are: **the single
 /// place** where the frames, the axis bands, the title band and the page meet
 /// (#394). The screen (`paint_scaled`), the three exports, the figure copy, the
@@ -1019,12 +1272,46 @@ pub struct FigureLayout {
     /// Smallest Top the first row's axes and the graph title allow, in
     /// points (#405). `0` for a legacy graph.
     pub min_top: u32,
+    /// How the cells are placed (#398). In [`LayerPlacement::Free`] the grid
+    /// vectors above (`column_breaks`, `row_breaks`, the gutters, the frame
+    /// sizes) are empty and the cells are in `free_cells`.
+    pub placement: LayerPlacement,
+    /// The cells of a free figure, one per `(row, column)`; empty on the grid.
+    pub free_cells: Vec<FreeCellRect>,
+    /// Stored coordinates of the top-left corner of the image, below the
+    /// title band, in points (free placement; `(0, 0)` on the grid). A stored
+    /// `left` is `left - free_origin.0` from the image edge.
+    pub free_origin: (f64, f64),
+}
+
+/// A cell of a free figure (#398) in figure coordinates, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeCellRect {
+    /// Index of the base layer of the cell in [`PlotSpec::panels`].
+    pub base: usize,
+    /// Grid identity of the cell.
+    pub row: usize,
+    /// Grid identity of the cell.
+    pub column: usize,
+    /// Outer rectangle `(x, y, width, height)`: frame, bands and panel title,
+    /// the graph title band included in `y`.
+    pub outer: (u32, u32, u32, u32),
+    /// The frame (plot area) `(x, y, width, height)`.
+    pub frame: (u32, u32, u32, u32),
 }
 
 impl FigureLayout {
-    /// True if the graph stores its frames; false for a legacy graph.
+    /// True if the graph stores its frames (grid) or its cell frames (free);
+    /// false for a legacy graph.
     pub fn is_explicit(&self) -> bool {
-        !self.column_gutters.is_empty()
+        self.placement == LayerPlacement::Free || !self.column_gutters.is_empty()
+    }
+
+    /// The free cell with this grid identity (free placement only).
+    fn free_cell(&self, row: usize, column: usize) -> Option<&FreeCellRect> {
+        self.free_cells
+            .iter()
+            .find(|cell| cell.row == row && cell.column == column)
     }
 
     /// The size the figure would have with these frame sizes and the bands it
@@ -1032,7 +1319,7 @@ impl FigureLayout {
     /// typed, before it is applied. A legacy layout has no band to keep apart,
     /// its own size comes back.
     pub fn size_with_frames(&self, widths: &[f64], heights: &[f64]) -> (f64, f64) {
-        if !self.is_explicit() {
+        if !self.is_explicit() || self.placement == LayerPlacement::Free {
             return (f64::from(self.size.0), f64::from(self.size.1));
         }
         let bands = |gutters: &[(u32, u32)]| -> f64 {
@@ -1051,6 +1338,9 @@ impl FigureLayout {
     /// `(x, y, width, height)`, the title band included in `y`. The **outer**
     /// cell: the frame and its bands.
     pub fn cell_rect(&self, row: usize, column: usize) -> Option<(u32, u32, u32, u32)> {
+        if self.placement == LayerPlacement::Free {
+            return self.free_cell(row, column).map(|cell| cell.outer);
+        }
         let (x0, x1) = (
             *self.column_breaks.get(column)?,
             *self.column_breaks.get(column + 1)?,
@@ -1064,6 +1354,9 @@ impl FigureLayout {
     /// cell outside the grid. The frames of a column share `x` and `width`,
     /// those of a row `y` and `height`.
     pub fn frame_rect(&self, row: usize, column: usize) -> Option<(u32, u32, u32, u32)> {
+        if self.placement == LayerPlacement::Free {
+            return self.free_cell(row, column).map(|cell| cell.frame);
+        }
         let (x, y, width, height) = self.cell_rect(row, column)?;
         let (left, right) = *self.column_gutters.get(column)?;
         let (top, bottom) = *self.row_gutters.get(row)?;
@@ -1083,6 +1376,57 @@ pub fn figure_layout<DB: DrawingBackend>(
     spec: &PlotSpec,
     probe: &DrawingArea<DB, Shift>,
 ) -> Result<FigureLayout, DrawingAreaErrorKind<DB::ErrorType>> {
+    if spec.layer_placement == LayerPlacement::Free {
+        let layout = free_layout_of(spec);
+        let (plans, _) = cell_plans(spec, &layout);
+        let free = FreeLayout::build(
+            spec,
+            &layout,
+            &plans,
+            None,
+            &mut |text, font, size, width| text_band(probe, text, font, size, width),
+            &mut |width| graph_title_band(spec, probe, width),
+        )?;
+        let natural = free.natural_size();
+        let band = free.title_band;
+        let free_cells = free
+            .place(natural)
+            .iter()
+            .map(|cell| FreeCellRect {
+                base: cell.key,
+                row: cell.row,
+                column: cell.column,
+                outer: (
+                    cell.outer.0,
+                    cell.outer.1 + band,
+                    cell.outer.2,
+                    cell.outer.3,
+                ),
+                frame: (
+                    cell.frame.0,
+                    cell.frame.1 + band,
+                    cell.frame.2,
+                    cell.frame.3,
+                ),
+            })
+            .collect();
+        return Ok(FigureLayout {
+            size: (natural.0, natural.1.saturating_add(band)),
+            title_band: band,
+            column_breaks: Vec::new(),
+            row_breaks: Vec::new(),
+            column_gutters: Vec::new(),
+            row_gutters: Vec::new(),
+            frame_widths: Vec::new(),
+            frame_heights: Vec::new(),
+            fixed_overflow: free.overflow,
+            min_left: 0,
+            min_top: 0,
+            placement: LayerPlacement::Free,
+            free_cells,
+            free_origin: free.origin,
+        });
+    }
     let layout = grid_of(spec, spec.panels.len());
     let Some(frames) = explicit_frames(spec) else {
         // Legacy: 480 x 360 pt, the title band inside.
@@ -1104,6 +1448,9 @@ pub fn figure_layout<DB: DrawingBackend>(
             fixed_overflow: false,
             min_left: 0,
             min_top: 0,
+            placement: LayerPlacement::Grid,
+            free_cells: Vec::new(),
+            free_origin: (0.0, 0.0),
         });
     };
     let (plans, _) = cell_plans(spec, &layout);
@@ -1130,7 +1477,149 @@ pub fn figure_layout<DB: DrawingBackend>(
         fixed_overflow: grid.overflow,
         min_left: grid.min_left,
         min_top: grid.min_top,
+        placement: LayerPlacement::Grid,
+        free_cells: Vec::new(),
+        free_origin: (0.0, 0.0),
     })
+}
+
+/// The free frames a graph on the **grid** would keep if it went to free
+/// placement (#398): one entry per panel in spec order, `None` for an
+/// overlaid layer (it uses its base's). Each frame sits where the grid draws it
+/// now (position from [`FigureLayout::frame_rect`], title band taken off the
+/// top) and has the width and height of the stored grid frames, so the figure
+/// does not change. `None` if the graph is already free, legacy (its frames
+/// are fixed first, [`legacy_frames`]) or has a grid abandoned for
+/// [`MAX_CELLS`].
+pub fn free_frames_from_grid<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+) -> Result<Option<Vec<Option<FreeFrame>>>, DrawingAreaErrorKind<DB::ErrorType>> {
+    if spec.layer_placement == LayerPlacement::Free {
+        return Ok(None);
+    }
+    let (Some(widths), Some(heights)) = (
+        spec.sanitized_frame_widths(),
+        spec.sanitized_frame_heights(),
+    ) else {
+        return Ok(None);
+    };
+    if !declared_grid(spec) {
+        return Ok(None);
+    }
+    let layout = figure_layout(spec, probe)?;
+    let mut frames = Vec::with_capacity(spec.panels.len());
+    for panel in spec.panels.iter() {
+        if panel.overlay.is_some() {
+            frames.push(None);
+            continue;
+        }
+        let (Some((x, y, _, _)), Some(&width), Some(&height)) = (
+            layout.frame_rect(panel.row, panel.column),
+            widths.get(panel.column),
+            heights.get(panel.row),
+        ) else {
+            return Ok(None);
+        };
+        frames.push(Some(FreeFrame {
+            left: f64::from(x),
+            top: f64::from(y.saturating_sub(layout.title_band)),
+            width,
+            height,
+        }));
+    }
+    Ok(Some(frames))
+}
+
+/// A rectangle in stored coordinates, `(x0, y0, x1, y1)`.
+type StoredRect = (f64, f64, f64, f64);
+
+/// Where a new layer goes beside an existing one (#398, L8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BesideSide {
+    /// To the right: same top, same frame size.
+    Right,
+    /// Below: same left, same frame size.
+    Below,
+}
+
+/// The frame of a layer added beside the cell of `panel` in a **free** graph
+/// (#398, L8): the same frame size as that cell, the same top (right) or the
+/// same left (below), and an outer rectangle (frame plus the bands of a new
+/// default layer) that overlaps no existing cell. If the place is taken, it
+/// moves past the obstacle, at most `panels + 1` times. `None` if the graph is
+/// not free or `panel` is not a layer of it.
+pub fn place_beside<DB: DrawingBackend>(
+    spec: &PlotSpec,
+    probe: &DrawingArea<DB, Shift>,
+    panel: usize,
+    side: BesideSide,
+) -> Result<Option<FreeFrame>, DrawingAreaErrorKind<DB::ErrorType>> {
+    if spec.layer_placement != LayerPlacement::Free {
+        return Ok(None);
+    }
+    let Some(origin_panel) = spec.panels.get(panel) else {
+        return Ok(None);
+    };
+    let layout = figure_layout(spec, probe)?;
+    // The outer rectangles in stored coordinates, `(x0, y0, x1, y1)`.
+    let (ox, oy) = layout.free_origin;
+    let band = f64::from(layout.title_band);
+    let outers: Vec<(usize, usize, StoredRect)> = layout
+        .free_cells
+        .iter()
+        .map(|cell| {
+            let (x, y, w, h) = cell.outer;
+            let x0 = f64::from(x) + ox;
+            let y0 = f64::from(y) - band + oy;
+            (
+                cell.row,
+                cell.column,
+                (x0, y0, x0 + f64::from(w), y0 + f64::from(h)),
+            )
+        })
+        .collect();
+    let Some(base) = outers
+        .iter()
+        .find(|(row, column, _)| (*row, *column) == (origin_panel.row, origin_panel.column))
+    else {
+        return Ok(None);
+    };
+    let base_outer = base.2;
+    let frame = spec.panels[spec.cell_bases()[panel]].sanitized_free_frame();
+    // The bands a new, default layer asks for around its frame.
+    let mut plan = CellPlan::default();
+    plan.add(&PanelSpec::default());
+    let new = plan.gutters(0);
+    let (new_left, new_top) = (f64::from(new.left), f64::from(new.top));
+    let (width, height) = (
+        frame.width + new_left + f64::from(new.right),
+        frame.height + new_top + f64::from(new.bottom),
+    );
+    // Candidate outer rectangle, `(x0, y0)`; the size is fixed.
+    let mut candidate = match side {
+        BesideSide::Right => (base_outer.2, frame.top - new_top),
+        BesideSide::Below => (frame.left - new_left, base_outer.3),
+    };
+    for _ in 0..=outers.len() {
+        let taken = outers.iter().find(|(_, _, o)| {
+            candidate.0 < o.2
+                && o.0 < candidate.0 + width
+                && candidate.1 < o.3
+                && o.1 < candidate.1 + height
+        });
+        let Some((_, _, o)) = taken else { break };
+        match side {
+            BesideSide::Right => candidate.0 = o.2,
+            BesideSide::Below => candidate.1 = o.3,
+        }
+    }
+    Ok(Some(FreeFrame {
+        left: candidate.0 + new_left,
+        top: candidate.1 + new_top,
+        width: frame.width,
+        height: frame.height,
+    }))
 }
 
 /// Frame sizes of a graph in points: `(widths, heights)`, one per grid column
@@ -1148,7 +1637,7 @@ pub fn legacy_frames<DB: DrawingBackend>(
     spec: &PlotSpec,
     probe: &DrawingArea<DB, Shift>,
 ) -> Result<Option<FrameSizes>, DrawingAreaErrorKind<DB::ErrorType>> {
-    if explicit_frames(spec).is_some() {
+    if spec.layer_placement == LayerPlacement::Free || explicit_frames(spec).is_some() {
         return Ok(None);
     }
     drawn_legacy_frames(spec, probe)

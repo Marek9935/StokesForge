@@ -301,3 +301,14 @@ pub fn figure_offset(unit: crate::length_unit::LengthUnit, minimum_points: f64) 
         .wide()
         .with_auto(AutoKind::Field)
 }
+
+/// Left or Top of a layer in free placement, a page coordinate in `unit`
+/// (#398): signed, bounded by the position range a free frame keeps
+/// (`stokesforge_plot::MAX_FIGURE_EXTENT / 2` each way). The unit is in the
+/// label.
+pub fn free_position(unit: crate::length_unit::LengthUnit) -> Quantity {
+    let half = stokesforge_plot::MAX_FIGURE_EXTENT / 2.0;
+    Quantity::real(unit.step(), unit.step() * 10.0, unit.decimals())
+        .between(unit.from_points(-half), unit.from_points(half))
+        .wide()
+}

@@ -2487,6 +2487,9 @@ pub struct PlotEdit {
     pub selected_series: usize,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
+    /// True once `selected_panel` has been set from the graph's active layer
+    /// (the shell does it at the first frame of the window, #398).
+    pub panel_initialized: bool,
     /// The spec of the model the draft started from (or just
     /// committed). As long as `spec` equals it, the draft has nothing in
     /// progress: if the model changes under it (Undo, Redo, script,
@@ -4708,8 +4711,26 @@ impl AppState {
             spec: model.clone(),
             selected_series: 0,
             selected_panel: 0,
+            panel_initialized: false,
             base: model,
         });
+    }
+
+    /// Opens the draft on the graph's active layer `active`, once: the first
+    /// call after the draft is created chooses the layer, later calls (the
+    /// draft being reused) keep what the user chose.
+    pub fn init_plot_edit_panel(&mut self, graph: NodeId, active: usize) {
+        if let Some(edit) = self
+            .plot_edit
+            .as_mut()
+            .filter(|edit| edit.graph == graph && !edit.panel_initialized)
+        {
+            edit.panel_initialized = true;
+            // A layer already chosen (not the default first one) is kept.
+            if edit.selected_panel == 0 {
+                edit.selected_panel = active.min(edit.spec.panels.len().saturating_sub(1));
+            }
+        }
     }
 
     /// Closes the current editing draft without committing anything.
@@ -10127,10 +10148,18 @@ impl AppState {
         // The new cell keeps the frame of its reference: the frames are fixed
         // before the grid changes.
         crate::frame_sizes::fix_new(&mut spec);
+        // Free placement (#398, L8): the new layer is placed beside the
+        // reference, never over another one, in the same command.
+        let beside = crate::frame_sizes::place_beside(&spec, panel, side);
         let Some(new_cell) = insert_cell(&mut spec, panel, side) else {
             self.fail(tr!("error-layer-grid-full"));
             return;
         };
+        if let Some(frame) = beside {
+            if let Some(target) = spec.panels.get_mut(new_cell) {
+                target.free_frame = Some(frame);
+            }
+        }
         if !columns.is_empty() {
             if let Err(message) =
                 self.add_columns_to_spec(&mut spec, new_cell, &columns, Some(plot_type))

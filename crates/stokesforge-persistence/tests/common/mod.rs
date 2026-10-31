@@ -311,6 +311,13 @@ pub fn non_trivial_spec(
         group_names: [(3, "Séries d'été".to_string())].into(),
         // Color gradient kept by group 3 (#213).
         group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
+        // #398: a free frame, negative left.
+        free_frame: Some(stokesforge_plot::FreeFrame {
+            left: -120.5,
+            top: 33.25,
+            width: 301.5,
+            height: 222.75,
+        }),
         ..PanelSpec::at(0, 0)
     };
     let panel_b = PanelSpec {
@@ -330,6 +337,12 @@ pub fn non_trivial_spec(
             ..Default::default()
         },
         title_color: "#8833aa".to_string(),
+        free_frame: Some(stokesforge_plot::FreeFrame {
+            left: 210.0,
+            top: 310.5,
+            width: 250.0,
+            height: 111.0,
+        }),
         ..PanelSpec::at(1, 0)
     };
 
@@ -350,6 +363,8 @@ pub fn non_trivial_spec(
         fixed_figure: true,
         figure_left: Some(133.5),
         figure_top: Some(97.25),
+        // #398: free placement.
+        layer_placement: stokesforge_plot::LayerPlacement::Free,
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }
 }
