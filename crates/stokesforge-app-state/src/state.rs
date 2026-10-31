@@ -2487,6 +2487,9 @@ pub struct PlotEdit {
     pub selected_series: usize,
     /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
+    /// True once `selected_panel` has been set from the graph's active layer
+    /// (the shell does it at the first frame of the window, #398).
+    pub panel_initialized: bool,
     /// The spec of the model the draft started from (or just
     /// committed). As long as `spec` equals it, the draft has nothing in
     /// progress: if the model changes under it (Undo, Redo, script,
@@ -4708,8 +4711,26 @@ impl AppState {
             spec: model.clone(),
             selected_series: 0,
             selected_panel: 0,
+            panel_initialized: false,
             base: model,
         });
+    }
+
+    /// Opens the draft on the graph's active layer `active`, once: the first
+    /// call after the draft is created chooses the layer, later calls (the
+    /// draft being reused) keep what the user chose.
+    pub fn init_plot_edit_panel(&mut self, graph: NodeId, active: usize) {
+        if let Some(edit) = self
+            .plot_edit
+            .as_mut()
+            .filter(|edit| edit.graph == graph && !edit.panel_initialized)
+        {
+            edit.panel_initialized = true;
+            // A layer already chosen (not the default first one) is kept.
+            if edit.selected_panel == 0 {
+                edit.selected_panel = active.min(edit.spec.panels.len().saturating_sub(1));
+            }
+        }
     }
 
     /// Closes the current editing draft without committing anything.

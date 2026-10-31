@@ -117,6 +117,11 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         )
     };
     state.begin_plot_edit(settings.graph);
+    // The window opens on the active layer of the graph (#398).
+    state.init_plot_edit_panel(
+        settings.graph,
+        super::graph_window::published_active_panel(ctx, settings.graph),
+    );
     let outcome = modal_dialog(ctx, egui::Id::new(id), &title, size, |ui| {
         plot_settings_contents(ui, state, &tree, settings)
     });
@@ -2622,6 +2627,33 @@ mod tests {
         assert!((left - 76.0).abs() < 0.01, "{left}");
     }
 
+    /// #398: the window opens on the active layer of the graph, on every tab,
+    /// and keeps the user's choice afterwards.
+    #[test]
+    fn the_window_opens_on_the_active_layer() {
+        let context = test_support::context();
+        for tab in [PlotSettingsTab::Graph, PlotSettingsTab::Legend] {
+            let mut harness = harness(|spec| {
+                let first = first_panel(spec).clone();
+                *spec = spec.clone().with_panels(stokesforge_plot::Panels::new([
+                    first,
+                    PanelSpec::at(0, 1),
+                    PanelSpec::at(0, 2),
+                ]));
+            });
+            let graph = harness.graph;
+            context.data_mut(|data| {
+                data.insert_temp(super::super::graph_window::active_panel_id(graph), 2usize)
+            });
+            harness.open(tab, None);
+            paint_window(&context, &mut harness.state, Vec::new());
+            assert_eq!(harness.state.plot_edit().unwrap().selected_panel, 2);
+            harness.state.plot_edit_mut().unwrap().selected_panel = 1;
+            paint_window(&context, &mut harness.state, Vec::new());
+            assert_eq!(harness.state.plot_edit().unwrap().selected_panel, 1);
+        }
+    }
+
     /// A graph of two layers side by side: 300 x 250 pt and 220 x 250 pt plot
     /// areas on the grid, or in free placement shifted far from the stored
     /// origin (so a raw stored coordinate and a distance from the image edge
@@ -3781,6 +3813,31 @@ mod tests {
             harness.state.plot_settings().is_none(),
             "second Escape: Cancel"
         );
+    }
+
+    /// Enter in a Graph Properties number field (S-N3): commits the field into
+    /// the model, the window stays open; a second Enter with no field focused
+    /// is the dialog's OK and keeps the change.
+    #[test]
+    fn enter_in_a_number_field_commits_and_keeps_the_window_open() {
+        let context = test_support::context();
+        let mut harness = harness(|spec| {
+            spec.frame_widths = vec![392.0];
+            spec.frame_heights = vec![284.0];
+        });
+        harness.open(PlotSettingsTab::Graph, None);
+        type_into(&context, &mut harness, "13.8289", "10");
+        assert!(harness.state.plot_settings().is_some(), "(b) window open");
+        assert!(
+            (harness.model().frame_widths[0] - 283.46).abs() < 0.01,
+            "(a, c)"
+        );
+        one_frame(&context, &mut harness.state, vec![key(egui::Key::Enter)]);
+        one_frame(&context, &mut harness.state, Vec::new());
+        // Pre-existing (dialogs.rs, not touched by #398): Enter with no field
+        // focused is the dialog's OK; the change is kept, not lost.
+        assert!(harness.state.plot_settings().is_none());
+        assert!((harness.model().frame_widths[0] - 283.46).abs() < 0.01);
     }
 
     /// Hovering is enough (#235): without focus, a notch on the list field goes to
