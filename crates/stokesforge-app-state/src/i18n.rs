@@ -39,8 +39,11 @@
 //! file falls to the next level, never a panic (invariant 10).
 //!
 //! The language is chosen **once**, on the first read of the global loader.
-//! Tests do not change it: they build their own loader ([`build_loader`]) so
-//! as not to step on each other.
+//! A test that changes it, or asserts a text of a given language through
+//! [`tr!`](crate::tr!), takes [`test_language`] for its whole body: the guard
+//! serialises those tests (the language is a process global and tests run in
+//! parallel) and puts the previous language back on drop. A test that does not
+//! care about the language takes nothing.
 //!
 //! # The `en-XA` pseudo-locale
 //!
@@ -263,6 +266,39 @@ pub fn set_language(language: Language) {
     match CURRENT.write() {
         Ok(mut guard) => *guard = next,
         Err(poisoned) => *poisoned.into_inner() = next,
+    }
+}
+
+/// Serialises tests on the global language; see [`test_language`].
+static TEST_LANGUAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Held by a test for its whole body: no other [`test_language`] holder runs
+/// meanwhile, and the language seen at creation is restored on drop.
+#[must_use = "the language is only protected while the guard is alive"]
+pub struct LanguageGuard {
+    previous: Language,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for LanguageGuard {
+    fn drop(&mut self) {
+        set_language(self.previous);
+    }
+}
+
+/// Test support (not for application code): takes the process-wide test lock
+/// (poison-tolerant), then sets `language`. A test may call [`set_language`]
+/// again while it holds the guard. Do not take it twice in one test.
+#[doc(hidden)]
+pub fn test_language(language: Language) -> LanguageGuard {
+    let lock = TEST_LANGUAGE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = self::language();
+    set_language(language);
+    LanguageGuard {
+        previous,
+        _lock: lock,
     }
 }
 
@@ -681,6 +717,7 @@ mod tests {
     /// through a separately built loader.
     #[test]
     fn the_macro_translates_with_and_without_an_argument() {
+        let _language = test_language(Language::English);
         let reference = build_loader(language());
         assert_eq!(tr!("menu-file"), reference.get("menu-file"));
         assert_eq!(

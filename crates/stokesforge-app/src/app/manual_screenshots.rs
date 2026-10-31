@@ -1110,7 +1110,7 @@ fn render_manual_screenshots() {
     );
     std::env::set_var("XDG_CONFIG_HOME", profile.path());
     std::env::set_var(i18n::LANGUAGE_VARIABLE, "en");
-    i18n::set_language(Language::English);
+    let _language = i18n::test_language(Language::English);
     let only = std::env::var("STOKESFORGE_SHOT").ok();
     for shot in SHOTS {
         if only.as_deref().is_some_and(|f| !shot.name.contains(f)) {

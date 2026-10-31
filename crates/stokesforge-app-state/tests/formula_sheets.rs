@@ -15,6 +15,7 @@ use stokesforge_session::Session;
 const LOOP_MESSAGE: &str = "Formulas refer to each other in a loop. Remove one of the references";
 
 struct Setup {
+    _language: i18n::LanguageGuard,
     _session: Session,
     state: AppState,
     /// `Sheet1`: A, B, C, D.
@@ -27,7 +28,7 @@ struct Setup {
 
 /// Two sheets; `prepare` may install formulas the way a file would hold them.
 fn setup(dir: &std::path::Path, prepare: impl FnOnce(&mut Project, &[NodeId], &[NodeId])) -> Setup {
-    i18n::set_language(Language::English);
+    let language = i18n::test_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet1 = project.tree().children(book).unwrap()[0];
@@ -54,6 +55,7 @@ fn setup(dir: &std::path::Path, prepare: impl FnOnce(&mut Project, &[NodeId], &[
     )
     .unwrap();
     Setup {
+        _language: language,
         _session: session,
         state,
         s1,

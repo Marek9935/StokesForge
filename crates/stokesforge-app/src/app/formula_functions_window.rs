@@ -135,7 +135,9 @@ mod tests {
     /// rows of the chosen one.
     #[test]
     fn the_window_shows_the_chosen_family_only() {
-        stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+        let _language = stokesforge_app_state::i18n::test_language(
+            stokesforge_app_state::i18n::Language::English,
+        );
         assert!(texts(false, 0).is_empty());
         let groups = formula_help::groups();
         let shown = texts(true, 1);

@@ -45,6 +45,7 @@ fn spec_of(state: &AppState, graph: NodeId) -> PlotSpec {
 
 #[test]
 fn the_broken_reference_texts_follow_the_interface_language() {
+    let _language = i18n::test_language(Language::English);
     let dir = tempfile::tempdir().expect("temp dir");
     let (project, graph) = broken_graph();
     let session = Session::spawn(project, None).expect("session");
@@ -153,6 +154,4 @@ fn the_broken_reference_texts_follow_the_interface_language() {
             sheet
         );
     }
-
-    i18n::set_language(Language::English);
 }

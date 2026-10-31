@@ -15,6 +15,7 @@ use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_core::{Column, ColumnMeta, NodeId, Project, SeriesRef};
 
 struct Fixture {
+    _language: i18n::LanguageGuard,
     project: Project,
     x: NodeId,
     y: NodeId,
@@ -22,7 +23,7 @@ struct Fixture {
 
 /// A line `y = 2x + 1` laid on 21 points, Y column "Intensity".
 fn fixture() -> Fixture {
-    i18n::set_language(Language::English);
+    let language = i18n::test_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -40,7 +41,12 @@ fn fixture() -> Fixture {
         ..ColumnMeta::default()
     };
     project.set_column_meta(y, meta).unwrap();
-    Fixture { project, x, y }
+    Fixture {
+        _language: language,
+        project,
+        x,
+        y,
+    }
 }
 
 fn series(f: &Fixture) -> Vec<SeriesRef> {
@@ -431,7 +437,7 @@ fn reference_candidates_exclude_the_processed_series_and_pair_their_x() {
 #[test]
 fn value_labels_name_known_keys_and_keep_unknown_ones() {
     use stokesforge_app_state::analysis::value_label;
-    i18n::set_language(Language::English);
+    let _language = i18n::test_language(Language::English);
     assert_eq!(value_label("param.tau", None), "tau");
     assert_eq!(value_label("stat.r_squared", None), "R²");
     assert_eq!(value_label("peak.center", Some(2)), "Peak 2: center");
