@@ -34,7 +34,7 @@ python3 scripts/french-guard.py              # no French outside exempt places /
 
 Rendering (phases R0-R8 closed): `stokesforge-render` (single text measurement through `epaint`, Plotters pipeline generic over the backend, and **all the rendering**: series types, axis scales, pixel primitives, clipping, legend, LTTB, interaction, Typst formulas, example graphs) → `stokesforge-render-egui` (`DrawingBackend` backend collecting `egui::Shape`s, cache `(revision, rect, pixels_per_point, view_generation)`, zoom/pan, *feathering* lever) and `stokesforge-render-svg` (SVG export, and PDF and PNG on top). Details: `docs/rendering.md`.
 
-`stokesforge-robustness`: no production code, depends on the whole workspace. Twenty-two batteries of tests (`b1`…`b22`, see its `src/lib.rs`) that test the base at its limits.
+`stokesforge-robustness`: no production code, depends on the whole workspace. Twenty-three batteries of tests (`b1`…`b23`, see its `src/lib.rs`) that test the base at its limits.
 
 Feature outside `default`: `python` (PyO3 bridge, requires `PYO3_CONFIG_FILE`; see `scripts/python-test.sh`), the only one in the repository. `cargo build --workspace` does not compile it. `scripts/python-test.sh` tests the bridge, scripts, robustness, application and CLI; the CI job `test-python` is automatic and blocking. Typst (scientific notation) is a firm dependency of the three rendering crates: `cargo build/test --workspace` compile and test it.
 
@@ -90,7 +90,7 @@ sequences: [`.claude/skills/README.md`](.claude/skills/README.md).
 
 - Before undo/history or the `.stf` format: `docs/commands-and-history.md`, `docs/persistence.md`, then `docs/archive/rustrewrite/format-fichier-plx.md` for the options already ruled out.
 - `docs/archive/rustrewrite/questions-ouvertes.md` §11: documented caps/counters. Check before "fixing" a behavior that looks like a bug.
-- Formula recalculation (#193): targeted by fingerprint (`stokesforge-session/src/recalc.rs`, invariant 11). **Any data read by a formula computation enters the fingerprint** (a column's version covers only type and values, not name, meta or position; membership of a read column in the sheet enters it, the displayed letters do not: a formula keeps its columns by identifier, #321), and **any data write to a column draws a fresh version** per `Project`. Full recalculation remains as the oracle (`FormulaRecalc::Full`, battery `b22`). To extend the mechanism (formula function, #184, #186): tests to write are in `docs/tests.md`, "Targeted recalculation".
+- Formula recalculation (#193): targeted by fingerprint (`stokesforge-session/src/recalc.rs`, invariant 11). **Any data read by a formula computation enters the fingerprint** (a column's version covers only type and values, not name, meta or position; membership of a read column in the sheet enters it, the displayed letters do not: a formula keeps its columns by identifier, #321), and **any data write to a column draws a fresh version** per `Project`. Full recalculation remains as the oracle (`FormulaRecalc::Full`, batteries `b22` and `b23`). To extend the mechanism (formula function, #184, #186): tests to write are in `docs/tests.md`, "Targeted recalculation".
 
 ## Delegation and model choice
 

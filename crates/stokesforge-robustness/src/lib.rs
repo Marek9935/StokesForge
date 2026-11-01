@@ -2,7 +2,7 @@
 //!
 //! It carries two things, and nothing else:
 //!
-//! - `tests/`: twenty-two batteries that test the base at its limits:
+//! - `tests/`: twenty-three batteries that test the base at its limits:
 //!   extreme numeric values, malformed then semantically hostile `.stf`
 //!   files, history macros, concurrency between actor clients, randomly
 //!   drawn properties (proptest), the Rust <-> Python boundary in both
@@ -17,7 +17,10 @@
 //!   version does to this reader (`b19`), two writers on the same file
 //!   (`b20`), cost and identity on the write path (`b21`) and (#193) the
 //!   targeted recalculation of formulas checked, step by step, against the
-//!   full recalculation of a twin session (`b22`);
+//!   full recalculation of a twin session (`b22`), then (#412) the same oracle
+//!   for the structural gestures (renames, moves, removals, pastes, transposes,
+//!   column type changes), with an independent re-evaluation after reload
+//!   (`b23`);
 //! - `src/bin/alloc_probe.rs` and `src/bin/stack_probe.rs`: two out-of-process
 //!   probes, because the cases they test end in an `abort()` that nothing
 //!   catches: an allocation failure for the first, a stack overflow for the

@@ -186,7 +186,7 @@ the growth of its source is undone.
 | what empties it | `Load` (the values of a file are not taken on trust) and `NewProject` |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
-| what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` (two twin sessions, same trees at each step) |
+| what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustness` `b22` and `b23` (two twin sessions, same trees at each step; `b23` draws the structural gestures) |
 
 ### Interruptible recalculation (#239)
 
@@ -231,7 +231,7 @@ reference #186, recalculated analyses #184):
   request that is not listed there is a hole.
 - `tests/session.rs` carries the named cases; on the robustness side, `b6`
   (concurrency between clients), `b18` (what stays possible while a macro is
-  open) and `b22` (targeted recalculation against full recalculation).
+  open) and `b22`, `b23` (targeted recalculation against full recalculation).
 - A request that replaces the project must empty the recalculation memo
   (`Recalculator::forget`), like `Load` and `NewProject`.
 
